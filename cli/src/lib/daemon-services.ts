@@ -1,11 +1,6 @@
-/**
- * Daemon service catalog + persistent toggle config.
- *
- * Defines the services the daemon hosts, loads their on/off state from
- * ~/.agents/daemon/services.yaml, and exposes lightweight helpers so both the
- * daemon and service clients (e.g. secrets) can check whether a service is
- * enabled without pulling in the whole daemon lifecycle.
- */
+/** Daemon service catalog and persistent toggle config (~/.agents/daemon/services.yaml), with light
+ * helpers so the daemon and service clients can check enablement without the whole daemon
+ * lifecycle. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -177,10 +172,8 @@ export function getDaemonServicesConfigPath(): string {
   return path.join(getDaemonConfigDir(), 'services.yaml');
 }
 
-/**
- * Read the services config from disk. Missing or malformed files return the
- * default (all services enabled). Never throws.
- */
+/** Read the services config; a missing or malformed file returns the default (all enabled). Never
+ * throws. */
 export function readDaemonServicesConfig(): DaemonServicesConfig {
   const cfg = defaultServicesConfig();
   try {
@@ -198,10 +191,8 @@ export function readDaemonServicesConfig(): DaemonServicesConfig {
   return cfg;
 }
 
-/**
- * Write the services config to disk, creating the daemon config dir if needed.
- * Preserves unknown keys/ordering in the existing file when possible.
- */
+/** Write the services config, creating the daemon config dir if needed and preserving unknown
+ * keys/ordering when possible. */
 export function writeDaemonServicesConfig(cfg: DaemonServicesConfig): void {
   const dir = getDaemonConfigDir();
   fs.mkdirSync(dir, { recursive: true });
@@ -224,10 +215,8 @@ export function writeDaemonServicesConfig(cfg: DaemonServicesConfig): void {
   atomicWriteFileSync(filePath, out, 'utf-8');
 }
 
-/**
- * Check whether a single service is enabled. Returns true (enabled) when the
- * config file is missing or the ID is unknown, so disabling must be explicit.
- */
+/** Whether a service is enabled; true when the config is missing or the ID unknown, so disabling
+ * must be explicit. */
 export function isDaemonServiceEnabled(id: DaemonServiceId): boolean {
   return readDaemonServicesConfig().services[id] !== false;
 }
@@ -250,13 +239,9 @@ export function listDaemonServiceStates(): Array<DaemonServiceDef & { enabled: b
   return DAEMON_SERVICES.map((s) => ({ ...s, enabled: cfg.services[s.id] !== false }));
 }
 
-/**
- * A tiny cross-process action queue for `agents daemon services restart <id>`
- * (RUSH-3193 P4) — SIGHUP can only signal "reload", it carries no payload, so a
- * restart request is dropped here first and the daemon's reload handler drains
- * it. Same file-backed pattern as `services.yaml` above, for the same reason:
- * the CLI invocation and the daemon are separate processes.
- */
+/** A tiny cross-process action queue for `agents daemon services restart <id>` (RUSH-3193 P4):
+ * SIGHUP carries no payload, so the request is dropped in a file and the daemon's reload handler
+ * drains it. */
 function getDaemonServiceActionsPath(): string {
   return path.join(getDaemonConfigDir(), 'service-actions.json');
 }
@@ -276,10 +261,8 @@ export function queueDaemonServiceRestart(id: DaemonServiceId): void {
   atomicWriteFileSync(filePath, JSON.stringify({ restart: ids }), 'utf-8');
 }
 
-/**
- * Drain every queued restart request. Called once per SIGHUP reload by the
- * daemon; never throws. Clears the file so a request is applied at most once.
- */
+/** Drain every queued restart request, once per SIGHUP reload; never throws. Clears the file so a
+ * request applies at most once. */
 export function drainDaemonServiceRestartQueue(): DaemonServiceId[] {
   const filePath = getDaemonServiceActionsPath();
   let ids: DaemonServiceId[] = [];

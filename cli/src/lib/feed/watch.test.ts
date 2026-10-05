@@ -84,15 +84,8 @@ describe('feed watch operator projection', () => {
 });
 
 
-/**
- * PHNX-3999 F08/F09 — a session is grouped under a project only when the
- * association is CONFIRMED (a registered project definition contains its cwd).
- *
- * The field has to survive the whole `agents feed watch --json` path, not just the
- * row builder: session envelope -> feed projection -> the serialized agent rows the
- * menu decodes. This pins both envelope kinds, because the reset and upsert paths
- * re-project rows separately.
- */
+/** PHNX-3999 F08/F09: a session is grouped under a project only when the association is
+ * confirmed (a registered project definition contains its cwd). */
 describe('confirmedProject rides the serialized feed stream (PHNX-3999 F08/F09)', () => {
   it('carries explicit null for an unbound directory through reset and upsert', async () => {
     // No project definitions exist under this test HOME, so nothing is confirmed —

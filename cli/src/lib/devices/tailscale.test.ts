@@ -1,10 +1,6 @@
-/**
- * Tailscale ingestion correctness.
- *
- * The real bugs guarded here: mapping the wrong OS to a platform (→ wrong
- * remote shell), shipping MagicDNS's trailing dot into ssh_config, picking an
- * IPv6 address ssh can't use, and mislabeling a relayed connection as direct.
- */
+/** Tailscale ingestion correctness. Guards: mapping the wrong OS to a platform (wrong remote
+ * shell), MagicDNS's trailing dot in ssh_config, an IPv6 address ssh cannot use, and mislabeling a
+ * relayed connection as direct. */
 import { describe, expect, it } from 'vitest';
 import { parseTailscaleStatus, nodeToDeviceInput, slugifyHostName } from './tailscale.js';
 

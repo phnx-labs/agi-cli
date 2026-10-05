@@ -20,14 +20,9 @@ describe('notifyOverdue — missing desktop notifier must not crash the daemon',
     process.env.PATH = origPath;
   });
 
-  // Regression: the desktop notifier (`osascript` on macOS, `notify-send` on
-  // Linux) is absent on headless boxes. spawn() reports that as an ASYNC 'error'
-  // event, not a synchronous throw — so the surrounding try/catch never saw it,
-  // Node re-threw it as an uncaught exception, and the daemon died on every
-  // overdue routine (systemd then restart-looped it, tearing down the browser
-  // IPC socket). Emptying PATH guarantees ENOENT on every platform, so this
-  // exercises the real spawn path. If the 'error' listener is removed, the async
-  // ENOENT crashes this test process instead of being swallowed.
+  // Regression: the desktop notifier (`osascript`/`notify-send`) is absent on headless boxes and
+  // spawn() reports that as an ASYNC 'error' event, so the daemon died on every overdue routine.
+  // Emptying PATH forces ENOENT; without the 'error' listener this process crashes.
   it('swallows the notifier ENOENT and lets the process survive', async () => {
     process.env.PATH = '';
 
@@ -45,12 +40,9 @@ describe('notifyOverdue — missing desktop notifier must not crash the daemon',
   });
 });
 
-/**
- * detectOverdueJobs walked a fixed one-week window looking for the most recent
- * expected fire. Any cron whose gap exceeds that returned null and was skipped
- * entirely — never flagged overdue on any device, never caught up, no record.
- * `slack-link-rotate` (`0 9 1,13,25 * *`, 12-day gaps) was live in that class.
- */
+/** detectOverdueJobs walked a fixed one-week window for the latest expected fire, so any cron with
+ * a longer gap returned null and was never flagged overdue or caught up. `slack-link-rotate` (`0 9
+ * 1,13,25 * *`, 12-day gaps) was in that class. */
 describe('detectOverdueJobs — schedules sparser than the old one-week lookback', () => {
   let home: string;
   let prevHome: string | undefined;

@@ -376,10 +376,9 @@ describe('reconcileAttention', () => {
   });
 
   it('a new declared block is not suppressed when the session cursor is unresolvable', () => {
-    // PHNX-3073: coveredByResolution defaults to suppress when the candidate has
-    // no comparable sourceCursor.lastActivityMs. A declared block must stamp its
-    // own cursor at write time so a fresh generation is not buried by a prior
-    // tombstone while lastActivityMs is missing (cloud / remote / index-lag).
+    // PHNX-3073: coveredByResolution suppresses when the candidate has no comparable
+    // sourceCursor.lastActivityMs, so a declared block must stamp its own cursor at write time or a
+    // prior tombstone buries a fresh generation (cloud, remote, index lag).
     const ts = '2026-08-27T12:00:00.000Z';
     const block = buildDeclaredBlock(
       { sessionId: 'sess-cloud', mailboxId: 'mbx', host: 'zion', runtime: 'claude' },

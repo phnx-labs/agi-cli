@@ -1,10 +1,6 @@
-/**
- * Top-level command spellcheck (RUSH-2329).
- *
- * Candidates are plain strings from KNOWN_TOP_LEVEL_COMMANDS — never the live
- * commander registry — so an unknown / typo'd invocation does not pay for
- * registerAllEagerCommands (~250-330ms of dynamic import + module eval).
- */
+/** Top-level command spellcheck (RUSH-2329). Candidates are plain strings from
+ * KNOWN_TOP_LEVEL_COMMANDS, not the commander registry, so a typo avoids registerAllEagerCommands
+ * (~250-330ms). */
 
 /** Calculate the Levenshtein edit distance between two strings. */
 export function levenshtein(a: string, b: string): number {
@@ -26,11 +22,8 @@ export function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
-/**
- * Closest top-level command name by Levenshtein distance.
- * Iterates candidates in first-seen order so ties break the same way as the
- * historical registerAllEagerCommands registration order (RUSH-2329).
- */
+/** Closest top-level command by Levenshtein distance, iterating in first-seen order so ties break
+ * like the historical registerAllEagerCommands order (RUSH-2329). */
 export function closestTopLevelCommand(
   unknown: string,
   candidates: Iterable<string>,

@@ -1,18 +1,6 @@
-/**
- * First-class setup-token mint + seed (PHNX-2364).
- *
- * Closes the mint-auth manual recipe: drive `claude setup-token` through an
- * injectable term driver (`lib/term-driver.ts`), capture a well-formed
- * `sk-ant-oat01-…` token (the #1767 ANSI-banner guard), and seed BOTH:
- *
- *   1. a named provider account (`agents accounts add` shape, policy never)
- *   2. the reserved FILE-BASED `auth` bundle keyed per-account email, which
- *      usage/probe reads (`resolveClaudeSetupToken`)
- *
- * Native rotating OAuth is never copied. Only this non-rotating class is
- * stored and optionally synced. Interactive mint is Claude-only; every other
- * harness fails loud with the command that actually provisions it.
- */
+/** First-class setup-token mint and seed (PHNX-2364): drive `claude setup-token` through an
+ * injectable term driver, capture a well-formed `sk-ant-oat01-...` token (the #1767 ANSI-banner
+ * guard), and seed a named account and the `auth` bundle. Native rotating OAuth is never copied. */
 import type { AgentId, Meta } from './types.js';
 import { resolveAgentName } from './agents.js';
 import {
@@ -74,17 +62,9 @@ export interface MintFlow {
   tokenCapture?: RegExp;
 }
 
-/**
- * Durable-credential flows per harness. Only Claude exposes an interactive
- * setup-token MINT; every other harness's durable credential is a provider API
- * key, COLLECTED via `--api-key` or a prompt by `accounts add` (never derived
- * from OAuth). The api-key entries describe collection only — they have no
- * mint argv, and `mintAndSeed` refuses them with the `accounts add` pointer.
- * A token-less harness (kimi/antigravity) has no portable credential and logs
- * in per box (run it there and complete its native login).
- * The apiKeyEnv values are pinned to HARNESS_AUTH's `api-key:<ENV>` worker
- * kinds by auth-mint.test.ts — keep them in lockstep.
- */
+/** Durable-credential flows per harness. Only Claude has an interactive setup-token mint; others
+ * use a provider API key collected via `--api-key` or a prompt by `accounts add`, never from OAuth
+ * (`mintAndSeed` refuses them). kimi/antigravity log in per box. */
 export const MINT_FLOWS: Record<string, MintFlow> = {
   claude: {
     harness: 'claude',
@@ -139,11 +119,8 @@ export function stripAnsi(text: string): string {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
 }
 
-/**
- * Pull a single well-formed Claude setup-token out of a (possibly ANSI-wrapped)
- * screen. Returns null when none is present. Two distinct tokens fail loud —
- * guessing which one to seed is how a banner fragment becomes an auth header.
- */
+/** Pull a single well-formed Claude setup-token from a possibly ANSI-wrapped screen; null if none.
+ * Two distinct tokens fail loud: guessing is how a banner fragment becomes an auth header. */
 export function extractClaudeSetupToken(screen: string): string | null {
   const text = stripAnsi(screen);
   const matches = text.match(new RegExp(CLAUDE_SETUP_TOKEN_CAPTURE_RE.source, 'g')) ?? [];
@@ -205,12 +182,9 @@ export interface ResolvedMintIdentity {
   email: string;
 }
 
-/**
- * Resolve the named account + the email that keys the reserved `auth` bundle.
- * `--account` that looks like an email is the email; a name needs `--email` or
- * a locally signed-in `.claude.json`. Missing email fails loud — we must not
- * fall back to a bare shared key (that is the multi-account mix-up).
- */
+/** Resolve the named account and the email keying the reserved `auth` bundle. An email-shaped
+ * `--account` is the email; a name needs `--email` or a signed-in `.claude.json`. Missing email
+ * fails loud, never a bare shared key (the multi-account mix-up). */
 export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMintIdentity {
   const accountRaw = input.account?.trim();
   const emailRaw = input.email?.trim();
@@ -249,11 +223,9 @@ export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMi
   return { accountName, email };
 }
 
-/**
- * Write (or rotate) the reserved FILE-BASED `auth` bundle's per-account key.
- * Usage/probe ignores a keychain- or vault-backed bundle of this name, so a
- * wrong backend fails loud instead of looking like a successful mint.
- */
+/** Write or rotate the reserved file-based `auth` bundle's per-account key. Usage/probe ignores a
+ * keychain- or vault-backed bundle of this name, so a wrong backend fails loud instead of looking
+ * like a successful mint. */
 export function seedReservedAuthToken(email: string, token: string): { key: string } {
   const cleaned = assertValidSetupToken(token);
   const key = claudeAccountTokenKey(email);
@@ -292,12 +264,9 @@ export function seedReservedAuthToken(email: string, token: string): { key: stri
   return { key };
 }
 
-/**
- * The env var a harness's durable worker credential injects as on a worker
- * (claude's setup-token rides CLAUDE_CODE_OAUTH_TOKEN; api-key harnesses ride
- * their MINT_FLOWS apiKeyEnv). Throws for a harness with no portable worker
- * credential — kimi/antigravity log in per box.
- */
+/** The env var a harness's durable worker credential injects as on a worker (claude's setup-token
+ * rides CLAUDE_CODE_OAUTH_TOKEN; api-key harnesses their MINT_FLOWS apiKeyEnv). Throws for
+ * harnesses with no portable credential (kimi/antigravity). */
 export function workerCredentialEnv(harness: AgentId): string {
   if (harness === 'claude') return 'CLAUDE_CODE_OAUTH_TOKEN';
   const flow = MINT_FLOWS[harness];
@@ -305,12 +274,9 @@ export function workerCredentialEnv(harness: AgentId): string {
   throw new Error(`No portable worker credential env for '${harness}' — it logs in per box.`);
 }
 
-/**
- * The reserved-store key for one account's worker credential:
- * `<ENV>_<accountId>` — keyed by account id, never by name or email, so a
- * rename or an email change never breaks the key. Hyphens are stripped because
- * the bundle key grammar (`BUNDLE_KEY_PATTERN`) is env-var-shaped.
- */
+/** The reserved-store key for one account's worker credential: `<ENV>_<accountId>`, by id rather
+ * than name or email so renames don't break it. Hyphens are stripped because `BUNDLE_KEY_PATTERN`
+ * is env-var-shaped. */
 export function workerCredentialStoreKey(harness: AgentId, accountId: string): string {
   const slug = accountId.replace(/-/g, '');
   if (!/^[A-Za-z0-9_]+$/.test(slug) || !slug) {
@@ -319,14 +285,9 @@ export function workerCredentialStoreKey(harness: AgentId, accountId: string): s
   return `${workerCredentialEnv(harness)}_${slug}`;
 }
 
-/**
- * Write (or rotate) one account's worker credential in the reserved
- * `__<harness>__` store (PHNX-3940). Only non-rotating kinds may enter
- * (`assertStorableCredentialKind` refuses a rotating OAuth/session credential at
- * this boundary — RUSH-1958). FILE-backed, policy `never`, same contract as the
- * legacy `auth` bundle: a keychain- or vault-backed store of this name fails
- * loud, since worker provisioning reads the file backend.
- */
+/** Write or rotate one account's worker credential in the reserved `__<harness>__` store
+ * (PHNX-3940). Only non-rotating kinds enter (`assertStorableCredentialKind` refuses rotating
+ * OAuth, RUSH-1958). File-backed, policy `never`, other backends fail loud. */
 export function seedReservedStoreKey(
   harness: AgentId,
   kind: StorableCredentialKind,
@@ -337,17 +298,9 @@ export function seedReservedStoreKey(
   const name = reservedStoreName(harness);
   const cleaned = value.trim();
   if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
-  // A `__<harness>__` reserved store is a real FILE-backed, policy-`never` bundle
-  // — the same shape as the legacy `auth` bundle — because the only transport to
-  // a worker is the ordinary bundle push (`syncReservedStores` →
-  // `pushBundleToHost`), which reads the store as a bundle and imports it
-  // remotely as one. It used to be written as a bare `store.set` item with no
-  // bundle record (the standalone rejected the `__`-wrapped name at the time), so
-  // the push could never read it and no worker received a Cursor/Codex/Grok key.
-  // The item name is unchanged (`agents-cli.secrets.__<harness>__.<KEY>`), so
-  // `readReservedCredential` and every worker that already holds the raw item
-  // keep resolving it. Requires -labs/secrets-cli >= 0.1.1 (reserved-shape
-  // bundle names).
+  // A `__<harness>__` reserved store is a file-backed policy-`never` bundle because the only
+  // worker transport is the bundle push (`syncReservedStores`). It was a bare `store.set` item
+  // with no bundle record, so no worker got a Cursor/Codex/Grok key. Needs secrets-cli >= 0.1.1.
   const item = secretsKeychainItem(name, key);
   try {
     if (bundleExistsSync(name)) {
@@ -396,15 +349,9 @@ export interface AdoptLegacyReservedItemsResult {
   errors: Array<{ bundle: string; key: string; message: string }>;
 }
 
-/**
- * Adopt reserved-store keys written by 1.22.84–1.22.89 as bare file items (no
- * bundle record) into the file-backed bundle the daemon push reads. Every
- * `accounts add codex|grok|cursor` from those releases left its worker key in
- * that shape on the laptop, unpushable; the item name is the same in both
- * shapes, so adoption re-seeds the bundle from the raw value in place and
- * nothing already on a worker changes. Idempotent: a key the bundle already
- * carries is skipped. Local data repair only — it never talks to a peer.
- */
+/** Adopt reserved-store keys written by 1.22.84-1.22.89 as bare file items (no bundle record) into
+ * the file-backed bundle the daemon push reads. Those runs left unpushable worker keys; it
+ * re-seeds in place under the same item name. Idempotent; local only. */
 export function adoptLegacyReservedStoreItems(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
 ): AdoptLegacyReservedItemsResult {
@@ -426,11 +373,9 @@ export function adoptLegacyReservedStoreItems(
   return result;
 }
 
-/**
- * Create or rotate the named provider account that `agents run --account` and
- * `agents accounts sync` consume. Existing account of a different kind fails
- * loud rather than silently overwriting an API key with a setup-token.
- */
+/** Create or rotate the named provider account consumed by `agents run --account` and `agents
+ * accounts sync`. An existing account of a different kind fails loud rather than overwriting an
+ * API key with a setup-token. */
 export function seedNamedAccount(name: string, token: string, flow: MintFlow): CredentialAccount {
   const cleaned = assertValidSetupToken(token);
   const existing = findAccount(name);
@@ -469,11 +414,9 @@ function emitMintProgress(line: string, json?: boolean): void {
   if (!json) console.log(line);
 }
 
-/**
- * Drive `claude setup-token` in a term session: scrape the authorize URL, open it,
- * optionally paste `--code`, then capture the token with the #1767 guard.
- * Tears the session down on the way out (success, timeout, or throw).
- */
+/** Drive `claude setup-token` in a term session: scrape the authorize URL, open it, optionally
+ * paste `--code`, then capture the token with the #1767 guard. Tears the session down on success,
+ * timeout, or throw. */
 export async function driveSetupTokenMint(
   command: string,
   flow: MintFlow,
@@ -602,11 +545,8 @@ export interface MintAndSeedResult {
   fleet: FleetSyncRow[];
 }
 
-/**
- * End-to-end mint: resolve identity, obtain a token (stdin or term drive),
- * seed the named account + reserved auth bundle, optionally sync the fleet.
- * Never returns or logs the token.
- */
+/** End-to-end mint: resolve identity, obtain a token (stdin or term drive), seed the named account
+ * and reserved auth bundle, optionally sync the fleet. Never returns or logs the token. */
 export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedResult> {
   const flow = getMintFlow(input.harness);
   const json = input.json === true;
@@ -728,18 +668,9 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
   }
 }
 
-/**
- * True when a Claude setup-token is already seeded on this box (setup status).
- *
- * Read-only status probe (`agents setup`, `agents doctor`) — neither the
- * account-registry read nor the reserved auth-bundle check MUST crash the whole
- * command because the secret store could not be reached (the macOS Keychain
- * helper source unavailable — PHNX-3385 — or the standalone `secrets` CLI
- * missing / unspawnable); the client's calls fail loud by contract, but that
- * contract is for destructive-write guards, not a diagnostic. An unreachable
- * store here just means "cannot confirm," reported honestly rather than
- * propagated.
- */
+/** True when a Claude setup-token is already seeded on this box. A read-only status probe (`agents
+ * setup`, `agents doctor`), so an unreachable store (Keychain helper unavailable, PHNX-3385;
+ * `secrets` CLI missing) means "cannot confirm", not a crash. */
 export function hasMintedSetupToken(): { ready: boolean; detail: string } {
   try {
     // The registry is the account bundles behind the standalone `secrets` CLI, so

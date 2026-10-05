@@ -1,10 +1,6 @@
-/**
- * PHNX-3298 — `gatherLiveTargets` must not dial the fleet when a unique live
- * local session is already in hand. Real tmux pane + real pid-registry entry;
- * only the SSH fan-out (`gatherRemoteActive`) is stubbed, so a sleeping peer
- * cannot stall the assertion. The skip is the product: detach/stop of that
- * pane SIGTERM immediately, with no `unreachable or no agents CLI` line.
- */
+/** PHNX-3298: `gatherLiveTargets` must not dial the fleet when a unique live local session is in
+ * hand; only the SSH fan-out is stubbed. The skip is the product: detach/stop of that pane
+ * SIGTERMs immediately with no `unreachable` line. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

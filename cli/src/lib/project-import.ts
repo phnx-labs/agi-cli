@@ -1,14 +1,6 @@
-/**
- * Pure builders behind `agents projects import`.
- *
- * Currently supports one source: **Linear** (projects someone deliberately
- * created on the board). Results funnel through `writeProjectDef`.
- *
- * Everything here is a pure function of its arguments — no fs, no shell, no
- * process env. The command layer shells out to `linear` and hands the rows in;
- * that's what makes these testable against plain fixtures with no mocking.
- * The one exception is `toHomeRelative`, a string rewrite against `$HOME`.
- */
+/** Pure builders behind `agents projects import` (currently Linear only), funneling through
+ * `writeProjectDef`. No fs, shell or env, so they test against plain fixtures; the command layer
+ * shells out to `linear`. The one exception is `toHomeRelative`, a string rewrite against `$HOME`. */
 
 import { isSafeProjectName, type ProjectDef } from './projects.js';
 import { matchLocalCheckoutExact, type LinearProjectLite } from './linear-projects.js';
@@ -37,21 +29,15 @@ export interface RawImportFlags {
   force?: boolean;
 }
 
-/**
- * Validate the flag combination, throwing a user-facing message on the first
- * problem.
- */
+/** Validate the flag combination, throwing a user-facing message on the first problem. */
 export function validateImportOpts(flags: RawImportFlags): ImportOptions {
   if (!flags.fromLinear) throw new Error('Pick an import source: --from-linear.');
   return { source: 'linear', force: flags.force === true };
 }
 
-/**
- * Turn a Linear project name into a definition slug: lowercase, every run of
- * unusable characters collapsed to one `-`, trimmed of leading/trailing
- * punctuation, capped at the 64 chars `isSafeProjectName` allows. Returns `''`
- * when nothing usable survives — the caller skips those loudly.
- */
+/** Turn a Linear project name into a def slug: lowercase, unusable runs collapsed to one `-`,
+ * trimmed, capped at the 64 chars `isSafeProjectName` allows; `''` if nothing survives (caller
+ * skips loudly). */
 export function slugifyProjectName(name: string): string {
   const slug = name
     .toLowerCase()
@@ -73,18 +59,9 @@ export interface LinearImportDeps {
   resolveOrigin: (dir: string) => string | undefined;
 }
 
-/**
- * Plan the Linear import. Every project becomes a def carrying its `linear`
- * link; the local checkout is bound **only on an exact normalized-name match**
- * (`matchLocalCheckoutExact`). The containment fallback that powers the `link`
- * suggestion is deliberately not used here — "Agents CLI" containing
- * "agents-cli-web" is a fine hint for a human to confirm, and a silently wrong
- * `root` on a write path.
- *
- * An existing def is preserved field-for-field; only `name` and `linear` are
- * overwritten, so a hand-set `description`/`contexts`/`integrations` survives a
- * re-import.
- */
+/** Plan the Linear import: each project becomes a def with its `linear` link; the checkout binds
+ * only on an exact normalized-name match, since containment would silently set a wrong `root`.
+ * Existing defs keep all but `name` and `linear`. */
 export function buildLinearImportCandidates(
   projects: LinearProjectLite[],
   existing: Map<string, ProjectDef>,

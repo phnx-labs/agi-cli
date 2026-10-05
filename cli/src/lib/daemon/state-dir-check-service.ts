@@ -1,27 +1,6 @@
-/**
- * State-dir self-terminate guard as a `PeriodicService` (RUSH-3193 P3).
- *
- * RUSH-2367: self-terminate if this daemon's own state directory has been
- * removed out from under it — the shape of a leaked test-fixture daemon whose
- * /tmp HOME was deleted by its test's own cleanup while the process itself
- * somehow survived. Nothing else can reach a daemon in that state: a
- * different HOME resolves a different `ensureDaemonDir()` and therefore a
- * different instance registry — without this it runs forever. Reads the
- * lifetime marker directly, never the local `ensureDaemonDir()` wrapper,
- * which recreates the directory as a side effect and would defeat the check.
- * Heartbeat/status paths may recreate the directory and pid file after a
- * deletion; they never recreate this per-lifetime token.
- *
- * `lifetimePath`/`lifetimeToken` are per-boot constants computed once at
- * `runDaemon()` start and passed in via the constructor, along with the
- * shutdown callback. Registering (and starting) this service happens AFTER
- * `runDaemon()` defines its `handleShutdown` — unlike the other four migrated
- * services, which register before `supervisor.startAll()` — because the
- * supervisor fires an immediate first tick on start, and calling an
- * as-yet-undefined `handleShutdown` const at that point would throw. See the
- * registration site in daemon.ts for the deferred `supervisor.register()` +
- * `supervisor.start()` pairing this requires.
- */
+/** State-dir self-terminate guard (RUSH-3193 P3, RUSH-2367): exit if this daemon's state directory
+ * was removed (a leaked test-fixture daemon), since nothing else can reach it. Reads the lifetime
+ * marker directly, not `ensureDaemonDir()` (recreates it). Registered after handleShutdown exists. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';

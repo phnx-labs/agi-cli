@@ -1,14 +1,6 @@
-/**
- * Account usage/auth services (PHNX-3608): usage and auth refresh now run as TWO
- * independent supervised PeriodicServices — `AccountUsageService` (`account-state`)
- * and `AccountAuthService` (`account-auth`) — each with its own per-tick deadline,
- * AbortSignal, and circuit breaker, replacing the old un-deadlined dual-`setInterval`
- * loop whose `usageRunning` latch could hang forever (the 12h usage-dark root cause).
- * Independent services mean a run of usage THROWS keeps usage ticking without ever
- * starving the slower auth refresh, and a usage HANG exits the daemon for a
- * supervised restart (PHNX-4116). Driven through the real ServiceSupervisor so the
- * deadline/abort/exit-on-breach path is exercised, not stubbed.
- */
+/** Account usage/auth services (PHNX-3608): two independent supervised PeriodicServices
+ * (`account-state`, `account-auth`), each with its own deadline, AbortSignal and breaker,
+ * replacing the un-deadlined loop whose latch caused the 12h usage-dark bug (PHNX-4116). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

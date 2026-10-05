@@ -1,47 +1,6 @@
-/**
- * Benchmark for the SessionStart-hook state reader (hook-sessions.ts): the
- * two on-disk sources `agents sessions --active` joins a `ps`-discovered pid
- * against on every ~3s poll (active.ts:1490 "The ~3s poll must not re-read
- * the dir ... per candidate") and exec.ts:1953/1708 reads once per
- * `--device`-dispatched non-Claude run --
- *
- *   - loadHookSessionIndex() (hook-sessions.ts:126) -- readdirSync + one
- *     readFileSync+JSON.parse PER FILE over ~/.agents/.cache/terminals/sessions/.
- *   - readStateSessionRecord() (hook-sessions.ts:81) -- ONE targeted
- *     readFileSync+JSON.parse over ~/.agents/.cache/state/sessions/<pid>.json,
- *     never a directory scan (hook-sessions.ts:66-67).
- *   - resolveHookSessionRecord() (hook-sessions.ts:183) -- the pure
- *     launchId -> terminalId -> pid -> childPids priority chain both
- *     exec.ts:1708 and active.ts:1533-1541/1637-1642 run per candidate over
- *     the pre-built index.
- *
- * No mocking of the read path itself -- every bench below calls the real
- * exported functions against real on-disk JSON files with the real
- * HookSessionRecord/state-record shapes. What IS controlled is HOME (state.ts:36
- * captures `process.env.HOME` at module load, so it's set BEFORE the dynamic
- * import below, exactly like pid-registry.bench.ts), because the two real counts
- * on THIS box, measured directly before writing this file
- * (`ls ~/.agents/.cache/terminals/sessions | wc -l` and
- * `ls ~/.agents/.cache/state/sessions | wc -l`, 2026-08-06), are:
- *
- *   - ~/.agents/.cache/terminals/sessions/  ->  0 files
- *   - ~/.agents/.cache/state/sessions/      ->  5021 files
- *
- * which is exactly what the module docblock predicts: the `terminals/sessions/`
- * writer, @agents/session-tracker, "is NOT deployed on the fleet -- its dir is
- * empty there" (hook-sessions.ts:8-9), while `state/sessions/` is "an unpruned
- * graveyard (thousands of dead-pid files)" (hook-sessions.ts:66). Because the
- * real terminals/sessions/ dir is permanently empty in production, benching it
- * unmodified would only prove "readdir on an empty dir is fast" -- not useful.
- * So loadHookSessionIndex() is seeded at pid-registry.bench.ts's SEED_COUNT (60,
- * "an actively-used box") as the stated counterfactual: what the scan would cost
- * if the writer package were ever deployed. readStateSessionRecord() IS seeded at
- * this box's REAL measured count (5021) -- not a guess, the actual current
- * graveyard size -- since that dir already accumulates on every real fleet box.
- *
- * Not wired into `vitest run` (vitest.config.ts:18 includes only `*.test.ts`);
- * run with `npx vitest bench --run` from cli.
- */
+/** Benchmark for the SessionStart-hook state reader (hook-sessions.ts), joined on the ~3s `agents
+ * sessions --active` poll. Real functions on real JSON files; HOME is set BEFORE the dynamic
+ * import. Seeds: 60 files for `terminals/sessions/`, the measured 5021 for `state/sessions/`. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

@@ -3,10 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolated HOME so this file's SQLite population is fully controlled — the whole
-// point is to assert scan-coverage vs. usage-coverage against a KNOWN total, which
-// a shared db (resource-stats.test.ts seeds extra sessions) would perturb. Real
-// SQLite + real parseSession/backfill, no mocking. (PHNX-2301)
+// Isolated HOME so SQLite contents are fully controlled: scan-coverage vs usage-coverage is
+// asserted against a known total that a shared db (resource-stats.test.ts) would perturb. Real
+// SQLite, no mocks (PHNX-2301).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-rescov-'));
 process.env.HOME = TEST_HOME;
 

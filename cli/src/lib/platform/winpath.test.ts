@@ -74,12 +74,8 @@ describe('shouldWriteExpandable', () => {
   });
 });
 
-// A real HKCU\Environment round-trip requires a Windows host and is out of scope
-// for these OS-agnostic unit tests (they run on the Linux/mac CI legs too). The
-// pure functions above are the single source of truth for the PATH computation
-// and the value-type decision, so covering them proves the #308 fix; the
-// PowerShell registry primitives are exercised end-to-end on Windows during
-// install/postinstall.
+// A real HKCU\Environment round-trip needs a Windows host. The pure functions cover the #308 fix;
+// the PowerShell primitives are exercised on Windows at install.
 
 describe('blocksLocalScripts', () => {
   // Restricted/AllSigned block the unsigned .ps1 launchers npm and agents-cli

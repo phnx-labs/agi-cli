@@ -1,19 +1,6 @@
-/**
- * Read-only listing of a browser profile's on-disk captures — screenshots, PDFs,
- * recordings (`<profile>/sessions/<task>/`) and downloads (`<profile>/downloads/`).
- * Reads straight from `.cache/browser/<profile>/`, so it works whether or not the
- * browser daemon is running. Backs both `agents browser sessions` and the
- * `agents sessions --browser` alias.
- *
- * Also owns the task-first grouping (RUSH-2407): browser captures are per-task
- * (`sessions/<task>/`), and a task persists `owner`/`launchId` in `tasks.json`
- * while it is live (see service.ts `resolveTaskIdentity`). This module groups
- * artifacts by task and, when a launchId is available, resolves it to the
- * agent session that ran it — reusing the session index (`getSessionById`) and
- * the same launchId join keys the rest of the CLI already uses for this exact
- * problem (pid registry, the SessionStart hook index, the activity log; see
- * `feed-post.ts` `resolvePostIdentity`), never a second parser.
- */
+/** Read-only listing of a browser profile's on-disk captures (screenshots, PDFs, recordings,
+ * downloads) from `.cache/browser/<profile>/`, with or without the daemon. Backs `agents browser
+ * sessions` and `agents sessions --browser`, grouped per task (RUSH-2407). */
 import { showFile } from '../open-url.js';
 import * as fs from 'fs';
 import { formatBytes } from '../format.js';
@@ -100,20 +87,14 @@ function listProfileArtifacts(profile: string): BrowserArtifact[] {
   return artifacts;
 }
 
-/**
- * Captures grouped by profile. With `only` set, returns just that profile (even
- * when empty); otherwise every profile dir on disk that has at least one capture.
- */
+/** Captures grouped by profile. With `only`, just that profile (even when empty); otherwise every
+ * profile dir with at least one capture. */
 function listBrowserSessions(only?: string): ProfileArtifacts[] {
   let profiles: string[];
   if (only) {
-    // A profile's live tasks/captures may live under a composite runtime dir
-    // (`<name>@<device>`, `<name>@endpoint-N`, forks) — NOT the bare `<name>`
-    // dir. Resolve `only` to every cache dir that belongs to it, the same rule
-    // status()/findTask use (keyBelongsToProfile), so `--profile comet-local`
-    // surfaces the real `comet-local@zion` store instead of the empty legacy
-    // dir. Keep the requested name when nothing exists on disk yet so a fresh
-    // profile still returns its (empty) entry rather than vanishing.
+    // A profile's tasks may live under a composite runtime dir (`<name>@<device>`, `@endpoint-N`,
+    // forks), not the bare dir. Resolve `only` to every belonging cache dir (keyBelongsToProfile)
+    // so `--profile comet-local` finds `comet-local@zion`; keep the name if none exist.
     const dirs = listProfileCacheDirs(only).map((d) => path.basename(d));
     profiles = dirs.length > 0 ? dirs : [only];
   } else {
@@ -162,10 +143,8 @@ export function renderBrowserSessions(groups: ProfileArtifacts[]): string {
   return lines.join('\n');
 }
 
-/**
- * Resolve `--open <sel>`: `latest` (newest across the groups) or a filename
- * substring match. Returns the absolute path, or null if nothing matched.
- */
+/** Resolve `--open <sel>`: `latest` (newest across groups) or a filename substring. Returns the
+ * absolute path, or null if nothing matched. */
 export function resolveArtifact(groups: ProfileArtifacts[], selector: string): string | null {
   const all = groups.flatMap((g) => g.artifacts).sort((a, b) => b.mtimeMs - a.mtimeMs);
   if (all.length === 0) return null;
@@ -182,24 +161,15 @@ export function resolveArtifact(groups: ProfileArtifacts[], selector: string): s
 export interface TaskIdentity {
   owner?: string;
   launchId?: string;
-  /**
-   * The agent session that drove the task. Primary identity: it is carried by
-   * every agent process, whereas a launch id is present on a minority of them.
-   * Sourced from the durable `browser_sessions` row, which survives task stop —
-   * `tasks.json` never records it beyond the task's own lifetime (RUSH-2549).
-   */
+  /** The agent session that drove the task, the primary identity since every agent process carries
+   * it (a launch id only a minority do). From the durable `browser_sessions` row, which survives
+   * task stop; `tasks.json` doesn't (RUSH-2549). */
   sessionId?: string;
 }
 
-/**
- * Read a profile's `tasks.json` for the identity of its CURRENTLY LIVE tasks,
- * keyed by task name. A task's entry is deleted on `agents browser stop` (see
- * service.ts `saveTaskState`), so a task whose run has already ended is absent
- * here even though its captures remain on disk — that is exactly the
- * "unlinked legacy task" case {@link groupIntoRows} reports. Same read-straight-
- * from-disk approach as the rest of this module: works whether or not the
- * browser daemon is running.
- */
+/** Read a profile's `tasks.json` for the identity of its live tasks by name. An entry is deleted on
+ * `agents browser stop` (service.ts `saveTaskState`), so an ended task is absent though its
+ * captures remain: the "unlinked legacy task" case. Works without the daemon. */
 export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
   const out = new Map<string, TaskIdentity>();
   let raw: string;
@@ -227,16 +197,9 @@ export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
   return out;
 }
 
-/**
- * Identity for one profile's tasks, durable copy first.
- *
- * `browser_sessions` is the source of truth: it is written at task start and
- * never deleted, so it answers for tasks that have already stopped — the case
- * `tasks.json` structurally cannot, since `saveTaskState` rewrites that file
- * from the LIVE task map. The live file is still merged on top for a task that
- * is running right now, so a task started by an older CLI (no DB row yet) keeps
- * whatever identity it does have rather than regressing to nothing.
- */
+/** Identity for a profile's tasks, durable copy first. `browser_sessions` is written at task start
+ * and never deleted, so it answers for stopped tasks, which `tasks.json` (rewritten from the live
+ * map) can't. The live file is merged on top so a task from an older CLI keeps its identity. */
 export function loadDurableTaskIdentities(profile: string): Map<string, TaskIdentity> {
   const merged = new Map<string, TaskIdentity>();
   for (const record of listBrowserSessionRecords(profile)) {
@@ -263,20 +226,9 @@ export interface LaunchSessionIndex {
   byLaunchId: Map<string, string>;
 }
 
-/**
- * Build the launchId -> sessionId index from the same three sources
- * `feed-post.ts` `resolvePostIdentity` already uses for this exact problem —
- * a browser task's `launchId` IS the `AGENT_LAUNCH_ID` of the CLI run that
- * called `agents browser start` (see service.ts `resolveTaskIdentity`), so
- * resolving "which session ran this launch" is the same join, not a new one.
- * Lowest-confidence source first so a later, more specific source overwrites
- * it on a collision:
- *  1. the activity log (durable, but least specific — read last)
- *  2. the SessionStart hook's live-session index (kept for parity with
- *     `hook-sessions.ts`; empty on this fleet today, harmless when so)
- *  3. the per-pid launch registry (`ag run`, launch-scoped, most authoritative)
- * Computed once per interactive session, not per row.
- */
+/** Build the launchId -> sessionId index from the sources `feed-post.ts` resolvePostIdentity uses:
+ * a task's `launchId` is the `AGENT_LAUNCH_ID` of the CLI run that started it. Lowest confidence
+ * first so later sources overwrite: activity log, SessionStart index, per-pid launch registry. */
 export function buildLaunchSessionIndex(): LaunchSessionIndex {
   const byLaunchId = new Map<string, string>();
   for (const ev of readRecentActivity({ maxBytesPerSession: 64 * 1024 })) {
@@ -324,12 +276,9 @@ export interface BrowserSessionRow {
   latestMtimeMs: number;
 }
 
-/**
- * Group flat per-profile artifacts into task-first rows, newest first. Pure:
- * identities and the launch resolver are passed in, so this has no filesystem
- * or session-index dependency and is unit-testable with synthetic data (see
- * {@link buildBrowserSessionRows} for the impure disk/index-reading caller).
- */
+/** Group flat per-profile artifacts into task-first rows, newest first. Pure: identities and the
+ * launch resolver are passed in, so it is unit-testable (see buildBrowserSessionRows for the
+ * impure caller). */
 export function groupIntoRows(
   groups: ProfileArtifacts[],
   taskIdentities: Map<string, Map<string, TaskIdentity>>,
@@ -396,10 +345,9 @@ export function groupIntoRows(
  *  reading `tasks.json` and resolving launchIds against the live indexes.
  *  The interactive picker's data source. */
 export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
-  // Retention runs from BOTH listing paths, not just the computer one: a box
-  // that uses `agents browser` and never runs `agents sessions --computer`
-  // would otherwise never sweep either table. Best-effort — a read-only DB
-  // must not break a listing.
+  // Retention runs from both listing paths: a box using `agents browser` but never `agents
+  // sessions --computer` would otherwise never sweep either table. Best-effort; a read-only DB
+  // must not break listing.
   try { pruneToolSessions(); } catch { /* listing must not fail on retention */ }
   const groups = listBrowserSessions(profile);
   const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile)]));
@@ -412,10 +360,8 @@ export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
   );
 }
 
-/**
- * Search predicate for the interactive picker: task name, profile, the linked
- * session's agent/topic/label, and any artifact filename in the row.
- */
+/** Search predicate for the interactive picker: task name, profile, the linked session's
+ * agent/topic/label, and any artifact filename in the row. */
 export function matchesBrowserSessionRow(row: BrowserSessionRow, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -429,11 +375,9 @@ export function matchesBrowserSessionRow(row: BrowserSessionRow, query: string):
   return row.artifacts.some((a) => a.name.toLowerCase().includes(q));
 }
 
-/**
- * Shared CLI action for `agents browser sessions` and `agents sessions --browser`.
- * `open` is the Commander value for `--open [selector]`: undefined when the flag
- * is absent, `true` when passed bare (defaults to 'latest'), or the selector string.
- */
+/** Shared CLI action for `agents browser sessions` and `agents sessions --browser`. `open` is the
+ * Commander `--open [selector]` value: undefined if absent, `true` if bare (means 'latest'), else
+ * the selector string. */
 export async function runBrowserSessions(opts: { profile?: string; open?: string | boolean; json?: boolean }): Promise<void> {
   const groups = listBrowserSessions(opts.profile);
 

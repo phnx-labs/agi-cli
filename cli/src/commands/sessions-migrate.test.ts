@@ -74,12 +74,9 @@ describe('buildMigrateResumeCommands — the migrated session must land on the A
 
   it('every tmux invocation in the launch command carries -S <agents socket>, never bare `tmux`', () => {
     const { launchCmd } = buildMigrateResumeCommands(base);
-    // The old bug: `tmux set-option ...` with no -S landed the session on
-    // tmux's own default OS socket — invisible to readAllPaneOwners, so the
-    // reaper's next tick killed the migrated agent's helpers as
-    // 'tmux-session-gone'. Assert that exact bare-invocation shape is absent
-    // (the mkdir path also contains the substring "tmux", so this checks the
-    // COMMAND shape, not a bare substring match).
+    // The old bug: `tmux set-option ...` with no -S landed on tmux's default OS socket, invisible
+    // to readAllPaneOwners, so the reaper killed the migrated agent's helpers as 'tmux-session-
+    // gone'. Assert that bare shape is absent; check the command shape, not a substring.
     expect(launchCmd).not.toContain('tmux set-option');
     expect(launchCmd).toContain('tmux -S "$HOME/.agents/.cache/helpers/tmux/server.sock" set-option');
   });

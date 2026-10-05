@@ -1,27 +1,6 @@
-/**
- * SessionsBackend — the token-source seam for `agents sessions export --to-r2` /
- * `import --from-r2`.
- *
- * Two legitimate principals, picked once at backup time through the ONE shared
- * managed-vs-BYO policy (`selectStorageBackendKind`):
- *
- *   - **managed**: the caller is signed in to Phoenix (`readSession()`), no
- *     explicit BYO override. Token is the Phoenix access_token; endpoint is the
- *     managed `sessions.agents-cli.sh` Worker; the namespace is the verified
- *     userId. ZERO Cloudflare setup — the user never provisions an r2.backups
- *     bucket. This is the whole point of the surface (the sessions analogue of
- *     managed `agents traces sync`).
- *   - **byo**: the existing `r2.backups` secrets bundle (`loadR2Config()`).
- *     Unchanged for power users / self-hosters / a zero-knowledge backup that
- *     Phoenix can never read.
- *
- * MANAGED-FIRST — the mere PRESENCE of an r2.backups bundle is NOT a BYO
- * override. A signed-in user with a stale r2.backups bundle still backs up to
- * managed unless they opt out explicitly: `--byo`, `AGENTS_SESSIONS_BACKEND=byo`,
- * or a DI write token. This mirrors the artifact-share backend contract (a
- * persisted BYO config is deliberately not an override) so the product's
- * managed-first contract is identical across surfaces.
- */
+/** SessionsBackend: token-source seam for `sessions export --to-r2` / `import --from-r2`. Managed
+ * (Phoenix sign-in, `sessions.agents-cli.sh`) comes first: an r2.backups bundle alone is NOT a BYO
+ * override; only `--byo`, AGENTS_SESSIONS_BACKEND=byo or a DI write token. BYO is zero-knowledge. */
 
 import { readSession, type PhoenixSession } from '../../identity/client.js';
 import { selectStorageBackendKind } from '../../storage/selection.js';
@@ -58,13 +37,9 @@ interface ResolveSessionsBackendOpts {
   session?: PhoenixSession | null;
 }
 
-/**
- * The sessions surface's BYO-override signals: an explicit `--byo`, a
- * caller-supplied static write token, or `AGENTS_SESSIONS_BACKEND=byo`. Detecting
- * WHICH signals count is surface-specific; the managed-vs-BYO decision itself is
- * the shared policy. A persisted r2.backups bundle is deliberately NOT an
- * override — a signed-in user still backs up to managed unless they opt out.
- */
+/** The sessions BYO-override signals: `--byo`, a caller-supplied write token, or
+ * `AGENTS_SESSIONS_BACKEND=byo`. Which signals count is surface-specific; the decision is the
+ * shared policy. A persisted r2.backups bundle is deliberately not an override. */
 function sessionsByoOverride(opts: ResolveSessionsBackendOpts): boolean {
   if (opts.byo === true) return true;
   if (opts.writeToken) return true;
@@ -79,12 +54,9 @@ export function shouldUseManagedSessions(opts: ResolveSessionsBackendOpts = {}):
   );
 }
 
-/**
- * Resolve the backend for a session backup / restore. Managed when signed in and
- * no explicit BYO override; otherwise BYO. Fails loud when neither principal can
- * authenticate — the actionable message ("run auth login" or "add r2.backups")
- * lives here, not in the shared policy.
- */
+/** Resolve the backend for a session backup/restore: managed when signed in with no BYO
+ * override, else BYO. Fails loud when neither can authenticate; the actionable message lives
+ * here, not in the shared policy. */
 export function resolveSessionsBackend(opts: ResolveSessionsBackendOpts = {}): SessionsBackend {
   // Resolve identity ONCE. Reading it for selection and then again for the
   // backend creates a race where logout can flip the principal mid-preflight.

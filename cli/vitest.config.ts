@@ -1,31 +1,15 @@
 import { defineConfig } from 'vitest/config';
 import { shouldEnableCiTestProfile } from './tests/hermetic-guards';
 
-// RUSH-2215: a large vitest forks suite can finish every test green and
-// still exit 1 because idle workers die ("Worker exited unexpectedly").
-// Measured on Windows CI (~12m) and on Linux selected CI (#2622, 863 files /
-// 12206 tests passed, 0 failed, then exit 1 — three times). Cap fork
-// concurrency on win32; ignore unhandled pool errors on win32 and in CI
-// so the required check tracks test outcomes, not orphan-worker noise.
-//
-// RUSH-3007: this profile is also what release-attestation-produce.sh needs
-// under load (RUSH-2970 trap 5a), which is why it's gated on
-// shouldEnableCiTestProfile() rather than a bare `process.env.CI === 'true'`
-// — see tests/hermetic-guards.ts for why that flag exists and must stay
-// decoupled from tests/setup.ts's real-~/.agents leak tripwires.
+// RUSH-2215: a big vitest forks suite can pass every test yet exit 1 as idle workers die (#2622).
+// Cap forks on win32; ignore pool errors there and in CI. Gated on shouldEnableCiTestProfile()
+// (RUSH-3007), not bare CI, to stay apart from leak tripwires.
 const isWin = process.platform === 'win32';
 const ignoreUnhandledPoolErrors = isWin || shouldEnableCiTestProfile(process.env);
 
-// RUSH-3081/RUSH-3015: the attestation producer (release-attestation-produce.sh,
-// AGENTS_ATTEST_PRODUCER=1) runs the FULL suite on the signing Mac (mac-mini),
-// which is a shared box usually under concurrent load. With the default forks
-// pool spawning a worker per core, these real-CLI / real-service integration
-// tests contend on shared state and flake (1-2 different tests per run out of
-// ~13k) and workers OOM/crash — observed failing ~every producer run across ~10
-// attempts, blocking releases. Cap producer concurrency so the suite runs stably
-// enough to attest. Only the producer is affected (a signing-Mac full-suite run);
-// normal CI on dedicated crabboxes (CI=true, not AGENTS_ATTEST_PRODUCER) keeps
-// full parallelism and its 90s budget.
+// RUSH-3081/RUSH-3015: the attestation producer runs the full suite on the shared signing Mac under
+// load; a worker per core made real-service tests flake and workers OOM (~every run, ~10 attempts).
+// Cap producer concurrency; normal CI keeps full parallelism and its 90s budget.
 const isAttestProducer = process.env.AGENTS_ATTEST_PRODUCER === '1';
 
 export default defineConfig({

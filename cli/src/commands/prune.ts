@@ -1,27 +1,6 @@
-/**
- * `agents prune cleanup` — destructive cleanup across the install.
- *
- * Cleanup targets:
- *   - Resource orphans: command/skill/hook files inside a version home that no
- *     longer come from any source (deleted from ~/.agents/ but never reconciled
- *     into the version install).
- *   - Version duplicates: older installed versions of an agent that share an
- *     account with a newer installed version of the same agent.
- *   - Trash/session targets are retained as no-op compatibility shims: version
- *     homes and session history are durable and must not be hard-deleted by
- *     agents-cli.
- *   - Runs: routine execution logs, keeping only the last N per job.
- *
- * Sync (additive: copy missing/changed files into version homes) is the job
- * of `agents sync` / `agents refresh` — the shim's launch hook
- * (`agents sync --launch`) is project-scoped only and deliberately skips
- * version-home reconciliation. Pruning, however, is destructive, so it stays
- * explicit.
- *
- * Default scope: each agent's currently-pinned default version for orphan
- * cleanup, plus the standard cross-agent version-dedup pass. Pass `--all`
- * to widen orphan cleanup to every installed version.
- */
+/** `agents prune cleanup`: destructive cleanup of resource orphans, version duplicates and routine
+ * run logs (last N per job). Trash/session targets are no-op shims: version homes and session
+ * history must never be hard-deleted. Additive sync is `agents sync`'s job; `--all` widens scope. */
 import * as fs from 'fs';
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -115,11 +94,9 @@ function collectOrphans(types: ResourceType[], all: boolean): OrphanGroup[] {
 
   if (types.includes('hooks')) {
     for (const { agent, version } of scopePairs(iterHooksCapableVersions(), all)) {
-      // Orphan hooks = scripts present in the version home but absent from
-      // every configured source (user + system + extras) — genuinely dead
-      // files, not merely unregistered ones (sync copies helper/test scripts
-      // that no manifest entry declares). Same definition the doctor overview
-      // reports (PHNX-2693).
+      // Orphan hooks are scripts in the version home absent from every configured source:
+      // genuinely dead files, not merely unregistered ones (sync copies helper/test scripts no
+      // manifest declares). Same definition as the doctor overview (PHNX-2693).
       const orphans = listUnmanagedHooksInVersionHome(agent, version);
       if (orphans.length > 0) {
         groups.push({ type: 'hooks', agent, version, orphans });
@@ -163,10 +140,8 @@ function removeOne(group: OrphanGroup, name: string): { success: boolean; error?
   }
 }
 
-/**
- * Resolve the optional positional. It can be a resource type, state type,
- * the literal "versions", or an agent name (shorthand for `prune versions <agent>`).
- */
+/** Resolve the optional positional: a resource type, state type, the literal "versions", or an
+ * agent name (shorthand for `prune versions <agent>`). */
 interface ParsedTarget {
   resourceTypes: ResourceType[];
   includeVersions: boolean;

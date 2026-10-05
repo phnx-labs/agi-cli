@@ -1,16 +1,6 @@
-/**
- * Tests for the cloud dispatch live budget kill-switch (issue #399).
- *
- * The wrapper wraps a provider's SSE stream, feeds `usage` frames into a
- * shared `makeLiveSpendWatcher`, and calls `provider.cancel(taskId)` on the
- * first breach. Verifies:
- *  - `wrapStreamWithBudgetGate` returns null when no caps are set (dormant).
- *  - The wrapped stream forwards `usage` events downstream unchanged when
- *    spend is under cap.
- *  - On a mid-stream cap breach it (a) calls provider.cancel exactly once,
- *    (b) emits a synthetic error + cancelled status downstream, (c) stops
- *    yielding further events from the source.
- */
+/** Tests for the cloud dispatch live budget kill-switch (issue #399): the wrapper feeds `usage`
+ * frames into `makeLiveSpendWatcher` and calls `provider.cancel(taskId)` on first breach. Checks:
+ * null with no caps; passthrough under cap; on breach, one cancel and a cancelled status. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -34,11 +24,8 @@ afterEach(() => {
   fs.rmSync(projectDir, { recursive: true, force: true });
 });
 
-/**
- * A stub CloudProvider that only implements what the gate touches: `cancel`.
- * Every other method throws — a fail-loud contract, so if the gate ever
- * calls something it shouldn't, the test surfaces it immediately.
- */
+/** A stub CloudProvider implementing only `cancel`; every other method throws, so a call the budget
+ * wrapper shouldn't make surfaces immediately. */
 class StubProvider implements CloudProvider {
   id = 'rush' as const;
   name = 'stub';
@@ -68,10 +55,8 @@ async function* mkStream(events: CloudEvent[]): AsyncIterable<CloudEvent> {
   for (const e of events) yield e;
 }
 
-/**
- * Collect every event a wrapped stream yields. Used to assert both that
- * pre-breach events pass through AND that post-breach events are dropped.
- */
+/** Collect every event a wrapped stream yields, to assert pre-breach events pass through and
+ * post-breach events are dropped. */
 async function collect(stream: AsyncIterable<CloudEvent>): Promise<CloudEvent[]> {
   const out: CloudEvent[] = [];
   for await (const e of stream) out.push(e);

@@ -1,33 +1,6 @@
-/**
- * One fleet fan-out, many readers.
- *
- * THE COST THIS EXISTS TO AVOID. `watchFleetFeed` opens a persistent
- * `ssh <peer> agents feed watch --json --local` per dialable device — that is
- * correct, and it is also per CALLER. Every consumer that wanted the operator
- * stream ran its own copy: the extension's leader child, a menu-bar helper, an
- * operator's `agents feed watch --json`. Three readers on a thirteen-device
- * fleet is thirty-nine long-lived ssh children carrying byte-identical NDJSON,
- * three copies of the local activity cursor, and three independent backoff
- * ladders that each re-dial the same offline box.
- *
- * WHAT REPLACES IT. The hub owns exactly ONE {@link watchFleetFeed} — so one ssh
- * child per reachable peer, one collector, one backoff ladder — and broadcasts
- * to every subscriber. The fan-out starts on the FIRST subscriber and stops on
- * the LAST, so an idle box with no reader open holds no peer connections at all.
- *
- * A LATE SUBSCRIBER COSTS NOTHING. The hub keeps the per-scope row state the
- * stream has delivered so far, so subscriber two is served a synthesized reset
- * per scope out of that state — no second fan-out, no re-dial, no waiting for
- * the peers to re-announce. Its `streamId`/`sequence` are its own and start at
- * 1, which is exactly what the published contract ("order by streamId +
- * sequence") lets a consumer rely on.
- *
- * RESET SEMANTICS ARE PRESERVED, NOT REINVENTED. A peer's reset replaces that
- * ONE scope's rows in the held state and is forwarded verbatim; a peer going
- * unavailable forwards the `scope` event and leaves its rows in place, so a
- * reader that attaches while a box is offline still sees that box's last-known
- * rows marked unavailable rather than an empty fleet.
- */
+/** One fleet fan-out, many readers: `watchFleetFeed` per caller meant 39 ssh children for three
+ * readers on 13 devices. The hub owns one, starting on the first subscriber and stopping on the
+ * last; late subscribers get a reset synthesized from held state. Peer resets stay per scope. */
 import { machineId, normalizeHost } from '../machine-id.js';
 import type { SessionWatchRow, SessionWatchScopeStatus } from '../session/watch.js';
 import type { ToolSetupRow } from '../setup-tool-status.js';
@@ -54,11 +27,8 @@ function emptyScope(): ScopeState {
   return { agents: new Map(), attention: new Map(), tools: new Map(), setup: [], capturedAt: 0 };
 }
 
-/**
- * The per-scope row state the hub has observed. This is a projection of the
- * events already delivered, never an independent gather: nothing here reads a
- * file, runs a command, or dials a peer.
- */
+/** The per-scope row state the hub has observed: a projection of delivered events, never an
+ * independent gather (no file reads, commands or dials). */
 export class FeedHubState {
   private readonly scopes = new Map<string, ScopeState>();
   private readonly activity: ActivityEvent[] = [];
@@ -136,39 +106,28 @@ export type HubFanOut = (options: {
 export type HubFailureListener = (error: Error) => void;
 
 interface FeedHubOptions {
-  /**
-   * The collector to own — the fleet ssh fan-out, or the local watcher. Required
-   * rather than defaulted so this module depends on neither, which is what keeps
-   * `watch.ts` free to depend on THIS module for its shared local collector.
-   */
+  /** The collector to own (fleet ssh fan-out or local watcher). Required, not defaulted, so this
+   * module depends on neither and `watch.ts` can depend on this one for its shared local
+   * collector. */
   watch: HubFanOut;
   /** Forwarded to the fan-out. */
   reconnectMs?: number;
 }
 
-/**
- * The shared collector. Construct one per process; call {@link subscribe} per
- * reader.
- */
+/** The shared collector: construct one per process and call `subscribe` per reader. */
 export class FeedHub {
   private readonly subscribers = new Set<Subscriber>();
   private readonly held = new FeedHubState();
   private controller: AbortController | null = null;
   private running: Promise<void> | null = null;
-  /**
-   * Bumped on every start/stop. A fan-out's completion handler only clears state
-   * when its own generation is still current, so a run winding down cannot clear
-   * a newer one's controller.
-   */
+  /** Bumped on every start/stop; a completion handler clears state only if its generation is
+   * current, so a winding-down run cannot clear a newer controller. */
   private generation = 0;
   /** The most recent fan-out failure, if the current generation hit one. */
   lastFailure: Error | null = null;
-  /**
-   * Called when the fan-out rejects. Without this the failure lived only in a
-   * dropped promise, so readers sat attached to a collector that had already died
-   * and saw an idle stream instead of an error. Settable so the socket server can
-   * attach after construction.
-   */
+  /** Called when the fan-out rejects. Without it the failure lived in a dropped promise and
+   * readers saw an idle stream instead of an error. Settable so the socket server can attach
+   * after construction. */
   onFailure: HubFailureListener | null = null;
   private readonly watch: HubFanOut;
 
@@ -183,11 +142,8 @@ export class FeedHub {
   /** The held per-scope state, for observability and tests. */
   get state(): FeedHubState { return this.held; }
 
-  /**
-   * Attach a reader. It is immediately served a snapshot of the held state, then
-   * every later event. Returns the detach function; the fan-out stops when the
-   * last reader detaches.
-   */
+  /** Attaches a reader: it gets a snapshot of held state, then every later event. Returns the
+   * detach function; the last detach stops the fan-out. */
   subscribe(emit: (event: FeedWatchEnvelope) => void): () => void {
     const subscriber: Subscriber = { emit, state: new FeedWatchState() };
     this.subscribers.add(subscriber);
@@ -216,16 +172,9 @@ export class FeedHub {
     await this.running?.catch(() => { /* only the timing matters here */ });
   }
 
-  /**
-   * Start the single fan-out, waiting for any previous one to finish first.
-   *
-   * The wait is the whole point. `stop()` aborts and returns immediately, but the
-   * fan-out it aborted is still tearing down ssh children. A reader that detaches
-   * and immediately reattaches — a VS Code window reloading, a menu-bar popover
-   * closing and reopening — therefore used to start a SECOND fan-out alongside
-   * the dying one: two ssh children per peer, two collectors, for as long as the
-   * overlap lasted. Serializing on the previous run makes that impossible.
-   */
+  /** Starts the single fan-out, waiting for any previous one to finish: `stop()` returns
+   * immediately while the aborted run still tears down ssh children, so a quick detach and
+   * reattach (window reload, popover reopen) started a second fan-out alongside the dying one. */
   private start(): void {
     if (this.controller) return;
     const generation = ++this.generation;
@@ -242,10 +191,9 @@ export class FeedHub {
         return this.watch({
           signal: controller.signal,
           ...(this.options.reconnectMs !== undefined ? { reconnectMs: this.options.reconnectMs } : {}),
-          // Generation-guarded: an aborted fan-out can still emit while it drains
-          // (a peer's last buffered line, a pending promise resolving). Those
-          // envelopes describe the OLD subscription and must not reach the new
-          // generation's readers or mutate its held state.
+          // Generation-guarded: an aborted fan-out can still emit while draining, and those
+          // envelopes describe the old subscription, so they must not reach the new generation's
+          // readers or mutate its held state.
           emit: (event) => { if (generation === this.generation) this.broadcast(event); },
         });
       })

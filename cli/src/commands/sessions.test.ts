@@ -26,12 +26,8 @@ import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/inde
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 
-// Pure unit tests for src/commands/sessions.ts exports. The subprocess-heavy
-// behavior tests live in the sessions.*.test.ts slices next to this file
-// (cli-list, cli-live, cli-tools, computer, render, resolve, resolve-errors,
-// ssh-peer), split so vitest can parallelize them across worker forks
-// (RUSH-2819) — this file was one 2,600-line suite measured at 172s, the
-// single slowest file in CI. Shared fixtures: sessions.test-fixture.ts.
+// Pure unit tests for sessions.ts exports. Subprocess-heavy tests live in the sessions.*.test.ts
+// slices (split for parallelism, RUSH-2819); shared fixtures are in sessions.test-fixture.ts.
 
 describe('session harness name resolution', () => {
   it('shares canonical aliases and typo correction with focus selectors', () => {

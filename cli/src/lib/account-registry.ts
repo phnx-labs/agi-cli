@@ -339,12 +339,8 @@ function assertUniqueUnifiedName(
   if (provider && !exceptIds?.has(provider.id)) throw new Error(`Account '${name}' already exists.`);
 }
 
-/**
- * Validate a native account NAME (charset + per-harness uniqueness) WITHOUT a
- * known identity — the pre-flight `agents accounts add` runs before it
- * installs a home and drives a login, so a bad/colliding name fails before any
- * side effect instead of orphaning a freshly-minted home (PHNX-3940).
- */
+/** Validate a native account name (charset + per-harness uniqueness) without a known identity, so
+ * `agents accounts add` fails before installing a home instead of orphaning one (PHNX-3940). */
 export function assertNativeAccountNameAvailable(name: string, agent: AgentId): void {
   assertNativeLabel(name);
   assertUniqueUnifiedName(name, readMeta(), undefined, undefined, agent);

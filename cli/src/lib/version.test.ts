@@ -11,15 +11,9 @@ describe('version', () => {
     expect(v.length).toBeGreaterThan(0);
   });
 
-  // getCliVersionFresh's contract — "re-reads package.json every call, unlike
-  // the memoized getCliVersion" — used to have NO honest unit test, because
-  // both functions read the same hardcoded path: with package.json unchanged
-  // mid-test, cached and fresh are equal by construction, including for the
-  // exact regression the contract exists to prevent
-  // (`getCliVersionFresh = () => getCliVersion()`). RUSH-2862 made the
-  // package.json path an optional parameter (production call sites still use
-  // the zero-arg form) so a test can swap the file a running module reads
-  // without touching the real, fork-shared cli/package.json.
+  // getCliVersionFresh re-reads package.json each call, unlike memoized getCliVersion, but had no
+  // honest test (same hardcoded path). RUSH-2862 added an optional path param so a test can swap
+  // the file.
   it('getCliVersionFresh follows an on-disk change; getCliVersion stays memoized (RUSH-2862)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-version-test-'));
     const pkgJsonPath = path.join(dir, 'package.json');
@@ -49,10 +43,9 @@ describe('version', () => {
   });
 });
 
-// Regression guard for the Bun single-file binary: `import.meta.url` is a virtual
-// `/$bunfs/` path there, so version + menu-bar-bundle resolution must fall back to
-// the on-disk install found via the `agents` launcher symlink. This locks the
-// dirname chain (`<pkg>/dist/bin/agents` -> `<pkg>/dist`) that the fallback rides.
+// Regression guard for the Bun single-file binary: `import.meta.url` is a virtual `/$bunfs/` path,
+// so resolution falls back to the install found via the `agents` launcher symlink. Locks the
+// dirname chain.
 describe('installLayoutFromBin', () => {
   it('derives dist/, entry, and package.json from an nvm launcher path', () => {
     const bin =

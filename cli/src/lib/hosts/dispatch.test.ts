@@ -70,10 +70,7 @@ function decodeWindows(command: string): string {
   return Buffer.from(encoded, 'base64').toString('utf16le');
 }
 
-/**
- * The script inside a `renderPowershellCommand` result, whichever of its two
- * forms (plain `-EncodedCommand`, or the deflated `-Command` bootstrap) it chose.
- */
+/** The script inside a `renderPowershellCommand` result, in either its plain or deflated form. */
 function decodeRendered(command: string): string {
   const encoded = command.match(/-EncodedCommand (\S+)$/)?.[1];
   if (encoded) return Buffer.from(encoded, 'base64').toString('utf16le');
@@ -482,18 +479,9 @@ describe('deriveMirroredCwd', () => {
   });
 });
 
-// The prefix is only ever consumed by a remote POSIX shell, so run it through a
-// real one against a real directory tree — that is what proves the mirror lands
-// in the project and the fallback lands in the home.
-//
-// The shell it runs through here is the LOCAL one, which is only a valid stand-in
-// for the remote where the local shell is POSIX. On Windows there is no bash to
-// spawn, so `spawnSync` returns a null status and the `pwd` output is empty —
-// the two positive cases fail on the harness rather than on the behavior, and the
-// negative case ("must exit non-zero") passes for the wrong reason. The prefix
-// itself is correct on a Windows client: it targets a remote POSIX shell either
-// way. Assert it there via the pure string expectations above, and run the
-// real-shell block only where a real POSIX shell exists.
+// Run the prefix through a real POSIX shell on a real directory tree to prove the mirror lands in
+// the project and the fallback in the home. Skipped on Windows, where there is no bash; the string
+// assertions above cover it there.
 describe.skipIf(process.platform === 'win32')('remoteCdPrefix executed by a real shell', () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-cwd-'));
   const present = 'src/github.com/acme/repo';
@@ -620,13 +608,8 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     Object.assign(process.env, env);
     resetActorCache();
   }
-  // Pin the tailscale resolvers to "names no one" for every test in this block,
-  // so an UNRESOLVED case is genuinely unresolvable regardless of whether the box
-  // running the suite is on the tailnet. Without this the local-run self-credit
-  // (`tailscaleSelf`) returns the CI/dev box's own tailnet owner and the
-  // UNRESOLVED assertion below sees that ambient account instead. The
-  // inherited-actor tests short-circuit before any resolver, so this doesn't
-  // change their behavior.
+  // Pin the tailscale resolvers to name no one so an UNRESOLVED case is unresolvable whether or not
+  // the box is on the tailnet.
   beforeEach(() => {
     delete process.env.AGENTS_RUNTIME;
     setActorResolvers({ whois: () => undefined, self: () => undefined, session: () => null });
@@ -746,11 +729,9 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
 
 describe('remoteRunShellPrelude — the run-auto chain-hop guard crosses the SSH boundary (RUSH-2132)', () => {
   it('exports the guard into the remote SHELL env for a `run auto` dispatch — and the remote shell really sees it', () => {
-    // Both dispatch paths (runInteractiveOnHost + launchDetached) build their
-    // remote command with this prelude, so asserting on it exercises the real
-    // boundary. The guard MUST land in the remote CLI's own process.env (read
-    // by runAutoDefaultsToAffinity): a forwarded `--env` flag only reaches the
-    // spawned agent, which was the review finding this guards.
+    // Both dispatch paths build their remote command with this prelude. The guard must land in the
+    // remote CLI's own process.env (read by runAutoDefaultsToAffinity); a forwarded `--env` only
+    // reaches the spawned agent.
     const prelude = remoteRunShellPrelude('auto');
     expect(prelude).toContain('export AGENTS_RUN_AUTO_HOST_RESOLVED=1');
     const out = spawnSync('bash', ['-lc', `${prelude}printf %s "$AGENTS_RUN_AUTO_HOST_RESOLVED"`], { encoding: 'utf-8' });
@@ -768,12 +749,9 @@ describe('remoteRunShellPrelude — the run-auto chain-hop guard crosses the SSH
     expect(buildInteractiveRunForwardedArgs({ agent: 'auto' }).join(' ')).not.toContain('AGENTS_RUN_AUTO_HOST_RESOLVED');
   });
 
-  // RUSH-3125 / PHNX-3316. The interactive dispatch hands the remote agent a
-  // TTY that IS an ssh link, so the remote CLI has to know the run arrived
-  // over the network — resolveTmuxWrap reads it for the --no-follow pane
-  // requirement, and reconnect.ts keys the drop-recovery off it. Like the
-  // run-auto guard, this MUST be a shell export: resolveTmuxWrap reads the
-  // remote CLI's own process.env, which a forwarded `--env` never reaches.
+  // RUSH-3125 / PHNX-3316: the interactive TTY is an ssh link, so the remote CLI must know via a
+  // shell export (not a forwarded `--env`, which resolveTmuxWrap never sees) that the run arrived
+  // over the network.
   it('exports the remote-interactive marker when asked, and the remote shell really sees it', () => {
     const prelude = remoteRunShellPrelude('claude', { AGENTS_REMOTE_INTERACTIVE: '1' });
     expect(prelude).toContain('export AGENTS_REMOTE_INTERACTIVE=1');

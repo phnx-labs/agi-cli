@@ -1,8 +1,6 @@
-/**
- * Event stream families — sessions-style --include / --exclude for the unified
- * event reader. One vocabulary maps onto existing filters (includeActivity,
- * eventTypes, level) so the engine stays single-path.
- */
+/** Event stream families: sessions-style --include / --exclude for the unified event reader. One
+ * vocabulary maps onto existing filters (includeActivity, eventTypes, level) so the engine stays
+ * single-path. */
 
 import type { EventType, EventLevel } from './feed/events.js';
 import type { UnifiedQuery } from './event-stream.js';
@@ -23,10 +21,8 @@ function isEventFamily(value: string): value is EventFamily {
   return FAMILY_SET.has(value);
 }
 
-/**
- * Parse a comma-separated family list. Throws on unknown names or empty list
- * after split (same discipline as sessions role lists).
- */
+/** Parse a comma-separated family list. Throws on unknown names or an empty list after split (same
+ * discipline as sessions role lists). */
 export function parseFamilyList(raw: string, flagName: string): EventFamily[] {
   const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
   if (parts.length === 0) {
@@ -48,14 +44,9 @@ const COMMAND_EVENT_TYPES: readonly EventType[] = ['command.start', 'command.end
 /** Run-dispatch outcome kinds (replaces the separate audit/log.jsonl product). */
 const RUN_EVENT_TYPES: readonly EventType[] = ['run.dispatched', 'run.launch', 'agent.run.end'];
 
-/**
- * Fold family include/exclude into a UnifiedQuery.
- * Precedence: family narrows sources/types; field filters (module, event, …)
- * still apply on top.
- *
- * --include and --exclude are mutually exclusive at the CLI layer; this
- * function accepts only one of includeFamilies / excludeFamilies.
- */
+/** Fold family include/exclude into a UnifiedQuery. Families narrow sources/types, with field
+ * filters (module, event, ...) still applied on top. --include and --exclude are mutually
+ * exclusive at the CLI layer; this accepts only one of includeFamilies / excludeFamilies. */
 export function applyFamilies(q: UnifiedQuery): UnifiedQuery {
   const include = q.includeFamilies;
   const exclude = q.excludeFamilies;
@@ -99,10 +90,9 @@ function applyInclude(q: UnifiedQuery, families: EventFamily[]): UnifiedQuery {
     if (!has('activity')) includeActivity = false;
   }
 
-  // Type-scoped families (commands / runs) only restrict eventTypes when no
-  // broader ops-side family is in the include list. ops and security already
-  // cover those kinds; AND-ing a type filter would shrink the union (e.g.
-  // --include security,runs would drop secrets.get and keep only run.dispatched).
+  // Type-scoped families (commands / runs) restrict eventTypes only when no broader ops-side
+  // family is included: ops and security already cover those kinds, and AND-ing a type filter
+  // would shrink the union (--include security,runs would drop secrets.get).
   const broadOps = has('ops') || has('security');
   let eventTypes = q.eventTypes ? [...q.eventTypes] : undefined;
   if (typeSets.length > 0 && !broadOps) {

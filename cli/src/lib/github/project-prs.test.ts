@@ -42,10 +42,8 @@ describe('project PR projection', () => {
   });
 });
 
-/**
- * A gh runner that answers from recorded REST payloads keyed by endpoint, and
- * records which endpoints were asked — the same JSON lines `gh api --jq` prints.
- */
+/** A gh runner answering from recorded REST payloads keyed by endpoint, recording which
+ * endpoints were asked. */
 type Routes = Record<string, string | Error | ((args: string[]) => string)>;
 
 function recordedGh(routes: Routes) {

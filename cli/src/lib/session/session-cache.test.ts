@@ -1,11 +1,6 @@
-/**
- * RUSH-2062 — cross-surface active-session cache invariants.
- *
- * Real disk files under a temp dir (no mocks of the cache layer itself). The
- * live gather is injected as a pure function so the test pins cache behaviour
- * without SSH / process-table cost; the critical path under test is the
- * freshness/staleness + immutable-memo contract.
- */
+/** RUSH-2062 cross-surface active-session cache invariants, on real temp-dir files. The live gather
+ * is injected as a pure function, so the freshness/staleness and immutable-memo contract is tested
+ * without SSH or process-table cost. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -378,14 +373,9 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
 });
 
 describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader connect (RUSH-2484)', () => {
-  // Real defect this closes: noteActiveSessionsJournalReader() (called by
-  // watchLocalSessions on connect) ONLY writes a timestamp file — it has no
-  // path back into the daemon process that owns the 15s warm-tick
-  // setInterval. A watcher connecting to a cold/idle daemon used to sit on
-  // "awaiting publisher" for up to a full ACTIVE_SESSIONS_WARM_TICK_MS (15s).
-  // These tests drive real setInterval-based scheduling via fake timers and
-  // assert the callback fires from the poll noticing the presence-file edge —
-  // never from a second, manually-invoked call to the tick function.
+  // Defect closed: noteActiveSessionsJournalReader() only writes a timestamp, so a watcher on a
+  // cold daemon waited up to a full 15s warm tick. Tests use fake timers and assert the poll sees
+  // the presence-file edge, not a manual tick.
   const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
   let dir: string;
   let prevPresence: string | null;

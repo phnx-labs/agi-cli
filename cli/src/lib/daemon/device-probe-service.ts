@@ -1,19 +1,6 @@
-/**
- * Device-probe tick as a `PeriodicService` (RUSH-3193 P3).
- *
- * Refreshes registered devices' reachability and detects newly appeared
- * tailnet nodes, dropping a sentinel per pending device so the menu-bar helper
- * can surface "NEW DEVICES -> Register / Ignore". Refresh mode never
- * auto-registers a newcomer; a machine without tailscale is a clean no-op.
- * `reconcilePendingSentinels` re-subtracts the ignore-list AND the registered
- * roster, so a dismissed or already-known device is never re-surfaced. On
- * soft-fail (no tailscale) sentinels are still pruned so a hermetic test leak
- * cannot leave fleet boxes in NEW DEVICES forever.
- *
- * The supervisor fires an immediate tick on start (see `service.ts`), which
- * replaces the previous inline `void runDeviceProbeTick()` kick-off that
- * cleared any leftover pollution set without waiting for the first interval.
- */
+/** Device-probe tick as a `PeriodicService` (RUSH-3193 P3): refresh registered devices'
+ * reachability and detect new tailnet nodes, dropping a sentinel per pending device for the
+ * menu-bar "NEW DEVICES" prompt. Never auto-registers or re-surfaces ignored/known devices. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';

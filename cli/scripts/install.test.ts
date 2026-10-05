@@ -15,13 +15,9 @@ function makeTempDir(prefix: string): string {
 
 const makeTempHome = () => makeTempDir('agents-install-home-');
 
-/**
- * Hermetic package tree: the real scripts/install.sh next to a stub dist/ and a
- * dependency-free package.json. install.sh cd's to its own parent and packs
- * whatever is there, so the copy exercises the real pack -> npm install -> link
- * path without needing this checkout to carry a built dist/ (the CI test shards
- * run vitest straight after `bun install`, with no `bun run build`).
- */
+/** Hermetic package tree: the real scripts/install.sh beside a stub dist/ and a dependency-free
+ * package.json. install.sh cd's to its parent and packs what is there, so this exercises the real
+ * pack, npm install and link path without a built dist/. */
 function stagePackageTree(): string {
   const root = makeTempDir('agents-install-pkg-');
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
@@ -223,10 +219,9 @@ describe.skipIf(process.platform === 'win32')('install.sh dev bin naming', () =>
     const root = stagePackageTree();
     fs.mkdirSync(linkDir(home), { recursive: true });
 
-    // A leftover `browser` shadow gets cleaned, but the manifest was pinned by a
-    // --bounce-daemon run to agents-dev, which is healthy and untouched. A bare
-    // substring test for "<linkdir>/agents" also matches "<linkdir>/agents-dev",
-    // which would send the user to restart a working shared daemon.
+    // A leftover `browser` shadow gets cleaned, but the manifest was pinned by a --bounce-daemon
+    // run to agents-dev, which is healthy. A bare substring test for "<linkdir>/agents" also
+    // matches "<linkdir>/agents-dev" and would send the user to restart a working shared daemon.
     fs.symlinkSync(
       path.join(devPrefix(home), 'bin', 'browser'),
       path.join(linkDir(home), 'browser'),
@@ -251,16 +246,9 @@ describe.skipIf(process.platform === 'win32')('install.sh dev bin naming', () =>
     const home = makeTempHome();
     const root = stagePackageTree();
 
-    // The real PATH minus every directory that provides an `agents` -- reproduces
-    // the state a box is left in when the dev shadow was the only thing
-    // answering to that name (postinstall.js:311 skips writing its own link when
-    // `agents` resolves). On a box where npm/node share a bin dir with `agents`
-    // (e.g. a Homebrew install, where `agents`, `npm`, and `node` all live in
-    // `/opt/homebrew/bin`), filtering by directory would strip npm/node too and
-    // fail the script for an unrelated reason ("npm not found") -- so instead of
-    // relying on directory-level exclusion, symlink node/npm/git into their own
-    // shim dir and prepend it, keeping them reachable independent of where
-    // `agents` happens to live on this host.
+    // The real PATH minus every directory providing an `agents`, reproducing a box where the dev
+    // shadow was the only `agents` (postinstall.js:311 skips its own link when `agents` resolves).
+    // node/npm/git get their own shim dir, since filtering dirs would drop them on Homebrew boxes.
     const shimDir = makeTempDir('agents-install-shim-');
     for (const bin of ['node', 'npm', 'git']) {
       const resolved = spawnSync('/bin/sh', ['-c', `command -v ${bin}`], {

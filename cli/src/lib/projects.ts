@@ -1,32 +1,6 @@
-/**
- * Named project definitions — the layer above the `--project <slug>` convention.
- *
- * `agents run --project <slug>` already resolves a bare name to a working
- * directory by pure convention (`<projectRoot>/<slug>`, see `project-root.ts`).
- * This module adds editable definitions on top: one YAML file per project under
- * `~/.agents/projects/<name>.yaml`, sitting beside the existing `routines/`,
- * `monitors/`, and `teams/` dirs in the user repo.
- *
- * That location makes definitions SYNCABLE, not automatically synced: they ride
- * the user repo only once they are committed to it, via `agents repo push user`
- * (`agents push` was removed). Until then the directory is untracked, and a
- * reconcile that cleans the working tree deletes it — observed twice on one
- * machine, taking four definitions with it each time. The recovery is an
- * orphaned `chore(local): save …-sync drift` commit, which is not a guarantee:
- * unreachable objects are collected. Say "commit them" rather than "for free".
- *
- * A defined project can name itself
- * independently of its folder, bind more than one repo, pin a monorepo subpath,
- * describe context subdirectories an agent should start from, carry a Linear
- * link and external integrations, and set an explicit default path.
- *
- * Portable by construction: `root`/`defaultPath` are stored home-relative
- * (`~/…`) via `toHomeRelative`, so the same definition re-roots on any machine
- * whose home differs — the exact mechanism `project-root.ts` already relies on.
- *
- * Resolution stays additive: an undefined slug still resolves exactly as today
- * (see `resolveProjectRef`), a defined one overrides it.
- */
+/** Named project definitions above the `--project <slug>` convention: one YAML per project in
+ * `~/.agents/projects/<name>.yaml`, home-relative. SYNCABLE, not synced: they ride the user repo
+ * only once committed (`agents repo push user`); until then a reconcile can delete them. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -43,20 +17,14 @@ export interface ProjectRepo {
   slug: string;
   /** Optional path within the repo an agent working this project cares about. */
   subpath?: string;
-  /**
-   * Optional home-relative local checkout of this repo. The def's `root` only
-   * knows the primary repo on disk; `path` opts an additional repo into
-   * workspace probing (`projects status`).
-   */
+  /** Optional home-relative local checkout of this repo. The def's `root` knows only the primary
+   * repo; `path` opts an additional repo into workspace probing (`projects status`). */
   path?: string;
 }
 
-/**
- * One checkout target for `projects pull`: a home-relative path plus the
- * expected GitHub slug so the pull step can verify the remote matches before
- * fast-forwarding. `expectedSlug` is absent when a bound dir has no declared
- * slug (the pull still fast-forwards; it just skips the slug check).
- */
+/** One checkout target for `projects pull`: a home-relative path plus the expected GitHub slug so
+ * the pull verifies the remote first. `expectedSlug` is absent when a bound dir declares none (the
+ * pull still fast-forwards, skipping the slug check). */
 export interface ProjectRepoTarget {
   /** Home-relative path — re-roots on each fleet device. */
   path: string;
@@ -64,11 +32,8 @@ export interface ProjectRepoTarget {
   expectedSlug?: string;
 }
 
-/**
- * A described context anchor: a subdirectory plus what it is. Agents starting on
- * the project read `purpose` to know where to look — an indexed starting point,
- * not just a path. This is the richer form of the single monorepo-focus dir.
- */
+/** A described context anchor: a subdirectory plus its `purpose`, so agents know where to look; the
+ * richer form of the single monorepo-focus dir. */
 export interface ProjectContext {
   /** Path relative to the project root (e.g. `apps/web`). */
   path: string;
@@ -76,13 +41,9 @@ export interface ProjectContext {
   purpose: string;
 }
 
-/**
- * A project goal — the OKR-shaped "why". A project serves one or more goals: a
- * qualitative `objective` ("Ship agents-cli 2.0") and an optional `measure`, the
- * key result that says whether it's landing ("fleet on 2.x", "p95 < 200ms"). The
- * goal is the outcome the work is chasing; milestones (dated checkpoints, pulled
- * from Linear) and live work (agents / PRs / artifacts) are how far along it is.
- */
+/** A project goal, the OKR-shaped "why": a qualitative `objective` and an optional `measure` (the
+ * key result, e.g. "p95 < 200ms"). Milestones (dated Linear checkpoints) and live work
+ * (agents/PRs/artifacts) show how far along it is. */
 export interface ProjectGoal {
   /** The outcome, in a line. */
   objective: string;
@@ -121,11 +82,9 @@ export interface ProjectDef {
   linear?: { projectId?: string; url?: string; name?: string };
   /** Free-form doc links surfaced in `projects show`. */
   docs?: string[];
-  /**
-   * Auto-dispatch settings. When `enabled` is true and `maxAgents > 0` and the
-   * project has a `linear.projectId`, the daemon polls Linear for delegated-Todo
-   * tickets and dispatches them up to the concurrency cap.
-   */
+  /** Auto-dispatch settings: when `enabled` and `maxAgents > 0` and the project has a
+   * `linear.projectId`, the daemon polls Linear for delegated-Todo tickets and dispatches up to the
+   * concurrency cap. */
   dispatch?: {
     /** Opt-in: enable auto-dispatch for this project (default: off). */
     enabled?: boolean;
@@ -158,12 +117,9 @@ export function projectDefPath(name: string): string {
   return safeJoin(getProjectsDir(), `${name}.yaml`);
 }
 
-/**
- * Validate a raw parsed object into a `ProjectDef`, throwing an actionable error
- * on the first problem. A malformed document or identity (bad/mismatched name)
- * throws; malformed entries inside the optional lists (`repos`/`contexts`/
- * `integrations`) are dropped so one bad row can't sink an otherwise good def.
- */
+/** Validate a raw object into a `ProjectDef`, throwing on the first problem. A malformed document or
+ * identity (bad/mismatched name) throws; malformed entries in the optional lists
+ * (`repos`/`contexts`/`integrations`) are dropped so one bad row can't sink a good def. */
 export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDef {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`Project ${sourceName ?? ''} is not a YAML mapping`.trim());
@@ -273,11 +229,8 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
   return def;
 }
 
-/**
- * Load a single project definition by name. Returns undefined when the file is
- * absent (the common "not a defined project, fall back to convention" case) but
- * throws when a file EXISTS and is malformed — a broken definition is loud.
- */
+/** Load one project definition. Undefined when the file is absent (not a defined project; fall back
+ * to convention); throws when a file EXISTS and is malformed. */
 export function loadProjectDef(name: string): ProjectDef | undefined {
   if (!isSafeProjectName(name)) return undefined;
   let raw: string;
@@ -292,11 +245,8 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
   return validateProjectDef(yaml.parse(raw), name);
 }
 
-/**
- * List every defined project, sorted by name. A missing projects directory is
- * the empty state; malformed definitions and filesystem failures stay loud so
- * CLI callers (including Factory) can show the actual error.
- */
+/** List every defined project sorted by name. A missing projects dir is the empty state; malformed
+ * defs and filesystem failures stay loud so CLI callers (including Factory) show the real error. */
 export function listProjectDefs(): ProjectDef[] {
   let files: string[];
   try {
@@ -317,11 +267,8 @@ export function listProjectDefs(): ProjectDef[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/**
- * Persist a project definition, normalizing `root`/`defaultPath` to home-relative
- * so it stays portable across machines. Creates the projects dir on first write.
- * Writes via temp+rename so readers never see a partial file.
- */
+/** Persist a project definition, normalizing `root`/`defaultPath` to home-relative for portability.
+ * Creates the dir on first write; writes via temp+rename so readers never see a partial file. */
 export function writeProjectDef(def: ProjectDef): string {
   const validated = validateProjectDef(def, def.name);
   const normalized: ProjectDef = {
@@ -357,36 +304,17 @@ export function removeProjectDef(name: string): boolean {
   }
 }
 
-/**
- * The cwd an agent lands in for a defined project: `defaultPath` when set, else
- * `root`. Home-relative when `forRemote` (the remote shell expands `~`), else
- * expanded against the local home. Returns undefined when neither is set.
- */
+/** The cwd an agent lands in for a defined project: `defaultPath` else `root`; home-relative when
+ * `forRemote` (remote shell expands `~`), else expanded locally. Undefined when neither is set. */
 export function projectBasePath(def: ProjectDef, forRemote: boolean): string | undefined {
   const base = def.defaultPath ?? def.root;
   if (!base) return undefined;
   return forRemote ? base : expandLocalHome(base);
 }
 
-/**
- * Every directory a project binds, ordered: `primary` first, then each
- * `repos[]` entry that carries a local `path` (joined with its `subpath`).
- * Deduped by resolved path, so a repo row pointing at the primary collapses.
- *
- * The repos[] walk and the dedupe are shared; the three things the two callers
- * genuinely disagree on are parameters rather than guesses, because collapsing
- * them would change one caller's meaning:
- *
- * - **primary** — spawning anchors on the cwd an agent lands in
- *   (`defaultPath ?? root`); probing anchors on `root`, so a monorepo
- *   subproject still probes its checkout rather than its subdirectory.
- * - **keepMissing** — probing KEEPS a missing directory, because reporting
- *   `✗ missing` across the fleet is the whole job. A local spawn drops it: a
- *   grant for a path that is not on this box is noise the harness rejects.
- * - **joinSubpath** — a spawn grants the subdirectory the project declares it
- *   cares about; a probe wants the repo root, since git status is a
- *   whole-checkout question.
- */
+/** Every directory a project binds: `primary` first, then each `repos[]` path, deduped. Callers
+ * differ on three parameters: primary (spawn `defaultPath ?? root`, probe `root`), keepMissing
+ * (probe keeps absent dirs), joinSubpath (spawn grants the subdir). */
 function projectDirList(
   def: ProjectDef,
   opts: {
@@ -419,16 +347,9 @@ function projectDirList(
   return out;
 }
 
-/**
- * All checkout targets for a project definition, each tagged with its expected
- * GitHub slug. The primary root carries `def.repo`; each `repos[i].path`
- * carries `repos[i].slug`. Paths are home-relative (re-root per fleet device)
- * and include missing checkouts so a remote peer can answer `missing` for them.
- *
- * This is the single authoritative expansion for both `projects status` (via
- * {@link projectProbeTargets}) and `projects pull`, so the two commands always
- * operate on exactly the same set of directories.
- */
+/** All checkout targets for a def with their expected GitHub slug, home-relative and including
+ * missing checkouts so a peer can answer `missing`. The single expansion behind both `projects
+ * status` and `projects pull`, so they act on the same directories. */
 export function projectRepoTargetsForDef(def: ProjectDef): ProjectRepoTarget[] {
   const targets: ProjectRepoTarget[] = [];
   const seen = new Set<string>();
@@ -447,24 +368,15 @@ export function projectRepoTargetsForDef(def: ProjectDef): ProjectRepoTarget[] {
   return targets;
 }
 
-/**
- * The directories `projects status` probes across the fleet: the repo root plus
- * every bound checkout, home-relative so each host re-roots them, and including
- * directories absent here so a peer can still answer `✗ missing` for them.
- */
+/** The directories `projects status` probes across the fleet: the repo root plus every bound
+ * checkout, home-relative, including ones absent here so a peer can answer `✗ missing`. */
 export function projectProbeTargets(def: ProjectDef): string[] {
   return projectRepoTargetsForDef(def).map((t) => t.path);
 }
 
-/**
- * The directories an agent spawned on this project should reach: the cwd first
- * (`resolveDefinedProjectPath`, so cwd behavior is unchanged), then every other
- * bound repo. `forRemote` keeps them `~/…` so the remote shell re-roots them at
- * its own `$HOME`; locally they are absolute and filtered to what exists.
- *
- * Callers pass the resolved primary so a `--project slug@worktree` run grants
- * the sibling repos alongside the worktree it actually landed in.
- */
+/** Directories an agent spawned on this project should reach: the cwd first, then every other bound
+ * repo. `forRemote` keeps `~/...`; locally they are absolute and filtered to what exists. Callers
+ * pass the resolved primary so `slug@worktree` grants sibling repos too. */
 export function projectDirsAbs(
   def: ProjectDef,
   opts: { forRemote: boolean; primary?: string },
@@ -482,18 +394,12 @@ export function projectDirsAbs(
 /** A project plus its repo root as an absolute local path, for cwd matching. */
 interface ProjectRootAbs {
   name: string;
-  /**
-   * One absolute, normalized path this project claims. A project contributes
-   * SEVERAL — its root, its monorepo subdir, and each bound repo's checkout and
-   * subpath — so the most specific claim can win over a broader one.
-   */
+  /** One absolute, normalized path this project claims. A project contributes several (root,
+   * monorepo subdir, each bound repo's checkout and subpath) so the most specific claim can win. */
   abs: string;
-  /**
-   * A fallback claim, used only when no ordinary claim matches. The root of a
-   * project that narrowed itself with `defaultPath` is weak: it should lose the
-   * shared monorepo root to an umbrella project, yet still cover its own repo
-   * when no other project claims it.
-   */
+  /** A fallback claim used only when no ordinary claim matches. A narrowed project's root is weak:
+   * it loses the shared monorepo root to an umbrella project but still covers its own repo when
+   * nobody else claims it. */
   weak?: boolean;
 }
 
@@ -504,24 +410,15 @@ function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
     out.push({ name, abs: path.resolve(expandLocalHome(raw)) });
   };
   for (const def of defs) {
-    // `root` says where the CHECKOUT is; `defaultPath` says which work is this
-    // project's. For a monorepo subproject those differ, and only the narrower
-    // one is a membership claim — a project scoped to `rush/apps/cli` does not
-    // own `rush/apps/web`.
-    //
-    // The old `root ?? defaultPath` collapsed such a subproject onto the
-    // monorepo root, the same path its umbrella anchors at, so the longest-match
-    // tiebreak below had nothing to separate them and a session in
-    // `rush/apps/cli` counted toward whichever definition was listed first.
+    // `root` is where the CHECKOUT is; `defaultPath` is which work is this project's, so for a
+    // monorepo subproject only the narrower one is a membership claim. `root ?? defaultPath`
+    // collapsed it onto the umbrella's root and sessions went to whichever def came first.
     const rootAbs = def.root ? path.resolve(expandLocalHome(def.root)) : undefined;
     const defaultAbs = def.defaultPath ? path.resolve(expandLocalHome(def.defaultPath)) : undefined;
     const narrowed = !!(rootAbs && defaultAbs && defaultAbs !== rootAbs && isUnder(defaultAbs, rootAbs));
-    // A narrowed project's root is a WEAK claim: it still covers the rest of the
-    // checkout when nobody else wants it, but yields to any project that claims
-    // a path outright. Dropping it entirely regressed the single-project case —
-    // `add foo --root ~/src/foo --path apps/web` stopped attributing work
-    // anywhere else in its own repo, and `--path` means where agents START, not
-    // which work counts.
+    // A narrowed project's root is a WEAK claim: it covers the rest of the checkout when nobody
+    // else wants it but yields to outright claims. Dropping it regressed the single-project case,
+    // since `--path` is where agents START, not which work counts.
     if (rootAbs) out.push({ name: def.name, abs: rootAbs, weak: narrowed });
     if (defaultAbs && defaultAbs !== rootAbs) out.push({ name: def.name, abs: defaultAbs });
     for (const r of def.repos ?? []) {
@@ -533,18 +430,9 @@ function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
   return out;
 }
 
-/**
- * The repository paths a project claims, as `{ slug, prefix }` with `prefix`
- * repo-relative and `dir/` shaped — the same ownership {@link projectRootsAbs}
- * applies to a session's cwd, expressed against the repository instead of a
- * checkout: a `defaultPath` narrowed under `root` claims that subtree of the
- * primary `repo`, and a `repos[]` entry with a `subpath` claims that subpath. A
- * project with no narrowed claim on a repository claims all of it and yields no
- * row for it. Two cases of {@link projectRootsAbs} have no repository form and
- * yield nothing here: a `defaultPath` outside `root` (no repo-relative path),
- * and the weak root of a narrowed project (it only takes what nobody claims,
- * which for a PR is the `repo-wide` scope).
- */
+/** Repository paths a project claims as `{ slug, prefix }`, the repo-side form of {@link
+ * projectRootsAbs}: a narrowed `defaultPath` or a `repos[]` `subpath`. No narrowed claim means the
+ * whole repo and no row; `defaultPath` outside `root` and weak roots have no repo form. */
 export function repoPathClaims(def: ProjectDef): Array<{ slug: string; prefix: string }> {
   const out: Array<{ slug: string; prefix: string }> = [];
   const add = (slug: string, rel: string) => {
@@ -569,19 +457,9 @@ function isUnder(child: string, parent: string): boolean {
   return child.startsWith(withSep);
 }
 
-/**
- * Which defined project a session belongs to, derived from its working
- * directory. A session whose `cwd` sits inside a project's repo root (or a
- * worktree under it) is a member; the LONGEST matching root wins so a nested
- * project beats its parent. Returns undefined when no definition contains the
- * path.
- *
- * The comparison is against the LOCAL home: roots and the cwd are both expanded
- * with `expandLocalHome` and resolved, so this matches sessions whose cwd shares
- * this machine's home layout. A session recorded on a different-home machine
- * (`/Users/x/…` vs `/home/x/…`) will not match until the fleet-wide,
- * home-relative variant lands (see docs/concepts.md).
- */
+/** Which defined project a session belongs to, from its cwd: the LONGEST matching root wins, so a
+ * nested project beats its parent; undefined if none. Compared against the LOCAL home, so sessions
+ * from different-home machines won't match until the fleet-wide variant lands. */
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;
   const abs = path.resolve(expandLocalHome(cwd));
@@ -604,23 +482,9 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
   return best ?? weakBest;
 }
 
-/**
- * Definition list, memoized against a stamp over the definition FILES, for the
- * per-tick readers (PHNX-3999).
- *
- * {@link listProjectDefs} parses every `<name>.yaml`, which is the right cost for
- * a command but not for a row builder on the `feed watch` / `sessions watch`
- * stream — that runs twice a second for as long as an editor window is open (see
- * `AGENTS.md`, every tick is budgeted). One `readdir` plus one `stat` per
- * definition replaces N YAML parses.
- *
- * The stamp is each file's name + mtime + size, NOT the directory's mtime: editing
- * a definition in place — retargeting a project's `root`, which is exactly what
- * changes which sessions belong to it — moves the FILE's mtime and leaves the
- * directory's untouched, so a directory stamp would serve a stale association for
- * the life of the process. An unreadable directory is not cached: the next call
- * retries.
- */
+/** Definition list memoized against a stamp over the definition FILES, for per-tick readers
+ * (PHNX-3999) like `feed watch`. The stamp is name+mtime+size per file, not the directory's mtime,
+ * which doesn't move when a def is edited in place. Unreadable dir: not cached. */
 let projectDefsMemo: { stamp: string; defs: ProjectDef[] } | null = null;
 
 function projectDefsStamp(): string | null {
@@ -658,25 +522,9 @@ export function resetProjectDefsCache(): void {
   projectDefsMemo = null;
 }
 
-/**
- * The **confirmed** project for a working directory, or `undefined` when the
- * association is not confirmed (PHNX-3999 F08/F09).
- *
- * Confirmed means exactly one thing: a registered project definition
- * ({@link projectNameForCwd}) whose root contains this path. Being inside *some*
- * git repository is NOT a project association — a repo nobody registered, a
- * checkout of someone else's code, or a loose directory that merely has a
- * `.git` in it would each invent a project name out of a folder, which is the
- * wrong-grouping the owner's recording shows at 01:30–01:56. So is a bare
- * directory basename ({@link resolveProjectKey}, which always answers).
- *
- * A consumer renders `undefined` as Uncategorized and keeps the session
- * reachable in its full list — nothing is hidden by not being grouped.
- *
- * Use {@link resolveProjectNameForCwd} instead when you want a best-effort
- * bucket KEY for joining rows; use this when the answer is shown to a person as
- * "this work belongs to that project".
- */
+/** The CONFIRMED project for a cwd, or undefined (PHNX-3999 F08/F09): exactly a registered def whose
+ * root contains the path. Being in some git repo or a directory basename is NOT an association;
+ * those invented project names. Consumers show undefined as Uncategorized, still reachable. */
 export function confirmedProjectForCwd(
   cwd: string | undefined | null,
   defs: ProjectDef[] = listProjectDefsCached(),
@@ -685,27 +533,17 @@ export function confirmedProjectForCwd(
   return projectNameForCwd(cwd, defs);
 }
 
-/**
- * The canonical project label for a cwd, for every surface that buckets work by
- * project (the activity timeline, feed posts, the sessions overview): the
- * DEFINED project whose root contains the cwd (longest root wins, so a
- * multi-repo project reads as one bucket), else the repository-level key from
- * {@link resolveProjectKey}. `defs` comes from {@link listProjectDefs}, which is
- * fail-open — with no definitions this degrades to exactly today's behavior.
- */
+/** The canonical project label for a cwd, for every surface bucketing work by project: the DEFINED
+ * project whose root contains it (longest wins), else the repository key from {@link
+ * resolveProjectKey}. With no defs (fail-open {@link listProjectDefs}) this is today's behavior. */
 export function resolveProjectNameForCwd(cwd: string | undefined | null, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;
   return projectNameForCwd(cwd, defs) ?? resolveProjectKey(cwd);
 }
 
-/**
- * Resolve a defined project's ref to a working directory, mirroring
- * `buildProjectPath`'s `forRemote` contract (a home-relative `~/…` for the
- * remote shell to expand, an absolute local path otherwise). A `@worktree`
- * lands under the repo ROOT's `.agents/worktrees/`, not the `defaultPath`
- * subdir — worktrees are per-repo, not per-focus. Returns undefined when the
- * definition carries no `root`/`defaultPath` (caller falls back to convention).
- */
+/** Resolve a defined project's ref to a working directory, mirroring `buildProjectPath`'s
+ * `forRemote` contract. A `@worktree` lands under the repo ROOT's `.agents/worktrees/`, not the
+ * `defaultPath` subdir. Undefined without `root`/`defaultPath`. */
 export function resolveDefinedProjectPath(
   def: ProjectDef,
   worktree: string | undefined,

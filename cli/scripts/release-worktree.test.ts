@@ -146,10 +146,8 @@ describe('release-worktree.sh', () => {
   });
 });
 
-/**
- * Builds a caller repo whose `release.sh` stub records the environment it was
- * handed, so a test can assert what the wrapper exported into it.
- */
+/** Builds a caller repo whose `release.sh` stub records the environment it was handed, so tests can
+ * assert what the wrapper exported. */
 function callerRepoRecordingEnv(root: string): string {
   const remote = path.join(root, 'remote.git');
   const caller = path.join(root, 'caller');
@@ -175,13 +173,9 @@ function callerRepoRecordingEnv(root: string): string {
   return caller;
 }
 
-/**
- * RUSH-2970 trap 2: `release.sh` re-execs into a throwaway worktree, where
- * REPO_ROOT resolves to the worktree — so the attestation store the producer
- * wrote in the CALLER's checkout was invisible and `require` reported
- * "missing exact attestation key" with `?` for every key component, reading
- * like a key mismatch rather than a wrong directory.
- */
+/** RUSH-2970 trap 2: release.sh re-execs into a throwaway worktree where REPO_ROOT is the worktree,
+ * so the caller's attestation store was invisible and `require` reported a misleading missing-key
+ * error. */
 describe('release-worktree.sh — the attestation store the caller owns', () => {
   it('exports RELEASE_ATTESTATION_DIR to the caller store when the caller has one', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-store-'));
@@ -233,17 +227,9 @@ describe('release-worktree.sh — the attestation store the caller owns', () => 
   });
 });
 
-/**
- * PHNX-3705 — the release worktree must be cut at the newest ATTESTED ANCESTOR,
- * not the bare tip.
- *
- * These are integration tests on purpose. The resolver has its own unit tests in
- * release-attested-base.test.ts, but the bug that mattered lived at the SEAM:
- * the first version of this change called the resolver by a relative path from a
- * script that does not cd into cli/ until its last line, so it never ran and the
- * `|| true` quietly fell back to the tip — the whole change was a no-op, and no
- * test noticed. So these assert on the worktree's resolved HEAD.
- */
+/** PHNX-3705: the release worktree must be cut at the newest attested ancestor, not the bare tip.
+ * Integration tests, because the bug lived at the seam: the resolver was called by a relative path
+ * before any cd into cli/, so it never ran and `|| true` fell back to the tip. */
 describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () => {
   /** Caller repo whose release.sh stub prints the HEAD it was actually run at. */
   function callerRepoRecordingHead(root: string): string {

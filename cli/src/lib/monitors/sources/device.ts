@@ -1,12 +1,6 @@
-/**
- * Device source evaluator.
- *
- * A fleet device becomes the watched source. Reuses the real load/health probe
- * (lib/devices/health.ts) — the first scheduler consumer of it — so a monitor can
- * fire "when a box goes loaded / unreachable". The observation is
- * `<reachable>\t<headroom>` plus the full DeviceStats in meta, so an on-change
- * monitor fires on a headroom-bucket flip and a match monitor can match `loaded`.
- */
+/** Device source evaluator: a fleet device is the watched source, via the real load/health probe
+ * (lib/devices/health.ts), so a monitor can fire when a box goes loaded or unreachable.
+ * Observation is `<reachable>\t<headroom>` plus DeviceStats in meta. */
 
 import { loadDevices } from '../../devices/registry.js';
 import { probeDeviceStats, probeLocalStats, headroom } from '../../devices/health.js';
@@ -23,10 +17,9 @@ export async function evaluate(source: MonitorSource): Promise<Observation | nul
   const wanted = normalizeHost(name);
   const entry = Object.entries(registry).find(([k]) => normalizeHost(k) === wanted);
 
-  // An unregistered / removed device must NOT silently fall back to the local
-  // machine's stats — that would watch the wrong box under the requested name
-  // (the "no fallback logic" convention). `add` validates --watch-device up
-  // front, so this catches the device-removed-after-creation case at eval time.
+  // An unregistered or removed device must NOT fall back to the local machine's stats (it would
+  // watch the wrong box). `add` validates --watch-device up front, so this catches a device
+  // removed after creation.
   if (!entry) {
     return {
       raw: `error\tdevice not registered: ${name}`,

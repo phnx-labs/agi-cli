@@ -1,17 +1,6 @@
-/**
- * The offloaded-session seam, end to end (RUSH-2479).
- *
- * Nothing covered the full path before: `sessions-browser.test.ts` tested the
- * ActiveSession -> SessionMeta conversion, `sessions-picker.test.ts` tested the
- * render given an already-remote SessionMeta, and the join between them — the
- * one place the bug lived — was exercised by neither.
- *
- * The bug: a run dispatched with `agents run --device <peer>` leaves a live shim
- * process on the DISPATCHING box. Attributed to that box, `liveSessionToMeta`
- * computed `_remote: false`, so `buildPreview` took the local branch, found no
- * transcript (it is on the peer) and printed a dead end instead of the
- * "on <peer>" affordance. SES-8 requires a non-empty preview.
- */
+/** The offloaded-session seam end to end (RUSH-2479). The ActiveSession -> SessionMeta conversion
+ * and the remote render were each tested, but not the join between them, where the bug lived. A
+ * `agents run --device <peer>` leaves a live shim locally; SES-8 needs a non-empty preview. */
 
 import { describe, it, expect } from 'vitest';
 import { foldExecutionMachine, type ActiveSession } from '../../lib/session/active.js';

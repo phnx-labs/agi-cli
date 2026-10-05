@@ -3,10 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// state.ts resolves HOME and the device id at import time, so we point both at a
-// throwaway temp dir and re-import the modules fresh for each test — the REAL
-// three-layer read/write path against real files, no mocks (mirrors
-// state.test.ts).
+// state.ts resolves HOME and the device id at import time, so point both at a temp dir and
+// re-import fresh per test: the real three-layer path against real files, no mocks.
 let TMP = '';
 
 async function freshModules() {
@@ -688,10 +686,9 @@ describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
 
     setConfigValue('role', 'worker', { fleet: true });
 
-    // 'zion' has never had a per-device doc written — the bare, doc-scan-only
-    // call (no roster) must not see it. This is the gap #2622's non-author
-    // review flagged: a fleet-wide `role` default silently dropped a doc-less
-    // device from the `--device auto` worker allowlist.
+    // 'zion' has never had a per-device doc, so the doc-scan-only call (no roster) must not see
+    // it. This is the gap flagged in #2622's review: a fleet-wide `role` default silently dropped
+    // a doc-less device from the `--device auto` worker allowlist.
     expect(listConfiguredDeviceRoles()).toEqual({});
     expect(listConfiguredDeviceRoles(['zion'])).toEqual({ zion: 'worker' });
 
@@ -705,11 +702,9 @@ describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
 });
 
 describe('devicesPinningBrowserProfile', () => {
-  // These pins cannot be written through setConfigValue from here — the browser
-  // keys are machine-local, so only the owning device can set them (it errors
-  // with "can only be read or set on the device itself"). They reach this
-  // machine by SYNC, as a device doc. So the fixture writes the doc, which is
-  // the real-world shape.
+  // These pins cannot be written through setConfigValue: browser keys are machine-local and error
+  // with "can only be read or set on the device itself". They reach this machine by sync as a
+  // device doc, so the fixture writes the doc.
   function writeDeviceDoc(device: string, body: string): void {
     const dir = path.join(TMP, '.agents', 'devices', device);
     fs.mkdirSync(dir, { recursive: true });

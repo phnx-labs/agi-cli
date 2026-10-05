@@ -1,21 +1,6 @@
-/**
- * Generic `--device` passthrough — the single choke point that runs an allowlisted
- * `agents <command>` on a remote host instead of locally. Called once from
- * `index.ts` before commander parses; returns `true` when it handled the
- * invocation (the local command must then NOT run).
- *
- * Transport is SSH (via `ssh-exec.ts`), never a daemon: SSH is the one hardened
- * choke point already used everywhere, and it gives auth + encryption + host-key
- * trust for free. Read-only commands stream synchronously (`sshStream`); the one
- * long-running case — `teams start --watch` — dispatches detached so the remote
- * supervisor outlives a dropped connection.
- *
- * Commands with their own richer `--device` handling (`run`/`sessions`/`feed`/
- * `computer`/`browser`/`secrets`/`logs`/…) are listed in {@link OWN_HOST_COMMANDS} and
- * fall through to their local actions. Everything else either routes via this
- * table or, when `--device` is present, exits with a clear
- * "not supported" message — never commander's raw `unknown option`.
- */
+/** Generic `--device` passthrough: the one choke point running an allowlisted `agents <command>`
+ * remotely, called from index.ts before commander parses (true = handled). SSH, never a daemon.
+ * OWN_HOST_COMMANDS keep their own handling; others get "not supported". */
 
 import chalk from 'chalk';
 import { assertValidSshTarget, sshStream } from '../ssh-exec.js';
@@ -62,40 +47,18 @@ export { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 interface RemoteSpec {
   /** Flags appended when running non-interactively (no local TTY / `--no-tty`). */
   nonInteractive?: string[];
-  /**
-   * Pure read-only RENDER command: draws a screen and exits, never reads stdin.
-   * Forwarded over a PLAIN PIPE rather than `ssh -tt` (a forced PTY), because the
-   * PTY teardown + local-terminal restore on a CLEAN exit wipes the just-drawn
-   * output — so the render "flashes and vanishes" the moment it finishes
-   * (PHNX-3583). Over a pipe the output persists exactly as the working non-TTY
-   * path already proves; color and terminal geometry are forced into the remote
-   * env so it still comes back colored and correctly wrapped
-   * ({@link renderForwardDecision}).
-   */
+  /** Pure read-only render command: forwarded over a plain pipe rather than `ssh -tt`, because
+   * PTY teardown on a clean exit wipes the drawn output (PHNX-3583). Color and geometry are
+   * forced into the remote env (renderForwardDecision). */
   render?: boolean;
-  /**
-   * For a {@link render} command with a NARROW interactive sub-path, return `true`
-   * when THIS argv hits it — the PTY is kept for that one invocation. Absent means
-   * the command never prompts, so it is always safe to forward over a pipe.
-   */
+  /** For a render command with a narrow interactive sub-path, true when this argv hits it,
+   * keeping the PTY. Absent means the command never prompts and is safe over a pipe. */
   interactiveWhen?: (forwarded: string[]) => boolean;
 }
 
-/**
- * First-class groups that run transparently on a remote via SSH when
- * `--device` is present. Keep both canonical names and aliases
- * (`repo`/`repos`, `exec`/`run`) so either argv form routes the same way.
- *
- * Prefer adding here over per-command SSH code — this is the single choke point.
- *
- * Every key MUST be a real top-level command (a `KNOWN_TOP_LEVEL_COMMANDS`
- * member) — `passthrough.test.ts` asserts it. A key that is not one is dead:
- * the gate in {@link maybeRunOnHost} rejects the name as unknown before this
- * table is consulted, and before that gate existed it SSH'd a command the peer
- * would also reject. `cli`/`packages`/`versions`/`daemon` were exactly that
- * (the commands are `clis`, `registry`/`search`/`install`/`publish`,
- * `add`/`use`/`list`, and none) and were removed.
- */
+/** First-class groups that run on a remote via SSH when `--device` is present; keep canonical
+ * names and aliases. Every key must be a real top-level command (KNOWN_TOP_LEVEL_COMMANDS,
+ * asserted in passthrough.test.ts); others are dead because maybeRunOnHost rejects them first. */
 export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   // inspect — pure read-only renders: forward over a pipe, never a forced PTY
   // (PHNX-3583), so the drawn output persists instead of vanishing on exit.
@@ -156,11 +119,8 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   factory: {},
 };
 
-/**
- * Commands that register and interpret `--device` themselves — must
- * fall through to local commander even when the flag is present. Do not add
- * these to {@link REMOTE_PASSTHROUGH}.
- */
+/** Commands that register and interpret `--device` themselves; they fall through to local
+ * commander. Do not add them to REMOTE_PASSTHROUGH. */
 export const OWN_HOST_COMMANDS = new Set([
   'run',
   'exec', // deprecated alias of run
@@ -197,15 +157,9 @@ function firstSubcommand(allArgs: string[], group: string): string | undefined {
   return idx >= 0 ? allArgs.slice(idx + 1).find((a) => !a.startsWith('-')) : undefined;
 }
 
-/**
- * Argv forwarded over SSH for a `--device` passthrough.
- *
- * `sync`'s umbrella spec appends `--yes` when there is no TTY so a remote
- * reconcile does not hang on a picker. `sync status` is inspect-only unless the
- * caller typed `--yes` themselves: `--yes` on that command is reconcile, not
- * "don't prompt". Nesting it under `sync` must not inherit the umbrella flag
- * (RUSH-2864).
- */
+/** Argv forwarded over SSH for a passthrough. `sync` appends `--yes` with no TTY to avoid a
+ * picker hang, but `sync status` stays inspect-only unless the caller typed `--yes`, since
+ * there it means reconcile (RUSH-2864). */
 export function buildPassthroughForwardedArgs(
   command: string,
   allArgs: string[],
@@ -223,24 +177,9 @@ export function buildPassthroughForwardedArgs(
   return forwarded;
 }
 
-/**
- * Decide whether a `--device` passthrough should forward over a PLAIN PIPE
- * instead of a PTY, and what color/geometry env to inject when it does.
- *
- * A pure read-only render ({@link RemoteSpec.render}) drawn under a forced
- * `ssh -tt` PTY vanishes on clean exit: the PTY teardown + local-terminal
- * restore (`restoreLocalTerminal` in ssh-exec.ts) wipes the output the command
- * just drew (PHNX-3583). The non-TTY (piped) path never had this problem, so a
- * render command takes it too — but only when a human is actually at a real
- * local terminal (`isTTY` and not `--no-tty`); a genuinely piped local run is
- * already on the pipe path and wants neither color nor forced geometry.
- *
- * A render command's narrow interactive sub-path ({@link RemoteSpec.interactiveWhen},
- * e.g. `view --prune`'s confirm) keeps the PTY. When forwarding over a pipe the
- * remote sees `isTTY=false`, so chalk goes colorless and `terminalWidth()` has no
- * `$COLUMNS` to read; `FORCE_COLOR`/`COLUMNS`/`LINES` restore both. `FORCE_COLOR`
- * is withheld under `--json` so it can never taint machine-readable output.
- */
+/** Decide whether a passthrough forwards over a plain pipe instead of a PTY, and which
+ * color/geometry env to inject (PHNX-3583). Only for a real local terminal; the narrow
+ * interactive sub-path keeps the PTY; FORCE_COLOR is withheld under `--json`. */
 export function renderForwardDecision(
   command: string,
   allArgs: string[],
@@ -390,18 +329,9 @@ function summarizeOutputResult(json: unknown): string {
   return parts.length ? parts.join(' · ') : 'ok';
 }
 
-/**
- * Summarize a `sync` payload, surfacing anything the peer REFUSED to write.
- *
- * The fan-out injects `--json`, so each peer returns the corrected `ok` and
- * `declined` from RUSH-2700 — but the roster rendered a flat `ok` regardless,
- * so `agents sync --device all` printed a green row for every box even when a
- * harness's config was never written. That is the fleet-wide silent success
- * this ticket exists to remove, one layer above where it was fixed.
- *
- * Covers both payload shapes: the umbrella carries a flat `declined`, the
- * per-agent modes carry one per version.
- */
+/** Summarize a `sync` payload, surfacing anything the peer refused to write (RUSH-2700), so
+ * `agents sync --device all` no longer shows a green row for a box whose config was never
+ * written. Handles the umbrella and per-agent `declined` shapes. */
 function summarizeSyncResult(json: unknown): string {
   const p = json as { declined?: unknown; versions?: Array<{ declined?: unknown }> } | null;
   const flat = Array.isArray(p?.declined) ? p!.declined as unknown[] : [];
@@ -511,10 +441,9 @@ export async function runFleetPassthrough(
     async (target) => {
       const cmd = ['agents', ...forwarded];
       const isSelf = target.device.name.toLowerCase() === self.toLowerCase() || isSelfHost(target.device.name);
-      // Only `browser` consults the fleet-remote marker (its consent gate), and
-      // the fan-out has no separate env channel — the marker must ride the argv.
-      // So scope the env-prefix to a REMOTE browser drive: every other command's
-      // remote argv stays byte-identical, and the self target is never gated.
+      // Only `browser` reads the fleet-remote marker (its consent gate) and the fan-out has no env
+      // channel, so the marker rides the argv; scope the env-prefix to a remote browser drive so
+      // other remote argv stay identical and self is never gated.
       const remoteCmd =
         !isSelf && command === 'browser' ? markFleetRemote(cmd, target.device) : cmd;
       const res = isSelf ? localRunner(cmd) : runner(target.device, remoteCmd);
@@ -548,18 +477,9 @@ export async function runFleetPassthrough(
   return true;
 }
 
-/**
- * Route `agents <command> … --device <name>` to a remote if the command is
- * device-routable and `--device` (or a fleet sentinel `--hosts`/`--devices`) was
- * given. Returns `false` (run locally) when no routing flag is present, the
- * command owns its own device handling, the target is this very machine, or
- * placement flags need the local action. Returns `true` after printing a clear
- * error when the flag is present on a command that is neither routable nor
- * self-handling — so the user never sees commander's raw `unknown option`.
- *
- * @param command the resolved subcommand name (`process.argv`'s first non-flag).
- * @param allArgs `process.argv.slice(2)` — the command name followed by its args.
- */
+/** Route `agents <command> … --device <name>` to a remote when device-routable. Returns false
+ * (run locally) for no flag, own handling, self target or placement flags; for a non-routable
+ * command prints an error and returns true, avoiding commander's raw `unknown option`. */
 export async function maybeRunOnHost(
   command: string,
   allArgs: string[],
@@ -579,13 +499,9 @@ export async function maybeRunOnHost(
   // those flags reach the local action.
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
-  // Placement, not routing: `teams add`/`teams create` read `--device`/`--devices`
-  // (and `--hosts`) as WHERE to place a teammate / the team pool — the
-  // command itself always runs locally on the orchestrator. Bail before the
-  // generic teams routing below so those flags reach the local action. Every
-  // other teams subcommand (`status`/`logs`/`stop`/…) keeps `--device` routing.
-  // Find the subcommand = the first non-flag token AFTER `teams` (robust to any
-  // leading global flags), then bail for the add/create aliases.
+  // Placement, not routing: `teams add`/`create` read `--device`/`--devices`/`--hosts` as where to
+  // place a teammate and always run locally, so bail before the generic teams routing; other teams
+  // subcommands keep `--device` routing.
   if (command === 'teams') {
     const teamsIdx = allArgs.indexOf('teams');
     const sub = teamsIdx >= 0 ? allArgs.slice(teamsIdx + 1).find((a) => !a.startsWith('-')) : undefined;
@@ -604,13 +520,9 @@ export async function maybeRunOnHost(
     if (!isAll && command !== 'routines') return false;
   }
 
-  // A command that does not exist is an unknown-command error, not a routing
-  // error. The router runs BEFORE commander parses, so without this gate a typo
-  // (`agents session resume --device box`) was answered with "does not support
-  // --device" — a true statement about a command the user never typed,
-  // and the exact opposite of the truth for the `sessions` they meant, which
-  // does support it. Fall through so commander reports `unknown command` (and
-  // its did-you-mean). RUSH-2022.
+  // A nonexistent command is an unknown-command error, not a routing error. The router runs before
+  // commander, so a typo like `agents session` got "does not support --device"; fall through so
+  // commander reports `unknown command` (RUSH-2022).
   if (!isKnownTopLevelCommand(command)) return false;
 
   const spec = REMOTE_PASSTHROUGH[command];
@@ -644,12 +556,9 @@ export async function maybeRunOnHost(
   // flags and bare flags were already handled.
   if (!hostName) return false;
 
-  // `auto` is the same affinity sentinel `agents run --device auto` resolves
-  // (RUSH-2185) — pick the concrete target up front via resolveDeviceAffinity so
-  // the isSelfHost check right below (which compares a literal name, not "auto")
-  // still catches a local pick and runs the command locally rather than
-  // resolving to a real Host and self-SSHing (or, if this box isn't itself a
-  // registered device, dialing a literal, nonexistent host named "auto").
+  // `auto` is the affinity sentinel from `run --device auto` (RUSH-2185): resolve it up front so
+  // the isSelfHost check below catches a local pick instead of self-SSHing or dialing a nonexistent
+  // host named "auto".
   if (isDeviceAuto(hostName)) {
     const plan = resolveDeviceAffinity({});
     if (!plan.host) {
@@ -661,11 +570,9 @@ export async function maybeRunOnHost(
     hostName = plan.host;
   }
 
-  // `interactive` is the second affinity sentinel: the box the human sits at
-  // (`interactive.host`). Resolved here, ahead of the isSelfHost check below, for
-  // the same reason `auto` is — a pin naming THIS machine must run locally rather
-  // than self-SSH. It never falls back to the local box when unset: rendering to
-  // a screen nobody is watching is the exact failure the sentinel prevents.
+  // `interactive` is the second affinity sentinel (`interactive.host`), resolved before isSelfHost
+  // like `auto`. It never falls back to the local box when unset, since rendering to a screen
+  // nobody watches is what it prevents.
   if (isDeviceInteractive(hostName)) {
     const pinned = resolveInteractiveDevice();
     if (!pinned) {
@@ -677,12 +584,9 @@ export async function maybeRunOnHost(
     hostName = pinned;
   }
 
-  // Running against your own machine is just a local run — skip the SSH round-trip.
-  // Match EVERY identity the box answers to (short id, loopback, tailscale
-  // dnsName), not just machineId() — a `--device <self-dnsName>` used to slip past a
-  // short-hostname-only check and self-SSH (RUSH-2114). Strip the routing flags
-  // from process.argv so the local command never sees an unregistered
-  // `--device` and dies with "unknown option".
+  // Running against your own machine is a local run, skipping SSH. Match every identity the box
+  // answers to (short id, loopback, tailscale dnsName; RUSH-2114) and strip routing flags from
+  // process.argv so the local command does not see an unknown `--device`.
   if (isSelfHost(hostName)) {
     const stripped = stripRoutingFlags(allArgs, STRIP_SPECS);
     process.argv = [process.argv[0], process.argv[1], ...stripped];
@@ -702,10 +606,8 @@ export async function maybeRunOnHost(
   }
   const target = sshTargetFor(host);
 
-  // A read-only render (view/inspect/insights/doctor) must forward over a plain
-  // pipe even from a real terminal — a forced `ssh -tt` PTY wipes its output on
-  // clean exit (PHNX-3583). renderForwardDecision returns that choice plus the
-  // color/geometry env that keeps a piped render colored and correctly wrapped.
+  // A read-only render must forward over a plain pipe even from a terminal, since `ssh -tt` wipes
+  // output on clean exit (PHNX-3583); renderForwardDecision also returns the color/geometry env.
   const { noPty: renderNoPty, env: renderForwardEnv } = renderForwardDecision(command, allArgs, {
     isTTY: !!process.stdout.isTTY,
     noTty: allArgs.includes('--no-tty'),
@@ -713,10 +615,9 @@ export async function maybeRunOnHost(
     rows: process.stdout.rows,
   });
 
-  // Interactive only when our own stdout is a terminal and the caller didn't opt
-  // out — otherwise force the command's non-interactive path so no half-drawn
-  // picker is piped into a file or another program. A no-PTY render is
-  // non-interactive by construction.
+  // Interactive only when stdout is a terminal and `--no-tty` is absent; otherwise force the non-
+  // interactive path so no half-drawn picker is piped. A no-PTY render is non-interactive by
+  // construction.
   const interactive = !!process.stdout.isTTY && !allArgs.includes('--no-tty') && !renderNoPty;
 
   const forwarded = buildPassthroughForwardedArgs(command, allArgs, interactive);
@@ -735,11 +636,9 @@ export async function maybeRunOnHost(
     return true;
   }
 
-  // Doctor commands probe the agent CLIs; remote POSIX login shells often don't
-  // have the agents shims on PATH, which produces false "not installed" negatives.
-  // Bootstrap PATH with the canonical shim locations before the remote command.
-  // Windows is skipped: PowerShell usually has the shim dir via the install
-  // profile, and single-quoted env values would not expand $HOME/$PATH.
+  // Doctor probes agent CLIs, and remote POSIX login shells often lack the shim dir on PATH (false
+  // "not installed"), so bootstrap PATH first. Skipped on Windows, where single-quoted env values
+  // would not expand $HOME/$PATH.
   const isDoctorCommand =
     command === 'doctor' || (command === 'teams' && forwarded[1] === 'doctor');
   const remoteOs = resolveRemoteOsSync(host.name);
@@ -760,21 +659,9 @@ export async function maybeRunOnHost(
   return true;
 }
 
-/**
- * `--device` passthrough for a **standalone binary** whose command name is fixed by
- * the binary itself (the `browser`/`computer` bins, `dist/browser.js` etc.) rather
- * than being the first argv token.
- *
- * `agents computer … --device <box>` still routes through {@link maybeRunOnHost}
- * in index.ts, but the standalone `browser` / `computer` binaries never enter
- * index.ts. Browser now owns `--device` (start binds the task; later verbs
- * reject it), so this function leaves argv intact for OWN_HOST commands and
- * only strips routing flags on `--help`/`--version`. Other standalone commands
- * still synthesize the implicit command token and delegate to
- * {@link maybeRunOnHost}.
- *
- * @param command the fixed command name the binary stands for (`'browser'`).
- */
+/** `--device` passthrough for a standalone binary with a fixed command name
+ * (`browser`/`computer`), which never enters index.ts. Browser owns `--device`, so argv is left
+ * intact and only `--help`/`--version` strip routing flags; others use maybeRunOnHost. */
 export async function maybeRunStandaloneOnHost(
   command: string,
   opts?: FleetPassthroughOptions,
@@ -814,19 +701,9 @@ export async function maybeRunStandaloneOnHost(
   return false;
 }
 
-/**
- * Run `agents <forwardedArgs>` on `host` over SSH, streaming its output, and
- * return the exit code. The single place the SSH hop is built, so every remote
- * `agents` invocation carries identical env semantics.
- *
- * Forwards actor provenance (`AGENTS_ACTOR`/`GIT_` vars) across the hop, merged UNDER
- * `extraEnv` so a caller-supplied PATH still wins — without this the remote
- * re-resolves the actor from THIS box's SSH_CONNECTION and mis-credits it
- * (RUSH-2028). Flows to both POSIX (export) and Windows ($env:) dialects.
- * AGENTS_FLEET_REMOTE marks this as a fleet-dispatched run so the far side can
- * gate consent-sensitive actions — the browser consent gate
- * (lib/browser/remote-control.ts) reads it to allow/deny a cross-machine drive.
- */
+/** Run `agents <forwardedArgs>` on `host` over SSH, streaming output; the single place the SSH
+ * hop is built. Forwards actor provenance (RUSH-2028); AGENTS_FLEET_REMOTE marks a fleet
+ * dispatch for the browser consent gate (lib/browser/remote-control.ts). */
 export function streamAgentsOnHost(
   host: Host,
   forwardedArgs: string[],

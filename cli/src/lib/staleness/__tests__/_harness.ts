@@ -1,23 +1,6 @@
 #!/usr/bin/env bun
-/**
- * Test harness for the staleness library. End-to-end test files spawn this
- * with a custom `$HOME` env var, so the library resolves real user/system
- * paths into a temp tree instead of the developer's home directory. This
- * sidesteps the need for any module mocking — every call is real I/O
- * against a real filesystem.
- *
- * Protocol:
- *   bun _harness.ts '<json-op>'
- *   stdout: '<json-result>'
- *
- * Operations:
- *   { cmd: 'build',   agent, version, cwd }
- *     → builds + saves manifest. Result: { manifest }
- *   { cmd: 'isStale', agent, version, cwd }
- *     → loads manifest, returns staleness. Result: { stale, exists }
- *   { cmd: 'list',    type,   cwd }
- *     → returns names from one checker. Result: { names }
- */
+/** Test harness for the staleness library: spawned with a custom `$HOME` so real user/system paths
+ * resolve into a temp tree. Protocol: `bun _harness.ts '<json-op>'` prints a JSON result. */
 
 import type { AgentId } from '../../types.js';
 import {

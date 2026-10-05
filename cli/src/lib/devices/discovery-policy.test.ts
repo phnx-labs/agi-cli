@@ -100,11 +100,9 @@ describe('synced device discovery policy', () => {
   });
 
   it('leaves a locally-registered device untouched when it has no policy entry at all, even while other entries exist (RUSH-2377 regression)', async () => {
-    // The concrete failure this guards: registering 12 devices on machine B,
-    // then approving/ignoring just ONE device on machine A and syncing. Every
-    // device absent from the synced policy — including ones registered by a
-    // path that never writes a policy entry (daemon/umbrella auto-refresh,
-    // pre-existing registrations) — must survive reconcile.
+    // Guards this failure: registering 12 devices on machine B, then approving/ignoring one on
+    // machine A and syncing. Every device absent from the synced policy, including ones registered
+    // without a policy entry (daemon auto-refresh, older registrations), must survive reconcile.
     const { getDevice, isIgnored, reconcileDeviceDiscoveryPolicies, setDeviceDiscoveryStatus, upsertDevice } = await freshModules();
     await upsertDevice('never-in-policy', {
       platform: 'linux',

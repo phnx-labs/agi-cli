@@ -1,21 +1,6 @@
-/**
- * Parse the `agents://` deep-link scheme.
- *
- * A rendered artifact (a plan or report) embeds `agents://session/<id>` in its
- * provenance line. Clicking it hands the URL to the OS, which routes it to the
- * registered handler (see register.ts) that runs the machine-only `agents _callback
- * <url>` verb (`open` remains a hidden back-compat alias). This module turns that URL
- * into a validated {@link AgentsSessionLink} the resume dispatcher consumes.
- *
- * Parsing is deliberately strict: the session id is the only thing that ever
- * reaches a child process, and the `_callback` command passes it as argv (never
- * interpolated into a shell), so a hostile URL cannot inject a command. Anything
- * that is not `agents://session/<valid-id>` is rejected with a reason.
- *
- * URL shape:
- *   agents://session/<id>              — resume <id>, owner host resolved from the id
- *   agents://session/<id>?host=<name>  — the same, with a routing hint
- */
+/** Parse the `agents://` deep-link scheme. An artifact embeds `agents://session/<id>` (optionally
+ * `?host=<name>`); the OS hands it to the registered handler (register.ts), which runs `agents
+ * _callback <url>`. Strict: only `agents://session/<valid-id>`; the id goes as argv, never shell. */
 
 interface AgentsSessionLink {
   kind: 'session';
@@ -29,14 +14,9 @@ interface AgentsUrlError {
   error: string;
 }
 
-/**
- * Session-id shapes accepted from a deep link. Mirrors `looksLikeSessionId`
- * (lib/session/discover.ts) WITHOUT importing the heavy session module, so the
- * `open` command stays cold-start cheap: a bare hex short-id/prefix (>=6 chars),
- * a UUID (optionally `session_`-prefixed), a `ses_<ulid>` (OpenCode), or an
- * `ag-…-<8hex>` tmux alias. The upper length bound is a sanity cap, not a format
- * rule.
- */
+/** Session-id shapes accepted from a deep link: hex short-id (>=6 chars), UUID (optionally
+ * `session_`-prefixed), OpenCode `ses_<ulid>`, or `ag-...-<8hex>` tmux alias. Mirrors
+ * `looksLikeSessionId` without importing it, to keep `open` cold-start cheap. */
 const HEX_ID = /^[0-9a-f-]{6,}$/i;
 const SES_ULID = /^ses_[0-9a-hjkmnp-tv-z]{26}$/i;
 import { AG_TMUX_NAME_RE as AG_ALIAS } from '@phnx-labs/sessions-cli/reader';
@@ -49,10 +29,8 @@ export function isDeepLinkSessionId(raw: string): boolean {
   return HEX_ID.test(bare) || SES_ULID.test(id) || AG_ALIAS.test(id);
 }
 
-/**
- * Parse an `agents://…` URL into a {@link AgentsSessionLink}, or return an
- * {@link AgentsUrlError} with a human reason. Never throws.
- */
+/** Parse an `agents://...` URL into an AgentsSessionLink, or an AgentsUrlError with a reason. Never
+ * throws. */
 export function parseAgentsUrl(input: string): AgentsSessionLink | AgentsUrlError {
   const raw = (input ?? '').trim();
   if (!raw) return { error: 'empty URL' };

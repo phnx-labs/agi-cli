@@ -19,10 +19,9 @@ import { claudeAccountTokenKey } from './claude-account-token.js';
 // Only tmux / multiplex-style suites are POSIX-process oriented.
 const describePosix = process.platform === 'win32' ? describe.skip : describe;
 
-// Real logged-out Claude stream-json tail, captured from an actual failed
-// routine run on disk (drain-linear-cli, 2026-07-27). Ground truth: `terminal_reason`
-// is "completed", so only the `error:"authentication_failed"` marker and the
-// `result`+`is_error` text can classify it.
+// Real logged-out Claude stream-json tail, captured from a failed routine run (drain-linear-cli,
+// 2026-07-27). `terminal_reason` is "completed", so only the `error:"authentication_failed"`
+// marker and the `result`+`is_error` text can classify it.
 const LOGGED_OUT_CLAUDE_LOG = [
   '{"type":"system","subtype":"init","session_id":"x"}',
   '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":401,"error":"authentication_failed","session_id":"x"}',
@@ -158,19 +157,9 @@ function idx(cmd: string[], tok: string): number {
   return cmd.indexOf(tok);
 }
 
-/**
- * Run `fn` with `keys` absent from `process.env`, restoring whatever was
- * there afterwards. `buildExecEnv` starts from `{...process.env}` and only
- * conditionally overwrites a handful of keys (AGENT_SESSION_ID,
- * AGENTS_MAILBOX_DIR, DISABLE_AUTOUPDATER, ...) — a test asserting one of
- * those is `undefined` for a case that doesn't set it is really asserting
- * "buildExecEnv doesn't inject a value on top of nothing", which only holds
- * when the process actually started with nothing there. This test suite runs
- * inside real `agents run`-launched sessions (including this very repo's own
- * dev loop), which carry every one of these vars in their own environment —
- * so an un-isolated assertion here passes on a clean CI runner and fails the
- * moment it runs inside a live agent session (RUSH-2749).
- */
+/** Run `fn` with `keys` absent from `process.env`, restoring them afterwards. `buildExecEnv` starts
+ * from `{...process.env}` and conditionally overwrites a few keys, so asserting one is `undefined`
+ * only holds when the process started without it; live agent sessions carry them (RUSH-2749). */
 function withClearedEnv<T>(keys: string[], fn: () => T): T {
   const prev = new Map(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
@@ -723,11 +712,9 @@ describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
     expect(resolveTmuxWrap({ ...base, configEnabled: false, tmuxAvailable: true, raw: false }).kind).toBe('bare');
   });
 
-  // PHNX-3316: tmux.enabled=false means NO wrap, local or remote. A followed
-  // --device run left bare is protected by reconnect-and-resume (hosts/
-  // reconnect.ts), not by a pane. The RUSH-3125 forced wrap conflated
-  // durability with an ergonomics preference and wrapped boxes whose operator
-  // had explicitly left tmux off.
+  // PHNX-3316: tmux.enabled=false means no wrap, local or remote. A followed --device run left
+  // bare is protected by reconnect-and-resume (hosts/reconnect.ts), not a pane. The RUSH-3125
+  // forced wrap wrongly wrapped boxes whose operator left tmux off.
   it('does NOT wrap a followed REMOTE-dispatched run when this device set tmux.enabled=false', () => {
     expect(resolveTmuxWrap({ ...base, configEnabled: false, remoteDispatch: true }).kind).toBe('bare');
     // …even when tmux is missing — nothing requested the wrap, so there is
@@ -845,11 +832,8 @@ describePosix('buildTmuxAgentCommand (env-preserving pane command)', () => {
   });
 });
 
-// resolveLaunchId is the one place that decides AGENT_LAUNCH_ID for a run. A
-// `--device` launcher forwards an id it controls so ONE correlation key spans the
-// SSH hop (RUSH-2034); every local run passes none and gets a fresh mint. The
-// adopt-vs-mint decision is what lets the launcher resolve a non-Claude agent's
-// real remote session id from the hook record afterwards.
+// resolveLaunchId is the one place deciding AGENT_LAUNCH_ID: a `--device` launcher forwards an id
+// it controls so one correlation key spans the SSH hop (RUSH-2034); local runs mint a fresh one.
 describePosix('resolveLaunchId', () => {
   it('adopts a launcher-forwarded id verbatim (the cross-hop correlation key)', () => {
     expect(resolveLaunchId('LID-from-host-42')).toBe('LID-from-host-42');
@@ -873,13 +857,9 @@ describePosix('resolveLaunchId', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// runInTmux exit-classification (RUSH-2185 / EXEC-23a)
-//
-// Three scenarios that must produce the right action.  The functions
-// shouldRecapDeadPane and isPaneKnownAliveFromQueryResult are pure extractions
-// of the decision logic inside runInTmux — testable without a real tmux process.
-// ─────────────────────────────────────────────────────────────────────────────
+// runInTmux exit-classification (RUSH-2185 / EXEC-23a): three scenarios must produce the right
+// action. shouldRecapDeadPane and isPaneKnownAliveFromQueryResult are pure extractions of
+// runInTmux's decision logic, testable without tmux.
 describePosix('shouldRecapDeadPane', () => {
   // (a) Interactive exit-0 fast-fail — the harness exited cleanly without ever
   // opening a REPL.  The user sees only a bare `[detached]`; we must surface a
@@ -935,11 +915,9 @@ describePosix('isPaneKnownAliveFromQueryResult', () => {
   });
 });
 
-// EXEC-23b. The bug: an interactive run whose tmux server died mid-work returned
-// exitCode 0. `agents run codex --interactive --device <box>` printed a failure
-// banner ("[server exited unexpectedly]", codex stranded at an approval prompt)
-// and still handed its caller a success code, so anything scripting `agents run`
-// counted a killed run as a clean finish.
+// EXEC-23b. The bug: an interactive run whose tmux server died mid-work returned exitCode 0.
+// `agents run codex --interactive --device <box>` printed a failure banner yet handed callers a
+// success code, so scripts counted a killed run as a clean finish.
 describePosix('tmuxRunExitCode — an unknown outcome is never success', () => {
   it('reports the real status when tmux read one off a dead pane', () => {
     expect(tmuxRunExitCode({ dead: true, status: 0 }, false)).toBe(0);
@@ -972,11 +950,9 @@ describePosix('tmuxRunExitCode — an unknown outcome is never success', () => {
   });
 });
 
-// The unknown-outcome input above is a real tmux state, not a hypothetical:
-// a server that goes away leaves paneExitStatus unable to answer. Proven
-// against real tmux — no mocking. Skipped whole when tmux is absent, matching
-// tmux/session.test.ts:37 — this is the first tmux-server-spawning suite in
-// this file, so a bare image would otherwise fail here where its sibling skips.
+// The unknown-outcome input above is a real tmux state: a server that goes away leaves
+// paneExitStatus unable to answer. Proven against real tmux, no mocking. Skipped whole when tmux
+// is absent, matching tmux/session.test.ts.
 const tmuxSkipReason = isTmuxInstalled() ? null : 'tmux not installed';
 describePosix.skipIf(tmuxSkipReason)('paneExitStatus against a real tmux server that went away', () => {
   it('cannot read a pane whose server is gone → {found:false, dead:false}', async () => {
@@ -1107,15 +1083,9 @@ describePosix('tmux env file (no secret VALUE in the process table, RUSH-2100)',
   });
 });
 
-// RUSH-2339: `agents run <agent>` on a machine without that harness used to exec a
-// nonexistent binary and die with `sh: 1: exec: cursor-agent: not found` (exit 127),
-// after a "looks logged out" banner that was also wrong. commands/exec.ts probes
-// resolveLaunchBinary before spawning, so this resolver is the whole gate.
-//
-// Driven in a subprocess with a planted temp HOME: the state paths (versions dir,
-// shims dir) are module-eval constants read from process.env.HOME, so an in-process
-// override cannot move them. Same pattern as versions.isolation.integration.test.ts.
-// No mocks — real files on a real PATH.
+// RUSH-2339: `agents run <agent>` without that harness used to exec a nonexistent binary and die
+// with `exec: cursor-agent: not found` (exit 127) after a wrong "looks logged out" banner.
+// commands/exec.ts probes resolveLaunchBinary first, so this resolver is the whole check.
 describePosix('resolveLaunchBinary — is the harness actually on this machine (RUSH-2339)', () => {
   let home: string;
   let pathDir: string;
@@ -1169,10 +1139,9 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
     expect(probe('claude', '9.9.9')).toBe(binary);
   });
 
-  // (b) The self-installed case: Homebrew / `curl | sh` / a distro package put the
-  // harness on PATH and agents-cli manages no version home for it. This is a
-  // SUPPORTED state — a naive `listInstalledVersions(agent).length === 0` guard
-  // would break it, so it must still resolve.
+  // The self-installed case (Homebrew, `curl | sh`, distro package): the harness is on PATH and
+  // agents-cli manages no version home. A supported state; a naive
+  // `listInstalledVersions(agent).length === 0` guard would break it.
   it('resolves a manual PATH install that has no version home at all', () => {
     const binary = path.join(pathDir, 'cursor-agent');
     plantExecutable(binary);
@@ -1207,12 +1176,9 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
     expect(probe('cursor')).toBeNull();
   });
 
-  // The other half of that rule, and a regression this fix originally introduced:
-  // a managed version exists but no default is PINNED, so resolveVersion returns
-  // null. The shim launches fine here — it resolves the version itself and prints
-  // its own `no default set … agents use` guidance — so calling this "not
-  // installed" would name the wrong fix (`agents add`) on a machine that already
-  // has the harness.
+  // The other half, a regression this fix introduced: a managed version exists but no default is
+  // pinned, so resolveVersion returns null. The shim still launches (it prints its own `no default
+  // set` guidance), so calling this "not installed" would name the wrong fix (`agents add`).
   it('counts the shim as an install when a managed version exists but none is pinned', () => {
     const shim = path.join(home, '.agents', '.cache', 'shims', 'opencode');
     plantExecutable(shim);
@@ -1245,11 +1211,9 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
     versionDirs = [];
     prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
-    // These cases assert WORKER (headless) credential semantics. Pin the self
-    // device id to a name that carries no role mark so selfConfiguredDeviceRole()
-    // resolves undefined (worker-equivalent) — otherwise, run on a machine marked
-    // `config.role: personal` (e.g. zion), the personal-device gate would defer to
-    // the login and these assertions would flip (RUSH-2395).
+    // These cases assert worker (headless) credential semantics: pin the self device id to an
+    // unmarked name so selfConfiguredDeviceRole() is undefined; on a `personal` box the headed
+    // rule would defer to the login and flip them (RUSH-2395).
     process.env.AGENTS_SYNC_MACHINE_ID = 'rush-2360-worker-fixture';
   });
 
@@ -1286,11 +1250,9 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
   }
 
   it('strips an ambient inherited CLAUDE_CODE_OAUTH_TOKEN when NO setup-token resolves (the provisioned-box leak)', () => {
-    // A provisioned box's launcher exports a shared, rotating CLAUDE_CODE_OAUTH_TOKEN;
-    // `agents run claude "<prompt>"` inherits it via sanitizeProcessEnv(process.env).
-    // No `auth` bundle is written, so no per-account setup-token resolves — the token
-    // MUST be stripped so the run authenticates against this home's own login, not the
-    // shared token that caused the RUSH-1822 fleet-wide logout.
+    // A provisioned box's launcher exports a shared rotating CLAUDE_CODE_OAUTH_TOKEN that `agents
+    // run claude` inherits. With no `auth` bundle setup-token it MUST be stripped so the run uses
+    // this home's own login, not the token behind the RUSH-1822 fleet-wide logout.
     const { version } = makeVersionHome('alpha@example.com');
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-shared-rotating-must-be-stripped';
 
@@ -1344,10 +1306,9 @@ describe('classifyClaudeRunRefusal (RUSH-3018 — persist/clear decision on the 
 
   it('the exact real Fable refusal is a distinct model-limit action, not a global clear', () => {
     const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
-    // The real-world evidence: this refusal commonly ends the CLI turn with
-    // exit 0. Before this fix, classifyClaudeRunRefusal fell through to
-    // `exitCode === 0 -> clear`, wrongly wiping any stale session/credits
-    // marker on the account for a refusal that was itself unrecognized.
+    // Real-world evidence: this refusal commonly ends the CLI turn with exit 0. Before the fix,
+    // classifyClaudeRunRefusal fell through to `exitCode === 0 -> clear`, wrongly wiping any stale
+    // session/credits marker on the account for an unrecognized refusal.
     expect(classifyClaudeRunRefusal(text, 0, 'claude-fable-5-1')).toEqual({
       action: 'note_model_limit',
       model: 'claude-fable-5-1',
@@ -1422,10 +1383,9 @@ describe('classifyCodexRunRefusal (PHNX-3859 — codex account marked so rotatio
   });
 
   it('does NOT fire on transcript content that merely mentions "usage limit" (false-positive guard)', () => {
-    // captureStdoutTail feeds a 16KB tail of the codex transcript, which streams
-    // the whole session — a run that discusses billing/quota code prints "usage
-    // limit" without being the CLI's own refusal. Only "hit your usage limit"
-    // triggers, so a healthy account is never wrongly excluded.
+    // captureStdoutTail feeds a 16KB tail of the codex transcript, which streams the whole
+    // session, so a run discussing billing/quota code prints "usage limit" without it being a
+    // refusal. Only "hit your usage limit" triggers, so a healthy account is never excluded.
     const transcript =
       'Looking at the usage limit handling in billing.ts — the docs say try again at Sep 12th, 2026 8:32 AM if exceeded.';
     expect(parseCodexUsageLimitReset(transcript)).toBeNull();

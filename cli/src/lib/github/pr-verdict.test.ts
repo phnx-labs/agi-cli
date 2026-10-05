@@ -1,15 +1,6 @@
-/**
- * Tests for the merge-on-green selector.
- *
- * Fixtures are shaped after live GitHub payloads captured 2026-08-20:
- *   - PR #2847 (phnx-labs/agi-cli): reviewDecision empty, reviews [], one
- *     issue comment starting `**Non-author review verdict: APPROVE**`, CI green.
- *   - PR #2849: no reviews, no comments, so unapproved.
- *   - merge-guard.sh's carried-from fixtures (#2736 laundering).
- *
- * No network: the selector is pure over those shapes. The poll that *fetches*
- * them lives in pr-mergeable.ts.
- */
+/** Tests for the merge-on-green selector, with fixtures shaped after live payloads captured
+ * 2026-08-20 (#2847 comment-only APPROVE, #2849 unapproved, merge-guard.sh's #2736 laundering
+ * cases). No network: the selector is pure; the fetching poll lives in pr-mergeable.ts. */
 
 import { describe, expect, it } from 'vitest';
 import {

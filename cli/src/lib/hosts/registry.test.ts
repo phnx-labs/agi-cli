@@ -1,28 +1,14 @@
-/**
- * resolveHost fall-through: the unified `--device` / `--device` resolution.
- *
- * The real bugs this guards against:
- *   1. A machine registered ONLY via `agents devices sync` must be reachable by
- *      `--device <name>` — the whole point of unifying devices and hosts. Before
- *      this, resolveHost consulted only the hosts registry and errored.
- *   2. The device's ssh target must be `user@dnsName` (dnsName preferred over ip).
- *   3. An ad-hoc `user@host` must resolve without any registration.
- *   4. A bare unknown name must return null (NOT be misread as an ad-hoc target)
- *      so capability-tag routing (`resolveHostByCap`, e.g. `--device gpu`) stays
- *      reachable.
- *   5. A password-auth device can't offload over BatchMode ssh — it must throw a
- *      typed, actionable error rather than dispatch a run that would hang.
- */
+/** resolveHost fall-through guards: a machine registered only via `agents devices sync` resolves
+ * by `--device <name>` as `user@dnsName`; an ad-hoc `user@host` needs no registration; a bare
+ * unknown name returns null for cap routing; a password-auth device throws a typed error. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the override
-// (both the devices registry and the hosts providers resolve paths from it).
-// USERPROFILE too: os.homedir() ignores HOME on Windows, and ssh-config.ts
-// builds ~/.ssh from os.homedir() — with only HOME set, the stanza written
-// below is invisible there and every lookup falls through.
+// Set HOME before state.ts loads so its module-level root picks it up. USERPROFILE too:
+// os.homedir() ignores HOME on Windows and ssh-config.ts builds ~/.ssh from it, so the stanza
+// written below would be invisible.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-host-resolve-test-'));
 process.env.HOME = TEST_HOME;
 // Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
@@ -289,11 +275,9 @@ describe('listAllHosts — merge same-name rows (RUSH-1967)', () => {
   });
 
   it('the LIVE device address wins over a stale enrolled overlay address', async () => {
-    // The frozen-route bug, via listAllHosts rather than resolveHost: enrol a
-    // device to tag it, then let `agents devices sync` move its address. The
-    // overlay keeps the OLD address forever (nothing rewrites it), so a merge
-    // that prefers the overlay serves a dead route. This matters beyond display
-    // because resolveHostByCap hands a listAllHosts() row straight to dispatch.
+    // The frozen-route bug via listAllHosts: after enrolling a device to tag it, `devices sync`
+    // moves its address but the overlay keeps the old one, so preferring the overlay serves a dead
+    // route; resolveHostByCap hands a listAllHosts() row straight to dispatch.
     await upsertDevice('mac-mini', {
       platform: 'macos',
       user: 'muqsit',

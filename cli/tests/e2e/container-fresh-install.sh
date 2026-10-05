@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Runs INSIDE a fresh Linux container (node:24). Replays the issue #112/#137
-# scenario end-to-end: a user with existing Claude Code + Codex installs and
-# populated user config installs agents-cli, adopts both agents, and triggers
-# the launch-time factory sync. Asserts no user setting is lost at any step.
+# Runs inside a fresh node:24 container, replaying issues #112/#137: a user with existing Claude
+# Code and Codex configs installs agents-cli, adopts both agents, and triggers the launch-time
+# factory sync. Asserts no user setting is lost.
 set -euo pipefail
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -100,10 +99,8 @@ assert_codex_config() {
 assert_claude_settings "after npm install"
 assert_codex_config "after npm install"
 
-# ---------------------------------------------------------------------------
-# 4. First-run setup (clones the public system repo), then adopt both agents
-#    via the same importAgentConfig path the interactive setup flow uses.
-# ---------------------------------------------------------------------------
+# Step 4: first-run setup (clones the public system repo), then adopt both agents via
+# importAgentConfig, as interactive setup does.
 step "agents setup"
 agents setup </dev/null || fail "agents setup exited non-zero"
 
@@ -118,10 +115,8 @@ echo "ok: config dirs adopted ($(readlink ~/.claude))"
 assert_claude_settings "after import"
 assert_codex_config "after import"
 
-# ---------------------------------------------------------------------------
-# 5. Trigger the launch-time factory sync — the exact call the claude shim
-#    makes on every launch, and the path that wiped settings in #112/#137.
-# ---------------------------------------------------------------------------
+# Step 5: trigger the launch-time factory sync, the call the claude shim makes on every launch and
+# the path that wiped settings in #112/#137.
 step "launch sync (factory settings writers)"
 CLAUDE_VERSION=$(ls ~/.agents/.history/versions/claude/ | head -1)
 agents sync --agent claude --agent-version "$CLAUDE_VERSION" --launch --cwd "$HOME" --quiet </dev/null \
@@ -133,11 +128,8 @@ agents sync --agent codex --agent-version "$CODEX_VERSION" --launch --cwd "$HOME
 assert_claude_settings "after launch sync"
 assert_codex_config "after launch sync"
 
-# ---------------------------------------------------------------------------
-# 6. Version switch: install a second claude version and switch to it. The
-#    carry-forward step must seed the new (empty) version home with the user's
-#    settings from the imported version.
-# ---------------------------------------------------------------------------
+# Step 6: version switch: install a second claude version and switch; the carry-forward must seed
+# the new empty home with the imported version's settings.
 SWITCH_CLAUDE_VERSION="${SWITCH_CLAUDE_VERSION:-2.1.170}"
 step "version switch carry-forward (claude@$SWITCH_CLAUDE_VERSION)"
 agents add "claude@$SWITCH_CLAUDE_VERSION" --yes </dev/null || fail "agents add claude@$SWITCH_CLAUDE_VERSION failed"

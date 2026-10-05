@@ -1,12 +1,6 @@
-/**
- * Local record of dispatched host tasks.
- *
- * Each dispatch writes a `<id>.json` sidecar next to its `<id>.log` (and the
- * remote's `<id>.exit`) under ~/.agents/.cache/hosts/, so `agents devices ps` / `agents logs`
- * can list runs and follow output across CLI invocations. (Folding these into
- * the cloud SQLite store so `agents cloud ps` sees them is a fast-follow — it
- * needs care around the cloud status-refresh path.)
- */
+/** Local record of dispatched host tasks: each dispatch writes a `<id>.json` sidecar beside its
+ * `.log` and the remote `.exit` under ~/.agents/.cache/hosts/, so `agents devices ps` / `agents
+ * logs` work across invocations. Folding into the cloud SQLite store is a fast-follow. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,24 +18,13 @@ export interface HostTask {
   agent: string;
   prompt: string;
   pid?: number;
-  /**
-   * The durable `agents run --name <slug>` handle for this dispatch, if given.
-   * Chosen at launch and agent-agnostic (unlike sessionId), so `agents devices
-   * ps` / `agents logs <name>` and the dispatch tip can reference the run by a stable name
-   * even for agents that never expose a session id up front. Absent when the
-   * run was launched without `--name`.
-   */
+  /** The durable `agents run --name <slug>` handle, chosen at launch and agent-agnostic, so
+   * `devices ps`, `agents logs <name>` and the dispatch tip can name the run even when no
+   * session id is exposed up front. Absent when launched without `--name`. */
   name?: string;
-  /**
-   * The remote run's agent session id, so `agents sessions`/resume-by-id can map
-   * a discovered session back to the host it lives on. Two sources: for Claude
-   * (the only agent that accepts `--session-id`) it's the id we FORCED at
-   * dispatch; for every other agent it's the id the remote COINED, captured from
-   * the run's stdout sentinel (`--emit-session-id`, see session-marker.ts) once
-   * the follow returns and stamped on the record via `captureRemoteSessionId`.
-   * Absent only until that capture lands — e.g. an unfollowed (`--no-follow`)
-   * non-Claude run whose id the reconcile path fills in later.
-   */
+  /** The remote run's session id, so resume-by-id can map a session to its host: the forced id
+   * for Claude, else the id the remote coined (captured from the `--emit-session-id` sentinel,
+   * session-marker.ts). Absent until captured, e.g. an unfollowed non-Claude run. */
   sessionId?: string;
   /** Remote paths (under the host's ~/.agents/.cache/hosts/). */
   remoteLog: string;
@@ -86,13 +69,9 @@ export function updateTask(id: string, patch: Partial<HostTask>): HostTask | nul
   return next;
 }
 
-/**
- * The record patch for a run that has finished with `code`. The single authority
- * for the exit-code → status mapping, so the dispatch, reconcile, and log-follow
- * paths can never disagree. A genuine remote exit code is never -1 (that sentinel
- * means "follow window closed while the run continues"), so callers must resolve
- * -1 as still-running and never pass it here.
- */
+/** The record patch for a run that finished with `code`: the single exit-code to status mapping,
+ * so dispatch, reconcile and log-follow agree. A real exit code is never -1 (that means follow
+ * window closed, run continues), so callers must not pass it. */
 export function terminalPatch(code: number): Partial<HostTask> {
   return {
     status: code === 0 ? 'completed' : 'failed',
@@ -116,12 +95,8 @@ export function listTasks(): HostTask[] {
   return tasks.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-/**
- * Find the host task that launched a given agent session id, so a resume-by-id
- * can re-dispatch to the host the session actually lives on. Newest task wins
- * (listTasks is createdAt-desc) — a session id should be unique, but a re-run
- * with the same forced id resolves to the most recent dispatch.
- */
+/** Find the host task that launched a session id so resume-by-id re-dispatches to the host it
+ * lives on; newest wins (listTasks is createdAt-desc) if an id was reused. */
 export function findTaskBySessionId(sessionId: string): HostTask | null {
   if (!sessionId) return null;
   for (const task of listTasks()) {
@@ -130,12 +105,8 @@ export function findTaskBySessionId(sessionId: string): HostTask | null {
   return null;
 }
 
-/**
- * Find the newest host task launched with `--name <name>`, so `agents logs
- * <name>` / `agents devices ps` and resolve-by-handle can address a run by its durable name.
- * Case-insensitive; newest wins (listTasks is createdAt-desc) when a name was
- * reused across dispatches.
- */
+/** Find the newest host task launched with `--name <name>` so `agents logs <name>`, `devices ps`
+ * and handle resolution can address it; case-insensitive, newest wins on reuse. */
 export function findTaskByName(name: string): HostTask | null {
   if (!name) return null;
   const wanted = name.toLowerCase();
@@ -145,12 +116,9 @@ export function findTaskByName(name: string): HostTask | null {
   return null;
 }
 
-/**
- * Resolve a host-task reference the way `agents devices ps`, `agents logs`, and `agents devices stop` do: a raw
- * dispatch id first, then a `--name` handle, then the remote agent/session id.
- * Shared so any other caller resolving "does this ref name a detached --device
- * dispatch?" (e.g. `agents message`) uses the identical three-way lookup.
- */
+/** Resolve a host-task reference as `agents devices ps`, `agents logs` and `devices stop` do:
+ * dispatch id, then `--name` handle, then remote agent/session id. Shared so other callers
+ * (e.g. `agents message`) use the same lookup. */
 export function resolveTaskRef(ref: string): HostTask | null {
   return loadTask(ref) ?? findTaskByName(ref) ?? findTaskBySessionId(ref);
 }

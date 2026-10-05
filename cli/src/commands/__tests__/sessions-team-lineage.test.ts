@@ -1,12 +1,5 @@
-/**
- * Team lineage + the `--device` browser gate.
- *
- * Two links that existed on disk but never reached the listing: the team a
- * session spawned (derived at scan time, dropped at the DB write) and the team a
- * teammate belongs to (parsed from its meta.json, then discarded). Plus the flag
- * gate that decides whether an explicit `--device` opens the interactive browser
- * or falls back to the legacy per-host SSH stream.
- */
+/** Team lineage and the `--device` browser gate. Two links existed on disk but never reached the
+ * listing: the team a session spawned and the team a teammate belongs to. */
 
 import { describe, it, expect } from 'vitest';
 import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
@@ -198,10 +191,9 @@ describe('formatTeamLineage — the preview pane Team: line', () => {
 });
 
 describe('peer-supplied team data is neither trusted nor rendered raw', () => {
-  // parseRemoteList copies a peer's JSON through without inspecting its fields
-  // (lib/session/remote-list.ts), and enrichTeamOrigins deliberately leaves an
-  // already-populated teamOrigin alone — so both the type and the content of these
-  // fields belong to another machine.
+  // parseRemoteList copies a peer's JSON through uninspected (lib/session/remote-list.ts) and
+  // enrichTeamOrigins leaves a populated teamOrigin alone, so the type and content of these fields
+  // belong to another machine.
   it('does not throw on a non-string spawnedTeam or team', () => {
     // teamBadge runs on EVERY picker row, so one malformed row used to take down
     // the whole listing rather than degrade a single entry.

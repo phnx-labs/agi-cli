@@ -13,13 +13,9 @@ import {
   writeDeviceRoutines,
 } from './routines.test-fixture.js';
 
-// Residual slice of the routines.*.test.ts suite (RUSH-2819): device
-// pin/activation lifecycle (`routines devices --set/--clear`) plus the
-// --device flag help/routing coverage. The subprocess-heavy behavior tests
-// live in the routines.*.test.ts slices next to this file (add, list, run),
-// split so vitest can parallelize them across worker forks — this file was
-// one 2,249-line suite measured at ~194s of test time. Shared fixtures:
-// routines.test-fixture.ts.
+// Residual slice of the routines.*.test.ts suite (RUSH-2819): device pin/activation lifecycle
+// (`routines devices --set/--clear`) and `--device` help/routing. Subprocess-heavy tests live in
+// the add/list/run slices. Fixtures: routines.test-fixture.ts.
 
 describeRoutines('routines devices --set persists', () => {
   it('writes activation to the target device manifest without changing definition metadata', () => {

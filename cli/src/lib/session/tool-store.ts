@@ -92,31 +92,20 @@ export function purgeMissingToolCallsInDirectory(
 export interface ToolScanResumePoint {
   /** Serialized ToolCallCollector snapshot at `parsedOffset`. */
   parserState: string;
-  /**
-   * Where a later scan may resume. For the streaming (claude/codex) path this is
-   * a BYTE offset just past the last complete record consumed. For the full-file
-   * harness path (`planEventToolResume`) it is instead the COUNT of normalized
-   * events already folded — the two never share a session (a session is one
-   * agent, and the streaming path is claude/codex only), so the column carries
-   * whichever meaning that agent's resumer wrote.
-   */
+  /** Where a later scan may resume. Streaming (claude/codex): a byte offset past the last complete
+   * record. Full-file harnesses (`planEventToolResume`): the count of normalized events folded. A
+   * session is one agent, so they never mix. */
   parsedOffset: number;
 }
 
 interface PersistToolCallsOptions {
-  /**
-   * `replace` drops the session's stored evidence first — correct for a parse
-   * that started at byte 0. `append` merges the batch into what is already
-   * stored and requires an existing ledger row; use it only for a parse that
-   * resumed from that row's `parsedOffset`.
-   */
+  /** `replace` drops the session's stored evidence first (right for a parse from byte 0). `append`
+   * merges into the stored batch and requires an existing ledger row; use it only for a parse
+   * resumed from that row's `parsedOffset`. */
   mode?: 'replace' | 'append';
-  /**
-   * Where a later scan may resume. Omitted (or null) clears any stored resume
-   * point, which forces the next scan of this session to re-read from byte 0 —
-   * the correct outcome whenever the parse could not cover the whole prefix
-   * (an oversized record, a size-capped transcript, a non-streaming harness).
-   */
+  /** Where a later scan may resume. Omitted or null clears it, forcing the next scan to re-read
+   * from byte 0: required when the parse could not cover the whole prefix (oversized record,
+   * size-capped transcript, non-streaming harness). */
   resume?: ToolScanResumePoint | null;
   maxSessionBytes?: number;
 }
@@ -294,26 +283,9 @@ export function persistToolCalls(
   txn();
 }
 
-/**
- * Decide whether a changed full-file-harness session can RESUME its tool index
- * from the last scan instead of re-deriving every call (PHNX-3411).
- *
- * The warm-tick indexer re-derives tool calls for a changed session on every
- * tick, and for an ACTIVE large session that means re-sanitizing tens of
- * thousands of calls each time — the synchronous work that wedged the daemon
- * event loop. Streaming harnesses (claude/codex) already resume from a byte
- * offset; every other harness re-parses the whole file, so this brings them the
- * same benefit at the EVENT level: the ledger stores how many events were folded
- * (`parsed_offset`) plus the collector snapshot (`parser_state`), and a later
- * scan folds only the newly appended events.
- *
- * Returns the prior resume point when it is safe to append, or `null` (full
- * re-scan) whenever the stored prefix may no longer describe the current file:
- * a different extractor, no recorded resume point, a source the ledger row does
- * not describe, a transcript that shrank below what was already parsed (a
- * truncation/rewrite, not an append), more events already folded than the file
- * now yields, or a snapshot that does not read back.
- */
+/** Decide whether a changed full-file-harness session can resume its tool index instead of
+ * re-deriving every call (PHNX-3411): re-sanitizing tens of thousands of calls per tick wedged the
+ * daemon event loop. Returns the prior resume point when safe to append, else null (full scan). */
 export function planEventToolResume(
   db: Database.Database,
   sessionId: string,

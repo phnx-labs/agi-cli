@@ -1,14 +1,6 @@
-/**
- * The automatic-update PLAN (PHNX-3940): eligibility, deferral, and the
- * once-per-agent target resolution. Real filesystem (HOME redirected to a
- * temp dir), real installation records, real launch-lease files, real OS
- * process-table scan (`realProcessSnapshot`, untouched). The ONE network
- * boundary (`getLatestNpmVersion`, which would otherwise hit
- * registry.npmjs.org) is stubbed via `vi.mock` with `importOriginal` so every
- * other export of `versions.js` stays real — this proves absence/count of
- * network calls, it does not fake a successful vendor response to make an
- * update appear to succeed.
- */
+/** The automatic-update plan (PHNX-3940): eligibility, deferral and once-per-agent target
+ * resolution, on a real filesystem, records, launch leases and process scan. Only the npm-
+ * registry call is stubbed (`vi.mock` with `importOriginal`), to prove call counts. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

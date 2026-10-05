@@ -1,23 +1,6 @@
-/**
- * Owner-delivery-sink reachability probe (RUSH-2262).
- *
- * The feed/notify owner-delivery lane (`agents send --to owner`, `agents feed post
- * --level important` / `--blocked`) reaches the owner through the channel
- * providers registered for each configured channel in humans.yaml.
- *
- * Transport capabilities differ by channel and platform:
- *   - **imessage:** macOS only (osascript → Messages.app). Linux boxes rely on
- *     the peer-forward in owner-forward.ts to reach a macOS peer.
- *   - **slack:** requires a `SLACK_BOT_TOKEN` in env or the `webhooks` secrets
- *     bundle. Platform-independent.
- *   - **telegram / discord:** requires the Rush daemon (removed); only
- *     openclaw-telegram is available as a Telegram alternative.
- *
- * `agents send --to owner --dry-run` is NOT this probe: dry-run short-circuits
- * before the capability check. Resolvability (does the envelope build?) and
- * reachability (can this box actually deliver?) are different questions; this
- * answers the second.
- */
+/** Owner-delivery-sink reachability probe (RUSH-2262): can this box reach the owner? imessage is
+ * macOS-only (Linux peer-forwards), slack needs SLACK_BOT_TOKEN, telegram/discord lost their
+ * daemon. Not `--dry-run`, which short-circuits before the capability check. */
 import { platform } from 'os';
 import type { Meta } from '../types.js';
 import { readOwnerDest } from './send.js';

@@ -56,12 +56,8 @@ import {
   type UsageWindowKey,
 } from './usage.js';
 
-/**
- * Build a healthy RotateCandidate (signed in, no live snapshot
- * => unverified, drawing the low UNVERIFIED_WEIGHT — never full capacity,
- * PHNX-3392). Pass overrides — e.g. `usageStatus:
- * 'rate_limited'` — to make it unhealthy.
- */
+/** Build a healthy RotateCandidate: signed in, no snapshot so unverified at UNVERIFIED_WEIGHT
+ * (PHNX-3392). Pass overrides such as `usageStatus: 'rate_limited'` to make it unhealthy. */
 function candidate(over: Partial<RotateCandidate> & { version: string }): RotateCandidate {
   return {
     agent: 'claude',
@@ -140,15 +136,11 @@ describe('isLaunchableSignedIn (per-version credential floor for rotation)', () 
 });
 
 describe('isVersionLaunchableHere (per-version signed-in probe for the run.launch event)', () => {
-  // The incident: `--device auto` guarantees SOME account is ready on the box,
-  // not that the SPECIFIC version launched is signed in there. A version whose
-  // home carries no per-version credential is NOT launchable — this is exactly
-  // the gate collectRunCandidates applies, surfaced for the pre-launch event.
+  // `--device auto` guarantees some account is ready on the box, not that the specific version
+  // launched is signed in. A version with no per-version credential home is not launchable.
   it('reports a version with no per-version credential home as NOT launchable, email null', async () => {
-    // A version that was never installed has no version home on disk, so
-    // getAccountInfo finds no per-version credential and credentialPresence's
-    // perVersion is false — launchable is false for claude (a known-location
-    // agent) regardless of any active/global login on the test box.
+    // A never-installed version has no home, so credentialPresence's perVersion is false and
+    // launchable is false for claude regardless of any active/global login on the test box.
     const state = await isVersionLaunchableHere('claude', '0.0.0-never-installed');
     expect(state.launchable).toBe(false);
     expect(state.email).toBeNull();
@@ -162,10 +154,8 @@ describe('isVersionLaunchableHere (per-version signed-in probe for the run.launc
     if (!state.launchable) expect(state.email).toBeNull();
   });
 
-  // These plant a real version-home fixture under the actual versions dir (the
-  // path getVersionHomePath resolves to) so the FULL wiring runs —
-  // getVersionHomePath -> getAccountInfo -> credentialPresence -> isLaunchableSignedIn —
-  // not just the composition. Each uses a unique version and is removed after.
+  // These plant a real version-home fixture so the full wiring runs, from getVersionHomePath to
+  // isLaunchableSignedIn. Each uses a unique version and is removed after.
   describe('against a real installed version home', () => {
     const plantedVersionDirs: string[] = [];
     afterEach(() => {
@@ -332,10 +322,9 @@ describe('preflightHandoffEligible (PHNX-3999 F19 — the run shapes a handoff i
   });
 
   it('refuses every shape the canonical --fallback validation rejects', () => {
-    // The regression this exists for: the handoff consumes the --fallback entry,
-    // so switching on one of these shapes would empty the spec and leave the
-    // later guard nothing to reject — `--interactive --fallback codex` would
-    // start an interactive Codex the CLI refuses today.
+    // Regression: the handoff consumes the --fallback entry, so switching on one of these shapes
+    // would leave the later guard nothing to reject and start an interactive Codex the CLI
+    // refuses.
     for (const shape of ['interactive', 'acp', 'loop', 'resumeCheckpoint'] as const) {
       expect(preflightHandoffEligible({ ...eligible, [shape]: true })).toBe(false);
     }
@@ -450,11 +439,9 @@ describe('shouldArmRotationFailover (#348 — arming gate; must not trip --acp/-
     expect(shouldArmRotationFailover({ ...armable, hasPrompt: false })).toBe(false);
   });
 
-  // An explicit --fallback no longer disarms rotation failover: the same-agent
-  // accounts are unshifted ahead of the cross-agent entries (gh-monitor heal
-  // bug — `--fallback codex,droid` pinned every run to one capped account).
-  // The armable baseline above is the explicit-fallback case too: the gate has
-  // no explicitFallback input anymore.
+  // An explicit --fallback no longer disarms rotation failover: same-agent accounts are unshifted
+  // ahead of cross-agent entries (gh-monitor heal bug, where `--fallback codex,droid` pinned one
+  // capped account).
 
   it('does NOT arm for pinned / non-rotation runs (no rotation or no picked version)', () => {
     expect(shouldArmRotationFailover({ ...armable, hasRotation: false })).toBe(false);
@@ -462,10 +449,8 @@ describe('shouldArmRotationFailover (#348 — arming gate; must not trip --acp/-
   });
 });
 
-// End-to-end proof that a synthesized chain actually recovers a 429 through the
-// SAME runWithFallback engine: a real child process (no mocking of the code under
-// test) 429s on the first ("account A") dispatch and succeeds on the re-dispatch
-// ("account B"). A non-rate-limit failure must NOT cascade.
+// End-to-end proof that a synthesized chain recovers a 429 through the same runWithFallback
+// engine, using a real child process. A non-rate-limit failure must not cascade.
 describe('runWithFallback re-dispatch on a mid-run 429 (the reused failover path)', () => {
   const tmpDirs: string[] = [];
 
@@ -612,12 +597,9 @@ describe('balanced excludes an account refused by Claude session quota (RUSH-285
 });
 
 describe('balanced excludes a weekly-exhausted account once the week window is cached (PHNX-3392, GWT-E5c)', () => {
-  // Fix C (claude-statusline.ts `ingestClaudeStatusLineUsage`) persists a
-  // 7d-100% `week` window when a run hits its weekly limit — via
-  // `mergeClaudeUsageCacheWindows`, the exact write path exercised here against
-  // a real cache file. Once that row exists, `hasUsageAvailable` (rotate.ts)
-  // reads the snapshot as rate_limited and the account is INELIGIBLE — the
-  // next `collectRunCandidates` → `pickBalancedCandidate` cannot return it.
+  // Fix C (`ingestClaudeStatusLineUsage`) persists a 7d-100% `week` window when a run hits its
+  // weekly limit, so `hasUsageAvailable` reads rate_limited and `pickBalancedCandidate` skips the
+  // account.
   it('a real 7d-100% week window in the cache makes the account ineligible, not merely down-weighted', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-week-limit-'));
     const previous = setClaudeUsageCachePathForTest(path.join(root, 'usage.json'));
@@ -862,10 +844,8 @@ function snapshotAt(
 }
 
 describe('routing refuses to decide on usage it cannot verify', () => {
-  // The real incident: yosemite-s1's usage cache sat 26h–2.7d old with a
-  // failing refresh, so balanced read muqsit@getrush.ai as 48% used and
-  // launched into it. The account was actually at its weekly cap and the
-  // session answered "You've hit your weekly limit" on its first turn.
+  // Incident: yosemite-s1's usage cache was 26h-2.7d old with a failing refresh, so balanced read
+  // muqsit@getrush.ai as 48% used and launched into an account already at its weekly cap.
   const NOW = Date.UTC(2026, 7, 3, 6, 57);
   const fresh = (usedPercent: number) =>
     snapshotAt(new Date(NOW - 60_000), [{ key: 'week', usedPercent }]);
@@ -873,11 +853,8 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     snapshotAt(new Date(NOW - 26 * 3600 * 1000), [{ key: 'week', usedPercent }]);
 
   it('a last-known window the VIEW renders (staleWindows) stays unverified and never rate-limits routing', () => {
-    // The display fix (last-known + age in `agents view`) must not leak into
-    // routing. A snapshot whose only reading is an expired 100% session window —
-    // moved to `staleWindows` so the view can show "S: █████ 100% · 6h old" —
-    // must read to the router exactly as a blind snapshot did before: unverified,
-    // not stale (no number in `windows`), and NOT rate-limited by that 100%.
+    // The view's last-known display (`staleWindows`) must not leak into routing: an expired 100%
+    // session window must read to the router as a blind snapshot, unverified and not rate-limited.
     const staleSession: UsageWindow = {
       key: 'session',
       label: 'Session',
@@ -995,11 +972,9 @@ describe('routing refuses to decide on usage it cannot verify', () => {
   });
 
   it('two-tier freshness: a budget-paced idle reading is unverified but NOT refusal-stale', () => {
-    // The daemon paces proactive refreshes under a per-provider budget, so a
-    // healthy IDLE account is deliberately refreshed on a stretched round-robin
-    // cadence. A 25-min-old reading is one of those: too old to WEIGHT on (the
-    // 5-min decision bar), but nowhere near the hours-old broken-refresh staleness
-    // the NO_VERIFIED_USAGE refusal exists to catch (40-min bar).
+    // The daemon paces proactive refreshes per provider, so a healthy idle account has a
+    // 25-min-old reading: too old to weight on (5-min bar) but not refusal-stale for
+    // NO_VERIFIED_USAGE (40-min bar).
     const paced = snapshotAt(new Date(NOW - 25 * 60_000), [{ key: 'week', usedPercent: 30 }]);
     expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: paced }), NOW)).toBe(false);
     expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: paced }), NOW)).toBe(false);
@@ -1020,11 +995,9 @@ describe('routing refuses to decide on usage it cannot verify', () => {
   });
 
   it('a verified MINORITY does not capture every launch — the 429-throttled regime', () => {
-    // The 2026-08-20 incident: the usage endpoint 429-throttles a machine, so
-    // each refresh cycle confirms exactly one account. Narrowing to verified
-    // made `choose` run over a one-element list — the same account picked on
-    // every launch, which kept refreshing its own snapshot and locked the loop
-    // in. One fresh account among eight stale ones must not be a pin.
+    // 2026-08-20 incident: the usage endpoint 429-throttles a machine, so each refresh confirms
+    // one account. Narrowing to verified made `choose` pick the same account every launch; one
+    // fresh among eight stale must not pin.
     const fresh1 = candidate({ version: '2.1.219', usageSnapshot: fresh(10) });
     const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
       .map((version) => candidate({ version, usageSnapshot: dayOld(0) }));
@@ -1045,13 +1018,9 @@ describe('routing refuses to decide on usage it cannot verify', () => {
   });
 
   it('in the 429-throttled regime, the one verified account wins the draw over emptier-looking stale ones (PHNX-3479)', () => {
-    // A verified MINORITY (1 of 8) does not narrow the pool, so the stale
-    // accounts still compete — but an unverified snapshot must weight as the
-    // floor, not by its frozen "0% used". Before this fix, seven stale-0%
-    // accounts (weight 100 each) outweighed the one fresh-40% account
-    // (weight 60) ~92% to 8%, so balanced kept launching into stale accounts
-    // that were really at their weekly cap on a worker whose refresh had
-    // stalled. Now the verified account wins the vast majority of draws.
+    // A verified minority (1 of 8) does not narrow the pool, but an unverified snapshot must
+    // weight as the floor, not its frozen 0% used. Before PHNX-3479, seven stale-0% accounts
+    // outweighed the fresh-40% one ~92% to 8%.
     const freshHealthy = candidate({ version: '2.1.219', usageSnapshot: fresh(40) });
     const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
       .map((version) => candidate({ version, usageSnapshot: dayOld(0) }));
@@ -1132,10 +1101,8 @@ describe('routing refuses to decide on usage it cannot verify', () => {
   });
 
   it('a meterless pool stays spread instead of pinning to the most recently logged account', () => {
-    // Both accounts are plan-only; one's billing log was touched a minute ago,
-    // the other's three days ago — the normal steady state for grok. If the
-    // recent one counted as verified, preferVerified would narrow to it every
-    // draw, and running it would refresh its log and pin it permanently.
+    // Both accounts are plan-only (normal for grok). If the recently logged one counted as
+    // verified, preferVerified would pin it every draw, since running it refreshes its own log.
     const recent = snapshotAt(new Date(NOW - 60_000), []);
     recent.plan = 'SuperGrok Heavy';
     const older = snapshotAt(new Date(NOW - 3 * 24 * 3600 * 1000), []);
@@ -1239,10 +1206,9 @@ describe('one readiness gate — sync freshness, expired windows, dead auth (PHN
 });
 
 describe('--strategy available applies the same freshness rule as balanced', () => {
-  // The reviewer's catch: collectRunCandidates caps staleness for EVERY caller,
-  // so `available` paid the new live-fetch cost while keeping the exact bug —
-  // it sorts by apparent headroom and takes the front, so an unconfirmed "48%
-  // used" outranked an accurate "90% used" just as it did under balanced.
+  // collectRunCandidates caps staleness for every caller, so `available` paid the live-fetch cost
+  // but kept the bug: it takes the front of the headroom sort, so a stale 48% outranked an
+  // accurate 90%.
   const NOW = Date.UTC(2026, 7, 3, 6, 57);
   const fresh = (usedPercent: number) =>
     snapshotAt(new Date(NOW - 60_000), [{ key: 'week', usedPercent }]);
@@ -1270,13 +1236,9 @@ describe('--strategy available applies the same freshness rule as balanced', () 
   });
 
   it('a verified MINORITY still wins the deterministic pick — no whole-pool relaxation here', () => {
-    // The reviewer's catch on the first cut of the RUSH-2858 fix: relaxing the
-    // verified-first narrowing for a verified minority is only safe for a
-    // WEIGHTED-RANDOM chooser (it spreads load). `available` picks the front of
-    // the headroom sort deterministically, so a whole-pool fallback would hand
-    // the slot to an unconfirmed stale "5% used" over an accurate 95% — the
-    // original yosemite-s1 inversion. One verified account among eight must
-    // still be the pick.
+    // Relaxing verified-first narrowing for a verified minority is safe only for a weighted-random
+    // chooser. `available` picks deterministically, so a whole-pool fallback would choose a stale
+    // 5% over an accurate 95% (RUSH-2858). One verified of eight must still be the pick.
     const verified = candidate({ version: '2.1.219', usageSnapshot: fresh(95) });
     const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
       .map((version) => candidate({ version, usageSnapshot: dayOld(5) }));
@@ -1618,10 +1580,9 @@ describe('resolveRunVersion — never auto-pick from entirely stale usage (PHNX-
   });
 
   it('pinned: an auth-blocked default rotating to only-stale siblings ALSO refuses (PR #3295 review)', async () => {
-    // The pinned strategy's auth-blocked-pin fallback rotates via
-    // pickAvailableCandidate — an initial selection, so it must honor the same
-    // verified-only gate. A revoked pin whose only siblings are stale must NOT
-    // launch one blind; it diverts exactly like balanced/available.
+    // The pinned strategy's auth-blocked-pin fallback rotates via pickAvailableCandidate, an
+    // initial selection, so it must honor the verified-only rule: a revoked pin with only stale
+    // siblings diverts, as balanced does.
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-2526-pin-stale-'));
     fs.writeFileSync(path.join(cwd, 'agents.yaml'), 'agents:\n  claude: "2.1.219"\n');
     const revokedPin = candidate({ version: '2.1.219', authVerdict: 'revoked' });
@@ -1784,10 +1745,9 @@ describe('resolveRunVersion — skip a logged-out default (PHNX-2685)', () => {
 });
 
 describe('buildRotationDecisionEvent (the observability contract for a bad pick)', () => {
-  // The whole point: when routing lands on a maxed/logged-out account, the
-  // emitted rotation event must carry enough to say WHY from `agents events`
-  // alone — the per-org identity, each candidate's freshness tier, its staleness,
-  // and the pick reason. The old payload (version + counts) could not.
+  // When routing lands on a maxed or logged-out account, the rotation event must say why from
+  // `agents events` alone: per-org identity, each candidate's freshness tier and staleness, and
+  // the pick reason.
   type EventCandidate = {
     usageKey: string | null; email: string | null; tier: string;
     source: string | null; ageMs: number | null; capturedAt: string | null;
@@ -1842,22 +1802,17 @@ describe('buildRotationDecisionEvent (the observability contract for a bad pick)
     expect(byKey(ev, 'claude:org=verified').eligible).toBe(true);
   });
 
-  // The two blockers PR #3320 review caught both lived at the emit()/sanitizer
-  // boundary, which the in-memory assertions above never cross. This drives a
-  // real emit() into a redirected sink and reads the persisted JSONL back, so a
-  // regression that (a) redacts a field by name or (b) truncates the candidate
-  // set is caught where it actually happens.
+  // Two blockers from the PR #3320 review lived at the emit()/sanitizer boundary. This drives a
+  // real emit() into a redirected sink and reads the JSONL back, catching field redaction or
+  // candidate truncation.
   it('survives the real emit() sanitizer: no redaction, no 10-cap, no shared-version collision', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rot-ev-'));
     const logPath = path.join(dir, 'events.jsonl');
     try {
       _resetForTest(logPath);
-      // 15 candidates. An ARRAY would be truncated to 10 by sanitizeNested. And —
-      // mirroring foldRegistryCandidates (RUSH-3182) — the first three SHARE one
-      // `version` and carry a null `usageKey` (native login + two provider
-      // accounts on the same runVersion); keying the map by version OR usageKey
-      // would collapse them via Object.fromEntries. Index keys must keep all 15,
-      // each distinguishable by accountKey.
+      // 15 candidates: an array would be truncated to 10 by sanitizeNested, and keying by version
+      // or usageKey would collapse the first three, which share a version and a null usageKey
+      // (RUSH-3182). Index keys keep all 15.
       const pool = Array.from({ length: 15 }, (_, i) =>
         candidate({
           version: i < 3 ? '2.1.219' : `2.1.${i}`,

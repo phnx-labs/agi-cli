@@ -1,20 +1,6 @@
-/**
- * Goose slash-command install/remove/list/compare.
- *
- * Goose has no native slash-command file format — a slash command is a recipe
- * YAML file registered in `~/.config/goose/config.yaml` under a `slash_commands`
- * array: `[{ command: "<name>", recipe_path: "<abs path to recipe.yaml>" }]`.
- * (See goose-docs.ai context-engineering/slash-commands.)
- *
- * agents-cli writes each command's recipe to `<versionHome>/.config/goose/commands/
- * <name>.yaml` — a dir distinct from the workflow recipes dir
- * (`.config/goose/recipes/`) so the workflow detector never treats a command
- * recipe as a workflow — and registers/unregisters the `slash_commands` entry in
- * `config.yaml` via a read-modify-write that preserves every other key
- * (`mcp_servers`, `extensions`, …). Under agents-cli version isolation HOME is the
- * version home, so both files live under it and the absolute `recipe_path`
- * resolves correctly at goose runtime.
- */
+/** Goose slash-command install/remove/list/compare. Goose has no native command format: a
+ * command is a recipe YAML registered under `slash_commands` in `~/.config/goose/config.yaml`.
+ * Recipes go in `.config/goose/commands/`, not `recipes/`, so they are never read as workflows. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -37,13 +23,9 @@ interface SlashCommandEntry {
   recipe_path: string;
 }
 
-/**
- * Read the goose config.yaml as a mutable object. Throws — rather than returning
- * `{}` — when a NON-EMPTY file fails to parse or isn't a mapping, so the caller
- * (which rewrites the whole file) never silently clobbers a real user config
- * (`mcp_servers`, `GOOSE_MODEL`, `extensions`, …). A missing or genuinely empty
- * file returns `{}`.
- */
+/** Reads the goose config.yaml as a mutable object. Throws, rather than returning `{}`, when a
+ * non-empty file fails to parse or is not a mapping, so the whole-file rewrite never clobbers a
+ * real user config. A missing or empty file returns `{}`. */
 function readGooseConfig(configPath: string): Record<string, unknown> {
   if (!fs.existsSync(configPath)) return {};
   const raw = fs.readFileSync(configPath, 'utf-8');
@@ -77,10 +59,8 @@ function readSlashCommands(config: Record<string, unknown>): SlashCommandEntry[]
   );
 }
 
-/**
- * Register (or update) a `slash_commands` entry for `commandName` pointing at
- * `recipePath`, preserving every other config key and other entries. Idempotent.
- */
+/** Registers or updates a `slash_commands` entry for `commandName` pointing at `recipePath`,
+ * preserving every other key and entry. Idempotent. */
 function registerSlashCommand(configPath: string, commandName: string, recipePath: string): void {
   const config = readGooseConfig(configPath);
   const entries = readSlashCommands(config);
@@ -118,10 +98,8 @@ function buildGooseCommandRecipe(commandName: string, sourcePath: string): strin
   return yaml.stringify(markdownToGooseRecipe(commandName, markdown));
 }
 
-/**
- * Install a command into a Goose version home: write its recipe YAML and register
- * the `slash_commands` entry in config.yaml.
- */
+/** Installs a command into a Goose version home: writes its recipe YAML and registers the
+ * `slash_commands` entry in config.yaml. */
 export function installGooseCommandToVersion(
   versionHome: string,
   commandName: string,
@@ -169,10 +147,8 @@ export function gooseCommandMatches(versionHome: string, commandName: string, so
   }
 }
 
-/**
- * Remove a Goose command from a version home: soft-delete the recipe to `trashDir`
- * (when provided) and unregister its `slash_commands` entry.
- */
+/** Removes a Goose command from a version home: soft-deletes the recipe to `trashDir` (when
+ * given) and unregisters its `slash_commands` entry. */
 export function removeGooseCommandFromVersion(
   versionHome: string,
   commandName: string,

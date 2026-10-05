@@ -1,21 +1,6 @@
-/**
- * Host provider registry + the single host/device resolver.
- *
- * Mirrors the cloud provider registry: a Map of provider id → implementation,
- * instantiated once. Registers `local` then `devices`; adding `rush`/`crabbox`
- * later is a one-line `providers.set(...)`.
- *
- * Resolution used to fork into two disagreeing chains — a local-provider-first
- * `resolveHost` (this file) and a devices-only `resolveSshTarget`
- * (`../devices/resolve-target.ts`). They dialed different boxes for the same
- * token (RUSH-1967). Now every caller goes through one core, {@link matchHost}:
- * it merges the two directories per-FIELD instead of letting one provider
- * shadow the other — the live devices registry supplies address/OS/presence,
- * the agents.yaml overlay supplies caps/hints, and ssh_config supplies hosts
- * Tailscale has never seen. The typed wrappers below (`resolveHost`) and in
- * resolve-target.ts (`resolveExplicitTargets`, `resolveDeviceTarget`) differ
- * only in what shape they hand back and which literal fallbacks they permit.
- */
+/** Host provider registry and the single host/device resolver; adding `rush`/`crabbox` is one
+ * `providers.set(...)`. Two chains once dialed different boxes for one token (RUSH-1967); now
+ * every caller uses matchHost, merging devices registry, agents.yaml overlay and ssh_config. */
 
 import type { Host, HostProvider, HostProviderId } from './types.js';
 import type { HostEntry } from '../types.js';
@@ -64,19 +49,13 @@ export function getAllProviders(): HostProvider[] {
   return [...providers.values()];
 }
 
-/**
- * A resolved host, carrying the live {@link DeviceProfile} when the token
- * matched a registered device (by normalized name). The device reference lets
- * the `agents ssh` wrapper reach auth/shell/tailscale metadata a plain `Host`
- * doesn't hold, and lets dispatch callers apply the device-only refusal
- * (password auth) without re-reading the registry.
- */
+/** A resolved host, carrying the live DeviceProfile when the token matched a registered device,
+ * so `agents ssh` can reach auth/shell/tailscale metadata and dispatch can apply the password-
+ * auth refusal without re-reading the registry. */
 interface ResolvedHost extends Host {
   device?: DeviceProfile;
-  /** True when the host is a synthesized ad-hoc `user@host` / IP / FQDN literal
-   * (never registered) rather than a device or overlay/ssh-config match. Lets the
-   * strict `agents ssh` wrapper accept devices + literals but still report
-   * "Unknown device" for a bare ssh-config-only alias, as it always has. */
+  /** True for a synthesized ad-hoc `user@host`/IP/FQDN literal (never registered), so strict
+   * `agents ssh` still reports "Unknown device" for an ssh-config-only alias. */
   adhoc?: boolean;
 }
 
@@ -86,21 +65,16 @@ export function splitUserHost(token: string): { user?: string; host: string } {
   return at === -1 ? { host: token } : { user: token.slice(0, at), host: token.slice(at + 1) };
 }
 
-/** True when a token is clearly a network target (a `user@`, or a dotted/IPv6
- * host / IP) rather than a bare alias. A bare unknown word is a typo, so a
- * strict caller (`agents ssh foo`) reports "Unknown device" instead of dialing
- * a literal `foo`. */
+/** True when a token is clearly a network target (`user@`, dotted or IPv6 host) rather than a
+ * bare alias; a bare unknown word is a typo, so `agents ssh foo` reports "Unknown device"
+ * instead of dialing `foo`. */
 function looksLikeHostLiteral(token: string): boolean {
   return token.includes('@') || token.includes('.') || token.includes(':');
 }
 
-/**
- * Match a host part (the piece after any `user@`) to a registered device: exact
- * registry key first, then a normalized-host match so `yosemite-s0` and
- * `yosemite-s0.<tailnet>.ts.net` land on the same profile. This normalized
- * grammar used to live only in the devices chain (RUSH-1967 divergence #3/#4);
- * it is now shared by every caller.
- */
+/** Match a host part to a registered device: exact registry key first, then a normalized match
+ * so `yosemite-s0` and its tailnet FQDN land on the same profile. Shared by every caller
+ * (RUSH-1967 divergence #3/#4). */
 function matchDevice(host: string, reg: DeviceRegistry): DeviceProfile | undefined {
   return reg[host] ?? Object.values(reg).find((d) => normalizeHost(d.name) === normalizeHost(host));
 }
@@ -111,15 +85,9 @@ function deviceStatus(device: DeviceProfile): Host['status'] {
   return device.tailscale.online ? 'online' : 'offline';
 }
 
-/**
- * Merge a matched device with any same-name agents.yaml overlay into one Host,
- * per-FIELD (the core of the RUSH-1967 fix). The live registry owns address, OS
- * and presence — so `agents devices sync` takes effect without re-enrolling and
- * an enrolled route can never freeze — while the overlay contributes capability
- * tags (the reason to enroll at all) and an OS hint when the device platform is
- * unknown. `dispatchable` follows the device's auth method, so a password-auth
- * device can never be made dispatchable by shadowing it with an inline entry.
- */
+/** Merge a matched device with its agents.yaml overlay per field (RUSH-1967): the live registry
+ * owns address, OS and presence so an enrolled route can't freeze; the overlay adds caps and an
+ * OS hint. `dispatchable` follows the device's auth. */
 function deviceHost(device: DeviceProfile, user: string | undefined, overlay?: HostEntry): ResolvedHost {
   // Effective profile: the central config's ssh.*/platform keys overlay the
   // discovery record, so an operator edit via `agents devices config` is
@@ -178,40 +146,22 @@ function literalHost(token: string, host: string, user?: string): ResolvedHost {
 
 /** Literal-fallback policy for {@link matchHost}. */
 export interface MatchHostOptions {
-  /**
-   * Also treat an unmatched dotted/colon host literal (a raw IP or FQDN with no
-   * `user@`) as an ad-hoc target. `agents ssh 1.2.3.4` sets this; dispatch and
-   * fan-out leave it off, so only a `user@host` is taken as an ad-hoc literal
-   * (a bare/dotted unknown is a miss, keeping capability-tag routing and the
-   * "Unknown device" verdict reachable).
-   */
+  /** Also treat an unmatched dotted/colon literal (raw IP or FQDN, no `user@`) as ad-hoc;
+   * `agents ssh 1.2.3.4` sets this, dispatch and fan-out do not, so a bare unknown stays a miss
+   * and cap routing and "Unknown device" remain reachable. */
   allowBareLiteral?: boolean;
   /** Override the affinity pick for generic `auto` host resolution in tests.
    * Harness-aware run/team placement resolves `auto` before reaching this core. */
   resolveAuto?: () => DeviceAffinityPlan;
 }
 
-/**
- * The one place a `--device` / `--device` token becomes a resolved host. Reads the
- * devices registry, the agents.yaml overlay, and ssh_config, and merges them
- * per-field (see {@link deviceHost}). One grammar for every caller: `name`,
- * `user@name`, a tailnet FQDN, an ssh_config alias, and a literal `user@host`
- * all resolve the same way regardless of which subcommand called.
- *
- * Non-throwing: returns null on an injection-guard failure or an unresolved bare
- * token. The device-only refusal (password auth) is NOT applied
- * here — that is the dispatch wrapper's job ({@link resolveHost}), so the fan-out
- * and `agents ssh` paths, which handle those cases differently, aren't forced
- * into a dispatch verdict.
- */
+/** The one place a `--device` token becomes a resolved host, merging devices registry,
+ * agents.yaml overlay and ssh_config per field (see deviceHost). One grammar for all callers
+ * (name, `user@name`, FQDN, ssh alias). Non-throwing; resolveHost owns the password refusal. */
 export async function matchHost(name: string, opts: MatchHostOptions = {}): Promise<ResolvedHost | null> {
-  // Generic host-only callers resolve `auto` through the affinity engine here;
-  // harness-aware run/team placement resolves it earlier with live probes. A
-  // `null` plan.host means the affinity engine picked this
-  // very machine; resolve that as the local device/host entry (if any) rather than
-  // returning nothing — callers that already special-case "target is this
-  // machine" (teams add/create, the passthrough self-host check) then treat it as
-  // local exactly as they would if the user had typed the local name.
+  // Host-only callers resolve `auto` through the affinity engine here (run/team placement resolves
+  // it earlier with live probes). A null plan.host means this machine: resolve it as the local
+  // entry so "target is this machine" callers treat it as local.
   if (isDeviceInteractive(name)) {
     const pinned = resolveInteractiveDevice();
     if (!pinned) throw new Error(interactiveUnsetError());
@@ -264,10 +214,9 @@ export async function matchHost(name: string, opts: MatchHostOptions = {}): Prom
   return null;
 }
 
-/** Every host across all registered providers, merged by name so a device's
- * presence/dispatchable/address and an overlay's caps coexist on one row
- * (RUSH-1967: first-wins dedup used to drop the device row, and its status/caps
- * with it). Provider order still decides the base row (`local` first). */
+/** Every host across all providers, merged by name so a device's presence/dispatchable/address
+ * and an overlay's caps coexist on one row (RUSH-1967: first-wins dedup dropped the device
+ * row). Provider order still decides the base row (`local` first). */
 export async function listAllHosts(): Promise<Host[]> {
   const byName = new Map<string, Host>();
   for (const provider of getAllProviders()) {
@@ -277,14 +226,9 @@ export async function listAllHosts(): Promise<Host[]> {
         byName.set(host.name, host);
         continue;
       }
-      // Same name from a later provider (a device behind an enrolled overlay):
-      // `prev` is the local/overlay row (`local` registers first), `host` is the
-      // live device row. Keep the overlay's caps/source/addedAt as the base, but
-      // the DEVICE wins every field it owns — address, user, OS, presence and
-      // dispatchable — so this matches `deviceHost()`'s per-field precedence and
-      // an enrolled device can never serve a frozen address. Getting this
-      // backwards reintroduced the frozen route through `resolveHostByCap`,
-      // which hands a `listAllHosts()` row straight to dispatch.
+      // Same name from a later provider: `prev` is the overlay row, `host` the live device row.
+      // Keep the overlay's caps/source/addedAt but let the device win its own fields (address,
+      // user, OS, presence, dispatchable), else the frozen route returns via resolveHostByCap.
       byName.set(host.name, {
         ...prev,
         address: host.address ?? prev.address,
@@ -298,19 +242,9 @@ export async function listAllHosts(): Promise<Host[]> {
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/**
- * Resolve a `--device`/`--device` token for DISPATCH — the shape every offload
- * caller consumes (`run --device`, the generic passthrough, teams placement, the
- * cloud host provider, doctor, funnel, remote secrets). Grammar and merge come
- * from {@link matchHost}; on top, this layer applies the device-only dispatch
- * refusal so it holds even when an inline overlay shadows the device:
- *   - a password-auth device throws the typed {@link DeviceOffloadUnsupportedError}
- *     (offload rides `BatchMode=yes` ssh, which can't answer a prompt);
- *   - an addressless device has nothing to dial.
- *
- * A bare unknown name returns null so capability-tag routing (`resolveHostByCap`,
- * e.g. `--device gpu`) stays reachable, and an ad-hoc `user@host` still resolves.
- */
+/** Resolve a `--device` token for dispatch (run, passthrough, teams, cloud, doctor, funnel,
+ * remote secrets) via matchHost plus the device-only refusal: a password-auth device throws
+ * DeviceOffloadUnsupportedError; an addressless one has nothing to dial. */
 export async function resolveHost(name: string): Promise<Host | null> {
   const host = await matchHost(name);
   if (!host) return null;
@@ -325,10 +259,8 @@ export async function resolveHost(name: string): Promise<Host | null> {
   return host;
 }
 
-/**
- * Resolve a host by capability tag (e.g. `--device gpu`). Returns the single
- * matching host, or throws on 0 or >1 matches unless `any` is set (then first).
- */
+/** Resolve a host by capability tag (e.g. `--device gpu`): the single match, or throws on 0 or
+ * >1 unless `any` is set (then the first). */
 export async function resolveHostByCap(cap: string, any = false): Promise<Host> {
   // Non-dispatchable hosts (password-auth devices) are listed for honesty but
   // must never be picked as a run target.

@@ -1,19 +1,6 @@
-/**
- * Before/after microbench for the `agents view` usage core.
- *
- * Measures:
- *   1. Warm-cache path latency (should be near-zero network; cache hit).
- *   2. Peak concurrent live fetches under a simulated cold multi-account load
- *      (must never exceed USAGE_FETCH_CONCURRENCY).
- *   3. Overview meter width with and without maxWindows=2 (alignment regressor).
- *
- * Run from cli:
- *   bun bench/view-usage-perf.ts
- *   # or: npx tsx bench/view-usage-perf.ts
- *
- * This is a local diagnostic harness, not a CI gate. Quote the printed numbers
- * in the PR so reviewers can see the before/after without re-running.
- */
+/** Before/after microbench for the `agents view` usage core: warm-cache latency (near-zero
+ * network), peak concurrent live fetches under simulated cold multi-account load (must not exceed
+ * USAGE_FETCH_CONCURRENCY), and overview meter width with and without maxWindows=2. */
 import {
   USAGE_CACHE_FRESH_MS,
   USAGE_FETCH_CONCURRENCY,

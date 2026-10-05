@@ -1,14 +1,6 @@
-/**
- * Agent Client Protocol (ACP) client wrapper for agents-cli.
- *
- * Spawns an ACP-capable agent CLI as a stdio subprocess and drives it through
- * initialize -> newSession -> prompt, streaming `session/update` notifications
- * back to the caller as async iterables.
- *
- * Also implements the Client interface (fs read/write, terminal exec) so the
- * agent can request filesystem and shell operations through us. `--mode plan`
- * rejects all write/terminal requests; `edit`/`full` allow them.
- */
+/** ACP client wrapper: spawns an ACP-capable agent CLI over stdio, drives initialize -> newSession
+ * -> prompt, and streams `session/update` as async iterables. Also implements the Client interface
+ * (fs, terminal); `--mode plan` rejects write/terminal requests, `edit`/`full` allow them. */
 
 import { spawn, type ChildProcess } from 'child_process';
 import { Readable, Writable } from 'stream';
@@ -52,26 +44,17 @@ interface AcpRunResult {
   sessionId: string;
 }
 
-/**
- * Runs a single prompt turn against an ACP-capable agent and streams updates
- * to `onUpdate`. Resolves when the turn completes (StopReason is returned).
- */
+/** Runs a single prompt turn against an ACP-capable agent, streaming updates to `onUpdate`;
+ * resolves with the StopReason when the turn completes. */
 export async function runAcp(opts: AcpRunOptions): Promise<AcpRunResult> {
   if (!supportsAcp(opts.agent)) {
     throw new Error(`Agent '${opts.agent}' does not support ACP. Use direct exec instead.`);
   }
   const spec = getAcpSpec(opts.agent)!;
 
-  // Build the harness's exec env the SAME way `agents run` does, instead of
-  // handing it a raw process.env. buildExecEnv is what injects the per-account
-  // `CLAUDE_CODE_OAUTH_TOKEN` on a worker device (gated by device role: a
-  // headed/personal box still defers to its native login). Without this, an ACP
-  // launch inherited no setup-token and fell through to the version home's
-  // copied native `.credentials.json` — which expires in ~15h and 401s once its
-  // refresh chain dies, exactly the "logged out on a worker" report (PHNX-3681).
-  // A verified precedence test shows the env token wins over a present
-  // `.credentials.json`, so injecting here is sufficient — the stale file no
-  // longer decides the session.
+  // Build the exec env the same way `agents run` does: buildExecEnv injects the per-account
+  // CLAUDE_CODE_OAUTH_TOKEN on a worker (by device role). Without it an ACP launch fell through to
+  // the copied `.credentials.json`, which expires in ~15h and 401s (PHNX-3681).
   const child: ChildProcess = spawn(spec.command, spec.args, {
     cwd: opts.cwd,
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -144,10 +127,9 @@ function buildClient(opts: AcpRunOptions): Client {
     },
 
     async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
-      // `skip` (formerly `full`) and `auto` blanket-approve; in `auto` the
-      // upstream model has its own classifier so we just say "allow once" and
-      // let it decide. `edit` says allow_once. `plan` should never reach here
-      // (canWrite gates writes earlier), but if it does we cancel.
+      // `skip` (formerly `full`) and `auto` blanket-approve; in `auto` the upstream model
+      // classifies, so say "allow once". `edit` says allow_once. `plan` never reaches here
+      // (canWrite blocks writes earlier); if it does, cancel.
       const skipAll = mode === 'skip';
       const optionId = skipAll
         ? (params.options.find(o => o.kind === 'allow_always')?.optionId

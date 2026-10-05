@@ -1,10 +1,6 @@
-/**
- * Cloud dispatch commands for running agent tasks on remote infrastructure.
- *
- * Provides a unified CLI for dispatching, monitoring, and managing tasks
- * across multiple cloud providers (Rush Cloud, Codex Cloud, Factory/Droid).
- * All tasks are tracked locally in a SQLite database for cross-provider listing.
- */
+/** Cloud dispatch commands for running agent tasks on remote infrastructure: one CLI to dispatch,
+ * monitor and manage tasks across providers (Rush Cloud, Codex Cloud, Factory/Droid), all tracked
+ * in a local SQLite database. */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die, relTime, truncate, isJsonMode } from '../lib/format.js';
@@ -191,10 +187,9 @@ Examples:
       // (claude→rush, codex→codex, droid→factory, antigravity→antigravity).
       const provider = resolveProvider(explicitProvider, options.agent as string | undefined);
 
-      // --repo is repeatable: commander gives us an array via our collector.
-      // A single --repo value arrives as a one-element array; keep the legacy
-      // singular `repo` field in sync so providers that only know that field
-      // still dispatch correctly.
+      // --repo is repeatable: commander gives an array via our collector. A single value arrives
+      // as a one-element array; keep the legacy singular `repo` field in sync for providers that
+      // only know it.
       const repoValues = Array.isArray(options.repo)
         ? (options.repo as string[])
         : options.repo
@@ -222,11 +217,9 @@ Examples:
         dispatchOptions.providerOptions!.strategy = 'balanced';
       }
 
-      // --on <event>: register this run as an event trigger instead of
-      // dispatching now. We parse + validate the event, attach it to
-      // dispatchOptions.trigger, and persist a trigger-bound routine so the
-      // local webhook receiver can fire it (src/lib/triggers/webhook.ts).
-      // Remote firing of the trigger is a follow-up.
+      // --on <event>: register this run as an event trigger instead of dispatching now. Parse and
+      // validate the event, attach it to dispatchOptions.trigger, and persist a trigger-bound
+      // routine for the local webhook receiver. Remote firing is a follow-up.
       if (options.on) {
         const event = normalizeTriggerEvent(options.on as string);
         if (!event) {
@@ -531,10 +524,8 @@ Examples:
       }
     });
 
-  // ── agents cloud envs ─────────────────────────────────────────────────
-  // Discover the pre-provisioned targets a provider runs inside — Codex
-  // environments, Factory Droid Computers — so users don't copy opaque IDs
-  // out of a web UI.
+  // agents cloud envs: discover the pre-provisioned targets a provider runs inside (Codex
+  // environments, Factory Droid Computers) so users don't copy opaque IDs out of a web UI.
   cloud
     .command('envs')
     .alias('targets')

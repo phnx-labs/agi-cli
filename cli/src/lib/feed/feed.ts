@@ -1,26 +1,6 @@
-/**
- * Feed store -- structured block records published by agents waiting on user
- * input (AskUserQuestion). The outbound counterpart to the inbound mailbox:
- * the mailbox delivers messages TO agents; the feed surfaces decisions agents
- * need FROM the user.
- *
- * Layout: <feedDir>/<blockId>.json
- *   Each file is one open block -- a question the agent asked. One block per
- *   session: a new AskUserQuestion in the same session replaces the previous
- *   block (an agent can only ask one question at a time). Removed when the
- *   session advances past the block.
- *
- * A block carries enough identity (sessionId, mailboxId, host, runtime) for
- * `agents feed` to aggregate across hosts and for `agents message` to route
- * a reply back to the right agent.
- *
- * Answer lifecycle:
- *   - A block may be answered from any surface (feed, terminal, tmux, cloud).
- *   - The first answer wins: `recordAnswer` atomically checks an answered
- *     marker so exactly one surface can claim the block.
- *   - Answered blocks stay visible until the agent consumes the message and
- *     continues, so the UI can show delivered/consumed/continued receipts.
- */
+/** Feed store: blocks published by agents waiting on user input (outbound twin of the mailbox),
+ * one `<feedDir>/<blockId>.json` per session; a new question replaces the old. First answer from
+ * any surface wins (recordAnswer is atomic); answered blocks stay visible for receipts. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -41,11 +21,8 @@ export interface BlockQuestion {
   header?: string;
   options?: BlockOption[];
   multiSelect?: boolean;
-  /**
-   * Preceding report/explanation for a prose question — the context that came
-   * BEFORE the trailing ask, Markdown + newlines preserved (PHNX-3999). The
-   * operator UI renders it under the question; absent for a structured question.
-   */
+  /** Preceding report/explanation for a prose question, Markdown and newlines preserved
+   * (PHNX-3999); absent for a structured question. */
   context?: string;
 }
 
@@ -58,14 +35,9 @@ export interface MessageReceipt {
   at: string;
   /** Optional sender label for the message. */
   from?: string;
-  /**
-   * The ask this receipt is ABOUT — the block generation live when the answer
-   * was sent. A block id is per SESSION, so it is reused by every generation of
-   * that session's questions; without this a late acknowledgement for question N
-   * is indistinguishable from one for question N+1 and would resolve the wrong
-   * ask (PHNX-3999). Carried durably on the queued message so it survives the
-   * process that sent it.
-   */
+  /** The ask this receipt is about: the block generation live when the answer was sent. A block
+   * id is per session, so without this a late acknowledgement for question N would resolve
+   * question N+1 (PHNX-3999). Carried durably on the queued message. */
   generation?: string;
   /** The claim (attempt) this receipt is about — `AnswerRecord.answeredAt`. */
   attempt?: string;
@@ -77,20 +49,9 @@ export interface ReceiptOrigin {
   attempt: string;
 }
 
-/**
- * Whether a receipt describes THIS ask.
- *
- * Identity is the GENERATION alone, never the attempt. The question is "does
- * this receipt answer this ask?", and a second attempt on the same ask carries
- * the same answer -- so a stranded claim that is adopted (which necessarily
- * mints a new attempt) must still recognise the message its predecessor queued,
- * or it enqueues a duplicate. `attempt` rides along as provenance for the
- * delivery check, not as part of identity.
- *
- * An UNBOUND receipt (written before these fields existed) matches NOTHING: it
- * cannot name an ask, so attributing it to one would let a message queued for an
- * earlier question resolve whichever question is current (PHNX-3999).
- */
+/** Whether a receipt describes this ask. Identity is the generation alone, never the attempt: an
+ * adopted stranded claim mints a new attempt and must still recognize its predecessor's message
+ * or it enqueues a duplicate. An unbound (pre-field) receipt matches nothing (PHNX-3999). */
 export function receiptMatchesOrigin(receipt: MessageReceipt, origin: ReceiptOrigin): boolean {
   if (receipt.generation === undefined) return false;
   return receipt.generation === origin.generation;
@@ -109,33 +70,19 @@ export interface AnswerRecord {
   verified?: boolean;
 }
 
-/**
- * Where an attention record came from, strongest evidence first.
- *   hook      — a harness event (AskUserQuestion / permission / notification).
- *   declared  — the agent said it is stuck (`agents feed post --blocked`).
- *   lifecycle — a structural session signal (plan handoff / permission wait).
- *   heuristic — an inferred prose question that decays.
- *   system    — a synthetic card the feed computed (runaway / needy / PR review).
- */
+/** Where an attention record came from, strongest first: hook (harness event), declared (`feed
+ * post --blocked`), lifecycle (structural session signal), heuristic (decaying prose question),
+ * system (synthetic card). */
 export type AttentionSource = 'hook' | 'declared' | 'lifecycle' | 'heuristic' | 'system';
 
-/**
- * The lifecycle state of an attention record. A block is `open` until it is
- * answered from some surface, `answered` once a surface claimed it, `consumed`
- * once the agent read the reply, `continued` once the agent moved on, and
- * `resolved` for a terminal clear (the block file is being removed). This is the
- * axis the operator projection ranks on — only `open` needs a human.
- */
+/** Lifecycle state of an attention record: `open` until answered, then `answered`, `consumed`
+ * (agent read it), `continued` (agent moved on), or `resolved` (terminal clear). The operator
+ * projection ranks on this; only `open` needs a human. */
 export type AttentionState = 'open' | 'answered' | 'consumed' | 'continued' | 'resolved';
 
-/**
- * A cursor into the source that produced a block — the transcript's last write
- * (`lastActivityMs`) or a specific transcript `eventId`. It is what lets a
- * resolution tombstone say "this generation was resolved at THIS point" so a
- * stale lifecycle re-read cannot resurrect it while the session sits still, yet
- * a genuinely newer turn (a strictly later cursor) is allowed through as a new
- * generation. See {@link AttentionResolution} and `reconcileAttention`.
- */
+/** A cursor into the producing source (transcript last write or `eventId`). Lets a tombstone say
+ * "resolved at this point" so a stale re-read cannot resurrect it, while a strictly later
+ * cursor passes as a new generation. */
 export interface SourceCursor {
   lastActivityMs?: number;
   eventId?: string;
@@ -147,23 +94,17 @@ export interface OpenBlock {
   mailboxId: string;
   host: string;
   runtime: string;
-  /**
-   * Generation key for this block's CURRENT question. A new AskUserQuestion (or a
-   * new `--blocked` post) in the same session mints a new generation, so a
-   * resolution tombstone for the previous generation cannot suppress the fresh
-   * ask. Derived from `ts` when a writer did not stamp it — see {@link blockGeneration}.
-   */
+  /** Generation key for the block's current question. A new AskUserQuestion or `--blocked` post
+   * mints a new one, so the previous generation's tombstone cannot suppress it. Derived from
+   * `ts` when unstamped (blockGeneration). */
   generation?: string;
   /** How this block came to exist. Derived from {@link kind} when absent — see {@link blockSource}. */
   source?: AttentionSource;
   /** Lifecycle state. Derived from the answer/continue markers when absent — see {@link deriveBlockState}. */
   state?: AttentionState;
-  /**
-   * Where in the source this block's generation sits — stamped at write time
-   * (`buildDeclaredBlock`, the feed-publish hook) and carried onto its resolution
-   * tombstone. Without a write-time cursor a new generation is suppressed whenever
-   * `session.lastActivityMs` is unresolvable (cloud / remote / index-lag).
-   */
+  /** Where in the source this generation sits, stamped at write time and carried onto its
+   * tombstone. Without it a new generation is suppressed whenever `session.lastActivityMs` is
+   * unresolvable (cloud, remote, index lag). */
   sourceCursor?: SourceCursor;
   /** Indexed launch origin, added at read time when the live session is known. */
   origin?: 'cli' | 'routine';
@@ -173,23 +114,9 @@ export interface OpenBlock {
   project?: string;
   ts: string;
   questions: BlockQuestion[];
-  /**
-   * How this block came to exist.
-   *   question     — an AskUserQuestion the harness surfaced
-   *   notification — a prompt the harness raised; `notificationType` names
-   *                  which (`permission_prompt`, `elicitation_dialog`). An
-   *                  `idle_prompt` is not published — it says the turn ended,
-   *                  not that anything is pending (PHNX-3999); a block of that
-   *                  type left on disk by an older hook is not a request either.
-   *   control      — a synthetic card the feed itself computed (runaway, needy)
-   *   declared     — the AGENT decided it is stuck and said so (`feed post --blocked`)
-   *
-   * `declared` is the only kind that does not depend on the harness noticing
-   * anything. Every other kind is inferred from a harness event, and hook events
-   * are not portable across harnesses (only Claude fires Notification, only Codex
-   * fires PermissionRequest), so a declared block is the one signal every agent
-   * can raise — it is just a shell command.
-   */
+  /** How a block came to exist: question (AskUserQuestion), notification (`notificationType`;
+   * `idle_prompt` is never published, PHNX-3999), control (synthetic feed card), or declared
+   * (the agent says it is stuck via `feed post --blocked`). */
   kind?: 'question' | 'notification' | 'control' | 'declared';
   notificationType?: string;
   ticket?: string;
@@ -256,14 +183,9 @@ export interface FeedAskStats {
   recentAskTimestamps: string[];
 }
 
-/**
- * Why an attention generation stopped needing a human — a resolution tombstone.
- *   answered        — a surface recorded an answer.
- *   continued       — the agent consumed the answer and moved on.
- *   tool_completed  — the tool an approval gated finished (permission cleared).
- *   expired         — a decaying heuristic ask aged out.
- *   session_advanced— the transcript moved past the block (Stop/PostToolUse clear).
- */
+/** Why an attention generation stopped needing a human: answered, continued (agent moved on),
+ * tool_completed (approval cleared), expired (heuristic aged out), or session_advanced
+ * (transcript moved past it). */
 export type ResolutionReason =
   | 'answered'
   | 'continued'
@@ -271,14 +193,9 @@ export type ResolutionReason =
   | 'expired'
   | 'session_advanced';
 
-/**
- * A resolution tombstone. It is recorded BEFORE the open-block view is cleared so
- * a resolved generation can never silently resurrect from a stale lifecycle
- * re-read (the RUSH-1522 stale-flag class): the reconciler suppresses a
- * lifecycle candidate whose generation the tombstone already covers, until the
- * session advances strictly past `sourceCursor`. One tombstone per block id,
- * latest-wins — the block id is stable per session, so this never grows unbounded.
- */
+/** A resolution tombstone, recorded before the open-block view is cleared so a resolved
+ * generation cannot resurrect from a stale lifecycle re-read (RUSH-1522) until the session
+ * advances past `sourceCursor`. One per block id, latest wins, so it never grows unbounded. */
 export interface AttentionResolution {
   blockId: string;
   /** The generation this tombstone resolved — matched against a fresh candidate's generation. */
@@ -292,23 +209,15 @@ export interface AttentionResolution {
 
 function resolutionDir(root: string): string { return path.join(root, 'resolutions'); }
 
-/**
- * Canonical generation for a block. A writer that stamped `generation` wins;
- * otherwise the publish timestamp `ts` is the generation, because the feed
- * rewrites `ts` only when a NEW question replaces the old one (an answer/continue
- * update to the same block keeps `ts`). So `ts` changes exactly when the ask
- * changes — which is what a generation must track.
- */
+/** Canonical generation for a block: the stamped `generation`, else the publish `ts`, which the
+ * feed rewrites only when a new question replaces the old, so it changes exactly when the ask
+ * does. */
 export function blockGeneration(block: OpenBlock): string {
   return block.generation ?? block.ts;
 }
 
-/**
- * Canonical source for a block. A writer that stamped `source` wins; otherwise it
- * is derived from `kind`: a declared block is `declared`, a synthetic control card
- * is `system`, everything else (question / notification, written by a harness hook)
- * is `hook`.
- */
+/** Canonical source for a block: the stamped `source`, else derived from `kind` (declared,
+ * system, or hook). */
 export function blockSource(block: OpenBlock): AttentionSource {
   if (block.source) return block.source;
   switch (block.kind) {
@@ -318,13 +227,9 @@ export function blockSource(block: OpenBlock): AttentionSource {
   }
 }
 
-/**
- * Canonical lifecycle state for a block. A writer that stamped `state` wins;
- * otherwise it is derived from the markers already on the block: `continuedAt`
- * means `continued`, a recorded `answer` means `answered`, and anything else is
- * still `open`. This is the ONE place that turns the historical marker fields into
- * the lifecycle axis, so no consumer re-derives it and drifts.
- */
+/** Canonical lifecycle state: the stamped `state`, else derived from `continuedAt` (continued),
+ * a recorded `answer` (answered), or open. The one place that maps the historical marker
+ * fields, so no consumer re-derives it. */
 export function deriveBlockState(block: OpenBlock): AttentionState {
   if (block.state) return block.state;
   if (block.continuedAt) return 'continued';
@@ -332,11 +237,8 @@ export function deriveBlockState(block: OpenBlock): AttentionState {
   return 'open';
 }
 
-/**
- * Record a resolution tombstone (latest-wins per block id). Called from the
- * answer / continue / clear paths BEFORE the open-block view is removed, so the
- * reconciler always has the tombstone by the time the block file is gone.
- */
+/** Records a resolution tombstone (latest wins per block id), called from answer/continue/clear
+ * paths before the block view is removed. */
 export function recordResolution(resolution: AttentionResolution, root?: string): void {
   const dir = resolutionDir(root ?? getFeedDir());
   ensureDir(dir);
@@ -348,10 +250,8 @@ export function readResolution(blockId: string, root?: string): AttentionResolut
   return safeReadJson<AttentionResolution>(path.join(resolutionDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
-/**
- * Stable block id for a session. One block per session -- a new question
- * replaces the previous one (the agent can only ask one question at a time).
- */
+/** Stable block id for a session: one block per session, since an agent asks one question at a
+ * time. */
 export function blockIdForSession(sessionId: string): string {
   const safeSessionId = sessionId.replace(/[^A-Za-z0-9._-]/g, '-');
   return `block-${safeSessionId}`;
@@ -392,15 +292,9 @@ type RecordAnswerResult =
   | { ok: false; existing: AnswerRecord }
   | { ok: false; unauthorized: true; reason: string };
 
-/**
- * Atomically claim the first answer for a block. Returns `{ ok: true }` when
- * this call is the first to answer; returns `{ ok: false, existing }` when a
- * different surface already answered the block. The marker file is created
- * with `O_EXCL` so two concurrent claimers cannot both succeed.
- *
- * High-consequence blocks require a verified operator identity. Unverified
- * answers (no operatorId or not in the registry/allowed list) are refused.
- */
+/** Atomically claims the first answer for a block: `{ ok: true }` for the first, `{ ok: false,
+ * existing }` otherwise. The marker is created with `O_EXCL`. High-consequence blocks require a
+ * verified operator identity; unverified answers are refused. */
 export function recordAnswer(
   blockId: string,
   answer: { answeredBy?: string; answeredFrom: string; operatorId?: string; verified?: boolean },
@@ -466,21 +360,9 @@ export function recordAnswer(
     throw err;
   }
 
-  // Marker created successfully -- mirror the answer into the block file.
-  //
-  // A `pending` claim stops there: the claim is recorded so no second surface
-  // can take it, but the generation is NOT resolved and the lifecycle stays
-  // `open`, so the card remains in the operator's feed until a rail reports a
-  // real receipt (`confirmAnswerResolution`). A claim is not a delivery, and a
-  // claim whose delivery is never confirmed must not silently remove the item
-  // (PHNX-3999). `state` wins over `answer` in `deriveBlockState`, so the
-  // explicit `open` is what keeps the claimed block visible.
-  //
-  // The default one-phase path advances straight to `answered` for surfaces
-  // that resolve atomically (a policy default, a synchronous enqueue). The
-  // resolution tombstone is written first, so if a stale lifecycle re-read races
-  // the block-file update the reconciler already refuses to resurrect this
-  // generation.
+  // Marker created: mirror the answer into the block file. A `pending` claim stops there, leaving
+  // the generation unresolved and state `open`, so the card stays until a rail reports a real
+  // receipt (`confirmAnswerResolution`, PHNX-3999); `state` beats `answer` in deriveBlockState.
   if (block) {
     if (!options.pending) {
       recordResolution({
@@ -498,15 +380,9 @@ export function recordAnswer(
   return { ok: true };
 }
 
-/**
- * Promote a pending claim to a resolved answer — the second half of the
- * two-phase answer protocol (see `recordAnswer`'s `pending` option).
- *
- * Called only once a rail has reported a real {@link MessageReceipt}: that is
- * the point the item stops needing a human, so that is the point the tombstone
- * is written and the card may leave the feed. An unconfirmed delivery never
- * reaches here, so its card stays up.
- */
+/** Promotes a pending claim to a resolved answer (second half of the two-phase protocol). Called
+ * only once a rail reports a real MessageReceipt, which is when the tombstone is written and
+ * the card may leave; an unconfirmed delivery never reaches here. */
 export function confirmAnswerResolution(
   blockId: string,
   root?: string,
@@ -516,14 +392,9 @@ export function confirmAnswerResolution(
   const block = readBlock(blockId, dir);
   const record = getAnswerRecord(blockId, dir);
   if (!block || !record) return false;
-  // One block id serves every generation of a session's asks, so a slow
-  // delivery for the PREVIOUS question must not resolve the one the agent has
-  // moved on to. A caller that knows which ask and which attempt it is
-  // confirming says so, and a mismatch is a no-op rather than a wrong tombstone.
-  // Bound to the ASK. The attempt is deliberately NOT compared: adopting a
-  // stranded claim mints a new attempt for the same question, and that adoption
-  // must still be able to resolve the ask it completed. The generation is what
-  // distinguishes one question from the next, which is the actual hazard.
+  // One block id serves every generation, so a slow delivery for the previous question must not
+  // resolve the current one: a caller naming the ask gets a no-op on mismatch. Bound to the
+  // generation, not the attempt, since adopting a stranded claim mints a new attempt.
   if (expected && blockGeneration(block) !== expected.generation) return false;
   recordResolution({
     blockId,
@@ -543,12 +414,9 @@ export function getAnswerRecord(blockId: string, root?: string): AnswerRecord | 
   return safeReadJson<AnswerRecord>(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
-/**
- * Release one specific answer claim after its reply rail failed. The compare on
- * `answeredAt` makes this a conditional rollback: it can never erase a newer
- * claimant. The caller supplies the exact pre-claim block/resolution snapshots,
- * restoring the attention lifecycle to the state another surface observed.
- */
+/** Releases one answer claim after its reply rail failed. The compare on `answeredAt` makes it a
+ * conditional rollback that never erases a newer claimant; the caller supplies the pre-claim
+ * block/resolution snapshots to restore. */
 export function rollbackAnswerClaim(
   blockId: string,
   answeredAt: string,
@@ -561,12 +429,9 @@ export function rollbackAnswerClaim(
   const current = safeReadJson<AnswerRecord>(marker);
   if (!current || current.answeredAt !== answeredAt) return false;
 
-  // Read-compare-then-unlink is NOT atomic, and two callers releasing the SAME
-  // claim is a real interleaving: both pass the compare, the first unlinks and
-  // re-claims, then the second unlinks the FIRST'S fresh marker and both end up
-  // holding a claim. The release is therefore gated on an O_EXCL token keyed by
-  // the exact claim being released -- the same primitive `recordAnswer` uses, so
-  // exactly one caller can ever release a given `answeredAt` (PHNX-3999).
+  // Read-compare-unlink is not atomic: two callers releasing the same claim can both pass the
+  // compare, then the second unlinks the first's fresh marker and both hold a claim. So release
+  // is gated on an O_EXCL token per exact claim, as recordAnswer does (PHNX-3999).
   const release = path.join(answeredDir(dir), `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
   if (!acquireReleaseToken(release)) return false;
   const dropToken = (): void => {
@@ -600,22 +465,13 @@ export function rollbackAnswerClaim(
   return true;
 }
 
-/**
- * How long a release token may sit before it is treated as abandoned. A release
- * is a handful of synchronous file operations, so anything this old belongs to a
- * process that died holding it.
- */
+/** How long a release token may sit before it is treated as abandoned; a release is a few
+ * synchronous file operations, so older belongs to a dead process. */
 export const RELEASE_TOKEN_STALE_MS = 60_000;
 
-/**
- * Take the O_EXCL token that serialises releasing one specific claim.
- *
- * The token MUST be recoverable: a process killed between creating it and
- * finishing would otherwise wedge that claim forever, and "the answer can never
- * be released again" is a worse failure than the race the token prevents. So the
- * token records its owner and its age, and a token whose owner is provably gone
- * (same host, no such pid) or which is simply stale is reclaimed once.
- */
+/** Takes the O_EXCL token serialising release of one claim. It must be recoverable, or a process
+ * killed mid-release wedges the claim forever. The token records owner and age; one whose owner
+ * is provably gone (same host, no such pid) or which is stale is reclaimed once. */
 function acquireReleaseToken(release: string): boolean {
   const mine = { pid: process.pid, host: os.hostname(), at: Date.now() };
   const create = (): boolean => {
@@ -659,12 +515,9 @@ const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
   expired: 3,
 };
 
-/**
- * Record a delivery-receipt transition for a message tied to a block.
- * Updates the receipts list in the block file. Status is monotonic
- * (queued → consumed → continued): a late `queued` write cannot overwrite
- * an already-recorded `consumed`/`continued` (race with mailbox drain).
- */
+/** Records a delivery-receipt transition for a block's message. Status is monotonic (queued,
+ * consumed, continued), so a late `queued` cannot overwrite `consumed`/`continued` (race with
+ * mailbox drain). */
 export function recordMessageReceipt(
   blockId: string,
   receipt: MessageReceipt,
@@ -687,21 +540,9 @@ export function recordMessageReceipt(
   block.receipts = receipts;
   publishBlock(block, dir);
 
-  // The AGENT's own acknowledgement is what resolves a pending claim: `queued`
-  // only says a rail took the answer, so it must never remove the card
-  // (PHNX-3999).
-  //
-  // The promotion is bound to the RECEIPT's own origin, not to whatever the
-  // block happens to hold now. Checking `block.answer` alone was not enough: if
-  // the agent moved to question N+1 AND that ask was itself claimed, a late
-  // acknowledgement for question N found a live claim and resolved the wrong
-  // question. `confirmAnswerResolution`'s own compare is what rejects it.
-  //
-  // An UNBOUND receipt never resolves. It cannot say which ask it acknowledges,
-  // so promoting it against whatever claim happens to be live would resolve the
-  // wrong question -- the exact failure this binding exists to prevent. Its
-  // delivery evidence is still recorded above; the card then clears through the
-  // ordinary session-advance path instead.
+  // Only the agent's own acknowledgement resolves a pending claim; `queued` must never remove the
+  // card (PHNX-3999). Promotion is bound to the receipt's own origin, since checking `block.answer`
+  // alone let a late ack for question N resolve a claimed question N+1.
   if ((receipt.status === 'consumed' || receipt.status === 'continued')
     && receipt.generation !== undefined && block.answer) {
     confirmAnswerResolution(blockId, dir, {
@@ -715,21 +556,16 @@ export function getBlockReceipts(blockId: string, root?: string): MessageReceipt
   return readBlock(blockId, root)?.receipts ?? [];
 }
 
-/**
- * The furthest-along receipt recorded for a block, or undefined when no rail
- * ever reported one. This is the ONLY truthful evidence that an answer reached
- * a delivery rail: an answer marker alone proves a claim was taken, not that
- * anything was delivered, so a caller reporting on a block it did not deliver
- * must read this rather than synthesize a receipt (PHNX-3999).
- */
+/** The furthest-along receipt for a block, or undefined. The only truthful evidence an answer
+ * reached a rail: an answer marker proves only a claim, so callers reporting on a block they
+ * did not deliver must read this, not synthesize a receipt (PHNX-3999). */
 export function latestMessageReceipt(
   blockId: string, root?: string, origin?: ReceiptOrigin,
 ): MessageReceipt | undefined {
   const all = getBlockReceipts(blockId, root);
-  // A block id is per SESSION, so its receipt list accumulates across every
-  // generation of that session's asks. Reading it unfiltered lets question N's
-  // receipt answer for question N+1 -- so a caller that knows which ask it is
-  // asking about passes the origin and sees only that ask's evidence.
+  // A block id is per session, so its receipts accumulate across generations; a caller that knows
+  // which ask passes the origin and sees only that ask's evidence, so question N's receipt cannot
+  // answer for N+1.
   const receipts = origin ? all.filter((receipt) => receiptMatchesOrigin(receipt, origin)) : all;
   let best: MessageReceipt | undefined;
   for (const receipt of receipts) {
@@ -818,23 +654,9 @@ interface DeclareBlockInput {
   ts?: string;
 }
 
-/**
- * Build the block record for `agents feed post --blocked` — pure, so the shape is testable
- * without touching the store or the broadcast layer.
- *
- * Class is derived, not asked for: a `--default` means the user could be absent
- * and policy could still resolve it (approval); no default means only a human can
- * choose (decision). `feed-policy.ts` reads exactly that distinction, so deriving
- * it here keeps one rule in one place instead of letting a caller set a class that
- * contradicts its own safeDefault.
- *
- * `costOfDelay: high` because a declared block is, by definition, an agent that
- * has already stopped making progress — that is what makes it worth interrupting
- * someone over, and what `feed --dispatch`'s urgency filter keys off.
- *
- * `sourceCursor` is stamped from `ts` at write time so a fresh generation is
- * comparable even when the live session's `lastActivityMs` is unresolvable.
- */
+/** Builds the block record for `agents feed post --blocked`, pure so the shape is testable.
+ * Class is derived: a `--default` means policy can resolve it (approval), none means only a
+ * human can (decision), as `feed-policy.ts` reads. */
 export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInput): OpenBlock {
   const text = input.text.trim().replace(/\s+/g, ' ');
   if (!text) {
@@ -933,12 +755,9 @@ export function listAskStats(root?: string): FeedAskStats[] {
 /** Remove a block record and its lifecycle sidecars. Returns true if the file was deleted. */
 export function removeBlock(blockId: string, root?: string): boolean {
   const dir = root ?? getFeedDir();
-  // Record a resolution tombstone BEFORE the block file and answered marker are
-  // gone, so a stale lifecycle re-read of the same session cannot resurrect this
-  // cleared generation. The reason names how it closed: an answered marker means
-  // the operator answered, `continuedAt` means the agent moved on, otherwise the
-  // transcript advanced past it (a Stop/PostToolUse clear). The tombstone itself
-  // is deliberately NOT cleared — it must outlive the block to do its job.
+  // Record a resolution tombstone before the block file and answered marker go, so a stale
+  // lifecycle re-read cannot resurrect the cleared generation. Reason: answered marker,
+  // `continuedAt` (agent moved on), else transcript advanced. Tombstone must outlive the block.
   const block = readBlock(blockId, dir);
   if (block) {
     const reason: ResolutionReason = isBlockAnswered(blockId, dir)
@@ -965,11 +784,8 @@ export function removeBlock(blockId: string, root?: string): boolean {
 // Hook installation
 // ---------------------------------------------------------------------------
 
-/**
- * The feed-publish PreToolUse hook script (Python, mirroring 09-mailbox-inject.py).
- * Embedded so it ships with the compiled CLI and can be installed to the
- * CLI-writable user hooks dir without a separate file in the npm tarball.
- */
+/** The feed-publish PreToolUse hook script (Python), embedded so it ships with the compiled CLI
+ * and installs to the user hooks dir. */
 export const FEED_PUBLISH_HOOK_SCRIPT = `#!/usr/bin/env python3
 """Publish and clear open-block records for \`agents feed\`.
 
@@ -1373,12 +1189,9 @@ if __name__ == "__main__":
         pass  # fail open
 `;
 
-/**
- * Install the feed-publish hook script into the user hooks dir and add its
- * manifest entry to the user agents.yaml. The system repo is an auto-pulled,
- * read-only mirror, so runtime-managed hooks must never write there.
- * Idempotent -- skips if the script is already present and up to date.
- */
+/** Installs the feed-publish hook script into the user hooks dir and its manifest entry into the
+ * user agents.yaml; the system repo is a read-only mirror, so runtime hooks never write there.
+ * Idempotent. */
 export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()): { installed: boolean; error?: string } {
   try {
     const hooksDir = path.join(userAgentsDir, 'hooks');
@@ -1433,15 +1246,9 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
         script: '10-feed-publish.py',
         timeout: 5,
       },
-      // Matcher-less PostToolUse clear: after Codex runs an approved tool, the
-      // approval card is stale, so clear it. Codex-only on purpose -- Claude
-      // never fires PermissionRequest, so it has no approval card to clear here,
-      // and a matcher-less PostToolUse for Claude would (1) re-run the script on
-      // every tool completion and (2) wipe Claude's notification-kind blocks
-      // (permission_prompt/elicitation_dialog) the moment any later
-      // tool runs, instead of letting them persist to Stop/SessionEnd like they
-      // did before RUSH-2039. Registering it for codex alone keeps Claude's
-      // card lifetime exactly as it was.
+      // Matcher-less PostToolUse clear for Codex only: after an approved tool runs, its approval
+      // card is stale. Claude fires no PermissionRequest, and a matcher-less PostToolUse for it
+      // would run on every tool and wipe its notification-kind blocks early (RUSH-2039).
       'feed-clear-permission': {
         agents: ['codex'],
         events: ['PostToolUse'],
@@ -1463,15 +1270,9 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
     }
     if (installed) {
       const tmpYaml = `${agentsYamlPath}.${process.pid}.tmp`;
-      // `flowCollectionPadding: false` matches the committed formatting. The yaml
-      // emitter defaults to padded flow sequences (`[ a, b ]`), but the tracked
-      // `agents.yaml` uses `[a, b]`. Re-emitting a committed flow node (e.g. a
-      // notify hook's `command: [agents, notify, "{message}"]`) with padding left
-      // the git-backed `~/.agents` tree permanently dirty on this file, so
-      // `agents repo pull` refused and seven boxes silently fell 37-52 commits
-      // behind fleet-wide (RUSH-2505). Preserve each node's committed block/flow
-      // style — do NOT force `collectionStyle`, which would flatten a committed
-      // flow hook to a block list and reintroduce a diff.
+      // `flowCollectionPadding: false` matches the committed `[a, b]`; padded re-emits left the
+      // git-backed ~/.agents dirty; `agents repo pull` refused fleet-wide (RUSH-2505). Keep each
+      // node's committed style; do NOT force `collectionStyle`.
       fs.writeFileSync(tmpYaml, stringifyDoc(yamlDoc));
       fs.renameSync(tmpYaml, agentsYamlPath);
     }

@@ -57,10 +57,9 @@ for i, line in enumerate(text.splitlines(), 1):
         print(f"LEAK {MD}:{i}: {line.strip()[:90]}")
         fail = 1
 
-# --- Prose numbers ------------------------------------------------------
-# Drift landed in sentences twice after the figures were already generated, so
-# the recognizer has to read prose too. Each entry is a claim the page makes in
-# words and the snapshot value it must equal.
+# Prose numbers: drift landed in sentences twice after the figures were generated, so the
+# recognizer reads prose too. Each entry is a claim the page makes in words and the snapshot value
+# it must equal.
 PRE = sum(v["fires"] for k, v in SNAP["guards"].items() if k != "verify-work-complete")
 STOP = SNAP["guards"]["verify-work-complete"]
 CLAIMS = [

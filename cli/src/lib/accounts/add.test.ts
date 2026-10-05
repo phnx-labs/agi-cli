@@ -362,10 +362,9 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
   });
 
   describe('worker credential minting (real reserved store, isolated backend)', () => {
-    // Each case gets its own SECRETS_HOME (real standalone). Reserved `__<harness>__`
-    // stores are raw file items, read back via readReservedCredential — the same
-    // path the worker slot uses — since the standalone rejects a `__`-wrapped bundle
-    // name. The legacy `auth` bundle is a plain name read through the client.
+    // Each case gets its own SECRETS_HOME. Reserved `__<harness>__` stores are raw file items read
+    // via readReservedCredential, as the worker slot does, since the standalone rejects
+    // `__`-wrapped bundle names.
     useFreshSecretsHome();
 
     it('claude: mints the setup-token into __claude__ keyed by account id (+ legacy auth key) and records workerCredential', async () => {

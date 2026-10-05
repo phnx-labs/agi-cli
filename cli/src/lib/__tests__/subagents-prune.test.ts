@@ -1,12 +1,6 @@
-/**
- * Tests for subagent soft-delete (prune) logic:
- *   - removeSubagentFromVersion: moves orphan subagents to trash (Claude + OpenClaw)
- *   - diffVersionSubagents: detects orphan subagent names against discovered set
- *   - listSubagentsForAgent: discovers installed subagents in both formats
- *
- * No mocking — all operations use real temp directories on the actual filesystem.
- * Tests that touch real agent version dirs (getVersionsDir) always clean up in finally.
- */
+/** Tests for subagent soft-delete (prune): removeSubagentFromVersion trashes orphans (Claude +
+ * OpenClaw), diffVersionSubagents detects orphans against the discovered set, listSubagentsForAgent
+ * finds both formats. No mocking: real temp dirs, cleaned up in finally. */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';

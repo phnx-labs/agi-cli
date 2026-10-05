@@ -1,9 +1,6 @@
-/**
- * Pure-logic tests for the AGI Menu UserDefaults → config migration (PHNX-3999).
- * The `defaults` exec and the sentinel are the thin macOS-only shell; the import
- * DECISION (which keys, never overriding a set value) and the type coercion are
- * the parts that must be right, and they are pure.
- */
+/** Pure-logic tests for the AGI Menu UserDefaults to config migration (PHNX-3999): the import
+ * decision (which keys, never overriding a set value) and type coercion are pure; the `defaults`
+ * exec and sentinel are the thin macOS shell. */
 
 import { describe, expect, it } from 'vitest';
 import { planMenubarPrefMigration, coerceMenubarPrefValue } from './migrate-prefs.js';

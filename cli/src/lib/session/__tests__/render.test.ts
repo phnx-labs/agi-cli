@@ -848,10 +848,9 @@ describe('renderSummary', () => {
     expect(out).not.toContain('/project/src/lib/render.ts');
   });
 
-  // ── Recent Activity & section ordering ──────────────────────────────────────
-  // These cover the lineage fix: temporally-near events appear in a chronological
-  // tail at the top, and Errors live above Modified/Read/Commands rather than at
-  // the bottom (where they used to look misleadingly recent).
+  // Recent Activity and section ordering: temporally-near events appear in a chronological tail at
+  // the top, and Errors sit above Modified/Read/Commands instead of looking misleadingly recent at
+  // the bottom.
 
   it('renders Recent Activity as the first content section', () => {
     const events: SessionEvent[] = [

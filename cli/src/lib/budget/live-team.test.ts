@@ -1,18 +1,6 @@
-/**
- * Tests for the teams live budget kill-switch (issue #399).
- *
- * Verifies the two contracts the supervisor relies on:
- *  1. `createTeamBudgetWatcher.poll()` reads new bytes from every running
- *     teammate's stdout.log, feeds real stream-json usage events into a
- *     shared `makeLiveSpendWatcher`, and calls `onBreach` when a cap is
- *     crossed by aggregated cross-teammate spend.
- *  2. `runSupervisor` — when given the watcher — stops the team via
- *     `AgentManager.stopByTask` on breach and returns `stoppedBy: 'budget'`.
- *
- * No mocking of the code under test: the watcher operates on a real
- * AgentManager backed by a temp dir, a real stdout.log with real Claude
- * stream-json shape, and the real pricing table (claude-opus-4 at $5/Mtok in).
- */
+/** Tests for the teams live budget kill-switch (issue #399): `createTeamBudgetWatcher.poll()` reads
+ * each running teammate's stdout.log, feeds real stream-json usage into a shared watcher and calls
+ * `onBreach` on aggregate overspend; `runSupervisor` then stops the team. No mocks. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -39,12 +27,9 @@ let mgr: InstanceType<typeof AgentManager>;
 /** Every child we spawn — cleaned up in afterEach so a failed test can't leak processes. */
 let spawnedChildren: ChildProcess[] = [];
 
-/**
- * One Claude stream-json assistant turn that costs exactly $5 on
- * claude-opus-4 (1M input tokens @ $5/Mtok). This is the same fixture shape
- * the LOCAL exec.ts watcher reads off a headless run's stdout, so tapping
- * teammate stdout.logs with this must behave identically.
- */
+/** One Claude stream-json assistant turn costing exactly $5 on claude-opus-4 (1M input tokens at
+ * $5/Mtok), the same fixture shape the local exec.ts watcher reads, so tapping teammate stdout.logs
+ * must behave the same. */
 function claudeAssistantTurnJson(): string {
   return JSON.stringify({
     type: 'assistant',
@@ -71,13 +56,9 @@ afterEach(() => {
   fs.rmSync(projectDir, { recursive: true, force: true });
 });
 
-/**
- * Plant a RUNNING teammate backed by a real, killable `sleep` process, so
- * `AgentProcess.isProcessAlive()` sees a live PID with a real matching
- * startTime and does NOT prematurely flip the teammate to COMPLETED via
- * `updateStatusFromProcess()`. When the supervisor's breach path calls
- * `stopByTask`, the SIGTERM/SIGKILL lands on our sleep and cleans up.
- */
+/** Plant a running teammate backed by a real killable `sleep`, so `isProcessAlive()` sees a live
+ * PID with a matching startTime and doesn't flip it to COMPLETED early. The breach path's
+ * `stopByTask` signals this sleep. */
 async function plantRunningTeammate(
   taskName: string,
   agentType: AgentType,

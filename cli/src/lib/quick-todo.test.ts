@@ -14,10 +14,9 @@ import {
 } from './quick-todo.js';
 import type { ProjectDef } from './projects.js';
 
-// Recorded from real `linear` runs on 2026-10-04 (PHNX-4234 created, marked Done,
-// reopened, Done again; PHNX-4235 created and canceled by undo).
-// tasks-assigned-open.json keeps the recorded PHNX-4234 list row and two rows
-// derived from it (no marker / no due date, and overdue), so no other issue leaks in.
+// Recorded from real `linear` runs on 2026-10-04 (PHNX-4234 created, Done, reopened, Done;
+// PHNX-4235 created and canceled by undo). tasks-assigned-open.json keeps the recorded PHNX-4234
+// row plus two derived rows (no marker/due date, and overdue), so no other issue leaks in.
 const testdata = (name: string) => fs.readFileSync(path.join(__dirname, 'testdata', 'quick-todo', name), 'utf-8');
 
 /** A linear runner answering from recorded output keyed by argv; records what was asked. */

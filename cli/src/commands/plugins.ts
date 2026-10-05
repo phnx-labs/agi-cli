@@ -1,10 +1,5 @@
-/**
- * Plugin management commands.
- *
- * Registers the `agents plugins` command tree for listing, viewing,
- * syncing, and removing plugin bundles (skills + hooks + permissions)
- * stored in ~/.agents/plugins/.
- */
+/** `agents plugins`: list, view, sync and remove plugin bundles (skills + hooks + permissions)
+ * stored in `~/.agents/plugins/`. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -642,10 +637,9 @@ Examples:
         // Reload the plugin so the re-sync reads the freshly-applied revision.
         const updated = getPlugin(plugin.name) ?? plugin;
 
-        // Re-sync to all supported installed versions. When the applied revision
-        // carries executable surfaces, only enable them if the user consented on
-        // this update (--allow-exec-surfaces); otherwise the benign content syncs
-        // but stays disabled, matching the install-time trust gate.
+        // Re-sync to all supported installed versions. Executable surfaces are enabled only if the
+        // user consented on this update (`--allow-exec-surfaces`); otherwise benign content syncs
+        // but stays disabled, matching the install-time trust check.
         for (const agentId of capableAgents('plugins')) {
           if (!pluginSupportsAgent(updated, agentId)) continue;
           const versions = listInstalledVersions(agentId);
@@ -665,10 +659,8 @@ Examples:
     });
 }
 
-/**
- * Prompt for missing or empty userConfig fields interactively.
- * Only prompts for fields not already present in existingConfig.
- */
+/** Prompt for missing or empty userConfig fields interactively, only for fields absent from
+ * existingConfig. */
 async function promptUserConfig(
   manifest: PluginManifest,
   existingConfig: Record<string, string> = {}
@@ -713,11 +705,9 @@ interface MarketplaceRow {
   enabled: number;
 }
 
-/**
- * Build one row per discovered marketplace. `plugins` counts plugin manifests
- * under the marketplace's source pluginsRoot; `enabled` counts entries in the
- * default Claude version's settings.json#enabledPlugins keyed on @<marketplace>.
- */
+/** Build one row per discovered marketplace: `plugins` counts manifests under the source
+ * pluginsRoot; `enabled` counts entries in the default Claude version's
+ * settings.json#enabledPlugins keyed on @<marketplace>. */
 export function collectMarketplaceRows(): MarketplaceRow[] {
   const marketplaces = discoverMarketplaces();
   const rows: MarketplaceRow[] = [];

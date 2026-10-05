@@ -1,10 +1,6 @@
-/**
- * The watchdog agent decider — one call per tick over the whole idle set.
- *
- * The injectable `run` seam stands in for the `agents run --mode plan` subprocess,
- * so these assert the batching + parsing + safe-skip-on-failure contract without
- * shelling out.
- */
+/** The watchdog agent decider, one call per tick over the whole idle set. The injectable `run` seam
+ * replaces the `agents run --mode plan` subprocess, so tests assert batching, parsing and
+ * safe-skip-on-failure. */
 import { describe, it, expect } from 'vitest';
 import { makeWatchdogAgentDecider } from './watchdog-agent.js';
 import type { WatchdogCandidate } from './watchdog.js';

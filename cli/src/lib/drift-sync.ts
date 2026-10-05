@@ -1,22 +1,6 @@
-/**
- * Interactive drift-sync flow — the single "we detected drift, want to fix it?"
- * action, shared by `agents sync status`, `agents doctor`, and the menu-bar "NEEDS
- * SYNC" row.
- *
- * It composes existing pieces, re-implementing nothing:
- *   - computeSyncStatus()          — the unified detection engine (sync-status.ts)
- *   - pullRepo()                   — fast-forward the `.system` repo (git.ts)
- *   - promptAgentVersionSelection() — the "which agent types / versions?" picker
- *   - repairAfterSync()            — the shared post-reconcile repair pass
- *                                    `agents sync` runs (heal + hook rewire +
- *                                    managed hook runtime shim repair)
- *
- * Combined flow (one confirmation): if `.system` is behind AND resources drifted,
- * a single "Sync all detected" both pulls `.system` and reconciles the chosen
- * version homes. The security posture is preserved — the `.system` pull only ever
- * happens on an explicit user choice here, never silently (see auto-pull-worker.ts
- * for why system auto-pull is off by default).
- */
+/** Interactive drift-sync flow: the single "drift detected, fix it?" action shared by `agents sync
+ * status`, `agents doctor`, and the menu-bar "NEEDS SYNC" row; composes existing pieces only.
+ * Security: the `.system` pull happens only on an explicit user choice here, never silently. */
 
 import chalk from 'chalk';
 import { select, confirm } from '@inquirer/prompts';
@@ -97,15 +81,9 @@ async function pullSystem(status: UnifiedSyncStatus): Promise<boolean> {
   return false;
 }
 
-/**
- * Reconcile a set of versions grouped by agent through the SHARED post-reconcile
- * repair pass (`repairAfterSync`) — the same superset the three `agents sync`
- * handlers run. Beyond the resources `heal()` fills, this also re-wires hooks
- * left unwired and repairs broken managed hook runtime shims, so drift-sync is
- * not a third orchestrator that silently skips shim repair. Renders each pass's
- * rewire / shim-repair detail; the heal rollup is printed separately by the
- * caller via `reportHealed`.
- */
+/** Reconcile versions grouped by agent through the shared `repairAfterSync` pass, the same superset
+ * the three `agents sync` handlers run: beyond `heal()` it re-wires unwired hooks and repairs
+ * broken managed hook shims, so drift-sync is not a third orchestrator that skips shim repair. */
 async function healVersions(
   versionsByAgent: Map<AgentId, string[]>,
   cwd: string,
@@ -142,10 +120,8 @@ function groupNeeding(needing: AgentVersionStatus[]): Map<AgentId, string[]> {
   return m;
 }
 
-/**
- * The unified "drift detected — sync now?" flow. Returns a structured result so
- * callers (menu-bar, doctor) can report without re-scanning.
- */
+/** The unified "drift detected, sync now?" flow. Returns a structured result so callers (menu-bar,
+ * doctor) can report without re-scanning. */
 export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<DriftSyncResult> {
   const cwd = opts.cwd ?? process.cwd();
   const status = opts.status ?? (await computeSyncStatus({ cwd }));

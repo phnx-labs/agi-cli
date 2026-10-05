@@ -1,10 +1,4 @@
-/**
- * `agents feed post --blocked` — the declared-block path.
- *
- * Real path throughout: a block is built from a real posted event, written to a
- * real temp feed dir, read back with the real reader, and planned against a real
- * sink config. Nothing is mocked.
- */
+/** `agents feed post --blocked` declared-block path, tested end to end with no mocks. */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -164,10 +158,8 @@ describe('blockDeliveryFailure — the fail-loud contract', () => {
   const ok = { name: 'owner', ok: true };
   const bad = { name: 'owner', ok: false, error: 'rush CLI not found on PATH' };
 
-  // This lived inline in the command action and was therefore never covered,
-  // which is exactly how a `--json` early-return silently bypassed it: the
-  // machine caller — the one that actually reads the exit code — got 0 while a
-  // human got 1. Reviewer caught it; this pins the contract in a pure function.
+  // Extracted into a pure function because the inline version was never covered and a `--json`
+  // early-return bypassed it, returning exit 0 to machine callers while humans got 1.
   it('reports failure when no sink is configured', () => {
     expect(blockDeliveryFailure(true, [])).toMatch(/no feed\.broadcast sink configured/);
   });

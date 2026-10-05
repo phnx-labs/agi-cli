@@ -3,18 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// db.ts + discover.ts capture their paths from HOME at import time, so point HOME
-// at a throwaway dir BEFORE importing. Real fs, real sqlite, a synthetic
-// opencode.db — no mocking.
-//
-// Two regressions this pins, both found on a real opencode.db after RUSH-2358
-// shipped:
-//   1. The tool-part read truncated only `state.output`, which bounds nothing —
-//      the largest real part was 1,346,068 bytes of which `state.attachments`
-//      (a base64 data URL from `read`) was 1,345,674 and `state.output` was 23.
-//   2. `json_extract` raises "malformed JSON" on a non-JSON value and aborts the
-//      WHOLE query, so one unparseable `part`/`message` row dropped EVERY
-//      OpenCode session from the index — silently in a non-TTY run.
+// HOME is captured at import, so point it at a throwaway dir BEFORE importing. Real fs and sqlite.
+// Pins two RUSH-2358 regressions: (1) the read truncated only `state.output`, not
+// `state.attachments`; (2) one non-JSON row aborted `json_extract` for every OpenCode session.
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-opencode-robust-'));
@@ -146,12 +137,9 @@ describe('OpenCode scan survives a malformed row (RUSH-2358 follow-up)', () => {
 describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
   const parsed = () => parse.parseOpenCode(`${OPENCODE_DB}#${SESSION_ID}`);
 
-  // The cost being pinned is what the QUERY loads, not what reaches the events:
-  // `state.attachments` never reached an event even before the fix, because the
-  // `case 'tool'` branch only copies `state.input` / `state.output`. The 1 MB
-  // was paid in the result set, which is why asserting on events alone would
-  // pass against the pre-fix code. Run the real query (imported, not re-typed)
-  // and measure its `part_data`.
+  // The cost pinned is what the query loads, not what reaches events: `state.attachments` never
+  // reached an event, but the 1 MB was paid in the result set, so asserting on events would pass
+  // pre-fix. Run the real query (imported) and measure `part_data`.
   const projectedBytes = (): { total: number; max: number } => {
     const oc = new (Database as any)(OPENCODE_DB);
     try {
@@ -202,12 +190,9 @@ describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
 });
 
 describe('OpenCode transcript parses on a schema with no todo table', () => {
-  // The `todo` probe must not cost the transcript when the table is absent. The
-  // hazard is runtime-specific: node:sqlite returns `undefined` for an empty
-  // `get()` and bun:sqlite returns `null`, so a sentinel-based probe silently
-  // inverts on the shipped Bun binary and every no-todo database parses to
-  // zero events. The probe counts rows instead, which is why this holds under
-  // both runtimes — vitest only exercises the node one.
+  // The `todo` probe must not cost the transcript when the table is absent. An empty `get()` is
+  // `undefined` on node:sqlite but `null` on bun:sqlite, so a sentinel probe inverts on Bun. The
+  // probe counts rows instead and holds on both runtimes; vitest only exercises node.
   const OLD_DB = path.join(tmpHome, 'old', 'opencode.db');
   const OLD_SESSION = 'ses_notodo000000000000000000';
 

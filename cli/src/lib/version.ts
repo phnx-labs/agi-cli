@@ -18,12 +18,8 @@ function readVersionAt(pkgPath: string): string | null {
   }
 }
 
-/**
- * Well-known locations of the `agents` launcher for PATH-less GUI/launchd
- * processes (the menu-bar helper inherits no login PATH). Also the anchor for
- * recovering the on-disk install layout when the CLI runs as a Bun single-file
- * binary — see {@link resolveInstalledLayout}.
- */
+/** Well-known `agents` launcher locations for PATH-less GUI/launchd processes (the menu-bar helper),
+ * and the anchor for recovering the install layout in a Bun binary (`resolveInstalledLayout`). */
 export function resolveAgentsBin(): string | null {
   const home = os.homedir();
   const candidates = [
@@ -52,12 +48,8 @@ interface InstallLayout {
   pkgJsonPath: string;
 }
 
-/**
- * Pure derivation (no I/O) of an install's on-disk layout from the realpath of
- * its `agents` launcher. A launcher lives at `<pkg>/dist/bin/agents`, so two
- * levels up is `<pkg>/dist`. Exported for unit testing so the dirname chain the
- * Bun-binary fallback depends on stays locked.
- */
+/** Pure derivation of the install layout from the launcher's realpath (`<pkg>/dist/bin/agents`, two
+ * levels up is `<pkg>/dist`); exported so the Bun-binary fallback's dirname chain stays tested. */
 export function installLayoutFromBin(realBin: string): InstallLayout {
   const distDir = path.dirname(path.dirname(realBin)); // <pkg>/dist/bin/agents -> <pkg>/dist
   return {
@@ -67,18 +59,9 @@ export function installLayoutFromBin(realBin: string): InstallLayout {
   };
 }
 
-/**
- * Resolve the on-disk install layout of the running CLI by following the
- * `agents` launcher symlink.
- *
- * When the CLI runs as a Bun single-file executable, `import.meta.url` points
- * inside the virtual bundle (`/$bunfs/…`), so sibling-relative resolution can't
- * see the shipped `package.json`, `dist/index.js`, or `MenubarHelper.app` on
- * disk. The launcher symlink points at the real files; walk up from it. Returns
- * null when no launcher is found (dev/tsx runs, or a box without the helper) —
- * callers keep their in-bundle resolution as the primary path and use this only
- * as the fallback.
- */
+/** Resolve the install layout via the `agents` launcher symlink: in a Bun single-file binary
+ * `import.meta.url` is `/$bunfs/...` and cannot see `package.json`, `dist/index.js` or
+ * `MenubarHelper.app`. Null when no launcher; fallback only. */
 export function resolveInstalledLayout(): InstallLayout | null {
   const bin = resolveAgentsBin();
   if (!bin) return null;
@@ -92,24 +75,9 @@ export function resolveInstalledLayout(): InstallLayout | null {
   return null;
 }
 
-/**
- * Resolve the CLI version from the shipping package.json. Used by the daemon
- * to answer `IPCAction: 'version'` and by the client to detect daemon drift —
- * a dev-build CLI talking to a launchd-managed registry daemon would silently
- * get stale behavior without this check.
- *
- * Primary read is relative to this module; when that fails (the Bun single-file
- * binary can't read its own bundled package.json), fall back to the on-disk
- * install found via the launcher symlink so callers like the menu bar don't see
- * a bogus `unknown`.
- *
- * `pkgJsonPath` is an optional override of the shipping package.json path,
- * accepted by both this function and {@link getCliVersionFresh}. Every
- * production call site uses the zero-argument form and gets the real on-disk
- * path below; the parameter exists only so a unit test can point both
- * functions at a fixture package.json instead of the real one shared by every
- * parallel test fork.
- */
+/** Resolve the CLI version from the shipping package.json; the daemon answers IPC `version` with it
+ * and clients detect daemon drift. A Bun binary cannot read it, so it falls back via the launcher
+ * symlink. `pkgJsonPath` exists only for unit tests. */
 export function getCliVersion(
   pkgJsonPath: string = path.join(__dirname, '..', '..', 'package.json')
 ): string {
@@ -124,16 +92,9 @@ function readInstalledPackageVersion(): string | null {
   return layout ? readVersionAt(layout.pkgJsonPath) : null;
 }
 
-/**
- * Read the version from package.json on disk every call, bypassing the cache.
- *
- * `getCliVersion()` memoizes the version a long-running process *started* with.
- * After `npm i -g` overwrites the install in place, the on-disk package.json
- * changes but the running process keeps its old in-memory code. Comparing this
- * fresh read against the cached startup value is how a daemon/broker detects it
- * is now stale and should reload onto the new code (self-healing). Returns
- * 'unknown' on any error.
- */
+/** Read the version from package.json on every call, bypassing the cache. After `npm i -g`
+ * overwrites the install, comparing it with the startup `getCliVersion()` tells a daemon it is
+ * stale and should reload. 'unknown' on error. */
 export function getCliVersionFresh(
   pkgJsonPath: string = path.join(__dirname, '..', '..', 'package.json')
 ): string {

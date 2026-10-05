@@ -29,10 +29,9 @@ describe('daemon-health', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  // RUSH-2418: a daemon start is COUNTED when it is issued, before its outcome
-  // is known, then refined if it fails outright. That refinement must not count
-  // the same start twice — the whole circuit breaker is a comparison against a
-  // threshold, so a double-count halves the limit it enforces.
+  // RUSH-2418: a daemon start is counted when issued, before its outcome is known, then refined on
+  // outright failure. The refinement must not double-count, since the circuit breaker compares
+  // against a threshold and a double-count halves the limit.
   describe('recordSubsystemErrorReason', () => {
     it('replaces the reason without bumping the streak', () => {
       recordSubsystemError('daemon-start', 'start issued', '2026-01-01T00:00:00.000Z');
@@ -141,15 +140,9 @@ describe('daemon-health', () => {
     expect(readSubsystemHealth('monitors')?.consecutiveFailures).toBe(0);
   });
 
-  // Review finding on PR #3037 (RUSH-3193 P1): recordSubsystemOk/Error are
-  // called from inside ServiceSupervisor.runTick's own catch block (and from
-  // recordFailure, its catch-of-a-catch). If the write here threw, that throw
-  // would escape as an unhandled rejection past every enclosing try/catch,
-  // hit the process-wide handler, and process.exit the WHOLE daemon —
-  // exactly the failure mode the supervisor exists to prevent. A disk-full,
-  // permission-denied, or (per this daemon's own state-dir self-check) a
-  // removed state directory must all degrade to a silently dropped health
-  // update instead.
+  // PR #3037 review (RUSH-3193 P1): recordSubsystemOk/Error run inside ServiceSupervisor's catch
+  // blocks, so a throwing write would escape as an unhandled rejection and exit the whole daemon.
+  // Disk-full, permission-denied or a removed state dir must degrade to a dropped update.
   it('recordSubsystemOk/Error never throw even when the health file cannot be written', () => {
     // health.json's parent dir is itself a FILE, so mkdirSync/writeFileSync
     // both fail — this simulates disk-full/permission-denied without needing

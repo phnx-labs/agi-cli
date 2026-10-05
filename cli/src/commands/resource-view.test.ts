@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { resourceLayout } from './resource-view.js';
 
-// resourceLayout is the pure column arithmetic behind the piped `skills/commands/
-// plugins/mcp list` tables. The bug it fixes: the old layout used fixed 22+10+16+42
-// columns plus an uncapped Sync column and a hardcoded 100-char separator, so it
-// overflowed every terminal narrower than ~130 cols. These tests pin the two things
-// that actually matter: the description column flexes with width, and a too-narrow
-// terminal drops to cards instead of overflowing.
+// resourceLayout is the pure column arithmetic behind the piped `skills/commands/plugins/mcp list`
+// tables. The old fixed columns, uncapped Sync column and hardcoded separator overflowed terminals
+// under ~130 cols. These pin that the description flexes and a narrow terminal drops to cards.
 
 describe('resourceLayout', () => {
   const base = { hasExtra: false, hasExtra2: false, nameW: 22, syncW: 12 };

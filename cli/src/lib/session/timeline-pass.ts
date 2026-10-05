@@ -1,23 +1,6 @@
-/**
- * The daemon's incremental timeline pass (PHNX-3939).
- *
- * Runs inside the existing `SessionStateService` tick, which is already
- * reader-gated — no watcher, no work — and already visits every live session.
- * This adds the one thing the tick did not do: fold each live transcript's
- * NEW BYTES into its cached {@link TimelineState} and store the bounded
- * projection a session row merges.
- *
- * Three properties keep it off the request path and off the CPU:
- *   - **Reader-gated and budgeted.** Nothing runs unless a `sessions watch`
- *     consumer is attached, and at most `budget` sessions are folded per tick.
- *   - **Appended bytes only.** For the resumable harnesses (Claude and Codex,
- *     line-delimited JSON) a fold reads `size - offset` bytes, not the file.
- *     The same resume rule the tool index already uses (`tool-index.ts`).
- *   - **Complete records only.** Only newline-terminated lines are folded and
- *     the offset advances past those alone, so the 973,963-byte record in one
- *     live transcript on this fleet cannot be folded half-written; the next tick
- *     picks it up whole.
- */
+/** The daemon's incremental timeline pass (PHNX-3939) in the reader-gated `SessionStateService`
+ * tick: folds each live transcript's new bytes into its cached TimelineState. At most `budget`
+ * sessions per tick; only appended, newline-terminated records fold, never one half-written. */
 
 import * as fs from 'fs';
 import type { ActiveSession } from './active.js';
@@ -42,47 +25,26 @@ const TIMELINE_PASS_MAX_PER_TICK = 8;
 /** Bytes one session may consume in one tick. A bigger backlog catches up over ticks. */
 export const TIMELINE_PASS_MAX_BYTES_PER_SESSION = 4 * 1024 * 1024;
 
-/**
- * Bytes the whole pass may consume in one tick, across every session.
- *
- * The per-session cap alone is not a bound on the TICK: on a cold cache eight
- * live sessions each fold from offset 0, and eight multi-megabyte transcripts
- * parsed back to back is what blew the 30 s `session-state` deadline and parked
- * the service on this fleet (observed 2026-09-06). A tick budget makes a cold
- * start catch up over a few ticks instead of stalling one.
- */
+/** Bytes the whole pass may consume per tick. The per-session cap does not bound the tick: eight
+ * cold multi-megabyte folds blew the 30 s `session-state` deadline and parked the service
+ * (2026-09-06); a budget spreads catch-up over ticks. */
 const TIMELINE_PASS_MAX_BYTES_PER_TICK = 8 * 1024 * 1024;
 
-/**
- * Ceiling on a whole-file re-parse for a harness with no resumable reader.
- * Beyond it the timeline is reported `partial` rather than wedging the tick —
- * the same honesty rule the tool index applies at its own in-memory limit.
- */
+/** Ceiling on a whole-file re-parse for a harness with no resumable reader. Beyond it the timeline
+ * is `partial` rather than wedging the tick, the same honesty rule as the tool index. */
 export const TIMELINE_PASS_MAX_WHOLE_FILE_BYTES = 16 * 1024 * 1024;
 
 /** Events folded from one non-resumable whole-file parse before reporting `partial`. */
 const TIMELINE_PASS_MAX_EVENTS = 20_000;
 
-/**
- * How long a non-resumable harness's timeline may go stale before the pass
- * re-parses its transcript whole.
- *
- * Kimi and Grok expose no byte offset to resume from, so their only option is a
- * full parse — and a full parse of a large, actively-appended transcript wedges
- * the Node event loop for seconds (the PHNX-3411 incident, which is why the tool
- * index deferred those two harnesses to their own budgeted pass). Re-parsing
- * every 15 s would reproduce it. One re-parse per minute keeps such a session's
- * timeline current enough for a card that moves about once a minute, at a
- * quarter of the cost.
- */
+/** Max staleness before a non-resumable harness (Kimi, Grok) is fully re-parsed. A full parse of a
+ * large transcript wedges the event loop for seconds (PHNX-3411), so 15 s re-parses would
+ * reproduce it; once a minute costs a quarter. */
 export const TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS = 60_000;
 
-/**
- * Harnesses whose transcript is append-only line-delimited JSON that the fold
- * can resume from a byte offset. Everything else is re-parsed whole (bounded)
- * because its parser exposes no offset — the same split as
- * `isResumableToolSource` in `tool-index.ts`.
- */
+/** Harnesses whose transcript is append-only line-delimited JSON that the fold can resume from a
+ * byte offset. Others are re-parsed whole (bounded): same split as `isResumableToolSource` in
+ * `tool-index.ts`. */
 function isResumableTimelineSource(agent: string): agent is 'claude' | 'codex' {
   return agent === 'claude' || agent === 'codex';
 }
@@ -140,16 +102,8 @@ function readCompleteLines(
   }
 }
 
-/**
- * Normalize one transcript chunk into the events the fold consumes.
- *
- * Interrupts are user steps in the timeline and the harness file ledger is the
- * Files card, so both are opted in — the published stream every OTHER consumer
- * reads stays unchanged. Codex reads its typed `item_completed` stream, NOT the
- * `response_item` records `parseCodexContent` reads: the two describe the same
- * turn, so folding both would double-count every call (see
- * `parseCodexItemsContent`).
- */
+/** Normalize one transcript chunk into fold events. Interrupts and the file ledger are opted in
+ * without changing the published stream. */
 function eventsForChunk(agent: SessionAgentId, text: string): SessionEvent[] {
   if (agent === 'claude') {
     return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true });
@@ -157,14 +111,9 @@ function eventsForChunk(agent: SessionAgentId, text: string): SessionEvent[] {
   return parseCodexItemsContent(text);
 }
 
-/**
- * Every event of one transcript, read the way the timeline fold needs them.
- *
- * The single source of truth for "which reader does this harness's timeline
- * use", shared by the daemon pass's non-resumable branch and
- * `agents sessions trace --steps` — so the CLI door and the cached row can never
- * fold two different event streams for the same session.
- */
+/** Every event of one transcript, read the way the timeline fold needs. The single source for which
+ * reader a harness uses, shared by the daemon's non-resumable branch and `sessions trace --steps`
+ * so the cached row and CLI never diverge. */
 export function parseTimelineEvents(filePath: string, agent: SessionAgentId): SessionEvent[] {
   if (isResumableTimelineSource(agent)) {
     return eventsForChunk(agent, fs.readFileSync(filePath, 'utf8'));
@@ -175,14 +124,9 @@ export function parseTimelineEvents(filePath: string, agent: SessionAgentId): Se
 /** One session's fold: the entry to cache, and what it actually cost to produce. */
 interface SessionTimelineFold {
   entry: SessionTimelineEntry;
-  /**
-   * Bytes this fold READ off disk — what the tick's byte budget is debited by.
-   *
-   * Not the transcript's growth delta: a non-resumable harness re-parses the
-   * WHOLE file every time, so eight 3 MiB sessions grown by 10 KB each read
-   * 24 MiB, not 80 KB. Charging the delta is what let a tick overrun its budget
-   * by an order of magnitude.
-   */
+  /** Bytes this fold read off disk, which the tick's budget is debited by. Not the growth delta: a
+   * non-resumable harness re-parses the whole file, so eight 3 MiB sessions grown 10 KB read 24
+   * MiB; charging the delta overran budgets 10x. */
   bytesRead: number;
 }
 
@@ -191,17 +135,9 @@ function mib(bytes: number): number {
   return Math.round((bytes / (1024 * 1024)) * 10) / 10;
 }
 
-/**
- * Fold one session's new transcript bytes and return the entry to cache.
- * Exported for tests: this is where the resume decision and the whole-file
- * fallback live, and both are worth pinning without a daemon.
- *
- * `byteBudget` is the TICK's remaining allowance. Each branch derives its own
- * ceiling from it — the resumable chunk read is additionally capped per session,
- * while a whole-file re-parse is gated on a budget that can actually reach a
- * real transcript. A session that genuinely does not fit gets a `partial` row
- * stating why, never silence.
- */
+/** Fold one session's new transcript bytes and return the entry to cache. Exported for tests: the
+ * resume decision and whole-file fallback live here. `byteBudget` is the tick's remaining
+ * allowance; a session that does not fit gets a `partial` row saying why, never silence. */
 function foldSessionTimeline(
   session: ActiveSession,
   filePath: string,
@@ -233,19 +169,17 @@ function foldSessionTimeline(
     const start = resumable ? state.offset : 0;
     const maxBytes = Math.min(byteBudget, TIMELINE_PASS_MAX_BYTES_PER_SESSION);
     const chunk = readCompleteLines(filePath, start, fileSize, maxBytes);
-    // Nothing COMPLETE in the window this tick could read — a record still being
-    // written, or a byte budget too small to reach the next newline. Leave the
-    // cached row and its offset alone; writing here would stamp an empty fold
-    // over a real one and move the resume point past bytes never folded.
+    // Nothing complete in the readable window (a record mid-write, or a budget too small to reach
+    // a newline). Leave the cached row and offset alone: writing would stamp an empty fold over a
+    // real one and skip unfolded bytes.
     if (!chunk.text && chunk.offset === start) return undefined;
     events = eventsForChunk(agent, chunk.text);
     offset = chunk.offset;
     bytesRead = chunk.offset - start;
   } else {
-    // No resumable reader for this harness: re-parse whole, bounded, from a
-    // FRESH state — a partial re-fold onto a prior state would double-count.
-    // Rate-limited so an actively-appended large transcript is not re-parsed on
-    // every 15 s tick (see TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS).
+    // No resumable reader for this harness: re-parse whole, bounded, from a fresh state (a partial
+    // re-fold would double-count). Rate-limited so large transcripts are not re-parsed every tick
+    // (TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS).
     if (prior && nowMs - prior.computedAt < TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS) return undefined;
     if (fileSize > TIMELINE_PASS_MAX_WHOLE_FILE_BYTES) {
       return {
@@ -258,12 +192,8 @@ function foldSessionTimeline(
         bytesRead: 0,
       };
     }
-    // Eligibility is the smaller of what the tick has left and what a whole-file
-    // fold is allowed to cost — NOT the per-session allowance, which is capped
-    // at 4 MiB and so could never reach a transcript in (4 MiB, 16 MiB] however
-    // idle the tick was. That gap left every such session on kimi/grok/gemini/
-    // cursor/opencode/droid/warp/forge/copilot/goose/antigravity with no row at
-    // all, silently counted `reused`.
+    // Eligibility is the smaller of the tick's remaining budget and the whole-file cost cap, not
+    // the per-session allowance (4 MiB), which could never reach a 4-16 MiB transcript.
     const wholeFileAllowance = Math.min(byteBudget, TIMELINE_PASS_MAX_WHOLE_FILE_BYTES);
     if (fileSize > wholeFileAllowance) {
       // It does not fit THIS tick. Say so on the row rather than write nothing:
@@ -308,15 +238,9 @@ function foldSessionTimeline(
   };
 }
 
-/**
- * Fold the timelines of the live local sessions, bounded, once per tick.
- * Returns what it did so the daemon tick can log it like every other pass.
- *
- * Async only because resolving the session list needs the session-cache module,
- * which is loaded lazily to keep this off the CLI's startup graph. When the
- * caller already HAS the rows (the daemon tick does — it just gathered them),
- * {@link runTimelinePassSync} is the same work with no dynamic import.
- */
+/** Fold the live local sessions' timelines, bounded, once per tick, returning what it did for the
+ * daemon log. Async only because the session-cache module is lazy-loaded to keep it off CLI
+ * startup; with rows in hand use runTimelinePassSync. */
 export async function runTimelinePass(opts: TimelinePassOptions = {}): Promise<TimelinePassResult> {
   const { readActiveSessionsCache, isActiveSessionsJournalReaderRecent } = await import('./session-cache.js');
   const now = opts.nowMs ?? Date.now();
@@ -352,11 +276,9 @@ export function runTimelinePassSync(
     const id = session.sessionId;
     const file = session.sessionFile;
     if (!id || !file) continue;
-    // Stamp on the file the PARSER reads, not the row's `sessionFile`: Kimi's row
-    // points at `state.json` while its content is in a sibling `wire.jsonl`, and
-    // Grok's at `summary.json` beside `chat_history.jsonl`. Stamping the wrong
-    // file makes an actively-growing session look unchanged forever. Same helper
-    // the tool index uses, so the two agree on what a session's bytes are.
+    // Stamp the file the parser reads, not the row's `sessionFile`: Kimi's row points at
+    // `state.json` (content in `wire.jsonl`), Grok's at `summary.json` (beside
+    // `chat_history.jsonl`). The wrong file makes a growing session look unchanged forever.
     const source = toolEvidenceSourcePath(file, (session.kind ?? 'claude'));
 
     let stamp: { fileMtimeMs: number; fileSize: number };

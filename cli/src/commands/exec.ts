@@ -1,10 +1,6 @@
-/**
- * Agent execution command.
- *
- * Registers the `agents run` command which spawns agent CLIs interactively
- * or headlessly. Supports profile resolution, version rotation, secrets
- * injection, and multi-agent fallback chains for rate-limit resilience.
- */
+/** Agent execution command: registers `agents run`, which spawns agent CLIs interactively or
+ * headlessly, with profile resolution, version rotation, secrets injection and fallback chains for
+ * rate-limit resilience. */
 
 import { InvalidArgumentError, Option, type Command } from 'commander';
 import chalk from 'chalk';
@@ -80,10 +76,8 @@ interface ExecCommandActionOptions {
   strategy?: string;
   /** Restrict selection to a named provider account discovered from live version homes. */
   account?: string;
-  /**
-   * @deprecated Hidden alias for `--device auto`. Resolved before host dispatch.
-   * Remove after one release.
-   */
+  /** @deprecated Hidden alias for `--device auto`, resolved before host dispatch. Remove after one
+   * release. */
   acp?: boolean;
   yes?: boolean;
   loop?: boolean;
@@ -92,10 +86,9 @@ interface ExecCommandActionOptions {
   budget?: string;
   until?: string;
   interval?: string;
-  // Host dispatch: run on a registered agent device instead of locally.
-  // `--device` is canonical; `--on`/`--computer` are hidden aliases.
-  // `--where` is the unified placement alias (lib/placement.ts) — expands into
-  // device/lease before dispatch; do not combine with those flags.
+  // Host dispatch: run on a registered device instead of locally. `--device` is canonical;
+  // `--on`/`--computer` are hidden aliases. `--where` is the unified placement alias
+  // (lib/placement.ts) expanding into device/lease, so do not combine it with those.
   where?: string;
   local?: boolean;
   host?: string;
@@ -154,16 +147,9 @@ export interface RunPickerMarkers {
   reason?: string;
 }
 
-/**
- * Parse the trailing picker markers on an `agents run` agent spec. A terminal
- * run of `#`/`@` characters requests the account picker (`#`) and/or the
- * device picker (`@`) — each at most once, in either order (`claude#@`,
- * `claude@#`). Stripping them yields the normalized spec (`claude#work@` →
- * `claude#work`, version pins and `#label` account pins intact). A picker
- * cannot combine with an explicit pin of what it picks: `claude@2.1.218#`
- * (the account picker already chooses the version — the old `claude@2.1.218@`
- * rule), `claude#work#`, `claude@@`.
- */
+/** Parse trailing picker markers on an agent spec: a terminal run of `#`/`@` requests the account
+ * (`#`) and/or device (`@`) picker, each once. Stripping yields the normalized spec
+ * (`claude#work@` -> `claude#work`). A picker cannot combine with a pin. */
 export function parseRunPickerMarkers(agentSpec: string): RunPickerMarkers {
   let rest = agentSpec;
   let accountPicker = false;
@@ -192,14 +178,9 @@ export function parseRunPickerMarkers(agentSpec: string): RunPickerMarkers {
   return { accountPicker, devicePicker, normalizedAgentSpec: rest, valid: reason === undefined, reason };
 }
 
-/**
- * The `--device` alias family — the flags that mean "dispatch this run to another
- * machine over SSH". `--device` is canonical; `--on`/`--computer` are hidden
- * aliases. Returns the values actually given (so callers can both test presence
- * and read the target). Kept in ONE place because a guard that listed only a
- * subset silently let `--terminal --device` open a local tab and drop the remote
- * target — the drift this predicate exists to prevent.
- */
+/** The `--device` alias family: flags meaning "dispatch this run to another machine over SSH"
+ * (`--device` canonical, `--on`/`--computer` hidden). Kept in one place because a guard listing
+ * only a subset let `--terminal --device` open a local tab and drop the remote target. */
 export function hostTargetGiven(options: {
   host?: string;
   device?: string;
@@ -211,13 +192,9 @@ export function hostTargetGiven(options: {
   );
 }
 
-/**
- * Turn a host target that names THIS machine into an explicit local pin: the
- * host-family flags are cleared and `local` is set, so no dispatch path
- * self-SSHes and the bare-interactive default (`bareInteractiveRunDefaultsToDeviceAuto`)
- * sees a decided placement. Returns true when the pin was applied. Pure over
- * the `isSelf` predicate so the rule is testable without a device registry.
- */
+/** Turn a host target that names this machine into an explicit local pin: host-family flags cleared
+ * and `local` set, so nothing self-SSHes and `bareInteractiveRunDefaultsToDeviceAuto` sees a
+ * decided placement. Returns true when applied. Pure over `isSelf`. */
 export function pinLocalWhenTargetIsSelf(
   options: { host?: string; device?: string; on?: string; computer?: string; local?: boolean },
   isSelf: (name: string) => boolean,
@@ -232,11 +209,8 @@ export function pinLocalWhenTargetIsSelf(
   return true;
 }
 
-/**
- * Return every option whose selection semantics conflict with an account
- * choice (`agent#`). Device routing is deliberately absent: the marker rides
- * the hop and the peer picks from ITS slots.
- */
+/** Return every option whose selection semantics conflict with an account choice (`agent#`). Device
+ * routing is deliberately absent: the marker rides the hop and the peer picks from its own slots. */
 export function runAccountPickerConflicts(options: {
   resume?: string | boolean;
   strategy?: string;
@@ -259,11 +233,9 @@ export function runAccountPickerConflicts(options: {
   return conflicts;
 }
 
-/**
- * Return every option that already decides where the run lands, so a device
- * choice (`agent@`) would be silently ignored: any explicit host flag, and the
- * lease/box paths, which own placement outright.
- */
+/** Return every option that already decides where the run lands, so a device choice (`agent@`)
+ * would be silently ignored: any explicit host flag, and the lease/box paths, which own placement
+ * outright. */
 export function runDevicePickerConflicts(options: {
   lease?: string | boolean;
   box?: string;
@@ -289,19 +261,9 @@ function isValidAgent(agent: string): agent is AgentId {
 // lib/types.ts (shared with the host dispatch layer); re-exported here.
 export { RUN_AUTO_KEYWORD };
 
-/**
- * Whether `run auto` should default its host layer to the affinity pick (the
- * same machinery as `--device auto`). False when the caller pinned any host
- * flag, and false when this process was itself dispatched by a host run —
- * the dispatcher exports AGENTS_RUN_AUTO_HOST_RESOLVED=1 into the remote SHELL
- * (hosts/dispatch.ts remoteRunShellPrelude) because it already resolved the
- * host layer, and re-picking here would chain-hop the run across the fleet.
- * An INTERACTIVE dispatch of a named harness also reaches the remote as a bare
- * `agents run <harness>` (its argv forwards without the routing flag), so the
- * interactive prelude's AGENTS_REMOTE_INTERACTIVE=1 counts as "already placed"
- * too — without it the remote would re-place the run and ping-pong across the
- * fleet. Pure so the pinning matrix is unit-testable.
- */
+/** Whether `run auto` defaults its host layer to the affinity pick (as `--device auto`). False when
+ * a host flag is pinned or this process was itself dispatched by a host run
+ * (AGENTS_RUN_AUTO_HOST_RESOLVED=1); re-picking would chain-hop the fleet. Pure. */
 export function runAutoDefaultsToAffinity(
   options: { host?: string; device?: string; on?: string; computer?: string; local?: boolean },
   env: NodeJS.ProcessEnv = process.env,
@@ -315,27 +277,9 @@ export function runAutoDefaultsToAffinity(
   return env.AGENTS_REMOTE_INTERACTIVE !== '1';
 }
 
-/**
- * Whether a bare human-facing `agents run <harness>` — no prompt, so an
- * interactive TUI run — defaults its placement to `--device auto` (PHNX-4083).
- * A marker left off is decided for you: no `#` means balanced rotation, and no
- * `@` (and no other placement flag) now means automatic device placement — the
- * same engine as `--device auto`, whose pool never contains a box marked
- * `personal`. ALL of these must hold:
- *
- * - no prompt (headless runs — teams, routines, hooks, `run <agent> "…"` —
- *   keep running in place, unchanged);
- * - a human-facing surface: a real TTY and no `--json`. This is the same
- *   two-condition gate `signInLaunchDecision` uses in run-account-picker.ts —
- *   reused here through isHumanFacingRun, not re-derived;
- * - no device-picker marker (`agent@` already chose the device; picking this
- *   machine there is a plain local run);
- * - no `--resume` / `--lease` / `--box` / `--cloud` (those own placement);
- * - the host layer is unpinned and this process is not itself a dispatched
- *   hop — delegated to runAutoDefaultsToAffinity, which encodes both.
- *
- * Pure so the default-placement matrix is unit-testable.
- */
+/** Whether a bare human-facing `agents run <harness>` defaults to `--device auto` (PHNX-4083); the
+ * auto pool never has a `personal` box. Requires no prompt, a TTY, no `--json`, no `@` marker, no
+ * `--resume`/`--lease`/`--box`/`--cloud`, and an unpinned, undispatched host layer. Pure. */
 export function bareInteractiveRunDefaultsToDeviceAuto(
   options: {
     host?: string;
@@ -359,15 +303,9 @@ export function bareInteractiveRunDefaultsToDeviceAuto(
   return runAutoDefaultsToAffinity(options, env);
 }
 
-/**
- * Whether an interactive host dispatch must mint a correlation launch id and
- * resolve the remote session via the launch-id join (RUSH-2034), rather than
- * trusting a pre-known session id. `run auto` ALWAYS joins: the harness is
- * picked on the remote, so an explicit --session-id is only adopted when the
- * pick lands on claude — pre-registering it would strand a stale session-index
- * entry naming an id a non-claude pick never used (RUSH-2132). Pure so the
- * decision matrix is unit-testable.
- */
+/** Whether an interactive host dispatch must mint a launch id and resolve the remote session via
+ * the launch-id join (RUSH-2034). `run auto` always joins: the harness is picked remotely and
+ * --session-id is adopted only on a claude pick (RUSH-2132). */
 export function hostInteractiveNeedsCorrelationId(
   runAgent: string,
   hostSessionId: string | undefined,
@@ -383,24 +321,16 @@ function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): 
   const { picked, healthy, excluded } = result;
   const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
-  // Say it when the pick was a guess. A machine whose usage refresh is failing
-  // reports old percentages with total confidence, so a silent banner reads
-  // identical whether the router knew the account had headroom or merely hoped
-  // so — and the operator only finds out when the agent answers "you've hit
-  // your weekly limit".
+  // Say it when the pick was a guess. A machine whose usage refresh is failing reports old
+  // percentages with total confidence, so a silent banner looks the same whether the router knew
+  // the account had headroom or hoped so.
   const caveat = result.usageUnverified ? ', usage unverified — no account could be refreshed' : '';
   return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
 }
 
-/**
- * Whether `cwd` is inside a git work tree.
- *
- * `--lease` / `--box` sync the working directory to the box through crabbox,
- * which enumerates the files to copy with `git ls-files`. Outside a git repo
- * that exits 128 (`fatal: not a git repository`) and the whole run dies at
- * "build sync file list: exit status 128" — AFTER the box is provisioned and
- * billed. Checking this up front lets the caller fail fast, before provisioning.
- */
+/** Whether `cwd` is inside a git work tree. `--lease`/`--box` sync the working directory via
+ * crabbox's `git ls-files`; outside a repo that exits 128 after the box is provisioned and billed.
+ * Checking up front fails fast before provisioning. */
 export function isInsideGitWorkTree(cwd: string): boolean {
   const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--is-inside-work-tree'], {
     encoding: 'utf-8',
@@ -414,23 +344,18 @@ export function gitToplevel(cwd: string): string | null {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
-/**
- * Network mode for a `--lease` run (F5, RUSH-1924). `--tailscale` forces the
- * tailnet, `--no-tailscale` forces public, and neither (undefined) defaults to
- * the tailnet ONLY in a reuse context (`--reuse`, `--box`, or a picked warm
- * box) — a one-shot solo `--lease` stays public. Pure so it is unit-testable;
- * the caller downgrades to `'public'` when no auth key is configured.
- */
+/** Network mode for a `--lease` run (F5, RUSH-1924): `--tailscale` forces the tailnet, `--no-
+ * tailscale` public; neither defaults to the tailnet only in a reuse context (`--reuse`, `--box`,
+ * a warm box). A solo `--lease` stays public; downgrades to `'public'` with no auth key. Pure. */
 export function computeNetMode(opts: { tailscale?: boolean; reuseContext: boolean }): 'public' | 'tailscale' {
   if (opts.tailscale === false) return 'public'; // --no-tailscale wins
   if (opts.tailscale === true) return 'tailscale'; // explicit --tailscale
   return opts.reuseContext ? 'tailscale' : 'public';
 }
 
-// ── "Always provision fresh" per-repo memory (F3, RUSH-1922) ─────────────────
-// The picker's "Always provision fresh (remember for this repo)" choice is
-// persisted as a list of git-toplevel paths in a small state file, so a repo
-// that opted out of the reuse picker is never prompted again.
+// "Always provision fresh" per-repo memory (F3, RUSH-1922): the picker's choice is persisted as
+// git-toplevel paths in a small state file, so a repo that opted out of the reuse picker is never
+// prompted again.
 
 /** True when `repoRoot` is in the remembered always-fresh set. Pure. */
 export function isAlwaysFreshRepo(repos: string[], repoRoot: string): boolean {
@@ -468,17 +393,9 @@ export function writeAlwaysFreshRepos(repos: string[]): void {
   }
 }
 
-/**
- * Build the LoopConfig the driver consumes from CLI flags and/or a workflow's
- * `loop:` frontmatter block (issue #332). Returns undefined when neither source
- * activates a loop (the common single-shot run). CLI flags take precedence over
- * the workflow's declared values field-by-field, so `--max-iterations 5`
- * overrides a workflow's `max_iterations: 3`.
- *
- * `--loop` with no sub-options is a valid bare loop (driver applies its own
- * maxIterations safety cap). A workflow `loop:` block activates a loop even
- * without `--loop` so `agents run <workflow>` honors a declared loop.
- */
+/** Build the LoopConfig from CLI flags and/or a workflow's `loop:` frontmatter (issue #332);
+ * undefined when neither activates a loop. CLI flags override the workflow field by field.
+ * `--loop` alone is a valid bare loop; a workflow `loop:` block activates one without it. */
 export function buildLoopConfig(
   flags: { loop?: boolean; maxIterations?: string; budget?: string; until?: string; interval?: string },
   workflowLoop?: import('../lib/workflows.js').LoopConfigRaw,
@@ -554,19 +471,9 @@ export function loopExitCode(stoppedBy: import('../lib/loop.js').LoopStoppedBy):
   }
 }
 
-/**
- * Drive a workflow's declarative `for_each:` fan-out end-to-end (issue #343).
- *
- * Runs the producer, expands one stage teammate per produced item (respecting
- * `max_items` / `DEFAULT_FOR_EACH_CAP`, surfacing any truncation — never a
- * silent cap), stages them into a fresh team via the existing `runForEach`
- * bridge, then drives the teams supervisor until the DAG drains. When a verify
- * panel is declared, tallies each item's `keep_if` gate from the skeptics'
- * terminal status and logs which items survived.
- *
- * Reuses the teams substrate wholesale — no new orchestration engine. Returns
- * the process exit code (0 on drain, 1 on producer failure / non-drain).
- */
+/** Drive a workflow's `for_each:` fan-out (issue #343): run the producer, expand one stage teammate
+ * per item (honoring `max_items`, surfacing truncation, never a silent cap), and drive the teams
+ * supervisor until the DAG drains. Returns 0 on drain, 1 otherwise. */
 export async function runWorkflowForEach(
   spec: import('../lib/workflows.js').ForEachSpec,
   opts: { workflowName: string; cwd: string; effort?: ExecEffort },
@@ -664,19 +571,9 @@ export async function runWorkflowForEach(
   return 1;
 }
 
-/**
- * The run's working directory from `--cwd` / `--project`. `--project <slug>` owns
- * the directory and is mutually exclusive with `--cwd`/`--remote-cwd`; both the
- * main dispatch and the `--terminal` handoff need the same answer, so the rule
- * and its error live here once instead of in two places that can drift.
- *
- * A project that binds several directories also contributes the ones it is not
- * landing in as `--add-dir` grants, so an agent on a multi-repo project can
- * actually reach the sibling checkouts. Claude / Cursor / Kimi take the native
- * flag; Codex folds them into workspace_roots; Grok widens its sandbox profile
- * (and always injects a rules note). Other harnesses have no multi-root surface
- * and ignore the grants (cwd only).
- */
+/** The run's working directory from `--cwd`/`--project`. `--project <slug>` owns the directory and
+ * excludes `--cwd`/`--remote-cwd`; dispatch and the `--terminal` handoff share this rule so they
+ * cannot drift. Extra project directories become `--add-dir` grants. */
 export async function resolveRunCwd(
   options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd' | 'addDir'>,
   opts: { forRemote: boolean },
@@ -708,15 +605,9 @@ export async function resolveRunCwd(
   }
 }
 
-/**
- * `--terminal`: hand this run to a real terminal tab and exit.
- *
- * The terminal is detected from the user's live sessions, so a run started from
- * a surface that cannot host a TUI (the menu bar's "New Session", a script) lands
- * in the terminal they actually work in instead of a hardcoded Terminal.app.
- * Exits non-zero when no terminal could be opened — the caller must not believe
- * a session started when none did.
- */
+/** `--terminal`: hand this run to a real terminal tab and exit. The terminal is detected from the
+ * user's live sessions, so a run from a surface that cannot host a TUI (menu bar, script) lands
+ * where they work. Exits non-zero when no terminal opens. */
 async function handleTerminalHandoff(
   agentSpec: string,
   options: ExecCommandActionOptions,
@@ -730,14 +621,9 @@ async function handleTerminalHandoff(
     process.exit(1);
   }
 
-  // Reject an unrunnable target HERE, where the person can read it. The tab would
-  // otherwise open, print the same error, and close — the failure lands in a
-  // window that is gone before it can be read, which reads as "nothing happened".
-  //
-  // `agents run <thing>` takes an agent id, a PROFILE, or a WORKFLOW (see the
-  // isValidAgent / profileExists / resolveWorkflowRef chain below), so this must
-  // accept all three. Gating on the agent table alone rejected every profile —
-  // the whole Kimi/DeepSeek/Qwen/GLM path — for `--terminal` runs only.
+  // Reject an unrunnable target here, where the person can read it: otherwise the tab opens,
+  // prints the error and closes before it can be read. `agents run <thing>` takes an agent id,
+  // profile or workflow, so accept all three; the agent table alone rejected every profile.
   const rawTarget = parseRunPickerMarkers(agentSpec).normalizedAgentSpec.split('#')[0].split('@')[0];
   const knownAgent = resolveAgentName(rawTarget);
   const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
@@ -758,12 +644,9 @@ async function handleTerminalHandoff(
       process.exit(1);
     }
   }
-  // --device and its aliases (--on/--computer) all mean "dispatch this
-  // run to another machine over SSH", which is incompatible with opening a
-  // terminal tab on THIS machine — so reject the whole alias family, not just
-  // the canonical flag. The rule and its wording live once, in the --device
-  // forwarding table, so the classification a reviewer reads and the error a
-  // user sees can't drift.
+  // --device and its aliases (--on/--computer) mean dispatch over SSH, which is incompatible with
+  // opening a terminal tab here, so reject the whole alias family. The rule and wording live once
+  // in the --device forwarding table so classification and error can't drift.
   if (hostTargetGiven(options).length) {
     const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
     console.error(chalk.red(RUN_OPTION_REJECT_MESSAGES.terminal));
@@ -780,11 +663,9 @@ async function handleTerminalHandoff(
     process.exit(1);
   }
 
-  // `--project` owns the working directory, but the main action resolves it far
-  // below this handoff — so without this the tab would open in THIS process's
-  // cwd (launchd's `/` for a menu-bar click) while the run inside it moved to
-  // the project. `forRemote: false` because --terminal is always local (--device
-  // is rejected above).
+  // `--project` owns the working directory but the main action resolves it far below this handoff,
+  // so without this the tab would open in this process's cwd (launchd's `/` for a menu-bar click)
+  // while the run moved to the project. `forRemote: false` because --terminal is always local.
   const cwd = await resolveRunCwd(options, { forRemote: false });
 
   const { getActiveSessions } = await import('../lib/session/active.js');
@@ -982,17 +863,14 @@ export function registerRunCommand(program: Command): void {
   runCmd.addOption(new Option('--on <name>', 'Alias of --device.').hideHelp());
   runCmd.addOption(new Option('--computer <name>', 'Alias of --device.').hideHelp());
 
-  // Internal: the `--device` dispatch forwards this so the REMOTE run prints its
-  // resolved session id as a one-line stdout sentinel (hosts/session-marker.ts),
-  // letting the launcher relate the remote-created session back to itself for
-  // every agent — not just Claude, whose id it forces up front.
+  // Internal: the `--device` dispatch forwards this so the remote run prints its resolved session
+  // id as a one-line stdout sentinel (hosts/session-marker.ts), letting the launcher map the
+  // remote session for every agent, not just Claude, whose id it forces up front.
   runCmd.addOption(new Option('--emit-session-id', 'internal: print the resolved session id for a --device launcher to capture').hideHelp());
 
-  // Required for the documented `agents run <agent> [prompt] -- <native flags>`
-  // passthrough: commander >=13 rejects excess operands by default, so any
-  // post-`--` token died with "too many arguments" before the action ran. The
-  // action re-derives the `--` boundary from rawArgs and still errors on excess
-  // operands that are NOT behind `--`.
+  // Required for the `agents run <agent> [prompt] -- <native flags>` passthrough: commander >=13
+  // rejects excess operands by default, so any post-`--` token died with "too many arguments". The
+  // action re-derives the `--` boundary from rawArgs; excess operands not behind `--` still error.
   runCmd.allowExcessArguments(true);
 
   setHelpSections(runCmd, {
@@ -1139,12 +1017,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
   runCmd.action(async (agentSpec: string | undefined, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
       bootMark('run-action:enter');
-      // Capture everything after -- as passthrough args forwarded verbatim to the
-      // underlying CLI. Commander strips the literal `--` and folds what follows
-      // into the positional operands (so `agents run codex -- --yolo` would parse
-      // `--yolo` as the PROMPT) — recover the boundary from rawArgs instead of
-      // operand counts. Excess operands not behind `--` are still an error (an
-      // unquoted prompt must not silently become agent flags).
+      // Capture everything after -- as verbatim passthrough args. Commander strips the `--` and
+      // folds what follows into operands (`agents run codex -- --yolo` parses `--yolo` as the
+      // PROMPT); recover the boundary from rawArgs. Excess operands not behind `--` still error.
       const rawArgs: string[] = process.argv;
       const separatorIdx = rawArgs.indexOf('--');
       const passthroughArgs = separatorIdx === -1 ? [] : rawArgs.slice(separatorIdx + 1);
@@ -1208,11 +1083,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      // --terminal: this process can't host the TUI (a menu-bar click, a script),
-      // so hand the run to a real terminal and exit. Resolved from the user's own
-      // live sessions, so it opens where they already work. Done before every
-      // other dispatch path because the tab re-runs this same argv without the
-      // flag — arming --notify or picking a version here would happen twice.
+      // --terminal: this process can't host the TUI (menu-bar click, script), so hand the run to a
+      // real terminal and exit. Done before every other dispatch path because the tab re-runs this
+      // argv without the flag, so arming --notify or picking a version here would happen twice.
       if (options.terminal) {
         await handleTerminalHandoff(agentSpec, options, prompt);
         return;
@@ -1251,11 +1124,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      // --device naming this machine (short id, MagicDNS name, loopback, or the
-      // `interactive` sentinel pinned here) is a local run, not a self-SSH: the
-      // hop probes its own login shell and times out under load. Pinned here,
-      // ahead of every placement gate, so the bare-interactive default sees an
-      // explicit local choice rather than an empty host set.
+      // --device naming this machine (short id, MagicDNS name, loopback, or `interactive`) is a
+      // local run, not a self-SSH, which probes its own login shell and times out under load.
+      // Pinned ahead of every placement check so the bare-interactive default sees a local choice.
       {
         const { isSelfHost } = await import('../lib/devices/self-host.js');
         const { isDeviceInteractive, resolveInteractiveDevice } = await import('../lib/devices/interactive-host.js');
@@ -1281,10 +1152,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         return;
       }
 
-      // --notify: post a desktop notification when this run finishes. Armed on
-      // process exit so it covers EVERY dispatch path below (local, --device,
-      // --lease, the error path) instead of one branch. Only for headless runs
-      // — an interactive run ends in front of the person who started it.
+      // --notify: post a desktop notification when the run finishes. Armed on process exit so it
+      // covers every dispatch path (local, --device, --lease, the error path). Headless runs only;
+      // an interactive run ends in front of the person who started it.
       if (options.notify && prompt !== undefined) {
         const { armRunFinishNotification } = await import('../lib/run-notify.js');
         armRunFinishNotification({
@@ -1296,11 +1166,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         });
       }
 
-      // Trailing picker markers request an interactive choice: `#` picks the
-      // account (and the version it signs in with), `@` picks the device, and
-      // `#@`/`@#` ask both. Strip only those terminal markers; concrete
-      // agent@version pins and `#label` account pins retain their meaning in
-      // every dispatch path below.
+      // Trailing picker markers request an interactive choice: `#` the account (and its sign-in
+      // version), `@` the device, `#@`/`@#` both. Strip only terminal markers; concrete
+      // agent@version pins and `#label` account pins keep their meaning in every dispatch path.
       const pickerMarkers = parseRunPickerMarkers(agentSpec);
       const accountPickerRequested = pickerMarkers.accountPicker;
       const devicePickerRequested = pickerMarkers.devicePicker;
@@ -1313,10 +1181,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         ));
         process.exit(1);
       }
-      // Peel `#name` off before --device dispatch so the selector rides the hop
-      // unchanged and the peer resolves ITS slot (PHNX-3940 T5). The later local
-      // parse is idempotent when the values match. A bare trailing `#` was the
-      // picker marker above, so it can never land here as an empty label.
+      // Peel `#name` off before --device dispatch so the selector rides the hop unchanged and the
+      // peer resolves its own slot (PHNX-3940 T5). The later local parse is idempotent when values
+      // match. A bare trailing `#` is the picker marker, so it never lands here as an empty label.
       {
         const labelParts = normalizedAgentSpec.split('#');
         if (labelParts.length > 2 || labelParts[1] === '') {
@@ -1401,10 +1268,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       let resolvedResumeSource: import('@phnx-labs/sessions-cli/reader').SessionMeta | undefined;
       let resolvedRecoveryTarget: import('../lib/session/recovery.js').SessionRecoveryTarget | undefined;
 
-      // Concrete resume ids resolve BEFORE placement. Full UUIDs take the local
-      // SQLite fast path; only a local miss fans out to the fleet. This lets a
-      // command entered on zion discover that the owning version-home is on a
-      // worker, while a command entered on that worker never pays for SSH.
+      // Concrete resume ids resolve before placement. Full UUIDs take the local SQLite fast path
+      // and only a local miss fans out to the fleet, so a command on zion can find that the owning
+      // version-home is on a worker while a command on that worker never pays for SSH.
       if (typeof options.resume === 'string' && options.resume.trim()) {
         const selector = options.resume.trim();
         const injectedSource = (() => {
@@ -1420,10 +1286,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           ? { kind: 'resolved' as const, session: injectedSource }
           : await (await import('./sessions.js')).resolveSessionMetadataValue(selector, { agent: runBaseAgentId ?? undefined });
         if (outcome.kind === 'partial') {
-          // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
-          // resolver already resolves an id found on the reachable fleet (SES-9a),
-          // so reaching here means the session was not found on any device we
-          // COULD reach — it may live on an unreachable peer we could not check.
+          // RUSH-2492: an unreachable peer is a warning, not a hard failure. The resolver already
+          // resolves an id found on the reachable fleet, so reaching here means the session was
+          // not found on any reachable device; it may live on a peer we could not check.
           const offline = outcome.failedPeers;
           console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
           console.error(chalk.red(`No session matching "${selector}" on any reachable device (${offline.length} unreachable, not checked).`));
@@ -1482,10 +1347,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
 
-        // Recovery is resolved on the device that owns the transcript. A remote
-        // dispatch is pinned to the source HARNESS (not `run auto`'s cross-harness
-        // picker); the peer repeats this block with the injected SessionMeta and
-        // chooses its own healthy version. Locally, resolve it now.
+        // Recovery is resolved on the device that owns the transcript. A remote dispatch is pinned
+        // to the source harness (not `run auto`'s cross-harness picker); the peer repeats this
+        // block with the injected SessionMeta and picks its own healthy version.
         const sourceAgent = resolvedResumeSource.agent as AgentId;
         if (!sourcePeer) {
           try {
@@ -1533,15 +1397,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (!resolvedResumeSource && runAutoDefaultsToAffinity(options)) options.device = 'auto';
       }
 
-      // The picker menus run HERE — after every conflict check, before
-      // placement resolves — so the picked account labels the device rows and
-      // the picked device is concrete for every host branch below.
-      //   `#@`/`@#`: account first, against THIS machine's slots; the picked
-      //     account becomes options.account and the device menu shows its
-      //     ✓/– per-device mark. A remote device pick dispatches with
-      //     `<agent>#<label>` so the peer resolves its own slot.
-      //   `@`: just the device menu; picking this machine is a plain local run.
-      // Either menu cancelled (Esc/Ctrl-C) launches nothing and exits 0.
+      // Picker menus run here, after every conflict check and before placement, so the picked
+      // account labels the device rows and the picked device is concrete. `#@`/`@#`: account
+      // first, then device. Cancel launches nothing.
       let upFrontAccountPick: import('../lib/accounting/rotate.js').RotateCandidate | null = null;
       if (accountPickerRequested && devicePickerRequested) {
         const baseName = normalizedAgentSpec.split('#')[0].split('@')[0];
@@ -1600,11 +1458,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (!isSelfHost(pickedDevice)) options.device = pickedDevice;
       }
 
-      // Default placement (PHNX-4083): a bare human-facing `agents run
-      // <harness>` (no prompt, real TTY, no placement flags, not a dispatched
-      // hop) places itself like `--device auto` — a marker left off is decided
-      // for you. Headless runs (a prompt, --json, teams/routines/hooks) keep
-      // running in place, unchanged.
+      // Default placement (PHNX-4083): a bare human-facing `agents run <harness>` (no prompt, real
+      // TTY, no placement flags, not a dispatched hop) places itself like `--device auto`.
+      // Headless runs (a prompt, --json, teams/routines/hooks) run in place.
       const defaultPlacement = bareInteractiveRunDefaultsToDeviceAuto(
         options,
         { prompt, devicePickerRequested },
@@ -1697,13 +1553,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
         }
 
-        // ── F3 reuse (RUSH-1922) + F5 net-mode (RUSH-1924) ───────────────────
-        // Resolve which box this run targets and how it is networked BEFORE any
-        // provisioning. `--box` is an explicit reuse; otherwise, on an
-        // interactive tty, offer the warm boxes as a reuse picker. Headless runs
-        // never block: leaseAndRun itself is reuse-first against the profile
-        // pool (a ready pool box is reused; none ready → warm a fresh one).
-        // `--fresh` opts out of every reuse path.
+        // F3 reuse (RUSH-1922) + F5 net-mode (RUSH-1924): resolve which box this run targets and
+        // how it is networked before provisioning. `--box` is an explicit reuse; on a tty, offer
+        // warm boxes as a picker; headless never blocks. `--fresh` opts out of reuse.
         const leaseSecretsBundle = process.env.AGENTS_LEASE_SECRETS_BUNDLE;
         const nowSecs = Math.floor(Date.now() / 1000);
         let reuseSlug: string | undefined = options.box;
@@ -1803,10 +1655,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         let credentialRuntimes: AgentId[] = [];
         let dispatchProfile: import('../lib/crabbox/lease.js').LeaseDispatchProfile | undefined;
 
-        // `--lease` requires a prompt (guarded above), so it is headless by
-        // contract — never block on an interactive picker. Provision exactly the
-        // one runtime this run needs, inferred from the agent, not every
-        // signed-in CLI (which would ship unrelated tokens to a throwaway box).
+        // `--lease` requires a prompt (guarded above), so it is headless by contract and never
+        // blocks on a picker. Provision exactly the one runtime this run needs, inferred from the
+        // agent, not every signed-in CLI, which would ship unrelated tokens to a throwaway box.
         if (profileExists(agentName)) {
           try {
             const profile = readProfile(agentName);
@@ -1846,10 +1697,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // proceeds with its portable provider environment instead.
         assertNoNativeOAuthTransfer(credentialRuntimes, detected);
 
-        // Headless-by-contract: don't prompt, but print exactly what ships and
-        // where — copying an auth token to a cloud box is a credential transfer.
-        // The box is destroyed after the run, so the credential's lifetime is
-        // bounded by the run.
+        // Headless by contract: don't prompt, but print exactly what ships and where, since
+        // copying an auth token to a cloud box is a credential transfer. The box is destroyed
+        // after the run, bounding the credential's lifetime.
         const whatShips = dispatchProfile
           ? `profile '${dispatchProfile.name}'`
           : `${runtime} runtime setup`;
@@ -1873,13 +1723,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
         const claudeCredentialsJson: null = null;
 
-        // Progress UI (F2, RUSH-1921). A self-throttled spinner (NOT ora — see
-        // progress.ts) covers provisioning; the box-side bootstrap then streams a
-        // structured step stream (sync → install → runtime → creds → …) via the
-        // router's `onStep`, and each step renders as a checklist line through the
-        // lib's `renderStepLine` (✔ <Step> — <detail> (<elapsed>)). The agent's own
-        // output prints verbatim after the box-side marker. Rule: only ONE spinner
-        // phase is active at a time, so it can never storm.
+        // Progress UI (F2, RUSH-1921): a self-throttled spinner (progress.ts) covers provisioning;
+        // box-side bootstrap then streams steps via the router's `onStep`, rendered by
+        // `renderStepLine`. One spinner phase at a time.
         const { createLeaseOutputRouter, createSpinner, renderStepLine } = await import('../lib/crabbox/progress.js');
         const spinner = createSpinner({ stream: process.stderr });
         let warmupTimer: ReturnType<typeof setInterval> | undefined;
@@ -1887,10 +1733,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
         const jsonMode = options.json === true;
         const stepsTty = Boolean(process.stderr.isTTY) && !jsonMode;
-        // The step currently in flight (its label spins on a TTY). It is persisted
-        // as a ✔ line when the NEXT step arrives (whose elapsedMs measures how long
-        // THIS step's block took) — or, for the last step, when agent output or
-        // teardown begins.
+        // The step currently in flight (its label spins on a TTY). It is persisted as a ✔ line
+        // when the next step arrives (whose elapsedMs measures this step), or, for the last step,
+        // when agent output or teardown begins.
         let activeStep: import('../lib/crabbox/progress.js').LeaseStep | null = null;
         const flushStep = (elapsedMs?: number) => {
           if (!activeStep) return;
@@ -1989,16 +1834,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // over SSH instead of running locally. The three flags are aliases.
       const hostGiven = hostTargetGiven(options);
 
-      // Auto-sync this run's redacted trajectory when it exits, so the console is
-      // never stale and a session link/QR resolves the moment the run finishes
-      // (PHNX-3628). Armed HERE — after hostGiven is finalized — so every
-      // remote-placement signal is already reflected in options: --device/--on/
-      // --computer and --where device: (expanded to options.host above), AND the
-      // --resume-to-peer redirect that sets options.host during resume
-      // resolution. A run that will dispatch remotely (hostGiven non-empty, or
-      // --lease/--box) has its trajectory on that box and never arms a local
-      // sync; --cloud returned earlier. The module additionally gates on opt-in
-      // (signed in + already synced once) and is best-effort.
+      // Auto-sync this run's redacted trajectory on exit so the console is never stale and a
+      // session link/QR resolves when the run finishes (PHNX-3628). Armed after hostGiven is final
+      // so every remote-placement signal counts. Remote/--lease/--box runs never arm a local sync.
       if (
         prompt !== undefined &&
         hostGiven.length === 0 &&
@@ -2019,10 +1857,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
         const hostName = hostGiven[0];
-        // Note: a `run auto` dispatch needs no marker forwarded from here — the
-        // dispatch layer (hosts/dispatch.ts remoteRunShellPrelude) exports the
-        // chain-hop guard into the remote shell for BOTH interactive and
-        // headless paths, keyed off the agent name being `auto`.
+        // A `run auto` dispatch needs no marker forwarded from here: the dispatch layer
+        // (hosts/dispatch.ts remoteRunShellPrelude) exports the chain-hop guard into the remote
+        // shell for interactive and headless paths, keyed off the agent name being `auto`.
         const { resolveHostRunTarget, resolveHostSessionId, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
@@ -2049,10 +1886,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
           return;
         }
-        // Shared resolution (name → capability tag → error). A password-auth
-        // device throws DeviceOffloadUnsupportedError inside the helper and
-        // propagates untouched — it's printed cleanly by the top-level catch in
-        // index.ts (covers every resolveHost caller).
+        // Shared resolution (name -> capability tag -> error). A password-auth device throws
+        // DeviceOffloadUnsupportedError inside the helper and propagates untouched; the top-level
+        // catch in index.ts prints it cleanly (covers every resolveHost caller).
         let host;
         try {
           host = await resolveHostRunTarget(hostName, { any: options.any });
@@ -2065,10 +1901,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
         try {
           const [runAgent, rawRunVersion] = normalizedAgentSpec.split('#')[0].split('@');
-          // Forward the explicit @version pin verbatim. Resolving aliases like
-          // @latest locally would check local installs, but the remote host may
-          // have versions the laptop does not. The remote agents CLI resolves
-          // aliases against its own installed versions.
+          // Forward the explicit @version pin verbatim. Resolving aliases like @latest locally
+          // would check local installs, but the remote may have versions the laptop lacks; the
+          // remote CLI resolves aliases against its own installed versions.
           const runVersion = rawRunVersion || undefined;
 
           // Normalize the effective strategy exactly like the local path so we
@@ -2084,35 +1919,25 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
           const runStrategy = options.balanced ? 'balanced' : explicitStrategy ?? undefined;
 
-          // Working directory on the host: an explicit --remote-cwd is used
-          // verbatim; --cwd/--project are made portable (a local-home absolute
-          // becomes `~/…` so the remote shell re-roots it at ITS home).
-          //
-          // With neither flag, mirror the LOCAL cwd's home-relative path onto
-          // the host (deriveMirroredCwd). Otherwise every host run starts in the
-          // remote `$HOME` — launch an agent from a repo and it opens with no
-          // project, and you `cd` by hand every time. The same checkout at the
-          // same home-relative path on both boxes is the normal fleet layout, so
-          // the mirror usually hits; when the host lacks that directory the run
-          // falls back to the remote home rather than failing.
+          // Working directory on the host: an explicit --remote-cwd is verbatim; --cwd/--project
+          // are made portable (a local-home absolute becomes `~/...`). With neither, mirror the
+          // local cwd's home-relative path (deriveMirroredCwd).
           const { toRemotePortable } = await import('../lib/project-root.js');
           const { deriveMirroredCwd } = await import('../lib/hosts/dispatch.js');
           const explicitHostCwd = options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined);
           const hostCwd = explicitHostCwd ?? deriveMirroredCwd(process.cwd());
           const mirrorHostCwd = explicitHostCwd === undefined;
           const hostAddDirs = options.addDir.length > 0 ? options.addDir.map(toRemotePortable) : undefined;
-          // `--resume [id]`: commander yields the string id, or `true` when the
-          // flag is passed bare. A bare resume needs the interactive picker,
-          // which can't run over a detached remote dispatch — only forward a
-          // concrete id.
+          // `--resume [id]`: commander yields the string id, or `true` when bare. A bare resume
+          // needs the interactive picker, which can't run over a detached remote dispatch, so only
+          // forward a concrete id.
           const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
 
           let hostCopyCreds: undefined;
 
-          // Decide whether this host run is interactive. No prompt always means
-          // interactive (matching local resolveInteractive); --interactive forces
-          // interactive even when a prompt is provided; --headless forces headless
-          // and therefore requires a prompt.
+          // Decide whether this host run is interactive: no prompt always means interactive
+          // (matching local resolveInteractive); --interactive forces interactive even with a
+          // prompt; --headless forces headless and so requires a prompt.
           if (options.interactive && options.headless) {
             console.error(chalk.red('--interactive and --headless are mutually exclusive. Pass one, or neither (mode is inferred from prompt presence).'));
             process.exit(1);
@@ -2136,20 +1961,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               console.error(chalk.red('--no-follow is not compatible with interactive host runs. Interactive runs are attached by definition.'));
               process.exit(1);
             }
-            // Mirror the local path (lib/exec.ts): only Claude accepts a forced
-            // `--session-id`. Adopt the caller's id when present; otherwise mint
-            // one here. Registering that same id keeps the local index aligned
-            // with the remote agent. On resume, don't mint a new one.
+            // Mirror the local path (lib/exec.ts): only Claude accepts a forced `--session-id`.
+            // Adopt the caller's id when present, else mint one here, and register it so the local
+            // index matches the remote agent. On resume, don't mint a new one.
             const hostSessionId = resolveHostSessionId(runAgent, resumeId, options.sessionId);
-            // For every OTHER agent the remote coins its own id, which we can't
-            // know up front. Forward a launch id we control as AGENT_LAUNCH_ID:
-            // the remote `agents run` adopts it (exec.ts resolveLaunchId) and its
-            // SessionStart hook records the real id under that exact key, so after
-            // the stream we resolve the id by one ssh read of the remote hook
-            // record — the same launch-id join used locally (RUSH-2034). Not
-            // needed for Claude (id forced) or resume (id already known).
-            // `run auto` ALWAYS joins: the remote picks the harness, so an
-            // explicit --session-id is only adopted by a claude pick.
+            // Other agents' remotes coin their own id, unknowable up front. Forward a launch id as
+            // AGENT_LAUNCH_ID: the remote adopts it and its SessionStart hook records the real id
+            // under it, so one ssh read resolves it (RUSH-2034). Not needed for Claude or resume.
             const correlationLaunchId =
               hostInteractiveNeedsCorrelationId(runAgent, hostSessionId, resumeId) ? randomUUID() : undefined;
             const hostEnv = correlationLaunchId
@@ -2215,13 +2033,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               forceInteractive: options.interactive,
               copyCreds: hostCopyCreds,
             });
-            // Resolve a non-Claude agent's REAL remote session id now the run has
-            // booted (its hook has fired on the peer): one ssh read of the remote
-            // hook record, keyed by the launch id we forwarded. Register it so the
-            // run shows in `agents sessions` and can be reconnected/focused —
-            // closing the non-Claude gap RUSH-2033 left. Best-effort: an
-            // unreachable host or a not-yet-landed record leaves the run un-mapped
-            // rather than mis-mapped.
+            // Resolve a non-Claude agent's remote session id once the run booted: one ssh read of
+            // the hook record keyed by the forwarded launch id, registered so the run shows in
+            // `agents sessions` (RUSH-2033). A missing record leaves it un-mapped.
             let resolvedRemoteId: string | undefined;
             if (correlationLaunchId) {
               const { resolveRemoteSessionId } = await import('../lib/hosts/remote-session-id.js');
@@ -2241,19 +2055,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 });
               }
             }
-            // A network drop kills the local ssh client (exit 255). What the
-            // remote agent does next depends on the peer's tmux.enabled
-            // (PHNX-3316): wrapped, it survives in its detached pane and the
-            // reconnect rejoins it; bare (the default), the drop SIGHUPs it and
-            // the reconnect resumes the session in place from disk. Either way,
-            // with a known session id (Claude's forced id, a resumed run, or a
-            // non-Claude id we just resolved from the remote hook record) we
-            // reconnect automatically instead of exiting — the user never has
-            // to notice the drop and `agents sessions focus` by hand.
-            // `raw` runs opted out of all of this, so there is nothing to
-            // reconnect to. For `run auto` prefer the join-resolved id (the
-            // harness the remote ACTUALLY picked) over the explicit
-            // --session-id only claude adopts.
+            // A network drop kills the local ssh client (exit 255). The remote agent survives in
+            // its detached pane if the peer's tmux.enabled is set (PHNX-3316), else is SIGHUP'd
+            // and resumed from disk. With a known session id we reconnect automatically.
             const { pickReconnectTarget, reconnectInteractiveSession, afterInteractiveRemoteExit, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
             const reconnectTarget = pickReconnectTarget({
               agent: runAgent,
@@ -2354,11 +2158,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      // --resume-checkpoint short-circuits normal dispatch entirely: the
-      // checkpoint already carries the agent, version, prompt, session id,
-      // iteration, and loop config of the killed run. Reconstruct ExecOptions
-      // straight from it and continue the loop from the last completed
-      // iteration, reusing the SAME runId/runDir (issue #332).
+      // --resume-checkpoint short-circuits normal dispatch: the checkpoint carries the killed
+      // run's agent, version, prompt, session id, iteration and loop config. Rebuild ExecOptions
+      // and continue from the last completed iteration, reusing runId/runDir (issue #332).
       if (options.resumeCheckpoint) {
         const { readCheckpoint } = await import('../lib/checkpoint.js');
         const { runLoop } = await import('../lib/loop.js');
@@ -2381,10 +2183,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           json: true,
           headless: true,
         };
-        // Resume honors the checkpoint's loop config, but lets the resume
-        // command RAISE the bounds field-by-field — `--max-iterations 4` on a
-        // checkpoint capped at 2 is the natural "continue, run more" gesture.
-        // Flags override; unspecified fields fall through from the checkpoint.
+        // Resume honors the checkpoint's loop config but lets the resume command raise the bounds
+        // field by field (`--max-iterations 4` on a checkpoint capped at 2). Flags override;
+        // unspecified fields fall through from the checkpoint.
         const resumeLoop = { ...cp.loop };
         if (options.maxIterations !== undefined) {
           const n = Number(options.maxIterations);
@@ -2528,15 +2329,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // WORKFLOW.md `loop:` block (issue #332). When a workflow declares it,
       // `agents run <workflow>` honors the loop without a --loop flag.
       let workflowLoop: import('../lib/workflows.js').LoopConfigRaw | undefined;
-      // WORKFLOW.md `for_each:` block (issue #343). When a workflow declares it,
-      // `agents run <workflow>` runs the producer, expands one stage teammate per
-      // produced item, and drives the teams supervisor to drain — no `teams`
-      // subcommands needed.
+      // WORKFLOW.md `for_each:` block (issue #343): `agents run <workflow>` runs the producer,
+      // expands one stage teammate per item and drives the teams supervisor to drain, with no
+      // `teams` subcommands needed.
       let workflowForEach: import('../lib/workflows.js').ForEachSpec | undefined;
-      // True once this run copies ≥1 dispatchable subagent into the shared agents
-      // dir. Used below to keep the `Task` tool in a `tools:`-restricted workflow —
-      // an orchestrator handed subagents but denied `Task` cannot reach them and
-      // degenerates to a no-op ("I'll wait for the completion notification").
+      // True once this run copies at least one dispatchable subagent into the shared agents dir.
+      // Keeps the `Task` tool in a `tools:`-restricted workflow: an orchestrator given subagents
+      // but denied `Task` cannot reach them and degenerates to a no-op.
       let workflowHasSubagents = false;
       const cwd = options.cwd ?? process.cwd();
 
@@ -2556,15 +2355,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
 
       if (autoHarnessRequested) {
-        // Harness layer (RUSH-2132): weighted pick across installed harnesses
-        // by best-account headroom. Zero healthy accounts anywhere fails loud
-        // — launching a default "because it's there" is how a rotate loop
-        // hammers an exhausted account.
+        // Harness layer (RUSH-2132): weighted pick across installed harnesses by best-account
+        // headroom. Zero healthy accounts anywhere fails loud; launching a default "because it's
+        // there" is how a rotate loop hammers an exhausted account.
         const byHarness = await collectHarnessCandidates();
-        // F1 (RUSH-2185 / EXEC-23a): a prompt-less run is interactive; only
-        // harnesses that can open a REPL with no argv are valid candidates.
-        // cursor-agent and similar exit immediately without a prompt, which
-        // leaves a silent [detached] pane and an orphan session.
+        // F1 (RUSH-2185 / EXEC-23a): a prompt-less run is interactive, so only harnesses that can
+        // open a REPL with no argv are candidates. cursor-agent and similar exit immediately,
+        // leaving a silent [detached] pane and an orphan session.
         const interactive = prompt === undefined && options.headless !== true;
         const replCapable = interactive ? new Set(capableAgents('interactiveRepl')) : null;
         const candidateHarness = replCapable
@@ -2592,10 +2389,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.stderr.write(chalk.yellow(`[agents] --session-id ignored: auto picked ${agent} (only claude accepts a forced session id)\n`));
         }
       } else if (profileExists(rawAgent)) {
-        // A profile by this exact name exists. Profiles bind (host agent,
-        // version, env overrides, keychain-backed auth) so Chinese models
-        // (Kimi, DeepSeek, Qwen, GLM) can run inside Claude Code without a
-        // local proxy, including when the profile name matches a native id.
+        // A profile by this exact name exists. Profiles bind host agent, version, env overrides
+        // and keychain-backed auth so Chinese models (Kimi, DeepSeek, Qwen, GLM) run inside Claude
+        // Code without a local proxy, even when the profile name matches a native id.
         try {
           const resolved = resolveProfileForRun(rawAgent, options.model);
           agent = resolved.agent;
@@ -2609,16 +2405,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           if (resolved.tierNote) {
             process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
           }
-          // A tier token (cheap/default/best/ultra) already resolved against
-          // this PROFILE's own `models:` map above, when the profile opts in.
-          // Replace the raw --model value here so the tier never reaches the
-          // native, HOST-catalog tier block below. When the profile has no
-          // `models:` opt-in at all, resolvedModel stays undefined and
-          // options.model is left as the raw tier token on purpose — the
-          // "cost tiers don't apply to custom harness ..." discard guard further
-          // down this function is the canonical fallback for that case, and
-          // this block must not race it with a second, differently-worded
-          // message.
+          // A tier token (cheap/default/best/ultra) already resolved against this profile's own
+          // `models:` map, when it opts in. Replace the raw --model so the tier never reaches the
+          // host-catalog tier block below; otherwise the raw token is left for the discard guard.
           if (resolved.resolvedModel !== undefined) {
             options.model = resolved.resolvedModel;
           }
@@ -2629,11 +2418,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       } else if (isValidAgent(rawAgent)) {
         agent = rawAgent;
       } else if (resolveWorkflowRef(rawAgent, cwd)) {
-        // Workflow: explicit directory, project .agents/workflows/<name>, user, system, or extra repo.
-        // Resolution follows resource precedence: direct path, then project > user > system > extras.
-        // Structure:
-        //   WORKFLOW.md        ← orchestrator instructions fed to claude as system prompt
-        //   subagents/*.md     ← flat .md files copied to ~/.claude/agents/ for Agent tool discovery
+        // Workflow: explicit directory, project .agents/workflows/<name>, user, system or extra
+        // repo, by resource precedence. WORKFLOW.md is the orchestrator's system prompt;
+        // subagents/*.md are flat files copied to ~/.claude/agents/ for Agent tool discovery.
         const workflowDir = resolveWorkflowRef(rawAgent, cwd)!;
         agent = 'claude';
         const workflowFrontmatter = parseWorkflowFrontmatter(workflowDir);
@@ -2647,29 +2434,22 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         const versionHome = getVersionHomePath('claude', resolvedVersion ?? getGlobalDefault('claude') ?? '');
         const claudeAgentsDir = path.join(versionHome, '.claude', 'agents');
 
-        // Copy subagents/*.md into ~/.claude/agents/ so Claude's Agent tool finds
-        // them. allowedAgents enforcement (issue #324): when the workflow declares
-        // `allowedAgents:`, copy ONLY those subagent files (matched by filename
-        // stem, e.g. security.md -> "security"). A subagent whose definition isn't
-        // on disk can't be dispatched — this is the actual, fail-closed mechanism.
-        // (Claude's `--agents` flag DEFINES custom agents; it does not restrict
-        // which subagents may be dispatched, so it is not used here.)
+        // Copy subagents/*.md into ~/.claude/agents/ so Claude's Agent tool finds them.
+        // allowedAgents (issue #324): when declared, copy only those (by stem); a subagent not on
+        // disk can't be dispatched, so this is fail-closed.
         const subagentsDir = path.join(workflowDir, 'subagents');
         const allowedAgents = workflowFrontmatter?.allowedAgents;
         if (fs.existsSync(subagentsDir)) {
           fs.mkdirSync(claudeAgentsDir, { recursive: true });
-          // Fail-closed subagent scoping (issue #324). resolveAllowedSubagents
-          // distinguishes "allowedAgents absent" (undefined -> copy all) from
-          // "present but empty" (=> copy ZERO). An explicit `allowedAgents: []`
-          // must mean "allow none", never silently widen to "allow all".
+          // Fail-closed subagent scoping (issue #324). resolveAllowedSubagents distinguishes
+          // "allowedAgents absent" (copy all) from "present but empty" (copy zero): an explicit
+          // `allowedAgents: []` means allow none, never widen to all.
           const allFiles = fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md'));
           const { allowedStems, missing } = resolveAllowedSubagents(allFiles, allowedAgents);
           const allowStemSet = new Set(allowedStems);
-          // Fail-closed prune (issue #401, follow-up to #324). A prior
-          // unrestricted run may have left workflow subagent files that THIS
-          // scoped run does not permit; they linger in the shared dir and stay
-          // dispatchable. Remove those no-longer-permitted workflow-managed
-          // files BEFORE writing the allowed set — never a user's own subagent.
+          // Fail-closed prune (issue #401, follow-up to #324): a prior unrestricted run may have
+          // left workflow subagent files this scoped run does not permit, which stay dispatchable.
+          // Remove those workflow-managed files first, never a user's own subagent.
           const pruned = pruneStaleWorkflowSubagents(claudeAgentsDir, allFiles, allowedStems);
           if (pruned.length > 0) {
             process.stderr.write(chalk.gray(`[workflow] pruned ${pruned.length} stale workflow subagent(s) from shared dir: ${pruned.join(', ')}\n`));
@@ -2734,10 +2514,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
         }
 
-        // Auto-inject secrets bundles declared in the workflow's frontmatter `secrets:` field.
-        // Union with any --secrets flags the user passed; dedupe. Skip when --no-auto-secrets is set.
-        // (Commander stores the negated flag as `autoSecrets: false` — the old
-        // `noAutoSecrets` read was never populated, making the flag a no-op.)
+        // Auto-inject secrets bundles declared in the workflow's `secrets:`, unioned with
+        // --secrets; skipped with --no-auto-secrets. Commander stores the negated flag as
+        // `autoSecrets: false`; the old `noAutoSecrets` read was never populated (a no-op flag).
         if (options.autoSecrets !== false) {
           const declared = workflowFrontmatter?.secrets ?? [];
           if (declared.length > 0) {
@@ -2756,14 +2535,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
         }
 
-        // Capability scoping: translate WORKFLOW.md `tools:` / `mcpServers:` into
-        // the Claude headless flags that ACTUALLY restrict the run (verified
-        // against `claude --help`): tools -> `--tools` (restricts the available
-        // built-in tool set), mcpServers -> `--mcp-config` + `--strict-mcp-config`
-        // (loads ONLY the named servers). `allowedAgents:` is enforced separately,
-        // above, by copying only the allowed subagent definition files. Gated
-        // behind the `allowlist` capability — if the resolved agent lacks it, warn
-        // loudly rather than silently dropping the declaration (issue #324).
+        // Capability scoping: translate WORKFLOW.md `tools:`/`mcpServers:` into Claude headless
+        // flags: tools -> `--tools`, mcpServers -> `--mcp-config` + `--strict-mcp-config`. Needs
+        // the `allowlist` capability; if absent, warn loudly, never silently drop (issue #324).
         const scopeVersion = resolveVersionAlias('claude', version) ?? getGlobalDefault('claude') ?? undefined;
         const allowlist = supports('claude', 'allowlist', scopeVersion);
         const tools = workflowFrontmatter?.tools;
@@ -2794,11 +2568,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             if (missing.length > 0) {
               process.stderr.write(chalk.yellow(`[workflow] mcpServers not found in registry, skipped: ${missing.join(', ')}\n`));
             }
-            // Fail-closed: `mcpServers:` was declared, so the run MUST be scoped to
-            // a config — never fall through to the user's ambient MCP set. When
-            // zero declared names resolve to installed servers, write a locked-down
-            // empty config (`{ "mcpServers": {} }`); with `--strict-mcp-config` the
-            // run gets NO MCP servers, which is LESS access than ambient (issue #324).
+            // Fail-closed: `mcpServers:` was declared, so scope the run to a config, never the
+            // user's ambient MCP set. With no declared name resolving to an installed server,
+            // write an empty config; `--strict-mcp-config` then gives NO servers (#324).
             const mcpConfig = buildWorkflowMcpConfig(servers);
             const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-workflow-mcp-'));
             workflowMcpConfigPath = path.join(configDir, 'mcp-config.json');
@@ -2998,10 +2770,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (resolvedRecoveryTarget.mode === 'native') {
           resumeNative = true;
           resumeSessionId = session.id;
-          // The centralized recovery decision proves the transcript belongs to
-          // this exact isolated home and resolves any harness-specific launch cwd.
-          // Claude's indexed `session.cwd` is the first user-turn cwd, which may
-          // differ from the earlier cwd that selected projects/<cwd-key>.
+          // The centralized recovery decision proves the transcript belongs to this exact isolated
+          // home and resolves any harness-specific launch cwd. Claude's indexed `session.cwd` is
+          // the first user-turn cwd, which may differ from the one selecting projects/<cwd-key>.
           if (!options.cwd && resolvedRecoveryTarget.cwd) options.cwd = resolvedRecoveryTarget.cwd;
           if (!options.quiet) process.stderr.write(chalk.gray(
             `Resuming ${agent} ${session.shortId} (native) in ${options.cwd ?? cwd}\n`,
@@ -3026,31 +2797,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // synthesize a same-agent fallback chain from the other healthy accounts
       // (issue #348). Stays null unless a non-pinned strategy actually rotated.
       let rotationResult: import('../lib/accounting/rotate.js').RotateResult | null = null;
-      /**
-       * The PRIMARY harness's configured run-default mode/effort, carried across a
-       * preflight alternate-harness handoff (PHNX-3999 F19).
-       *
-       * Run defaults are resolved after the harness is known, so without this a
-       * handoff would silently adopt the ALTERNATE's configured defaults — a
-       * primary configured `mode: plan` becoming the alternate's `mode: skip`
-       * escalates a read-only intent into an unattended writable run. The
-       * canonical mid-run cascade keeps the primary's resolved mode for the same
-       * reason (`runWithFallback` forwards `options.mode` and only re-derives the
-       * mode that was never configured at all). An IMPLICIT mode is deliberately
-       * not carried: it is the harness's own safe default, so the alternate's
-       * applies (identical to `modeWasImplicit ? implicitModeFor(agent)`).
-       */
+      /** The primary harness's run-default mode/effort, carried across a preflight alternate-
+       * harness handoff (PHNX-3999 F19). Without it a primary `mode: plan` could become the
+       * alternate's `mode: skip`, escalating read-only intent into an unattended writable run. */
       let handoffRunDefaults: ResolvedRunDefaults | undefined;
-      // Precomputed launchable-signed-in verdict for the ACTUAL launched
-      // candidate, fed to the pre-launch `run.launch` event so it need not
-      // re-probe. Sourced per resolution branch from the candidate that WON, not
-      // the original auto-pick: the interactive picker (RUSH-2334 / PHNX-2526)
-      // deliberately lets the user launch a LOGGED-OUT account, which is a
-      // different candidate than `rotationResult.picked` — reading the verdict off
-      // the auto-pick there would report `launchedLoggedOut:false` for a version
-      // that is actually logged out, the exact false-negative this event exists to
-      // prevent. Left undefined for pinned-default / explicit-pin so emitRunLaunch
-      // falls back to probing the version home itself.
+      // Precomputed launchable-signed-in verdict for the launched candidate, fed to `run.launch`
+      // so it need not re-probe. Taken from the winning candidate, not the auto-pick: the picker
+      // (RUSH-2334/PHNX-2526) can launch a logged-out account, which the auto-pick misreports.
       let launchSignedIn: boolean | null | undefined;
       let launchEmail: string | null | undefined;
       // Set when the zero-healthy path already announced a deliberate
@@ -3066,26 +2819,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
       const strategy = options.balanced ? 'balanced' : explicitStrategy ?? configuredStrategy;
 
-      // Strategy applies to bare (unpinned) invocations. Explicit @version and
-      // profiles already name the target. A --fallback chain does NOT pin the
-      // primary: it only names where to cascade on a rate limit, so the bare
-      // primary still resolves through the strategy — otherwise every
-      // `agents run claude --fallback codex` run lands on the pinned default
-      // account and account rotation silently stops (the gh-monitor heal bug).
-      // `pinned` still resolves so a logged-out default can yield to a signed-in
-      // sibling on this device (PHNX-2685); an explicit @version pin is unchanged.
-      // Bounded handoff loop: each iteration resolves an account for `agent`, and
-      // the only `continue` is the preflight exhaustion handoff below, which
-      // consumes one entry of the `--fallback` spec before retrying as that
-      // alternate. The spec is finite, so this terminates (PHNX-3999 F19).
-      // A balanced pick or the no-fresh-usage picker returns a CANDIDATE. Since
-      // PHNX-3940 a native candidate is a registered account SLOT, not the
-      // version home the executable lives in, so the spawn must resolve that
-      // slot (home + durable env) through the canonical local launch resolver.
-      // Without this the run launched the version home and whichever login it
-      // held: on yosemite-m0 (2026-09-23) the picker chose trp and Claude
-      // started as a different account in its first-run wizard. A remote run
-      // re-resolves on the peer, which runs this same code locally.
+      // Strategy applies to bare (unpinned) invocations. A --fallback chain does not pin the
+      // primary, or `run claude --fallback codex` would stop rotation (PHNX-2685). A native
+      // candidate is a registered slot (PHNX-3940): resolve its home/env via the launcher.
       const applyPickedCandidate = async (candidate: import('../lib/accounting/rotate.js').RotateCandidate): Promise<void> => {
         if (!candidate.nativeAccount || options.host || options.device) return;
         const { resolveLocalAccountLaunch } = await import('../lib/accounting/account-launch.js');
@@ -3112,11 +2848,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: custom harness pins its own version/auth\n`));
         } else {
           try {
-            // Account-centric candidate list: native version-home logins PLUS
-            // provider accounts (setup-token / API-key) that can auth this agent,
-            // so `--strategy balanced` spreads across ALL accounts, not just the
-            // ones sitting in a version home (RUSH-3182). Run-path only — the
-            // picker's other callers keep the native-only collector.
+            // Account-centric candidates: native version-home logins plus provider accounts
+            // (setup-token/API-key) that can auth this agent, so `--strategy balanced` spreads
+            // across all accounts (RUSH-3182). Run-path only.
             const { collectRunCandidatesForRun } = await import('../lib/accounting/account-pool-collect.js');
             bootMark('resolve-version:start');
             const routingModel = options.model ?? resolvedResumeSource?.model ?? workflowModel
@@ -3124,20 +2858,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             const resolved = await resolveRunVersion(agent, strategy, cwd, collectRunCandidatesForRun, routingModel);
             bootMark('resolve-version:done');
             if (resolved.exhausted) {
-              // Zero healthy accounts splits two ways, and conflating them is what
-              // stranded a logged-out harness with no way in at all (RUSH-2334):
-              //
-              // - THROTTLED (rate_limited / out_of_credits) -> fail loud (RUSH-2132).
-              //   The old behavior warned "found no usable version; falling back to
-              //   defaults" and launched the pinned default anyway — the exact move
-              //   that loops a rotate into an exhausted account. Only a window reset
-              //   clears it. The message text is a contract the Factory watchdog
-              //   tail-detects; do not reword it.
-              // - NEEDS A SIGN-IN (signed_out / revoked) -> launching IS the fix,
-              //   because the harness's own TUI is the login surface. So on a TTY we
-              //   carry the user into that login instead of erroring. Exiting here
-              //   made `agents run <agent>`, `agents run <agent>#`, and `agents use`
-              //   all dead-end with no reachable way to authenticate.
+              // Zero healthy accounts splits two ways (RUSH-2334). Throttled: fail loud
+              // (RUSH-2132); the Factory watchdog tail-detects the message, do not reword. Needs
+              // sign-in: launching is the fix, so on a TTY carry the user into the login TUI.
               const recoverable = signInRecoverableCandidates(resolved.exhausted);
               const { signInLaunchDecision } = await import('./run-account-picker.js');
               const decision = signInLaunchDecision({
@@ -3157,22 +2880,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 // would print a second, near-identical "looks logged out" warning.
                 signInLaunch = true;
               } else {
-                // Every account of this harness is throttled. A configured
-                // alternate exists for exactly this case, so hand off to it here
-                // rather than exiting — `runWithFallback` would only reach it
-                // after a run that can no longer start (PHNX-3999 F19). The
-                // alternate becomes the primary and is dropped from the spec, so
-                // the chain that remains never lists the agent now running.
-                //
-                // ONLY for a run shape `--fallback` is valid on. The handoff
-                // consumes the entry it uses, and the canonical --fallback
-                // validation runs later (it rejects interactive/--acp/--loop/
-                // --resume-checkpoint chains and requires a prompt) — so
-                // switching first on an ineligible shape would empty the spec,
-                // leave that guard nothing to reject, and start the alternate
-                // harness on a run the CLI refuses today. An ineligible shape
-                // never switches, so the spec survives and still fails there
-                // with its own message. See preflightHandoffEligible.
+                // Every account of this harness is throttled, so hand off to the configured
+                // alternate here, not after a run that can no longer start (PHNX-3999 F19). Only
+                // for shapes `--fallback` accepts. See preflightHandoffEligible.
                 const handoff = preflightHandoffEligible({
                   hasPrompt: prompt !== undefined,
                   interactive: options.interactive === true,
@@ -3212,13 +2922,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 process.exit(1);
               }
             } else if (resolved.noVerifiedUsage) {
-              // Entirely stale usage (PHNX-2526): every eligible account carries
-              // a stale-but-present usage number and none is verified, so the
-              // route would be a guess. NEVER auto-pick it. Interactive: show the
-              // account picker so a human chooses with the (stale) numbers in
-              // view. Unattended: fail loud with NO_VERIFIED_USAGE. The stale
-              // pool survives ONLY as `resolved.rotation.healthy` for bounded
-              // post-rejection failover, never as the initial pick.
+              // Entirely stale usage (PHNX-2526): every eligible account has stale usage and none
+              // is verified, so a pick would be a guess. Never auto-pick: interactive shows the
+              // picker; unattended fails loud with NO_VERIFIED_USAGE.
               const { noVerifiedUsageDecision, pickRunAccountCandidate } = await import('./run-account-picker.js');
               const decision = noVerifiedUsageDecision({
                 tty: isInteractiveTerminal(),
@@ -3262,11 +2968,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 launchEmail = resolved.rotation.picked.email;
                 await applyPickedCandidate(resolved.rotation.picked);
               }
-              // A balanced/available pick of a PROVIDER account (setup-token /
-              // API-key) carries `providerAccount`. Resolve its env through the
-              // same `resolveSpawnAccount` path an explicit `--account` uses, so
-              // exec injects the credential; a native pick has no providerAccount
-              // and resolved its slot home in applyPickedCandidate above.
+              // A balanced/available pick of a provider account (setup-token/API-key) carries
+              // `providerAccount`. Resolve its env via `resolveSpawnAccount`, as an explicit
+              // `--account` does, so exec injects the credential.
               const pickedProviderAccount = resolved.rotation?.picked.providerAccount;
               if (pickedProviderAccount) {
                 try {
@@ -3296,13 +3000,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       break;
       }
 
-      // Self-heal the launch target. A gutted install (JS wrapper present,
-      // native binary missing — a partial/raced npm extraction of the optional
-      // per-arch dependency) would otherwise spawn and die with a raw ENOENT
-      // inside the agent's own wrapper. Repair it in place (or fall back to a
-      // runnable version, re-pinning it) BEFORE we build the launch command.
-      // Skipped for headless resume-native/acp/loop paths only if it errored;
-      // here it runs for every normal dispatch. Best-effort log to stderr.
+      // Self-heal the launch target. A gutted install (JS wrapper present, native binary missing
+      // after a partial npm extraction) would die with a raw ENOENT. Repair in place, or fall back
+      // to a runnable version and re-pin it, before building the launch command.
       {
         const launchTarget = version ?? resolveVersion(agent, cwd) ?? undefined;
         if (launchTarget) {
@@ -3327,17 +3027,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
       bootMark('ensure-runnable:done');
 
-      // The harness may simply not be on this machine. The self-heal above only
-      // runs when a managed version resolved, so with nothing installed we used
-      // to fall through and spawn the bare `cliCommand`, which dies as
-      // `exec: cursor-agent: not found` (exit 127) after a misleading
-      // "looks logged out" banner (RUSH-2339). Probe the executable
-      // buildExecCommand will actually spawn and fail loud instead.
-      //
-      // This is an EXISTENCE probe, not "does agents-cli manage a version". A
-      // harness the user installed themselves (Homebrew, a vendor `curl | sh`, a
-      // distro package) has no version home and MUST still launch — the PATH
-      // branch of resolveLaunchBinary is what keeps that working.
+      // The harness may not be on this machine. Self-heal runs only when a managed version
+      // resolved, so with none installed we spawned bare `cliCommand` and died `exec: cursor-
+      // agent: not found` (RUSH-2339). Probe the executable; self-installed harnesses must work.
       {
         const { resolveLaunchBinary } = await import('../lib/exec.js');
         // `version` already carries the self-heal's resolution above (it assigns
@@ -3353,31 +3045,18 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       const defaultVersion = version ?? resolveVersion(agent, cwd);
 
-      // Re-apply the active rules preset before every launch (issue: preset
-      // changes via `setActiveRulesPreset` only took effect after an explicit
-      // `agents rules switch` / `agents sync`). Version-scoped, skip-fast when
-      // nothing changed — see lib/rules/run-sync.ts. Placed here (immediately
-      // after the resolved version is known, before ACP/loop/fallback branch
-      // off) so every downstream dispatch path for this agent+version sees a
-      // fresh rules file, not just the plain execAgent path. `defaultVersion`
-      // is null when nothing is installed yet — execAgent handles that error
-      // path itself; there's no version home to sync into.
+      // Re-apply the active rules preset before every launch: `setActiveRulesPreset` changes took
+      // effect only after `agents rules switch`/`sync`. Version-scoped and skip-fast
+      // (lib/rules/run-sync.ts), before ACP/loop/fallback branch.
       if (defaultVersion) {
         applyActiveRulesPresetAtRun(agent, defaultVersion, getVersionHomePath(agent, defaultVersion));
         applySystemResourcesAtRun(agent, defaultVersion, getVersionHomePath(agent, defaultVersion));
       }
       bootMark('rules-sync:done');
 
-      // Login preflight (advisory, warn + continue). On a local INTERACTIVE
-      // launch, probe whether this agent's account has a credential and print a
-      // one-line warning if it looks logged out — so you find out BEFORE the TUI
-      // opens, not after typing a prompt and getting "/login" back. Inspect the
-      // selected account home, not an unrelated global login. This file-based
-      // read makes no Keychain ACL prompt. It can still false-negative for opaque
-      // credentials, so this NEVER blocks — it warns and launches anyway. Skipped
-      // for --json/--quiet, when a rotation already picked a signed-in account,
-      // and via --no-auth-check / AGENTS_NO_AUTH_CHECK=1. (--device/--lease return
-      // earlier.)
+      // Login preflight (advisory, never blocks): on a local interactive launch, warn if the
+      // selected account home looks logged out. Reads files (no Keychain prompt), can false-
+      // negative. Skipped for --json/--quiet and --no-auth-check.
       {
         const { shouldCheckLoginBeforeLaunch, loginHint } = await import('../lib/signin-badge.js');
         const preflight = shouldCheckLoginBeforeLaunch({
@@ -3398,11 +3077,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             const { getAccountInfo } = await import('../lib/agents.js');
             const authVersion = accountConfigVersion ?? version;
             const info = await getAccountInfo(agent, execHome ?? (authVersion ? getVersionHomePath(agent, authVersion) : undefined));
-            // Claude authenticates interactively from a per-version setup-token on a
-            // keychain-less worker (the shim's .oauth_token fallback), which the
-            // native-credential probe above can't see — so don't warn "logged out" when
-            // a setup-token resolves for this version. No-op on macOS, where the
-            // credential lives in the keychain and resolveClaudeSetupToken returns null.
+            // Claude authenticates from a per-version setup-token on a keychain-less worker (the
+            // shim's .oauth_token fallback), which the native-credential probe can't see, so don't
+            // warn "logged out" when one resolves. No-op on macOS.
             let authedViaSetupToken = false;
             if (!info.signedIn && agent === 'claude' && version) {
               const { resolveClaudeSetupToken } = await import('../lib/claude-account-token.js');
@@ -3446,15 +3123,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         process.exit(1);
       }
 
-      // Default CLI mode is the generic 'plan'. Agents without a read-only
-      // mode (antigravity, …) degrade via resolveMode to their
-      // safest native mode (modes[0], typically edit). That covers both the
-      // implicit default and an explicit `--mode plan`, so multi-agent
-      // scripts can pass a uniform plan flag without per-agent branching.
-      // Mode degradation is never silent: buildExecCommand emits one stderr
-      // warning for the requested-to-resolved transition unless --quiet is set.
-      // `skip` still hard-fails when unsupported — pretending we bypassed
-      // permissions would be unsafe.
+      // Default CLI mode is the generic 'plan'. Agents without a read-only mode degrade via
+      // resolveMode to their safest native mode, so scripts can pass one flag. buildExecCommand
+      // warns unless --quiet; `skip` still hard-fails when unsupported.
       const modeIsDefault = modeSource === 'default';
       let requestedMode = normalizeMode(mode);
       // Codex's intrinsic omitted-mode default is safe writable: workspace plus
@@ -3472,11 +3143,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
       mode = resolvedMode as ExecMode;
 
-      // Fail fast on the headless-plan stall footgun: a slash command run
-      // headless under the implicit default 'plan' mode hangs forever at
-      // ExitPlanMode (no TTY to approve the plan). Tell the user how to fix it
-      // instead of leaving them staring at a frozen process. Explicit
-      // `--mode plan` is respected for genuine read-only command runs.
+      // Fail fast on the headless-plan stall: a slash command run headless under the implicit
+      // default 'plan' mode hangs forever at ExitPlanMode (no TTY to approve). Tell the user how
+      // to fix it. An explicit `--mode plan` is respected for genuine read-only runs.
       const stallCmd = headlessPlanStallCommand({
         prompt,
         interactive: resolveInteractive({ prompt, headless: options.headless, interactive: options.interactive || forceInteractive }),
@@ -3519,19 +3188,17 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         ? options.secretsKeys.split(',').map((k: string) => k.trim()).filter(Boolean)
         : undefined;
       let secretsEnv: Record<string, string> = {};
-      // Resource-profile scoping (CTX-1): agents-cli computes which bundle
-      // names the active profile allows and forwards it as the client's
-      // `allowedBundles` on every local resolution — the standalone has no
-      // concept of a profile. undefined (no active profile) is full trust.
+      // Resource-profile scoping (CTX-1): compute which bundle names the active profile allows and
+      // forward it as the client's `allowedBundles` on every local resolution, since the
+      // standalone has no concept of a profile. undefined (no active profile) is full trust.
       const secretsContext = await resolveSecretsContextForRun(agent);
       for (const bundleRef of options.secrets) {
         try {
           const { bundle: bundleName, host } = splitBundleRef(bundleRef);
           if (host) {
-            // Least-privilege flags (--secrets-keys / --allow-expired) do not
-            // yet cross the SSH resolver — silently applying them would inject
-            // the full remote env or an expired key. Fail loud so the user
-            // can drop the flag or resolve locally instead.
+            // Least-privilege flags (--secrets-keys / --allow-expired) do not yet cross the SSH
+            // resolver, so silently applying them would inject the full remote env or an expired
+            // key. Fail loud so the user can drop the flag or resolve locally.
             assertRemoteBundleFlagsUnsupported(
               bundleName,
               host,
@@ -3550,12 +3217,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               agent,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
-              // The harness identity scopes any cached grant. An agent launch
-              // resolves broker-only and fails fast naming
-              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock) — it
-              // MUST NOT raise a Touch ID sheet regardless of tty (SEC-13). Gating on
-              // isHeadlessSecretsContext() left `--interactive` launches (the watchdog's
-              // `agents run auto --interactive`) able to prompt, piling up helper sheets.
+              // The harness identity scopes any cached grant. An agent launch resolves broker-only
+              // and fails fast naming `agents secrets unlock <bundle>`; it must not raise a Touch
+              // ID sheet regardless of tty (SEC-13).
               agentOnly: true,
             }, secretsContext);
             const entries = await describeBundle(bundle, secretsContext);
@@ -3577,11 +3241,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         ? shareRuntimeEnv()
         : undefined;
 
-      // Merge order (later wins): profile env < selected account < auto share token < secrets bundles < --env K=V.
-      // Profile carries provider auth; secrets bundles carry user-defined
-      // values; --env is the per-invocation override. The share token is
-      // best-effort: if it is not already in env or an unlocked bundle, unrelated
-      // runs keep working, and `agents artifacts share` itself still fails loudly on use.
+      // Merge order (later wins): profile env < selected account < auto share token < secrets
+      // bundles < --env K=V. The share token is best-effort; `agents artifacts share` fails loudly
+      // on use without it.
       const hasOverrides = profileEnv || accountEnv || autoShareEnv || options.secrets.length > 0 || userEnv;
       const env: Record<string, string> | undefined = hasOverrides
         ? { ...(profileEnv ?? {}), ...(accountEnv ?? {}), ...(autoShareEnv ?? {}), ...secretsEnv, ...(userEnv ?? {}) }
@@ -3594,10 +3256,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           ? (workflowModel ?? (options.fallback ? undefined : runDefaults.model))
           : undefined);
 
-      // Cost tiers (cheap|default|best|ultra) resolve against a harness's own model
-      // catalog. A custom harness's model comes from its endpoint, not the host
-      // harness, so a tier here would forward an incompatible host-harness model to a
-      // different API. Discard it loudly and let the custom harness's own model stand.
+      // Cost tiers (cheap|default|best|ultra) resolve against a harness's own model catalog. A
+      // custom harness's model comes from its endpoint, so a tier would forward an incompatible
+      // host model to a different API. Discard it loudly; the custom model stands.
       if (fromProfile && model && isTierToken(model)) {
         process.stderr.write(chalk.yellow(
           `[agents] --model ${model}: cost tiers don't apply to custom harness '${rawAgent}' ` +
@@ -3641,21 +3302,18 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // forwards `--emit-session-id`): print the resolved session id as a
         // stdout sentinel so the launcher captures the id this run coined.
         emitSessionId: options.emitSessionId === true,
-        // Observability-only: carried onto the pre-launch `run.launch` event so
-        // the stream records HOW this version was chosen. Neither affects the
-        // spawn. `resolvedVia` attributes the version source cheaply — an
-        // explicit @version pin, a strategy rotation, or the pinned default.
+        // Observability only: carried onto the pre-launch `run.launch` event to record how this
+        // version was chosen (explicit @version pin, strategy rotation or pinned default). Neither
+        // affects the spawn.
         strategy,
         resolvedVia: rawVersion
           ? 'explicit-pin'
           : rotationResult
             ? 'rotated'
             : 'pinned-default',
-        // Launchable-signed-in verdict for the ACTUAL launched candidate, set per
-        // resolution branch above (auto-pick from rotation.picked; interactive
-        // picker from the user's `selected`, which may be logged out). Undefined
-        // for a pinned-default / explicit-pin launch, where spawnAgent probes the
-        // version home itself.
+        // Launchable-signed-in verdict for the launched candidate, set per resolution branch
+        // (rotation.picked for auto-pick; the user's `selected`, possibly logged out, for the
+        // picker). Undefined for pinned/explicit-pin, where spawnAgent probes.
         launchSignedIn,
         launchEmail,
       };
@@ -3708,11 +3366,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      // Profile-declared same-host model swap (issue #325). Inserted BEFORE any
-      // user --fallback entries so a rate limit first tries the cheaper/backup
-      // model on the same provider (auth + base URL preserved via envOverride);
-      // only if THAT still rate-limits do we cascade to a different agent CLI.
-      // Requires a prompt for the same reason --fallback does — headless-only.
+      // Profile-declared same-host model swap (issue #325), placed before user --fallback entries
+      // so a rate limit first tries the backup model on the same provider (auth and base URL kept
+      // via envOverride) before cascading to another agent CLI. Headless-only, needs a prompt.
       if (fromProfile && profileFallbackModel && prompt !== undefined && !options.interactive) {
         fallback.unshift({
           agent,
@@ -3721,26 +3377,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         });
       }
 
-      // Mid-run rate-limit failover (issue #348). When a pre-flight rotation
-      // picked an account and there are OTHER healthy accounts for the same
-      // agent, synthesize a same-agent fallback chain from them so a 429 mid-run
-      // re-dispatches on the next healthy account via the SAME runWithFallback
-      // path (continuing the session via /continue). Because this injects into
-      // the same `fallback` array `--fallback` uses, it must only arm for run
-      // shapes that accept a fallback chain — shouldArmRotationFailover excludes
-      // acp/loop/resume-checkpoint (which reject a non-empty fallback below)
-      // and interactive/no-prompt runs. Pinned/single-account runs stay
-      // unchanged because rotationResult is null or rotationFailoverChain
-      // returns []. version is set here because rotationResult is only
-      // populated when resolveRunVersion picked one.
-      //
-      // Composes with an explicit --fallback chain: the same-agent accounts are
-      // UNSHIFTED ahead of the user's cross-agent entries, so a rate limit
-      // first tries the other accounts of the same agent (cheapest recovery —
-      // same CLI, session continues) and only then cascades to codex/gemini/etc.
-      // Profiles never compose: strategy is skipped for them, rotationResult
-      // stays null. (fromProfile's model-swap unshift above is therefore never
-      // displaced by this one.)
+      // Mid-run rate-limit failover (issue #348): when rotation picked an account and other
+      // healthy accounts exist, synthesize a same-agent fallback chain so a 429 re-dispatches on
+      // the next account via runWithFallback. Only for shapes that accept a `fallback`.
       if (
         shouldArmRotationFailover({
           hasRotation: !!rotationResult,
@@ -3752,11 +3391,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           resumeCheckpoint: !!options.resumeCheckpoint,
         })
       ) {
-        // With an explicit alternate harness configured, "use the alternate once
-        // the primary's accounts are exhausted" is the policy — so EVERY healthy
-        // same-agent account has to be tried first, not the default cap of three
-        // (PHNX-3999 F19). Without one, the cap stands: it bounds how long a
-        // rate-limited run keeps retrying itself.
+        // With an explicit alternate harness configured, "use the alternate once the primary's
+        // accounts are exhausted" is the policy, so every healthy same-agent account is tried
+        // first, not the default cap of three (PHNX-3999 F19).
         const failover = rotationFailoverChain(
           rotationResult!,
           version!,
@@ -3810,21 +3447,15 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      // Budget pre-flight gate (issue #346). Estimate the run's cost and, when a
-      // cap is configured with on_exceed:block, refuse to launch if it would push
-      // a cap over the line — exiting non-zero so CI/headless inherit the block.
-      // --yes skips ONLY the interactive confirm threshold, never a hard block.
+      // Budget pre-flight check (issue #346): estimate the run's cost and, when a cap has
+      // on_exceed:block, refuse to launch if it would cross it, exiting non-zero so CI/headless
+      // inherit the block. --yes skips only the interactive confirm threshold, never a hard block.
       {
         const { runPreflightGate } = await import('../lib/budget/preflight.js');
         const { resolveEffectiveModel } = await import('../lib/models.js');
-        // Estimate against the model that will ACTUALLY run, not an unpriced
-        // `${agent}-default` placeholder (which made estimateCost return $0 and
-        // silently neutered the per_run/per_day gate for the common no-`--model`
-        // case). When `model` is undefined the spawned CLI uses its built-in
-        // default, which we recover from the extracted catalog. If we still can't
-        // resolve a concrete model, pass the placeholder — the gate now treats an
-        // unpriced estimate under active caps as needing confirmation, so it is
-        // never a silent $0 wave-through.
+        // Estimate against the model that will actually run, not an unpriced `${agent}-default`
+        // placeholder (estimateCost returned $0, neutering the per_run/per_day check). With no
+        // `model`, use the CLI's default; an unpriced estimate under caps asks to confirm, not $0.
         const effectiveModel = resolveEffectiveModel(agent, version ?? '', model) ?? `${agent}-default`;
         const gate = runPreflightGate({
           agent,
@@ -3884,10 +3515,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       };
 
-      // Restore the shared per-agent agents dir after the run (issue #401):
-      // remove the workflow subagent files THIS run copied in, so a scoped
-      // workflow never leaves definitions behind for the next, unrelated run to
-      // inherit. Mirrors cleanupWorkflowMcpConfig — tear down only what we made.
+      // Restore the shared per-agent agents dir after the run (issue #401): remove the workflow
+      // subagent files this run copied in, so a scoped workflow never leaves definitions for the
+      // next unrelated run. Mirrors cleanupWorkflowMcpConfig: tear down only what we made.
       const cleanupWorkflowSubagents = () => {
         for (const target of workflowSubagentTargets) {
           try {
@@ -3898,12 +3528,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       };
 
-      // for_each dispatch (issue #343). A workflow that declares `for_each:` is a
-      // declarative dynamic fan-out, not a single-agent run: execute the producer,
-      // expand one stage teammate per produced item (+ optional verify panel),
-      // stage them into a team, then drive the supervisor until the DAG drains.
-      // This is mutually exclusive with the single-agent loop/fallback paths — the
-      // fan-out IS the run.
+      // for_each dispatch (issue #343): a workflow declaring `for_each:` is a declarative fan-out,
+      // not a single-agent run. Run the producer, expand one teammate per item, stage them into a
+      // team and drive the supervisor until the DAG drains. Exclusive with loop/fallback.
       if (workflowForEach) {
         cleanupWorkflowMcpConfig();
         cleanupWorkflowSubagents();
@@ -3915,10 +3542,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         process.exit(exitCode);
       }
 
-      // Loop dispatch (issue #332). Active when --loop is passed OR a workflow
-      // declares a `loop:` block. The loop path runs AFTER the #346 pre-flight
-      // gate above (which fired once) — the loop's token budget is an ADDITIONAL
-      // guard, not a replacement. Composable, not bypassing.
+      // Loop dispatch (issue #332), active with --loop or a workflow `loop:` block. It runs after
+      // the #346 pre-flight (which fired once); the loop's token budget is an additional guard,
+      // not a replacement.
       let loopConfig: import('../lib/loop.js').LoopConfig | undefined;
       try {
         loopConfig = buildLoopConfig(options, workflowLoop);
@@ -3974,11 +3600,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      // Agent footgun (RUSH-1829): a run with no prompt and no explicit
-      // --interactive resolves to interactive intent, but in a non-TTY shell
-      // (a headless agent, a pipe, CI) there is no terminal to host the REPL —
-      // the TUI attaches to dead stdin and hangs forever. Fail fast with the
-      // headless alternatives instead of launching a doomed interactive session.
+      // Agent footgun (RUSH-1829): a run with no prompt and no explicit --interactive resolves to
+      // interactive, but in a non-TTY shell (headless agent, pipe, CI) the TUI attaches to dead
+      // stdin and hangs forever. Fail fast with the headless alternatives.
       if (inferredInteractiveWithoutTty(execOptions, isInteractiveTerminal())) {
         // Tear down the workflow MCP config + subagents staged above before we
         // exit — same as every sibling exit path; requireInteractiveSelection
@@ -3996,10 +3620,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         let ranAgent = agent;
         let ranVersion = defaultVersion;
         if (fallback.length > 0 || (rotationResult !== null && prompt !== undefined && !options.interactive)) {
-          // Fallback and balanced runs need captured output so a clean-exit
-          // session-limit refusal can update account availability.
-          // The sink reports which chain entry actually executed (may differ from
-          // the primary after a rate-limit handoff) so the audit record is honest.
+          // Fallback and balanced runs need captured output so a clean-exit session-limit refusal
+          // can update account availability. The sink reports which chain entry actually executed
+          // (possibly not the primary after a handoff) so the audit record is honest.
           const sink: { agent?: AgentId; version?: string } = {};
           exitCode = await runWithFallback({ ...execOptions, prompt: prompt!, fallback, dispatchSink: sink });
           ranAgent = sink.agent ?? agent;
@@ -4009,12 +3632,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
         cleanupWorkflowMcpConfig();
         cleanupWorkflowSubagents();
-        // Surface committed-but-unpushed work a headless writable run left
-        // behind, so it isn't silently stranded in a worktree. Also warn when
-        // the branch still has an OPEN PR (RUSH-2394) — a background
-        // `gh pr checks --watch` dies with the agent. Advisory only,
-        // never throws; skipped for interactive runs (the human sees the shell)
-        // and read-only plan mode (can't commit).
+        // Surface committed-but-unpushed work a headless writable run left in a worktree, and warn
+        // when the branch still has an open PR (RUSH-2394), since a background `gh pr checks
+        // --watch` dies with the agent. Advisory, never throws.
         if (shouldWarnUnpushed(mode, resolveInteractive(execOptions))) {
           await warnUnpushedWork(cwd);
           await warnOrphanedOpenPr(cwd);
@@ -4022,15 +3642,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // Governance chokepoint (#347): every dispatched run finalizes here.
         // ONE tamper-evident audit record per run — non-fatal by contract.
         recordDispatchedRun({ agent: ranAgent, version: ranVersion ?? 'unknown', mode, cwd, exitCode });
-        // A clean headless exit is real auth evidence — the account authenticated
-        // and produced a result. Record it as the per-account FACT `agents view`
-        // renders (`last used ok`), keyed to the slot the run used so it lands on
-        // the right row and clears any stale failure fact (PHNX-4116). A non-zero
-        // exit is NOT recorded as an auth failure: the exit code alone does not
-        // prove the token was rejected (a task can fail for a hundred reasons), and
-        // a lying "auth failure" fact is worse than none. Real auth failures are
-        // recorded where they are actually detected (the routine runner's
-        // isAuthFailureFromLog sites) and by the daemon probe.
+        // A clean headless exit is real auth evidence: record it as the per-account fact `agents
+        // view` renders (`last used ok`), clearing any stale failure (PHNX-4116). A non-zero exit
+        // is not recorded as an auth failure: it does not prove the token was rejected.
         if (exitCode === 0) {
           recordRunAuthOutcome({
             agent: ranAgent,

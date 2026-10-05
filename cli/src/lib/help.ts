@@ -1,9 +1,5 @@
-/**
- * Custom help formatting for the CLI.
- *
- * Overrides commander's default help layout to show Commands before Options,
- * and applies consistent conventions (short -h flag, no implicit help subcommand).
- */
+/** Custom help formatting: shows Commands before Options and applies consistent conventions
+ * (short -h flag, no implicit help subcommand). */
 import type { Command, Help } from 'commander';
 
 /** Description of a named command group rendered as its own section in help output. */
@@ -16,21 +12,15 @@ interface CommandGroup {
 
 const commandGroupRegistry = new WeakMap<Command, readonly CommandGroup[]>();
 
-/**
- * Register named groups for a parent command so its help output splits the
- * Commands section into multiple labeled sections. Subcommands not listed in
- * any group fall back to a plain "Commands:" section below the groups.
- */
+/** Registers named groups for a parent command so help splits Commands into labeled sections;
+ * unlisted subcommands fall back to a plain "Commands:" section. */
 export function registerCommandGroups(parent: Command, groups: readonly CommandGroup[]): void {
   commandGroupRegistry.set(parent, groups);
 }
 
-/**
- * Front-door command groups shown on `agents --help`. Derived from measured
- * reach: tier 1 = setup/run/sessions/view, tier 2 = teams/browser/secrets/
- * devices/accounts/add. The remaining groups stay discoverable through the
- * pointer rendered below these groups.
- */
+/** Front-door command groups on `agents --help`, from measured reach: tier 1 is
+ * setup/run/sessions/view, tier 2 is teams/browser/secrets/devices/accounts/add. The remaining
+ * groups stay discoverable through the pointer rendered below. */
 export const FRONT_DOOR_COMMAND_GROUPS: readonly CommandGroup[] = [
   {
     title: 'Quick start',
@@ -57,14 +47,9 @@ interface HelpSections {
 
 const helpSectionRegistry = new WeakMap<Command, HelpSections>();
 
-/**
- * Attach an Examples block (rendered between the description and Arguments)
- * and/or a Notes block (rendered at the very end, after Options) to a command.
- *
- * Bodies are normalized: the shared leading indent is stripped, then every line
- * is re-indented by two spaces. Callers can pass natural multiline template
- * literals without babysitting whitespace.
- */
+/** Attaches an Examples block (between description and Arguments) and/or a Notes block (at the
+ * end, after Options) to a command. Bodies are normalized: shared leading indent stripped, then
+ * every line re-indented by two spaces. */
 export function setHelpSections(cmd: Command, sections: HelpSections): void {
   helpSectionRegistry.set(cmd, sections);
 }
@@ -102,11 +87,9 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
   const itemIndentWidth = 2;
   const itemSeparatorWidth = 2;
 
-  // commander v15 dropped `Help.wrap(str, width, indent)` in favor of
-  // `boxWrap(str, width)` plus a built-in `formatItem(term, termWidth,
-  // description, helper)` that handles the term-pad + continuation-indent
-  // math we used to do by hand. Delegate to it so callers get the same
-  // continuation-line alignment under the description column.
+  // commander v15 dropped `Help.wrap` for `boxWrap(str, width)` plus a built-in `formatItem` that
+  // handles term padding and continuation indent. Delegate to it so continuation lines align under
+  // the description column.
   function formatItem(term: string, description?: string): string {
     if (description) {
       return helper.formatItem(term, termWidth, description, helper);

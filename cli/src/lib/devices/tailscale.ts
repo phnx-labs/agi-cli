@@ -1,14 +1,6 @@
-/**
- * Tailscale ingestion for the device registry.
- *
- * `tailscale status --json` already hands us most of a device registry for
- * free — per node: `OS` (→ platform), `Online`/`LastSeen` (→ reachability),
- * `Relay` vs `CurAddr` (→ direct-vs-relayed latency hint), `DNSName`, and
- * `TailscaleIPs`. `parseTailscaleStatus` turns that JSON into draft device
- * profiles so `agents devices sync` can self-populate instead of you
- * hand-entering hosts. Kept a pure function (JSON in, profiles out) so it is
- * unit-testable without a live tailnet.
- */
+/** Tailscale ingestion for the device registry. `parseTailscaleStatus` turns `tailscale status
+ * --json` (OS, Online/LastSeen, Relay vs CurAddr direct-vs-relayed hint, DNSName, TailscaleIPs)
+ * into draft profiles so `agents devices sync` self-populates. */
 import { spawnSync } from 'child_process';
 import {
   type DeviceInput,
@@ -61,11 +53,8 @@ function firstIpv4(ips: string[] | undefined): string | undefined {
   return ips.find((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) ?? ips[0];
 }
 
-/**
- * Slugify a raw Tailscale HostName into a valid logical device name (ssh alias
- * charset). Used only as a fallback — when a node has a DNSName we prefer its
- * first label, which is the canonical slug Tailscale itself derived.
- */
+/** Slugify a raw Tailscale HostName into a valid logical device name (ssh alias charset). A
+ * fallback only: with a DNSName, its first label (Tailscale's own slug) is preferred. */
 export function slugifyHostName(hostName: string): string {
   return hostName
     .toLowerCase()
@@ -74,13 +63,8 @@ export function slugifyHostName(hostName: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-/**
- * The logical name for a node. macOS computer names contain spaces and
- * apostrophes ("Bisma's MacBook Pro") and iOS devices all report HostName
- * "localhost" — both break as ssh aliases and the latter collides in the
- * registry. The MagicDNS label (first segment of DNSName) is already a unique,
- * valid slug per device, so prefer it; fall back to a slugified HostName.
- */
+/** The logical name for a node. macOS computer names have spaces and apostrophes and iOS devices
+ * all report HostName "localhost", which break as ssh aliases and collide in the registry. */
 function deviceNameFor(raw: RawTsNode, dnsName: string | undefined): string | null {
   const label = dnsName?.split('.')[0];
   if (label && label.length > 0) return label;
@@ -110,11 +94,8 @@ function toNode(raw: RawTsNode): TailscaleNode | null {
   };
 }
 
-/**
- * Parse `tailscale status --json` output into one node per tailnet device,
- * including Self. Throws on malformed JSON. Nodes without a HostName are
- * skipped (they cannot be addressed by a logical name).
- */
+/** Parse `tailscale status --json` into one node per tailnet device, including Self. Throws on
+ * malformed JSON; nodes without a HostName are skipped (no logical name to address). */
 export function parseTailscaleStatus(json: string): TailscaleNode[] {
   let parsed: RawTsStatus;
   try {
@@ -148,10 +129,8 @@ export function nodeToDeviceInput(node: TailscaleNode): DeviceInput {
   };
 }
 
-/**
- * Run `tailscale status --json` and return its raw stdout. Throws a clear
- * error when the binary is missing or the daemon is not reachable.
- */
+/** Run `tailscale status --json` and return raw stdout. Throws a clear error when the binary is
+ * missing or the daemon is unreachable. */
 export function tailscaleStatusJson(): string {
   const res = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf-8', windowsHide: true });
   if (res.error && (res.error as NodeJS.ErrnoException).code === 'ENOENT') {

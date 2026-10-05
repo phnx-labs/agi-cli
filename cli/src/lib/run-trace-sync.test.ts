@@ -5,10 +5,9 @@ import * as path from 'path';
 
 import { shouldAutoSyncTraces, fireTraceSyncInBackground } from './run-trace-sync.js';
 
-// Real files, no mocks: the gate reads the phoenix session + the traces-sync
-// ledger off disk under getRuntimeStateDir(), which honors AGENTS_STATE_DIR. We
-// point that at a fresh temp dir per test and toggle the two files that encode
-// "signed in" and "has synced before".
+// Real files, no mocks: the check reads the phoenix session and traces-sync ledger under
+// getRuntimeStateDir() (honors AGENTS_STATE_DIR), so point that at a fresh temp dir per test and
+// toggle the two files encoding "signed in" and "has synced before".
 const savedStateDir = process.env.AGENTS_STATE_DIR;
 const savedNoSync = process.env.AGENTS_NO_TRACE_SYNC;
 let dir: string;

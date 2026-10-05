@@ -1,23 +1,6 @@
-/**
- * Live budget kill-switch for `agents teams` supervisor (issue #399).
- *
- * Follow-up to #346, which wired `makeLiveSpendWatcher` into local `agents run`
- * only. Teams spawns each teammate as its own `agents run --headless --json`
- * process, so per-teammate `per_run` caps already fire from those child
- * watchers. What was still missing was aggregate cross-teammate enforcement
- * (`per_project` / `per_day` / `per_agent` combined), because the ledger only
- * gets written on child close — a long-running teammate would blow the shared
- * cap without any single child watcher noticing.
- *
- * This module reuses `makeLiveSpendWatcher` verbatim: on each supervisor wave
- * we tail every running teammate's stdout.log through `extractUsageEvents`
- * (the same primitive the local run path uses in src/lib/exec.ts), feed the
- * usage events into ONE shared watcher, and expose `breached()` so the
- * supervisor can call `stopByTask` to terminate the whole team.
- *
- * Dormant (returns null) when no caps are configured — same zero-cost contract
- * as the local watcher.
- */
+/** Live budget kill-switch for the teams supervisor (issue #399). Per-teammate `per_run` caps fire
+ * in child watchers, but aggregate caps (`per_project`/`per_day`/`per_agent`) were missed since
+ * the ledger is written on child close. Each wave tails teammate logs into a shared watcher. */
 import * as fs from 'fs';
 import type { AgentManager } from '../teams/agents.js';
 import {
@@ -48,17 +31,9 @@ interface StreamCursor {
   pending: string;
 }
 
-/**
- * Build a team-scoped budget watcher for the given team. Returns null when the
- * effective budget config has no caps — matching the local watcher's dormant
- * contract so callers pay nothing when the feature is off.
- *
- * The watcher is seeded with prior-day and prior-project spend from the ledger
- * so a partway-through day counts today's earlier runs against `per_day`.
- * Each `poll()` reads new bytes from every running teammate's stdout.log and
- * feeds parsed usage events into the shared watcher — `onBreach` fires exactly
- * once, mirroring `makeLiveSpendWatcher`.
- */
+/** Build a team-scoped budget watcher; null when the effective budget has no caps (dormant, like
+ * the local watcher). Seeded with prior-day and prior-project ledger spend, each `poll()` feeds
+ * new teammate stdout usage into the shared watcher, and `onBreach` fires once. */
 export function createTeamBudgetWatcher(args: {
   manager: AgentManager;
   team: string;

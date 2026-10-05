@@ -1,7 +1,5 @@
-/**
- * RUSH-2320 #3 — buildManifest carries still-fresh fingerprints from a
- * previous manifest (no re-hash of unchanged sources).
- */
+/** RUSH-2320 #3: buildManifest carries still-fresh fingerprints from a previous manifest, with
+ * no re-hash of unchanged sources. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

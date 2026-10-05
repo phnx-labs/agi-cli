@@ -9,24 +9,9 @@ import { findGitRepos, collectCommits, toSearchDate } from '../git-output.js';
 let root: string;
 let repo: string;
 
-/**
- * Run a git command in `repo`, optionally stamping author+committer identity
- * and dates.
- *
- * Identity is passed as ENV, not `-c user.email=…`, because git's
- * `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_EMAIL` environment variables OUTRANK
- * `-c` config. A developer box that exports those (many do, and the agent
- * fleet does) silently re-authored every fixture commit to the ambient
- * identity, so `collectCommits(['alice@example.com', …])` matched nothing and
- * four tests failed with a bare `expected +0 to be 2`. CI never saw it — its
- * runners export no such vars — so this only ever broke locally and, worse,
- * inside the fail-closed release-attestation producer, where it blocked
- * releases from any box with a git identity in the environment.
- *
- * The env we hand git is therefore built explicitly rather than inherited
- * wholesale: the four identity vars are always set (never left to leak in),
- * which makes the fixture's authorship independent of the host.
- */
+/** Runs git in `repo`, optionally stamping author+committer identity and dates. Identity is passed
+ * as ENV, not `-c user.email=...`, because `GIT_AUTHOR_EMAIL`/`GIT_COMMITTER_EMAIL` OUTRANK `-c`:
+ * boxes exporting them (the fleet does) re-authored fixtures and failed tests and releases. */
 function git(args: string[], dateIso?: string, identity?: { email: string; name: string }): void {
   const env = { ...process.env } as Record<string, string>;
   if (dateIso) {

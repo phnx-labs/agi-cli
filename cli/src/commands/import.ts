@@ -1,25 +1,6 @@
-/**
- * `agents import` — adopt an existing unmanaged agent install into agents-cli.
- *
- * Three forms:
- *
- *   agents import openclaw
- *     Auto-detect via the binary on PATH. Resolves the npm package directory,
- *     reads its version, and registers it under
- *     ~/.agents/.history/versions/<agent>/<version>/.
- *
- *   agents import openclaw --version 2026.3.8
- *     Same auto-detect, but pin the version label rather than reading it from
- *     the package. Useful when the package metadata is stale or you want a
- *     canonical name.
- *
- *   agents import openclaw --from-path /opt/homebrew/lib/node_modules/openclaw
- *     Skip detection entirely. The given path must be a directory containing
- *     a valid package.json with a `bin` entry.
- *
- * In all forms, the agent's config dir (e.g. ~/.openclaw) is also moved under
- * management — same behavior as the first-run `agents setup` import flow.
- */
+/** `agents import <agent>` adopts an unmanaged install into the managed versions dir under
+ * `~/.agents/.history/`: auto-detect via the PATH binary, `--as <version>` to pin the label, or
+ * `--from-path <dir>`. The config dir is also moved under management. */
 
 import type { Command } from 'commander';
 import { withIsolationBoundary } from '../lib/isolation-boundary-report.js';
@@ -69,27 +50,20 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   }
   const agent = AGENTS[agentId];
 
-  // Import registers the adopted install as a NORMAL version and only then sets the
-  // default / creates the shim / repoints the config. By that point the agent has a
-  // non-isolated version, so it is no longer protected and the primitive gates —
-  // which read the state as it is at call time — would let the adoption through.
-  // The boundary has to be checked against the state BEFORE the import mutates it.
-  // --isolated adopts nothing, so the boundary does not apply to it — it is in fact
-  // the supported way to bring a local install in while protection is on.
+  // Import registers the install as a normal version before setting default/shim/config, by which
+  // point protection would no longer see it as isolated, so check the boundary before the import
+  // mutates state. `--isolated` adopts nothing and is the supported way in under protection.
   if (!opts.isolated) {
     assertIsolationBoundary(agentId, 'adopt your existing install');
   }
 
-  // installScript-based agents (Grok, Antigravity, Cursor, Goose, Roo)
-  // don't have an npm package; their binary lives wherever the curl/brew
-  // installer dropped it. We adopt by symlinking that PATH binary directly
-  // into the version's `node_modules/.bin/`. No package.json walk.
+  // installScript agents (Grok, Antigravity, Cursor, Goose, Roo) have no npm package; adopt them
+  // by symlinking the PATH binary into the version's `node_modules/.bin/`, with no package.json
+  // walk.
   const isInstallScriptAgent = !agent.npmPackage;
 
-  // Whether to adopt the binary by a direct symlink (installScript style) vs.
-  // the npm package.json walk. Starts equal to isInstallScriptAgent, but an
-  // npm-capable agent that turns out to be installed as a standalone binary
-  // (see the resolvePackageDirFromBinary fallback below) flips this to true.
+  // Whether to adopt via direct symlink (installScript style) or the package.json walk. Starts as
+  // isInstallScriptAgent; an npm-capable agent installed as a standalone binary flips it to true.
   let useDirectBinaryImport = isInstallScriptAgent;
 
   let globalPath: string | null = null;
@@ -130,23 +104,17 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     } else {
       globalPath = resolvePackageDirFromBinary(binary);
       if (!globalPath) {
-        // npmPackage is declared, but the binary on PATH doesn't live inside an
-        // npm package layout — e.g. Kimi installed via its curl install.sh,
-        // which drops a standalone bundled binary at ~/.kimi-code/bin/kimi
-        // rather than into node_modules/<pkg>/. The binary is valid and
-        // self-contained, so adopt it the same way as an installScript agent:
-        // a direct symlink. Key the decision on the on-disk layout, not on
-        // whether an npmPackage label happens to exist.
+        // npmPackage is declared but the PATH binary is not in an npm layout (e.g. Kimi's curl
+        // install.sh puts a bundled binary at ~/.kimi-code/bin/kimi). It is self-contained, so
+        // adopt by direct symlink: decide on the on-disk layout, not the npmPackage label.
         installScriptBinary = binary;
         useDirectBinaryImport = true;
       }
     }
   }
 
-  // For Grok, the binary on PATH is typically `~/.grok/bin/grok` (a moving
-  // pointer to the latest install). Prefer the exact versioned file in
-  // `~/.grok/downloads/` so the v<x.y.z> alias is pinned to that file and
-  // doesn't drift when the user upgrades externally.
+  // Grok's PATH binary `~/.grok/bin/grok` is a moving pointer; prefer the exact versioned file in
+  // `~/.grok/downloads/` so the v<x.y.z> alias doesn't drift when the user upgrades externally.
   if (isInstallScriptAgent && agentId === 'grok' && !opts.fromPath) {
     const detected = await getCliVersion(agentId);
     if (detected) {
@@ -173,11 +141,9 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
         /* fall through */
       }
     }
-    // Only fall back to running the PATH binary's --version when we're
-    // auto-detecting. With --from-path on an npm agent, the PATH binary may
-    // belong to a different install entirely; reporting its version here
-    // would silently mis-attribute the imported version. installScript agents
-    // always use `<bin> --version` since they have no package.json to read.
+    // Fall back to the PATH binary's `--version` only when auto-detecting: with `--from-path` on
+    // an npm agent it may be a different install and would mis-attribute the version.
+    // installScript agents always use `<bin> --version` since they have no package.json.
     if (!version && (isInstallScriptAgent || !opts.fromPath)) {
       const detected = await getCliVersion(agentId);
       version = detected ?? undefined;
@@ -210,10 +176,9 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
       configAlreadyManaged = true;
       console.log(`  config: ${chalk.gray(`${agent.configDir} (already managed — will skip)`)}`);
     } else if (opts.isolated) {
-      // This summary is printed BEFORE the branch that does the work, so it has to
-      // describe the mode it is actually about to run. Saying "will be moved" under
-      // --isolated announced the exact adoption the flag exists to prevent — a
-      // confirmation prompt that misdescribes the operation is worse than none.
+      // This summary prints before the work branch, so it must describe the mode that will run:
+      // saying config 'will be moved' under `--isolated` announced the adoption the flag prevents;
+      // a misdescribing confirmation is worse than none.
       console.log(`  config: ${chalk.gray(`${agent.configDir} (will be COPIED — your original stays put)`)}`);
       if (!opts.withAuth) {
         console.log(`          ${chalk.gray('credentials are skipped; pass --with-auth to include them')}`);
@@ -242,10 +207,9 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     }
   }
 
-  // Order: config first, then binary, then finalize. Config does the
-  // user-visible side effect (renaming ~/.<agent>/), so if it fails we don't
-  // want a stranded symlink farm. Binary registration is cheap and reversible
-  // — if it fails after config, the next `agents import` call retries cleanly.
+  // Order: config first, then binary, then finalize. Config renames `~/.<agent>/` (user-visible),
+  // so its failure must not strand a symlink farm; binary registration is cheap and reversible,
+  // and a retry of `agents import` is clean.
   const willImportConfig = configDirExists && !configAlreadyManaged && !opts.isolated;
   if (opts.isolated && configDirExists && configAlreadyManaged) {
     console.log(chalk.gray(`  Skipping config copy: ${agent.configDir} is a managed symlink, not your real settings.`));
@@ -343,12 +307,9 @@ export function registerImportCommand(program: Command): void {
     .command('import')
     .argument('<agent>', 'Agent id (e.g. openclaw, claude, codex)')
     .description('Import an existing unmanaged agent install into agents-cli')
-    // NOT `--version`. The program declares `.version(VERSION)` (src/index.ts), which
-    // claims `-V, --version` globally and wins over a subcommand option of the same
-    // name — so `agents import codex --version 1.2.3` printed the CLI's own version
-    // and exited without importing anything. The flag had been unreachable since it
-    // was introduced, and the "could not determine version" error even advised using
-    // it. Renamed so it actually reaches the command.
+    // Not `--version`: the program's global `.version(VERSION)` claims `-V, --version` and wins,
+    // so `agents import codex --version 1.2.3` printed the CLI version and imported nothing.
+    // Renamed to `--as`.
     .option('--as <version>', 'Version label to import as (otherwise read from package.json)')
     .option('--from-path <path>', 'Path to the npm package dir (otherwise auto-detected from PATH)')
     .option('--isolated', 'Copy the install into a self-contained isolated version instead of adopting it')

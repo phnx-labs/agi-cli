@@ -1,15 +1,6 @@
-/**
- * Project-resource pipeline integration tests.
- *
- * Drives compileRulesForProject + resolveResource + listMcpServerConfigs
- * against the checked-in fixture at tests/fixtures/project-resources/.
- * No agent CLI invocations, no LLM calls — pure filesystem assertions.
- *
- * Mock strategy: redirect getUserAgentsDir/getSystemAgentsDir/etc. to empty
- * temp dirs so the project layer is the only one with content. The real
- * getProjectAgentsDir walk-up is preserved (project discovery is what we're
- * actually testing).
- */
+/** Project-resource pipeline integration tests: compileRulesForProject, resolveResource and
+ * listMcpServerConfigs against tests/fixtures/project-resources/. No agent CLIs or LLMs. Other
+ * layers are redirected to empty temp dirs; the real project walk-up is kept. */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -68,10 +59,9 @@ interface FixtureLayout {
 function setupFixture(): FixtureLayout {
   TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-res-'));
   fs.mkdirSync(path.join(TEMP_ROOT, '.git'), { recursive: true });
-  // Recursive copy that preserves symlinks/empty dirs and hidden .agents/.
-  // fs.cpSync is cross-platform — the old `cp -R` spawn assumed a POSIX `cp`
-  // on PATH, which the windows-latest runner does not provide. Default
-  // dereference:false copies symlinks as links, matching `cp -R`.
+  // Recursive copy preserving symlinks, empty dirs and hidden .agents/. fs.cpSync is cross-platform
+  // (the old `cp -R` spawn needs a POSIX cp that windows-latest lacks); dereference:false copies
+  // symlinks as links.
   fs.cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
   USER_DIR = path.join(TEMP_ROOT, '_user_empty');
   SYSTEM_DIR = path.join(TEMP_ROOT, '_system_empty');
@@ -243,17 +233,9 @@ describe('project-resources: resolveResource project precedence', () => {
 });
 
 describe('project-resources: syncResourcesToVersion security defense', () => {
-  // Commit 1cc35b14 (fix(security): project-resource defense) closed a
-  // threat-class: a cloned public repo could ship .agents/commands/foo.md
-  // with a harmful body, and the next `agents run` would materialize that
-  // file under the agent's prompt surface. The fix unconditionally excludes
-  // the project layer from sync for commands/skills/MCP/subagents/permissions.
-  // resolveResource still surfaces project entries for listing/inspection;
-  // only the materializing pipeline is locked down.
-  //
-  // These tests pin the defense at the sync layer. If a future change re-adds
-  // project-layer materialization without a confirm step, these assertions
-  // flip and the threat returns.
+  // Commit 1cc35b14 closed a threat: a cloned public repo could ship .agents/commands/foo.md with
+  // a harmful body that the next `agents run` would materialize. The project layer is excluded
+  // from sync (resolveResource still lists it). These pin that defense at the sync layer.
   it('does NOT materialize a project command into version home, regardless of cwd', async () => {
     const { repoRoot } = setupFixture();
     const { syncResourcesToVersion } = await import('../src/lib/installations/versions.js');

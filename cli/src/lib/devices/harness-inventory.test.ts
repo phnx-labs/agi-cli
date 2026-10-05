@@ -123,10 +123,9 @@ describe('summarizeQuota', () => {
     expect(q.usedPercent).toBe(99);
   });
 
-  // #3705: status and usedPercent must read from the SAME live windows. A 100%
-  // window whose reset already passed has rolled over — its usedPercent is the
-  // PREVIOUS period, so it must not colour the displayed percentage while the
-  // status (from `deriveUsageStatusFromSnapshot`) reads `available`.
+  // #3705: status and usedPercent must read from the same live windows. A 100% window past its
+  // reset has rolled over, so its usedPercent is the previous period and must not colour the
+  // percentage while the status (`deriveUsageStatusFromSnapshot`) reads `available`.
   it('a 100% window past its reset yields available status and a percent not from that window', () => {
     const rolledOver: UsageWindow = {
       key: 'week', label: 'week', shortLabel: 'week',
@@ -179,11 +178,9 @@ describe('summarizeQuota', () => {
   });
 
   it('never surfaces the internal not-collected sentinel — the caller normalizes it (PHNX-3348)', () => {
-    // collectLocalHarnessInventory feeds `usageErrorForDisplay(usage?.error)` into
-    // summarizeQuota, so a never-cached account (error === 'stale', without
-    // --refresh) can never reach `agents devices harnesses/accounts --json`'s
-    // `quota.unavailableReason` as the raw sentinel — the same leak class PHNX-3348
-    // fixed for `agents view --json`.
+    // collectLocalHarnessInventory feeds `usageErrorForDisplay(usage?.error)` into summarizeQuota,
+    // so a never-cached account (error === 'stale') cannot reach `quota.unavailableReason` as the
+    // raw sentinel, the leak class PHNX-3348 fixed for `agents view --json`.
     const q = summarizeQuota(null, usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER));
     expect(q.unavailableReason).not.toBe(USAGE_NOT_COLLECTED_MARKER);
     expect(q.unavailableReason).not.toBe('stale');

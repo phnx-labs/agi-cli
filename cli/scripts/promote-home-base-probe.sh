@@ -1,20 +1,7 @@
 #!/usr/bin/env bash
-# Read-only readiness probe for the PROMOTE home base (RUSH-3026).
-#
-# The home-base phase is promote-only: download the attested tarball, verify,
-# install-smoke, npm publish, re-attach the reused helper zip. Nothing on that
-# path signs or notarizes, so this probe checks exactly what promoting needs —
-# tool presence, gh auth, and a headlessly readable npmjs.com NPM_TOKEN — and
-# deliberately NOT signing provisioning (cert/keychain/provisionprofile). Helper
-# signing has its own path (scripts/signing-home-base-probe.sh remains the
-# provisioning checker for that) and runs only when helper sources change.
-#
-# `secrets exec ... test -n` proves the token resolves WITHOUT printing it; a
-# locked keychain or missing bundle fails here, before the release's first
-# mutation, instead of after merge+tag (the RUSH-2535 shape).
-#
-# Runs on the home base: inline when the release is invoked there, else piped
-# over `agents ssh <home-base> bash -s` by assert_promote_home_base.
+# Read-only readiness probe for the promote home base (RUSH-3026). `secrets exec ... test -n`
+# proves the token resolves without printing it, so a locked keychain or missing bundle fails
+# before the release's first mutation, not after merge+tag (the RUSH-2535 shape).
 set -u
 
 fail() { echo "promote-probe: $*" >&2; exit 1; }

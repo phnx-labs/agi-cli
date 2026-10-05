@@ -4,14 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Isolated copies used to be unreachable by bare name: `resolveVersion` ended at the
-// global default, and an isolated install deliberately never becomes one. So an
-// isolated-only user had to type the full `agents run codex@0.144.6` every time —
-// `agents run codex` fell through to whatever `codex` meant on PATH.
-//
-// `agents use <agent>@<isolated>` now records an ISOLATED default instead of refusing,
-// and `resolveVersion` falls back to it. The pointer lives in `meta.isolatedAgents`,
-// never `meta.agents`, so it cannot leak into launcher/shim/config-symlink territory.
+// `agents use <agent>@<isolated>` records an isolated default in `meta.isolatedAgents` (never
+// `meta.agents`), and `resolveVersion` falls back to it, so bare `agents run codex` works for
+// isolated-only users.
 describe.skipIf(process.platform === 'win32')('isolated default', () => {
   let home: string;
   const A = '9.9.4';

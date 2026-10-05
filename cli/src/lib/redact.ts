@@ -14,13 +14,9 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\bghp_[A-Za-z0-9]{36}\b/g, '[REDACTED_GITHUB_TOKEN]'],
   [/\bgh[osru]_[A-Za-z0-9]{36}\b/g, '[REDACTED_GITHUB_TOKEN]'],
   [/\bgithub_pat_[A-Za-z0-9_]{22,}\b/g, '[REDACTED_GITHUB_TOKEN]'],
-  // Anthropic credentials, before the generic sk- rule so the marker is specific
-  // (the generic rule would otherwise swallow them first). Covers every kind of
-  // sk-ant token by matching the kind segment generically: API keys
-  // (sk-ant-api03-…) AND the long-lived OAuth setup-tokens (sk-ant-oat01-…) that
-  // `claude setup-token` mints. The generic sk- rule below CANNOT match an oat01
-  // token — the hyphen after `ant` breaks its [A-Za-z0-9]{20,} run — so without
-  // this an OAuth setup-token leaks verbatim into any log/export (#1767).
+  // Anthropic credentials go before the generic sk- rule. Matches API keys (sk-ant-api03-...) AND
+  // OAuth setup-tokens (sk-ant-oat01-...). The generic rule can't match oat01 (the hyphen after
+  // `ant` breaks its run), so a setup-token would leak verbatim into logs and exports (#1767).
   [/\bsk-ant-[a-z0-9]{3,8}-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_ANTHROPIC_KEY]'],
   // Stripe live secret / restricted keys.
   [/\b[rs]k_live_[A-Za-z0-9]{20,}\b/g, '[REDACTED_STRIPE_KEY]'],
@@ -69,13 +65,9 @@ function csiEnd(text: string, i: number): number {
   return i;
 }
 
-/**
- * Remove terminal control sequences from untrusted text before storage or display.
- *
- * A single forward scan, not a regex: an OSC lookup for its terminator (BEL or
- * ESC-\) is the classic polynomial-backtracking shape, and untrusted text can be
- * built to trigger it. Each character is visited a bounded number of times here.
- */
+/** Remove terminal control sequences from untrusted text. A single forward scan, not a regex: an OSC
+ * lookup for its terminator is the classic polynomial-backtracking shape that crafted text can
+ * trigger; here each character is visited a bounded number of times. */
 export function sanitizeForTerminal(text: string): string {
   if (!text) return text;
   let out = '';
@@ -132,12 +124,8 @@ const SECRET_ENV_NAME = /(?:TOKEN|KEY|SECRET|PASSWORD)/i;
 /** Don't literal-mask trivially short values — they collide with ordinary text. */
 const MIN_KNOWN_VALUE_LEN = 6;
 
-/**
- * Scrub secrets from `text`. Two passes: format-based patterns (above), then a
- * value-aware pass that masks any `knownValues` verbatim — a credential we
- * already hold in hand leaks regardless of its format, so an exact-value match
- * catches tokens the regexes don't recognize.
- */
+/** Scrub secrets from `text` in two passes: format-based patterns, then a value-aware pass masking
+ * any `knownValues` verbatim, since a credential already in hand leaks regardless of format. */
 export function redactSecrets(text: string, knownValues?: readonly string[]): string {
   let safe = text;
   for (const [pattern, replacement] of SECRET_PATTERNS) {
@@ -152,12 +140,9 @@ export function redactSecrets(text: string, knownValues?: readonly string[]): st
   return safe;
 }
 
-/**
- * Secret values already present in the environment (e.g. an injected secrets
- * bundle), selected by secret-shaped var NAME. These are the "known" values fed
- * to {@link redactSecrets} so an exported transcript can't leak a live
- * credential verbatim even when its format matches no pattern.
- */
+/** Secret values already in the environment (e.g. an injected secrets bundle), picked by
+ * secret-shaped var NAME, fed to {@link redactSecrets} as known values so an exported transcript
+ * can't leak a live credential that matches no pattern. */
 export function knownSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
   const out: string[] = [];
   for (const [name, value] of Object.entries(env)) {
@@ -169,13 +154,9 @@ export function knownSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): 
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-/**
- * Mask email addresses in already-rendered text. A published page's sensitive-
- * content scan refuses a body containing an email (`artifacts share` does the
- * same), and almost every real transcript carries a few — git author addresses,
- * `gh api user`, a pasted log. Masking them here means the page genuinely does
- * not carry them, rather than training callers to pass `--force`.
- */
+/** Mask email addresses in rendered text: a published page's sensitive-content scan refuses a body
+ * containing an email (as `artifacts share` does) and most transcripts carry some, so masking makes
+ * the page genuinely free of them rather than training callers to pass `--force`. */
 export function redactEmails(text: string): string {
   return text.replace(EMAIL_RE, '[EMAIL]');
 }

@@ -1,12 +1,6 @@
-/**
- * Schema-v3 `execution` block parsing for a portable agent package (agent.yaml).
- *
- * Pure and fs-free beyond reading the manifest file itself — never resolves or
- * hashes referenced resources (that's `package-resolve.ts`). Fails closed on
- * anything malformed: this is the "malformed shared config fails closed"
- * boundary from the PHNX-3838 brief, so a bad manifest throws immediately
- * rather than materializing a partial package.
- */
+/** Schema-v3 `execution` block parsing for a portable agent package (agent.yaml). Pure and fs-free
+ * beyond reading the manifest; resolution and hashing live in package-resolve.ts. Fails closed on
+ * anything malformed (PHNX-3838), so a bad manifest throws. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';

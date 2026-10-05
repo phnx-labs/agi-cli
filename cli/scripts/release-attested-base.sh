@@ -1,35 +1,7 @@
 #!/usr/bin/env bash
-#
-# Print the newest commit at or below `origin/<branch>` whose TREE already has a
-# published attestation on the rolling `main-attestations` release (PHNX-3705).
-#
-# Why this exists. release.sh used to require an attestation for the tree of
-# origin/<branch> AS OF THE INSTANT IT RAN. attest-main.yml produces that by
-# running the full suite — minutes of work — so on a repo where agents merge
-# continuously, main advances faster than attestation completes and the release
-# loses the race every time:
-#
-#     [2/6] Require origin/main attestation
-#     error: missing exact attestation key: tree=2aa4ed447... suite=selected
-#
-# Measured 2026-09-01: six merges to main in ~30 minutes while attest-main runs
-# were still pending; the tip was never attested long enough to release from, so
-# the release starved indefinitely. That also makes owner requirement R2 (release
-# < 60s) unreachable by construction.
-#
-# The release does not need THE TIP attested. It needs a green base to cut the
-# release commit from and to derive the release-tree attestation against
-# (PHNX-3696). Any attested ANCESTOR serves: the published tarball is still bound
-# to a tree whose suite passed, and `derive`'s allowlist still fails closed on any
-# code file. The only cost is shipping from a slightly older tree than the tip —
-# which was always true (an attested tree is by definition not the newest one).
-#
-# Prints the resolved SHA on stdout, exits 1 when no attested ancestor is found
-# within the lookback so the caller can fail loud rather than release unproven
-# bytes.
-#
-# Testable without network: set RELEASE_ATTEST_ASSETS to a newline-separated
-# asset list and no `gh` call is made.
+# Prints the newest commit at or below `origin/<branch>` whose tree has a published attestation on
+# the rolling `main-attestations` release (PHNX-3705). The tip is rarely attested, so any attested
+# ancestor serves; `derive`'s allowlist still fails closed on code files.
 set -euo pipefail
 
 REPO_ROOT="${1:?usage: release-attested-base.sh <repo-root> <branch> [lookback]}"

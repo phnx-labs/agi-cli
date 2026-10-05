@@ -4,26 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Regression for a REAL user report: "one of the self-heal mechanisms messed up my
-// local installation." Reproduced end-to-end from isolated-only usage, no misuse.
-//
-// The chain:
-//   1. `agents run <agent>@<isolated>` finds the copy broken (partial npm extraction).
-//   2. The in-place repair fails (registry unreachable).
-//   3. Launch-path self-heal adopts ANOTHER installed version and pins it as the
-//      global default.
-//   4. That default is the only thing gating the `shadowing` check
-//      (`if (!getGlobalDefault(agent)) continue`), which now fires and ADOPTS the
-//      user's own launcher — repointing ~/.npm-global/bin/<cli>, an npm-created
-//      symlink, at our shim.
-//   5. `shims` + `path` then add a bare shim and a PATH entry.
-//
-// Net effect on the reporter's machine: the globally installed CLI stopped working.
-// Every link in that chain has to stay broken, so this test asserts the whole
-// pipeline is inert — not just the one step that happened to be patched.
-//
-// POSIX-only: `shadowing` is gated to darwin/linux, and the npm bin-symlink layout
-// and PATH-order problem are POSIX concerns (Windows resolves via the registry).
+// Regression for a real report: in isolated-only usage a failed repair made launch-path self-heal
+// pin another version as default, letting `shadowing` adopt the user's launcher. Every link of
+// that chain must stay broken, so this asserts the whole pipeline is inert.
 describe.skipIf(process.platform === 'win32')('isolated-only usage never disturbs a local install', () => {
   let home: string;
   const GOOD = '9.9.4';

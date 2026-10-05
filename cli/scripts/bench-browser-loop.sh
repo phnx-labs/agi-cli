@@ -1,16 +1,7 @@
 #!/usr/bin/env bash
-# Independent A/B benchmark for RUSH-2149 — per-action Node CLI boot in the
-# `agents browser` loop. Reproduces the exact layer breakdown from the ticket
-# (bare node boot, CLI-only boot, status/screenshot/click round-trips, the
-# screenshot+click loop) so before/after runs are directly comparable.
-#
-# Usage:
-#   AGENTS_BROWSER_TASK=<task> ./bench-browser-loop.sh [n]
-#
-# Requires a live `agents browser` daemon with a session already open for
-# $AGENTS_BROWSER_TASK (`agents browser start --profile <p>` first). Prints
-# medians in the same layer table as the ticket. Not a CI benchmark — run by
-# hand against a warm daemon.
+# A/B benchmark for RUSH-2149, per-action Node CLI boot in the `agents browser` loop: bare node
+# boot, CLI-only boot, status/screenshot/click round-trips and the screenshot+click loop, so
+# before/after runs compare. Not a CI benchmark; run by hand on a warm daemon.
 
 set -uo pipefail
 

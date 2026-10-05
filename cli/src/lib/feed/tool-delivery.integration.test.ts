@@ -1,23 +1,6 @@
-/**
- * Cross-track integration tests: tool-activity delivery + standalone-tool
- * setup, measured against a PROCESS BUDGET.
- *
- * These tests sit beside `feed/` because the delivery seam under test is the
- * feed stream, but they exercise two production tracks at once:
- *
- * - feed: `feed/tool-activity.ts`, `feed/tools.ts`, `feed/hub.ts`,
- *   `feed/hub-server.ts` — one event-driven collector, one fleet fan-out,
- *   many readers over a UNIX socket.
- * - setup: `lib/setup-tool-status.ts` — presence is metadata, health is the
- *   last explicit check, never a timer probe; a shared disk lock coalesces
- *   overlapping refreshes from separate CLI clients.
- *
- * Every scenario below names the failure it exists to catch, drives the REAL
- * modules with REAL files / sockets / child processes (fake tools are shell
- * scripts on a test PATH — that is a real exec, not a mocked service), and
- * counts the processes it would duplicate if the seam regressed. No harness
- * mocks, no source-string assertions.
- */
+/** Cross-track integration tests of tool-activity delivery and standalone-tool setup against a
+ * process budget. Each scenario names its failure, drives real modules, files, sockets and
+ * processes (fake tools are real scripts on PATH), and counts duplicated processes. No mocks. */
 import { expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -36,11 +19,8 @@ import { FeedWatchState, watchFleetFeed, watchLocalFeed, type FeedWatchEnvelope 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const CLI_SRC = path.resolve(HERE, '..', '..');
 
-/**
- * Absolute bun path, resolved BEFORE any test narrows PATH to the fake tool
- * dirs — child processes still need to exec the runtime even when the code
- * under test must only see the fake tools.
- */
+/** Absolute bun path, resolved before any test narrows PATH to the fake tool dirs: child
+ * processes still need the runtime. */
 function resolveOnPath(name: string): string {
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
     if (!dir) continue;
@@ -51,12 +31,9 @@ function resolveOnPath(name: string): string {
 }
 const BUN = resolveOnPath('bun');
 
-/**
- * The durable events ledger for this whole file, on a temp path via the
- * supported override. eventsPath() caches its resolution at FIRST call, so
- * this must be pinned before any test in this fork touches the feed — a
- * per-test override would be silently ignored after the first watcher arms.
- */
+/** The durable events ledger for this file, on a temp path via the supported override.
+ * eventsPath() caches at first call, so this must be pinned before any test touches the feed; a
+ * per-test override would be ignored once the first watcher arms. */
 const EVENTS_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-tool-delivery-events-'));
 const EVENTS_FILE = path.join(EVENTS_ROOT, 'events.jsonl');
 process.env.AGENTS_EVENTS_PATH = EVENTS_FILE;
@@ -69,13 +46,9 @@ interface FakeTool {
   probeLog: string;
 }
 
-/**
- * A real standalone-tool install on a test PATH: a package dir carrying a
- * `@phnx-labs/<tool>-cli` package.json and a real executable shell script,
- * linked through bin/<tool> exactly like an npm global. `statusBody` is what
- * the tool prints for `status --json`; every invocation appends a line to
- * `probeLog` so a test COUNTS real execs.
- */
+/** A real standalone-tool install on a test PATH: a `@phnx-labs/<tool>-cli` package dir with a
+ * real executable script linked via bin/<tool>. `statusBody` is what `status --json` prints;
+ * every invocation appends to `probeLog` so tests count real execs. */
 function makeFakeTool(root: string, tool: string, statusBody: string, opts: { probeLog: string; statusDelayMs?: number }): FakeTool {
   const pkg = path.join(root, 'pkg', tool);
   const binDir = path.join(root, 'bin');
@@ -107,12 +80,8 @@ function probeCount(fake: FakeTool): number {
   try { return fs.readFileSync(fake.probeLog, 'utf-8').trim().split('\n').filter(Boolean).length; } catch { return 0; }
 }
 
-/**
- * Run `refreshToolSetup` / `getCachedToolSetup` in a REAL child process (bun,
- * TypeScript source direct) so file-lock coalescing and cache sharing are
- * exercised across process boundaries, not just across async tasks in one
- * process. Inherits the fork's sandboxed HOME/PATH.
- */
+/** Runs `refreshToolSetup` / `getCachedToolSetup` in a real bun child so file-lock coalescing
+ * and cache sharing are exercised across processes. */
 function runSetupChild(script: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; stdout: string; ms: number }> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
@@ -200,11 +169,9 @@ it('warm reads and the armed watcher issue ZERO probes; install changes invalida
         expect(probeCount(fake)).toBe(1); // still just the explicit refresh
         expect(emissions).toHaveLength(0); // nothing changed, nothing emitted
 
-        // An install change invalidates the health row from METADATA ONLY —
-        // the watcher emits the downgraded row and the tool is still not exec'd.
-        // A real install replaces files by rename (npm unpacks that way), and
-        // only a rename fires a Linux directory watch — an in-place write would
-        // be invisible IN_MODIFY noise the production watcher rightly ignores.
+        // An install change invalidates the health row from metadata only; the tool is still not
+        // exec'd. A real install replaces files by rename, and only a rename fires a Linux
+        // directory watch; an in-place write is IN_MODIFY noise the watcher ignores.
         const staged = path.join(root, 'pkg', 'browser', 'staged');
         fs.writeFileSync(staged, '#!/bin/sh\necho replaced\nexit 88\n', { mode: 0o755 });
         fs.renameSync(staged, fake.executable);
@@ -236,10 +203,9 @@ it('a slow health probe is bounded, never blocks a concurrent reader, and the st
     const { getCachedToolSetup } = await import('../setup-tool-status.js');
     try {
       const cacheDir = path.join(root, 'cache');
-      // A tool whose probe hangs only when TOOL_PROBE_HANG is set, so the SAME
-      // executable (same fingerprint → stale cache stays valid) serves both the
-      // fast seed probe and the slow re-probe. probeCapture kills the process
-      // group on timeout, so the sleep cannot linger.
+      // A tool whose probe hangs only when TOOL_PROBE_HANG is set, so the same executable (same
+      // fingerprint, stale cache stays valid) serves the fast seed probe and the slow re-probe.
+      // probeCapture kills the process group on timeout.
       const hangScript = '#!/bin/sh\necho "$$" >> "' + probeLog + '"\n[ -n "$TOOL_PROBE_HANG" ] && sleep 30\nprintf \'%s\' \'{"running":true}\'\n';
       fs.writeFileSync(fake.executable, hangScript, { mode: 0o755 });
       await runSetupChild(childScript(`await refreshToolSetup('browser', { cacheDir: '${cacheDir}' });`));
@@ -535,11 +501,9 @@ fi
       await sleep(900);
       expect(sshSpawns()).toHaveLength(4);
 
-      // Stale retention: losing the peer does not erase its rows. The stream
-      // contract keeps last-known state — the client's own log still carries
-      // the peer's reset with its tool row after the unavailable event, which
-      // is what a UI renders from. (The hub-side retention itself is pinned
-      // separately against FeedHubState below.)
+      // Stale retention: losing the peer does not erase its rows. The stream contract keeps
+      // last-known state, so the client's log still carries the peer's reset after the unavailable
+      // event. Hub-side retention is pinned separately against FeedHubState.
       for (const i of [0, 2]) {
         const resets = clients[i]!.filter((e) => e.type === 'reset' && e.scope === 'peer-a');
         expect(resets.length).toBeGreaterThan(0);

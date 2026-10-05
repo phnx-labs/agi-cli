@@ -5,11 +5,9 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-  # bun, not npm: CI installs with bun and enforces bun.lock (bun auto-enables
-  # --frozen-lockfile under CI). The npm ecosystem updated package.json +
-  # package-lock.json but left bun.lock stale, so every dependabot PR failed
-  # `bun install` with "lockfile had changes, but lockfile is frozen". The bun
-  # ecosystem updates bun.lock in lockstep. (Dependabot bun support GA 2025-02.)
+  # bun, not npm: CI installs with bun and enforces bun.lock (frozen under CI). The npm ecosystem
+  # updated package-lock.json but left bun.lock stale, so every dependabot PR failed `bun
+  # install`; the bun ecosystem (GA 2025-02) updates bun.lock in lockstep.
   - package-ecosystem: "bun"
     directory: "/"
     schedule:

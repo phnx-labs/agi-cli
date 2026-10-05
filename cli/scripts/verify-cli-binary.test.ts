@@ -84,10 +84,9 @@ describe('verify-cli-binary.sh prepack gate', () => {
   it.runIf(process.platform !== 'darwin')(
     'passes when the bundler merged VERSION into a declaration list (comma, not semicolon)',
     () => {
-      // bun 1.3.14 merges adjacent consts: the stamped line lands in the
-      // binary as `var VERSION = "<v>", IS_DEV_BUILD = …;` — the gate must
-      // not demand a semicolon after the version literal (1.22.36 publish
-      // blocker).
+      // bun 1.3.14 merges adjacent consts, so the stamped line lands as `var VERSION = "<v>",
+      // IS_DEV_BUILD = ...;`; the gate must not demand a semicolon after the literal (1.22.36
+      // publish blocker).
       const root = stageTree({
         binary: 'MACHO-STAND-IN\nvar VERSION = "1.0.0", IS_DEV_BUILD = false;\n',
       });

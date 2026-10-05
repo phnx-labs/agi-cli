@@ -267,11 +267,9 @@ describe('computeOverviewHealth (bare `agents doctor` triage across versions)', 
 });
 
 describe('doctor remediations point only at `agents sync` (never `doctor --fix`)', () => {
-  // doctor diagnoses; sync fixes. Every finding whose category the fixer
-  // reconciles must name an `agents sync …` command — the one command that can
-  // actually deliver the fix. `agents repo pull` (source-behind) and
-  // `agents prune cleanup` (orphan) are the only non-sync remediations, and both
-  // are for gaps sync intentionally does not touch.
+  // doctor diagnoses; sync fixes. Every finding whose category the fixer reconciles must name an
+  // `agents sync ...` command. `agents repo pull` (source-behind) and `agents prune cleanup`
+  // (orphan) are the only non-sync remediations, for gaps sync does not touch.
   const AUTO_FIXABLE = new Set([
     'hook-runtime-broken', 'unwired-hook', 'settings-missing', 'settings-unparseable',
     'missing', 'divergent', 'stale', 'never-synced', 'duplicate-hook', 'duplicate-hook-drift',
@@ -428,11 +426,9 @@ afterEach(() => {
   projectDir = '';
 });
 
-/**
- * Seed a temp HOME with the given Claude version dirs and an optional global default.
- * Creates both the binary stub (so listInstalledVersions sees each version) and
- * the version home dir (so diffVersionResources doesn't abort before JSON output).
- */
+/** Seed a temp HOME with the given Claude version dirs and an optional global default: a binary
+ * stub (so listInstalledVersions sees each version) and the version home dir (so
+ * diffVersionResources doesn't abort before JSON output). */
 function seedHome(versions: string[], defaultVersion?: string): void {
   testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-doctor-spec-home-'));
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-doctor-spec-proj-'));
@@ -636,11 +632,9 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
   // ---- the remote contributes ONLY the kind; everything else is ours --------
 
   it('produces byte-identical output for a hostile row and a kind-only row', () => {
-    // The strong form of the guarantee, and the only one worth asserting:
-    // rather than checking that some specific bad substring is absent — which a
-    // partial leak would still pass — prove that EVERY non-kind field the remote
-    // sent is irrelevant, by showing the result equals what a row carrying
-    // nothing but the kind produces.
+    // The strong form of the guarantee: rather than checking one bad substring is absent (a
+    // partial leak would pass), prove every non-kind field the remote sent is irrelevant by
+    // showing the result equals that of a row carrying only the kind.
     const hostile = {
       kind: 'env-secret-export',
       device: 'some-other-box',
@@ -753,16 +747,9 @@ function resolveBun(): string {
 }
 
 describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () => {
-  // doctor is the umbrella diagnostic (AGENTS.md §Diagnostic command taxonomy) —
-  // it must never crash outright because ONE subsystem is unavailable, the same
-  // way an uninstalled cursor/opencode/antigravity login degrades to a finding
-  // rather than aborting the whole report. Its rc-file / master-passphrase scans
-  // route through the sync secrets client (doctor.ts), which throws
-  // SecretsClientError('SECRETS_BIN_MISSING') with no standalone installed;
-  // doctor.ts's scanUserRcFiles()/masterPassphraseInEnv() wrappers swallow that
-  // transport error and degrade to "nothing to report" from those two checks so
-  // the rest of the fleet report still prints. Spawned with an EMPTY PATH and a
-  // blank SECRETS_BIN so nothing resolves `secrets`.
+  // doctor must not crash because one subsystem is unavailable. Its rc-file and master-passphrase
+  // scans use the secrets client, which throws SECRETS_BIN_MISSING with no standalone installed;
+  // the wrappers swallow it. Spawned with an empty PATH and blank SECRETS_BIN.
   it('degrades gracefully — full report, exit 0, no stacktrace', () => {
     seedHome(['2.0.0'], '2.0.0');
     const r = spawnSync(resolveBun(), [INDEX, 'doctor', '--cwd', projectDir], {

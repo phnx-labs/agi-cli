@@ -1,16 +1,7 @@
 import type { Command } from 'commander';
 
-/**
- * The ONE place that defines the CLI's standard short-form verb aliases.
- *
- * These are the canonical short forms an agent or user reaches for on a
- * command group's CRUD verbs — `ls` for `list`, `rm` for `remove`, and so on.
- * They are NOT cross-verb synonyms (`info`/`install`/`create`); those are
- * per-command back-compat aliases owned by the individual commands.
- *
- * Apply them with {@link withAliases} so every group stays in lockstep instead
- * of each command hand-rolling its own `.alias('rm')`.
- */
+/** The one place defining the CLI's short-form CRUD verb aliases (`ls` for `list`, `rm` for
+ * `remove`), applied via `withAliases`. Not cross-verb synonyms. */
 export const CANONICAL_ALIASES = {
   list: ['ls'],
   view: ['show'],

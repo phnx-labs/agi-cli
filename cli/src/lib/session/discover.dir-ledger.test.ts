@@ -1,13 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-// ESM module namespaces are non-configurable, so `vi.spyOn(fs, 'statSync')`
-// throws "Cannot redefine property". The repo's established way to instrument
-// fs (see src/commands/__tests__/sessions-tail.test.ts) is to replace the whole
-// module with a wrapper that delegates to `node:fs` and hooks one method — here
-// `statSync`, so we can count the per-file stats the dir_ledger short-circuit is
-// supposed to elide. The counting state is a top-level const captured by the
-// factory closure (Bun's runner does not hoist vi.mock; a plain const works in
-// both runners without vi.hoisted).
+// ESM namespaces are non-configurable, so `vi.spyOn(fs, 'statSync')` throws. Replace the module
+// with a wrapper delegating to `node:fs` and hooking `statSync`, to count the per-file stats
+// dir_ledger should elide. Top-level const state, since Bun's runner does not hoist vi.mock.
 const statCounter: { watchPath: string | null; count: number } = { watchPath: null, count: 0 };
 
 vi.mock('fs', () => {
@@ -28,10 +23,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// db.ts + state.ts resolve their paths from HOME at module-import time. Point
-// HOME at a throwaway dir BEFORE importing so the whole suite runs against a
-// clean, isolated sqlite DB and session tree (real fs via node:fs, real sqlite,
-// all under a temp HOME).
+// db.ts + state.ts resolve paths from HOME at import. Point HOME at a throwaway dir BEFORE
+// importing so the suite runs against an isolated sqlite DB and session tree.
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-dirledger-'));
@@ -108,11 +101,9 @@ describe('dir_ledger short-circuit (A-2)', () => {
     expect(run1.has('live-2')).toBe(true);
     expect(run1.has('bkup-1')).toBe(true);
 
-    // Age the backup file's ledger stamp past the 10-minute hot window so it is
-    // cold — a real immutable backup was last scanned long ago, not seconds
-    // earlier. (A file scanned within HOT_FILE_WINDOW_MS is deliberately re-stat'd
-    // even in an unchanged dir; T9 covers that path.) Only the backup file is
-    // aged; the live-root files stay hot regardless.
+    // Age the backup file's ledger stamp past the 10-minute hot window so it is cold (a real
+    // backup was scanned long ago). A file scanned within HOT_FILE_WINDOW_MS is re-stat'd even in
+    // an unchanged dir (T9); live-root files stay hot.
     db.getDB().prepare('UPDATE scan_ledger SET scanned_at = ? WHERE file_path = ?')
       .run(Date.now() - 20 * 60_000, fs.realpathSync(backupFile));
 
@@ -206,11 +197,9 @@ describe('dir_ledger short-circuit (A-2)', () => {
     let ids = await discoverIds();
     expect(ids.has('ren-old')).toBe(true);
 
-    // This synthetic test derives the session id from the filename, so a rename
-    // produces a genuinely new id (ren-new) while ren-old's row keeps a now-missing
-    // file_path. Since ren-old has durable content, it is archived (kept), not
-    // dropped. (Real harnesses derive the id from transcript content, so a rename
-    // rewrites file_path on the SAME row and no such pair arises in production.)
+    // The synthetic test derives the session id from the filename, so a rename makes a new id
+    // while ren-old keeps a missing file_path; with durable content it is archived (kept). Real
+    // harnesses derive the id from content, so no such pair arises in production.
     fs.renameSync(oldFp, path.join(dir, 'ren-new.jsonl'));
     const all = await discoverAll();
     expect(all.find(s => s.id === 'ren-new'), 'renamed file surfaces under its new id').toBeDefined();
@@ -238,10 +227,9 @@ describe('dir_ledger short-circuit (A-2)', () => {
     expect(before).toBeDefined();
     const countBefore = before!.messageCount;
 
-    // Append in place (dir mtime unchanged), bump the file mtime. Force the
-    // ledger's scanned_at RECENT so the file is inside HOT_FILE_WINDOW_MS (it is
-    // not a live-root file, so only the hot window keeps it eligible), but past
-    // the 5s append debounce.
+    // Append in place (dir mtime unchanged), bump the file mtime, and make the ledger's scanned_at
+    // recent (inside HOT_FILE_WINDOW_MS, since it is not a live-root file) but past the 5s append
+    // debounce.
     fs.appendFileSync(fp, claudeLine('2026-06-02T00:05:00Z', '/proj/hot', 'grown') + '\n', 'utf-8');
     bumpMtime(fp, Math.floor(Date.now() / 1000) + 20);
     // scanned_at within the 10min hot window but older than the 5s debounce.
@@ -287,11 +275,9 @@ describe('dir_ledger short-circuit (A-2)', () => {
     expect(row).toBeDefined();
     expect(row!.filePath).toBe(liveFp);
 
-    // A backup snapshot of that same session id is written to a fresh backup dir
-    // (new leaf dir -> full walk -> the backup copy is "changed" this run). The
-    // live copy is COLD: its content is untouched, so it is NOT in the changed
-    // set. Pre-fix, the backup copy would win the dedup and overwrite the row's
-    // file_path with the frozen backup path.
+    // A backup snapshot of the same session id goes in a fresh dir (new leaf dir, full walk, so
+    // the backup is "changed"); the live copy is cold and unchanged. Before the fix the backup won
+    // the dedup and overwrote file_path with the frozen backup path.
     const backupDir = path.join(BACKUP_PROJECTS, '-xroot');
     const backupFp = writeSession(backupDir, 'xroot-1', '2026-07-08T00:00:00Z', '/proj/xr', 'the live session');
     expect(backupFp).not.toBe(liveFp);

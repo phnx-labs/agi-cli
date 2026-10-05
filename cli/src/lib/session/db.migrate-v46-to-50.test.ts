@@ -14,12 +14,9 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v46 shape: the PHNX-3792 mirror provenance columns exist, but NONE
-  // of the PHNX-3798 phoenix_id (v47), PHNX-3939 last_user_message (v48),
-  // PHNX-3940 account_id (v49), or PHNX-3797 generated-title (v50) columns do.
-  // A real box on v46 upgrading straight to v50 (skipping no releases, just
-  // landing four independently-merged migrations at once) must get ALL of
-  // them — the collision-resolution case this whole rebase turned on.
+  // Authentic v46 shape: the PHNX-3792 mirror columns exist, but none of phoenix_id (v47),
+  // last_user_message (v48), account_id (v49) or generated-title (v50). A box on v46 landing four
+  // independently-merged migrations at once must get all of them.
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (

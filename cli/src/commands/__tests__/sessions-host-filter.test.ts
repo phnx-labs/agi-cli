@@ -1,11 +1,6 @@
-/**
- * Tests for the pure seed decision backing `agents sessions --active --host/--device`.
- *
- * The bug this pins: `--host X` used to be additive — it folded X in alongside
- * the local machine instead of scoping to X. `shouldIncludeLocal` is the gate
- * that keeps local out of the view unless no host is named (full fleet) or the
- * local machine is itself named. Pure, so it tests without SSH or `ps`.
- */
+/** Tests the pure seed decision behind `agents sessions --active --host/--device`. `--host X` used
+ * to fold X in alongside the local machine instead of scoping to X; `shouldIncludeLocal` keeps
+ * local out unless no host is named or local is named. */
 
 import { describe, it, expect } from 'vitest';
 import { shouldIncludeLocal, remoteHostsToDial, hasNoBrowserDisqualifyingFlags, filterActiveSessionsByHostScope } from '../sessions.js';
@@ -63,11 +58,9 @@ describe('remoteHostsToDial', () => {
 });
 
 describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () => {
-  // The bug this pins: a bare `agents sessions --device/--device <box>` used to
-  // short-circuit into the legacy per-host raw stream (non-interactive, no
-  // previews) instead of the fleet browser. The browser handles an explicit
-  // host scope; the gate below is what lets `--device` reach it — but only for a
-  // bare listing the picker can represent (no query / render / filter flag).
+  // A bare `agents sessions --device <box>` used to short-circuit into the legacy per-host raw
+  // stream instead of the fleet browser. The gate lets `--device` reach the browser, but only for
+  // a bare listing the picker can represent (no query, render or filter flag).
   it('allows a bare --host listing (no query, no flags) into the browser', () => {
     expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'] } as any, undefined)).toBe(true);
   });
@@ -83,22 +76,15 @@ describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () 
   });
 
   it('#12: --skill/--plugin must not silently fall through to the unfiltered browser', () => {
-    // The bug this pins: a bare `agents sessions --skill foo` on a TTY would
-    // otherwise open the interactive browser (a fuzzy-search TUI over the
-    // whole discovered pool) with the filter dropped, instead of showing the
-    // SQL-filtered listing --skill/--plugin actually produce.
+    // A bare `agents sessions --skill foo` on a TTY would open the interactive browser with the
+    // filter dropped, instead of the SQL-filtered listing --skill/--plugin produce.
     expect(hasNoBrowserDisqualifyingFlags({ skill: 'design' } as any, undefined)).toBe(false);
     expect(hasNoBrowserDisqualifyingFlags({ plugin: 'rush' } as any, undefined)).toBe(false);
   });
 });
 
-/**
- * RUSH-2479. `shouldIncludeLocal`/`remoteHostsToDial` decide which boxes to ASK;
- * this decides what the answer may CONTAIN. They are different questions, and
- * conflating them is the bug: a host-dispatched run (`agents run --device peer`)
- * is reported by the box that dispatched it while the agent executes on the
- * peer, so `--device <dispatcher>` listed sessions running somewhere else.
- */
+/** RUSH-2479: `shouldIncludeLocal`/`remoteHostsToDial` decide which boxes to ask; this decides what
+ * the answer may contain. */
 describe('filterActiveSessionsByHostScope', () => {
   const self = 'zion';
   const row = (over: Partial<ActiveSession>): ActiveSession =>

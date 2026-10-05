@@ -1,7 +1,5 @@
-/**
- * Commands staleness — one `.md` file per command, first-wins across
- * project > user > system > extras.
- */
+/** Commands staleness: one `.md` file per command, first-wins across project > user > system >
+ * extras. */
 
 import * as fs from 'fs';
 import * as path from 'path';

@@ -1,10 +1,5 @@
-/**
- * Model catalog inspection command.
- *
- * Registers the hidden `agents models` command for listing models
- * supported by installed agent versions. Extracts model catalogs from
- * each agent's CLI bundle and displays IDs, aliases, and metadata.
- */
+/** Hidden `agents models` command: lists models supported by installed agent versions, extracted
+ * from each agent's CLI bundle (IDs, aliases, metadata). */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -39,11 +34,9 @@ interface SetDefaultOptions {
 
 const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid'];
 
-/**
- * Agents that don't necessarily install under ~/.agents/versions (cursor ships
- * via a curl script). For these, fall back to the PATH binary and synthesize
- * a version label from the install path so cache keys stay stable.
- */
+/** Agents that don't necessarily install under ~/.agents/versions (cursor ships via a curl script):
+ * fall back to the PATH binary and synthesize a version label from the install path so cache keys
+ * stay stable. */
 const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor']);
 
 /** Derive a version label from the PATH-installed binary location for agents without managed versions. */
@@ -98,10 +91,9 @@ export function registerModelsCommand(program: Command): void {
       }
     });
 
-  // `models set` — the ergonomic setter for per-agent/version run defaults. It
-  // reads and writes the same store as `agents config set run.<agent@version>.*`
-  // (agents.yaml -> run.defaults), so the two stay consistent — `set` is just the
-  // short front door, nested here because `models` owns model/mode concerns.
+  // `models set` is the short front door to per-agent/version run defaults, reading and writing
+  // the same store as `agents config set run.<agent@version>.*` (agents.yaml run.defaults); nested
+  // here because `models` owns model/mode concerns.
   const set = models
     .command('set [selector]')
     .description('Set the default model/mode an agent version uses for `agents run`')

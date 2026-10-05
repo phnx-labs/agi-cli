@@ -4,19 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/**
- * PHNX-3705 — the release must be able to cut from an attested ANCESTOR.
- *
- * release.sh required an attestation for origin/main's tree as of the instant it
- * ran. attest-main.yml produces that by running the full suite, so on a repo with
- * continuous merges the tip is essentially never attested and the release starved
- * (measured: six merges in ~30 minutes, tip never attested, release failed every
- * time at phase 2).
- *
- * Real git repos, real script, no network: the asset list is injected through
- * RELEASE_ATTEST_ASSETS, which is the same seam the script uses when `gh` is
- * unavailable.
- */
+/** PHNX-3705: the release must be able to cut from an attested ancestor, since the tip is
+ * essentially never attested on a repo with continuous merges.
+ * Real git repos, no network: the asset list is injected via RELEASE_ATTEST_ASSETS. */
 const SCRIPT = path.resolve(__dirname, 'release-attested-base.sh');
 
 function git(cwd: string, ...args: string[]): string {
@@ -86,12 +76,9 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('refuses an ATTESTED commit that is not on the branch history', () => {
-    // The security property behind release.sh's relaxed base guard: an attested
-    // tree is not by itself a licence to release from that commit. The resolver
-    // only ever walks `rev-list origin/<branch>`, so a divergent commit — even
-    // one whose tree has a published attestation asset — can never be selected.
-    // Without this, someone able to publish an asset could aim a release at a
-    // tree of their choosing.
+    // Security property: an attested tree is not a licence to release from that commit. The
+    // resolver walks only `rev-list origin/<branch>`, so a divergent commit with a published
+    // attestation can never be selected.
     const { root, shas } = repoWithHistory(2);
     // A commit off the branch history, built without touching the working tree.
     const blob = spawnSync('git', ['-C', root, 'hash-object', '-w', '--stdin'], {
@@ -115,10 +102,8 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('fails closed on a blank asset list instead of returning the tip', () => {
-    // Deliberately a BLANK (whitespace) list rather than a truly empty one: the
-    // script treats an unset/empty RELEASE_ATTEST_ASSETS as "no seam supplied"
-    // and falls through to `gh`, which a test must not depend on. Whitespace
-    // exercises the parse path with nothing matchable in it.
+    // Deliberately a blank (whitespace) list, not an empty one: an empty RELEASE_ATTEST_ASSETS
+    // means no seam and falls through to `gh`, which tests must not depend on.
     const { root } = repoWithHistory(2);
     const r = spawnSync('bash', [SCRIPT, root, 'main'], {
       encoding: 'utf-8',

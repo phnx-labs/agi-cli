@@ -1,23 +1,7 @@
 #!/usr/bin/env node
-/**
- * A/B benchmark for the shared SSH engine, against a real enrolled host.
- *
- *   bun run build            # build dist/ first
- *   node scripts/bench-ssh.mjs <host>
- *
- * Measures the three tangible laptop-side costs the engine targets. Each number
- * is wall-clock on the machine you run it from — the thing that matters when the
- * fleet is driven from a small laptop:
- *
- *   P3  repeated `--host` calls: fresh handshake each vs reused control socket
- *   P2  readiness: old 3 round-trips vs new 1 compound readyProbe
- *   P1  follow loop: old 2 un-muxed calls/cycle vs current 1 muxed combined
- *       call/cycle vs one persistent stream for the whole follow
- *
- * Requires a live host reachable over passwordless ssh (needs a real network
- * round-trip to be meaningful — a Tailscale-relayed peer shows the win most
- * clearly since each avoided handshake is expensive). Not a CI benchmark.
- */
+/** A/B benchmark for the shared SSH engine against a real enrolled host: `bun run build`, then
+ * `node scripts/bench-ssh.mjs <host>`. Needs passwordless ssh with real network latency (a
+ * Tailscale-relayed peer shows it best). Not a CI benchmark. */
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync } from 'child_process';

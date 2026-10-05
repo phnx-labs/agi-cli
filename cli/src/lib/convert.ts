@@ -1,9 +1,5 @@
-/**
- * Format conversion between Markdown (Claude/Codex) and TOML (Gemini) command files.
- *
- * Handles frontmatter parsing and bidirectional translation so that slash commands
- * authored in one format can be synced to agents that expect the other.
- */
+/** Format conversion between Markdown (Claude/Codex) and TOML (Gemini) command files, including
+ * frontmatter, so commands authored in one format sync to agents expecting the other. */
 
 /** Parsed YAML frontmatter from a Markdown command file. */
 interface MarkdownFrontmatter {
@@ -58,16 +54,9 @@ export function markdownToToml(skillName: string, markdown: string): string {
   return lines.join('\n');
 }
 
-/**
- * Convert a Markdown command file to a Goose recipe YAML object.
- *
- * Goose has no native slash-command file format — a slash command is a recipe
- * (registered in `config.yaml` under `slash_commands`). The recipe schema matches
- * the one agents-cli already emits for Goose workflow/subagent recipes:
- * `version`, `title`, `description`, `instructions`, `prompt`. The Markdown body
- * (with `$ARGUMENTS` preserved) becomes both `instructions` and `prompt`.
- * Returns a plain object so the caller can `yaml.stringify` it.
- */
+/** Convert a Markdown command to a Goose recipe object: Goose has no slash-command file, so a
+ * command is a recipe registered under `slash_commands` in `config.yaml`. The body (with
+ * `$ARGUMENTS`) becomes both `instructions` and `prompt`. */
 export function markdownToGooseRecipe(commandName: string, markdown: string): Record<string, unknown> {
   const { frontmatter, body } = parseMarkdownFrontmatter(markdown);
   const description = frontmatter.description || `Run ${commandName} command`;

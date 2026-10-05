@@ -1,12 +1,6 @@
-/**
- * Tests for the machine-grouping layer behind `agents sessions --active`.
- *
- * The renderer couples grouping with chalk+console; groupSessionsByMachine and
- * dedupeByMachineSession are the pure pieces where the real bugs live — keying
- * off the terminal-app host instead of the machine, dropping the local box out
- * of first place, or collapsing two different machines' identically-numbered
- * sessions into one.
- */
+/** Tests the machine-grouping layer behind `agents sessions --active`. groupSessionsByMachine and
+ * dedupeByMachineSession are where real bugs live: keying off the terminal-app host, dropping the
+ * local box from first place, or merging two machines' identically-numbered sessions. */
 
 import { describe, it, expect } from 'vitest';
 import { groupSessionsByMachine, dedupeByMachineSession, mergeLocalFirst, pickerColumnsFor } from '../sessions.js';
@@ -143,11 +137,9 @@ describe('dedupeByMachineSession', () => {
     expect(out).toHaveLength(2);
   });
 
-  // RUSH-2479. Once foldExecutionMachine attributes a host-dispatched run to the
-  // box it EXECUTES on, the dispatcher's shim row and the executing machine's own
-  // row collide on the same key. The shim has no transcript and only a
-  // `[host/<peer>]` placeholder, so first-wins would strip the real preview off
-  // the merged fleet view.
+  // RUSH-2479: once foldExecutionMachine attributes a host-dispatched run to its executing box,
+  // the dispatcher's shim row and the executor's row collide on one key. The shim has only a
+  // `[host/<peer>]` placeholder, so first-wins would strip the real preview from the merged view.
   it('prefers the executing machine\'s row over the dispatcher\'s offload shim', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion', label: '[host/yosemite-s0]' }),

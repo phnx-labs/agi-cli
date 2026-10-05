@@ -1,21 +1,6 @@
-/**
- * Persistence guarantees for the device ignore-list.
- *
- * The ignore-list is what makes "a dismissed device never resurfaces" true, so
- * the real bugs to guard:
- *   1. addIgnored must survive a reload (a dismissal that evaporates would let
- *      the node re-appear on the next sync — exactly what the user asked us to
- *      prevent), and it must land in the TRACKED central agents.yaml
- *      (`fleet.ignored`) so the dismissal reaches every box (RUSH-3062).
- *   2. addIgnored is idempotent and removeIgnored is the exact inverse — a
- *      re-add keeps the original who/when rather than rewriting history.
- *   3. A malformed `fleet.ignored` block throws rather than silently returning
- *      an empty set that the next write would clobber (the data-loss path,
- *      mirroring the registry) — and a WRITE against it must fail too, never
- *      replace the block.
- *   4. An ignored node stays subtracted from the discovery pending-diff (the
- *      behavior runDeviceSync depends on at sync.ts's loadIgnored call site).
- */
+/** Persistence guarantees for the device ignore-list ("a dismissed device never resurfaces"):
+ * addIgnored survives a reload in central `fleet.ignored` (RUSH-3062) and is idempotent,
+ * removeIgnored its exact inverse; a malformed list throws rather than returning an empty set. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';

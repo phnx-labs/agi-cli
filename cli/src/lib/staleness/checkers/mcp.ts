@@ -1,12 +1,6 @@
-/**
- * MCP server staleness — one `.yaml`/`.yml` file per server, first-wins
- * across project > user > system > extras. Name is the `name:` field inside
- * the YAML, NOT the filename (per `getAvailableResources`).
- *
- * We delegate name/path discovery to `listMcpServerConfigs(cwd)` which
- * already handles parsing — keeps a single source of truth for "what counts
- * as a discoverable MCP server."
- */
+/** MCP server staleness: one `.yaml`/`.yml` per server, first-wins across project > user > system >
+ * extras. The name is the YAML `name:` field, not the filename. Discovery delegates to
+ * `listMcpServerConfigs(cwd)` as the single source of truth. */
 
 import { fingerprintFile, isFileStale } from '../fingerprint.js';
 import { listMcpServerConfigs } from '../../mcp.js';

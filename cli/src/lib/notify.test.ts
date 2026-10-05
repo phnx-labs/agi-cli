@@ -57,17 +57,9 @@ describe('formatUrgentBlockMessage', () => {
   });
 });
 
-/**
- * Real-path tests for the consolidated owner-send seam. No mocking: a real
- * `openclaw` executable (a shell script that records its argv) is placed on PATH,
- * so the assertions run through lookupTransport → openclaw-telegram provider →
- * exec, the actual delivery path.
- *
- * POSIX-only (RUSH-2215): the openclaw-telegram provider resolves the binary
- * with `which openclaw` and execs it, and the fake is a `#!/bin/sh` recorder —
- * neither works on Windows (no `which`; an extensionless shell script is not
- * executable), so these assertions can only run on a POSIX host.
- */
+/** Real-path tests for the owner-send seam, no mocking: a real `openclaw` script recording argv on
+ * PATH exercises lookupTransport, the provider and exec. POSIX-only (RUSH-2215): the provider uses
+ * `which` and the fake is a `#!/bin/sh` recorder. */
 describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + provider routing)', () => {
   let tmp: string;
   let record: string;
@@ -213,16 +205,9 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
   });
 });
 
-/**
- * PHNX-3698: the owner policy fans one alert out to iMessage AND Slack, and only
- * Slack can render a labeled link. sendToOwner must therefore compose the body
- * PER destination — Slack gets `<url|label>`, iMessage the plain sentence — not
- * one shared plain string to both (the bug this fixes). Real path, no mocking:
- * the actual rush `slack`/`imessage` providers, dry-run so no `rush` binary is
- * needed, with `composeForFormat` the real owner composer. Each destination's
- * echoed `body` is the observable proof (the same field `--dry-run --json`
- * surfaces). Not POSIX-gated — the dry-run provider path spawns nothing.
- */
+/** PHNX-3698: the owner policy fans one alert to iMessage AND Slack and only Slack renders labeled
+ * links, so sendToOwner must compose the body PER destination. Real path: the actual rush
+ * providers in dry-run; each destination's echoed `body` is the proof. Not POSIX-gated. */
 describe('sendToOwner composes per destination (PHNX-3698)', () => {
   const savedHumans = process.env.AGENTS_HUMANS_FILE;
   const savedWorkspace = process.env.LINEAR_WORKSPACE;
@@ -342,17 +327,9 @@ describe.skipIf(process.platform === 'win32')('notifyUrgentBlock (feed urgent-bl
   });
 });
 
-/**
- * PHNX-3303 integration: sendToOwner must actually INVOKE the SSH forward when
- * local owner delivery fails on a box with no working provider — proving the
- * wiring, not just the isolated owner-forward.ts functions.
- *
- * Real path, no mocking of the logic: the owner channel is the macOS-only
- * `imessage` transport, so on this Linux box the local send genuinely fails on
- * platform, a real device registry names a macOS peer, and a fake `ssh` on PATH
- * stands in for the transport (the same on-PATH-fake pattern the openclaw tests
- * above use) returning the peer's `agents send --json` result.
- */
+/** PHNX-3303 integration: sendToOwner must actually INVOKE the SSH forward when local owner
+ * delivery fails. Real path: the owner channel is macOS-only `imessage`, so on Linux it fails on
+ * platform; a real registry names a macOS peer and a fake `ssh` on PATH answers. */
 // Linux-only: the scenario is a headless worker whose local iMessage provider
 // fails on platform (rush.ts sends via osascript now, no `rush` preflight), so
 // on macOS the "local failure" would be a real Messages.app send attempt.

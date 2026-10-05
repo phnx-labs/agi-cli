@@ -31,11 +31,8 @@ async function settle(): Promise<void> {
   for (let turn = 0; turn < 4; turn++) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/**
- * A hub over a controllable collector. The collector is a real async function
- * honouring the abort signal — what the tests assert on is how many times the hub
- * STARTED one, and whether a dying one can still reach the new generation.
- */
+/** A hub over a controllable collector (a real async function honouring abort). Tests assert how
+ * many times the hub started one and whether a dying one can reach the new generation. */
 function controllable() {
   const starts: AbortSignal[] = [];
   const emitters: Array<(event: FeedWatchEnvelope) => void> = [];

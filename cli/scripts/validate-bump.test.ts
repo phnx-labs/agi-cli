@@ -1,12 +1,6 @@
-/**
- * The release version arithmetic, exercised by running the REAL script.
- *
- * This is the only thing standing between a typo in the comparison chain and a
- * bad `latest` on npm: nothing else in CI runs `scripts/`, and `release.sh`
- * cannot be invoked hermetically in a test — it demands live npm and GitHub
- * access long before it reaches the bump decision. Extracting the decision into
- * `validate-bump.sh` is what makes the real code path testable here.
- */
+/** The release version arithmetic, tested against the real script. Nothing else in CI runs
+ * `scripts/`, and release.sh needs live npm and GitHub before reaching the bump decision, so the
+ * decision is extracted into validate-bump.sh. */
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -42,12 +36,9 @@ describe('validate-bump: main ahead of the registry', () => {
     expect(bumpKind('1.20.70', '1.20.75', '1.20.75').kind).toBe('phnx-catchup');
   });
 
-  /**
-   * The 1.20.75 incident: a merged release PR whose squash pulled in concurrent
-   * main commits cannot be published (its tree is not the tree CI tested), and
-   * before patch-from-main existed the next patch read as a skipped version —
-   * so there was no patch-level path forward at all.
-   */
+  /** The 1.20.75 incident: a merged release PR whose squash pulled in concurrent main commits
+   * cannot be published, and before patch-from-main the next patch read as a skipped version,
+   * leaving no patch-level path. */
   it('accepts the next patch after an unpublishable main (patch-from-main)', () => {
     expect(bumpKind('1.20.74', '1.20.75', '1.20.76').kind).toBe('patch-from-main');
   });

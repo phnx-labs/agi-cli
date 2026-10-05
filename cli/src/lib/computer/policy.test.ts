@@ -1,14 +1,6 @@
-/**
- * The allow list is the security boundary of `agents computer`, and PHNX-4075
- * moved it to the seam: the standalone engine enforces whatever agents-cli
- * renders into the policy file and has no way to second-guess it. A rule this
- * parser wrongly ADMITS is an app an agent can drive that the user never
- * authorized; one it wrongly DROPS is a broken workflow.
- *
- * Exercised against real permission-group YAML on disk through the same
- * `AGENTS_USER_PERMISSIONS_DIR` / `AGENTS_SYSTEM_PERMISSIONS_DIR` seams the CLI
- * itself reads — no mocking of the resolution layer.
- */
+/** The allow list is the security boundary of `agents computer` and the engine enforces whatever is
+ * rendered into the policy file (PHNX-4075). A wrongly admitted rule is an unauthorized app; a
+ * wrongly dropped one breaks a workflow. Tested against real permission-group YAML, no mocking. */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

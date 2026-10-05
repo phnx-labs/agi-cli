@@ -1,16 +1,6 @@
-/**
- * `--watch-pid` support — turns a backgrounded OS process into a durable,
- * daemon-polled watcher instead of relying on a harness's own exit hook
- * (PHNX-3023: a "will re-invoke me" background shell never fires when the
- * harness only notifies on process exit and the watch loop itself never
- * exits — `gh pr checks --watch`, a long sleep, a tick poll).
- *
- * The command built here reuses the same existence-check predicate
- * `isPidAlive`'s existence branch uses (`process.kill(pid, 0)`), but it runs
- * inside the monitor engine's own poll loop (`sources/command.ts`) rather than
- * the caller's process — so the check survives past the CLI invocation that
- * armed it.
- */
+/** `--watch-pid`: a backgrounded OS process becomes a durable daemon-polled watcher instead of a
+ * harness exit hook (PHNX-3023: such a hook never fires when the watch loop never exits). It runs
+ * `process.kill(pid, 0)` in the engine's poll (sources/command.ts), outliving the arming CLI. */
 
 import { IS_WINDOWS } from '../platform/index.js';
 
@@ -18,24 +8,14 @@ import { IS_WINDOWS } from '../platform/index.js';
 export const PID_WATCH_EXITED_TOKEN = 'exited';
 /** Emitted while the pid is alive. */
 export const PID_WATCH_RUNNING_TOKEN = 'running';
-/**
- * Emitted when the pid is not alive AND has never been observed alive — the
- * `--force` not-yet-spawned case. Deliberately distinct from
- * {@link PID_WATCH_EXITED_TOKEN} so it can never match the exit condition.
- */
+/** Emitted when the pid is not alive AND has never been observed alive (the `--force`
+ * not-yet-spawned case); distinct from {@link PID_WATCH_EXITED_TOKEN} so it can never match the
+ * exit condition. */
 export const PID_WATCH_NOT_YET_SPAWNED_TOKEN = 'notyetspawned';
 
-/**
- * The shell command a --watch-pid source polls. A poll only reports "exited"
- * once it has FIRST observed the pid running — tracked with a marker file the
- * command touches on every "running" poll — otherwise a `--force`-armed watch
- * on a not-yet-spawned pid would report "exited" on its very first poll (the
- * pid doesn't exist *yet*, not *anymore*), which the engine's match-mode
- * fires immediately (no prior state to diff against) and then persists as the
- * baseline — silencing the real exit forever once the process actually spawns
- * and later dies. Portable across the shells `sources/command.ts` invokes
- * (`/bin/sh -c` posix, `cmd /c` Windows).
- */
+/** The shell command a --watch-pid source polls. It reports "exited" only after FIRST seeing the
+ * pid running (a marker file); else a `--force` watch on a not-yet-spawned pid fires at once and
+ * silences the real exit. Portable: `/bin/sh -c` and `cmd /c`. */
 export function pidLivenessCommand(pid: number, seenRunningMarkerPath: string): string {
   if (IS_WINDOWS) {
     return (

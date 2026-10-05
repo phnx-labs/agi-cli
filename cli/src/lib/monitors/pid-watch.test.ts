@@ -54,13 +54,9 @@ describe('pidLivenessCommand (PHNX-3023)', () => {
   });
 });
 
-/**
- * PHNX-3023's acceptance bar: a REAL watcher, armed on a REAL backgrounded
- * process, must actually fire once that process exits — no exit-based harness
- * hook involved, only the monitor engine's own poll (`evaluateMonitorOnce`,
- * the exact call `MonitorEngine.tick` makes). This is the scenario the ticket
- * names dead: "5 shells still running" that "never wakes up, never alerts".
- */
+/** PHNX-3023's acceptance bar: a REAL watcher on a REAL backgrounded process must fire when it
+ * exits, with only the engine's own poll (`evaluateMonitorOnce`, as `MonitorEngine.tick` does) and
+ * no harness hook. The ticket's dead scenario: "5 shells still running" that never alert. */
 describe('--watch-pid arms a watcher that actually fires on exit (PHNX-3023)', () => {
   const names: string[] = [];
   afterEach(() => {
@@ -110,11 +106,9 @@ describe('--watch-pid arms a watcher that actually fires on exit (PHNX-3023)', (
     async () => {
       const name = `test-pidwatch-force-${process.pid}-${Date.now()}`;
       names.push(name);
-      // The real engine — not the dry-run evaluate — so state persists across
-      // polls exactly as the daemon's tick loop persists it. This is what
-      // exposed the bug: match-mode's `hasChanged` treats "no prior state" as
-      // changed, so a first-poll "exited" observation fired immediately AND
-      // persisted "exited" as the baseline, silencing the real exit forever.
+      // The real engine, so state persists across polls as in the daemon. This exposed the bug:
+      // match-mode's `hasChanged` treats no prior state as changed, so a first-poll "exited" fired
+      // at once and became the baseline, silencing the real exit forever.
       const engine = new MonitorEngine();
 
       // A pid guaranteed not to belong to any process right now — the --force

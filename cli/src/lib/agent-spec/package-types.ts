@@ -1,12 +1,6 @@
-/**
- * Types for the portable agent-package resolver + native-home materializer
- * (PHNX-3838). A package is a filesystem `agent.yaml` (schema v3 `execution`
- * block) describing behavior — instructions, skills, subagents, mcp, hooks —
- * that `resolveAgentPackage` reduces to ONE canonical resource set, which
- * `materializeAgentPackage` then projects into a native Claude Code, Codex, or
- * OpenCode home. See `.agents/plans/phnx-3827-portable-agent-cloud/plan.md`
- * (PR muqsitnawaz/agents#2055) for the source design.
- */
+/** Types for the portable agent-package resolver and native-home materializer (PHNX-3838). A
+ * package is an `agent.yaml` (schema v3 `execution`) reduced to one canonical resource set and
+ * projected into a Claude Code, Codex or OpenCode home (PR muqsitnawaz/agents#2055). */
 import type { AgentId } from '../types.js';
 
 export type PackageResourceKind = 'instructions' | 'skills' | 'subagents' | 'mcp' | 'hooks';

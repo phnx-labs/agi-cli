@@ -1,20 +1,6 @@
-/**
- * Poll-failure classifier (PHNX-3510).
- *
- * A poll that FAILS to observe — the command exited non-zero, or its output
- * carries a transport/auth/rate-limit error shape — is an OBSERVATION FAILURE,
- * not a new value. Reading it as a value is the defect this closes: a
- * `gh pr list … | jq` monitor whose gh half intermittently prints
- * `GraphQL: API rate limit already exceeded …` flapped empty→error→empty, and an
- * `[on-change]` monitor read that as two value changes and dispatched a full
- * agent run on a premise that was false.
- *
- * The exit code alone is not enough: when gh is piped into jq the shell's exit
- * status is jq's (0 on empty input), so the rate-limit text can ride an exit-0
- * observation. The text patterns catch exactly that case. They stay tightly
- * scoped to unambiguous failure shapes so a legitimate observation whose content
- * merely mentions "timeout" is never misread as a failure.
- */
+/** Poll-failure classifier (PHNX-3510). A poll that FAILS to observe (non-zero exit, or
+ * transport/auth/rate-limit output) is not a value: a `gh pr list | jq` monitor flapped
+ * empty/error/empty and ran a full agent. Exit code alone isn't enough, so text patterns catch it. */
 
 /** A failure text pattern and the short reason it maps to (used in drought health). */
 interface FailurePattern {
@@ -41,15 +27,9 @@ export function matchFailureText(text: string): string | null {
   return null;
 }
 
-/**
- * Classify one poll snapshot. Returns a short failure reason when the snapshot is
- * an observation failure (non-zero exit, or a failure-shaped output), else null —
- * in which case the snapshot is a genuine value the condition may diff.
- *
- * A failure-shaped OUTPUT is checked even on exit 0, because a piped command
- * (`gh … | jq`) swallows the failing half's exit code. A non-zero exit is a
- * failure regardless of output shape.
- */
+/** Classifies one poll snapshot: a short failure reason for an observation failure, else null (a
+ * genuine value to diff). Failure-shaped OUTPUT is checked even on exit 0 (a piped command
+ * swallows the failing half's exit code); non-zero exit always fails. */
 export function classifyPollFailure(input: { exitCode?: number; text: string }): string | null {
   const textReason = matchFailureText(input.text);
   const badExit = typeof input.exitCode === 'number' && input.exitCode !== 0;

@@ -3,10 +3,9 @@ import { isRushSessionExpired } from './rush-session.js';
 
 describe('isRushSessionExpired', () => {
   it('treats expires_at: 0 as non-expiring (Phoenix pid_ bearer, PHNX-3645)', () => {
-    // 0 is the sentinel `rush login` writes for a non-expiring opaque bearer.
-    // Reading it as an absolute timestamp was the 1970-01-01 bug that rejected
-    // every valid Phoenix session across cloud dispatch, secrets sync, and the
-    // cloud session source.
+    // 0 is the sentinel `rush login` writes for a non-expiring opaque bearer; reading it as an
+    // absolute timestamp was the 1970-01-01 bug that rejected every valid Phoenix session across
+    // cloud dispatch, secrets sync and the cloud session source.
     expect(isRushSessionExpired(0)).toBe(false);
   });
 
@@ -25,12 +24,9 @@ describe('isRushSessionExpired', () => {
     expect(isRushSessionExpired(oneHourAhead)).toBe(false);
   });
 
-  // PHNX-3805 regression: expires_at is stored in MILLISECONDS (e.g.
-  // 1788157222000 = the JWT `exp` 1788157222 seconds × 1000). The check used to
-  // compare it against `Date.now() / 1000` (SECONDS), so a long-past ms value
-  // read as `1.788e12 <= 1.788e9` → always false → never expired. That made
-  // `agents cloud providers` report Rush `available: true` on a dead session.
-  // A real ms-scale timestamp well in the past MUST read as expired.
+  // PHNX-3805 regression: expires_at is in MILLISECONDS but was compared to `Date.now() / 1000`, so
+  // a long-past value never read as expired and `agents cloud providers` reported Rush `available:
+  // true` on a dead session. A real past ms timestamp MUST read as expired.
   it('is expired for a real ms-scale timestamp already in the past (PHNX-3805)', () => {
     // A concrete stored value observed on disk: 2026-08-31, already past.
     const realPastMs = 1788157222000;

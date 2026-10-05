@@ -1,11 +1,6 @@
-/**
- * Sandbox environment for routine job execution.
- *
- * Creates an overlay HOME directory per job with symlinked allowed
- * directories and agent-specific config files (permissions, settings).
- * The spawned agent process sees only the overlay, limiting filesystem
- * access to explicitly allowed paths.
- */
+/** Sandbox environment for routine job execution: a per-job overlay HOME with symlinked allowed
+ * directories and agent config files (permissions, settings), so the spawned agent sees only the
+ * overlay and its filesystem access is limited to allowed paths. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -74,11 +69,9 @@ function tomlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/**
- * Absolute path to this host's `gh` config directory (`hosts.yml` + `config.yml`),
- * or null when the host has never run `gh auth login`. Prefer `GH_CONFIG_DIR` when
- * the parent already pinned one; otherwise `$XDG_CONFIG_HOME/gh` or `~/.config/gh`.
- */
+/** Absolute path to this host's `gh` config dir (`hosts.yml` + `config.yml`), or null when `gh auth
+ * login` was never run. Prefers a parent-pinned `GH_CONFIG_DIR`, else `$XDG_CONFIG_HOME/gh` or
+ * `~/.config/gh`. */
 export function resolveHostGhConfigDir(): string | null {
   // Honor an explicit pin only when it actually exists; otherwise fall through
   // to the default locations so a stale/broken GH_CONFIG_DIR cannot hide a
@@ -114,11 +107,9 @@ export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, str
     }
   }
 
-  // Pin GH_CONFIG_DIR at the REAL host config so `gh` does not look under the
-  // disposable overlay HOME (which has no hosts.yml). Same posture as linking
-  // Cursor's auth.json — forward the credentials the daemon user already holds
-  // (RUSH-2860). Always prefer resolveHostGhConfigDir over a stale allowlisted
-  // value; an explicit extraEnv GH_CONFIG_DIR still wins below.
+  // Pin GH_CONFIG_DIR at the REAL host config so `gh` doesn't look under the overlay HOME (no
+  // hosts.yml); forward credentials the daemon user already holds (RUSH-2860). Prefer this over a
+  // stale allowlisted value; an explicit extraEnv GH_CONFIG_DIR still wins.
   const hostGh = resolveHostGhConfigDir();
   if (hostGh) {
     env.GH_CONFIG_DIR = hostGh;
@@ -133,15 +124,9 @@ export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, str
   return env;
 }
 
-/**
- * Get the overlay HOME directory path for a named job.
- *
- * The job name originates from routine YAML (`name:` field or file basename),
- * which can arrive from a synced user/system config repo. `safeJoin` contains
- * it to a single segment beneath the routines dir so a crafted name such as
- * `../../../..` cannot steer `prepareJobHome`/`cleanJobHome` (which does a
- * recursive `rmSync`) at a path outside `~/.agents/routines`.
- */
+/** Overlay HOME path for a named job. The name comes from routine YAML (possibly a synced repo), so
+ * `safeJoin` confines it to one segment; a crafted `../../../..` could otherwise steer the
+ * recursive `rmSync` in `cleanJobHome` outside `~/.agents/routines`. */
 export function getJobHomePath(name: string): string {
   return path.join(safeJoin(getRoutinesDir(), name), 'home');
 }
@@ -162,18 +147,9 @@ export function prepareJobHome(config: JobConfig, version?: string): string {
     generateCursorConfig(overlayHome);
   }
 
-  // Host tool credentials / setup the overlay HOME would otherwise hide.
-  // Cursor already links its own auth above; gh is harness-agnostic and needed
-  // by every sandboxed `--run` that shells out to `gh` (RUSH-2860 — monitor
-  // merge agents saw "not logged into any GitHub hosts" while the daemon user
-  // was fine).
-  //
-  // Deliberately NOT linking the real ~/.agents here. It would put the secrets
-  // master key (.secrets-key) and the encrypted store (.cache/secrets) together
-  // at a predictable path inside the overlay, through a writable symlink, in a
-  // child whose prompt can carry untrusted text from a watched source. The
-  // separate "agents-cli is not set up" defect (state.ts ignores AGENTS_USER_DIR)
-  // gets its own scoped change: RUSH-2954.
+  // Host gh credentials the overlay HOME would hide (RUSH-2860). Deliberately NOT linking the real
+  // ~/.agents: it would put the secrets master key and encrypted store together via a writable
+  // symlink in a child whose prompt can carry untrusted text.
   linkHostGhConfig(overlayHome);
 
   if (config.allow?.dirs) {
@@ -204,11 +180,9 @@ export function linkVersionAuth(overlayHome: string, agent: AgentId, version?: s
   }
 }
 
-/**
- * Link this host's `gh` config directory into the disposable overlay so
- * `$HOME/.config/gh` resolves even when `GH_CONFIG_DIR` is unset. Mirrors
- * `generateCursorConfig`: same-host credentials, never copied to another box.
- */
+/** Link this host's `gh` config dir into the overlay so `$HOME/.config/gh` resolves even when
+ * `GH_CONFIG_DIR` is unset; like `generateCursorConfig`, same-host credentials, never copied to
+ * another box. */
 export function linkHostGhConfig(overlayHome: string): void {
   const realGhDir = resolveHostGhConfigDir();
   if (!realGhDir || !fs.existsSync(realGhDir)) return;
@@ -223,15 +197,9 @@ export function linkHostGhConfig(overlayHome: string): void {
   }
 }
 
-/**
- * Refuse to launch a sandboxed child when THIS host holds GitHub auth but the
- * spawn env would hide it. The RUSH-2860 failure mode was silent: the monitor
- * fire recorded `ok` (spawn succeeded) while every `gh` call inside the child
- * failed. Prefer forwarding (buildSpawnEnv / linkHostGhConfig); this assert is
- * the regression tripwire — if forwarding ever regresses, fail loud at spawn
- * instead of recording a hollow success. No-ops when the host has no gh auth
- * (jobs that do not need GitHub still run).
- */
+/** Refuse to launch a sandboxed child when THIS host holds GitHub auth but the spawn env would hide
+ * it. RUSH-2860 failed silently: the monitor fire recorded `ok` while every `gh` call failed.
+ * Regression tripwire; no-op when the host has no gh auth. */
 export function assertSandboxForwardsHostGhAuth(spawnEnv: Record<string, string>): void {
   if (!hostHasGhAuth()) return;
   if (spawnEnv.GH_TOKEN || spawnEnv.GH_ENTERPRISE_TOKEN || spawnEnv.GITHUB_TOKEN) return;

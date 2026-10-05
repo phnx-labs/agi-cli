@@ -1,13 +1,6 @@
-/**
- * Pin the cross-platform matrix trigger policy in ./ci.yml.
- *
- * The six-job OS × Node matrix is expensive (macOS 10×, Windows 2×) and gates
- * nothing (main requires only `test` + `gitleaks`; release.sh gates on an
- * exact-tree attestation, never this matrix). It must therefore stay OFF the
- * release path: a nightly schedule plus manual workflow_dispatch only. It must
- * NOT fire on release/** branches (16-53 min of billed, non-gating, often-red
- * work on every release) nor on v* tags.
- */
+/** Pin ./ci.yml's matrix trigger policy: the OS x Node matrix is expensive (macOS 10x, Windows 2x)
+ * and gates nothing (main requires `test` + `gitleaks`), so it stays off the release path:
+ * nightly plus workflow_dispatch only, never on release/** branches or v* tags. */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

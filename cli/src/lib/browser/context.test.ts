@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The fleet/config/actor boundary is mocked so the fd-3 context SHAPE — the wire
-// contract with the standalone `browser` engine — is asserted deterministically
-// without a real device registry. The real device resolution is covered by
-// `ssh-tunnel`'s own tests; here we pin what agents-cli hands the engine.
+// The fleet/config/actor boundary is mocked so the fd-3 context shape (the wire contract with the
+// standalone `browser` engine) is asserted deterministically. Real device resolution is covered by
+// `ssh-tunnel`'s tests.
 const mockResolveRemoteDevice = vi.fn();
 const mockGetConfigValue = vi.fn();
 vi.mock('../ssh-tunnel.js', () => ({ resolveRemoteDevice: (...a: unknown[]) => mockResolveRemoteDevice(...a) }));

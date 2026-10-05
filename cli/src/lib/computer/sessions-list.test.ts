@@ -44,12 +44,9 @@ function action(overrides: Partial<ComputerAction> = {}): ComputerAction {
   };
 }
 
-// ─── Pure grouping (RUSH-2432) ──────────────────────────────────────────────
-// groupIntoComputerRuns / matchesComputerSessionRow are pure — resolvers are
-// injected, so these run with no filesystem or session-index dependency.
-// listComputerActions / buildComputerSessionRows are the impure ledger/disk
-// readers, covered further down against the real event log (same pattern as
-// browser/sessions-list.test.ts's disk-backed section).
+// Pure grouping (RUSH-2432): groupIntoComputerRuns / matchesComputerSessionRow take injected
+// resolvers, so they need no filesystem or session index. The impure ledger readers are tested
+// further down against the real event log.
 
 describe('groupIntoComputerRuns', () => {
   it('collapses every action sharing a pid into one row, newest action first', () => {
@@ -227,10 +224,8 @@ describe('applyRowDisplayLimit', () => {
   });
 
   it('caps at the given limit and reports the exact remainder — the real-history explosion (RUSH-2432 demo finding)', () => {
-    // A real machine's history is mostly one standalone verb per CLI
-    // invocation (one pid = one row), not `run --task` loops — an unbounded
-    // flat dump against it prints hundreds of one-action rows. This pins the
-    // fix found while demonstrating the feature against real history.
+    // Real history is mostly one standalone verb per CLI invocation, so an unbounded flat dump
+    // prints hundreds of one-action rows. This pins the fix found against real history.
     const { shown, more } = applyRowDisplayLimit(manyRows(237), 50);
     expect(shown).toHaveLength(50);
     expect(more).toBe(187);
@@ -248,14 +243,9 @@ describe('applyRowDisplayLimit', () => {
   });
 });
 
-// ─── Ledger round-trip (real event log) ─────────────────────────────────────
-// listComputerActions / buildComputerSessionRows read through the REAL
-// events.ts query() path, isolated per test via _resetForTest(eventsPath()) —
-// same seam lib/computer/record.ts writes through
-// already use for computer.action. `emit()` always stamps the CALLING
-// process's own pid (see events.ts sanitizePayload's reserved-key note), so
-// every event this suite writes shares one pid and collapses to one row —
-// multi-row grouping is covered above with synthetic actions instead.
+// Ledger round-trip against the REAL events.ts query() path, isolated per test via
+// _resetForTest(eventsPath()). `emit()` stamps the calling process's pid, so every event here
+// collapses to one row; multi-row grouping is covered above.
 
 describe('listComputerActions + buildComputerSessionRows (real event log)', () => {
   let dir: string;
@@ -292,11 +282,9 @@ describe('listComputerActions + buildComputerSessionRows (real event log)', () =
     expect(actions).toHaveLength(3);
     expect(actions.every((a) => a.pid === process.pid)).toBe(true);
 
-    // Scope to THIS run's invocation: buildComputerSessionRows also recovers
-    // runs from the durable computer_sessions table (RUSH-2549), so the machine's
-    // own history legitimately contributes rows this ledger never wrote. The
-    // assertion here is about grouping — three events, one row — not about how
-    // much history the box happens to hold.
+    // Scope to this run's invocation: buildComputerSessionRows also recovers runs from the durable
+    // computer_sessions table (RUSH-2549), so the box's history adds rows. The assertion is about
+    // grouping (three events, one row).
     const rows = buildComputerSessionRows();
     const ledgerRows = rows.filter((r) => r.invocationId === 'real-run');
     expect(ledgerRows).toHaveLength(1);
@@ -363,12 +351,9 @@ describe('listComputerActions + buildComputerSessionRows (real event log)', () =
   it('returns an empty listing rather than throwing when the ledger has no computer.action rows yet', () => {
     _resetForTest(eventsPath());
     expect(listComputerActions()).toEqual([]);
-    // An empty ledger contributes no rows OF ITS OWN. Any row still present came
-    // from the durable computer_sessions table, and every such row is a RECOVERED
-    // one — identified by carrying recoveredActionCount (RUSH-2549). Asserting
-    // on `actions.length === 0` instead would be vacuous: appendPrunedRunsFromDb
-    // hardcodes `actions: []`, so that can never fail. A ledger row leaking in
-    // here would have recoveredActionCount undefined, and this catches it.
+    // An empty ledger contributes no rows of its own; any row present is a recovered one carrying
+    // recoveredActionCount (RUSH-2549). Asserting `actions.length === 0` would be vacuous since
+    // appendPrunedRunsFromDb hardcodes `actions: []`.
     expect(() => buildComputerSessionRows()).not.toThrow();
     expect(buildComputerSessionRows().every((r) => r.recoveredActionCount !== undefined)).toBe(true);
   });

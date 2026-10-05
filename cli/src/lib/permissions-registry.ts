@@ -1,36 +1,6 @@
-/**
- * Declarative permission-target registry.
- *
- * Every allowlist-capable agent gets ONE entry (`PERMISSION_TARGETS`) describing
- * where its permissions live and how to read that file back into the canonical
- * `PermissionSet`. `agents permissions list <agent>` and the config-file import
- * behind `agents permissions add <path>` used to dispatch through hand-written
- * 3-arm switches while
- * `applyPermissionsToVersion` wrote 13 harnesses, so permissions were written
- * for cursor, antigravity, grok, kimi, droid, copilot, openclaw and
- * hermes and then reported as absent for all ten (RUSH-2676).
- *
- * The key set is pinned to `capableAgents('allowlist')` by
- * `permissions-registry.test.ts`, mirroring `SUBAGENT_TARGETS` — the pattern the
- * repo's own AGENTS.md names for cross-harness capabilities. A newly added
- * allowlist harness cannot be written-but-unreadable: it must land an entry here
- * in the same change.
- *
- * This module also OWNS the canonical<->native tool vocabularies. `permissions.ts`
- * imports them for the forward (canonical -> native) serializers, and the reverse
- * projections below are derived from the same tables, so the two directions
- * cannot drift into disagreeing about what `developer__shell` or `fs_read` means.
- *
- * ## Every reverse projection is lossy, and says how
- *
- * The forward direction discards information — several canonical tools collapse
- * onto one native id (`Read`/`Grep`/`Glob` all become a coarse capability), and
- * pattern grammars differ (`git:*` becomes `git *`). Reading back therefore
- * recovers a permission set that GRANTS THE SAME ACCESS, not the byte-identical
- * strings that were written. Each target documents its own collapse. Callers that
- * need a faithful record of what agents-cli installed should read the central
- * `~/.agents/permissions/` set, not a harness's config.
- */
+/** One `PERMISSION_TARGETS` entry per allowlist-capable agent: where permissions live and how to
+ * read them back (RUSH-2676: ten written harnesses were unreadable). Keys pinned to
+ * `capableAgents('allowlist')` by test. Reverse projections are lossy but grant the same access. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -68,13 +38,9 @@ export const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
   webfetch: 'read_url',
 };
 
-/**
- * Invert a forward map, keeping the FIRST canonical tool that maps to each
- * native id. Several canonical tools collapse onto one native id, so the
- * inverse must pick a representative; declaration order in the forward table is
- * that choice, which is why `read` (declared before `grep`/`glob`) represents
- * a coarser native capability.
- */
+/** Inverts a forward map keeping the FIRST canonical tool per native id. Several canonical tools
+ * collapse onto one native id, so declaration order picks the representative (`read` before
+ * `grep`/`glob` stands for a coarser capability). */
 function invertFirstWins(forward: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [canonical, native] of Object.entries(forward)) {
@@ -111,10 +77,8 @@ function titleCaseTool(lower: string): string {
   return CANONICAL_TOOL_CASE[lower] ?? lower;
 }
 
-/**
- * Inverse of the serializers' `normalizeBashPattern`: native grammars spell a
- * command's arg-glob `git *`, canonical spells it `git:*`. `*` stays `*`.
- */
+/** Inverse of the serializers' `normalizeBashPattern`: native grammars spell a command's arg-glob
+ * `git *`, canonical `git:*`. `*` stays `*`. */
 function denormalizeBashPattern(pattern: string): string {
   if (pattern === '*' || pattern === '**') return '*';
   if (pattern.endsWith(' *')) return `${pattern.slice(0, -2)}:*`;
@@ -142,16 +106,9 @@ function permissionSet(allow: string[], deny: string[]): PermissionSet | null {
 
 // ── file readers ─────────────────────────────────────────────────────────────
 
-/**
- * Strip JSON comments for JSONC parsing, only OUTSIDE string literals.
- *
- * A naive `//`-to-end-of-line regex destroys
- * `"$schema": "https://opencode.ai/config.json"` — which every
- * opencode-generated config carries — so the file then fails to parse and its
- * permissions read back as absent, the very defect this registry exists to fix.
- * Exported so `permissions.ts` shares this one implementation instead of
- * keeping its own copy.
- */
+/** Strips JSON comments for JSONC only OUTSIDE string literals. A naive `//` regex destroys
+ * `"$schema": "https://opencode.ai/config.json"`, so the file fails to parse and permissions read
+ * as absent. Exported so `permissions.ts` shares this copy. */
 export function stripJsonComments(content: string): string {
   let result = '';
   let inString = false;
@@ -251,15 +208,9 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
-/**
- * Invert `convertDenyToCodexRules` (permissions.ts). The writer emits
- * `prefix_rule(pattern=["git", "reset"], decision="forbidden")` from a
- * canonical `Bash(git reset:*)`. Prefix-match is the native form of `:*`,
- * so the reverse always reconstructs `Bash(<parts>:*)`.
- *
- * Only `decision = "forbidden"` is a deny; anything else is skipped rather
- * than guessed into an allow (Codex grants come from sandbox_mode).
- */
+/** Inverts `convertDenyToCodexRules` (permissions.ts): `prefix_rule(pattern=["git", "reset"],
+ * decision="forbidden")` becomes `Bash(git reset:*)`. Only `decision = "forbidden"` is a deny;
+ * others are skipped, not guessed into an allow. */
 function convertCodexRulesToDeny(content: string): string[] {
   const deny: string[] = [];
   const marker = 'prefix_rule';
@@ -350,37 +301,20 @@ interface PermissionTarget {
   home(home: string): string;
   /** Permissions file for a project checkout, when the harness reads one. */
   project?: (cwd: string) => string;
-  /**
-   * Read `configPath` and project it to canonical form. Returns null when the
-   * file is absent, unreadable, or records no permissions — never throws.
-   */
+  /** Reads `configPath` and projects it to canonical form. Returns null when the file is absent,
+   * unreadable, or records no permissions; never throws. */
   toCanonical(configPath: string): PermissionSet | null;
   /** One line naming what this harness's shape loses on the way back. */
   lossyBecause: string;
-  /**
-   * Extra path suffixes this harness's config may use, for DETECTION only.
-   *
-   * `home()`/`project()` may probe the filesystem to pick between accepted
-   * spellings, which is correct when resolving a real root but meaningless for
-   * detection — `detectPermissionAgentFromPath` passes `''`, so the probe would
-   * resolve against `process.cwd()` and make the same input detect differently
-   * depending on where the CLI was run.
-   *
-   * Detection still calls `home('')`/`project('')`, since most targets are pure
-   * `path.join` and need no entry. A target whose resolver probes MUST list
-   * EVERY spelling it can return — that is what makes the probe's answer
-   * irrelevant rather than unreachable. `existingOr` (opencode) is the only
-   * probing resolver today; `permissions-registry.test.ts` pins the invariant
-   * for the whole table rather than leaving it as prose.
-   */
+  /** Extra path suffixes this harness's config may use, for DETECTION only: `home()`/`project()`
+   * may probe the filesystem, but detection passes `''`, so the probe resolves against
+   * `process.cwd()`. A probing resolver MUST list EVERY spelling it can return. */
   altSuffixes?: string[];
 }
 
-/**
- * Single source of truth for where each allowlist-capable agent stores
- * permissions and how to read them back. Keys MUST equal
- * `capableAgents('allowlist')` — pinned by `permissions-registry.test.ts`.
- */
+/** Single source of truth for where each allowlist-capable agent stores permissions and how to read
+ * them back. Keys MUST equal `capableAgents('allowlist')` (pinned by
+ * permissions-registry.test.ts). */
 export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   claude: {
     home: (h) => path.join(h, '.claude', 'settings.json'),
@@ -657,11 +591,8 @@ function kimiPatternToCanonical(pattern: string): string | null {
   return canonicalRule(lowerTool, arg);
 }
 
-/**
- * Read `agent`'s permissions from `home` (a version home or the real HOME) and
- * project them to canonical form. `scope: 'project'` reads the repo-local file
- * for the harnesses that have one, and returns null for those that do not.
- */
+/** Reads `agent`'s permissions from `home` (a version home or the real HOME) in canonical form.
+ * `scope: 'project'` reads the repo-local file for harnesses that have one, else null. */
 export function readCanonicalPermissions(
   agent: AgentId,
   scope: 'user' | 'project' = 'user',

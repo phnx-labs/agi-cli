@@ -1,16 +1,6 @@
-// Unified self-heal subsystem — shared shapes.
-//
-// agents-cli had ~37 separate repair routines scattered across the daemon, every
-// CLI startup, and a handful of commands, each hand-rolling detect+fix on its own
-// trigger. This subsystem gives every repairable class of problem ONE shape — a
-// HealCheck — driven by ONE runner, hosted behind TWO front doors (the daemon,
-// on tiered schedules, and `agents doctor`, on demand).
-//
-// A check's `run()` both detects and repairs in a single pass (repair is skipped
-// when `ctx.dryRun`), mirroring the existing resource heal (heal.ts) which computes
-// and applies together. `mode` gates how aggressive a repair may be: 'safe' (the
-// daemon default) fixes only low-risk drift and merely reports risky conditions;
-// 'full' (`agents sync`) applies everything.
+// Shared shapes for the self-heal subsystem: each repairable problem is one HealCheck run by one
+// runner, behind the daemon and `agents doctor`. `run()` detects and repairs in one pass (skipped
+// on `ctx.dryRun`). 'safe' mode fixes low-risk drift; 'full' (`agents sync`) fixes all.
 
 export type HealCheckId =
   | 'resources'

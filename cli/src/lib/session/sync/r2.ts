@@ -1,14 +1,6 @@
-/**
- * Minimal S3-compatible client for Cloudflare R2, built on aws4fetch (SigV4
- * over the platform `fetch` + WebCrypto — works identically under Bun and
- * Node >= 22). Only the verbs the backup target needs: put / get / head / list /
- * delete.
- *
- * No mounting, no FUSE: this is a plain object-store client driven on demand by
- * `agents sessions export --to-r2` / `import --from-r2`, which is the only
- * approach that is seamless on both macOS and Linux (Mountpoint for S3 is
- * Linux-only; rclone-mount needs macFUSE).
- */
+/** Minimal S3-compatible R2 client on aws4fetch (SigV4 over `fetch` + WebCrypto; Bun and Node >=
+ * 22) with only put/get/head/list/delete. Plain on-demand client, no mounting: Mountpoint for S3
+ * is Linux-only and rclone-mount needs macFUSE. */
 
 import { AwsClient } from 'aws4fetch';
 import type { R2Config } from './config.js';

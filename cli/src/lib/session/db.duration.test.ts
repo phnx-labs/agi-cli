@@ -1,11 +1,6 @@
-/**
- * The persisted `duration_ms` (PHNX-3457) against a REAL SQLite index. Harness
- * scan extractors that never derived a span (rush/grok/kimi/cursor/muse/
- * antigravity) left `duration_ms` NULL — 52% of the corpus, 100% of rush — so the
- * console median was computed over only the ~48% that carried it. The fix computes
- * it at the single upsert boundary from the timestamps the row already stores, so
- * every harness gets a span. This exercises that write path end to end.
- */
+/** The persisted `duration_ms` (PHNX-3457) against a real SQLite index. Extractors for
+ * rush/grok/kimi/cursor/muse/antigravity left it NULL (52% of the corpus), skewing the median. It
+ * is now computed at the upsert boundary from stored timestamps. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';

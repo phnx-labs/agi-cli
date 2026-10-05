@@ -238,9 +238,8 @@ describe('fleetCapacity', () => {
 });
 
 describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => {
-  // retainHardwareFacts (RUSH-3096) carries specsFetchedAt forward across an
-  // unreachable probe to say when the retained hardware facts were actually
-  // observed. Any success path that forgets to stamp it degrades that
+  // retainHardwareFacts (RUSH-3096) carries specsFetchedAt forward across an unreachable probe to
+  // date the retained hardware facts. Any success path that forgets to stamp it degrades that
   // provenance to the coarser fetchedAt.
   it('windows: unparseable probe output still stamps it', () => {
     const s = parseWinProbeOutput('winbox', 'garbage that matches nothing', 1000);
@@ -259,14 +258,9 @@ describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => 
 });
 
 
-/**
- * PHNX-3682 — a relayed peer needs a bigger probe budget than a direct one.
- *
- * The regression: one 2.5s budget was applied to every device, which is shorter
- * than a cold DERP-relayed SSH handshake (measured 1.7-6.6s across a 9-box
- * relayed fleet). `--device auto` then reported every healthy worker as
- * "unreachable" and refused to launch.
- */
+/** PHNX-3682: a relayed peer needs a bigger probe budget than a direct one. One 2.5s budget was
+ * shorter than a cold DERP-relayed SSH handshake (measured 1.7-6.6s), so `--device auto` reported
+ * every healthy worker unreachable and refused to launch. */
 function device(over: Partial<DeviceProfile> = {}): DeviceProfile {
   return {
     name: 'box',

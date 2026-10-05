@@ -94,13 +94,9 @@ describe('config command', () => {
   });
 
   it('sets, gets and unsets browser.viewer WITHOUT touching browser.profile', () => {
-    // Regression guard for a destructive bug: `getConfig`/`unsetConfig` both
-    // hardcoded 'browser.profile' in their `case 'browser'` arm, so
-    // `config get browser.viewer` reported browser.profile's value as if it were
-    // the answer, and `config unset browser.viewer` DELETED browser.profile
-    // while printing success. Neither arm is covered by a `never` binding — they
-    // switch on parsed.scope, where `case 'browser'` already existed — so only a
-    // test catches it.
+    // Regression guard for a destructive bug: `getConfig`/`unsetConfig` hardcoded
+    // 'browser.profile' in their `case 'browser'` arm, so `config unset browser.viewer` deleted
+    // browser.profile while printing success. Only a test catches it.
     runAgents(home, ['config', 'set', 'browser.profile', 'comet-local']);
     runAgents(home, ['config', 'set', 'browser.viewer', 'reading']);
 

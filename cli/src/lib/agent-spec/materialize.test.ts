@@ -163,11 +163,9 @@ describe('materializeAgentPackage — refuses to write through a symlink out of 
 });
 
 describe('materializeAgentPackage — refuses a preplanted symlink at each final leaf (PHNX-3838)', () => {
-  // Every concrete file the materializer writes/chmods, keyed to the leaf a
-  // preplanted symlink could redirect. `.claude` leaves for the claude harness
-  // (2.1.0). `dangling` = the link's target does not exist yet — the subtle case
-  // realpath-of-existing-prefix misses (it reads the leaf as a contained
-  // to-be-created file), which copyFileSync/writeFileSync/chmod then FOLLOW.
+  // Every concrete file the materializer writes or chmods, keyed to the leaf a preplanted symlink
+  // could redirect. `dangling` (target absent) is the subtle case realpath-of-existing-prefix
+  // misses, which copyFileSync/writeFileSync/chmod then follow.
   const leaves: { name: string; leaf: (home: string) => string }[] = [
     { name: 'instructions', leaf: (h) => path.join(h, '.claude', 'CLAUDE.md') },
     { name: 'mcp config', leaf: (h) => getMcpConfigPathForHome('claude', h) },

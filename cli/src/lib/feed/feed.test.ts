@@ -134,16 +134,9 @@ describe('feed store', () => {
     expect(files.filter(f => f.endsWith('.json'))).toHaveLength(1);
   });
 
-  // RUSH-2840: publishBlock() now routes through the shared atomicWriteJsonSync
-  // instead of hand-rolling its own tmp-then-rename. This pins the discriminating
-  // half of that guarantee that the "no partial reads" test above does not cover:
-  // a write that FAILS must leave the previous valid block untouched, with no
-  // stray tmp file. Only a NEW-file create can be blocked by directory
-  // permissions -- renaming over an existing directory entry is not -- so
-  // making the dir read-only forces atomicWriteJsonSync's first fs call (the
-  // tmp-file create) to fail before rename is ever reached. chmod is a no-op on
-  // Windows and root bypasses the permission check entirely, so this is skipped
-  // where the mechanism cannot hold.
+  // RUSH-2840: publishBlock() uses the shared atomicWriteJsonSync. A failed write must leave the
+  // previous valid block untouched with no stray tmp file. A read-only dir makes the tmp create
+  // fail; skipped on Windows and as root, where that cannot hold.
   const canBlockFileCreate =
     process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
   const itBlocksCreate = canBlockFileCreate ? it : it.skip;
@@ -661,10 +654,9 @@ describe('feed store', () => {
     const doc = yaml.parse(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8')) as {
       hooks: Record<string, { agents?: string[]; events?: string[]; matcher?: string }>;
     };
-    // feed-clear-permission fires on EVERY PostToolUse (it has no matcher), so
-    // registering it for Claude would add per-tool overhead AND delete Claude's
-    // notification-kind blocks the moment any later tool runs. Codex-only keeps
-    // Claude's card lifetime (persist to Stop/SessionEnd) exactly as before.
+    // feed-clear-permission fires on every PostToolUse (no matcher), so registering it for Claude
+    // would add per-tool overhead and delete Claude's notification-kind blocks on the next tool
+    // run. Codex-only keeps Claude's card lifetime (to Stop/SessionEnd).
     expect(doc.hooks['feed-clear-permission'].agents).toEqual(['codex']);
     expect(doc.hooks['feed-clear-permission'].agents).not.toContain('claude');
     expect(doc.hooks['feed-clear-permission'].matcher).toBeUndefined();
@@ -678,13 +670,9 @@ describe('feed store', () => {
   });
 
   it.runIf(hasPython)('a plain PostToolUse clears a notification block at the script level -- which is why Claude must NOT register the matcher-less clear', () => {
-    // The script is agent-blind: it clears on hook_event_name alone. So if a
-    // matcher-less PostToolUse (any tool completion) were delivered for Claude,
-    // it WOULD delete Claude's notification-kind card -- that is the exact
-    // regression. This test pins that causal fact at the script level; the
-    // manifest test above pins the fix (Claude does not register the hook, so
-    // its plain tool completions never reach the script and the card persists
-    // to Stop/SessionEnd as it did before RUSH-2039).
+    // The script is agent-blind and clears on hook_event_name alone, so a matcher-less PostToolUse
+    // delivered for Claude would delete its notification-kind card. This pins that fact at script
+    // level; the manifest test pins the fix (RUSH-2039).
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-notif-clear-'));
     const feedDir = path.join(home, '.agents', '.history', 'feed');
     const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
@@ -859,11 +847,9 @@ describe('feed store', () => {
   });
 
   it.runIf(hasPython)('real hook UserPromptSubmit writes an answered tombstone so a stale re-read cannot resurrect (PHNX-3074)', () => {
-    // The Python terminal-answer path used to unlink the block with no
-    // resolutions/<id>.json tombstone. Once reconcileAttention is on the
-    // read path, a session engine still reporting waiting_input at the same
-    // cursor would resurrect the answered ask. This is the producer-side
-    // match of TS recordAnswer: tombstone BEFORE unlink.
+    // The Python terminal-answer path used to unlink the block with no resolutions/<id>.json
+    // tombstone, so a session engine still reporting waiting_input at the same cursor would
+    // resurrect the answered ask. Producer-side match of TS recordAnswer: tombstone before unlink.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-terminal-tombstone-'));
     const feedDir = path.join(home, '.agents', '.history', 'feed');
     const sessionId = 'session-tombstone';

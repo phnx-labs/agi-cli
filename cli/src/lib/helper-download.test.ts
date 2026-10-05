@@ -71,19 +71,13 @@ describe('menu-bar helper release-asset URLs', () => {
   });
 });
 
-// cli/ — this file lives at cli/src/lib/, so two levels up. Resolved from
-// import.meta.url, not __dirname: the package is "type": "module", so __dirname
-// exists only because vite injects it, and every other test file here uses the
-// ESM form.
+// cli/ root, resolved from import.meta.url rather than __dirname: the package is "type": "module",
+// so __dirname exists only via vite injection.
 const REPO_ROOT_FOR_PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('the release repo slug is the GitHub repo, not the npm package', () => {
-  // These are two different names and conflating them breaks something either
-  // way. The repository was renamed agents-cli -> agi-cli; the published npm
-  // package is still @phnx-labs/agents-cli. Renaming the package to match would
-  // orphan every existing install, and leaving the slug on the old name means
-  // signed-binary downloads resolve only through GitHub's rename redirect --
-  // one re-created repo away from pointing elsewhere.
+  // Two different names, and conflating them breaks something: the repo was renamed agents-cli to
+  // agi-cli but the npm package is still @phnx-labs/agents-cli.
   it('uses the renamed repository, not the redirect', () => {
     expect(HELPER_RELEASE_REPO).toBe('phnx-labs/agi-cli');
     // Guard the specific regression: the pre-rename slug must not come back.
@@ -187,19 +181,9 @@ describe('download sha256 gate (real hash + parse used in downloadHelperApp)', (
   });
 });
 
-// RUSH-3113 regression. `helper-download.ts` must be importable as the FIRST
-// local module in a fresh process. It used to reach the computer subsystem's
-// ssh-tunnel module (since extracted, PHNX-4075)
-// for two sha256 helpers, and that graph ran through the (now-removed, PHNX-3989)
-// in-repo secrets engine's own keychain-helper downloader, which imported back
-// into this module while it was still evaluating — before `EXPECTED_TEAM_ID`
-// (line 30) is bound. Every entry point that reached helper-download first died
-// with `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before initialization`,
-// taking drift-sync and self-heal's real-subprocess tests down with it.
-//
-// A SUBPROCESS is the only faithful reproduction: inside vitest the module
-// registry is usually already warm, so the cycle does not re-trigger. Fails on
-// the parent commit, passes here.
+// RUSH-3113 regression: `helper-download.ts` must be importable as the first local module in a
+// fresh process; an import cycle hit EXPECTED_TEAM_ID before initialization. Only a subprocess
+// reproduces it, since vitest's module registry is usually warm.
 describe('module-init cycle (RUSH-3113)', () => {
   it('imports standalone in a fresh process without a TDZ error', () => {
     const mod = path.resolve(process.cwd(), 'src/lib/helper-download.ts');

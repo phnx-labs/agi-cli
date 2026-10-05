@@ -1,17 +1,6 @@
-/**
- * Session-summarizer service (PHNX-3939).
- *
- * The single daemon-owned executor that computes a per-session goal / progress
- * checkpoints / checklist and writes them to the transcript-keyed
- * `session_summaries` cache, from which the display/merge path serves them onto
- * the `sessions watch` stream. It NEVER runs on a request path.
- *
- * Off by default: `runSummarizerPass` no-ops unless `summarizer.enabled` and a
- * model endpoint (`summarizer.baseUrl` + `summarizer.model`) are configured, so a
- * daemon with the feature unconfigured makes zero model calls. Reader-gated and
- * bounded per tick like the other session services, so it costs nothing while no
- * one is watching.
- */
+/** Session-summarizer service (PHNX-3939): the single daemon-owned executor computing
+ * goal/progress/checklist into the `session_summaries` cache that `sessions watch` serves. Never
+ * on a request path. Off by default: needs `summarizer.enabled` and a model endpoint. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';

@@ -1,8 +1,5 @@
-/**
- * Verifies parseRush normalizes the flat rush messages.jsonl format to the
- * shared SessionEvent shape, and detectAgent routes both local and cloud
- * filename conventions to the right parser.
- */
+/** Verifies parseRush normalizes the flat rush messages.jsonl to SessionEvent and detectAgent
+ * routes both local and cloud filename conventions. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';

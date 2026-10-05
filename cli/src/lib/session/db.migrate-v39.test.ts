@@ -10,26 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv39-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v38 -> v39: durable tool-session metadata (RUSH-2549).
- *
- * The upgrade is driven the way production drives it, not by hand-writing an
- * older schema: open the DB (current schema), drop the two new tables, stamp
- * the recorded version back to 38, close, reopen. `getDB` then replays what a real
- * pre-v39 machine replays — `db.exec(SCHEMA)` followed by `migrateSchema(38)`.
- *
- * What this can and cannot prove, stated honestly. `getDB` runs
- * `db.exec(SCHEMA)` UNCONDITIONALLY (db.ts:1221) before it reads the recorded
- * version, and v39 adds only new tables — so `SCHEMA` has already created them
- * by the time `migrateSchema` runs, and the v39 block's `CREATE TABLE IF NOT
- * EXISTS` is an idempotent backstop rather than the thing that does the work.
- * That makes a fresh-vs-upgraded COLUMN comparison tautological here (both
- * sides are `SCHEMA`'s output), unlike v36/v38 where the block does an
- * `ALTER TABLE` / rebuild that `SCHEMA` cannot express — so no such assertion
- * is made. What IS asserted is real: upgrading a v38 database yields both
- * tables and their indexes, stamps the new version, preserves existing rows,
- * and produces tables that actually accept a write.
- */
+/** v38 -> v39: durable tool-session metadata (RUSH-2549). Driven as production does: drop the two
+ * new tables, stamp version 38, reopen so getDB replays SCHEMA then `migrateSchema(38)`. SCHEMA
+ * already creates the tables, so no column comparison is made. */
 const { getSessionsDir } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

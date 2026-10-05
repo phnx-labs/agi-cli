@@ -120,11 +120,9 @@ describe('selectFallback — --attach-only (old `go`) vs default resume', () => 
 });
 
 describe('focusResolvedSession --attach-only Path D (PHNX-3356)', () => {
-  // `agents focus <id> --attach-only` against a live IDE row that has not
-  // registered a sessionId yet: isAttachableLiveSession is true (pid liveness
-  // only), jumpTo takes Path D (no tmux/Ghostty rail), refuseFallback prints
-  // the recovery hint. The indexed id the user passed must appear in that hint
-  // — not the literal `<id>` placeholder.
+  // `focus --attach-only` on a live IDE row with no sessionId yet takes Path D and prints the
+  // recovery hint, which must contain the indexed id the user passed, not the literal `<id>`
+  // placeholder.
   const id = 'ffffffff-1111-2222-3333-444444444444';
   const meta: SessionMeta = {
     id, shortId: 'ffffffff', agent: 'codex', version: '0.1.0', mode: 'edit',
@@ -383,10 +381,9 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
 });
 
 describe('shouldAttachLocalTmuxAliasBeforeFleet — local pane, no SSH', () => {
-  // Measured: `sessions resume ag-claude-0145ab8f --attach-only` on yosemite-s0
-  // printed two unreachable-device lists and waited ~2 min on offline peers
-  // before attaching a pane that `agents tmux ls` already showed on this box.
-  // The alias is the pane name; a fleet sweep cannot add information.
+  // Measured: `sessions resume ag-claude-0145ab8f --attach-only` waited ~2 min on offline peers
+  // before attaching a pane `agents tmux ls` already showed locally. The alias is the pane name,
+  // so a fleet sweep adds nothing.
   it('is true for a tmux alias with no --device scope', () => {
     expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-claude-0145ab8f', [])).toBe(true);
     expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-kimi-632c1fbc', [])).toBe(true);
@@ -403,12 +400,9 @@ describe('shouldAttachLocalTmuxAliasBeforeFleet — local pane, no SSH', () => {
 });
 
 describe('resolveTmuxAliasState — a tmux alias is classified against the REAL server', () => {
-  // RUSH-2498: `sessions focus ag-kimi-632c1fbc` used to fall through to the
-  // metadata resolver, which treats an unmatched alias as a keyword query and
-  // returned 13 unrelated text hits while that pane was alive and attachable.
-  // The alias's hex is the LAUNCH id, not the harness session id, so for a
-  // harness that writes no state/sessions/<pid>.json there is no mapping back
-  // to a SessionMeta at all — the pane name is the only handle that works.
+  // RUSH-2498: `sessions focus ag-kimi-632c1fbc` fell through to the keyword resolver and returned
+  // 13 unrelated hits for a live pane. The alias hex is the launch id, not the harness session id,
+  // so the pane name is the only usable handle.
   it('rejects selectors that are not alias-shaped', () => {
     expect(looksLikeTmuxAlias('87e2bc83')).toBe(false);
     expect(looksLikeTmuxAlias('87e2bc83-d1e8-499b-9f54-d8cf98abe51b')).toBe(false);

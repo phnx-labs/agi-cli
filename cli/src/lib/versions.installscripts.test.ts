@@ -62,10 +62,8 @@ vi.mock('child_process', async (importOriginal) => {
     }
     return undefined;
   });
-  // Real child_process.execFile carries a `util.promisify.custom` that resolves
-  // to `{ stdout, stderr }`. A bare vi.fn loses it, so `promisify(execFile)`
-  // would resolve to a single string and `const { stdout } = ...` would be
-  // undefined — breaking getLatestNpmVersion. Restore the faithful shape.
+  // Real execFile carries a `util.promisify.custom` resolving to `{ stdout, stderr }`; a bare vi.fn
+  // loses it and breaks getLatestNpmVersion. Restore that shape.
   (execFileMock as any)[promisify.custom] = (file: string, args: string[], options: unknown) =>
     new Promise((resolve, reject) => {
       execFileMock(file, args, options as never, (err: Error | null, stdout: string, stderr: string) =>
@@ -112,11 +110,9 @@ describe('installVersion npm install argv', () => {
     try {
       vi.resetModules();
       const { installVersion } = await import('./installations/versions.js');
-      // installVersion verifies the installed binary actually launches (an
-      // integrity gate against gutted installs). The mocked `npm install` writes
-      // no files, so stub the binary a real install would drop into
-      // node_modules/.bin — otherwise the gate correctly fails the install and
-      // this argv assertion never runs.
+      // installVersion verifies the binary launches (guards against gutted installs). The mocked
+      // `npm install` writes nothing, so stub the binary in node_modules/.bin or the gate fails
+      // first.
       const binDir = path.join(home, '.agents', '.history', 'versions', 'codex', '0.116.0', 'node_modules', '.bin');
       fs.mkdirSync(binDir, { recursive: true });
       fs.writeFileSync(path.join(binDir, 'codex'), '#!/bin/sh\necho 0.116.0\n');

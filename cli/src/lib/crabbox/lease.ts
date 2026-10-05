@@ -1,34 +1,6 @@
-/**
- * `agents run --lease` orchestrator.
- *
- * Acquire a box → provision the picked runtime(s) + their credentials → run the
- * agent on the box (via `crabbox run`, which owns the SSH) → tear the box down.
- * Acquisition is reuse-first against the shared warm pool (a ready box carrying
- * the lease profile + netMode labels is reused and kept; `--fresh` opts out and
- * always leases a new, torn-down box). Concurrent callers run from separate
- * `~/workspaces/<repo>-<run>` directories on that box. The whole box-side
- * sequence rides a single `--script-stdin` body so token contents never touch argv.
- *
- * ── Command-layer contract (RUSH-1920/1921/1924) ─────────────────────────────
- * Exports the commands layer (exec.ts / lease.ts / ssh.ts) consumes:
- *   • `buildBootstrapScript(opts)` — `opts.copySetup` (default TRUE; clear for
- *     --bare) gates the `copy-setup` progress sentinel; `opts.netMode`
- *     ('public' | 'tailscale', default 'public') adds the `joined-tailnet` step.
- *   • `LeaseRunOptions.copySetup` / `LeaseRunOptions.netMode` — forwarded by
- *     `leaseAndRun` (netMode → `crabboxWarmup`). `LeaseRunOptions.fresh`
- *     (`--fresh`) skips the warm profile-pool reuse check and always leases a
- *     new box, torn down after the run.
- *   • `crabboxWarmup(opts.netMode)` — 'tailscale' leases onto the tailnet
- *     (`--network tailscale -tailscale-tags tag:crabbox`); auth key rides the
- *     child env as `CRABBOX_TAILSCALE_AUTH_KEY` (crabboxEnv, cli.ts).
- *   • `CrabboxBox.tailscaleIPv4` / `CrabboxBox.tailscaleFQDN` — populated from
- *     the box labels by `normalizeBox` (cli.ts).
- *   • Step stream (progress.ts): `type LeaseStep`, the `onStep` router option,
- *     and the self-contained `renderStepLine(step)` helper (the lib never prints).
- *   • Setup-copy (setup-copy.ts): `copySetupToBox({ host, user?, port?,
- *     secretsBundle?, userAgentsDir?, onData? }): Promise<CopySetupResult>` — the
- *     push-from-local the command layer runs before the box run.
- */
+/** `agents run --lease` orchestrator (RUSH-1920/1921/1924): acquire a box (reuse-first from the
+ * warm pool; `--fresh` leases a new torn-down box), provision runtimes and credentials, run via
+ * `crabbox run` (owns SSH), tear down. One `--script-stdin` body keeps tokens out of argv. */
 
 import type { AgentId } from '../types.js';
 import { crabboxFind, crabboxList, crabboxStatusReady, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, poolReusableBoxes, type CrabboxBox } from './cli.js';
@@ -65,19 +37,12 @@ interface LeaseRunOptions {
   dispatchProfile?: LeaseDispatchProfile;
   /** Secrets bundle providing crabbox's provider token. */
   secretsBundle?: string;
-  /**
-   * Push the git-tracked subset of the local `~/.agents` onto the box before the
-   * run (default TRUE). The command layer sets `false` for `--bare`. When true,
-   * `buildBootstrapScript` emits the `copy-setup` progress sentinel; the actual
-   * push-from-local is `copySetupToBox` (setup-copy.ts), which the command layer
-   * runs before the box run.
-   */
+  /** Push the git-tracked subset of local `~/.agents` onto the box before the run (default true;
+   * `--bare` sets false). When true, `buildBootstrapScript` emits the `copy-setup` sentinel; the
+   * push itself is `copySetupToBox` (setup-copy.ts), run by the command layer. */
   copySetup?: boolean;
-  /**
-   * Network mode threaded to `crabboxWarmup` (default `'public'`). `'tailscale'`
-   * leases the box onto the tailnet and adds a `joined-tailnet` progress step.
-   * The command layer decides WHEN to enable it — this is plumbing only.
-   */
+  /** Network mode passed to `crabboxWarmup` (default `'public'`); `'tailscale'` joins the tailnet
+   * and adds a `joined-tailnet` step. The command layer decides when; this is plumbing only. */
   netMode?: 'public' | 'tailscale';
   onData?: (s: string) => void;
   /** Progress phases (warmup → ready → teardown) for a command-layer spinner. */
@@ -86,17 +51,12 @@ interface LeaseRunOptions {
   keep?: boolean;
   /** Existing warm crabbox slug to reuse instead of provisioning a new lease. */
   reuseBox?: string;
-  /**
-   * Force a brand-new box: skip the warm profile-pool reuse check and tear the
-   * box down after the run (the pre-pool `--lease` behavior). `--fresh` at the
-   * command layer.
-   */
+  /** Force a brand-new box: skip warm pool reuse and tear the box down after the run (the pre-pool
+   * `--lease` behavior). `--fresh` at the command layer. */
   fresh?: boolean;
-  /**
-   * Raw wrapped Claude OAuth payload (from `resolveClaudeCredentialsBlob`), written
-   * to `~/.claude/.credentials.json` on the box. The command layer resolves it
-   * (after consent) so this module stays free of Keychain I/O and unit-testable.
-   */
+  /** Raw wrapped Claude OAuth payload (from `resolveClaudeCredentialsBlob`) written to
+   * `~/.claude/.credentials.json` on the box. The command layer resolves it after consent so this
+   * module stays free of Keychain I/O. */
   claudeCredentialsJson?: string | null;
 }
 
@@ -117,14 +77,9 @@ interface LeaseRunResult {
   toreDown: boolean;
 }
 
-/**
- * Exit code the box-side bootstrap raises when `agents setup` did not leave a
- * usable install (`~/.agents/.system` is still not a git repo). The run-side gate
- * (`ensureInitialized`, commands/setup.ts) refuses `agents run` with "agents-cli
- * is not set up" in exactly that state, so the bootstrap aborts with this code
- * instead of running the agent into that refusal. `leaseAndRun` reads it to stop
- * a box THIS run provisioned — a newly created box that can't run is pure cost.
- */
+/** Exit code the box-side bootstrap raises when `agents setup` left no usable install
+ * (`~/.agents/.system` still not a git repo), which the run-side `ensureInitialized` gate would
+ * refuse anyway. `leaseAndRun` reads it to stop a box this run provisioned. */
 export const LEASE_BOOTSTRAP_FAILED_CODE = 97;
 
 /** POSIX single-quote for safe embedding in the generated bootstrap script. */
@@ -171,16 +126,9 @@ function runtimeInstallSpec(id: AgentId, dispatchProfile?: LeaseDispatchProfile)
   return id;
 }
 
-/**
- * Bash snippet that guarantees `agents` is runnable AND set up on the box. Fresh
- * crabbox images ship without node, and the box user may not own the global npm
- * prefix, so everything installs user-level under ~/.local (node from the official
- * latest-v22.x tarball to satisfy engines.node >=22.5.0). Exits 96 with a
- * diagnostic when the CLI still isn't runnable, and {@link LEASE_BOOTSTRAP_FAILED_CODE}
- * when `agents setup` did not leave a git-repo `~/.agents/.system` — both used to
- * surface only as a downstream failure (`agents: command not found`, or the run-side
- * "agents-cli is not set up" gate) after a swallowed `|| true`.
- */
+/** Bash snippet ensuring `agents` is runnable and set up on the box. Fresh images lack node and the
+ * user may not own the npm prefix, so everything installs under ~/.local. Exits 96 if the CLI is
+ * not runnable, LEASE_BOOTSTRAP_FAILED_CODE if setup left no git-repo `.system`. */
 const ENSURE_AGENTS_CLI = [
   'export PATH="$HOME/.local/bin:$PATH"',
   'if ! command -v node >/dev/null 2>&1; then',
@@ -197,14 +145,9 @@ const ENSURE_AGENTS_CLI = [
   '  echo "lease bootstrap: agents-cli install failed (node: $(command -v node || echo missing))" >&2',
   '  exit 96',
   'fi',
-  // The run-side gate (`ensureInitialized`, commands/setup.ts) refuses `agents run`
-  // with "agents-cli is not set up" until `~/.agents/.system` is a GIT REPO. Gate
-  // setup on that same postcondition — not a swallowed exit: capture setup's output,
-  // and if the repo still isn't there afterward, print the real cause and abort so
-  // the box is never run into that refusal (a swallowed `|| true` here is what left
-  // a provisioned box dying at "agents-cli is not set up"). `-e` (not `-d`) matches
-  // the gate's `isGitRepo` (git.ts), which is `existsSync('.git')` — true for a
-  // gitfile/gitlink too, so a linked-worktree `.system` never false-aborts here.
+  // The run-side gate (`ensureInitialized`) refuses `agents run` until `~/.agents/.system` is a
+  // git repo, so gate setup on that same postcondition: capture output and abort with the cause,
+  // never `|| true`. `-e` (not `-d`) matches `isGitRepo`, so a gitfile `.system` is fine.
   'if [ ! -e "$HOME/.agents/.system/.git" ]; then',
   '  setup_out=$(agents setup 2>&1)',
   '  if [ ! -e "$HOME/.agents/.system/.git" ]; then',
@@ -215,11 +158,9 @@ const ENSURE_AGENTS_CLI = [
   'fi',
 ].join('\n');
 
-/**
- * Build the single bootstrap script run on the box: ensure agents-cli, install
- * the picked runtime CLIs, write their credentials, run the agent, then shred
- * the credential files. Best-effort install steps never abort the run.
- */
+/** Build the single box-side bootstrap script: ensure agents-cli, install the picked runtime CLIs,
+ * write credentials, run the agent, then shred the credential files. Best-effort install steps
+ * never abort the run. */
 export function buildBootstrapScript(opts: LeaseRunOptions): string {
   const credentialRuntimes = opts.credentialRuntimes ?? opts.runtimes;
   const credScript = buildCredentialScript(credentialRuntimes, opts.detected, {
@@ -284,10 +225,9 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     step('creds'),
     credScript,
     profileScript,
-    // copy-setup: the host already rsync'd the git-tracked ~/.agents onto the box
-    // (leaseAndRun, before this script). Here — after ENSURE_AGENTS_CLI installed
-    // the CLI — we materialize that config into the runtime home. Gated by
-    // copySetup (cleared for --bare). Best-effort; a refresh failure never aborts.
+    // copy-setup: the host already rsync'd the git-tracked ~/.agents onto the box, so after
+    // ENSURE_AGENTS_CLI we materialize it into the runtime home. Gated by copySetup (cleared for
+    // --bare); best-effort.
     copySetup ? [step('copy-setup'), 'agents sync --local -y >/dev/null 2>&1 || true'].join('\n') : '',
     // Marker on its own line: the command layer shows everything before this as
     // setup progress and everything after (the agent's output) verbatim.
@@ -301,15 +241,9 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     .join('\n');
 }
 
-/**
- * The first warm box in this run's profile pool that is actually SSH-ready, or
- * null. Mirrors scripts/sandbox.sh's `pick_ready_box`: list the running boxes
- * for the run's profile + netMode, then gate each on `crabbox status`
- * ready=true — a box whose bootstrap failed still lists as `running` and would
- * burn the whole SSH wait before hard-failing. A skipped box is left alone
- * (never stopped): a concurrent run may be mid-boot on it, and crabbox's idle
- * timeout reaps genuine duds.
- */
+/** The first warm pool box that is actually SSH-ready, or null. Mirrors scripts/sandbox.sh
+ * `pick_ready_box`: gate each running box on `crabbox status` ready=true, since a failed-bootstrap
+ * box lists as `running`. A skipped box is never stopped: a concurrent run may be mid-boot. */
 function pickReadyPoolBox(opts: LeaseRunOptions): CrabboxBox | null {
   const candidates = poolReusableBoxes(crabboxList({ secretsBundle: opts.secretsBundle }), {
     profile: opts.profile,
@@ -337,16 +271,9 @@ interface StrayMatchOptions {
   graceSecs?: number;
 }
 
-/**
- * Whether `box` is an EXPIRED, idle stray in this run's pool — the boxes that
- * accumulate cost. An expired box can never be reused (`poolReusableBoxes` gates
- * on an unexpired lease), yet `keep:true` leaves it running, so without a sweep a
- * fresh provision leaves the old one billing until `gc`'s 1h-idle window. Only a
- * box that is running, in the SAME profile+netMode pool, has an EXPIRED lease, and
- * has been untouched for the grace window is a stray — a mid-boot or in-use box
- * (recent `lastTouchedAt`, or an unexpired lease) is never one. Pure — testable
- * without a shell.
- */
+/** Whether `box` is an expired, idle stray in this run's pool: running, same profile+netMode,
+ * EXPIRED lease, untouched for the grace window. An expired box can never be reused yet
+ * `keep:true` leaves it billing until `gc`'s 1h window. Mid-boot or in-use boxes are never strays. */
 export function isExpiredPoolStray(box: CrabboxBox, opts: StrayMatchOptions): boolean {
   const profile = opts.profile ?? DEFAULT_CRABBOX_PROFILE;
   const netMode = opts.netMode ?? 'public';
@@ -363,11 +290,8 @@ export function isExpiredPoolStray(box: CrabboxBox, opts: StrayMatchOptions): bo
   return true;
 }
 
-/**
- * Opportunistically stop expired, idle strays in this run's pool — rides the
- * lease (no scheduler), best-effort (never throws, never blocks the run). Returns
- * how many were stopped.
- */
+/** Opportunistically stop expired, idle strays in this run's pool. Rides the lease (no scheduler),
+ * best-effort, never throws or blocks; returns the count stopped. */
 function reapExpiredPoolStrays(opts: LeaseRunOptions, keepSlug: string): number {
   let boxes: CrabboxBox[];
   try {
@@ -384,11 +308,9 @@ function reapExpiredPoolStrays(opts: LeaseRunOptions, keepSlug: string): number 
 }
 
 export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult> {
-  // SING-1b, FAIL FAST: `buildBootstrapScript` below refuses to copy a native OAuth
-  // login (via `buildCredentialScript`), but that runs only AFTER a box has been
-  // leased — and a `--fresh` box would leak because the throw escapes the teardown
-  // `finally`. Refuse HERE, before any box is provisioned or paid for, mirroring how
-  // `--copy-creds` refuses before it opens an SSH connection.
+  // SING-1b, fail fast: `buildBootstrapScript` refuses to copy a native OAuth login but only after
+  // a box is leased, and a `--fresh` box would leak since the throw escapes the teardown
+  // `finally`. Refuse here before any box is provisioned or paid for.
   assertNoNativeOAuthTransfer(opts.credentialRuntimes ?? opts.runtimes, opts.detected, {
     claudeCredentialsJson: opts.claudeCredentialsJson,
   });
@@ -429,20 +351,15 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   }
   opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
 
-  // Reap expired, idle strays in this pool now that we hold our box. An expired
-  // box can never be reused, so these are pure cost the 1h-idle `gc` window
-  // leaves running. Skip when the caller named an explicit `--box` (they're
-  // driving box lifecycle by hand). Best-effort — never blocks or aborts the run.
+  // Reap expired, idle strays now that we hold our box: they can never be reused and are pure cost
+  // until the 1h `gc` window. Skipped for an explicit `--box`; best-effort.
   if (!opts.reuseBox) {
     reapExpiredPoolStrays(opts, box.slug);
   }
 
-  // Setup-copy (F1, RUSH-1920): push the git-tracked ~/.agents config onto the
-  // box from the host, over crabbox's own per-lease ssh (a raw ssh fails
-  // publickey). rsync only here — the box has no agents-cli yet, so the matching
-  // `agents sync --local` runs inside the bootstrap script, after the install
-  // step. Best-effort: a copy failure never aborts the run (the agent just runs
-  // without the config).
+  // Setup-copy (F1, RUSH-1920): rsync the git-tracked ~/.agents from the host over crabbox's
+  // per-lease ssh (raw ssh fails publickey). The matching `agents sync --local` runs in the
+  // bootstrap script after install. Best-effort: a copy failure never aborts the run.
   if (opts.copySetup !== false) {
     try {
       await copySetupToBox({
@@ -463,12 +380,9 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   const script = buildBootstrapScript(opts);
   let exitCode: number | null = null;
   let toreDown = false;
-  // Track whether the box-side script reached the agent — the bootstrap echoes
-  // LEASE_AGENT_MARKER on its own line immediately before `agents run`, and aborts
-  // (LEASE_BOOTSTRAP_FAILED_CODE) strictly BEFORE that. So "marker never seen" is
-  // how we tell a pre-agent bootstrap abort from an agent that merely happened to
-  // exit with the same numeric code — only the former is an unusable box. A short
-  // rolling tail keeps the check robust if the marker straddles two output chunks.
+  // Track whether the box script reached the agent: the bootstrap echoes LEASE_AGENT_MARKER right
+  // before `agents run` and aborts strictly before it, so a missing marker tells a bootstrap abort
+  // from an agent exiting with the same code. A rolling tail handles a split marker.
   let sawAgentMarker = false;
   let markerTail = '';
   const trackedOnData = (chunk: string) => {
@@ -490,12 +404,9 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
       renewIdleTimeoutSecs,
     });
   } finally {
-    // A box this run PROVISIONED (never a reused one) whose BOOTSTRAP failed is
-    // unusable capacity — keep it and it bills until the idle GC window. Stop it
-    // regardless of --keep-box: the user asked to keep a working box, not a broken
-    // one. A reused box is left alone (a concurrent run may share it). The
-    // failed-code check is gated on the agent never having started (marker unseen),
-    // so an agent that legitimately exits with the same code keeps its --keep-box box.
+    // A box this run provisioned (never a reused one) whose bootstrap failed is unusable capacity,
+    // so stop it regardless of --keep-box. The failed-code check requires the agent marker unseen,
+    // so an agent exiting with the same code keeps its box.
     const bootstrapFailed = exitCode === LEASE_BOOTSTRAP_FAILED_CODE && !sawAgentMarker;
     // Normal --lease establishes or reuses the warm pool, so a healthy box outlives
     // this run; credentials are still shredded inside the script above. Only --fresh

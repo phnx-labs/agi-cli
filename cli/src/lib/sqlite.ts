@@ -17,12 +17,9 @@ import { createRequire } from 'module';
 const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
 const require = createRequire(import.meta.url);
 
-// node:sqlite emits a process-level ExperimentalWarning the first time it loads.
-// The packaged CLI launches Node with --no-warnings=ExperimentalWarning, but a
-// direct `node dist/...` run (and vitest's subprocesses) does not, so the warning
-// would leak onto stderr and break any command whose --json output is asserted to
-// be clean. Suppress only that single warning for the duration of the load; every
-// other warning passes through untouched.
+// node:sqlite emits a process-level ExperimentalWarning on first load. The packaged CLI suppresses
+// it, but direct `node dist/...` and vitest subprocesses do not, which would break clean `--json`
+// output. Suppress only that warning during the load.
 function loadNodeSqlite(): unknown {
   const original = process.emitWarning;
   const filtered = ((warning: string | Error, ...rest: unknown[]): void => {
@@ -43,20 +40,9 @@ function loadNodeSqlite(): unknown {
   }
 }
 
-// Keep BOTH runtimes on createRequire() so Vitest doesn't try to prebundle the
-// built-in sqlite module as a userland package during test collection.
-//
-// The Bun arm used to be `await import('bun:sqlite' as string)`, which made this
-// a TOP-LEVEL AWAIT. esbuild cannot lower top-level await to CJS, so every test
-// that spawns a subprocess through `tsx` (CJS mode) died at transform time with
-// `Top-level await is currently not supported with the "cjs" output format` --
-// 49 failures across 7 files, none of which touch sqlite. `require` is
-// synchronous, so the await disappears and with it the whole failure class.
-//
-// The specifier is held in a variable, not written inline: a literal
-// `require('bun:sqlite')` is statically analyzable, so bundlers and Vitest's
-// collector try to resolve a module that does not exist off-Bun. That
-// indirection is what the old `as string` cast was doing for the dynamic import.
+// Keep both runtimes on createRequire() so Vitest does not prebundle the built-in sqlite module.
+// The Bun arm was a top-level `await import('bun:sqlite')`, which esbuild cannot lower to CJS (49
+// failures in tsx subprocess tests); `require` is synchronous.
 const BUN_SQLITE = 'bun:sqlite';
 const sqliteMod = isBun
   ? (require as (id: string) => unknown)(BUN_SQLITE)
@@ -67,26 +53,9 @@ const NativeDatabase: new (filename: string, options?: { strict: boolean }) => N
   (sqliteMod as { Database?: unknown; DatabaseSync?: unknown }).Database as never
   ?? (sqliteMod as { DatabaseSync?: unknown }).DatabaseSync as never;
 
-/**
- * bun:sqlite binds a named-parameter object ONLY when its keys carry the SQL
- * sigil (`{ '@id': … }` for `VALUES (@id)`); bare keys (`{ id: … }`) match
- * nothing and every parameter stays NULL, so the first NOT NULL column raises a
- * constraint error and the write is lost. node:sqlite accepts the bare keys.
- * `strict: true` makes bun accept them too, so the bare-key call shape this
- * codebase uses works on both runtimes. node:sqlite has no such option and
- * rejects a second argument that isn't an object, so the argument list is built
- * per runtime.
- *
- * The two runtimes are still not interchangeable at the edges, and only bun's
- * half is exercised by the shipped binary rather than by vitest — so keep binds
- * inside the intersection:
- *   - omit a named key: bun throws `Missing parameter "x"`, node binds NULL.
- *   - pass an extra named key: bun accepts it, node throws `Unknown named
- *     parameter`.
- *   - use sigil keys (`{'@id': …}`): node accepts them, strict bun rejects them.
- *   - a single non-plain object positional arg (e.g. `run(new Date())`) reaches
- *     the named path via bindArgs below and throws under strict bun.
- */
+/** bun:sqlite binds named-parameter objects only when keys carry the SQL sigil; bare keys leave
+ * params NULL and lose the write. node:sqlite takes bare keys, so `strict: true` makes bun accept
+ * them too; node rejects a second non-object arg, so args are built per runtime. */
 const NATIVE_ARGS: [] | [{ strict: boolean }] = isBun ? [{ strict: true }] : [];
 
 interface NativeStmt {
@@ -161,15 +130,9 @@ class Database {
     this.inner.exec(`PRAGMA ${stmt}`);
   }
 
-  // Wrap fn in BEGIN IMMEDIATE/COMMIT, ROLLBACK on throw. Manual on both
-  // runtimes because node:sqlite has no `db.transaction(fn)`.
-  //
-  // BEGIN IMMEDIATE (not BEGIN DEFERRED) is required for write transactions in
-  // WAL mode. BEGIN DEFERRED upgrades the lock lazily on the first write; if
-  // another writer already committed since the transaction started, SQLite
-  // returns SQLITE_BUSY_SNAPSHOT (a sub-code of SQLITE_BUSY that the busy
-  // handler does NOT retry). BEGIN IMMEDIATE claims the write lock upfront so
-  // the busy handler fires correctly and respects busy_timeout.
+  // Wrap fn in BEGIN IMMEDIATE/COMMIT, ROLLBACK on throw; manual because node:sqlite has no
+  // `db.transaction`. IMMEDIATE is required in WAL mode: DEFERRED upgrades lazily and can hit
+  // SQLITE_BUSY_SNAPSHOT, which the busy handler does not retry.
   transaction<Args extends unknown[], R>(fn: (...args: Args) => R): (...args: Args) => R {
     return (...args: Args): R => {
       this.inner.exec('BEGIN IMMEDIATE');

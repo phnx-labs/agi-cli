@@ -1,37 +1,15 @@
-/**
- * Cloud dispatch type definitions.
- *
- * Defines the provider-agnostic interface that all cloud backends (Rush, Codex,
- * Factory) implement, plus the shared task and event types that flow through
- * the dispatch pipeline.
- */
+/** Cloud dispatch types: the provider-agnostic interface every backend (Rush, Codex, Factory)
+ * implements, plus shared task and event types. */
 
 import type { JobTrigger } from '../scheduling/routines.js';
 
-/**
- * Identifier for a supported cloud dispatch backend.
- *
- * Each id is one agent's *own* cloud — plus your own machines:
- *   - `rush`        — Rush Cloud (runs Claude against a GitHub repo → PR)
- *   - `codex`       — OpenAI Codex Cloud (`codex cloud exec`)
- *   - `factory`     — Factory Droid Computers (`droid computer ssh` + remote `droid exec`)
- *   - `antigravity` — Google Gemini Managed Agents (Interactions API)
- *   - `cursor`      — Cursor Cloud Agents REST API
- *   - `host`        — a machine you own (`agents devices`), over SSH
- *
- * Agents route to their native cloud automatically (see `cloudProvider` in the
- * agent registry); `--provider` overrides. Nothing auto-routes to `host` — it
- * is always an explicit `--provider host` (or `--device <name>`) choice.
- */
+/** Identifier for a cloud backend: each is an agent's own cloud (rush, codex, factory, antigravity,
+ * cursor) or `host` (your machine over SSH). Agents route to their native cloud via
+ * `cloudProvider`; `--provider` overrides. `host` is only ever explicit. */
 export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity' | 'cursor' | 'host';
 
-/**
- * Lifecycle state of a cloud-dispatched task.
- *
- * `idle` represents a long-lived session that has stopped between turns and
- * can be resumed via `message()`. Distinct from the terminal `completed |
- * failed | cancelled` states, which cannot transition back to `running`.
- */
+/** Lifecycle state of a cloud task. `idle` is a long-lived session stopped between turns and
+ * resumable via `message()`, unlike terminal `completed | failed | cancelled`. */
 export type CloudTaskStatus =
   | 'queued'
   | 'allocating'
@@ -45,24 +23,9 @@ export type CloudTaskStatus =
 /** Cloud backends whose wire status is normalized by `normalizeProviderStatus`. */
 type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity' | 'cursor';
 
-/**
- * Normalize a provider's raw wire status into the canonical `CloudTaskStatus`.
- *
- * Each cloud backend speaks its own status vocabulary and had its own copy of
- * this mapping, which had drifted. This dispatches per provider while keeping
- * provider-specific defaults explicit:
- *   - `rush`        — switch over the Factory Floor's known strings; includes
- *                     `allocating` and stopped/resumable `idle` states, has no
- *                     `queued`, default `running`.
- *   - `codex`       — substring match on the lowercased CLI status; default
- *                     `running`.
- *   - `antigravity` — substring match on the (possibly `undefined`) Interactions
- *                     API status; default `completed` (its synchronous response
- *                     is terminal), and `undefined`-safe.
- *
- * Factory's `mapResultStatus` is structurally different (it maps a droid *exit*
- * result, not a lifecycle string) and deliberately stays in `factory.ts`.
- */
+/** Normalize a provider's raw status into `CloudTaskStatus`, per provider with explicit defaults:
+ * rush switches over known Factory Floor strings (default `running`); codex substring-matches
+ * (default `running`); antigravity defaults to `completed`. */
 export function normalizeProviderStatus(
   provider: StatusNormalizingProvider,
   wireStatus: string | undefined,
@@ -120,11 +83,8 @@ function normalizeCodexStatus(s: string): CloudTaskStatus {
   return 'running';
 }
 
-/**
- * Antigravity Interactions API status → canonical enum. Substring match,
- * `undefined`-safe; default `completed` because the synchronous response is
- * already terminal.
- */
+/** Antigravity Interactions API status to canonical enum: substring match, undefined-safe, default
+ * `completed` because the synchronous response is terminal. */
 function normalizeAntigravityStatus(s: string | undefined): CloudTaskStatus {
   const lower = (s ?? '').toLowerCase();
   if (lower.includes('queue') || lower.includes('pending')) return 'queued';
@@ -143,16 +103,11 @@ export interface CloudTask {
   status: CloudTaskStatus;
   agent?: string;
   prompt: string;
-  /**
-   * First (or only) repo the task targets. Kept for back-compat with callers
-   * that treat one task as one repo. For multi-repo dispatches, see `repos`.
-   */
+  /** First (or only) repo the task targets, kept for back-compat with one-task-one-repo callers;
+   * see `repos` for multi-repo. */
   repo?: string;
-  /**
-   * All repos the task targets, in dispatch order. Populated for multi-repo
-   * dispatches (Rush Cloud, and any provider that supports it). `repo`
-   * mirrors `repos[0]` when both are set.
-   */
+  /** All repos the task targets, in dispatch order, for multi-repo dispatches. `repo` mirrors
+   * `repos[0]` when both are set. */
   repos?: string[];
   branch?: string;
   prUrl?: string;
@@ -161,15 +116,9 @@ export interface CloudTask {
   summary?: string;
 }
 
-/**
- * Single event emitted by a running cloud task.
- *
- * Discriminated union mirroring the local `SessionEvent` taxonomy so cloud
- * streams can be rendered with the same UI primitives as local sessions. The
- * `unknown` variant catches event names the provider emits that the client
- * doesn't recognize — surfacing them rather than silently dropping is the
- * point.
- */
+/** Event emitted by a running cloud task: a discriminated union mirroring the local `SessionEvent`
+ * taxonomy so the same UI renders both. The `unknown` variant surfaces unrecognized provider
+ * events instead of dropping them. */
 export type CloudEvent =
   | { type: 'text'; content: string; timestamp?: string }
   | { type: 'thinking'; content: string; timestamp?: string }
@@ -200,41 +149,23 @@ export const MAX_IMAGES_PER_DISPATCH = 5;
 export interface DispatchOptions {
   prompt: string;
   agent?: string;
-  /**
-   * Event/webhook trigger to register with this dispatch. Set by
-   * `agents cloud run --on <event>`: instead of dispatching immediately, the
-   * dispatch is persisted as a trigger-bound routine so the local webhook
-   * receiver can fire it when the event arrives. Remote firing of the trigger
-   * is a follow-up; today the flag parses, validates, and persists.
-   */
+  /** Event/webhook trigger from `agents cloud run --on <event>`: the dispatch is persisted as a
+   * trigger-bound routine for the local webhook receiver. Remote firing is a follow-up; today it
+   * parses, validates and persists. */
   trigger?: JobTrigger;
-  /**
-   * Legacy single-repo target. Still honored: if `repos` is empty, this
-   * becomes the only repo. Providers that support multi-repo treat
-   * `repos = [repo]` and `repo` as equivalent.
-   */
+  /** Legacy single-repo target, still honored: if `repos` is empty this is the only repo. */
   repo?: string;
-  /**
-   * One or more repos the dispatch targets. Repeatable on the CLI via
-   * `--repo`. Providers handle multi-repo differently:
-   *   - Rush Cloud clones each into /workspace/<owner>/<name>/
-   *   - Codex Cloud rejects (multi-repo requires an env that bundles them)
-   *   - Factory (local) clones each into the workspace before dispatch
-   */
+  /** One or more target repos (repeatable `--repo`). Rush clones each into
+   * /workspace/<owner>/<name>/; Codex Cloud rejects multi-repo; Factory clones each into the
+   * workspace first. */
   repos?: string[];
   branch?: string;
   timeout?: string;
   model?: string;
-  /**
-   * Skills to ship with the dispatch. Providers that support skills mount
-   * them in the pod's skills directory before the agent runs. Providers
-   * without skill support reject via `capabilities().skills === false`.
-   */
+  /** Skills to ship with the dispatch, mounted in the pod before the agent runs. Providers without
+   * support reject via `capabilities().skills === false`. */
   skills?: SkillRef[];
-  /**
-   * Image attachments for vision-enabled dispatch (e.g., "fix this UI bug,
-   * here's the screenshot"). Capped at MAX_IMAGES_PER_DISPATCH.
-   */
+  /** Image attachments for vision dispatch, capped at MAX_IMAGES_PER_DISPATCH. */
   images?: ImageAttachment[];
   /** Provider-specific options (e.g., codex env ID, factory computer name). */
   providerOptions?: Record<string, unknown>;
@@ -242,11 +173,8 @@ export interface DispatchOptions {
   env?: Record<string, string>;
 }
 
-/**
- * Collapse `repo` + `repos` into a single deduped list. Exported so callers,
- * tests, and every provider share the same resolution — one source of truth
- * for "which repos does this dispatch target?".
- */
+/** Collapse `repo` + `repos` into one deduped list; the single source of truth for which repos a
+ * dispatch targets. */
 export function resolveDispatchRepos(options: DispatchOptions): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -264,12 +192,8 @@ export function resolveDispatchRepos(options: DispatchOptions): string[] {
   return out;
 }
 
-/**
- * What a provider can actually do. Replaces the single-bool `supports()` so
- * callers can ask "does this provider support cancel?" without trying and
- * catching. The CLI gates feature-specific calls on these flags and surfaces
- * a typed error instead of letting throws bubble.
- */
+/** What a provider can actually do, so callers check flags and surface a typed error instead of
+ * try/catch. Replaces the single-bool `supports()`. */
 export interface ProviderCapabilities {
   /** Configured + reachable (auth present, binary installed, etc.). */
   available: boolean;
@@ -284,12 +208,8 @@ export interface ProviderCapabilities {
   images: boolean;
 }
 
-/**
- * A pre-provisioned dispatch target a provider runs *inside* — a Codex
- * environment (`env_…`) or a Factory Droid Computer (a name). Surfaced by
- * `agents cloud envs` and the missing-target picker so users don't have to
- * copy opaque IDs out of a web UI.
- */
+/** A pre-provisioned target a provider runs inside (Codex `env_...` or a Factory Droid Computer
+ * name), surfaced by `agents cloud envs` and the picker. */
 export interface CloudTarget {
   /** The value passed to dispatch (env id / computer name). */
   id: string;
@@ -301,13 +221,9 @@ export interface CloudTarget {
 /** Which dispatch option a provider's pre-provisioned target maps to. */
 export type TargetKind = 'env' | 'computer' | 'host';
 
-/**
- * Thrown by a provider's `dispatch()` when it needs a pre-provisioned target
- * (Codex env / Factory computer) and none was supplied. The CLI catches this
- * to offer a picker (`listTargets`) or actionable guidance, instead of a raw
- * error. `kind` names the missing flag; `guidance` is shown when the target
- * can't be enumerated.
- */
+/** Thrown by `dispatch()` when a required pre-provisioned target (Codex env / Factory computer) is
+ * missing. The CLI offers a picker via `listTargets`, or shows `guidance` when targets can't be
+ * listed. */
 export class MissingTargetError extends Error {
   constructor(public kind: TargetKind, message: string, public guidance?: string) {
     super(message);
@@ -315,14 +231,8 @@ export class MissingTargetError extends Error {
   }
 }
 
-/**
- * Contract that every cloud backend must implement.
- *
- * Each provider translates between the unified dispatch interface and its
- * backend-specific API (Rush Factory Floor, Codex Cloud CLI, Droid daemon).
- *
- * `message()` may transition a task from `idle` back to `running`.
- */
+/** Contract every cloud backend implements, translating the unified dispatch interface to its own
+ * API. `message()` may move a task from `idle` back to `running`. */
 export interface CloudProvider {
   id: CloudProviderId;
   name: string;
@@ -342,20 +252,13 @@ export interface CloudProvider {
   /** Send a follow-up message to a finished/idle/needs_review task. */
   message(taskId: string, content: string): Promise<void>;
 
-  /**
-   * The pre-provisioned target this provider runs inside, if any. Set for
-   * Codex (`env`) and Factory (`computer`); undefined for Rush (per-repo) and
-   * Antigravity (on-demand sandbox).
-   */
+  /** The pre-provisioned target this provider runs inside: Codex `env`, Factory `computer`;
+   * undefined for Rush (per-repo) and Antigravity (on-demand). */
   targetKind?: TargetKind;
 
-  /**
-   * Enumerate selectable targets for `agents cloud envs` and the picker.
-   * Present only when the backend can list non-interactively (Factory via
-   * `droid computer list`). Codex has no such CLI — it omits this, and callers
-   * fall back to `MissingTargetError.guidance`. May throw (e.g. not signed in);
-   * callers surface that verbatim.
-   */
+  /** Enumerate selectable targets for `agents cloud envs` and the picker, only where the backend
+   * can list non-interactively (Factory). Codex omits it and uses `MissingTargetError.guidance`.
+   * May throw. */
   listTargets?(): Promise<CloudTarget[]>;
 }
 
@@ -366,19 +269,11 @@ export type DroidAutonomy = 'low' | 'medium' | 'high';
 export interface CloudProviderConfig {
   rush?: Record<string, string>;
   codex?: { env?: string };
-  /**
-   * Factory (Droid) cloud. `computer` is the pre-provisioned Droid Computer
-   * name (managed in Factory's UI, or BYOM via `droid computer register`) —
-   * the Factory analogue of Codex's pre-built `env`. `autonomy` is the default
-   * `droid exec --auto` level for cloud runs (defaults to `high`).
-   */
+  /** Factory (Droid) cloud. `computer` is the pre-provisioned Droid Computer name (analogue of
+   * Codex's `env`); `autonomy` is the default `droid exec --auto` level (default `high`). */
   factory?: { computer?: string; autonomy?: DroidAutonomy };
-  /**
-   * Antigravity (Gemini Managed Agents) cloud. The Gemini API key is read from
-   * an `agents secrets` bundle named here (never stored in agents.yaml); if
-   * unset, the provider falls back to GEMINI_API_KEY / GOOGLE_API_KEY in the
-   * environment. `model` overrides the default managed-agent id.
-   */
+  /** Antigravity cloud. The Gemini key comes from the `agents secrets` bundle named here (never
+   * agents.yaml), else GEMINI_API_KEY / GOOGLE_API_KEY. `model` overrides the default agent id. */
   antigravity?: { secretsBundle?: string; model?: string };
   /** Cursor Cloud Agents API. The API key remains in the named secrets bundle. */
   cursor?: { secretsBundle?: string };

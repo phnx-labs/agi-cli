@@ -1,17 +1,6 @@
-/**
- * `agents events` — read the unified event stream (the one ops/timeline product).
- *
- * One stream over BOTH operational events (`~/.agents/.history/events/YYYY-MM-DD/`:
- * every `agents <module> <cmd>` invocation plus typed events like secrets access,
- * browser/computer, daemon lifecycle, version installs) AND agent-semantic events
- * (per-session activity: plans, PRs, worktrees, sub-agents, artifacts). Run-dispatch
- * outcomes land here as `run.dispatched` (readable via `--include runs`).
- *
- * `agents events audit` and `agents logs` are thin aliases of this command.
- *
- * Filter with sessions-style `--include` / `--exclude` families (ops, activity,
- * commands, runs, security) plus field filters (`--module`, `--event`, …).
- */
+/** `agents events` reads the unified event stream: operational events
+ * (`~/.agents/.history/events/YYYY-MM-DD/`) and agent-semantic ones (plans, PRs, worktrees). Run
+ * dispatch is `run.dispatched` (`--include runs`). `audit` and `logs` are aliases. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -23,12 +12,9 @@ import { ingestBatch } from '../lib/events-ingest.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerAuditCommands } from './audit.js';
 
-/**
- * Resolve `--limit` into a record cap. `0` means "no cap" — without it there is
- * no way to read the whole stream, and any aggregation (group-by failure, count
- * per module) silently ranks the newest 50 records instead of the real set.
- * A non-numeric or negative value is a usage error, not a quiet fallback.
- */
+/** Resolve `--limit` into a record cap. `0` means no cap; otherwise any aggregation silently ranks
+ * only the newest 50 records. A non-numeric or negative value is a usage error, not a quiet
+ * fallback. */
 export function resolveEventsLimit(raw: string | undefined): number | undefined {
   const token = raw ?? '50';
   // Number('') and Number('   ') are both 0, which would read as "no cap" — an
@@ -41,11 +27,8 @@ export function resolveEventsLimit(raw: string | undefined): number | undefined 
   return value === 0 ? undefined : value;
 }
 
-/**
- * Cap `fetched` (read with `limit + 1`) to `limit`, reporting whether records
- * were dropped. The caller announces the cap so a truncated read is never
- * mistaken for the complete set.
- */
+/** Cap `fetched` (read with `limit + 1`) to `limit`, reporting whether records were dropped, so the
+ * caller can announce the cap and a truncated read is never mistaken for the complete set. */
 export function capRecords<T>(fetched: T[], limit: number | undefined): { records: T[]; truncated: boolean } {
   if (limit === undefined || fetched.length <= limit) return { records: fetched, truncated: false };
   return { records: fetched.slice(0, limit), truncated: true };
@@ -139,11 +122,9 @@ function registerEmitSubcommand(events: Command): void {
       opts: { source: string; dryRun?: boolean; json?: boolean },
       cmd?: { parent?: { opts: () => { json?: boolean } } },
     ) => {
-      // The parent `events` command also declares `--json` (for its read view).
-      // Commander binds a flag declared on BOTH to the parent, so a bare
-      // `events emit … --json` lands on parent.opts().json and the child sees
-      // undefined — the human string would print where a caller expects JSON.
-      // Read both, same as `feed post`.
+      // The parent `events` command also declares `--json`, and commander binds a flag declared on
+      // both to the parent, so a bare `events emit ... --json` leaves the child seeing undefined
+      // and printing the human string. Read both, as `feed post` does.
       const wantJson = Boolean(opts?.json ?? cmd?.parent?.opts?.().json);
       const input = await readStdin();
       if (input.trim() === '') {

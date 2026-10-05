@@ -1,63 +1,23 @@
-/**
- * ServiceSupervisor (RUSH-3193 P1, PHNX-4116).
- *
- * Owns the timer for every registered `PeriodicService`, replacing the bare
- * `setInterval` closures in `runDaemon()`. Two failure modes motivated it, both
- * observed in production, and each is now handled without ever leaving a service
- * silently dark:
- *
- *  - A throw escaping a tick's local try/catch used to hit the process-wide
- *    `uncaughtException` handler and `process.exit(1)` the whole daemon, taking
- *    every OTHER service down with it. Here a thrown tick is caught per-service,
- *    recorded via `recordFailure`, and the service keeps ticking on its own
- *    interval — a throw is recoverable, so it is retried in place on the next
- *    tick and no sibling is disturbed.
- *  - A tick that HANGS on an unbounded await (SSH, keychain) used to latch its
- *    in-flight guard `true` forever, silently freezing that one service for the
- *    daemon's life (observed ~51h). A hang cannot be retried in-process — the
- *    promise may never settle — so when a tick (or a `start()`/`restart()`
- *    lifecycle call) BREACHES its deadline the supervisor records the cause,
- *    flushes it to disk, and EXITS the process (code 70). systemd
- *    (`Restart=always`, `RestartSec=30`, `StartLimitIntervalSec=0`) and launchd
- *    (`KeepAlive` + `ThrottleInterval=30`) restart the daemon within ~30s and the
- *    wedged service comes back healthy with it.
- *
- * This is the PHNX-4116 model: there is NO `parked` state and NO in-process
- * backoff restart. A supervised service is `idle` before start, `running` while
- * ticking, or `stopped` after a live disable / shutdown — a hang is not a fourth
- * state to sit in, it is a reason to hand the daemon back to its OS supervisor,
- * which is what actually "just works" like systemd/launchd. `start()`/`stop()`/
- * `restart()` stay bounded by {@link ServiceSupervisorOptions.lifecycleDeadlineMs}
- * so a wedged bind or close cannot stall daemon startup or shutdown; a start /
- * restart lifecycle breach exits the same way a tick breach does.
- */
+/** ServiceSupervisor (RUSH-3193 P1, PHNX-4116): owns the timer for every `PeriodicService`,
+ * replacing bare `setInterval` closures. A thrown tick is caught per service and retried. A
+ * deadline breach is a hang (seen ~51h) that cannot be retried in-process, so the daemon exits. */
 
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemState, recordDaemonRestart } from '../daemon-health.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import type { DaemonContext, DaemonService, PeriodicService, ServiceHealth, ServiceState } from './service.js';
 import { isPeriodicService } from './service.js';
 
-/**
- * Exit code the supervisor uses when a deadline breach hands the daemon back to
- * its OS supervisor for a restart. 70 (`EX_SOFTWARE`) marks an internal software
- * fault, distinct from a clean shutdown (0) or a config error.
- */
+/** Exit code when a deadline breach hands the daemon back to its OS supervisor: 70 (`EX_SOFTWARE`),
+ * distinct from a clean shutdown (0) or a config error. */
 const DEADLINE_EXIT_CODE = 70;
 
 interface ServiceSupervisorOptions {
-  /**
-   * Hard cap on a service's `start()`/`stop()`/`restart()` call (PHNX-3608). A
-   * wedged bind/close would otherwise stall `startAll()` (which awaits each
-   * `startOne` in turn) or `stopAll()` at shutdown. A start/restart that breaches
-   * it exits the process for a supervised restart (PHNX-4116); a stop that
-   * breaches it is logged and the service is left marked stopped. Default 30s.
-   */
+  /** Hard cap on a service's `start()`/`stop()`/`restart()` (PHNX-3608), so a wedged bind/close
+   * cannot stall `startAll()` or `stopAll()`. A start/restart breach exits for a supervised
+   * restart (PHNX-4116); a stop breach is logged and the service marked stopped. Default 30s. */
   lifecycleDeadlineMs?: number;
-  /**
-   * How the supervisor ends the process on a deadline breach. Defaults to
-   * `process.exit`; injected in tests so a breach is observable without actually
-   * exiting the test runner (PHNX-4116).
-   */
+  /** How the supervisor ends the process on a deadline breach. Defaults to `process.exit`; injected
+   * in tests so a breach is observable (PHNX-4116). */
   exit?: (code: number) => never;
 }
 
@@ -71,26 +31,17 @@ interface RegisteredService {
   activeTick?: Promise<void>;
   /** Aborts the in-flight tick at its deadline (or when the service is stopped). */
   activeController?: AbortController;
-  /**
-   * Resolvers for `awaitIdle()` callers waiting on the current tick. Resolved by
-   * `clearInFlight()` — the SAME place that flips `inFlight` to false — so a
-   * waiter never observes `inFlight === true` after `awaitIdle()` resolves
-   * (PHNX-3608: the SIGHUP live-disable race — awaiting the tick promise directly
-   * could resume the waiter's `.then(stop)` on a shorter microtask chain than the
-   * tick's own finally, so `stop()` saw a still-in-flight tick and threw).
-   */
+  /** Resolvers for `awaitIdle()` callers, released by `clearInFlight()` where `inFlight` flips to
+   * false, so a waiter never sees `inFlight === true` after resuming. Awaiting the tick promise
+   * directly raced the tick's own finally and `stop()` threw (PHNX-3608). */
   idleWaiters: Array<() => void>;
   /** True once `start()` has completed without throwing — guards `stop()` from being called on a service that never successfully started. */
   everStarted: boolean;
   timer?: ReturnType<typeof setInterval>;
   startupTimer?: ReturnType<typeof setTimeout>;
-  /**
-   * The in-flight tick's deadline timer. Stored on the entry (not just a local
-   * in `runTick`) so `stopOne` can clear it — otherwise a force-stop aborts the
-   * tick and returns while this timer stays armed, and if the hung tick ignores
-   * the abort it fires `exitForRestart` mid-shutdown (wrong exit code, spurious
-   * restart-ledger entry, `handleShutdown` cleanup skipped). PHNX-4116.
-   */
+  /** The in-flight tick's deadline timer, stored on the entry so `stopOne` can clear it. Otherwise
+   * a force-stop leaves it armed and a hung tick that ignores the abort fires `exitForRestart`
+   * mid-shutdown (wrong exit code, spurious ledger entry, skipped cleanup). PHNX-4116. */
   deadlineTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -112,13 +63,9 @@ export class ServiceSupervisor {
     this.exit = opts.exit ?? ((code: number) => process.exit(code));
   }
 
-  /**
-   * Race `op` against a deadline. On breach the returned promise rejects with a
-   * labelled error while the real `op` is left to settle in the background —
-   * used to bound the lifecycle calls (`start`/`stop`/`restart`) so a wedged one
-   * cannot stall startup or shutdown. `Promise.race` cannot cancel `op`; the
-   * caller decides what a breach means for that service.
-   */
+  /** Race `op` against a deadline; on breach reject with a labelled error while `op` settles in the
+   * background. Bounds start/stop/restart so a wedged one cannot stall startup or shutdown.
+   * `Promise.race` cannot cancel `op`; the caller decides what a breach means. */
   private async withDeadline<T>(op: () => Promise<T>, ms: number, label: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
@@ -131,14 +78,8 @@ export class ServiceSupervisor {
     }
   }
 
-  /**
-   * Register a service. Must be called before `startAll()`.
-   *
-   * Accepts both `PeriodicService` (ticked on a fixed interval) and
-   * lifecycle-only `DaemonService` (started once, stopped at shutdown). The
-   * supervisor uses `isPeriodicService()` to decide whether to schedule a timer
-   * for each registered entry.
-   */
+  /** Register a service before `startAll()`. Accepts `PeriodicService` (ticked on an interval) and
+   * lifecycle-only `DaemonService`; `isPeriodicService()` decides whether to schedule a timer. */
   register(service: DaemonService, options: RegisterServiceOptions = {}): void {
     if (this.registry.has(service.id)) throw new Error(`service '${service.id}' is already registered`);
     this.registry.set(service.id, {
@@ -152,11 +93,8 @@ export class ServiceSupervisor {
     });
   }
 
-  /**
-   * Flip a tick's in-flight guard off and release every `awaitIdle()` waiter in
-   * the same synchronous step, so no waiter's continuation can run while
-   * `inFlight` is still true (PHNX-3608).
-   */
+  /** Flip a tick's in-flight guard off and release every `awaitIdle()` waiter in the same
+   * synchronous step (PHNX-3608). */
   private clearInFlight(entry: RegisteredService): void {
     entry.inFlight = false;
     const waiters = entry.idleWaiters;
@@ -178,11 +116,8 @@ export class ServiceSupervisor {
     for (const id of this.registry.keys()) await this.stopOne(id, true);
   }
 
-  /**
-   * Force one service to restart right now — drives `agents daemon services
-   * restart <id>` (RUSH-3193 P4). A plain stop + start, with no intermediate
-   * `parked` state (PHNX-4116).
-   */
+  /** Force one service to restart now, driving `agents daemon services restart <id>` (RUSH-3193
+   * P4): a plain stop + start, no `parked` state (PHNX-4116). */
   async restartOne(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
@@ -203,30 +138,21 @@ export class ServiceSupervisor {
     return Array.from(this.registry.keys());
   }
 
-  /**
-   * Resolve when the service's current tick has really settled. Daemon control
-   * edges use this to queue a requested live transition without polling.
-   */
+  /** Resolve when the service's current tick has settled; daemon control edges use it to queue a
+   * live transition without polling. */
   async awaitIdle(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
-    // Resolve from clearInFlight (which also flips `inFlight` false) rather than
-    // from the tick promise directly: awaiting the tick promise resumed this
-    // caller on a shorter microtask chain than the tick's own finally, so a
-    // queued `.then(stop)` could run before `inFlight` was cleared and `stop()`
-    // would throw "cannot stop while a tick is still in flight" (PHNX-3608 — the
-    // SIGHUP live-disable regression). Waiting on the guard makes it deterministic.
+    // Resolve from clearInFlight, which flips `inFlight` false, not from the tick promise: the
+    // latter resumed on a shorter microtask chain than the tick's finally, so a queued
+    // `.then(stop)` threw "cannot stop while a tick is still in flight" (PHNX-3608).
     if (!entry.inFlight) return;
     await new Promise<void>((resolve) => { entry.idleWaiters.push(resolve); });
   }
 
-  /**
-   * Start one registered service live — drives `agents daemon services enable
-   * <id>` (RUSH-3193 P4). Only affects a service already registered on this
-   * supervisor. Callers that need live enable from a boot-disabled state must
-   * register the service with `{ enabled: false }`, which gives the supervisor
-   * ownership without running its startup side effects.
-   */
+  /** Start one registered service live, driving `agents daemon services enable <id>` (RUSH-3193
+   * P4). Only affects an already registered service; to enable from a boot-disabled state,
+   * register it with `{ enabled: false }` so the supervisor owns it without startup side effects. */
   async start(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
@@ -317,10 +243,9 @@ export class ServiceSupervisor {
       clearTimeout(entry.startupTimer);
       entry.startupTimer = undefined;
     }
-    // Cancel the in-flight tick's deadline timer too — leaving it armed lets it
-    // fire `exitForRestart` mid-shutdown if the hung tick ignores the abort
-    // below (PHNX-4116). The `state === 'stopped'` guard in `runTick` is the
-    // belt to this braces.
+    // Cancel the in-flight tick's deadline timer too: left armed it fires `exitForRestart`
+    // mid-shutdown if the hung tick ignores the abort (PHNX-4116). The `state === 'stopped'` guard
+    // in `runTick` backs this up.
     if (entry.deadlineTimer) {
       clearTimeout(entry.deadlineTimer);
       entry.deadlineTimer = undefined;
@@ -356,18 +281,9 @@ export class ServiceSupervisor {
     entry.timer = setInterval(() => { void this.runTick(id); }, entry.service.intervalMs);
   }
 
-  /**
-   * Run one tick under a hard deadline (PHNX-3608, PHNX-4116). The tick receives
-   * an `AbortSignal` that is aborted when the deadline elapses, so a cooperating
-   * tick can bound its own I/O and unwind. The deadline itself is enforced with
-   * `Promise.race` — JS cannot forcibly cancel an arbitrary await.
-   *
-   * A tick that THROWS is recoverable: it is recorded and the interval keeps
-   * firing, so the service retries on its next tick. A tick that BREACHES its
-   * deadline is a hang that can never be retried in-process (the promise may
-   * never settle), so the supervisor exits the process (`exitForRestart`) and
-   * lets systemd/launchd restart the whole daemon.
-   */
+  /** Run one tick under a hard deadline (PHNX-3608, PHNX-4116). The tick gets an `AbortSignal`
+   * aborted at the deadline so it can unwind; the deadline itself uses `Promise.race`. A throw is
+   * recorded and retried; a breach is a hang, so the supervisor exits for a restart. */
   private async runTick(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     const ctx = this.ctx;
@@ -398,21 +314,14 @@ export class ServiceSupervisor {
       entry.lastRunMs = Date.now();
       recordSubsystemOk(id);
     } catch (err) {
-      // A stopped service must never exit the process: `stopOne` may have
-      // force-stopped this tick (aborting its signal) while the deadline timer
-      // was still armed, and a hang that ignored the abort would otherwise let
-      // that timer fire `exitForRestart` mid-shutdown — wrong exit code, a
-      // spurious restart-ledger entry, and `handleShutdown` cleanup skipped
-      // (PHNX-4116). This is the belt to `stopOne`'s clearTimeout braces. Read
-      // the state fresh: `stopOne` mutated it across the `await` above, past the
-      // narrowing the top-of-function `state !== 'running'` guard applied.
+      // A stopped service must never exit the process: `stopOne` may have force-stopped this tick
+      // while its deadline timer was armed, and a hang ignoring the abort would fire
+      // `exitForRestart` mid-shutdown (PHNX-4116). Read the state fresh.
       const stoppedDuringTick = this.registry.get(id)?.state === 'stopped';
       if (timedOut && !stoppedDuringTick) {
-        // Abort the runaway tick's signal so a cooperating tick can unwind, then
-        // hand the daemon back to its OS supervisor: a hang has no in-process
-        // recovery (PHNX-4116). `exitForRestart` calls `process.exit`, so nothing
-        // below runs in production; the injected test exit returns, and the
-        // `finally` still releases the in-flight guard.
+        // Abort the runaway tick's signal so a cooperating tick can unwind, then hand the daemon
+        // to its OS supervisor; a hang has no in-process recovery (PHNX-4116). `exitForRestart`
+        // calls `process.exit`; the injected test exit returns and `finally` releases the guard.
         controller.abort();
         this.exitForRestart(id, err);
         return;
@@ -436,16 +345,9 @@ export class ServiceSupervisor {
     this.ctx?.log('WARN', `service '${id}' failed: ${message}`);
   }
 
-  /**
-   * Record a deadline breach durably and exit the process so systemd/launchd
-   * restart the whole daemon (PHNX-4116). `recordSubsystemError` writes
-   * `health.json` synchronously (atomic write under a file lock), so the cause is
-   * on disk before we exit; `recordDaemonRestart` appends to the restart ledger
-   * `agents daemon status` reads for "restarts in the last 24h". Every timer is
-   * frozen first so no further tick fires between this decision and process death
-   * — and so an injected test `exit` (which does not actually exit) still observes
-   * exactly one call.
-   */
+  /** Record a deadline breach durably and exit so systemd/launchd restart the daemon (PHNX-4116).
+   * `recordSubsystemError` writes `health.json` synchronously before exit; `recordDaemonRestart`
+   * appends to the ledger `agents daemon status` reads. Timers are frozen first. */
   private exitForRestart(id: DaemonServiceId, err: unknown): void {
     const cause = err instanceof Error ? err.message : String(err);
     const entry = this.registry.get(id);

@@ -146,10 +146,9 @@ describe('Auth column + freshness', () => {
   });
 
   it('sizes the Auth column so a wide mixed-auth cell never misaligns later columns', () => {
-    // Regression: a full `●2 ·3 ◐1 ○1` cell (11 display cells) overflowed a
-    // hard-coded 9-wide slot, shoving Version/Load-Mem/Note right on that row.
-    // Same name width + same version → the Version value must start at the same
-    // column in both the wide-auth row and the em-dash row.
+    // Regression: a full `●2 ·3 ◐1 ○1` cell (11 display cells) overflowed a hard-coded 9-wide
+    // slot, shoving Version/Load-Mem/Note right. With the same name width and version, Version
+    // must start at the same column in the wide-auth row and the em-dash row.
     const report = buildFleetHealthReport([
       row({ name: 'aaaa', version: '9.9.9', auth: { live: 2, present: 3, degraded: 1, revoked: 1, total: 7, oldestCheckedAt: 1 } }),
       row({ name: 'bbbb', version: '9.9.9' }), // no auth → '—'

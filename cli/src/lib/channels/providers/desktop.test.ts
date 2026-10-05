@@ -64,12 +64,8 @@ describe('desktopProvider', () => {
     expect(listChannelProviders()).toContain('desktop');
   });
 
-  // These two pin an ORDERING that CI caught and a dev box hides: a machine WITH
-  // notify-send passes them either way, so both bugs were invisible locally and
-  // only failed on a runner with no notifier. `--dry-run` means "resolve + build
-  // but do not send", so it must not depend on the ability to send; and an empty
-  // message is a caller error on every platform, so it must not be masked by
-  // "this box has no notifier". Both must therefore hold regardless of platform.
+  // These pin an ordering CI caught: dry-run and the empty-message error must not depend on the
+  // platform having a notifier.
   it('dry-run resolves even where nothing could actually be delivered', async () => {
     const res = await desktopProvider.send('hi', { target: 'local', dryRun: true });
     expect(res.ok).toBe(true);
@@ -92,10 +88,8 @@ describe('desktopProvider', () => {
     expect(res.error).not.toMatch(/notify-send|no desktop notifier/);
   });
 
-  // Runs the REAL send path (notifyDesktop is detached + best effort, so this
-  // exercises delivery without asserting on a GUI). The assertion follows the
-  // real deliverability probe, so it holds on a Mac, on a Linux desktop, and on
-  // a headless box with no notify-send.
+  // Runs the real send path; the assertion follows the real deliverability probe so it holds on
+  // Mac, Linux desktop, and headless boxes.
   it('reports honestly for the current platform', async () => {
     const res = await desktopProvider.send('agents-cli test\nbody line', { target: 'local' });
     const deliverable = desktopDeliverable();
@@ -105,10 +99,8 @@ describe('desktopProvider', () => {
 });
 
 describe('desktopDeliverable', () => {
-  // The bug this guards: reporting ok from the platform name alone. On a headless
-  // Linux box notify-send is absent and notifyDesktop swallows the ENOENT, so a
-  // platform-only answer would mark an undelivered notification as delivered --
-  // the same silent failure relocated.
+  // Guards against reporting ok from the platform name alone: on headless Linux notify-send is
+  // absent and its ENOENT is swallowed.
   it('probes for notify-send on linux rather than trusting the platform', () => {
     const hasNotifySend = spawnSync('which', ['notify-send'], { stdio: 'ignore' }).status === 0;
     const verdict = desktopDeliverable('linux');

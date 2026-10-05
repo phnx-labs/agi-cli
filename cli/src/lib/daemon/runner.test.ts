@@ -196,18 +196,9 @@ describeSpawn('runner device enforcement', () => {
 
 
 describeSpawn('runner fire-time auth preflight (PHNX-3415)', () => {
-  // Proves the runner.ts WIRING, not just the extracted pure function
-  // (routine-readiness.auth.test.ts covers fireTimeAuthReadiness in isolation): a
-  // routine whose resolved account is provably signed out records a terminal
-  // `blocked`/`agent_auth_failed` run — with the re-login repair, exitCode/pid
-  // null, and nothing spawned — through the real executeJob/executeJobDetached
-  // call sites, instead of a `failed` run that spawned and 401'd.
-  //
-  // A PINNED version resolves through `resolveRoutineLaunch` without a live
-  // credential (the pin returns its own chain — runner.ts:1069), so the fire-time
-  // cache preflight downstream is what's exercised; `sandbox: false` keeps the run
-  // out of a version-home overlay it need not build. This is the real signed-out
-  // pinned-routine scenario, not a synthetic one.
+  // Proves the runner.ts wiring, not just the pure function (routine-readiness.auth.test.ts): a
+  // routine whose account is provably signed out records a terminal `blocked`/`agent_auth_failed`
+  // run, nothing spawned, via the real executeJob, not a `failed` run that 401'd.
   afterEach(() => {
     cleanupJobRuns('auth-preflight-fg');
     cleanupJobRuns('auth-preflight-detached');
@@ -339,10 +330,9 @@ describeSpawn('runner host placement', () => {
   });
 
   it('reapExitedRunningJobs finalizes a host-placed run via the async reconciler (no sync ssh on the tick)', async () => {
-    // The daemon heartbeat tick reaches host-placed runs through the ASYNC path
-    // (finalizeHostRunAsync → reconcileTaskAsync). A terminal sidecar returns
-    // without any ssh probe, so this asserts the async path heals the record
-    // identically to the sync monitorRunningJobs one (PHNX-3695).
+    // The heartbeat tick reaches host-placed runs through the async path (finalizeHostRunAsync,
+    // reconcileTaskAsync). A terminal sidecar returns without an ssh probe, so this asserts the
+    // async path heals the record like the sync monitorRunningJobs one (PHNX-3695).
     const taskId = 'ffff0002';
     const jobName = 'host-monitor-async-test';
     const runId = 'run-hm-async-1';
@@ -416,11 +406,9 @@ describe('routine transcript archiving', () => {
     expect(fs.readFileSync(archived, 'utf-8')).toContain('"content":"hi"');
   });
 
-  // Regression: Kimi splits a session across state.json (metadata) and
-  // agents/main/wire.jsonl (the actual conversation) — see
-  // session/discover.ts:4382-4384. A ROUTINE_TRANSCRIPT_SPECS entry that only
-  // matched `.json` archived the metadata shell and silently dropped every
-  // message; both extensions must be captured.
+  // Regression: Kimi splits a session across state.json (metadata) and agents/main/wire.jsonl (the
+  // conversation) (session/discover.ts:4382). A ROUTINE_TRANSCRIPT_SPECS entry matching only
+  // `.json` archived the shell and dropped every message; both must be captured.
   it('archives BOTH state.json and wire.jsonl for a kimi routine session', () => {
     const kimiJobName = 'archive-kimi-test';
     const kimiRunId = 'run-kimi-1';
@@ -448,12 +436,9 @@ describe('routine transcript archiving', () => {
     }
   });
 
-  // RUSH-2271: a real Claude routine writes its transcript to the per-version
-  // CLAUDE_CONFIG_DIR home (buildExecEnv, exec.ts), NOT the sandbox overlay the
-  // archiver used to scan — so nothing was ever archived and the run never became
-  // an origin='routine' session. The archiver now reads the version home, scoped by
-  // a pre-spawn baseline so it copies ONLY this run's transcript out of that shared
-  // home, never a sibling session's.
+  // RUSH-2271: a Claude routine writes its transcript to the per-version CLAUDE_CONFIG_DIR home,
+  // not the sandbox overlay the archiver scanned, so nothing was archived and the run never became
+  // an origin='routine' session. The archiver now reads the version home via a pre-spawn baseline.
   it('archives a Claude routine transcript from the per-version home and excludes pre-existing sessions', () => {
     const jobName = 'archive-versionhome-test';
     const runId = 'run-vh-1';
@@ -488,10 +473,9 @@ describe('routine transcript archiving', () => {
     }
   });
 
-  // RUSH-2271 failover: the single-shot loop spawns each chain entry's OWN version,
-  // whose per-version home differs from chain[0]'s. When a run rate-limit-fails over to
-  // a second account, the archiver must read the home the attempt that actually ran wrote
-  // to — re-pointed via meta.version + a re-taken baseline before each attempt (runner.ts).
+  // RUSH-2271 failover: the single-shot loop spawns each chain entry's own version, whose home
+  // differs from chain[0]'s. After a rate-limit failover the archiver must read the home the
+  // attempt that ran wrote to (re-pointed via meta.version + a re-taken baseline).
   it('archives the failover attempt\'s version home, not the first attempt\'s (RUSH-2271)', () => {
     const jobName = 'archive-failover-test';
     const runId = 'run-fo-1';
@@ -647,10 +631,9 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
   }
 
-  // Regression: a detached (daemon-scheduled) command run must record its REAL
-  // terminal status. The first cut relied on monitorRunningJobs, which only infers
-  // status for agent jobs — so every successful command cron run was mis-recorded
-  // as 'failed'. child.on('exit') now writes the true status.
+  // Regression: a detached (daemon-scheduled) command run must record its real terminal status.
+  // monitorRunningJobs infers status only for agent jobs, so every successful command cron run was
+  // recorded `failed`. child.on('exit') now writes the true status.
   it('records completed / exitCode 0 on a successful detached run (not failed)', async () => {
     const meta = await executeJobDetached(commandConfig('cmd-det-ok', 'exit 0'));
     const final = await waitTerminal('cmd-det-ok', meta.runId);
@@ -699,9 +682,8 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`;
     const config = commandConfig('cmd-det-failed-live', command);
     const first = await executeJobDetached(config);
-    // Mark the first run failed while its child is still alive — the exact shape
-    // that used to wedge the slot forever (a failed/timeout record whose pid stays
-    // live is treated as "active"). Reaping that orphaned process group is
+    // Mark the first run failed while its child is alive: the shape that wedged the slot forever
+    // (a failed/timeout record with a live pid counted as "active"). Reaping that process group is
     // reapTerminalRoutineProcesses's job, not a reason to keep the slot occupied.
     writeRunMeta({ ...first, status: 'failed', completedAt: new Date().toISOString(), exitCode: 1 });
 
@@ -714,10 +696,9 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
 
   it('a failed run still carrying a live daemon-shaped pid no longer wedges every later slot (RUSH-2640)', async () => {
     const config = commandConfig('cmd-det-2640-failed', 'exit 0');
-    // Reproduce the release-train wedge: a prior run reached `failed` while its
-    // record still carries a pid that isPidOurs() always accepts. The daemon
-    // stamps its OWN pid on the provisional claim and the daemon never dies, so
-    // isPidOurs() can never go false — process.pid is exactly that shape here.
+    // Reproduce the release-train wedge: a prior run reached `failed` but its record carries a pid
+    // isPidOurs() always accepts. The daemon stamps its own pid on the provisional claim and never
+    // dies, so isPidOurs() can't go false; process.pid is that shape here.
     const runId = 'wedged-failed-daemonpid';
     fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
     writeRunMeta({
@@ -911,14 +892,9 @@ describe('RUSH-2640 scheduler slot release (pure paths)', () => {
   });
 });
 
-// Regression: executeJobDetached / executeCommandJobDetached (the daemon's
-// normal firing path) never wrapped their settle() with createTimer(...).end(),
-// unlike executeJob/executeJobOnCloud/executeJobOnHost — so every routine that
-// actually fired off the daemon's own schedule emitted ZERO perf.timing
-// samples, and `agents perf run` / `agents routines stats` had nothing to show
-// for the most common firing path. Verifies against the REAL disposable perf
-// warehouse (recordPerfTiming's dynamic import into perf/spool.ts respects the
-// same _resetPerfDbForTest override db.test.ts uses), not a mock.
+// Regression: executeJobDetached / executeCommandJobDetached (the daemon's normal firing path)
+// never wrapped settle() with createTimer(...).end(), so scheduled routines emitted zero
+// perf.timing samples and `agents perf run` / `routines stats` saw nothing for them.
 describeSpawn('detached routine fires record a perf.timing sample (agent.run)', () => {
   const jobs: string[] = [];
   let tmp: string;

@@ -55,11 +55,9 @@ import type { SyncStatusRow, OrphanRow } from '../drift.js';
 import type { FetchStatusMarker } from '../auto-pull.js';
 import { DOCTOR_ALL_KINDS, type VersionResourceReport, type DoctorKind } from '../doctor-diff.js';
 
-/**
- * Singular noun per resource kind for finding messages. A naive `kind.replace(/s$/,'')`
- * mangles `memory` → `memor` and `mcp` → `mcp` inconsistently, so the mapping is
- * explicit. Keyed by `DoctorKind` so a new kind fails the type check until named.
- */
+/** Singular noun per resource kind for finding messages. `kind.replace(/s$/,'')` mangles `memory`,
+ * so the mapping is explicit and keyed by `DoctorKind` so a new kind fails the type check until
+ * named. */
 const KIND_SINGULAR: Record<DoctorKind, string> = {
   commands: 'command',
   skills: 'skill',
@@ -82,31 +80,24 @@ const AGENT_NAMES: Record<string, string> = Object.fromEntries(
   ALL_AGENT_IDS.map((id) => [id, AGENTS[id].name]),
 );
 
-/** Agents with NO per-version credential isolation: their login is shared across
- *  every installed version, so a "log into THIS version" remediation would be a
- *  lie. Derived from `CONFIG_ENV_ISOLATED_AGENTS` in `lib/installations/shims.ts` — the shim
- *  generator is what actually exports the per-version isolation env var, so it is
- *  the source of truth. Do not hand-maintain a second copy: an agent gaining
- *  isolation there must not leave a stale "login is shared" hint here. */
+/** Agents with no per-version credential isolation: their login is shared across versions, so a
+ * "log into THIS version" remediation would be false. Derived from `CONFIG_ENV_ISOLATED_AGENTS` in
+ * `lib/installations/shims.ts`; do not hand-maintain a second copy. */
 const ISOLATED_LOGIN = new Set<AgentId>(CONFIG_ENV_ISOLATED_AGENTS);
 const NO_PER_VERSION_LOGIN = new Set<AgentId>(
   ALL_AGENT_IDS.filter((a) => !ISOLATED_LOGIN.has(a)),
 );
 
-/** How an agent's login is actually reached — the three shapes `loginHint`
- *  encodes (`lib/signin-badge.ts:23-36`), split apart because a per-version fix
- *  has to build a different command for each:
- *    `subcommand` — `<cli> login` / `<cli> auth login`, runnable via `--`
- *    `in-tui`     — claude only: a `/login` slash command inside its own TUI
- *    `on-launch`  — the device/oauth flow starts when the agent launches */
+/** How an agent's login is reached (the three shapes `loginHint` encodes,
+ * `lib/signin-badge.ts:23-36`): `subcommand` (`<cli> login` / `<cli> auth login`), `in-tui`
+ * (claude only: `/login` inside its TUI), `on-launch` (the device/oauth flow starts at launch). */
 const LOGIN_SUBCOMMAND: Partial<Record<AgentId, string>> = Object.fromEntries(
   SUBCOMMAND_LOGIN_AGENTS.map((agent) => [agent, loginSubcommand(agent)!]),
 );
 
-/** Kinds whose fix is inherently PER VERSION, so a row collapsed across versions
- *  could not carry a correct remediation. A login is the whole set: there is no
- *  `@all` selector for it, and dropping the version falls back to the bare native
- *  hint, which the shim points at the DEFAULT version. */
+/** Kinds whose fix is inherently per version, so a row collapsed across versions could not carry a
+ * correct remediation. A login is the whole set: there is no `@all` selector, and dropping the
+ * version falls back to the bare native hint, which the shim points at the default version. */
 const NEVER_COLLAPSED = new Set<FindingKind>(['logged-out', 'logout-unprovable']);
 
 function loginShape(agent: AgentId): 'subcommand' | 'in-tui' | 'on-launch' {
@@ -153,17 +144,9 @@ export const ALL_FINDING_KINDS = [
   'leaked-daemon',         // a `__daemon-run` process no owner record names (not the unit main PID, not daemon.pid)
 ] as const;
 
-/**
- * The severity each kind is emitted with - the SINGLE source of truth, read by
- * the builders below and asserted against both prose rubrics by
- * `doctor-findings.test.ts`.
- *
- * It exists because severity drifted: the rubrics claimed `never-synced` and
- * `duplicate-hook-drift` were critical for three days after RUSH-2162 downgraded
- * them, and the exhaustiveness test missed it because it only checked that a kind
- * was *named* in the rubric, not which bucket it sat in. Change a severity HERE
- * and the test names the docs that must move with it.
- */
+/** The severity each kind is emitted with, the single source of truth, read by the builders and
+ * asserted against both prose rubrics by `doctor-findings.test.ts`. Severity drifted for three
+ * days after RUSH-2162 because the test only checked a kind was named, not its bucket. */
 export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   // Needs you now: the harness cannot do its job until this is fixed.
   'logged-out': 'critical',
@@ -200,11 +183,9 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'ssh-key-enrollment': 'critical',
   'stale-cli': 'warning',
   'binary-shadow': 'warning',
-  // A stray `__daemon-run` under its own (usually temp) HOME: it shares nothing
-  // with this install's state, so it cannot double-fire the real box's work —
-  // but it is a leak nothing owns and it outlives whatever launched it (W4,
-  // PHNX-3736). A human reads its HOME/start time and kills it; nothing is
-  // blocked right now.
+  // A stray `__daemon-run` under its own (usually temp) HOME shares nothing with this install, so
+  // it cannot double-fire the real box's work, but it is an unowned leak that outlives its
+  // launcher (W4, PHNX-3736). A human checks its HOME/start time and kills it; nothing is blocked.
   'leaked-daemon': 'warning',
 };
 
@@ -250,15 +231,9 @@ function sortedAgentIds(ids: string[]): string[] {
   return [...ids].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
-/**
- * The exact remediation for a finding. Login fixes are harness-native
- * (`loginHint`); a per-version login is offered ONLY for agents that isolate the
- * credential per home (`agents run <agent>@<version>` then log in) — for
- * gemini/antigravity/droid the login is shared, so we say so instead of
- * faking a per-version fix. (Cursor now isolates its token per version home via
- * XDG_CONFIG_HOME — see buildExecEnv — so it gets the per-version run.) Every
- * other kind maps to its canonical command.
- */
+/** The exact remediation for a finding. Login fixes are harness-native (`loginHint`); a per-version
+ * login is offered only for agents that isolate the credential per home. For
+ * gemini/antigravity/droid the login is shared, and the text says so. */
 export function remediationFor(finding: DoctorFinding): string {
   const { kind, agent, version } = finding;
   const idLabel = agent && version ? `${agent}@${version}` : agent ?? '';
@@ -273,10 +248,9 @@ export function remediationFor(finding: DoctorFinding): string {
           ? `${native} (shared across all ${agentName(agent)} versions)`
           : native;
       }
-      // Isolated per-version home: the login must RUN INSIDE that home. A bare
-      // `<cli> login` afterwards would NOT — the native shim resolves to the
-      // project/default version (`lib/installations/shims.ts:471-474`), so it would log into
-      // whichever version is default, not the one that is logged out.
+      // Isolated per-version home: the login must run inside that home. A bare `<cli> login` would
+      // use the shim's project/default version (`lib/installations/shims.ts:471-474`), logging
+      // into the wrong version rather than the logged-out one.
       switch (loginShape(agent)) {
         case 'subcommand':
           // `-- <args>` is forwarded verbatim to the binary in that version home
@@ -297,10 +271,8 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'missing-resource':
     case 'content-drift':
     case 'stale':
-      // doctor diagnoses; `agents sync` fixes (the superset of the old
-      // `agents sync`). A bare `agents sync <agent>` hits only the default
-      // version, so an agent-only row collapsed across versions must ask for
-      // @all to reach every one it covers.
+      // doctor diagnoses; `agents sync` fixes. A bare `agents sync <agent>` hits only the default
+      // version, so an agent-only row collapsed across versions must ask for @all.
       if (agent && version) return `agents sync ${agent}@${version} --yes`;
       return agent ? `agents sync ${agent}@all --yes` : 'agents sync';
     case 'hook-runtime-visibility-unavailable':
@@ -326,13 +298,9 @@ export function remediationFor(finding: DoctorFinding): string {
       // the wrong repo.
       return `agents repo pull ${version ?? 'user'}`;
     case 'fleet-resource-gap':
-      // The resource is absent from this box's CENTRAL repos, not from a version
-      // home, so `agents sync` (which reconciles central -> homes) has nothing to
-      // copy. The divergence row cannot say WHICH repo declares it,
-      // and neither `agents repo pull` nor the sync umbrella touches the system
-      // repo (`commands/repo.ts:1186`, `lib/sync-umbrella.ts:104`) — that one is
-      // npm-shipped and moves with the CLI. So name both paths rather than a
-      // single command that silently covers half the cases.
+      // The resource is absent from this box's central repos, not a version home, so `agents sync`
+      // has nothing to copy. The row cannot say which repo declares it, and neither `agents repo
+      // pull` nor the sync umbrella touches the npm-shipped system repo, so name both paths.
       return 'agents repo pull user (or upgrade agents-cli if it ships in .system)';
     case 'version-skew':
       return idLabel ? `agents add ${idLabel}` : 'agents add <agent>@<version>';
@@ -387,15 +355,9 @@ interface ResourceItem {
   full: string;
 }
 
-/**
- * Emit at most ONE finding for a list of same-kind resources on one version.
- * A single affected resource is named in full (`hook 'git-guard' missing`); two
- * or more collapse into a count plus the first two subjects
- * (`32 hooks missing (incl. 'git-guard', 'rm-guard')`). Naming every item — the
- * pre-RUSH-2069-review behavior — flooded the section with dozens of near-identical
- * rows for one root cause; the count carries the same signal and `agents sync`
- * is the same command either way.
- */
+/** Emit at most one finding for same-kind resources on one version: one resource is named in full,
+ * two or more collapse into a count plus the first two subjects. Naming every item flooded the
+ * section with near-identical rows for one root cause (RUSH-2069 review). */
 function emitGroup(
   out: DoctorFinding[],
   items: ResourceItem[],
@@ -429,10 +391,9 @@ export interface LocalFindingInputs {
   signIn: Record<string, FleetVersionSignIn[]>;
   /** Managed agents (installed versions) whose binary won't resolve. */
   cliMissing?: AgentId[];
-  /** Host CLIs declared in a DotAgents repo's `cli/`: their install state on this
-   *  box, plus any manifest the loader could not parse. Host-global (installed to
-   *  PATH, never synced into a version home), so they are a machine-level
-   *  finding, not a per-version one. */
+  /** Host CLIs declared in a DotAgents repo's `cli/`: install state on this box plus any manifest
+   * the loader could not parse. Host-global (on PATH, never in a version home), so a machine-level
+   * finding. */
   hostClis?: {
     statuses: Array<{ name: string; installed: boolean }>;
     errors: Array<{ file: string; reason: string }>;
@@ -442,11 +403,9 @@ export interface LocalFindingInputs {
   duplicateHooks?: DuplicateVersionHook[];
   /** Credential-shaped exports found in the user's shell rc files (RUSH-1968). */
   rcSecrets?: RcSecretFinding[];
-  /** True when the file-store master key is live in THIS process's environment.
-   *  Distinct from `rcSecrets`, which scans FILES: a value inherited by a
-   *  long-lived process survives deleting the rc line that set it, so the rc
-   *  scan reports clean while the leak is still in flight (RUSH-1968). Never the
-   *  value — only whether it is set. */
+  /** True when the file-store master key is live in this process's environment. Distinct from
+   * `rcSecrets` (which scans files): an inherited value survives deleting the rc line, so the rc
+   * scan reads clean while the leak continues (RUSH-1968). Never the value. */
   masterPassphraseInEnv?: boolean;
   /** True when the reserved `auth` bundle exists on a non-file backend
    *  (SEC-GAP-3): usage/probe ignores the setup-tokens and falls through to
@@ -457,31 +416,25 @@ export interface LocalFindingInputs {
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
   /** Read-only Windows OpenSSH AuthorizedKeysFile/content/ACL audit. */
   windowsSshEnrollment?: WindowsSshEnrollmentAudit | null;
-  /** `<agent>@<version>` keys whose home is an isolated copy. Their findings are
-   *  never collapsed across versions: the agent-wide `agents sync <agent>@all`
-   *  sweep deliberately skips isolated copies, so a collapsed row would print a
-   *  remediation that does not fix them. */
+  /** `<agent>@<version>` keys whose home is an isolated copy. Their findings are never collapsed
+   * across versions: the `agents sync <agent>@all` sweep skips isolated copies, so a collapsed row
+   * would print a remediation that does not fix them. */
   isolatedVersions?: string[];
-  /** Whether the feed/notify owner-delivery lane can reach the owner from this box
-   *  (RUSH-2262). Collected by `probeOwnerSink` in the command (it spawns the real
-   *  `rush` transport, so it stays out of this pure module). Absent → no probe ran
-   *  → no finding. */
+  /** Whether the feed/notify owner-delivery lane can reach the owner from this box (RUSH-2262).
+   * Collected by `probeOwnerSink` in the command (it spawns the real `rush` transport, keeping
+   * this module pure). Absent means no probe ran and no finding. */
   ownerSink?: OwnerSinkStatus;
   /** `agents` binaries that shadow the currently running CLI (RUSH-2431). */
   binaryShadows?: AgentsBinaryShadow[];
-  /** `__daemon-run` processes no owner record names — neither the service
-   *  manager's unit main PID nor the recorded daemon.pid (W4, PHNX-3736).
-   *  Collected by `findLeakedDaemons` in the command (it runs `ps` and reads
-   *  /proc, so it stays out of this pure module). */
+  /** `__daemon-run` processes no owner record names: neither the service manager's unit main PID
+   * nor the recorded daemon.pid (W4, PHNX-3736). Collected by `findLeakedDaemons` in the command
+   * (it runs `ps` and reads /proc), keeping this module pure. */
   leakedDaemons?: LeakedDaemon[];
 }
 
-/**
- * Fold this machine's signals into findings. Missing hooks/plugins and unwired
- * hooks are CRITICAL; provable logouts are CRITICAL and unprovable ones WARNING;
- * everything else (other missing kinds, drift, stale/never-synced, repo-behind,
- * orphans) is a WARNING. Pure.
- */
+/** Fold this machine's signals into findings. Missing hooks/plugins, unwired hooks, and provable
+ * logouts are critical; unprovable logouts and everything else (other missing kinds, drift,
+ * stale/never-synced, repo-behind, orphans) are warnings. Pure. */
 export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   const out: DoctorFinding[] = [];
   const device = input.device;
@@ -552,10 +505,9 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
         message: `hook '${issue.name}' wired but its generated shim is ${issue.reason}`,
       }));
     }
-    // A never-synced version has EVERY declared resource "missing" — that's one
-    // root cause (never synced), not one emergency per hook. Collapse it to a
-    // single critical rather than flooding the top section with 100+ lines. The
-    // per-version `never-synced` warning below carries the sync remediation.
+    // A never-synced version has every declared resource "missing": one root cause, not one
+    // emergency per hook. Collapse it to a single finding instead of flooding the top section with
+    // 100+ lines; the per-version `never-synced` warning below carries the sync remediation.
     const neverSynced = input.syncRows.some(
       (s) => s.agent === agent && s.version === version && s.status === 'never-synced',
     );
@@ -583,12 +535,9 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }
 
     if (neverSynced) {
-      // Everything is "missing" because it was never synced — collapse to ONE
-      // line. A never-synced version is almost always an old/unused install (you
-      // don't run a version you never synced), so this is a WARNING, not a "needs
-      // you now" critical: it isn't hurting anything until you actually launch it.
-      // The real criticals are a logged-out account or a hook/plugin missing from
-      // a version you DO keep synced (the `else` branch below).
+      // Everything is missing because it was never synced, so collapse to one line. A never-synced
+      // version is usually an old unused install, so this is a warning, not a critical. Real
+      // criticals are a logged-out account or a hook/plugin missing from a synced version.
       const total = missingHooks.length + missingPlugins.length + missingOther.length;
       if (total > 0) {
         const breakdown = [
@@ -612,11 +561,9 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }
   }
 
-  // Sync status → stale (warning). A NEVER-SYNCED version already surfaced a
-  // single collapsed critical above (its resources aren't installed at all), so
-  // we don't ALSO emit a never-synced warning — that would double-report the same
-  // root cause. Likewise a version that just listed its drifted/missing resources
-  // by name gets no vaguer `sources changed since last sync` row on top.
+  // Sync status to stale (warning). A never-synced version already surfaced a collapsed finding,
+  // so skip its never-synced warning to avoid double-reporting; likewise a version that listed its
+  // drifted resources by name gets no vaguer `sources changed` row.
   for (const row of input.syncRows) {
     if (row.status === 'stale') {
       if (detailedVersions.has(`${row.agent}@${row.version}`)) continue;
@@ -731,11 +678,9 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }));
   }
 
-  // Leaked daemons (warning) — a `__daemon-run` no owner record names. One row
-  // per pid: the remediation is pid-specific, and the HOME + start time are
-  // what let the operator tell a leaked test fixture from something they meant
-  // to run before they kill it (W4, PHNX-3736). Built directly, not through
-  // finding(): the remediation carries this row's own pid.
+  // Leaked daemons (warning): one row per pid, since the remediation is pid-specific and HOME +
+  // start time tell a leaked test fixture from an intended daemon (W4, PHNX-3736). Built directly,
+  // not through finding(), because the remediation carries this row's pid.
   for (const d of input.leakedDaemons ?? []) {
     const home = d.home ?? 'unknown HOME';
     const started = d.startedAt ? `, started ${d.startedAt}` : '';
@@ -753,10 +698,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   return collapseAcrossVersions(out, new Set(input.isolatedVersions ?? []));
 }
 
-/**
- * Fold every orphan row on a device into one warning. Returns `[]` when nothing
- * is orphaned. Pure.
- */
+/** Fold every orphan row on a device into one warning; `[]` when nothing is orphaned. Pure. */
 function orphanFinding(device: string, rows: OrphanRow[]): DoctorFinding[] {
   const affected = rows.filter((r) => r.commands + r.skills + r.hooks > 0);
   if (affected.length === 0) return [];
@@ -770,15 +712,9 @@ function orphanFinding(device: string, rows: OrphanRow[]): DoctorFinding[] {
   })];
 }
 
-/**
- * Findings for hooks materialized into several version homes at once. Differing
- * content is CRITICAL — a stale copy can gate differently from the active one;
- * byte-identical copies are a WARNING (noise plus duplicated runtime cost).
- *
- * One row per (agent, severity), not per hook: `agents sync <agent>@<active>
- * --yes` reconciles every copy in one command, and a machine with five installed
- * claudes otherwise emits two dozen identical rows. Pure.
- */
+/** Findings for hooks materialized into several version homes. Differing content is critical (a
+ * stale copy can gate differently); identical copies are a warning. One row per (agent, severity),
+ * not per hook: `agents sync <agent>@<active> --yes` reconciles all copies. Pure. */
 function duplicateHookFindings(device: string, dups: DuplicateVersionHook[]): DoctorFinding[] {
   const out: DoctorFinding[] = [];
   const byAgentKind = new Map<string, DuplicateVersionHook[]>();
@@ -801,10 +737,9 @@ function duplicateHookFindings(device: string, dups: DuplicateVersionHook[]): Do
         `${versions.length} version${versions.length === 1 ? '' : 's'} ` +
         `(incl. ${group.slice(0, 2).map((d) => `'${d.name}'`).join(', ')}) — ${authority}`;
     out.push({
-      // A hook that DIFFERS across versions is still installed and firing — it's
-      // stale/sync drift, not a missing hook. Resolvable by one sync; a WARNING,
-      // not a "needs you now" critical. (A genuinely MISSING hook stays critical
-      // via the missing-hook path.)
+      // A hook that differs across versions is still installed and firing: stale/sync drift
+      // resolvable by one sync, so a warning. A genuinely missing hook stays critical via the
+      // missing-hook path.
       severity: FINDING_SEVERITY[drift ? 'duplicate-hook-drift' : 'duplicate-hook'],
       kind: drift ? 'duplicate-hook-drift' : 'duplicate-hook',
       device, agent, versions, message,
@@ -814,12 +749,9 @@ function duplicateHookFindings(device: string, dups: DuplicateVersionHook[]): Do
   return out;
 }
 
-/**
- * Warnings for credential-shaped exports in the user's shell rc files. The
- * file-store master passphrase and ordinary credentials have different fixes, so
- * they get one row each (never one per export — the count plus two examples
- * carries the same signal). Pure.
- */
+/** Warnings for credential-shaped exports in shell rc files. The file-store master passphrase and
+ * ordinary credentials have different fixes, so one row each (never one per export; count plus two
+ * examples). Pure. */
 function rcSecretFindings(device: string, rc: RcSecretFinding[]): DoctorFinding[] {
   if (rc.length === 0) return [];
   const out: DoctorFinding[] = [];
@@ -828,10 +760,9 @@ function rcSecretFindings(device: string, rc: RcSecretFinding[]): DoctorFinding[
       rows: rc.filter((f) => f.isMasterPassphrase),
       remediation: 'move it to ~/.agents/.secrets-key/passphrase (chmod 600)',
     },
-    // `agents secrets add [bundle] [key]` stores exactly ONE variable
-    // (`commands/secrets.ts:1349`), and nothing edits the rc file — so an
-    // aggregated row has to say both that the command repeats and that the
-    // deletion is manual, or following it once leaves most of the leak in place.
+    // `agents secrets add [bundle] [key]` stores exactly one variable (`commands/secrets.ts:1349`)
+    // and nothing edits the rc file, so an aggregated row must say the command repeats and the
+    // deletion is manual, or following it once leaves most of the leak.
     { rows: rc.filter((f) => !f.isMasterPassphrase), remediation: '' },
   ];
   for (const g of groups) {
@@ -856,28 +787,12 @@ function rcSecretFindings(device: string, rc: RcSecretFinding[]): DoctorFinding[
   return out;
 }
 
-/**
- * The Windows-only advisory: when the effective PowerShell execution policy
- * blocks unsigned local scripts (`Restricted`/`AllSigned`), the generated
- * `agents.ps1` launcher fails even though it is on PATH. The `agents.cmd`
- * companion still works, so this is a warning and doctor never changes the
- * policy itself. Returns null off Windows or on a permissive policy — pure, so
- * both branches are testable without invoking PowerShell.
- */
-/**
- * The file-store master key sitting in THIS process's environment.
- *
- * `rc-hygiene.ts` scans FILES, which leaves a real hole: a value inherited by a
- * long-lived process outlives the rc line that set it, so an operator who
- * deletes `~/.zshenv:8` gets a clean `rc-secret-export` while every shell,
- * editor and agent started before the edit still carries the key — and hands it
- * to everything they spawn. Verified on a box with no rc export whose live
- * environment still held the value, hashing identical to its key file.
- *
- * Warning, not critical: on the release home base the export is deliberate and
- * scoped (`headless-sign-context.sh`), so the message names that exception
- * rather than the check trying to detect it.
- */
+/** Windows-only advisory: when the effective PowerShell execution policy (`Restricted`/`AllSigned`)
+ * blocks unsigned local scripts, the generated `agents.ps1` fails even on PATH. `agents.cmd` still
+ * works, so it is a warning and doctor never changes the policy. Null elsewhere; pure. */
+/** The file-store master key sitting in this process's environment. `rc-hygiene.ts` scans files,
+ * but an inherited value outlives the rc line that set it, so a clean scan can coexist with a live
+ * leak. A warning: on the release home base the export is deliberate. */
 function envSecretFinding(device: string, present: boolean): DoctorFinding | null {
   if (!present) return null;
   return finding({
@@ -911,27 +826,9 @@ function execPolicyFinding(
   });
 }
 
-/**
- * Fold findings that say the SAME thing about several versions of one agent into
- * a single row carrying `versions`, and widen its remediation to the agent-wide
- * sweep (`agents sync claude@all --yes` heals every non-isolated version in one
- * go). Five identical `plugin 'code' — mirror missing` rows, one per installed
- * claude, is the same fact five times.
- *
- * Three things never merge, because for each of them the widened remediation
- * would be wrong:
- *  - **Isolated copies** — the agent-wide sweep deliberately skips them, so a
- *    folded row would print a command that leaves one broken.
- *  - **Findings with no agent** (repo-behind, rc-secret-export, …) — their
- *    `version` field is an alias, not a version.
- *  - **Logouts** ({@link NEVER_COLLAPSED}) — a login is inherently per-version:
- *    the fix is `agents run <agent>@<version> -- login`, and there is no `@all`
- *    equivalent. Dropping `version` would fall back to the bare native hint,
- *    which the shim resolves to the DEFAULT version — logging into the wrong one
- *    and leaving the finding to reappear.
- *
- * Pure; input order is kept.
- */
+/** Fold findings that say the same thing about several versions of one agent into one row with
+ * `versions`, widening the fix to the agent-wide sweep. Never merged: isolated copies, findings
+ * with no agent, and logouts ({@link NEVER_COLLAPSED}), since a login is per-version. Pure. */
 export function collapseAcrossVersions(
   findings: DoctorFinding[],
   isolated: Set<string>,
@@ -966,31 +863,17 @@ export function collapseAcrossVersions(
   return out;
 }
 
-/**
- * Map a device's per-version sign-in into logout findings: a PROVABLE logout is
- * CRITICAL, an unprovable one is a hedged WARNING ("could not verify sign-in"),
- * and a signed-in version yields nothing.
- *
- * An agent with no inspectable identity never appears at all — not even as the
- * hedged warning: agents-cli knows no credential file for it, so "logged out" is
- * unknowable and silence beats a false claim. Membership is
- * `supportsAccountInspection` (`lib/agents.ts`) and is deliberately NOT listed
- * here — agents move between the sets, and a copy of the list in prose becomes a
- * lie the next time one does. Note the caller also requires
- * `CredentialPresence.knownLocation`: the inspection set and the credential-path
- * map move independently, so being inspectable is not on its own enough to call a
- * logout provable. Pure.
- */
+/** Map a device's per-version sign-in into logout findings: provable logout is critical, unprovable
+ * a hedged warning, signed-in nothing. Agents with no inspectable identity never appear
+ * (`supportsAccountInspection`): silence beats a false claim. Also requires `knownLocation`. Pure. */
 export function signInToFindings(
   device: string,
   signIn: Record<string, FleetVersionSignIn[]>,
 ): DoctorFinding[] {
   const out: DoctorFinding[] = [];
-  // Iterate in the registry's agent order, NOT the map's insertion order:
-  // `collectLocalFleetSignIn` fills its map inside a `Promise.all`, so key order
-  // is whatever order the account probes happened to finish in. The renderer
-  // preserves input order within a device, so consuming the map order directly
-  // would make two runs on identical state print their logout rows differently.
+  // Iterate in the registry's agent order, not map insertion order: `collectLocalFleetSignIn`
+  // fills its map inside a `Promise.all`, so key order is probe completion order, and the renderer
+  // keeps input order, so identical state would print logout rows differently.
   for (const agentId of sortedAgentIds(Object.keys(signIn))) {
     const rows = signIn[agentId];
     const agent = agentId as AgentId;
@@ -1015,10 +898,8 @@ export function signInToFindings(
   return out;
 }
 
-/**
- * Rebuild remote generated-wrapper findings from the closed enum inventory
- * state. Remote paths and detector messages never cross the fleet boundary.
- */
+/** Rebuild remote generated-wrapper findings from the closed enum inventory state. Remote paths and
+ * detector messages never cross the fleet boundary. */
 export function hookRuntimeToFindings(
   device: string,
   hookRuntime: Record<string, Record<string, FleetHookRuntimeState>> | undefined,
@@ -1051,14 +932,9 @@ export function hookRuntimeToFindings(
   return out;
 }
 
-/**
- * Map cross-device divergence (from {@link compareFleetInventories}) into
- * warnings: an agent version present elsewhere but absent on a device is a
- * version-skew warning; a diverged config repo is a repo-drift warning; a
- * missing resource is a missing-resource warning. Baseline = the local machine.
- * Only the *lagging* box is attributed (a `*-missing-local` finding is the
- * baseline's gap). Pure.
- */
+/** Map cross-device divergence ({@link compareFleetInventories}) into warnings: version-skew (agent
+ * version missing on a device), repo-drift, and missing-resource. Baseline is the local machine;
+ * only the lagging box is attributed (a `*-missing-local` finding is the baseline's gap). Pure. */
 export function fleetDivergenceToFindings(
   divergences: FleetDivergence[],
   baseline: string,
@@ -1124,12 +1000,9 @@ function critLabel(f: DoctorFinding): { left: string; account: string; message: 
   };
 }
 
-/** Pad a plain string to a DISPLAY width, ignoring that the caller may color it
- *  later (we pad before coloring so alignment is on visible text). Uses the
- *  repo's width helpers, not `.length`: a CJK character or a compound emoji is
- *  one-to-several UTF-16 code units but a different number of terminal columns,
- *  so `.length` skews every column in the row — and account labels, device
- *  names, and org badges are all user-supplied. */
+/** Pad a plain string to its display width before coloring, so alignment is on visible text. Uses
+ * the repo's width helpers, not `.length`: CJK characters and compound emoji skew columns, and
+ * account labels, device names, and org badges are user-supplied. */
 function pad(s: string, width: number): string {
   return padToWidth(s, width);
 }
@@ -1150,12 +1023,9 @@ export interface RenderOptions {
   header?: string;
 }
 
-/**
- * Render the two-part hybrid layout from a flat findings list. Pure — returns the
- * lines so the exact output is snapshot-tested. Criticals across ALL devices go
- * to the top section, worst-first; the per-computer section lists each device's
- * warnings + a `✗ N critical (above)` marker, worst device first.
- */
+/** Render the hybrid layout from a flat findings list; pure, returns lines for snapshot tests.
+ * Criticals across all devices go to the top, worst-first; the per-computer section lists each
+ * device's warnings plus a `✗ N critical (above)` marker, worst device first. */
 export function renderFindings(
   findings: DoctorFinding[],
   accounts: Record<string, Record<string, FleetVersionSignIn[]>>,
@@ -1282,12 +1152,9 @@ function warningSubject(f: DoctorFinding): string {
   return f.kind;
 }
 
-/**
- * The compact accounts/versions line for one device: every installed version and
- * its account, grouped by agent — green ✓ signed in, red ✗ provably logged out,
- * gray ? unknown (see {@link badge}). e.g.
- *   `claude 2.1.170 ✓muqsit@gmail(Max) 2.1.999 ✓team(Team) · codex ✗ · grok ✓`
- */
+/** The compact accounts/versions line for one device, grouped by agent: green ✓ signed in, red ✗
+ * provably logged out, gray ? unknown (see {@link badge}). E.g. `claude 2.1.170 ✓muqsit@gmail(Max)
+ * 2.1.999 ✓team(Team) · codex ✗ · grok ✓`. */
 export function renderAccountsLine(signIn: Record<string, FleetVersionSignIn[]>): string {
   const parts: string[] = [];
   // Stable agent order matches AGENT display order.
@@ -1311,16 +1178,9 @@ export function renderAccountsLine(signIn: Record<string, FleetVersionSignIn[]>)
   return parts.join(chalk.gray(' · '));
 }
 
-/**
- * The per-version sign-in badge: green `✓` + cyan account when signed in, red `✗`
- * only for a PROVABLE logout, gray `?` when the state is unknown.
- *
- * The third case is load-bearing. A probe that threw, or an agent whose
- * credential location we do not know, yields `signedIn: false` with
- * `provable: false` — and the finding for that row is deliberately the hedged
- * "could not verify sign-in". Painting it red here would have the same report say
- * "unverifiable" in the warning and "logged out" in the accounts line.
- */
+/** The per-version sign-in badge: green `✓` + cyan account when signed in, red `✗` only for a
+ * provable logout, gray `?` when unknown. The gray case is load-bearing: painting a failed probe
+ * or unknown credential location red would contradict the hedged finding. */
 function badge(agent: AgentId, row: FleetVersionSignIn): string {
   if (row.signedIn) {
     const who = row.account ?? '';

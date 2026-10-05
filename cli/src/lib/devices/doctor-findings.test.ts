@@ -584,11 +584,9 @@ describe('signInToFindings — provable vs unprovable logout', () => {
 });
 
 describe('the severity rubric matches the code (docs cannot drift from behavior)', () => {
-  // The earlier version of this suite only checked that each kind was NAMED in
-  // both rubrics. RUSH-2162 then moved never-synced and duplicate-hook-drift from
-  // critical to warning, the rubrics kept saying critical, and the test stayed
-  // green for three days — a kind can be named in the wrong bucket. So assert the
-  // BUCKET, against FINDING_SEVERITY, which the builders themselves read.
+  // The earlier suite only checked each kind was named in both rubrics. RUSH-2162 moved two kinds
+  // to warning, the rubrics kept saying critical, and the test stayed green for three days. So
+  // assert the bucket, against FINDING_SEVERITY, which the builders read.
   const read = (rel: string) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
 
   /** Split a rubric into its critical and warning halves. */
@@ -600,14 +598,9 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
     return { critical: text.slice(c, w), warning: text.slice(w) };
   }
 
-  /**
-   * Whether a rubric names this kind as a WHOLE token. Plain `includes` credits a
-   * kind whenever a LONGER kind contains it — `cli-missing` inside
-   * `host-cli-missing`, `stale` inside `stale-cli`, `duplicate-hook` inside
-   * `duplicate-hook-drift`. Three such pairs exist today and more will appear, so
-   * this is a boundary match, not a per-pair special case: a kind must not be
-   * flanked by another id character.
-   */
+  /** Whether a rubric names this kind as a whole token. Plain `includes` credits a kind when a
+   * longer kind contains it (`cli-missing` in `host-cli-missing`, `stale` in `stale-cli`). Use a
+   * boundary match: a kind must not be flanked by another id character. */
   const names = (half: string, kind: string): boolean =>
     new RegExp(`(^|[^a-z-])${kind}($|[^a-z-])`).test(half);
 
@@ -690,32 +683,16 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
   });
 
   it('no doc calls a finding by the wrong severity in prose', () => {
-    // The rubric tests above pin the LISTS. They do not pin prose elsewhere that
-    // names a kind and a severity in the same breath — which is how this branch
-    // originally shipped `docs/secrets.md` calling `env-secret-export` "critical"
-    // while its own restored `docs/observability.md` correctly listed it under
-    // WARNING, in the same commit. Two doc sections contradicting each other on
-    // one finding's severity is worse than either being silently absent.
-    // Scoped to the SENTENCE, not to adjacency. An adjacency-only match (severity
-    // word and backticked kind separated by whitespace alone) missed the review's
-    // mutation `is reported as CRITICAL when \`env-secret-export\` fires` — the
-    // same wrong claim, reworded. A sentence is the unit a reader actually binds
-    // a severity to.
-    //
-    // Flags only when the sentence carries the WRONG severity word and NOT the
-    // right one, so a sentence legitimately naming both ("criticals and warnings
-    // both appear in ...") does not fire, and neither does observability.md's own
-    // rubric, where each bucket sits in its own sentence with only its own word.
+    // The rubric tests pin the lists, not prose: a doc once called `env-secret-export` "critical"
+    // while another listed it WARNING. Scope to the sentence, not adjacency; flag only a sentence
+    // with the wrong severity word and not the right one.
     const docsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs');
     const wrong: string[] = [];
     for (const file of fs.readdirSync(docsDir).filter((f) => f.endsWith('.md'))) {
       const text = fs.readFileSync(path.join(docsDir, file), 'utf-8');
-      // Do NOT split on a period that ends an abbreviation: `e.g.` / `i.e.` /
-      // `cf.` cut a clause in half, and the review defeated the guard that way —
-      // "the `env-secret-export` case, i.e. ... is treated as critical." became
-      // two fragments, neither holding both the kind and the wrong word.
-      // Version numbers (`1.22.48`) are safe already: the split needs whitespace
-      // after the period.
+      // Do not split on a period ending an abbreviation (`e.g.`, `i.e.`, `cf.`): that cut a clause
+      // in half and let the review defeat the guard. Version numbers are safe since a split needs
+      // whitespace after the period.
       const sentences = text
         .replace(/\b(e\.g|i\.e|cf|etc|vs)\./gi, '$1\u0000')
         .split(/(?<=[.!?])\s+|\n{2,}/)

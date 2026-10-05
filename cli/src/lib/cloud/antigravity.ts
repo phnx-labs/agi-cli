@@ -1,24 +1,6 @@
-/**
- * Antigravity cloud provider — Google's Antigravity agent via the Gemini
- * **Managed Agents Interactions API**.
- *
- * The `agy` CLI is local-only (`--print` / `--sandbox`); Antigravity's cloud
- * surface is an HTTP endpoint that runs the Antigravity harness in a remote
- * ephemeral Linux sandbox:
- *
- *   POST https://generativelanguage.googleapis.com/v1beta/interactions
- *   x-goog-api-key: <GEMINI_API_KEY>
- *   { "agent": "antigravity-preview-05-2026", "input": "<prompt>", "environment": "remote" }
- *
- * The call is synchronous by default (the response carries `status` +
- * `output_text`), so `dispatch()` awaits it, returns a terminal CloudTask, and
- * `stream()` replays the buffered text + done events — same shape as the Factory
- * provider. It is a raw sandbox: no GitHub repo → PR (that's Rush's job).
- *
- * Auth: the Gemini API key comes from an `agents secrets` bundle named in
- * `cloud.providers.antigravity.secretsBundle` (never from agents.yaml), falling
- * back to GEMINI_API_KEY / GOOGLE_API_KEY in the environment.
- */
+/** Antigravity cloud provider via the Gemini Managed Agents Interactions API (POST
+ * /v1beta/interactions). Synchronous: dispatch() awaits a terminal CloudTask; stream() replays
+ * buffered events. Key comes from `cloud.providers.antigravity.secretsBundle`, never agents.yaml. */
 
 import type {
   CloudProvider,
@@ -84,10 +66,7 @@ export class AntigravityCloudProvider implements CloudProvider {
     this.model = config?.model ?? DEFAULT_MODEL;
   }
 
-  /**
-   * True when a key *source* is configured. Cheap: never resolves the bundle
-   * (which could prompt for biometry) — that happens lazily at dispatch.
-   */
+  /** True when a key source is configured. Cheap: never resolves the bundle (may prompt biometry). */
   private hasKeySource(): boolean {
     if (this.secretsBundle) return true;
     return KEY_NAMES.some((k) => Boolean(process.env[k]));
@@ -97,12 +76,8 @@ export class AntigravityCloudProvider implements CloudProvider {
   private async resolveApiKey(): Promise<string> {
     if (this.secretsBundle) {
       try {
-        // Cloud dispatch resolves the key on its own (no human at a sheet), so the
-        // read is always `agentOnly` (SEC-13: never pop Touch ID on its own). A
-        // locked bundle THROWS the actionable "unlock <name>" message, which the
-        // catch below re-raises verbatim — dispatch genuinely needs the key, so it
-        // fails LOUD with the unlock hint rather than swallowing it into a wrong
-        // path. A `never`/no-ACL or broker-held bundle resolves silently.
+        // Cloud dispatch reads the key `agentOnly` (SEC-13: never pop Touch ID). A locked bundle
+        // throws the unlock message, re-raised verbatim so dispatch fails loud.
         const { env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: true });
         for (const k of KEY_NAMES) {
           if (env[k]) return env[k];

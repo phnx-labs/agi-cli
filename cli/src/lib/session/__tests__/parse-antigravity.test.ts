@@ -1,18 +1,6 @@
-/**
- * Verifies parseAntigravity decodes Antigravity's protobuf-in-SQLite step
- * payloads into the shared SessionEvent shape, normalizes tool names onto the
- * existing vocabulary (run_command -> Bash, view_file -> Read, ...), dedupes the
- * request + completion steps that share a call id, and that detectAgent routes
- * antigravity-cli conversation DBs to this parser.
- *
- * The fixture is built here from scratch — a tiny SQLite `steps` table whose
- * `step_payload` BLOBs are hand-encoded protobuf messages (deterministic,
- * synthetic, no private conversation content). Both the fixture writer and the
- * parser under test read/write through the node/bun SQLite wrapper (the same
- * one production uses), so this exercises the real critical path (real SQLite
- * BLOB round-trip, real protobuf decode) on every OS — the `sqlite3` CLI is
- * absent on the Windows runner.
- */
+/** Verifies parseAntigravity decodes protobuf-in-SQLite step payloads into SessionEvent, maps tool
+ * names (run_command -> Bash), dedupes request+completion steps, and detectAgent routes
+ * antigravity DBs. Synthetic fixtures via the production SQLite wrapper. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -42,12 +30,8 @@ function strField(field: number, s: string): number[] {
   return [...varint((field << 3) | 2), ...varint(bytes.length), ...bytes];
 }
 
-/**
- * Build a step_payload for a tool call. Fields mirror the reverse-engineered
- * layout: f1 = call id, f2 = tool name, f3 = JSON args (must contain
- * "toolAction" for the decoder's JSON sniff). Optionally nests the tool-call
- * message one level deep to exercise the recursive descent.
- */
+/** Build a step_payload for a tool call: f1 = call id, f2 = tool name, f3 = JSON args (must contain
+ * "toolAction"). Optionally nests the message one level to exercise recursive descent. */
 function toolStep(opts: {
   id: string;
   name: string;

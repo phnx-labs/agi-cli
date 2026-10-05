@@ -1,15 +1,6 @@
-/**
- * Parked-agent answer router (RUSH-1474).
- *
- * `agents message` historically only enqueued into the mailbox (delivered at the
- * next PreToolUse). That steers a *running* agent between tool calls but never
- * unblocks a *parked* agent:
- *   - interactive TUI open on AskUserQuestion (needs keystrokes, not context)
- *   - headless run waiting on input (no next tool call; needs resume)
- *
- * This module picks the delivery mechanism from (open feed block × session
- * liveness × runtime rail). Pure — unit-testable without a live terminal.
- */
+/** Parked-agent answer router (RUSH-1474). `agents message` only enqueued to the mailbox (next
+ * PreToolUse), which steers a running agent but never unblocks a parked one (TUI on
+ * AskUserQuestion, headless awaiting input). This picks delivery from block x liveness x rail. */
 import { deriveBlockState, type OpenBlock, type BlockOption } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
 import type { InjectTarget } from './terminal/index.js';
@@ -22,23 +13,16 @@ export interface AnswerRoute {
   kind: AnswerRouteKind;
   /** Human reason shown in CLI output / refused errors. */
   reason: string;
-  /**
-   * Keystrokes / payload for the chosen path.
-   *  - mailbox: unused (text is enqueued as-is)
-   *  - tmux/iterm: the digit or free-text to inject
-   *  - resume: the free-text prompt to pass on re-entry
-   */
+  /** Keystrokes/payload for the chosen path: unused for mailbox; the digit or free text for
+   * tmux/iterm; the free-text prompt for resume. */
   payload?: string;
   /** Inject target when kind is tmux/iterm. */
   inject?: InjectTarget;
   /** Session id + agent kind for resume. */
   resume?: { sessionId: string; agent: string };
-  /**
-   * Whether to append Enter after the injected payload. Default (omitted) is
-   * true. A cancel keystroke (Escape, from a deny / send-back choice) sets this
-   * false — the ESC byte itself dismisses the prompt, and a trailing newline
-   * would submit a stray empty line into the composer behind it.
-   */
+  /** Whether to append Enter after the payload (default true). A cancel keystroke (Escape) sets
+   * false: the ESC byte dismisses the prompt, and a newline would submit a stray empty line into
+   * the composer. */
   enter?: boolean;
 }
 
@@ -56,10 +40,8 @@ interface AnswerRouterInput {
 /** The Escape keystroke as its raw control byte — what a tmux/iterm rail reads as a real Escape. */
 const ESCAPE_KEY = '\u001b';
 
-/**
- * Match free-text answer against question options.
- * Exact (case-insensitive) > startsWith > includes. Returns 0-based index or -1.
- */
+/** Match a free-text answer against question options: exact (case-insensitive), then startsWith,
+ * then includes. Returns a 0-based index or -1. */
 export function matchOptionIndex(
   answer: string,
   options: Array<Pick<BlockOption, 'label'>> | undefined,
@@ -76,11 +58,8 @@ export function matchOptionIndex(
   return includes;
 }
 
-/**
- * Build the keystroke payload that closes an AskUserQuestion TUI.
- * Numbered options are selected by digit (1-based) + Enter. Free text with an
- * "Other" option selects Other then types; without Other, types the answer.
- */
+/** Build the keystroke payload that closes an AskUserQuestion TUI: numbered options by 1-based
+ * digit + Enter; free text selects "Other" then types, or types the answer if there is no Other. */
 export function keystrokesForAnswer(
   answer: string,
   options?: Array<Pick<BlockOption, 'label'>>,
@@ -90,12 +69,9 @@ export function keystrokesForAnswer(
     // AskUserQuestion / plan select-lists are 1-indexed digits.
     return { payload: `${idx + 1}`, matched: 'option' };
   }
-  // A symbolic cancel token — the `esc` deliveryKey a deny / send-back choice
-  // carries — is the Escape KEY, not the letters "esc". Send the ESC control
-  // byte (a real cancel on every raw tmux/iterm rail) and suppress the
-  // trailing Enter, so the prompt is dismissed rather than confirmed by a stray
-  // newline. Runs after the option match so an option literally labelled "esc"
-  // still wins as a selection.
+  // A symbolic cancel token (the `esc` deliveryKey of a deny/send-back choice) is the Escape key,
+  // not the letters: send the ESC byte and suppress Enter. Runs after option matching so an option
+  // labelled "esc" wins.
   if (/^(?:esc|escape)$/i.test(answer.trim())) {
     return { payload: ESCAPE_KEY, matched: 'other', enter: false };
   }
@@ -120,16 +96,9 @@ export function isParkedOnInput(session: ActiveSession | null | undefined): bool
   return false;
 }
 
-/**
- * True when an open feed block still needs an answer.
- *
- * Openness comes from {@link deriveBlockState}, not from `block.answer` being
- * truthy: a PENDING claim records the answer while deliberately leaving the
- * block `open` (feed.ts `recordAnswer`'s two-phase mode), so reading the field
- * directly would call a claimed-but-undelivered block "closed" — and a retry of
- * a stranded claim would then re-route a parked headless agent to the mailbox it
- * will never drain (PHNX-3999).
- */
+/** True when an open feed block still needs an answer. Openness comes from deriveBlockState, not a
+ * truthy `block.answer`: a pending claim records the answer but stays `open` (feed.ts
+ * `recordAnswer`); a retry would re-route a parked headless agent to a dead mailbox (PHNX-3999). */
 export function isOpenQuestionBlock(block: OpenBlock | null | undefined): boolean {
   if (!block) return false;
   if (block.parkedAt || block.continuedAt || block.defaultedAt) return false;
@@ -145,15 +114,9 @@ function injectTargetForSession(session: ActiveSession): InjectTarget | null {
   return null;
 }
 
-/**
- * Pick the delivery mechanism for one answer.
- *
- * Precedence:
- *   1. Parked on open question + injectable rail (tmux/iterm) → keystroke
- *   2. Parked on open question + headless (no rail) → resume with answer
- *   3. Parked on open question + no rail + interactive → refuse (don't mailbox-drop)
- *   4. Otherwise → mailbox (running agent between tool calls)
- */
+/** Pick the delivery for one answer. Parked on an open question: injectable rail (tmux/iterm) gives
+ * keystrokes; headless resumes with the answer; interactive with no rail is refused (don't
+ * mailbox-drop). Otherwise mailbox (running agent between tool calls). */
 export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
   const { answer, block, session } = input;
   const openQ = isOpenQuestionBlock(block);

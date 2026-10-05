@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BROWSER_PASSTHROUGH_VERBS, peekDevice } from './browser.js';
 
-// The verb catalog is agents-cli's half of the contract with the standalone
-// `browser` engine: it is what `agents browser --help` lists and what the help
-// groups index. A verb dropped here silently disappears from the surface even
-// though the engine still implements it, so the catalog is pinned. `sessions` is
-// deliberately NOT in the passthrough set — it is agents-cli's own reader.
+// The verb catalog is agents-cli's half of the contract with the standalone `browser` engine: it
+// is what `agents browser --help` lists. A dropped verb silently disappears from the surface, so
+// the catalog is pinned.
 describe('BROWSER_PASSTHROUGH_VERBS', () => {
   const names = BROWSER_PASSTHROUGH_VERBS.map((v) => v.name);
 

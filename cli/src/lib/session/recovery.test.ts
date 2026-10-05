@@ -158,11 +158,9 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 
   it('does NOT native-rotate a signed-out origin, even with a healthy provider account (needs a login, not a rotation)', () => {
-    // Native-rotate is gated on a usage/rate LIMIT, not signed_out/revoked
-    // (SES-39): a signed-out origin has no credential to resume under and must
-    // take the /continue path. The continue pick of the healthy provider still
-    // carries RecoveryAccount so exec injects it instead of launching the
-    // signed-out native login.
+    // Native-rotate is limited to usage/rate LIMITs, not signed_out/revoked (SES-39): a signed-out
+    // origin takes /continue. The healthy provider's continue pick still carries RecoveryAccount
+    // so exec injects it instead of the signed-out login.
     const result = resolveSessionRecoveryFromCandidates(
       session(),
       [
@@ -187,10 +185,8 @@ describe('resolveSessionRecoveryFromCandidates', () => {
 
   it('does not launch the exhausted native login when origin is limited, transcript is outside the origin home, and a healthy provider is available', () => {
     // PHNX-3674: native-rotate does not fire when inspection.available is false
-    // (trash/backup/reinstall, or a local /continue fallback from an unreachable
-    // peer). The continue pick of the healthy provider must carry RecoveryAccount
-    // so exec injects it — a credentialless continue on 2.1.187 would spawn as
-    // the rate-limited origin login.
+    // (trash/backup/reinstall, or a /continue fallback from an unreachable peer). The continue
+    // pick must carry RecoveryAccount, or 2.1.187 would spawn as the rate-limited origin login.
     const result = resolveSessionRecoveryFromCandidates(
       session({ accountId: 'origin-account' }),
       [
@@ -260,10 +256,9 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 
   it('rotates to a healthy sibling account when the origin version is rate-limited (balanced)', () => {
-    // Origin 2.1.187 is throttled → the balanced picker selects a DIFFERENT
-    // healthy account of the SAME harness. It resumes via /continue there (a
-    // different isolated home does not own the origin transcript for native
-    // resume), continuing the same session on the rotated account (PHNX-3626).
+    // Origin 2.1.187 is throttled, so the balanced picker selects a different healthy account of
+    // the same harness. It resumes via /continue there (another isolated home does not own the
+    // transcript) on the rotated account (PHNX-3626).
     const result = resolveSessionRecoveryFromCandidates(
       session({ accountId: 'origin-account' }),
       [candidate('2.1.187', { usageStatus: 'rate_limited', nativeAccountId: 'origin-account' }), candidate('2.1.218')],

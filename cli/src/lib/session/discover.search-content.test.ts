@@ -1,13 +1,6 @@
-/**
- * PHNX-2767: content search must return an FTS hit even when that session is
- * absent from the in-memory listing pool.
- *
- * The listing pool is cwd-scoped and default-capped (50), so intersecting FTS
- * hits with it dropped grep-visible transcripts — `agents sessions "tmux pane"`
- * returned 0 while the project JSONLs matched. No mocking: real SQLite FTS via
- * upsertSession, then searchContentIndex / filterSessionsByQuery against a
- * truncated pool.
- */
+/** PHNX-2767: content search must return an FTS hit even when the session is absent from the
+ * in-memory listing pool, which is cwd-scoped and capped (50); intersecting with it dropped
+ * grep-visible transcripts. Real SQLite FTS, truncated pool, no mocking. */
 
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';

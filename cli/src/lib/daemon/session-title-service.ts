@@ -1,24 +1,6 @@
-/**
- * Session-title service (PHNX-3797) — the ONE generator of session headlines.
- *
- * Every session row's headline used to be the agent's latest transcript line.
- * This service replaces it with a user-anchored NAME: it sweeps the local
- * session index for recent sessions whose title is still the raw first user
- * message, asks a {@link SessionTitleProvider} (the cloud cheap-model call by
- * default) for a short action+object headline, and persists it
- * (`lib/session/title.ts`). Because the value lands in the index, every consumer
- * — the CLI list, the picker, `sessions watch --json`, the fleet mirror, AGI EXT
- * — reads one title that was generated exactly once.
- *
- * Cost is bounded by construction, not by hope: at most
- * {@link SESSION_TITLE_MAX_PER_TICK} generations per tick, only for sessions
- * inside the display window, only for rows whose stored source key no longer
- * matches their user text (so a titled session is a pure DB read forever after),
- * and never for the titler's own spawned sessions. When the harness is missing
- * or signed out every attempt fails, so the service backs off exponentially
- * instead of respawning two processes a minute forever — the rows simply keep
- * showing the user's own words, which is the honest fallback.
- */
+/** Session-title service (PHNX-3797), the one generator of session headlines: replaces rows still
+ * titled with the raw first user message with a SessionTitleProvider name, persisted in the index.
+ * Bounded: SESSION_TITLE_MAX_PER_TICK, never its own sessions; backs off when the harness fails. */
 
 import type { DaemonServiceId } from '../daemon-services.js';
 import { runSessionTitleTick, SESSION_TITLE_MAX_PER_TICK, type SessionTitleRunner } from '../session/title.js';

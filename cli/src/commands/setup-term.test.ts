@@ -4,15 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { isTermCliInstalled, runTermWizard } from './setup-term.js';
 
-/**
- * `agents setup term` installs the standalone `term` CLI when missing
- * (PHNX-4092), the PTY engine the setup-token mint behind `agents accounts
- * add`/`login` spawns on demand (extracted PHNX-4091). agents-cli never
- * rebundles it. With PATH empty,
- * npm is unreachable so install fails closed and the wizard still returns false
- * (no throw). Presence on PATH is the whole readiness signal — there is no
- * further onboarding to configure.
- */
+/** `agents setup term` installs the standalone `term` CLI when missing (PHNX-4092), the PTY engine
+ * behind the setup-token mint (PHNX-4091); never rebundled. With PATH empty npm is unreachable, so
+ * install fails closed and returns false. Presence is readiness. */
 describe('agents setup term', () => {
   const saved: Record<string, string | undefined> = {};
   const ENV_KEYS = ['TERM_BIN', 'PATH'];

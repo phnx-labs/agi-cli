@@ -1,9 +1,5 @@
-/**
- * `agents memory` — first-class knowledge/facts resource (not rules).
- *
- * Mirrors the skills surface at list / add / remove / view / sync scale.
- * Canonical storage: ~/.agents/memory/ (project > user > system layering).
- */
+/** `agents memory`: first-class knowledge/facts resource (not rules), mirroring the skills surface.
+ * Stored in `~/.agents/memory/` with project > user > system layering. */
 
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';

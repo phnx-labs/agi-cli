@@ -1,23 +1,6 @@
-/**
- * Autonomous loop driver (issue #332).
- *
- * Re-injects an entrypoint each iteration until a stop condition is met. The
- * driver is the deterministic skeleton; the entrypoint inside stays dynamic (it
- * can spawn subagents freely). Every guard — `max_iterations`, `budget`, the
- * `until: signal` condition, SIGINT/SIGTERM — lives OUTSIDE the agent, so the
- * agent cannot vote past a kill-switch (the standard answer to runaway-loop and
- * runaway-cost failure modes; see docs/execution.md).
- *
- * Structure mirrors the teams supervisor (`runSupervisor` in teams/supervisor.ts):
- * a bounded for-loop with a hard cap, a SIGINT/SIGTERM trap that flips a stop
- * flag, a per-iteration guard check, an interval sleep, and a typed `stoppedBy`
- * union for the exit reason.
- *
- * Token accounting: the budget cap is a TOKEN hard-cap, enforced after each
- * turn from the usage events parsed off the agent's stream-json output. Token
- * extraction reuses `extractUsageEvents` from budget/enforce.ts (read-only
- * import) rather than re-implementing the per-provider parsing.
- */
+/** Autonomous loop driver (#332): re-injects an entrypoint each iteration until a stop condition.
+ * Every guard (`max_iterations`, token `budget`, `until: signal`, SIGINT/SIGTERM) lives OUTSIDE
+ * the agent so it cannot vote past a kill-switch. Mirrors runSupervisor in teams/supervisor.ts. */
 
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -91,11 +74,8 @@ export interface LoopContext {
   startIteration?: number;
   /** Tokens already consumed before this driver started (carried across a resume). */
   startTokens?: number;
-  /**
-   * On a resume, the killed run's LAST iteration session id. The first resumed
-   * iteration `/continue`s from it to thread conversation memory forward.
-   * Undefined on a fresh run (iteration 1 mints its own id, no prior to continue).
-   */
+  /** On a resume, the killed run's LAST iteration session id; the first resumed iteration
+   * `/continue`s from it. Undefined on a fresh run. */
   sessionId?: string;
 }
 
@@ -117,48 +97,24 @@ export function loopSignalPath(runDir: string): string {
   return path.join(runDir, 'loop-signal.json');
 }
 
-/**
- * Build the prompt for iteration >= 2 so the agent CONTINUES the prior
- * iteration's conversation instead of starting fresh.
- *
- * This reuses the repo's established cross-process Claude-continuity mechanism —
- * the `/continue <id>` skill (see `buildFallbackPrompt` in exec.ts, which hands
- * a rate-limit successor `/continue ${prevSessionId}`). The skill loads the
- * prior transcript via `agents sessions <id>`, so continuity does NOT depend on
- * the provider's native session being "active"; it reads the transcript off
- * disk. That is why each loop iteration can safely pin a FRESH session id (the
- * `--session-id` flag CREATES a session — re-passing one errors "Session ID
- * already in use") while still threading the conversation forward via the
- * prior id.
- *
- * The original entrypoint is re-appended after the continue directive so the
- * agent both recalls the prior turn AND knows what to do this iteration.
- */
+/** Builds the iteration >= 2 prompt: continues the prior conversation via the `/continue <id>`
+ * skill (as in buildFallbackPrompt, exec.ts), which reads the transcript off disk, so each
+ * iteration can pin a fresh session id. The original entrypoint is re-appended. */
 export function buildLoopContinuePrompt(prevSessionId: string, entrypoint: string): string {
   return buildContinuePrompt(prevSessionId, entrypoint);
 }
 
-/**
- * The universal (Tier-2) resume directive: a `/continue <id>` first message that
- * tells the agent to load the prior transcript via `agents sessions <id>` and
- * pick up. Works for ANY agent that ships the `/continue` command — the resume
- * path for agents without a native `--resume` (gemini, grok, opencode, …). An
- * optional follow-on prompt is appended after a blank line; omitted when empty so
- * a bare resume sends just the directive.
- */
+/** The universal (Tier-2) resume directive: a `/continue <id>` first message telling the agent to
+ * load the prior transcript via `agents sessions <id>`. Works for any agent shipping `/continue`
+ * (those without native `--resume`). An optional follow-on prompt follows a blank line. */
 export function buildContinuePrompt(sessionId: string, prompt?: string): string {
   const directive = `/continue ${sessionId}`;
   return prompt && prompt.trim() ? `${directive}\n\n${prompt}` : directive;
 }
 
-/**
- * Resolve a loop interval string to milliseconds. `"0"` is an explicit
- * back-to-back run (0ms). Any other string must parse via parseTimeout
- * (e.g. "30m", "1h"); an unparseable value (e.g. "30s", "5", "abc") is a
- * configuration error and must NOT silently coalesce to 0 (which would run the
- * loop full-speed on a typo). Throws on bad input; validate at config build
- * time (validateLoopInterval) so the error surfaces before the loop starts.
- */
+/** Resolves a loop interval to ms. "0" is an explicit back-to-back run; anything else must parse
+ * via parseTimeout ("30m", "1h"). Unparseable values throw rather than coalescing to 0, which
+ * would run full-speed on a typo. */
 export function parseLoopInterval(interval: string | undefined): number {
   if (interval === undefined) return 0;
   if (interval.trim() === '0') return 0;
@@ -171,10 +127,8 @@ export function parseLoopInterval(interval: string | undefined): number {
   return ms;
 }
 
-/**
- * Read and parse loop-signal.json. Returns null when the file is absent or
- * unparseable — the caller treats null as fail-closed (continue:false).
- */
+/** Reads loop-signal.json. Null when absent or unparseable; the caller treats null as fail-closed
+ * (continue:false). */
 export function readLoopSignal(runDir: string): LoopSignal | null {
   const file = loopSignalPath(runDir);
   if (!fs.existsSync(file)) return null;
@@ -197,14 +151,9 @@ export function clearLoopSignal(runDir: string): void {
   }
 }
 
-/**
- * Default per-iteration runner: spawn the agent, tee stdout, and sum token usage
- * off the stream. This is a purpose-built token-capturing spawn for the loop's
- * budget guard, not a re-implementation of exec's fallback/budget machinery —
- * it reuses `buildExecCommand` / `buildExecEnv` (the canonical command/env
- * builders) and `extractUsageEvents` (the canonical stream parser). The agent
- * is forced to JSON/headless so the usage stream is parseable.
- */
+/** Default per-iteration runner: spawns the agent, tees stdout and sums token usage for the budget
+ * guard, reusing buildExecCommand/buildExecEnv and extractUsageEvents. The agent is forced to
+ * JSON/headless so usage is parseable. */
 export function defaultRunIteration(options: ExecOptions): Promise<IterationResult> {
   // Force the stream-json output the usage parser needs; a loop iteration is
   // always headless (re-injected programmatically, never an interactive TUI).
@@ -216,10 +165,9 @@ export function defaultRunIteration(options: ExecOptions): Promise<IterationResu
   const model = execOptions.model ?? `${execOptions.agent}-default`;
 
   return new Promise((resolve, reject) => {
-    // DEP0190-safe shell spawn: on the win32 shell path compose ONE fully-quoted
-    // command line and pass an EMPTY args array (see composeWin32CommandLine) so
-    // Node never concatenates the args array — which carries the re-injected
-    // prompt — into the cmd.exe line unescaped.
+    // DEP0190-safe shell spawn on win32: compose ONE fully-quoted command line and pass an empty
+    // args array so Node never concatenates the args (carrying the re-injected prompt) into the
+    // cmd.exe line unescaped.
     const useShell = process.platform === 'win32' && (
       !path.isAbsolute(executable) || executable.endsWith('.cmd')
     );
@@ -254,19 +202,9 @@ export function defaultRunIteration(options: ExecOptions): Promise<IterationResu
   });
 }
 
-/**
- * Run the autonomous loop. Returns when a guard trips, the until-condition is
- * met, the iteration cap is reached, or a signal arrives.
- *
- * stoppedBy semantics:
- *   - `condition-met` — until=signal and the signal said stop (continue:false
- *     OR the file was absent/corrupt → fail-closed).
- *   - `budget`        — cumulative tokens crossed the budget cap (checked after
- *     each turn, outside the agent).
- *   - `max`           — ran maxIterations iterations without any earlier stop.
- *   - `signal`        — SIGINT/SIGTERM arrived; checkpoint is written before exit.
- *   - `error`         — an iteration threw or exited non-zero.
- */
+/** Runs the loop until a guard trips, the until-condition is met, the cap is reached, or a signal
+ * arrives. `stoppedBy`: condition-met (signal said stop, or file absent/corrupt: fail-closed),
+ * budget, max, signal (checkpoint written first), error (iteration threw or exited non-zero). */
 export async function runLoop(
   execOptions: ExecOptions,
   loop: LoopConfig,
@@ -281,15 +219,9 @@ export async function runLoop(
   const maxIterations = loop.maxIterations ?? 1000;
   const intervalMs = parseLoopInterval(loop.interval);
 
-  // Per-iteration session pinning (issue #332). `--session-id` CREATES a
-  // session, so each iteration must pin a DISTINCT id — re-passing one errors
-  // "Session ID already in use". Iteration 1 pins `firstSessionId`; iteration
-  // >= 2 mints a fresh id AND injects `/continue <prior id>` so the agent
-  // threads the prior conversation forward (see buildLoopContinuePrompt).
-  //
-  // `prevSessionId` is the id whose transcript the NEXT iteration continues
-  // from. On a resume it is ctx.sessionId (the killed run's last session);
-  // on a fresh run it starts undefined and is set after iteration 1.
+  // Per-iteration session pinning (#332): `--session-id` creates a session, so each iteration
+  // needs a distinct id. Iteration 1 uses `firstSessionId`; later ones mint a fresh id and inject
+  // `/continue <prevSessionId>` (on resume, ctx.sessionId, the killed run's last session).
   const firstSessionId = randomUUID();
   let prevSessionId = ctx.sessionId;
   // The session id recorded in the checkpoint is the most recent iteration's id
@@ -362,18 +294,14 @@ export async function runLoop(
         return done(iteration - startIteration, 'signal');
       }
 
-      // Pin a DISTINCT session id every iteration (`--session-id` CREATES a
-      // session; re-passing one errors "Session ID already in use"). The first
-      // executed iteration of a fresh run reuses firstSessionId; every later
-      // iteration mints a new id.
+      // Pin a distinct session id each iteration (`--session-id` creates a session; re-passing one
+      // errors). The first executed iteration of a fresh run reuses firstSessionId; later ones
+      // mint a new id.
       const iterationSessionId =
         prevSessionId === undefined ? firstSessionId : randomUUID();
 
-      // Continuity: when a prior iteration exists (prevSessionId set) and the
-      // agent supports it, thread the conversation forward via the established
-      // `/continue <prior id>` prompt-injection. Otherwise re-inject the bare
-      // entrypoint. prevSessionId is set after iteration 1 of a fresh run, or
-      // carried in from ctx.sessionId on a resume.
+      // Continuity: once a prior iteration exists (prevSessionId set) and the agent supports it,
+      // inject `/continue <prior id>`; otherwise re-inject the bare entrypoint.
       const iterationPrompt =
         prevSessionId !== undefined && continuitySupported
           ? buildLoopContinuePrompt(prevSessionId, entrypointPrompt)

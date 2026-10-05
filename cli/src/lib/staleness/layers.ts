@@ -1,16 +1,6 @@
-/**
- * Layer resolution for resources. Encapsulates which DotAgents repos a given
- * resource type reads from and in what precedence. Centralized so every
- * checker, plus the sync writer, agrees on the same set.
- *
- * Resolution model:
- *   - "first-wins" (commands, skills, mcp, subagents, workflows, plugins):
- *     project > user > system > extras. Same-named entries shadow.
- *   - "first-wins, no project" (hooks): security exclusion — see
- *     `src/lib/installations/versions.ts:1832-1836` for the rationale. User > system > extras.
- *   - "merged" (permissions): every layer contributes; first-wins on name.
- *   - "composed" (rules): preset + subrules resolved per-name across layers.
- */
+/** Layer resolution for resources, shared by every checker and the sync writer. First-wins
+ * (project > user > system > extras): commands, skills, mcp, subagents, workflows, plugins. Hooks:
+ * first-wins with NO project layer (security exclusion). Permissions merge; rules are composed. */
 
 import * as path from 'path';
 import * as fs from 'fs';
@@ -32,20 +22,9 @@ export interface Layer {
   alias?: string;
 }
 
-// ─── Per-process memoization ─────────────────────────────────────────────────
-//
-// `firstWinsLayers(cwd)` and `hookLayers()` get called from every checker for
-// every resource — easily 50+ times per `isStale` call. Each call invokes
-// `getProjectAgentsDir(cwd)` (walks up the filesystem) and `getEnabledExtraRepos()`
-// (reads agents.yaml). Memoizing at process scope eliminates the redundancy.
-//
-// Safety: in a CLI invocation, neither cwd nor the user/system base dirs
-// change mid-process, so the cache is always correct. Tests that exercise
-// different HOMEs/cwds run in separate subprocesses (per `_harness.ts`), so
-// the module's process-scope cache resets between scenarios.
-//
-// `clearLayerCache()` is exposed for tests or long-running daemons that need
-// to force re-discovery.
+// Per-process memoization: `firstWinsLayers(cwd)` and `hookLayers()` run 50+ times per `isStale`
+// and each walks the filesystem and reads agents.yaml. Safe because cwd and base dirs do not
+// change mid-process; tests use separate subprocesses (`_harness.ts`).
 
 const firstWinsCache = new Map<string, Layer[]>();
 let hookLayersCache: Layer[] | null = null;
@@ -86,10 +65,8 @@ export function hookLayers(): Layer[] {
   return layers;
 }
 
-/**
- * Resolve a single resource by name. Returns the first matching layer's
- * absolute path plus the layer scope, or null when no layer has it.
- */
+/** Resolve a single resource by name: the first matching layer's absolute path and scope, or
+ * null if no layer has it. */
 export function resolveByName(
   layers: Layer[],
   relative: string,

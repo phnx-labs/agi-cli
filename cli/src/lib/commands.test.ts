@@ -45,19 +45,9 @@ function runCommandsExpression(home: string, expression: string): unknown {
   return JSON.parse(child.stdout.trim());
 }
 
-/**
- * Scaffold a fake installed version so listInstalledVersions() recognises it.
- * versions.ts:940-956 checks for a binary at
- * <versionsDir>/<agent>/<version>/node_modules/.bin/<cliCommand>.
- * The CLI command for each agent:
- *   claude -> 'claude'   (agents.ts:171)
- *   gemini -> 'gemini'   (agents.ts:207)
- *   codex  -> 'codex'    (agents.ts:190)
- *
- * HOME is set to `home` in these tests, so:
- *   USER_AGENTS_DIR = home/.agents          (state.ts:30)
- *   VERSIONS_DIR    = home/.agents/versions (state.ts:55)
- */
+/** Scaffold a fake installed version so listInstalledVersions() recognises it: a binary at
+ * <versionsDir>/<agent>/<version>/node_modules/.bin/<cliCommand> (versions.ts:940-956), under the
+ * test HOME. */
 function scaffoldInstalledVersion(home: string, agent: string, version: string): void {
   const cliCommand = agent; // claude -> 'claude', gemini -> 'gemini', codex -> 'codex'
   const binaryDir = path.join(home, '.agents', '.history', 'versions', agent, version, 'node_modules', '.bin');
@@ -246,11 +236,8 @@ describe('version command management', () => {
 
   it('installs, lists, diffs, and removes generated command skills for Codex 0.117.0+', () => {
     const home = makeTempHome();
-    // codex 0.117.0 uses shouldInstallCommandAsSkill (skills path, not prompts file).
-    // capabilities: commands: { until: '0.117.0' }, skills: true  (agents.ts:201)
-    // So for 0.117.0, supports(codex, 'commands', '0.117.0').ok === false and
-    //                    supports(codex, 'skills',   '0.117.0').ok === true
-    //                 => shouldInstallCommandAsSkill returns true.
+    // codex 0.117.0 has `commands: { until: '0.117.0' }, skills: true` (agents.ts:201), so
+    // supports(codex, 'commands') is false and shouldInstallCommandAsSkill returns true.
     writeSystemCommand(home, 'recap', 'Summarize this session.');
 
     const installed = runCommandsExpression(home, "installCommandToVersion('codex', '0.117.0', 'recap')") as { success: boolean };

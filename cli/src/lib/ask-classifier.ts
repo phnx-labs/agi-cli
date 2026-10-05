@@ -1,18 +1,6 @@
-/**
- * Ask classifier + stall suppression (RUSH-1477).
- *
- * ~39% of AskUserQuestion calls are workflow-stalls ("should I…?", "what's next?",
- * "merge now?"). The feed's first job is to make those disappear so real Decisions
- * and Approvals stay visible.
- *
- * Pipeline:
- *   1. Classify every block into Decision / Approval / Clarification / Stall / Fyi
- *   2. Suppress stalls (and pure FYIs) with an auto-answer so they never render
- *   3. Surface Decision + Approval (+ Clarification when it needs a real fact)
- *
- * Rules-based on stable high-volume shapes. Pure classify/match; suppression has
- * side effects via the feed store when applied.
- */
+/** Ask classifier + stall suppression (RUSH-1477). ~39% of AskUserQuestion calls are
+ * workflow-stalls ("should I...?"). Classify blocks as Decision, Approval, Clarification, Stall or
+ * Fyi; auto-answer stalls and FYIs so they never render, and surface the rest. */
 import type { OpenBlock } from './feed/feed.js';
 import { recordAnswer, recordMessageReceipt, removeBlock } from './feed/feed.js';
 import { enqueue, mailboxDir } from './mailbox.js';
@@ -114,11 +102,8 @@ const RULES: Rule[] = [
   },
 ];
 
-/**
- * Classify one ask from free text (+ optional explicit blockClass from the agent).
- * Explicit blockClass from the agent is honored as a floor: 'decision' never becomes
- * a suppressible stall (false-suppress rate ~0 for real Decisions).
- */
+/** Classify one ask from free text plus an optional explicit blockClass, honored as a floor: a
+ * 'decision' never becomes a suppressible stall (false-suppress rate ~0 for real Decisions). */
 export function classifyAsk(
   text: string,
   opts?: { header?: string; blockClass?: OpenBlock['blockClass'] },
@@ -167,10 +152,8 @@ interface SuppressResult {
   suppressed: boolean;
 }
 
-/**
- * Auto-answer + remove a suppressible block so it never renders as a card.
- * Logs the stall as answered by policy:stall-suppression.
- */
+/** Auto-answer and remove a suppressible block so it never renders as a card, logging it as
+ * answered by policy:stall-suppression. */
 export function suppressStallBlock(block: OpenBlock, root?: string, mailboxRoot?: string): SuppressResult {
   const c = classifyBlock(block);
   if (!c.suppress || !c.autoAnswer) {
@@ -227,10 +210,8 @@ interface FeedFilterResult {
   counts: Record<AskClass, number>;
 }
 
-/**
- * Classify every block; optionally apply stall suppression (mutate store).
- * When `apply` is false, only classifies (dry run for --json audit).
- */
+/** Classify every block, optionally applying stall suppression (mutates the store). With `apply`
+ * false it only classifies (dry run for --json audit). */
 export function filterBlocksForFeed(
   blocks: OpenBlock[],
   opts?: { apply?: boolean; root?: string; mailboxRoot?: string },

@@ -1,19 +1,6 @@
-/**
- * The ONE place agents-cli talks to its account backend (Phoenix ID).
- *
- * Why a seam at all: the removed Prix-coupled layer (RUSH-2581) had no single
- * entry point — the backend URL was hardcoded in five files and the session
- * token was re-read from `~/.rush/user.yaml` by seven separate functions, so
- * re-pointing identity meant editing a dozen call sites and rewriting error
- * strings scattered through the tree. This module is the correction: one base
- * URL, one token reader, one HTTP funnel, one error type. Commands import from
- * here and nothing else.
- *
- * The shape mirrors the seams this repo already proved elsewhere —
- * the bounded secrets process client (`lib/secrets-client.ts`) and
- * `CloudProvider` (`lib/cloud/types.ts`) — so a second identity backend, if
- * one is ever needed, is a swap here rather than a sweep across commands.
- */
+/** The one place agents-cli talks to its account backend (Phoenix ID). The removed Prix layer
+ * (RUSH-2581) hardcoded the URL in five files and re-read the token in seven; this has one base
+ * URL, token reader, HTTP funnel and error type. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,14 +8,9 @@ import * as path from 'path';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { getRuntimeStateDir } from '../state.js';
 
-/**
- * Where the account backend lives. Config, never a literal at a call site.
- *
- * The default is Phoenix ID's branded custom domain. The legacy workers.dev
- * hostname remains live for already-released clients, but new clients and
- * managed Workers must share this canonical base so token verification cannot
- * drift across the release boundary.
- */
+/** Where the account backend lives: config, never a literal at a call site. Default is Phoenix
+ * ID's custom domain; the legacy workers.dev host stays live for released clients, but new
+ * clients and Workers must share this base so token verification can't drift. */
 export const DEFAULT_PHOENIX_ID_BASE = 'https://id.byphoenix.com';
 export const PHOENIX_ID_BASE = process.env.PHOENIX_ID_BASE ?? DEFAULT_PHOENIX_ID_BASE;
 
@@ -41,11 +23,8 @@ export interface PhoenixSession {
   access_token: string;
   email?: string;
   userId?: string;
-  /**
-   * Hosted OAuth profile image (https URL), when Phoenix ID exposes one. Wins
-   * over the email-Gravatar fallback in share attribution. Optional forever —
-   * a missing value just means the Gravatar/initials fallback.
-   */
+  /** Hosted OAuth profile image (https URL) when Phoenix ID exposes one; wins over the email-
+   * Gravatar fallback in share attribution and is optional forever. */
   avatarUrl?: string;
   /** Display name from `/api/v1/auth/me`, persisted by `refreshSessionProfile`. */
   name?: string;
@@ -63,11 +42,9 @@ export function readSession(): PhoenixSession | null {
   }
 }
 
-/**
- * Replace the session file whole: a temp file renamed over it, so a crash
- * mid-write never leaves a truncated bearer, and an explicit 0600 because
- * `writeFile`'s `mode` only applies to a file it creates.
- */
+/** Replace the session file whole: a temp file renamed over it, so a crash mid-write never
+ * leaves a truncated bearer, with an explicit 0600 because `writeFile`'s `mode` only applies to
+ * a file it creates. */
 export function writeSession(session: PhoenixSession): void {
   const file = sessionFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });

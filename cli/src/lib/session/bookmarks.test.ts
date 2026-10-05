@@ -9,13 +9,9 @@ process.env.HOME = TEST_HOME;
 const { listBookmarks, isBookmarked, setBookmark, toggleBookmark, bookmarksFilePath, clearBookmarksCache } =
   await import('./bookmarks.js');
 
-/**
- * Bookmarks are the one piece of per-session state a human ASSERTS rather than
- * the scanner deriving, so the properties that matter are durability (a real
- * file, atomically written, surviving a reindex of the session cache) and that
- * a corrupt or absent file degrades to "nothing is bookmarked" instead of taking
- * `agents sessions` down with it.
- */
+/** Bookmarks are asserted by a human, not derived by the scanner, so the properties that matter are
+ * durability (atomic real file surviving a reindex) and that a corrupt or absent file means
+ * "nothing bookmarked" instead of breaking `agents sessions`. */
 describe('session bookmarks', () => {
   it('round-trips a bookmark through the real file and reports it back', () => {
     expect(isBookmarked('sid-a')).toBe(false);

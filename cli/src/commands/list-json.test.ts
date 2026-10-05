@@ -5,17 +5,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-/**
- * Real-CLI contract test for the machine-readable `--json` output of the two
- * "list" commands (`repos list`, `plugins list`). No mocks: we run the actual
- * command tree in a subprocess against a guarded temp HOME and assert stdout
- * parses as JSON.
- *
- * This exists to catch a specific wiring regression: declaring `--json` on both a
- * parent command and its subcommand makes commander bind the flag to the parent,
- * so `plugins list --json` silently falls back to the human table. A unit test on
- * the action can't see that — only driving the parsed command tree does.
- */
+/** Real-CLI contract test for `--json` on `repos list` and `plugins list`, in a subprocess against
+ * a temp HOME. Declaring `--json` on both a parent and its subcommand binds the flag to the
+ * parent, so `plugins list --json` falls back to the table, which a unit test cannot see. */
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');

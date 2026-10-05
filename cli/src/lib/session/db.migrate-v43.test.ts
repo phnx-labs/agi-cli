@@ -10,21 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv43-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v42 -> v43: persist a per-tool-call END timestamp (PHNX-3437).
- *
- * The migration ALTERs `tool_calls` to add a nullable `end_timestamp` column,
- * which `db.exec(SCHEMA)`'s `CREATE TABLE IF NOT EXISTS` cannot express on an
- * existing table. So we hand-seed the PRE-v43 `tool_calls` shape (no
- * `end_timestamp`) with a row and stamp the recorded version to 42, then let
- * `getDB` replay exactly what a real pre-v43 machine replays: `db.exec(SCHEMA)`
- * (a no-op on the existing table) followed by `migrateSchema(42)`.
- *
- * What must be true afterwards: the column exists, is NULL on the pre-upgrade
- * row (which `insights.ts` degrades to the bounded-gap heuristic), the row and
- * its evidence survive, the new version is stamped, and the altered table
- * accepts a write that carries an end timestamp and reads it back.
- */
+/** v42 -> v43: persist a per-tool-call END timestamp (PHNX-3437). The migration ALTERs `tool_calls`
+ * to add nullable `end_timestamp`, which SCHEMA cannot add to an existing table, so we hand-seed
+ * the pre-v43 shape. Afterwards: the column exists, old rows are NULL, writes round-trip. */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

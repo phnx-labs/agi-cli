@@ -1,12 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Count how many times `opencode.db` is OPENED. That is the cost RUSH-2210 is
-// about: the whole-DB mtime stamp re-emitted every indexed session on any DB
-// write, and upsertSessionsBatch's enrichment then re-opened this same file once
-// per re-emitted entry (via parseSession -> parseOpenCode). Wrapping the shared
-// sqlite shim is the honest way to measure it — the counter is a top-level const
-// captured by the factory closure, matching discover.dir-ledger.test.ts (Bun's
-// runner does not hoist vi.mock, so a plain const works in both runners).
+// Count how many times `opencode.db` is OPENED, the RUSH-2210 cost: the whole-DB mtime stamp
+// re-emitted every session on any write and enrichment re-opened the file per entry. Wrap the
+// sqlite shim; the counter is a top-level const (Bun does not hoist vi.mock).
 const openCounter: { match: string | null; count: number } = { match: null, count: 0 };
 
 vi.mock('../sqlite.js', async () => {
@@ -51,15 +47,9 @@ function openFixture() {
   return new (Database as any)(OPENCODE_DB);
 }
 
-/**
- * Build an opencode.db with the tables the scanner and parser read: `session`
- * (one row per session) and `message`/`part` (the transcript parseOpenCode
- * walks). `control_account` is also created — real OpenCode installs carry it
- * — but it stays unused by design: the real account source is `auth.json`
- * (see `seedAuthJson`), which `resolveOpenCodeAccountId` reads. On a real,
- * actively-used install `control_account` is permanently empty, so reading it
- * would always yield `undefined` (RUSH-2358).
- */
+/** Build an opencode.db with the tables the scanner and parser read: `session`, and
+ * `message`/`part`. `control_account` is created as real installs have it but stays unused: the
+ * real account source is `auth.json`, since `control_account` is permanently empty (RUSH-2358). */
 function seedFixture(): void {
   fs.mkdirSync(path.dirname(OPENCODE_DB), { recursive: true });
   const oc = openFixture();
@@ -91,11 +81,8 @@ function seedFixture(): void {
   oc.close();
 }
 
-/**
- * Write the auth.json `resolveOpenCodeAccountId` actually reads — the real
- * OpenCode account source (RUSH-2358). One valid `api`-type credential for
- * provider `anthropic`.
- */
+/** Write the auth.json `resolveOpenCodeAccountId` actually reads, the real OpenCode account source
+ * (RUSH-2358): one valid `api` credential for provider `anthropic`. */
 function seedAuthJson(): void {
   const authPath = path.join(tmpHome, '.local', 'share', 'opencode', 'auth.json');
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
@@ -110,12 +97,9 @@ function addMessage(oc: any, sessionId: string, messageId: string, ts: number, t
     .run(`${messageId}-p0`, messageId, sessionId, JSON.stringify({ type: 'text', text }), ts);
 }
 
-/**
- * Write to the shared DB the way OpenCode does: append a turn to ONE session and
- * move that row's `time_updated`. Every other session row is untouched, but the
- * DB file's own mtime/size moves — the exact shape that used to re-emit all of
- * them.
- */
+/** Write to the shared DB as OpenCode does: append a turn to one session and move that row's
+ * `time_updated`. Other rows are untouched but the DB file's mtime/size moves, the shape that used
+ * to re-emit all of them. */
 function appendTurnTo(sessionId: string, ts: number, text: string): void {
   const oc = openFixture();
   addMessage(oc, sessionId, `${sessionId}-m-${ts}`, ts, text);
@@ -124,14 +108,9 @@ function appendTurnTo(sessionId: string, ts: number, text: string): void {
   bumpDbMtime(ts);
 }
 
-/**
- * Append a PART to a session's existing message without touching `session` or
- * `message`. This is not hypothetical: on a real `opencode.db` (mac-mini,
- * 74 sessions) `ses_3955202dfffe7C4oedWxL38Lul` carried
- * `time_updated = 1771316403087` with its newest part at `1771331512162` — over
- * four hours later. A stamp built from `session.time_updated` alone would call
- * that session unchanged forever.
- */
+/** Append a PART to a session's existing message without touching `session` or `message`. Real: on
+ * a mac-mini opencode.db a session's `time_updated` lagged its newest part by over four hours, so
+ * a stamp from `session.time_updated` alone would call it unchanged forever. */
 function appendPartTo(sessionId: string, messageId: string, ts: number, text: string): void {
   const oc = openFixture();
   oc.prepare(`INSERT INTO part (id, message_id, session_id, data, time_created) VALUES (?, ?, ?, ?, ?)`)
@@ -140,10 +119,8 @@ function appendPartTo(sessionId: string, messageId: string, ts: number, text: st
   bumpDbMtime(ts);
 }
 
-/**
- * Grow an EXISTING part's `data` in place — a streaming turn — with no new row,
- * no new id, and no timestamp anywhere moving.
- */
+/** Grow an existing part's `data` in place (a streaming turn) with no new row, id or timestamp
+ * moving. */
 function growPartInPlace(partId: string, text: string, ts: number): void {
   const oc = openFixture();
   oc.prepare(`UPDATE part SET data = ? WHERE id = ?`).run(JSON.stringify({ type: 'text', text }), partId);
@@ -284,10 +261,9 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     await scan();
     const before = ledgerFor(target);
 
-    // SQLite's LENGTH() on a TEXT column returns characters: LENGTH('日本語')
-    // is 3, LENGTH(CAST('日本語' AS BLOB)) is 9. The stamp is a byte budget
-    // downstream (tool-index.ts), so a CJK transcript must not report a third
-    // of its real size.
+    // SQLite's LENGTH() on TEXT returns characters (`LENGTH('日本語')` is 3, as a BLOB 9). The stamp
+    // is a byte budget downstream (tool-index.ts), so a CJK transcript must not report a third of
+    // its real size.
     const cjk = '日本語'.repeat(200); // 600 chars, 1800 UTF-8 bytes
     appendPartTo(target, `${target}-m0`, Date.UTC(2026, 6, 2, 6), cjk);
 

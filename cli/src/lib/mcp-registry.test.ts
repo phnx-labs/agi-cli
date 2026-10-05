@@ -7,11 +7,9 @@ import { getMcpConfigPathForHome, getProjectMcpConfigPath, getUserMcpConfigPath 
 import type { AgentId } from './types.js';
 
 describe('MCP_TARGETS completeness', () => {
-  // The bug this pins: `capabilities.mcp` is true for every harness, so a newly
-  // added one used to resolve a config path and then fall through three separate
-  // dispatch chains -- no write, no error, `success: true`. A harness now has to
-  // declare a format here or declare, in `format: null` + `unsupportedReason`,
-  // that agents-cli cannot write it.
+  // Pins the bug: `capabilities.mcp` is true for every harness, so a new one resolved a path and
+  // fell through the dispatch chains with `success: true` and no write. A harness must declare a
+  // format or `format: null` + `unsupportedReason`.
   it('has exactly one entry per mcp-capable agent', () => {
     const capable = [...capableAgents('mcp')].sort();
     const registered = (Object.keys(MCP_TARGETS) as AgentId[]).sort();
@@ -47,10 +45,9 @@ describe('MCP_TARGETS completeness', () => {
 });
 
 describe('MCP path resolvers agree with the registry', () => {
-  // Writer, parser, and the staleness detector each resolved a path through a
-  // different switch, so a harness could be written to one file and read back
-  // from another (kimi wrote .kimi-code/mcp.json, the detector read
-  // .kimi-code/settings.json and always reported it missing).
+  // Writer, parser and staleness detector once resolved paths through different switches, so a
+  // harness could be written to one file and read from another (kimi wrote mcp.json, detector read
+  // settings.json).
   const home = path.join(os.tmpdir(), 'agents-mcp-registry-home');
   const cwd = path.join(os.tmpdir(), 'agents-mcp-registry-repo');
 

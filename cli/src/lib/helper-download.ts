@@ -1,20 +1,6 @@
-/**
- * Shared on-demand download + verification for the macOS native helper `.app`
- * bundles that ship as signed + notarized GitHub release assets on each helper's
- * OWN tag (`ComputerHelper.app`, `MenubarHelper.app`, `Agents CLI.app`) — see
- * `helper-versions.ts` for why they are no longer keyed to the CLI's tag.
- *
- * A `.app` is a directory, so each asset is a zip (`ditto -c -k --keepParent`);
- * a fresh `npm i -g` machine with no bundled copy fetches the asset for the
- * pinned helper version, verifies its sha256 against the published `.sha256`,
- * then verifies the code signature (Developer ID Team + notarization — and, for
- * the menu-bar helper, its designated requirement) before it is ever installed.
- *
- * `menubar/download-menubar.ts`
- * (MenubarHelper) are thin per-helper wrappers over the primitives here — one
- * download+verify machinery, two specs — so a fix to the verify/download logic
- * lands for both helpers at once.
- */
+/** Shared on-demand download and verification for the macOS helper `.app` bundles shipped as
+ * signed, notarized release assets on each helper's own tag (see `helper-versions.ts`). Each zip
+ * is checked against its `.sha256` and code signature (Team ID, notarization) before install. */
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -25,17 +11,9 @@ import { getCacheDir } from './state.js';
 import { parseSha256Asset, sha256File } from './sha256-asset.js';
 import { helperTag, type HelperName } from './helper-versions.js';
 
-/**
- * GitHub repo whose `<helper>/v<version>` releases carry the helper assets.
- *
- * This is the SLUG, which is not the npm package name: the package is still
- * `@phnx-labs/agents-cli`, but the repository was renamed to `agi-cli`. The old
- * slug kept working only because GitHub redirects a renamed repo, which is a
- * poor thing to hang signed-binary delivery on — a redirect is one re-created
- * repo away from resolving somewhere else. What actually protects the download
- * is the sha256 + codesign + designated-requirement + Team ID verification
- * below; this just stops relying on the redirect.
- */
+/** GitHub repo whose `<helper>/v<version>` releases carry the helper assets. This is the slug,
+ * not the npm package name; the repo was renamed to `agi-cli`, so do not rely on GitHub's rename
+ * redirect. The sha256 and codesign checks are what actually protect the download. */
 export const HELPER_RELEASE_REPO = 'phnx-labs/agi-cli';
 /** Apple Developer ID Team every helper must be signed by ("Developer ID
  *  Application: Muqit Nawaz"). Defense in depth on top of `spctl` notarization. */
@@ -44,11 +22,8 @@ export const EXPECTED_TEAM_ID = '2HTP252L87';
 /** One helper's identity + verification policy — everything that differs between
  *  the computer helper and the menu-bar helper. */
 export interface HelperSpec {
-  /**
-   * Which helper this is — the key into the independent release train
-   * (`helper-versions.ts`). This is what makes the download URL a function of
-   * the HELPER's version rather than the CLI's.
-   */
+  /** Which helper this is: the key into the independent release train (`helper-versions.ts`),
+   * making the URL a function of the helper's version, not the CLI's. */
   helper: HelperName;
   /** The zipped `.app` release asset name, e.g. `ComputerHelper.app.zip`. */
   assetName: string;
@@ -58,15 +33,8 @@ export interface HelperSpec {
   cacheSubdir: string[];
   /** Developer ID Team the bundle must be signed by. */
   expectedTeamId: string;
-  /**
-   * When set, the bundle's designated requirement MUST pin this
-   * CFBundleIdentifier in addition to `expectedTeamId`. Used by the menu-bar
-   * helper: macOS keys the Accessibility (TCC) grant to this requirement, so a
-   * substituted bundle whose DR does not pin (id, team) would silently revoke
-   * the user's grant on the next paste. Left undefined for the computer helper,
-   * which has no such upgrade-stable grant to protect (matching its behavior
-   * before this shared primitive existed).
-   */
+  /** When set, the designated requirement must pin this CFBundleIdentifier as well as
+   * `expectedTeamId`. */
   expectedBundleId?: string;
   /** Local-build command named in the "asset missing" error, for a repo checkout. */
   localBuildHint: string;
@@ -77,23 +45,13 @@ export function helperCacheDir(spec: HelperSpec, version: string): string {
   return path.join(getCacheDir(), ...spec.cacheSubdir, `v${version}`);
 }
 
-/**
- * Release-asset URLs for one helper build, at that HELPER's own tag.
- *
- * The tag is `<helper>/v<version>` (e.g. `menubar/v1.0.0`), never the CLI's
- * `v<cliVersion>`. Keying these to the CLI tag is what forced every CLI release
- * to re-stage every helper asset, and simultaneously made a helper fix
- * unreachable without a CLI release — see `helper-versions.ts` for the full why.
- *
- * `version` is a HELPER version. Passing a CLI version here yields a tag that
- * does not exist; callers default it from {@link helperFloor}.
- */
+/** Release-asset URLs for one helper build at that helper's own tag `<helper>/v<version>` (e.g.
+ * `menubar/v1.0.0`), never the CLI's `v<cliVersion>`; */
 export function helperAssetUrls(spec: HelperSpec, version: string): { zip: string; sha256: string } {
   const base = `https://github.com/${HELPER_RELEASE_REPO}/releases/download/${helperTag(spec.helper, version)}`;
-  // Asset names must not contain spaces: GitHub rewrites a space to a dot on
-  // upload, so a spaced name is requested at a URL that 404s forever. Caught on
-  // `Agents CLI.app.zip`, which GitHub served as `Agents.CLI.app.zip`. Use an
-  // underscore -- GitHub preserves it verbatim.
+  // Asset names must not contain spaces: GitHub rewrites a space to a dot on upload, so a spaced
+  // name 404s forever (`Agents CLI.app.zip` was served as `Agents.CLI.app.zip`). Use an underscore,
+  // which GitHub preserves.
   if (spec.assetName.includes(' ')) {
     throw new Error(
       `helper asset name ${JSON.stringify(spec.assetName)} contains a space; GitHub rewrites it to a dot on `
@@ -117,14 +75,8 @@ function readDesignatedRequirement(appPath: string): string {
   return `${r.stdout ?? ''}${r.stderr ?? ''}`;
 }
 
-/**
- * Pure predicate (no I/O) behind the DR pin: does the requirement string pin
- * BOTH the expected CFBundleIdentifier and the Developer ID Team? Returns null
- * when it does, else an actionable error message naming the missing pin. Kept
- * pure so the truth table is unit-testable without a signed bundle or codesign.
- * Mirrors the release-time gate in `scripts/verify-menubar-helper.sh` (identifier
- * + team substring check against the same requirement string).
- */
+/** Pure predicate behind the DR pin: does the requirement string pin both the expected
+ * CFBundleIdentifier and the Developer ID Team? Null when it does, else an actionable message. */
 export function checkDesignatedRequirement(req: string, bundleId: string, teamId: string): string | null {
   const trimmed = req.trim();
   const shown = trimmed ? JSON.stringify(trimmed.slice(0, 200)) : '<none>';
@@ -143,24 +95,17 @@ export function checkDesignatedRequirement(req: string, bundleId: string, teamId
   return null;
 }
 
-/**
- * Verify the bundle's designated requirement pins the expected CFBundleIdentifier
- * AND Developer ID Team. macOS re-validates each new version against this stored
- * requirement to keep an Accessibility grant alive across upgrades; a downloaded
- * bundle whose DR drops either pin would silently revoke that grant on the next
- * paste, so refuse it.
- */
+/** Verifies the bundle's designated requirement pins the expected CFBundleIdentifier and
+ * Developer ID Team. macOS re-validates each new version against it to keep an Accessibility
+ * grant alive across upgrades, so a bundle dropping either pin would silently revoke the grant. */
 function verifyDesignatedRequirement(appPath: string, bundleId: string, teamId: string): void {
   const err = checkDesignatedRequirement(readDesignatedRequirement(appPath), bundleId, teamId);
   if (err) throw new Error(err);
 }
 
-/**
- * Verify a helper `.app` bundle is intact, signed by the expected Developer ID
- * Team, (for the menu-bar helper) pinned by its designated requirement, and
- * notarized (Gatekeeper-accepted). Throws with an actionable message on any
- * failure — a downloaded bundle is never trusted without this.
- */
+/** Verifies a helper `.app` is intact, signed by the expected Developer ID Team, pinned by its
+ * DR (menu-bar helper), and notarized. Throws with an actionable message on any failure; a
+ * downloaded bundle is never trusted without this. */
 export function verifyHelperApp(appPath: string, spec: HelperSpec): void {
   // 1. Structural + signature integrity.
   try {
@@ -169,11 +114,9 @@ export function verifyHelperApp(appPath: string, spec: HelperSpec): void {
     throw new Error(`code signature invalid for ${appPath}: ${(e as Error).message}`);
   }
 
-  // 2. Team identity — must be our Developer ID, not some other valid signer.
-  // `codesign -dv` writes its details to STDERR even on success (exit 0), so we
-  // must read stderr, not stdout. spawnSync captures both streams regardless of
-  // exit code; execFileSync would return only (empty) stdout and the Team check
-  // would falsely reject every validly-signed helper.
+  // Team identity must be our Developer ID. `codesign -dv` writes details to STDERR even on
+  // success, so read stderr; spawnSync captures both streams, whereas execFileSync returns only the
+  // empty stdout and would falsely reject every validly signed helper.
   const dv = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=4', appPath], { encoding: 'utf8' });
   const info = `${dv.stdout ?? ''}${dv.stderr ?? ''}`;
   const team = parseTeamId(info);
@@ -200,12 +143,9 @@ export function verifyHelperApp(appPath: string, spec: HelperSpec): void {
   }
 }
 
-/**
- * Download a helper release asset for `version`, verify sha256, extract the
- * `.app`, and verify its signature (+ DR pin when the spec requires one).
- * Returns the path to the extracted bundle. A missing asset is a hard error
- * naming the exact tag — never a silent fallback to another release.
- */
+/** Downloads a helper release asset for `version`, verifies sha256, extracts the `.app`, and
+ * verifies its signature (plus DR pin if required). Returns the extracted bundle path. A
+ * missing asset is a hard error naming the exact tag, never a fallback to another release. */
 export async function downloadHelperApp(spec: HelperSpec, version: string): Promise<string> {
   const dir = helperCacheDir(spec, version);
   const cachedApp = path.join(dir, spec.appName);

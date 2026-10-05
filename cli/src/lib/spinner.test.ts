@@ -1,12 +1,6 @@
-/**
- * The guarantee under test is one line with an outsized blast radius: the
- * spinner must be built with `discardStdin: false`. With ora's default
- * (`discardStdin: true`) a TTY spinner raw-modes stdin and swallows Ctrl-C for
- * its whole lifetime — so a spinner wrapping a multi-second fleet sweep traps
- * the user until it finishes (see the module doc for the mechanism). A silent
- * flip back to the default would restore that trap with no other visible
- * symptom, which is exactly the kind of regression a test should catch.
- */
+/** Guards one line with outsized blast radius: the spinner must be built with `discardStdin:
+ * false`. ora's default raw-modes stdin and swallows Ctrl-C for the spinner's lifetime, trapping
+ * the user during a long fleet sweep; a silent flip back has no other symptom. */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const oraSpy = vi.fn(() => ({ start: () => ({}) }));

@@ -4,11 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// End-to-end: plant a temp HOME with one installed agent and a symlink launcher that
-// shadows the shim, then drive the real runSelfHeal (shims + shadowing + path) in a
-// subprocess (state paths resolve from process.env.HOME at module-eval — the pattern
-// from doctor-diff.test.ts). No mocks: real shim generation, real launcher adoption,
-// real rc-file edit — all confined to the temp home.
+// End-to-end: a temp HOME with one agent and a symlink launcher shadowing the shim, driving the
+// real runSelfHeal in a subprocess (state paths resolve from HOME at module-eval). No mocks.
 
 // POSIX-only: exercises symlink-launcher adoption (the `shadowing` check is gated to
 // darwin/linux) plus a `/bin/echo` symlink and a bash rc-file edit — none of which
@@ -245,11 +242,9 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — generated hook ru
   });
 });
 
-// The `resources` check runs UNATTENDED from the daemon (~30s after start, then every
-// ~6h) and reconciles every installed version home against the shared DotAgents
-// definitions. `agents add --isolated` promises the opposite — "no settings carry-over,
-// no resource sync" — so the sweep must walk straight past an isolated home while still
-// healing the normal one beside it.
+// The `resources` check runs unattended from the daemon and reconciles every version home. `agents
+// add --isolated` promises no resource sync, so the sweep must skip an isolated home while healing
+// the normal one.
 describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never sync into isolated homes', () => {
   let home: string;
 

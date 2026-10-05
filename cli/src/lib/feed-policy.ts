@@ -1,17 +1,6 @@
-/**
- * Feed timeout policy — unattended default-on-no-answer behavior.
- *
- * Two block classes:
- *   - Approval: has a safe default (e.g. 'deny'). After the configured timeout with
- *     no operator answer, the policy auto-records that default and queues it to the
- *     agent. Logged so the operator can audit later.
- *   - Decision: no safe default (a real choice). After the timeout the block is
- *     hard-parked: a parked marker is recorded and, if we can locate the session
- *     process, it is stopped so the agent cannot proceed on a stale default.
- *
- * Policy is loaded from ~/.agents/feed-policy.yaml. Missing file uses the built-in
- * conservative defaults.
- */
+/** Feed timeout policy for unattended blocks, loaded from ~/.agents/feed-policy.yaml
+ * (conservative defaults if absent). Approval blocks auto-record their safe default after the
+ * timeout; decision blocks are hard-parked and the session stopped. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -121,10 +110,8 @@ interface PolicyResult {
   answer?: AnswerRecord;
 }
 
-/**
- * Apply policy to a single open block. Returns the action taken (none/defaulted/parked).
- * Caller is responsible for persistence/logging side effects not owned by feed.ts.
- */
+/** Applies policy to one open block and returns the action taken (none/defaulted/parked); the
+ * caller persists side effects. */
 export function applyPolicyToBlock(
   block: OpenBlock,
   policy: FeedPolicy,

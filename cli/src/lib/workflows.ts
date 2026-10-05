@@ -1,10 +1,6 @@
-/**
- * Workflow management library.
- *
- * Workflows are directory bundles with a WORKFLOW.md containing YAML frontmatter.
- * They optionally contain subagents/, skills/, and plugins/ subdirectories that
- * are composed at runtime by `agents run <workflow>`.
- */
+/** Workflow management library. Workflows are directory bundles with a WORKFLOW.md (YAML
+ * frontmatter) and optional subagents/, skills/, plugins/, composed at runtime by `agents run
+ * <workflow>`. */
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -28,11 +24,8 @@ import { listInstalledVersions } from './installations/versions.js';
 // lib/capabilities.ts. The capability matrix on AgentConfig is the single
 // source of truth.
 
-/**
- * The `loop:` block as it appears in WORKFLOW.md frontmatter (YAML, snake_case).
- * Parsed defensively and translated to the camelCase LoopConfig the driver
- * consumes (src/lib/loop.ts). See docs/execution.md.
- */
+/** The `loop:` block of WORKFLOW.md frontmatter (snake_case YAML), parsed defensively into the
+ * camelCase LoopConfig the driver consumes (src/lib/loop.ts). See docs/execution.md. */
 export interface LoopConfigRaw {
   /** Stop condition. Only `signal` is supported today. */
   until?: 'signal';
@@ -44,15 +37,9 @@ export interface LoopConfigRaw {
   interval?: string;
 }
 
-/**
- * The `verify:` sub-block of a `for_each:` construct (issue #343).
- *
- * Each produced item's stage teammate can be gated by a panel of independent
- * skeptics: `votes` of them run (as teammates that depend on the stage), and
- * `keep_if` records how their verdicts converge (`majority` / `all` / `any`).
- * The vote-counting itself is a downstream concern — the declarative layer's
- * job is to expand the panel; see `expandForEach`.
- */
+/** The `verify:` sub-block of `for_each:` (#343): `votes` independent skeptic teammates gate each
+ * item's stage teammate, `keep_if` (`majority`/`all`/`any`) records convergence. Counting is
+ * downstream; this layer only expands the panel (`expandForEach`). */
 export interface ForEachVerifySpec {
   /** Subagent / agent id that plays skeptic for each item. */
   agent: string;
@@ -64,25 +51,13 @@ export interface ForEachVerifySpec {
   keep_if: 'majority' | 'all' | 'any';
 }
 
-/**
- * The `for_each:` block as it appears in WORKFLOW.md frontmatter (issue #343).
- *
- * Declarative dynamic fan-out: a producer emits a list at runtime, one stage
- * teammate runs per produced item (runtime-computed N), optionally followed by
- * a `verify` panel. This is a thin declarative layer over the existing teams
- * substrate — each expanded teammate is staged into the supervisor's
- * mid-flight-add path (`AgentManager.spawn`), NOT a new engine. See
- * `expandForEach` and `src/lib/teams/forEach.ts`.
- *
- * Parsed defensively (mirrors `parseLoopBlock`): a malformed block drops to
- * undefined rather than passing a bad shape downstream.
- */
+/** The `for_each:` block of WORKFLOW.md (#343): a producer emits a list, one stage teammate runs per
+ * item, optionally followed by a `verify` panel. A thin layer over the teams substrate
+ * (`AgentManager.spawn`); a malformed block drops to undefined. See `expandForEach`. */
 export interface ForEachSpec {
-  /**
-   * The producer: a shell command or subagent whose stdout is a JSON array (or
-   * newline-delimited list) of items. Alternatively `itemsRef` names a prior
-   * step's output. At least one of the two is expected for a runnable spec.
-   */
+  /** The producer: a shell command or subagent whose stdout is a JSON array or newline list of
+   * items; alternatively `itemsRef` names a prior step's output. A runnable spec needs at least
+   * one. */
   produce?: string;
   /** `${step}`-style reference to a prior step's produced list. */
   itemsRef?: string;
@@ -94,21 +69,15 @@ export interface ForEachSpec {
   prompt: string;
   /** In-flight cap — maps to the supervisor's wave size (>= 1). */
   concurrency?: number;
-  /**
-   * Hard runaway guard: the producer can emit at most this many items before
-   * the fan-out is truncated. Defaults to `DEFAULT_FOR_EACH_CAP`.
-   */
+  /** Hard runaway guard: the producer emits at most this many items before the fan-out is truncated.
+   * Defaults to `DEFAULT_FOR_EACH_CAP`. */
   max_items?: number;
   /** Optional convergence gate run after each item's stage. */
   verify?: ForEachVerifySpec;
 }
 
-/**
- * Hard upper bound on items a single `for_each` expands, absent an explicit
- * `max_items`. A guard against a runaway producer spawning unbounded teammates
- * (acceptance criterion in issue #343). Anthropic's Dynamic Workflows cap at
- * 1000; we default lower and let authors raise it deliberately.
- */
+/** Hard upper bound on items one `for_each` expands without an explicit `max_items`, guarding
+ * against a runaway producer (#343). Anthropic's Dynamic Workflows cap at 1000; we default lower. */
 export const DEFAULT_FOR_EACH_CAP = 256;
 
 /** Parsed WORKFLOW.md frontmatter. */
@@ -120,24 +89,15 @@ export interface WorkflowFrontmatter {
   skills?: string[];
   mcpServers?: string[];
   allowedAgents?: string[];
-  /**
-   * Secrets bundle names this workflow needs (e.g. `linear.app`, `github.com`).
-   * When `agents run <workflow>` resolves a workflow, these are unioned into the
-   * effective `--secrets` list and resolved from the macOS Keychain before spawn.
-   * Pass `--no-auto-secrets` to skip this injection.
-   */
+  /** Secrets bundle names this workflow needs (e.g. `linear.app`); `agents run <workflow>` unions
+   * them into `--secrets` and resolves them from the macOS Keychain. `--no-auto-secrets` skips
+   * this. */
   secrets?: string[];
-  /**
-   * Optional loop block: wraps the workflow in a bounded until-condition loop
-   * (issue #332). When present, `agents run <workflow>` honors it without a
-   * `--loop` flag. Validated/coerced in parseWorkflowFrontmatter.
-   */
+  /** Optional loop block (#332): wraps the workflow in a bounded until-condition loop that `agents
+   * run <workflow>` honors without `--loop`. Validated in parseWorkflowFrontmatter. */
   loop?: LoopConfigRaw;
-  /**
-   * Optional declarative dynamic fan-out (issue #343): a producer emits a list
-   * and one stage teammate runs per item, with an optional verify panel.
-   * Validated/coerced in parseWorkflowFrontmatter via `parseForEachBlock`.
-   */
+  /** Optional declarative dynamic fan-out (#343): a producer emits a list, one stage teammate per
+   * item, with an optional verify panel. Validated via `parseForEachBlock`. */
   forEach?: ForEachSpec;
 }
 
@@ -207,21 +167,9 @@ function readWorkflowBody(workflowDir: string): string {
   return lines.slice(endIndex + 2).join('\n').trim();
 }
 
-/**
- * Defensively coerce a frontmatter `loop:` value into a LoopConfigRaw.
- *
- * Mirrors the asStringArray discipline above: a malformed field is dropped to
- * undefined rather than passed through, so the loop driver never sees a bad
- * shape. Returns undefined when `loop:` is absent or not an object, or when no
- * recognized field survives coercion (an all-garbage block is treated as
- * "no loop", not "empty loop").
- *
- * Field rules:
- *   - until:          only the literal `signal` is accepted; anything else dropped.
- *   - max_iterations: a finite positive integer; non-numbers/<=0 dropped.
- *   - budget:         a finite positive number (tokens); non-numbers/<=0 dropped.
- *   - interval:       a string (e.g. "0", "30m"); non-strings dropped.
- */
+/** Defensively coerce a frontmatter `loop:` into a LoopConfigRaw: malformed fields drop to
+ * undefined, and an all-garbage block means "no loop". Rules: `until` only `signal`;
+ * `max_iterations` positive integer; `budget` positive number; `interval` a string. */
 export function parseLoopBlock(v: unknown): LoopConfigRaw | undefined {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const raw = v as Record<string, unknown>;
@@ -257,13 +205,9 @@ function asNonEmptyString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim().length > 0 ? v : undefined;
 }
 
-/**
- * Defensively coerce a frontmatter `verify:` sub-block into a ForEachVerifySpec.
- *
- * Requires an `agent`; drops the whole block otherwise (a verify panel with no
- * skeptic is meaningless). `votes` defaults to 1 (a single confirmation) and
- * `keep_if` to `majority`; both are validated against their allowed shapes.
- */
+/** Defensively coerce a `verify:` sub-block into a ForEachVerifySpec: drop it without an `agent` (a
+ * panel with no skeptic is meaningless); `votes` defaults to 1 and `keep_if` to `majority`, both
+ * validated. */
 export function parseVerifyBlock(v: unknown): ForEachVerifySpec | undefined {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const raw = v as Record<string, unknown>;
@@ -285,13 +229,9 @@ export function parseVerifyBlock(v: unknown): ForEachVerifySpec | undefined {
   return out;
 }
 
-/**
- * Defensively coerce a frontmatter `for_each:` block into a ForEachSpec (issue
- * #343). Mirrors `parseLoopBlock`'s discipline: a block missing the two
- * load-bearing fields (`agent` + `prompt`) drops to undefined rather than
- * passing a half-formed spec to the expander. Optional numeric/verify fields
- * are individually validated and dropped when malformed.
- */
+/** Defensively coerce a `for_each:` block into a ForEachSpec (#343), like `parseLoopBlock`: missing
+ * `agent` or `prompt` drops the block to undefined; optional numeric/verify fields are validated
+ * individually. */
 export function parseForEachBlock(v: unknown): ForEachSpec | undefined {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const raw = v as Record<string, unknown>;
@@ -359,11 +299,8 @@ interface ForEachExpansion {
   cap: number;
 }
 
-/**
- * Substitute `{{item}}` / `{{index}}` (and 1-based `{{n}}`) in a prompt
- * template. Unknown `{{...}}` tokens are left intact so a template can carry
- * placeholders the caller resolves elsewhere.
- */
+/** Substitute `{{item}}`, `{{index}}` and 1-based `{{n}}` in a prompt template; unknown `{{...}}`
+ * tokens are left intact for the caller to resolve. */
 export function renderForEachTemplate(template: string, item: string, index: number): string {
   return template
     .replace(/\{\{\s*item\s*\}\}/g, item)
@@ -371,23 +308,9 @@ export function renderForEachTemplate(template: string, item: string, index: num
     .replace(/\{\{\s*n\s*\}\}/g, String(index + 1));
 }
 
-/**
- * Expand a `for_each` spec against a producer's output into concrete teammate
- * descriptors (issue #343) — the heart of the declarative fan-out.
- *
- * Pure and deterministic: no I/O, no spawning. `src/lib/teams/forEach.ts`
- * feeds the result to `AgentManager.spawn`, staging each descriptor into the
- * supervisor's existing mid-flight-add path — so this reuses the dynamic-DAG
- * substrate rather than introducing a new engine.
- *
- * For N produced items (capped at `spec.max_items` / `DEFAULT_FOR_EACH_CAP`):
- *   - one `stage` teammate per item, depending on `producerName` if given;
- *   - when `verify` is set, `votes` `verify` teammates per item, each
- *     depending on that item's stage teammate.
- *
- * Names are unique (`<base>-<n>` and `<base>-<n>-verify-<v>`) so `--after`
- * linkage and the teams cycle check carry over unchanged.
- */
+/** Expand a `for_each` spec against producer output into teammate descriptors (#343): pure, no I/O;
+ * `teams/forEach.ts` stages them via `AgentManager.spawn`. Per item (capped at `max_items`): one
+ * stage teammate plus `votes` verify teammates. Names are unique so `--after` linkage carries over. */
 export function expandForEach(
   spec: ForEachSpec,
   items: string[],
@@ -439,21 +362,9 @@ export function expandForEach(
   };
 }
 
-/**
- * Decide which subagent .md stems a workflow may use, given the discovered
- * subagent files and the parsed `allowedAgents` frontmatter. This is the
- * fail-closed security boundary for issue #324:
- *
- *   - `allowedAgents === undefined` (field absent)  -> NO restriction; allow all.
- *   - `allowedAgents === []`        (present, empty) -> allow ZERO; copy none.
- *   - `allowedAgents = [a, b]`                       -> allow only those stems.
- *
- * An explicit empty array must NEVER widen to "allow all" — that would copy
- * every subagent definition into the run, granting MORE access than declared.
- *
- * `available` are the .md filenames found in subagents/ (e.g. `security.md`).
- * Returns the stems to copy and any allowedAgents entries with no matching file.
- */
+/** Decide which subagent .md stems a workflow may use from `allowedAgents` (fail-closed boundary,
+ * #324): undefined allows all, `[]` allows none, a list allows only those. An empty array must
+ * never widen to all. Returns stems to copy and unmatched entries. */
 export function resolveAllowedSubagents(
   available: string[],
   allowedAgents: string[] | undefined,
@@ -475,46 +386,17 @@ export function resolveAllowedSubagents(
  *  subagents, or the orchestrator has no way to reach them. */
 const SUBAGENT_DISPATCH_TOOL = 'Task';
 
-/**
- * Keep the subagent-dispatch tool (`Task`) in a `tools:`-restricted workflow's
- * allowlist when the workflow actually ships subagents to dispatch.
- *
- * A WORKFLOW.md `tools:` list becomes Claude's `--tools` set, which *restricts*
- * the available built-ins. An orchestrator whose `subagents/` files were just
- * copied into the shared agents dir but whose `tools:` omits `Task` cannot
- * reach any of them — it silently no-ops (observed: the run emits only "I'll
- * wait for the completion notification" and exits). Omitting `Task` while
- * shipping a `subagents/` dir is always an authoring miss, so we re-add it at
- * the source rather than relying on every workflow author to remember.
- *
- * Returns `tools` unchanged when the workflow has no subagents or already lists
- * `Task`; otherwise appends `Task`.
- */
+/** Keep `Task` in a `tools:`-restricted workflow's allowlist when it ships subagents: `tools:`
+ * becomes Claude's `--tools` set, and an orchestrator without `Task` cannot reach its subagents and
+ * silently no-ops. Omitting it is always an authoring miss, so we re-add it here. */
 export function ensureSubagentDispatchTool(tools: string[], hasSubagents: boolean): string[] {
   if (!hasSubagents || tools.includes(SUBAGENT_DISPATCH_TOOL)) return tools;
   return [...tools, SUBAGENT_DISPATCH_TOOL];
 }
 
-/**
- * Prune stale workflow-managed subagent files from the shared per-agent agents
- * dir before a scoped run writes the permitted set (issue #401, follow-up to
- * #324). A prior *unrestricted* run of a workflow copies every subagent
- * definition into the shared `~/.claude/agents/` dir; a later run that declares
- * `allowedAgents:` copies only the permitted ones but never removes the
- * leftovers — so an unlisted subagent stays on disk and remains dispatchable,
- * silently defeating the fail-closed scope.
- *
- * Fail-closed fix (mirrors how `cleanupWorkflowMcpConfig` only tears down what
- * the workflow itself created): remove any file that (a) belongs to THIS
- * workflow's subagents/ — matched by filename, i.e. the workflow-managed
- * universe — and (b) is NOT in the permitted set. A user's own hand-placed
- * subagent shares no name with a workflow subagent file, so it is never
- * touched. Permitted files are left in place; the caller (re)copies them.
- *
- * `workflowSubagentFiles` are the .md filenames in the workflow's subagents/
- * dir (e.g. `security.md`); `allowedStems` are the permitted stems from
- * `resolveAllowedSubagents`. Returns the filenames actually removed.
- */
+/** Prune stale workflow-managed subagent files from the shared agents dir before a scoped run
+ * (#401): a prior unrestricted run leaves unlisted subagents dispatchable, defeating the
+ * fail-closed scope. Removes only this workflow's non-permitted files; user files are untouched. */
 export function pruneStaleWorkflowSubagents(
   sharedAgentsDir: string,
   workflowSubagentFiles: string[],
@@ -593,14 +475,9 @@ export function transformWorkflowForKimi(workflowPath: string, name: string): st
   return `---\n${frontmatter}\n---\n\n\`\`\`d2\nBEGIN -> step -> END\nstep: |md\n${indentD2BlockString(instructions)}\n|\n\`\`\`\n`;
 }
 
-/**
- * Convert a canonical agents-cli workflow bundle into an Antigravity workflow
- * markdown file. Antigravity discovers workflows as flat `<name>.md` files under
- * `~/.gemini/config/global_workflows/` (scanned by `agy` at startup) and exposes
- * each as a `/<name>` slash command. Frontmatter carries the required `description`
- * plus the shared `agents_workflow` ownership marker so agents-cli never clobbers a
- * user-authored workflow of the same name.
- */
+/** Convert a workflow bundle into an Antigravity workflow: flat `<name>.md` under
+ * `~/.gemini/config/global_workflows/`, exposed as `/<name>`. Frontmatter has `description` plus
+ * the `agents_workflow` marker so a user-authored workflow is never clobbered. */
 export function transformWorkflowForAntigravity(workflowPath: string, name: string): string {
   const fm = parseWorkflowFrontmatter(workflowPath);
   if (!fm) throw new Error(`Invalid WORKFLOW.md in ${workflowPath}`);
@@ -655,17 +532,9 @@ function escapeRhaiString(s: string): string {
     .replace(/\r/g, '\\n');
 }
 
-/**
- * Convert a canonical agents-cli workflow bundle into a Grok native Rhai
- * workflow script. Grok discovers saved workflows as
- * `~/.grok/workflows/<name>.rhai` (and project `.grok/workflows/`) and exposes
- * each as a `/<name>` slash command (enabled by default since v0.2.111).
- *
- * The projection is a single-agent orchestrator that feeds the WORKFLOW.md
- * body as the agent prompt plus the caller's `args.prompt` (or string args).
- * Multi-phase fan-out is left to hand-authored Rhai — agents-cli's job is to
- * land the orchestrator instructions in the native path.
- */
+/** Convert a workflow bundle into a Grok Rhai script at `~/.grok/workflows/<name>.rhai` (or project
+ * `.grok/workflows/`), exposed as `/<name>`. A single-agent orchestrator feeding WORKFLOW.md plus
+ * `args.prompt`; multi-phase fan-out is left to hand-authored Rhai. */
 export function transformWorkflowForGrok(workflowPath: string, name: string): string {
   const fm = parseWorkflowFrontmatter(workflowPath);
   if (!fm) throw new Error(`Invalid WORKFLOW.md in ${workflowPath}`);
@@ -750,15 +619,9 @@ function isPluginDirectory(pluginRoot: string, entry: fs.Dirent): boolean {
   return isDir;
 }
 
-/**
- * Plugin `workflows/` directories in discovery order (project → user → system →
- * extra). Used by name resolution and listing so a plugin-packaged workflow is
- * runnable via `agents run <name>` without a separate install into
- * ~/.agents/workflows/ (Phase 5 packaging). Within the plugin band, project
- * plugins beat user/system plugins (same first-hit-wins as other layers).
- *
- * Pass `pluginName` to restrict to one plugin (for `name@plugin` resolution).
- */
+/** Plugin `workflows/` dirs in discovery order (project, user, system, extra), so a plugin-packaged
+ * workflow runs via `agents run <name>` without a separate install (Phase 5). Project plugins beat
+ * user/system; `pluginName` restricts to one plugin. */
 export function listPluginWorkflowDirs(
   cwd: string = process.cwd(),
   pluginName?: string,
@@ -784,11 +647,8 @@ export function listPluginWorkflowDirs(
   return pluginRoots;
 }
 
-/**
- * True when `ref` is a single bare workflow / source identifier (no path
- * separators, no `..`, no `@`). Name lookup must not path-join multi-segment
- * or traversal refs into search roots. `name@source` is parsed separately.
- */
+/** True when `ref` is a single bare workflow identifier (no path separators, `..` or `@`), so name
+ * lookup never path-joins multi-segment or traversal refs. `name@source` is parsed separately. */
 export function isBareWorkflowName(ref: string): boolean {
   if (!ref || ref === '.' || ref === '..') return false;
   if (ref.includes('/') || ref.includes('\\')) return false;
@@ -803,17 +663,13 @@ export function isBareWorkflowName(ref: string): boolean {
 interface ParsedWorkflowRef {
   /** Workflow directory name (WORKFLOW.md parent). */
   name: string;
-  /**
-   * When set (`name@source`), pin resolution to that source only:
-   * a plugin name, or an enabled extra-repo alias.
-   */
+  /** When set (`name@source`), pin resolution to that source only: a plugin name or an enabled
+   * extra-repo alias. */
   source?: string;
 }
 
-/**
- * Parse a workflow run target: optional `workflow:` type prefix and optional
- * `@source` pin. Returns null when the form is not a valid name lookup.
- */
+/** Parse a workflow run target: optional `workflow:` prefix and optional `@source` pin; null when
+ * not a valid name lookup. */
 export function parseWorkflowRef(ref: string): ParsedWorkflowRef | null {
   let r = ref.trim();
   if (r.startsWith('workflow:')) r = r.slice('workflow:'.length);
@@ -830,13 +686,9 @@ export function parseWorkflowRef(ref: string): ParsedWorkflowRef | null {
   return { name: r };
 }
 
-/**
- * Resolve an `agents run <workflow>` reference.
- *
- * Directories are accepted anywhere on disk when they contain WORKFLOW.md.
- * Name lookup precedence (docs/07-entrypoints): project > user > plugin > extra > system.
- * Pin a source with `name@plugin` or `name@extra-alias` (optional `workflow:` prefix).
- */
+/** Resolve an `agents run <workflow>` reference. Any directory with WORKFLOW.md is accepted; name
+ * lookup precedence is project > user > plugin > extra > system (docs/07-entrypoints), pinnable
+ * with `name@plugin` or `name@extra-alias`. */
 export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): string | null {
   const direct = resolveWorkflowPath(ref, cwd);
   if (direct) return direct;
@@ -874,11 +726,8 @@ export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): st
   return null;
 }
 
-/**
- * Discover all workflow directories (those containing WORKFLOW.md) in a local path.
- * Checks if the path itself is a workflow, then scans a top-level workflows/ subdirectory,
- * then falls back to scanning all immediate subdirectories.
- */
+/** Discover workflow dirs (containing WORKFLOW.md) in a local path: the path itself, then a
+ * top-level workflows/ subdir, then all immediate subdirectories. */
 export function discoverWorkflowsFromRepo(repoPath: string): DiscoveredWorkflow[] {
   const results: DiscoveredWorkflow[] = [];
 
@@ -923,11 +772,8 @@ export function discoverWorkflowsFromRepo(repoPath: string): DiscoveredWorkflow[
   return results;
 }
 
-/**
- * List all workflows in central storage + plugin packages.
- * Precedence: user > plugin > extra > system (first writer wins; project is
- * cwd-scoped and handled by resolveWorkflowRef / the resource handler).
- */
+/** List all workflows in central storage plus plugin packages. Precedence: user > plugin > extra >
+ * system (first writer wins); project is cwd-scoped and handled by resolveWorkflowRef. */
 export function listInstalledWorkflows(cwd: string = process.cwd()): Map<string, InstalledWorkflow> {
   const result = new Map<string, InstalledWorkflow>();
   const extraRepos = getEnabledExtraRepos();
@@ -999,16 +845,9 @@ export function removeWorkflow(name: string): { success: boolean; error?: string
   }
 }
 
-/**
- * Antigravity user workflows are NOT version-isolated. `agy` scans a single,
- * shared, HOME-global directory at startup — `~/.gemini/config/global_workflows/`
- * — and that dir is a real directory in the user's home, never symlinked into a
- * per-version home (only `~/.gemini/antigravity-cli` is version-scoped). Writing
- * into a version home therefore lands somewhere agy never reads. So every
- * antigravity version resolves to the same real shared dir; `versionHome` is
- * intentionally ignored. (Verified via strace of `agy`: it opens
- * `$HOME/.gemini/config/global_workflows/<name>.md` and never the version home.)
- */
+/** Antigravity workflows are not version-isolated: `agy` scans one HOME-global dir
+ * (`~/.gemini/config/global_workflows/`), never symlinked into a version home. So `versionHome` is
+ * ignored (verified via strace). */
 export function antigravityWorkflowsDir(): string {
   return path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'global_workflows');
 }
@@ -1060,12 +899,8 @@ export function writeGooseSubrecipe(workflowPath: string, subrecipeName: string,
   fs.writeFileSync(path.join(destDir, `${subrecipeName}.yaml`), yaml.stringify(recipe), 'utf-8');
 }
 
-/**
- * Render the main Goose recipe YAML for a workflow — the exact bytes the Goose
- * `WORKFLOW_TARGETS` entry writes to `<name>.yaml`. Extracted so the writer and
- * the doctor content-drift check (`matches`) render from ONE source and can
- * never disagree. Returns null on invalid frontmatter.
- */
+/** Render the main Goose recipe YAML for a workflow, the exact bytes the Goose target writes. Shared
+ * by the writer and the doctor drift check so they never disagree; null on invalid frontmatter. */
 export function renderGooseRecipeYaml(workflowPath: string, name: string): string | null {
   const frontmatter = parseWorkflowFrontmatter(workflowPath);
   if (!frontmatter) return null;

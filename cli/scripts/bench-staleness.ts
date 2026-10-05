@@ -1,12 +1,7 @@
 #!/usr/bin/env bun
-/**
- * Benchmarks the staleness library against a real cwd and agent@version.
- * Usage:
- *   bun scripts/bench-staleness.ts <cwd> <agent> <version> [--iters=N]
- * Defaults: cwd=PWD, agent=claude, version=<default-claude>, iters=50.
- *
- * Reports min/median/p95/max/mean for each scenario, plus resource counts.
- */
+/** Benchmarks the staleness library against a real cwd and agent@version: `bun
+ * scripts/bench-staleness.ts <cwd> <agent> <version> [--iters=N]` (defaults: PWD, claude, its
+ * default version, 50). Reports min/median/p95/max/mean per scenario plus resource counts. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -106,10 +101,9 @@ bench('  build', () => { m = buildManifest(agent, version, cwd); });
 saveManifest(agent, version, m!);
 console.log();
 
-// 2a. isStale cold — first call in a fresh process. This is what the
-// 50-concurrent-agent burst case pays for each process. The layer
-// memoization is cold here; subsequent calls within the same process get
-// the warm path measured below.
+// 2a. isStale cold: the first call in a fresh process, what each of a 50-concurrent-agent burst's
+// processes pays. The layer memoization is cold here; later calls in the same process take the
+// warm path measured below.
 console.log('isStale (cold — first call in a fresh process):');
 const loaded = loadManifest(agent, version)!;
 // Reset module-level layer cache before the cold measurement.

@@ -1,11 +1,6 @@
-/**
- * Tests for the interactive-session auto-reconnect policy. The load-bearing logic
- * is the pure state machine `reconnectStep` + `backoffMs` — exercised directly with
- * real inputs, no mocks. `reconnectInteractiveSession` is driven through that same
- * real state machine; only the two genuinely-external effects (the SSH re-attach and
- * the wall-clock wait) are supplied as deterministic sequences, because SSH cannot
- * run in CI. No production code path is stubbed.
- */
+/** Tests for the interactive auto-reconnect policy: the pure state machine `reconnectStep` +
+ * `backoffMs` run with real inputs, and `reconnectInteractiveSession` runs through it with only
+ * the SSH re-attach and the wall-clock wait supplied, since CI has no SSH. */
 import { describe, expect, test } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import type { Host } from './types.js';
@@ -156,21 +151,14 @@ describe('backoffMs — capped exponential', () => {
 });
 
 describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell (no mock)', () => {
-  // These run the actual returned string through a real `bash`, the same
-  // interpreter ssh hands it to on a POSIX peer. This is what directly
-  // reproduces (and proves fixed) the "attempt 1/6 forever" bug: the loop only
-  // ever looped because a remote-origin 255 was indistinguishable from a real
-  // ssh drop. Skipped on Windows CI, where `bash` isn't guaranteed on PATH —
-  // interactive host dispatch (what this wraps) is already POSIX-only
-  // (dispatch.ts), so there's no Windows behavior to regress.
+  // These run the returned string through a real `bash`, reproducing the "attempt 1/6 forever" bug:
+  // a remote-origin 255 was indistinguishable from a real ssh drop. Skipped on Windows, where
+  // interactive host dispatch is already POSIX-only (dispatch.ts).
   const runsBash = process.platform !== 'win32';
 
-  // `(exit N)` runs in a forked SUBSHELL — it returns control to the wrapper
-  // script with status N (via `$?`), unlike a bare top-level `exit N` builtin,
-  // which would terminate the wrapper script before its own remap logic ever
-  // runs. This is what makes these tests actually exercise the remap, the same
-  // way a real subprocess (`agents sessions focus …`) returning exit code N does
-  // in production — it doesn't terminate the wrapping `bash -lc` script either.
+  // `(exit N)` runs in a forked subshell and returns status N to the wrapper, unlike a bare `exit
+  // N`, which would end the wrapper before its remap logic runs; this mirrors a real subprocess
+  // returning exit code N.
   function realBashExitCode(cmd: string): number | undefined {
     try {
       execFileSync('bash', ['-c', wrapRemoteExitCode(cmd)]);
@@ -187,11 +175,9 @@ describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell
   });
 
   test.skipIf(!runsBash)('a 255 exit is remapped to REMOTE_EXIT_255_REMAPPED (254), verified via real bash exit status — this is the exact mechanism that let the "attempt 1/6 forever" bug loop', () => {
-    // Before this fix: a remote command (the login-shell fallback, a nested
-    // remote-tmux hop) that happened to exit 255 for its own reasons rode back
-    // up through `sshStream` as SSH_CONN_FAILURE — indistinguishable from the ssh
-    // transport itself dropping — and kept refilling the reconnect loop's retry
-    // budget forever.
+    // Before the fix, a remote command exiting 255 for its own reasons rode back through
+    // `sshStream` as SSH_CONN_FAILURE, indistinguishable from an ssh drop, and kept refilling the
+    // reconnect retry budget forever.
     expect(realBashExitCode('(exit 255)')).toBe(REMOTE_EXIT_255_REMAPPED);
     expect(REMOTE_EXIT_255_REMAPPED).not.toBe(SSH_CONN_FAILURE);
   });
@@ -203,20 +189,15 @@ describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell
 
 describe('reattachRemoteCommand — the real remote invocation, exercised through a REAL shell with an argv-echoing "agents" shim (no mock)', () => {
   const runsBash = process.platform !== 'win32';
-  // Mirrors remote-cmd.test.ts's decodeRemoteArgv/injection-test shim: define
-  // "agents" as a bash FUNCTION (so it runs in-process, not a real binary) that
-  // either echoes its argv one-per-line, or `return`s a chosen status (NOT
-  // `exit`, which would kill the whole script — a function must `return` to
-  // hand a status back to its caller without terminating the shell, the same
-  // way a real subprocess handing back an exit code doesn't kill the wrapper).
+  // Mirrors remote-cmd.test.ts's shim: `agents` is a bash function that echoes its argv or
+  // `return`s a chosen status (not `exit`, which would kill the script), like a real subprocess
+  // handing back an exit code.
   const argvShim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; `;
   const exit255Shim = `agents() { return 255; }; export -f agents; `;
 
-  // A session id is never attacker-controlled in production (Claude mints it,
-  // or it's an existing session's own id), but this proves the composition is
-  // safe regardless: shellQuote is applied to the id AND to the whole wrapper
-  // string, and nested POSIX '\'' escaping must compose correctly under that
-  // double-quoting for the real command to survive.
+  // A session id is never attacker-controlled in production, but this proves the composition is
+  // safe anyway: shellQuote on the id and the whole wrapper, with nested POSIX `'\''` escaping,
+  // must still deliver the real command.
   const INJECTION_SID = "a'b; touch /tmp/PWNED-reconnect-test; #";
 
   test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
@@ -227,10 +208,9 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
   });
 
   test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
-    // Before this fix: refuseFallback's remote branch (or a nested remote-tmux
-    // hop) exiting 255 for its own reasons rode back up through `sshStream` as
-    // SSH_CONN_FAILURE — indistinguishable from the ssh transport itself
-    // dropping — and kept refilling the reconnect loop's retry budget forever.
+    // Before the fix, refuseFallback's remote branch (or a nested remote-tmux hop) exiting 255 for
+    // its own reasons rode back as SSH_CONN_FAILURE, indistinguishable from an ssh drop, and
+    // refilled the retry budget forever.
     let status: number | undefined;
     try {
       execFileSync('bash', ['-c', exit255Shim + reattachRemoteCommand(SESSION_TARGET)]);
@@ -274,10 +254,9 @@ describe('pickReconnectTarget — what we go back for, and why a launch id is th
       .toEqual({ kind: 'session', id: RESUME });
   });
 
-  // The whole point. Every session id above is either forced by the launcher or
-  // read back off the peer AFTER the stream returned — i.e. over the link that
-  // just dropped. On a real outage that read fails, so a Grok/Codex/Kimi tab had
-  // NO id and skipped reconnect entirely while a Claude tab beside it retried.
+  // Every id above is forced by the launcher or read back from the peer after the stream returned,
+  // over the link that just dropped. On a real outage that read fails, so a Grok/Codex/Kimi tab had
+  // no id and skipped reconnect while a Claude tab retried.
   test('a non-Claude harness whose id could not be read back still reconnects, by launch id', () => {
     expect(pickReconnectTarget({ agent: 'grok', launchId: LAUNCH_ID }))
       .toEqual({ kind: 'launch', id: LAUNCH_ID });
@@ -535,13 +514,9 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
   });
 
   test('a mixed outage — unreachable attempts, then one that reconnects and drops out — reports the drop, not "couldn\'t reconnect"', async () => {
-    // The budget is spent by the run of unreachable attempts, but the attempt that
-    // spends it DID reach the host, so the notice must describe that, and must not
-    // claim a count of successful reconnections it never made.
-    // Mixed: the streak starts with a genuinely unreachable host, then the host
-    // comes back but the attach dies straight out every time. The attempt that
-    // finally spends the window is one that REACHED the host, so the notice must
-    // describe a link that kept dropping — not a host it could never reach.
+    // The budget is spent by unreachable attempts, but the attempt that spends it did reach the
+    // host, so the notice must say so and not claim reconnections it never made. Mixed case: an
+    // unreachable start, then the host returns but every attach drops immediately.
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
@@ -596,10 +571,9 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(rc).toBe(0);
   });
 
-  // RUSH-3125: Ctrl-C during the backoff used to hit node's default SIGINT
-  // handler and kill the whole process mid-notice, dropping the user at a bare
-  // shell with no hint the agent was still alive on the peer — the exact
-  // dead-end reconnect exists to prevent.
+  // RUSH-3125: Ctrl-C during the backoff hit node's default SIGINT handler and killed the process
+  // mid-notice, dropping the user at a bare shell with no hint the agent was still alive on the
+  // peer, the dead-end reconnect exists to prevent.
   test('Ctrl-C during the wait stops the loop cleanly and says where the agent is', async () => {
     let calls = 0;
     const writes: string[] = [];

@@ -1,29 +1,6 @@
-/**
- * Managed backup encryption key (DEK) — mint, cache, escrow, recover.
- *
- * On the MANAGED path, a session backup is NEVER uploaded in plaintext. Every
- * transcript body is sealed with AES-256-GCM (the same `transcript-crypto.ts`
- * primitives BYO uses) under a 32-byte data-encryption key (DEK) minted per
- * Phoenix user.
- *
- * Where the DEK lives, and the honest trust boundary:
- *   - **Local cache** at `~/.agents/.cache/state/sessions-backup-key.json`
- *     (mode 0600), a `{ [userId]: <base64-dek> }` map so several Phoenix
- *     accounts on one box stay isolated. The Worker escrow remains authoritative.
- *   - **Escrow** at the bearer-gated Worker key `<userId>/__key/backup-dek`, so
- *     a FRESH box that signs in with the same Phoenix account recovers the DEK
- *     with zero setup and can decrypt its own prior backups.
- *
- * Trust boundary (documented honestly — SES-51):
- *   - Confidential vs a raw R2 / Cloudflare bucket read: objects at rest are
- *     ciphertext envelopes (SES-24 holds), and the DEK escrow object is itself
- *     only reachable with the owner's bearer.
- *   - NOT zero-knowledge vs Phoenix: the DEK is escrowed on Phoenix-operated
- *     infrastructure, so the operator *can* recover the key and read a backup.
- *     A user who needs a key Phoenix can never see uses BYO (`--byo`), which
- *     keeps the DEK only in their own `r2.backups` bundle — that is the
- *     zero-knowledge path.
- */
+/** Managed backup DEK: minted per Phoenix user, cached locally (0600), escrowed at
+ * `<userId>/__key/backup-dek` so a fresh box recovers it. Backups are AES-256-GCM, never plaintext
+ * (SES-24). NOT zero-knowledge vs Phoenix, which can recover the DEK (SES-51); `--byo` is. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -108,15 +85,9 @@ function parseEscrow(body: string, expectedUserId: string): Buffer | null {
   return null;
 }
 
-/**
- * Resolve the managed backup DEK for `userId`, minting + escrowing one on first
- * use. NEVER returns null — the managed path must not upload plaintext.
- *
- * The escrow is authoritative. On a missing escrow, the local cache (if any) is
- * restored with a conditional create; otherwise a new key is minted. Concurrent
- * first-use devices race that create, then every loser reads the one winner
- * before encrypting anything, so no backup can be orphaned under a losing DEK.
- */
+/** Resolve the managed backup DEK for `userId`, minting and escrowing on first use; never null,
+ * since managed backups must not upload plaintext. Escrow is authoritative; concurrent first-use
+ * devices race a conditional create and losers read the winner before encrypting. */
 export async function resolveManagedBackupKey(
   client: ManagedSessionsBackupClient,
   userId: string,

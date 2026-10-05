@@ -1,15 +1,6 @@
-/**
- * Tests for the watchdog runner (RUSH-1415) — the CONSUMER tick.
- *
- * Drives real synthetic ActiveSession inputs through runWatchdogTick with the I/O
- * seams supplied (sessions, clock, tail, policy, the decider) and dryRun injection,
- * so no live terminal and no real `agents run` are needed. The pure logic
- * (classifyTerminal / resolveInjectTargetForSession) runs for real — nothing is
- * mocked. The decision itself comes from an injected `smartDecider` (production runs
- * the batched agent; watchdog-agent.test.ts covers that path). Each case asserts the
- * exact tick behavior: a nudge is delivered + booked only when CONFIRMED and
- * addressable; it SKIPS within cooldown / when un-addressable; handsoff never injects.
- */
+/** Tests for the watchdog runner tick (RUSH-1415): synthetic ActiveSessions through runWatchdogTick
+ * with injected I/O seams and dryRun, no live terminal. Decisions come from an injected
+ * `smartDecider`; a nudge is delivered only when confirmed and addressable. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -28,12 +19,9 @@ import {
   type SmartDecider,
 } from './runner.js';
 
-/**
- * Every tick is run through this wrapper so no test touches real state: it pins
- * the log to the tmp state dir (the writer would otherwise append to the real
- * ~/.agents/.cache/logs/watchdog.log) and stubs the feed block reader off disk.
- * Individual tests still override any field.
- */
+/** Wraps every tick so no test touches real state: pins the log to the tmp state dir (not
+ * ~/.agents/.cache/logs/watchdog.log) and stubs the feed block reader. Tests may override any
+ * field. */
 function run(opts: WatchdogTickOptions) {
   return runWatchdogTick({
     logPath: path.join(stateDir, 'watchdog.log'),
@@ -415,10 +403,8 @@ describe('runWatchdogTick — delivery routing (answer-router + vscodium)', () =
 
 describe('runWatchdogTick — confirmed vs unconfirmed delivery', () => {
   it('an UNCONFIRMED delivery (vscodium fire-and-forget) is recorded undelivered, NOT a nudge', async () => {
-    // The real defect: `codium --open-url` exits 0 but the ext may no-op the verb.
-    // injectFn reports ok:true, confirmed:false — the tick must NOT count it as a
-    // landed nudge (decision skip, injected false), while still starting the
-    // cooldown so a possibly-working ext session is not re-hit every tick.
+    // `codium --open-url` exits 0 but the ext may no-op the verb: injectFn reports ok:true,
+    // confirmed:false. The tick must not count a landed nudge, yet still start the cooldown.
     const unconfirmedInject = async (target: InjectTarget) =>
       ({ ok: true as const, confirmed: false as const, backend: target.backend, writes: 2 });
     const smartDecider: SmartDecider = async () => ({ nudge: true, reason: 'proceed' });
@@ -531,17 +517,9 @@ describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost up
 });
 
 describe('runWatchdogTick — brain says needs-human → wires the owner feed', () => {
-  // The brain marks a session "leave for human" (decision.nudge === false →
-  // needsHuman === true). The watchdog must surface that signal on the owner's feed —
-  // not drop it silently in a menubar-only flag. Two paths depending on addressability:
-  //   A. Addressable (tmux): inject a self-file reminder into the agent's terminal.
-  //   B. Un-addressable (ghostty, no tmux): file a declared block on the agent's behalf.
-  // Both paths are gated by the same cooldown ledger as a nudge (at most once per
-  // cooldown window) and are no-ops when a block already exists for the session.
-  //
-  // Owner-paging fires ONLY on this confirmed-needsHuman path. A nudge-worthy
-  // drive-forward poke (decision.nudge === true) that is un-addressable or under a
-  // hands-off policy is NEVER paged — see section C, which pins that no-page.
+  // Brain marks a session "leave for human": surface it on the owner's feed. Addressable (tmux):
+  // inject a self-file reminder; else file a declared block. Both obey the cooldown. Owner-paging
+  // fires only here; un-addressable or hands-off pokes are never paged (section C).
 
   const needsHumanDecider: SmartDecider = async () => ({ nudge: false, reason: 'credentials required — needs the human' });
 
@@ -598,11 +576,9 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
   });
 
   describe('B. un-addressable session (ghostty, no tmux) — file a declared block', () => {
-    // The MOST important case: the session genuinely needs the human AND the watchdog
-    // cannot even reach its terminal to remind it. It must NOT silently vanish — the
-    // only way to reach Muqsit is to file a declared block on the agent's behalf.
-    // A waiting_input ghostty session deterministically escalates to the brain, which
-    // returns nudge:false (needsHuman), and the resolver reports it un-addressable.
+    // The most important case: the session needs the human and its terminal is unreachable, so the
+    // only way to reach the owner is a declared block filed on the agent's behalf; it must not
+    // vanish silently.
     const unaddressableNeedsHuman = () => ghosttySession({ activity: 'waiting_input', awaitingReason: 'question' });
 
     it('publishes a declared block and records the cooldown', async () => {
@@ -653,10 +629,8 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
   });
 
   describe('C. a nudge-worthy (NOT needsHuman) session is NEVER paged', () => {
-    // The over-paging guard: the refuse and handsoff branches are reached only for a
-    // drive-forward poke (decision.nudge === true), which is NEVER needsHuman. Those
-    // sessions "just need a poke" — they must not text Muqsit's phone. This pins the
-    // fix: neither an un-addressable poke nor a hands-off poke publishes a block.
+    // Over-paging guard: refuse and handsoff branches are reached only for a drive-forward poke
+    // (nudge === true), never needsHuman, so neither publishes a block or texts the owner's phone.
 
     it('un-addressable NUDGE-worthy poke → flag only, no block, no cooldown write', async () => {
       // The agent judges it idle-but-unfinished (drive-forward, NOT needsHuman).

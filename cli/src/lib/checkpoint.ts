@@ -1,20 +1,6 @@
-/**
- * Harness-level loop checkpoint (issue #332).
- *
- * A checkpoint is the durable harness state for a `--loop` run: it records the
- * iteration count, the pinned session id, the prompt being re-injected, and the
- * loop config — everything `--resume-checkpoint` needs to continue a run that a
- * SIGTERM, timeout, or machine sleep killed mid-flight.
- *
- * This is NOT provider-side state. `--session-id` resumes Claude's *conversation*
- * (server-side); a checkpoint resumes the *harness* (iteration count, loop
- * variables, prompt chain) — the part Claude's own resume cannot recover.
- *
- * Atomic write (temp + rename) mirrors `writeRunMeta` in routines.ts so a crash
- * mid-write never leaves a half-written checkpoint that `readCheckpoint` would
- * choke on. `readCheckpoint` returns null on a missing or corrupt file (mirrors
- * `readRunMeta`) — a corrupt checkpoint is a "start fresh", never a throw.
- */
+/** Harness-level loop checkpoint (issue #332): durable state for a `--loop` run so
+ * `--resume-checkpoint` can continue after SIGTERM, timeout, or sleep. Written atomically (temp +
+ * rename); a missing or corrupt file reads as null, meaning start fresh. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,11 +35,7 @@ export function checkpointPath(runId: string): string {
   return path.join(getRunsDir(), runId, 'checkpoint.json');
 }
 
-/**
- * Write a checkpoint atomically (temp file + rename). The rename is atomic on a
- * single filesystem, so a reader never observes a partially written file.
- * Mirrors the durable-write contract of `writeRunMeta`.
- */
+/** Write a checkpoint atomically (temp file + rename) so a reader never sees a partial file. */
 export function writeCheckpoint(c: Checkpoint, file?: string): void {
   const target = file ?? checkpointPath(c.id);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -62,11 +44,7 @@ export function writeCheckpoint(c: Checkpoint, file?: string): void {
   fs.renameSync(tmp, target);
 }
 
-/**
- * Read a checkpoint from disk. Returns null if the file is missing or its
- * contents are not valid JSON — corruption means "no resumable state", which
- * the caller treats as a fresh start. Mirrors `readRunMeta`.
- */
+/** Read a checkpoint; null if missing or invalid JSON, which the caller treats as a fresh start. */
 export function readCheckpoint(file: string): Checkpoint | null {
   if (!fs.existsSync(file)) return null;
   try {

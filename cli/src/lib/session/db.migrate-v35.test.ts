@@ -10,15 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv35-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v34 -> v35 (RUSH-2211): the default listing sort was `ORDER BY IFNULL(last_activity,
- * timestamp) DESC` — wrapping the column in IFNULL() makes SQLite unable to use
- * idx_sessions_last_activity, so every list/resume query did a full sort instead of an
- * index walk. Every upsert already writes a non-NULL last_activity, so the only rows
- * that can still be NULL are legacy ones from before the v8 migration (or seeded
- * directly by a test, as here). v35 backfills them so the column is unconditionally
- * NOT NULL and querySessions can sort on the bare column.
- */
+/** v34 -> v35 (RUSH-2211): the default sort `ORDER BY IFNULL(last_activity, timestamp)` could not
+ * use idx_sessions_last_activity, so every list query did a full sort. Only legacy pre-v8 rows can
+ * have NULL last_activity; v35 backfills them so querySessions sorts on the bare column. */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

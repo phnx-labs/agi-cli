@@ -28,13 +28,9 @@ function upsert(over: Partial<SessionMeta> & { id: string }): void {
   );
 }
 
-/**
- * RUSH-2018: the sessions DB records who launched a session (`actor`) and the
- * actor's kind (`initiated_by`). The contract that matters is write-once
- * preservation: those columns are stamped at creation and a later content
- * rescan — which carries no actor — must NOT clobber them. That is enforced by
- * keeping both columns out of the upsert's ON CONFLICT update set.
- */
+/** RUSH-2018: the sessions DB records the launcher (`actor`) and kind (`initiated_by`). They are
+ * write-once: a later content rescan carries no actor and must not clobber them, so both stay out
+ * of the upsert's ON CONFLICT update set. */
 describe('sessions DB actor provenance (RUSH-2018)', () => {
   beforeAll(() => {
     getDB(); // migrate a fresh home to schema v19

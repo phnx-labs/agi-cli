@@ -1,9 +1,5 @@
-/**
- * Tests for the headless-exit orphaned-open-PR warning (RUSH-2394).
- *
- * Real path: the pure classifier + formatter, plus `getBranchOpenPr` against a
- * real child process standing in for `gh`. No network — no GitHub calls.
- */
+/** Tests for the headless-exit orphaned-open-PR warning (RUSH-2394): the pure classifier and
+ * formatter, plus getBranchOpenPr against a real child process standing in for `gh`; no network. */
 import { describe, it, expect } from 'vitest';
 import {
   shouldWarnOrphanedOpenPr,

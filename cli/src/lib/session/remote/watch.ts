@@ -45,17 +45,9 @@ export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'cont
   branch?: string;
   rowKey: string;
   sourceDevice: string;
-  /**
-   * The registered project this session's working directory belongs to, or
-   * `null` when the association is not confirmed (PHNX-3999 F08/F09).
-   *
-   * This is what a UI groups by. It is deliberately not `project`: that field is
-   * a bucket KEY derived from the path (the basename of the cwd, so it always
-   * answers something), which is how a loose or unrelated directory became its
-   * own project group. `null` means Uncategorized — the row is still listed, it
-   * just is not filed under a project nobody bound it to. Resolved on the device
-   * that owns the path, since a definition's root is a local path.
-   */
+  /** The registered project this session's cwd belongs to, or `null` if unconfirmed (PHNX-3999
+   * F08/F09). UIs group by this, not `project`, a cwd-basename key that made loose directories
+   * their own groups. Resolved on the owning device. */
   confirmedProject: string | null;
   /** Durable index rows are kept on the stream under a distinct identity so a
    * live row can replace/disappear without erasing its recoverable history. */
@@ -74,10 +66,9 @@ export function sessionWatchRowKey(scope: string, row: ActiveSession): string {
 
 export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWatchRow {
   const rowKey = sessionWatchRowKey(scope, row);
-  // A dead, days-stale crash-orphan is folded OUT of the reconnectable set — it
-  // is not resumable, so the "Needs reconnecting" list stops ballooning with
-  // leaked --device tunnel sessions (RUSH-3011 / issue #3b). A live or
-  // recently-exited session stays resumable.
+  // A dead, days-stale crash-orphan is folded out of the reconnectable set so 'Needs reconnecting'
+  // stops ballooning with leaked `--device` tunnel sessions (RUSH-3011). Live or recently exited
+  // sessions stay resumable.
   const resumable = Boolean(row.sessionId) && !isReapableOrphan(row);
   const previous = row.status === 'closed'
     || row.status === 'crashed'
@@ -91,10 +82,8 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     // no computed summary reads `pending` when the summarizer is on, `skipped`
     // when it is off (PHNX-3939). goal/checkpoints/summaryChecklist rode `...row`.
     summaryState: resolveStreamSummaryState(row.summaryState),
-    // The CONFIRMED project this work belongs to, or null for Uncategorized
-    // (PHNX-3999 F08/F09). Only a registered project definition counts — a
-    // consumer must never group by a directory basename, which is how unrelated
-    // and unbound directories became their own "projects".
+    // The confirmed project for this work, or null for Uncategorized (PHNX-3999 F08/F09). Only a
+    // registered project definition counts; never group by a directory basename.
     confirmedProject: confirmedProjectForCwd(row.cwd) ?? null,
     rowKey,
     sourceDevice: scope,
@@ -120,13 +109,9 @@ function previousSessionWatchRowKey(scope: string, sessionId: string): string {
   return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
 }
 
-/**
- * The headline for a durable history row, on the same ladder a live row uses
- * ({@link deriveSessionRecap}): an explicit `/rename` label, then the
- * daemon-generated title (PHNX-3797), then the daemon-folded request headline
- * (`request.headline` — the user's own sentence with attachment noise pulled
- * out, PHNX-3939) when the transcript cache has one, else the raw `topic`.
- */
+/** Headline for a durable history row, on the same ladder as a live row (deriveSessionRecap):
+ * `/rename` label, daemon-generated title (PHNX-3797), daemon-folded `request.headline`
+ * (PHNX-3939), else raw `topic`. */
 function previousRowTitle(session: SessionMeta, foldedHeadline: string | undefined): string | undefined {
   return session.label || session.generatedTitle || foldedHeadline || session.topic || undefined;
 }
@@ -141,10 +126,9 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
   const worktree = session.worktreeSlug && session.cwd
     ? { slug: session.worktreeSlug, path: session.cwd, ...(session.gitBranch ? { branch: session.gitBranch } : {}) }
     : undefined;
-  // Project the daemon-computed summary (PHNX-3939) onto the history row from the
-  // transcript-keyed cache — the same store the live merge reads, so a closed or
-  // fleet-mirrored session carries its goal/checkpoints/checklist with no
-  // transcript re-parse and no model call. Prefer a value already on the meta row.
+  // Project the daemon-computed summary (PHNX-3939) onto the history row from the transcript-keyed
+  // cache the live merge reads, so closed or mirrored sessions carry it with no re-parse or model
+  // call. A value already on the meta row wins.
   const summary = session.goal !== undefined || session.summaryState !== undefined
     ? {
         goal: session.goal,
@@ -168,10 +152,8 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     // person sees comes from the confirmed association (PHNX-3999 F08/F09).
     ...(session.project ? { project: session.project } : {}),
     confirmedProject: confirmedProjectForCwd(session.cwd) ?? null,
-    // Same headline ladder as a live row (`deriveSessionRecap`, PHNX-3797):
-    // `/rename` label → the daemon-generated title → `request.headline` (the
-    // user's own sentence with attachment noise pulled out, PHNX-3939) →
-    // the raw `topic`. See {@link previousRowTitle}.
+    // Same headline ladder as a live row (deriveSessionRecap, PHNX-3797): `/rename` label,
+    // generated title, `request.headline` (PHNX-3939), raw `topic`. See previousRowTitle.
     ...(session.label ? { label: session.label } : {}),
     ...(session.generatedTitle ? { generatedTitle: session.generatedTitle } : {}),
     ...(title ? { title } : {}),
@@ -392,11 +374,9 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   try {
     return querySessions({
       machine: normalizeHost(scope),
-      // Every harness that writes a discoverable transcript. The list used to be
-      // four, so a Kimi/Grok/Cursor/Droid session simply never appeared as a
-      // Previous row — and after PHNX-3939 it would also have been the only rows
-      // with no request/timeline. Kept explicit (not `SESSION_AGENTS`) so
-      // `openclaw`, which has no transcript to project, stays out.
+      // Every harness that writes a discoverable transcript; the old list of four hid
+      // Kimi/Grok/Cursor/Droid sessions. Explicit, not `SESSION_AGENTS`, so `openclaw` (no
+      // transcript to project) stays out.
       agents: SESSION_AGENTS.filter((agent) => agent !== 'openclaw'),
       sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
       excludeTeamOrigin: true,
@@ -408,10 +388,8 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   }
 }
 
-/**
- * Keep one local subscription alive. Startup reads one canonical reset snapshot;
- * steady state tails the canonical writer journal and never invokes a gather.
- */
+/** Keep one local subscription alive. Startup reads one canonical reset snapshot; steady state
+ * tails the canonical writer journal and never invokes a gather. */
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;
@@ -422,10 +400,9 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
   try { offset = fs.statSync(journal).size; } catch { /* first publication */ }
   const initial = readCache('local');
   options.emit(state.reset(options.scope, initial?.sessions ?? [], readPrevious(options.scope)));
-  // Known gap (out of scope for RUSH-2484): a present cache alone marks
-  // 'available' with no staleness/age check, so a reconnect can briefly render
-  // a stale snapshot as live before the out-of-band gather this file triggers
-  // (see watchActiveSessionsReaderPresence in session-cache.ts) replaces it.
+  // Known gap (out of scope for RUSH-2484): a present cache alone marks 'available' with no age
+  // check, so a reconnect can briefly show a stale snapshot as live until the out-of-band gather
+  // (watchActiveSessionsReaderPresence) replaces it.
   options.emit(state.scope(options.scope, initial ? 'available' : 'unavailable', initial ? undefined : 'awaiting publisher'));
   if (options.signal.aborted) return;
   // Signal the daemon that a consumer is live so it does not skip the gather.
@@ -488,11 +465,9 @@ function remoteWatchCommand(os: string): string {
     : `bash -lc ${shellQuote(`agents ${args.map(shellQuote).join(' ')}`)}`;
 }
 
-/**
- * Subscribe to every dialable compute device with one persistent SSH process.
- * A peer disconnect emits `scope: unavailable` but no removes; reconnecting
- * peer resets only its own scope. There is no recurring fleet list command.
- */
+/** Subscribe to every dialable compute device with one persistent SSH process. A peer
+ * disconnect emits `scope: unavailable` but no removes; a reconnecting peer resets only its
+ * own scope. No recurring fleet list command. */
 export async function watchFleetSessions(options: WatchFleetOptions): Promise<void> {
   const projection = new SessionProjection();
   const emit = (event: SessionWatchEnvelope) => { for (const projected of projection.apply(event)) options.emit(projected); };

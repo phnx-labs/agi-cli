@@ -1,16 +1,6 @@
-// Runtime share-token injection for spawned agents.
-//
-// The artifact share ENGINE moved to `@phnx-labs/artifacts-cli` (PHNX-3992);
-// agents-cli no longer publishes artifacts itself. What stays here is the thin
-// glue that lets a dispatched agent inherit the operator's BYO write token so
-// its own `artifacts share` can publish headlessly: `run`/`teams`/`cloud`
-// dispatch call `shareRuntimeEnv()` and forward the result into the agent env.
-// artifacts-cli honors the same `SHARE_WRITE_TOKEN` variable, so the injection
-// contract is unchanged by the extraction.
-//
-// The endpoint config still lives in `agents.yaml` under `share:` (Meta.share)
-// so a previously-provisioned BYO endpoint keeps syncing fleet-wide; the raw
-// write token lives in the keychain-backed `share` secrets bundle, never on disk.
+// Runtime share-token injection for spawned agents; the share engine moved to artifacts-cli
+// (PHNX-3992). Dispatch forwards `shareRuntimeEnv()` (`SHARE_WRITE_TOKEN`) into the agent env.
+// The raw write token lives in the keychain-backed `share` bundle, never on disk.
 
 import { readMeta } from './state.js';
 import {
@@ -39,16 +29,9 @@ function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string | null 
   return token ? token : null;
 }
 
-/** Best-effort runtime env for spawned agents. Never throws AND never prompts.
- *
- * Auto-injecting the share write token on every `agents run` is a background
- * convenience, NOT a user-initiated secret access — so it MUST NOT raise a Touch
- * ID sheet (SEC-13: an agent launch never pops biometry on its own). The read is
- * always `agentOnly`: it resolves the token only from the injected env or an
- * already-held / no-ACL bundle, and silently returns undefined otherwise (the
- * agent can still publish via its own `artifacts share` credentials). For
- * zero-friction auto-share with no prompt: unlock once (`agents secrets unlock
- * share`) or make it no-ACL (`agents secrets policy share never`). */
+/** Best-effort runtime env for spawned agents; never throws and never prompts. Auto-injecting the
+ * share token on `agents run` is background convenience, so it must not raise a Touch ID sheet
+ * (SEC-13). The read is `agentOnly` and silently returns undefined otherwise. */
 export function shareRuntimeEnv(): Record<string, string> | undefined {
   if (!hasShareEndpoint()) return undefined;
   const fromEnv = readWriteTokenEnv();

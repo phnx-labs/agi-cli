@@ -75,11 +75,8 @@ export function installSecretsCli(): boolean {
   return isSecretsCliInstalled();
 }
 
-/**
- * Install the standalone if missing, then hand off to `secrets migrate`.
- * Returns whether setup is now complete (installed, and migrate exited 0
- * when it ran).
- */
+/** Install the standalone if missing, then hand off to `secrets migrate`. Returns whether setup is
+ * complete (installed, and migrate exited 0 when it ran). */
 export async function runSecretsSetupWizard(): Promise<boolean> {
   if (!isSecretsCliInstalled()) {
     if (!installSecretsCli()) {

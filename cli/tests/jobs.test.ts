@@ -21,10 +21,9 @@ vi.mock('../src/lib/state.js', async (importOriginal) => {
     gt.__agents_cli_jobs_test_state__ = { TEST_DIR: '', META: {} };
   }
   const state = () => gt.__agents_cli_jobs_test_state__ as JobsHoistedState;
-  // Spread the real module so every export the (post-cycle-break) import graph pulls
-  // in is present, then override only the path/meta accessors this suite redirects to
-  // TEST_DIR. getSystemRoutinesDir points at a nested path that won't exist under
-  // TEST_DIR, so listJobs()/readJob() union it but find nothing (existing tests unchanged).
+  // Spread the real module so every export in the import graph is present, then override only the
+  // path/meta accessors this suite redirects to TEST_DIR; getSystemRoutinesDir points at a nested
+  // nonexistent path, so existing tests are unchanged.
   return {
     ...actual,
     getRoutinesDir: () => nodePath.join(state().TEST_DIR, 'routines'),
@@ -157,11 +156,9 @@ describe('validateJob', () => {
     expect(errors.some((e) => e.includes('agent must be one of'))).toBe(true);
   });
 
-  // RUSH-2102: opencode is a real, installable agent (ALL_AGENT_IDS) but has no
-  // entry in ROUTINE_AGENT_IDS, so the local daemon can't build a command for
-  // it (runner.ts buildJobCommand throws "Unsupported agent for daemon jobs").
-  // Reject it at add time instead of accepting the routine and failing later
-  // when the scheduled job fires.
+  // RUSH-2102: opencode is installable (ALL_AGENT_IDS) but not in ROUTINE_AGENT_IDS, so the daemon
+  // cannot build its command (runner.ts buildJobCommand throws). Reject it at add time instead of
+  // failing when the job fires.
   it('rejects a real agent the local daemon cannot fire, at add time', () => {
     const errors = validateJob({ ...makeConfig(), agent: 'opencode' as any });
     expect(errors.some((e) => e.includes("agent 'opencode' is not supported by the local routine daemon"))).toBe(true);

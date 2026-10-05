@@ -1,16 +1,6 @@
-/**
- * Shared harness for the `agents daemon` CLI subprocess suites (RUSH-2354).
- *
- * Every test spawns the real CLI against an isolated mkdtemp HOME with no
- * daemon running — no mocks. Modeled on routines.test.ts.
- *
- * EXTRACTED so the suite can live in several files. `daemon.test.ts` was 35
- * tests in ONE file at 159s — the slowest file in the repo and therefore the
- * SUITE'S FLOOR, because vitest parallelises across files and runs the tests
- * inside one file sequentially in a single worker. Splitting the tests across
- * files lets them run concurrently; sharing the harness is what makes that
- * possible without duplicating the spawn plumbing.
- */
+/** Shared harness for the `agents daemon` CLI subprocess suites (RUSH-2354): each test spawns the
+ * real CLI against an isolated mkdtemp HOME, no daemon, no mocks. Split from a 159s single file
+ * because vitest runs one file's tests sequentially. */
 import { spawnSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -23,12 +13,9 @@ const require = createRequire(import.meta.url);
 export const TSX_IMPORT = pathToFileURL(require.resolve('tsx')).href;
 export const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
 
-/**
- * win32: subprocess CLI + process-group signals / path spawn assumptions
- * (RUSH-2215). Exported as a PREDICATE, not as a pre-bound `describe.skip` —
- * vitest's suite type is not nameable across a module boundary (TS4023), so
- * each suite builds its own `describe` from this.
- */
+/** win32: subprocess CLI, process-group signals and path spawn assumptions (RUSH-2215). Exported as
+ * a predicate, not a bound `describe.skip`, because vitest's suite type is not nameable across
+ * modules (TS4023). */
 export const DAEMON_TESTS_SUPPORTED = process.platform !== 'win32';
 
 /** Provision an isolated HOME with just enough scaffolding for the CLI to boot. */
@@ -57,16 +44,9 @@ export function run(home: string, args: string[]): ReturnType<typeof spawnSync> 
   });
 }
 
-/**
- * Spawn a real, long-lived process whose command line ends in `__daemon-run`
- * (so `isLiveDaemon`'s process-command check accepts it — see
- * `lib/daemon.test.ts`'s "reaps a live __daemon-run registrant" test, same
- * technique) and register it in `home`'s OWN instance registry, exactly the
- * marker `registerDaemonInstance` would write. A real live process, not a
- * mock — `agents daemon status` reads it through the actual registry +
- * `ps`-liveness path, the same one the reaper and `stopDaemon`'s postcondition
- * use.
- */
+/** Spawn a real long-lived process whose command line ends in `__daemon-run` (so `isLiveDaemon`
+ * accepts it) and register it in `home`'s instance registry as `registerDaemonInstance` would.
+ * Real process, not a mock. */
 export async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProcess> {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
     stdio: 'ignore',

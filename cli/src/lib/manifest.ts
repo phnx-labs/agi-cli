@@ -1,9 +1,5 @@
-/**
- * agents.yaml manifest reading, writing, and serialization.
- *
- * The manifest file (agents.yaml) is the central configuration for version defaults,
- * repository overrides, dependencies, and MCP server declarations.
- */
+/** agents.yaml manifest reading, writing and serialization: version defaults, repo overrides,
+ * dependencies and MCP server declarations. */
 import * as fs from 'fs';
 import * as yaml from 'yaml';
 import { stringifyDoc } from './yaml-io.js';
@@ -22,17 +18,9 @@ function parseManifest(content: string): Manifest {
   return yaml.parse(content) as Manifest;
 }
 
-/**
- * Serialize a Manifest to YAML WITHOUT destroying hand-written comments.
- *
- * Plain `yaml.stringify(manifest)` drops every comment, so `agents mcp add`
- * (and every other writeManifest caller) used to clobber annotations in
- * agents.yaml. Matching `serializeCentral` in state.ts: when existing file
- * text is provided, parse it into a `yaml.Document` (comments + key order
- * preserved) and edit only keys that actually changed. Untouched keys and
- * their comments stay byte-stable. Falls back to plain stringify when there
- * is no existing document yet.
- */
+/** Serializes a Manifest to YAML without destroying hand-written comments (plain `yaml.stringify`
+ * dropped them, so `agents mcp add` clobbered annotations). Like `serializeCentral` in state.ts,
+ * it edits an existing yaml.Document in place and only changes keys that differ. */
 function serializeManifest(manifest: Manifest, existingContent?: string | null): string {
   const entries = Object.entries(manifest as Record<string, unknown>).filter(
     ([, v]) => v !== undefined,
@@ -67,11 +55,9 @@ function serializeManifest(manifest: Manifest, existingContent?: string | null):
   // Nothing changed → keep the file byte-identical (comments intact).
   if (!changed) return existingContent;
 
-  // stringifyDoc still normalizes a legacy flow root (`{}`) to block so edited
-  // nodes do not render flow, but no longer forces block on a normal document —
-  // that flattened committed flow sequences and made this writer disagree with
-  // the other agents.yaml writers (RUSH-2505). parseDocument still preserves
-  // comments + key ordering.
+  // stringifyDoc normalizes a legacy flow root (`{}`) to block but no longer forces block on a
+  // normal document; that flattened committed flow sequences and disagreed with other agents.yaml
+  // writers (RUSH-2505).
   return isEmpty ? '' : stringifyDoc(doc);
 }
 

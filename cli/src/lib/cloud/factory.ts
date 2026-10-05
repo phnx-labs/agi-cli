@@ -1,24 +1,6 @@
-/**
- * Factory (Droid) cloud provider.
- *
- * Dispatches to a Factory **Droid Computer** — a persistent cloud VM (managed
- * by Factory, or bring-your-own via `droid computer register`). There is no
- * `droid cloud run`; remote execution = reach the computer over the Droid relay
- * (`droid computer ssh <name>`) and run a headless `droid exec` there.
- *
- * `droid exec` is synchronous (it runs to completion and exits, unlike Codex
- * Cloud which is async server-side). So `dispatch()` runs the remote exec to
- * completion with `--output-format stream-json`, buffers the NDJSON events, and
- * `stream()` replays them. The task id is droid's own `session_id` (captured
- * from the run output), so it lines up with `droid exec -s <id>` for future
- * resume support.
- *
- * Transport note: the exact relay SSH composition (user + ProxyCommand) is
- * built in `buildSshArgs()` and must be confirmed against a live provisioned
- * Droid Computer (Factory auth required). `capabilities().available` gates on
- * the droid binary + a configured computer so the provider fails with a clear
- * message rather than misfiring when unconfigured.
- */
+/** Factory (Droid) cloud provider: dispatches to a Droid Computer via the relay (`droid computer
+ * ssh <name>`) and runs a synchronous headless `droid exec`; stream() replays buffered stream-json
+ * events. Task id is droid's `session_id`. `buildSshArgs()` still needs live confirmation. */
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -73,13 +55,9 @@ function runDroid(bin: string, args: string[]): Promise<{ stdout: string; stderr
   });
 }
 
-/**
- * Parse `droid computer list` text into targets. Defensive: the exact column
- * layout isn't documented, so we take the first whitespace token of each data
- * row as the computer name and keep the remainder as a label, skipping headers,
- * separators, and status messages. The interactive picker degrades to free-text
- * entry if this yields nothing, so an unexpected layout never blocks a dispatch.
- */
+/** Parse `droid computer list` text into targets. Defensive since the column layout is
+ * undocumented: first token is the name, the rest a label; the picker falls back to free text on
+ * an empty result. */
 export function parseComputerList(text: string): CloudTarget[] {
   const out: CloudTarget[] = [];
   for (const raw of text.split('\n')) {
@@ -96,10 +74,8 @@ export function parseComputerList(text: string): CloudTarget[] {
   return out;
 }
 
-/**
- * Build the remote `droid exec` argv. Headless, stream-json output, given
- * autonomy. `sessionId` (when resuming) maps to `-s`.
- */
+/** Build the remote headless `droid exec` argv with stream-json output; `sessionId` maps to `-s`
+ * when resuming. */
 export function buildExecArgs(
   prompt: string,
   opts: { autonomy: DroidAutonomy; sessionId?: string },
@@ -110,15 +86,9 @@ export function buildExecArgs(
   return args;
 }
 
-/**
- * Build the `ssh` argv that runs a remote command on a Droid Computer through
- * the Droid relay. The relay is used as an OpenSSH ProxyCommand
- * (`droid computer ssh <name> --proxy`), so the connection rides Factory's
- * brokered tunnel rather than a directly reachable host.
- *
- * `remoteArgv` is the already-built remote command (e.g. droid exec argv); it is
- * shell-quoted into a single remote command string.
- */
+/** Build the `ssh` argv for a Droid Computer, using the Droid relay (`droid computer ssh <name>
+ * --proxy`) as ProxyCommand over Factory's brokered tunnel. `remoteArgv` is shell-quoted into one
+ * string. */
 export function buildSshArgs(
   computer: string,
   remoteBin: string,
@@ -153,12 +123,8 @@ export function mapResultStatus(line: { is_error?: boolean; subtype?: string }):
   return 'completed';
 }
 
-/**
- * Map one parsed droid stream-json event to a CloudEvent. The stream-json
- * schema is only partially documented, so this is defensive: known shapes map
- * to typed events, everything else surfaces as `unknown` rather than being
- * dropped (mirrors the rest of the cloud event pipeline).
- */
+/** Map one droid stream-json event to a CloudEvent. The schema is only partly documented, so known
+ * shapes become typed events and the rest surface as `unknown` rather than being dropped. */
 export function mapDroidEvent(obj: Record<string, unknown>): CloudEvent {
   const ts = new Date().toISOString();
   const type = String(obj.type ?? '');

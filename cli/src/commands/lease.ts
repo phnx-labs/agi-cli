@@ -1,12 +1,6 @@
-/**
- * `agents devices lease` — manage the disposable cloud boxes used by `agents run --lease`.
- *
- * Today: `agents devices lease prune`, which stops expired + idle "orphan" boxes that are
- * holding a provider's server quota (the cause of the `server_limit` 403 a new
- * lease hits). Reaping is conservative: only boxes whose lease has expired AND
- * that have been untouched for a safety window are eligible (see `isReapSafe`),
- * so a box a concurrent run just reused is never stopped.
- */
+/** `agents devices lease prune` manages the disposable cloud boxes of `agents run --lease`: it
+ * stops expired, idle orphan boxes holding provider server quota (the `server_limit` 403). Only
+ * boxes with an expired lease untouched for a safety window are eligible (`isReapSafe`). */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -59,11 +53,8 @@ export function boxStatus(box: CrabboxBox): string {
   return box.ready ? 'ready' : box.state || box.status || 'pending';
 }
 
-/**
- * Warm boxes eligible for reuse: `ready` and the lease has not expired.
- * Sorted most-recently-touched first so `--reuse` / the auto-pick lands on the
- * freshest box (an untouched `lastTouchedAt` sorts last).
- */
+/** Warm boxes eligible for reuse: `ready` with an unexpired lease, most-recently-touched first so
+ * `--reuse` and the auto-pick land on the freshest (untouched sorts last). */
 export function reusableBoxes(boxes: CrabboxBox[], nowSecs: number): CrabboxBox[] {
   return boxes
     .filter((b) => b.ready && (b.expiresAt === null || b.expiresAt > nowSecs))
@@ -88,14 +79,9 @@ const TAILSCALE_BUNDLE = 'tailscale.com';
 const TAILSCALE_KEY = 'CRABBOX_TAILSCALE_AUTH_KEY';
 const TAILSCALE_KEYS_URL = 'https://login.tailscale.com/admin/settings/keys';
 
-/**
- * Optional Tailscale setup for private-network leases (`--tailscale`). Collects
- * an EPHEMERAL, pre-authorized, `tag:crabbox` auth key and stores it in the
- * `tailscale.com` keychain bundle under `CRABBOX_TAILSCALE_AUTH_KEY` (the exact
- * key `crabboxEnv` auto-injects). Blank input skips — public-IP leases still
- * work with no Tailscale key. Never throws for cancel; mirrors the Hetzner
- * capture above but does no live validation (Tailscale has no cheap probe).
- */
+/** Optional Tailscale setup for `--tailscale` leases: collects an ephemeral, pre-authorized
+ * `tag:crabbox` auth key into the `tailscale.com` keychain bundle. Blank skips (public-IP leases
+ * work without it); never throws on cancel; no live validation (no cheap probe). */
 async function captureTailscaleAuthKey(): Promise<void> {
   console.error(chalk.bold('\nOptional: private-network leases over Tailscale'));
   console.error(chalk.dim('Mint an EPHEMERAL, pre-authorized auth key tagged `tag:crabbox` in the Tailscale admin,'));
@@ -144,13 +130,9 @@ export async function validateHetznerToken(
   }
 }
 
-/**
- * One-time credential setup for `agents run --lease` (Hetzner today). Opens the
- * token page, collects a token, validates it against the live API, stores it in
- * the keychain bundle `hetzner.com`, and persists it as the default lease bundle
- * (so `--lease` needs no env var or flag afterward). Returns true on success.
- * Never throws for expected outcomes (non-interactive, cancel, repeated failure).
- */
+/** One-time credential setup for `agents run --lease` (Hetzner): collects a token, validates it
+ * against the live API, stores it in the `hetzner.com` keychain bundle and persists it as the
+ * default lease bundle. Returns true on success; never throws for expected outcomes. */
 export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<boolean> {
   const provider = opts.provider ?? 'hetzner';
   if (provider !== 'hetzner') {

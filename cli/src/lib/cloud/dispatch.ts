@@ -1,12 +1,5 @@
-/**
- * Shared cloud dispatch core — the ONE path every cloud dispatch goes through.
- *
- * Both `agents cloud run` (commands/cloud.ts) and `agents run <agent> --cloud`
- * (commands/run-cloud.ts) build a DispatchOptions + resolve a provider, then
- * call executeCloudDispatch here. Behavior — capability checks, the missing-
- * target picker, local persistence, event emission, streaming, and the live
- * budget kill-switch — must not diverge between the two surfaces.
- */
+/** Shared cloud dispatch core: the one path for `agents cloud run` and `agents run --cloud`.
+ * Capability checks, persistence, events and the budget kill-switch must not diverge. */
 import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -46,10 +39,7 @@ function parseSkillRef(raw: string): SkillRef {
   return { id: raw };
 }
 
-/**
- * Resolve the prompt for a cloud dispatch: the raw value, or the contents of
- * the file it points at (with a dim note on TTY). Dies when empty.
- */
+/** Resolve the cloud prompt: the raw value or the file it points at. Dies when empty. */
 export function resolveCloudPrompt(raw: string | undefined, opts: { json: boolean; hint: string }): string {
   let prompt = raw;
   if (!prompt) die('Prompt is required. Pass it as an argument or with --prompt.', 1, { json: opts.json, hint: opts.hint });
@@ -67,17 +57,8 @@ export function resolveCloudPrompt(raw: string | undefined, opts: { json: boolea
   return prompt;
 }
 
-/**
- * After a `MissingTargetError`, try to resolve the target interactively.
- * Returns the chosen id, or undefined when no interactive resolution is
- * possible (non-TTY/JSON, provider can't enumerate, or user cancels) — the
- * caller then prints the error's guidance.
- *
- * Codex has no `listTargets` (no list-environments CLI), so it always returns
- * undefined here and the user sees the `codex cloud` guidance. Factory lists
- * Droid Computers; if listing fails (not signed in) or parses to nothing, we
- * fall back to a free-text prompt so a dispatch is never hard-blocked.
- */
+/** After a `MissingTargetError`, try to resolve the target interactively; returns the id or
+ * undefined. Factory lists Droid Computers, else free text, so dispatch is never hard-blocked. */
 async function pickMissingTarget(
   provider: CloudProvider,
   err: MissingTargetError,
@@ -124,12 +105,8 @@ interface ExecuteCloudDispatchParams {
   json: boolean;
 }
 
-/**
- * Dispatch a cloud task and (unless follow=false) stream it to completion.
- * Owns: share-env injection, capability checks, the dispatch spinner +
- * missing-target picker, local persistence, event emission, and the budget
- * kill-switch. Dies on any dispatch failure — callers never see a partial.
- */
+/** Dispatch a cloud task and, unless follow=false, stream it to completion. Owns share-env
+ * injection, capability checks, persistence, events and the budget kill-switch. Dies on failure. */
 export async function executeCloudDispatch(params: ExecuteCloudDispatchParams): Promise<void> {
   const { provider, dispatchOptions, follow, json } = params;
   const imagePaths = params.imagePaths ?? [];
@@ -200,10 +177,8 @@ export async function executeCloudDispatch(params: ExecuteCloudDispatchParams): 
   if (!follow) return;
 
   try {
-    // Live budget kill-switch (issue #399). Reuses makeLiveSpendWatcher to
-    // feed the provider's `usage` events into a shared watcher; on a cap
-    // breach we call provider.cancel(task.id) mid-stream. Dormant (returns
-    // null) when no caps are configured, so the raw stream flows unchanged.
+    // Live budget kill-switch (issue #399): feeds `usage` events to a watcher and cancels the task
+    // on a cap breach. Dormant (null) when no caps are set.
     const { wrapStreamWithBudgetGate } = await import('../budget/live-cloud.js');
     const gated = wrapStreamWithBudgetGate({
       provider,

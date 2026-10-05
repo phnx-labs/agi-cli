@@ -1,11 +1,6 @@
-// Release-time changelog step. Folds every queued note in `.changelog/next/`
-// into `.changelog/<version>.md`, regenerates the aggregate `CHANGELOG.md`, and
-// prints the folded notes to stdout (release.sh uses them as the PR body).
-//
-// Exits non-zero if the queue is empty — a release must document itself. This
-// replaces the old awk "## Unreleased -> ## <version>" promotion in release.sh.
-//
-// Run: `bun scripts/release-changelog.ts <version>`.
+// Release-time changelog step: folds queued notes in `.changelog/next/` into
+// `.changelog/<version>.md`, regenerates CHANGELOG.md, and prints the notes as the PR body. Exits
+// non-zero if the queue is empty. Run: `bun scripts/release-changelog.ts <version>`.
 
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

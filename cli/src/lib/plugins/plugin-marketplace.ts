@@ -1,30 +1,6 @@
-/**
- * Native plugin marketplaces for Claude / OpenClaw — one per DotAgents repo.
- *
- * Every DotAgents repo that holds plugins synthesizes its OWN synthetic local
- * marketplace under each version's plugin directory, named after the repo:
- *
- *   <versionHome>/.{claude,openclaw}/plugins/
- *     known_marketplaces.json                    # registers each repo's marketplace
- *     marketplaces/agents-cli/                    # ~/.agents/plugins/*        (user repo)
- *     marketplaces/agents-<alias>/                # ~/.agents-<alias>/plugins/* (extra repo)
- *     marketplaces/agents-project/                # <cwd>/.agents/plugins/*    (project repo)
- *       .claude-plugin/marketplace.json           # synthesized catalog
- *       plugins/<plugin>/                         # copied plugin source
- *
- * Plus the version's settings.json gets
- *   `enabledPlugins["<plugin>@<marketplace>"] = true`.
- *
- * This produces native `/plugin:skill` slash namespacing, visibility in
- * `/plugins`, `/plugin enable|disable` support, AND honest attribution (the
- * user can see which repo each plugin came from) — matching the Claude Code
- * spec at https://code.claude.com/docs/en/plugins and /plugin-marketplaces.
- *
- * The naming policy lives in one place — marketplaceNameFor(). Source-side
- * discovery (discoverMarketplaces) and per-version synthesis (syncMarketplaceManifest
- * / registerMarketplace / syncAllMarketplaces) all key off a MarketplaceSpec so
- * the catalog name and on-disk layout are derived, never hard-coded per call.
- */
+/** Native plugin marketplaces for Claude/OpenClaw, one per DotAgents repo, synthesized per version
+ * and named after the repo (agents-cli, agents-<alias>, agents-project). Gives `/plugin:skill`
+ * namespacing and attribution. Naming lives in marketplaceNameFor(). */
 
 import * as fs from 'fs';
 import { agentConfigDirName } from '../agents.js';
@@ -32,11 +8,8 @@ import * as path from 'path';
 import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec, DiscoveredMarketplace } from '../types.js';
 import { getPluginsDir, getEnabledExtraRepos, getProjectPluginsDir, getSystemPluginsDir } from '../state.js';
 
-/**
- * Canonical name for the user-repo marketplace (~/.agents/plugins/). Kept as an
- * exported constant for callers that operate on the user repo directly and for
- * the `marketplaces/agents-cli/` on-disk path that existing installs already have.
- */
+/** Canonical name of the user-repo marketplace (~/.agents/plugins/). Kept because existing installs
+ * have the `marketplaces/agents-cli/` path. */
 export const MARKETPLACE_NAME = 'agents-cli';
 export const SYSTEM_MARKETPLACE_NAME = 'agents-system';
 
@@ -50,15 +23,9 @@ interface KnownMarketplaceEntry {
   autoUpdate?: boolean;
 }
 
-/**
- * Droid tracks INSTALLED plugins in .factory/plugins/installed_plugins.json —
- * a registry distinct from the marketplace catalog. A plugin is only visible to
- * `droid plugin list` (and loaded at runtime) when it has an entry here; the
- * marketplace copy + enabledPlugins alone are not enough. Verified against the
- * Factory CLI (droid 0.161.0): `droid plugin install` writes exactly this shape,
- * and pointing `installPath` at the marketplace install dir (no separate cache
- * copy) lists the plugin as Active.
- */
+/** Droid tracks installed plugins in .factory/plugins/installed_plugins.json, separate from the
+ * catalog. A plugin needs an entry here to show in `droid plugin list` (verified on droid
+ * 0.161.0). */
 interface DroidInstalledEntry {
   scope: string;
   installPath: string;
@@ -73,20 +40,9 @@ interface DroidInstalledPlugins {
   plugins: Record<string, DroidInstalledEntry[]>;
 }
 
-/**
- * GitHub Copilot CLI records plugin state across TWO files under COPILOT_HOME
- * (`~/.copilot`), both distinct from the marketplace catalog. Verified against
- * Copilot CLI 1.0.56 (`plugin marketplace add` + `plugin install`):
- *
- *   settings.json  { extraKnownMarketplaces, enabledPlugins }  (user-editable)
- *   config.json    { installedPlugins }                        (auto-managed)
- *
- * A plugin is only visible to `copilot plugin list` (and loaded at runtime) when
- * it has an installedPlugins entry in config.json; the marketplace + enabledPlugins
- * alone are not enough. `cache_path` may point at the marketplace install dir —
- * no separate copy is needed (confirmed: `plugin list` lists it and `plugin
- * marketplace list` shows the marketplace as registered).
- */
+/** Copilot CLI keeps plugin state in settings.json (extraKnownMarketplaces, enabledPlugins) and
+ * config.json (installedPlugins). A plugin needs an installedPlugins entry to be listed (verified
+ * on 1.0.56). */
 interface CopilotExtraMarketplace {
   source: { source: 'directory'; path: string };
 }
@@ -130,10 +86,7 @@ export interface SyncAllResult {
 
 // ─── Naming policy (single source of truth) ──────────────────────────────────
 
-/**
- * Map a MarketplaceSpec to its catalog name. This is the ONLY place that
- * encodes the repo → name policy; every other function derives the name here.
- */
+/** Map a MarketplaceSpec to its catalog name. The only place that encodes the repo to name policy. */
 export function marketplaceNameFor(spec: MarketplaceSpec): string {
   switch (spec.kind) {
     case 'user':    return MARKETPLACE_NAME;          // "agents-cli"
@@ -159,27 +112,15 @@ function descriptionFor(spec: MarketplaceSpec): string {
 
 // ─── Source-side discovery ────────────────────────────────────────────────────
 
-/**
- * Discover every DotAgents repo that contributes plugins, in precedence order
- * (user, then each enabled extra repo, then the project repo when cwd has one).
- * No agent / version is involved — this walks source-side plugin roots only.
- *
- * A repo is included when its plugins/ directory exists on disk. The user repo
- * is always probed; extras come from getEnabledExtraRepos() (already filtered to
- * enabled + on-disk repos); the project repo is included only when
- * <cwd>/.agents/plugins/ exists.
- */
+/** Discover every DotAgents repo contributing plugins, in precedence order: user, enabled extras,
+ * then the project repo if <cwd>/.agents/plugins/ exists. Source-side only; no agent or version
+ * involved. */
 export function discoverMarketplaces(opts: { cwd?: string } = {}): DiscoveredMarketplace[] {
   const out: DiscoveredMarketplace[] = [];
 
-  // System repo — npm-shipped defaults (~/.agents/.system/plugins/) → the
-  // "agents-system" marketplace. Listed FIRST so it has the lowest precedence:
-  // consumers that dedupe by plugin name keep the LAST occurrence, letting
-  // user / extra / project plugins of the same name override a system one (same
-  // direction collectPluginScopes() in project-launch.ts uses). Without this,
-  // `agents sync` never discovers system plugins, so cleanOrphanedPluginSkills
-  // trashes whatever a project launch installed under agents-system and the
-  // marketplace gets unregistered on the next sync.
+  // System repo (npm-shipped defaults) maps to agents-system, listed FIRST for lowest precedence
+  // since dedupers keep the last occurrence. Without it `agents sync` never finds system plugins,
+  // so cleanOrphanedPluginSkills trashes them.
   const systemRoot = getSystemPluginsDir();
   if (dirExists(systemRoot)) {
     const spec: MarketplaceSpec = { kind: 'system', root: systemRoot };
@@ -236,10 +177,8 @@ export function marketplaceRoot(specOrName: MarketplaceSpec | string, agent: Age
 
 export function marketplaceManifestPath(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): string {
   const root = marketplaceRoot(specOrName, agent, versionHome);
-  // Copilot resolves a marketplace's catalog from `marketplace.json` at the
-  // marketplace ROOT (also `.plugin/marketplace.json`, `.github/plugin/
-  // marketplace.json`) — NOT `.claude-plugin/marketplace.json`. Verified against
-  // GitHub Copilot CLI 1.0.56 (`plugin marketplace add`).
+  // Copilot reads the catalog from `marketplace.json` at the marketplace root, not
+  // `.claude-plugin/marketplace.json` (verified on Copilot CLI 1.0.56).
   if (agent === 'copilot') return path.join(root, 'marketplace.json');
   return path.join(root, '.claude-plugin', 'marketplace.json');
 }
@@ -258,20 +197,9 @@ function settingsPath(agent: AgentId, versionHome: string): string {
 
 // ─── Copy plugin source into a marketplace ────────────────────────────────────
 
-/**
- * Copy plugin source into the marketplace install dir for the given spec.
- * Source of truth remains the plugin's source dir — this is a per-version snapshot.
- *
- * Symlinks pointing OUTSIDE the plugin source root are dropped. They show up
- * when plugin authors (legitimately) link prompt-side references to sibling
- * codebases — e.g. the rush plugin's `app -> ../../../rush/app` for @app/...
- * autocomplete in user prompts. Faithfully copying those symlinks pollutes
- * the marketplace with gigabytes of node_modules / .next / brand-asset video
- * that the consumer (Claude Code, OpenClaw) then walks during plugin
- * discovery — which is the documented cause of multi-minute startup hangs.
- *
- * Internal symlinks (target stays inside the plugin root) are preserved.
- */
+/** Copy plugin source into the marketplace install dir (a per-version snapshot). Symlinks pointing
+ * OUTSIDE the plugin root are dropped: copying them pulled gigabytes of node_modules and assets
+ * and caused multi-minute startup hangs in plugin discovery. Internal symlinks are preserved. */
 export function copyPluginToMarketplace(
   plugin: DiscoveredPlugin,
   spec: MarketplaceSpec | string,
@@ -325,20 +253,9 @@ export function copyPluginToMarketplace(
 
 // ─── Manifest validation ─────────────────────────────────────────────────────
 
-/**
- * Claude Code's plugin-manifest schema requires the resource path fields to be
- * relative paths starting with "./" — `skills`/`commands`/`agents` are
- * `union([startsWith("./"), array(startsWith("./"))])` (verified against the
- * Claude Code binary). Bare names like "loop" fail validation and Claude rejects
- * the ENTIRE plugin at load time, surfacing only in its `/plugin` > Errors tab.
- *
- * agents-cli copies plugin.json verbatim into the marketplace, so a malformed
- * manifest ships looking fully installed while loading nothing. This catches the
- * unambiguous type violation (non-"./" string entries) and returns one warning
- * per offending field so the caller can surface it loudly. `hooks`/`mcpServers`
- * are intentionally skipped — they legitimately accept inline objects, so a path
- * check would false-positive.
- */
+/** Claude Code requires skills/commands/agents path fields to start with "./"; bare names make it
+ * reject the ENTIRE plugin, visible only in its /plugin Errors tab. Returns one warning per
+ * offending field. hooks/mcpServers are skipped since they legitimately accept inline objects. */
 export function validateClaudePluginManifest(manifest: unknown): string[] {
   const warnings: string[] = [];
   if (!manifest || typeof manifest !== 'object') return warnings;
@@ -348,10 +265,8 @@ export function validateClaudePluginManifest(manifest: unknown): string[] {
     const value = m[field];
     if (value === undefined || value === null) continue;
 
-    // How-to-fix written so a human OR a coding agent reading stderr can act
-    // without further investigation. Deleting the field is the recommended fix:
-    // Claude auto-discovers skills/commands/agents from their directories, which
-    // is why every well-formed plugin omits these fields entirely.
+    // Fix text written so a human or agent reading stderr can act: delete the field, since Claude
+    // auto-discovers skills/commands/agents from their directories.
     const fix =
       `Fix: delete the "${field}" field from plugin.json (recommended — Claude ` +
       `auto-discovers from the ${field}/ directory), or rewrite every entry as a ` +
@@ -380,13 +295,8 @@ export function validateClaudePluginManifest(manifest: unknown): string[] {
   return warnings;
 }
 
-/**
- * Fields safe to auto-repair by deletion. Scoped to `skills`/`commands` only —
- * NOT `agents`: agents-cli overloads `agents` in plugin.json as its own
- * `AgentId[]` targeting list (bare names like "claude"), so stripping it would
- * destroy real metadata. (`validateClaudePluginManifest` still WARNS on a bare
- * `agents` field; repairing it is a separate, deliberate non-goal here.)
- */
+/** Fields safe to auto-repair by deletion: skills and commands only. NOT `agents`, which agents-cli
+ * overloads as its own AgentId[] targeting list. */
 const REPAIRABLE_PATH_FIELDS = ['skills', 'commands'] as const;
 
 /** True when a manifest field holds bare-name entries Claude Code rejects. */
@@ -396,26 +306,17 @@ function fieldHasBareEntries(value: unknown): boolean {
   return entries.some((e) => typeof e !== 'string' || !e.startsWith('./'));
 }
 
-/**
- * The repairable fields present-and-invalid in a parsed manifest. Drives both
- * the dry-run preview (heal/agents sync) and the actual write below.
- */
+/** The repairable fields present and invalid in a parsed manifest; drives both the dry-run preview
+ * and the write. */
 export function repairableManifestFields(manifest: unknown): string[] {
   if (!manifest || typeof manifest !== 'object') return [];
   const m = manifest as Record<string, unknown>;
   return REPAIRABLE_PATH_FIELDS.filter((f) => fieldHasBareEntries(m[f]));
 }
 
-/**
- * Auto-repair a plugin's SOURCE plugin.json in place: delete any `skills`/
- * `commands` field that holds bare names (Claude Code silently rejects the
- * ENTIRE plugin otherwise). Claude auto-discovers both from their directories,
- * so deletion is the canonical, lossless fix — exactly what the validator's
- * warning already recommends. Returns the fields it dropped (empty = no change).
- *
- * Writes to the source manifest (not the regenerated marketplace copy) so the
- * fix survives the next sync. Pass `{ dryRun }` to preview without writing.
- */
+/** Auto-repair the SOURCE plugin.json in place: delete `skills`/`commands` holding bare names
+ * (Claude rejects the whole plugin). Lossless, since both are auto-discovered. Writes the source
+ * so it survives sync. Returns dropped fields; `{ dryRun }` previews. */
 export function repairPluginManifestFile(
   manifestPath: string,
   opts: { dryRun?: boolean } = {},
@@ -436,12 +337,8 @@ export function repairPluginManifestFile(
 
 // ─── Catalog synthesis ──────────────────────────────────────────────────────
 
-/**
- * Re-synthesize <marketplace>/.claude-plugin/marketplace.json from the plugins
- * already installed under <marketplace>/plugins/. Always run after add or remove
- * so the manifest stays in lockstep with on-disk contents. Returns the manifest
- * it wrote, or null when the marketplace has no plugins dir yet.
- */
+/** Re-synthesize <marketplace>/.claude-plugin/marketplace.json from installed plugins. Run after
+ * every add or remove. Returns the manifest, or null when there is no plugins dir yet. */
 export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, versionHome: string): MarketplaceManifest | null {
   const name = marketplaceNameFor(spec);
   const root = marketplaceRoot(spec, agent, versionHome);
@@ -504,19 +401,15 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
 
 // ─── Registration in known_marketplaces.json ──────────────────────────────────
 
-/**
- * Register a marketplace in known_marketplaces.json so Claude Code discovers
- * it on startup. Idempotent: re-running just refreshes lastUpdated. Other
- * marketplaces' entries are preserved untouched.
- */
+/** Register a marketplace in known_marketplaces.json so Claude Code discovers it. Idempotent
+ * (refreshes lastUpdated); other entries are untouched. */
 export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versionHome: string): void {
   const name = marketplaceNameFor(spec);
   const root = marketplaceRoot(spec, agent, versionHome);
 
-  // Copilot diverges from Claude's known_marketplaces.json: it reads registered
-  // marketplaces from settings.json#extraKnownMarketplaces. Verified against
-  // GitHub Copilot CLI 1.0.56 (`plugin marketplace add <dir>` writes exactly
-  // this shape). A "directory"-source entry points at the on-disk catalog root.
+  // Copilot reads marketplaces from settings.json#extraKnownMarketplaces, not
+  // known_marketplaces.json. A "directory" source entry points at the catalog root (verified on
+  // Copilot CLI 1.0.56).
   if (agent === 'copilot') {
     registerCopilotMarketplace(name, root, agent, versionHome);
     return;
@@ -533,10 +426,8 @@ export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versi
     }
   }
 
-  // Droid names the on-disk source type "local" (Claude/OpenClaw use
-  // "directory") and stamps autoUpdate — verified against `droid plugin
-  // marketplace add`. A "directory" entry is silently ignored by the Factory
-  // CLI, so the plugin never resolves.
+  // Droid names the source type "local" (not "directory") and stamps autoUpdate. A "directory"
+  // entry is silently ignored by the Factory CLI.
   const isDroid = agent === 'droid';
   known[name] = {
     source: { source: isDroid ? 'local' : 'directory', path: root },
@@ -568,13 +459,8 @@ function readInstalledPlugins(agent: AgentId, versionHome: string): DroidInstall
   return { schemaVersion: 1, plugins: {} };
 }
 
-/**
- * Record a plugin in Droid's installed_plugins.json (user scope), pointing
- * installPath at the marketplace install dir so no second copy is needed. This
- * is what makes `droid plugin list` show the plugin (Active once enabledPlugins
- * is set). Idempotent: re-running refreshes lastUpdated and preserves the
- * original installedAt plus any non-user scope entries.
- */
+/** Record a plugin in Droid's installed_plugins.json (user scope), with installPath at the
+ * marketplace dir (no second copy). Idempotent: keeps installedAt and non-user scopes. */
 export function registerDroidInstalledPlugin(
   pluginName: string,
   marketplaceName: string,
@@ -618,11 +504,8 @@ export function isDroidPluginInstalled(
   return Array.isArray(entries) && entries.some(e => e.scope === 'user');
 }
 
-/**
- * Remove a plugin's user-scope entry from Droid's installed_plugins.json.
- * Inverse of registerDroidInstalledPlugin. Drops the key when no scopes remain
- * and deletes the file when the registry is empty.
- */
+/** Remove a plugin's user-scope entry from Droid's installed_plugins.json. Drops the key when no
+ * scopes remain and deletes the file when empty. */
 export function unregisterDroidInstalledPlugin(
   pluginName: string,
   marketplaceName: string,
@@ -712,12 +595,8 @@ function readCopilotConfig(agent: AgentId, versionHome: string): CopilotConfig {
   return { installedPlugins: [] };
 }
 
-/**
- * Record a plugin in Copilot's config.json#installedPlugins (the registry that
- * makes `copilot plugin list` see it). `cache_path` points at the marketplace
- * install dir — no separate copy. Idempotent: re-running refreshes the entry and
- * preserves the original installed_at plus every other config key.
- */
+/** Record a plugin in Copilot's config.json#installedPlugins, with cache_path at the marketplace
+ * dir. Idempotent: keeps installed_at and every other config key. */
 export function registerCopilotInstalledPlugin(
   pluginName: string,
   marketplaceName: string,
@@ -748,12 +627,8 @@ export function registerCopilotInstalledPlugin(
   fs.writeFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
-/**
- * Remove a plugin's entry from Copilot's config.json#installedPlugins. Inverse
- * of registerCopilotInstalledPlugin. Leaves the file (with an empty
- * installedPlugins) rather than deleting it, since config.json may hold other
- * Copilot-managed keys.
- */
+/** Remove a plugin from Copilot's config.json#installedPlugins. Leaves the file in place, since
+ * config.json holds other Copilot-managed keys. */
 export function unregisterCopilotInstalledPlugin(
   pluginName: string,
   marketplaceName: string,
@@ -769,11 +644,8 @@ export function unregisterCopilotInstalledPlugin(
   fs.writeFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
-/**
- * Drop a marketplace entry from known_marketplaces.json. Called when the last
- * plugin under it is removed. Removes only its own entry; deletes the file only
- * when no entries remain.
- */
+/** Drop a marketplace entry from known_marketplaces.json when its last plugin is removed. Touches
+ * only its own entry; deletes the file only when empty. */
 export function unregisterMarketplace(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): void {
   const name = nameOf(specOrName);
 
@@ -808,18 +680,9 @@ export function unregisterMarketplace(specOrName: MarketplaceSpec | string, agen
 
 // ─── Top-level orchestration ──────────────────────────────────────────────────
 
-/**
- * Discover every source-side marketplace, then for each one re-synthesize its
- * catalog from the plugins already copied under the version home and register
- * it in known_marketplaces.json. Returns one result per marketplace that has at
- * least one plugin installed.
- *
- * Copying plugin source into a marketplace is the caller's responsibility
- * (copyPluginToMarketplace / syncPluginToVersion) — this reconciles catalogs +
- * registrations across all repos once the copies are in place. Marketplaces
- * whose version-home plugins dir is empty or absent are skipped, so we never
- * register a known_marketplace pointing at a directory with no catalog.
- */
+/** Re-synthesize each marketplace catalog from plugins already copied under the version home and
+ * register it. Returns a result per marketplace with plugins. Copying is the caller's job. Empty
+ * or absent plugins dirs are skipped. */
 export function syncAllMarketplaces(agent: AgentId, versionHome: string, opts: { cwd?: string } = {}): SyncAllResult[] {
   const results: SyncAllResult[] = [];
   for (const dm of discoverMarketplaces(opts)) {
@@ -833,12 +696,9 @@ export function syncAllMarketplaces(agent: AgentId, versionHome: string, opts: {
 
 // ─── Per-plugin settings ops ──────────────────────────────────────────────────
 
-/**
- * Mark a plugin as enabled in <versionHome>/.{agent}/settings.json under
- * enabledPlugins["<plugin>@<marketplace>"]: true. Reads, mutates, writes —
- * preserving every other key. Trust/exec-surface gating is the caller's
- * responsibility (plugins.ts owns plugin capability inspection).
- */
+/** Mark a plugin enabled in <versionHome>/.{agent}/settings.json as
+ * enabledPlugins["<plugin>@<marketplace>"]: true, preserving other keys. Trust gating is the
+ * caller's job (plugins.ts). */
 export function addPluginToSettings(pluginName: string, marketplaceName: string, agent: AgentId, versionHome: string): void {
   const sPath = settingsPath(agent, versionHome);
   let settings: Record<string, unknown> = {};
@@ -897,10 +757,7 @@ export function removePluginFromSettings(pluginName: string, marketplaceName: st
 
 // ─── Marketplace teardown helpers ─────────────────────────────────────────────
 
-/**
- * Remove a plugin's installed marketplace directory. Returns true if the dir
- * existed and was removed.
- */
+/** Remove a plugin's installed marketplace directory. Returns true if it existed and was removed. */
 export function removePluginFromMarketplace(
   pluginName: string,
   specOrName: MarketplaceSpec | string,

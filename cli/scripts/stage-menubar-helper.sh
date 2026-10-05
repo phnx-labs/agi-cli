@@ -76,10 +76,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The floor is the CLI's own resolution, read from the module the installed CLI
-# reads -- the same `bun -e` the attestation producer uses for computer-mac. Not
-# a regex over the TS source: a second parser of that table is a second place
-# for the answer to drift.
+# The floor is the CLI's own resolution, read from the module the installed CLI reads (the same
+# `bun -e` the attestation producer uses), not a regex over the TS source; a second parser of that
+# table is a second place to drift.
 command -v bun >/dev/null 2>&1 || die "bun not found on PATH (needed to read the menubar floor from src/lib/helper-versions.ts)"
 [[ -f src/lib/helper-versions.ts ]] || die "src/lib/helper-versions.ts not found under $(pwd)"
 FLOOR="$(bun -e "console.log((await import('./src/lib/helper-versions.ts')).helperFloor('menubar'))" 2>/dev/null)" \
@@ -112,10 +111,9 @@ sha256_of() {
   fi
 }
 
-# fetch URL OUT -> prints the HTTP status. OUT exists only on 200. A transport
-# failure (no network, DNS, TLS, a transfer stalled under 1 KiB/s for 60s)
-# returns non-zero and prints curl's own message -- bounded, so a half-dead
-# connection fails loud instead of hanging a release.
+# fetch URL OUT prints the HTTP status; OUT exists only on 200. A transport failure (no network,
+# DNS, TLS, or a transfer under 1 KiB/s for 60s) returns non-zero with curl's message, so a
+# half-dead connection fails loud instead of hanging a release.
 fetch() {
   local url="$1" out="$2" code
   rm -f "$out"

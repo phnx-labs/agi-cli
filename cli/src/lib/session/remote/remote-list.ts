@@ -1,18 +1,6 @@
-/**
- * Cross-machine fan-out for the default `agents sessions` listing.
- *
- * `discoverSessions()` only scans the local disk. To browse the whole fleet in
- * one list — without syncing anything — we run `agents sessions <same query>
- * --json` on each peer over SSH and merge the parsed `SessionMeta[]`, tagging
- * every row with the machine it came from so the picker/table can label and
- * group by computer.
- *
- * This is the browse-listing sibling of `remote-active.ts` (which fans out
- * `--active`): same transport, same device set, same recursion guard. The peer
- * runs with `AGENTS_SESSIONS_LOCAL=1` so it answers only for itself and the
- * sweep never recurses. A dead or slow host is skipped with a stderr note,
- * never fatal — one asleep laptop must not blank the list.
- */
+/** Cross-machine fan-out for the default `agents sessions` listing: runs `sessions <query> --json`
+ * on each peer over SSH and merges rows tagged by machine. Peers run with
+ * `AGENTS_SESSIONS_LOCAL=1` (no recursion); dead hosts are skipped. */
 import { spawn } from 'child_process';
 import chalk from 'chalk';
 import {
@@ -56,10 +44,9 @@ import {
 } from '@phnx-labs/sessions-cli/reader';
 
 const REMOTE_TOOL_TIMEOUT_MS = 60_000;
-// The per-peer stdout ceiling and the UTF-8-safe accumulator live in ssh-exec.ts
-// (the shared SSH transport both this reader and the top-level `remote-agents-json`
-// fan-out import), so the bound is defined once. Re-exported here for the existing
-// consumers/tests that reach them through this module.
+// The per-peer stdout ceiling and UTF-8-safe accumulator live in ssh-exec.ts (shared with
+// `remote-agents-json`) so the bound is defined once; re-exported for existing consumers and
+// tests.
 export { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../../ssh-exec.js';
 export const REMOTE_TOOL_AGGREGATE_MAX_BYTES = TOOL_QUERY_MAX_SERIALIZED_BYTES;
 
@@ -88,13 +75,9 @@ export function consumeParsedRemoteToolSearchBudget(
   return consumeRemoteToolByteBudget(budget, serializedToolSearchEnvelopeBytes(envelope));
 }
 
-/**
- * The command run on each peer: answer for itself, as JSON, without recursing.
- * `forwardedArgs` carry the caller's own query/filters (already including the
- * leading `sessions` and a `--json`) so each peer returns a comparable slice.
- * A Windows peer gets a PowerShell invocation (ssh lands in cmd.exe/PowerShell
- * there, where `bash -lc` is not a command); every other OS keeps `bash -lc`.
- */
+/** The command run on each peer: answer for itself as JSON, without recursing. `forwardedArgs`
+ * carry the caller's query (including `sessions` and `--json`). A Windows peer gets PowerShell,
+ * since `bash -lc` is not a command there; other OSes keep `bash -lc`. */
 export function remoteListCommand(forwardedArgs: string[], os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
     return buildWindowsAgentsCommand({
@@ -108,14 +91,9 @@ export function remoteListCommand(forwardedArgs: string[], os?: string): string 
   return `bash -lc ${shellQuote(inner)}`;
 }
 
-/**
- * Parse a peer's `sessions --json` stdout into `SessionMeta[]`, tagging each
- * with `machine`. Defensive against version skew / partial output: non-JSON or
- * a non-array yields `[]`, and non-object entries are dropped rather than
- * throwing. The `machine` we dialed always wins over any value the peer set on
- * its own rows, so grouping keys off the computer we asked. Exported for unit
- * testing without a live tailnet.
- */
+/** Parse a peer's `sessions --json` stdout into `SessionMeta[]` tagged with `machine`. Non-JSON or
+ * non-array yields `[]` and non-object entries are dropped. The machine we dialed always wins over
+ * the peer's own value. Exported for tests. */
 export function parseRemoteList(stdout: string, machine: string): SessionMeta[] {
   let parsed: unknown;
   try {
@@ -222,12 +200,9 @@ interface RemoteListResult {
   sessions: SessionMeta[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
   deviceCount: number;
-  /**
-   * Peers that failed to answer, by display name. The stderr note above is
-   * enough for a printed listing, but the interactive browser repaints over it —
-   * so callers rendering a full-screen UI need the outcome as data to tell
-   * "that box is asleep" apart from "that box has no matching sessions".
-   */
+  /** Peers that failed to answer, by display name. The interactive browser repaints over the
+   * stderr note, so full-screen callers need this as data to tell an asleep box from one with
+   * no matches. */
   unreachable: string[];
 }
 
@@ -238,20 +213,13 @@ export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean 
   return d.platform === 'windows' || d.platform === 'linux' || d.platform === 'macos';
 }
 
-/**
- * Gather listing sessions from other machines. With an explicit `hosts` list
- * (from `--device`), fan out to exactly those. Otherwise sweep the registered,
- * online devices from `ag devices`, excluding this machine and any without an
- * address. `forwardedArgs` are the caller's own sessions args (query + filters,
- * already `--json`) so every peer returns the same slice this machine asked for.
- */
+/** Gather listing sessions from other machines: exactly the `--device` hosts, else registered
+ * online devices with an address except this one. `forwardedArgs` are the caller's own args
+ * (already `--json`) so every peer returns the same slice. */
 interface GatherRemoteListOptions {
-  /**
-   * Opt-in early-exit for a globally-unique id lookup (a full UUID): the first
-   * peer to return the matching row resolves the fan-out and cancels the rest.
-   * Omitted for browse/label/prefix sweeps, which must wait for every peer to
-   * know whether the match is unique or conflicting.
-   */
+  /** Opt-in early exit for a globally unique id lookup (full UUID): the first peer returning the
+   * match resolves the fan-out and cancels the rest. Omitted for browse/label/prefix sweeps, which
+   * need every peer to judge uniqueness. */
   isDefinitive?: (session: SessionMeta, machine: string) => boolean;
   /** Per-peer deadline for slower indexed browse queries. */
   timeoutMs?: number;
@@ -515,11 +483,8 @@ export function parseRemoteToolSearch(
   }
 }
 
-/**
- * Fleet sibling of {@link gatherRemoteList} for the versioned tool-search
- * envelope. Each peer executes the same local-only query against its own
- * SQLite index; only compact matches cross SSH.
- */
+/** Fleet sibling of gatherRemoteList for the versioned tool-search envelope. Each peer runs the
+ * local-only query on its own SQLite index; only compact matches cross SSH. */
 export async function gatherRemoteToolSearch(
   forwardedArgs: string[],
   hosts?: string[],
@@ -619,22 +584,13 @@ export async function resolvePeerTarget(machine: string): Promise<{ target: stri
   return undefined;
 }
 
-/** Interactive ceiling for a picker-driven peer preview fetch. Tighter than the
- * fan-out's 60s: the user is arrowing through rows, and a peer that can't
- * answer a one-session digest in this window should degrade to the metadata
- * card rather than hold a "fetching…" pane open. */
+/** Interactive ceiling for a picker-driven peer preview fetch, tighter than the fan-out's 60s:
+ * a slow peer should degrade to the metadata card rather than hold a 'fetching' pane open. */
 const PEER_PREVIEW_TIMEOUT_MS = 15_000;
 
-/**
- * Fetch one remote session's preview digest from its owning peer — the data
- * behind the picker pane for a `_remote` row, whose transcript file this
- * machine cannot parse. Runs the peer's own `agents sessions preview <id>
- * --local --json` (the same envelope `agents sessions preview` already
- * delegates to for a remote id) and returns its `preview` object, verbatim and
- * UNSANITIZED — the caller owns scrubbing peer-supplied strings before any of
- * them reach a TTY. Undefined on every failure: unregistered machine, SSH
- * error, timeout, version-skewed peer with no `--json` preview envelope.
- */
+/** Fetch one remote session's preview digest via the peer's `agents sessions preview <id> --local
+ * --json`. Returns `preview` verbatim and unsanitized; callers must scrub it before any TTY.
+ * Undefined on any failure. */
 export async function fetchPeerPreviewDigest(
   sessionId: string,
   machine: string,
@@ -649,18 +605,9 @@ export type PeerPreviewEnvelopeResult =
   | { ok: true; envelope: unknown }
   | { ok: false; reason: 'no-target' | 'unreachable' | 'invalid-json' };
 
-/**
- * Fetch the FULL `agents sessions preview <id> --local --json` envelope
- * (session/active/preview/error, not just the `.preview` slice
- * {@link fetchPeerPreviewDigest} narrows to) from a session's owning peer in
- * exactly ONE bounded {@link sshCapture} hop. This is the canonical exact
- * ID+owner preview loader (PHNX-3999): the peer's own command already runs the
- * owner-side bounded parsers/fold (`loadSessionPreviewDigest`) and existing
- * redaction, so a caller that already knows the owning device needs no
- * separate metadata round trip before this one — unlike the general fleet
- * resolver, which fans out a `sessions <id> --json --all` metadata query first
- * because it does NOT yet know which peer (if any) holds the id.
- */
+/** Fetch the full `sessions preview <id> --local --json` envelope from the owning peer in one
+ * bounded sshCapture hop: the canonical id+owner preview loader (PHNX-3999). The peer already runs
+ * the bounded parsers and redaction. */
 export async function fetchPeerPreviewEnvelope(
   sessionId: string,
   machine: string,
@@ -686,43 +633,12 @@ export function parsePeerPreviewDigest(parsed: unknown): unknown | undefined {
   return preview;
 }
 
-/**
- * Run `agents <args>` ON a peer over SSH, attached to this terminal (inherited
- * stdio). `args` is the full arg vector after the binary — callers pass e.g.
- * `['sessions', id, '--markdown']` or `['sessions', 'resume', id]`. Used when a
- * picked session lives on another machine: its transcript and agent binary are
- * there, so both reading (no TTY) and resuming (TTY) must execute on the peer —
- * not via a local `--device` hop, which would discover locally and dead-end for a
- * session that exists only on the peer. Resolves 'no-target' when the machine
- * isn't a dialable registered device; the caller surfaces a clear message.
- *
- * `opts.env` adds variables to the remote command. It deliberately does NOT
- * carry `AGENTS_FLEET_REMOTE` the way the `--device` passthrough does: that marker
- * gates consent-sensitive actions on the far side
- * (lib/browser/remote-control.ts), and a resumed agent is a long-lived session
- * that would inherit it for its whole life — `agents browser start` inside it
- * would then be refused as a cross-machine drive. A one-shot `--device` command
- * can carry the marker; a session cannot.
- *
- * `opts.sessionId` (with `tty`) prints the session id and resume command when
- * the SSH hop ends, so OpenSSH's `Shared connection … closed.` is not the last
- * thing on the local shell (RUSH-3227). Omit it for one-shot non-TTY renders.
- *
- * Resolves `'unreachable'` when the SSH connection itself failed — ssh could not
- * launch (spawn error) or exited with {@link SSH_CONN_FAILURE_CODE} (255, its
- * connect-failure convention) — as opposed to `'ok'` for a hop that actually
- * reached the peer (whatever the remote command's own exit code). This lets a
- * caller prefer the recorded device yet fall back locally when it is genuinely
- * offline (PHNX-3626); callers that ignore `'unreachable'` behave exactly as
- * before (it was `'ok'`).
- */
-/**
- * Classify a finished SSH hop by its exit code: `'unreachable'` when the
- * connection itself failed (ssh's {@link SSH_CONN_FAILURE_CODE} = 255, or a null
- * code from a killed/never-launched child), else `'ok'` — the remote command ran,
- * whatever its own exit status. Pure so the offline-device fallback is unit-tested
- * without a live SSH hop (PHNX-3626).
- */
+/** Run `agents <args>` on a peer over SSH (inherited stdio) for sessions living there. `opts.env`
+ * omits `AGENTS_FLEET_REMOTE`: a resumed agent would inherit it and be refused `browser start`.
+ * Resolves 'unreachable' on ssh exit 255 so callers can fall back locally (PHNX-3626). */
+/** Classify a finished SSH hop: 'unreachable' when the connection failed (SSH_CONN_FAILURE_CODE
+ * 255 or a null code), else 'ok' whatever the remote exit status. Pure so the offline fallback
+ * is testable (PHNX-3626). */
 export function peerHopOutcome(code: number | null): 'ok' | 'unreachable' {
   return code === SSH_CONN_FAILURE_CODE || code === null ? 'unreachable' : 'ok';
 }

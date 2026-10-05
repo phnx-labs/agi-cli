@@ -271,12 +271,9 @@ describe('projectNameForCwd', () => {
   });
 });
 
-/**
- * PHNX-3999 F08/F09 — what counts as a CONFIRMED project association, and what
- * must stay Uncategorized. The owner's recording (01:30–01:56) shows sessions
- * filed under groups nobody created, because the old answer was the basename of
- * the working directory, which always answers something.
- */
+/** PHNX-3999 F08/F09: what counts as a CONFIRMED project association and what stays Uncategorized.
+ * The owner's recording (01:30-01:56) showed sessions in groups nobody created, because the old
+ * answer was the cwd basename, which always answers something. */
 describe('confirmedProjectForCwd', () => {
   it('confirms a registered definition, including a nested one and a worktree', () => {
     const defs: ProjectDef[] = [
@@ -419,9 +416,8 @@ describe('projectNameForCwd — monorepo subprojects', () => {
   });
 
   it('a lone narrowed project still owns the rest of its own checkout', () => {
-    // The subdir claim must not shrink a project that has no umbrella beside it:
-    // `--path` picks where an agent starts, not which work counts. Narrowing to
-    // the subdir alone silently orphaned every session in the repo root and in
+    // The subdir claim must not shrink a project with no umbrella beside it: `--path` picks where
+    // an agent starts, not which work counts; narrowing orphaned sessions in the repo root and
     // sibling subdirs.
     const solo: ProjectDef[] = [{ name: 'foo', root: '~/src/foo', defaultPath: '~/src/foo/apps/web' }];
     const repo = path.join(HOME_, 'src', 'foo');

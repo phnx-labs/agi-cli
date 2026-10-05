@@ -4,14 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Diagnostics that misreport isolation state are the recurring failure here: an
-// isolated copy shown as `(global)` (fixed once already), a resume that claimed to
-// run and didn't, and — found by diffing every command's output between an
-// isolated-only and a normal install — `inspect` printing a bare shim path that
-// does not exist, and `view --json` carrying no isolation signal at all.
-//
-// A wrong diagnostic is worse than a missing one when the whole feature is a
-// promise about what was left alone: it is the only thing the user can check.
+// Diagnostics that misreport isolation state are worse than missing ones: they are the only way
+// the user can verify what was left alone (isolated shown as `(global)`, bare shim path, no
+// `--json` signal).
 describe.skipIf(process.platform === 'win32')('isolated installs report themselves honestly', () => {
   let home: string;
   const V = '9.9.4';

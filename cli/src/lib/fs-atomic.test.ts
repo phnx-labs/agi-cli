@@ -1,13 +1,5 @@
-/**
- * Tests for the cross-process file lock's synchronous heartbeat (RUSH-1975).
- *
- * proper-lockfile keeps a held lock alive by refreshing its lockfile mtime on a
- * setTimeout every `stale/2` — but that timer only fires when the event loop gets a
- * turn, so a fully synchronous critical section that outlives the stale window (the
- * scrypt-bound secrets rotation) would age past `stale` mid-hold and a peer could
- * break the lock as "stale" and interleave. `withFileLock` hands `fn` a `heartbeat()`
- * that bumps the lockfile mtime synchronously to close that window.
- */
+/** Tests the file lock's synchronous heartbeat (RUSH-1975). proper-lockfile refreshes its mtime
+ * on a setTimeout every `stale/2`, which needs an event-loop turn. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -16,16 +8,9 @@ import * as path from 'path';
 import lockfile from 'proper-lockfile';
 import { withFileLock, withFileLockAsync, ensureLockTarget, sleepSync, atomicWriteJsonSync } from './fs-atomic.js';
 
-/**
- * proper-lockfile silently raises any `stale` below this floor:
- *   node_modules/proper-lockfile/lib/lockfile.js:219 (and :304)
- *     options.stale = Math.max(options.stale || 0, 2000);
- *
- * Every stale window in this file MUST sit above it. A test written with
- * `stale: 50` does not test a 50ms window — it tests a 2000ms one, so a hold
- * shorter than 2s blocks a peer whether or not the heartbeat does anything,
- * and the test passes against a no-op heartbeat.
- */
+/** proper-lockfile raises any `stale` below 2000 to 2000 (lib/lockfile.js:219, :304), so every
+ * stale window here must sit above it. `stale: 50` would actually test 2000ms, and a hold under
+ * 2s blocks a peer even with a no-op heartbeat. */
 const PROPER_LOCKFILE_MIN_STALE_MS = 2_000;
 const STALE_MS = PROPER_LOCKFILE_MIN_STALE_MS + 500;
 /** Long enough that an un-refreshed lock is comfortably past STALE_MS. */
@@ -57,10 +42,9 @@ function peerVerdictAfterSyncHold(beat: ((heartbeat: () => void) => void) | null
         }
       }, { staleMs: STALE_MS, acquireTimeoutMs: 100 });
     } catch (err) {
-      // A stolen lock now surfaces synchronously as a "broken by another process"
-      // error instead of proper-lockfile crashing the process from its refresh
-      // timer. That only happens in the stolen case, so it corroborates the
-      // verdict rather than being an error to hide.
+      // A stolen lock now surfaces synchronously as "broken by another process" instead of
+      // proper-lockfile crashing the process from its refresh timer. That only happens when stolen,
+      // so it corroborates the verdict rather than being an error to hide.
       if (!/was broken by another process/.test((err as Error).message)) throw err;
       expect(verdict).toBe('stole');
     }
@@ -161,15 +145,9 @@ describe('ENOTDIR stale-lock self-healing', () => {
   });
 });
 
-/**
- * RUSH-2840: `atomicWriteJsonSync` is the JSON convenience wrapper around
- * `atomicWriteFileSync` -- six independent private/inline copies of this
- * write-tmp-then-rename-JSON pattern were consolidated to call it instead of
- * reinventing the primitive. These tests pin its atomicity guarantee (which
- * it inherits from `atomicWriteFileSync`) against the real filesystem, and
- * are deliberately discriminating: they fail against a naive, non-atomic
- * `writeFileSync(target, ...)` mutant.
- */
+/** RUSH-2840: `atomicWriteJsonSync` wraps `atomicWriteFileSync`, consolidating six private
+ * tmp-then-rename JSON copies. These tests pin its atomicity against the real filesystem and
+ * are discriminating: they fail against a naive `writeFileSync(target, ...)` mutant. */
 describe('atomicWriteJsonSync()', () => {
   function tmpBase(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-json-'));
@@ -196,12 +174,9 @@ describe('atomicWriteJsonSync()', () => {
     }
   });
 
-  // Only a NEW-file create can be blocked by directory permissions; renaming
-  // over an already-existing file's directory entry is not (the rename needs
-  // write access in the DIRECTORY, not the target file, but making the tmp
-  // file impossible to CREATE blocks the write before rename is ever
-  // reached). chmod is a no-op on Windows and root bypasses the permission
-  // check entirely, so this is skipped where the mechanism cannot hold.
+  // Only creating a new file can be blocked by directory permissions; renaming over an existing
+  // entry cannot. Making the tmp file uncreatable fails the write before rename. chmod is a no-op
+  // on Windows and root bypasses it, so this is skipped there.
   const canBlockFileCreate =
     process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
   const itBlocksCreate = canBlockFileCreate ? it : it.skip;
@@ -216,13 +191,9 @@ describe('atomicWriteJsonSync()', () => {
         const before = fs.readFileSync(target, 'utf-8');
         expect(JSON.parse(before)).toEqual({ version: 1 });
 
-        // Block creation of the sibling tmp file by making the directory
-        // read-only. This drives the REAL writer into a failure at its very
-        // first fs call (the tmp-file create) instead of planting a decoy
-        // file it never touches -- a bare `writeFileSync(target, ...)` would
-        // still SUCCEED here, since `target` already exists and stays
-        // writable regardless of the directory's permissions. That asymmetry
-        // is what makes this test discriminating against a non-atomic mutant.
+        // Make the directory read-only to block the sibling tmp file, failing the real writer at
+        // its first fs call. A bare writeFileSync would still succeed (target stays writable),
+        // which is what makes this test catch a non-atomic mutant.
         fs.chmodSync(dir, 0o555);
         try {
           expect(() => atomicWriteJsonSync(target, { version: 2 })).toThrow();
@@ -242,10 +213,9 @@ describe('atomicWriteJsonSync()', () => {
   );
 });
 
-// PHNX-3695: on the daemon's shared event loop the SYNC withFileLock retries
-// acquisition with sleepSync (Atomics.wait), freezing the whole loop while a peer
-// holds the lock. withFileLockAsync must acquire the same lock without ever
-// blocking the loop.
+// PHNX-3695: on the daemon's shared event loop the sync withFileLock retries with sleepSync
+// (Atomics.wait), freezing the loop while a peer holds the lock. withFileLockAsync must acquire the
+// same lock without blocking the loop.
 describe('withFileLockAsync (non-blocking acquisition)', () => {
   it('runs the critical section and returns its value under the lock', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-async-'));

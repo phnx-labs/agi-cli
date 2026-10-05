@@ -1,12 +1,5 @@
-/**
- * MCP server management - reading from ~/.agents/mcp/ and applying to agent configs.
- *
- * MCP servers are stored as YAML files in ~/.agents/mcp/:
- *   ~/.agents/mcp/swarm.yaml
- *   ~/.agents/mcp/figma.yaml
- *
- * Each file defines a server that gets applied (merged) into agent configs during sync.
- */
+/** MCP server management: servers are YAML files in ~/.agents/mcp/ (e.g. swarm.yaml) merged into
+ * agent configs during sync. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -74,10 +67,8 @@ export function parseMcpServerConfig(filePath: string): McpYamlConfig | null {
   return validateMcpYamlConfig(parsed);
 }
 
-/**
- * Validate an MCP server name. Rejects names that could be misinterpreted as
- * command-line options or that contain characters unsafe for argv/identifier use.
- */
+/** Validates an MCP server name; rejects names that could be read as command-line options or
+ * contain characters unsafe for argv/identifiers. */
 export function validateMcpServerName(name: string): void {
   if (name.startsWith('-')) {
     throw new Error(`Invalid MCP server name '${name}': names cannot start with '-'`);
@@ -132,24 +123,17 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return Object.values(value).every((item) => typeof item === 'string');
 }
 
-// ─── Project MCP trust (RUSH-1776) ───────────────────────────────────────────
-// Project-scoped MCP configs (<repo>/.agents/mcp/*.yaml) are UNTRUSTED by
-// default. An MCP server is an arbitrary command spawned under the agent's
-// authority, so merely cloning a hostile repo must never auto-register or run
-// it. A project's MCP servers enter the register/spawn path only after the user
-// explicitly trusts that project (`agents mcp trust`), recorded in a user-owned
-// store OUTSIDE any repo so a cloned repo can't grant itself trust. User- and
-// system-scoped MCPs (~/.agents/mcp/*) are always trusted.
+// Project MCP trust (RUSH-1776): project-scoped configs (<repo>/.agents/mcp/*.yaml) are UNTRUSTED
+// by default, since a server is an arbitrary command. Used only after `agents mcp trust`, stored
+// outside any repo. User/system-scoped MCPs are always trusted.
 
 /** Path to the user-owned project-trust store (never inside a repo). */
 export function getMcpTrustStorePath(): string {
   return path.join(getUserAgentsDir(), 'mcp-trust.yaml');
 }
 
-/**
- * Key a project by its ROOT (parent of `.agents/`), resolved through symlinks
- * so the key is stable no matter how the cwd was spelled.
- */
+/** Keys a project by its ROOT (parent of `.agents/`), resolved through symlinks so the key is
+ * stable however the cwd was spelled. */
 function normalizeProjectKey(projectAgentsDir: string): string {
   const root = path.dirname(projectAgentsDir);
   try {
@@ -189,19 +173,14 @@ function writeTrustedProjects(trusted: Set<string>): void {
   fs.writeFileSync(storePath, yaml.stringify({ trustedProjects: Array.from(trusted).sort() }), 'utf-8');
 }
 
-/**
- * Whether the project that owns `projectAgentsDir` has been explicitly trusted
- * for MCP auto-apply. Untrusted by default (fail closed).
- */
+/** Whether the project owning `projectAgentsDir` was explicitly trusted for MCP auto-apply.
+ * Untrusted by default (fail closed). */
 export function isProjectMcpTrusted(projectAgentsDir: string): boolean {
   return readTrustedProjects().has(normalizeProjectKey(projectAgentsDir));
 }
 
-/**
- * Record explicit trust for the project containing `cwd` so its project-scoped
- * MCP servers may be registered/spawned. Returns the trusted project root, or
- * null when `cwd` is not inside a project (no `.agents/` to trust).
- */
+/** Records explicit trust for the project containing `cwd`. Returns the trusted root, or null when
+ * `cwd` is not in a project (no `.agents/`). */
 export function trustProjectMcp(cwd: string = process.cwd()): string | null {
   const projectAgentsDir = getProjectAgentsDir(cwd);
   if (!projectAgentsDir) return null;
@@ -225,17 +204,9 @@ export function untrustProjectMcp(cwd: string = process.cwd()): boolean {
   return true;
 }
 
-/**
- * List all MCP server configs from ~/.agents/mcp/.
- *
- * When `enforceProjectTrust` is set, project-scoped configs are included only
- * for a project the user has explicitly trusted (see `isProjectMcpTrusted`) —
- * this is the choke point that keeps an untrusted cloned repo's MCP servers out
- * of the register/spawn path. It ALSO fixes name-collision shadowing: an
- * untrusted project entry is dropped before dedup, so it can never mask a
- * same-named user entry. Display callers omit the flag to surface project
- * entries (command+args and all) regardless of trust.
- */
+/** Lists MCP server configs. With `enforceProjectTrust`, project configs are included only for
+ * trusted projects: the choke point keeping an untrusted repo's servers out of register/spawn;
+ * they are dropped before dedup so they can't shadow a user entry. Display callers omit the flag. */
 export function listMcpServerConfigs(
   cwd: string = process.cwd(),
   options: { enforceProjectTrust?: boolean } = {}
@@ -277,15 +248,9 @@ export function listMcpServerConfigs(
   return Array.from(results.values());
 }
 
-/**
- * Parse one config during a directory SCAN. `validateMcpYamlConfig` returns null
- * for some malformed shapes but *throws* for others (`args` not a string array,
- * `command`/`env` of the wrong type), and a scan must not be all-or-nothing: a
- * single bad file under `<repo>/mcp/` took down the whole of
- * `agents inspect <repo>` with an unhandled stack trace. Skip the file and name
- * it, exactly as a null return is already skipped. Explicit single-file
- * operations call `parseMcpServerConfig` directly and still throw loudly.
- */
+/** Parses one config during a directory SCAN. validateMcpYamlConfig throws for some malformed
+ * shapes, and one bad file under `<repo>/mcp/` took down all of `agents inspect <repo>`; skip and
+ * name the file instead. Explicit single-file operations still throw. */
 export function parseMcpConfigForScan(filePath: string): McpYamlConfig | null {
   try {
     return parseMcpServerConfig(filePath);
@@ -296,10 +261,8 @@ export function parseMcpConfigForScan(filePath: string): McpYamlConfig | null {
   }
 }
 
-/**
- * Scan a repository for MCP server YAML configs.
- * Looks under <repoPath>/mcp/*.yaml — same on-disk layout as ~/.agents/mcp/.
- */
+/** Scans a repository for MCP server YAML under <repoPath>/mcp/*.yaml, the same layout as
+ * ~/.agents/mcp/. */
 export function discoverMcpConfigsFromRepo(repoPath: string): InstalledMcpServer[] {
   const dir = path.join(repoPath, 'mcp');
   if (!fs.existsSync(dir)) return [];
@@ -318,11 +281,8 @@ export function discoverMcpConfigsFromRepo(repoPath: string): InstalledMcpServer
   return results;
 }
 
-/**
- * Install an MCP YAML config from a source file into ~/.agents/mcp/.
- * Re-serializes via writeMcpServerConfig so the on-disk filename is
- * deterministic (sanitized from the server name).
- */
+/** Installs an MCP YAML config into ~/.agents/mcp/, re-serialized via writeMcpServerConfig so the
+ * filename is deterministic (sanitized from the server name). */
 export function installMcpConfigCentrally(
   sourcePath: string
 ): { success: boolean; error?: string; path?: string } {
@@ -338,11 +298,7 @@ export function installMcpConfigCentrally(
   }
 }
 
-/**
- * Get MCP servers by name.
- * If names is provided, returns only those servers.
- * Otherwise returns all servers.
- */
+/** Gets MCP servers by name; all servers when `names` is not provided. */
 export function getMcpServersByName(
   names?: string[],
   options: { cwd?: string; enforceProjectTrust?: boolean } = {}
@@ -357,12 +313,8 @@ export function getMcpServersByName(
   return allServers.filter((server) => names.includes(server.name));
 }
 
-/**
- * Assemble the JSON payload Claude's `--mcp-config` flag expects from a set of
- * installed MCP servers: `{ "mcpServers": { "<name>": { command, args, env } | { url } } }`.
- * Pure — takes servers, returns a JSON string. The caller writes it to an
- * ephemeral file and passes the path to buildExecCommand.
- */
+/** Assembles the JSON Claude's `--mcp-config` flag expects from installed servers: `{ "mcpServers":
+ * { name: { command, args, env } | { url } } }`. Pure; the caller writes it to an ephemeral file. */
 export function buildWorkflowMcpConfig(servers: InstalledMcpServer[]): string {
   const mcpServers: Record<string, Record<string, unknown>> = {};
   for (const server of servers) {
@@ -379,10 +331,8 @@ export function buildWorkflowMcpConfig(servers: InstalledMcpServer[]): string {
   return JSON.stringify({ mcpServers });
 }
 
-/**
- * Install MCP server using Claude CLI.
- * Uses: claude mcp add --scope user --transport <type> <name> [--env K=V]... -- <cmd> [args...]
- */
+/** Installs an MCP server via `claude mcp add --scope user --transport <type> <name> [--env K=V]...
+ * -- <cmd> [args...]`. */
 function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, versionHome: string): void {
   const execEnv = { ...process.env, HOME: versionHome };
 
@@ -426,10 +376,7 @@ function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, ver
   }
 }
 
-/**
- * Install MCP server using Codex CLI.
- * Uses: codex mcp add <name> -- <cmd> [args...]
- */
+/** Installs an MCP server via `codex mcp add <name> -- <cmd> [args...]`. */
 function installMcpViaCodex(binaryPath: string, server: InstalledMcpServer, versionHome: string): void {
   let args: string[];
   if (server.config.transport === 'http') {
@@ -546,17 +493,9 @@ function toWritableServer(server: InstalledMcpServer): WritableMcpServer {
   };
 }
 
-/**
- * Read an existing agent config, or `{}` when it does not exist yet.
- *
- * A file that exists but does not parse **throws** rather than resetting to
- * `{}`: these configs hold far more than MCP (hermes' whole `config.yaml`,
- * openclaw's `openclaw.json`, opencode's `opencode.jsonc`), so silently
- * rewriting one from scratch destroys everything else in it. The five per-agent
- * installers this replaced parsed unguarded for exactly that reason -- the throw
- * surfaced as a reported error and left the file intact, which is the behavior
- * preserved here.
- */
+/** Reads an existing agent config, or `{}` when absent. A file that exists but does not parse
+ * THROWS instead of resetting, since these configs hold far more than MCP (hermes config.yaml,
+ * openclaw.json, opencode.jsonc) and a rewrite from scratch destroys the rest. */
 function readExistingConfig(
   configPath: string,
   parse: (raw: string) => unknown,
@@ -580,42 +519,16 @@ function readExistingConfig(
   return parsed as Record<string, unknown>;
 }
 
-/**
- * Parse a JSONC config.
- *
- * Uses the shared string-literal-aware `stripJsonComments` — the same one the
- * read path uses on this very file. A regex that blanks `//` to end-of-line
- * destroys `"$schema": "https://opencode.ai/config.json"`, which every
- * opencode-generated config carries, and would make the writer disagree with
- * the reader about the same bytes.
- */
+/** Parses JSONC with the shared string-literal-aware `stripJsonComments`, the same as the read
+ * path. A regex blanking `//` destroys `"$schema": "https://opencode.ai/config.json"` and makes
+ * writer and reader disagree. */
 function parseJsonc(raw: string): unknown {
   return JSON.parse(stripJsonComments(raw));
 }
 
-/**
- * Serialize MCP servers into an agent-specific config file.
- *
- * The format comes from `MCP_TARGETS` (lib/mcp-registry.ts), so a harness whose
- * schema is not implemented **throws** here rather than falling through the
- * switch and returning as if it had written something. `installMcpServers`
- * catches that and reports it as an error, never as a silent success.
- *
- * `mode: 'overwrite'` replaces the whole MCP section (used for tool-managed
- * version-home configs). `mode: 'merge'` updates/adds the provided server
- * entries while preserving existing entries (used for project-level configs
- * that users may hand-edit or populate via agent CLI commands).
- *
- * An empty `servers` list is a no-op by default — most callers pass a
- * resolved-but-possibly-empty selection and an empty one means "nothing to
- * apply," not "clear whatever is there," so this must never wipe an existing
- * config out from under an unrelated caller. `options.allowEmpty` is the
- * explicit opt-in for a caller that owns the ENTIRE mcp section by
- * construction (it always knows the complete current desired server set,
- * including the empty set) and needs `overwrite` to actually clear it —
- * still only the mcp section: `readExistingConfig` above preserves every
- * other top-level key already, in both modes.
- */
+/** Serializes MCP servers into an agent's config; format comes from `MCP_TARGETS`, an unimplemented
+ * harness THROWS. `overwrite` replaces the MCP section, `merge` updates given entries. Empty
+ * `servers` is a no-op unless `options.allowEmpty`; other top-level keys are always preserved. */
 export function writeMcpConfig(
   agentId: AgentId,
   configPath: string,
@@ -860,21 +773,17 @@ export function writeMcpConfig(
       break;
     }
     default: {
-      // Unreachable: mcpWriteUnsupportedReason above rejects a null format and
-      // every McpFormat has an arm. The assignment is deliberately NOT cast —
-      // `as never` would make it unfailable and the guard cosmetic. Adding an
-      // McpFormat without an arm above is a compile error here.
+      // Unreachable: mcpWriteUnsupportedReason rejects a null format and every McpFormat has an
+      // arm. The assignment is deliberately not cast (`as never` would make the guard cosmetic),
+      // so a new McpFormat without an arm fails to compile.
       const unhandled: never = format;
       throw new Error(`unhandled MCP config format: ${String(unhandled)}`);
     }
   }
 }
 
-/**
- * Install MCP servers to an agent.
- * For Claude/Codex: uses CLI commands (claude mcp add, codex mcp add)
- * For others: edits config files directly
- */
+/** Installs MCP servers to an agent: via CLI commands (`claude mcp add`, `codex mcp add`) for
+ * Claude/Codex, direct config edits for the rest. */
 export function installMcpServers(
   agentId: AgentId,
   version: string,
@@ -915,11 +824,9 @@ export function installMcpServers(
         installMcpViaCodex(binaryPath, server, versionHome);
         handled = true;
       } else {
-        // No harness CLI for this agent (or none that works — `grok mcp add`
-        // does not register into the version home), so write its config file
-        // directly. `writeMcpConfig` throws for a harness whose format is not
-        // implemented, which the catch below turns into a reported error rather
-        // than a silent success. Merge, because this loop runs once per server.
+        // No working harness CLI for this agent (`grok mcp add` doesn't register into the version
+        // home), so write the config directly. writeMcpConfig throws for an unimplemented format
+        // and the catch reports it. Merge, since this loop runs once per server.
         writeMcpConfig(agentId, getMcpConfigPathForHome(agentId, versionHome), [toWritableServer(server)], 'merge');
         handled = true;
       }
@@ -974,12 +881,9 @@ interface McpComparable {
   url?: string;
 }
 
-/**
- * Canonical string form of an MCP server for a structural, format-agnostic
- * compare: http servers by url; stdio servers by command + args (order
- * significant) + env (key-sorted, so serialization order is not drift). Undefined
- * / empty fields are dropped so `{args: []}` and `{}` compare equal.
- */
+/** Canonical string form of an MCP server for a format-agnostic compare: http by url; stdio by
+ * command + args (ordered) + env (key-sorted). Empty fields are dropped so `{args: []}` equals
+ * `{}`. */
 function mcpCanonical(entry: McpComparable): string {
   if (entry.url) return JSON.stringify({ url: entry.url });
   const env = entry.env && Object.keys(entry.env).length > 0
@@ -992,14 +896,9 @@ function mcpCanonical(entry: McpComparable): string {
   });
 }
 
-/**
- * True when MCP server `name` materialized in `agent`'s version home byte-matches
- * the resolved SOURCE definition `source` — the content-drift predicate `agents
- * doctor` uses. Parses the home's canonical MCP config for the harness (no
- * `claude mcp add` shell-out — the on-disk file is parseable) and structurally
- * compares command/args/env/url. Returns false when the server is absent from
- * the home (surfaced as `missing`/`extra` at the name level, not here).
- */
+/** True when server `name` in `agent`'s version home matches the resolved SOURCE definition (the
+ * `agents doctor` content-drift predicate). Parses the on-disk config and compares
+ * command/args/env/url structurally; false when absent (reported as missing/extra elsewhere). */
 export function mcpServerMatches(
   agent: AgentId,
   versionHome: string,

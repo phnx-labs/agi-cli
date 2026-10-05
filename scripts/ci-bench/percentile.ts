@@ -8,11 +8,8 @@ export function percentileUnits(p: number): number {
   return Math.round(p * 100);
 }
 
-/**
- * Minimum observations so percentile `p` is an actual sample, not a
- * fabricated interpolation. P99 needs 100, P99.9 needs 1_000, P99.99
- * needs 10_000. That is `ceil(1 / (1 - p/100))` in integer 1e-4 units.
- */
+/** Minimum observations so percentile `p` is a real sample, not an interpolation: P99 needs 100,
+ * P99.9 needs 1_000, P99.99 needs 10_000 (`ceil(1 / (1 - p/100))`). */
 export function minSamplesForPercentile(p: number): number {
   const units = percentileUnits(p);
   if (units === 0 || units === 10_000) return 1;
@@ -26,11 +23,8 @@ export function nearestRank(n: number, p: number): number {
   return Math.ceil((units * n) / 10_000);
 }
 
-/**
- * Nearest-rank percentile of a sorted-ascending array.
- * rank = ceil(p/100 * n); value = sorted[rank - 1].
- * This returns an observed sample. It never interpolates.
- */
+/** Nearest-rank percentile of a sorted-ascending array: rank = ceil(p/100 * n), value = sorted[rank
+ * - 1]. Returns an observed sample, never an interpolation. */
 export function exactPercentile(sortedAscending: readonly number[], p: number): number {
   if (sortedAscending.length === 0) {
     throw new RangeError('exactPercentile requires at least one sample');

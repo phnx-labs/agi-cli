@@ -1,28 +1,6 @@
-/**
- * Settings that gate the AUTOMATIC update pass (PHNX-3940): whether it runs at
- * all (global + per-harness), and whether one installation participates.
- *
- * Two independent axes, deliberately kept apart:
- *   - `updates.auto` / `updates.<agent>.auto` — an OPERATOR switch, global and
- *     per-harness, stored centrally (`~/.agents/agents.yaml` `config:`) so it
- *     syncs fleet-wide like `summarizer.*`. Both are registered as ordinary
- *     TYPED entries in `device-config.ts`'s `CONFIG_KEYS` — the one canonical
- *     store for user-scope config — rather than a second untyped read/write
- *     path against `Meta.config` directly, so a config rewrite that only knows
- *     about the registry (validation, `agents config list`, the fleet sync
- *     that round-trips `config:`) can't silently drop these keys.
- *   - `Installation.updatePolicy` — an INSTALLATION property. Manual
- *     `agents update <agent>@<label> --to <concrete>` pins it; `--to latest`
- *     (or a fresh install) leaves/returns it to `'latest'`.
- *
- * The global switch is a HARD KILL SWITCH, not a default an explicit
- * per-harness `true` can override: `updates.auto=false` must stop every
- * harness's automatic pass even when an operator separately turned one
- * harness's switch on, because the global switch is the "something is
- * wrong, stop touching installations fleet-wide" lever and a forgotten
- * per-harness override must never defeat it. See
- * {@link isAutoUpdateEnabledForAgent}.
- */
+/** Settings gating the automatic update pass (PHNX-3940): the operator switch `updates.auto` /
+ * `updates.<agent>.auto` (central, typed in `CONFIG_KEYS`) and per-installation `updatePolicy`.
+ * The global switch is a hard kill switch that no per-harness `true` overrides. */
 
 import { getConfigValue, setConfigValue, unsetConfigValue } from '../device-config.js';
 import { withFileLockAsync } from '../fs-atomic.js';
@@ -67,52 +45,29 @@ export function unsetAgentAutoUpdateEnabled(agent: AgentId): void {
   unsetConfigValue(agentAutoKey(agent));
 }
 
-/**
- * Whether the automatic-update pass may consider this agent at all.
- *
- * `updates.auto=false` is a hard kill switch: it wins even over an explicit
- * `updates.<agent>.auto=true` (see the module docblock). With the global
- * switch on (the default), the per-harness switch refines it when explicitly
- * set, else the harness is enabled too.
- */
+/** Whether the automatic-update pass may consider this agent. `updates.auto=false` is a hard
+ * kill switch that wins over `updates.<agent>.auto=true`; with the global switch on (default),
+ * an explicit per-harness switch refines it, else the harness is enabled. */
 export function isAutoUpdateEnabledForAgent(agent: AgentId): boolean {
   if (!isGlobalAutoUpdateEnabled()) return false;
   const perAgent = rawAgentAutoUpdateSetting(agent);
   return perAgent !== false;
 }
 
-/**
- * The effective policy for one installation. Absent (legacy data, or a fresh
- * install that never set it) means `'latest'` — see {@link Installation.updatePolicy}.
- * Read through this everywhere rather than comparing the field directly.
- */
+/** The effective policy for one installation; absent (legacy data or never set) means `'latest'`
+ * (see Installation.updatePolicy). Read through this rather than comparing the field. */
 export function effectiveUpdatePolicy(installation: Pick<Installation, 'updatePolicy'>): UpdatePolicy {
   return installation.updatePolicy ?? 'latest';
 }
 
-/**
- * Persist an installation's update policy. Takes the SAME per-installation
- * lock `updateInstallation` (`update.ts`) holds for its whole transaction —
- * without it, a manual `--to <release>`/`--to latest` pin racing an automatic
- * pass's own `recordRelease` write (both a read-modify-write of the same
- * `installation.json`) could lose whichever wrote second, silently reverting
- * a just-applied pin or an update's own release bump. Reloads the record
- * fresh from disk under the lock (never trusts a possibly-stale in-memory
- * copy) and writes back only the policy field — never touches
- * `history`/`releaseVersion`, since pinning or unpinning is not a release
- * change. Locks with the SAME `staleMs`/`acquireTimeoutMs`
- * ({@link INSTALLATION_LOCK_OPTIONS}) as that transaction — the fs-atomic
- * default (5s stale) is far shorter than an update can legitimately run, so
- * using it here would let this write break the transaction's
- * still-legitimately-held lock out from under it.
- */
+/** Persist an installation's update policy under the same lock `updateInstallation` holds, since
+ * a manual pin racing an automatic `recordRelease` could revert one write. Reloads under the
+ * lock and writes only the policy field, with INSTALLATION_LOCK_OPTIONS. */
 export async function setInstallationUpdatePolicy(agent: AgentId, label: string, policy: UpdatePolicy): Promise<Installation> {
   if (!fs.existsSync(installationDir(agent, label))) throw new Error(`No installation directory for ${agent}@${label}.`);
-  // Guarantees `installation.json` exists and is VALID before locking on it,
-  // migrating a legacy pre-frozen version dir when needed — same reasoning as
-  // `launch-gate.ts`'s identical call. Throws its own clear
-  // "no installation directory" error when `label` was never installed at
-  // all, which is a real caller bug, not a race to reconcile under the lock.
+  // Guarantee `installation.json` exists and is valid before locking, migrating a legacy pre-frozen
+  // dir (same as launch-gate.ts); a label never installed throws its own clear "no installation
+  // directory" error, a caller bug, not a race.
   const recordPath = installationLockTarget(agent, label);
   return withFileLockAsync(recordPath, () => {
     const current = ensureInstallationLocked(agent, label);

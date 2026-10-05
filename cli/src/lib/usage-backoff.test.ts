@@ -43,13 +43,9 @@ describe('parseRetryAfterMs', () => {
 });
 
 describe('the recorded backoff survives across processes', () => {
-  // The whole point of putting this on disk: the offenders are separate
-  // processes — the long-lived daemon on a 3-minute timer, and every one-shot
-  // `agents view` / `agents run`. An in-memory guard would fix neither.
-  // The cache dir is a module-level constant resolved at import, so overriding
-  // HOME does NOT redirect the file — the first version of this test wrote into
-  // the real ~/.agents/.cache/ and parked live usage reads behind a 45-minute
-  // penalty. Use the explicit seam.
+  // On disk because the offenders are separate processes (daemon timer, one-shot `agents
+  // view`/`run`). The cache dir is a module constant, so overriding HOME does not redirect it: use
+  // the explicit seam.
   let dir: string;
   let prevDir: string | null;
 
@@ -118,13 +114,8 @@ describe('formatBackoffRemaining', () => {
 });
 
 describe('a shorter deadline cannot displace a longer one', () => {
-  // Three rounds of review went into arguing that an unlocked read-modify-write
-  // on one shared JSON document was survivable. It was not: two processes could
-  // both read the old value and let the SHORTER deadline write last, and it
-  // could recur on every 429 batch. The argument was replaced with a design that
-  // does not need one — the deadline lives in the FILENAME, so concurrent
-  // writers create separate files and a read takes the maximum. Monotonicity is
-  // structural, and these tests pin that rather than a claim about interleaving.
+  // An unlocked read-modify-write on one JSON doc let the shorter deadline write last. The deadline
+  // lives in the filename and a read takes the maximum; these tests pin that monotonicity.
   let dir: string;
   let prevDir: string | null;
 

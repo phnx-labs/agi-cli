@@ -10,10 +10,8 @@ import {
   setLinearRateLimitDirForTest,
 } from './linear-rate-limit.js';
 
-// getCacheDir() resolves HOME once at module load, so swapping process.env.HOME
-// would read and WRITE the developer's real cache and throttle their own Linear
-// reads. Point the dedicated dir seam at a temp dir. Real fs, real files, no
-// mocking — exactly the cross-process state the limiter coordinates on.
+// getCacheDir() resolves HOME once at load, so swapping HOME would read and write the developer's
+// real cache; use the dir seam with a temp dir. Real fs and files, no mocking.
 let root: string;
 let prevOverride: string | null;
 const KEY = 'lin_api_test_key';
@@ -87,10 +85,9 @@ describe('linear shared request budget', () => {
   });
 
   it('fails OPEN when the cache dir cannot be written — the request still goes out', () => {
-    // Point the state root at a path whose parent is a FILE, so mkdirSync throws
-    // ENOTDIR deterministically (no reliance on chmod, which root ignores). The
-    // reservation cannot be recorded, but the request must not be blocked on a
-    // broken cache dir — the reactive 429 backoff remains the backstop.
+    // A state root whose parent is a FILE makes mkdirSync throw ENOTDIR deterministically (chmod
+    // is ignored by root). The reservation can't be recorded, but the request must still go
+    // through; the reactive 429 backoff is the backstop.
     const asFile = path.join(root, 'not-a-dir');
     fs.writeFileSync(asFile, '');
     setLinearRateLimitDirForTest(path.join(asFile, 'under-a-file'));

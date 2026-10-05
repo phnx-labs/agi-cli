@@ -1,10 +1,5 @@
-/**
- * Git operations for the agents-cli system repo and package repositories.
- *
- * Handles cloning, pulling, syncing, and inspecting git repos used by
- * the agents version management and plugin/package system. Includes
- * source parsing for GitHub shorthand, SSH, HTTPS, and local paths.
- */
+/** Git operations for the agents-cli system repo and package repositories: clone, pull, sync,
+ * inspect, and source parsing (GitHub shorthand, SSH, HTTPS, local paths). */
 import simpleGit, { SimpleGit } from 'simple-git';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
@@ -14,23 +9,9 @@ import { IS_WINDOWS, isWindowsAbsolutePath, toNativePath } from './platform/inde
 import { getPackageLocalPath } from './state.js';
 import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 
-/**
- * Validate that a clone/pull source uses a safe git transport before it is
- * handed to `git`.
- *
- * Git's remote-helper transports (`ext::`, `fd::`, …) execute arbitrary
- * commands at clone time, `file://`/`git://` are unauthenticated, and a source
- * beginning with `-` is parsed by `git` as a command-line flag (option
- * injection). We therefore allow only:
- *   - `https://`                         (encrypted + authenticated)
- *   - `ssh://` and SCP-style `git@host:path` / `host:path`
- *   - local filesystem paths (callers handle these before reaching `git clone`)
- *
- * Pure string inspection — no filesystem or platform calls — so it behaves
- * identically on Linux, macOS, and Windows.
- *
- * @throws Error if the source uses a disallowed transport.
- */
+/** Validates that a clone/pull source uses a safe transport. Remote-helper transports (`ext::`,
+ * `fd::`) run arbitrary commands at clone time, `file://`/`git://` are unauthenticated, and a
+ * leading `-` is parsed as a flag (option injection). */
 export function assertSafeGitTransport(source: string): void {
   const s = source.trim();
 
@@ -63,15 +44,9 @@ export function assertSafeGitTransport(source: string): void {
   // No scheme -> SCP-style SSH ("git@host:path") or a local path; both safe.
 }
 
-/**
- * Validate a branch name before it is passed to `git push` / `git pull`.
- *
- * A name beginning with `-` is parsed by git as a command-line option
- * (e.g. `--mirror`, `--receive-pack=…`), not a ref. Pure string check —
- * identical on every OS, no spawn.
- *
- * @throws Error if the name is empty or would be interpreted as a git option.
- */
+/** Validates a branch name before `git push`/`git pull`: a leading `-` is parsed as an option
+ * (`--mirror`, `--receive-pack=...`), not a ref. Pure string check; throws if empty or
+ * option-like. */
 export function assertValidBranchName(branch: string): void {
   const b = branch.trim();
   if (!b) {
@@ -86,18 +61,9 @@ export function assertValidBranchName(branch: string): void {
   }
 }
 
-/**
- * `git push origin <branch>` with option-injection hardening:
- *   1. {@link assertValidBranchName} rejects leading `-`
- *   2. `--` ends option parsing so a hostile ref cannot be read as a flag
- *
- * Prefer this over `git.push(remote, branch)` whenever the branch comes from
- * repo state rather than a hard-coded literal.
- *
- * Pass `targetBranch` to push the local `branch` to a differently-named remote
- * branch (`git push origin <branch>:<targetBranch>`) — used when publishing the
- * working tree to a branch other than the checked-out one.
- */
+/** `git push origin <branch>` hardened against option injection: assertValidBranchName rejects a
+ * leading `-` and `--` ends option parsing. Prefer it over `git.push` when the branch comes
+ * from repo state. */
 export async function pushOrigin(
   git: SimpleGit,
   branch: string,
@@ -112,29 +78,17 @@ export async function pushOrigin(
   await git.raw(['push', '--', 'origin', branch]);
 }
 
-/**
- * Whether installing a cloned/pulled repo's `.githooks/` is enabled.
- *
- * Installing hooks wires those scripts into `.git/hooks/`, so `git` EXECUTES
- * them on the next commit/checkout/merge. A repo added via `agents repo add
- * <source>` is untrusted, so auto-installing its hooks is remote code
- * execution. We require explicit opt-in via `AGENTS_ENABLE_GITHOOKS=1`.
- */
+/** Whether installing a cloned repo's `.githooks/` is enabled. Installed hooks run on the next
+ * commit/checkout/merge, and a repo added via `agents repo add` is untrusted, so auto-install
+ * would be remote code execution; explicit opt-in via `AGENTS_ENABLE_GITHOOKS=1`. */
 function githooksEnabled(): boolean {
   const v = process.env.AGENTS_ENABLE_GITHOOKS;
   return v === '1' || v === 'true';
 }
 
-/**
- * Install hooks from `.githooks/` by symlinking each entry into `.git/hooks/`.
- *
- * Gated behind `AGENTS_ENABLE_GITHOOKS=1` (see {@link githooksEnabled}) because
- * the hooks run code on git operations and the source repo may be untrusted.
- *
- * Why symlinks rather than `git config core.hooksPath`: `core.hooksPath` is a
- * known sandbox-escape vector and is blocked by some sandboxed environments
- * (e.g. Claude Code). Symlinks inside `.git/hooks/` run the same way.
- */
+/** Installs `.githooks/` by symlinking each entry into `.git/hooks/`, gated behind
+ * `AGENTS_ENABLE_GITHOOKS=1` since the source may be untrusted. Symlinks rather than
+ * `core.hooksPath`, a known sandbox-escape vector that some sandboxes (e.g. Claude Code) block. */
 function installGithooksSymlinks(repoDir: string): void {
   const githooksDir = path.join(repoDir, '.githooks');
   if (!fs.existsSync(githooksDir)) return;
@@ -176,23 +130,7 @@ interface GitSource {
   ref?: string;
 }
 
-/**
- * Parse a source string into a GitSource object.
- *
- * Supported formats:
- *   gh:owner/repo                    -> https://github.com/owner/repo.git
- *   gh:owner/repo@branch             -> https://github.com/owner/repo.git (ref: branch)
- *   owner/repo                       -> https://github.com/owner/repo.git
- *   owner/repo@branch                -> https://github.com/owner/repo.git (ref: branch)
- *   github.com/owner/repo            -> https://github.com/owner/repo.git
- *   github.com:owner/repo            -> https://github.com/owner/repo.git
- *   github.com:owner/repo.git        -> https://github.com/owner/repo.git
- *   git@github.com:owner/repo.git    -> https://github.com/owner/repo.git
- *   https://github.com/owner/repo    -> https://github.com/owner/repo.git
- *   https://github.com/owner/repo.git -> https://github.com/owner/repo.git
- *   /path/to/local                   -> local path
- *   ./relative/path                  -> local path
- */
+/** Parses a source string into a GitSource. */
 export function parseSource(source: string): GitSource {
   // Split off @ref suffix (but not from URLs with @ in them like git@)
   let ref: string | undefined;
@@ -390,10 +328,9 @@ export async function getRepoCommit(repoPath: string): Promise<string> {
   }
 }
 
-/** Compact, self-contained state of a git repo — branch, short HEAD, and a
- *  dirty flag — for cross-device comparison (RUSH-2027). Synchronous and
- *  best-effort: a non-repo or unreadable path yields `null` fields, never a
- *  throw, so a device's `doctor --json` payload always serializes. */
+/** Compact state of a git repo (branch, short HEAD, dirty flag) for cross-device comparison
+ * (RUSH-2027). Synchronous and best-effort: a non-repo or unreadable path yields `null` fields,
+ * never a throw, so a device's `doctor --json` always serializes. */
 interface RepoStateSnapshot {
   branch: string | null;
   head: string | null;
@@ -432,17 +369,8 @@ export function readRepoState(repoPath: string): RepoStateSnapshot | null {
  *  out to git once per resource. */
 const _snapshotShaCache = new Map<string, string | undefined>();
 
-/**
- * The short HEAD sha of the git repo at `repoRoot` (`git -C <repoRoot>
- * rev-parse --short HEAD`), for provenance — "which commit of this DotAgents
- * repo was this resource/plugin resolved from". `undefined` when `repoRoot`
- * isn't a git repo (or has no commits yet), never a throw.
- *
- * Deliberately synchronous + resolved once and cached: callers (resources.ts,
- * plugins.ts) attach this as a lazy getter on the resolved object, so a
- * consumer that never inspects provenance never pays for the git shell-out —
- * see {@link ResolvedResource.snapshotSha} / {@link DiscoveredPlugin.snapshotSha}.
- */
+/** The short HEAD sha of the repo at `repoRoot`, for provenance of which commit a
+ * resource/plugin resolved from. `undefined` when not a git repo or no commits, never a throw. */
 export function resolveSnapshotSha(repoRoot: string): string | undefined {
   const cached = _snapshotShaCache.get(repoRoot);
   if (cached !== undefined || _snapshotShaCache.has(repoRoot)) return cached;
@@ -479,13 +407,9 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
   }
 }
 
-/**
- * Canonical `host/owner/repo` form of a git remote, transport-agnostic, so the
- * same repo cloned over SSH vs HTTPS compares equal. Strips protocol, any
- * `user@`, a trailing `.git`, and folds the scp-style `host:owner/repo` colon to
- * a slash. Lower-cased. Used to decide whether an existing checkout is "the same
- * repo" as a requested source before adopting it.
- */
+/** Canonical `host/owner/repo` form of a git remote, transport-agnostic so SSH and HTTPS clones
+ * compare equal: strips protocol, `user@` and `.git`, folds the scp-style colon to a slash,
+ * lower-cases. */
 export function canonicalGitRemote(url: string): string {
   const canonical = url
     .trim()
@@ -500,48 +424,25 @@ export function canonicalGitRemote(url: string): string {
   return RENAMED_REMOTE_ALIASES[canonical] ?? canonical;
 }
 
-/**
- * Git remotes that denote the SAME repository under an old and a new name,
- * keyed by canonical `host/owner/repo`. `phnx-labs/.agents-system` was renamed
- * to `phnx-labs/.agents` on GitHub (PHNX-3394); {@link DEFAULT_SYSTEM_REPO}
- * still points at the pre-rename slug (GitHub's own redirect makes that
- * resolve fine), so folding the new name onto it here means both compare equal
- * everywhere remotes are compared: {@link sameGitRemote} (repo adoption),
- * {@link isSystemRepoRemote} (the system-origin check), and the
- * DotAgents-layer classifier in state.ts.
- */
+/** Remotes that denote the same repository under an old and new name, keyed by canonical
+ * `host/owner/repo`: `phnx-labs/.agents-system` was renamed `phnx-labs/.agents` (PHNX-3394)
+ * while DEFAULT_SYSTEM_REPO keeps the old slug (GitHub redirects). */
 const RENAMED_REMOTE_ALIASES: Record<string, string> = {
   'github.com/phnx-labs/.agents': 'github.com/phnx-labs/.agents-system',
 };
 
-/**
- * True when a git remote URL (any transport form: ssh, https, scp-style) points
- * at the system DotAgents repo — {@link DEFAULT_SYSTEM_REPO}'s current slug OR
- * its `phnx-labs/.agents` rename target (PHNX-3394), which
- * {@link canonicalGitRemote} folds onto it via {@link RENAMED_REMOTE_ALIASES}.
- * Pure string check with no git spawn, so it is unit-testable off a live
- * checkout; {@link isSystemRepoOrigin} reads a dir's origin and delegates here.
- */
+/** True when a git remote URL (any transport) points at the system DotAgents repo:
+ * DEFAULT_SYSTEM_REPO's slug or its `phnx-labs/.agents` rename (PHNX-3394), folded by
+ * canonicalGitRemote. */
 export function isSystemRepoRemote(remote: string | null | undefined): boolean {
   if (!remote) return false;
   const c = canonicalGitRemote(remote);
   return c === canonicalGitRemote(`https://github.com/${systemRepoSlug(DEFAULT_SYSTEM_REPO)}`);
 }
 
-/**
- * True when `remote` is the origin the system repo is EXPECTED to track on this
- * machine, honouring an operator's `AGENTS_SYSTEM_REPO` override.
- *
- * The system repo ships hooks that register as shell `command` strings run on
- * every tool event, and its checkout auto-fast-forwards from origin — so a
- * fast-forward from an origin the operator never chose is remote code execution
- * on the next command that loads a system resource (PHNX-2957). This is the
- * pinning predicate every auto-pull of the system repo gates on: pull only when
- * origin is the canonical {@link isSystemRepoRemote} repo, or the exact
- * `AGENTS_SYSTEM_REPO` the operator pointed at instead. Anything else — a
- * repointed origin, a fork, an unset-then-swapped remote — is refused, not
- * pulled. Pure string check; no git spawn.
- */
+/** True when `remote` is the origin the system repo is expected to track, honouring an
+ * `AGENTS_SYSTEM_REPO` override. Every system-repo auto-pull checks this: its hooks run as shell,
+ * so fast-forwarding from a repointed origin or fork is remote code execution (PHNX-2957). */
 export function isExpectedSystemRepoRemote(remote: string | null | undefined): boolean {
   if (!remote) return false;
   const override = process.env.AGENTS_SYSTEM_REPO?.trim();
@@ -574,18 +475,8 @@ type CommitAndPushResult = {
   pushed?: boolean;
 };
 
-/**
- * Commit (if dirty) and push a repo.
- *
- * Clean tree + local ahead of origin still pushes — "nothing to commit" is not
- * "nothing to push". Reports "already up to date" only when `ahead === 0` and
- * there is nothing to commit.
- *
- * `targetBranch` pushes the working tree to a differently-named remote branch
- * (`<current>:<targetBranch>`) and is reported back as the result `branch`, so
- * callers that print a branch-scoped URL reference where the commit actually
- * landed — not the checked-out branch.
- */
+/** Commits (if dirty) and pushes a repo. A clean tree with local ahead of origin still pushes;
+ * "already up to date" is reported only when `ahead === 0` and nothing to commit. */
 export async function commitAndPush(
   repoPath: string,
   message: string,
@@ -678,49 +569,23 @@ export async function hasUncommittedChanges(repoPath: string): Promise<boolean> 
   }
 }
 
-/**
- * Check if a directory is a git repository (**synchronous, root-only**).
- *
- * Tests for a `.git` entry directly under `dir`, so it recognizes only a
- * repository *root* — it returns false inside a subdirectory and for linked
- * worktrees (whose `.git` is a file pointing elsewhere is caught, but a nested
- * cwd is not). This is deliberate: the system-repo sync callers here always
- * pass a known root. For the async, worktree-correct predicate used by teams,
- * see `isGitRepo` in `lib/teams/worktree.ts` (which shells out to
- * `git rev-parse --git-dir`). The two are intentionally **not** merged.
- */
+/** Whether `dir` is a git repository: synchronous and root-only (checks for a `.git` entry
+ * directly under `dir`), so false in a subdirectory. Deliberate: system-repo sync callers pass
+ * a known root. */
 export function isGitRepo(dir: string): boolean {
   return fs.existsSync(path.join(dir, '.git'));
 }
 
-/**
- * Return the absolute path to the git working-tree root containing `dir`.
- *
- * Shells out to `git rev-parse --show-toplevel`, so it resolves correctly from
- * any subdirectory and for linked worktrees (unlike the root-only, synchronous
- * {@link isGitRepo} above). Throws if `dir` is not inside a git repository.
- *
- * Git prints POSIX separators even on Windows (`C:/Users/...`); we fold them to
- * the native separator so the result is a real filesystem path that compares
- * equal to one built with `path.*`. On POSIX this is a no-op.
- */
+/** Absolute path of the git working-tree root containing `dir`, via `git rev-parse
+ * --show-toplevel` (works from subdirectories and linked worktrees). Throws outside a repo. */
 export async function getGitRoot(dir: string): Promise<string> {
   const root = await simpleGit(dir).revparse(['--show-toplevel']);
   return toNativePath(root.trim());
 }
 
-/**
- * Return the absolute path to the **main** working-tree root for `dir`.
- *
- * Unlike {@link getGitRoot}, this stays correct when `dir` is inside a *linked*
- * worktree: `--show-toplevel` there returns the worktree's own path, but the
- * common git dir (`--git-common-dir`) always points at the primary repo's
- * `.git`, whose parent is the main checkout. Throws if `dir` is not in a repo.
- *
- * Git prints POSIX separators even on Windows (`C:/Users/...`); we fold them to
- * the native separator so the result is a real filesystem path that compares
- * equal to one built with `path.*`. On POSIX this is a no-op.
- */
+/** Absolute path of the main working-tree root for `dir`. Unlike getGitRoot it stays correct in
+ * a linked worktree, where `--show-toplevel` returns the worktree's path: `--git-common-dir`
+ * always points at the primary `.git`. Throws outside a repo; */
 export async function getMainRepoRoot(dir: string): Promise<string> {
   const common = await simpleGit(dir).raw(['rev-parse', '--path-format=absolute', '--git-common-dir']);
   return toNativePath(path.dirname(common.trim()));
@@ -734,10 +599,8 @@ export async function initRepo(dir: string): Promise<void> {
   await git.init();
 }
 
-/**
- * Clone a repo into an existing directory (for initializing ~/.agents/).
- * This clones into a temp dir, moves .git, then checks out tracked files.
- */
+/** Clones a repo into an existing directory (for initializing ~/.agents/): clones to a temp dir,
+ * moves .git, then checks out tracked files. */
 export async function cloneIntoExisting(
   source: string,
   targetDir: string
@@ -793,20 +656,9 @@ export async function cloneIntoExisting(
   }
 }
 
-/**
- * Git-back an EXISTING, populated directory from a remote — clone it in place
- * without deleting the local files. Turns a plain `~/.agents` folder (which setup
- * creates as a bare `mkdirSync` and never git-clones — see state.ts ensureAgentsDir)
- * into a real clone of the user's config remote, so `agents repo pull/push` and
- * `agents sync` work on a fresh or Windows machine that never got the manual clone.
- *
- * Unlike cloneIntoExisting (which blindly `checkout .`s over local files), this
- * BACKS UP every tracked file whose local copy differs from the remote — into a
- * sibling `<dir>.pre-adopt-backup/` OUTSIDE the repo so it can't be re-committed —
- * before overwriting it. So a box with local edits to agents.yaml/hooks/rules
- * doesn't silently lose them. Untracked runtime state (.cache/.history/.system,
- * all gitignored) is never touched because `checkout .` only restores tracked paths.
- */
+/** Git-backs an existing populated directory from a remote without deleting local files, so
+ * `agents repo pull/push` and `agents sync` work on a box setup only `mkdirSync`ed. Tracked files
+ * differing locally are first backed up to sibling `<dir>.pre-adopt-backup/` (outside the repo). */
 export async function adoptRepo(
   source: string,
   targetDir: string,
@@ -816,12 +668,9 @@ export async function adoptRepo(
     return { success: false, commit: '', backedUp: [], error: 'Already a git repo — nothing to adopt' };
   }
 
-  // Preserve the user's transport. `parseSource` THROWS for `ssh://` and any
-  // non-github `git@host:` URL, and rewrites `git@github.com:x` → https (breaking
-  // SSH-key-only auth — the common config-repo setup — so a private clone hangs on
-  // a credential prompt). So for an SSH URL, clone it AS-IS and never call
-  // parseSource; for everything else, normalize + reject local via parseSource —
-  // inside the try, so a malformed URL returns a graceful error, not a stack trace.
+  // Preserve the user's transport: `parseSource` throws on `ssh://` and non-github `git@host:`
+  // URLs and rewrites `git@github.com:x` to https, breaking SSH-key auth. Clone SSH URLs as-is;
+  // parse the rest inside the try so a malformed URL returns an error, not a stack trace.
   const isSsh = trimmed.startsWith('git@') || trimmed.startsWith('ssh://');
   const tempDir = path.join(targetDir, '.git-adopt-temp');
   try {
@@ -842,12 +691,7 @@ export async function adoptRepo(
     // Idempotency: clear a stale temp left by an interrupted prior run.
     if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
 
-    // Clone to temp, then move its .git in so the index == remote HEAD.
-    // Fail fast on a missing credential instead of hanging on a prompt: set
-    // GIT_TERMINAL_PROMPT=0 on the inherited env directly rather than via
-    // simple-git's `.env()`, which validates and rejects command-like vars the
-    // harness may set (GIT_EDITOR, PAGER, …) — the child inherits process.env,
-    // and non-interactive git is what we always want in the CLI anyway.
+    // Clone to temp, then move its .git in so index equals remote HEAD.
     process.env.GIT_TERMINAL_PROMPT = '0';
     await simpleGit().clone(cloneUrl, tempDir);
     const repoGit = simpleGit(tempDir);
@@ -890,12 +734,9 @@ export async function adoptRepo(
 }
 
 
-/**
- * Device-local record of the user config repo's remote URL, kept OUTSIDE the git
- * tree so it survives a lost `.git` (`.history/` is gitignored runtime state).
- * This is what lets `agents repo sync user` adopt-in-place a box that was healthy
- * once and later lost its checkout, without the operator re-typing the URL.
- */
+/** Device-local record of the user config repo's remote URL, kept outside the git tree
+ * (`.history/` is gitignored) so it survives a lost `.git`, letting `agents repo sync user`
+ * adopt in place without the operator re-typing the URL. */
 function userRepoRemoteRecordPath(dir: string): string {
   return path.join(dir, '.history', 'user-repo-remote.json');
 }
@@ -913,11 +754,8 @@ export function readOriginUrl(dir: string): string | null {
   }
 }
 
-/**
- * Persist the user repo's remote URL to device-local runtime state so a future
- * adopt-in-place can recover it after a `.git` loss. Best-effort — a write
- * failure never blocks a sync.
- */
+/** Persists the user repo's remote URL to device-local runtime state so a later adopt-in-place
+ * can recover it after a `.git` loss. Best-effort; a write failure never blocks a sync. */
 export function recordUserRepoRemote(dir: string, url: string): void {
   try {
     const file = userRepoRemoteRecordPath(dir);
@@ -928,17 +766,9 @@ export function recordUserRepoRemote(dir: string, url: string): void {
   }
 }
 
-/**
- * Resolve the user config repo's remote URL WITHOUT hardcoding it, for the
- * adopt-in-place self-heal. In priority order:
- *   1. an existing `origin` remote on the dir (a partial repo that kept its
- *      `.git` but drifted) — the same source `agents repo sync` already reads;
- *   2. the `AGENTS_USER_REPO_URL` env override (a fresh/never-cloned box);
- *   3. the device-local record written by a prior healthy sync (a box that lost
- *      its `.git` but kept `.history/` runtime state).
- * Returns null when none is known — the caller then guides the operator to
- * `agents repo pull user <git-url>` instead of crashing.
- */
+/** Resolves the user config repo's remote URL without hardcoding it, in priority order: an
+ * existing `origin` on the dir; the `AGENTS_USER_REPO_URL` env override; the device-local
+ * record from a prior healthy sync. */
 export function resolveUserRepoRemoteUrl(dir: string): string | null {
   const fromOrigin = readOriginUrl(dir);
   if (fromOrigin) return fromOrigin;
@@ -956,19 +786,9 @@ export function resolveUserRepoRemoteUrl(dir: string): string | null {
   return null;
 }
 
-/**
- * Decide whether a local top-level `agents.yaml` is a stale install stub that
- * should be restored from the committed copy, vs. a legitimately customized file
- * that must be preserved.
- *
- * The stub a partial install leaves behind (createDefaultMeta + a few config
- * writes) is strictly SHORTER than the committed config AND missing whole
- * top-level blocks the committed one carries (`config:` / `hooks:` — the fleet
- * browser hub and hook registrations). Device-specific settings live in
- * `devices/<host>/agents.yaml`, never here, so restoring the top-level file is
- * safe. A file that already carries those blocks (or is longer) is treated as a
- * real local edit and left alone — it surfaces as a modified path instead.
- */
+/** Decides whether a local top-level `agents.yaml` is a stale install stub to restore from the
+ * committed copy or a customized file to preserve. A stub is shorter and lacks `config:`/`hooks:`;
+ * device settings live in `devices/<host>/agents.yaml`, so restoring the top-level file is safe. */
 export function isStaleAgentsYamlStub(local: string, committed: string): boolean {
   if (local.trim() === committed.trim()) return false;
   const shorter = local.split('\n').length < committed.split('\n').length;
@@ -985,45 +805,18 @@ interface AdoptInPlaceResult {
   materialized: number;
   /** True when the stale-stub top-level agents.yaml was restored from origin. */
   reconciledAgentsYaml: boolean;
-  /**
-   * When agents.yaml was reconciled, the path the PRE-reconcile local copy was
-   * saved to first — so even a false-positive stub match (e.g. a user who
-   * deliberately removed a whole `hooks:`/`config:` block) is recoverable, never
-   * silently lost.
-   */
+  /** The path the pre-reconcile local agents.yaml was saved to first, so even a false-positive
+   * stub match (e.g. a deliberately removed block) is recoverable. */
   agentsYamlBackup?: string;
-  /**
-   * Tracked paths whose local copy differs from origin/main and was NOT touched
-   * — un-gitignored local edits surfaced rather than silently overwritten.
-   */
+  /** Tracked paths whose local copy differs from origin/main and was not touched: local edits
+   * surfaced rather than silently overwritten. */
   localEdits: string[];
   error?: string;
 }
 
-/**
- * Adopt an EXISTING, non-git (or origin-less) `~/.agents` directory in place —
- * git-back it against its remote WITHOUT re-cloning and WITHOUT destroying the
- * runtime state it carries (`.cache` / `.history` / `scratch` / `.system`, all
- * gitignored). The self-heal for a partial install (PHNX-3301): the current code
- * hard-fails with "Not a git repo", and the only manual fix is a destructive
- * re-clone that wipes that runtime state.
- *
- * Plumbing-only, so it never trips the fleet git-guard (no `reset` / `checkout
- * <branch>` / `stash` / `git config`):
- *   1. `git init` + point HEAD at `main`.
- *   2. `git remote add origin <url>`.
- *   3. `git fetch origin main`.
- *   4. `git update-ref refs/heads/main origin/main`; set upstream to origin/main.
- *   5. `git read-tree origin/main` — index = origin/main, working tree untouched.
- *   6. Materialize only the tracked files MISSING from the working tree
- *      (`checkout-index` on that set) — existing local files are never overwritten.
- *   7. Reconcile the top-level `agents.yaml`: restore it from origin/main only
- *      when the local copy is a stale stub ({@link isStaleAgentsYamlStub}).
- *
- * Idempotent: a second run finds the remote/refs already present and simply
- * re-materializes nothing. Any tracked path with real local edits is returned in
- * `localEdits` (surfaced, never clobbered).
- */
+/** Adopts an existing non-git `~/.agents` in place (PHNX-3301 self-heal): git-backs it without
+ * re-cloning or destroying gitignored runtime state. Plumbing only, so the git-guard never trips;
+ * missing tracked files are materialized, existing ones never overwritten (edits in localEdits). */
 export async function adoptRepoInPlace(
   dir: string,
   remoteUrl: string,
@@ -1037,11 +830,9 @@ export async function adoptRepoInPlace(
   };
   const trimmed = remoteUrl.trim();
   try {
-    // The URL is always a resolved git remote (origin / env / record), never a
-    // `gh:` shorthand — so skip parseSource (which THROWS on ssh:// and rewrites
-    // git@github -> https, breaking SSH-key-only auth). assertSafeGitTransport
-    // still blocks the dangerous transports (ext::, file://, option injection)
-    // while permitting https / ssh / scp-style / a local bare repo.
+    // The URL is always a resolved git remote (origin, env or record), never a `gh:` shorthand, so
+    // skip parseSource (it throws on ssh:// and rewrites git@github to https, breaking SSH-key-only
+    // auth). assertSafeGitTransport still blocks ext::, file:// and option injection.
     assertSafeGitTransport(trimmed);
     if (!fs.existsSync(dir)) {
       return { ...empty, error: `Target directory does not exist: ${dir}` };
@@ -1052,10 +843,8 @@ export async function adoptRepoInPlace(
 
     const git = simpleGit(dir);
 
-    // 1. init + HEAD -> main (idempotent: init on an existing repo is a no-op).
-    //    Set HEAD via symbolic-ref rather than `init -b main` so it works on git
-    //    < 2.28, and lands on `main` even if the repo already initialized as
-    //    `master`.
+    // init + HEAD to main (idempotent). Set HEAD via symbolic-ref rather than `init -b main` so it
+    // works on git < 2.28 and lands on `main` even if the repo was initialized as `master`.
     if (!isGitRepo(dir)) await git.init();
     await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
 
@@ -1073,10 +862,9 @@ export async function adoptRepoInPlace(
     // 5. index = origin/main, working tree untouched.
     await git.raw(['read-tree', 'origin/main']);
 
-    // 6. Materialize only the tracked files MISSING on disk. Passing the explicit
-    //    missing set (never `checkout-index -a`) guarantees no existing local
-    //    file — a stub agents.yaml, a modified rule — is overwritten. Chunked to
-    //    stay under the argv limit on a cold box where most files are missing.
+    // Materialize only the tracked files missing on disk. Passing the explicit missing set (never
+    // `checkout-index -a`) guarantees no existing local file is overwritten. Chunked to stay under
+    // the argv limit on a cold box where most files are missing.
     const tracked = (await git.raw(['ls-files', '-z'])).split('\0').filter(Boolean);
     const missing = tracked.filter((rel) => !fs.existsSync(path.join(dir, rel)));
     for (let i = 0; i < missing.length; i += 500) {
@@ -1092,10 +880,9 @@ export async function adoptRepoInPlace(
       const local = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf-8') : '';
       const committed = await git.raw(['show', 'origin/main:agents.yaml']);
       if (isStaleAgentsYamlStub(local, committed)) {
-        // The stub heuristic can't perfectly distinguish a partial-install stub
-        // from a user who deliberately removed a whole block, so save the local
-        // copy to gitignored runtime state BEFORE restoring — a false positive is
-        // then recoverable and surfaced, never silent data loss.
+        // The stub heuristic cannot perfectly distinguish a partial-install stub from a
+        // deliberately removed block, so save the local copy to gitignored runtime state before
+        // restoring; a false positive is recoverable and surfaced.
         if (local) {
           agentsYamlBackup = path.join(dir, '.history', 'agents.yaml.pre-adopt.bak');
           fs.mkdirSync(path.dirname(agentsYamlBackup), { recursive: true });
@@ -1130,14 +917,8 @@ export async function adoptRepoInPlace(
   }
 }
 
-/**
- * Self-heal entry point for the USER config repo: when `dir` is not a git repo
- * (or is a repo with no `origin`), resolve its remote URL and adopt it in place;
- * otherwise return null (nothing to adopt — the normal sync path runs). Returns a
- * failed result carrying `needsUrl` when the URL cannot be resolved, so the
- * caller can print the `agents repo pull user <git-url>` remediation instead of
- * the old "Not a git repo" crash.
- */
+/** Self-heal entry point for the user config repo: when `dir` is not a repo (or has no
+ * `origin`), resolve its remote URL and adopt in place, else null. */
 export async function adoptUserRepoIfNeeded(
   dir: string,
   opts: { explicitUrl?: string } = {},
@@ -1160,12 +941,9 @@ export async function adoptUserRepoIfNeeded(
   return adoptRepoInPlace(dir, url);
 }
 
-/**
- * Check if the repo's origin points to the system repo — `phnx-labs/.agents-system`
- * or its GitHub rename target `phnx-labs/.agents` (PHNX-3394), across any
- * transport form. Reads the dir's origin and delegates the match to the pure
- * {@link isSystemRepoRemote}.
- */
+/** Checks whether the repo's origin points to the system repo (`phnx-labs/.agents-system` or its
+ * rename `phnx-labs/.agents`, PHNX-3394), any transport. Reads the dir's origin and delegates
+ * to the pure isSystemRepoRemote. */
 export async function isSystemRepoOrigin(dir: string): Promise<boolean> {
   try {
     const git = simpleGit(dir);
@@ -1178,45 +956,21 @@ export async function isSystemRepoOrigin(dir: string): Promise<boolean> {
   }
 }
 
-/**
- * Render an absolute path in ~-relative form with forward slashes, matching the
- * way the rest of the CLI prints home-anchored paths (e.g. `~/.agents/.system`).
- */
+/** Renders an absolute path in ~-relative form with forward slashes, matching how the CLI prints
+ * home-anchored paths (e.g. `~/.agents/.system`). */
 export function displayHomePath(dir: string): string {
   const home = os.homedir();
   const rel = dir.startsWith(home) ? '~' + dir.slice(home.length) : dir;
   return rel.replace(/\\/g, '/');
 }
 
-/**
- * Pull changes in an existing repo.
- * A dirty working tree no longer refuses outright: a fast-forward that touches
- * no uncommitted path still runs (see `dirtyTreeRefusal`). It refuses when the
- * branch has local commits to rebase, or when an incoming path is also dirty.
- *
- * Strategy (RUSH-2282):
- *   1. Fetch, then compare HEAD to the resolved tracking ref.
- *   2. Clean behind-only (HEAD is an ancestor of tracking) → `merge --ff-only`
- *      against the tracking ref. Never re-enter `git pull` after a bare fetch —
- *      multi-entry FETCH_HEAD (concurrent fetch, multi-branch remote) makes
- *      `git pull --rebase` die with "Cannot rebase onto multiple branches" even
- *      when the checkout is a pure fast-forward.
- *   3. Genuinely diverged (local commits not on tracking) → `rebase` onto the
- *      tracking ref (same outcome as {@link syncRepoGit}, without a second pull).
- */
+/** Pulls changes in an existing repo. A dirty tree no longer refuses outright: a fast-forward
+ * touching no uncommitted path still runs (`dirtyTreeRefusal`). RUSH-2282: after fetch, use
+ * `merge --ff-only` or rebase onto the tracking ref; never `git pull` (multi-entry FETCH_HEAD). */
 export interface PullRepoOptions {
-  /**
-   * `'default-branch-fast-forward'` — strict mode for `projects pull`:
-   *   - Blocks immediately if the tree is dirty (no remote read needed).
-   *   - Fetches origin, resolves the remote default branch, and refuses if the
-   *     current branch is not the remote default.
-   *   - Refuses if HEAD is ahead of the upstream (local commits not on remote).
-   *   - Fast-forwards only (`merge --ff-only`). NEVER rebases.
-   *   - NEVER installs git hook symlinks (read-only model path).
-   *
-   * `'preserve-local'` (default) — the existing behavior: tolerates dirty trees
-   * when the incoming diff does not collide, and rebases a diverged branch.
-   */
+  /** `'default-branch-fast-forward'` is strict mode for `projects pull`: blocks on a dirty tree,
+   * refuses unless the current branch is the remote default or HEAD is ahead of upstream,
+   * fast-forwards only (never rebases), and never installs hook symlinks. */
   mode?: 'preserve-local' | 'default-branch-fast-forward';
 }
 
@@ -1228,14 +982,9 @@ export async function pullRepo(
   try {
     const git = simpleGit(dir);
 
-    // A rebase left in progress by an earlier run must be reported as itself.
-    // Without this the dirty-tree guard below claims "Blocked by local changes",
-    // which is both wrong and actively harmful advice mid-rebase on a detached
-    // HEAD.
-    // Ask git where the state dirs live rather than assuming `<dir>/.git/` is a
-    // directory. In a worktree `.git` is a FILE containing `gitdir: <path>`, so
-    // path.join(dir, '.git', 'rebase-merge') can never exist and the check would
-    // silently never fire. `rev-parse --git-path` resolves both layouts.
+    // A rebase left in progress by an earlier run must be reported as itself; otherwise the
+    // dirty-tree guard says 'Blocked by local changes'. Use `rev-parse --git-path`: in a worktree
+    // `.git` is a file, so joining `.git/rebase-merge` would never exist.
     const gitPath = async (name: string): Promise<string | null> => {
       try {
         const raw = (await git.raw(['rev-parse', '--git-path', name])).trim();
@@ -1275,12 +1024,8 @@ export async function pullRepo(
         error: `Blocked: dirty working tree. Commit or discard local changes before pulling.\n\n  cd ${displayHomePath(dir)} && git status`,
       };
     }
-    // A dirty tree is not decided here: whether a fast-forward is safe depends
-    // on what is actually incoming, and that needs a fetched upstream ref. The
-    // gate therefore sits just before the integrate step below. The exception is
-    // a repo with no remote at all — there is nothing to fast-forward from, so
-    // the dirt is the whole answer and the resolution below would only fail
-    // with a less useful message.
+    // A dirty tree is not decided here: whether a fast-forward is safe depends on the incoming
+    // changes, which needs a fetched upstream ref, so the check sits before the integrate step.
     if (!strict && isDirty && (await git.getRemotes()).length === 0) {
       return {
         success: false,
@@ -1291,11 +1036,9 @@ export async function pullRepo(
 
     const branch = status.current || 'main';
 
-    // Resolve the upstream ref to fast-forward against.
-    // Strict mode: always fetch origin and resolve its default branch — then
-    // verify the current branch IS the remote default (refuse otherwise).
-    // Preserve-local mode: prefer the local branch's tracking config; only
-    // fetch when no tracking is set.
+    // Resolve the upstream ref. Strict mode always fetches origin, resolves its default branch and
+    // refuses if the current branch is not it. Preserve-local prefers the branch's tracking config
+    // and fetches only when none is set.
     let tracking = status.tracking;
     if (strict || !tracking) {
       try {
@@ -1321,22 +1064,18 @@ export async function pullRepo(
       }
     }
 
-    // Split the remote-tracking ref (<remote>/<branch>) so callers/logs can name
-    // the remote. Branch names may contain slashes, so split on the FIRST
-    // separator only. The integrate step below uses `tracking` directly (not a
-    // second `git pull <remote> <branch>`) so a multi-entry FETCH_HEAD cannot
-    // turn a clean fast-forward into "Cannot rebase onto multiple branches".
+    // Split the tracking ref (`<remote>/<branch>`) on the first separator only, since branch names
+    // may contain slashes. The integrate step uses `tracking` directly, not a second `git pull
+    // <remote> <branch>`, so a multi-entry FETCH_HEAD cannot break a clean fast-forward.
     const sep = tracking.indexOf('/');
     const remoteBranch = sep > 0 ? tracking.slice(sep + 1) : branch;
     // Keep branch-name validation on the ref we would have passed to pull —
     // rejects traversal / flag-smuggling shapes before any integrate command.
     assertValidBranchName(remoteBranch);
 
-    // Bare fetch: updates every remote, so the revparse below sees a fresh ref
-    // whichever one the branch tracks. Deliberately argument-less — simple-git's
-    // fetchTask only forwards a remote when BOTH remote and branch are passed,
-    // so `fetch(remoteName)` would silently drop the argument and do exactly
-    // this anyway. Saying so beats an inert argument that reads as targeted.
+    // Bare fetch updates every remote so the revparse sees a fresh ref whichever the branch tracks.
+    // Deliberately argument-less: simple-git's fetchTask forwards a remote only when remote and
+    // branch are both passed, so `fetch(remoteName)` would drop it anyway.
     await git.fetch();
 
     const localRef = await git.revparse(['HEAD']);
@@ -1354,10 +1093,9 @@ export async function pullRepo(
       };
     }
 
-    // Behind-only when tracking has commits we lack AND we have none of our own
-    // on top. Use rev-list counts — simple-git does not reject on the exit-1
-    // that `merge-base --is-ancestor` returns for a non-ancestor, so a try/catch
-    // around that call would always report "can ff" (RUSH-2282).
+    // Behind-only means tracking has commits we lack and we have none on top. Use rev-list counts:
+    // simple-git does not reject on the exit 1 of `merge-base --is-ancestor` for a non-ancestor, so
+    // a try/catch around it would always say "can ff" (RUSH-2282).
     const aheadCount = parseInt(
       (await git.raw(['rev-list', '--count', `${tracking}..HEAD`])).trim(),
       10,
@@ -1366,11 +1104,9 @@ export async function pullRepo(
       (await git.raw(['rev-list', '--count', `HEAD..${tracking}`])).trim(),
       10,
     );
-    // Both counts are the ONLY inputs to the fast-forward decision, so a count
-    // we cannot read is a refusal, not a reason to guess. Fail here rather than
-    // downstream: an unreadable count used to fall through to the rebase arm in
-    // preserve-local mode, and to a "HEAD diverged" message in strict mode that
-    // named the wrong cause.
+    // Both counts are the only inputs to the fast-forward decision, so an unreadable count is a
+    // refusal, not a guess. Failing here avoids the old fall-through to the rebase arm
+    // (preserve-local) or a "HEAD diverged" message naming the wrong cause (strict).
     if (!Number.isFinite(aheadCount) || !Number.isFinite(behindCount)) {
       return {
         success: false,
@@ -1410,26 +1146,15 @@ export async function pullRepo(
         // Integrate the already-fetched tracking ref. No network, no FETCH_HEAD.
         await git.raw(['merge', '--ff-only', tracking]);
       } else {
-        // Diverged (or local-only commits). Rebase onto the tracking tip —
-        // same outcome as `git pull --rebase <remote> <branch>` without
-        // re-fetching or consulting FETCH_HEAD.
-        //
-        // PRESERVE-LOCAL ONLY — strict mode can never reach this arm, so the
-        // fleet pull never rewrites history. Strict has already returned for
-        // every case that leaves `canFastForward` false: an identical local and
-        // remote ref, `aheadCount > 0` (which is also what "diverged" means),
-        // and a count that would not parse. That leaves `aheadCount === 0` with
-        // a differing ref, i.e. `behindCount > 0` — a fast-forward. Keep those
-        // three returns above intact if you change this.
+        // Diverged or local-only commits: rebase onto the tracking tip without re-fetching.
+        // Preserve-local only: strict mode never reaches here, so the fleet pull never rewrites
+        // history. Keep the three strict returns above intact if you change this.
         await git.raw(['rebase', tracking]);
       }
     } catch (err) {
-      // Abort so the tree is restored, matching the atomicity --ff-only gave us.
-      // Without this a conflict leaves the repo detached, mid-rebase, with
-      // conflict markers written into live config (this repo is ~/.agents —
-      // agents.yaml and AGENTS.md are in it), and every later pull misreports
-      // the cause. `agents sync` reaches this path unattended across the fleet,
-      // so a wedged checkout would be worse than the bug this fixes.
+      // Abort so the tree is restored, matching the atomicity --ff-only gave. Otherwise a conflict
+      // leaves the repo detached mid-rebase with conflict markers in live config (agents.yaml,
+      // AGENTS.md) and later pulls misreport the cause;
       await git.raw(['rebase', '--abort']).catch(() => { /* not mid-rebase */ });
       const verb = canFastForward ? 'Fast-forward' : 'Rebase';
       return {
@@ -1454,17 +1179,9 @@ export async function pullRepo(
   }
 }
 
-/**
- * Every repo-relative path a status reports as locally touched, in one set.
- *
- * Reads `status.files`, which `simple-git` documents as "all files" and which is
- * the same source `isClean()` is computed from — so this set and the decision to
- * treat the tree as dirty can never disagree. The per-category arrays
- * (`modified`, `staged`, `not_added`, …) are projections of that list; unioning
- * them by hand means a category nobody thought of contributes nothing. `from`
- * carries a rename's original path, and the incoming side may collide with
- * either end.
- */
+/** Every repo-relative path a status reports as locally touched, from `status.files` (the source
+ * `isClean()` uses, so the set and the dirty decision cannot disagree). Hand-unioning the
+ * per-category arrays misses categories nobody thought of. */
 function dirtyPathSet(status: { files: Array<{ path: string; from?: string }> }): Set<string> {
   const out = new Set<string>();
   for (const f of status.files || []) {
@@ -1474,27 +1191,9 @@ function dirtyPathSet(status: { files: Array<{ path: string; from?: string }> })
   return out;
 }
 
-/**
- * Why a dirty working tree must NOT fast-forward to `upstreamRef` — or `null`
- * when it safely can.
- *
- * The single home for that decision: `syncRepoGit` and `pullRepo` both integrate
- * upstream and both meet dirty trees, and two copies of this rule would drift
- * into two different answers for one question. Refusing outright is the thing
- * being replaced — it strands merged changes behind unrelated local files —
- * so the rule is narrow and stated once:
- *
- *   - local commits ahead of upstream → refuse (they need a rebase, which
- *     requires a clean tree);
- *   - an incoming path that is also dirty → refuse, and name it;
- *   - otherwise the fast-forward touches nothing the author is holding.
- *
- * `-z` on the diff because `git diff --name-only` C-quotes paths containing
- * unicode or control characters — `café.txt` comes back as `"caf\303\251.txt"`,
- * while `status.files` reports it raw. Without `-z` the two sides are in
- * different encodings and a collision on such a path silently misses. (A plain
- * space does NOT trigger quoting; `my file.txt` is emitted as-is either way.)
- */
+/** Why a dirty tree must not fast-forward to `upstreamRef`, or null when it safely can. The single
+ * home of the rule for `syncRepoGit` and `pullRepo`. Refuse on local commits ahead or a dirty
+ * incoming path. `-z` on the diff because it C-quotes unicode paths while status.files does not. */
 async function dirtyTreeRefusal(
   git: SimpleGit,
   status: { files: Array<{ path: string; from?: string }> },
@@ -1515,12 +1214,9 @@ async function dirtyTreeRefusal(
     .filter(Boolean);
   const collisions = incoming.filter((p) => dirty.has(p));
   if (collisions.length > 0) {
-    // Central agents.yaml is AUTHORITATIVE (account labels/rows), not regenerable,
-    // and a dirty copy always equals serializeCentral(current meta) — so no
-    // byte check can tell a stranded real edit from a stale one. Refuse rather
-    // than discard: it is data-safe and self-heals, because commit-on-write
-    // (lib/state.ts) and the daemon's publish tick both commit agents.yaml,
-    // after which the very next pull succeeds normally. See PHNX-3968.
+    // Central agents.yaml is authoritative and not regenerable; a dirty copy equals
+    // serializeCentral(meta), so no byte check tells a stranded edit from a stale one. Refuse,
+    // never discard: commit-on-write and daemon publish commit it, so next pull works (PHNX-3968).
     const shown = collisions.slice(0, 5).join(', ');
     const more = collisions.length > 5 ? ` (+${collisions.length - 5} more)` : '';
     return `incoming changes touch uncommitted paths: ${shown}${more}`;
@@ -1528,32 +1224,9 @@ async function dirtyTreeRefusal(
   return null;
 }
 
-/**
- * Rebase a repo onto its remote, optionally pushing local commits back up.
- *
- * The one-repo counterpart to `pullRepo` used by `agents sync <repo>`:
- *   1. `git fetch origin`.
- *   2. Clean tree → `git pull --rebase origin <branch>`: rebase, not merge, so a
- *      local commit lands cleanly on top of upstream with no merge bubble.
- *   3. Dirty tree → fast-forward instead, but only when that is provably safe:
- *      no local commits ahead of upstream, and no incoming path collides with a
- *      dirty one. Otherwise refuse, naming the paths that collided.
- *   4. When `push` is set, `git push origin <branch>` to send local commits up.
- *
- * The branch is read from the repo's current HEAD (falls back to `main`) rather
- * than hardcoded. System repos pass `push: false` — they are pull-only mirrors
- * of the npm-shipped upstream.
- *
- * Why step 3 exists: refusing on *any* dirt strands merged changes indefinitely.
- * A DotAgents repo accumulates unrelated local state — a modified `agents.yaml`,
- * a session's scratch file, a machine-local dotfile — and under the old rule one
- * such file froze that box's layer forever, silently. Measured 2026-08-10: a
- * merged fix could not reach three of three boxes, each blocked by files the
- * incoming commits never touched. A `--ff-only` merge is the safe primitive
- * here: it cannot rewrite local commits, and git itself aborts rather than
- * overwrite a modified file, so the path check is belt-and-braces, not the only
- * guard.
- */
+/** Rebases a repo onto its remote, optionally pushing: the one-repo counterpart to `pullRepo`.
+ * Clean tree: `git pull --rebase`. Dirty tree: `--ff-only` only with no local commits ahead and no
+ * incoming path colliding with a dirty one, else refuse. System repos pass push: false. */
 export async function syncRepoGit(
   dir: string,
   opts: { push: boolean },
@@ -1601,10 +1274,7 @@ export async function syncRepoGit(
   }
 }
 
-/**
- * Get git status for sync display.
- * Returns files categorized by their status relative to HEAD.
- */
+/** Git status for sync display: files categorized by status relative to HEAD. */
 interface GitSyncStatus {
   /** Tracked and unchanged files. */
   synced: string[];
@@ -1710,11 +1380,8 @@ export async function getTrackedFiles(dir: string, subdir?: string): Promise<str
   }
 }
 
-/**
- * Try to auto-pull a git repo if it's clean and has a remote.
- * Uses --ff-only for safety (fails if diverged instead of creating merge commits).
- * Returns silently on success, returns error message on failure.
- */
+/** Auto-pulls a git repo if it is clean and has a remote, using --ff-only so divergence fails
+ * instead of creating merge commits. Silent on success; returns an error message on failure. */
 async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error?: string }> {
   // Must be a git repo
   if (!isGitRepo(dir)) {
@@ -1774,17 +1441,9 @@ interface SystemRepoPullResult {
   actualRemote?: string;
 }
 
-/**
- * Auto-pull the system repo ONLY after verifying its origin is the expected
- * system remote (PHNX-2957). The system repo ships hooks that run as shell on
- * tool events, so fast-forwarding it from an unexpected/repointed origin is
- * remote code execution. An origin that fails {@link isExpectedSystemRepoRemote}
- * is REFUSED loud (`refused: true`), never pulled — the canonical system repo
- * (or an operator's `AGENTS_SYSTEM_REPO`) still fast-forwards exactly as before.
- *
- * A system dir with no origin at all is a plain no-op (`pulled: false`), not a
- * refusal — there is nothing to pull from and nothing to distrust.
- */
+/** Auto-pulls the system repo only after verifying its origin (PHNX-2957): its hooks run as shell,
+ * so fast-forwarding from a repointed origin is remote code execution. A bad origin is refused
+ * loud (`refused: true`); no origin at all is a plain no-op (`pulled: false`). */
 export async function tryAutoPullSystemRepo(dir: string): Promise<SystemRepoPullResult> {
   if (!isGitRepo(dir)) return { pulled: false };
 
@@ -1806,16 +1465,9 @@ export async function tryAutoPullSystemRepo(dir: string): Promise<SystemRepoPull
   return { ...res, actualRemote: remote };
 }
 
-/**
- * How many commits `dir`'s checked-out branch is behind its upstream, read from
- * the LAST-FETCHED remote-tracking ref — no network call. Returns null when the
- * dir is not a git repo, has no upstream configured, or git errors.
- *
- * Used by `agents doctor` to flag a source layer (`~/.agents`, `~/.agents/.system`)
- * that is reconciled against stale truth. Staleness relative to origin is a
- * background auto-pull concern; this surfaces the same fact synchronously in the
- * per-version verdict.
- */
+/** How many commits `dir`'s branch is behind its upstream, read from the last-fetched tracking
+ * ref with no network call. Null if not a repo, no upstream, or git errors. Used by `agents
+ * doctor` to flag a source layer reconciled against stale truth. */
 export function commitsBehindUpstream(dir: string): { behind: number; branch: string } | null {
   if (!isGitRepo(dir)) return null;
   const run = (args: string[]): string | null => {

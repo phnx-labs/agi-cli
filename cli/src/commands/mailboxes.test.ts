@@ -1,12 +1,6 @@
-/**
- * Tests for the `agents mailboxes` command surface (RUSH-1737).
- *
- * Real behavior only: boxes are seeded with the actual `enqueue` spool writer
- * into a temp HOME (state.ts derives the mailbox root from HOME at import
- * time, so HOME must be set before the module graph loads), and every view is
- * driven through real Commander parsing. --watch is stopped by invoking the
- * SIGINT handler the action installs — the same path ⌃C takes in production.
- */
+/** Tests for `agents mailboxes` (RUSH-1737), real behavior only: boxes seeded via the real
+ * `enqueue` writer in a temp HOME, views driven through real Commander parsing, and --watch
+ * stopped via the SIGINT handler the action installs. */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -106,11 +100,9 @@ describe('agents mailboxes', () => {
     try {
       fs.rmSync(TEST_HOME, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch (err) {
-      // Windows CI: a just-released handle on the spool (the aborted watch
-      // poll, or Defender scanning the tree) can outlive even the rm retries
-      // and EPERM the whole suite. Cleanup here is hygiene, not a behavior
-      // assertion — a leaked temp dir on an ephemeral runner is harmless, a
-      // false-negative suite is not. Stay strict on posix.
+      // Windows CI: a just-released handle on the spool (aborted watch poll, Defender) can outlive
+      // the rm retries and EPERM the suite. Cleanup is hygiene, not an assertion, so tolerate it
+      // there; stay strict on posix.
       if (process.platform !== 'win32') throw err;
     }
   });

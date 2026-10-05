@@ -1,13 +1,6 @@
-/**
- * daemon-ticks.ts holds the daemon's account-state tick bodies (usage + fleet
- * auth), which the supervised `AccountStateDaemonService` runs on its tick in-process.
- * `isFreshFleetAuthSnapshot` is the freshness predicate the on-demand fleet auth
- * refresh uses to decide whether a recent daemon publication already satisfies a
- * request or a fresh provider probe is needed — the risky bit worth pinning.
- *
- * `runActiveSessionsWarmTick` is the continuous journal writer `sessions watch`
- * depends on (RUSH-2484). Without it Factory freezes after the initial snapshot.
- */
+/** Tests daemon-ticks.ts (usage + fleet auth bodies run by `AccountStateDaemonService`).
+ * `isFreshFleetAuthSnapshot` decides whether a recent publication satisfies an on-demand refresh.
+ * `runActiveSessionsWarmTick` is the journal writer `sessions watch` depends on (RUSH-2484). */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -67,10 +60,9 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
     expect(isCachedFleetAuthProbeFresh([row(now - 60_000), row(now - (AUTH_PROBE_MAX_AGE_MS + 1), '1.1.0')], now, installed('1.0.0', '1.1.0'))).toBe(false);
   });
 
-  // force=true is the on-demand `agents devices ping [--strict]` contract: it must
-  // NEVER reuse the throttled cached verdict, or --strict silently passes a revoked
-  // account whose cache row is still inside the 20-minute window. Both runFleetPing
-  // call sites pass force:true for exactly this reason (RUSH-2998).
+  // force=true is the on-demand `agents devices ping [--strict]` contract and must never reuse the
+  // throttled cached verdict, or --strict silently passes a revoked account still inside the
+  // 20-minute window (RUSH-2998).
   it('force always re-probes, even against a perfectly fresh cache', () => {
     const freshCache = [row(now - 60_000)];
     expect(shouldReuseCachedAuthProbe(false, freshCache, now, only1_0_0)).toBe(true);  // periodic tick reuses
@@ -83,14 +75,9 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
     expect(shouldReuseCachedAuthProbe(false, [row(now - (AUTH_PROBE_MAX_AGE_MS + 1))], now, only1_0_0)).toBe(false);
   });
 
-  // PHNX-4051. The cache holds a row per (agent, version) home ever probed, and
-  // nothing deletes one when its version is uninstalled — the probe only walks
-  // homes that EXIST, so that row's checkedAt freezes. Counting it made this
-  // predicate permanently false on yosemite-m0 (rows dated Sep 2 / Sep 6 for
-  // uninstalled Claude versions), so the 3-minute tick live-probed
-  // /api/oauth/usage for every account forever, re-arming the per-account 429
-  // park (usage-backoff/) that keeps the usage refresher stopped — the exact
-  // RUSH-2998 failure the 20-minute window prevents.
+  // PHNX-4051: the cache keeps a row per probed (agent, version) home and nothing deletes one on
+  // uninstall, so its checkedAt freezes. Counting it made the predicate permanently false, so the
+  // tick live-probed /api/oauth/usage forever, re-arming the 429 park (RUSH-2998).
   describe('orphan rows for uninstalled versions (PHNX-4051)', () => {
     const weeksOld = now - 9 * 24 * 60 * 60_000;
 
@@ -117,11 +104,9 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
   });
 });
 
-/**
- * PHNX-4051 — the other half: an orphan must also LEAVE the cache, or `agents
- * view` and fleet status keep rendering a verdict for a version that is gone.
- * Real cache file, real lock, hermetic HOME (tests/setup.ts).
- */
+/** PHNX-4051, other half: an orphan must also leave the cache, or `agents view` and fleet status
+ * keep rendering a verdict for a gone version. Real cache file and lock, hermetic HOME
+ * (tests/setup.ts). */
 describe('writeFleetAuthRows prunes this host\'s orphan rows (PHNX-4051)', () => {
   const health = (checkedAt: number) => ({ verdict: 'live' as const, checkedAt });
   const probed = (version: string, checkedAt: number): AuthProbeRow => ({ agent: 'claude', version, health: health(checkedAt) });
@@ -187,10 +172,9 @@ describe('runActiveSessionsWarmTick', () => {
   });
 
   it('gathers exactly ONCE per tick', async () => {
-    // The tick is gather -> fold the timelines -> publish (PHNX-3939). The fold
-    // needs the rows, and the publish must not re-gather them: a second live
-    // gather is ~9s of `ps`/`lsof` on this fleet, and it would also mean the
-    // published row was folded from a different snapshot than the one it carries.
+    // The tick is gather, fold timelines, publish (PHNX-3939). The publish must not re-gather: a
+    // second live gather is ~9s of `ps`/`lsof` and would fold the published row from a different
+    // snapshot than it carries.
     noteActiveSessionsJournalReader();
     let gathers = 0;
     await runActiveSessionsWarmTick({ gather: async () => { gathers++; return []; } });

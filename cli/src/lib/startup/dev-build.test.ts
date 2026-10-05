@@ -25,10 +25,9 @@ describe('detectDevBuild', () => {
   });
 
   it('Homebrew-node npm-global install is NOT a dev build (the bug)', () => {
-    // Reproduce the real layout: a brew prefix that is itself a git repo, with
-    // `agents` symlinked from <prefix>/bin into the installed package under
-    // <prefix>/lib/node_modules. The naive dirname(dirname(symlink)) walked to
-    // <prefix>, saw <prefix>/.git, and false-positived as a dev build.
+    // Reproduce the real layout: a brew prefix that is itself a git repo, with `agents` symlinked
+    // from <prefix>/bin into the installed package under <prefix>/lib/node_modules. The naive
+    // dirname(dirname(symlink)) reached <prefix>, saw .git, and false-positived as a dev build.
     const prefix = mkTmp();
     fs.mkdirSync(path.join(prefix, '.git')); // Homebrew's own repo
     const pkgDir = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
@@ -71,10 +70,9 @@ describe('detectDevBuild', () => {
   });
 
   it('a monorepo source checkout (package nested under cli) IS a dev build', () => {
-    // This repo's actual layout: `.git` lives at the true repo root, one level
-    // above the package (`cli`), not at the package root itself. Both
-    // running tsx from `cli/src/index.ts` and a built `cli/dist/index.js`
-    // must still be recognized as a dev build (RUSH-2749).
+    // This repo's layout: `.git` is at the true repo root, one level above the package (`cli`).
+    // Both tsx from `cli/src/index.ts` and a built `cli/dist/index.js` must still be recognized as
+    // a dev build (RUSH-2749).
     const repoRoot = mkTmp();
     fs.mkdirSync(path.join(repoRoot, '.git'));
     const packageRoot = path.join(repoRoot, 'apps', 'cli');

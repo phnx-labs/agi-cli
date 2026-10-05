@@ -1,23 +1,6 @@
-/**
- * Cost tiers for model selection: cheap / default / best / ultra.
- *
- * An orchestrating agent picks a teammate's model by a stable, cost-first tier
- * instead of a concrete id that churns per release and varies per harness. A
- * tier resolves, per (harness, installed version), to a model that version
- * actually ships — so `--model cheap|default|best|ultra` works on `agents run`
- * and `agents teams add` alike, funnelling through `resolveModel()`.
- *
- * Ranking signal, in priority (see cli/docs — model ranking mechanisms):
- *   1. Provider-declared lineup — the catalog's own family names / descriptions
- *      (opus/sonnet/haiku/fable; Codex "frontier / balanced / fast"). Most
- *      drift-proof: the provider tells us its own ranking.
- *   2. Per-token price (prices.json) — cross-check + the $/Mtok display + budget.
- *   3. Size-token heuristic (nano|mini|lite|flash cheaper; pro|max|opus dearer).
- *   4. Reasoning effort for single-model harnesses (Grok) — tiers steer --effort.
- *
- * The mechanism differs per provider and drifts across versions, so tiers always
- * resolve against the installed version's own catalog.
- */
+/** Cost tiers for model selection: cheap / default / best / ultra. A stable tier replaces a
+ * per-release id and resolves per (harness, installed version) via `resolveModel()`. Ranking:
+ * provider lineup, per-token price, size-token heuristic, reasoning effort (Grok). */
 import type { AgentId } from './types.js';
 import { getModelCatalog, type ModelInfo } from './models.js';
 import { getModelPricing } from './pricing/index.js';
@@ -47,12 +30,9 @@ export interface TierResolution {
   source?: 'auto' | 'override' | 'curated';
 }
 
-/**
- * Curated tier ladders for harnesses the auto-ranker can't order from names/price
- * (subscription harnesses with no price signal). Each rung is `[tier, matcher]` in
- * cheap -> best order; the newest catalog id matching each rung fills that tier,
- * missing tiers clamp. Extend this table rather than adding per-harness branches.
- */
+/** Curated tier ladders for harnesses the auto-ranker can't order (subscription harnesses with no
+ * price signal). Each rung is `[tier, matcher]` cheap to best; the newest matching catalog id
+ * fills the tier, missing tiers clamp. Extend this table, not per-harness branches. */
 const CURATED_LADDERS: Partial<Record<AgentId, Array<{ tier: ModelTier; match: RegExp }>>> = {
   // Kimi: K2.7 Highspeed < K2.7 Coding < K3 (the 1M-context default; k3-256k folds
   // into K3). No ultra. The name heuristic can't tell K3 > K2.7, so curate it.
@@ -132,12 +112,9 @@ interface Ranked {
   price: number | null;
 }
 
-/**
- * Compare two concrete ids so the newest wins within a family. Strips a trailing
- * date stamp (`-20251101`), rebuild marker (`-v1`), and `-fast` first, so a dated
- * `opus-4-5-20251101` doesn't out-rank the genuinely newer `opus-4-8` (a bare
- * `compareVersions` reads the date as a huge version component).
- */
+/** Compares two concrete ids so the newest wins within a family. Strips a trailing date
+ * (`-20251101`), rebuild marker (`-v1`) and `-fast` first, so a dated `opus-4-5-20251101` doesn't
+ * out-rank `opus-4-8` (compareVersions reads the date as a huge version). */
 function cleanForCompare(id: string): string {
   return id
     .replace(/-\d{8}(?=($|-))/, '')
@@ -149,12 +126,9 @@ function versionSegments(id: string): number[] {
   const m = cleanForCompare(id).match(/\d+/g);
   return m ? m.map((n) => parseInt(n, 10)) : [];
 }
-/**
- * Newest concrete id within a family wins. `compareVersions` only splits on `.`,
- * so it degenerates to a single `[0]` segment for a dash-separated model id and
- * mis-ranks e.g. `claude-sonnet-5` below `claude-sonnet-4-6`. Compare the numeric
- * segments directly instead.
- */
+/** Newest concrete id within a family wins. `compareVersions` only splits on `.`, so dash-separated
+ * ids mis-rank (`claude-sonnet-5` below `claude-sonnet-4-6`); compare the numeric segments
+ * directly. */
 function newer(a: string, b: string): number {
   const A = versionSegments(a);
   const B = versionSegments(b);
@@ -165,13 +139,9 @@ function newer(a: string, b: string): number {
   return 0;
 }
 
-/**
- * Rank a harness's catalog models cheapest -> dearest and collapse variants of
- * one model to a single rung (keeping the newest concrete id). Strategy depends
- * on the harness class: aggregator (Cursor) ranks by price of the normalized
- * base id; single-provider harnesses rank by the provider lineup with price and
- * size tokens as fallbacks.
- */
+/** Ranks a harness's catalog cheapest to dearest, collapsing variants of one model to a rung
+ * (newest id). Aggregators (Cursor) rank by price of the normalized base id; single-provider
+ * harnesses by provider lineup, with price and size tokens as fallbacks. */
 function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
   const usable = models.filter((m) => !PSEUDO.test(m.id));
   // Cursor and Pi (Oh My Pi) are cross-provider aggregators: their ids are
@@ -202,10 +172,9 @@ function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
         family = `desc-${desc}-${baseId.replace(/[0-9].*$/, '')}`;
       } else if (price != null) {
         rank = 10 + price * 1e6;
-        // Collapse only true re-releases of ONE model (same base id, differing
-        // date/rebuild suffix). Keying on price would merge two DIFFERENT models
-        // that happen to cost the same (e.g. gpt-5.5 and gpt-5.6-sol), dropping
-        // one from every tier.
+        // Collapse only true re-releases of ONE model (same base id, differing date/rebuild
+        // suffix). Keying on price would merge different models of equal cost (gpt-5.5 and
+        // gpt-5.6-sol) and drop one from every tier.
         family = cleanForCompare(baseId);
       } else {
         rank = 20 + sizeTokenRank(lc);
@@ -275,10 +244,8 @@ function tierizeFromLadder(
   return map;
 }
 
-/**
- * Resolve all four tiers for an (agent, version) -- what `agents models` prints and
- * `resolveTier` indexes. Precedence: user override -> curated ladder / auto-ranking.
- */
+/** Resolves all four tiers for an (agent, version), what `agents models` prints and `resolveTier`
+ * indexes. Precedence: user override, then curated ladder / auto-ranking. */
 export function resolveTierMap(agent: AgentId, version: string): Record<ModelTier, TierResolution> {
   let base: Record<ModelTier, TierResolution>;
   let catalogIds: Set<string> | null;
@@ -304,12 +271,9 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
   return applyTierOverrides(overrides, `${agent}@${version}`, catalogIds, base);
 }
 
-/**
- * Apply user overrides on top of the auto/curated map. Pure (takes the resolved
- * override map, no config lookup) so it is directly testable. An overridden id is
- * used only when the version actually ships it (or when there is no catalog to
- * check, e.g. Droid); otherwise the tier keeps its base value with a note.
- */
+/** Applies user overrides over the auto/curated map. Pure (takes the resolved override map). An
+ * overridden id is used only when the version ships it (or there is no catalog to check, e.g.
+ * Droid); otherwise the tier keeps its base value with a note. */
 export function applyTierOverrides(
   overrides: Partial<Record<ModelTier, string>>,
   label: string,
@@ -330,10 +294,8 @@ export function applyTierOverrides(
   return out;
 }
 
-/**
- * Map a harness's catalog models onto the four tiers. Pure (no catalog lookup) so
- * it is directly testable. A single-model harness maps the tiers to reasoning effort.
- */
+/** Maps a harness's catalog models onto the four tiers. Pure (no catalog lookup). A single-model
+ * harness maps tiers to reasoning effort. */
 export function tierizeModels(agent: AgentId, models: ModelInfo[]): Record<ModelTier, TierResolution> {
   const rungs = rankCatalog(agent, models);
 

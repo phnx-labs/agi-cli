@@ -1185,14 +1185,9 @@ describe('factory.launch as a milestone', () => {
   });
 
   it('is deliberately ABSENT from the Python hook milestone set, and nothing else is', () => {
-    // The hook script carries its own copy of MILESTONE_EVENTS, used only to
-    // tier events the hook itself writes from PreToolUse/PostToolUse. It never
-    // writes factory.launch (that arrives via `agents events emit`) or
-    // status.blocked (that arrives via `agents feed post --blocked`), so the two
-    // lists legitimately differ by exactly those out-of-process members. Pinning
-    // it here turns an invisible divergence into a deliberate, reviewed one: if
-    // someone adds a milestone the hook DOES write and forgets the Python copy,
-    // this fails.
+    // The hook script keeps its own MILESTONE_EVENTS copy, used only to tier events it writes
+    // itself. It never writes factory.launch or status.blocked, so the lists differ by exactly
+    // those. Pinning it turns drift into a reviewed divergence.
     const block = ACTIVITY_LOG_HOOK_SCRIPT.match(/MILESTONE_EVENTS = \{([^}]*)\}/);
     expect(block).not.toBeNull();
     const pythonSet = new Set(

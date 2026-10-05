@@ -1,15 +1,6 @@
-/**
- * Tests for the fleet-wide half of the duplicate guard.
- *
- * The local check catches "I already have this watcher". It cannot catch the
- * case that actually bites a fleet: two agents, on two different machines,
- * creating a watcher for the same work item with the same arguments. Neither box
- * can see the other's monitors dir, so the claim has to be asked of the fleet.
- *
- * Parsing is the part that must be defensive — a peer on an older CLI can emit a
- * different shape or no JSON at all, and one bad peer must never blank the guard
- * for the rest of the fleet (which would silently allow a duplicate).
- */
+/** Tests for the fleet-wide half of the duplicate guard: the local check can't see two agents on
+ * two machines creating the same watcher, so the fleet is asked. Parsing must be defensive: a peer
+ * on an older CLI may emit another shape or no JSON, and one bad peer must never blank the guard. */
 
 import { describe, it, expect } from 'vitest';
 import { parseRemoteMonitors, gatherFleetMonitors } from './remote.js';
@@ -97,16 +88,9 @@ describe('parseRemoteMonitors', () => {
   });
 });
 
-/**
- * THE test this file exists for. The first version of these tests fabricated a
- * peer payload with a full `action`, while `monitors list --json` actually
- * emitted `action: { type }` only — so the fingerprint could never match a
- * `--run` monitor, the fleet check was inert for the exact case it was built
- * for, and every test passed anyway.
- *
- * So the fixture is now built by the SAME projection `list --json` performs.
- * If that projection ever drops a field the fingerprint needs, this fails.
- */
+/** THE test this file exists for. The first version fabricated a peer payload with a full `action`,
+ * but `monitors list --json` emitted only `action: { type }`, so the fingerprint never matched and
+ * every test still passed. The fixture is now built by the same projection. */
 describe('against the real `monitors list --json` projection', () => {
   type Ident = Pick<MonitorConfig, 'name' | 'source' | 'condition' | 'action'>;
 

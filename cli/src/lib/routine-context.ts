@@ -1,38 +1,6 @@
-/**
- * Routine execution context + readiness resolution.
- *
- * A scheduled routine has to run *somewhere*. This module is the single,
- * target-aware answer to "which directory does this routine's run land in, and
- * is the chosen harness able to start there?" — computed for the eventual
- * execution TARGET, never from the daemon process's own cwd.
- *
- * Two layers, both pure of global state (every input is injected, so a test
- * exercises the real code path against real temp directories rather than a mock):
- *
- *  - {@link resolveRoutineExecutionContext} — resolve the working directory from
- *    the routine's singular `project` anchor and/or portable `cwd`, following the
- *    locked resolution table (see below), and verify the structural + filesystem
- *    readiness of that directory (existence, portability, writability, cloud
- *    portability). This layer owns the *context* readiness codes.
- *  - {@link evaluateRoutineReadiness} — take a resolved context and layer the
- *    *harness/target* readiness codes (agent installed, Codex workspace trust,
- *    live auth, target reachability) via injected probes.
- *
- * Resolution table (target `$HOME` = the execution device's home):
- *
- *  | project | cwd            | resolved dir            | readiness |
- *  |---------|----------------|-------------------------|-----------|
- *  | usable  | —              | project base            | continue  |
- *  | usable  | relative       | base + cwd (inside base)| continue if inside base + exists |
- *  | rootless| relative       | $HOME + cwd             | continue if exists |
- *  | —       | relative       | $HOME + cwd             | continue if exists |
- *  | —       | ~/…            | $HOME-relative          | continue if exists |
- *  | —       | abs under home | normalized to ~/…       | continue  |
- *  | —       | abs outside home| local-pinned only      | pause (cwd_not_portable) for host/fleet/cloud |
- *  | named+unusable | —       | no fallback             | pause (project_path_missing) |
- *  | —       | — (agent/workflow) | no implicit home     | pause (execution_context_missing) |
- *  | —       | — (command)    | $HOME                   | continue (housekeeping) |
- */
+/** Routine execution context and readiness: the single target-aware answer to "which directory does
+ * this run land in, and can the harness start there?", computed for the execution TARGET, never
+ * the daemon's cwd. Inputs are injected, so tests use real temp dirs. */
 
 import * as path from 'path';
 
@@ -64,10 +32,8 @@ export interface RoutineReadiness {
 /** Where the routine body executes — mirrors {@link HostStrategy} placement. */
 export type PlacementMode = 'local' | 'host' | 'fleet' | 'cloud';
 
-/**
- * What the caller resolved about the routine's singular `project` anchor.
- * `undefined` (the field on the input) means the routine names no project.
- */
+/** What the caller resolved about the routine's singular `project` anchor; `undefined` on the input
+ * means the routine names no project. */
 export type ProjectResolution =
   | { defined: false }
   /** Defined project; `base` is its portable base dir (`~/…` or absolute), or
@@ -98,12 +64,9 @@ export interface ExecutionContextInput {
   targetHome: string;
   /** Resolution of the `project` anchor; omit when the routine names no project. */
   projectResolution?: ProjectResolution;
-  /**
-   * Filesystem probe for the target, present only when this process can inspect
-   * it (a local run, or add/edit/doctor invoked on the target box). Absent for a
-   * remote/cloud target we cannot reach — then only structural + portability
-   * checks run (existence is deferred, never assumed).
-   */
+  /** Filesystem probe for the target, present only when this process can inspect it (a local run, or
+   * add/edit/doctor on the target box). Absent for an unreachable remote/cloud target: only
+   * structural + portability checks run and existence is deferred, never assumed. */
   probe?: ContextFsProbe;
 }
 
@@ -124,16 +87,9 @@ export interface ResolvedExecutionContext {
 // --- target-aware path helpers (do NOT use project-root.ts's local-HOME-bound
 // forms: resolution must root at the execution target's home, not this box's) ---
 
-/**
- * Path flavour of the EXECUTION TARGET, inferred from its own home string.
- *
- * The target home belongs to whichever machine will run the routine, which need
- * not be this one — a Windows box can schedule onto a Linux target. Joining with
- * the LOCAL separator therefore built `\home\user\svc` for a POSIX target (and
- * would build `C:/Users/x/svc` the other way), so these helpers key off the home
- * path's shape instead of `process.platform`. Same-platform behaviour is
- * unchanged; only the cross-platform case is fixed.
- */
+/** Path flavour of the EXECUTION TARGET, inferred from its own home string: the target may be
+ * another OS than this machine (a Windows box can schedule onto Linux), so joining with the local
+ * separator built `\home\user\svc`. Same-platform behaviour is unchanged. */
 function targetPath(home: string): typeof path.posix {
   return /^[A-Za-z]:[\\/]/.test(home) || home.includes('\\') ? path.win32 : path.posix;
 }
@@ -156,25 +112,16 @@ function toTargetPortable(home: string, abs: string): string {
   return abs;
 }
 
-/**
- * True for a bare relative path (not absolute, not home-anchored) ON THE TARGET.
- *
- * `isAbsolute` is evaluated in the TARGET's own path flavour (see
- * {@link targetPath}), not this process's platform — a Windows-shaped absolute
- * cwd (`C:\Users\x\override`) dispatched from a POSIX daemon must still be
- * recognized as absolute, or it is misread as project-relative.
- */
+/** True for a bare relative path (not absolute, not home-anchored) ON THE TARGET. `isAbsolute` uses
+ * the TARGET's path flavour ({@link targetPath}), so a Windows-shaped cwd dispatched from a POSIX
+ * daemon isn't misread as project-relative. */
 export function isBareRelative(home: string, p: string): boolean {
   return !targetPath(home).isAbsolute(p) && !p.startsWith('~') && !p.startsWith('$HOME');
 }
 
-/**
- * True when `child` is `base` or strictly beneath it (no `..` escape).
- *
- * Compares in the BASE's own path flavour (see {@link targetPath}) — both
- * arguments are target-side paths, and comparing a POSIX pair with Windows
- * semantics (or the reverse) answers about the wrong filesystem.
- */
+/** True when `child` is `base` or strictly beneath it (no `..` escape), compared in the BASE's path
+ * flavour ({@link targetPath}) since both are target-side paths and the wrong semantics answer
+ * about the wrong filesystem. */
 function isInside(baseAbs: string, childAbs: string): boolean {
   const tp = targetPath(baseAbs);
   const rel = tp.relative(baseAbs, childAbs);
@@ -188,12 +135,9 @@ function pause(
   return { ...ctx, ready: false, readiness };
 }
 
-/**
- * Resolve the working directory a routine's run lands in and verify its
- * structural + filesystem readiness for the given placement. Pure of global
- * state — every dependency (target home, project resolution, filesystem probe)
- * is injected.
- */
+/** Resolve the working directory a routine's run lands in and verify its structural + filesystem
+ * readiness for the placement. Pure of global state: target home, project resolution and filesystem
+ * probe are injected. */
 export function resolveRoutineExecutionContext(input: ExecutionContextInput): ResolvedExecutionContext {
   const { project, cwd, kind, mode, targetHome, projectResolution, probe } = input;
   const requestedCwd = cwd;
@@ -292,11 +236,9 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
       const abs = expandTargetHome(targetHome, cwd);
       return finalize(toTargetPortable(targetHome, abs), 'cwd_missing');
     }
-    // Absolute in EITHER path flavour — a Windows daemon resolving a POSIX
-    // target cwd (or the reverse) must not fall through to bare-relative join.
-    // Do not `path.resolve` on the local platform: on win32 that rewrites
-    // `/home/u/override` to `D:\home\u\override` and falsely flags
-    // cwd_not_portable (Windows CI, cross-platform schedule).
+    // Absolute in EITHER path flavour, so a Windows daemon resolving a POSIX cwd (or the reverse)
+    // doesn't fall through to a bare-relative join. Don't `path.resolve` locally: on win32 it
+    // rewrites `/home/u/override` to `D:\home\u\override`, falsely flagging cwd_not_portable.
     const cwdIsAbsolute =
       targetPath(targetHome).isAbsolute(cwd) ||
       path.posix.isAbsolute(cwd) ||
@@ -355,13 +297,9 @@ export interface RoutineReadinessResult {
   readiness?: RoutineReadiness;
 }
 
-/**
- * Layer the harness/target readiness codes onto a resolved execution context.
- * Context blockers short-circuit (no point probing auth for a routine that has
- * no directory to run in). Every probe is optional and injected; an omitted
- * probe is treated as "not applicable / passes" so a caller only pays for the
- * checks it wires up.
- */
+/** Layer harness/target readiness codes onto a resolved context. Context blockers short-circuit (no
+ * probing auth for a routine with no directory); every probe is optional and injected, and an
+ * omitted one passes, so callers pay only for what they wire up. */
 export function evaluateRoutineReadiness(
   context: ResolvedExecutionContext,
   probes: HarnessReadinessProbes = {},

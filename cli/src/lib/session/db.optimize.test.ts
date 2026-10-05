@@ -1,9 +1,6 @@
-/**
- * optimizeSessionSearchIndex — FTS5 `'optimize'` merges the segments the scanner
- * accumulates via delete+insert on every rescan, non-destructively. This is the
- * fix for sessions.db index bloat (tool_call_text_data ballooning to GBs of
- * unmerged segments for tens of MB of content, hanging `agents sessions`).
- */
+/** optimizeSessionSearchIndex: FTS5 `'optimize'` non-destructively merges the segments each rescan
+ * accumulates. Fixes sessions.db bloat (tool_call_text_data growing to GBs for tens of MB of
+ * content, hanging `agents sessions`). */
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

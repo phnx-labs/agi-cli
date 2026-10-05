@@ -1,14 +1,6 @@
-/**
- * Release drift for `agents projects prs`: a repository's latest version tag, when
- * it was cut, and what npm serves for the package that tag released, so AGI Menu
- * can say "v1.22.121 tagged · npm still 1.22.120 · 1 merge since" without a
- * browser trip.
- *
- * Every GitHub read is REST and cached by gh for an hour (`--cache 1h`); the npm
- * version is `npm view <name> version` (5 s timeout), cached for an hour in
- * `project-npm-versions.json`. The merge count costs nothing: it is the repo's
- * `recentlyMerged` list filtered by the tag time.
- */
+/** Release drift for `agents projects prs`: the latest version tag, when it was cut, and what
+ * npm serves for that package, so AGI Menu can show "v1.22.121 tagged, npm still 1.22.120, 1
+ * merge since". */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -91,12 +83,9 @@ export interface NpmVersionCache {
 /** True for gh's "not found" failure, the normal answer for a repository with no root package.json. */
 const isNotFound = (err: unknown) => /\(HTTP 404\)|Not Found/i.test(String((err as { stderr?: unknown })?.stderr ?? err));
 
-/**
- * Read a repository's latest version tag, the tagged commit's time, and npm's
- * version of the package that commit released. Null when the repository has no
- * version tag. A package.json that does not exist is skipped; any other failure
- * throws, so the caller reports it instead of showing a repository as current.
- */
+/** Reads a repo's latest version tag, the tagged commit's time, and npm's version of the package
+ * it released. Null with no version tag. A missing package.json is skipped; any other failure
+ * throws so the caller reports it instead of showing the repo as current. */
 export async function readLatestTag(
   slug: string,
   gh: GhExec,
@@ -148,13 +137,9 @@ async function readNpmVersion(name: string, npm: { view: NpmView; cache: NpmVers
   return { name, ...read };
 }
 
-/**
- * Complete a tag read with the merges into `base` (the default branch) since it.
- * `merged` is the repository's
- * scoped merges in the window, before the 20-row cap (null when they could not be
- * read); the count is complete only when the tag falls inside the merged window
- * and the closed-PR scan was not truncated.
- */
+/** Completes a tag read with merges into `base` (the default branch) since it. `merged` is the
+ * scoped merges before the 20-row cap (null if unreadable); the count is complete only when the
+ * tag falls inside the merged window and the closed-PR scan was not truncated. */
 export function withMergesSince(
   tag: TagRead,
   merged: ReadonlyArray<{ mergedAt: string; baseRefName: string }> | null,

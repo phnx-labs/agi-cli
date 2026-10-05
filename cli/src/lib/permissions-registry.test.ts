@@ -59,12 +59,9 @@ describe('PERMISSION_TARGETS completeness', () => {
   });
 });
 
-/**
- * The real round trip: write a canonical set into a version home with the SAME
- * function `agents sync` uses, then read it back through the registry. Every
- * harness must report the permissions it was just given — that is exactly what
- * RUSH-2676 says was broken for ten of them. No mocking; real files on disk.
- */
+/** The real round trip: write a canonical set into a version home with the SAME function `agents
+ * sync` uses, then read it back through the registry. Every harness must report what it was given
+ * (RUSH-2676 broke ten of them). No mocking; real files. */
 describe('write then read back, per harness', () => {
   const set: PermissionSet = {
     name: 'test',
@@ -129,26 +126,13 @@ describe('exportPermissionsFromPath detects every harness by its own path', () =
 });
 
 describe('allow and deny never cross on the way back', () => {
-  // The reverse readers rebuild allow/deny from formats that encode polarity
-  // very differently — Grok's `action`, Kimi's `decision`,
-  // Hermes' approvals.deny, OpenClaw's alsoAllow/deny. A polarity slip in any of
-  // them silently turns a deny into a grant, which is the worst failure this
-  // registry could have.
+  // The reverse readers rebuild allow/deny from formats that encode polarity very differently
+  // (Grok `action`, Kimi `decision`, Hermes approvals.deny, OpenClaw alsoAllow/deny). A polarity
+  // slip silently turns a deny into a grant: the worst failure this registry could have.
 
-  /**
-   * Harnesses whose read path returns nothing for a SUB-COMMAND deny like
-   * `Bash(rm:*)`, verified by driving the real writer and reading what it
-   * produced. Two distinct reasons — do not conflate them:
-   *
-   *   openclaw  — CANNOT express it. Tool-level only, so a sub-command rule is
-   *               skipped by the serializer (convertToOpenClawFormat).
-   *   copilot   — CANNOT express it. Its config records approvals (grants) and
-   *               has no deny list at all.
-   *
-   * Both read back `null` today, so asserting non-null would assert a lie.
-   * Codex used to sit here because the reader skipped `agents-deny.rules`
-   * (PHNX-2703); it now round-trips like the other nine harnesses.
-   */
+  /** Harnesses whose read path returns nothing for a SUB-COMMAND deny like `Bash(rm:*)`, for two
+   * distinct reasons: openclaw is tool-level only (the serializer skips it); copilot records
+   * approvals and has no deny list. Both read back `null`. Codex used to be here (PHNX-2703). */
   const DENY_NOT_READ_BACK = new Set(['openclaw', 'copilot']);
 
   for (const agent of capableAgents('allowlist')) {
@@ -185,10 +169,9 @@ describe('allow and deny never cross on the way back', () => {
 });
 
 describe('codex reads agents-deny.rules (PHNX-2703)', () => {
-  // The writer always emitted `.codex/rules/agents-deny.rules`; the reader
-  // opened only config.toml and hardcoded `deny: []`. These tests drive the
-  // real write path (or the exact Starlark the writer produces) and require
-  // the forbids to come back.
+  // The writer always emitted `.codex/rules/agents-deny.rules` but the reader opened only
+  // config.toml and hardcoded `deny: []`. These tests drive the real write path (or the exact
+  // Starlark it produces) and require the forbids to come back.
 
   it('reads back Bash(rm:*) that applyPermissionsToVersion just wrote', () => {
     const home = makeTempHome();
@@ -257,11 +240,9 @@ describe('codex reads agents-deny.rules (PHNX-2703)', () => {
   });
 
   it('a later apply with empty deny deletes agents-deny.rules so the read-back is []', () => {
-    // Same version home, two sequential writes — the real resync path
-    // (`staleness/writers/permissions.ts`) rebuilds PermissionSet from the
-    // currently selected groups, so deselecting a deny group arrives here as
-    // deny: []. Before PHNX-2703 the writer left the stale file; the new
-    // reader then reported the removed forbid as still active.
+    // Same version home, two sequential writes (the real resync path): deselecting a deny group
+    // arrives as deny: []. Before PHNX-2703 the writer left the stale file and the reader reported
+    // the removed forbid as active.
     const home = makeTempHome();
     const cwd = process.cwd();
     const rulesPath = path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME);
@@ -289,12 +270,9 @@ describe('codex reads agents-deny.rules (PHNX-2703)', () => {
 });
 
 describe('harness detection does not depend on the working directory', () => {
-  // The bug: detection built its match suffixes from `target.home('')`, and
-  // OpenCode's resolvers probe the filesystem to choose between the two
-  // spellings it accepts. With an empty root that probe resolved against
-  // `process.cwd()`, so the SAME file detected differently depending on where
-  // the CLI ran. A cwd holding decoy opencode configs reproduces it; a cwd
-  // without them does not, which is why one-cwd coverage passed on main.
+  // The bug: detection built suffixes from `target.home('')`, and OpenCode's resolvers probe the
+  // filesystem, so with an empty root the probe resolved against `process.cwd()` and the SAME file
+  // detected differently by cwd. A cwd with decoy opencode configs reproduces it.
   function withCwd<T>(dir: string, fn: () => T): T {
     const before = process.cwd();
     process.chdir(dir);
@@ -305,15 +283,13 @@ describe('harness detection does not depend on the working directory', () => {
     }
   }
 
-  // Table-wide pin: whatever a target's own resolver answers for a real root,
-  // detecting that path must not depend on the working directory. Catches a
-  // future target whose resolver probes the filesystem without declaring its
-  // spellings in `altSuffixes` — the exact shape of this bug.
+  // Table-wide pin: detecting a target's real-root path must not depend on the working directory.
+  // Catches a future target whose resolver probes the filesystem without declaring its spellings
+  // in `altSuffixes`.
   it('resolves every harness the same way from any cwd', () => {
-    // Seed ONLY the non-preferred spelling. A probing resolver rooted at ''
-    // then answers `.json` while the candidate under test is `.jsonc`, which is
-    // what makes the mismatch observable. Seeding both would let the probe find
-    // the right suffix by luck and the test would pass against the bug.
+    // Seed ONLY the non-preferred spelling: a probing resolver rooted at '' then answers `.json`
+    // while the candidate is `.jsonc`, making the mismatch observable. Seeding both would let the
+    // probe pass by luck.
     const decoy = makeTempHome();
     fs.mkdirSync(path.join(decoy, '.config', 'opencode'), { recursive: true });
     fs.writeFileSync(path.join(decoy, 'opencode.json'), '{}', 'utf-8');
@@ -338,10 +314,8 @@ describe('harness detection does not depend on the working directory', () => {
       const configPath = path.join(configDir, spelling);
       fs.writeFileSync(configPath, '{"permission":{"bash":{"git *":"allow"}}}', 'utf-8');
 
-      // The decoy cwd must carry ONLY the spelling the file under test is NOT,
-      // so an fs probe rooted at '' resolves to the WRONG suffix. Seeding both
-      // spellings would let the probe find the right one by luck and the test
-      // would pass against the bug.
+      // The decoy cwd must carry ONLY the spelling the file under test is NOT, so an fs probe
+      // rooted at '' resolves to the WRONG suffix; seeding both would let it pass against the bug.
       const other = spelling === 'opencode.jsonc' ? 'opencode.json' : 'opencode.jsonc';
       const decoy = makeTempHome();
       fs.mkdirSync(path.join(decoy, '.config', 'opencode'), { recursive: true });

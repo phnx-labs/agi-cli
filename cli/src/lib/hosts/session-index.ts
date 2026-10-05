@@ -1,21 +1,6 @@
-/**
- * Register host-dispatched runs (`agents run --device <h>`) into the LOCAL session
- * index so they show up in `agents sessions` and are resolvable by id — even
- * though the transcript itself lives on the remote host.
- *
- * The transcript file is remote, so the row is registered with an EMPTY
- * `file_path`. The DB's stale-row filter keeps rows with no file_path
- * (`!file_path || existsSync(file_path)` in db.ts querySessions) precisely for
- * this "synthetic file_path" case, and the scanner never prunes session rows —
- * so the entry survives rescans. `cwd` is the LOCAL directory the dispatch was
- * issued from, so the run appears in that project's session listing like any
- * local run. The `[host/<name>]` label mirrors the cloud path's
- * `[cloud/<status>]` convention.
- *
- * `machine` is the dispatch host, not this box. Both the transcript and the
- * version-isolated harness home live there; omitting it makes the SQLite upsert
- * infer this box from the empty file path and sends recovery to the wrong home.
- */
+/** Register host-dispatched runs in the local session index so they show in `agents sessions`
+ * though the transcript is remote: empty `file_path` (never pruned), local `cwd`,
+ * `[host/<name>]` label. `machine` is the dispatch host, or recovery picks the wrong home. */
 
 import * as fs from 'fs';
 import { upsertSession } from '../session/db.js';
@@ -33,11 +18,8 @@ interface HostSessionContext {
   prompt: string;
 }
 
-/**
- * Build the SessionMeta for a host-dispatched run. Returns null when the run has
- * no captured session id (nothing stable to key/resume on) or its agent isn't a
- * known session agent. Pure — no I/O — so the mapping is unit-testable.
- */
+/** Build the SessionMeta for a host-dispatched run; null when no session id was captured or the
+ * agent isn't a known session agent. Pure, so it is unit-testable. */
 export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): SessionMeta | null {
   const id = task.sessionId;
   if (!id) return null;
@@ -61,11 +43,8 @@ export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): Sessio
   };
 }
 
-/**
- * Register (or refresh) a host-dispatched run in the local session index. No-op
- * when the task carries no session id. Best-effort: a failed write must never
- * break the dispatch itself, which has already been launched on the host.
- */
+/** Register (or refresh) a host-dispatched run in the local session index; no-op without a
+ * session id. Best-effort: a failed write must not break the already-launched dispatch. */
 export function registerHostSession(task: HostTask, ctx: HostSessionContext): void {
   const meta = hostSessionMeta(task, ctx);
   if (!meta) return;
@@ -76,22 +55,9 @@ export function registerHostSession(task: HostTask, ctx: HostSessionContext): vo
   }
 }
 
-/**
- * Relate a remote-created session id back to a followed host dispatch.
- *
- * The remote run (dispatched with `--emit-session-id`) prints its resolved id as
- * a stdout sentinel (see session-marker.ts) that rides the followed log into the
- * task's local mirror. Read that mirror, parse the id, and stamp it on the task
- * so `findTaskBySessionId` and the session-index registration work for agents
- * that never take a forced `--session-id` — closing the gap where every
- * non-Claude host run was orphaned.
- *
- * Returns the updated task when an id was captured (and differs from what's on
- * the record), else null. A task that already carries an id (Claude's forced id,
- * a resume) is left untouched — the marker only fills a genuinely empty slot, so
- * it can never overwrite an authoritative id with a stale echo. Best-effort: a
- * missing/unreadable mirror or absent marker yields null, never an exception.
- */
+/** Relate a remote-created session id to a followed dispatch: parse the `--emit-session-id`
+ * sentinel from the local log mirror and stamp it on the task, so non-Claude host runs aren't
+ * orphaned. Returns the updated task or null; an existing id is never overwritten. */
 export function captureRemoteSessionId(task: HostTask): HostTask | null {
   if (task.sessionId) return null;
   let text: string;
@@ -114,12 +80,9 @@ interface InteractiveHostSessionContext {
   createdAt?: string;
 }
 
-/**
- * Register an interactive host run (no prompt, TTY forwarded over SSH) in the
- * local session index. Unlike detached host runs, there is no remote log/exit
- * file and no HostTask; we only need the session id so `agents sessions` can
- * surface and resume it by id.
- */
+/** Register an interactive host run (TTY over SSH) in the local session index. There is no
+ * remote log, exit file or HostTask; only the session id is needed so `agents sessions` can
+ * show and resume it. */
 export function registerInteractiveHostSession(ctx: InteractiveHostSessionContext): void {
   if (!isSessionTrackedAgent(ctx.agent)) return;
   try {

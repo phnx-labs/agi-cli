@@ -1,10 +1,5 @@
-/**
- * Unified resource system types.
- *
- * Resources merge from three layers: system → user → project
- * - Union: All resources from all layers are combined
- * - Override on name conflict: Higher layer wins (project > user > system)
- */
+/** Unified resource system types. Resources merge from system, user and project layers: all are
+ * unioned, and on a name conflict the higher layer wins (project > user > system). */
 
 // Import + re-export the canonical AgentId so resource handlers never drift
 // from the main registry (lib/types.ts). A local copy previously omitted amp + muse.
@@ -22,31 +17,20 @@ export interface ResolvedItem<T> {
   path: string;
 }
 
-/**
- * Resource handler interface.
- *
- * Each resource type (commands, hooks, skills, etc.) implements this interface
- * to provide consistent list/resolve/sync behavior across all agent types.
- */
+/** Resource handler interface: each resource type (commands, hooks, skills, ...) implements it for
+ * consistent list/resolve/sync behavior across agent types. */
 export interface ResourceHandler<T> {
   readonly kind: ResourceKind;
 
-  /**
-   * List all resources across layers, with higher layer winning on name conflict.
-   * Returns a union of all resources, deduplicated by name.
-   */
+  /** List all resources across layers as a union deduplicated by name, the higher layer winning a
+   * conflict. */
   listAll(agent: AgentId, cwd?: string): ResolvedItem<T>[];
 
-  /**
-   * Resolve a single resource by name.
-   * Returns the winning layer's version, or null if not found.
-   */
+  /** Resolve one resource by name: the winning layer's version, or null if not found. */
   resolve(agent: AgentId, name: string, cwd?: string): ResolvedItem<T> | null;
 
-  /**
-   * Sync resolved resources to the agent's version home directory.
-   * Copies/transforms resources as needed for the agent's expected format.
-   */
+  /** Sync resolved resources to the agent's version home directory, copying or transforming into the
+   * agent's expected format. */
   sync(agent: AgentId, versionHome: string, cwd?: string): void;
 
   /**
@@ -59,25 +43,17 @@ export interface ResourceHandler<T> {
    */
   targetDir(agent: AgentId): string;
 
-  /**
-   * For resources that modify config files (MCP, permissions),
-   * return the config file path. Returns null if not applicable.
-   */
+  /** For resources that modify config files (MCP, permissions), the config file path; null if not
+   * applicable. */
   configPath?(agent: AgentId, versionHome: string): string | null;
 
-  /**
-   * Compute content hash for a resource item (for change detection).
-   * Used by diff() to detect modifications without full content comparison.
-   * Optional — handlers that don't implement this fall back to full sync.
-   */
+  /** Content hash of a resource item for change detection, so diff() can spot modifications without
+   * a full content comparison. Optional: handlers without it fall back to full sync. */
   hash?(item: T): string;
 
-  /**
-   * Compare source layers vs synced target to detect drift.
-   * Returns list of resources that differ (added, modified, removed).
-   * Enables incremental sync and "X resources out of sync" status.
-   * Optional — handlers that don't implement this always report "unknown".
-   */
+  /** Compare source layers vs the synced target and list differing resources (added, modified,
+   * removed), enabling incremental sync and "X resources out of sync" status. Optional: handlers
+   * without it always report "unknown". */
   diff?(agent: AgentId, versionHome: string, cwd?: string): ResourceDiff[];
 }
 

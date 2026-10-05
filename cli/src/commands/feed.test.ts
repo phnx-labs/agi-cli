@@ -281,10 +281,9 @@ describe('controlFeedSession', () => {
 
     expect(result).toBe(`killed pid ${child.pid}`);
     await new Promise((resolve) => child.once('exit', resolve));
-    // The process is dead either way; how the death is reported is
-    // platform-specific. Windows has no POSIX signals — a terminated process
-    // surfaces as an exit code with signalCode null, so only assert the
-    // SIGTERM shape where signals actually exist.
+    // The process is dead either way; how the death is reported is platform-specific. Windows has
+    // no POSIX signals (a terminated process shows an exit code with signalCode null), so assert
+    // the SIGTERM shape only where signals exist.
     if (process.platform === 'win32') {
       expect(child.exitCode).not.toBeNull();
     } else {

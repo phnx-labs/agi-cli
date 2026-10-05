@@ -1,32 +1,13 @@
-/**
- * Declarative hook caching + timing.
- *
- * Hooks that opt in via `cache:` in hooks.yaml get a generated bash shim
- * (~/.agents/.cache/shims/hooks/<name>.sh) registered with the agent instead
- * of the raw script path. The shim handles:
- *
- *   1. cache lookup — reads ~/.agents/.cache/state/hooks/<name>.<key>.out
- *      and serves it if newer than ttl.
- *   2. stale-while-revalidate — when prefetch=background, serves stale cache
- *      and refreshes the cache file in a detached child.
- *   3. timing — appends one JSONL line per fire to events-YYYY-MM-DD.jsonl.
- *
- * The shim is regenerated whenever the registrar runs; if its content doesn't
- * change (idempotent), mtime is preserved. Stale shims for removed hooks are
- * cleaned by the registrar's garbage collection (shims dir is in
- * managedPrefixes).
- */
+/** Declarative hook caching and timing: a hook with `cache:` in hooks.yaml gets a generated bash
+ * shim (~/.agents/.cache/shims/hooks/<name>.sh) registered in place of the raw script. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import type { HookCache, HookCacheConfig, HookCacheKey, HookCachePrefetch, HookMatches } from '../types.js';
 import { getHookCacheDir, getHookShimsDir, getLogsDir, getPerfDir } from '../state.js';
 
-/**
- * Parse a `cache:` value from hooks.yaml into the canonical config form.
- * Accepts the shorthand string ("5m", "30s-bg") or the full object form.
- * Returns null if the value is missing or unparseable.
- */
+/** Parses a `cache:` value from hooks.yaml (shorthand "5m"/"30s-bg" or full object) into
+ * canonical config; null if missing or unparseable. */
 export function parseCacheConfig(raw: HookCache | undefined): HookCacheConfig | null {
   if (raw == null) return null;
   if (typeof raw === 'string') return parseShorthand(raw);
@@ -67,11 +48,8 @@ export function parseDuration(d: number | string | undefined): number | null {
   return value;
 }
 
-/**
- * Reject hook names that could escape the shims directory when interpolated
- * into a filename. Mirrors the containment gate on hook script resolution in
- * hooks.ts (`resolveContainedHookPath`).
- */
+/** Rejects hook names that could escape the shims directory when interpolated into a filename;
+ * mirrors `resolveContainedHookPath` in hooks.ts. */
 export function isValidHookShimName(name: string): boolean {
   return (
     !!name &&
@@ -102,13 +80,9 @@ export function getHookShimPath(name: string): string {
   return resolveContainedHookShimPath(getHookShimsDir(), name);
 }
 
-/**
- * Optional path overrides for tests that need to redirect cache + logs to a
- * temp dir. Production callers omit `paths`; the shim uses real state.ts dirs.
- * (state.ts captures HOME at module load, so mutating process.env.HOME in a
- * test's beforeEach doesn't reach getHookCacheDir() — this is the explicit
- * seam.)
- */
+/** Optional path overrides for tests that redirect cache and logs to a temp dir. state.ts
+ * captures HOME at module load, so changing process.env.HOME in a test's beforeEach does not
+ * reach getHookCacheDir(); this is the explicit seam. */
 export interface HookShimPaths {
   shimsDir?: string;
   cacheDir?: string;
@@ -117,28 +91,17 @@ export interface HookShimPaths {
   perfDir?: string;
 }
 
-/**
- * Generate (or refresh) the shim script for a hook. Idempotent — only writes
- * when the content differs from what's on disk. Returns the absolute shim path.
- *
- * A shim is generated when the hook opts into caching (`cache`) and/or declares
- * `matches:` predicates. When `matches` is present the shim gates execution on
- * those predicates before running the underlying script (see `renderShim`);
- * when `cache` is absent the shim is a thin pass-through wrapper that only
- * applies the gate and forwards stdin/stdout unchanged.
- */
+/** Generates or refreshes a hook's shim, writing only when content differs; returns the shim
+ * path. */
 export function generateHookShim(args: {
   name: string;
   scriptPath: string;
   cache?: HookCacheConfig | null;
   matches?: HookMatches;
   paths?: HookShimPaths;
-  /**
-   * Deny the tool call (exit 2) when the source script is missing instead of
-   * failing with 127, which every harness reads as "allow". Set for
-   * PreToolUse hooks: a guard whose script vanished (version pruned, sync
-   * rewriting the hooks dir) must not silently wave tool calls through.
-   */
+  /** Deny the tool call (exit 2) when the source script is missing, instead of 127 which every
+   * harness reads as "allow". Set for PreToolUse hooks, so a guard whose script vanished
+   * (version pruned, sync rewriting the hooks dir) never waves tool calls through. */
   failClosed?: boolean;
 }): string {
   const shimsDir = args.paths?.shimsDir ?? getHookShimsDir();
@@ -154,10 +117,9 @@ export function generateHookShim(args: {
     try { existing = fs.readFileSync(shimPath, 'utf-8'); } catch { /* rewrite */ }
   }
   if (existing !== content) {
-    // A hook may fire while a background self-heal repairs another stale shim.
-    // Write in the destination directory and rename only after its mode and
-    // complete contents are ready, so observers see either the old complete
-    // wrapper or the new complete wrapper — never a truncated shell script.
+    // A hook may fire while a background self-heal repairs another stale shim. Write in the
+    // destination directory and rename once mode and contents are complete, so observers see the
+    // old or new complete wrapper, never a truncated script.
     const tempPath = path.join(
       shimsDir,
       `.${path.basename(shimPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
@@ -179,20 +141,9 @@ export function generateHookShim(args: {
   return shimPath;
 }
 
-/**
- * The matches: gate, as a self-contained Python program run once per fire.
- *
- * Reads the hook's `matches:` block from $MATCHES_JSON and the event JSON from
- * stdin, then prints `FIRE` or `SKIP`. A faithful port of `shouldFire()` in
- * src/lib/hooks/match.ts — all declared predicates AND together, an empty block
- * always fires, and the same ReDoS guard (`isSafeHookRegex`) rejects unsafe
- * regexes to `SKIP`. Kept in double-quotes/apostrophe-free so it survives being
- * embedded in a single-quoted `python -c '...'` argument in the shim. Behavioural
- * parity with shouldFire() is pinned by a conformance test (match-parity.test.ts).
- *
- * On any exception it does NOT print SKIP — the shim treats a missing/garbled
- * verdict as FIRE (fail-open), so a broken gate never silently disables a hook.
- */
+/** The `matches:` gate as a self-contained Python program run once per fire: reads
+ * `$MATCHES_JSON` and the event JSON from stdin, prints FIRE or SKIP. Port of match.ts
+ * shouldFire(), pinned by match-parity.test.ts. On exception prints nothing; the shim fails open. */
 const GATE_PY = `import json, os, re, subprocess, sys
 
 def arr(v):
@@ -345,11 +296,9 @@ def should_fire():
 print("FIRE" if should_fire() else "SKIP")
 `;
 
-/**
- * Gate-only pass-through tail: no caching, just run the underlying script with
- * stdin forwarded and stdout/exit code propagated, plus one timing log line.
- * Used when a hook declares \`matches:\` but no \`cache:\`.
- */
+/** Gate-only pass-through tail: no caching; runs the script with stdin forwarded and stdout/exit
+ * code propagated, plus one timing log line. Used when a hook declares `matches:` without
+ * `cache:`. */
 const PASSTHROUGH_TAIL = `now_ns() { "$PY" -c 'import time; print(int(time.time()*1e9))'; }
 START_NS=$(now_ns)
 EXIT=0
@@ -373,19 +322,9 @@ printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":%d,"cache":"%s
 
 exit "$EXIT"`;
 
-/**
- * Render the bash shim. Bash 3.2-compatible (macOS default). Uses Python for
- * hashing + monotonic-ish nanosecond timing + portable mtime, resolved at
- * runtime (python3, then python) so a Windows Microsoft Store `python3` alias
- * stub — which exits non-zero without running — doesn't silently break caching.
- *
- * When `matches` is set, an early gate block evaluates the `matches:` predicates
- * against the event JSON on stdin and exits 0 without running the script when
- * they don't hold — this is the runtime enforcement of the documented `matches:`
- * gating (mirrors `shouldFire()` in match.ts). When `cache` is null the shim is
- * a gate-only pass-through: it forwards stdin to the script and its stdout back,
- * with no cache read/write.
- */
+/** Renders the bash shim, Bash 3.2-compatible. Uses Python for hashing, nanosecond timing and
+ * portable mtime, resolved at runtime (python3, then python) so a Windows Store `python3` alias
+ * stub that exits non-zero doesn't silently break caching. */
 function renderShim(
   name: string,
   scriptPath: string,
@@ -521,11 +460,8 @@ ${cache ? CACHE_TAIL : PASSTHROUGH_TAIL}
 `;
 }
 
-/**
- * Cache tail: the full cache lookup / stale-while-revalidate / timing machinery.
- * Emitted only when the hook opts into \`cache:\`. (When only \`matches:\` is set,
- * PASSTHROUGH_TAIL runs instead — no cache read/write.)
- */
+/** Cache tail: the full cache lookup, stale-while-revalidate and timing machinery, emitted only
+ * when the hook opts into `cache:` (else PASSTHROUGH_TAIL runs). */
 const CACHE_TAIL = `# Portable sha1 — \`shasum\` is Perl, missing on minimal Linux images;
 # \`sha1sum\` is coreutils, missing on macOS. Truncate to 12 hex chars.
 sha1_12() { "$PY" -c 'import hashlib,sys; print(hashlib.sha1(sys.stdin.read().encode()).hexdigest()[:12])'; }
@@ -669,10 +605,8 @@ printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":%d,"cache":"%s
 exit "$EXIT"
 `;
 
-/**
- * Remove a hook's shim. Called by the registrar's garbage collection when a
- * hook is renamed/deleted or has its `cache:` field removed.
- */
+/** Removes a hook's shim; called by the registrar's garbage collection when a hook is renamed,
+ * deleted, or loses its `cache:` field. */
 export function removeHookShim(name: string, shimsDir?: string): void {
   if (!isValidHookShimName(name)) return;
   const dir = shimsDir ?? getHookShimsDir();

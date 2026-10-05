@@ -1,14 +1,6 @@
-/**
- * The shared live-session reach engine that `sessions focus` / `resume --attach-only`
- * import ("attach or refuse", never fork/resume):
- *   - `gatherLiveTargets` / `pickLiveTarget` / `buildLivePool` — live-session discovery + picker
- *   - `jumpTo` — the side-effecting jump: attach the already-running terminal
- *       local tmux    -> attach (switch-client when already inside tmux)
- *       local Ghostty -> focus its tab (Cmd+<n> via System Events; tab # from ghostty-tabs)
- *       remote tmux   -> ssh -tt + tmux attach (pane->session resolved on the remote)
- *       otherwise     -> hand off to the `UnreachableFallback` (attach-only refuses; focus resumes)
- *   - `refuseFallback` — the attach-only fallback (remote -> login shell; local -> refuse)
- */
+/** The shared live-session reach engine for `sessions focus` / `resume --attach-only` (attach or
+ * refuse, never fork): live discovery and pickers, `jumpTo` (tmux, Ghostty tab, remote tmux over
+ * ssh, else `UnreachableFallback`), and `refuseFallback`. */
 import chalk from 'chalk';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -44,13 +36,8 @@ import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Scope a live-session pool by device and live status. Pure so the `focus`
- * device/status filters are unit-testable without touching the sweep. `hosts`
- * keeps only sessions whose `machine` is in the set (local rows carry `self`,
- * remote rows carry their peer tag); `statuses` reuses `--active`'s exact
- * `matchesLiveStatus` derivation rather than a parallel status table.
- */
+/** Scope a live-session pool by device and live status. Pure so the `focus` filters are testable
+ * without the sweep; statuses reuse `--active`'s `matchesLiveStatus` rather than a parallel table. */
 export function filterLivePool(
   sessions: ActiveSession[],
   opts: { hosts?: string[]; statuses?: LiveStatusFilter[] } = {},
@@ -66,36 +53,25 @@ export function filterLivePool(
   return out;
 }
 
-/**
- * Live rows whose session id starts with `selector` (case-insensitive prefix).
- * Same match `resolveOne` uses, so skip-fleet and resolve stay aligned.
- */
+/** Live rows whose session id starts with `selector` (case-insensitive prefix), the same match
+ * `resolveOne` uses. */
 export function localLiveSelectorMatches(sessions: ActiveSession[], selector: string): ActiveSession[] {
   const q = selector.toLowerCase();
   return sessions.filter((s) => (s.sessionId ?? '').toLowerCase().startsWith(q));
 }
 
-/**
- * Skip `gatherRemoteActive` when local already answered the selector:
- * two local matches fail closed without waiting for a sleeping peer that
- * might collide; a single local hit skips only when the selector is a full
- * UUID or unique-enough 8-hex (`isUniqueEnoughSelector`). A shorter unique
- * local prefix still races the fleet so a remote collision can fail closed.
- * Zero matches still race the fleet.
- */
+/** Skip `gatherRemoteActive` when local already answered: two local matches fail closed; one hit
+ * skips only for a full UUID or unique-enough 8-hex. A shorter unique prefix still races the fleet
+ * so a remote collision can fail closed; zero matches also race. */
 export function shouldSkipRemoteSweep(localMatches: ActiveSession[], selector: string): boolean {
   if (localMatches.length >= 2) return true;
   if (localMatches.length === 1) return isUniqueEnoughSelector(selector);
   return false;
 }
 
-/**
- * First-hit abort predicate for a live-id fleet race. A full UUID is globally
- * unique so the first exact hit is the only hit. A unique-enough live prefix
- * (8+ chars, the tmux `ag-<agent>-<8hex>` short id) aborts remaining SSH once
- * a reachable peer answers — unanswered boxes must not delay (PHNX-3298).
- * Shorter prefixes stay all-settle.
- */
+/** First-hit abort predicate for a live-id fleet race: a full UUID is globally unique; an 8+ char
+ * prefix (tmux short id) aborts remaining SSH once a peer answers (PHNX-3298). Shorter prefixes
+ * stay all-settle. */
 export function isDefinitiveLiveMatch(session: ActiveSession, selector: string): boolean {
   const id = (session.sessionId ?? '').toLowerCase();
   const q = selector.trim().toLowerCase();
@@ -111,19 +87,9 @@ function liveSelectorEarlyExit(
   return { isDefinitive: (item) => isDefinitiveLiveMatch(item, selector) };
 }
 
-/**
- * Live jump targets (local + remote), keyed by session id. Cloud is excluded by
- * default (it has no local pid to attach), but `detach` opts in with
- * `includeCloud` so it can resolve a cloud id and refuse it with a clear message
- * instead of a bare "no live session".
- *
- * `hosts` scopes the sweep to named devices — the fan-out only dials them, and the
- * pool is then filtered to `s.machine ∈ hosts` so a stray local row can't leak in.
- * `statuses` narrows to the live-state words `--active` uses (orphan/crashed/…).
- * `selector` (detach/stop) skips fleet SSH when local already has a unique live
- * id or a local collision; omit it for browse (`focus` with no id) so the picker
- * still all-settles.
- */
+/** Live jump targets (local + remote) keyed by session id. Cloud is excluded unless `includeCloud`
+ * (detach) so it can refuse a cloud id clearly. `hosts` scopes the sweep; `selector` skips fleet
+ * SSH when local has a unique id or collision; omit it for browse. */
 export async function gatherLiveTargets(
   local: boolean,
   opts: { includeCloud?: boolean; hosts?: string[]; statuses?: LiveStatusFilter[]; selector?: string } = {},
@@ -172,12 +138,8 @@ export async function pickLiveTarget(
   return activeById.get(picked.session.id) ?? null;
 }
 
-/**
- * Multi-select over the live sessions' rich SessionMeta (same rows as
- * `pickLiveTarget`, but a checkbox picker) — the plural sibling that lets `focus`
- * open several sessions at once. Mirrors `sessions resume`'s `multiItemPicker`
- * wiring; returns the chosen live sessions in pick order, or `[]` on cancel.
- */
+/** Multi-select over live sessions' SessionMeta (same rows as `pickLiveTarget`), so `focus` can
+ * open several at once. Returns picks in order, or `[]` on cancel. */
 export async function pickLiveTargets(
   activeById: Map<string, ActiveSession>,
   self: string,
@@ -208,11 +170,8 @@ export async function pickLiveTargets(
   return chosen.map((m) => activeById.get(m.id)).filter((s): s is ActiveSession => !!s);
 }
 
-/**
- * Map each live session to its rich SessionMeta (worktree/PR/changes/tools/tests
- * via the shared picker), reusing `discoverSessions`. Remote or unindexed live
- * sessions get a minimal synthesized meta so they still appear and jump.
- */
+/** Map each live session to its rich SessionMeta via `discoverSessions`; remote or unindexed ones
+ * get a minimal synthesized meta so they still appear and jump. */
 export async function buildLivePool(activeById: Map<string, ActiveSession>, self: string): Promise<SessionMeta[]> {
   let metas: SessionMeta[] = [];
   try {
@@ -229,15 +188,9 @@ export async function buildLivePool(activeById: Map<string, ActiveSession>, self
 
 function synthMeta(s: ActiveSession, self: string): SessionMeta {
   const remote = !sessionProcessIsLocal(s, self);
-  // For a local session, locate the real transcript so the picker's buildPreview
-  // parses it directly (rich Prompt/Changes/Tools/Last response) rather than
-  // rendering from the indexed digest. For Claude that resolves off disk; every
-  // other harness resolves the id THROUGH the session index (RUSH-2691), so a
-  // local non-Claude session the index has not reached yet yields '' here and
-  // gets the same clean "not indexed here" note as a remote one — which is the
-  // honest answer, since the pre-RUSH-2691 alternative was a co-located
-  // stranger's transcript. Remote transcripts live on the peer, so leave
-  // filePath empty there too.
+  // Local sessions locate the real transcript; remote ones live on the peer, so filePath stays
+  // empty. Non-Claude harnesses resolve via the session index (RUSH-2691): an unindexed one yields
+  // '' and a 'not indexed here' note, not a stranger's transcript.
   const filePath = remote ? '' : (findSessionFileForKind(s.kind, s.cwd, s.sessionId) ?? '');
   return {
     id: s.sessionId!,
@@ -276,11 +229,8 @@ export function remoteAttachEndedNotice(
   );
 }
 
-/**
- * Pure, testable mirror of `jumpTo`'s path selection (jumpTo itself has side
- * effects — process.exit / ssh / osascript). Keep the branch ORDER in sync with
- * `jumpTo` below: remote-tmux, then local-tmux, then ghostty, then refuse.
- */
+/** Pure mirror of `jumpTo`'s path selection (jumpTo has side effects).
+ * Keep the branch order in sync: remote-tmux, local-tmux, ghostty, refuse. */
 export function describeWhere(s: ActiveSession, self: string): Where {
   const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
@@ -299,12 +249,9 @@ export function describeWhere(s: ActiveSession, self: string): Where {
   return { label: s.host ?? 'unknown terminal', action: 'resume it (no live attach rail)' };
 }
 
-/**
- * What to do when a session can't be *attached* (no tmux/Ghostty rail). `go`
- * refuses; `focus` opens a new tab and resumes. `remote` is the peer name when
- * the session lives on another machine, else undefined. `fallbackId` is the
- * indexed session id when the live row has not registered one yet (PHNX-3356).
- */
+/** What to do when a session can't be attached: `go` refuses, `focus` resumes in a new tab.
+ * `remote` is the peer name if any; `fallbackId` is the indexed id when the live row has none yet
+ * (PHNX-3356). */
 export type UnreachableFallback = (s: ActiveSession, remote: string | undefined, fallbackId?: string) => void | Promise<void>;
 
 export type AttachRailLiveness =

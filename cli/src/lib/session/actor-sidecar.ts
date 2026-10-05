@@ -1,19 +1,6 @@
-/**
- * Durable sessionId -> actor sidecar (RUSH-2019, P3 lineage).
- *
- * The actor behind a run is resolved at spawn (`resolveActor()`), but the session
- * transcript on disk carries no record of it — so the scanner that indexes those
- * transcripts into `sessions.db` (`discover.ts` -> `upsertSessionsBatch`) has
- * nothing to attribute a session to a person with. The pid-registry answers this
- * for LIVE processes (`--active` owner, RUSH-2018), but it lives under `.cache`
- * and is pruned when the pid dies, so it can't back a DURABLE, historical listing.
- *
- * This module writes one small, durable record per launched session — keyed by
- * session id, under `~/.agents/.history` (never pruned) — that the scanner joins
- * on to fill the write-once `actor` / `initiated_by` columns. Best-effort
- * throughout: a failed write or a corrupt file degrades to an unattributed row,
- * never throws into the launch or the scan path.
- */
+/** Durable sessionId -> actor sidecar (RUSH-2019). Transcripts carry no actor; the pid-registry
+ * (RUSH-2018) is pruned when the pid dies. One never-pruned record per session under
+ * `~/.agents/.history`, joined by the scanner. Best-effort: never throws into launch or scan. */
 import fs from 'fs';
 import path from 'path';
 import { getHistoryDir } from '../state.js';
@@ -25,12 +12,9 @@ interface SessionActorRecord {
   actor?: string;
   /** Actor kind (`resolveActor().kind`). */
   initiatedBy?: 'human' | 'agent';
-  /**
-   * Phoenix id of the responsible actor (`resolveActor().phoenixId`) — the
-   * tailnet human's stable Phoenix identity, resolved from the `actors:` map at
-   * spawn (PHNX-3798). Pairs with {@link actor}: joined onto the session index at
-   * scan time so a durable listing can surface the Phoenix id, not just the email.
-   */
+  /** Phoenix id of the responsible actor (`resolveActor().phoenixId`), resolved from the `actors:`
+   * map at spawn (PHNX-3798). Joined onto the session index at scan time so listings can show it,
+   * not just the email. */
   phoenixId?: string;
   /** Effective permissions mode used by the launcher. */
   mode?: SessionRunMode;
@@ -38,12 +22,8 @@ interface SessionActorRecord {
   version?: string;
   /** Credential account used at launch, independent of the installed executable. */
   accountId?: string;
-  /**
-   * Custom harness / profile name when launched via `agents run <profile>`
-   * (e.g. `deepseek`). Joined onto the session index at scan time so a
-   * durable listing can distinguish the profile from its host agent
-   * (PHNX-2935).
-   */
+  /** Custom harness/profile name when launched via `agents run <profile>` (e.g. `deepseek`), joined
+   * onto the index at scan time to distinguish the profile from its host agent (PHNX-2935). */
   harness?: string;
   /** Stable wrapper names that resolve to this native session id. */
   aliases?: string[];
@@ -54,13 +34,9 @@ function sidecarDir(): string {
   return path.join(getHistoryDir(), 'by-session');
 }
 
-/**
- * A session id safe to use as a filename: no path separators or `..`, so a
- * caller-supplied `--session-id` can never escape `by-session/` via
- * `path.join`. Session ids are uuids in practice; anything else is rejected
- * rather than sanitized, so a bad id degrades to no record, never a write
- * outside the directory.
- */
+/** A session id safe as a filename: no path separators or `..`, so a caller-supplied `--session-id`
+ * cannot escape `by-session/`. Anything else is rejected, not sanitized, so a bad id yields no
+ * record rather than an outside write. */
 function isSafeSessionId(sessionId: string): boolean {
   return sessionId.length > 0 && !/[/\\]/.test(sessionId) && sessionId !== '.' && sessionId !== '..';
 }
@@ -95,11 +71,8 @@ function writeRecord(record: SessionActorRecord): void {
   fs.writeFileSync(recordPath(record.sessionId), JSON.stringify(record), 'utf8');
 }
 
-/**
- * Record the actor a session was launched under. Never throws — the sidecar is
- * an attribution optimization; a session with no record simply scans unattributed.
- * No-ops without a concrete session id (nothing to key on).
- */
+/** Record the actor a session was launched under. Never throws: the sidecar is an attribution
+ * optimization. No-ops without a concrete session id. */
 export function writeSessionActorRecord(record: SessionActorRecord): void {
   if (!isSafeSessionId(record.sessionId)) return;
   try {
@@ -180,12 +153,9 @@ export function readSessionActorRecord(sessionId: string): SessionActorRecord | 
   return undefined;
 }
 
-/**
- * Load every session actor record into a `sessionId -> record` map, for the scan
- * path to join a whole batch of sessions in one directory read instead of a
- * stat-per-row. Best-effort: unreadable/corrupt files are skipped, a missing dir
- * yields an empty map.
- */
+/** Load every actor record into a `sessionId -> record` map so the scan joins a batch in one
+ * directory read, not a stat per row. Best-effort: corrupt files are skipped, a missing dir yields
+ * an empty map. */
 export function loadSessionActorIndex(): Map<string, SessionActorRecord> {
   const out = new Map<string, SessionActorRecord>();
   let files: string[];

@@ -3,10 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// An OLDER OpenCode schema: no `cost`/`model` columns on `session`, and no `todo`
-// table at all. The scanner must still index the session (selecting NULL for the
-// absent columns and tolerating the missing todo table) rather than throwing
-// "no such column" and dropping every OpenCode row (RUSH-2358 resilience).
+// An older OpenCode schema (no `cost`/`model` on `session`, no `todo` table). The scanner must
+// still index it (NULL for absent columns, tolerate the missing table) rather than throw "no such
+// column" and drop every OpenCode row (RUSH-2358).
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-opencode-drift-'));

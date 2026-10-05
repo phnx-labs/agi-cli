@@ -8,11 +8,9 @@ function dev(name: string): DeviceProfile {
   return { name, platform: 'linux' } as DeviceProfile;
 }
 
-/**
- * A device whose ssh probe really fails. The address is under `.invalid`, the
- * RFC 6761 reserved TLD guaranteed never to resolve, so `probeDeviceStats` runs
- * the actual ssh path and comes back unreachable without reaching any host.
- */
+/** A device whose ssh probe really fails: the address is under `.invalid` (RFC 6761, never
+ * resolves), so `probeDeviceStats` runs the real ssh path and returns unreachable without reaching
+ * any host. */
 function unreachableDev(name: string): DeviceProfile {
   return {
     name,
@@ -153,11 +151,8 @@ describe('loadFleetStats', () => {
     expect(Object.keys(written[0])).toEqual(['stale']);
   });
 
-  // RUSH-3096: hardware does not change while a box is down, so a failed probe
-  // must not erase the cores/RAM/disk the last successful one recorded — that is
-  // what rendered `ci-runner-fsn1  linux  offline` with an empty spec cell.
-  // The probe here is the REAL one (no probeFleet override): an unresolvable
-  // address, the actual ssh path, a genuine `reachable: false` row.
+  // RUSH-3096: hardware does not change while a box is down, so a failed probe must not erase the
+  // last recorded cores/RAM/disk (it rendered an offline row with an empty spec cell).
   it('a real failed probe keeps the hardware from the last successful one, and persists it', async () => {
     const seen = 5_000_000;
     const now = seen + STATS_STALE_MS + 1; // cache is stale, so the box IS re-probed

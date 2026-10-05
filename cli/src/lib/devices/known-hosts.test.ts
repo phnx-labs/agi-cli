@@ -1,12 +1,6 @@
-/**
- * Managed known_hosts pinning (RUSH-1767).
- *
- * The real bugs here are security-shaped: a host must be judged "pinned" only
- * when its key is actually recorded (else the credential-copy gate would ship
- * tokens over an unverified connection), the policy must flip to
- * StrictHostKeyChecking=yes exactly when pinned, and re-scanning an
- * already-pinned key must be a no-op (else the store grows without bound).
- */
+/** Managed known_hosts pinning (RUSH-1767), security-shaped: a host is "pinned" only when its key
+ * is recorded (else the credential-copy check ships tokens over an unverified connection), policy
+ * flips to StrictHostKeyChecking=yes exactly when pinned, and re-scanning a pinned key is a no-op. */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -71,11 +65,9 @@ describe('newKnownHostsLines', () => {
 });
 
 describe('recordScannedKeys (the non-device / ssh-config-alias pin path)', () => {
-  // The remedy for RUSH-1767's dead-end: a bare `~/.ssh/config` Host alias is
-  // NOT a registered device, so `agents ssh <alias>` can't pin it. The
-  // --copy-creds gate instead scans the alias's resolved HostName and records
-  // it here; this is the store-write half that decides the scan now counts as
-  // pinned, so --copy-creds stops refusing.
+  // Remedy for RUSH-1767's dead end: a bare `~/.ssh/config` Host alias is not a registered device,
+  // so `agents ssh <alias>` cannot pin it. The --copy-creds check scans the alias's resolved
+  // HostName and records it here; this store-write half makes the scan count as pinned.
   it('pins a non-device host from ssh-keyscan output, idempotently', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kh-'));
     const file = path.join(dir, 'known_hosts');

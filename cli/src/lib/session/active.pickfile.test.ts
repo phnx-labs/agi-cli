@@ -4,11 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { pickSessionFile, pickClaudeSessionFileAcrossRoots } from './active.js';
 
-// Regression for the "every co-located session shows the same preview" bug: when a
-// concrete session id was requested but its transcript file was absent,
-// findClaudeSessionFile fell through to the NEWEST .jsonl in the cwd, so N distinct
-// sessions collapsed onto one file's preview + topic (they looked like duplicate
-// cards). A supplied-but-missing id must resolve to undefined, never a sibling.
+// Regression for "every co-located session shows the same preview": a requested session id with no
+// transcript fell through to the newest .jsonl in the cwd. A supplied-but-missing id must resolve
+// to undefined, never a sibling.
 
 let dir: string;
 
@@ -50,12 +48,9 @@ describe('pickSessionFile', () => {
   });
 });
 
-// Regression for the "watchdog / sessions goes blind after an upgrade" bug: a
-// session launched under an EARLIER agent version keeps its transcript under that
-// version's home, not the live `~/.claude` symlink (which repoints to the newest
-// installed version). Resolving only the live root dropped every still-running
-// older-version session — no sessionFile → no timestamp → `unknown` state and a
-// watchdog "no activity timestamp" skip. The resolver must search ALL roots.
+// Regression for "watchdog / sessions goes blind after an upgrade": a session from an earlier
+// agent version keeps its transcript under that version's home, not the live `~/.claude` symlink.
+// Resolving only the live root dropped it (`unknown` state); the resolver must search all roots.
 describe('pickClaudeSessionFileAcrossRoots', () => {
   let base: string;
   const cwd = '/work/proj';

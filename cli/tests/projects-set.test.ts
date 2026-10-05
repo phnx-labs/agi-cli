@@ -1,11 +1,6 @@
-/**
- * End-to-end `agents projects set` — the real CLI against real YAML on disk.
- *
- * The behavior worth pinning is what `set` does NOT do: `add --force` rebuilds a
- * definition from flags alone and drops every field not re-passed, which is how
- * a `linear.projectId` gets deleted by someone correcting a repo slug. `set`
- * loads, patches one field, and writes back.
- */
+/** End-to-end `agents projects set` against real YAML. It pins what `set` does NOT do: `add --force`
+ * rebuilds a definition from flags and drops fields not re-passed (deleting a `linear.projectId`
+ * when fixing a repo slug); `set` loads, patches one field, writes back. */
 
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';

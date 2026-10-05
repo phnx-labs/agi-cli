@@ -213,10 +213,9 @@ describe('permission path handling', () => {
     }
   });
 
-  // PHNX-3187: git checks group yaml out with CRLF on Windows (core.autocrlf).
-  // The rule extractor anchors on the closing quote (`"$`); a trailing '\r'
-  // meant it matched ZERO rules, so `agents doctor --fix` on win-mini wrote an
-  // empty permission set and could never reconcile permissions.
+  // PHNX-3187: git checks group yaml out with CRLF on Windows (core.autocrlf). The rule extractor
+  // anchors on the closing quote (`"$`), so a trailing '\r' matched ZERO rules and `agents doctor
+  // --fix` on win-mini wrote an empty permission set.
   it('extracts rules from a CRLF-checked-out permission group (PHNX-3187)', async () => {
     const home = makeTempHome();
     const groupsDir = path.join(home, '.agents', 'permissions', 'groups');
@@ -397,10 +396,9 @@ describe('codex writable roots (build/test/install caches)', () => {
 
 describe('convertToKimiFormat', () => {
   it('translates Claude `:*` bash patterns into Kimi globs, with a slash-crossing variant', () => {
-    // The core bug: copying `Bash(git status:*)` verbatim never matches in
-    // Kimi's engine (it globs the raw command string), so every call prompts.
-    // The second `*​/**` form is required because Kimi's `*` does not cross `/`,
-    // so a bare `cmd*` misses any path argument (`git push origin feat/x`).
+    // The core bug: copying `Bash(git status:*)` verbatim never matches in Kimi's engine (it globs
+    // the raw command string), so every call prompts. The second `*/**` form is needed because
+    // Kimi's `*` does not cross `/`, so `cmd*` misses path arguments (`git push origin feat/x`).
     const { permission } = convertToKimiFormat({
       name: 'core',
       allow: ['Bash(git push:*)', 'Bash(mq:*)', 'Bash(env)'],
@@ -467,10 +465,8 @@ describe('convertToKimiFormat', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Permission-set storage: groups/ contract
-// Regression for the bug where writes go to groups/ but reads scanned root.
-// ---------------------------------------------------------------------------
+// Permission-set storage: groups/ contract. Regression for writes going to groups/ while reads
+// scanned the root.
 describe('permission-set storage (groups/ contract)', () => {
   let userPermsDir: string;
   let sysPermsDir: string;
@@ -595,20 +591,9 @@ describe('permission-set storage (groups/ contract)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// PHNX-3294: safe cross-machine ops must resolve to ALLOW on every harness.
-//
-// Fleet agents were punting on `ssh` / `scp` / `agents ssh` / compound
-// `scp … && open …` / `git -C <config-repo>` because the blanket `Bash` grant
-// (user 30-paths.yaml) translated to a form some harnesses do not honour as
-// allow-all — most sharply Grok, whose `pattern:'*'` is only a SINGLE-level
-// wildcard, so it never auto-approved a multi-token `ssh host cmd`.
-//
-// These tests hit the REAL translation path (no mocking): the canonical set is
-// converted to each harness's native config on disk via applyPermissionsToVersion,
-// then read back with the registry's reverse projection, and a reference
-// (Claude-semantics) matcher checks each safe command resolves to allow.
-// ---------------------------------------------------------------------------
+// PHNX-3294: safe cross-machine ops (`ssh`, `scp`, `agents ssh`, `git -C`) must resolve to ALLOW
+// on every harness; the blanket `Bash` grant wasn't honoured as allow-all by some (Grok's
+// `pattern:'*'` is single-level). Real translation path, no mocking.
 describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
   // The prefix a canonical Bash rule grants, or '*' for a blanket grant, or
   // null when the rule is not a Bash allow. Mirrors Claude's token-prefix match:
@@ -716,12 +701,9 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
     expect(readBack!.allow).toContain('Bash(*)');
   });
 
-  // The explicit allowlist (no blanket Bash) must still grant the safe shapes on
-  // the harnesses that keep per-command rules. Grok is excluded here on purpose:
-  // its config `pattern` glob is single-level, so an explicit `Bash(ssh:*)` alone
-  // is NOT a reliable multi-token match — the pattern-less blanket grant above is
-  // grok's reliable fleet mechanism. Codex has no per-command allowlist, so any
-  // allow widens its sandbox to workspace-write and reads back as Bash(*).
+  // The explicit allowlist (no blanket Bash) must still grant the safe shapes on harnesses with
+  // per-command rules. Grok is excluded (its `pattern` glob is single-level). Codex has no
+  // per-command allowlist, so any allow widens its sandbox and reads back as Bash(*).
   const EXPLICIT_ONLY = FLEET_ALLOW.filter((r) => r !== 'Bash');
   it.each(['claude', 'kimi', 'droid', 'codex'] as AgentId[])(
     'explicit ssh/scp/git-C allowlist (no blanket) still allows the safe commands on %s',

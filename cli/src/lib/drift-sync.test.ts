@@ -4,11 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * End-to-end apply test for the drift-sync flow. The `yes` path must actually
- * reconcile the version home: overwrite a drifted file with its source and
- * install a missing one. No mocks — real heal, real file writes.
- */
+/** End-to-end apply test for the drift-sync flow: the `yes` path must reconcile the version home
+ * (overwrite a drifted file with its source, install a missing one). No mocks: real heal, real
+ * file writes. */
 
 let testHome: string;
 let userDir: string;

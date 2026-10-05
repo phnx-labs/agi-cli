@@ -13,10 +13,9 @@ import {
   projectsEnv,
 } from './routines.test-fixture.js';
 
-// `routines list`/`runs` output-surface slice of the routines.*.test.ts suite
-// (RUSH-2819) — split off the original 2,249-line routines.test.ts (measured
-// ~194s of test time) so vitest can parallelize the file across worker
-// forks. Shared fixtures: routines.test-fixture.ts.
+// `routines list`/`runs` output slice of the routines.*.test.ts suite (RUSH-2819), split from the
+// 2,249-line routines.test.ts (~194s) so vitest can parallelize it. Shared fixtures:
+// routines.test-fixture.ts.
 
 describeRoutines('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
@@ -171,10 +170,9 @@ describeRoutines('routines list --json has devices+runsHere, no device', () => {
     }
   });
 
-  // A routine re-pinned to other devices leaves its old run records behind on
-  // the machine that used to fire it. Reporting those as the routine's status
-  // painted a peer's healthy routine red in `list` and in the menu bar (which
-  // reads this JSON) — the record describes this device, not the owner.
+  // A routine re-pinned to other devices leaves old run records on the machine that used to fire
+  // it. Reporting those as status painted a peer's healthy routine red in `list` and the menu bar;
+  // the record describes this device, not the owner.
   it('reports no status for a routine pinned away from this device', () => {
     const home = makeHome({
       jobs: [
@@ -389,13 +387,9 @@ describeRoutines('routines list grouped by device', () => {
   // repeated our local record, which is how a green routine showed up red.
   it('shows Last Status only under this machine, not under a peer device', () => {
     const home = makeHome({
-      // Deliberately a two-device pin: the point here is that the listing still
-      // renders a row under EACH device group, and only the This-machine row
-      // carries a status. (Ownership means only zion fires it; the peer row
-      // existing is what this test is about.)
-      // zion must be the OWNER (lowest normalized name) so its row carries a
-      // status, while a second device still renders a peer group — that peer
-      // row having no status is what this test asserts.
+      // Deliberately a two-device pin: the listing must render a row under each device group, with
+      // a status only on the This-machine row. zion must be the owner (lowest normalized name) so
+      // its row carries a status while the peer group renders without one.
       jobs: [{ ...baseJob, name: 'two-device-job' }],
       registry: { ...registry, 'zulu-box': { name: 'zulu-box', platform: 'linux' } },
       deviceRoutines: { zion: ['two-device-job'], 'zulu-box': ['two-device-job'] },

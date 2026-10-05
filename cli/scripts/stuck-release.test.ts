@@ -1,12 +1,6 @@
-/**
- * Detecting the release that died between `git tag` and `npm publish`, by
- * running the REAL script.
- *
- * The case that matters is the one that actually happened on 2026-08-02: npm at
- * 1.20.78, main at 1.20.81, v1.20.80 and v1.20.81 tagged but never published. If
- * this returns nothing there, release.sh cuts 1.20.82 on top and the gap widens
- * by one — which is precisely how a one-version gap became a three-version gap.
- */
+/** Detecting the release that died between `git tag` and `npm publish`, by running the real script.
+ * The case that happened 2026-08-02: npm at 1.20.78, main at 1.20.81, v1.20.80 and v1.20.81 tagged
+ * but unpublished. If this returns nothing, release.sh cuts 1.20.82 and the gap widens. */
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -78,13 +72,9 @@ describe('stuck-release: nothing stuck', () => {
 });
 
 describe('stuck-release: release.sh must consume the tag list fail-closed', () => {
-  // This pins a bug that was actually shipped in this PR's first draft and only
-  // caught on a second pass. `remote_version_tags` calls `die` when it cannot
-  // read origin, so the guard looks fail-closed — but if release.sh consumes it
-  // as `done < <(remote_version_tags)`, the `die` exits only the process
-  // substitution's SUBSHELL. The loop then reads an empty list, no stuck tag is
-  // found, and the release bumps straight past the stuck version: fail-OPEN,
-  // the exact widening the guard exists to prevent.
+  // Pins a bug from this PR's first draft: `remote_version_tags` calls `die` when it cannot read
+  // origin, but consumed as `done < <(remote_version_tags)` the `die` exits only the
+  // process-substitution subshell: the loop sees no tags and bumps past the stuck one, fail-open.
   const RELEASE_SH = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8');
 
   it('demonstrates why: die inside a process substitution does NOT abort the script', () => {
@@ -127,12 +117,9 @@ describe('stuck-release: release.sh must consume the tag list fail-closed', () =
 });
 
 describe('release.sh: every irreversible act is gated by the lease', () => {
-  // Two separate review rounds each found an UNGATED push that the previous
-  // round's fix had missed — first the already-published recovery tag, then the
-  // main tag push on the branch where the local tag already exists. Both were
-  // the same shape: the gate was attached to a conditional branch rather than to
-  // the irreversible act itself. This walks the script and asserts the gate sits
-  // on the act, so the next one is caught here instead of by a third reviewer.
+  // Two review rounds each found an ungated push the previous fix missed (the already-published
+  // recovery tag, then the main tag push when the local tag exists): the gate was on a conditional
+  // branch, not the irreversible act. This walks the script and asserts the gate sits on the act.
   const LINES = fs
     .readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8')
     // Split on \r?\n: git's autocrlf checks out release.sh with CRLF on Windows,
@@ -160,12 +147,9 @@ describe('release.sh: every irreversible act is gated by the lease', () => {
   });
 
   it('any PRE-publish PR merge is lease-gated; the async bump-merge runs after publish', () => {
-    // Publish is decoupled from live main (RUSH-2395): the only `gh pr merge` in
-    // the primary flow is the version-bump merge that runs AFTER route_home_base_phase
-    // (the publish). It is best-effort and soft-guarded by a lease `verify` rather
-    // than a fatal require_lease, because the irreversible act (publish) is already
-    // done. The truly irreversible acts -- the tag push and the publish routing --
-    // stay require_lease-gated (asserted by the sibling tests below).
+    // Publish is decoupled from live main (RUSH-2395): the only `gh pr merge` in the primary flow
+    // is the version-bump merge after route_home_base_phase. It is soft-guarded by a lease
+    // `verify`, not a fatal require_lease, since the publish is done.
     const publishIdx = LINES.findIndex((l) =>
       /^\s*route_home_base_phase\s*\\?$/.test(l),
     );
@@ -225,10 +209,9 @@ describe('stuck-release: version ordering', () => {
 
 
 describe('stuck-release: the 2026-08-10 deadlock', () => {
-  // npm at 1.22.35, main carrying 1.22.36, v1.22.36 tagged but unpublishable
-  // (its CI-tested tree predates the prepack version-gate fix 1dffc78bc, so its
-  // own `npm publish` rejects a correct binary). Both guards fired and each named
-  // the other as the way out, so no version could ship at all.
+  // npm at 1.22.35, main carrying 1.22.36, v1.22.36 tagged but unpublishable (its tree predates
+  // the prepack version-gate fix 1dffc78bc). Both guards fired and each named the other as the way
+  // out, so nothing could ship.
   const TAGS: Array<[string, 'yes' | 'no']> = [
     ['1.22.35', 'yes'],
     ['1.22.36', 'no'],
@@ -263,10 +246,9 @@ describe('stuck-release: the 2026-08-10 deadlock', () => {
   });
 
   it('still reports a genuine jam sitting BEHIND main own version', () => {
-    // The exemption drops only main's version from the candidate set — it must
-    // not suppress the whole report. A second tag that really did die between
-    // `git tag` and `npm publish` is still the answer, even though the oldest
-    // stuck version is the exempt one.
+    // The exemption drops only main's version from the candidates and must not suppress the whole
+    // report: a second tag that really died between `git tag` and `npm publish` is still the
+    // answer.
     expect(
       stuck(
         '1.22.35',

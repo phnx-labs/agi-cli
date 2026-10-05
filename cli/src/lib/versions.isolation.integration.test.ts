@@ -4,16 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// End-to-end isolation boundary for the LAUNCH-path self-heal (ensureAgentRunnable).
-// `agents run <agent>@<version>` calls it on every dispatch (commands/exec.ts) and the
-// daemon calls it unattended every ~6h (healBrokenDefaultLaunches), so its two mutating
-// steps — "adopt another installed version as the default" and "install latest and pin
-// it" — are the places where an isolated copy can bleed into the user's normal setup.
-//
-// Driven in a subprocess with a planted temp HOME: state paths resolve from
-// process.env.HOME at module-eval, the pattern used by self-heal.integration.test.ts.
-// No mocks — the repair genuinely calls npm (which fails on these synthetic versions,
-// whether by 404 online or by network error offline; both land on the same branch).
+// End-to-end isolation boundary for the launch-path self-heal (ensureAgentRunnable), run on every
+// dispatch and by the daemon every ~6h; its mutating steps are where an isolated copy could bleed
+// into the user's setup. Subprocess with a temp HOME, no mocks.
 
 // POSIX-only: the launch probe resolves node_modules/.bin/<cli> directly on POSIX but
 // the `.cmd` wrapper on Windows, where a missing wrapper is deliberately treated as
@@ -122,12 +115,9 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     expect(r.stillIsolated).toBe(true);
   }, 180_000);
 
-  // The daemon's unattended 6-hourly launch-health pass runs with
-  // allowDefaultSwitch:false. A broken default that can't be repaired IN PLACE
-  // must NOT be silently swapped to another installed version — repointing the
-  // default installs/points at a different version home, which for Claude is a
-  // fresh empty credential scope (the "unprovoked logout"). It must fail closed
-  // and leave the default for the user to choose.
+  // The daemon's unattended pass runs with allowDefaultSwitch:false: an unrepairable default must
+  // not be swapped to another version (for Claude a fresh empty credential scope, the "unprovoked
+  // logout"). Fail closed.
   it('does not repoint the default in unattended mode (allowDefaultSwitch: false)', () => {
     plant('9.9.1', { runnable: false });   // broken normal default
     plant('9.9.3', { runnable: true });    // a healthy normal version it COULD adopt
@@ -135,11 +125,8 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
 
     const r = runEnsure('9.9.1', '9.9.3', { allowDefaultSwitch: false });
 
-    // In-place repair fails (synthetic 9.9.1 → npm 404) and, crucially, the
-    // healthy 9.9.3 is NOT adopted: the default pointer stays put and the failure
-    // is surfaced (null) so the daemon can alert instead of silently switching.
-    // (The failed clean-reinstall guts 9.9.1's node_modules so it drops off the
-    // installed list — orthogonal to the point here, which is the DEFAULT pointer.)
+    // In-place repair fails (synthetic 9.9.1, npm 404) and the healthy 9.9.3 is NOT adopted: the
+    // default pointer stays and the failure is surfaced (null) so the daemon can alert.
     expect(r.healed).toBeNull();
     expect(r.defaultAfter).toBe('9.9.1');
     expect(r.defaultAfter).not.toBe('9.9.3');
@@ -158,11 +145,9 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     expect(r.defaultAfter).toBe('9.9.3');
   }, 180_000);
 
-  // The last-resort step ("install latest and pin it") reuses the version dir of
-  // whatever `latest` resolves to. If the user already holds THAT version as an
-  // isolated copy, installing would commandeer it and pinning would hand an
-  // isolated install the global default — the leak the candidate filter above
-  // blocks, arriving through a different door.
+  // The last-resort step (install latest and pin it) reuses `latest`'s version dir; if the user
+  // holds it as an isolated copy, pinning would hand it the global default, the leak the candidate
+  // filter blocks.
   it('refuses to pin `latest` when the user holds that exact version as an isolated copy', () => {
     const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const latest = execFileSync('npm', ['view', '@openai/codex', 'version'], { encoding: 'utf-8' }).trim();

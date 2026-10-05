@@ -1,23 +1,6 @@
-/**
- * PHNX-3940: `agents update --check` is a READ-ONLY preview and must not trigger
- * the mutating startup steps every other real command runs.
- *
- * The planner (`planAutoUpdates`) is already read-only, but bootstrap ran the
- * migration pass, the legacy device-config fold, and the background sync/auto-
- * update BEFORE the command's action — so `--check` wrote the migration sentinel
- * and folded a legacy `fleet.devices.<name>.config` store to disk. Separately,
- * `device-config.getConfigValue` folded the device stores even on the pure
- * USER-scope `updates.auto` read the plan makes.
- *
- * This spawns the real CLI against a temp HOME with the startup suppression
- * flags explicitly OFF (AGENTS_SKIP_MIGRATION=0 etc.) — otherwise the dev-build
- * detector sets them to 1 and the migration never runs at all, hiding the very
- * behavior under test. It asserts `--check` (with and without a target) leaves
- * the migration sentinel absent, the legacy device store un-folded, and every
- * installation record byte-identical, while a real `--auto` invocation over the
- * SAME fixture DOES migrate — proving the exemption is real, not a fixture that
- * never folds.
- */
+/** PHNX-3940: `agents update --check` is a read-only preview and must not run mutating startup
+ * steps (migration, device-config fold, sync). Spawns the real CLI with suppression flags OFF
+ * (AGENTS_SKIP_MIGRATION=0), else dev-build detection hides the bug; `--auto` must still migrate. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -51,13 +34,9 @@ function paths(home: string) {
   };
 }
 
-/**
- * Build a fully set-up fixture HOME: a system repo (so `ensureInitialized`
- * returns without prompting), one claude + one codex managed installation,
- * `updates.auto=false` so the plan resolves NO network target, and a legacy
- * `fleet.devices.oldbox.config` store that the device-config migration would
- * fold into `devices/oldbox/agents.yaml` and strip from central.
- */
+/** Build a fixture HOME: a system repo (so `ensureInitialized` does not prompt), one claude and one
+ * codex install, `updates.auto=false` (no network target), and a legacy
+ * `fleet.devices.oldbox.config` store that the device-config migration would fold into */
 function makeFixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'update-check-ro-'));
   const home = path.join(dir, 'home');

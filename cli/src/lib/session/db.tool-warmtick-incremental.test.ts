@@ -1,26 +1,6 @@
-/**
- * The daemon warm-tick tool index is incremental for NON-streaming harnesses
- * (PHNX-3411).
- *
- * A live session's transcript grows every turn, so the warm-tick indexer sees a
- * changed session on every tick. It used to re-derive — parse AND re-sanitize —
- * every tool call in the whole history each time, `toolIndexMode: 'replace'`.
- * For an active large session on the interactive hub that was seconds of
- * synchronous work per tick, blocking the daemon event loop and browser IPC.
- * claude/codex were carved out into a resumable path; the other 11 harnesses
- * were not.
- *
- * These tests drive the real `upsertSessionsBatch` warm-tick path for a Grok
- * session (a non-streaming, full-file harness) across many ticks and pin:
- *   - the tool index resumes (append), not re-derives (replace), after tick 1;
- *   - a growing session's already-stored calls are never deleted+reinserted;
- *   - the incrementally-built index is byte-for-byte the same as one full
- *     re-parse of the final transcript (NO regression);
- *   - a first scan, a truncation/rewrite, and an extractor bump all still
- *     full-scan correctly.
- *
- * Real files, a real SQLite index, the real parser — no mocks.
- */
+/** PHNX-3411: the daemon warm-tick tool index is incremental for non-streaming harnesses; it used
+ * to re-parse every tool call each tick, blocking the event loop. Drives real
+ * `upsertSessionsBatch` for Grok: later ticks append, matching a full re-parse. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -133,10 +113,9 @@ describe('warm-tick tool index — Grok (non-streaming harness) stays incrementa
 
     const firstCallRowid = storedCalls(session)[0].rowid;
 
-    // Five more ticks, one appended completed call each. Every tick after the
-    // first MUST be an incremental resume, and the first call's row MUST keep its
-    // rowid — a full 'replace' deletes+reinserts it (new rowid), an 'append'
-    // upsert does not, so a stable rowid is observable proof of incrementality.
+    // Five more ticks, one appended completed call each. Every tick after the first must be an
+    // incremental resume, and the first call's row must keep its rowid (a 'replace'
+    // deletes+reinserts it), which is observable proof of incrementality.
     let priorEventCount = firstEventCount;
     for (let tick = 2; tick <= 6; tick++) {
       fs.appendFileSync(filePath, grokCall(`step ${tick}`, `ok ${tick}`));

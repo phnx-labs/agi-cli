@@ -1,17 +1,6 @@
-/**
- * Quick to-dos for AGI Menu's Home: `agents projects todo add|list|done|undo`.
- *
- * Linear is the record; nothing is stored here. `add` turns one typed line into a
- * Linear issue with `linear create` (assignee: the API key's owner, the active
- * cycle, status Todo, no milestone), reading `#project`, a day word (today,
- * tomorrow, mon…sun) and `!`/`!!` from the text. The issue description carries
- * {@link QUICK_TODO_MARKER}, which is how `list` tells a quick to-do from any other
- * issue (the team has no "todo" label, and taxonomy is not ours to add). `list`
- * shows the caller's open quick to-dos plus anything assigned to them that is due
- * today or overdue. `done` closes one; `undo` reopens a closed one, or cancels a
- * quick to-do created moments ago (linear-cli has no issue archive; Canceled is
- * the workflow's own discard state).
- */
+/** Quick to-dos for AGI Menu's Home (`agents projects todo add|list|done|undo`). Linear is the
+ * record; nothing is stored here. `add` makes a Linear issue reading `#project`, a day word and
+ * `!`/`!!`; its description carries {@link QUICK_TODO_MARKER} so `list` can find them. */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -63,14 +52,9 @@ const BANGS = /^!+$/;
 /** A trailing token's punctuation, as typed in "call back tomorrow," or "#AGI.". */
 const clean = (token: string) => token.replace(/[,.;:]+$/, '');
 
-/**
- * Read a typed line. The first `#project` is taken from anywhere in it. A day
- * word and a run of `!` (one: high, two or more: urgent) are taken only from
- * the tokens that end the line, so "Fix the today view bug" keeps its words
- * while "Call back tomorrow !!" does not. Tokens must stand alone ("today's" is
- * a word); trailing commas and periods on them are ignored. The rest, spaces
- * collapsed, is the title. AGI Menu's chips mirror this rule (QuickTodoParse).
- */
+/** Read a typed line: the first `#project` anywhere; a day word and a run of `!` (one: high, two+:
+ * urgent) only from tokens ending the line, so "Fix the today view bug" keeps its words. Tokens
+ * must stand alone; AGI Menu's chips mirror this (QuickTodoParse). */
 export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   let project: string | null = null;
   let due: string | null = null;
@@ -179,10 +163,8 @@ export interface TodoResult {
   message: string;
 }
 
-/**
- * Create a quick to-do. `project` (the `--project` flag) applies when the text
- * names none. Nothing is created from a line that is only tokens.
- */
+/** Create a quick to-do. `project` (`--project`) applies when the text names none; nothing is
+ * created from a line that is only tokens. */
 export async function addQuickTodo(
   text: string,
   opts: { project?: string; defs: readonly ProjectDef[]; now: Date },
@@ -226,11 +208,9 @@ export async function addQuickTodo(
   }
 }
 
-/**
- * The caller's to-dos: open quick to-dos plus open issues assigned to them due
- * today or earlier, due ones first (earliest due), then the newest quick to-dos;
- * at most {@link TODO_LIST_LIMIT}. `total` counts them all.
- */
+/** The caller's to-dos: open quick to-dos plus open assigned issues due today or earlier, due ones
+ * first (earliest due), then newest quick to-dos, at most {@link TODO_LIST_LIMIT}; `total` counts
+ * all. */
 export async function listQuickTodos(now: Date, linear: LinearExec = linearExec): Promise<{ todos: QuickTodo[]; total: number }> {
   const parsed = JSON.parse((await linear(['tasks', '--assignee', 'me', '--status', 'open', '--cycle', 'all', '--all', '--json'])).stdout) as { issues?: RawIssue[] };
   const today = localDay(now);
@@ -252,11 +232,8 @@ async function readStates(linear: LinearExec): Promise<Array<{ name?: string; ty
   return JSON.parse((await linear(['states', '--json'])).stdout) as Array<{ name?: string; type?: string }>;
 }
 
-/**
- * Mark one issue Done, and confirm it is: linear queues a close it could not
- * make (a rate limit) and still exits 0, so the issue is read back and only a
- * completed state counts.
- */
+/** Mark one issue Done and confirm it: linear queues a close it couldn't make (rate limit) and still
+ * exits 0, so the issue is read back and only a completed state counts. */
 export async function completeTodo(id: string, linear: LinearExec = linearExec): Promise<TodoResult> {
   try {
     const update = await linear(['update', id, '--done', '--proof', DONE_PROOF]);
@@ -270,12 +247,9 @@ export async function completeTodo(id: string, linear: LinearExec = linearExec):
   }
 }
 
-/**
- * Undo the last menu action on an issue: a completed one goes back to Todo; a
- * quick to-do still open and created within {@link UNDO_CREATE_WINDOW_MS} is
- * canceled (moved to the team's canceled state). Anything else is refused, so an
- * Undo never silently does nothing.
- */
+/** Undo the last menu action: a completed issue goes back to Todo; a still-open quick to-do created
+ * within {@link UNDO_CREATE_WINDOW_MS} is canceled. Anything else is refused so Undo never silently
+ * does nothing. */
 export async function undoTodo(id: string, now: Date, linear: LinearExec = linearExec): Promise<TodoResult> {
   let issue: QuickTodo;
   let states: Array<{ name?: string; type?: string }>;

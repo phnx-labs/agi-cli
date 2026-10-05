@@ -1,30 +1,6 @@
-/**
- * One peer's `--local` watch subscription, with connection hygiene.
- *
- * Both fleet fan-outs (`watchFleetSessions`, `watchFleetFeed`) subscribe to
- * every dialable device with a long-lived `ssh <peer> agents … watch --json
- * --local`. Both used to respawn that child on a bare 2 s timer with the
- * child's stderr set to `'ignore'`, so an offline peer — and `isDialableDevice`
- * deliberately never excludes one — got a fresh ssh every ConnectTimeout + 2 s
- * for the whole life of the watcher, with the reason discarded. That is the
- * ssh-child churn the 2026-09-03 incident reported.
- *
- * This module is the single implementation both fan-outs call:
- *
- * - exponential backoff per peer, {@link PEER_BACKOFF_BASE_MS} doubling to
- *   {@link PEER_BACKOFF_CAP_MS}, reset the moment the peer delivers a healthy
- *   protocol event;
- * - the child's stderr captured (bounded to {@link PEER_STDERR_BYTES}) and
- *   surfaced as the `unavailable` reason instead of being thrown away;
- * - a peer that fails {@link PEER_PARK_AFTER_FAILURES} spawns in a row parked —
- *   it stops the reconnect cycle and re-dials only when the device registry
- *   changes or the capped backoff elapses;
- * - a peer that fails {@link PEER_RETIRE_AFTER_FAILURES} in a row RETIRED — the
- *   capped 60 s ladder is itself unbounded in total work, so past that point the
- *   re-dial drops to {@link PEER_RETIRED_RECHECK_MS};
- * - abort listeners removed per iteration, so a watcher open for hours does not
- *   accumulate one per reconnect on the caller's AbortSignal.
- */
+/** One peer's `--local` watch subscription with connection hygiene, shared by both fleet fan-outs.
+ * Replaces a 2 s respawn that churned ssh against offline peers (2026-09-03 incident) with
+ * per-peer backoff, bounded stderr as the `unavailable` reason, and park/retire thresholds. */
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -39,33 +15,21 @@ export const PEER_BACKOFF_BASE_MS = 2_000;
 export const PEER_BACKOFF_CAP_MS = 60_000;
 /** Consecutive failed spawns before the peer is parked. */
 export const PEER_PARK_AFTER_FAILURES = 3;
-/**
- * Consecutive failed spawns before the peer is RETIRED — the capped 60 s ladder
- * gives way to {@link PEER_RETIRED_RECHECK_MS}.
- *
- * The cap alone bounds the delay but not the total work: a box that is off for a
- * weekend was dialed every 60 s for two days, ~2,880 ssh children per watcher
- * per peer, each one already known to fail. Ten consecutive failures is well
- * past any transient network event, so past that point the peer is treated as
- * genuinely absent and re-dialed on the slow cadence instead.
- */
+/** Consecutive failed spawns before a peer is retired and re-dialed at PEER_RETIRED_RECHECK_MS. The
+ * 60 s cap bounds delay, not total work: a box off for a weekend took ~2,880 failing ssh children
+ * per watcher. Ten failures is well past any transient event. */
 export const PEER_RETIRE_AFTER_FAILURES = 10;
-/**
- * Re-dial cadence for a retired peer. Still bounded rather than never, because a
- * box can come back without anything touching the device registry — waiting
- * only on a registry change would leave it unreachable until an operator acted.
- */
+/** Re-dial cadence for a retired peer. Bounded rather than never, since a box can return
+ * without any device registry change. */
 export const PEER_RETIRED_RECHECK_MS = 15 * 60_000;
 /** Bytes of a peer's stderr retained for the `unavailable` reason. */
 const PEER_STDERR_BYTES = 2_048;
 /** How often a parked peer re-checks the device registry for a refresh. */
 const PEER_REGISTRY_POLL_MS = 5_000;
 
-/**
- * Reconnect delay for `failures` consecutive failed spawns: 0 for a healthy
- * peer, then {@link PEER_BACKOFF_BASE_MS} doubling to {@link PEER_BACKOFF_CAP_MS},
- * and {@link PEER_RETIRED_RECHECK_MS} once the peer is retired.
- */
+/** Reconnect delay after `failures` consecutive failed spawns: 0 when healthy, then
+ * PEER_BACKOFF_BASE_MS doubling to PEER_BACKOFF_CAP_MS, then PEER_RETIRED_RECHECK_MS once
+ * retired. */
 export function peerBackoffDelayMs(
   failures: number,
   base = PEER_BACKOFF_BASE_MS,
@@ -84,10 +48,8 @@ interface PeerStreamOptions {
   /** Remote command to run over ssh, already shell-quoted for the peer's OS. */
   command: string;
   signal: AbortSignal;
-  /**
-   * One line of the peer's stdout. Return `true` when the line was a valid
-   * protocol event — that is the health signal that resets the backoff.
-   */
+  /** One stdout line from the peer. Return `true` for a valid protocol event: that health
+   * signal resets the backoff. */
   onLine: (line: string) => boolean;
   /** Report the peer as unavailable, with the captured reason. */
   onUnavailable: (reason: string) => void;
@@ -145,10 +107,8 @@ async function parkedWait(options: PeerStreamOptions, delayMs: number): Promise<
   });
 }
 
-/**
- * Hold one peer subscription open for the life of the signal, reconnecting with
- * backoff. Resolves when the signal aborts or the peer cannot be addressed.
- */
+/** Hold one peer subscription open until the signal aborts, reconnecting with backoff. Resolves
+ * on abort or when the peer cannot be addressed. */
 export async function streamFromPeer(options: PeerStreamOptions): Promise<void> {
   const parkAfter = options.parkAfterFailures ?? PEER_PARK_AFTER_FAILURES;
   let failures = 0;

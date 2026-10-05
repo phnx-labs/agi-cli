@@ -1,7 +1,5 @@
-/**
- * Hooks detector — names of hook scripts materialized in the version home
- * whose contents match the central source. Mirrors versions.ts:391-421.
- */
+/** Hooks detector: names of hook scripts in the version home whose contents match the central
+ * source (mirrors versions.ts:391-421). */
 import * as fs from 'fs';
 import { agentConfigDirName } from '../../agents.js';
 import * as path from 'path';

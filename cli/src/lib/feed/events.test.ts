@@ -55,10 +55,9 @@ describeEventsIo('events', () => {
         timer.mark('startup');
         timer.end({ exitCode: 0, status: 'success' });
 
-        // The spool append MUST be complete the instant end() returns — no await,
-        // no polling. A foreground `agents run` exits the process on the very next
-        // tick, so any deferred write is lost (PHNX-3497). Reading immediately is
-        // the regression assertion: it fails if recordPerfTiming ever goes async.
+        // The spool append must be complete the instant end() returns, with no await: a foreground
+        // `agents run` exits on the next tick, so a deferred write is lost (PHNX-3497). Reading
+        // immediately is the regression assertion.
         const line = fs.readFileSync(spool, 'utf-8').trim().split('\n').filter(Boolean).pop();
         expect(line).toBeDefined();
         const rec = JSON.parse(line!);
@@ -749,10 +748,9 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
   });
 
   it('registers browser.navigate, browser.screenshot, and computer.action as real, non-audit kinds (#11)', () => {
-    // browser.navigate/browser.screenshot were declared in the EventType union
-    // but never emitted anywhere — this pins them (and the new computer.action
-    // kind) as accepted, info-level events now that BrowserService and the
-    // computer action recording actually calls emit() with them.
+    // browser.navigate/browser.screenshot were in the EventType union but never emitted; this pins
+    // them and computer.action as accepted info-level events now that BrowserService and computer
+    // action recording call emit().
     for (const kind of ['browser.navigate', 'browser.screenshot', 'computer.action']) {
       expect(EVENT_TYPES).toContain(kind);
       expect(isEventType(kind)).toBe(true);

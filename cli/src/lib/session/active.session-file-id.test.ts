@@ -4,31 +4,15 @@ import * as os from 'os';
 import * as path from 'path';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
-// RUSH-2691: `findSessionFileForKind` took a `sessionId` and, for every harness
-// except Claude, threw it away — it answered from `latestSessionFileForCwd`, i.e.
-// `WHERE agent = ? AND cwd = ? ORDER BY last_activity DESC LIMIT 1`. With two
-// same-harness agents in ONE cwd (routine on this fleet: two codex sessions were
-// running in the agents-cli checkout when this was written, ids `01a00504-8ac6-…`
-// and `01a00504-8bd8-…`), BOTH live rows resolved to whichever transcript was
-// touched last.
-//
-// Before RUSH-2682 that mis-set a status badge. After it, the live row backs
-// `sessions preview <id>`, so the guess renders the OTHER session's digest under
-// this session's header — and `sessions-picker.ts` caches that body keyed on the
-// wrong id. An id we cannot resolve must yield undefined (the honest "not indexed
-// here" render), never a neighbour's transcript.
-//
-// Real SQLite, real files, no mocks: HOME is redirected before db.js loads so the
-// index under test is the actual one the resolver reads.
+// RUSH-2691: findSessionFileForKind dropped `sessionId` for non-Claude harnesses, so two
+// same-harness agents in one cwd both got the last-touched transcript. `sessions preview` then
+// showed the other session's digest. An unresolvable id must yield undefined.
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
-// realpath'd: on macOS os.tmpdir() is /var/folders/… , a symlink to /private/var/
-// folders/… . `latestSessionFileForCwd` realpaths the cwd it queries by
-// (db.ts:2605) while the upsert stores it raw (db.ts:2274), so an unresolved
-// temp path stores one spelling and queries another and the id-less fallback
-// silently finds nothing. The macOS CI leg only runs on the nightly matrix, so
-// this would have gone green here and red on the next nightly run.
+// realpath'd: on macOS os.tmpdir() is a symlink, and `latestSessionFileForCwd` realpaths the cwd
+// it queries (db.ts:2605) while the upsert stores it raw (db.ts:2274), so the id-less fallback
+// silently finds nothing. Only the nightly macOS leg would catch it.
 const testHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-active-file-id-')));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
@@ -71,11 +55,9 @@ function indexSession(id: string, agent: string, lastActivity: string): string {
   return filePath;
 }
 
-// Activity times are relative to now, never hardcoded. `latestSessionFileForCwd`
-// — the pre-fix behavior these tests are pinned against — filters on
-// ACTIVE_SESSION_STALE_MS (24h), so a fixed 2026-08-15 timestamp would age out a
-// day later and the pre-fix code would start returning undefined too. The tests
-// would keep passing while quietly losing the power to catch the regression.
+// Activity times are relative to now: `latestSessionFileForCwd` filters on ACTIVE_SESSION_STALE_MS
+// (24h), so a fixed timestamp would age out and the tests would silently lose the power to catch
+// the regression.
 const minsAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 
 describe('findSessionFileForKind — a known id selects its OWN transcript', () => {

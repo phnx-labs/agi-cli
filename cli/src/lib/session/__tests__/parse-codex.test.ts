@@ -1,9 +1,6 @@
-/**
- * Verifies parseCodex recovers the two event kinds that were silently dropped
- * before: apply_patch edits (response_item / custom_tool_call, NOT function_call)
- * and web searches (event_msg / web_search_end). Also checks the update_plan and
- * apply_patch summaries render cleanly. Fixtures are synthetic — no user data.
- */
+/** Verifies parseCodex recovers two previously dropped event kinds: apply_patch edits
+ * (custom_tool_call) and web searches (web_search_end), and that update_plan/apply_patch summaries
+ * render. Fixtures are synthetic. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -77,12 +74,9 @@ describe('parseCodex apply_patch (custom_tool_call)', () => {
 });
 
 describe('newer Codex exec cell (custom_tool_call name=exec)', () => {
-  // gpt-5.6-sol wraps every shell command in a JS cell: name="exec",
-  // input=`await tools.exec_command({cmd:"…"})`. Without unwrapping, the whole
-  // trajectory reads as an opaque wall of "exec" (the bug this fixes).
-  // The canonical acorn-based extractor (shared with the tool-call index) is what
-  // parse.ts reuses — it walks the whole AST, so it captures EVERY command in a
-  // multi-exec cell and never mistakes a comment/string for an invocation.
+  // gpt-5.6-sol wraps every shell command in a JS cell (name="exec"), so without unwrapping the
+  // trajectory reads as opaque "exec" calls. The shared acorn-based extractor walks the whole AST,
+  // capturing every command and ignoring comments/strings.
   test('commandsFromCodexExec captures every command, including parallel ones, and ignores comments', () => {
     expect(commandsFromCodexExec('const r = await tools.exec_command({cmd:"git status --short","workdir":"/x"});'))
       .toEqual(['git status --short']);

@@ -1,15 +1,6 @@
-/**
- * Which commit a release tags + publishes, exercised by running the REAL script
- * against a REAL git repository (no mocks).
- *
- * This is the integrity rule that keeps a busy default branch from publishing an
- * untested tarball: when unrelated PRs merge during a release PR's CI window, the
- * squash-merge tree diverges from what CI tested, and release.sh must fall back to
- * the CI-tested release commit rather than the drifted merge. release.sh itself
- * cannot run hermetically in a test (it demands live npm + GitHub); extracting the
- * decision into select-publish-commit.sh is what makes this path testable — the
- * same reason validate-bump.sh exists.
- */
+/** Which commit a release tags and publishes, run against the real script and a real git repo. This
+ * integrity rule stops a busy default branch from publishing an untested tarball: when the
+ * squash-merge tree diverges from what CI tested, release.sh falls back to the CI-tested commit. */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';

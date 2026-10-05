@@ -323,10 +323,9 @@ describe('updateSessionFilePaths rewrites file_path after soft-delete to trash',
   });
 });
 
-// An isolated install (`agents add --isolated`) is tagged with a `.isolated`
-// sentinel at the version-dir root. The marker is what keeps every "adopting"
-// code path away from the copy, so the roundtrip and the unmarked-default case
-// must both be exact.
+// An isolated install (`agents add --isolated`) is tagged with a `.isolated` sentinel at the
+// version-dir root, which keeps every "adopting" path away from the copy, so the roundtrip and the
+// unmarked-default case must both be exact.
 describe('isolated install markers', () => {
   it('marks a version isolated, reads it back, and leaves other versions unmarked', () => {
     const agent: AgentId = 'claude';

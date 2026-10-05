@@ -1,13 +1,6 @@
-/**
- * Personal operating reminders.
- *
- * A small, user-owned list of principles kept in
- * `~/.agents/reminders/reminders.yaml` and surfaced succinctly in the Claude
- * statusline — one per session, chosen deterministically from the session id so
- * concurrent agents each show a different one and it stays stable within a
- * session. Presence of the file with at least one entry is the opt-in; there is
- * no separate flag. The file syncs across the fleet via `agents repo push/pull`.
- */
+/** Personal operating reminders: a user-owned list in `~/.agents/reminders/reminders.yaml`, shown in
+ * the Claude statusline, one per session picked deterministically from the session id. A file with
+ * at least one entry is the opt-in; it syncs via `agents repo push/pull`. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -23,11 +16,8 @@ export interface Reminder {
 
 let remindersFilePathOverride: string | null = null;
 
-/**
- * Point the reminders file at a fixture for tests, mirroring
- * `setClaudeUsageCachePathForTest` in accounting/usage.ts. Returns the prior
- * override so a test can restore it. Pass `null` to clear.
- */
+/** Point the reminders file at a fixture for tests (like `setClaudeUsageCachePathForTest` in
+ * accounting/usage.ts); returns the prior override, `null` clears. */
 export function setRemindersFilePathForTest(filePath: string | null): string | null {
   const prev = remindersFilePathOverride;
   remindersFilePathOverride = filePath;
@@ -42,14 +32,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Load reminders from disk.
- *
- * Returns `[]` when the file does not exist — the feature is simply not opted
- * in. Throws on a present-but-malformed file so `agents reminders` can surface
- * the problem; the statusline caller deliberately swallows that, because a
- * broken prompt is worse than a missing reminder line.
- */
+/** Load reminders from disk. `[]` when the file is absent (not opted in); throws on a
+ * present-but-malformed file so `agents reminders` can surface it, while the statusline caller
+ * swallows that because a broken prompt is worse than a missing reminder line. */
 export function loadReminders(filePath = remindersFilePath()): Reminder[] {
   let raw: string;
   try {
@@ -74,12 +59,8 @@ export function loadReminders(filePath = remindersFilePath()): Reminder[] {
   return reminders;
 }
 
-/**
- * Deterministically pick one reminder for a session. Same `sessionId` always
- * maps to the same reminder, so it is stable within a session; different session
- * ids spread across the list, so concurrent agents show different reminders.
- * Returns `null` when there are no reminders.
- */
+/** Deterministically pick one reminder for a session: the same `sessionId` always maps to the same
+ * one (stable within a session), different ids spread across the list; `null` when there are none. */
 export function pickReminderForSession(reminders: Reminder[], sessionId?: string): Reminder | null {
   if (reminders.length === 0) return null;
   const key = sessionId?.trim();

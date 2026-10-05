@@ -110,14 +110,9 @@ function majorityProvider(jobs: readonly BenchJob[]): Provider {
   return best;
 }
 
-/**
- * Exact wall-clock phases for one completed run.
- *
- * - queue: event `created_at` → first required-path job start
- * - setup / execution: max across parallel required-path leaves (not the aggregator)
- * - report: aggregator job duration (or report-classified steps if no aggregator)
- * - e2e: required-check terminal (`aggregator.completed_at` else last job) − event
- */
+/** Exact wall-clock phases for one completed run: queue (event created_at to first required job
+ * start), setup/execution (max across parallel leaves), report (aggregator duration), e2e
+ * (required-check terminal minus event). */
 export function extractPhaseTimes(run: BenchRun): PhaseTimes | null {
   if (!isUsableRun(run)) return null;
   const { included, excluded } = requiredPathJobs(run);

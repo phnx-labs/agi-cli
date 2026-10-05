@@ -48,11 +48,9 @@ describe('feed answer claim-before-route', () => {
   it('resolves --choice approve-session on a permission item to the harness key (2), delivered via the reply rail', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-perm-'));
     const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-perm-mailbox-'));
-    // A running (not parked) agent routes the answer to its mailbox, so the
-    // delivered text is exactly the resolved deliveryKey — proving `approve-session`
-    // maps to Claude's option-2 selection token, not the label.
-    // The block carries the harness's recorded subtype and a write-time cursor
-    // the row's last transcript event precedes — a confirmed pending permission.
+    // A running agent routes the answer to its mailbox, so delivered text is exactly the resolved
+    // deliveryKey, proving `approve-session` maps to Claude's option-2 token, not the label. The
+    // block carries the recorded subtype and a write-time cursor.
     const session = { context: 'terminal', kind: 'claude', host: 'worker', sessionId: 'perm', agentId: 'perm', status: 'running', activity: 'working', pidAlive: true, lastEventMs: 900 } as ActiveSession;
     const block: OpenBlock = {
       blockId: blockIdForSession('perm'), sessionId: 'perm', mailboxId: 'perm', host: 'worker', runtime: 'claude',

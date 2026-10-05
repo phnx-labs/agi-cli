@@ -107,13 +107,9 @@ describe('resolvePaneIdentity — name-based recovery (the fleet fix)', () => {
   });
 });
 
-/**
- * RUSH-2192 — pins the listTmuxAgentSessions *forward* of terminalId, not just
- * that PidSessionEntry can hold the field. Removing
- * `terminalId: liveEntry?.terminalId` from the tmux ActiveSession push must fail
- * this test. Real tmux + real by-pid entry; socket redirected so we never touch
- * the fleet's default server.
- */
+/** RUSH-2192: pins that listTmuxAgentSessions forwards terminalId; removing `terminalId:
+ * liveEntry?.terminalId` from the tmux ActiveSession push must fail this test. Real tmux, real
+ * by-pid entry, socket redirected. */
 const tmuxSkip = isTmuxInstalled() ? null : 'tmux not installed';
 
 describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)', () => {

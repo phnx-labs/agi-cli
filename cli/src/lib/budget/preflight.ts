@@ -1,17 +1,6 @@
-/**
- * Pre-flight cost estimate + gate (issue #346).
- *
- * Before a run spawns we estimate its cost and decide whether to allow it. The
- * estimate's token basis comes from recent ledger averages for the same agent
- * (the most accurate signal we have), falling back to a prompt-character
- * heuristic when there's no history. Cost is computed via the canonical pricing
- * module — never reimplemented here.
- *
- * `enforcePreflight` is the decision: with `on_exceed: block`, if launching
- * this run would push any cap (per_run / per_day / per_agent / per_project)
- * over the line, it denies. With `on_exceed: warn` it always allows but reports
- * the projected overrun.
- */
+/** Pre-flight cost estimate and decision (issue #346). The token basis is recent ledger averages
+ * for the agent, else a prompt-character heuristic; cost comes from the pricing module.
+ * `enforcePreflight` with `on_exceed: block` denies a run that would push any cap over. */
 import type { BudgetConfig } from '../types.js';
 import { estimateCost, formatUsd } from '../pricing/index.js';
 import { loadLedger, spendForDay, spendForAgentDay, spendForProject, localDay } from './ledger.js';
@@ -32,20 +21,13 @@ interface RunEstimate {
 
 /** Roughly 4 characters per token — the standard coarse heuristic for English text. */
 const CHARS_PER_TOKEN = 4;
-/**
- * Output is typically a multiple of the visible prompt for an agentic run
- * (tool calls, file reads, reasoning). 6x is a deliberately conservative
- * lower bound so the estimate doesn't wildly under-report and wave through a
- * run that then blows the cap on its first turn.
- */
+/** Output is typically a multiple of the visible prompt for an agentic run. 6x is a deliberately
+ * conservative lower bound so the estimate doesn't under-report and wave through a run that blows
+ * the cap on its first turn. */
 const HEURISTIC_OUTPUT_MULTIPLIER = 6;
 
-/**
- * Estimate the cost of a run. When the ledger has prior runs for this agent we
- * use their average input/output tokens; otherwise we fall back to a
- * prompt-character heuristic. `recentAvgTokens` lets callers inject a
- * precomputed average (e.g. from a scoped ledger) for testability.
- */
+/** Estimate a run's cost from the agent's average ledger tokens, else a prompt-character heuristic.
+ * `recentAvgTokens` lets callers inject a precomputed average for testability. */
 export function estimateRunCost(args: {
   agent: string;
   model: string;
@@ -144,13 +126,9 @@ export function ledgerStateFor(agent: string, project: string, ledger?: SpendEnt
   };
 }
 
-/**
- * The pre-flight gate. Projects this run's estimate on top of current spend and
- * decides allow/deny. `on_exceed: warn` never blocks (allow:true) but still
- * reports the projected overrun via `reason`. A hard block sets allow:false —
- * `--yes` MUST NOT override it (the caller enforces that; this function only
- * reports the truth).
- */
+/** The pre-flight decision: projects this run's estimate onto current spend. `on_exceed: warn`
+ * allows but reports the overrun via `reason`. A hard block sets allow:false, which `--yes` must
+ * not override (the caller enforces that). */
 export function enforcePreflight(
   cfg: BudgetConfig,
   state: LedgerState,
@@ -192,11 +170,9 @@ export function enforcePreflight(
   let needsConfirm =
     cfg.require_confirm_over !== undefined && est.estUsd >= cfg.require_confirm_over;
 
-  // Unpriced model + active caps: the estimate is $0 because we have no price
-  // for this model, so NONE of the per_run/per_day caps above can ever trip and
-  // we'd silently wave the run through. Never $0-wave-through (#346): when caps
-  // are set but the model is unpriced, require confirmation so the user is told
-  // the cap cannot be enforced for this model rather than getting a false pass.
+  // Unpriced model with active caps: the estimate is $0, so no cap above can trip and the run
+  // would silently pass. Never $0-wave-through (#346): require confirmation so the user learns the
+  // cap can't be enforced.
   if (!est.priced && hasAnyCap(cfg) && breaches.length === 0) {
     needsConfirm = true;
     return {
@@ -253,13 +229,9 @@ interface PreflightGateResult {
   banner: string;
 }
 
-/**
- * High-level pre-flight gate: resolve the effective budget for `cwd`, estimate
- * the run, and evaluate every cap. Returns `dormant:true` (and skips all work)
- * when no caps are set, so the gate is zero-cost for users who never configure
- * a budget. The CLI layer decides how to act on `decision` (print banner,
- * confirm, or block + exit non-zero).
- */
+/** High-level pre-flight check: resolve the effective budget for `cwd`, estimate the run and
+ * evaluate every cap. Returns `dormant:true` and skips work when no caps are set. The CLI layer
+ * decides to print a banner, confirm, or block and exit non-zero. */
 export function runPreflightGate(args: {
   agent: string;
   model: string;

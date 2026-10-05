@@ -1,20 +1,6 @@
-/**
- * Complete teardown of agents-cli — the reverse of `agents setup`.
- *
- * The hard part is undoing "adoption": normal installs move the user's real
- * `~/.<agent>` aside and replace it with a symlink into agents-cli's version
- * homes (see `switchConfigSymlink` / `importAgent`). A clean uninstall must put
- * those real directories back, release any adopted launchers, strip the shim
- * directory from the user's PATH, and only then dispose of `~/.agents`.
- *
- * Safety invariant: a `~/.<agent>` that agents-cli never adopted is a REAL user
- * directory and is never touched. Ownership is decided structurally by
- * `getConfigSymlinkVersion` (non-null only for a symlink into our versions dir),
- * exactly as `removeVersion` does it — no marker files, no guessing.
- *
- * This module is split into a read-only {@link planUninstall} and a mutating
- * {@link executeUninstall} so `--dry-run` and the real run share one code path.
- */
+/** Complete teardown, the reverse of `agents setup`: restore the real `~/.<agent>` dirs that
+ * adoption symlinked, release launchers, strip PATH lines, dispose of `~/.agents`. A `~/.<agent>`
+ * never adopted is a real user dir and is never touched (`getConfigSymlinkVersion`). */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -107,13 +93,8 @@ function symlinkTarget(p: string): string | null {
   }
 }
 
-/**
- * Remove a symlink/junction at `p` without following into its target. On POSIX
- * this is a plain `unlinkSync`; on Windows the same call correctly deletes a
- * junction or directory-symlink reparse point while leaving the target intact —
- * verified on a real Windows host, where `fs.rmSync(p, { force: true })` instead
- * throws `EFAULT` on a reparse point. `rmSync` is deliberately NOT used here.
- */
+/** Remove a symlink/junction without following it: `unlinkSync` works on POSIX and Windows
+ * junctions, while `fs.rmSync` throws EFAULT on a Windows reparse point. */
 function removeLink(p: string): void {
   fs.unlinkSync(p);
 }
@@ -200,10 +181,8 @@ function planRcFiles(): string[] {
   return out;
 }
 
-/**
- * Build a read-only plan of everything a complete uninstall would change.
- * Performs no mutations; safe to run for `--dry-run` and to print for confirm.
- */
+/** Build a read-only plan of everything an uninstall would change; no mutations, safe for
+ * `--dry-run`. */
 export function planUninstall(): UninstallPlan {
   const agentsDir = getUserAgentsDir();
   const legacy = getLegacySystemAgentsDir();
@@ -227,13 +206,8 @@ export function planUninstall(): UninstallPlan {
   };
 }
 
-/**
- * Execute a plan built by {@link planUninstall}. Restores adopted config dirs
- * and home files, releases adopted launchers, strips shim PATH lines, then
- * disposes of `~/.agents` — moved aside to `~/.agents.removed-<ts>` (recoverable)
- * by default, or hard-deleted when `purge` is set. Config restore always runs
- * before disposal because the backups live inside `~/.agents`.
- */
+/** Execute a plan: restore config dirs, release launchers, strip PATH lines, then move `~/.agents`
+ * aside (or delete with `purge`). Restore runs first because backups live in `~/.agents`. */
 export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; timestamp: number }): UninstallResult {
   const result: UninstallResult = {
     restoredConfigs: [],
@@ -251,12 +225,8 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
   for (const c of plan.configs) {
     try {
       if (c.kind === 'restore-backup') {
-        // The adopted link carries no data (the real dir is the backup); drop it,
-        // then move the backup out of ~/.agents onto the real path — EXDEV-safe so a
-        // cross-volume ~/.agents can't strand the backup mid-restore. unlinkSync (not
-        // rmSync) is deliberate: it removes a POSIX symlink AND a Windows junction/
-        // dir-symlink without following into the target, whereas rmSync throws EFAULT
-        // on a Windows reparse point.
+        // Drop the adopted link (no data; the real dir is the backup), then move the backup out of
+        // ~/.agents, EXDEV-safe. `unlinkSync` not `rmSync`: EFAULT on a Windows reparse point.
         removeLink(c.realPath);
         moveDirCrossDevice(c.source, c.realPath);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
@@ -322,10 +292,8 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 5. Remove the legacy back-compat symlink, if present. `~/.agents-system` is a
-  // link (junction on Windows — createLink uses 'junction' for a dir source), so it
-  // goes through removeLink for the same reason as the config links: rmSync throws
-  // EFAULT on a Windows reparse point.
+  // Remove the legacy `~/.agents-system` link (a junction on Windows) via removeLink; rmSync throws
+  // EFAULT there.
   if (plan.legacySymlink) {
     try {
       removeLink(plan.legacySymlink);

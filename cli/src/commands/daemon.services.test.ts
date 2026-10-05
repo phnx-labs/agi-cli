@@ -1,14 +1,6 @@
-/**
- * agents daemon — services, broker, webhooks.
- *
- * Per-service state: what `services` reports, how enable/disable/restart behave,
- * and the webhook surface that rides the same config.
- *
- * Split out of a single 35-test `daemon.test.ts` that ran 159s — the slowest
- * file in the repo, and therefore the whole suite's floor: vitest parallelises
- * across FILES and runs one file's tests sequentially in a single worker. The
- * shared spawn harness lives in `daemon-test-harness.ts`.
- */
+/** agents daemon: services, broker, webhooks: what `services` reports, enable/disable/restart
+ * behavior, and the webhook surface on the same config. Split from a 159s daemon.test.ts; harness
+ * in `daemon-test-harness.ts`. */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -26,10 +18,9 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
     const res = run(makeHome(), ['services', '--json']);
     expect(res.status).toBe(0);
     const payload = JSON.parse(res.stdout);
-    // Pinned: existing agents/CI consumers read this field directly.
-    // secretsBroker.socketPath is always null now (PHNX-3989 OWN-1): the daemon
-    // no longer hosts that broker, only probes its reachability. The browserIpc
-    // field is gone with the standalone browser CLI (PHNX-4101).
+    // Pinned: agents/CI consumers read this field directly. secretsBroker.socketPath is always
+    // null (PHNX-3989 OWN-1): the daemon only probes broker reachability. browserIpc is gone with
+    // the standalone browser CLI (PHNX-4101).
     expect(payload.secretsBroker.reachable).toBe(false);
     expect(payload.secretsBroker.socketPath).toBeNull();
     expect(payload.browserIpc).toBeUndefined();

@@ -68,10 +68,9 @@ describe('captureFleet', () => {
   });
 
   it('keeps the config of a device missing from the captured roster', () => {
-    // `fleet.devices.<name>.config` is the operator-config store, so a capture
-    // run from a box whose registry has not seen a peer used to erase that
-    // peer's settings outright. Observed for real: capturing on yosemite-s0
-    // deleted zion's whole config block from the shared agents.yaml.
+    // `fleet.devices.<name>.config` is the operator-config store, so a capture from a box that had
+    // not seen a peer used to erase that peer's settings. Observed for real: capturing on
+    // yosemite-s0 deleted zion's whole config block from the shared agents.yaml.
     const prev = {
       devices: {
         zion: { config: { browserRemoteControl: false, defaultBrowserProfile: 'comet-local' } },

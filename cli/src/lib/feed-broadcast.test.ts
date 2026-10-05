@@ -557,11 +557,8 @@ describe('channel delivery — real provider registry, no mocking', () => {
     expect(pending.map((m) => m.text)).toContain(composeBroadcastMessage(postCtx));
   });
 
-  // RUSH-2123: before effectiveBroadcastConfig, this exact scenario
-  // (notify.owner set, feed.broadcast never written) returned [] from
-  // broadcastBlock and the block reached nobody, even though blockDeliveryFailure
-  // would have reported it undelivered — nothing in the outbound stack knew
-  // notify.owner existed. Now it delivers.
+  // RUSH-2123: with notify.owner set and feed.broadcast unset, broadcastBlock returned [] and the
+  // block reached nobody. Now it delivers.
   it('was silent before RUSH-2123: --blocked with notify.owner set and no feed.broadcast now delivers', async () => {
     const meta = { notify: { owner: { channel: 'mailbox', to: BOX } } } as Meta;
     const postCtx = ctx({ level: 'important' });
@@ -585,17 +582,9 @@ describe('channel delivery — real provider registry, no mocking', () => {
   });
 });
 
-/**
- * PHNX-3303 integration: the feed owner sink must actually INVOKE the SSH
- * forward when local owner delivery fails on a box with no working provider —
- * not just leave the pure `owner-forward.ts` functions correct in isolation.
- *
- * Real path, no mocking of the logic: the owner channel is the macOS-only
- * `imessage` transport, so on this Linux box the local send genuinely fails on
- * platform, a real device registry names a macOS peer, and a fake `ssh` on PATH
- * stands in for the transport (the same kind of on-PATH fake the
- * notify/openclaw tests use) and returns the peer's `agents send --json` result.
- */
+/** PHNX-3303: the owner sink must invoke the SSH forward when local owner delivery fails on a
+ * box with no provider. Uses a fake `ssh` on PATH and the macOS-only imessage channel, which
+ * genuinely fails on Linux. */
 // Linux-only: the scenario is a headless worker whose local iMessage provider
 // fails on platform (rush.ts sends via osascript now, no `rush` preflight), so
 // on macOS the "local failure" would be a real Messages.app send attempt.
@@ -695,16 +684,9 @@ describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH
   });
 });
 
-/**
- * PHNX-3698 — the RUNTIME half of the important-`feed post` → owner fan-out.
- * The planning tests above prove `ctx`/`messageTemplate` land on the owner-alias
- * sink; this proves the sink, once RUN, re-renders the body PER destination so a
- * Slack channel in the owner policy gets mrkdwn labeled links while iMessage
- * stays plain — the same two-different-bodies guarantee notify.test.ts asserts
- * for `agents send --to owner`, but through the `feed post` entry point. Real path, no
- * mocking of the composer: spy providers stand in for the rush `imessage`/`slack`
- * transports and capture the exact body each was handed.
- */
+/** PHNX-3698 runtime half: the owner fan-out re-renders the body per destination (Slack mrkdwn
+ * links, iMessage plain). Spy providers capture the exact body each transport receives; the
+ * composer is not mocked. */
 describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', () => {
   const savedHumans = process.env.AGENTS_HUMANS_FILE;
   const savedWorkspace = process.env.LINEAR_WORKSPACE;

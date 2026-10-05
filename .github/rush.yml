@@ -1,21 +1,6 @@
 version: 1
 
-# prix/code-reviewer is PAUSED — see #1767.
-#
-# Every webhook-dispatched run was failing on startup: the Rush Cloud agent-host
-# token-rotation path captured the interactive `claude setup-token` TTY stream
-# (ANSI codes + banner) as the `Authorization` header instead of parsing the
-# `sk-ant-oat01-...` value, so Anthropic rejected the header and the run died —
-# and that same setup flow prints a fresh 1-year OAuth token in cleartext, so
-# every failed run (~1/min since 2026-08-02T04:27Z) minted and logged a live
-# credential. Pausing the trigger here stops this repo's spill until the upstream
-# capture bug is fixed and the leaked tokens are revoked.
-#
-# Meanwhile the non-author review falls back to a subagent reviewer (see AGENTS.md
-# "Conventions"). Re-enable by restoring the block below once the upstream fix lands.
+# prix/code-reviewer is PAUSED (#1767). Pausing stops the spill until the capture bug is fixed and
+# leaked tokens are revoked. Meanwhile the non-author review is a subagent reviewer (AGENTS.md
+# "Conventions"); re-enable by restoring the removed trigger block from git history once fixed.
 agents: []
-#  - id: prix/code-reviewer
-#    on:
-#      pull_request:
-#        types: [opened, reopened, synchronize]
-#        branches: [main]

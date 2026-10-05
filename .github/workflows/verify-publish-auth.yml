@@ -1,9 +1,7 @@
 name: Verify npm publish auth
 
-# Manual, non-destructive check that the NPM_TOKEN secret is present and valid.
-# Runs `npm whoami` against the public registry with the publish token — it does
-# NOT publish anything. Use it to confirm the release pipeline can authenticate
-# before (or independently of) cutting a release.
+# Manual, non-destructive check that the NPM_TOKEN secret is present and valid: runs `npm whoami`
+# against the public registry with the publish token and publishes nothing.
 
 on:
   workflow_dispatch:

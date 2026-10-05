@@ -18,19 +18,9 @@ function dev(extra: Partial<DeviceProfile> = {}): DeviceProfile {
   } as DeviceProfile;
 }
 
-/**
- * The tokens a REAL shell hands the program, given what we told ssh to run.
- *
- * This is the whole point of the feature, so it is exercised through an actual
- * `sh -c` rather than asserted against a quoting snapshot: the command string we
- * build is what a remote login shell parses, and only a real parse proves the
- * tokens survive.
- *
- * The delimiter is NUL, not newline. A token is allowed to CONTAIN a newline —
- * that is one of the cases this feature exists for — so a newline-delimited
- * read-back cannot tell "one token with a newline in it" from "two tokens", and
- * would report a pass for a string the shell had actually split.
- */
+/** The tokens a real shell hands the program, via an actual `sh -c` rather than a quoting snapshot,
+ * since only a real parse proves tokens survive. The delimiter is NUL, not newline: a token may
+ * contain a newline, which would read back as two tokens. */
 function tokensAfterRealShell(command: string): string[] {
   const out = execFileSync('sh', ['-c', command], { encoding: 'utf8' });
   return out.split('\u0000').slice(0, -1);
@@ -178,14 +168,9 @@ describe('--argv parsing fails loud', () => {
 });
 
 describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
-  /**
-   * The command string ssh would send, extracted from a real `buildSshInvocation`.
-   *
-   * The earlier tests here exercised `wrapRemoteCommand` in isolation, which is
-   * exactly where the provenance bug hid: `buildSshInvocation` applied
-   * `markFleetRemote` BEFORE quoting, so the already-quoted prelude got quoted a
-   * second time and nothing in a quoter-only test could see it.
-   */
+  /** The command string ssh would send, taken from a real `buildSshInvocation`. Testing
+   * `wrapRemoteCommand` alone hid the provenance bug: `buildSshInvocation` applied
+   * `markFleetRemote` before quoting, so the quoted prelude was quoted twice. */
   function remoteCommandFrom(device: DeviceProfile, cmd: string[], argv: boolean): string {
     const { args } = buildSshInvocation(device, cmd, '/nonexistent/askpass', {}, argv ? { argv: true } : {});
     return args[args.length - 1]!;
@@ -207,10 +192,9 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
   });
 
   it('delivers provenance AND exact argv through a real shell, in one command', () => {
-    // The invoked program prints BOTH its argv and the variables it can see, so a
-    // single real execution proves the two halves together. Reading the variables
-    // in a *later* command would read the ambient shell instead: `env K=V cmd`
-    // scopes them to `cmd` alone, which is exactly what `markFleetRemote` relies on.
+    // The invoked program prints both its argv and the variables it sees, so one real execution
+    // proves both halves. A later command would read the ambient shell: `env K=V cmd` scopes
+    // variables to `cmd`, which `markFleetRemote` relies on.
     const prelude = fleetRemotePrelude(dev(), actor);
     const script = 'printf ' + PRINTF_NUL_Q + ' "$@" "$AGENTS_FLEET_REMOTE" "$AGENTS_ACTOR" "$AGENTS_ACTOR_ID" "$GIT_AUTHOR_NAME"';
     const remote = wrapRemoteCommand(
@@ -279,13 +263,9 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
 });
 
 describe('PowerShell 5.1 loses arguments, so neither branch uses its serializer', () => {
-  /**
-   * Measured on a real Windows peer (win-mini, PowerShell 5.1), NOT inferred:
-   * PowerShell re-serializes arguments when invoking a NATIVE program, dropping an
-   * empty argument entirely and discarding embedded double quotes. `--%` does not
-   * rescue it — it applies only to native commands, a newline argument ends the
-   * directive, and it expands `%VAR%`. Hence the two-branch script.
-   */
+  /** Measured on a real Windows peer (win-mini, PowerShell 5.1): PowerShell re-serializes arguments
+   * to a native program, dropping empty ones and embedded double quotes. `--%` does not help
+   * (native only, a newline ends it, it expands `%VAR%`), hence the two-branch script. */
   function pwshScript(cmd: string[]): string {
     const wrapped = wrapRemoteCommand(dev({ shell: 'powershell' }), cmd, { argv: true })!;
     return decodeRenderedPowershell(wrapped);

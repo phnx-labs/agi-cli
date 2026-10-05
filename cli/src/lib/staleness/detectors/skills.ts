@@ -1,7 +1,5 @@
-/**
- * Skills detector — names of skill directories materialized in the version
- * home that match the central source content. Mirrors versions.ts:359-389.
- */
+/** Skills detector: names of skill directories in the version home that match the central
+ * source content (mirrors versions.ts:359-389). */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
@@ -25,11 +23,9 @@ export function skillDirsMatch(src: string, dest: string): boolean {
       if (!fs.existsSync(destPath)) return false;
       if (!skillDirsMatch(srcPath, destPath)) return false;
     } else {
-      // Stat-first (RUSH-2320 #2): size mismatch is a definitive miss with no
-      // content reads. Do NOT treat equal mtimes as equal content — src and
-      // dest are different trees (version home vs source), and copyFileSync
-      // does not preserve mtime, so mtime equality is accidental and unsafe.
-      // Content compare only when sizes match.
+      // Stat-first (RUSH-2320 #2): a size mismatch is a definitive miss with no content reads.
+      // Equal mtimes are not equal content: src and dest are different trees and copyFileSync does
+      // not preserve mtime. Compare content only when sizes match.
       let srcStat: fs.Stats;
       let destStat: fs.Stats;
       try {

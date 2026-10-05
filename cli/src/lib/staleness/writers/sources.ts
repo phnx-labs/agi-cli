@@ -1,12 +1,6 @@
-/**
- * Shared layer-source resolution for writers.
- *
- * Layer precedence matches getResourceBases() in versions.ts. Project layer
- * is intentionally EXCLUDED for commands/skills/hooks/subagents/permissions
- * — those bodies become agent context, and a cloned public repo could ship
- * one that coerces the agent on the next launch. Trusted layers only:
- * user → system → extras.
- */
+/** Shared layer-source resolution for writers; precedence matches getResourceBases() in
+ * versions.ts. The project layer is excluded for commands/skills/hooks/subagents/permissions:
+ * those bodies become agent context and a cloned public repo could coerce the agent. */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, PluginManifest } from '../../types.js';
@@ -123,10 +117,8 @@ export function listPluginSkillNames(options: { agent?: AgentId; plugins?: Set<s
   return Array.from(names);
 }
 
-/**
- * Subdirectories under hooks/ that are never group dirs.
- * Must stay in lockstep with HOOK_GROUP_SKIP_DIRS in hooks.ts.
- */
+/** Subdirectories under hooks/ that are never group dirs. Must stay in lockstep with
+ * HOOK_GROUP_SKIP_DIRS in hooks.ts. */
 const HOOK_GROUP_SKIP_DIRS = new Set(['node_modules', '.git', '.cache']);
 
 const HOOK_SCRIPT_EXTS = new Set([
@@ -169,12 +161,8 @@ function findNestedHookFile(hooksRoot: string, basename: string): string | null 
   return null;
 }
 
-/**
- * Find the trusted source for a hook by name.
- * - File basename (`04-session-identity.sh`) or relative path
- *   (`session-starts/04-session-identity.sh`) → script file
- * - Directory basename (`tests`) → directory bundle (fixtures-only etc.)
- */
+/** Find the trusted source for a hook by name: a file basename or relative path resolves to the
+ * script file; a directory basename (`tests`) resolves to a directory bundle (fixtures-only etc.). */
 export function resolveHookSource(name: string): string | null {
   const roots = [
     path.join(getUserAgentsDir(), 'hooks'),

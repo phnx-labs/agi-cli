@@ -9,10 +9,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv10-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Build a v9-shaped DB (with the old, separate `name` column) on disk, then let
-// db.js's getDB() upgrade it to v10 on first open. Locks the load-bearing
-// invariant: a user's `agents run --name` handle is folded into `label`, never
-// lost, and the redundant column is dropped.
+// Build a v9-shaped DB (old separate `name` column), then let getDB() upgrade it to v10. Locks the
+// invariant: a user's `agents run --name` handle is folded into `label`, never lost, and the
+// redundant column is dropped.
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

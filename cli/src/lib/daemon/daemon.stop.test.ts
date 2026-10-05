@@ -1,17 +1,6 @@
-/**
- * Daemon shutdown semantics: the singleShot guard and `agents daemon stop`'s
- * postcondition contract.
- *
- * RUSH-2819: split out of daemon.test.ts (2201 lines / 88 tests / ~112s in CI).
- * This is the single heaviest slice — the "agents daemon stop" describe alone
- * measured ~18s locally (wedge/killTree escalation tests each wait out a real
- * 5s SIGTERM grace window) — so it gets its own file to run in its own vitest
- * fork rather than serializing behind everything else. Shared helpers live in
- * daemon.test-fixture.ts; the manifest/plist/systemd tests live in
- * daemon.test.ts; spawn/single-instance/self-terminate tests live in
- * daemon.lifecycle.test.ts; registry and misc daemon utilities live in
- * daemon.registry.test.ts.
- */
+/** Daemon shutdown semantics: the singleShot guard and `agents daemon stop`'s postcondition
+ * contract. The heaviest slice (~18s: wedge/killTree tests each wait out a real 5s SIGTERM grace),
+ * split from daemon.test.ts (RUSH-2819) into its own fork. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -25,19 +14,9 @@ import { DIST_ENTRY, REPO_ROOT, installKeychainHermeticity } from './daemon.test
 
 installKeychainHermeticity();
 
-// RUSH-2423: the daemon's shutdown must run at most once — it is reachable from
-// SIGTERM, SIGINT, and the state-dir self-check's independent
-// `void handleShutdown()`, and two can arrive together (a service manager
-// SIGTERMing a daemon whose state dir was just removed). Before this it was only
-// INCIDENTALLY safe: every step inside happens to be idempotent, a property each
-// newly added step would silently have to re-earn.
-//
-// Tested at the MECHANISM, not end-to-end, and that is deliberate. A real
-// shutdown completes in ~26ms, so a second signal lands on a dead process and is
-// swallowed as ESRCH — an e2e "send three SIGTERMs and count the log lines" test
-// passes with the guard REMOVED (verified: 3/3 runs, and across 2/5/10/20/50ms
-// spacings). That test would have been ceremony, so it is gone; this asserts the
-// thing that can actually fail.
+// RUSH-2423: shutdown must run at most once; it is reachable from SIGTERM, SIGINT and the
+// state-dir self-check, and two can arrive together. It was only incidentally safe because each
+// step is idempotent. Tested at the mechanism: an e2e test passed with the guard removed.
 describe('singleShot (RUSH-2423: shutdown runs at most once)', () => {
   it('runs the body once no matter how many callers fire it', async () => {
     let runs = 0;
@@ -66,21 +45,12 @@ describe('singleShot (RUSH-2423: shutdown runs at most once)', () => {
   });
 });
 
-// KNOWN GAP (RUSH-2423): the `skipIf(process.platform === 'win32')` blocks in this
-// file mean the daemon's Windows behaviour — the taskkill/`killTree` stop path,
-// named-pipe IPC release, and the POSIX-only instance registry being absent — has
-// no automated coverage at all. Each skips for a real reason (they drive `ps`,
-// POSIX signals, or AF_UNIX sockets, none of which exist on Windows), so closing
-// this needs Windows-shaped equivalents plus a Windows CI runner, not an un-skip.
-// Tracked in RUSH-2423; deliberately not attempted here.
-/**
- * stopDaemon postcondition assertion (RUSH-2355 / SING-12). Real path, no
- * mocking: a genuine `__daemon-run` (or a real SIGTERM-ignoring process) is
- * stopped through the actual `agents daemon stop` command in a subprocess under
- * its OWN HOME, so every path constant (pid file, instance registry, browser
- * socket, broker socket, runs dir) resolves inside the temp state dir and the
- * test can never touch a live daemon on the dev machine.
- */
+// KNOWN GAP (RUSH-2423): the win32 `skipIf` blocks leave the daemon's Windows behaviour
+// (taskkill/`killTree` stop, named-pipe release) with no coverage. Each skips for a real reason
+// (`ps`, POSIX signals, AF_UNIX); closing it needs Windows equivalents and a Windows CI runner.
+/** stopDaemon postcondition assertion (RUSH-2355 / SING-12), real path with no mocking: a genuine
+ * `__daemon-run` or SIGTERM-ignoring process is stopped through the actual `agents daemon stop`
+ * under its own HOME, so every path resolves in the temp state dir and no live daemon is touched. */
 describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const waitFor = async (cond: () => boolean, timeoutMs: number) => {
@@ -176,10 +146,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
         fs.mkdirSync(daemonDir, { recursive: true });
         fs.writeFileSync(daemonPidFile(home), String(daemon.pid));
 
-        // The subprocess still drives the real stop command, but an empty PATH
-        // makes its real `ps` identity inspection unavailable. That uncertainty
-        // must preserve the owner record and process rather than becoming
-        // permission to signal or clean up either one.
+        // An empty PATH makes the subprocess's real `ps` identity inspection unavailable. That
+        // uncertainty must preserve the owner record and process rather than permit signaling or
+        // cleanup.
         const emptyPath = path.join(home, 'empty-path');
         fs.mkdirSync(emptyPath);
         const { status, result } = runStop(home, { PATH: emptyPath });
@@ -241,10 +210,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
         expect(await waitFor(() => fs.existsSync(path.join(daemonDir, 'daemon.lock')), 5_000)).toBe(true);
         expect(await waitFor(() => fs.existsSync(incumbentSignaled), 5_000)).toBe(true);
 
-        // A non-cooperating fresh daemon replaces both shared artifacts while
-        // stop is inside its real SIGTERM grace window. The lock excludes every
-        // production start; the replacement also proves cleanup is ownership-
-        // checked rather than merely relying on cooperation.
+        // A non-cooperating fresh daemon replaces both shared artifacts during stop's real SIGTERM
+        // grace window. The lock excludes every production start; the replacement proves cleanup
+        // is ownership-checked, not cooperation-based.
         successor = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '', '__daemon-run'], { stdio: 'ignore' });
         expect(successor.pid).toBeTruthy();
         expect(await waitFor(() => {
@@ -366,13 +334,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     60_000,
   );
 
-  // RUSH-2421: the postcondition covered the two sockets and the process, but
-  // not the three state files a graceful handleShutdown removes — the lifetime
-  // marker, the heartbeat, and this pid's instance-registry entry. On the
-  // ESCALATED path handleShutdown never runs, so all three outlived the daemon
-  // while the stop still reported `ok: true`. They are not cosmetic: a leftover
-  // heartbeat is what resolveLiveDaemonPid consults to re-adopt a daemon whose
-  // pid file is gone, so a dead daemon can read as running.
+  // RUSH-2421: the postcondition missed the three state files a graceful handleShutdown removes
+  // (lifetime marker, heartbeat, registry entry). On the ESCALATED path they outlived the daemon
+  // while stop reported `ok: true`; a leftover heartbeat re-adopts a dead daemon.
   it.skipIf(process.platform === 'win32')(
     'killTree path: reclaims the lifetime marker, heartbeat and registry entry the dead daemon left',
     async () => {
@@ -417,10 +381,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     60_000,
   );
 
-  // The other half of the same rule: reclaim only what a provably DEAD owner
-  // left. A successor daemon that started during the stop owns a lifetime marker
-  // and heartbeat naming ITS live pid, and deleting those would break it — the
-  // same reasoning the broker-socket branch uses for a standalone owner.
+  // Reclaim only what a provably DEAD owner left: a successor started during the stop owns a
+  // marker and heartbeat naming its live pid, and deleting them would break it (same reasoning as
+  // the broker-socket branch).
   it.skipIf(process.platform === 'win32')(
     'never reclaims a lifetime marker or heartbeat owned by a LIVE daemon',
     async () => {
@@ -464,15 +427,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     60_000,
   );
 
-  // THE regression the awaited close introduced (RUSH-2421 review). A socket
-  // client holds its connection open on purpose — the socket stays warm between
-  // messages — and `net.Server.close()` does not complete while any connection
-  // is open. With the close bounded at the SAME 5s as the daemon's SIGTERM grace
-  // window, `handleShutdown` was still inside a service `stop()` when `stopDaemon`
-  // gave up waiting and escalated to killTree. The browser IPC socket this
-  // originally exercised left with the standalone browser CLI (PHNX-4101), so the
-  // same invariant is now pinned against the feed-stream hub — a socket the daemon
-  // still hosts and that likewise keeps subscriber connections warm.
+  // The regression the awaited close introduced (RUSH-2421 review): a socket client holds its
+  // connection open and `net.Server.close()` waits for it. With the close bounded at the same 5s
+  // as the SIGTERM grace, `stopDaemon` escalated to killTree mid-`stop()`.
   it.skipIf(process.platform === 'win32')(
     'graceful stop STAYS graceful when a socket client is holding a warm hub connection',
     async () => {
@@ -500,13 +457,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
         const { status, result } = runStop(home);
         const elapsed = Date.now() - started;
 
-        // The sharp assertion, and the one that is deterministic: the daemon
-        // must release and exit WELL inside the 5s SIGTERM grace window. Pre-fix
-        // the close waited out its own 5s timeout — the same 5s — so the stop
-        // finished at the boundary and whether it escalated was a coin flip
-        // decided by which timer fired first. Asserting `escalated === false`
-        // alone would therefore pass on the broken code about half the time;
-        // asserting the margin is what actually pins the behaviour.
+        // The deterministic assertion: the daemon must release and exit well inside the 5s grace
+        // window. Pre-fix the close waited out the same 5s, so escalation was a coin flip;
+        // asserting the margin pins it.
         expect(elapsed).toBeLessThan(4000);
         expect(result.escalated).toBe(false);
         expect(result.ok).toBe(true);

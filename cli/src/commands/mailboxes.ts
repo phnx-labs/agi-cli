@@ -1,21 +1,6 @@
-/**
- * `agents mailboxes` — fleet comms: a read-only window onto the agent mailbox spool.
- *
- * The mailbox spool (`~/.agents/.history/mailbox/<id>/{inbox,processing,consumed}`)
- * is the transport under `agents message` / `agents feed` / `agents teams message`:
- * one box per logical agent (session UUID / teams agentId / loop runId). This
- * command surfaces which boxes exist, how much mail each holds, the messages that
- * flowed BETWEEN agents (including already-consumed ones), and — with `--watch` —
- * the live stream as it happens. Rendering rides the shared comms engine
- * (`lib/comms-render.ts`): masthead, sparkline, aggregate, graphEdges.
- *
- *   agents mailboxes                     overview: masthead + 24h sparkline + boxes + recent log
- *   agents mailboxes <id>                one box in full (inbox / processing / consumed)
- *   agents mailboxes --watch             live tail of cross-box traffic until ⌃C
- *   agents mailboxes --between <a> <b>   one relationship as a thread, either direction
- *   agents mailboxes --graph             who-talks-to-whom adjacency, busiest first
- *   --from/--to/--since                  filter the overview log and the --watch stream
- */
+/** `agents mailboxes`: a read-only window onto the mailbox spool under
+ * `~/.agents/.history/mailbox/`, the transport under `message`, `feed` and `teams message`. Shows
+ * boxes, mail counts, messages (including consumed), `--watch`, `--between <a> <b>` and `--graph`. */
 import type { Command } from 'commander';
 import * as os from 'os';
 import * as path from 'path';
@@ -103,12 +88,9 @@ const STATE_TAG: Record<StoredMessage['state'], string> = {
   consumed: chalk.dim('delivered'),
 };
 
-/**
- * The watching agent's own box id. Spawn wiring (`buildExecEnv`,
- * lib/exec.ts) hands every agent `AGENTS_MAILBOX_DIR` keyed by its box, so
- * `basename` is the id that resolves to "you". Unset for a human operator at
- * a plain terminal — nothing in the spool is addressed to them.
- */
+/** The watching agent's own box id: `buildExecEnv` (lib/exec.ts) gives each agent
+ * `AGENTS_MAILBOX_DIR`, whose basename resolves to 'you'. Unset for a human at a plain terminal,
+ * since nothing is addressed to them. */
 function selfMailboxId(): string | undefined {
   const dir = process.env.AGENTS_MAILBOX_DIR;
   if (!dir) return undefined;
@@ -216,12 +198,8 @@ function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void
   console.log(chalk.dim('Tip: `agents mailboxes <id>` one box · `--watch` live tail · `--between <a> <b>` thread · `--graph` routes · `--json` machine output'));
 }
 
-/**
- * --watch: the money shot. Stream every new cross-box message as it lands,
- * resolved to live labels; a message addressed to the watching agent's own
- * box (AGENTS_MAILBOX_DIR) renders as `▲ you` so an orchestrator sees its
- * replies light up. ⌃C aborts the poller cleanly via AbortController.
- */
+/** --watch: stream every new cross-box message with live labels; mail addressed to the watcher's
+ * own box renders as `▲ you`. ⌃C aborts the poller via AbortController. */
 async function runWatch(root: string, opts: { json?: boolean; filters: Filters }): Promise<void> {
   const boxes = await collectBoxes(root);
   const labels = new Map(boxes.map((b) => [b.id, b.label]));

@@ -1,22 +1,6 @@
-/**
- * Devices host provider: the Tailscale fleet as dispatch targets.
- *
- * Bridges the devices registry (`agents devices`, ~/.agents/.history/devices/
- * registry.json) into the host pool behind the same `HostProvider` seam as
- * `local` — the Tailscale-backed device provider described in docs/fleet.md. With
- * it, a machine registered once via `agents devices sync` becomes a resolvable
- * `--device`/`--device` dispatch target, participates in capability routing, and
- * is enumerable by target pickers — not just resolvable by exact name.
- *
- * Password-auth devices are listed (the pool stays honest about what exists)
- * but marked `dispatchable: false`; resolving one for dispatch throws the same
- * typed `DeviceOffloadUnsupportedError` as before — offload rides `sshExec`,
- * whose SSH_OPTS force `BatchMode=yes`.
- *
- * Precedence is unchanged: this provider registers AFTER `local`, so an
- * enrolled host shadows a same-name device in both list dedup and resolve
- * order, exactly like the old tier-2 devices fall-through in resolveHost.
- */
+/** Devices host provider: bridges the devices registry into the host pool as dispatch targets
+ * with capability routing. Password-auth devices are listed but `dispatchable: false`. It
+ * registers after `local`, so an enrolled host shadows a same-name device. */
 
 import { loadDevices, getDevice, type DeviceProfile } from '../../devices/registry.js';
 import { resolveDeviceProfile } from '../../devices/resolve-profile.js';
@@ -29,13 +13,9 @@ function statusOf(device: DeviceProfile): HostStatus {
   return device.tailscale.online ? 'online' : 'offline';
 }
 
-/**
- * Bridge a device profile into a `Host`. dnsName (stable across IP churn) is
- * preferred over ip; `source: 'inline'` makes `sshTargetFor` emit `user@address`.
- * Capability tags come from an enrolled overlay entry for the device in
- * agents.yaml (`Meta.hosts`) — that entry shadows this row by provider
- * precedence, carrying the caps.
- */
+/** Bridge a device profile into a `Host`, preferring the stable dnsName over ip; `source:
+ * 'inline'` makes `sshTargetFor` emit `user@address`. Capability tags come from an enrolled
+ * `Meta.hosts` overlay, which shadows this row by provider precedence. */
 function deviceToPoolHost(rawDevice: DeviceProfile): Host | null {
   // Effective profile: central config (ssh.*/platform) overlays discovery.
   const device = resolveDeviceProfile(rawDevice);

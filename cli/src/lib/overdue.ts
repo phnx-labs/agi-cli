@@ -1,16 +1,6 @@
-/**
- * Overdue routine detection.
- *
- * When the daemon was not running (laptop off, reboot, daemon crash) at the
- * time a job was supposed to fire, the missed schedule is lost — croner only
- * schedules forward from "now." This module compares each enabled job's
- * most-recent expected fire time (from its cron expression) with the start
- * time of its most-recent recorded run; jobs whose latest run is older than
- * their most-recent expected fire are flagged as overdue.
- *
- * Surfaced two ways: a desktop notification on daemon startup, and a
- * `agents routines catchup` command that runs them on demand.
- */
+/** Overdue routine detection. If the daemon wasn't running when a job should fire, the miss is lost
+ * (croner schedules forward only). This flags jobs whose latest run predates their latest expected
+ * fire; surfaced at daemon startup and by `agents routines catchup`. */
 
 import * as fs from 'fs';
 import { Cron } from 'croner';
@@ -29,27 +19,16 @@ export interface OverdueJob {
 // the small gap between the cron tick and when the runner writes meta.json.
 const GRACE_MS = 60_000;
 
-/** Compute the most recent fire of `pattern` at or before `now`. Delegates to
- *  {@link alignedSlotForFire} so overdue detection (`missedRunId`) and the live
- *  forward-timer dispatch (`slotRunId`) key on the SAME occurrence identity — a
- *  missed fire and its live twin for one UTC slot then collide by construction
- *  (SING-15). */
+/** Computes the most recent fire of `pattern` at or before `now`, via {@link alignedSlotForFire},
+ * so overdue detection (`missedRunId`) and live dispatch (`slotRunId`) share one occurrence
+ * identity: a missed fire and its live twin collide by construction (SING-15). */
 function previousExpectedFire(cron: Cron, now: Date): Date | null {
   return alignedSlotForFire(cron, now);
 }
 
-/**
- * When a routine started existing, and therefore the earliest fire it can
- * sensibly be judged against.
- *
- * `createdAt` is stamped by `writeJob`. Routines written before that field
- * existed have none, so the file's own mtime stands in — it is the closest
- * honest answer available on disk, and it only ever moves the floor later,
- * never earlier, so it cannot manufacture a false "overdue".
- *
- * Returns null when neither is available, which leaves the routine unfloored
- * (previous behaviour) rather than silently skipping it.
- */
+/** When a routine started existing, the earliest fire it can be judged against. `createdAt` is
+ * stamped by `writeJob`; older routines use file mtime, which only moves the floor later so can't
+ * manufacture a false "overdue". Null when neither exists (unfloored, not skipped). */
 export function routineEffectiveStart(job: JobConfig, now: Date = new Date()): Date | null {
   if (job.createdAt) {
     const stamped = new Date(job.createdAt);
@@ -76,15 +55,13 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
 
   for (const job of listJobs()) {
     if (!job.enabled) continue;
-    // One-shot: fires at most once, so a missed slot is not a backlog to replay.
-    // Use the same predicate the scheduler does — the raw `runOnce` flag alone
-    // missed a one-shot-LIKE schedule (a fixed minute/hour/day/month) that never
-    // carried the flag.
+    // One-shot: fires at most once, so a missed slot isn't a backlog. Use the scheduler's own
+    // predicate: the raw `runOnce` flag alone missed one-shot-LIKE schedules (a fixed
+    // minute/hour/day/month) that never carried it.
     if (isOneShotRoutine(job)) continue;
-    // Past its configured end: catch-up must not resurrect a routine the author
-    // already retired. The scheduler only auto-disables lazily, inside a live
-    // cron tick, so a routine whose endAt elapsed while the daemon was down is
-    // still enabled on disk when the catch-up pass runs.
+    // Past its configured end: catch-up must not resurrect a retired routine. The scheduler only
+    // auto-disables lazily in a live cron tick, so a routine whose endAt elapsed while the daemon
+    // was down is still enabled on disk.
     if (isPastEndAt(job, now)) continue;
     // Trigger-only jobs (no cron schedule) never have an expected fire time.
     if (!job.schedule) continue;
@@ -107,10 +84,9 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
 
     if (!expected) continue;
 
-    // A fire that predates the routine never could have happened, so it is not
-    // a miss. Without this, any newly created routine on a daily/weekly cron is
-    // instantly "overdue" for the previous occurrence — and with auto-catchup
-    // that means `agents routines add` runs the routine once, immediately.
+    // A fire that predates the routine never could have happened, so it isn't a miss. Otherwise
+    // any new daily/weekly routine is instantly "overdue" and, with auto-catchup, `agents routines
+    // add` would run it once immediately.
     const start = routineEffectiveStart(job, now);
     if (start && expected.getTime() < start.getTime()) continue;
 
@@ -128,12 +104,9 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
   return overdue;
 }
 
-/**
- * Fire a branded desktop notification listing the overdue jobs. Routed through
- * the MenubarHelper companion (notify-desktop.ts) so it carries the agents-cli
- * mark; clicking opens the runs folder (~/.agents/.history/runs). Best-effort —
- * a missing notifier or absent display is swallowed and never crashes the daemon.
- */
+/** Fires a branded desktop notification listing overdue jobs, via the MenubarHelper companion
+ * (notify-desktop.ts); clicking opens ~/.agents/.history/runs. Best-effort: a missing notifier or
+ * display is swallowed and never crashes the daemon. */
 export function notifyOverdue(jobs: OverdueJob[]): void {
   if (jobs.length === 0) return;
 

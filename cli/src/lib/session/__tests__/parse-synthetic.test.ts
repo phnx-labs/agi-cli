@@ -1,11 +1,6 @@
-/**
- * Harness-injected `role=user` scaffolding must not be treated as a genuine user
- * turn. A Claude session opened with a `!`-prefix command (`j <dir>`) stores
- * `<bash-input>`/`<bash-stdout>` as user records; before the `_synthetic` flag
- * these were counted by `--first`/`--last` and returned by `--include user`, so
- * `--include user --first 1` returned the jump command instead of the real ask.
- * Fixture is synthetic — no user data.
- */
+/** Harness-injected `role=user` scaffolding must not count as a real user turn. A `!`-prefix
+ * command stores `<bash-input>`/`<bash-stdout>` as user records, so `--include user --first 1`
+ * returned the jump command; the `_synthetic` flag fixes it. Fixture is synthetic. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';

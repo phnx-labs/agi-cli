@@ -1,23 +1,6 @@
-/**
- * Rules composition — assemble a fully-inlined rules document from layered
- * `subrules/` fragments and `rules.yaml` preset definitions.
- *
- * The model:
- *   - Every DotAgents repo holds `<repo>/rules/subrules/*.md` (rule fragments)
- *     and `<repo>/rules/rules.yaml` (preset definitions).
- *   - Layers are read in precedence order (highest first):
- *       project > user > extra > system.
- *   - The active preset's `subrules:` list is resolved against the layer set
- *     using per-name shadowing — a project subrule shadows a user/system one
- *     of the same name.
- *   - Subrules in the user / extra / project layers that the preset did NOT
- *     name are auto-appended in precedence order. (System auto-append is
- *     opt-in only: system never auto-appends to avoid noise.)
- *   - Output is a single concatenated string with no `@-import` syntax.
- *
- * No filesystem writes happen here — callers (`syncResourcesToVersion`,
- * project-rules compile) decide where to land the composed output.
- */
+/** Rules composition: one inlined document from layered `subrules/*.md` and `rules.yaml` presets,
+ * precedence project > user > extra > system. Preset-named subrules shadow per name; unnamed
+ * user/extra/project subrules auto-append (system never). No `@-import` syntax, no writes. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -85,14 +68,9 @@ const SUBRULE_RULE_FILE = 'rule.md';
 /** Inside a dir-form subrule, the optional hook manifest. */
 const SUBRULE_HOOKS_FILE = 'hooks.yaml';
 
-/**
- * Resolve the prose file for a subrule named `name` under `<rulesDir>/subrules/`.
- *
- * A subrule resolves to the DIRECTORY form `subrules/<name>/rule.md` when that
- * file exists, otherwise the flat form `subrules/<name>.md`. Returns the
- * markdown path plus the dir-form subrule directory when applicable (callers
- * that fold hooks need the dir to resolve `hooks.yaml` and relative scripts).
- */
+/** Resolve a subrule's prose file under `<rulesDir>/subrules/`: the DIRECTORY form `<name>/rule.md`
+ * if present, else flat `<name>.md`. Returns the path plus the subrule dir for dir-form (needed to
+ * resolve `hooks.yaml` and scripts). */
 function resolveSubrulePath(
   rulesDir: string,
   name: string
@@ -141,11 +119,8 @@ function findSubrule(
   return null;
 }
 
-/**
- * List subrule names in a layer. A name is contributed by either the flat
- * form `subrules/<name>.md` OR the dir form `subrules/<name>/rule.md`; a
- * directory without `rule.md` is not a subrule and is skipped.
- */
+/** List subrule names in a layer, contributed by flat `subrules/<name>.md` or dir form
+ * `subrules/<name>/rule.md`; a directory without `rule.md` is not a subrule. */
 function listLayerSubruleNames(layer: RulesLayer): string[] {
   const dir = path.join(layer.rulesDir, SUBRULES_DIR_NAME);
   if (!fs.existsSync(dir)) return [];
@@ -164,12 +139,8 @@ function listLayerSubruleNames(layer: RulesLayer): string[] {
   }
 }
 
-/**
- * Compose a rules document from the given layers.
- *
- * Throws when the requested preset isn't defined in any layer's rules.yaml —
- * means the caller passed a typo or no layer ships the named preset.
- */
+/** Compose a rules document from the given layers; throws when the preset isn't defined in any
+ * layer's rules.yaml (a typo, or no layer ships it). */
 export function composeRules(opts: ComposeOptions): ComposeResult {
   const presetName = opts.preset || DEFAULT_PRESET;
 
@@ -230,13 +201,9 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
   };
 }
 
-/**
- * Discover layers for use at sync time (no cwd) or runtime (with cwd).
- *
- * Project layer is included only when cwd is given AND `<cwd>/.agents/rules/`
- * exists. Without cwd, only user / extras / system are surfaced — matching
- * the home-file write at sync time.
- */
+/** Discover layers at sync time (no cwd) or runtime (with cwd). The project layer is included only
+ * when cwd is given AND `<cwd>/.agents/rules/` exists; without cwd only user/extras/system,
+ * matching the home-file write at sync time. */
 export function discoverRulesLayers(opts: { cwd?: string } = {}): RulesLayer[] {
   const layers: RulesLayer[] = [];
 
@@ -276,18 +243,9 @@ export function composeRulesFromState(opts: { preset?: string; cwd?: string } = 
   return composeRules({ preset: opts.preset, layers });
 }
 
-/**
- * hooks.yaml shape (the bare-map form, chosen for brevity):
- *
- *   <hookName>:
- *     script: enforce.sh        # relative to the subrule dir
- *     events: [PreToolUse]
- *     matcher: "Edit|Write"     # optional
- *     timeout: 30               # optional
- *
- * A wrapped `{ hooks: { <hookName>: {...} } }` form is also accepted so a
- * hooks.yaml can carry sibling keys without confusing the parser.
- */
+/** hooks.yaml shape: `<hookName>: { script (relative to the subrule dir), events: [PreToolUse],
+ * matcher (optional), timeout (optional) }`. A wrapped `{ hooks: { ... } }` form is also accepted
+ * so the file can carry sibling keys. */
 function parseSubruleHooksFile(file: string): Record<string, ManifestHook> {
   const parsed = yaml.parse(fs.readFileSync(file, 'utf-8')) as
     | Record<string, ManifestHook>
@@ -298,19 +256,9 @@ function parseSubruleHooksFile(file: string): Record<string, ManifestHook> {
   return (map as Record<string, ManifestHook>) || {};
 }
 
-/**
- * Collect hooks declared inside the active subrule directories.
- *
- * Resolves the same composed subrule set as {@link composeRules} (preset-named
- * plus auto-append, highest-layer-wins per name). For each dir-form subrule
- * that ships a `hooks.yaml`, parses it, rewrites each hook's `script` to an
- * ABSOLUTE path under the subrule dir, and namespaces the key as
- * `<subruleName>__<hookName>` to avoid collisions across subrules.
- *
- * Returns an empty map for flat subrules and dir-form subrules without a
- * `hooks.yaml`. A malformed hooks.yaml is skipped (try/catch) so a bad file
- * never breaks rule composition or hook registration.
- */
+/** Collect hooks declared in active subrule directories (same set as {@link composeRules}). Each
+ * dir-form hooks.yaml has its `script` rewritten to an ABSOLUTE path and its key namespaced
+ * `<subrule>__<hook>`. A malformed hooks.yaml is skipped so it never breaks composition. */
 export function collectSubruleHooks(
   layers: RulesLayer[],
   presetName?: string

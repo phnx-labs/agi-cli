@@ -1,10 +1,6 @@
-/**
- * Real SQLite warehouse under a temp dir — no mocks. Covers the project
- * filter's plumbing through loadHookProfile (the SQLite-vs-legacy-JSONL
- * fallback), which has a real bug shape: a project filter that finds no
- * warehouse rows must NOT silently fall back to the unfilterable legacy
- * JSONL log and show unfiltered results.
- */
+/** Real SQLite warehouse under a temp dir, no mocks. Covers the project filter through
+ * loadHookProfile: a filter that finds no warehouse rows must not silently fall back to the
+ * unfilterable legacy JSONL log and show unfiltered results. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -128,10 +124,9 @@ describe('formatRateColumn', () => {
 });
 
 describe('frictionAction', () => {
-  // friction events (emitFriction in events.ts) carry no cwd today — agents
-  // _internal friction has no --cwd flag — so --project (inherited from the
-  // shared `perf` parent command) must fail loud instead of silently
-  // returning unfiltered results, which would look like it filtered.
+  // Friction events (emitFriction in events.ts) carry no cwd today (`agents _internal friction`
+  // has no --cwd), so the shared parent's `--project` must fail loud instead of returning
+  // unfiltered results that look filtered.
   it('rejects --project with a clear error instead of silently ignoring it', () => {
     const errors: string[] = [];
     const originalError = console.error;

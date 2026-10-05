@@ -1,7 +1,5 @@
-/**
- * Daemon self-heal: heartbeat, path guard, pid-reuse safety.
- * RUSH-1669 / RUSH-1670 / RUSH-1672 / RUSH-1673.
- */
+/** Daemon self-heal: heartbeat, path guard, pid-reuse safety (RUSH-1669, RUSH-1670, RUSH-1672,
+ * RUSH-1673). */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';

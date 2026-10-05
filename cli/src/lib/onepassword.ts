@@ -28,11 +28,8 @@ interface ImportableSecret {
   itemTitle: string;
   fieldLabel: string;
   value: string;
-  /**
-   * The item's free-form notes (1Password's `notesPlain` / any NOTES-purpose
-   * field), carried as descriptive metadata for the imported secret. Never the
-   * secret value — omitted when the item has no notes.
-   */
+  /** The item's free-form notes (`notesPlain` / any NOTES-purpose field), carried as descriptive
+   * metadata for the imported secret. Never the secret value; omitted when absent. */
   description?: string;
 }
 
@@ -122,13 +119,9 @@ function pickBestField(fields: OpField[]): OpField | null {
   return dominated[0];
 }
 
-/**
- * The item's notes, if any — a NOTES-purpose field (1Password's `notesPlain`)
- * or a field labelled notes/notesPlain, whichever carries a non-empty value.
- * Returns undefined when the item has no notes. This is descriptive metadata
- * only; it is deliberately independent of value selection and is never picked
- * as the secret value (see SKIP_FIELD_LABELS / pickBestField).
- */
+/** The item's notes, if any: a NOTES-purpose field (`notesPlain`) or a field labelled
+ * notes/notesPlain with a non-empty value. Descriptive metadata only, independent of value
+ * selection and never picked as the secret (see SKIP_FIELD_LABELS / pickBestField). */
 function pickNotes(fields: OpField[]): string | undefined {
   const notes = fields.find(
     (f) =>
@@ -141,12 +134,9 @@ function pickNotes(fields: OpField[]): string | undefined {
   return value ? value : undefined;
 }
 
-/**
- * Pure transform from a fetched 1Password item to an importable secret (or the
- * reason it was skipped). Split out of extractSecrets so the field-selection
- * and notes-extraction logic is exercised directly by tests without shelling
- * out to `op`.
- */
+/** Pure transform from a fetched 1Password item to an importable secret (or the skip reason). Split
+ * out of extractSecrets so field selection and notes extraction are tested without shelling out to
+ * `op`. */
 export function itemToSecret(
   item: OpItem
 ): { secret: ImportableSecret } | { skipped: SkippedField } {

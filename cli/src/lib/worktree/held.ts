@@ -1,24 +1,6 @@
-/**
- * Surfacing the held set of agent worktrees (PHNX-3520).
- *
- * The nightly `worktree-sweep` routine (PHNX-3503, in phnx-labs/.agents)
- * reclaims merged worktrees and correctly HOLDS anything dirty, unmerged, or
- * undeterminable. That fail-closed bias is right for a destructive job, but it
- * left the held set a silent, growing residue that nothing ever resolves — the
- * sweep prints only a `held=<n>` count. Measured 2026-08-30 the held set is
- * consistently LARGER than the reclaimed set (~800 worktrees fleet-wide), and
- * one bucket inside it — worktrees whose branch carries commits on no remote —
- * is real stranded work (the PHNX-2951 / PHNX-2732 failure class: an agent
- * finished, its commits never reached a remote, and nothing surfaces it).
- *
- * This module is the READ-ONLY surfacing half. It does not remove anything —
- * the destructive reclaim was deliberately reverted from the CLI (3a8d1eb04 →
- * 7e48361f5) and lives as a shell routine. Here we only classify each held
- * worktree into a bucket so the `unmerged-commits` set can be surfaced and,
- * with `pushStrandedBranch`, recovered by publishing the branch — never by
- * deleting anything. Everything fails CLOSED: an unreadable status or an
- * undeterminable merge state is a bucket of its own, never read as "fine".
- */
+/** Surface the held set of agent worktrees (PHNX-3520). The nightly `worktree-sweep` (PHNX-3503)
+ * holds dirty/unmerged/undeterminable trees but prints only `held=<n>`. Read-only: buckets them,
+ * deletes nothing, fails closed. `unmerged-commits` is stranded work (PHNX-2951/2732): push it. */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
@@ -29,25 +11,13 @@ const execFileAsync = promisify(execFile);
 /** Worktree dir names are slugs; anything else is refused rather than shelled. */
 const WORKTREE_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
-/**
- * The coarse bucket a held worktree falls into. These are the three the ticket
- * names, and they demand very different follow-ups:
- *
- * - `unmerged-commits` — the one that matters. The branch carries commits with
- *   no patch-equivalent upstream: real work visible to nobody. Candidate for
- *   "push the branch or open a PR", never deletion.
- * - `uncommitted-changes` — a dirty tree. Could be live work, could be build
- *   output nobody will miss. Needs a human eye, not an automatic action.
- * - `undeterminable` — a broken or locked checkout whose merge state or status
- *   could not be read. Fails closed by design; must be re-examined, never swept.
- */
+/** Coarse bucket of a held worktree. `unmerged-commits`: real work nobody can see; push or open a
+ * PR, never delete. `uncommitted-changes`: dirty tree, needs a human. `undeterminable`: broken or
+ * locked checkout; fails closed, never sweep. */
 export type HeldBucket = 'unmerged-commits' | 'uncommitted-changes' | 'undeterminable';
 
-/**
- * The specific reason inside a bucket. `undeterminable` splits into the two the
- * sweep distinguishes so an operator can tell a locked index (`status-unreadable`)
- * from a repo with no resolvable default ref (`merge-state-unknown`).
- */
+/** Specific reason inside a bucket; `undeterminable` splits into `status-unreadable` (locked index)
+ * and `merge-state-unknown` (no resolvable default ref). */
 export type HeldReason =
   | 'unmerged-commits'
   | 'uncommitted-changes'
@@ -68,10 +38,7 @@ export interface HeldWorktree {
   branch: string | null;
   bucket: HeldBucket;
   reason: HeldReason;
-  /**
-   * Commits on this worktree with no patch-equivalent upstream (`git cherry`).
-   * -1 means the answer could not be established.
-   */
+  /** Commits with no patch-equivalent upstream (`git cherry`); -1 means it could not be established. */
   unmergedCommits: number;
   /** `git status --porcelain` line count; -1 means it could not be read. */
   dirtyFiles: number;
@@ -88,12 +55,8 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-/**
- * Resolve the default branch ref to compare against: `origin/HEAD` when set,
- * else whichever of `origin/main` / `origin/master` exists. Returns null when
- * none resolve, which makes every worktree `merge-state-unknown` rather than
- * silently comparing against nothing.
- */
+/** Resolve the default branch ref: `origin/HEAD`, else `origin/main` or `origin/master`. Null when
+ * none resolve, making every worktree `merge-state-unknown` instead of comparing against nothing. */
 export async function resolveDefaultRef(repoRoot: string): Promise<string | null> {
   try {
     const head = await git(repoRoot, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']);
@@ -112,16 +75,9 @@ export async function resolveDefaultRef(repoRoot: string): Promise<string | null
   return null;
 }
 
-/**
- * Count commits with no patch-equivalent upstream. Returns -1 when the answer
- * cannot be established, which the classifier treats as `merge-state-unknown`.
- *
- * Patch-id (`git cherry`), NOT ancestry, is load-bearing: this fleet
- * rebase-merges, so a landed branch's SHAs are rewritten and
- * `merge-base --is-ancestor` reports *not merged* for work that fully landed.
- * It also subsumes the unpushed check — an unpushed commit has no upstream
- * equivalent, so it surfaces as unmerged rather than needing a separate probe.
- */
+/** Count commits with no patch-equivalent upstream; -1 when unknown (`merge-state-unknown`).
+ * Patch-id (`git cherry`), not ancestry: this fleet rebase-merges, so `merge-base --is-ancestor`
+ * reports landed work as unmerged. It also covers unpushed commits. */
 async function countUnmergedCommits(
   worktreePath: string,
   defaultRef: string | null,
@@ -162,11 +118,8 @@ function parseWorktreePorcelain(out: string): PorcelainEntry[] {
   return entries;
 }
 
-/**
- * True when `child` is `parent` or sits beneath it, compared on path
- * boundaries. A raw `startsWith` makes `.../fix-1103` look like it is inside
- * `.../fix-110`, so the primary checkout would be mistaken for a neighbour.
- */
+/** True when `child` is `parent` or beneath it, on path boundaries: a raw `startsWith` makes
+ * `.../fix-1103` look inside `.../fix-110`. */
 export function isInside(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
   return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
@@ -182,17 +135,9 @@ interface HeldFacts {
   unmergedCommits: number;
 }
 
-/**
- * Decide which bucket a worktree falls into, or null when it is neither stranded
- * nor dirty nor broken (clean and fully upstream — nothing to surface). Pure.
- *
- * Precedence is chosen for SURFACING, not for the sweep's deletion decision:
- * the work-loss signal wins. A determinable `unmerged-commits` is reported as
- * exactly that even when the tree is also dirty, because the recoverable work
- * is the priority — an operator seeing `uncommitted-changes` would push nothing.
- * Only when the merge state itself is unreadable do we fall to `undeterminable`,
- * because then we genuinely cannot tell whether work is stranded.
- */
+/** Decide a worktree's bucket, or null when clean and fully upstream. Pure. Precedence is for
+ * surfacing, not deletion: a determinable `unmerged-commits` wins even if the tree is dirty, since
+ * recoverable work is the priority. `undeterminable` only when merge state itself is unreadable. */
 export function classifyHeld(facts: HeldFacts): { bucket: HeldBucket; reason: HeldReason } | null {
   // Fail closed first: if we could not establish the merge state, we cannot
   // claim the work is safe, so it is undeterminable — never silently "clean".
@@ -232,12 +177,8 @@ async function dirSize(dir: string): Promise<number> {
   return total;
 }
 
-/**
- * Classify every worktree registered under one repo and return only the held
- * ones. Read-only — no `git worktree remove`, no `branch -d`, no push. The
- * primary checkout (the first porcelain record, always the repo root) is never
- * a `.agents/worktrees` slug, so it is skipped implicitly.
- */
+/** Classify every worktree under one repo and return the held ones. Read-only (no remove, branch -d,
+ * or push); the primary checkout is never a `.agents/worktrees` slug, so it is skipped. */
 export async function collectHeldWorktrees(repoRoot: string): Promise<HeldWorktree[]> {
   let porcelain: string;
   try {
@@ -305,11 +246,8 @@ export async function collectHeldWorktrees(repoRoot: string): Promise<HeldWorktr
   return held;
 }
 
-/**
- * Discover repo roots that own a `.agents/worktrees` container beneath
- * `searchHome`. Mirrors the sweep's discovery: match directory SHAPE, prune the
- * heavy dirs so a large home stays fast. Read-only.
- */
+/** Discover repo roots owning a `.agents/worktrees` container under `searchHome`, mirroring the
+ * sweep: match directory shape and prune heavy dirs. Read-only. */
 async function discoverWorktreeRepos(searchHome: string, maxDepth = 7): Promise<string[]> {
   const PRUNE = new Set([
     'node_modules', '.cache', '.npm', '.bun', 'Library', '.venv', 'dist', 'target', '.git',
@@ -386,12 +324,8 @@ interface FleetHeldSummary extends HeldSummary {
   devices: { device: string; total: number }[];
 }
 
-/**
- * Merge several devices' held sets into one fleet roll-up, stamping each entry
- * with its source device so the `unmerged-commits` bucket names where the
- * stranded work lives. Pure — the SSH fan-out that produces the input lives in
- * the command layer.
- */
+/** Merge several devices' held sets into one fleet roll-up, stamping each entry with its device so
+ * `unmerged-commits` names where the work lives. Pure; the SSH fan-out is in the command layer. */
 export function aggregateHeld(perDevice: DeviceHeld[]): FleetHeldSummary {
   const buckets = EMPTY_BUCKETS();
   const devices: { device: string; total: number }[] = [];
@@ -412,20 +346,9 @@ interface PushResult {
   reason: string;
 }
 
-/**
- * The safe automatic action for the `unmerged-commits` bucket (ticket step 3):
- * PUBLISH the branch so the work becomes visible, never remove anything.
- *
- * Gated hard, fails closed:
- *  - only a worktree whose live classification is still `unmerged-commits`;
- *  - only when the branch does NOT already exist on `origin` — a branch that is
- *    already pushed (including one behind an open PR) needs nothing, and this
- *    also means we never force-update a remote ref;
- *  - a slug-shaped worktree name only, never shelled otherwise.
- *
- * `git push` sets no `--force`: it fast-forwards a new ref or fails loud. A
- * failure is returned, never swallowed.
- */
+/** Safe automatic action for `unmerged-commits`: publish the branch, never remove anything. Fails
+ * closed: only if still `unmerged-commits`, only if the branch is not already on `origin` (no
+ * force-update), only for slug-shaped names. No `--force`; failures are returned. */
 export async function pushStrandedBranch(repoRoot: string, wt: HeldWorktree): Promise<PushResult> {
   const base: PushResult = { name: wt.name, branch: wt.branch, pushed: false, reason: '' };
   if (!WORKTREE_NAME_RE.test(wt.name)) return { ...base, reason: 'unsafe worktree name' };

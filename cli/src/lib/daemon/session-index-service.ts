@@ -1,15 +1,6 @@
-/**
- * Session-index warm service (RUSH-2682), migrated onto `ServiceSupervisor`
- * (RUSH-3193 P1) as the proof-of-concept periodic service.
- *
- * Incrementally scans this host's transcript dirs into the local index so a
- * locally-started session is discoverable within seconds, not on the next
- * unrelated `agents sessions*` call. Single-flight via the DB scan claim in
- * `scanSessionsIncremental` — a concurrent foreground scan is a skip, not a
- * failure. Previously a bare `setInterval` in `runDaemon()`
- * (daemon.ts:1118-1137); the supervisor now owns its timer, error boundary,
- * and deadline instead.
- */
+/** Session-index warm service (RUSH-2682), the proof-of-concept periodic service on
+ * `ServiceSupervisor` (RUSH-3193 P1). Incrementally scans this host's transcript dirs so a local
+ * session is discoverable within seconds; single-flight via the DB scan claim. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -35,10 +26,9 @@ export class SessionIndexService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const { indexed, claimed } = await runSessionIndexWarmTick();
-    // Log only when the tick did something. A silent tick is what let it
-    // report 0 forever unnoticed (RUSH-2691); a line on every idle 20s tick
-    // would drown the log, so the steady state (claimed, nothing changed)
-    // stays quiet and both interesting outcomes are visible.
+    // Log only when the tick did something. A silent tick let it report 0 forever unnoticed
+    // (RUSH-2691), but a line on every idle 20s tick would drown the log, so the quiet steady
+    // state stays quiet.
     if (!claimed) ctx.log('INFO', 'session-index warm: skipped, another process holds the scan claim');
     else if (indexed > 0) ctx.log('INFO', `session-index warm: indexed ${indexed} transcript(s)`);
     // Deferred tool-index pass (PHNX-3411): fill tool_scan_ledger rows for

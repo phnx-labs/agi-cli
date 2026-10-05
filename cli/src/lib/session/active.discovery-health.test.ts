@@ -11,14 +11,9 @@ import {
 import { isTmuxInstalled } from '../tmux/binary.js';
 import * as tmuxPaths from '../tmux/paths.js';
 
-/**
- * RUSH-2507: a live fleet sweep found ~41 running agents while `agents
- * sessions --active` reported "No active agent sessions" — the tmux source
- * silently collapsed "socket unreadable" into the same `[]` a genuinely idle
- * socket returns. These pin the fix: a missing socket (nothing has ever run)
- * stays a clean empty, while a present-but-unreachable socket (tmux truth
- * exists but couldn't be read) is reported as DEGRADED, not empty.
- */
+/** RUSH-2507: a fleet sweep found ~41 running agents while `agents sessions --active` said none,
+ * because the tmux source collapsed "socket unreadable" into the same `[]` as an idle socket. A
+ * missing socket stays a clean empty; a present-but-unreachable one is reported DEGRADED. */
 const tmuxSkip = isTmuxInstalled() ? null : 'tmux not installed';
 
 describe('listTmuxAgentSessions / describeActiveDiscoveryHealth — degraded vs genuinely empty', () => {

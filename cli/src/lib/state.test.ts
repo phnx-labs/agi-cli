@@ -5,10 +5,9 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as yaml from 'yaml';
 
-// state.ts resolves HOME and the device id at import time, so we point both at a
-// throwaway temp dir and re-import the module fresh for each test. This
-// exercises the REAL partition + overlay (writeMetaUnlocked / overlayMachineLocal)
-// against real files — no mocking of the persistence layer.
+// state.ts resolves HOME and the device id at import time, so point both at a temp dir and
+// re-import fresh per test. This exercises the real partition and overlay (writeMetaUnlocked /
+// overlayMachineLocal) against real files, no mocking.
 let TMP = '';
 
 async function freshState() {
@@ -150,10 +149,9 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
   it('routes a newly-declared device-scoped key to the device doc by default, never central (PHNX-3315 P3)', async () => {
     const { updateMeta, readMeta } = await freshState();
 
-    // `probeDeviceKey` is NOT in CENTRAL_META_KEYS, so device-scope is its DEFAULT
-    // — the whole point of P3: a key nobody explicitly marked fleet-shared lands
-    // per-box, never in the synced agents.yaml. Cast because it is not a modeled
-    // Meta field; the generic router keys off the scope classifier, not the type.
+    // `probeDeviceKey` is not in CENTRAL_META_KEYS, so device scope is its default (P3): an
+    // unmarked key lands per-box, never in the synced agents.yaml. Cast because it is not a
+    // modeled Meta field; the generic router keys off the scope classifier.
     updateMeta((m) => ({
       ...m,
       probeDeviceKey: { hello: 'world' },
@@ -192,10 +190,9 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
   it('does not surface a legacy device-doc `defaultBrowserProfile:` onto Meta (generic overlay exclusion, PHNX-3315 P3)', async () => {
     const { readMeta } = await freshState();
 
-    // A pre-migration device doc: a bare top-level `defaultBrowserProfile:` the
-    // config migration later folds into `config:`. The generic overlay must NOT
-    // surface it onto Meta (it never was before P3) — BESPOKE_DEVICE_DOC_KEYS
-    // excludes it. Deleting that exclusion would fail this test.
+    // A pre-migration device doc with a bare top-level `defaultBrowserProfile:` that the config
+    // migration later folds into `config:`. The generic overlay must not surface it onto Meta (it
+    // never did before P3); BESPOKE_DEVICE_DOC_KEYS excludes it.
     fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
     fs.writeFileSync(devicePath(), 'defaultBrowserProfile: work\n');
 
@@ -245,11 +242,9 @@ describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
 });
 
 describe('getProjectAgentsDir does not treat a DotAgents-repo clone as a project layer (RUSH-2037)', () => {
-  // Cloning your own ~/.agents repo to the canonical ~/src/github.com/<you>/.agents
-  // path makes it a git checkout of the very repo whose rules already load as the
-  // user layer. It must not ALSO be picked up as a project layer (project outranks
-  // user), or a stale clone silently shadows the live rules and plants a compiled
-  // AGENTS.md in an ancestor dir. Discovery is by repo identity (git origin), not path.
+  // Cloning your own ~/.agents repo to ~/src/github.com/<you>/.agents makes a checkout of the repo
+  // whose rules already load as the user layer. It must NOT also load as a project layer (it would
+  // shadow live rules and plant an AGENTS.md); discovery is by git origin, not path.
   function initGitRepo(dir: string, originUrl: string) {
     fs.mkdirSync(dir, { recursive: true });
     execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
@@ -320,10 +315,9 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
-  // The pre-rename header the top-level agents.yaml froze on: repo `agents-cli`
-  // (not `agi-cli`) and no `$schema:` line. A hand-written body comment sits below
-  // it — the yaml library folds that whole block onto the first key's comment,
-  // which is exactly why the header cannot be healed via doc.commentBefore.
+  // The pre-rename header the top-level agents.yaml froze on: repo `agents-cli` (not `agi-cli`)
+  // and no `$schema:` line, with a hand-written body comment below. The yaml library folds that
+  // block onto the first key's comment, so the header cannot be healed via doc.commentBefore.
   const STALE = [
     '# agents-cli metadata',
     '# Auto-generated - do not edit manually',
@@ -370,10 +364,9 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
     writeCentral(STALE);
     const before = fs.readFileSync(centralPath(), 'utf-8');
 
-    // A device-only write (agents pins route to the untracked device store, not
-    // central). Healing here would rewrite the shared file on an unrelated write —
-    // the exact churn that wedges `agents sync` — so central must be untouched and
-    // its stale header must survive until a real central change heals it.
+    // A device-only write (pins go to the untracked device store, not central). Healing here would
+    // rewrite the shared file on an unrelated write, the churn that wedges `agents sync`, so
+    // central stays untouched until a real central change heals it.
     updateMeta((m) => ({ ...m, agents: { claude: '2.1.0' } }));
 
     const after = fs.readFileSync(centralPath(), 'utf-8');
@@ -397,18 +390,9 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
   });
 });
 
-// ── Commit-on-write for CLI-owned central edits (PHNX-3968) ────────────────
-//
-// A CLI config command rewrites the fleet-shared central agents.yaml. Left
-// uncommitted, the tree is dirty on agents.yaml between the write and the
-// daemon's next publish tick — and an incoming peer publish commit that also
-// touches agents.yaml then trips dirtyTreeRefusal, wedging `agents repo pull`.
-// writeMeta/updateMeta now commit the central edit synchronously after the meta
-// lock releases (only when the central bytes actually moved), so the tree is
-// clean at rest. The daemon (`agents __daemon-run`) commits too: since the
-// shared-state exchange moved to SSH (PHNX-4116) no daemon tick touches the user
-// repo, so a daemon-side central write would otherwise sit dirty until the next
-// CLI edit. Real git repo, no mocks.
+// Commit-on-write for CLI-owned central edits (PHNX-3968): an uncommitted agents.yaml edit makes a
+// peer publish commit trip dirtyTreeRefusal and wedge `agents repo pull`. writeMeta/updateMeta
+// commit after the meta lock releases (only if bytes moved); the daemon too (PHNX-4116).
 describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
   let TMP2 = '';
   const agentsDir = () => path.join(TMP2, '.agents');
@@ -473,15 +457,9 @@ describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
   });
 });
 
-// ── Finding 2: legacy meta.yaml migration must not spawn git inside the lock ──
-//
-// readMeta()'s one-shot legacy branch (.system/meta.yaml present && agents.yaml
-// absent) used to call the PUBLIC writeMeta, which runs commit-on-write's git
-// subprocess. When readMeta runs as updateMeta/writeMeta's first statement it is
-// already inside the held, non-heartbeated meta lock — so that commit violated
-// the commit-after-lock invariant. The migration now writes via a reentrant
-// withMetaLock(writeMetaUnlocked): lock-safe when standalone, a no-op re-entry
-// when already locked, and it never spawns git.
+// Finding 2: readMeta's one-shot legacy branch (meta.yaml present, agents.yaml absent) called the
+// public writeMeta, whose git commit ran inside the held, non-heartbeated meta lock, violating
+// commit-after-lock. It now uses reentrant withMetaLock(writeMetaUnlocked), never spawning git.
 describe('legacy meta.yaml migration: lock-safe, commit-free write (PHNX-3968)', () => {
   let TMP3 = '';
   const agentsDir = () => path.join(TMP3, '.agents');
@@ -529,11 +507,9 @@ describe('legacy meta.yaml migration: lock-safe, commit-free write (PHNX-3968)',
     const commitCount = () => git(['rev-list', '--all', '--count']).trim();
     expect(commitCount()).toBe('0'); // no commits yet
 
-    // Simulate what updateMeta/writeMeta do: readMeta runs as the first statement
-    // inside a HELD meta lock. withMetaLock's ensureLockTarget writes a default
-    // agents.yaml on entry, which would normally skip the legacy branch — remove
-    // it inside the lock so the migration actually runs on the reentrant (depth>0)
-    // path, the exact case finding 2 is about.
+    // Simulate updateMeta/writeMeta: readMeta runs first inside a held meta lock. ensureLockTarget
+    // writes a default agents.yaml on entry, which would skip the legacy branch, so remove it
+    // inside the lock to run the migration on the reentrant (depth>0) path.
     const meta = withMetaLock(() => {
       fs.rmSync(path.join(agentsDir(), 'agents.yaml'), { force: true });
       return readMeta();

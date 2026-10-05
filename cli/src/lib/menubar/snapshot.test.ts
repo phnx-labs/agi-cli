@@ -9,11 +9,9 @@ import { closeDB } from '../session/db.js';
 import { emailDigest } from '../github/viewer.js';
 import { computeMenubarSnapshot, readLastWatchdogTick } from './snapshot.js';
 
-// The snapshot's device list reads the central device-config block, whose
-// public API auto-folds legacy stores on first use. This file's statically
-// imported graph uses the REAL HOME (read-only, as before) — pin the migration
-// gate so a test run never folds the developer's real ~/.agents as a side
-// effect. The central-block test below re-imports with a redirected HOME.
+// The snapshot's device list reads the central device-config block, which auto-folds legacy stores
+// on first use. This file's static imports use the REAL HOME, so pin the migration gate to keep a
+// test run from folding the developer's real ~/.agents.
 process.env.AGENTS_SKIP_MIGRATION = '1';
 
 const dirs: string[] = [];
@@ -82,16 +80,9 @@ describe('menubar snapshot', () => {
   });
 
   it('emits preferred state layered from the device doc over the fleet default', async () => {
-    // Auto-launch flags live in the tracked per-device doc
-    // (devices/<name>/agents.yaml config:) — so this test needs a redirected
-    // HOME, which state.ts captures at import time: fresh modules, dynamic
-    // import.
-    //
-    // computeMenubarSnapshot also opens the sessions index (querySessions). On
-    // Windows better-sqlite3 keeps sessions.db locked across rmSync. Pin the
-    // DB outside the HOME we delete, and close BOTH the static-import singleton
-    // and the post-resetModules singleton (vi.resetModules() creates a fresh
-    // db.js instance that the static closeDB() cannot see).
+    // Auto-launch flags live in the per-device doc, so this needs a redirected HOME (captured by
+    // state.ts at import): use fresh modules. On Windows better-sqlite3 keeps sessions.db locked
+    // across rmSync: pin the DB outside the deleted HOME and close both singletons.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-snapshot-home-'));
     const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-snapshot-db-'));
     dirs.push(home, dbDir);
@@ -159,14 +150,9 @@ describe('menubar snapshot', () => {
   });
 });
 
-/**
- * PHNX-3999 F25 — Settings shows each device's role and useful hardware specs.
- *
- * Two properties matter and both are pinned here: the numbers come from the
- * fleet-stats CACHE (opening Settings must never probe the fleet — see
- * docs/menubar.md), and a device nobody has measured reports `stats: null`
- * rather than zeroes that would render as "idle box, empty disk".
- */
+/** PHNX-3999 F25: Settings shows each device's role and hardware specs. Pins that numbers come from
+ * the fleet-stats CACHE (opening Settings never probes the fleet; docs/menubar.md) and an
+ * unmeasured device reports `stats: null`, not zeroes that read as "idle". */
 describe('computeMenubarSnapshot — device roles and specs (PHNX-3999 F25)', () => {
   it('projects role, auto-placement eligibility and cached specs, and says nothing about an unmeasured box', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-specs-home-'));
@@ -272,13 +258,9 @@ describe('computeMenubarSnapshot — device roles and specs (PHNX-3999 F25)', ()
   });
 });
 
-/**
- * RUSH-2336 — the menubar snapshot must apply the same canonical
- * `isRunningLiveSession` selector the CLI's bare `--active` view does. The
- * daemon warm-tick writer never stamps `machine` on a local row (unlike the
- * CLI's own gather), so this also pins the self-stamp fallback that lets a
- * process row satisfy the selector's "names its machine" requirement.
- */
+/** RUSH-2336: the snapshot must apply the same `isRunningLiveSession` selector as the CLI's
+ * `--active` view. The daemon warm-tick never stamps `machine` on a local row, so this also pins
+ * the self-stamp that lets a row satisfy the selector. */
 describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () => {
   let snapDir: string;
   let prevSnap: string | null;
@@ -374,11 +356,8 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
   });
 });
 
-/**
- * The menu's avatar: `me` comes from the Phoenix session file and the cached
- * `gh api user` record only (no gh spawn while the record is fresh), and the
- * Phoenix picture wins over the GitHub one.
- */
+/** The menu's avatar: `me` comes only from the Phoenix session file and the cached `gh api user`
+ * record (no gh spawn while fresh), and the Phoenix picture wins over GitHub's. */
 describe('computeMenubarSnapshot — me', () => {
   const PHOENIX_PIC = 'https://lh3.googleusercontent.com/a/example=s96-c';
   const OCTOCAT = { login: 'octocat', name: 'The Octocat', avatarUrl: 'https://avatars.githubusercontent.com/u/583231?v=4', emailSha256: emailDigest('octocat@github.com') };

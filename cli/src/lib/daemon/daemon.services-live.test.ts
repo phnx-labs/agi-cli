@@ -1,18 +1,6 @@
-/**
- * `agents daemon services enable/disable/restart <id>` live path (RUSH-3193
- * P4). Before this, a toggle only wrote `services.yaml` and told the operator
- * to run `agents daemon reload` (or restart) themselves — this drives the real
- * end-to-end mechanism instead: write the toggle / queue a restart exactly as
- * the CLI commands do, signal the daemon over the same `SIGHUP` control path
- * `agents daemon reload` uses, then read back the cross-process state the
- * daemon persisted via `recordSubsystemState` (`ServiceSupervisor`,
- * `supervisor.ts`) — never in-process, since `agents daemon services` runs as
- * a separate process from the daemon. Drives a REAL compiled daemon
- * subprocess, like the other `daemon.*.test.ts` integration slices — the
- * supervisor's SIGHUP wiring lives inside `runDaemon()`, which cannot be
- * unit-tested in isolation (single-instance guard, subsystem boot order, an
- * infinite `await new Promise(() => {})`).
- */
+/** `agents daemon services enable/disable/restart <id>` live path (RUSH-3193 P4). A toggle used to
+ * only write `services.yaml`; this drives the real mechanism: toggle or queue a restart, signal
+ * SIGHUP as `agents daemon reload` does, read the persisted state. Uses a REAL compiled daemon. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -88,11 +76,9 @@ describe('agents daemon services enable/disable/restart live path (integration: 
       // persist the toggle, then signal the same SIGHUP `agents daemon reload` uses.
       fs.writeFileSync(servicesConfigPath, 'services:\n  session-index: false\n', 'utf-8');
       process.kill(pid, 'SIGHUP');
-      // The confirming "stopped live" log is written only AFTER supervisor.stop()
-      // resolves — strictly later than the 'stopped' health state recorded at the
-      // start of stopOne(). Wait for the LOG (the later signal), which implies the
-      // state; snapshotting the log right after the state flip is a race that
-      // loses on a loaded CI box.
+      // The confirming "stopped live" log is written only after supervisor.stop() resolves, later
+      // than the 'stopped' health state. Wait for the log; snapshotting right after the state flip
+      // is a race on a loaded CI box.
       await waitFor(() => readLog().includes(`Service 'session-index' stopped live (SIGHUP reload)`));
       expect(readLog()).toContain(`Service 'session-index' stopped live (SIGHUP reload)`);
       expect(readHealth()['session-index']?.state).toBe('stopped');

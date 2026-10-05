@@ -1,24 +1,6 @@
-/**
- * Seed the hermetic vitest device registry with the live Windows e2e host.
- *
- * `tests/setup.ts` (RUSH-2042) redirects `AGENTS_DEVICES_DIR` to a fork-private
- * empty directory so unit tests cannot leak fixtures into the real fleet
- * registry. The live Windows-host e2e suites (`computer/ssh-tunnel.e2e.test.ts`,
- * `browser/drivers/ssh.e2e.test.ts`) still need a real `DeviceProfile` for
- * `AGENTS_TEST_WIN_HOST` so `resolveRemoteDevice` can dial it. Without this
- * seed every e2e run fails immediately with `Unknown device 'win-mini'` —
- * which is what turned `tests-windows-host-e2e.yml` red after #1572 even when
- * the runner had a correct real registry and tailnet reach to win-mini.
- *
- * Source priority:
- *   1. Real fleet registry (`~/.agents/.history/devices/registry.json`) — copy
- *      the named entry into the private dir (read-only on the real file).
- *   2. `ssh -G <host>` — synthesize a minimal windows profile from OpenSSH's
- *      resolved user/hostname (covers a fresh crabbox runner that has Host
- *      config + key auth but never ran `agents devices sync`).
- *
- * Never writes to the real registry.
- */
+/** Seed the hermetic vitest device registry with the live Windows e2e host: setup.ts (RUSH-2042)
+ * empties `AGENTS_DEVICES_DIR`, but e2e suites need a DeviceProfile for `AGENTS_TEST_WIN_HOST`.
+ * Copies the real entry, else synthesizes from `ssh -G`; never writes the real registry. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -63,12 +45,9 @@ export function isIpLiteral(hostname: string): boolean {
   return false;
 }
 
-/**
- * Minimal windows DeviceProfile-shaped entry from ssh -G fields. Shape matches
- * `DeviceProfile` in `src/lib/devices/registry.ts` so `sshTargetFor` /
- * `hostNameFor` accept it without a real `upsertDevice` (which needs locks +
- * module state).
- */
+/** Minimal windows DeviceProfile-shaped entry from ssh -G fields, matching `DeviceProfile` in
+ * `src/lib/devices/registry.ts` so `sshTargetFor`/`hostNameFor` accept it without `upsertDevice`
+ * (locks, module state). */
 export function synthesizeWindowsDevice(
   name: string,
   fields: SshGFields,
@@ -113,10 +92,8 @@ function readRegistry(file: string): Record<string, unknown> {
   return {};
 }
 
-/**
- * Ensure `devicesDir/registry.json` contains an entry for `host`.
- * @returns `'real' | 'ssh-g' | 'already' | 'missing'` — how the entry was sourced.
- */
+/** Ensure `devicesDir/registry.json` has an entry for `host`; returns how it was sourced: `'real' |
+ * 'ssh-g' | 'already' | 'missing'`. */
 export function seedHermeticE2eWinHost(opts: SeedE2eWinHostOpts): 'real' | 'ssh-g' | 'already' | 'missing' {
   const host = opts.host.trim();
   if (!host) return 'missing';

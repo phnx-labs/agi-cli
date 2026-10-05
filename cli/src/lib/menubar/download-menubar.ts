@@ -1,25 +1,6 @@
-/**
- * On-demand download + verification of the macOS menu-bar helper
- * ("MenubarHelper.app").
- *
- * Mirrors the ComputerHelper download model the computer subsystem used before
- * it was extracted (PHNX-4075): the
- * helper ships as a signed + notarized `.app` zipped as a GitHub release asset
- * on the helper's own `menubar/v<x.y.z>` tag, NOT the CLI's tag (see
- * `helper-versions.ts`). A fresh `npm i -g` machine whose tarball lacks a
- * bundled copy fetches the asset for the pinned helper version, verifies its
- * sha256 + code signature before install.
- *
- * The one difference — and the reason this is not the ComputerHelper spec — is
- * the DESIGNATED-REQUIREMENT pin. macOS keys the menu bar's Accessibility (TCC)
- * grant to the bundle's designated requirement (bundle id
- * `com.phnx-labs.agents-menubar` + Developer ID Team `2HTP252L87`), and
- * re-validates each new version against it. A downloaded bundle whose DR drops
- * either pin would silently revoke the user's grant, so `MENUBAR_HELPER_SPEC`
- * sets `expectedBundleId` and the shared `verifyHelperApp` enforces the DR
- * before the bundle is ever installed. This matches the release-time gate in
- * `scripts/verify-menubar-helper.sh`.
- */
+/** On-demand download and verification of the macOS menu-bar helper: a signed, notarized .app zip
+ * on its own `menubar/v<x.y.z>` tag (helper-versions.ts). Unlike ComputerHelper it pins the
+ * designated requirement, since macOS keys the Accessibility grant to it. */
 
 import { EXPECTED_TEAM_ID, type HelperSpec, downloadHelperApp, helperAssetUrls, helperCacheDir } from '../helper-download.js';
 import { helperFloor } from '../helper-versions.js';
@@ -57,11 +38,8 @@ export function menubarHelperCacheDir(version: string): string {
   return helperCacheDir(MENUBAR_HELPER_SPEC, version);
 }
 
-/**
- * Download the menu-bar helper release asset for `version`, verify sha256 +
- * signature + DR pin, and return the path to the extracted `MenubarHelper.app`
- * in the cache. A missing asset is a hard error naming the exact tag.
- */
+/** Downloads the helper asset for `version`, verifies sha256 + signature + DR pin, and returns the
+ * extracted `MenubarHelper.app` path in the cache. A missing asset is a hard error naming the tag. */
 export function downloadMenubarHelperApp(version: string): Promise<string> {
   return downloadHelperApp(MENUBAR_HELPER_SPEC, version);
 }

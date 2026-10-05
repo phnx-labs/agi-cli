@@ -244,11 +244,9 @@ describe('repairSelfReferentialBinShims', () => {
 
     withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
 
-    // After repair the loop is broken and the .bin entry yields the real binary.
-    // On Windows without the symlink privilege createLink copies (a copy's
-    // realpath is itself, not the target), so assert the functional contract —
-    // same bytes as the real binary, and no longer resolving back into the
-    // shims dir — rather than symlink-target identity.
+    // After repair the loop is broken and the .bin entry yields the real binary. Windows without
+    // symlink privilege copies instead (a copy's realpath is itself), so assert the functional
+    // contract (same bytes, no longer resolving into the shims dir), not symlink-target identity.
     expect(fs.readFileSync(binLink)).toEqual(fs.readFileSync(realBin));
     expect(fs.realpathSync(binLink).startsWith(fs.realpathSync(shimsDir) + path.sep)).toBe(false);
   });
@@ -1017,10 +1015,9 @@ notify:
   });
 
   it('writes the device file with the canonical four-line META_HEADER', () => {
-    // The subtlest decision in the migration: migrate.ts's own local HEADER
-    // constants are THREE lines (no yaml-language-server hint), so writing one
-    // of those would leave a device file that state.ts's writeIfChanged rewrites
-    // on the very next meta write — reintroducing the churn this removes.
+    // The subtlest decision in the migration: migrate.ts's local HEADER constants are three lines
+    // (no yaml-language-server hint), so writing one would leave a device file that state.ts's
+    // writeIfChanged rewrites on the next meta write, reintroducing the churn this removes.
     const dir = userDirWith(CENTRAL_WITH_DEFAULT);
 
     migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');

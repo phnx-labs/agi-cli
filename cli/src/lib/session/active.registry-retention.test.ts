@@ -29,13 +29,9 @@ function writeRegistry(windowAgeMs: number, pid: number): void {
   );
 }
 
-/**
- * The regression this exists for: a VS Code window that crashed left a dead-pid
- * entry behind, `readLiveTerminals` filtered it out, and the session simply
- * DISAPPEARED from `--active` — indistinguishable from one that had never run.
- * The retention rule is what puts it back, and it has to be narrow enough that an
- * ordinary terminal close doesn't start reporting itself as a crash.
- */
+/** Regression: a crashed VS Code window left a dead-pid entry that `readLiveTerminals` filtered
+ * out, so the session vanished from `--active`. The retention rule restores it but must be narrow
+ * enough that an ordinary terminal close is not reported as a crash. */
 describe('live-terminals retention for a crashed host', () => {
   beforeEach(() => {
     fs.rmSync(REGISTRY, { force: true });

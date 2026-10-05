@@ -11,13 +11,9 @@ function writeTempTranscript(lines: string[]): string {
   return filePath;
 }
 
-/**
- * Claude records every hook firing as a top-level `attachment` line whose
- * payload is `{type: "hook_success"|"hook_error"|…, hookName, hookEvent, …}`.
- * The parser turns each firing into a normalized `hook` event; the derivative
- * `hook_additional_context` record (same firing, shared toolUseID) is skipped
- * so counts are per-firing, not per-record.
- */
+/** Claude records each hook firing as a top-level `attachment` line (hook_success, hook_error,
+ * ...). The parser emits one `hook` event per firing and skips the derivative
+ * `hook_additional_context` record, so counts are per firing. */
 describe('Claude hook attachment parsing', () => {
   const line = (att: Record<string, unknown>) =>
     JSON.stringify({ type: 'attachment', timestamp: '2026-08-03T09:21:15Z', attachment: att });

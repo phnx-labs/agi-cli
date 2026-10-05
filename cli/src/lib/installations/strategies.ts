@@ -52,26 +52,14 @@ export interface CommitHandles {
   finalize: () => void;
 }
 
-/**
- * How one class of harness replaces the release inside a frozen installation.
- *
- * Chosen from the registry's declared capabilities — never from an agent id — so
- * a harness added to `AGENTS` is covered the day it lands. See
- * {@link selectUpdateStrategy}.
- */
+/** How one class of harness replaces the release inside a frozen installation. Chosen from the
+ * registry's declared capabilities, never an agent id, so a harness added to `AGENTS` is
+ * covered the day it lands (see selectUpdateStrategy). */
 export interface UpdateStrategy {
   readonly id: UpdateStrategyId;
-  /**
-   * True only when `undo` can restore the PREVIOUS RELEASE in full — i.e. the
-   * vendor artifact lives inside this installation's own directory and was
-   * fetched without mutating anything global.
-   *
-   * It is not a switch for whether the orchestrator rolls back: `undo` always
-   * runs on a post-commit failure, because every strategy that displaces
-   * something must put it back. What this flag changes is what the user is
-   * told, since for an installer-driven harness the global binary the vendor
-   * replaced is not ours to restore.
-   */
+  /** True only when `undo` can restore the previous release in full: the vendor artifact lives
+   * inside this installation's dir and was fetched without mutating anything global. It doesn't
+   * gate rollback; it changes what the user is told. */
   readonly transactional: boolean;
   /** True when several installations of this agent share one binary on disk. */
   readonly sharedBinary: boolean;
@@ -95,21 +83,14 @@ function moveDir(from: string, to: string): void {
   fs.renameSync(from, to);
 }
 
-/**
- * Entries a swap replaces: everything npm owns inside a version dir. The lockfile
- * is included deliberately — leaving the previous release's `package-lock.json`
- * beside the new `node_modules` would make the directory describe a release it no
- * longer contains, and the next repair reinstall would resolve from that stale lock.
- * Entries absent on either side are skipped, so a dir without a lockfile is fine.
- */
+/** Entries a swap replaces: everything npm owns inside a version dir. The lockfile is included
+ * deliberately: the old `package-lock.json` beside the new `node_modules` would describe a
+ * release the dir no longer holds. Absent entries are skipped. */
 const NPM_LIVE_ENTRIES = ['node_modules', 'package.json', 'package-lock.json'] as const;
 
-/**
- * npm-packaged harnesses (claude, codex, kimi, opencode, …). The only fully
- * transactional class: a pinned release can be fetched into a sibling directory,
- * probed there, and swapped in, with the displaced tree kept until the swap is
- * proven — so a failed update leaves the previous release running.
- */
+/** npm-packaged harnesses (claude, codex, kimi, opencode, …): the only fully transactional
+ * class. A pinned release is fetched into a sibling dir, probed and swapped in, keeping the
+ * displaced tree until the swap is proven. */
 const npmPackageStrategy: UpdateStrategy = {
   id: 'npm-package',
   transactional: true,
@@ -142,10 +123,9 @@ const npmPackageStrategy: UpdateStrategy = {
 
     const winShell = process.platform === 'win32';
     ctx.onProgress?.(`Staging ${pkg}@${target}...`);
-    // `--ignore-scripts` for the dependency tree; the first-party package's own
-    // postinstall is re-run below, exactly as the install path does — several
-    // harnesses ship their native binary via that script and are unlaunchable
-    // without it.
+    // `--ignore-scripts` for the dependency tree; the first-party package's own postinstall is re-
+    // run below as the install path does, since several harnesses ship their native binary via that
+    // script and are unlaunchable without it.
     await execFileAsync('npm', ['install', `${pkg}@${target}`, '--ignore-scripts'], {
       cwd: stagingDir,
       shell: winShell,
@@ -195,13 +175,9 @@ const npmPackageStrategy: UpdateStrategy = {
     };
 
     try {
-      // Move the live tree aside first, then move the staged tree in. Doing it
-      // in this order means the failure window contains no half-merged tree on
-      // its own: either the old entries are all aside (restorable) or the new
-      // ones are all in place — the try/catch below is what makes a throw
-      // BETWEEN those two loops (or partway through the second one) recover
-      // to the pre-commit state instead of leaving whichever entries already
-      // moved exactly where the exception left them.
+      // Move the live tree aside first, then the staged tree in, so a failure never leaves a half-
+      // merged tree: old entries are all aside (restorable) or new ones all in place. The try/catch
+      // restores the pre-commit state if a throw lands between or during the loops.
       for (const entry of NPM_LIVE_ENTRIES) {
         const live = path.join(dir, entry);
         if (!fs.existsSync(live)) continue;
@@ -230,13 +206,9 @@ const npmPackageStrategy: UpdateStrategy = {
   },
 };
 
-/**
- * Harnesses that are ONE global self-updating binary (droid, muse, warp): every
- * installation of the agent points at the same file, so there is nothing
- * per-installation to stage or swap, and updating one necessarily updates all.
- * The honest model is therefore: run the official installer, probe the live
- * binary, and record the new release on every installation that shares it.
- */
+/** Harnesses that are one global self-updating binary (droid, muse, warp): every installation
+ * points at the same file, so nothing is per-installation to stage. Run the official installer,
+ * probe the live binary, record the new release on every installation sharing it. */
 const globalBinaryStrategy: UpdateStrategy = {
   id: 'global-binary',
   transactional: false,
@@ -282,14 +254,9 @@ const globalBinaryStrategy: UpdateStrategy = {
   },
 };
 
-/**
- * Harnesses installed by an official script that keeps a per-installation copy
- * or symlink farm (grok, cursor, antigravity, hermes, goose, …). The
- * vendor artifact lands in a global location the installer owns, so the fetch
- * itself is not reversible; what IS per-installation — the version dir's binary
- * link farm — is staged and swapped so a failed re-import cannot strand the
- * installation without a launch target.
- */
+/** Harnesses installed by an official script with a per-installation link farm (grok, cursor,
+ * antigravity, hermes, goose, …). The global fetch isn't reversible, so only the link farm is
+ * staged and swapped, so a failed re-import can't strand the installation. */
 const installScriptStrategy: UpdateStrategy = {
   id: 'install-script',
   transactional: false,
@@ -321,10 +288,9 @@ const installScriptStrategy: UpdateStrategy = {
         `${config.name} installer finished but ${config.cliCommand} is not on PATH — the install did not complete.`
       );
     }
-    // On Windows there is no `.cmd` wrapper beside an imported install-script
-    // binary, so the staged launch probe cannot run and reports healthy. The
-    // gate is therefore weaker here than on POSIX; the unconditional undo in
-    // update.ts is what keeps a bad swap recoverable.
+    // On Windows there is no `.cmd` wrapper beside an imported install-script binary, so the staged
+    // launch probe can't run and reports healthy; the check is weaker than on POSIX, and the
+    // unconditional undo in update.ts keeps a bad swap recoverable.
 
     const release = target === 'latest'
       ? (await getLiveVersion(ctx.agent)) ?? target
@@ -358,26 +324,18 @@ const installScriptStrategy: UpdateStrategy = {
   commit: npmPackageStrategy.commit,
 };
 
-/**
- * Pick the update strategy for an agent from the registry's declared shape.
- *
- * The ordering mirrors `installVersion`: an npm package wins whenever one is
- * declared (kimi declares both a package and a script, and its package is what
- * `agents add` installs), then a single shared global binary, then a per-install
- * script. Anything else is an integration boundary we do not handle — it throws
- * rather than silently no-opping and reporting success.
- */
+/** Pick the update strategy from the registry's declared shape, in `installVersion`'s order: an
+ * npm package wins when declared (kimi declares both), then a shared global binary, then a per-
+ * install script. Anything else throws rather than reporting false success. */
 export function selectUpdateStrategy(agent: AgentId): UpdateStrategy {
   const config = AGENTS[agent];
   if (config.npmPackage) return npmPackageStrategy;
   if (config.installScript && isGlobalBinaryAgent(agent)) return globalBinaryStrategy;
   if (config.installScript) {
     if (!usesVersionDirLinkFarm(agent)) {
-      // The install path resolves this harness's binary somewhere the version
-      // dir's link farm does not describe (grok keeps a real per-release copy
-      // under its version home). Staging and swapping the link farm would leave
-      // the launch target untouched, so the update would record a release that
-      // is not actually installed. Refuse instead of reporting a false success.
+      // This harness's binary resolves somewhere the version dir's link farm doesn't describe (grok
+      // keeps a real per-release copy). Swapping the farm would leave the launch target untouched
+      // and record a release that isn't installed, so refuse instead of reporting false success.
       throw new Error(
         `${config.name} keeps its binary outside the managed version directory, so agents-cli cannot yet update an `
         + `installation in place. Install the current release as a new installation: agents add ${agent}@latest`
@@ -391,24 +349,17 @@ export function selectUpdateStrategy(agent: AgentId): UpdateStrategy {
   );
 }
 
-/**
- * Does this harness's launch target live in the version dir's own
- * `node_modules/.bin` link farm — the thing an installation can stage and swap?
- *
- * Probed through `getBinaryPath`, the single resolver the shims and `agents run`
- * use, rather than tested against an agent id, so a harness that resolves its
- * binary elsewhere is recognised without being enumerated here.
- */
+/** Does this harness's launch target live in the version dir's own `node_modules/.bin` link
+ * farm, which an installation can stage and swap? Probed through `getBinaryPath` (the resolver
+ * shims and `agents run` use), not an agent id. */
 function usesVersionDirLinkFarm(agent: AgentId): boolean {
   const probe = '0.0.0-probe';
   const expected = path.join(installationDir(agent, probe), 'node_modules', '.bin', AGENTS[agent].cliCommand);
   return getBinaryPath(agent, probe) === expected;
 }
 
-/**
- * Whether a concrete release can be requested for this agent at all. False for
- * every self-updating harness — their installers carry no version token.
- */
+/** Whether a concrete release can be requested for this agent at all; false for every self-
+ * updating harness, whose installers carry no version token. */
 export function supportsPinnedUpdate(agent: AgentId): boolean {
   const config = AGENTS[agent];
   if (config.npmPackage) return true;

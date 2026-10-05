@@ -7,11 +7,8 @@ import { spawnSync } from 'child_process';
 import { memoryTargetDir, syncClaudeProjectMemoryDir, getClaudeProjectMemoryDir } from './memory.js';
 import { claudeProjectDirName } from './project-key.js';
 
-// Pass-through by default (real symlinkSync) — only the raced-EEXIST tests
-// below override one call each via mockImplementationOnce. Needed because
-// vitest can't vi.spyOn an ESM namespace export directly ("module namespace
-// is not configurable"); this is the standard workaround, scoped to exactly
-// the one syscall those tests need to simulate a concurrent winner.
+// Pass-through by default (real symlinkSync); only the raced-EEXIST tests override one call each.
+// vitest can't vi.spyOn an ESM namespace export, so this scopes the mock to the one syscall.
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return { ...actual, symlinkSync: vi.fn(actual.symlinkSync) };
@@ -232,17 +229,9 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
   });
 
   it('treats a raced EEXIST as success when the winner landed the same canonical target', async () => {
-    // True multi-process concurrency turned out impossible to land reliably
-    // here: the vulnerable window (lstat sees nothing -> symlinkSync) is
-    // sub-millisecond, well under real OS process-scheduling granularity —
-    // measured directly, 20+ trials of real concurrent `tsx` processes
-    // (even barrier-synchronized to release simultaneously) produced zero
-    // collisions. A prior version of this test claimed to reproduce the
-    // race via two unsynchronized processes; non-author review of PHNX-2817
-    // caught that it didn't reliably (0/15 on a rerun) — this replaces it
-    // with a deterministic simulation of the exact outcome a real race
-    // produces: `fs.symlinkSync` throwing EEXIST because another process
-    // won the link first.
+    // Real multi-process concurrency can't be landed: the window (lstat then symlinkSync) is
+    // sub-millisecond and 20+ `tsx` trials gave zero collisions (PHNX-2817 review caught the old
+    // test at 0/15). This simulates `symlinkSync` throwing EEXIST because another process won.
     const home = makeTempHome();
     const prevStateDir = process.env.AGENTS_STATE_DIR;
     process.env.AGENTS_STATE_DIR = path.join(home, '.cache', 'state');

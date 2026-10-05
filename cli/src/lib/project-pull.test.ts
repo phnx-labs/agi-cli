@@ -1,13 +1,6 @@
-/**
- * Tests for the project-pull library (RUSH-2536).
- *
- * Coverage:
- *   - fingerprintTargets — deterministic, order-independent
- *   - parseProjectPullEnvelope — fail-closed validation (schema, kind, machine, fingerprint)
- *   - projectPullComplete — exit-code predicate
- *   - pullProjectTargets — real git repos; missing / slug-mismatch / dirty / ahead blocks
- *   - buildPullEnvelope — round-trip with parseProjectPullEnvelope
- */
+/** Tests for the project-pull library (RUSH-2536): fingerprintTargets, fail-closed
+ * parseProjectPullEnvelope, the projectPullComplete exit predicate, pullProjectTargets on real git
+ * repos (missing / slug-mismatch / dirty / ahead blocks), and the buildPullEnvelope round-trip. */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -84,10 +77,9 @@ describe('parseProjectPullEnvelope', () => {
     expect(items[0].path).toBe('~/src/a');
   });
 
-  // Every rejection below must report `valid: false`, NOT a bare empty list. An
-  // empty-but-valid answer is indistinguishable from a peer with nothing to do,
-  // which is how a peer's real mutation/block/failure used to vanish from the
-  // output while the command still exited 0.
+  // Every rejection must report `valid: false`, not a bare empty list: an empty-but-valid answer
+  // looks like a peer with nothing to do, which is how a peer's real mutation/block/failure used to
+  // vanish while the command exited 0.
   it('rejects non-JSON input loudly', () => {
     expect(parseProjectPullEnvelope('not json', machine)).toEqual({ items: [], valid: false });
   });
@@ -251,13 +243,9 @@ describe('pullProjectTargets', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await configIdentity(author);
-    // Commit `* -text` before anything clones this repo. On Windows CI the
-    // *checkout* during `git clone` runs with the machine-default autocrlf
-    // (true) before configIdentity() can set autocrlf=false on the fresh clone,
-    // so the local working tree comes out as CRLF while the index holds LF and
-    // status.isClean() sees a phantom modification — making pullProjectTargets'
-    // strict pullRepo refuse a clean tree as dirty. A committed .gitattributes
-    // wins over autocrlf at checkout time and prevents that.
+    // Commit `* -text` before cloning: on Windows CI the clone's autocrlf=true yields a CRLF tree
+    // against an LF index, a phantom modification that makes pullRepo refuse a clean tree as dirty.
+    // A committed .gitattributes wins at checkout.
     fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
@@ -349,10 +337,9 @@ describe('pullProjectTargets', () => {
   });
 
   it('fast-forwards when the origin slug matches the declared slug', async () => {
-    // A real, fetchable local remote whose PATH is itself slug-shaped, so the
-    // same origin both serves the fetch and parses as `org/a`. (Rewriting the
-    // URL with `insteadOf` cannot work here: `git remote` reports the rewritten
-    // URL, which is what the slug check reads.)
+    // A real, fetchable local remote whose PATH is itself slug-shaped, so one origin serves the
+    // fetch and parses as `org/a`. (`insteadOf` can't work: `git remote` reports the rewritten URL,
+    // which the slug check reads.)
     const slugRemote = path.join(root, 'github.com', 'org', 'a.git');
     const slugAuthor = path.join(root, 'slug-author');
     const slugLocal = path.join(root, 'slug-local');

@@ -4,10 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
-// Redirect HOME to a throwaway dir BEFORE the module graph (state.ts captures
-// HOME at first import, and mirrorPath lands files under ~/.agents/.history) so
-// placement tests never touch the real session store. The module is loaded
-// dynamically in beforeAll, after HOME is set.
+// Redirect HOME to a throwaway dir BEFORE the module graph loads so tests never touch the real
+// session store (state.ts captures HOME at first import; mirrorPath writes under .history).
+// The module is loaded dynamically in beforeAll.
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bundle-home-'));
 process.env.HOME = TMP_HOME;
 

@@ -1,16 +1,6 @@
-/**
- * Project workspace probing — the drift signal behind `projects status`.
- *
- * Projects are natively multi-device: the same definition (home-relative paths)
- * re-roots on every fleet machine, and the question is whether the project's
- * repos are PRESENT on each box, on which branch, how far ahead/behind their
- * upstream, and whether they carry uncommitted changes. This module is the pure
- * local half: given a set of home-relative paths it probes each one with a
- * handful of read-only git calls. Drift is measured against the LAST-FETCHED
- * upstream (`@{upstream}`) — deliberately no `git fetch`, so a probe is fast
- * and offline-safe. The fleet half (`--fleet`) just runs this probe on every
- * peer via the canonical `remote-agents-json` SSH fan-out.
- */
+/** Project workspace probing behind `projects status`: read-only git calls per home-relative path
+ * (presence, branch, ahead/behind, dirty). Drift is against the last-fetched upstream, deliberately
+ * no `git fetch`, so it is fast and offline-safe. `--fleet` runs it on peers. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,11 +9,9 @@ import chalk from 'chalk';
 import { expandLocalHome, toHomeRelative } from './project-root.js';
 import { projectProbeTargets, type ProjectDef } from './projects.js';
 
-/** Per-call git budget. A read-only git call taking >3s is wedged by any
- * definition (NFS stall, index lock) — and the fleet fan-out SIGKILLs the SSH
- * hop at 12s, so a probe must fit inside that budget to avoid a slow peer
- * being misreported as unreachable: 3s × 5 calls leaves headroom even when
- * one repo is genuinely stuck. */
+/** Per-call git budget: a read-only git call over 3s is wedged (NFS stall, index lock), and the
+ * fleet fan-out SIGKILLs the SSH hop at 12s, so 3s x 5 calls fits and a slow peer isn't
+ * misreported as unreachable. */
 const GIT_TIMEOUT_MS = 3_000;
 
 /** The on-disk state of one workspace repo on one machine. */
@@ -65,12 +53,9 @@ function git(absPath: string, args: string[]): string | undefined {
   }
 }
 
-/**
- * Probe one workspace repo. A missing path yields `{present: false}` and no
- * git call is made. On a present repo every signal is best-effort: whatever
- * succeeded is reported, and a repo whose `.git` exists yet every git call
- * failed surfaces as present-with-error rather than silently clean.
- */
+/** Probe one workspace repo. A missing path yields `{present: false}` with no git call; on a present
+ * repo each signal is best-effort, and a repo whose git calls all failed surfaces as
+ * present-with-error, never silently clean. */
 export function probeRepoWorkspace(absPath: string): RepoWorkspaceStatus {
   const status: RepoWorkspaceStatus = { path: toHomeRelative(absPath), present: false };
   if (!fs.existsSync(path.join(absPath, '.git'))) return status;
@@ -109,27 +94,16 @@ export function probeProjectWorkspaces(paths: string[]): RepoWorkspaceStatus[] {
   return paths.map((p) => probeRepoWorkspace(expandLocalHome(p)));
 }
 
-/**
- * The home-relative paths to probe for a project definition: its `root` plus
- * each `repos[].path` (the opt-in for additional repos), deduped. Every target
- * is normalized through the same `toHomeRelative(expandLocalHome(...))` the
- * probe echoes, so a hand-edited def (absolute path under home, trailing
- * slash) matches its probe rows exactly — `writeProjectDef` normalizes on
- * write, but defs are hand-editable YAML and never silently drop a row.
- *
- * The walk itself lives in `projects.ts` so the probe and the spawn grants read
- * one definition of "the project's directories" instead of two that drift.
- */
+/** Home-relative paths to probe for a def: `root` plus each `repos[].path`, deduped and normalized
+ * as the probe echoes them so hand-edited defs match. The walk lives in `projects.ts` so probe and
+ * spawn grants share one definition. */
 export function workspaceTargetsForDef(def: ProjectDef): string[] {
   return projectProbeTargets(def);
 }
 
-/**
- * Parse a peer's `projects probe` stdout, tagging each row with the
- * machine that answered. Defensive against version skew / partial output, the
- * same boundary contract as `parseRemoteActive`: non-JSON or a non-array
- * yields `[]`, and rows without a `path`/`present` core are dropped.
- */
+/** Parse a peer's `projects probe` stdout, tagging rows with the machine. Defensive against version
+ * skew (same contract as `parseRemoteActive`): non-JSON or a non-array yields `[]`, and rows
+ * without a `path`/`present` core are dropped. */
 export function parseRemoteProbe(stdout: string, machine: string): HostWorkspaceStatus[] {
   let parsed: unknown;
   try {
@@ -149,10 +123,8 @@ export function parseRemoteProbe(stdout: string, machine: string): HostWorkspace
   });
 }
 
-/**
- * One workspace's compact state: `✓ clean · main`, `⚠ 12 dirty · ↑3 ↓1 ·
- * feature/x`, `✗ missing`, or `⚠ error: …`. Pure — chalk styling only.
- */
+/** One workspace's compact state: `✓ clean · main`, `⚠ 12 dirty · ↑3 ↓1 · feature/x`, `✗ missing`,
+ * or `⚠ error: …`. Pure apart from chalk. */
 export function formatWorkspaceLine(s: RepoWorkspaceStatus): string {
   if (!s.present) return chalk.red('✗ missing');
   if (s.error) return chalk.yellow(`⚠ error: ${s.error}`);
@@ -167,12 +139,8 @@ export function formatWorkspaceLine(s: RepoWorkspaceStatus): string {
   return s.branch ? `${head} ${chalk.dim('·')} ${s.branch}` : head;
 }
 
-/**
- * The fleet view of one project's workspaces: one content line per probed
- * path (host-sorted `host: state` cells joined by ` · `), labelled with the
- * path when a project probes more than one. Pure — the caller adds the
- * `fleet` row label.
- */
+/** The fleet view of one project's workspaces: a line per probed path (host-sorted `host: state`
+ * cells), labelled with the path when more than one. Pure; the caller adds the `fleet` row label. */
 export function formatFleetWorkspaces(statuses: HostWorkspaceStatus[]): string[] {
   const paths = [...new Set(statuses.map((s) => s.path))];
   const multi = paths.length > 1;
@@ -185,15 +153,9 @@ export function formatFleetWorkspaces(statuses: HostWorkspaceStatus[]): string[]
   });
 }
 
-/**
- * One-line fleet health summary — `6/13 clean · 4 behind · 4 dirty · 1 missing`.
- * Sits ABOVE the per-host {@link formatFleetWorkspaces} table so the card is
- * scannable without reading every host cell; the table keeps the per-host branch
- * and drift detail. Zero buckets are omitted. `behind` colours red when any host
- * is ≥10 behind (matching the footer's critical threshold), else yellow; a host
- * that is both behind and dirty counts in both. Each host×path row is one unit,
- * the same unit the table renders. Pure — chalk styling only.
- */
+/** One-line fleet summary (`6/13 clean · 4 behind · 4 dirty · 1 missing`) above the per-host table;
+ * zero buckets omitted. `behind` is red when any host is >=10 behind. A host behind and dirty
+ * counts in both. Pure apart from chalk. */
 export function formatFleetSummary(statuses: HostWorkspaceStatus[]): string {
   const total = statuses.length;
   let clean = 0;
@@ -232,25 +194,9 @@ interface WorkspaceWarning {
   remediation?: string;
 }
 
-/**
- * Turn probed workspace rows into card-footer warnings, GROUPED by root cause so
- * a fleet where eight hosts drift is a few lines, not sixteen (each with its own
- * repeated remediation).
- *
- * - missing / unreadable git → critical (agents there cannot share a tree)
- * - behind upstream → critical when ANY host is ≥10 commits behind, else continue
- * - dirty tree → continue (local work is fine; just note it)
- * - ahead-only is not a warning (that is progress waiting to push)
- *
- * Within one probed path, all behind hosts collapse to one warning listing each
- * host with its count (`4 hosts behind origin/main — mac-mini ↓172, …`) plus one
- * shared remediation; a lone host keeps its full sentence. Missing and dirty
- * collapse the same way. `error` stays per-host (each message is distinct).
- * Grouping is per path so two different repos never merge into one count. Unlike
- * doctor's `emitGroup`, the list names EVERY host, not the first two — each
- * host's drift count differs and is individually actionable. Pure — chalk only.
- * Caller decides whether the rows came from `--fleet` or a local probe.
- */
+/** Turn probed rows into footer warnings GROUPED by root cause so eight drifting hosts are a few
+ * lines. Missing/unreadable git is critical; behind is critical at >=10 commits; dirty is
+ * informational; ahead-only is none. Grouped per path, naming every host. */
 export function workspaceWarnings(statuses: HostWorkspaceStatus[]): WorkspaceWarning[] {
   const out: WorkspaceWarning[] = [];
   const where = (s: HostWorkspaceStatus): string => (s.host ? s.host : 'local');

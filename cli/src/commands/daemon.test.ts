@@ -1,14 +1,6 @@
-/**
- * agents daemon — command surface, status, enable/disable.
- *
- * The command group itself: that it resolves, that Funnel nests under it, and
- * that status/enable/disable agree about whether this device runs a daemon.
- *
- * Split out of a single 35-test `daemon.test.ts` that ran 159s — the slowest
- * file in the repo, and therefore the whole suite's floor: vitest parallelises
- * across FILES and runs one file's tests sequentially in a single worker. The
- * shared spawn harness lives in `daemon-test-harness.ts`.
- */
+/** agents daemon: command surface, status, enable/disable: the group resolves, Funnel nests under
+ * it, and status/enable/disable agree on whether this device runs a daemon. Split from a 159s
+ * daemon.test.ts; harness in `daemon-test-harness.ts`. */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -82,12 +74,9 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     expect(payload.state).toBe('disabled');
     expect(payload.daemonEnabled).toBe(false);
 
-    // Persisted to disk, not just in-process — the status call above is a fresh
-    // CLI invocation that read it back. It lands in THIS machine's own doc, not
-    // the fleet-shared agents.yaml: the kill switch is machine-local, so syncing
-    // it would disable the daemon on every box that pulls.
-    // The doc is keyed by this machine's id, which the test does not pin — read
-    // whichever device dir the CLI created rather than hardcoding a name.
+    // Persisted to disk (status is a fresh CLI invocation), in this machine's own doc, not the
+    // fleet-shared agents.yaml: the kill switch is machine-local, so syncing it would disable the
+    // daemon on every box that pulls. Machine id is unpinned; read whichever device dir exists.
     const devicesDir = path.join(home, '.agents', 'devices');
     const [machineDir] = fs.readdirSync(devicesDir);
     const localDoc = fs.readFileSync(path.join(devicesDir, machineDir, 'agents.yaml'), 'utf-8');
@@ -150,11 +139,9 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
         // A real __daemon-run process registered in `home`'s OWN registry — a
         // genuine duplicate (e.g. a predecessor that crashed without cleanup).
         ownDuplicate = await spawnFakeRegisteredDaemon(home);
-        // A real __daemon-run process registered in a COMPLETELY SEPARATE
-        // registry (`otherHome`) — standing in for the leaked vitest fixture
-        // this ticket was filed over: same box, different HOME, therefore a
-        // different getDaemonDir() and a different registry. A raw `ps` scan
-        // sees both processes identically; the registry does not.
+        // A real __daemon-run process in a separate registry (`otherHome`), standing in for the
+        // leaked vitest fixture the ticket was filed over: different HOME, so a different
+        // getDaemonDir(). A raw `ps` scan sees both; the registry does not.
         foreignFixture = await spawnFakeRegisteredDaemon(otherHome);
 
         const res = run(home, ['status', '--json']);
@@ -172,14 +159,9 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     },
     20_000,
   );
-  /**
-   * RUSH-2493: a daemon whose entry file has been deleted answers every probe
-   * and reads healthy, but cannot restart and runs whatever was loaded before
-   * the delete. Observed live: one ran 4h14m from a removed worktree while
-   * `systemctl is-active` said `active`.
-   *
-   * Real process launched from a real file that is then unlinked — no mocks.
-   */
+  /** RUSH-2493: a daemon whose entry file was deleted answers every probe and reads healthy but
+   * cannot restart. Observed: one ran 4h14m from a removed worktree while `systemctl is-active`
+   * said `active`. Real process, real unlinked file. */
   // 90s, not the default 30s: several real `agents` CLI boots (cold `node
   // --import tsx`), measured over the 30s cap under 16 CPU-bound background
   // processes on a 20-core box (RUSH-2839).
@@ -262,10 +244,9 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     fs.writeFileSync(script, 'setInterval(() => {}, 1e9);\n');
     const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
     await new Promise((r) => setTimeout(r, 200));
-    // Deliberately NOT registered -- this is the INCIDENT shape. The 4h14m ghost
-    // ran from a deleted worktree under an ephemeral /tmp cwd, so it was neither
-    // status.pid nor in this install's registry. Gating the DISPLAY on the
-    // registry would leave this command silent on the case it exists for.
+    // Deliberately unregistered: the incident shape. The 4h14m ghost ran from a deleted worktree
+    // under an ephemeral /tmp cwd, so it was neither status.pid nor in the registry; gating on the
+    // registry would hide the case this exists for.
     fs.rmSync(dir, { recursive: true, force: true });
     try {
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
@@ -274,10 +255,9 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
         'must be VISIBLE',
       ).toBe(true);
 
-      // ...but never actionable: no doctor problem, so no kill instruction and
-      // no exit 1 for every other user on this box (RUSH-2368's actual harm).
-      // The tier must ride the machine surface too — a routine reading
-      // staleBinaries has to tell a ghost it may act on from one it may not.
+      // ...but never actionable: no doctor problem, so no kill instruction and no exit 1 for other
+      // users on the box (RUSH-2368's harm). The tier rides the machine surface too, so a routine
+      // can tell a ghost it may act on from one it may not.
       const row = payload.staleBinaries.find((s: { pid: number }) => s.pid === child.pid);
       expect(row.actionable, 'json row must be marked non-actionable').toBe(false);
 

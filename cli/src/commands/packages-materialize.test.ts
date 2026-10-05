@@ -1,12 +1,6 @@
-/**
- * Real-CLI tests for `agents packages materialize` (PHNX-3838).
- *
- * Drives the entrypoint as a subprocess. No mocks. Writes only under a temp
- * output home — never the live user harness dirs. The command is a thin front
- * door over the canonical materializer (agent-spec/materialize.ts): these tests
- * prove the wiring (a canonical receipt lands, the resources hit disk) and the
- * front-door guards (portable-harness allowlist, live-home refusal, path escape).
- */
+/** Real-CLI subprocess tests for `agents packages materialize` (PHNX-3838), no mocks, writing only
+ * under a temp output home. A thin front door over agent-spec/materialize.ts, so they prove the
+ * wiring (receipt, resources) and the guards (harness allowlist, live-home refusal, path escape). */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';

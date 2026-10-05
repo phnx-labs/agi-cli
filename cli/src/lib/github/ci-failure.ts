@@ -1,17 +1,6 @@
-/**
- * Why a commit's CI failed, and the one-click remedy, for AGI Menu's ✗ glyph:
- * `agents projects prs failure` and `agents projects prs rerun`.
- *
- * `failure` lists every failing check on ONE commit (a PR head, a merge commit,
- * or the default branch head) and, for each GitHub Actions job, the error lines
- * from that job's log: `GET repos/{repo}/actions/jobs/{job}/logs`, timestamps and
- * ANSI colour stripped, runner cleanup after "Post job cleanup." dropped, and only
- * the lines that read like an error (plus one line of context each side) kept,
- * at most {@link EXCERPT_LIMIT}. `rerun` asks GitHub to re-run a workflow run's
- * failed jobs (`POST repos/{repo}/actions/runs/{id}/rerun-failed-jobs`).
- *
- * REST only: the root AGENTS.md bans GraphQL reads, and a log is a REST blob.
- */
+/** Why a commit's CI failed and the one-click remedy, for AGI Menu's failure glyph: `agents
+ * projects prs failure` lists failing checks on one commit with error lines from each Actions
+ * job log (timestamps/ANSI stripped, post-cleanup dropped, at most EXCERPT_LIMIT); */
 
 import { ghExec, type GhExec } from './pr-mergeable.js';
 import { FAILING_CONCLUSIONS, FAILING_STATES, ghFailure } from './project-prs.js';
@@ -76,14 +65,9 @@ function cleanLine(raw: string): string {
   return raw.replace(TIMESTAMP, '').replace(ESCAPES, '').replace(CONTROLS, '').replace(/^##\[(?:error|warning)\]/, '').trimEnd();
 }
 
-/**
- * The error lines of one job log. Lines are cleaned ({@link cleanLine}), the
- * runner's cleanup after "Post job cleanup." is dropped, and each line that reads
- * like an error is kept with one line of context on each side; blank and runner
- * bookkeeping lines never count. Over {@link EXCERPT_LIMIT} lines, the first seven
- * (where the root cause usually is) and the last four (the exit) are kept around
- * an "…" line.
- */
+/** The error lines of one job log: cleaned, runner cleanup after "Post job cleanup." dropped,
+ * each error-like line kept with one context line each side. Over EXCERPT_LIMIT, the first
+ * seven lines (usually the root cause) and last four (the exit) are kept around an "…" line. */
 export function excerptFromLog(log: string): string[] {
   const lines: string[] = [];
   for (const raw of log.replace(/^\uFEFF/, '').split(/\r?\n/)) {
@@ -130,14 +114,9 @@ const isFailing = (item: RollupItem) => (item.state === undefined
   ? FAILING_CONCLUSIONS.has(item.conclusion ?? '')
   : FAILING_STATES.has(item.state));
 
-/**
- * Every failing check on `sha` with the error lines of its job log. The checks
- * are the same REST rollup the ✗ glyph is computed from ({@link rollupForSha}:
- * check runs and legacy statuses, a check run winning a name collision), so this
- * names exactly the checks the glyph counted. Logs are read concurrently. A log
- * that cannot be read (expired, still uploading, no access) empties that check's
- * excerpt and says why in `excerptError`; it never fails the report.
- */
+/** Every failing check on `sha` with its job-log error lines. Checks come from the same REST
+ * rollup as the glyph (rollupForSha), so this names exactly what the glyph counted. An unreadable
+ * log empties that excerpt and sets `excerptError`; it never fails the report. */
 export async function readCiFailure(repo: string, sha: string, gh: GhExec = ghExec): Promise<CiFailureReport> {
   let items: RollupItem[];
   try {
@@ -160,11 +139,8 @@ export async function readCiFailure(repo: string, sha: string, gh: GhExec = ghEx
   return { repo, sha, checks, error: null };
 }
 
-/**
- * Re-run a workflow run's failed jobs (`POST actions/runs/{id}/rerun-failed-jobs`).
- * GitHub answers 201 with no body; a refusal (the run is still in progress, or
- * too old to re-run) comes back as `requested: false` with GitHub's message.
- */
+/** Re-runs a workflow run's failed jobs. GitHub answers 201 with no body; a refusal (run in
+ * progress or too old) returns `requested: false` with GitHub's message. */
 export async function rerunFailedJobs(repo: string, runId: number, gh: GhExec = ghExec): Promise<RerunResult> {
   try {
     await gh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${runId}/rerun-failed-jobs`]);

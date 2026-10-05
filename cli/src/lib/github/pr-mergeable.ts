@@ -1,22 +1,6 @@
-/**
- * List this user's mergeable PRs across registered project repos.
- *
- * The built-in `pr-merge-on-green` monitor used to run `gh pr list --author @me`
- * with no `--repo`. `gh` then infers the repository from the working directory,
- * and the daemon's cwd is not a git repo, so every poll returned empty.
- *
- * This helper:
- *   1. Collects GitHub slugs from `~/.agents/projects/*.yaml` (`repo` / `repos[].slug`).
- *   2. Canonicalizes each slug (REST `repos/{slug}` — `phnx-labs/agents-cli` lists
- *      nothing; the live name is `phnx-labs/agi-cli`).
- *   3. Runs `gh pr list --repo <slug> --author @me` (cwd-independent).
- *   4. Keeps CI-green PRs with a merge-guard verdict (formal APPROVED review
- *      OR an APPROVE comment on THIS PR).
- *
- * Stdout is a single line of `owner/repo#n` refs (or empty). Empty is a silent
- * observation under `condition.mode: every` — do not write to stderr on the
- * no-match path, or command.ts will treat stderr as the observation and fire.
- */
+/** Lists this user's mergeable PRs across registered project repos, using `--repo` per slug since
+ * the daemon's cwd is not a repo. Keeps CI-green PRs with an APPROVED review or APPROVE comment.
+ * Prints `owner/repo#n` refs; never write stderr on no match, or command.ts fires on it. */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -35,12 +19,9 @@ const execFileAsync = promisify(execFile);
 
 export type GhExec = (args: string[]) => Promise<string>;
 
-/**
- * `gh --json` is not color-safe when this fleet exports FORCE_COLOR /
- * CLICOLOR_FORCE: gh paints the payload and JSON.parse / jq die on the ANSI
- * prefix (live miss on the sibling poll script). Strip the force vars and
- * pin GH_NO_COLOR for every gh spawn.
- */
+/** `gh --json` is not color-safe when the fleet exports FORCE_COLOR/CLICOLOR_FORCE: gh paints
+ * the payload and JSON.parse/jq die on the ANSI prefix. Strip the force vars and pin
+ * GH_NO_COLOR for every gh spawn. */
 function ghEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   env.CLICOLOR = '0';
@@ -76,13 +57,9 @@ export function projectRepoSlugs(defs: readonly ProjectDef[]): string[] {
   return [...slugs].sort();
 }
 
-/**
- * Resolve a slug to GitHub's current `nameWithOwner`. A renamed repo
- * (`phnx-labs/agents-cli` → `phnx-labs/agi-cli`) lists zero PRs under the old
- * name; the REST repo read follows the rename redirect and returns the live one.
- * REST + a 24h gh cache: a rename is rare, and every `projects prs` refresh asks.
- * On error, keep the input slug.
- */
+/** Resolves a slug to GitHub's current `nameWithOwner`: a renamed repo lists zero PRs under the
+ * old name, while the REST read follows the redirect. REST plus a 24h gh cache, since renames
+ * are rare; on error, keeps the input slug. */
 export async function canonicalizeRepo(slug: string, gh: GhExec): Promise<string> {
   try {
     const out = (await gh([
@@ -117,10 +94,8 @@ async function fetchVerdict(
   };
 }
 
-/**
- * Given PRs already listed for one repo, attach verdict payloads only for the
- * CI-green ones that lack a formal APPROVED reviewDecision, then select.
- */
+/** Given PRs listed for one repo, attaches verdict payloads only for CI-green ones lacking a
+ * formal APPROVED reviewDecision, then selects. */
 export async function selectListedMergeable(
   repo: string,
   listed: readonly ListedPr[],

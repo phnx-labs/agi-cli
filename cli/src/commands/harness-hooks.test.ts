@@ -18,13 +18,9 @@ function fakeIO(respond: (kind: string, message: string, choices?: WizardChoice<
   };
 }
 
-/**
- * The model catalog pick (RUSH-2220) turns a host's `getModelCatalog` list into
- * `select` choices. `buildModelChoices` is the pure labelling core — the catalog
- * probe itself shells out and is exercised end-to-end, but the choice shape (the
- * always-present escape hatch, the edit-mode keep row, tier/alias hints) is
- * asserted here with no probe.
- */
+/** The model catalog pick (RUSH-2220) turns `getModelCatalog` output into `select` choices;
+ * `buildModelChoices` is the pure labelling core, asserted here without the probe: the escape
+ * hatch, the edit-mode keep row, and tier/alias hints. */
 const model = (over: Partial<ModelInfo>): ModelInfo => ({ id: 'x', ...over });
 
 describe('buildModelChoices — catalog list → select choices', () => {

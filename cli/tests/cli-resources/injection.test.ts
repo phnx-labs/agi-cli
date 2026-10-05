@@ -1,19 +1,6 @@
-/**
- * Regression test for the manifest-driven RCE in src/lib/cli-resources.ts.
- *
- * Pre-fix, both `isCliInstalled` (via spawnSync({shell:true}) on `manifest.check`)
- * and `installCli` (via execSync of a built `npm install -g ${name}` string)
- * concatenated free-form manifest text into a shell command — a malicious
- * manifest could trivially smuggle `; touch /tmp/agents-rce-test`.
- *
- * Post-fix:
- *  - parseCliManifest rejects unsafe `check:` tokens up front.
- *  - isCliInstalled dispatches a structured CheckSpec to spawnSync with argv.
- *  - installCli routes `npm` through spawnSync('npm', ['install','-g', name])
- *    after re-validating the package name allowlist.
- *
- * Whichever sink an attacker hits, the canary file MUST NOT be created.
- */
+/** Regression test for the manifest-driven RCE in src/lib/cli-resources.ts: check/install
+ * concatenated free-form manifest text into a shell command (`; touch /tmp/agents-rce-test`). Now
+ * unsafe tokens are rejected and argv spawns are used. The canary file MUST NOT be created. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

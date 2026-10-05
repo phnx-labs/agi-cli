@@ -355,12 +355,9 @@ describe('formatCheckedAge', () => {
 });
 
 describe('probeAuthHealth derives live from a fresh usage fetch (RUSH-3036)', () => {
-  // The auth probe and the usage fetch hit the SAME rate-limited endpoint with
-  // the SAME shared setup-token, so a fresh successful usage snapshot already
-  // proves the token live. Exercised against the REAL cache file via the test
-  // seam; in this environment no credentials exist, so a 'live' verdict can
-  // ONLY come from the derivation path — a broken gate falls through to the
-  // live probe and returns a non-live verdict.
+  // The auth probe and usage fetch hit the same rate-limited endpoint with the same setup-token,
+  // so a fresh usage snapshot proves the token live. Run against the real cache via the test seam;
+  // with no credentials a 'live' verdict can only come from the derivation path.
   it('returns live without a network probe when the account has a fresh snapshot', async () => {
     const os = await import('node:os');
     const fs = await import('node:fs');
@@ -469,10 +466,9 @@ describe('derivation guards (RUSH-3036 review findings)', () => {
 });
 
 describe('enumerateSlotInstalls — the daemon probe covers account slots', () => {
-  // Real temp dirs, no mocks: a registered codex account with a slot on disk is a
-  // probe target keyed `slot:<id>`; a slot whose dir is gone, and an account whose
-  // harness is not being probed, are skipped. Before this the probe walked
-  // `listInstalledVersions` only, so a slot's verdict was never re-derived.
+  // Real temp dirs, no mocks: a registered codex account with a slot on disk is a probe target
+  // `slot:<id>`; a gone slot or an unprobed harness is skipped. Before, the probe walked only
+  // `listInstalledVersions`, so a slot's verdict was never re-derived.
   it('yields one probe target per registered slot that exists on disk', async () => {
     const fs = await import('node:fs');
     const os = await import('node:os');

@@ -1,12 +1,6 @@
-/**
- * Per-(kind, agent) detector contract.
- *
- * A detector inspects a version home and reports which resource names of a
- * given kind are materialized there. The aggregator at
- * `getActuallySyncedResources` calls one detector per kind/agent pair to build
- * the "what is actually on disk" view, which is then diffed against
- * "what is available" to drive the resource prompt in `agents view`.
- */
+/** Per-(kind, agent) detector contract: inspect a version home and report which resource names of a
+ * kind are materialized. `getActuallySyncedResources` calls one per pair to build the on-disk
+ * view, diffed against what is available for `agents view`. */
 import type { AgentId } from '../../types.js';
 import type { ResourceKind } from '../writers/kinds.js';
 

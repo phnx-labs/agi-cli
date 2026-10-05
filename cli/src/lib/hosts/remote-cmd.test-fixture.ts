@@ -1,14 +1,6 @@
-/**
- * Test-only decoder for a rendered remote PowerShell command.
- *
- * `renderPowershellCommand` emits whichever of two representations is shorter: the
- * plain `-EncodedCommand <base64 UTF-16LE>`, or a `-Command` bootstrap carrying a
- * deflated UTF-8 payload. Tests assert on the SCRIPT, not the representation, so
- * every suite needs both — and four copies of that parsing is exactly how one of
- * them silently stops decoding the form it was meant to check.
- *
- * Named `*.test-fixture.ts` after the existing `daemon.test-fixture.ts`.
- */
+/** Test-only decoder for a rendered remote PowerShell command: `renderPowershellCommand` emits
+ * the plain `-EncodedCommand` or a deflated `-Command` bootstrap, whichever is shorter. Tests
+ * assert on the script, so one shared decoder replaces four drifting copies. */
 import * as zlib from 'node:zlib';
 
 /** The script behind either render route. Throws if the command is neither. */

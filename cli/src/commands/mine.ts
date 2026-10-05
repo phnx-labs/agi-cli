@@ -1,17 +1,6 @@
-/**
- * `agents mine` helpers — white-label the CLI under your own name.
- *
- * `agents setup mine init <name>` mints a personally-named binary (e.g. `jack`) that
- * IS agents-cli: a pure pass-through shim on PATH that runs every `agents` verb
- * under the brand's name, with the brand's disabled commands and curated
- * resource profile applied. Manage verbs live under `agents setup mine`
- * (`list` / `toggle` / `remove`); the bare `agents setup mine` wizard is the
- * discoverable entry point (see setup-mine.ts).
- *
- * Storage: brand config in `meta.brands` (agents.yaml); the curated resource set
- * reuses the resource-profile engine — each brand owns a preset named
- * `mine-<name>` in `meta.profiles.presets`. See lib/brand.ts.
- */
+/** `agents mine` helpers: `agents setup mine init <name>` mints a personally-named pass-through
+ * binary that IS agents-cli, applying the brand's disabled commands and resource profile. Config
+ * lives in `meta.brands`; each brand owns a preset `mine-<name>` (lib/brand.ts). */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 
@@ -39,11 +28,8 @@ function knownCommandNames(): Set<string> {
   return names;
 }
 
-/**
- * Add/remove a `!name` exclusion on a preset's pattern list for one kind,
- * keeping `*` so everything not explicitly disabled stays enabled. Deletes the
- * key entirely once nothing but `*` remains, so a clean brand has an empty preset.
- */
+/** Add/remove a `!name` exclusion on a preset's pattern list for one kind, keeping `*`; delete the
+ * key once only `*` remains so a clean brand has an empty preset. */
 function applyResourceToggle(
   preset: ResourceProfilePreset,
   kind: ToggleKind,
@@ -93,10 +79,8 @@ function editPreset(name: string, fn: (preset: ResourceProfilePreset) => void): 
   });
 }
 
-/**
- * Create (or re-mint) a brand. Shared by `setup mine init` and the `setup mine`
- * wizard. Writes the shim, the brand config, and an empty resource preset.
- */
+/** Create or re-mint a brand, shared by `setup mine init` and the wizard: writes the shim, the
+ * brand config, and an empty resource preset. */
 export function initBrand(
   name: string,
   opts: { disabledCommands?: string[]; force?: boolean } = {},
@@ -142,10 +126,8 @@ function printMinted(name: string, pathWarning: boolean): void {
   }
 }
 
-/**
- * Register brand manage verbs (`init`/`list`/`toggle`/`remove`) under a parent
- * Command — used by `agents setup mine`.
- */
+/** Register the brand manage verbs (`init`/`list`/`toggle`/`remove`) under a parent Command, used
+ * by `agents setup mine`. */
 export function registerMineManageCommands(cmd: Command): void {
   cmd
     .command('init <name>')

@@ -1,9 +1,6 @@
-/**
- * Claude quota attribution, separate from the stable login identity in accountId.
- * Launch-recorded identity wins over current credentials in a reused home.
- * Older rows retain their evidence-labelled path/version inference for historical
- * quota reports; recovery never treats that org-scoped accountKey as login proof.
- */
+/** Claude quota attribution, separate from the stable login identity in accountId. Launch-recorded
+ * identity wins over current credentials in a reused home. Older rows keep evidence-labelled
+ * path/version inference; recovery never treats the org-scoped accountKey as login proof. */
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -15,11 +12,9 @@ const VERSIONS_ROOTS = [getHistoryDir(), getAgentsDir()];
 
 /** The account a transcript is attributed to. */
 export interface ClaudeAccountBucket {
-  /**
-   * Stable grouping key. For an attributed bucket this is the org-scoped `usageKey`
-   * (e.g. `claude:org=<uuid>`). For an unattributed one it is `unattributed:<reason>`
-   * so distinct dark sources never merge into each other or into a real account.
-   */
+  /** Stable grouping key. Attributed buckets use the org-scoped `usageKey` (e.g.
+   * `claude:org=<uuid>`); unattributed ones use `unattributed:<reason>` so distinct dark sources
+   * never merge with each other or a real account. */
   key: string;
   /** True when the key came from a real `oauthAccount`. */
   attributed: boolean;
@@ -43,27 +38,16 @@ interface HomeEntry {
 export interface ClaudeAccountIndex {
   /** Version-, account-slot-, and trash-home prefixes, longest first. Excludes the `~/.claude` symlink. */
   entries: HomeEntry[];
-  /**
-   * Config-dir prefixes of homes that exist but carry no `oauthAccount`. Kept
-   * separately from `entries` so a transcript living in a signed-out home is reported
-   * against THAT home rather than falling through to its recorded version: the file's
-   * location is what proves which config dir Claude was pointed at.
-   */
+  /** Config-dir prefixes of homes that exist but carry no `oauthAccount`. Kept apart from `entries`
+   * so a transcript in a signed-out home is reported against that home, since the file's location
+   * proves which config dir Claude used. */
   darkHomes: Array<{ prefix: string; version: string | null }>;
-  /**
-   * Claude CLI version → the account that version ran as. `'ambiguous'` when retired
-   * snapshots of one version disagree and no live home settles it, which is reported
-   * as dark rather than guessed.
-   */
+  /** Claude CLI version -> the account that version ran as. `'ambiguous'` when retired snapshots of
+   * one version disagree and no live home settles it; reported dark rather than guessed. */
   byVersion: Map<string, ClaudeAccountBucket | 'ambiguous'>;
-  /**
-   * Account-slot id (`<historyDir>/accounts/claude/<accountId>/`, PHNX-3940) →
-   * the identity read from that slot's own `.claude.json`. A slot's identity is
-   * proven the same way a version home's is — tier 1 evidence, see
-   * {@link resolveClaudeAccount} — so this map exists only to let a launch-
-   * recorded accountId (once the actor sidecar carries one) resolve straight to
-   * a bucket without re-deriving it from a path.
-   */
+  /** Account-slot id (`<historyDir>/accounts/claude/<accountId>/`, PHNX-3940) -> the identity in
+   * that slot's own `.claude.json` (tier 1 evidence, see {@link resolveClaudeAccount}), so a
+   * launch-recorded accountId resolves straight to a bucket. */
   byAccountId: Map<string, ClaudeAccountBucket>;
   /** Whatever `~/.claude` points at right now; tier-3 evidence only. */
   symlinkBucket: ClaudeAccountBucket | null;
@@ -124,11 +108,9 @@ function listDirs(dir: string): string[] {
   }
 }
 
-/**
- * Enumerate every Claude home that could own an indexed transcript. Includes retired
- * `trash/` snapshots: they keep their `.claude.json`, so a transcript indexed before
- * its version was rotated out stays attributable.
- */
+/** Enumerate every Claude home that could own an indexed transcript, including retired `trash/`
+ * snapshots, which keep their `.claude.json` so a transcript indexed before its version rotated
+ * out stays attributable. */
 export function buildClaudeAccountIndex(): ClaudeAccountIndex {
   const entries: HomeEntry[] = [];
   const darkHomes: Array<{ prefix: string; version: string | null }> = [];
@@ -172,17 +154,9 @@ export function buildClaudeAccountIndex(): ClaudeAccountIndex {
     }
   }
 
-  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir at
-  // <historyDir>/accounts/claude/<accountId>/, sharing the one managed install
-  // rather than owning a version home of its own (lib/accounts/slots.ts
-  // `slotDir`). Each slot's `.claude.json` proves ITS identity exactly as
-  // directly as a version home's — tier 1 evidence in `resolveClaudeAccount` —
-  // so without this, every transcript a slot-launched session wrote was
-  // discoverable (the account is registered and runnable) yet permanently
-  // unattributed here, and `isManagedSessionFile`/`getAgentSessionDirs` would
-  // never even have scanned it in the first place. An unconfigured slot (never
-  // signed in) yields no bucket and is simply skipped, not recorded dark — a
-  // slot with nothing written to it yet owns no transcript to misattribute.
+  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir under
+  // <historyDir>/accounts/claude/<accountId>/ (lib/accounts/slots.ts). Its `.claude.json` proves
+  // its identity like a version home's. A never-signed-in slot is skipped.
   const accountsBase = path.join(getHistoryDir(), 'accounts', 'claude');
   for (const accountId of listDirs(accountsBase)) {
     const home = path.join(accountsBase, accountId);
@@ -263,10 +237,9 @@ export function resolveClaudeAccount(
       return unattributed(`ambiguous history for version ${recordedVersion}`);
     }
     if (byVersion) return byVersion;
-    // Recorded but unresolvable — the version was uninstalled and its trash snapshot
-    // pruned. Stay dark. Falling through to the symlink's current target would move
-    // these rows onto whichever account happens to be default now, which is the
-    // inference tier 2 exists to avoid.
+    // Recorded but unresolvable (version uninstalled, trash snapshot pruned): stay dark. Falling
+    // through to the symlink's current target would move these rows onto whatever account is
+    // default now, which tier 2 exists to avoid.
     return unattributed(`no home for version ${recordedVersion}`);
   }
 

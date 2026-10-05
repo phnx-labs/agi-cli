@@ -69,11 +69,8 @@ post_install: |
   });
 
   it('tolerates a double-quoted Windows-style path in a display-only field', () => {
-    // A double-quoted YAML string containing "C:\Users\..." trips the strict parser
-    // because \U is not a valid YAML escape sequence. parseCliManifest uses
-    // strict:false so the manifest loads and falls through to the field validators.
-    // description is display-only and not passed to any child process, so the
-    // recovered (possibly mangled) value is acceptable — the manifest must not throw.
+    // A double-quoted YAML string with `C:\Users\...` trips the strict parser (`\U` is invalid).
+    // parseCliManifest uses strict:false, so the manifest must load, not throw.
     const raw = 'name: gh\ndescription: "Binary at C:\\Users\\foo"\ninstall:\n  - brew: gh\n';
     const parsed = parseCliManifest(raw, { name: 'gh', source: 'user', path: '/tmp/g.yaml' });
     expect(parsed.name).toBe('gh');

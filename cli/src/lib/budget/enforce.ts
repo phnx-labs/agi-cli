@@ -1,16 +1,6 @@
-/**
- * Live spend watcher + cap math (issue #346).
- *
- * This is the provider-agnostic shared surface the loop driver (#332) will
- * reuse for its budget guard. It knows nothing about child processes, agents,
- * or the ledger — it accepts parsed usage events and a caps object, accumulates
- * cost via the canonical pricing module, and fires `onBreach` exactly once when
- * any active cap is crossed.
- *
- * The accumulation is the cross-vendor primitive: feed Claude usage and Codex
- * usage to the same watcher under one `per_project` / `per_run` cap and the
- * spend aggregates across both — no single-vendor control can do that.
- */
+/** Live spend watcher and cap math (issue #346), the provider-agnostic surface the loop driver
+ * (#332) reuses. It takes parsed usage events and caps, accumulates cost via the pricing module,
+ * and fires `onBreach` once. Claude and Codex usage count toward one `per_project`/`per_run` cap. */
 import type { AgentId, BudgetConfig } from '../types.js';
 import { actualCost } from '../pricing/index.js';
 
@@ -24,12 +14,9 @@ export interface UsageEvent {
   cacheCreationTokens?: number;
 }
 
-/**
- * Caps the watcher enforces. `priorDaySpend` / `priorProjectSpend` seed the
- * accumulators with spend already on the ledger BEFORE this run started, so a
- * per_day cap counts today's earlier runs too — not just this process. Per-cap
- * fields are USD; undefined means "not enforced".
- */
+/** Caps the watcher enforces. `priorDaySpend`/`priorProjectSpend` seed the accumulators with ledger
+ * spend from before this run, so `per_day` counts earlier runs too. Per-cap fields are USD;
+ * undefined means not enforced. */
 export interface LiveCaps {
   perRun?: number;
   perDay?: number;
@@ -89,12 +76,9 @@ export function capsFromConfig(
   };
 }
 
-/**
- * Create a live spend watcher. `onBreach` fires at most once, on the first
- * event that pushes any active cap from at-or-under to over. After it fires the
- * watcher keeps accumulating (so `runSpend()` stays accurate for the final
- * ledger record) but never calls `onBreach` again.
- */
+/** Create a live spend watcher. `onBreach` fires at most once, on the first event pushing any
+ * active cap from at-or-under to over. It keeps accumulating afterward so `runSpend()` stays
+ * accurate for the ledger. */
 export function makeLiveSpendWatcher(args: {
   caps: LiveCaps;
   onBreach: (breach: BreachInfo) => void;
@@ -161,15 +145,9 @@ export function makeLiveSpendWatcher(args: {
   };
 }
 
-/**
- * Incrementally extract usage events from a stream-json chunk. Buffers a partial
- * trailing line across calls (returned in `rest`), parses each complete line,
- * and yields one UsageEvent per line that carries token counts. Provider shapes
- * handled: Claude/`--json` assistant turns (`message.usage` with
- * `input_tokens`/`output_tokens`/`cache_*_input_tokens`) and the flatter
- * `usage.record` shape (`usage.input_tokens`/`output`). Lines that aren't JSON
- * or carry no usage are skipped — this never throws on agent output.
- */
+/** Incrementally extract usage events from a stream-json chunk, buffering a partial trailing line
+ * (`rest`). Handles Claude/`--json` assistant turns (`message.usage`) and the flatter
+ * `usage.record` shape. Non-JSON or usage-less lines are skipped; it never throws on agent output. */
 export function extractUsageEvents(
   chunk: string,
   pending: string,
@@ -196,12 +174,9 @@ export function extractUsageEvents(
 }
 
 function usageFromObject(obj: any, fallbackModel?: string, fallbackAgent?: string): UsageEvent | null {
-  // Claude emits a final `type:"result"` event carrying a TOP-LEVEL cumulative
-  // `usage` that already sums every per-turn `message.usage`. Counting both the
-  // per-turn turns AND this cumulative total double-counts a multi-turn run
-  // (~2x). The canonical session parser (src/lib/session/parse.ts) reads usage
-  // ONLY from `message.usage` and extracts nothing from the result line — mirror
-  // that here: skip result lines entirely for usage.
+  // Claude's final `type:"result"` event carries a cumulative top-level `usage` summing every
+  // per-turn `message.usage`, so counting both double-counts (~2x). The canonical parser
+  // (src/lib/session/parse.ts) reads only `message.usage`; skip result lines for usage.
   if (obj?.type === 'result') return null;
 
   // Claude stream-json assistant turn.

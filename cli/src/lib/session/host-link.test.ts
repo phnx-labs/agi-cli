@@ -5,12 +5,9 @@ const NOW = 1_700_000_000_000;
 const fresh = NOW - 30_000;
 const stale = NOW - HOST_HEARTBEAT_STALE_MS - 1;
 
-/**
- * The decision table behind the `crashed` / `orphaned` statuses. Each case is a
- * scenario a user hits, not a permutation for its own sake — the point of the
- * classifier is that it never cries wolf on a session that is fine, and never
- * stays silent on one that has genuinely lost its human.
- */
+/** The decision table behind the `crashed` / `orphaned` statuses. Each case is a real user
+ * scenario; the classifier must never cry wolf on a healthy session nor stay silent on one that
+ * lost its human. */
 describe('classifyHostLink', () => {
   it('reports a healthy session as connected', () => {
     expect(classifyHostLink({ pidAlive: true, windowHeartbeatMs: fresh, nowMs: NOW })).toBe('connected');
@@ -45,21 +42,17 @@ describe('classifyHostLink', () => {
   });
 
   it('treats an unknown client count as unknown, not as zero', () => {
-    // A tmux server too old to report `session_attached` (or a parse miss) must
-    // not read as "nobody is attached" and orphan every tmux session on the box.
-    // That invariant is unchanged — an absent count is still never `no-client`.
-    // What changed (RUSH-3125) is how the non-orphan case is EXPRESSED: it used
-    // to borrow `connected`, asserting health it had not observed. `unknown`
-    // says the same "do not orphan this" without the false claim.
+    // A tmux server too old to report `session_attached` (or a parse miss) must not read as
+    // "nobody is attached" and orphan every tmux session; an absent count is never `no-client`.
+    // RUSH-3125: the non-orphan case is `unknown`, not `connected`.
     const link = classifyHostLink({ pidAlive: true, tmuxClients: undefined, nowMs: NOW });
     expect(link).not.toBe('no-client');
     expect(link).toBe('unknown');
   });
 
-  // RUSH-3125. This case used to return `connected`, which reads as "verified
-  // fine" when the truth is "nobody looked". Neither input exists for a bare
-  // terminal, a team spawn, a cloud task, or any session whose pane lives on
-  // another machine — every signal this function keys on is local.
+  // RUSH-3125. This case used to return `connected`, reading as "verified fine" when nobody
+  // looked. No signal exists for a bare terminal, team spawn, cloud task or a session whose pane
+  // lives on another machine; every input here is local.
   it('says `unknown` when it has no signal at all, rather than defaulting to healthy', () => {
     expect(classifyHostLink({ pidAlive: true, nowMs: NOW })).toBe('unknown');
   });
@@ -81,12 +74,9 @@ describe('classifyHostLink', () => {
   });
 });
 
-/**
- * `hostWindowLost` is the NARROW promotion signal (PHNX-3183): it is true only
- * when a running agent's owning window went stale, never on mere client absence.
- * This is what lets a running orphan be flagged without re-adding the reverted
- * zero-clients false positive.
- */
+/** `hostWindowLost` is the NARROW promotion signal (PHNX-3183): true only when a running agent's
+ * owning window went stale, never on mere client absence, so a running orphan is flagged without
+ * the reverted zero-clients false positive. */
 describe('hostWindowLost', () => {
   it('is true only when a live agent lost a window that WAS republishing', () => {
     expect(hostWindowLost({ pidAlive: true, windowHeartbeatMs: stale, nowMs: NOW })).toBe(true);

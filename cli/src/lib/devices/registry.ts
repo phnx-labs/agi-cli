@@ -1,18 +1,6 @@
-/**
- * Device registry.
- *
- * Manages the persistent registry of SSH device profiles stored at
- * ~/.agents/.history/devices/registry.json. Each profile records what we had
- * to re-derive by hand the first time we reached a host: its platform (so we
- * know PowerShell vs POSIX), the login user, how to address it (Tailscale
- * DNS name / IP), and how to authenticate (pubkey, or a password pulled from
- * a secrets bundle).
- *
- * Like the team registry this is per-machine runtime state (it embeds a host
- * list + addresses) and lives under .history/ so it is NOT pulled in by
- * `agents repo push`. The load/save/lock plumbing is a deliberate clone of
- * src/lib/teams/registry.ts so the data-loss guarantees match exactly.
- */
+/** Device registry: persistent SSH device profiles at ~/.agents/.history/devices/registry.json
+ * (platform, login user, address, auth). Per-machine runtime state like the team registry, so it
+ * lives under .history/ and is not pushed by `agents repo push`. */
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -68,16 +56,9 @@ export interface DeviceTailscale {
   lastSeen?: string;
 }
 
-/**
- * Verdict of the last live SSH reachability probe (RUSH-1965).
- *
- * The live `agents devices` probe already learns whether a box answered right
- * now; this persists that answer so the online/offline word is read from a
- * fresh probe instead of the potentially-stale {@link DeviceTailscale.online}
- * snapshot (which only `agents devices sync` / the daemon ever writes). A
- * `via:"manual"` device — which never gets a tailscale peer entry — gets a
- * reachability verdict this way too, so it stops rendering "offline forever".
- */
+/** Verdict of the last live SSH reachability probe (RUSH-1965), persisted so the online/offline
+ * word reads a fresh probe instead of the stale {@link DeviceTailscale.online} snapshot. A
+ * `via:"manual"` device, with no tailscale entry, gets a verdict this way too. */
 export interface DeviceReachability {
   /** Whether the last live probe reached the device. */
   reachable: boolean;
@@ -104,50 +85,19 @@ export interface DeviceProfile {
   updatedAt: string;
 }
 
-/**
- * Whether a fan-out should dial this device, honouring the preference stated on
- * {@link DeviceProfile.reachability}: the live SSH probe wins over the cached
- * {@link DeviceTailscale.online} snapshot.
- *
- * Reading only `tailscale.online` is wrong in both directions, and both were
- * live on a real fleet. A `via:"manual"` device never gets a tailscale peer
- * entry at all, so its `online` is permanently `undefined` and a strict
- * `=== true` test skipped it forever — every session on that box was invisible
- * to the cross-fleet sweep. Conversely a box that has since gone to sleep keeps
- * a stale `online:true` and gets dialed, burning a full ConnectTimeout and
- * reporting a false "unreachable" that callers treat as doubt.
- */
+/** Whether a fan-out should dial this device: the live SSH probe ({@link
+ * DeviceProfile.reachability}) wins over cached {@link DeviceTailscale.online}. Reading only
+ * `online` skipped manual devices forever and dialed sleeping boxes into a false "unreachable". */
 export function isDialableDevice(d: DeviceProfile): boolean {
-  // Union, deliberately: either signal saying "go" is enough. A probe may only
-  // ADD a peer to the sweep, never remove one.
-  //
-  // The probe is not trustworthy enough to exclude on. It runs with a short SSH
-  // budget, so on a congested tailnet it returns false negatives — observed
-  // marking the LOCAL machine unreachable, and flipping a live worker box from
-  // reachable to unreachable nine minutes apart. Letting that shrink the sweep
-  // would hide sessions on healthy boxes, a worse failure than the one below.
-  //
-  // The snapshot alone is not enough either: a device registered with
-  // `address.via: "manual"` never gets a tailscale peer entry, so `online`
-  // stays undefined and a strict `=== true` test skipped it forever, making
-  // every session on that box unresolvable from any other machine.
-  //
-  // So: no tailscale block at all is unknown-not-offline (the rule `ssh.ts`
-  // renderDeviceTable and the ext's `isDeviceOnline` already use, so the picker
-  // and the sweep agree on who exists), and a positive probe rescues a device
-  // whose snapshot says offline. The cost of dialing a box that is actually
-  // asleep is one ConnectTimeout — the pre-existing behaviour, not a regression.
+  // Union, deliberately: either signal saying "go" is enough; a probe may only add a peer, never
+  // remove one. The probe is untrustworthy for exclusion (short SSH budget; false negatives on a
+  // congested tailnet), and the snapshot alone skips manual devices.
   if (d.reachability?.reachable) return true;
   return !d.tailscale || d.tailscale.online === true;
 }
-// Two more fan-outs still gate on the bare `tailscale.online === true` and so
-// still skip manual devices: `commands/apply.ts` (`devices: all` config-sync
-// targeting) and `commands/output.ts` (`--all-hosts`). They are left alone here
-// deliberately — neither is a session surface, and changing what `agents apply`
-// targets is a config-sync behaviour change that deserves its own PR rather
-// than riding along on a sessions fix. `devices/fleet.ts` planFleetTargets and
-// `smart-launch.ts` listOnlineDeviceNames already treat a missing tailscale
-// block as a candidate, so they need no change.
+// `commands/apply.ts` (`devices: all`) and `commands/output.ts` (`--all-hosts`) still gate on bare
+// `tailscale.online === true` and skip manual devices. Left alone on purpose: neither is a session
+// surface and changing `agents apply` targeting deserves its own PR.
 
 /** Map of device name to profile. */
 export type DeviceRegistry = Record<string, DeviceProfile>;
@@ -160,21 +110,14 @@ function registryPath(): string {
  * unambiguous `Host` stanza and is safe as an ssh target. */
 const DEVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
-/**
- * `--device` values that mean "resolve me", not "connect to a box with this
- * name". A real device registered under one of these would be unreachable,
- * and pinning `interactive.host` to one is a misconfiguration that has to fail
- * at WRITE time — otherwise the read side can only report "none is set", which
- * tells the user to run the command they just ran.
- */
+/** `--device` values that mean "resolve me", not a box name. A real device under one of these would
+ * be unreachable, and pinning `interactive.host` to one must fail at write time; otherwise the
+ * read side can only say "none is set", sending the user back to the command they just ran. */
 export const RESERVED_DEVICE_NAMES = new Set(['auto', 'interactive', 'all']);
 
-/**
- * Throw if `name` is not usable as an ssh alias (no spaces, quotes, etc.).
- *
- * SHAPE ONLY. Safe on read paths, which must keep working for a name that is
- * already registered — including one this version would refuse to create.
- */
+/** Throw if `name` is not usable as an ssh alias (no spaces, quotes, etc.). Shape only, safe on
+ * read paths, which must keep working for an already-registered name this version would refuse to
+ * create. */
 export function assertValidDeviceName(name: string): void {
   if (!DEVICE_NAME_RE.test(name)) {
     throw new Error(
@@ -183,20 +126,9 @@ export function assertValidDeviceName(name: string): void {
   }
 }
 
-/**
- * Throw if `name` cannot be used for a NEW device: bad shape, or a reserved
- * routing sentinel.
- *
- * Deliberately separate from {@link assertValidDeviceName}, and called from
- * exactly two kinds of place: `agents devices add <name>`, and the config keys
- * that point AT a device (`interactive.host`).
- *
- * Not from `upsertDevice`, `addIgnored` or the discovery writers. Those all
- * receive tailnet node names the user never typed — `devices sync` upserts every
- * observed node in a loop with no per-node catch, so one node named `auto` would
- * abort the entire sync and register nothing after it. A name the fleet OBSERVES
- * is not a name anyone CHOSE; only the second kind is policy's business.
- */
+/** Throw if `name` can't name a new device: bad shape or a reserved routing sentinel. Called
+ * only from `agents devices add` and device-pointing config keys (`interactive.host`), never from
+ * upsertDevice/addIgnored/discovery: one observed node named `auto` would abort the whole sync. */
 export function assertRegistrableDeviceName(name: string): void {
   assertValidDeviceName(name);
   if (RESERVED_DEVICE_NAMES.has(name.trim().toLowerCase())) {
@@ -227,11 +159,8 @@ export function shellForPlatform(platform: DevicePlatform): DeviceShell {
   return platform === 'windows' ? 'powershell' : 'posix';
 }
 
-/**
- * Run `fn` while holding an exclusive cross-process lock on the registry file.
- * proper-lockfile requires the target to exist, so we touch it first. Stale
- * locks (from crashed callers) auto-expire after `stale` ms.
- */
+/** Run `fn` holding an exclusive cross-process lock on the registry file (proper-lockfile needs the
+ * target to exist, so touch it first). Stale locks from crashed callers expire after `stale` ms. */
 async function withRegistryLock<T>(p: string, fn: () => Promise<T>): Promise<T> {
   await fs.mkdir(path.dirname(p), { recursive: true });
   if (!fsSync.existsSync(p)) {
@@ -253,11 +182,8 @@ async function withRegistryLock<T>(p: string, fn: () => Promise<T>): Promise<T> 
   }
 }
 
-/**
- * Load all devices from the registry file. Returns an empty object only when
- * the file does not exist. A malformed file is a hard error — silently
- * returning {} would let the next write wipe the user's device list.
- */
+/** Load all devices; an empty object only when the file does not exist. A malformed file is a hard
+ * error, since returning {} would let the next write wipe the user's device list. */
 export async function loadDevices(): Promise<DeviceRegistry> {
   const p = registryPath();
   let raw: string;
@@ -276,12 +202,8 @@ export async function loadDevices(): Promise<DeviceRegistry> {
   }
 }
 
-/**
- * Synchronous {@link loadDevices} for callers already on a sync path (e.g. the
- * `agents sessions --device` fan-out builds its ssh command strings synchronously
- * and only needs the target's platform to pick POSIX vs PowerShell). Same
- * missing-file/corruption contract as {@link loadDevices}.
- */
+/** Synchronous {@link loadDevices} for sync paths (e.g. the `agents sessions --device` fan-out
+ * building ssh strings that need the target's platform). Same missing-file/corruption contract. */
 export function loadDevicesSync(): DeviceRegistry {
   const p = registryPath();
   let raw: string;
@@ -320,11 +242,8 @@ export interface DeviceInput {
   reachability?: DeviceReachability;
 }
 
-/**
- * Create the device if absent, otherwise merge the supplied fields into the
- * existing profile. `shell` is always re-derived from the (possibly new)
- * platform so the two can never drift. Returns the resulting profile.
- */
+/** Create the device if absent, otherwise merge the supplied fields into the profile. `shell` is
+ * always re-derived from the (possibly new) platform so they cannot drift. Returns the profile. */
 export async function upsertDevice(name: string, input: DeviceInput): Promise<DeviceProfile> {
   assertValidDeviceName(name);
   const p = registryPath();
@@ -351,15 +270,9 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
   });
 }
 
-/**
- * Persist live reachability verdicts for many devices in one locked pass
- * (RUSH-1965). A no-op verdict (same `reachable` and not newer than what's
- * stored) is skipped, so a cache-served `agents devices` render doesn't churn
- * the registry every call; only a flip or a fresher probe writes. Unlike
- * {@link upsertDevice} this does NOT bump `updatedAt` — reachability is
- * transient liveness (like the tailscale snapshot), not a profile edit. Unknown
- * device names are ignored. Returns the names actually updated.
- */
+/** Persist live reachability verdicts for many devices in one locked pass (RUSH-1965). A no-op
+ * verdict (same `reachable`, not newer) is skipped so a cache-served render does not churn the
+ * registry. Does not bump `updatedAt`: reachability is transient liveness, not a profile edit. */
 export async function writeReachability(
   updates: Record<string, DeviceReachability>,
 ): Promise<string[]> {
@@ -402,33 +315,18 @@ export async function removeDevice(name: string): Promise<boolean> {
   });
 }
 
-/**
- * The ignore-list: tailscale node names the user explicitly dismissed from
- * auto-discovery. A dismissed node is deliberately NOT a device (it never
- * enters the registry), so it has no per-device doc — its home is the central,
- * TRACKED `~/.agents/agents.yaml` under a `fleet.ignored` list, which syncs
- * fleet-wide via `agents repo push/pull`: a dismissal on one box stops the
- * suggestion on every box (RUSH-3062). Auto-discovery (`runDeviceSync`'s
- * pending diff) subtracts this set, so an ignored node never re-surfaces as a
- * suggestion. Writes go through `updateMeta` — the central-config write path
- * (withMetaLock + atomic write) — so two agents writing concurrently cannot
- * corrupt it, and no second lock is hand-rolled here.
- */
+/** The ignore-list: tailscale node names the user dismissed from auto-discovery. A dismissed node
+ * is not a device, so it lives in the tracked central `agents.yaml` `fleet.ignored`, synced
+ * fleet-wide so one dismissal stops the suggestion everywhere (RUSH-3062). */
 
-// The dismissal record and the `fleet.ignored` field are declared on
-// FleetManifest itself (lib/fleet/types.ts) rather than as a local intersection
-// here: an intersection kept the field invisible to every OTHER consumer of the
-// manifest — which is exactly how the migration's emptied-block guard came to
-// omit it and would have deleted the user's dismissals fleet-wide. Re-exported
-// so importers of this module keep the name they already use.
+// `fleet.ignored` is declared on FleetManifest itself (lib/fleet/types.ts), not as a local
+// intersection: an intersection hid the field from other consumers, so the migration's
+// emptied-block guard omitted it and would have deleted dismissals fleet-wide.
 export type { IgnoredDeviceEntry } from '../fleet/types.js';
 
-/**
- * The full ignore-list entries — who dismissed a node, when, and on which box —
- * the typed read side for `agents devices ignored`. Absent `fleet.ignored` =>
- * []. A malformed block is a hard error for the same reason the registry is:
- * silently returning [] would let the next write wipe the user's dismissals.
- */
+/** The full ignore-list entries (who, when, which box), the typed read side for `agents devices
+ * ignored`. Absent `fleet.ignored` is []. A malformed block is a hard error, since returning []
+ * would let the next write wipe the user's dismissals. */
 /** Validate a raw ignore-list block, or throw with `where` naming the file. */
 function assertIgnoredShape(raw: unknown, where: string): asserts raw is IgnoredDeviceEntry[] {
   if (
@@ -447,11 +345,9 @@ function assertIgnoredShape(raw: unknown, where: string): asserts raw is Ignored
   }
 }
 
-/**
- * THIS box's OWN dismissals — the writable slice in `meta.deviceFleet.ignored`
- * (the device doc). `withIgnoredAdded`/`removeIgnored` operate on this so a box
- * only ever edits its own folder (PHNX-3315). Absent => [].
- */
+/** This box's own dismissals: the writable slice in `meta.deviceFleet.ignored` (the device doc).
+ * `withIgnoredAdded`/`removeIgnored` operate on it so a box only edits its own folder (PHNX-3315).
+ * Absent is []. */
 function loadOwnIgnoredEntries(meta: Meta): IgnoredDeviceEntry[] {
   const raw = meta.deviceFleet?.ignored;
   if (raw === undefined) return [];
@@ -459,14 +355,8 @@ function loadOwnIgnoredEntries(meta: Meta): IgnoredDeviceEntry[] {
   return raw;
 }
 
-/**
- * The EFFECTIVE ignore-list: the union of every box's device doc
- * `fleet.ignored` (deduped by node name, newest `ignoredAt` winning) plus any
- * lingering central-legacy `fleet.ignored` block (drained by the migration).
- * Deterministic and order-independent. A malformed block is a hard error for the
- * same reason the registry is: silently returning [] would let the next write
- * wipe the user's dismissals.
- */
+/** The effective ignore-list: the union of every box's device doc `fleet.ignored` (deduped by node
+ * name, newest `ignoredAt` wins) plus any lingering central-legacy block. Order-independent. */
 export function loadIgnoredEntries(meta: Meta = readMeta()): IgnoredDeviceEntry[] {
   const byName = new Map<string, IgnoredDeviceEntry>();
   const central = meta.fleet?.ignored;
@@ -489,13 +379,9 @@ export async function isIgnored(name: string): Promise<boolean> {
   return (await loadIgnored()).has(name);
 }
 
-/**
- * Union `names` into the meta's ignore-list, stamping new entries with
- * `ignoredAt` and THIS machine's id. Existing entries keep their original
- * who/when, so re-adding a name is a true no-op. Returns the input unchanged
- * when no name is new. Exported for the one-shot legacy-store migration in
- * lib/devices/config-migration.ts.
- */
+/** Union `names` into the meta's ignore-list, stamping new entries with `ignoredAt` and this
+ * machine's id. Existing entries keep their original who/when, so re-adding is a no-op; returns
+ * the input unchanged when no name is new. Also used by the legacy migration. */
 export function withIgnoredAdded(meta: Meta, names: string[], ignoredAt: string): Meta {
   const entries = loadOwnIgnoredEntries(meta); // throws on a corrupted block — never wipe it
   const have = new Set(entries.map((e) => e.name));
@@ -508,11 +394,9 @@ export function withIgnoredAdded(meta: Meta, names: string[], ignoredAt: string)
   return { ...meta, deviceFleet: { ...meta.deviceFleet, ignored } };
 }
 
-/** Add a node name to THIS box's ignore-list (device doc). Idempotent. Returns
- * the resulting cross-box union of dismissed names. Reads only the device docs
- * for the return value — a corrupt central-legacy block surfaces loudly on the
- * effective read path ({@link loadIgnoredEntries}), never blocks a per-box
- * write that does not touch central at all. */
+/** Add a node name to this box's ignore-list (device doc), idempotently; returns the cross-box
+ * union of dismissed names. Reads only device docs, so a corrupt central-legacy block surfaces on
+ * {@link loadIgnoredEntries} and never blocks this per-box write. */
 export async function addIgnored(name: string): Promise<Set<string>> {
   assertValidDeviceName(name);
   updateMeta((m) => withIgnoredAdded(m, [name], new Date().toISOString()));

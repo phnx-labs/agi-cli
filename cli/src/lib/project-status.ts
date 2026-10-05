@@ -1,16 +1,6 @@
-/**
- * Project-level progress rollup — the headline of the projects subsystem.
- *
- * At 50–100 agents the per-agent activity line is noise; what matters is the
- * PROJECT. This aggregates the signals already carried per session (status,
- * plan progress, open PRs, tickets, worktrees) into one row per project, keyed
- * by matching each session's cwd to a defined project root (`projectNameForCwd`).
- * The session set is whatever the caller passes (today `getActiveSessions()` —
- * this machine's live view, matched by local-home cwd; a fleet-wide fan-out is a
- * deferred follow-up). Pure over an `ActiveSession[]` so the aggregation is
- * unit-testable; the merged-PR signal IS repo-global (harvested via `gh`) and the
- * artifact signal is local, both added in `enrichProjectSignals`.
- */
+/** Project-level progress rollup: aggregates per-session signals (status, plan, PRs, tickets,
+ * worktrees) into one row per project, matched by cwd (`projectNameForCwd`). Pure over
+ * `ActiveSession[]`; merged-PR (via `gh`) and artifact signals are added in `enrichProjectSignals`. */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -21,12 +11,8 @@ import { readRecentActivity } from './feed/activity.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * How many recent merges `gh` is asked for. A repo busy enough that all of them
- * land inside the window has more than this — agents-cli itself merged 100 of
- * its 100 most recent PRs within 7 days — so the count is reported as a lower
- * bound rather than as a total.
- */
+/** How many recent merges `gh` is asked for. A busy repo can exceed it (agents-cli merged 100 of its
+ * 100 latest PRs within 7 days), so the count is reported as a lower bound. */
 const MERGED_PR_LIMIT = 100;
 
 /** One live agent on a project — the WHO behind the byStatus count. */
@@ -73,16 +59,11 @@ function blank(name: string): ProjectSessionRollup {
   };
 }
 
-/**
- * Roll active sessions up by project. Returns a map keyed by project name,
- * containing only projects with at least one matched session — callers merge
- * with the full definition list to show zero-agent projects.
- */
+/** Roll active sessions up by project: a map keyed by name containing only projects with a matched
+ * session; callers merge with the definition list to show zero-agent projects. */
 
-/**
- * Ensure every session carries a host for the card roster. Local
- * `getActiveSessions()` omits `machine`; remotes already set it. Pure.
- */
+/** Ensure every session carries a host for the roster: local `getActiveSessions()` omits `machine`,
+ * remotes set it. Pure. */
 export function withDefaultMachine<T extends { machine?: string }>(
   sessions: T[],
   defaultHost: string,
@@ -134,44 +115,20 @@ export function rollupSessionsByProject(
   return map;
 }
 
-/**
- * Statuses that mean the session is over. Taken from the repo's own rule
- * (`commands/sessions.ts`): "`closed` and `crashed` are unconditionally dead".
- * `orphaned` is NOT among them — `session/active.ts` defines it as "Alive, but
- * no client is attached", i.e. the agent outlived its window and is still
- * working. Counting it as dead understates the project by exactly the sessions
- * that are running unattended.
- */
+/** Statuses meaning the session is over, per `commands/sessions.ts`: "`closed` and `crashed` are
+ * unconditionally dead". `orphaned` is not: `session/active.ts` defines it as alive with no client
+ * attached, so counting it dead would understate the unattended running sessions. */
 const DEAD_STATUSES = new Set(['closed', 'crashed']);
 
-/**
- * True when a session's status means it is over. Exported so the card can keep
- * the `agents` roster to live sessions: the headline and the `dead` row already
- * separate the two, and a roster that reads `crashed ×25` beside `23 live`
- * makes the reader distrust both numbers.
- */
+/** True when a session's status means it is over. Exported so the roster keeps to live sessions: a
+ * `crashed x25` beside `23 live` makes the reader distrust both numbers. */
 export function isDeadStatus(status: string): boolean {
   return DEAD_STATUSES.has(status);
 }
 
-/*
- * Every `ActiveStatus`, and why it lands where it does:
- *
- *   running, idle, queued, input_required   live — obviously working or waiting
- *   orphaned                                live — "alive, but no client is
- *                                           attached"; the agent outlived its
- *                                           window and is still running
- *   abandoned                               live — it fires on transcript
- *                                           staleness BEFORE the liveness check,
- *                                           so it also covers the live-but-
- *                                           forgotten session that asked a
- *                                           question and sat over a weekend
- *   unknown                                 live — we cannot prove it is dead,
- *                                           and claiming so would overstate the
- *                                           wreckage row
- *   closed, crashed                         dead — unconditionally, per
- *                                           commands/sessions.ts
- */
+/* Where each `ActiveStatus` lands. Live: running, idle, queued, input_required, orphaned (outlived
+ * its window), abandoned (transcript stale; may be forgotten but alive), unknown (can't prove
+ * dead). Dead: closed, crashed, per commands/sessions.ts. */
 
 /** Live vs finished sessions on a project. */
 interface LiveDeadSplit {
@@ -181,14 +138,9 @@ interface LiveDeadSplit {
   deadByStatus: Array<{ status: string; n: number }>;
 }
 
-/**
- * Split a rollup's sessions into what is working and what is wreckage.
- *
- * The headline used to be the raw session count, which on a real project read
- * `39 agents` when 19 of those had crashed. A count that is half corpses is not
- * a throughput signal — but the corpses are worth their own number, because 19
- * crashed sessions is itself a thing to go fix.
- */
+/** Split a rollup's sessions into working and wreckage. The headline used to be the raw count (`39
+ * agents` with 19 crashed), which is no throughput signal, but the crashed count is itself worth
+ * showing. */
 export function liveDeadSplit(byStatus: Partial<Record<ActiveStatus, number>>): LiveDeadSplit {
   let live = 0;
   let dead = 0;
@@ -206,14 +158,9 @@ export function liveDeadSplit(byStatus: Partial<Record<ActiveStatus, number>>): 
   return { live, dead, deadByStatus };
 }
 
-/**
- * The `dead` row body: `41 crashed` when every dead session shares one status,
- * else `12 finished or lost (8 crashed, 4 closed)`. The generic "finished or
- * lost" only earns its keep when the statuses actually differ — with a single
- * status it just hides which one behind a parenthetical that repeats the count.
- * Pure — chalk styling only; the caller adds the `dead` label. Assumes
- * `split.dead > 0` (the caller gates on it).
- */
+/** The `dead` row body: `41 crashed` when all dead sessions share a status, else `12 finished or
+ * lost (8 crashed, 4 closed)`; the generic wording only helps when statuses differ. Pure apart from
+ * chalk; the caller adds the label and gates on `split.dead > 0`. */
 export function formatDeadSummary(split: LiveDeadSplit): string {
   if (split.deadByStatus.length === 1) {
     return chalk.yellow(`${split.dead} ${split.deadByStatus[0].status}`);
@@ -222,11 +169,8 @@ export function formatDeadSummary(split: LiveDeadSplit): string {
   return `${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${detail})`)}`;
 }
 
-/**
- * Display order for the members line: the states a human scans for first
- * (running, then idle, then need-input, then queued), everything else after,
- * status name then agent name ascending within a state.
- */
+/** Display order for the members line: running, idle, need-input, queued, then everything else,
+ * ascending by status then agent name within a state. */
 const MEMBER_STATUS_RANK: Record<string, number> = { running: 0, idle: 1, input_required: 2, queued: 3 };
 
 /** Sort members for the card: running first, then idle, then the rest; agent name asc within a state. */
@@ -246,10 +190,8 @@ export const MEMBERS_LINE_LIMIT = 6;
 /** Cap for host groups on the multi-line agents roster. */
 const MEMBERS_HOST_LIMIT = 8;
 
-/**
- * Collapse members into distinct state cells (`agent · status · ticket[@host]`),
- * counting duplicates as `×N`. Pure.
- */
+/** Collapse members into distinct state cells (`agent · status · ticket[@host]`), counting
+ * duplicates as `×N`. Pure. */
 function collapseMemberCells(
   members: ProjectMember[],
   opts: { includeHostOnCell?: boolean } = {},
@@ -281,29 +223,16 @@ function formatCollapsedCells(
   return parts.join(chalk.dim('  ·  ')) + (more > 0 ? chalk.dim(`  ·  +${more} more`) : '');
 }
 
-/**
- * The `agents` line under `live`: one cell per DISTINCT member state —
- * `claude · running · RUSH-2107 @zion` — with identical cells collapsed to a
- * `×N` count (35 same-harness sessions in one state are one fact, not six
- * truncated duplicates), capped at {@link MEMBERS_LINE_LIMIT} cells with a
- * `+N more` tail counting members, not cells. Pure (chalk styling only); the
- * caller adds the label.
- *
- * Prefer {@link formatProjectMembersByHost} on the card: a flat line hides which
- * machine is running the work when the same harness×status spans hosts.
- */
+/** The `agents` line under `live`: one cell per DISTINCT member state (`claude · running · RUSH-2107
+ * @zion`), identical cells collapsed to `×N`, capped at {@link MEMBERS_LINE_LIMIT} with a `+N more`
+ * tail. Prefer {@link formatProjectMembersByHost}: a flat line hides the machine. */
 export function formatProjectMembers(members: ProjectMember[], limit = MEMBERS_LINE_LIMIT): string {
   if (members.length === 0) return '';
   return formatCollapsedCells(collapseMemberCells(members, { includeHostOnCell: true }), members.length, limit);
 }
 
-/**
- * Host-grouped agents roster. One content line per host:
- * `@zion  claude · running ×9  ·  claude · idle ×4`
- *
- * When no member carries a host (local-only rollup with no machine stamp), falls
- * back to a single flat line via {@link formatProjectMembers}. Pure.
- */
+/** Host-grouped agents roster, one line per host (`@zion  claude · running ×9  ·  claude · idle
+ * ×4`); with no host on any member, falls back to the flat {@link formatProjectMembers} line. Pure. */
 export function formatProjectMembersByHost(
   members: ProjectMember[],
   opts: { cellLimit?: number; hostLimit?: number } = {},
@@ -369,11 +298,8 @@ export interface ProjectWarning {
   remediation?: string;
 }
 
-/**
- * Severity markers for the warnings footer. User-facing by design: critical
- * stops you (wrong repo, missing checkout, large drift); continue is a soft
- * nudge (dirty tree, schedule not measurable).
- */
+/** Severity markers for the warnings footer: critical stops you (wrong repo, missing checkout, large
+ * drift); continue is a soft nudge (dirty tree, schedule not measurable). */
 export function warningEmoji(severity: ProjectWarningSeverity): string {
   return severity === 'critical' ? '🔴' : '⚠️';
 }
@@ -384,10 +310,7 @@ function sortProjectWarnings(warnings: ProjectWarning[]): ProjectWarning[] {
   return [...warnings].sort((a, b) => rank[a.severity] - rank[b.severity] || a.text.localeCompare(b.text));
 }
 
-/**
- * Format one or more warning lines for the card footer. Pure (chalk only).
- * Returns empty when there is nothing to say.
- */
+/** Format warning lines for the card footer. Pure (chalk only); empty when there is nothing to say. */
 export function formatProjectWarnings(warnings: ProjectWarning[]): string[] {
   if (warnings.length === 0) return [];
   const lines: string[] = [];
@@ -405,11 +328,8 @@ export interface ProjectRemoteSignals {
   windowDays: number;
   /** PRs merged into the primary repo within the window (via `gh`). */
   mergedPrs: number;
-  /**
-   * True when the `gh` fetch cap cut the count short — `mergedPrs` is then a
-   * LOWER bound (rendered `100+`), never presented as the complete count. Same
-   * contract `LinearProjectCounts.truncated` keeps for the Linear line.
-   */
+  /** True when the `gh` fetch cap cut the count short: `mergedPrs` is then a LOWER bound (rendered
+   * `100+`), same contract as `LinearProjectCounts.truncated`. */
   mergedPrsTruncated?: boolean;
   /** Artifacts agents produced within the window (activity.created milestones). */
   artifacts: number;
@@ -419,13 +339,9 @@ export interface ProjectRemoteSignals {
   latestRelease?: { tag: string; publishedAt: string };
 }
 
-/**
- * Harvest the signals that don't live on the active-session list: recently
- * merged PRs (from GitHub via `gh`) and artifacts agents produced (from the
- * local activity-milestone log, matched to the project by cwd). Best-effort —
- * a missing `gh`, no auth, or no repo degrades to zero rather than throwing, so
- * `projects status` still renders. `nowMs` is injected for testability.
- */
+/** Harvest signals not on the session list: recently merged PRs (via `gh`) and agent artifacts
+ * (local milestone log, matched by cwd). Best-effort: a missing `gh`, no auth, or no repo degrades
+ * to zero so `projects status` still renders. `nowMs` is injected for tests. */
 export async function enrichProjectSignals(
   def: ProjectDef,
   windowDays: number,
@@ -453,10 +369,9 @@ export async function enrichProjectSignals(
       );
       const rows = JSON.parse(stdout) as { mergedAt?: string }[];
       out.mergedPrs = rows.filter((r) => r.mergedAt && Date.parse(r.mergedAt) >= sinceMs).length;
-      // `--limit 100` caps the fetch, so a busy repo where every one of the 100
-      // most recent merges falls inside the window has MORE than 100 — this repo
-      // really does. Say so (`100+`) rather than presenting a cap as a count,
-      // the same contract `LinearProjectCounts.truncated` already keeps.
+      // `--limit 100` caps the fetch, so a repo with all 100 latest merges inside the window has
+      // MORE than 100 (this one does). Say `100+` rather than presenting a cap as a count, per
+      // `LinearProjectCounts.truncated`.
       if (rows.length >= MERGED_PR_LIMIT && out.mergedPrs >= MERGED_PR_LIMIT) out.mergedPrsTruncated = true;
     } catch {
       /* gh missing / unauthenticated / repo not found — skip this signal */

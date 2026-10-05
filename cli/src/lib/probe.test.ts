@@ -1,12 +1,6 @@
-/**
- * RUSH-3028: a probed binary that forks its own child (the copilot npm
- * wrapper forking its platform-binary downloader) must not leave that
- * grandchild alive after the probe settles — the survivor keeps writing into
- * the probe-time $HOME and races test teardown rm (ENOTEMPTY). These tests
- * drive REAL process trees: a shell parent forks a writer grandchild, and we
- * assert the whole group is dead once the probe returns. They fail on
- * ungated spawns (plain execFile/spawnSync): the grandchild survives there.
- */
+/** RUSH-3028: a probed binary that forks a child (the copilot npm wrapper's downloader) must not
+ * leave the grandchild alive after the probe settles; it keeps writing into the temp $HOME and
+ * races teardown (ENOTEMPTY). These tests drive real process trees and fail on ungated spawns. */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -78,10 +72,9 @@ posixOnly('probeCapture (RUSH-3028: nothing a probe spawns outlives it)', () => 
       const script = writeForker(dir, { parentExits: true });
       const { stdout } = await probeCapture(script, [], 3000);
       expect(stdout).toContain('1.2.3');
-      // The reap can land before the grandchild records its pid, so assert on
-      // the leak itself: once the probe has settled, WRITES INTO THE DIR MUST
-      // CEASE. On ungated code the grandchild keeps appending every 50ms for
-      // 60s and this size check fails.
+      // The reap can land before the grandchild records its pid, so assert the leak itself: after
+      // the probe settles, writes into the dir must cease. On ungated code the grandchild appends
+      // every 50ms for 60s and this size check fails.
       const log = path.join(dir, 'writes.log');
       const sizeOf = (): number => (fs.existsSync(log) ? fs.statSync(log).size : 0);
       await new Promise((r) => setTimeout(r, 150));
@@ -94,11 +87,9 @@ posixOnly('probeCapture (RUSH-3028: nothing a probe spawns outlives it)', () => 
   });
 
   it('reaps the probe subtree when the CLI hard-exits mid-probe (Ctrl-C shape, process.exit(130))', async () => {
-    // Reviewer-demonstrated leak (#2896 review): a detached probe leaves the
-    // terminal's foreground group, so index.ts's SIGINT handler
-    // (process.exit(130)) would strand it without the process-exit reap hook.
-    // Drive the REAL module in a real child: a tsx wrapper starts probeCapture
-    // on a hung forker, then hard-exits — everything the probe spawned must die.
+    // #2896 review: a detached probe leaves the terminal's foreground group, so index.ts's SIGINT
+    // handler (process.exit(130)) would strand it without the exit reap hook. Drives the real
+    // module in a real child that hard-exits; everything the probe spawned must die.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-reap-'));
     try {
       const script = writeForker(dir, { parentExits: false });

@@ -1,13 +1,6 @@
-/**
- * Materialization helpers — install manifest CLIs, register MCP servers,
- * sync resources into installed version homes, register hooks, add shims to
- * PATH, prompt for missing default versions, install declared host-CLIs.
- *
- * The reconcile stage behind `agents sync` (the umbrella `--local` path calls
- * this; see sync-umbrella.ts) and any other caller that needs to re-derive local
- * state from declared configuration. Does NOT do any git operations — that lives
- * in `agents repo pull`.
- */
+/** Materialization helpers: install manifest CLIs, register MCP servers, sync resources into version
+ * homes, register hooks, add shims, install host-CLIs. The reconcile stage behind `agents sync`
+ * (see sync-umbrella.ts); does no git operations (those are in `agents repo pull`). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -70,10 +63,8 @@ interface RefreshOptions {
   skipPrompts?: boolean;
   /** Skip CLI version install/upgrade from agents.yaml. */
   skipClis?: boolean;
-  /**
-   * Suppress human progress lines on stdout. Required for machine consumers
-   * (`agents sync --json` / fleet fan-out) so stdout stays a single JSON object.
-   */
+  /** Suppress human progress lines on stdout; required for machine consumers (`agents sync --json`,
+   * fleet fan-out) so stdout stays a single JSON object. */
   quiet?: boolean;
   /** Limit reconciliation to the requested resource kinds/names. */
   selection?: ResourceSelection;
@@ -81,12 +72,9 @@ interface RefreshOptions {
   allowExecSurfaces?: boolean;
 }
 
-/**
- * Old repo layout stored promptcuts under claude/promptcuts.yaml (agent-scoped).
- * The new layout is `~/.agents/.system/promptcuts.yaml` at the repo root — the
- * hook reads from a fixed path so it survives version upgrades. If the root
- * file doesn't exist yet but an agent-scoped one does, hoist the first one found.
- */
+/** Old repo layout stored promptcuts under claude/promptcuts.yaml; the new location is
+ * `~/.agents/.system/promptcuts.yaml` (the hook reads a fixed path so it survives upgrades). If
+ * only an agent-scoped file exists, hoist the first found. */
 function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
   const rootPath = path.join(agentsDir, 'promptcuts.yaml');
   if (fs.existsSync(rootPath)) return;
@@ -106,28 +94,17 @@ function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
   }
 }
 
-/**
- * Re-materialize local state from declared configuration: install CLI versions,
- * register MCP servers, sync resources to version homes, register hooks, add
- * shims to PATH, prompt for missing defaults, install declared host-CLIs.
- *
- * Idempotent — safe to run repeatedly. No network operations.
- */
-/**
- * What a reconcile pass refused to write, so callers can report it.
- *
- * `refresh` used to return void, so a resource agents-cli declined to write was
- * visible only on the interactive path — `agents sync --yes` and the
- * `--device all` fan-out reported a clean sync (RUSH-2700).
- */
+/** Re-materialize local state from declared configuration (install CLI versions, register MCP
+ * servers, sync resources, register hooks, add shims, prompt for defaults, install host-CLIs).
+ * Idempotent; no network operations. */
+/** What a reconcile pass refused to write, so callers can report it. `refresh` used to return void,
+ * so a declined resource was visible only on the interactive path and `agents sync --yes` /
+ * `--device all` reported a clean sync (RUSH-2700). */
 interface RefreshResult {
   /** User-facing sentences, one per refused resource, prefixed with the agent. */
   declined: string[];
-  /**
-   * The exact (agent, version) pairs this refresh reconciled — the set a
-   * post-reconcile verification must re-check for residual drift, so it never
-   * flags a version the reconcile never targeted (PHNX-3186).
-   */
+  /** The exact (agent, version) pairs this refresh reconciled, the set a post-reconcile verification
+   * must re-check so it never flags a version the reconcile never targeted (PHNX-3186). */
   reconciled: Array<{ agent: AgentId; version: string }>;
 }
 
@@ -229,11 +206,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 3. Sync resources into version homes.
-  // Unattended (`skipPrompts` / `agents sync --yes --local`) and explicit
-  // resource selectors: every installed version. Otherwise non-default homes
-  // keep stale resources after a system update or named plugin sync.
-  // Interactive full reconcile: default only.
+  // 3. Sync resources into version homes. Unattended (`skipPrompts` / `agents sync --yes --local`)
+  // and explicit selectors cover every installed version, otherwise non-default homes keep stale
+  // resources after a system update or named plugin sync. Interactive full reconcile: default only.
   const cliStates = await getAllCliStates();
   const agentsToSync = agentFilter ? [agentFilter] : MANAGED_AGENT_IDS;
   const available = getAvailableResources();
@@ -249,10 +224,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
       : [defaultVer!];
     if (versionsToSync.length === 0) continue;
 
-    // Interactive-only: getActuallySyncedResources walks every skill tree with
-    // content compares (~1s/agent on a full install). The unattended path
-    // (`skipPrompts` / `agents sync --yes`) never reads these — it always
-    // force-full-syncs — so skip the scan entirely (RUSH-2320 #1).
+    // Interactive-only: getActuallySyncedResources walks every skill tree with content compares
+    // (~1s/agent on a full install). The unattended path always force-full-syncs and never reads
+    // these, so skip the scan (RUSH-2320 #1).
     let actuallySynced: ReturnType<typeof getActuallySyncedResources> | undefined;
     let newResources: ReturnType<typeof getNewResources> | undefined;
     let hasAnySynced = false;

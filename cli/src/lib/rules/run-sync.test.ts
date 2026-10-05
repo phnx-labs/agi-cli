@@ -38,10 +38,9 @@ afterAll(() => {
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-// System-layer presets never auto-append an un-named subrule (only user/extra
-// layers do — see rules/compose.ts), so 'default' and 'alt' below resolve to
-// genuinely disjoint source-file sets. This is the realistic shape of a real
-// preset switch (see .system/rules/rules.yaml in this repo).
+// System-layer presets never auto-append an un-named subrule (only user/extra layers do, see
+// rules/compose.ts), so 'default' and 'alt' resolve to genuinely disjoint source-file sets, the
+// realistic shape of a preset switch (see .system/rules/rules.yaml in this repo).
 writeFile(
   '.agents/.system/rules/rules.yaml',
   'presets:\n  default:\n    subrules: [alpha]\n  alt:\n    subrules: [beta]\n',
@@ -100,10 +99,9 @@ describe('applyActiveRulesPresetAtRun', () => {
   });
 
   it('is a no-op for a version with no version home to sync into yet', () => {
-    // First-run-after-add shape: nothing has been synced for this version yet,
-    // but the active preset still resolves from the system layer above — the
-    // ordinary compose+write path runs (creating the file), it just must not
-    // throw for an otherwise-unseen version.
+    // First-run-after-add shape: nothing synced for this version yet, but the preset still resolves
+    // from the system layer, so the ordinary compose+write path runs and must not throw for an
+    // unseen version.
     const version = '0.0.1-unsynced';
     const versionHome = getVersionHomePath(AGENT, version);
     expect(() => applyActiveRulesPresetAtRun(AGENT, version, versionHome)).not.toThrow();
@@ -112,11 +110,9 @@ describe('applyActiveRulesPresetAtRun', () => {
 });
 
 describe('applyActiveRulesPresetAtRun — preset switch with an unchanged file set', () => {
-  // User-layer subrules auto-append into EVERY preset that doesn't explicitly
-  // exclude them (rules/compose.ts), so two differently-named presets can
-  // legitimately resolve to the identical source-file set. isRulesStale's
-  // file-fingerprint comparison alone would miss that a preset switch
-  // happened; the sentinel also tracks the preset name to catch it.
+  // User-layer subrules auto-append into EVERY preset that doesn't exclude them, so two
+  // differently-named presets can resolve to the identical source-file set. isRulesStale's
+  // fingerprint alone would miss a preset switch; the sentinel also tracks the preset name.
   const VERSION = '8.8.8';
 
   writeFile(

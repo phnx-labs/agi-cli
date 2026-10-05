@@ -1,8 +1,5 @@
-/**
- * Verifies parseGrok normalizes Grok's chat_history.jsonl transcript into the
- * shared SessionEvent shape (user/assistant/tool_use/thinking/tool_result), and
- * that detectAgent routes Grok session paths correctly.
- */
+/** Verifies parseGrok normalizes Grok's chat_history.jsonl into SessionEvent
+ * (user/assistant/tool_use/thinking/tool_result) and detectAgent routes Grok paths. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -11,11 +8,8 @@ import * as path from 'path';
 import { parseGrok, detectAgent } from '@phnx-labs/sessions-cli/reader';
 import { toolCallsFromEvents } from '@phnx-labs/sessions-cli/reader';
 
-/**
- * Build a Grok session dir (summary.json + chat_history.jsonl) and return the
- * summary.json path — that is what the scanner records as the session filePath,
- * and what parseSession hands the parser.
- */
+/** Build a Grok session dir (summary.json + chat_history.jsonl) and return the summary.json path,
+ * which the scanner records as filePath and parseSession hands the parser. */
 function makeGrokSession(historyLines: object[]): string {
   const dir = path.join(
     os.tmpdir(),

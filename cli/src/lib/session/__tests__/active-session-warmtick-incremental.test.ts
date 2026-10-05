@@ -3,22 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// PHNX-3411 regression guard — the daemon's session-index warm tick MUST NOT
-// fully re-parse an actively-growing Claude session on every tick.
-//
-// The live wedge this pins against: the daemon's warm tick
-// (`runSessionIndexWarmTick` -> `scanSessionsIncremental`) runs on the SAME
-// event loop that serves the browser IPC server. If an active, large Claude
-// session were re-parsed + re-redacted from offset 0 on every 20s tick, that
-// O(session) synchronous burst would block the loop for seconds and starve
-// `browser.sock` (accepts but never replies) -> cross-device browser drives
-// fail with ECONNREFUSED / socket timeout. The invariant that keeps the loop
-// responsive is that a grown-but-same session resumes from its stored parse
-// offset (the INCREMENTAL branch), so per-tick cost tracks the APPENDED bytes,
-// not the whole transcript.
-//
-// Real fs, real sqlite, the live Claude scan path under a throwaway HOME. No
-// mocks. Mirrors the harness of incremental-scan-e2e.test.ts.
+// PHNX-3411 regression guard: the daemon's session-index warm tick must not fully re-parse a
+// growing Claude session each tick. That O(session) sync burst starves `browser.sock`. A grown
+// session must resume from its stored offset. Real fs, sqlite, no mocks.
 
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;

@@ -1,14 +1,6 @@
-/**
- * Tests for checkVersionHookWiring — the settings.json wiring inspector behind
- * `agents doctor`. The blind spot it closes: a hook FILE can be present in a
- * version home and byte-identical to source (doctor calls it "ok"), yet be
- * absent from settings.json's event array, so it never fires. These assert the
- * inspector catches that (UNWIRED), agrees with the real registrar when wiring
- * is intact, and flags a missing settings.json.
- *
- * Runs the inspector in a subprocess with HOME=testHome because the path
- * constants in state.ts capture HOME at module-load (see doctor-diff.test.ts).
- */
+/** Tests for checkVersionHookWiring, the settings.json wiring inspector behind `agents doctor`.
+ * It closes a blind spot: a hook file can be present and byte-identical to source (doctor says
+ * "ok") yet absent from settings.json's event array, so it never fires. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -105,10 +97,8 @@ describe('version hooks path resolution', () => {
   });
 });
 
-/**
- * Plant a launch binary so listInstalledVersions / iterHooksCapableVersions
- * treat the version as installed (isVersionInstalled probes node_modules/.bin).
- */
+/** Plants a launch binary so listInstalledVersions / iterHooksCapableVersions treat the version
+ * as installed (isVersionInstalled probes node_modules/.bin). */
 function plantClaudeBinary(version: string): void {
   const binDir = path.join(userDir, '.history', 'versions', 'claude', version, 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -658,27 +648,18 @@ describe('repairManagedHookRuntimeArtifacts', () => {
 describe('installSessionTrackerHookSync — failure reasons are never empty', () => {
   it('returns installed:false with a NON-EMPTY error when the hook cannot be installed', async () => {
     const { installSessionTrackerHookSync } = await import('./install.js');
-    // antigravity passes the CLI-side supports(agent,'hooks') gate, but the
-    // session-tracker child declines it (no SessionStart hook event) and prints
-    // the reason to STDOUT. Pre-fix, err.stderr was an empty-but-truthy Buffer,
-    // so the surfaced error was '' — the regression this pins. In an environment
-    // where the package is unbuilt and tsx is absent, the static not-built
-    // message satisfies the same non-empty contract.
+    // antigravity passes the CLI-side supports(agent,'hooks') gate, but the session-tracker child
+    // declines it (no SessionStart event) and prints the reason to STDOUT. Pre-fix, err.stderr was
+    // an empty-but-truthy Buffer so the surfaced error was ''.
     const res = installSessionTrackerHookSync('antigravity');
     expect(res.installed).toBe(false);
     expect((res.error ?? '').trim().length).toBeGreaterThan(0);
   });
 });
 
-// ─── listUnmanagedHooksInVersionHome — orphan = absent from SOURCE (PHNX-2693) ──
-//
-// The bug: orphan detection diffed installed hook names against the REGISTERED
-// hook manifest, not the source file set. Sync copies helper / test / benchmark
-// scripts into every version home alongside registered hooks but never registers
-// them, so each read as an orphan — `agents prune cleanup` offered to trash ~1000
-// in-use files. The fix diffs against the resolved source set (user + system +
-// extras), so a source-present file is never an orphan and a genuinely dead one
-// still is.
+// listUnmanagedHooksInVersionHome: an orphan is a file absent from SOURCE (PHNX-2693). Detection
+// used to diff against the registered manifest, but sync copies unregistered helper/test/benchmark
+// scripts into every home, so `agents prune cleanup` offered to trash ~1000 in-use files.
 
 /** Write a hook script into a source root's hooks dir (user or system). */
 function seedSourceHook(root: string, relative: string): void {

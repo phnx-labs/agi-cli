@@ -1,16 +1,6 @@
-/**
- * The unified event reader -- one stream over BOTH operational events
- * (`~/.agents/.history/events/YYYY-MM-DD/` via events.ts: secrets, commands, teams, ...) and
- * agent-semantic events (the per-session activity logs via activity.ts: plans,
- * PRs, worktrees, sub-agents, artifacts). They share one {@link EventType}
- * vocabulary and one {@link EventRecord} shape, so `agents events` and any
- * higher-level feature (a session/project summarizer, RSS) read them together.
- *
- * The two write paths stay separate for efficiency -- operational events append
- * to the locked global log (low frequency), agent events append to lock-free
- * per-session shards (high frequency, one writer each). This module is the
- * single READ surface that merges them; nothing here writes.
- */
+/** The unified event reader: one stream over operational events (events.ts) and agent-semantic
+ * events (per-session activity logs via activity.ts), sharing one {@link EventType} vocabulary and
+ * {@link EventRecord} shape for `agents events`. */
 import { query, type EventRecord, type EventType, type EventLevel, levelFor } from './feed/events.js';
 import { readActivityAsEventRecords } from './feed/activity.js';
 import { applyFamilies, type EventFamily } from './event-families.js';
@@ -66,21 +56,14 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
   return true;
 }
 
-/**
- * Read a unified, newest-first event stream. Operational events come from
- * events.ts `query()`; agent-semantic events from the activity logs, normalized
- * to the same record shape and filtered identically. `limit` caps the merged
- * result (each source is fetched up to `limit` *after* its primary filters —
- * eventTypes for activity, eventTypes/module/bundle for ops — so the top-N is
- * exact for those filters).
- */
+/** Read a unified, newest-first event stream: operational events from events.ts `query()`, activity
+ * events normalized to the same shape and filtered identically. */
 export function readUnifiedEvents(raw: UnifiedQuery = {}): EventRecord[] {
   const q = applyFamilies(raw);
 
-  // `bundle` is filtered inside query()'s scan (before its limit cutoff) so a
-  // matching-bundle record older than the newest-`limit` window is not dropped.
-  // Over-fetch when we will post-filter excludeEventTypes / excludeLevel so the
-  // top-N is still meaningful after drops.
+  // `bundle` is filtered inside query()'s scan (before its limit cutoff) so a matching record
+  // older than the newest-`limit` window is not dropped. Over-fetch when post-filtering
+  // excludeEventTypes / excludeLevel so the top-N stays meaningful.
   const needsPost = Boolean(q.excludeEventTypes?.length || q.excludeLevel);
   const fetchLimit = q.limit === undefined
     ? undefined
@@ -112,12 +95,9 @@ export function readUnifiedEvents(raw: UnifiedQuery = {}): EventRecord[] {
     return typeof q.limit === 'number' ? ops.slice(0, q.limit) : ops;
   }
 
-  // Push eventTypes into the activity reader so `limit` is applied AFTER the
-  // event-type filter (readRecentActivity already does this for `events`).
-  // Without this, a rare match older than the newest-`limit` window of routine
-  // churn is silently dropped — the same class of bug as the ops-side bundle
-  // pre-filter above (RUSH-2093). Remaining filters (agent, sessionId, …) still
-  // run via matches() for fields activity.ts does not pre-filter.
+  // Push eventTypes into the activity reader so `limit` applies after the event-type filter;
+  // otherwise a rare match older than the newest-`limit` window is dropped, the same bug class as
+  // the ops-side bundle pre-filter (RUSH-2093). Other filters still run via matches().
   const acts = readActivityAsEventRecords({
     sinceMs: q.startDate?.getTime(),
     limit: fetchLimit,

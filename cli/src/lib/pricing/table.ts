@@ -1,30 +1,6 @@
-/**
- * Offline, versioned per-model pricing table.
- *
- * The canonical data lives in `prices.json` (LiteLLM-style per-token USD map)
- * and is imported with a `type: json` attribute so it survives `tsc` emit AND
- * Node ESM's import-attribute requirement at runtime (the package is ESM).
- *
- * ## Keeping it current
- *
- * A model missing from `prices.json` prices to NOTHING — `getModelPricing` returns
- * null and the session contributes $0, silently. That is how 478 `claude-opus-5`
- * sessions read as free: matching is dash-bounded, so `claude-opus-5` cannot fall back
- * to the `claude-opus-4` entry. When a new model ships, add it here in the same change.
- *
- * **Dated rate: Claude Sonnet 5 is priced at its introductory $2/$10 per MTok, which
- * ends 2026-08-31.** From 2026-09-01 the standard rate is $3/$15 (cache write $3.75,
- * cache read $0.30). This table has no notion of an effective date — every row is a
- * single current rate — so that entry MUST be updated then, or Sonnet 5 spend will
- * read ~33% low. Source: https://platform.claude.com/docs/en/about-claude/pricing
- *
- * `getModelPricing` is prefix/suffix-tolerant: real model identifiers carry
- * vendor prefixes (`us.anthropic.`), version dashes (`claude-opus-4-8`), and
- * date suffixes (`-20250514`), none of which appear in the canonical keys. We
- * normalize the input, then match against the LONGEST canonical key the
- * normalized id contains so `claude-opus-4` wins over a hypothetical
- * `claude-opus` when both are present.
- */
+/** Offline per-model pricing table from `prices.json`. A model missing from it prices to $0
+ * silently (478 `claude-opus-5` sessions read free), so add new models in the same change. Sonnet
+ * 5 intro rate $2/$10 ends 2026-08-31; update to $3/$15 from 2026-09-01 (table has no dates). */
 import pricesData from './prices.json' with { type: 'json' };
 
 /** Per-token USD prices for a single model. Cache fields optional (not all vendors expose them). */
@@ -51,13 +27,8 @@ const MODELS: Record<string, ModelPricing> = PRICES.models;
 // specific key (e.g. "gemini-2.5-flash-lite" before "gemini-2.5-flash").
 const KEYS_BY_LENGTH = Object.keys(MODELS).sort((a, b) => b.length - a.length);
 
-/**
- * Normalize a raw model id into the dash-delimited token space the canonical
- * keys live in. Strips vendor prefixes (`anthropic/`, `us.anthropic.`,
- * `models/`, `openai/`), lowercases, and collapses any non [a-z0-9.] run to a
- * single dash so `claude-opus-4-8`, `Claude Opus 4`, and `claude.opus.4` all
- * normalize to a comparable form.
- */
+/** Normalize a model id to the dash-delimited key space: strip vendor prefixes (`anthropic/`,
+ * `us.anthropic.`, `models/`, `openai/`), lowercase, and collapse non [a-z0-9.] runs to one dash. */
 function normalizeModelId(modelId: string): string {
   let id = modelId.trim().toLowerCase();
   // Drop a leading vendor segment: "anthropic/claude-..", "us.anthropic.claude-..",
@@ -70,11 +41,8 @@ function normalizeModelId(modelId: string): string {
   return id;
 }
 
-/**
- * Resolve per-token pricing for a model id. Tolerant of vendor prefixes,
- * version dashes, and date suffixes. Returns null when no canonical key is a
- * substring of the normalized id (i.e. genuinely unknown model).
- */
+/** Resolve per-token pricing for a model id, tolerant of vendor prefixes, version dashes and date
+ * suffixes; null when no canonical key is a substring (unknown model). */
 export function getModelPricing(modelId: string): ModelPricing | null {
   if (!modelId) return null;
   const norm = normalizeModelId(modelId);
@@ -82,10 +50,8 @@ export function getModelPricing(modelId: string): ModelPricing | null {
   // Exact key first (fast path + unambiguous).
   if (MODELS[norm]) return MODELS[norm];
 
-  // Containment match, longest canonical key wins. The canonical key must
-  // appear as a dash-bounded prefix of the normalized id so "claude-opus-4"
-  // matches "claude-opus-4-8" and "claude-opus-4-20250514" but a stray
-  // "gpt-4" inside "gpt-40-turbo-experimental" still requires the boundary.
+  // Containment match, longest canonical key wins, dash-bounded: "claude-opus-4" matches
+  // "claude-opus-4-8" and "claude-opus-4-20250514".
   for (const key of KEYS_BY_LENGTH) {
     if (norm === key || norm.startsWith(key + '-') || norm.startsWith(key + '.')) {
       return MODELS[key];

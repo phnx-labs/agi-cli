@@ -72,12 +72,9 @@ describe('upsertSessionsBatch scanner event reuse', () => {
   });
 
   it('skips parseSession for kimi/grok large-transcript entries with no events (PHNX-3411)', () => {
-    // Kimi reads wire.jsonl and Grok reads chat_history.jsonl — potentially
-    // large flat files. Their scanners produce only metadata, no events.
-    // The warm tick must NOT open the transcript file for these agents —
-    // tool indexing is deferred to runDeferredToolIndex. Verify by pointing
-    // filePath at a non-existent file: if parseSession were called it would
-    // throw and the upsert would fail.
+    // Kimi and Grok have large flat files and metadata-only scanners. The warm tick must not open
+    // them (tool indexing is deferred to runDeferredToolIndex); a non-existent filePath proves it,
+    // since parseSession would throw.
     const deferredAgents: Array<SessionMeta['agent']> = ['kimi', 'grok'];
     for (const agent of deferredAgents) {
       const missingTranscript = path.join(testHome, `.${agent}`, 'no-events.jsonl');

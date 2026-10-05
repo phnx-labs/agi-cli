@@ -1,15 +1,5 @@
-/**
- * Permissions detector — inspects the agent's native permission storage and
- * reports the permission GROUP names that have been applied.
- *
- * For claude/opencode the detector intersects with discovered groups (a group
- * is "applied" if any of its allow/deny rules are present). For Codex /
- * Antigravity / Grok the on-disk format is lossy — once any group has been
- * applied the storage doesn't carry per-group provenance back, so we report
- * "all known groups applied" when any permission artifact is present. This
- * matches the existing behavior in versions.ts:445-518 (extended to the
- * agents that were previously silent-skipped).
- */
+/** Permissions detector: reports applied permission GROUP names from the agent's native storage.
+ * Codex/Antigravity/Grok storage is lossy, so any permission artifact reports all known groups. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from 'smol-toml';

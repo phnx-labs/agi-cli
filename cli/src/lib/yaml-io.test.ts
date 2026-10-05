@@ -2,16 +2,9 @@ import { describe, it, expect } from 'vitest';
 import * as yaml from 'yaml';
 import { stringifyDoc } from './yaml-io.js';
 
-/**
- * RUSH-2505. `agents.yaml` has five in-place writers. Unpadding flow sequences
- * fixed one half; the other half was that those writers disagreed on collection
- * style, so an empty map came out as `mcp:` + an indented `{}` from two of them
- * and `mcp: {}` from the other three, and they rewrote each other forever.
- *
- * These assert the properties that actually prevent the outage — flow sequences
- * survive verbatim, re-emitting is a fixed point, and every writer shares one
- * code path — rather than asserting the emitter options.
- */
+/** RUSH-2505: agents.yaml has five in-place writers that disagreed on collection style and rewrote
+ * each other forever. These assert what prevents it: flow sequences survive verbatim, re-emitting
+ * is a fixed point, and all writers share one code path. */
 describe('stringifyDoc', () => {
   it('preserves committed flow sequences byte-identically', () => {
     const src =

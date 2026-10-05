@@ -1,37 +1,6 @@
-/**
- * Benchmark: the event-emission + provenance bootstrap that index.ts pays.
- *
- * `index.ts:213-214` imports `{ emit, emitFriction, redactArgs }` from
- * `./lib/events.js` and `{ stampProvenance }` from `./lib/event-provenance.js`
- * EAGERLY — top-level, before commander parses argv (`program.parseAsync()` at
- * index.ts:1440 is reached only after all module evaluation). Every `agents`
- * process pays the module-graph evaluation cost, including the `--version` /
- * `--help` fast paths that never emit an event. The `emit`/`redactArgs`/
- * `stampProvenance` RUNTIME cost is then paid on every real command: the root
- * program's `preAction` hook calls `redactArgs(process.argv.slice(2, 22))` +
- * `emit('command.start', …)` (index.ts:292-300) and `postAction` calls
- * `emit('command.end', …)` + `stampProvenance()` (index.ts:314-337);
- * `emitFriction` is the `_internal friction` path (index.ts:942).
- *
- * WHY THIS FILE, NOT index.bench.ts. `src/lib/index.bench.ts` already lists
- * `events.js` and `event-provenance.js` in its `EAGER_MINUS_BRAND` cold-import
- * spec list (index.bench.ts:464-465) but times them ONLY inside the 12-module
- * `EAGER_MINUS_BRAND` / `EAGER_WITH_BRAND` bundles — no per-module row isolates
- * these two, and its docblock (index.bench.ts:295-300) says the per-import
- * cold-child breakdown is owned by the open sibling PR #2280, so adding those
- * rows there would collide. And the RUNTIME cost of `emit` / `emitFriction` /
- * `redactArgs` / `stampProvenance` — the actual functions this hot path calls —
- * is measured in NO bench today. Both belong beside their source
- * (`events.ts` / `event-provenance.ts`), which is here.
- *
- * NO MOCKING. Group A spawns real cold `node` processes importing the real
- * BUILT `dist/lib/*.js` artifacts (the module graph a shipped install evaluates,
- * incl. the third-party edges `proper-lockfile` via fs-atomic.ts and `yaml` via
- * state.ts). Group B calls the real exported functions against a real temp
- * events sink — `emit()` takes the real proper-lockfile lock, appends to a real
- * file, runs the real rotate/prune size checks — on realistic argv/payloads
- * matching index.ts's own call sites.
- */
+/** Benchmark of the event-emission + provenance bootstrap index.ts pays: cold import of events.js
+ * and event-provenance.js (real `node` children on built dist) and runtime of emit, emitFriction,
+ * redactArgs, stampProvenance against a real temp sink. No mocking; not in index.bench.ts. */
 import { describe, bench, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -47,15 +16,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_ROOT = path.resolve(__dirname, '../../dist');
 const distUrl = (rel: string): string => pathToFileURL(path.join(DIST_ROOT, rel)).href;
 
-/**
- * Import `specs` in a fresh Node process. Node caches an ESM module for the life
- * of a process, so only a fresh process yields an honest module-LOAD number; a
- * second in-process `import()` would time a Map lookup. Every Group-A row spawns
- * the identical shape, so the constant Node spawn floor cancels between rows and
- * (row - FLOOR) is that graph's own evaluation cost. Throws on a non-zero exit
- * so a moved/mistyped specifier — which exits FASTER than the floor and would
- * otherwise read as the quickest row — cannot post a false number.
- */
+/** Import `specs` in a fresh Node process: ESM modules are cached per process, so only a fresh one
+ * gives an honest load number. Every Group-A row spawns the same shape, so the Node spawn floor
+ * cancels. */
 function coldEval(specs: string[]): void {
   const src = specs.map((s) => `await import(${JSON.stringify(s)});`).join('\n');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', src], {
@@ -70,23 +33,15 @@ function coldEval(specs: string[]): void {
 
 const EVENTS_SPEC = distUrl('lib/events.js');
 const PROVENANCE_SPEC = distUrl('lib/event-provenance.js');
-/**
- * state.js is ALREADY eager via index.ts:513, and it is the source of the two
- * heavy third-party edges the event modules also pull: `yaml` (state.ts:29) and
- * `proper-lockfile` (state.ts:31 → fs-atomic.ts:4). So the honest "cost this hot
- * path ADDS to startup" is (state + events + provenance) − (state alone), not
- * the isolated events.js number — most of which is shared, already-paid graph.
- */
+/** state.js is already eager via index.ts and supplies the heavy third-party edges the event
+ * modules also pull (`yaml`, `proper-lockfile`). So the honest added startup cost is (state +
+ * events + provenance) - (state alone), not isolated events.js. */
 const STATE_SPEC = distUrl('lib/state.js');
 const COLD_OPTS = { time: 3000, iterations: 12 } as const;
 
-/**
- * Prove both dist specs resolve at MODULE scope — a throw here aborts the whole
- * file where vitest reports it (a real Failed Suite), before any row is timed.
- * A throw inside a `bench` callback is swallowed by tinybench and merely posts
- * `NaN` for that row (see index.bench.ts:412-421), so this preflight is what
- * makes a bad/stale dist build loud instead of silently mis-measured.
- */
+/** Prove both dist specs resolve at module scope: a throw there fails the file as a real Failed
+ * Suite before any row is timed, whereas a throw inside a `bench` callback is swallowed by
+ * tinybench and posts `NaN` (index.bench.ts:412-421). This makes a bad or stale dist build loud. */
 (function preflightColdImports(): void {
   coldEval([EVENTS_SPEC]);
   coldEval([PROVENANCE_SPEC]);
@@ -123,14 +78,9 @@ describe('MARGINAL cost over the already-eager baseline — state.js is loaded r
   }, COLD_OPTS);
 });
 
-// ─── Group B: runtime cost of the four hot-path functions ────────────────────
-//
-// Real temp events sink so emit() exercises the actual append/lock/rotate path,
-// not a stub. _resetForTest(path) sets _eventsPathOverride (events.ts:1490-1497)
-// so both the active log and the prune marker live under this temp dir — same
-// seam events.test.ts uses (events.test.ts:42). Warm-up emits below write the
-// prune marker + prime the provenance/chmod caches so every TIMED emit measures
-// steady state, not the one-time first-append prune (events.ts:1229-1240).
+// Group B: runtime cost of the four hot-path functions, against a real temp events sink so emit()
+// exercises the real append/lock/rotate path. `_resetForTest(path)` sets the events path override,
+// the seam events.test.ts uses.
 const SINK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-events-bench-'));
 const SINK = path.join(SINK_DIR, 'events.jsonl');
 _resetForTest(SINK);
@@ -140,12 +90,9 @@ afterAll(() => {
   try { fs.rmSync(SINK_DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
-/**
- * A realistic `agents run` argv (index.ts:298 audits `process.argv.slice(2, 22)`).
- * Exercises the real redaction branches: a `--prompt` over 200 chars → sha256
- * marker (events.ts:557, 582), a `--session`/`--device` passthrough, and a
- * secret-shaped path caught by SECRET_PATH (events.ts:588).
- */
+/** A realistic `agents run` argv (index.ts audits `process.argv.slice(2, 22)`) exercising the real
+ * redaction branches: a `--prompt` over 200 chars to a sha256 marker, a `--session`/`--device`
+ * passthrough, and a secret-shaped path caught by SECRET_PATH. */
 const REALISTIC_ARGV = [
   'run', 'claude', '--mode', 'auto',
   '--prompt', 'Benchmark the event-emission bootstrap in cli: read index.ts:213-214, events.ts and event-provenance.ts end to end, commit a vitest bench beside the source that exercises the real emit/redactArgs/stampProvenance path against a temp sink, then propose optimizations from the measured numbers.',
@@ -165,11 +112,8 @@ const END_PAYLOAD = { module: 'run', command: 'run claude', durationMs: 1234 } a
 // Prime the sink (prune marker + provenance/chmod caches) so timed emits are steady state.
 for (let i = 0; i < 8; i++) emit('command.start', START_PAYLOAD);
 
-/**
- * Time-bounded (300ms) so the cumulative sink stays well under the 10 MiB
- * gzip-rotation threshold (events.ts:107) and no rotation skews a sample —
- * verified empirically: no `events.*.jsonl.gz` archive is created across runs.
- */
+/** Time-bounded (300ms) so the cumulative sink stays well under the 10 MiB gzip-rotation threshold
+ * (events.ts:107) and no rotation skews a sample; verified that no `events.*.jsonl.gz` is created. */
 const EMIT_OPTS = { time: 300, iterations: 20, warmupTime: 100 } as const;
 
 describe('redactArgs — index.ts:298, preAction on every command. Real regex passes over a realistic 22-arg `agents run` line, incl. the >200-char --prompt sha256 branch', () => {

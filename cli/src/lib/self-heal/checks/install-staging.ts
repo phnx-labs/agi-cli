@@ -1,19 +1,6 @@
-// install-staging check — fleet-wide self-heal for the orphaned npm reify
-// staging dir that dead-ends `agents upgrade` forever (PHNX-3393).
-//
-// `agents upgrade` itself sweeps this orphan proactively before every reify
-// (sweepStaleInstallStaging in self-update.ts), so a box that runs `agents
-// upgrade` regularly never accumulates one. This check exists for the box
-// that does NOT: one that stopped upgrading after the crash that left the
-// orphan behind, so the next manual `agents upgrade` would still hit the same
-// ENOTEMPTY the sweep exists to prevent, and nothing runs `agents upgrade` to
-// trigger that sweep in the meantime. Periodic cadence closes that gap
-// fleet-wide (via the daemon's self-heal service) and on demand via
-// `agents sync`.
-//
-// The age guard is load-bearing: a staging dir can be legitimately mid-write
-// by a CONCURRENT upgrade this instant. Only a dir older than the guard is
-// touched, so an unattended periodic run can never delete a live reify.
+// install-staging check: self-heal for the orphaned npm reify staging dir that dead-ends `agents
+// upgrade` (PHNX-3393). Covers boxes that stopped upgrading after the crash. Age guard is
+// load-bearing: a live concurrent reify is never deleted.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,15 +14,9 @@ const __installStagingDirname = path.dirname(fileURLToPath(import.meta.url));
 /** A concurrent upgrade must be long finished before an unattended sweep may touch its staging dir. */
 export const STALE_INSTALL_STAGING_AGE_MS = 10 * 60 * 1000;
 
-/**
- * Find the retire-path staging dir(s) for `packageRoot` older than
- * `maxAgeMs`. Reimplements the same matching self-update.ts's
- * sweepStaleInstallStaging uses, so the age guard can be checked BEFORE
- * anything is deleted — the sweep helper itself removes unconditionally,
- * which is correct for the upgrade hot path (nothing else touches that
- * path while an upgrade you just started is running) but wrong for an
- * unattended periodic sweep that could race a concurrent upgrade.
- */
+/** Find retire-path staging dirs for `packageRoot` older than `maxAgeMs`. Re-implements the
+ * self-update.ts sweep matching so the age check runs BEFORE deletion; the sweep helper deletes
+ * unconditionally. */
 function findAgedInstallStaging(packageRoot: string, maxAgeMs: number, now: number): string[] {
   const resolved = path.resolve(packageRoot);
   const dir = path.dirname(resolved);

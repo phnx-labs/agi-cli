@@ -3,10 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// auth-health.ts -> state.ts resolves HOME (and thus the auth-health cache dir)
-// at import time, so pin HOME to a throwaway dir BEFORE the module is loaded,
-// then a single dynamic import picks it up. Mirrors star-nudge.test.ts; no mocks
-// of our own modules — this exercises the real cache read/write path (PHNX-4116).
+// auth-health.ts -> state.ts resolves HOME (the cache dir) at import, so pin HOME to a throwaway
+// dir before the module loads, then one dynamic import picks it up (as star-nudge.test.ts). No
+// mocks: this exercises the real cache read/write path (PHNX-4116).
 const savedHome = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-facts-test-'));
 process.env.HOME = TMP_HOME;
@@ -73,12 +72,9 @@ describe('runOutcomeVersionKey (pure fallback key)', () => {
 
 describe('probeAuthHealth — the row a non-headed box drops (why the host path needs launchability, PHNX-4116)', () => {
   it('a signed-in claude account on a non-headed box yields no_evidence, not a probe verdict', async () => {
-    // The temp HOME has no configured role, so it is not headed and cannot read
-    // the usage endpoint (RUSH-2392). With no usageKey there is no fresh-usage
-    // shortcut either, so the honest verdict is "we did not look" — no_evidence.
-    // `probeLocalFleetAuth` DROPS that row, which is exactly why the host
-    // readiness path must fall back to launchability rather than read the absent
-    // row as 'unconfigured'. Real behavior: no network probe is issued on this path.
+    // The temp HOME has no role, so it is not headed and can't read the usage endpoint
+    // (RUSH-2392); with no usageKey there is no usage shortcut, so the verdict is no_evidence.
+    // `probeLocalFleetAuth` drops that row, so host readiness must fall back to launchability.
     const info = {
       accountKey: 'acct-1', usageKey: null, accountId: null, organizationId: null,
       userId: null, email: 'bot@example.com', plan: null, usageStatus: null,

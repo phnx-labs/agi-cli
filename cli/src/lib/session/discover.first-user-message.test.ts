@@ -14,12 +14,9 @@ import {
   readGrokMeta,
 } from './discover.js';
 
-/**
- * PHNX-3621 leftover from competing #3359: per-harness scanner coverage for
- * `SessionMeta.firstUserMessage` that #3358 did not absorb. Hits the real scan
- * path (Claude incremental parse-state + serialize/hydrate resume, Codex
- * rollout, Kimi wire stream first-wins, Grok bounded prefix read).
- */
+/** PHNX-3621 leftover from competing #3359: per-harness scanner coverage for
+ * `SessionMeta.firstUserMessage` that #3358 did not absorb. Hits the real scan path (Claude
+ * incremental parse-state resume, Codex rollout, Kimi wire first-wins, Grok bounded prefix read). */
 
 let TMP: string;
 beforeAll(() => { TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fum-')); });
@@ -123,10 +120,9 @@ describe('Grok scanner captures firstUserMessage (bounded chat_history read)', (
   });
 
   it('skips production Grok scaffolding and returns the prompt_index <user_query> turn', () => {
-    // Real chat_history.jsonl shape (measured 23/44 sessions on one box):
-    // system, then a huge <user_info>+<rules> user dump (no synthetic_reason),
-    // then a system-reminder user with synthetic_reason, then the genuine
-    // originating request at prompt_index: 0 wrapped in <user_query>.
+    // Real chat_history.jsonl shape (23/44 sessions on one box): a system line, a huge
+    // <user_info>+<rules> user dump (no synthetic_reason), a system-reminder user with
+    // synthetic_reason, then the genuine request at prompt_index 0 wrapped in <user_query>.
     const genuine = '## Mission\nIndependently design the product-facing compute tier model.';
     const userInfoDump = '<user_info>\nOS Version: linux\nWorkspace Path: /repo\n<rules>never store this dump as the first user turn</rules>\n</user_info>';
     const dir = writeGrokSession('bbbbbbbb-cccc-dddd-eeee-ffffffffffff', [

@@ -1,10 +1,5 @@
-/**
- * Cron-based job scheduler for routines.
- *
- * Wraps the croner library to manage scheduled jobs in-memory. The daemon
- * process creates a single JobScheduler instance that loads enabled jobs
- * on startup and reloads them on SIGHUP.
- */
+/** Cron-based job scheduler for routines: wraps croner to hold scheduled jobs in memory. The daemon
+ * creates a single JobScheduler that loads enabled jobs on startup and reloads on SIGHUP. */
 
 import { Cron } from 'croner';
 import type { JobConfig } from './scheduling/routines.js';
@@ -36,22 +31,9 @@ interface TriggerContext {
   scheduledFor?: Date;
 }
 
-/**
- * The aligned occurrence boundary a fire callback belongs to — the value the
- * single-fire `(routine, scheduledFor)` claim keys on.
- *
- * croner's `currentRun()` inside a fire callback is the JITTERED wall-clock
- * trigger instant (it carries milliseconds — verified against croner 10.x), not
- * the aligned schedule boundary. Keying `slotRunId` on it directly minted a
- * distinct run id per delivery, so two callbacks for one occurrence each claimed
- * a different run dir and both launched, and a live fire never collided with its
- * catch-up twin (`missedRunId`, which keys on the aligned boundary). Flooring the
- * fire to its schedule boundary via {@link alignedSlotForFire} makes the claim a
- * structural claim on the occurrence identity (SING-15). Always returns a
- * concrete Date — `currentRun()` falls back to now, and an unresolvable boundary
- * falls back to the fire instant — so the forward path never dispatches without a
- * durable slot key.
- */
+/** The aligned occurrence boundary the single-fire `(routine, scheduledFor)` claim keys on. croner's
+ * `currentRun()` is the JITTERED trigger instant, so keying on it minted a run id per delivery and
+ * a live fire never collided with its catch-up twin (SING-15). */
 export function fireSlot(cron: Cron): Date {
   const fire = cron.currentRun() ?? new Date();
   return alignedSlotForFire(cron, fire) ?? fire;
@@ -103,10 +85,9 @@ export class JobScheduler {
     }
     if (isPastOneShotRoutine(config)) return;
 
-    // catch: true — a throw from one job's callback should not kill the
-    // whole cron loop. Each invocation of onTrigger is already wrapped in
-    // try/catch, but a synchronous throw before the await would otherwise
-    // bubble up; defense in depth.
+    // catch: true: a synchronous throw before the await in one job's callback would bubble up and
+    // kill the whole cron loop; onTrigger is already try/catch-wrapped, so this is defense in
+    // depth.
     const cronOptions: Record<string, unknown> = { catch: true };
     if (config.timezone) cronOptions.timezone = config.timezone;
 
@@ -126,12 +107,9 @@ export class JobScheduler {
       }
 
       try {
-        // scheduledFor is the ALIGNED occurrence boundary (fireSlot), not croner's
-        // jittered currentRun(): the single-fire claim keys on (routine,
-        // scheduledFor), so the key must be the occurrence identity or a live fire
-        // and its catch-up twin (missedRunId) won't collide and two deliveries of
-        // one slot each mint a distinct id. fireSlot always returns a Date, so the
-        // forward path always carries a durable claim (SING-15).
+        // scheduledFor is the ALIGNED occurrence boundary (fireSlot), not croner's jittered
+        // currentRun(): the single-fire claim keys on it, so a live fire and its catch-up twin
+        // (missedRunId) must share it (SING-15).
         await this.onTrigger(config, { scheduledFor: fireSlot(self) });
       } catch (err) {
         console.error(`Job '${config.name}' failed:`, (err as Error).message);

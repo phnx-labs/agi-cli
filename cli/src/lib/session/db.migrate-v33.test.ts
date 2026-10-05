@@ -10,16 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv33-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v32 -> v33: attribute each Claude session to the account that produced it.
- *
- * Two properties are load-bearing and both are asserted here:
- *   1. Rows spanning several version homes get DISTINCT account_key values. Before
- *      v33 a single email was resolved once and stamped on every row.
- *   2. scan_ledger is NOT wiped. Attribution derives from (file_path, version), which
- *      are already stored, so no transcript needs re-parsing — unlike most migrations
- *      in this file, which flush the ledger on purpose.
- */
+/** v32 -> v33: attribute each Claude session to the account that produced it. Load-bearing: (1)
+ * rows across version homes get distinct account_key values (one email used to be stamped on all);
+ * (2) scan_ledger is NOT wiped, since attribution derives from stored (file_path, version). */
 const HISTORY = path.join(TEST_HOME, '.agents', '.history');
 
 interface Acct { org: string; email: string; name: string; type: string }
@@ -220,10 +213,9 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
 
 describe('v33 self-healing repair on an already-migrated DB', () => {
   it('clears a stale email left on a dark row and fills a NULL account_key', () => {
-    // Two ways a v33 DB still goes wrong: an older CLI writes NULL (its INSERT does
-    // not name the column), and a DB migrated by a build predating the "clear the
-    // stale email" fix keeps a known-wrong address. The migration cannot fix either —
-    // it never runs again — so getDB() repairs on open.
+    // Two ways a v33 DB still goes wrong: an older CLI writes NULL (its INSERT omits the column),
+    // and a DB migrated before the "clear the stale email" fix keeps a wrong address. The
+    // migration never reruns, so getDB() repairs on open.
     const db = getDB();
     db.prepare(`UPDATE sessions SET account = 'stale@wrong.example' WHERE id = 'out-1'`).run();
     db.prepare(`UPDATE sessions SET account_key = NULL, account_org = NULL WHERE id = 'ms-1'`).run();
@@ -245,12 +237,9 @@ describe('v33 self-healing repair on an already-migrated DB', () => {
 });
 
 describe('v33 repair safety', () => {
-  // NOTE: the missing-column guard that lived here was removed. It set
-  // AGENTS_SESSIONS_DB mid-file and called getDB(), but db.ts:29 captures DB_PATH at
-  // module load, so it opened the file-level fixture and `not.toThrow()` could never
-  // fail. Exercising that path needs its own test file with HOME set before import,
-  // the pattern every other migration test here uses. A test that cannot fail is worse
-  // than no test, so it is gone rather than left as false assurance.
+  // NOTE: the missing-column guard that lived here was removed. It set AGENTS_SESSIONS_DB mid-file
+  // but db.ts:29 captures DB_PATH at module load, so `not.toThrow()` could never fail; that path
+  // needs its own file with HOME set before import. A test that cannot fail is worse than none.
 
   it('repairs only broken rows, leaving an attributed row untouched', () => {
     // Re-resolving every Claude row on an unrelated trigger would downgrade a correct

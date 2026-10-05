@@ -55,10 +55,9 @@ describe('copyAppBundle: atomic install', () => {
   });
 
   it('a failed copy leaves the existing installed bundle intact (never rm-then-cp)', () => {
-    // The core regression: the old code did `rm -rf dest` BEFORE the slow `cp`,
-    // so any failure (or a concurrent reader) saw a missing/partial bundle —
-    // macOS "is damaged and can't be opened". The staged copy must never touch
-    // the live bundle until it is complete.
+    // Core regression: the old code did `rm -rf dest` before the slow `cp`, so a failure or
+    // concurrent reader saw a missing/partial bundle (macOS "is damaged"). The staged copy must
+    // not touch the live bundle until complete.
     const dir = tmpDir();
     const dest = path.join(dir, 'installed', 'Helper.app');
     copyAppBundle(makeBundle(path.join(dir, 'good'), 'v1'), dest);

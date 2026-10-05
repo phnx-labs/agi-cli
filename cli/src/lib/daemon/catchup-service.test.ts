@@ -1,9 +1,6 @@
-/**
- * CatchupService (PHNX-3608, PHNX-4116): catch-up recovery under the
- * ServiceSupervisor with a real per-tick deadline + AbortSignal, replacing the
- * bare `setInterval` the daemon used to boot/stop alongside the scheduler. Driven
- * through the real supervisor so the deadline/abort/exit-on-breach path is exercised.
- */
+/** CatchupService (PHNX-3608, PHNX-4116): catch-up recovery under the ServiceSupervisor with a real
+ * per-tick deadline and AbortSignal, replacing the bare `setInterval`. Driven through the real
+ * supervisor so deadline/abort/exit-on-breach is exercised. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

@@ -1,7 +1,5 @@
-/**
- * Real-filesystem tests for folding N per-account installations into 1 install
- * + N slots (PHNX-3940 T7). Uses the fork-private HOME from tests/setup.ts.
- */
+/** Real-filesystem tests for folding N per-account installations into 1 install + N slots
+ * (PHNX-3940 T7), using the fork-private HOME from tests/setup.ts. */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -355,10 +353,9 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     const gmailAcct = natives.find((a) => a.identityLabel === gmail)!;
     const slotBefore = fs.readdirSync(slotDir('claude', gmailAcct.id));
     expect(slotBefore.length).toBeGreaterThan(0);
-    // Canonical is the newest signed-in install, so plant a newer icloud home
-    // to hold that role: it also already has a slot, which exercises the
-    // canonical branch (binary kept, home left in place) while the older gmail
-    // home below takes the trash branch.
+    // Canonical is the newest signed-in install, so plant a newer icloud home for that role. It
+    // already has a slot, exercising the canonical branch (binary kept, home left) while the older
+    // gmail home takes the trash branch.
     const pinnedDefault = `9.9.9-${suffix}-def`;
     extraCleanupLabels.push(pinnedDefault);
     plantInstall(pinnedDefault, '9.9.9', { email: icloud });

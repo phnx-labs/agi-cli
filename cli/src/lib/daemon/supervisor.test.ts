@@ -1,12 +1,6 @@
-/**
- * ServiceSupervisor (RUSH-3193 P1, PHNX-4116): per-service error boundary,
- * per-tick deadline, and exit-on-breach — exercised against fake
- * `DaemonService`/`PeriodicService` implementations, not the real daemon-hosted
- * services. A thrown tick is recorded and the service keeps ticking; a tick (or
- * a start()/restart() lifecycle call) that breaches its deadline exits the
- * process (via an injected `exit`) so systemd/launchd restart the daemon. There
- * is no `parked` state and no in-process backoff restart.
- */
+/** ServiceSupervisor (RUSH-3193 P1, PHNX-4116) tested against fake services: a thrown tick is
+ * recorded and the service keeps ticking; a tick or start()/restart() that breaches its deadline
+ * exits the process (injected `exit`) for a systemd/launchd restart. No `parked` state. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -144,12 +138,9 @@ describe('ServiceSupervisor', () => {
   });
 
   it('a hang whose deadline elapses AFTER stopAll() does NOT exit or write a restart record (PHNX-4116)', async () => {
-    // stopAll() force-stops the in-flight tick (aborting its signal) while its
-    // deadline timer was still armed. If the hung tick ignores the abort, that
-    // timer must NOT fire exitForRestart mid-shutdown: doing so exits 70 instead
-    // of the clean 0, appends a spurious restart-ledger entry, and skips
-    // handleShutdown's cleanup. Both belts guard it — stopOne clears the timer,
-    // and runTick no-ops the timeout branch for a stopped service.
+    // stopAll() force-stops an in-flight tick while its deadline timer is armed. If the hung tick
+    // ignores the abort, the timer must not fire exitForRestart mid-shutdown (exit 70 instead of
+    // 0, a spurious restart-ledger entry, skipped cleanup). stopOne clears the timer.
     const exit = makeExit();
     const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     const hanging = new HangingService(); // id 'device-probe', deadlineMs 500
@@ -399,11 +390,9 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
   });
 
-  // RUSH-3193 P3 migrated watchdog, device-probe, self-heal, and state-dir-check
-  // onto the supervisor. The throw/hang mechanics above already exercise
-  // 'watchdog' (ThrowingService) and 'device-probe' (HangingService) by id; this
-  // closes the same two guarantees explicitly for every id P3 migrated, proving
-  // the mechanism the concrete `*-service.ts` wrappers rely on is id-agnostic.
+  // RUSH-3193 P3 moved watchdog, device-probe, self-heal and state-dir-check onto the supervisor.
+  // The throw/hang tests above cover two ids; this shows the mechanism is id-agnostic for every
+  // migrated id.
   describe('RUSH-3193 P3 migrated ids: throw keeps ticking, hang exits (PHNX-4116)', () => {
     const P3_IDS: DaemonServiceId[] = ['watchdog', 'device-probe', 'self-heal', 'state-dir-check'];
 
@@ -456,13 +445,9 @@ describe('ServiceSupervisor', () => {
     });
   });
 
-  // Review finding on PR #3037: recordSubsystemOk/Error (daemon-health.ts) are
-  // called from inside runTick's own catch block. Before the fix, a health-file
-  // write failure there (disk full, permission, or — as simulated here — the
-  // state dir replaced with an unwritable path mid-run) would throw OUT of that
-  // catch with no further handler, becoming an unhandled rejection that takes the
-  // whole daemon down — reproducing exactly the failure mode this supervisor
-  // exists to prevent.
+  // Review finding on PR #3037: recordSubsystemOk/Error (daemon-health.ts) run inside runTick's
+  // catch. A health-file write failure there (disk full, unwritable state dir) would throw out as
+  // an unhandled rejection and kill the daemon, the failure mode the supervisor exists to prevent.
   it('a health-ledger write failure never escapes runTick — the daemon and every sibling survive', async () => {
     // Point AGENTS_DAEMON_DIR at a FILE instead of a directory, so daemon-health's
     // mkdirSync/writeFileSync both fail on every recordSubsystemOk/Error call.
@@ -482,10 +467,9 @@ describe('ServiceSupervisor', () => {
     // The failing service still tracks its own failures correctly...
     expect(bad.ticks).toBeGreaterThan(0);
     expect(supervisor.health()['watchdog'].consecutiveFailures).toBeGreaterThan(0);
-    // ...and the healthy sibling was never touched by the other service's
-    // health-write failures — this is the actual regression: an escaped throw
-    // there would have killed the process before this line ever ran. A throwing
-    // tick is recoverable, so the process is never exited for it either.
+    // The healthy sibling was untouched by the other service's health-write failures; an escaped
+    // throw would have killed the process before this line. A throwing tick is recoverable, so the
+    // process is never exited for it.
     expect(healthy.ticks).toBeGreaterThan(0);
     expect(supervisor.health()['scheduler'].state).toBe('running');
     expect(exit).not.toHaveBeenCalled();

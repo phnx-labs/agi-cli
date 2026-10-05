@@ -43,10 +43,9 @@ describe('shouldBlockOffPlatform', () => {
   });
 });
 
-// The verb catalog is agents-cli's half of the contract with the standalone
-// engine: it is what `agents computer --help` lists and what the help groups
-// index. A verb dropped here silently disappears from the surface even though
-// the engine still implements it, so the catalog is pinned.
+// The verb catalog is agents-cli's half of the contract with the standalone engine: it is what
+// `agents computer --help` lists. A dropped verb silently disappears from the surface, so the
+// catalog is pinned.
 describe('COMPUTER_PASSTHROUGH_VERBS', () => {
   const names = COMPUTER_PASSTHROUGH_VERBS.map((v) => v.name);
 
@@ -104,11 +103,9 @@ describe('parseTrustFromStatusJson', () => {
   });
 });
 
-// The engine has no fleet registry of its own (PHNX-4090) — a resolved --device
-// becomes --host on the argv it actually sees. This is the descendant of the
-// regression that made `agents computer setup --device win-mini` install the
-// macOS helper locally instead of provisioning the Windows box: the selector
-// commander consumed has to be put back, now as --host.
+// The engine has no fleet registry (PHNX-4090), so a resolved --device becomes --host on its argv.
+// This descends from the regression where `agents computer setup --device win-mini` installed the
+// macOS helper locally: the selector commander consumed must be put back as --host.
 describe('withHostFlag', () => {
   it('re-inserts --host right after the verb so the engine sees the remote selector', () => {
     expect(withHostFlag(['setup'], 'ssh://Administrator@win-mini')).toEqual(['setup', '--host', 'ssh://Administrator@win-mini']);
@@ -158,12 +155,8 @@ describe('resolveDeviceHost', () => {
   });
 
   it('uses the configured ssh:// host/user, not the registry\'s own resolution, when they disagree', async () => {
-    // Regression: computer.host must actually override the connection target,
-    // not just gate scheme selection while the registry's resolveRemoteDevice
-    // answer silently wins. The forwarded --host and the fd-3 target.host must
-    // also stay byte-identical, since the engine matches its own
-    // sshTarget(parseAddress(--host)) against context.target.host to decide
-    // whether the inherited ssh identity (sshArgs) applies at all.
+    // Regression: computer.host must actually override the connection target, not just gate scheme
+    // selection while the registry's resolveRemoteDevice answer wins.
     mockGetConfigValue.mockReturnValue({ value: 'ssh://otheruser@otherhost:2222' });
     mockResolveRemoteDevice.mockResolvedValue({
       target: 'muqsit@linux-desk', user: 'muqsit', host: 'linux-desk',

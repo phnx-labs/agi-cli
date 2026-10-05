@@ -1,26 +1,11 @@
-/**
- * DaemonService contract (RUSH-3193 P1).
- *
- * Historically the daemon's background services were bare `setInterval` closures
- * inside one long `runDaemon()` (daemon.ts), sharing one event loop with no
- * per-service error boundary or deadline. A throw escaping a tick's local
- * try/catch hits the process-wide handler and kills every service; a tick that
- * hangs on an unbounded await latches its in-flight guard `true` forever and
- * silently freezes that service for the daemon's life.
- *
- * This module defines the service shape a `ServiceSupervisor` (supervisor.ts)
- * drives instead: one contract per service, owned timer, per-tick deadline,
- * and a health record the supervisor can report without the service having to
- * know it is being supervised.
- */
+/** DaemonService contract (RUSH-3193 P1). Services were bare `setInterval` closures sharing one
+ * event loop with no error boundary or deadline: a throw escaping a tick killed every service, and
+ * a hung tick froze its service. `ServiceSupervisor` drives this contract instead. */
 
 import type { DaemonServiceId } from '../daemon-services.js';
 
-/**
- * Lifecycle state a supervised service can be in. There is no `parked` state:
- * a throw keeps the service `running` (it retries on the next tick) and a
- * deadline breach exits the whole daemon for a supervised OS restart (PHNX-4116).
- */
+/** Lifecycle state of a supervised service. There is no `parked` state: a throw keeps it `running`
+ * (retry next tick); a deadline breach exits the daemon for an OS restart (PHNX-4116). */
 export type ServiceState = 'idle' | 'running' | 'stopped';
 
 /** A service's most recently observed health, as reported by the supervisor. */
@@ -51,30 +36,15 @@ export interface DaemonService {
 /** A service the supervisor ticks on a fixed interval, under a hard per-tick deadline. */
 export interface PeriodicService extends DaemonService {
   readonly intervalMs: number;
-  /**
-   * Hard cap per tick. An over-budget tick is a HANG that cannot be retried
-   * in-process (its promise may never settle), so the supervisor aborts the
-   * tick's {@link AbortSignal} and EXITS the daemon (code 70) for a supervised
-   * systemd/launchd restart (PHNX-4116) — there is no park or in-process backoff.
-   * A tick that awaits `signal` (or forwards it to its I/O) can observe the
-   * deadline and unwind cleanly before the process exits.
-   */
+  /** Hard cap per tick. An over-budget tick is a hang that cannot be retried in-process, so the
+   * supervisor aborts its AbortSignal and exits the daemon (code 70) for a supervised restart
+   * (PHNX-4116). A tick that awaits `signal` can unwind cleanly first. */
   readonly deadlineMs: number;
-  /**
-   * Delay before the FIRST tick after `start()`, in ms. Every later tick
-   * still fires on the normal `intervalMs` cadence — this only staggers the
-   * boot-time tick. Default (omitted) is 0, the supervisor's baseline
-   * immediate-first-tick behavior. Set this when a service's first-boot work
-   * needs something else (shims, PATH) to settle before it runs, rather than
-   * firing at daemon startup.
-   */
+  /** Delay in ms before the first tick after `start()`; later ticks use `intervalMs`. Default 0
+   * (immediate). Set it when first-boot work needs something else (shims, PATH) to settle. */
   readonly startupDelayMs?: number;
-  /**
-   * Run one tick. `signal` aborts when the supervisor's {@link deadlineMs}
-   * elapses (or the service is being stopped), so a well-behaved tick threads it
-   * into its awaits — `fetch(url, { signal })`, an ssh/exec spawn, a
-   * cancellable sleep — to bound its own I/O instead of leaking a runaway await.
-   */
+  /** Run one tick. `signal` aborts at the supervisor's deadlineMs or on stop; thread it into awaits
+   * (`fetch`, ssh/exec, sleeps) so I/O is bounded. */
   tick(ctx: DaemonContext, signal: AbortSignal): Promise<void>;
 }
 
@@ -87,18 +57,9 @@ function blankHealth(): ServiceHealth {
   return { state: 'idle', lastRunMs: 0, consecutiveFailures: 0 };
 }
 
-/**
- * Convenience base for a lifecycle-only (non-periodic) daemon service.
- *
- * Concrete subclasses implement `onStart` and `onStop`; the base owns the
- * `ServiceHealth` record and the `restart()` default (`stop` + `start`).
- * Unlike `BasePeriodicService` there is no tick — the supervisor just calls
- * `start()` once at boot, keeps the service marked `running`, and calls
- * `stop()` at shutdown.
- *
- * `lastRunMs` is set to the time `start()` completed, so `supervisor.health()`
- * carries a meaningful "last known healthy" timestamp even with no periodic ticks.
- */
+/** Base for a lifecycle-only (non-periodic) daemon service: subclasses implement `onStart` and
+ * `onStop`; the base owns `ServiceHealth` and a `restart()` default (stop + start). The supervisor
+ * calls `start()` once and `stop()` at shutdown. */
 export abstract class BaseDaemonService implements DaemonService {
   abstract readonly id: DaemonServiceId;
 
@@ -131,13 +92,9 @@ export abstract class BaseDaemonService implements DaemonService {
   }
 }
 
-/**
- * Convenience base for a periodic service: owns the `ServiceHealth` record so
- * concrete services only implement the three lifecycle hooks. `restart()`
- * defaults to `stop()` then `start()` against the last context passed to
- * `start()`, which is what every current-generation service needs — a
- * concrete service overrides it only if it must reuse state across a restart.
- */
+/** Base for a periodic service: owns the `ServiceHealth` record so subclasses implement only the
+ * lifecycle hooks. `restart()` defaults to `stop()` then `start()` with the last context; override
+ * only to reuse state across a restart. */
 export abstract class BasePeriodicService implements PeriodicService {
   abstract readonly id: DaemonServiceId;
   abstract readonly intervalMs: number;
@@ -148,11 +105,8 @@ export abstract class BasePeriodicService implements PeriodicService {
 
   protected abstract onStart(ctx: DaemonContext): Promise<void>;
   protected abstract onStop(): Promise<void>;
-  /**
-   * Run one tick. `signal` aborts at the supervisor's deadline (or on stop);
-   * thread it into the tick's own awaits to bound its I/O. A subclass that does
-   * no cancellable work may implement `onTick(ctx)` and ignore the second arg.
-   */
+  /** Run one tick. `signal` aborts at the supervisor's deadline or on stop; thread it into awaits.
+   * A subclass without cancellable work may ignore it. */
   protected abstract onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void>;
 
   async start(ctx: DaemonContext): Promise<void> {

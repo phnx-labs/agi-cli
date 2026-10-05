@@ -1,9 +1,5 @@
-// Installs the polyglot src/hook.sh as a SessionStart hook in each agent's
-// native config file. Idempotent — running twice does not double-register.
-//
-// CLI usage:
-//   tsx src/install-hook.ts claude
-//   tsx src/install-hook.ts claude codex cursor
+// Installs the polyglot src/hook.sh as a SessionStart hook in each agent's native config.
+// Idempotent. Usage: `tsx src/install-hook.ts claude [codex cursor ...]`.
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -220,26 +216,9 @@ async function installHermes(opts: InstallOptions): Promise<InstallResult> {
   return { agent: 'hermes', installed: true, configPath };
 }
 
-/**
- * Per-agent support for the SessionStart state-writer hook — the single source of
- * truth, replacing a hardcoded switch whose `default` lumped "not wired up yet"
- * together with "genuinely can't host it" under one opaque "not yet implemented"
- * (RUSH-2205). Keyed by {@link AgentId}, so TypeScript forces an entry for every
- * agent and the completeness test can assert each is either installable or carries
- * a specific reason. The writer needs BOTH a native SessionStart hook the tracker
- * can write AND a `hook.sh` branch that parses the harness's payload:
- *
- *   - gemini      — hard-deprecated; kept only for parsing old sessions/config.
- *   - antigravity — its native config has no SessionStart event (only
- *                   before_tool_call / after_model_call / on_loop_stop / on_error).
- *   - opencode    — SessionStart is delivered by a generated TS plugin
- *                   (session.created), not a shell-command hook this tracker emits.
- *
- * openclaw and rush are absent from this package's {@link AgentId} entirely — the
- * former has no native SessionStart hook host, the latter is the Rush app, not a
- * hook-bearing harness — so the writer cannot reach them at all. Their headless
- * rows still surface via the discovery comm-map (cli/src/lib/session/active.ts).
- */
+/** Per-agent support for the SessionStart state-writer hook: single source of truth (RUSH-2205),
+ * keyed by AgentId so TypeScript forces an entry per agent. gemini is hard-deprecated; antigravity
+ * has no SessionStart event; opencode uses a TS plugin. */
 type HookSupport =
   | { install: (opts: InstallOptions) => Promise<InstallResult> }
   | { unsupported: string };

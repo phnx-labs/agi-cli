@@ -127,11 +127,9 @@ describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
   });
 
   it('rejects a real agent the local daemon cannot fire, at add time', () => {
-    // opencode is a real, installable agent (ALL_AGENT_IDS) but has no entry in
-    // ROUTINE_AGENT_IDS/AGENT_COMMANDS, so the daemon can't build a command for
-    // it. Before this fix, validateJob only checked ALL_AGENT_IDS and let this
-    // through, and it would only fail later when the scheduled job fired
-    // (runner.ts buildJobCommand: "Unsupported agent for daemon jobs: opencode").
+    // opencode is installable (ALL_AGENT_IDS) but absent from ROUTINE_AGENT_IDS/AGENT_COMMANDS, so
+    // the daemon can't build its command. validateJob used to let it through to fail at fire time
+    // ("Unsupported agent for daemon jobs").
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'opencode' }));
     expect(errors.some((e) => e.includes("agent 'opencode' is not supported by the local routine daemon"))).toBe(true);
     expect(errors.some((e) => e.includes(ROUTINE_AGENT_IDS.join(', ')))).toBe(true);
@@ -466,10 +464,9 @@ describe('validateJob — devices', () => {
   });
 });
 
-// A routine pinned to several devices used to fire once PER device: on the live
-// fleet `security-sweep` ran at 15:30:02 on one box and 15:30:03 on the other,
-// two full agent sessions doing identical work. Ownership is now singular and
-// derived from config alone, so every daemon agrees without coordination.
+// A routine pinned to several devices used to fire once PER device (`security-sweep` ran at
+// 15:30:02 on one box and 15:30:03 on another, two sessions doing identical work). Ownership is now
+// singular and derived from config alone, so every daemon agrees without coordination.
 describe('routineOwnerDevice / single-device ownership', () => {
   it('picks one owner deterministically, whatever the list order', () => {
     expect(routineOwnerDevice({ devices: ['yosemite-s1', 'yosemite-s0'] })).toBe('yosemite-s0');
@@ -498,10 +495,9 @@ describe('routineOwnerDevice / single-device ownership', () => {
     expect(hasAmbiguousDevicePin({ devices: ['Yosemite-S0', 'yosemite-s0.tailnet.ts.net'] })).toBe(false);
   });
 
-  // The daemon's load path never calls validateJob, and ownership treats a
-  // non-array `devices` as "no pin" — so without a guard a YAML typo
-  // (`devices: yosemite-s0`, a scalar) would silently promote the routine to
-  // fleet-wide and fire it on EVERY box. Inert-and-loud beats unrestricted.
+  // The daemon's load path never calls validateJob and ownership treats a non-array `devices` as
+  // "no pin", so a YAML typo (`devices: yosemite-s0`, a scalar) would silently promote the routine
+  // to fleet-wide and fire it on EVERY box. Inert-and-loud beats unrestricted.
   it('refuses to load a routine whose devices is not a list', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-malformed-'));
     const prevHome = process.env.HOME;
@@ -615,14 +611,9 @@ describe('readJobFile fails closed on legacy singular device key', () => {
   });
 });
 
-/**
- * `dispatchedBy: 'monitor'` makes jobRunsOnThisDevice skip this device's routine
- * activation manifest (RUSH-2681). That is correct for the job a monitor
- * synthesizes at dispatch, which has no definition file — but a routine YAML
- * carrying the key would fire on every box regardless of activation, on every
- * path, since the daemon's load path never calls validateJob. Both ends of the
- * schema boundary are closed.
- */
+/** `dispatchedBy: 'monitor'` makes jobRunsOnThisDevice skip the device activation manifest
+ * (RUSH-2681), right for a monitor's synthesized job. A routine YAML carrying it would fire on
+ * every box regardless of activation, since the daemon's load path never calls validateJob. */
 describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () => {
   it('returns null for a YAML file that contains dispatchedBy:', () => {
     ensureAgentsDir();

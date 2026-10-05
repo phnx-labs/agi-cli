@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Headless offload smoke test.
-#
-# Proves `agents run` dispatches a headless agent end-to-end and prints how long
-# it took. Run it ON the offload device (e.g. the GB10 / yosemite-s0), or from a
-# laptop over ssh:  ssh muqsit@yosemite-s0 'bash -s' < bench/offload-smoke.sh
-#
-# Headless leaves no TUI / Ink render loop and no terminal-emulator repaint on
-# the host — that is the whole point of pushing fan-out work off the laptop.
+# Headless offload smoke test: proves `agents run` dispatches a headless agent end-to-end and
+# prints how long it took. Run it on the offload device (e.g. the GB10 / yosemite-s0) or over ssh:
+# `ssh muqsit@yosemite-s0 'bash -s' < bench/offload-smoke.sh`.
 set -euo pipefail
 
 AGENT="${AGENT:-claude}"

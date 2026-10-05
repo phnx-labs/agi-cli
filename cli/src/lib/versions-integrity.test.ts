@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { isMissingBinarySignature, probeSpawnSpec } from './installations/versions.js';
 
-/**
- * isMissingBinarySignature is the gate that decides whether a freshly-installed
- * agent's `--version` probe failure means "the runnable binary is missing"
- * (a gutted install we must reject) versus an ordinary nonzero exit we must
- * tolerate. Getting this wrong either lets a broken install become the default
- * (the ENOENT bug) or false-fails a healthy one.
- */
+/** isMissingBinarySignature decides whether a failed `--version` probe means the binary is missing
+ * (reject the gutted install) or an ordinary nonzero exit (tolerate). Wrong either way breaks
+ * installs (the ENOENT bug). */
 describe('isMissingBinarySignature (gutted-install detector)', () => {
   it('flags the real codex ENOENT crash (wrapper present, native binary missing)', () => {
     const blob =
@@ -34,15 +30,9 @@ describe('isMissingBinarySignature (gutted-install detector)', () => {
   });
 });
 
-/**
- * probeSpawnSpec builds the argv for the `<binary> --version` launch probe. The
- * load-bearing case: on Windows the `.cmd` runs through cmd.exe, so a spaced
- * profile path (`C:\Users\John Doe\…`) MUST be fully quoted — else cmd.exe splits
- * it at the space, emits "'C:\Users\John' is not recognized", trips
- * isMissingBinarySignature, and false-fails a HEALTHY install into a destructive
- * reinstall. The probe must compose the quoted line + empty args (never let Node
- * concatenate the path into a shell string unescaped).
- */
+/** probeSpawnSpec builds the `<binary> --version` argv. On Windows the `.cmd` runs via cmd.exe, so
+ * a spaced profile path MUST be fully quoted or a healthy install is false-failed into a
+ * destructive reinstall. */
 describe('probeSpawnSpec (launch-probe quoting)', () => {
   it('fully quotes a SPACED Windows .cmd path and empties the args array', () => {
     const spaced =

@@ -1,14 +1,6 @@
-/**
- * Migration ledger (RUSH-1977) — an append-only record of every
- * `agents sessions migrate`, so a session handed off to another machine stays
- * trackable: where it went, when, in which mode, move vs copy, and the WIP
- * branch/PR its working tree was parked on.
- *
- * Append-only JSONL under the already-synced `~/.agents/.history`, so the source
- * and target machines converge on the same trail. One line per event; a session
- * that hops A→B→C leaves three lines — that ordered history IS the lineage, which
- * is why this is an event log, not a mutable field on the session.
- */
+/** Migration ledger (RUSH-1977): append-only JSONL under the synced `~/.agents/.history` recording
+ * every `agents sessions migrate`. An event log, not a mutable field, so an A->B->C hop sequence
+ * keeps its lineage. */
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
@@ -47,11 +39,8 @@ function migrationsLedgerPath(): string {
   return path.join(homeDir(), '.agents', '.history', 'migrations.jsonl');
 }
 
-/**
- * Append one migration event. A ledger write must never break a migration that
- * otherwise succeeded, so a write failure is a visible warning, not a throw.
- * `file` is injectable for tests; production uses the default ledger path.
- */
+/** Append one migration event. A write failure warns instead of throwing so it never breaks a
+ * successful migration. `file` is injectable for tests. */
 export function recordMigration(rec: MigrationRecord, file: string = migrationsLedgerPath()): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });

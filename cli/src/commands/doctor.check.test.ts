@@ -5,17 +5,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-/**
- * Real-filesystem, real-CLI tests for `agents doctor --check` — the scriptable
- * CI drift gate (folded in from the former `agents check`). No mocks: we build a
- * temp HOME with a real installed version + real source resources, drive the
- * actual `agents sync` to snapshot the manifest, then run `agents doctor --check`
- * in a subprocess and assert the EXIT CODE.
- *
- * The contract (issue #329): a clean, in-sync install exits 0; drift (a source
- * changed since last sync) exits non-zero. This is the gap plain `agents doctor`
- * left — it returned 0 even under drift, so CI could never gate on it.
- */
+/** Real-filesystem, real-CLI tests for `agents doctor --check`, the scriptable CI drift check
+ * (issue #329). No mocks: drive the real `agents sync`, then assert the exit code. Clean exits 0;
+ * drift exits non-zero (plain `agents doctor` returned 0 under drift, so CI could not gate). */
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -178,10 +170,9 @@ describe('agents doctor --check — CI drift gate exit code', () => {
   });
 
   it('exits non-zero when a hook is present but unwired, with the version otherwise fresh', () => {
-    // The yosemite-s1 blind spot: the drift gate went through computeDrift, which
-    // only knew manifest staleness — a present-but-unwired hook read as fresh and
-    // the gate exited 0. This proves it now fails, and fails ONLY on the unwired
-    // signal (stale/never-synced/sourceBehind all zero).
+    // The yosemite-s1 blind spot: the drift check used computeDrift, which knew only manifest
+    // staleness, so a present-but-unwired hook read as fresh and exited 0. This proves it now
+    // fails, and only on the unwired signal (stale/never-synced/sourceBehind all zero).
     seedHome();
     syncSnapshot(); // 1st sync: the migrator runs here, clearing legacy agents.yaml
 

@@ -1,10 +1,6 @@
-// Cloudflare API credential glue, shared by the commands that provision or read
-// Cloudflare-backed endpoints (`agents traces`, `agents sessions backup`).
-//
-// This used to live in `lib/share/config.ts` alongside the embedded artifact
-// share engine. The share engine moved out to `@phnx-labs/artifacts-cli`
-// (PHNX-3992); `readCloudflareCreds` stayed because it is a generic Cloudflare
-// util that `traces`/`sessions backup` borrow, unrelated to sharing.
+// Cloudflare API credential glue shared by `agents traces` and `agents sessions backup`. Stayed
+// here when the share engine moved to `@phnx-labs/artifacts-cli` (PHNX-3992): it is a generic
+// Cloudflare util.
 
 import {
   bundleExistsSync as bundleExists,

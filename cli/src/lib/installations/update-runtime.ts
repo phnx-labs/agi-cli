@@ -1,40 +1,6 @@
-/**
- * The automatic-update pass (PHNX-3940): decide which installations may be
- * moved to their harness's latest release with no operator in the loop, then
- * (optionally) move them.
- *
- * Split into a PLAN (`planAutoUpdates` — the `--check` dry-run and the
- * daemon's own decision step both read it; it reads through
- * {@link listInstallationSnapshots}, which NEVER mutates disk, so a preview is
- * genuinely a preview) and a RUN (`runAutoUpdatePass`, which migrates a
- * legacy installation for real, under its own lock, and regenerates its
- * already-owned shim/versioned-alias, before driving eligible plan entries
- * through the existing `updateInstallation` transaction). Both share one
- * eligibility computation so a dry-run can never report "would update" for
- * something the real run would skip, or vice versa.
- *
- * Eligibility is deliberately narrow:
- *   - Only the `npm-package` strategy is transactional AND isolated per
- *     installation (stage into a sibling dir, launch-probe it, swap, keep the
- *     displaced tree until the swap is proven) — the shape every existing
- *     safety property in `update.ts` depends on. A global-binary or
- *     install-script harness has no reversible per-installation swap to offer,
- *     so it is reported honestly as manual/vendor-managed rather than silently
- *     skipped or, worse, "updated" via an irreversible reinstall with no
- *     operator watching.
- *   - The operator switch (`updates.auto` / `updates.<agent>.auto`,
- *     `update-policy.ts`) and the per-installation policy
- *     (`Installation.updatePolicy`) must both allow it.
- *   - The installation must not look ACTIVE right now (see
- *     {@link isInstallationLikelyActive}) — a real OS process-table scan, not
- *     just this box's session registry, so a harness launched by a bare
- *     generated shim with no session bookkeeping still defers correctly.
- *
- * The latest release for a harness is resolved ONCE per pass (not once per
- * installation) — `resolveSharedTargets` below — so a fleet with a dozen
- * pinned-to-latest Claude installations issues one npm registry read, not a
- * dozen.
- */
+/** The automatic-update pass (PHNX-3940): decide which installations may move to the latest
+ * release unattended, then move them. A read-only PLAN (also used by `--check`) and a RUN share
+ * eligibility: `npm-package` strategy, policy allows, not active. */
 
 import * as fs from 'fs';
 import { AGENTS, isAgentHardDeprecated } from '../agents.js';
@@ -101,16 +67,9 @@ function autoUpdateStrategyFor(agent: AgentId): UpdateStrategy | null {
   return strategy.id === 'npm-package' && strategy.transactional ? strategy : null;
 }
 
-/**
- * Build the record a real migration (`ensureInstallation`, `store.ts`) would
- * mint for a legacy version dir that has no `installation.json` yet — the
- * same fields (schema, label-as-release, history seeded from the directory's
- * own mtime) — but never persisted, and never carrying the real
- * `mintInstallationId()` format, so nothing downstream can mistake it for an
- * id that survived a lock-protected migration. Returns null when the
- * directory itself is gone mid-scan, tolerated the same way
- * `listInstallations` tolerates that.
- */
+/** Build the record `ensureInstallation` would mint for a legacy version dir (same fields,
+ * history from the dir's mtime) but never persisted and with an id that can't be mistaken for a
+ * real one. Null when the dir vanishes mid-scan. */
 function ephemeralInstallationSnapshot(agent: AgentId, label: string): Installation | null {
   const dir = installationDir(agent, label);
   let createdAt: string;
@@ -131,17 +90,9 @@ function ephemeralInstallationSnapshot(agent: AgentId, label: string): Installat
   };
 }
 
-/**
- * Read-only enumeration of installations — the ONLY listing {@link planAutoUpdates}
- * may use. `listInstallations` (`store.ts`) migrates a legacy version dir's
- * `installation.json` into existence via `ensureInstallation` as a side
- * effect of merely being READ, which made `agents update --check` (a
- * "preview") write to disk. A legacy dir with no persisted record yet gets an
- * {@link ephemeralInstallationSnapshot} instead — real fields, but never
- * written and never a real id. The real run migrates it for real, under this
- * installation's own lock, immediately before acting on it — see
- * {@link runAutoUpdatePass}.
- */
+/** Read-only enumeration, the only listing planAutoUpdates may use: `listInstallations` migrates
+ * a legacy record into existence as a read side effect, making `agents update --check` write to
+ * disk. A legacy dir gets an ephemeral snapshot; the real run migrates it under lock. */
 export function listInstallationSnapshots(agent: AgentId): Installation[] {
   const out: Installation[] = [];
   for (const label of listInstallationLabels(agent)) {
@@ -157,13 +108,9 @@ export function listInstallationSnapshots(agent: AgentId): Installation[] {
   return out;
 }
 
-/**
- * Build the automatic-update plan: one entry per installation of every scoped
- * agent, with eligibility, deferral, and the resolved target release already
- * computed. Never mutates anything — reads only through
- * {@link listInstallationSnapshots} — so it is genuinely safe to call from
- * `--check` or before every real pass.
- */
+/** Build the plan: one entry per installation of every scoped agent with eligibility, deferral
+ * and resolved target release computed; read-only, so safe from `--check` or before every real
+ * pass. */
 export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise<AutoUpdatePlanEntry[]> {
   const agents = (opts.agents ?? MANAGED_AGENT_IDS).filter((agent) => !isAgentHardDeprecated(agent));
   let commandLines: string[] | null = null;
@@ -254,44 +201,22 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
   return plan;
 }
 
-/**
- * Run the automatic-update pass: plan, then drive every eligible,
- * non-deferred, actually-behind entry through {@link updateInstallation}.
- * Installations update sequentially — this runs from a bounded daemon-spawned
- * child process (`harness-update-service.ts`) on its own schedule, not a
- * user-facing wait, so there is no reason to parallelize and every reason not
- * to (concurrent npm installs sharing this box's npm cache have a history of
- * corrupting each other).
- *
- * `abortIfPinnedBeforeCommit` / `abortIfAutoDisabledBeforeCommit: true` on
- * every call: this is the ONE caller for whom a policy or switch change
- * mid-staging must cancel the commit (see `update.ts`'s docblock on those
- * options) — a manual `agents update` never routes through here.
- */
+/** Run the pass: plan, then drive every eligible, behind, non-deferred entry through
+ * updateInstallation, sequentially (concurrent npm installs sharing a cache have corrupted each
+ * other). Abort-before-commit options are set so a policy change mid-staging cancels. */
 export async function runAutoUpdatePass(opts: AutoUpdatePassOptions = {}): Promise<AutoUpdatePassResult> {
-  // Cancellation is wired from IPC (the daemon's cross-platform request),
-  // channel `disconnect` (daemon gone), and SIGTERM/SIGINT — never a forced
-  // process kill (see `update-cancellation.ts`). The guard it holds is what lets
-  // `index.ts` defer its SIGINT hard-exit while a swap is in flight.
+  // Cancellation is wired from IPC (the daemon's request), channel `disconnect` and SIGTERM/SIGINT,
+  // never a forced kill (update-cancellation.ts); the guard it holds lets `index.ts` defer its
+  // SIGINT hard-exit while a swap is in flight.
   return withGuardedUpdateCancellation(async (cancelled) => {
     const result = await runAutoUpdatePassUntilCancelled(opts, cancelled);
     return { ...result, cancelled: cancelled() };
   });
 }
 
-/**
- * The hidden `__harness-update-run` verb the daemon spawns with an IPC channel
- * (dispatched in `index.ts`). Runs ONE auto-update pass with the cooperative,
- * cross-platform cancellation above, writes a compact JSON summary to stdout for
- * the daemon's log, and returns the process exit code.
- *
- * Exit code mirrors the manual `agents update --auto` path
- * (`commands/update.ts`): a per-installation error is a NORMAL tick outcome (a
- * bad vendor release) surfaced as a non-zero exit the daemon logs as a warning,
- * not a service failure. A cooperative cancel is not itself an error, so it does
- * not force a non-zero exit — the child exits on its own and the daemon observes
- * that true completion rather than reading a killed process.
- */
+/** The hidden `__harness-update-run` verb the daemon spawns with an IPC channel: runs one pass
+ * with cooperative cancellation, writes a JSON summary to stdout and returns the exit code. A
+ * per-installation error is a normal non-zero outcome; a cancel is not an error. */
 export async function runHarnessUpdateChild(): Promise<number> {
   const result = await runAutoUpdatePass({});
   const anyError = result.outcomes.some((o) => o.error);
@@ -315,10 +240,8 @@ export async function runHarnessUpdateChild(): Promise<number> {
 async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, cancelled: () => boolean): Promise<AutoUpdatePassResult> {
   const plan = await planAutoUpdates(opts);
   const outcomes: AutoUpdatePassOutcome[] = [];
-  // One shim resolves every installation of an agent dynamically at launch
-  // time, so regenerating it once per agent (not once per installation) this
-  // pass touches is enough — a second entry for the same agent would just
-  // redo `ensureShimCurrent`'s own no-op "already current" check.
+  // One shim resolves every installation of an agent at launch, so regenerating it once per agent
+  // in a pass is enough; a second entry would only repeat `ensureShimCurrent`'s no-op.
 
   for (const entry of plan) {
     if (cancelled()) break;
@@ -326,31 +249,18 @@ async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, canc
     if (!entry.targetRelease || entry.targetRelease === entry.currentRelease) continue;
 
     try {
-      // The plan above is deliberately read-only (`listInstallationSnapshots`),
-      // so a legacy version dir with no persisted `installation.json` yet is
-      // represented there by an ephemeral, never-written snapshot. A REAL
-      // pass must migrate it for real before acting on it — done here, under
-      // the SAME per-installation lock `updateInstallation` itself takes
-      // (`INSTALLATION_LOCK_OPTIONS`), so two concurrent real passes can never
-      // mint two different ids for the same legacy install. Already-migrated
-      // installations round-trip through this unchanged (`ensureInstallation`
-      // is a plain read when a record already exists).
+      // The plan is read-only, so a legacy dir without `installation.json` is an ephemeral
+      // snapshot there; a real pass migrates it first, under the same per-installation lock
+      // (INSTALLATION_LOCK_OPTIONS), so concurrent passes can't mint two ids.
       const installation = await withFileLockAsync(
         installationLockTarget(entry.agent, entry.installation.label),
         () => ensureInstallationLocked(entry.agent, entry.installation.label, entry.installation.createdAt),
         INSTALLATION_LOCK_OPTIONS,
       );
 
-      // Regenerate only what this pass already owns — the agent's generated
-      // shim, and this installation's versioned alias if it was installed
-      // isolated — using the existing upgrade-in-place helpers
-      // (`ensureShimCurrent`/`ensureVersionedAliasCurrent`). Deliberately
-      // NEVER `adoptShadowingLauncher`: that seizes a launcher this pass does
-      // not own (a user's own PATH entry, or another install's), and is an
-      // operator-triggered `agents sync` action, not something an unattended
-      // background pass may do on its own. Real-pass-only, same reason as the
-      // migration above — a `--check` preview must not touch PATH or a
-      // config-dir symlink.
+      // Regenerate only what this pass owns (the agent's shim, and the versioned alias if
+      // isolated). Never `adoptShadowingLauncher`: it seizes a launcher we don't own and is an
+      // operator action. Real-pass-only, so `--check` never touches PATH or symlinks.
       refreshOwnedLaunchers(entry.agent, installation.label);
 
       const outcome = await updateInstallation(installation, {

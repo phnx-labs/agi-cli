@@ -14,10 +14,9 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v49 shape: the PHNX-3792 mirror columns, the PHNX-3798 phoenix_id
-  // column, the PHNX-3939 last_user_message column, and the PHNX-3940 account_id
-  // column all exist; the PHNX-3797 generated-title columns deliberately do not,
-  // so getDB must add them through migrateSchema(49).
+  // Authentic v49 shape: mirror, phoenix_id, last_user_message and account_id columns exist; the
+  // PHNX-3797 generated-title columns deliberately do not, so getDB must add them through
+  // migrateSchema(49).
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (

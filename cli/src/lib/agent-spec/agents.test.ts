@@ -58,10 +58,9 @@ function makeTempDir(): string {
 }
 
 describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
-  // credentialPresence splits a credential file's existence into the per-version
-  // home and the active/global HOME. A provable logout is only when BOTH are
-  // absent. Pin AGENTS_REAL_HOME to a fresh empty dir so the "active" side never
-  // leaks the developer's real ~/.codex login.
+  // credentialPresence splits a credential file's existence into the per-version home and the
+  // active HOME; a provable logout is when both are absent. Pin AGENTS_REAL_HOME to an empty dir
+  // so the real ~/.codex login doesn't leak in.
   let prevRealHome: string | undefined;
   let activeHome: string;
   beforeEach(() => {
@@ -109,10 +108,9 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
 
   it('honors the claude alternative credential paths (.claude/.claude.json OR .claude.json)', () => {
     const versionHome = makeTempDir();
-    // A bare `.claude.json` with no oauthAccount and no `.credentials.json`/
-    // `.oauth_token` is the PHNX-3502 false-healthy shape on non-macOS — write a
-    // real setup-token alongside it so this test isolates the ALTERNATIVE-PATH
-    // concern from the credential-floor concern covered separately below.
+    // A bare `.claude.json` with no oauthAccount and no `.credentials.json`/`.oauth_token` is the
+    // PHNX-3502 false-healthy shape off macOS; write a real setup-token so this isolates the
+    // alternative-path concern.
     fs.writeFileSync(path.join(versionHome, '.claude.json'), '{}', 'utf-8');
     fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(versionHome, '.claude', '.oauth_token'), 'sk-ant-oat01-test', 'utf-8');
@@ -120,10 +118,9 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
   });
 
   it('reports perVersion=false for claude when .claude.json exists but the real credential is blank (PHNX-3502)', () => {
-    // Off macOS `.claude.json` is stale account METADATA, not the credential —
-    // a version can carry it with neither `.credentials.json` nor the
-    // `.oauth_token` setup-token file, which used to read as "present" here
-    // even though a real launch would find no usable credential at all.
+    // Off macOS `.claude.json` is stale account metadata, not the credential. A version with
+    // neither `.credentials.json` nor the `.oauth_token` file used to read as present though a
+    // launch finds no credential.
     const versionHome = makeTempDir();
     fs.writeFileSync(path.join(versionHome, '.claude.json'), '{}', 'utf-8');
     const p = credentialPresence('claude', versionHome);
@@ -204,13 +201,9 @@ afterEach(() => {
   }
 });
 
-// These prove the SOURCE passes MCP commands as an argv array (never a shell
-// string), so injection payloads like `; touch pwned` stay inert. The proof
-// relies on a `#!/bin/sh` argv-logger fake that records each arg — a POSIX-only
-// mechanism (no shebang/argv-logger on Windows, where the agent CLI is a `.cmd`
-// reached through cmd.exe). The argv-safety property itself is platform-agnostic
-// (execFileAsync with an array), but it can only be asserted via the sh fake, so
-// these run on POSIX. registerMcp's Windows spawn path is hardened in agents.ts.
+// These prove MCP commands go as an argv array, never a shell string, so payloads like `; touch
+// pwned` stay inert. The proof needs a `#!/bin/sh` argv-logger fake, so it runs on POSIX only; the
+// property itself is platform-agnostic.
 describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
   it('registers MCP servers with argv, not a shell command string', async () => {
     const dir = makeTempDir();
@@ -580,12 +573,9 @@ function writeDroidCredential(dir: string, claims: Record<string, unknown>): voi
 }
 
 describe('getAccountInfo — token-only agents (no local email)', () => {
-  // Sign-in is account-global: getAccountInfo falls back from the passed
-  // per-version home to the active config under AGENTS_REAL_HOME. Pin that to a
-  // fresh empty dir so "signed out" assertions don't leak into the developer's
-  // real ~/.factory / ~/.kimi-code / ~/.gemini login (RUSH-1318 fallback).
-  // Antigravity on macOS stores its token in the real keychain, which can't be
-  // sandboxed per-test — opt out of the probe so "signed out" is hermetic.
+  // Sign-in is account-global: getAccountInfo falls back from the per-version home to
+  // AGENTS_REAL_HOME. Pin it to an empty dir so "signed out" assertions don't see the developer's
+  // real logins (RUSH-1318). Antigravity's macOS keychain token can't be sandboxed: opt out.
   let prevRealHome: string | undefined;
   let prevNoKeychain: string | undefined;
   beforeEach(() => {
@@ -618,10 +608,9 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.signedIn).toBe(true);
     // Consumer Google OAuth exposes no email/identity claim locally.
     expect(info.email).toBeNull();
-    // A stable usage identity is derived from the refresh token so `agents
-    // view` can dedupe + cache the per-model quota bars for this login. The
-    // raw (non-JWT) refresh token is a live credential, so the key carries
-    // only its SHA-256 fingerprint — never the token itself.
+    // A stable usage identity derives from the refresh token so `agents view` can dedupe and cache
+    // quota bars. The raw refresh token is a live credential, so the key carries only its SHA-256
+    // fingerprint.
     expect(info.accountKey).toMatch(/^antigravity:sub=[0-9a-f]{16}$/);
     expect(info.accountKey).not.toContain('1//refresh');
     expect(info.usageKey).toBe(info.accountKey);
@@ -833,12 +822,9 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
 });
 
 describe('getAccountInfo — OpenCode provider credentials', () => {
-  // OpenCode stores its login at $XDG_DATA_HOME/opencode/auth.json (defaulting
-  // to ~/.local/share/opencode/auth.json on every platform). getAccountInfo
-  // checks the passed per-version home first, then $XDG_DATA_HOME, then the
-  // active real home. Pin XDG_DATA_HOME and AGENTS_REAL_HOME at fresh empty dirs
-  // so assertions can't leak into (or false-positive from) the developer's real
-  // OpenCode login, and so "signed out" is hermetic.
+  // OpenCode stores its login at $XDG_DATA_HOME/opencode/auth.json (default
+  // ~/.local/share/opencode). getAccountInfo checks the version home, then $XDG_DATA_HOME, then
+  // the real home; pin both to empty dirs so the developer's login can't leak in.
   let prevXdg: string | undefined;
   let prevRealHome: string | undefined;
   beforeEach(() => {
@@ -947,10 +933,9 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
     expect(info.signedIn).toBe(false);
   });
 
-  // An OAuth provider hands OpenCode a real access token. OpenAI's — the one
-  // `opencode auth login openai` stores — is a JWT carrying the same namespaced
-  // profile/auth claims Codex's own auth.json does, so the row can name WHO is
-  // signed in instead of only `id:<providers>`.
+  // An OAuth provider hands OpenCode a real access token. OpenAI's is a JWT with the same
+  // namespaced profile/auth claims as Codex's auth.json, so the row can name who is signed in, not
+  // only `id:<providers>`.
   function jwt(claims: Record<string, unknown>): string {
     const part = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
     return `${part({ alg: 'RS256', typ: 'JWT' })}.${part(claims)}.signature`;
@@ -1043,12 +1028,9 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
 });
 
 describe('getAccountInfo — claude credential floor (blanked .credentials.json)', () => {
-  // A failed OAuth refresh rewrites .claude/.credentials.json with empty
-  // accessToken/refreshToken and expiresAt 0, keeping only the descriptive
-  // fields — while .claude.json keeps a full oauthAccount. Before the floor,
-  // that home reported signedIn:true with usage bars, and balanced rotation kept
-  // routing runs into it; each spawn died on "OAuth session expired and could
-  // not be refreshed".
+  // A failed OAuth refresh rewrites .claude/.credentials.json with empty tokens and expiresAt 0
+  // while `.claude.json` keeps oauthAccount. Before the floor, that home reported signedIn:true
+  // and balanced rotation routed runs into it, each dying on "OAuth session expired".
   function writeClaudeHome(
     home: string,
     oauth: Record<string, unknown> | null,

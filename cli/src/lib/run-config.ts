@@ -1,9 +1,5 @@
-/**
- * Project-local `run:` config discovery.
- *
- * The user/system `agents.yaml` is read through state.ts. Project-local
- * agents.yaml files are discovered from the current working directory upward.
- */
+/** Project-local `run:` config discovery: user/system `agents.yaml` is read via state.ts, while
+ * project-local agents.yaml files are discovered from the cwd upward. */
 
 import * as fs from 'fs';
 import * as path from 'path';

@@ -1,14 +1,6 @@
-/**
- * Tests for the watchdog rotate path (one-watchdog) — in-place rotation of a
- * rate-limited session onto a healthy account/harness in the SAME tab.
- *
- * Pure pieces (limit detection, reset parsing, exit-sequence table, launch
- * command, replay text) are asserted directly. The state machine is driven
- * through runWatchdogTick with real synthetic ActiveSession inputs and the
- * runner's injectable seams (rotateGate / tuiLiveFor / newSessionIdFor /
- * injectFn), per runner.test.ts's established pattern — no live terminal, no
- * real account probe.
- */
+/** Tests for the watchdog rotate path: in-place rotation of a rate-limited session onto a healthy
+ * account/harness. Pure pieces are asserted directly; the state machine runs through
+ * runWatchdogTick with synthetic ActiveSessions and injectable seams, no live terminal. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -461,10 +453,8 @@ describe('runWatchdogTick — watchdog.rotate: off', () => {
     // The brain decided skip (synthetic decider) — crucially NOT a rotate outcome.
     expect(result.outcomes[0].decision).toBe('skip');
     expect(result.outcomes[0].reason).toBe('synthetic decider');
-    // The synthetic decider returns nudge:false → needsHuman. The session is
-    // tmux-addressable, so the ONE inject is the self-file reminder (NOT a rotate
-    // keystroke sequence). That the single call is the reminder — not the two-write
-    // rotate exit+relaunch — is the "not a rotate outcome" proof this test cares about.
+    // The synthetic decider returns nudge:false (needsHuman), so the one inject is the self-file
+    // reminder, not the two-write rotate exit+relaunch; that is the "not a rotate outcome" proof.
     expect(calls).toHaveLength(1);
     expect(calls[0].text).toMatch(/agents feed post/i);
   });

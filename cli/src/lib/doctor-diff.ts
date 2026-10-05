@@ -1,40 +1,6 @@
-/**
- * Per-version, per-cwd resource diff for `agents doctor <agent[@version]>`.
- *
- * Mirrors what `syncResourcesToVersion` writes into a version home, then
- * compares each kind back against its resolved source (project > user > system
- * > extra repos). Surfaces:
- *   - ok       — present in home, content matches resolved source
- *   - diff     — present in home, content differs from resolved source
- *   - missing  — resolved source exists, not present in home
- *   - extra    — present in home, no source in any layer
- *
- * Coverage — every kind `syncResourcesToVersion` writes is content-aware, so a
- * byte change under an unchanged name is `diff`, never a false `ok` (PHNX-3504):
- *   commands, skills, hooks, rules — full content compare with source layer.
- *   mcp        — structural compare of the home server def vs resolved source.
- *   subagents  — re-render source through the registry transform, byte-compare.
- *   workflows  — layout-aware per-harness content compare (dir tree or file).
- *   memory     — knowledge facts (~/.agents/memory/*.md), per-fact byte-compare.
- *   plugins    — per-item content compare of the marketplace mirror.
- *   permissions — per-rule compare in the harness's native vocabulary for the
- *     representable harnesses (claude/opencode/cursor/droid/openclaw); the lossy
- *     TOML/flag harnesses stay presence-only with an honest `detail`, never a
- *     faked `ok`.
- * A completeness test binds `DOCTOR_ALL_KINDS` to the writer set so a future
- * synced kind cannot silently become a blind spot. `promptcuts` is NOT a kind —
- * it is not version-scoped, so there is nothing per-home to diff.
- *
- * Intentional asymmetries (must mirror sync):
- *   - hooks ignore the project layer (`syncResourcesToVersion` skips
- *     project/.agents/hooks/ for safety).
- *   - rules/AGENTS.md is compared against the preset composition the rules writer
- *     emits (`composeRulesFromState`), re-rendered from the current `subrules/`
- *     fragments — so a fragment edit is caught even though `rules/AGENTS.md`
- *     never changed. A non-@-import home compiled by `agents refresh-rules`
- *     carries a leading `COMPILED_HEADER`, which is stripped before comparing so
- *     a header-compiled home still reconciles (the header is not source content).
- */
+/** Per-version, per-cwd resource diff for `agents doctor <agent[@version]>`: mirrors what
+ * `syncResourcesToVersion` writes and compares each kind to its resolved source (ok/diff/missing/
+ * extra). Each kind is content-aware, never a false `ok` (PHNX-3504); hooks skip project layer. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -183,19 +149,9 @@ function fileExists(p: string | null | undefined): p is string {
   return !!p && fs.existsSync(p) && !fs.lstatSync(p).isSymbolicLink();
 }
 
-/**
- * True when `filePath` is a git symlink that was CHECKED OUT AS A PLAIN TEXT
- * FILE — the shape git produces on a client without symlink support (Windows
- * without Developer Mode, `core.symlinks=false`). Such a file holds exactly the
- * link target (a relative path, no trailing newline) instead of the pointed-to
- * content. `lstat().isSymbolicLink()` is FALSE for it, so callers that only
- * skip real symlinks (e.g. the rules/permissions alias files CLAUDE.md /
- * GEMINI.md, which are symlinks to AGENTS.md in the repo) wrongly treat it as
- * an independent resource that no sync can ever reconcile (PHNX-3187). The
- * signal is unambiguous: a whole file with no newline whose entire content
- * resolves to an existing sibling path. Real markdown rule files always contain
- * newlines, so this never false-positives on genuine content.
- */
+/** True when `filePath` is a git symlink checked out as a plain text file (no symlink support,
+ * `core.symlinks=false`) holding only the link target; `lstat` misses it, so alias files looked
+ * unreconcilable (PHNX-3187). Signal: no newline and resolves to a sibling path. */
 export function isCheckedOutSymlink(filePath: string): boolean {
   let content: string;
   try {
@@ -238,11 +194,9 @@ function buildLayerBases(cwd: string, kind: DoctorKind, opts: { excludeProject?:
   return out;
 }
 
-/**
- * Resolve directory-shaped source resources of `kind` by name across the layers
- * (project > user > system > extra; first layer wins a name collision), keeping
- * only entries whose directory satisfies `predicate` (e.g. holds `AGENT.md`).
- */
+/** Resolve directory-shaped source resources of `kind` by name across layers (project > user >
+ * system > extra; first wins), keeping only entries whose directory satisfies `predicate` (e.g.
+ * holds `AGENT.md`). */
 function resolveSourceDirsByName(
   kind: DoctorKind,
   cwd: string,
@@ -291,10 +245,9 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       const name = entry.name.replace(/\.md$/, '');
-      // Directory docs (README/AGENTS/CLAUDE/GEMINI) live in commands/ but are
-      // documentation, not commands. `discoverCommands` and `resolveResource`
-      // both refuse them, so the sync writer never installs them — mirror that
-      // here or every one false-reports as a missing command no sync can clear.
+      // Directory docs (README/AGENTS/CLAUDE/GEMINI) live in commands/ but are documentation;
+      // `discoverCommands` and `resolveResource` refuse them, so the writer never installs them.
+      // Mirror that, or each false-reports as a missing command no sync can clear.
       if (isDirectoryDoc('commands', name)) continue;
       if (sourceByName.has(name)) continue;
       sourceByName.set(name, { layer: base.layer, path: path.join(base.path, entry.name), alias: base.alias });
@@ -311,16 +264,9 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
   for (const [name, src] of sourceByName) {
     seen.add(name);
     if (!installed.has(name)) {
-      // Command-as-skill agents (codex >= 0.117, kimi): when a real skill of the
-      // same name exists in the sources, the skill wins the shared
-      // `skills/<name>/` slot and `installCommandSkillToVersion` deliberately
-      // writes no command wrapper (versions.ts keeps the real skill in
-      // skillsToSync and overwrites any wrapper). The command's behavior is
-      // provided by that same-named skill, so it is NOT missing drift — reporting
-      // it so drove an unclearable "N missing" loop (PHNX-3186). Mirror the
-      // writer's skip predicate exactly: a skill source of this name whose
-      // `agents_command` marker is not this command (a real skill, or a different
-      // command).
+      // Command-as-skill agents (codex >= 0.117, kimi): a real same-named skill wins the shared
+      // `skills/<name>/` slot and no wrapper is written, so it is not missing drift (reporting it
+      // looped "N missing", PHNX-3186). Mirror the writer's skip predicate exactly.
       if (asSkill && skillSourceExists(name, skillRoots) && readSkillSourceCommandMarker(name, skillRoots) !== name) {
         rows.push({
           kind: 'commands',
@@ -380,10 +326,9 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
     });
   }
 
-  // Plugin-bundled commands (installed as `<plugin>-<cmd>`) are source-managed by
-  // their plugin, tracked under the `plugins` kind — not extras. Without this,
-  // `agents doctor` shows every plugin command (swarm-plan, code-review, …) as an
-  // unmanaged extra, mirroring the orphan false-positive the prune path had.
+  // Plugin-bundled commands (installed as `<plugin>-<cmd>`) are managed by their plugin under the
+  // `plugins` kind, not extras; otherwise doctor lists every plugin command as unmanaged, as the
+  // prune path once did for orphans.
   const pluginCommands = listPluginCommandNames();
   for (const name of installed) {
     if (seen.has(name)) continue;
@@ -406,12 +351,9 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
 // ─── skills ───────────────────────────────────────────────────────────────────
 
 function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
-  // Native ~/.agents/skills consumers (Gemini, …) read central skills directly.
-  // The orchestrator DELETES their version-home skills dir (syncResourcesToVersion)
-  // and registers no skills writer, so there is nothing in the version home to
-  // reconcile. Mirror diffVersionSkills' native gate (skills.ts) — without it
-  // every central skill is false-reported `missing` and held as unreconcilable
-  // forever (drift never clears for these agents).
+  // Native ~/.agents/skills consumers (Gemini, ...) read central skills directly: the orchestrator
+  // deletes their version-home skills dir and registers no skills writer, so there is nothing to
+  // reconcile. Mirror diffVersionSkills' native gate, else every skill reads `missing` forever.
   if (AGENTS[agent].nativeAgentsSkillsDir) return [];
   const homeDir = getVersionSkillsDir(agent, version);
   const installed = new Set(listSkillsInVersionHome(agent, version));
@@ -536,10 +478,9 @@ function listRulesNames(cwd: string, excludeProject = false): Map<string, Source
       if (!file.endsWith('.md') || file === RULES_DOC_FILENAME) continue;
       const filePath = path.join(base.path, file);
       const stat = fs.lstatSync(filePath);
-      // Skip the CLAUDE.md / GEMINI.md alias symlinks — both when they are real
-      // symlinks (posix) and when git checked them out as plain text files
-      // (Windows), so they are never mistaken for independent rule sources the
-      // writer can't produce (PHNX-3187).
+      // Skip the CLAUDE.md / GEMINI.md alias symlinks, both real symlinks (posix) and git's
+      // plain-text checkouts (Windows), so they are not mistaken for rule sources the writer
+      // cannot produce (PHNX-3187).
       if (stat.isSymbolicLink() || isCheckedOutSymlink(filePath)) continue;
       const name = file.replace(/\.md$/, '');
       if (out.has(name)) continue;
@@ -550,16 +491,9 @@ function listRulesNames(cwd: string, excludeProject = false): Map<string, Source
 }
 
 function expectedRuleContent(agent: AgentId, name: string, version: string, sourcePath: string): string | null {
-  // The instruction file (AGENTS → the agent's CLAUDE.md/GEMINI.md/AGENTS.md)
-  // is COMPOSED from `subrules/` fragments for the version's active preset —
-  // that is exactly what the rules writer emits (see
-  // staleness/writers/rules.ts → composeRulesFromState). Compare against the
-  // same rendering so a correctly-synced home file reconciles instead of being
-  // held forever against the raw `rules/AGENTS.md` (the whole-repo doc, which a
-  // preset composition deliberately never equals — system subrules don't
-  // auto-append). The `agent` is not part of the rendering (every capable agent
-  // gets identical composed bytes); it is kept for symmetry with the writer's
-  // per-agent dispatch and future per-agent presets.
+  // The instruction file is composed from `subrules/` fragments for the active preset, as the
+  // rules writer emits (`composeRulesFromState`). Compare against that rendering, not raw
+  // `rules/AGENTS.md`, which a preset never equals, or a synced home is held forever.
   if (name === 'AGENTS') {
     try {
       return composeRulesFromState({ preset: getActiveRulesPreset(agent, version) }).content;
@@ -578,11 +512,9 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
   const configDir = path.join(versionHome, agentConfigDirName(agent));
   const sourcesByName = listRulesNames(cwd, excludeProject);
 
-  // Files actually present in the version home. Include *.md siblings AND the
-  // agent's own instructions filename even when it is not *.md — cursor's rules
-  // file is `.cursorrules`, so an `.md`-only scan never saw it and reported the
-  // AGENTS rule `missing` on every sync, a phantom no reconcile could clear
-  // (PHNX-3186).
+  // Files present in the version home: include `*.md` siblings and the agent's own instructions
+  // filename even when not `.md` (cursor's is `.cursorrules`), else an `.md`-only scan reported
+  // the AGENTS rule `missing` on every sync, a phantom no reconcile could clear (PHNX-3186).
   const homeFiles = new Set<string>();
   if (fs.existsSync(configDir)) {
     for (const f of fs.readdirSync(configDir)) {
@@ -609,10 +541,9 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
       rows.push({ kind: 'rules', name, status: 'diff', source: src.layer, sourcePath: src.path, homePath });
       continue;
     }
-    // A non-@-import home compiled by `agents refresh-rules` carries a leading
-    // COMPILED_HEADER the raw preset composition does not. Strip it before the
-    // compare so a header-compiled home still reconciles — the header is
-    // agents-cli provenance, not source content (PHNX-3504).
+    // A non-@-import home compiled by `agents refresh-rules` has a leading COMPILED_HEADER that
+    // the raw composition lacks. Strip it before comparing; it is agents-cli provenance, not
+    // source content (PHNX-3504).
     if (name === 'AGENTS' && !supportsRulesImports(agent) && actual.startsWith(COMPILED_HEADER)) {
       actual = actual.slice(COMPILED_HEADER.length);
     }
@@ -626,10 +557,9 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
     });
   }
 
-  // Anything in the configDir matching an instructions filename or AGENTS.md
-  // but with no source is an extra. We only report files that look like rules
-  // — i.e. the agent's instructionsFile, plus any *.md siblings that came
-  // from the rules sync.
+  // Anything in the configDir matching an instructions filename or AGENTS.md with no source is an
+  // extra. Only report files that look like rules: the agent's instructionsFile plus `*.md`
+  // siblings from the rules sync.
   const rulesFilenames = new Set<string>();
   rulesFilenames.add(agentConfig.instructionsFile);
   for (const targetName of homeSeen) rulesFilenames.add(targetName);
@@ -792,14 +722,9 @@ function diffWorkflows(
 
 // ─── memory (knowledge facts — content-aware) ────────────────────────────────
 
-/**
- * Diff synced knowledge-fact memory (~/.agents/memory/*.md fanned into each
- * capable home under `memoryTargetDir`). Distinct from the rules-preset list
- * that overloads `AvailableResources.memory` — this reads the canonical facts
- * (`listMemoryFacts`) and the home copies bounded by the `.agents-cli-memory.json`
- * manifest, so an untracked native memory file the user authored is never
- * mistaken for drift (PHNX-3504).
- */
+/** Diff synced knowledge-fact memory (~/.agents/memory/*.md fanned into capable homes), bounded by
+ * the `.agents-cli-memory.json` manifest so a user-authored native memory file is never mistaken
+ * for drift (PHNX-3504). */
 function diffMemory(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
   if (!supports(agent, 'memory', version).ok) return [];
   const versionHome = getVersionHomePath(agent, version);
@@ -862,13 +787,9 @@ function listPluginCommandFiles(pluginDir: string): string[] {
   } catch { return []; }
 }
 
-/**
- * Describe how a version's marketplace MIRROR of a plugin diverges from its
- * central source — the detail presence-only checks miss. Surfaces a stale mirror
- * version, a Claude-invalid manifest, and (the part users care about) the
- * plugin's own skills/commands that never made it into the mirror. Returns null
- * when the mirror faithfully matches source.
- */
+/** Describe how a version's marketplace mirror of a plugin diverges from its central source, beyond
+ * presence checks: a stale mirror version, a Claude-invalid manifest, and the plugin's
+ * skills/commands missing from the mirror. Null when the mirror faithfully matches source. */
 export function describePluginDrift(central: DiscoveredPlugin, mirrorDir: string): string | null {
   if (!fs.existsSync(mirrorDir)) return 'mirror missing';
   const parts: string[] = [];
@@ -892,12 +813,9 @@ export function describePluginDrift(central: DiscoveredPlugin, mirrorDir: string
   if (missSkills.length) parts.push(`missing skill${missSkills.length > 1 ? 's' : ''}: ${missSkills.join(', ')}`);
   if (missCmds.length) parts.push(`missing command${missCmds.length > 1 ? 's' : ''}: ${missCmds.join(', ')}`);
 
-  // Content drift of a skill/command that exists in BOTH — the mirror kept the
-  // dir/file but its bytes went stale (PHNX-2955: a skill edit landed on origin
-  // and was pulled into central, but the per-version marketplace copy was never
-  // refreshed, so agents kept executing the OLD skill text while `plugins list`
-  // and `doctor` reported it `everywhere`/`ok`). Presence alone missed this; a
-  // content compare is what turns a stale mirror into a reportable `diff`.
+  // Content drift of a skill/command present in both: the mirror kept the dir/file but its bytes
+  // went stale. PHNX-2955: a skill edit reached central but the per-version marketplace copy was
+  // never refreshed, so agents ran old text while `plugins list` and `doctor` said `ok`.
   const staleSkills = centralSkills
     .filter((s) => mirrorSkills.has(s))
     .filter((s) => !dirsContentMatch(path.join(central.root, 'skills', s), path.join(mirrorDir, 'skills', s)))
@@ -953,12 +871,9 @@ interface DiffOptions {
   cwd?: string;
   /** Restrict to specific kinds; undefined = all. */
   kinds?: DoctorKind[];
-  /**
-   * Drop the project (`<cwd>/.agents/`) layer from resolution. Used by the heal
-   * path: the GLOBAL version home is only ever reconciled against user/system/
-   * extra sources — project resources are layered at launch, never synced into
-   * the global home, so counting them as "missing" there is a false gap.
-   */
+  /** Drop the project (`<cwd>/.agents/`) layer from resolution. Used by the heal path: the global
+   * version home is reconciled only against user/system/extra sources; project resources are
+   * layered at launch and never synced there, so counting them missing is a false gap. */
   excludeProject?: boolean;
 }
 
@@ -1011,10 +926,9 @@ export function diffVersionResources(
       synced.permissions,
     );
   }
-  // Subagents are version-gated (e.g. kimi >= 0.29.0). A version below the floor
-  // is never written any subagent by the sync writer, so counting the source
-  // ones as "missing" is phantom drift no sync can clear (PHNX-3186). Zero the
-  // available set when unsupported; a stale installed copy still surfaces `extra`.
+  // Subagents are version-gated (e.g. kimi >= 0.29.0): a version below the floor is never written
+  // any, so counting source ones as "missing" is phantom drift (PHNX-3186). Zero the available set
+  // when unsupported; a stale installed copy still surfaces `extra`.
   if (requested.has('subagents')) {
     empty.subagents = diffSubagents(
       agent,

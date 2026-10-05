@@ -1,11 +1,6 @@
-/**
- * Tests for git source parsing and transport validation.
- *
- * Focus: assertSafeGitTransport must reject the transports that lead to
- * clone-time RCE (ext::/fd:: remote helpers, option injection) or plaintext
- * MITM (http://, git://, file://), while still allowing https/ssh/SCP and
- * local paths. These checks are pure string logic, identical on every OS.
- */
+/** Git source parsing and transport validation. assertSafeGitTransport must reject clone-time
+ * RCE (ext::/fd:: helpers, option injection) and plaintext transports (http://, git://,
+ * file://) while allowing https/ssh/SCP and local paths. */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -120,11 +115,8 @@ describe('parseSource transport safety', () => {
   });
 });
 
-/**
- * Real-repo tests for syncRepoGit — the git-level `agents sync <repo>` engine.
- * Uses a bare "remote" plus two clones on the filesystem (no mocking): one
- * stands in for the remote author, one for the local machine being synced.
- */
+/** Real-repo tests for syncRepoGit, the engine behind `agents sync <repo>`: a bare remote plus
+ * two clones (remote author and local machine), no mocking. */
 describe('syncRepoGit', () => {
   let root: string;
   let remote: string; // bare origin
@@ -161,13 +153,9 @@ describe('syncRepoGit', () => {
     // Author clone seeds the first commit and pushes it.
     await simpleGit().clone(remote, author);
     await configIdentity(author);
-    // Commit `* -text` so every clone checks out byte-identical LF content
-    // regardless of the machine's core.autocrlf. On Windows CI (autocrlf=true)
-    // the *checkout* during `git clone` runs before configIdentity() can set
-    // autocrlf=false on the fresh clone, so the local working tree would come
-    // out as CRLF and `status.isClean()` would see a phantom modification —
-    // making syncRepoGit refuse with "uncommitted changes". A committed
-    // .gitattributes wins over autocrlf at checkout time and prevents that.
+    // Commit `* -text` so every clone checks out identical LF content regardless of core.autocrlf.
+    // On Windows CI the checkout in `git clone` runs before configIdentity() sets autocrlf=false,
+    // so the tree came out CRLF and `status.isClean()` saw a phantom modification.
     fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
@@ -181,10 +169,9 @@ describe('syncRepoGit', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  // A dirty tree used to fail the sync outright, which stranded merged upstream
-  // changes behind unrelated local files — a modified agents.yaml, a session's
-  // scratch file — indefinitely and silently. The contract is now: fast-forward
-  // past dirt the incoming commits do not touch, refuse when they do.
+  // A dirty tree used to fail the sync outright, stranding merged upstream changes behind unrelated
+  // local files. Now: fast-forward past dirt the incoming commits do not touch, refuse when they
+  // do.
 
   it('fast-forwards past dirt the incoming changes do not touch, preserving it', async () => {
     await commitFile(author, 'README.md', 'v2\n', 'upstream change');
@@ -228,17 +215,9 @@ describe('syncRepoGit', () => {
     expect(res.error).toMatch(/local commit/);
   });
 
-  // The collision guard reads status.files, not the per-category arrays. These
-  // pin the dirty states a hand-rolled union kept missing: a staged deletion, a
-  // staged rename (both ends), and a C-quoted path.
-  //
-  // Honest about their strength: they assert `success:false` plus the path, and
-  // `merge --ff-only` supplies that on its own by aborting, so gutting
-  // dirtyPathSet leaves them GREEN. The two that genuinely go red on that
-  // mutation are the ones asserting the refusal wording only dirtyTreeRefusal
-  // emits ("incoming changes touch uncommitted paths", "Blocked by local
-  // changes"). These three pin the user-visible outcome; those two pin the
-  // function.
+  // The collision guard reads status.files, not the per-category arrays; these pin dirty states a
+  // hand-rolled union missed (staged deletion, staged rename both ends, C-quoted path). Honest
+  // strength: `merge --ff-only` aborts on its own, so gutting dirtyPathSet leaves them green.
 
   it('treats a staged deletion as dirty and refuses when it collides', async () => {
     await commitFile(author, 'doomed.txt', 'v1\n', 'add doomed');
@@ -271,10 +250,9 @@ describe('syncRepoGit', () => {
   });
 
   it('refuses when a C-quoted unicode path collides — the case -z exists for', async () => {
-    // `git diff --name-only` emits this as "caf\303\251.txt" while status.files
-    // reports it raw, so without -z the two sides never string-match and the
-    // collision is missed. A space does NOT trigger quoting, so a spaced path
-    // would pass with or without the fix and prove nothing.
+    // `git diff --name-only` emits this as "caf\303\251.txt" while status.files reports it raw, so
+    // without -z the sides never match and the collision is missed. A space does not trigger
+    // quoting, so a spaced path would pass with or without the fix.
     await commitFile(author, 'caf\u00e9.txt', 'v1\n', 'add unicode');
     await simpleGit(author).push('origin', 'main');
     await syncRepoGit(local, { push: false });
@@ -293,10 +271,9 @@ describe('syncRepoGit', () => {
     expect(fs.readFileSync(path.join(local, 'caf\u00e9.txt'), 'utf8')).toBe('local edit\n');
   });
 
-  // pullRepo is the sibling entry point — `agents sync` with no repo argument
-  // reaches it, not syncRepoGit. It shares the same rule via dirtyTreeRefusal;
-  // without these, the umbrella path could regress to refusing on any dirt and
-  // the suite would stay green.
+  // pullRepo is the sibling entry point (`agents sync` with no repo argument reaches it, not
+  // syncRepoGit) and shares the rule via dirtyTreeRefusal; without these the umbrella path could
+  // regress to refusing on any dirt with the suite still green.
 
   it('pullRepo also fast-forwards past unrelated dirt', async () => {
     await commitFile(author, 'README.md', 'v2\n', 'upstream change');
@@ -353,16 +330,9 @@ describe('syncRepoGit', () => {
     expect(fs.existsSync(path.join(verify, 'up.txt'))).toBe(true);
   });
 
-  // ── Central agents.yaml: refuse-not-discard + commit-on-write (PHNX-3968) ──
-  //
-  // Central agents.yaml is AUTHORITATIVE (account labels/rows), not regenerable,
-  // and a dirty copy always equals serializeCentral(current meta) — so no byte
-  // check can tell a stranded real edit from a stale one. A dirty-and-differing
-  // central therefore REFUSES (data-safe), never discards. The acute pull trip
-  // is closed instead by commit-on-write (lib/state.ts, commitCentralConfig):
-  // every CLI central edit is committed, so the tree is clean at rest and the
-  // daemon's publish commit no longer touches agents.yaml — the incoming commit
-  // then touches only device paths and integrates cleanly.
+  // Central agents.yaml: refuse-not-discard plus commit-on-write (PHNX-3968). Central is
+  // authoritative, so a dirty differing copy refuses, never discards; commit-on-write keeps it
+  // clean.
   const HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n';
 
   it('REFUSES (does not discard) a dirty central agents.yaml the incoming commit also touches', async () => {
@@ -523,10 +493,8 @@ describe('pullRepo dirty-tree hint', () => {
   });
 });
 
-/**
- * Real-repo tests for commitAndPush + pullRepo rebase — RUSH-1454.
- * Bare remote + clones; no mocks.
- */
+/** Real-repo tests for commitAndPush and pullRepo rebase (RUSH-1454): bare remote plus clones,
+ * no mocks. */
 describe('commitAndPush (clean-but-ahead + dirty)', () => {
   let root: string;
   let remote: string;
@@ -641,10 +609,9 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
     expect(fs.existsSync(path.join(onMain, 'skills-index.json'))).toBe(false);
   });
 
-  // #1061: a target-branch push must run even from a clean, not-ahead tree —
-  // the `pushedBranch === branch` guard narrows the "already up to date"
-  // short-circuit so it never swallows a push to a new branch. No dirty file
-  // here, so `committed` is false and `ahead` is 0; the push must still land.
+  // #1061: a target-branch push must run even from a clean, not-ahead tree; the `pushedBranch ===
+  // branch` guard narrows the "already up to date" short-circuit so it never swallows a push to a
+  // new branch (`committed` false, `ahead` 0, push must still land).
   it('pushes to a new target branch from a clean, not-ahead tree', async () => {
     const pre = await simpleGit(local).status();
     expect(pre.isClean()).toBe(true);
@@ -721,10 +688,9 @@ describe('pullRepo reconciliation', () => {
     expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
   });
 
-  // RUSH-2282: a clean 1-behind checkout must fast-forward even when FETCH_HEAD
-  // is multi-entry (extra remote branches + a concurrent/leftover fetch). The
-  // old path ran `git pull --rebase` after a bare fetch and died with
-  // "Cannot rebase onto multiple branches" on fleet boxes.
+  // RUSH-2282: a clean 1-behind checkout must fast-forward even when FETCH_HEAD is multi-entry. The
+  // old bare fetch plus `git pull --rebase` died with "Cannot rebase onto multiple branches" on
+  // fleet boxes.
   it('fast-forwards a clean 1-behind checkout despite multi-entry FETCH_HEAD (RUSH-2282)', async () => {
     // Extra branches on the remote so a bare `git fetch` writes multi-line FETCH_HEAD.
     await commitFile(author, 'side.txt', 'side\n', 'side branch base');
@@ -770,11 +736,9 @@ describe('pullRepo reconciliation', () => {
     expect(after).toBe(before);
   });
 
-  // REVERSED deliberately (RUSH-2056). This asserted that divergence alone
-  // refuses the pull. That is what broke fleet distribution: --ff-only rejects
-  // ANY divergence, conflict or not, so a single local commit wedged the pull
-  // permanently with nothing actually in conflict. pullRepo now
-  // rebases, which is what its own doc has always claimed it does.
+  // Reversed deliberately (RUSH-2056): this used to assert divergence alone refuses the pull, which
+  // wedged fleet distribution since --ff-only rejects any divergence, conflicting or not. pullRepo
+  // now rebases, as its doc always claimed.
   it('rebases a diverged branch instead of refusing when nothing conflicts', async () => {
     // Upstream and local each add a DIFFERENT file → diverged, no conflict.
     await commitFile(author, 'up.txt', 'from-author\n', 'author commit');
@@ -937,10 +901,8 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     await g.addConfig('core.autocrlf', 'false');
   }
 
-  // Builds: bare remote + an `author` clone that pushes upstream, and a `local`
-  // clone that has its own unpushed commit. That is exactly the fleet shape — a
-  // local commit lands, upstream moves on, and the two diverge with NOTHING in
-  // conflict (different files).
+  // Bare remote, an `author` clone pushing upstream, and a `local` clone with its own unpushed
+  // commit: the fleet shape, diverged with nothing in conflict (different files).
   async function divergedPair(): Promise<{ local: string; author: string }> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pullrebase-'));
     tmpDirs.push(root);
@@ -950,13 +912,9 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await identity(author);
-    // Commit `* -text` BEFORE anything clones this branch, exactly as the outer
-    // fixture does. identity() sets core.autocrlf=false, but on Windows the
-    // checkout inside `git clone` has already run by then — so `local` came out
-    // CRLF while the index held LF, status.isClean() saw a phantom modification
-    // of every file, and pullRepo correctly refused with "Blocked by local
-    // changes". A committed .gitattributes wins over autocrlf at checkout time,
-    // so the clone is byte-identical on every OS.
+    // Commit `* -text` before anything clones this branch, as the outer fixture does. On Windows
+    // the checkout in `git clone` runs before identity() sets autocrlf=false, so `local` came out
+    // CRLF vs an LF index and pullRepo refused with "Blocked by local changes".
     fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     fs.writeFileSync(path.join(author, 'seed.txt'), 'seed\n');
     await simpleGit(author).add('-A');
@@ -1012,10 +970,9 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
 
     expect(res.success).toBe(false);
 
-    // The invariant --ff-only used to give for free, and the reason this suite
-    // exists: a failed pull must leave the checkout exactly as it found it.
-    // Without `rebase --abort` the repo is left detached, mid-rebase, with
-    // conflict markers written into live config files.
+    // The invariant --ff-only gave for free, and why this suite exists: a failed pull must leave
+    // the checkout as it found it. Without `rebase --abort` the repo is left detached mid-rebase
+    // with conflict markers in live config files.
     expect(after).toBe(before);
     expect(fs.existsSync(path.join(local, '.git', 'rebase-merge'))).toBe(false);
     expect(fs.existsSync(path.join(local, '.git', 'rebase-apply'))).toBe(false);
@@ -1039,15 +996,9 @@ describe('pullRepo reconciles a diverged branch by rebasing', () => {
     expect(res.error).not.toMatch(/Blocked by local changes/);
   });
 
-  // A branch may track a remote that is not named 'origin'. Hardcoding origin
-  // for the pull while comparing against `tracking` made pullRepo report SUCCESS
-  // having moved nothing — the exact "reported ok, pulled nothing" failure this
-  // change exists to remove, just narrower.
-  // A branch may track a remote that is not named 'origin'. Hardcoding origin
-  // for the pull while comparing against `tracking` made pullRepo report SUCCESS
-  // having moved nothing — the exact "reported ok, pulled nothing" failure this
-  // change exists to remove, just narrower. origin must be STALE here, or
-  // pulling it would incidentally fetch the same content and hide the bug.
+  // A branch may track a remote not named 'origin'. Hardcoding origin for the pull made pullRepo
+  // report success having moved nothing. origin must be stale here, or pulling it would
+  // incidentally fetch the same content and hide the bug.
   it('pulls the remote the branch actually tracks, not a hardcoded origin', async () => {
     const { local } = await divergedPair();
 
@@ -1232,13 +1183,9 @@ describe('pullRepo strict mode (default-branch-fast-forward)', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await configIdentity(author);
-    // Commit `* -text` before anything clones this repo. On Windows CI the
-    // *checkout* during `git clone` runs with the machine-default autocrlf
-    // (true) before configIdentity() can set autocrlf=false on the fresh clone,
-    // so the local working tree comes out as CRLF while the index holds LF and
-    // status.isClean() sees a phantom modification — making pullRepo strict
-    // mode refuse with "dirty working tree". A committed .gitattributes wins
-    // over autocrlf at checkout time and prevents that.
+    // Commit `* -text` before anything clones this repo. On Windows CI the checkout in `git clone`
+    // runs with autocrlf=true before configIdentity() sets it false, so the tree came out CRLF vs
+    // an LF index and strict-mode pullRepo refused with "dirty working tree".
     fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
@@ -1302,10 +1249,9 @@ describe('pullRepo strict mode (default-branch-fast-forward)', () => {
   });
 });
 
-// PHNX-2957: the system repo ships hooks that run as shell on tool events and
-// its checkout auto-fast-forwards from origin — so a pull from an unexpected /
-// repointed origin is remote code execution. isExpectedSystemRepoRemote is the
-// pinning predicate; tryAutoPullSystemRepo is the gated pull.
+// PHNX-2957: the system repo ships hooks that run as shell on tool events and its checkout
+// auto-fast-forwards from origin, so a pull from a repointed origin is remote code execution.
+// isExpectedSystemRepoRemote is the pinning predicate; tryAutoPullSystemRepo is the gated pull.
 describe('isExpectedSystemRepoRemote', () => {
   const SAVED = process.env.AGENTS_SYSTEM_REPO;
   afterEach(() => {

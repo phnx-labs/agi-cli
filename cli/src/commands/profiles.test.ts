@@ -16,10 +16,9 @@ import {
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
 
-// Every path here writes a profile token (`agents-cli.<provider>.token`) or an
-// account/secrets bundle, all keychain items in the standalone — on a headed
-// macOS box that is the operator's login keychain, so the file runs only where
-// the standalone routes keychain items to its encrypted file store.
+// Every path writes a profile token (`agents-cli.<provider>.token`) or a secrets bundle, all
+// keychain items in the standalone (the login keychain on a headed macOS box), so the file runs
+// only where the standalone routes keychain items to its encrypted file store.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 let TEST_ROOT: string;
@@ -56,10 +55,9 @@ describe.skipIf(!fileBacked)('addProfile — --from-secrets threading (host + mo
   });
 
   it('does not clobber the host\'s own keychain item when --from-secrets is given without --auth-provider', async () => {
-    // profileFromHostModel defaults profile.provider to the *host* id ('claude')
-    // even though no auth is attached yet — applyFromSecrets must not trust
-    // that default, or it would overwrite the host's own keychain slot instead
-    // of falling through to the bundle name.
+    // profileFromHostModel defaults profile.provider to the host id ('claude') even with no auth
+    // attached, so applyFromSecrets must not trust it, or it would overwrite the host's own
+    // keychain slot instead of using the bundle name.
     const preExisting = 'pre-existing-claude-host-token';
     setKeychainTokenSync(profileKeychainItem('claude'), preExisting);
 
@@ -91,10 +89,9 @@ describe.skipIf(!fileBacked)('addProfile — --from-secrets threading (preset pa
   });
 
   it('skips the interactive key prompt entirely — a preset that normally requires auth still succeeds non-interactively', async () => {
-    // 'kimi' is not authOptional, so without --from-secrets this would call
-    // ensureProviderToken -> promptForSecret, which throws outside a TTY. A
-    // clean resolve here proves the prompt was skipped, not just that no error
-    // surfaced for an unrelated reason.
+    // 'kimi' is not authOptional, so without --from-secrets this would call ensureProviderToken ->
+    // promptForSecret, which throws outside a TTY. A clean resolve proves the prompt was skipped,
+    // not just that an unrelated error didn't surface.
     await expect(
       addProfile('kimi', { preset: 'kimi', fromSecrets: 'prod' }, 'Harness'),
     ).resolves.toBeUndefined();

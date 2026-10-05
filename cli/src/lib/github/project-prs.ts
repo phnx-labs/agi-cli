@@ -1,34 +1,6 @@
-/**
- * `agents projects prs <PROJECT>` — every OPEN pull request across a project's
- * attached repositories, as one machine-readable envelope for AGI Menu.
- *
- * Why this exists: `agents projects status`'s `openPrs` only carries the PRs the
- * fleet's own SESSIONS opened (the session rollup), so a project's board of open
- * PRs — drafts, other people's PRs, anything not tied to a live session — is
- * invisible to it. This reads the truth straight from GitHub.
- *
- * Design constraints (see docs conventions + the contract in
- * `.agents/scratch/contracts-status.json`):
- *   - Repos come ONLY from the ProjectDef's own attached slugs
- *     ({@link projectRepoSlugs}); `--repo` is refused unless it is one of them.
- *   - The list is REST + paginated (`gh api repos/{repo}/pulls?state=open
- *     --paginate`), includes drafts, and applies NO author filter — it is the
- *     whole open board, not this user's mergeable set. REST is the budget the
- *     fleet's GraphQL poll loops do not drain (PHNX-3501).
- *   - `checks` / `reviewDecision` are null in the list; `--number N` enriches
- *     exactly that one PR against its live head SHA (checks via REST
- *     {@link rollupForSha}, reviewDecision via a single lazy `gh pr view`).
- *   - The at-a-glance CI verdict (`ciState` + `failingChecks`) on every listed
- *     PR, the PRs merged in the last 7 days, and the default branch's CI are all
- *     REST too: {@link rollupForSha} per head / merge commit / branch head. A
- *     finished rollup is cached, never permanently: a green one for an hour (a slower
- *     workflow can still register late), a red one for five minutes (re-running the
- *     failed job turns the same SHA green). Running and check-less SHAs are re-read.
- *     A failed CI read empties the affected fields and names itself in
- *     `ciError`; it never fails the repository and is never silent.
- *   - A per-repo fetch failure is reported as `repositories[].error` and flips
- *     `partial` — it is NEVER relabeled as "zero open PRs".
- */
+/** `agents projects prs <PROJECT>`: every open PR across a project's attached repos as one
+ * envelope for AGI Menu. Repos come only from the ProjectDef; reads are REST (PHNX-3501).
+ * A per-repo failure sets `repositories[].error` and `partial`, never 'zero open PRs'. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -46,14 +18,9 @@ export interface ProjectPrAuthor {
   avatarUrl: string;
 }
 
-/**
- * Where a PR sits for a project whose repository is SHARED with another project
- * (a monorepo): `project` touches the paths this project claims, `repo-wide`
- * touches no sharing project's paths (root config, CI, docs). A PR that touches
- * only another project's paths is not listed at all. Null when the repository is
- * not shared, or this project claims all of it. Claims are {@link repoPathClaims},
- * the same ownership that attributes a session's cwd.
- */
+/** Where a PR sits for a repo shared with another project (monorepo): `project` touches this
+ * project's claimed paths, `repo-wide` touches no sharing project's paths. A PR touching only
+ * another project's paths is not listed. Null when the repo is not shared or fully claimed. */
 export type ProjectPrScope = 'project' | 'repo-wide';
 
 /** GitHub's `StatusState` for a commit's combined check rollup. */
@@ -127,23 +94,15 @@ export interface ProjectRepoPrs {
   recentlyMerged: MergedPr[];
   /** The default branch head and its CI; null with `--number` or when its read failed. */
   defaultBranch: DefaultBranchCi | null;
-  /**
-   * Null when every CI and merged-PR read succeeded. Otherwise GitHub's message for
-   * the failure (a rate limit when one occurred, else the first), and the fields
-   * that read failed are null/empty rather than describing a repo with no checks.
-   */
+  /** Null when every CI and merged-PR read succeeded. Otherwise GitHub's message for the failure
+   * (a rate limit if one occurred, else the first), and the failed fields are null/empty rather
+   * than describing a repo with no checks. */
   ciError: string | null;
-  /**
-   * True when `recentlyMerged` may be missing merges: more closed PRs were updated
-   * inside the window than the {@link MERGED_PAGE_CAP} pages read. False otherwise,
-   * including with `--number`.
-   */
+  /** True when `recentlyMerged` may be missing merges: more closed PRs were updated in the
+   * window than MERGED_PAGE_CAP pages read. False otherwise, including with `--number`. */
   truncated: boolean;
-  /**
-   * The latest version tag, the merges since it, and npm's version of the package
-   * it released ({@link RepoRelease}); null with `--number`, when the repository
-   * has no version tag, or when that read failed (`releaseError` then says why).
-   */
+  /** The latest version tag, merges since it, and npm's version of the package it released; null
+   * with `--number`, with no version tag, or when the read failed (`releaseError` says why). */
   release: RepoRelease | null;
   /** Why `release` could not be read; null otherwise. */
   releaseError: string | null;
@@ -222,11 +181,8 @@ export function rowToProjectPr(row: Record<string, unknown>): ProjectPr {
   };
 }
 
-/**
- * Every OPEN PR for one repo, over REST, fully paginated, drafts included, no
- * author filter. `--paginate` follows Link headers; `--jq` streams one flattened
- * object per line so a multi-page result stays parseable.
- */
+/** Every open PR for one repo over REST, fully paginated, drafts included, no author filter.
+ * `--jq` streams one flattened object per line so multi-page results parse. */
 export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<ProjectPr[]> {
   const out = await gh([
     'api',
@@ -247,16 +203,9 @@ export async function fetchOnePr(repo: string, number: number, gh: GhExec = ghEx
   return rowToProjectPr(rows[0]);
 }
 
-/**
- * GitHub's computed review decision AND the PR's current head oid, from ONE lazy
- * `gh pr view` (GraphQL). reviewDecision is deliberately NOT REST-derived: it is
- * a branch-protection / CODEOWNERS decision REST cannot compute, and
- * approximating it could mislead a merge decision (PHNX-3501 note). `headRefOid`
- * rides the same call so the checks and the review verdict can be anchored to the
- * SAME head — a PR that advanced between the REST read and this call would
- * otherwise pair a stale check rollup with a current review. One call per
- * `--number`, never a poll loop, so it does not drain the shared GraphQL budget.
- */
+/** GitHub's reviewDecision and the PR's head oid from one lazy `gh pr view` (GraphQL).
+ * reviewDecision is not REST-derived: REST can't compute branch-protection/CODEOWNERS (PHNX-3501).
+ * The head oid anchors checks to the same head. One call per --number, never a poll loop. */
 export async function fetchReviewAndHead(
   repo: string,
   number: number,
@@ -272,12 +221,9 @@ export async function fetchReviewAndHead(
   };
 }
 
-/**
- * Enrich one PR with its checks + reviewDecision, both anchored to the SAME head.
- * `gh pr view` gives the authoritative current head oid; the check rollup is run
- * against THAT (not the possibly-staler REST head SHA), and `headSha` is updated
- * to match, so checks and reviewDecision can never describe two different heads.
- */
+/** Enriches one PR with checks and reviewDecision anchored to the same head: `gh pr view` gives
+ * the current head oid, the rollup runs against it (not the possibly staler REST head), and
+ * `headSha` is updated to match. */
 export async function enrichPr(repo: string, pr: ProjectPr, gh: GhExec = ghExec): Promise<ProjectPr> {
   const { reviewDecision, headRefOid } = await fetchReviewAndHead(repo, pr.number, gh);
   const head = headRefOid || pr.headSha;
@@ -306,12 +252,9 @@ const NO_CI: CiSummary = { ciState: null, failingChecks: [] };
 /** A REST rollup item is a check run when it carries no legacy status `state`. */
 const isCheckRun = (item: RollupItem) => item.state === undefined;
 
-/**
- * The one CI classifier, over the REST rollup {@link rollupForSha} returns, with
- * GitHub's own precedence: any failing check makes it red even while others still
- * run, and it is `ERROR` only when errored statuses are the only red. A commit with
- * no checks is null.
- */
+/** The one CI classifier over the REST rollup, with GitHub's precedence: any failing check is
+ * red even while others run, and `ERROR` only when errored statuses are the only red. A commit
+ * with no checks is null. */
 export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
   if (items.length === 0) return NO_CI;
   const failing: string[] = [];
@@ -333,37 +276,28 @@ export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
 /** Check-run conclusions that pass. */
 const PASSING_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
-/**
- * True when every check finished and passed: each check run COMPLETED as SUCCESS,
- * NEUTRAL or SKIPPED, each status SUCCESS. Such a rollup is trusted for
- * {@link PASSING_ROLLUP_TTL_MS}; a finished red one for {@link FAILING_ROLLUP_TTL_MS}.
- */
+/** True when every check finished and passed: check runs COMPLETED as SUCCESS/NEUTRAL/SKIPPED,
+ * statuses SUCCESS. Trusted for PASSING_ROLLUP_TTL_MS; a finished red one for
+ * FAILING_ROLLUP_TTL_MS. */
 export function isPassingRollup(items: readonly RollupItem[]): boolean {
   return items.length > 0 && items.every((i) => (isCheckRun(i)
     ? i.status === 'COMPLETED' && PASSING_CONCLUSIONS.has(i.conclusion ?? '')
     : i.state === 'SUCCESS'));
 }
 
-/**
- * How long a passing rollup is trusted. A workflow that starts late (a chained
- * `workflow_run`, a slow external status) can add a check to a SHA that already
- * looked green; after this long the SHA is read again and the new check shows up.
- */
+/** How long a passing rollup is trusted. A late-starting workflow (chained `workflow_run`, slow
+ * external status) can add a check to a SHA that looked green, so it is re-read after this
+ * long. */
 export const PASSING_ROLLUP_TTL_MS = 60 * 60 * 1000;
 
-/**
- * How long a finished red rollup is trusted. Re-running a failed job turns the same
- * SHA green, so a red verdict is re-read after this long; caching it at all is what
- * keeps a persistently red default branch from costing two requests per commit on
- * every refresh.
- */
+/** How long a finished red rollup is trusted. Re-running a failed job turns the same SHA green,
+ * so it is re-read after this long; caching at all keeps a persistently red default branch from
+ * costing two requests per commit per refresh. */
 export const FAILING_ROLLUP_TTL_MS = 5 * 60 * 1000;
 
-/**
- * True when no check can still change on its own: the rollup is non-empty, every
- * check run COMPLETED, and no status is pending. Only such a rollup is cached; an
- * empty one is not, because a just-pushed SHA has no checks registered yet.
- */
+/** True when no check can still change: the rollup is non-empty, every run COMPLETED, no status
+ * pending. Only such a rollup is cached; an empty one is not, since a just-pushed SHA has no
+ * checks registered yet. */
 export function isFinishedRollup(items: readonly RollupItem[]): boolean {
   return items.length > 0 && items.every((i) => (isCheckRun(i) ? i.status === 'COMPLETED' : i.state !== 'PENDING'));
 }
@@ -399,11 +333,9 @@ const isMergedDetail = (v: unknown): v is MergedDetail =>
   isRecord(v) && (v.mergedBy === null || typeof v.mergedBy === 'string') &&
   typeof v.additions === 'number' && typeof v.deletions === 'number';
 
-/**
- * A JSON map persisted under the cache dir, keyed `<slug><sep><id>`. A missing or
- * unreadable file, or an entry of the wrong shape, only costs re-reads: invalid
- * entries are dropped on load, so nothing downstream can trip over one and fail a list.
- */
+/** A JSON map persisted under the cache dir, keyed `<slug><sep><id>`. A missing or unreadable
+ * file or a wrong-shaped entry only costs re-reads: invalid entries are dropped on load so none
+ * can fail a list. */
 export class KeyedCache<T> {
   private readonly file: string;
   private readonly sep: '@' | '#';
@@ -479,10 +411,8 @@ interface CiReader {
   reads: Map<string, Promise<CiSummary>>;
 }
 
-/**
- * The CI of one commit: a finished rollup still within its TTL ({@link rollupTtlMs})
- * comes from the cache; anything else is a REST read, cached only once finished.
- */
+/** The CI of one commit: a finished rollup within its TTL (rollupTtlMs) comes from the cache;
+ * anything else is a REST read, cached only once finished. */
 function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
   if (!sha) return Promise.resolve(NO_CI);
   let read = ci.reads.get(sha);
@@ -520,13 +450,9 @@ interface MergedCandidate {
   headSha: string;
 }
 
-/**
- * PRs merged at or after `sinceMs`, newest `mergedAt` first. Closed PRs are read
- * most-recently-updated first, and a merge updates its PR, so every merge in the
- * window sits ahead of the first PR last updated before it: paging stops there.
- * Reaching {@link MERGED_PAGE_CAP} pages with the window still open stops too, and
- * reports `truncated` so the short list is not mistaken for every merge.
- */
+/** PRs merged at or after `sinceMs`, newest first. Closed PRs are read most-recently-updated
+ * first and a merge updates its PR, so paging stops at the first PR last updated before the
+ * window. Reaching MERGED_PAGE_CAP with the window open also stops and reports `truncated`. */
 export async function listRecentlyMerged(
   repo: string,
   sinceMs: number,
@@ -613,12 +539,9 @@ async function readDefaultBranch(ci: CiReader): Promise<DefaultBranchCi | null> 
   }
 }
 
-/**
- * Resolve which repositories a run targets, restricted to the project's own
- * attached repos. Slugs are canonicalized (a renamed repo lists nothing under
- * its old name — `phnx-labs/agents-cli` → `phnx-labs/agi-cli`). A `--repo` that
- * is not one of the project's attached repos (raw or canonical) is refused.
- */
+/** Resolves which repositories a run targets, restricted to the project's attached repos. Slugs
+ * are canonicalized (a renamed repo lists nothing under its old name, e.g.
+ * `phnx-labs/agents-cli` is `agi-cli`); a `--repo` not attached (raw or canonical) is refused. */
 export async function resolveTargetSlugs(
   def: ProjectDef,
   repo: string | undefined,
@@ -647,11 +570,9 @@ export async function resolveTargetSlugs(
   return [requested];
 }
 
-/**
- * Classify one PR of a shared repository by the files it changes. `own` are
- * this project's prefixes, `others` every other sharing project's. Returns
- * null when the PR belongs only to another project.
- */
+/** Classifies one PR of a shared repository by its changed files: `own` are this project's
+ * prefixes, `others` every other sharing project's. Null when it belongs only to another
+ * project. */
 export function scopeForFiles(files: readonly string[], own: readonly string[], others: readonly string[]): ProjectPrScope | null {
   const under = (prefixes: readonly string[]) => files.some((f) => prefixes.some((p) => f.startsWith(p)));
   if (under(own)) return 'project';
@@ -659,13 +580,9 @@ export function scopeForFiles(files: readonly string[], own: readonly string[], 
   return 'repo-wide';
 }
 
-/**
- * The files a PR changes, keyed by its head SHA. The list for a given head is
- * immutable, so a cached entry never goes stale; a push mints a new key. Open and
- * recently merged PRs share one key space (a PR that merges keeps its entry), and
- * pruning keeps every head the run listed, open or merged, so neither list evicts
- * the other's entries.
- */
+/** The files a PR changes, keyed by head SHA. The list for a head is immutable, so entries never
+ * go stale and a push mints a new key. Open and merged PRs share one key space and pruning
+ * keeps every head the run listed, so neither list evicts the other's entries. */
 class PrFilesCache extends KeyedCache<string[]> {
   constructor(dir: string) {
     super(dir, 'project-pr-files.json', '@', isFileList);
@@ -701,10 +618,8 @@ export async function fetchViewer(gh: GhExec = ghExec): Promise<string | null> {
   return (await fetchViewerProfile(gh))?.login ?? null;
 }
 
-/**
- * The repository paths `def` claims, keyed by canonical slug. Canonicalization
- * is cached, so this costs no network after the first run of the day.
- */
+/** The repository paths `def` claims, keyed by canonical slug. Canonicalization is cached, so
+ * there is no network cost after the first run of the day. */
 async function canonicalClaims(def: ProjectDef, gh: GhExec): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   for (const { slug, prefix } of repoPathClaims(def)) {
@@ -737,18 +652,8 @@ async function repoPeers(
   return bySlug;
 }
 
-/**
- * Build the full envelope. `number` (which the command requires alongside
- * `repo`) fetches and enriches exactly that one PR; otherwise every target
- * repo's open PRs are listed with checks/reviewDecision left null.
- *
- * `peers` are every project definition. A repository attached to more than one
- * project is scoped: when this project claims part of it ({@link repoPathClaims}),
- * its open AND recently merged lists keep only PRs that touch those paths
- * (`scope: project`) or touch no sharing project's paths (`scope: repo-wide`).
- * `ctx.nowMs` anchors the merged window; `ctx.cacheDir` holds the file-list,
- * rollup, and merged-PR caches (default: the agents cache dir).
- */
+/** Builds the full envelope. `number` (required with `repo`) enriches exactly that PR; otherwise
+ * every target repo's open PRs are listed with checks/reviewDecision null. */
 export async function buildProjectPrs(
   def: ProjectDef,
   opts: ProjectPrsOptions = {},
@@ -774,10 +679,9 @@ export async function buildProjectPrs(
   };
   const sinceMs = nowMs - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
-  // Fetch repos in PARALLEL so a native caller's overall deadline scales with the
-  // slowest repo, not the sum — a serial multi-repo walk of 30s gh calls can blow
-  // past a bounded caller timeout and lose the whole result. Repo count is small
-  // (a project's attached repos), so this is a bounded fan-out, not unbounded.
+  // Fetch repos in parallel so a native caller's deadline scales with the slowest repo, not the
+  // sum: a serial walk of 30s gh calls can blow past a bounded timeout and lose the whole result. A
+  // project's attached repos are few, so the fan-out is bounded.
   const repositories: ProjectRepoPrs[] = await Promise.all(
     slugs.map(async (slug): Promise<ProjectRepoPrs> => {
       const peer = shared.get(slug);
@@ -898,11 +802,8 @@ export async function defaultMergeMethod(repo: string, gh: GhExec = ghExec): Pro
   return method;
 }
 
-/**
- * gh prints GitHub's refusal on stderr (`gh: Required status check … (HTTP 405)`),
- * sometimes followed by a hint line (a 401 adds `try authenticating with: gh auth
- * login`). Keep the line carrying the HTTP status, else the first line.
- */
+/** gh prints GitHub's refusal on stderr (`gh: Required status check ... (HTTP 405)`), sometimes
+ * with a hint line. Keep the line carrying the HTTP status, else the first. */
 export function ghFailure(err: unknown): string {
   const stderr = (err as { stderr?: unknown })?.stderr;
   const text = typeof stderr === 'string' && stderr.trim() ? stderr : err instanceof Error ? err.message : String(err);
@@ -911,13 +812,8 @@ export function ghFailure(err: unknown): string {
   return line.replace(/^gh:\s*/, '');
 }
 
-/**
- * Merge one PR over REST (`PUT repos/{repo}/pulls/{n}/merge`), pinned to `sha`:
- * GitHub refuses with 409 when the head moved since the caller looked, so a push
- * that landed after the menu rendered is never merged unseen. Branch protection,
- * required checks and reviews are GitHub's to enforce; their refusal comes back
- * as `merged: false` with GitHub's own message.
- */
+/** Merges one PR over REST (`PUT pulls/{n}/merge`) pinned to `sha`: GitHub refuses with 409 if
+ * the head moved, so a push after the menu rendered is never merged unseen. */
 export async function mergeProjectPr(
   repo: string,
   number: number,
@@ -944,11 +840,8 @@ export async function mergeProjectPr(
   return { repo, number, method: chosen, merged: true, sha: out.trim() || null, message: 'Merged' };
 }
 
-/**
- * Refuse when the PR's live head is not the SHA the caller reviewed. `seen` may
- * be short (the menu shows 7 characters); the full live SHA is returned so the
- * write can pin to it exactly.
- */
+/** Refuses when the PR's live head is not the SHA the caller reviewed. `seen` may be short (the
+ * menu shows 7 chars); the full live SHA is returned so the write pins exactly. */
 function assertHeadIs(repo: string, number: number, live: string, seen: string): string {
   if (!live.toLowerCase().startsWith(seen.toLowerCase())) {
     throw new Error(`${repo}#${number} moved to ${live.slice(0, 7)} since you looked at ${seen.slice(0, 7)}; reload it and try again.`);
@@ -967,15 +860,9 @@ export interface ProjectPrReadyResult {
   message: string;
 }
 
-/**
- * Mark a draft PR ready for review. GitHub has no REST endpoint for this (a REST
- * `PATCH pulls/{n}` ignores `draft`), so the write is ONE GraphQL mutation,
- * `markPullRequestReadyForReview`, after a REST read for the node id and draft
- * flag. A single mutation does not drain the shared GraphQL budget the way a poll
- * loop does (root AGENTS.md, the Mutations note). With `sha`, a PR whose head
- * moved since the caller looked is refused; the mutation itself takes no SHA, so
- * that check is read-then-write, not atomic.
- */
+/** Marks a draft PR ready. GitHub has no REST endpoint (REST `PATCH pulls/{n}` ignores `draft`),
+ * so it is one GraphQL mutation, `markPullRequestReadyForReview`, after a REST read for node id
+ * and draft flag; one mutation does not drain the shared budget (root AGENTS.md). */
 export async function markProjectPrReady(
   repo: string,
   number: number,
@@ -1023,14 +910,9 @@ export interface ProjectPrReviewResult {
   message: string;
 }
 
-/**
- * Approve a PR over REST (`POST pulls/{n}/reviews`, `event=APPROVE`). GitHub
- * accepts a review on an older commit instead of refusing it, so the live head is
- * read first and a moved head is refused; the review then carries `commit_id` set
- * to that full SHA, so a push racing the call cannot turn this into an approval
- * of code the caller never saw. Approving your own PR is GitHub's to refuse
- * (HTTP 422), reported as `submitted: false`.
- */
+/** Approves a PR over REST (`POST pulls/{n}/reviews`, `event=APPROVE`). GitHub accepts reviews
+ * on older commits, so the live head is read first and a moved head refused; the review sets
+ * `commit_id` to that full SHA so a racing push cannot turn it into approval of unseen code. */
 export async function approveProjectPr(
   repo: string,
   number: number,
@@ -1067,11 +949,9 @@ export interface ProjectPrCommentResult {
   message: string;
 }
 
-/**
- * Post a conversation comment on a PR over REST (`POST issues/{n}/comments`, the
- * endpoint root AGENTS.md names instead of the GraphQL-backed `gh pr comment`).
- * A comment changes no code, so it is not pinned to a head SHA.
- */
+/** Posts a conversation comment over REST (`POST issues/{n}/comments`), the endpoint root
+ * AGENTS.md names instead of GraphQL-backed `gh pr comment`. Not pinned to a head SHA since it
+ * changes no code. */
 export async function commentOnProjectPr(
   repo: string,
   number: number,

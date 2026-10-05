@@ -36,11 +36,9 @@ import type { NativeAccountRecord } from './types.js';
 import { buildExecEnv } from './exec.js';
 import { getVersionHomePath } from './installations/versions.js';
 
-// Every bundle read/write below goes through the real standalone `secrets`
-// CLI (PHNX-3989). useFreshSecretsHome gives each test an empty SECRETS_HOME;
-// the fork defaults in tests/setup.ts pin no broker + a deterministic
-// file-store passphrase. The reserved `auth` bundle and the `__<harness>__`
-// stores are file-backed by policy, so nothing here can reach a host keychain.
+// Bundle reads/writes go through the real standalone `secrets` CLI (PHNX-3989) with an empty
+// SECRETS_HOME per test; `auth` and `__<harness>__` stores are file-backed, so no host keychain is
+// reachable.
 describe('claude-account-token (standalone secrets)', () => {
   useFreshSecretsHome();
 
@@ -87,14 +85,8 @@ describe('claude-account-token (standalone secrets)', () => {
     return home;
   }
 
-  /**
-   * Write the reserved `auth` bundle with exactly these raw keys, in the shape
-   * `seedReservedAuthToken` produces (file-backed, policy never, one raw item
-   * per key). Unlike the seed helper it accepts any key and any value, which the
-   * bare-shared-key and malformed-blob cases need, and it does NOT touch the
-   * process-local memo — it is what an out-of-band write (another process,
-   * a fleet sync) looks like to this process.
-   */
+  /** Write the reserved `auth` bundle with raw keys, like `seedReservedAuthToken` but accepting any
+   * key/value and not touching the process memo; simulates an out-of-band write. */
   function writeAuthBundle(values: Record<string, string>): void {
     const bundle: SecretsBundle = { name: 'auth', backend: 'file', policy: 'never', vars: {}, meta: {} };
     const items = new Map<string, string>();
@@ -230,10 +222,8 @@ describe('claude-account-token (standalone secrets)', () => {
 
     it('rejects a malformed captured setup-token TTY blob rather than resolving it (#1767)', () => {
       const home = makeHome('alpha@example.com');
-      // The #1767 shape: the raw `claude setup-token` TTY stream (ANSI + banner +
-      // token) stored as the credential instead of the parsed value. Injecting this
-      // as CLAUDE_CODE_OAUTH_TOKEN builds an invalid Authorization header and crashes
-      // the run — resolve must refuse it, so the caller falls back to normal login.
+      // The #1767 shape: the raw `claude setup-token` TTY stream stored as the credential. It
+      // would crash the run as an invalid header, so resolve must refuse it.
       const blob = '\x1b[?2004h\x1b[?1004hWelcome to Claude Code\n  sk-ant-oat01-abcdefghij\n';
       writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: blob });
 
@@ -345,10 +335,8 @@ describe('claude-account-token (standalone secrets)', () => {
   });
 
   describe('reserved auth backend policy (SEC-GAP-3)', () => {
-    // A keychain-backed `auth` cannot be created through the standalone at all:
-    // its write guard refuses it, so the read-side wrong-backend path is not
-    // reproducible here. What is observable is the refusal itself and that
-    // agents-cli recognizes the standalone's code as the reserved-backend error.
+    // A keychain-backed `auth` cannot be created through the standalone (its write guard refuses
+    // it); this tests the refusal and that agents-cli recognizes its error code.
     it('the standalone refuses a keychain-backed auth bundle and the refusal reads as a reserved-backend error', () => {
       const home = makeHome('alpha@example.com');
       const key = claudeAccountTokenKey('alpha@example.com');

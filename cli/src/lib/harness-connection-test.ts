@@ -1,20 +1,6 @@
-/**
- * Pre-save connection test for a custom harness (PHNX-2221).
- *
- * A harness binds a (host CLI + model + endpoint + auth) — but none of that is
- * exercised until the first real run, so a typo in the base URL, a wrong account,
- * or a model id the endpoint doesn't serve only surfaces later. This module runs
- * a genuine minimal request through the SAME resolution path a real run takes —
- * `agents run <name> "say alive in one word" --headless --timeout 60s`, which
- * flows `resolveProfileForRun` → `resolveProfileEnv` (keychain/account read) →
- * `buildExecEnv` → spawn — and classifies the result so the user learns it works
- * (or exactly why it doesn't) before committing the harness.
- *
- * There is no mock or dry-run: the profile must already be on disk (the caller
- * writes it first) because the test drives the real `agents run` argv. The
- * classifier is a pure function over the child's exit code + combined output, so
- * it is unit-tested against real stderr samples with no spawn.
- */
+/** Pre-save connection test for a custom harness (PHNX-2221): runs a real minimal `agents run`
+ * through the same resolution path a real run takes, so a bad URL, account or model surfaces
+ * before saving. No mock or dry-run: the profile must already be on disk. */
 
 import { spawnSync } from 'node:child_process';
 import { getCliLaunch } from './cli-entry.js';
@@ -34,17 +20,9 @@ export interface ConnectionTestResult {
 /** The prompt the smoke test sends — cheap, deterministic, one token of output. */
 export const CONNECTION_TEST_PROMPT = 'say alive in one word';
 
-/**
- * Classify a finished `agents run` smoke test from its exit code and combined
- * stdout+stderr. Pure — no spawn — so the mapping (pass / auth / endpoint /
- * model / unknown) is unit-tested against real provider error strings.
- *
- * Exit 0 is a pass. Otherwise the output is matched against provider-error
- * shapes in priority order: an auth rejection (401 / invalid key) is the most
- * specific, then a model-not-served error, then a transport/DNS failure; a
- * failure that matches none is `unknown` (the run failed but not in a way we can
- * name — surfaced verbatim, never swallowed).
- */
+/** Classifies a finished `agents run` smoke test from exit code and combined output. Pure. Exit
+ * 0 is a pass; otherwise matched in priority order: auth rejection (401/invalid key),
+ * model-not-served, transport/DNS. Anything else is `unknown`, surfaced verbatim, never swallowed. */
 export function classifyConnectionOutput(exitCode: number | null, output: string): ConnectionTestResult {
   if (exitCode === 0) return { ok: true, message: 'Connection test passed.' };
 
@@ -72,14 +50,9 @@ interface ConnectionTestOptions {
   killAfterMs?: number;
 }
 
-/**
- * Run the real connection test against an already-saved harness. Spawns the CLI
- * itself (`getCliLaunch`, the one self-invocation primitive) with the same argv a
- * user would type, and classifies the result. Never throws on a failed run — a
- * failure is returned as a classified {@link ConnectionTestResult}; only a spawn
- * that never produced an exit (killed by the wall-clock cap) reads as `endpoint`
- * (the request hung).
- */
+/** Runs the real connection test against a saved harness, spawning the CLI via `getCliLaunch`
+ * with the argv a user would type. Never throws on a failed run; a run killed by the
+ * wall-clock cap (hung request) reads as `endpoint`. */
 export async function runHarnessConnectionTest(name: string, opts: ConnectionTestOptions = {}): Promise<ConnectionTestResult> {
   const { command, args } = getCliLaunch([
     'run',

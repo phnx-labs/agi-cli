@@ -1,21 +1,6 @@
-/**
- * sha256 helpers for verifying downloaded release assets.
- *
- * These live in their own LEAF module — importing only `node:crypto` and
- * `node:fs` — on purpose. They used to sit in the computer subsystem's ssh-tunnel
- * module (since extracted, PHNX-4075), whose
- * own import graph reached `browser/drivers/ssh.ts` -> `browser/chrome.ts` ->
- * the in-repo secrets engine's own keychain-helper downloader, which imported
- * back into `helper-download.ts` while it was still evaluating — before
- * `EXPECTED_TEAM_ID` was bound, throwing `ReferenceError: Cannot access
- * 'EXPECTED_TEAM_ID' before initialization` for any entry point that reached
- * `helper-download.ts` first (RUSH-3113). The secrets engine that closed that
- * cycle is gone now (PHNX-3989 — the standalone `secrets` CLI downloads its own
- * helper), but the discipline that fixed it still holds: keep this module a
- * leaf, since `helper-download.ts` needs nothing beyond these two pure
- * functions and adding a local import here can reintroduce a cycle with
- * whatever imports it next.
- */
+/** sha256 helpers for verifying downloaded release assets. Keep this a LEAF module (only
+ * `node:crypto`, `node:fs`): a local import can reintroduce a cycle like the one that threw a
+ * ReferenceError on `EXPECTED_TEAM_ID` in `helper-download.ts` (RUSH-3113; PHNX-4075, PHNX-3989). */
 
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';

@@ -3,14 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// End-to-end proof of RUSH-2271: a routine's archived transcript, once it lands
-// under <runsDir>/<job>/<run>/sessions/claude/projects/, is discovered and indexed
-// as an origin='routine' session linked to its routine name + run id. Real fs, real
-// sqlite, real discovery under a throwaway HOME. No mocks.
-//
-// The archiver-side half (making the transcript LAND in that dir out of the shared
-// per-version CLAUDE_CONFIG_DIR home) is covered by runner.test.ts; this closes the
-// loop on the scan side so "routine runs land as origin='routine'" is proven whole.
+// End-to-end proof of RUSH-2271: an archived routine transcript under
+// <runsDir>/<job>/<run>/sessions/claude/projects/ is indexed as origin='routine' with its routine
+// name and run id. Real fs, sqlite, no mocks. The archiver half is covered by runner.test.ts.
 
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
@@ -59,10 +54,9 @@ describe('RUSH-2271 routine archive → origin=routine (e2e)', () => {
 
     const transcript = claudeTranscript(sessionId);
 
-    // The ORIGINAL still lives in the per-version CLAUDE_CONFIG_DIR home (where the
-    // routine wrote it, and where the ordinary scan finds it as origin='cli') — the
-    // archive is a COPY. The routine-archive scan runs after the version-home scan
-    // within one discoverSessions pass, so origin='routine' must win deterministically.
+    // The original still lives in the per-version CLAUDE_CONFIG_DIR home (origin='cli'); the
+    // archive is a copy. The routine-archive scan runs after it within one discoverSessions pass,
+    // so origin='routine' must win deterministically.
     const versionHomeProjects = path.join(
       versions.getVersionHomePath('claude', '2.1.0'), '.claude', 'projects', '-home-u-repo',
     );

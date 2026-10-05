@@ -126,10 +126,9 @@ describe('collectRepoKind', () => {
   });
 
   it('keeps the first-line description for non-Markdown resources', () => {
-    // Guarding the shebang inside readFirstProseLine was the wrong layer: it is
-    // shared by every kind, and readResourceDir enumerates .yaml/.yml/.toml/
-    // .json too, so an extension test blanked all of them. A `# comment` on
-    // line 1 of an mcp yaml is a real description and must survive.
+    // Guarding the shebang inside readFirstProseLine was the wrong layer: it is shared by every
+    // kind, and readResourceDir lists .yaml/.yml/.toml/.json too. A `# comment` on line 1 of an
+    // mcp yaml is a real description and must survive.
     const root = makeProjectRepo();
     const mcpDir = path.join(root, '.agents', 'mcp');
     fs.mkdirSync(mcpDir, { recursive: true });
@@ -238,11 +237,9 @@ describe('collectRepoKind', () => {
     const root = makeProjectRepo();
     const dir = path.join(root, '.agents', 'plugins', 'wrongtypes', '.claude-plugin');
     fs.mkdirSync(dir, { recursive: true });
-    // loadPluginManifest validates only name/version, so every other field is
-    // whatever the JSON says. `dependencies` as a bare string is the sharp one:
-    // `.length` is truthy on a string and `.join` does not exist, which threw
-    // inside pluginToItem — i.e. while BUILDING THE LIST, taking down `inspect .`,
-    // `--plugins`, and even a query for a different, valid plugin.
+    // loadPluginManifest validates only name/version; a string `dependencies` has truthy `.length`
+    // but no `.join`, which threw in pluginToItem while building the list, taking down `inspect
+    // .`, `--plugins`, and queries for other valid plugins.
     fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
       name: 'wrongtypes', version: 2, description: 'd', dependencies: 'some-plugin',
     }));
@@ -412,10 +409,9 @@ describe('summarizeHook', () => {
   });
 
   it('survives agents.yaml values whose YAML type contradicts the declared type', () => {
-    // A hook entry is an unvalidated yaml.parse cast. `events` as a scalar is
-    // neither null nor an array, so `(hook.events ?? []).join()` threw — killing
-    // bare `agents inspect <repo>`, and via the central manifest every box's
-    // `agents inspect <agent>`. Renders the scalar rather than dropping it.
+    // A hook entry is an unvalidated yaml.parse cast: a scalar `events` is neither null nor an
+    // array, so `.join()` threw, killing `agents inspect <repo>` and, via the central manifest,
+    // every box's `inspect <agent>`. Render the scalar, don't drop it.
     expect(summarizeHook({ script: 'x.sh', events: 'PreToolUse' } as unknown as ManifestHook))
       .toBe('PreToolUse');
     // Predicates reach `truncate`, which calls `.slice`.
@@ -517,11 +513,9 @@ describe('repoGitInfo', () => {
     expect(info.dirty).toBe(1);
   });
 
-  // The `$(touch …)` payload is POSIX-shell syntax and embeds an absolute
-  // sentinel path (which contains `:` / `\` on Windows — illegal in a filename),
-  // so the demonstrator runs on POSIX only. The fix (argv-form execFileSync)
-  // removes the shell on every platform, so Windows is covered by construction,
-  // not by this sh-specific probe.
+  // The `$(touch ...)` payload is POSIX syntax with an absolute sentinel path (illegal on
+  // Windows), so this runs on POSIX only. The fix (argv-form execFileSync) removes the shell
+  // everywhere, so Windows is covered by construction.
   it.skipIf(process.platform === 'win32')('treats a repo path with shell metacharacters as a literal argument', () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-inject-'));
     tempDirs.push(base);

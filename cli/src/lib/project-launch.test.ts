@@ -9,10 +9,9 @@ let SYSTEM_DIR: string;
 let PROJECT_DIR: string;
 let VERSION_HOME: string;
 
-// state.ts derives paths from $HOME captured at module load. Mock the
-// path-providing getters per-test to point at TMP_HOME; getVersionsDir feeds
-// versions.ts:getVersionHomePath transitively. Real fs writes/reads under
-// the temp dir — no business logic mocked.
+// state.ts derives paths from $HOME captured at module load, so mock the path getters per test to
+// point at TMP_HOME (getVersionsDir feeds versions.ts:getVersionHomePath). Real fs under the temp
+// dir; no business logic mocked.
 vi.mock('./state.js', () => ({
   get getPluginsDir() { return () => path.join(USER_DIR, 'plugins'); },
   get getSystemPluginsDir() { return () => path.join(SYSTEM_DIR, 'plugins'); },
@@ -83,9 +82,8 @@ afterEach(() => {
 });
 
 describe('runLaunchSync — workspace resource mirror', () => {
-  // #281: the real subagent source shape is a DIRECTORY containing AGENT.md
-  // (NOT a flat .md file). It must be flattened and WRITTEN to
-  // cwd/.claude/agents/<name>.md as a regular file — symlinking can't work
+  // #281: a real subagent source is a DIRECTORY containing AGENT.md, not a flat .md. It must be
+  // flattened and WRITTEN to cwd/.claude/agents/<name>.md as a regular file; a symlink can't work
   // because a subagent is N source files collapsed into one.
   it('writes .agents/subagents/<name>/AGENT.md -> cwd/.claude/agents/<name>.md (flattened, regular file)', () => {
     writeFile(
@@ -241,10 +239,9 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
 
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
-    // The plugin gets installed into the marketplace (visible in /plugins) but
-    // is NOT enabled. enablePluginInSettings is a no-op for exec-surface
-    // plugins when allowExecSurfaces=false, so settings.json may not exist at
-    // all in this scenario — either way is acceptable.
+    // The plugin is installed into the marketplace (visible in /plugins) but NOT enabled.
+    // enablePluginInSettings is a no-op for exec-surface plugins when allowExecSurfaces=false, so
+    // settings.json may not exist at all; either is acceptable.
     const settingsPath = path.join(VERSION_HOME, '.claude', 'settings.json');
     const settings = fs.existsSync(settingsPath)
       ? readJson(settingsPath) as { enabledPlugins?: Record<string, boolean> }
@@ -353,10 +350,9 @@ describe('runLaunchSync — project rules compile', () => {
 });
 
 describe('runLaunchSync — shim skip-fast sentinel', () => {
-  // Local-scope $HOME override: touchLaunchSentinel reads process.env.HOME
-  // directly (matches the bash shim's $HOME expansion). Scoping the override
-  // to this describe block keeps the other tests' mocked state.js paths
-  // intact — globally overriding HOME breaks their settings.json fixtures.
+  // touchLaunchSentinel reads process.env.HOME directly (like the bash shim's $HOME expansion).
+  // Scope the override to this describe block; a global HOME override breaks the other tests'
+  // settings.json fixtures built on mocked state.js paths.
   let originalHome: string | undefined;
   beforeEach(() => {
     originalHome = process.env.HOME;

@@ -1,39 +1,15 @@
-/**
- * Terminfo propagation for `agents ssh` interactive logins.
- *
- * Modern terminals (Ghostty, kitty, Alacritty, WezTerm, foot, rio) advertise a
- * custom `TERM` (e.g. `xterm-ghostty`) whose terminfo entry ships with the
- * terminal, not with the remote host's ncurses. SSH into a box that lacks the
- * entry and the session is subtly broken: wrong backspace, missing colors, a
- * garbled clear/alt-screen. Ghostty's own shell integration fixes this for the
- * bare `ssh` command, but `agents ssh` (Tailscale-relayed, spawned directly)
- * bypasses that wrapper — so we handle it here.
- *
- * Strategy: on an interactive POSIX login, if the local `$TERM` is one the
- * remote is unlikely to have, export it locally (`infocmp -x`) and compile it on
- * the remote (`tic -x -`, writes to the user's `~/.terminfo`, no sudo). This is
- * the canonical, terminal-agnostic technique.
- *
- * Two invariants keep it safe and cheap:
- *  - **Fail-safe.** Every failure is swallowed. A push that errors, times out,
- *    or hits a remote without `tic` leaves the user exactly where they are today
- *    — it never blocks or delays the actual login beyond the short push timeout.
- *  - **Cached.** A successful sync stamps a local marker keyed by host+TERM, so
- *    only the first login to each host pays the one extra round-trip; every
- *    repeat login is zero-cost.
- */
+/** Terminfo propagation for `agents ssh` interactive logins. Terminals with a custom `TERM`
+ * (Ghostty, kitty, ...) break backspace, colors, and alt-screen when the remote lacks the entry,
+ * so push `infocmp -x` into remote `tic -x -`. Failures are swallowed; success is cached per host. */
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDir } from '../state.js';
 import { type DeviceProfile } from './registry.js';
 
-/**
- * Terminfo names that ncurses ships essentially everywhere, so pushing them is
- * wasted work. Anything NOT in this set (the exotic terminal entries) is a sync
- * candidate. Kept deliberately conservative: when unsure, we push — `tic` is
- * idempotent and the result is cached.
- */
+/** Terminfo names ncurses ships essentially everywhere, so pushing them is wasted work; anything
+ * else is a sync candidate. Conservative on purpose: when unsure, push (`tic` is idempotent and
+ * the result is cached). */
 const UNIVERSAL_TERMS = new Set<string>([
   'dumb',
   'ansi',
@@ -60,12 +36,9 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 /** Cap on the push so a stalled remote can't delay the login indefinitely. */
 const PUSH_TIMEOUT_MS = 8000;
 
-/**
- * Decide whether an interactive login warrants a terminfo push. Pure so the
- * gating logic is unit-testable without touching ssh or the filesystem.
- *
- * @param interactive true only for a real login (no remote command) on a human tty.
- */
+/** Decide whether an interactive login warrants a terminfo push. Pure, so the gating is testable
+ * without ssh or the filesystem; `interactive` is true only for a real login (no remote command)
+ * on a human tty. */
 export function shouldSyncTerminfo(params: {
   term?: string;
   shell: DeviceProfile['shell'];
@@ -79,14 +52,9 @@ export function shouldSyncTerminfo(params: {
   return true;
 }
 
-/**
- * Cache key for a device: the remote **user@host**, not just the host. terminfo
- * is compiled into the *per-user* `~/.terminfo`, so `alice@box` and `bob@box`
- * are distinct sync targets — keying on host alone would let the first user's
- * stamp suppress the second user's (never-installed) sync. Mirrors
- * {@link sshTargetFor}'s user handling; falls back to the device name when the
- * address is unresolved.
- */
+/** Cache key for a device: the remote user@host, not just host. terminfo compiles into the per-user
+ * `~/.terminfo`, so `alice@box` and `bob@box` are distinct targets; host-only keying would let the
+ * first user's stamp suppress the second's sync. */
 export function terminfoHostKey(device: Pick<DeviceProfile, 'user' | 'name'>, addr: string | undefined): string {
   const host = addr ?? device.name;
   return device.user ? `${device.user}@${host}` : host;
@@ -139,14 +107,8 @@ export function localTerminfoSource(term: string): string | null {
   return null;
 }
 
-/**
- * Best-effort: ensure `device` has the terminfo entry for the local `$TERM`
- * before an interactive login. Never throws; returns whether a push succeeded
- * (false when skipped, already-cached, or failed). `sshArgs`/`sshEnv` are the
- * SAME host-key + auth options the real login uses, minus the interactive tty —
- * so a password-auth device resolves through the askpass shim without a second
- * human prompt.
- */
+/** Best-effort: ensure `device` has the terminfo entry for the local `$TERM` before an interactive
+ * login. Never throws; returns whether a push succeeded (false when skipped, cached, or failed). */
 export function syncTerminfoToDevice(opts: {
   device: DeviceProfile;
   host: string;

@@ -1,17 +1,6 @@
-/**
- * Concurrent write benchmark for the session indexer.
- *
- * Spawns N workers that simultaneously call upsertSessionsBatch with the same
- * 300-session batch. Before the fix, concurrent writes contend on the SQLite
- * write lock and some workers fail with "database is locked". After the fix,
- * workers detect already-written rows inside the transaction and skip them —
- * making all workers fast and lock-failure-free.
- *
- * Usage:
- *   bun tests/bench-concurrent-writes.ts [workers=4] [sessions=300]
- *
- * Compare before and after applying the upsertSessionsBatch ledger-recheck fix.
- */
+/** Concurrent write benchmark for the session indexer: N workers call upsertSessionsBatch with the
+ * same batch. Before the fix writers hit "database is locked"; after, they skip rows already
+ * written. Usage: bun tests/bench-concurrent-writes.ts [workers=4] [sessions=300]. */
 
 import { mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';

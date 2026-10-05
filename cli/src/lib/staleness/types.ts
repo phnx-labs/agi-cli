@@ -1,8 +1,5 @@
-/**
- * Public types for the staleness library. The on-disk manifest shape stays
- * at `v: 1` for backward compatibility — see `src/lib/sync-manifest.ts` for
- * the loader/saver that consumes these.
- */
+/** Public types for the staleness library. The on-disk manifest stays at `v: 1` for backward
+ * compatibility; see `src/lib/sync-manifest.ts` for the loader/saver. */
 
 import type { Fingerprint } from './fingerprint.js';
 
@@ -26,28 +23,20 @@ export interface RulesEntry {
   files: Record<string, FileEntry>;
 }
 
-/**
- * Permissions section — merged across layers (every group across every scope
- * contributes; same name first-wins user > system). Plus the active preset
- * env value, since preset selection changes which groups are applied.
- */
+/** Permissions section, merged across layers (every group in every scope contributes; same name
+ * first-wins user > system), plus the active preset env value, since preset selection changes
+ * which groups apply. */
 export interface PermEntry {
   groups: Record<string, FileEntry>;
   permissionPreset: string | null;
 }
 
-/**
- * Plugin entry. Plugins have a complex layout (`.claude-plugin/plugin.json`
- * plus optional `skills/`, `commands/`, ...). We fingerprint the entire
- * plugin root, same shape as a DirEntry.
- */
+/** Plugin entry. Plugins have a complex layout (`.claude-plugin/plugin.json`, optional `skills/`,
+ * `commands/`), so the entire plugin root is fingerprinted, as a DirEntry. */
 export type PluginEntry = DirEntry;
 
-/**
- * Full manifest. `workflows` and `plugins` are optional so older v1 files
- * stay loadable; missing fields are treated as empty maps — name-set diff
- * then triggers a single re-sync that fills them in.
- */
+/** Full manifest. `workflows` and `plugins` are optional so older v1 files stay loadable; missing
+ * fields read as empty maps, so the name-set diff triggers one re-sync that fills them. */
 export interface SyncManifest {
   v:          typeof MANIFEST_VERSION;
   syncedAt:   string;
@@ -62,15 +51,8 @@ export interface SyncManifest {
   subagents:  Record<string, DirEntry>;
   workflows?: Record<string, DirEntry>;
   plugins?:   Record<string, PluginEntry>;
-  /**
-   * Absolute paths of the artifacts the last full sync materialized in the
-   * version home (writer-reported — see `WriteResult.paths`). `isStale`
-   * treats a missing path as stale so a deleted resource is restored by a
-   * plain `agents sync`, not only `--force` (#2398). An absent field means a
-   * pre-upgrade manifest: it reads as stale once, and the resulting full sync
-   * establishes the baseline — same migration precedent as the optional
-   * `workflows`/`plugins` maps above. An empty array is a valid baseline
-   * ("nothing recorded to verify"), never a migration trigger.
-   */
+  /** Absolute paths of artifacts the last full sync materialized (writer-reported,
+   * `WriteResult.paths`). `isStale` treats a missing path as stale so a plain `agents sync`
+   * restores a deleted resource (#2398). Absent = old manifest (stale once); [] is valid. */
   writtenTargets?: string[];
 }

@@ -1,14 +1,6 @@
-/**
- * Tests for getResourceInventory (RUSH-2238) — the single inventory chokepoint
- * behind inspect/doctor. Asserts the four states stay distinct (capable vs
- * declared vs onDisk vs wired), that onDisk resolves through the RUSH-2237
- * absolute-hooksDir fix (grok/kimi version homes list their real hooks), that
- * unmanaged = onDisk − declared, and that getAgentResources routes its hooks
- * listing through the inventory module.
- *
- * Runs in subprocesses with HOME=testHome because the path constants in
- * state.ts capture HOME at module-load (mirrors hooks.test.ts).
- */
+/** Tests for getResourceInventory (RUSH-2238), the chokepoint behind inspect/doctor: the four states
+ * stay distinct, onDisk resolves through the RUSH-2237 absolute-hooksDir fix, unmanaged = onDisk -
+ * declared. Subprocesses with HOME=testHome since state.ts captures HOME at load. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';

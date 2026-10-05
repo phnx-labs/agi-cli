@@ -1,9 +1,6 @@
-/**
- * Skills writer — copies each selected skill directory into
- * `{agentDir}/skills/<name>/`. Agents flagged `nativeAgentsSkillsDir` (Gemini)
- * read directly from `~/.agents/skills/` and have no writer registered; the
- * sync orchestrator clears their version-home skills dir.
- */
+/** Skills writer: copies each selected skill dir into `{agentDir}/skills/<name>/`. Agents flagged
+ * `nativeAgentsSkillsDir` (Gemini) read `~/.agents/skills/` directly and have no writer; the
+ * orchestrator clears their version-home skills dir. */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# janitor.sh — daily hygiene for ci-runner-fsn1 (runs on-box via root cron).
-# Keeps the standing CI box from accumulating state: docker cruft, stale
-# runner workdirs, logs, packages. Never touches runner registration state.
-# When CI_ROOT is set (untrusted executor), also sweep finished run records
-# older than a day. Active admitted/running records are left alone.
+# janitor.sh: daily hygiene for ci-runner-fsn1 (root cron on-box): prunes docker cruft, stale
+# runner workdirs, logs, packages; never touches runner registration. With CI_ROOT set (untrusted
+# executor) it also sweeps finished run records older than a day, leaving active ones.
 set -uo pipefail
 
 log() { echo "[$(date -u +%FT%TZ)] $*"; }

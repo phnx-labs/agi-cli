@@ -1,15 +1,6 @@
-/**
- * Bounded, order-preserving async mapper.
- *
- * Runs `fn` over `items` with at most `concurrency` calls in flight, and — when
- * `staggerMs` is set — spaces successive task starts at least that far apart so
- * spawns trickle out instead of firing as one simultaneous burst. Results come
- * back in input order regardless of completion order.
- *
- * The stagger matters beyond scheduling: a burst of identical child spawns (per-PID
- * `lsof`, multi-dotfile scans) reads to behavioral EDR as recon/enumeration. A
- * bounded, spread-out spawn rate produces the same data without the burst signature.
- */
+/** Bounded, order-preserving async mapper: at most `concurrency` calls in flight and, with
+ * `staggerMs`, successive starts spaced apart. Results return in input order. Staggering matters
+ * because a burst of identical spawns (per-PID `lsof`) reads to behavioral EDR as recon. */
 interface BoundedMapOptions {
   /** Maximum number of `fn` calls running at once. Coerced to >= 1. */
   concurrency: number;

@@ -111,12 +111,9 @@ describe('resolveOutputHome', () => {
   it('fails closed — refuses EVERY output home while a live ~/.claude link is dangling (PHNX-3838)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-dangling-'));
     tempDirs.push(home);
-    // ~/.claude is a symlink to a target that does NOT exist yet. `mkdir -p` on
-    // the dangling target (under any spelling) would follow the link and create
-    // the operator's live ~/.claude. Its absent target has no realpath-canonical
-    // spelling to compare a candidate against, and the destination volume's case/
-    // Unicode collation is not knowable from the path text, so the guard refuses
-    // outright until the link is repaired — not just the aliasing path.
+    // ~/.claude is a symlink to a target that does NOT exist yet; `mkdir -p` on it would follow
+    // the link and create the operator's live ~/.claude. With no realpath-canonical spelling to
+    // compare against, the guard refuses outright until the link is repaired.
     const absentTarget = path.join(home, 'not-there-yet');
     fs.symlinkSync(absentTarget, path.join(home, '.claude'));
 

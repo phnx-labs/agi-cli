@@ -93,11 +93,9 @@ describe('MCP sync execution', () => {
     expect(() => parseMcpServerConfig(configPath)).toThrow('whitespace or control characters');
   });
 
-  // Proves installMcpServers spawns the CLI with an argv array (no shell), so a
-  // `command: "/bin/echo; touch"` payload can't execute. The proof uses a
-  // `#!/bin/sh` argv-logger fake binary, which is POSIX-only — on Windows the
-  // managed binary is a `.cmd` reached via cmd.exe. installMcpServers' Windows
-  // spawn path (.cmd resolution + shell) is hardened in mcp.ts.
+  // Proves installMcpServers spawns the CLI with an argv array (no shell), so `command:
+  // "/bin/echo; touch"` can't execute. Uses a POSIX `#!/bin/sh` fake binary; the Windows spawn
+  // path is hardened in mcp.ts.
   it.skipIf(IS_WINDOWS)('installs Codex MCP servers with argv, not a shell command string', async () => {
     const home = makeTempHome();
     const version = '0.1.0';
@@ -656,10 +654,8 @@ describe('installMcpServers handled-agent tracking', () => {
   });
 
   it.skipIf(IS_WINDOWS)('fails loud for an agent whose config format is not implemented', () => {
-    // RUSH-2677: copilot is mcp-capable but agents-cli has no verified schema for
-    // its mcp-config.json. It used to return `success: true` with an empty
-    // `applied` -- a silent no-op the sync surface could not distinguish from a
-    // real write. It must now say why it wrote nothing.
+    // RUSH-2677: copilot is mcp-capable but has no verified mcp-config.json schema. It returned
+    // `success: true` with empty `applied`, a silent no-op; it must now say why it wrote nothing.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -691,10 +687,9 @@ describe('installMcpServers handled-agent tracking', () => {
   });
 
   it.skipIf(IS_WINDOWS)('writes antigravity MCP into the shared ~/.gemini/config it actually reads', () => {
-    // RUSH-2677: antigravity resolved a config path and then fell through the
-    // writer switch entirely -- no file, no error, reported as success. It also
-    // resolved the per-version .gemini/antigravity-cli/ state dir rather than the
-    // shared .gemini/config/ agy reads MCP from.
+    // RUSH-2677: antigravity resolved a path then fell through the writer switch (no file, no
+    // error, reported success), and resolved the per-version state dir instead of the shared
+    // `.gemini/config/`.
     const home = makeTempHome();
     const version = '1.0.16';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -778,10 +773,9 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(detected).toContain('kimi-server');
   });
   it.skipIf(IS_WINDOWS)('refuses a malformed existing config instead of rewriting it from scratch', () => {
-    // The five per-agent installers this replaced parsed unguarded, so a corrupt
-    // config threw and the file survived. writeMcpConfig's catch-and-reset would
-    // have rebuilt hermes' whole config.yaml — which holds far more than MCP —
-    // from `{}`.
+    // The five per-agent installers parsed unguarded, so a corrupt config threw and the file
+    // survived. writeMcpConfig's catch-and-reset would have rebuilt hermes' whole config.yaml from
+    // `{}`.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -842,10 +836,9 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers.srv).toBeTruthy();
   });
   it.skipIf(IS_WINDOWS)('keeps a URL inside a JSONC string intact when merging opencode MCP', () => {
-    // A `//`-to-end-of-line regex eats the `//` in
-    // "$schema": "https://opencode.ai/config.json" — which every
-    // opencode-generated config carries — so the writer would refuse a config
-    // the reader parses fine. Both must use the string-literal-aware stripper.
+    // A `//`-to-end-of-line regex eats the `//` in `"$schema": "https://opencode.ai/config.json"`,
+    // so the writer would refuse a config the reader parses. Both must use the
+    // string-literal-aware stripper.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');

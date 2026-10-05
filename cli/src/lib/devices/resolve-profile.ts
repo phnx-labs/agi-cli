@@ -1,20 +1,6 @@
-/**
- * The effective device profile: the registry's discovery record overlaid with
- * the operator's config (the per-device doc `devices/<name>/agents.yaml`
- * `config:` block over central `fleet.defaults.config`).
- *
- * The registry (`~/.agents/.history/devices/registry.json`) stays the
- * discovery cache — address, Tailscale snapshot, reachability, createdAt. The
- * central config owns the operator-set profile fields: `ssh.user`, `ssh.auth`,
- * `ssh.bundle`, `ssh.bundle-key`, `ssh.identity-file`, and `platform`. A config
- * value WINS over the registry field so `agents devices config <name>` takes
- * effect from any box without re-discovery; an unset key falls back to the
- * registry value.
- *
- * Sync and cheap (readMeta is cached), so dial/render call sites apply it at
- * their entry point rather than threading a resolved profile through every
- * signature. Resolving an already-resolved profile is idempotent.
- */
+/** The effective device profile: the registry's discovery record overlaid with operator config
+ * (per-device `config:` over `fleet.defaults.config`). Config wins for ssh.* and `platform` so
+ * `agents devices config` works from any box; unset keys fall back to the registry. Idempotent. */
 
 import {
   shellForPlatform,

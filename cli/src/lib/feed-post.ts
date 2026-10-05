@@ -1,18 +1,6 @@
-/**
- * Agent status posts — deliberate progress messages into the activity stream.
- *
- * Surface: `agents feed post --title <subject> <body>` (agent-callable; humans
- * watch via `agents feed` / `agents events --module activity`).
- *
- * Identity is automatic: session id, agent, cwd, launch/pid/tmux provenance
- * are resolved from the process environment and the per-pid launch registry
- * (`lib/session/pid-registry.ts`). The agent authors a short title + body —
- * no domain-specific flags (tickets, URLs, tracks). Phone `{message}` ends with
- * a "Sent from agent/session on host" footer.
- *
- * Storage: append-only activity log as a `status.posted` milestone. Does NOT
- * open a feed block (blocks remain "needs you" state only).
- */
+/** Agent status posts: `agents feed post --title <subject> <body>`, with session identity
+ * resolved from env and the pid registry. Stored as an append-only `status.posted` milestone;
+ * does not open a feed block. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
@@ -38,10 +26,8 @@ export const STATUS_POST_MAX_CHARS = 500;
 export const STATUS_TITLE_MAX_CHARS = 60;
 
 interface FeedPostInput {
-  /**
-   * Short subject (required for new posts). ~4–5 words. Phone broadcasts put
-   * this on the first line so a scan names the topic before the body.
-   */
+  /** Short subject (required for new posts), about 4-5 words; phone broadcasts put it on the
+   * first line. */
   title: string;
   /** Body text (required). Domain-agnostic free text — what happened / the ask. */
   text: string;
@@ -49,23 +35,12 @@ interface FeedPostInput {
   sessionId?: string;
   /** Generic artifacts to attach: local paths (copied for durability) or URLs. */
   attach?: string[];
-  /**
-   * The agent is STUCK, not merely reporting. Writes `status.blocked` instead of
-   * `status.posted`, and the caller pairs it with an OpenBlock so the ask stays
-   * answerable until someone resolves it.
-   *
-   * This is a state, not a volume: a blocked post is always broadcast at
-   * `important`, so an agent never has to decide the level as well. One thing to
-   * say is what makes the habit stick.
-   */
+  /** The agent is STUCK, not just reporting: writes `status.blocked` and the caller pairs it
+   * with an OpenBlock. Always broadcast at `important`, so the agent never decides the level. */
   blocked?: boolean;
   /** Override activity root (tests). */
   activityRoot?: string;
-  /**
-   * Override the attachments store root (tests). Local files are copied under
-   * `<attachmentsRoot>/<sessionId>/<updateId>/`. Defaults to
-   * `~/.agents/.history/attachments`.
-   */
+  /** Overrides the attachments store root (tests). Defaults to `~/.agents/.history/attachments`. */
   attachmentsRoot?: string;
   /** Override env for identity resolution (tests). */
   env?: NodeJS.ProcessEnv;
@@ -73,11 +48,8 @@ interface FeedPostInput {
   cwd?: string;
   /** Fixed timestamp (tests). */
   ts?: string;
-  /**
-   * Starting pid for registry ancestor walk (defaults to process.ppid so the
-   * walk begins at the parent of this CLI process — usually the agent/shell).
-   * Tests inject a fake pid here.
-   */
+  /** Starting pid for the registry ancestor walk (defaults to process.ppid). Tests inject a fake
+   * pid. */
   startPid?: number;
   /** Override parent-pid lookup (tests). */
   getParentPid?: (pid: number) => number | undefined;
@@ -104,13 +76,9 @@ export interface PostIdentity {
   tmuxPane?: string;
 }
 
-/**
- * Resolve who is posting. Order:
- *  1. Explicit --session flag
- *  2. Env: AGENT_SESSION_ID / AGENTS_SESSION_ID / basename(AGENTS_MAILBOX_DIR)
- *  3. Env AGENT_LAUNCH_ID → match in pid registry or activity index
- *  4. Walk parent PIDs from startPid (default process.ppid) through by-pid registry
- */
+/** Resolves who is posting, in order: --session flag;
+ * AGENT_SESSION_ID/AGENTS_SESSION_ID/AGENTS_MAILBOX_DIR env; AGENT_LAUNCH_ID lookup; then a
+ * parent-pid walk through the by-pid registry. */
 export function resolvePostIdentity(
   input: Pick<FeedPostInput, 'sessionId' | 'env' | 'cwd' | 'activityRoot' | 'startPid' | 'getParentPid' | 'readEntry' | 'listEntries'>,
 ): PostIdentity | undefined {
@@ -277,14 +245,9 @@ function newUpdateId(ts: string): string {
   return `${stamp}-${rand}`;
 }
 
-/**
- * Turn one `--attach` token into an {@link Attachment}. Remote URLs become
- * `link` (or a media kind when the extension is unambiguous). Local files are
- * classified by extension and, when `copyRoot` is set, copied under
- * `<copyRoot>/<sessionId>/<updateId>/<basename>` so the link survives a worktree
- * delete — the stored `href` then points at the durable copy. A missing local
- * file is dropped (fail-open) rather than throwing.
- */
+/** Turns one `--attach` token into an Attachment: URLs become links, local files are classified
+ * by extension and copied under `copyRoot` so the link survives a worktree delete. A missing
+ * local file is dropped rather than thrown. */
 export function buildAttachment(
   token: string,
   ctx: { copyRoot?: string; sessionId: string; updateId: string },
@@ -346,10 +309,7 @@ export function buildAttachments(
   return out;
 }
 
-/**
- * Collapse whitespace and strip em/en dashes (house rule: no em-dashes in
- * agent-authored outbound copy — phones and plain text render them poorly).
- */
+/** Collapses whitespace and strips em/en dashes from agent-authored outbound copy (house rule). */
 export function scrubDashes(text: string): string {
   return text
     .replace(/\u2014/g, ' - ') // em dash —
@@ -373,10 +333,8 @@ export function normalizeStatusTitle(title: string): string {
   return `${collapsed.slice(0, STATUS_TITLE_MAX_CHARS - 1)}…`;
 }
 
-/**
- * Append a `status.posted` milestone for the calling agent.
- * Throws if title/text is empty or session identity cannot be resolved.
- */
+/** Appends a `status.posted` milestone for the calling agent; throws if title/text is empty or
+ * identity cannot be resolved. */
 export function postFeedStatus(input: FeedPostInput): FeedPostResult {
   const title = normalizeStatusTitle(input.title ?? '');
   const detail = normalizeStatusText(input.text);
@@ -400,11 +358,9 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
   }
 
   const ts = input.ts ?? new Date().toISOString();
-  // The post is written where the agent runs, so the cwd is a local path and
-  // gets full canonical resolution — a defined project's name wins (a post from
-  // any repo of a multi-repo project files under that project), else the repo
-  // key, matching how the timeline groups everything else. listProjectDefs is
-  // fail-open, so this costs one small readdir + YAML parse per post.
+  // The post is written where the agent runs, so cwd is local and fully resolved: a defined
+  // project's name wins, else the repo key. listProjectDefs is fail-open and costs one small
+  // readdir and YAML parse per post.
   const project = resolveProjectNameForCwd(identity.cwd, listProjectDefs());
   const attachments = buildAttachments(input.attach, {
     copyRoot: input.attachmentsRoot ?? path.join(getHistoryDir(), 'attachments'),

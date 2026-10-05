@@ -1,29 +1,6 @@
-/**
- * Event-driven tool-activity collector — the thing that makes the rows in
- * `tools.ts` reach the feed stream without a poll.
- *
- * THE COST THIS EXISTS TO AVOID. A status surface that wants "which browser
- * tasks and computer runs are there right now" has, until this module, one way
- * to ask: run `agents browser sessions --json` and `agents computer sessions
- * --json`, per device, on a timer. Two subprocesses per tool per device per
- * tick, each paying a full CLI boot, to answer "nothing changed" almost every
- * time. A menu bar at a one-minute cadence over a ten-device fleet is 1,200
- * process spawns an hour for, typically, zero new rows.
- *
- * WHAT REPLACES IT. The two sources are files on the machine that owns them:
- * the browser runtime tree (task index + capture dirs) and the event ledger
- * that `computer.action` appends to. This collector watches those roots, and
- * re-projects ONLY when one of them reports a change. A warm idle does no work
- * at all: no directory read, no subprocess, no emission. When something does
- * change it re-projects and emits the DIFF — the changed rows and the vanished
- * row keys — never a full snapshot, so a single new screenshot costs one
- * `tool.upsert`.
- *
- * WHEN THE WATCHERS CANNOT ARM (an unsupported filesystem, a root that does not
- * exist yet) the collector says so on `armed` and re-projects on the bounded
- * sweep cadence instead. That is a stated degradation, not a silent one: a
- * caller can surface it, and the diff shape is identical either way.
- */
+/** Event-driven tool-activity collector: gets `tools.ts` rows onto the feed stream without polling
+ * `agents browser/computer sessions --json` (1,200 spawns/hour at 10 devices). Watches the roots,
+ * emits only diffs; if watchers can't arm it says so via `armed` and sweeps. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getBrowserRuntimeDir } from '../state.js';
@@ -51,36 +28,25 @@ interface ToolSources {
   liveTasks?: () => LiveBrowserTask[];
 }
 
-/**
- * One projection attempt. `complete` is false when any source threw.
- *
- * The flag is load-bearing, not diagnostic. A transient read failure — the
- * browser rewriting `tasks.json`, a rotating ledger, an EMFILE — used to yield an
- * EMPTY row list, which the differ then read as "every task closed" and published
- * as a remove for every row. The operator watched their live tasks vanish and
- * come back. An incomplete projection is not evidence of absence, so the caller
- * keeps the state it already had.
- */
+/** One projection attempt; `complete` is false when any source threw. Load-bearing: a transient
+ * read failure (tasks.json rewrite, rotating ledger, EMFILE) used to yield an empty list that
+ * the differ published as a remove for every row. */
 export interface ToolSnapshot {
   rows: ToolRow[];
   complete: boolean;
 }
 
-/**
- * Project every browser task and computer run this machine knows about into
- * canonical tool rows, newest first. Impure by design — the three readers are
- * injectable so a test drives real temp stores rather than a mocked service.
- */
+/** Projects every browser task and computer run this machine knows into canonical tool rows,
+ * newest first. The three readers are injectable so tests drive real temp stores. */
 export function collectToolRows(scope: string, sources: ToolSources = {}): ToolSnapshot {
   let complete = true;
   const read = <T>(source: () => T, empty: T): T => {
     try { return source(); } catch { complete = false; return empty; }
   };
 
-  // Task→device binding is browser-cli's now (bound at `start`, PHNX-4101), so
-  // agents-cli keeps no separate binding index. Cross-device tasks are driven by
-  // browser-cli from THIS box, so their `tasks.json` is local and reached by
-  // `readLiveBrowserTasks` below. The `bindings` source stays a test seam.
+  // Task-to-device binding is browser-cli's now (bound at `start`, PHNX-4101), so agents-cli keeps
+  // no binding index. Cross-device tasks are driven from THIS box, so their `tasks.json` is local.
+  // The `bindings` source stays a test seam.
   const bindings = new Map<string, { device?: string; profile?: string; url?: string; createdAt?: number; sessionId?: string; launchId?: string }>();
   for (const binding of read(sources.bindings ?? (() => []), [])) bindings.set(binding.name, binding);
   const liveTasks = new Map<string, LiveBrowserTask>();
@@ -93,11 +59,9 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
     if (row.task) captured.add(row.task);
     rows.push(projectBrowserToolRow(scope, row, row.task ? bindings.get(row.task) : undefined, row.task ? liveTasks.get(row.task) : undefined));
   }
-  // Neither the capture tree nor the task index alone answers "which tasks exist".
-  // `tasks.json` is the live authority (and the only source of tabs); the task
-  // index additionally routes a task whose browser runs on ANOTHER device, which
-  // has no local live record. A task bound a second ago is live and closable with
-  // no capture to its name, and deriving rows from captures alone hid exactly that.
+  // `tasks.json` is the live authority (and the only source of tabs); the task index also routes a
+  // task whose browser runs on another device. A task bound a second ago is live with no capture,
+  // so deriving rows from captures alone hid it.
   for (const task of new Set([...liveTasks.keys(), ...bindings.keys()])) {
     if (captured.has(task)) continue;
     const binding = bindings.get(task);
@@ -109,13 +73,9 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
   return { rows: sortToolRows(rows), complete };
 }
 
-/**
- * Holds the last projected row set and answers "what changed?".
- *
- * Row identity is the projection's own `rowKey`, so a browser task that gains a
- * capture upserts under the same key, and a closed task — gone from both the
- * index and the capture tree — comes back as a remove.
- */
+/** Holds the last projected row set and answers what changed. Identity is the projection's
+ * `rowKey`: a task gaining a capture upserts under the same key, and a task gone from both
+ * index and captures is a remove. */
 export class ToolRowSet {
   private readonly rows = new Map<string, string>();
 
@@ -161,29 +121,16 @@ interface ToolWatchOptions {
   initial?: ToolRow[];
 }
 
-/**
- * The directory roots whose contents back the tool rows.
- *
- * The standalone computer ledger is its OWN root: the engine writes there
- * directly, without going through agents-cli, so nothing under the event-ledger
- * or browser roots changes when an operator runs `computer` by hand. Omitting it
- * meant those actions were only ever noticed on a sweep triggered by unrelated
- * activity.
- */
+/** The directory roots backing tool rows. The standalone computer ledger is its own root: the
+ * engine writes there without going through agents-cli, so omitting it meant manual `computer`
+ * runs were only noticed on a sweep from unrelated activity. */
 export function toolWatchRoots(): string[] {
   return [getBrowserRuntimeDir(), getEventsDir(), standaloneComputerActionsDir()];
 }
 
-/**
- * One profile's live task records, with the tabs each task addresses.
- *
- * THROWS on a read it cannot trust. An absent `tasks.json` is the ordinary "no
- * live browser on this profile" case and returns nothing — but EACCES, EMFILE, a
- * truncated file or malformed JSON are failures, and swallowing them returned an
- * empty list that is indistinguishable from "every task closed". The caller then
- * published a remove for every live row. Failing loud here is what lets
- * `collectToolRows` mark the projection incomplete and PRESERVE the rows it has.
- */
+/** One profile's live task records with their tabs. Throws on an untrusted read: absent
+ * `tasks.json` returns nothing, but EACCES, EMFILE or bad JSON must not look like "all closed"
+ * (which removed every live row); failing lets collectToolRows keep the rows it has. */
 function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
   const file = path.join(profileDir, 'tasks.json');
   let raw: string;
@@ -223,15 +170,13 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
       ...(typeof record.profile === 'string' ? { profile: record.profile } : {}),
       ...(typeof record.label === 'string' ? { label: record.label } : {}),
       tabs,
-      // The real persisted schema is `createdAt` + `lastActionAt` (`browser/types.ts`
-      // `Task`). An earlier revision read `startedAt`, which the DTO at
-      // `service.ts` uses but `tasks.json` never carries — so every zero-capture
-      // task reported no start time at all and sorted to the bottom.
+      // The persisted schema is `createdAt` + `lastActionAt` (`browser/types.ts` Task). An earlier
+      // revision read `startedAt` (a service.ts DTO field `tasks.json` never carries), so
+      // zero-capture tasks had no start time and sorted last.
       ...(typeof record.createdAt === 'number' ? { startedAtMs: record.createdAt } : {}),
-      // `lastActionAt` is refreshed by every task-scoped action, which makes it
-      // the honest freshness key for a task that has produced no capture yet.
-      // Tasks written before RUSH-2622 carry none; `createdAt` is the fallback the
-      // browser's own reader normalizes them to.
+      // `lastActionAt` is refreshed by every task-scoped action, making it the honest freshness key
+      // for a task with no capture yet. Tasks written before RUSH-2622 carry none; `createdAt` is
+      // the fallback the browser's own reader uses.
       ...(typeof record.lastActionAt === 'number' ? { lastActionAtMs: record.lastActionAt }
         : typeof record.createdAt === 'number' ? { lastActionAtMs: record.createdAt } : {}),
       ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
@@ -242,14 +187,9 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
   return out;
 }
 
-/**
- * Every live browser task on this machine, across every profile runtime dir.
- *
- * THROWS for the same reason {@link readLiveTasksFor} does. A runtime dir that
- * does not exist means no browser has ever run here — genuinely no tasks. A
- * readdir that fails for any other reason (EACCES, EMFILE) is a failure, and
- * returning `[]` for it would tell the differ every task had closed.
- */
+/** Every live browser task on this machine across profile runtime dirs. THROWS like
+ * readLiveTasksFor: a missing runtime dir means no tasks, but other readdir failures (EACCES,
+ * EMFILE) must not return `[]`, which would tell the differ every task closed. */
 export function readLiveBrowserTasks(root = getBrowserRuntimeDir()): LiveBrowserTask[] {
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(root, { withFileTypes: true }); }
@@ -265,17 +205,9 @@ export function readLiveBrowserTasks(root = getBrowserRuntimeDir()): LiveBrowser
   return out;
 }
 
-/**
- * Watch the tool roots and report diffs until `signal` aborts.
- *
- * `armed()` reports whether every root currently has a live watcher. It is a
- * FUNCTION, not a flag captured at setup: a watcher can die later (its directory
- * is removed and recreated, an inotify limit is hit), and a frozen `armed: true`
- * meant the tick kept short-circuiting on `!dirty` from a watcher that would
- * never report again — changes were then missed permanently, with the handle
- * still claiming to be armed. Each tick re-arms whatever is missing and sweeps
- * until everything is watched again.
- */
+/** Watches the tool roots and reports diffs until `signal` aborts. `armed()` is a function, not
+ * a setup-time flag: a watcher can die later (directory recreated, inotify limit), and a frozen
+ * `armed: true` let ticks short-circuit on `!dirty` and miss changes permanently. */
 export function watchToolActivity(options: ToolWatchOptions): { armed: () => boolean; stop: () => void } {
   const roots = options.roots ?? toolWatchRoots();
   const set = new ToolRowSet();

@@ -1,11 +1,6 @@
-/**
- * RUSH-2864 — top-level `agents status` moved under `agents sync status`.
- * Pins both directions: the nested path exists with the same flags and JSON
- * contract, and the old top-level name is gone (not a silent auto-correct).
- *
- * The tree assertions use `buildFullCommandTree` (no mocks). The CLI spawn
- * tests drive `src/index.ts` against a disposable HOME, same as sync.test.ts.
- */
+/** RUSH-2864: top-level `agents status` moved under `agents sync status`. Pins both directions: the
+ * nested path exists with the same flags and JSON contract, and the old name is gone (no silent
+ * auto-correct). Tree via `buildFullCommandTree`; spawns use a disposable HOME. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import { Command } from 'commander';

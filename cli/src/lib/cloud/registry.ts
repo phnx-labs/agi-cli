@@ -1,9 +1,5 @@
-/**
- * Cloud provider registry.
- *
- * Reads the `cloud` section of agents.yaml, lazily instantiates provider
- * implementations, and exposes lookup helpers used by the `agents cloud` commands.
- */
+/** Cloud provider registry: reads the `cloud` section of agents.yaml, lazily instantiates
+ * providers, and exposes lookups for `agents cloud`. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -61,11 +57,8 @@ function initProviders(): void {
   providers.set('host', new HostCloudProvider());
 }
 
-/**
- * The cloud provider an agent dispatches to by default. Reads the canonical
- * `cloudProvider` field on the agent registry entry — one source of truth, no
- * side map. Returns undefined for agents with no native cloud.
- */
+/** The cloud provider an agent dispatches to by default, from the `cloudProvider` field on its
+ * registry entry; undefined if no native cloud. */
 export function nativeProviderForAgent(agentId: string): CloudProviderId | undefined {
   const agent = AGENTS[agentId as AgentId];
   return agent?.cloudProvider;
@@ -93,17 +86,9 @@ export function getAllProviders(): CloudProvider[] {
   return [...providers.values()];
 }
 
-/**
- * Resolve the active provider for a dispatch.
- *
- * Precedence: explicit `--provider` > the agent's native cloud
- * (`cloudProvider`) > configured `cloud.default_provider` > `rush`. This is
- * what makes `agents cloud run --agent droid` land on Factory and
- * `--agent codex` land on Codex Cloud without the user naming a provider.
- *
- * Callers that already hold a concrete provider id (e.g. resolving a stored
- * task's provider) pass it as `explicit` and the agent arg is ignored.
- */
+/** Resolve the provider: explicit `--provider` > the agent's `cloudProvider` >
+ * `cloud.default_provider` > `rush`. A caller with a concrete provider id passes it as `explicit`;
+ * the agent arg is then ignored. */
 export function resolveProvider(explicit?: string, agentId?: string): CloudProvider {
   const id = (explicit
     ?? (agentId ? nativeProviderForAgent(agentId) : undefined)

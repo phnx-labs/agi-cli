@@ -1,42 +1,6 @@
-/**
- * One-time migration to the current device-config + pins layout:
- *
- *   (a) central `fleet.devices.<name>.config` (the short-lived #2458 store)
- *       folds into each per-device doc's `config:` block — central wins
- *       (newest intent) — and is stripped from central;
- *   (b) legacy `.history/devices/auto-launch.json` flags fold into the doc
- *       `config:` too (oldest store — only fills keys not already set);
- *   (c) a top-level `defaultBrowserProfile:` in a device doc folds into that
- *       doc's `config:`;
- *   (d) agent pins (`agents:` / `isolatedAgents:`) leave the TRACKED
- *       per-device docs: THIS machine's pins move to the untracked
- *       `.history/devices/pins-<host>.json` (pins file wins on conflict — it
- *       is the destination); peers' pins are simply dropped from the tracked
- *       file (each peer owns/rewrites its own pins locally).
- *   (e) legacy `.history/devices/ignored.json` (per-machine, UNTRACKED — a
- *       dismissal never reached the rest of the fleet) folds into the central
- *       TRACKED `fleet.ignored` list (RUSH-3062). Entries keep the legacy
- *       file's `updatedAt` as `ignoredAt` and take THIS machine's id as
- *       `ignoredOn` — the legacy store recorded neither, so the folding box
- *       is the only attribution available. The legacy file is removed only
- *       AFTER the central write lands.
- *
- * What stays put: a device doc's existing `config:` (already the right home)
- * and its `routines:` list (operator-owned, read cross-device by
- * routine-activation.ts).
- *
- * Order is crash-safe: destination writes (pins file, device doc) land BEFORE
- * the source strip (central), so a crash mid-fold re-folds on the next run and
- * the destination-wins merges make that a no-op. Idempotent — after a
- * successful run none of the legacy locations hold data, so re-running is a
- * cheap existence check. A doc that fails to parse is LOUDLY skipped (left
- * untouched) so the next run retries — never silently emptied, same corruption
- * contract the device registry keeps.
- *
- * Invoked from three places so every install converges regardless of entry
- * point: `runMigration()` (fresh / sentinel-less installs), daemon boot, and
- * the first `lib/device-config.ts` read/write in a process.
- */
+/** One-time migration to the device-config + pins layout: legacy and central config (#2458) fold
+ * into each device doc's `config:`; pins leave tracked docs; `ignored.json` folds into
+ * `fleet.ignored` (RUSH-3062). Writes precede strips, so a crash re-folds as a no-op. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -144,12 +108,8 @@ function isConfigMap(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/**
- * The legacy per-machine ignored.json. Absent => null. A parse failure is
- * logged loudly and reported as `undefined` so the caller LEAVES the file in
- * place for a later retry — never silently emptied, the same corruption
- * contract the ignore-list itself keeps (registry.ts's loadIgnoredEntries).
- */
+/** The legacy per-machine ignored.json; absent is null. A parse failure is logged and reported as
+ * `undefined` so the caller leaves the file for a retry, never silently emptied. */
 function readLegacyIgnoredFile(p: string): { names: string[]; updatedAt?: string } | null | undefined {
   let raw: string;
   try {
@@ -169,10 +129,8 @@ function readLegacyIgnoredFile(p: string): { names: string[]; updatedAt?: string
   }
 }
 
-/**
- * Fold every legacy device-config/pins location into the current layout. Safe
- * to call on every boot / config access: cheap no-op once folded.
- */
+/** Fold every legacy device-config/pins location into the current layout. Safe on every boot or
+ * config access: a cheap no-op once folded. */
 export function migrateDeviceConfigStores(): void {
   const devicesRoot = path.join(getUserAgentsDir(), 'devices');
   const autoLaunchPath = getDevicesAutoLaunchPath();
@@ -249,10 +207,9 @@ export function migrateDeviceConfigStores(): void {
   const autoLaunchPending = fs.existsSync(autoLaunchPath);
   if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending && !legacyIgnoredPending && !centralFleetState && !centralHostsPending && !accountsPending) return;
 
-  // ── 2. Destination writes FIRST (crash-safe), under the meta lock so they
-  //    serialize against writeMetaUnlocked's own read-merge-write of the doc.
-  //    Only taken when there IS a write — a converged install never locks
-  //    (taking it would create a default central agents.yaml as a side effect).
+  // Step 2: destination writes first (crash-safe), under the meta lock so they serialize with
+  // writeMetaUnlocked. Only taken when there is a write; locking a converged install would create
+  // a default central agents.yaml.
   if (hasDestinationWork) {
     withMetaLock(() => {
       // 2a. THIS machine's pins: doc pins merge INTO the pins file (pins file
@@ -275,10 +232,8 @@ export function migrateDeviceConfigStores(): void {
     });
   }
 
-  // ── 3. Source strips LAST ────────────────────────────────────────────────
-  // 3a. Central: drop every devices.<name>.config block (now folded into the
-  //     device docs). Overrides left with no other fields are dropped; an
-  //     emptied fleet block (no defaults/secrets/routines) goes away entirely.
+  // Step 3: source strips last. Drop every central devices.<name>.config block (now in device
+  // docs); overrides left empty are dropped, and an emptied fleet block goes away.
   if (centralHasConfig) {
     updateMeta((m) => {
       const devices = m.fleet?.devices;
@@ -290,11 +245,9 @@ export function migrateDeviceConfigStores(): void {
         if (Object.keys(rest).length > 0) nextDevices[name] = rest;
       }
       const fleet: FleetManifest = { ...m.fleet, devices: nextDevices };
-      // Drop the whole `fleet` block only when NOTHING else lives in it. Every
-      // resident must be named here: `ignored` holds the user's dismissals and
-      // `discovery` their discovery policy, and deleting the block would not
-      // just lose them locally — `agents repo push` would sync the deletion
-      // fleet-wide. Add any new fleet.* key to this guard.
+      // Drop the whole `fleet` block only when nothing else lives in it. Name every resident here:
+      // `ignored` and `discovery` would otherwise be lost, and `agents repo push` would sync the
+      // deletion fleet-wide. Add any new fleet.* key to this guard.
       const fleetIsEmpty =
         Object.keys(nextDevices).length === 0 &&
         !fleet.defaults &&
@@ -320,11 +273,9 @@ export function migrateDeviceConfigStores(): void {
     }
   }
 
-  // ── 4. Legacy ignored.json → central fleet.ignored ───────────────────────
-  // Destination write (updateMeta: withMetaLock + atomic write) lands BEFORE
-  // the legacy file is removed, so a crash re-folds on the next run and
-  // withIgnoredAdded's union-by-name makes that a no-op. A file that failed to
-  // parse (legacyIgnored === undefined) is left in place for that retry.
+  // Step 4: legacy ignored.json to central fleet.ignored. The destination write lands before the
+  // legacy file is removed, so a crash re-folds as a no-op (withIgnoredAdded unions by name). A
+  // file that failed to parse is left for that retry.
   if (legacyIgnored) {
     if (legacyIgnored.names.length > 0) {
       updateMeta((m) => withIgnoredAdded(m, legacyIgnored.names, legacyIgnored.updatedAt ?? new Date().toISOString()));
@@ -336,13 +287,9 @@ export function migrateDeviceConfigStores(): void {
     }
   }
 
-  // ── 5. Central fleet.discovery / fleet.ignored → THIS box's device doc ─────
-  // (PHNX-3315) The shared maps every box used to rewrite fold into this box's
-  // deviceFleet, then are stripped from central. writeMetaUnlocked writes the
-  // device doc BEFORE the central strip, so a crash re-folds on the next run and
-  // the union-dedup (ignored beats approved; newest ignoredAt wins) makes the
-  // re-fold a no-op. Idempotent — once central holds neither key the gather
-  // guard above skips this whole pass.
+  // Step 5 (PHNX-3315): central fleet.discovery / fleet.ignored fold into this box's device doc,
+  // then are stripped from central. The device doc is written first, and union-dedup (ignored
+  // beats approved; newest ignoredAt wins) makes a re-fold a no-op.
   if (centralFleetState) {
     updateMeta((m) => {
       const disc = m.fleet?.discovery;
@@ -393,11 +340,8 @@ export function migrateDeviceConfigStores(): void {
     });
   }
 
-  // ── 6. Central hosts map → THIS box's device doc (PHNX-3315) ───────────────
-  // The shared host registry folds into this box's deviceHosts, then the central
-  // key is dropped. writeMetaUnlocked writes the device doc before the central
-  // strip, so a crash re-folds and the newest-addedAt union makes it a no-op.
-  // Idempotent — once central holds no `hosts:` the gather guard skips this.
+  // Step 6 (PHNX-3315): the central hosts map folds into this box's deviceHosts, then the central
+  // key is dropped. The device doc is written first; newest-addedAt union makes a re-fold a no-op.
   if (centralHostsPending) {
     updateMeta((m) => {
       const hosts = m.hosts;
@@ -411,12 +355,9 @@ export function migrateDeviceConfigStores(): void {
     });
   }
 
-  // ── 7. Central device-scoped native accounts → THIS box's device doc ───────
-  // (PHNX-3315) Fold `scope:'device'` natives and the bindings that target them
-  // out of central and into the device doc, removing their identity PII from the
-  // git-tracked shared file. The selection is recomputed INSIDE the lock so a
-  // concurrent write is never clobbered; the device-doc write precedes the
-  // central strip, so a crash re-folds and the id-keyed merge makes it a no-op.
+  // Step 7 (PHNX-3315): fold `scope:'device'` native accounts and bindings from central into the
+  // device doc, removing identity PII from the tracked file. Selection is recomputed inside the
+  // lock so concurrent writes are not clobbered; the id-keyed merge makes a re-fold a no-op.
   if (accountsPending) {
     updateMeta((m) => {
       const native = { ...m.accounts?.native };
@@ -472,13 +413,9 @@ function sameDocContent(a: Record<string, unknown>, b: Record<string, unknown>):
   return ak.every((k) => k in b && JSON.stringify(a[k]) === JSON.stringify(b[k]));
 }
 
-/**
- * Compute a device doc's post-fold content: merge the config layers (oldest
- * auto-launch.json flags < the doc's own config: < the central #2458 block —
- * newest wins), fold a top-level defaultBrowserProfile into config:, and strip
- * pins from the tracked file. Returns null when the doc is corrupt (loudly —
- * left for manual repair) or the fold would not change its content.
- */
+/** Compute a device doc's post-fold content: merge config layers (auto-launch.json < the doc's
+ * `config:` < central #2458 block, newest wins), fold `defaultBrowserProfile`, strip pins. Returns
+ * null when the doc is corrupt (loudly, left for manual repair) or the fold would change nothing. */
 function planDeviceDocFold(
   name: string,
   docPath: string,

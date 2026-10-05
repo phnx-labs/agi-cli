@@ -1,13 +1,6 @@
-/**
- * Spawn-time native-account HOME resolution (PHNX-3940 T5).
- *
- * Order: existing slot → provisionable worker slot → recorded leftover `homes`
- * label → identity match across installed version homes → fail loud with the
- * T4 hint. Never a wrong home that looks like success. Identity matching is
- * the pre-T5 fallback (`resolveAccountVersion` over each installed home's own
- * credential file) so a native account whose backfill never wrote a `homes`
- * label still spawns from the home that actually holds its login.
- */
+/** Spawn-time native-account HOME resolution (PHNX-3940 T5). Order: existing slot, provisionable
+ * worker slot, recorded leftover `homes` label, identity match across installed version homes,
+ * then fail loud with the T4 hint; never a wrong home that looks like success. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -35,19 +28,9 @@ interface NativeSpawnHome {
   label?: string;
 }
 
-/**
- * The env a DURABLE slot injects at spawn (PHNX-3940 T5/T6). A worker's slot
- * for an api-key harness (codex/grok/cursor/opencode/droid) holds no file — the
- * daemon pushed the account's worker API key into the reserved
- * `__<harness>__` store and `provisionWorkerSlot` recorded the slot as
- * `durable`; the key rides the harness's own env var (`CURSOR_API_KEY`, …)
- * on every launch. Anything else — a native login in the slot on a headed
- * device, a claude durable slot (its setup-token is a `.oauth_token` file the
- * adapter reads), a harness with no api-key worker kind, a headed device — injects
- * nothing.
- * Without this, `agents run cursor#gmail` on a worker reached Cursor with an
- * empty env and got `Authentication required … set CURSOR_API_KEY`.
- */
+/** The env a durable slot injects at spawn (PHNX-3940 T5/T6). A worker's slot for an api-key
+ * harness (codex/grok/cursor/opencode/droid) holds no file: the key lives in the reserved
+ * `__<harness>__` store and rides the harness's env var. Anything else injects nothing. */
 export function durableSlotEnv(
   agent: AgentId,
   account: { id: string },
@@ -56,10 +39,9 @@ export function durableSlotEnv(
   deps: { selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole> } = {},
 ): Record<string, string> {
   if (resolved.slot?.authMode !== 'durable') return {};
-  // A headed device authenticates from its own native login (invariant 7). A
-  // `durable` record can outlive a role change (`agents devices role … personal`
-  // never rewrites slots), so the gate is the box's CURRENT role, the same
-  // predicate `isProvisionableWorker` applies — never a record on disk.
+  // A headed device authenticates from its own native login (invariant 7). A `durable` record can
+  // outlive a role change (`agents devices role ... personal` never rewrites slots), so check the
+  // box's current role (as `isProvisionableWorker` does), never a record on disk.
   if (isHeadedDeviceRole((deps.selfRole ?? selfConfiguredDeviceRole)())) return {};
   const envName = workerApiKeyEnv(agent);
   if (!envName) return {};
@@ -117,11 +99,8 @@ export function adoptedConfigPointsAtHome(agent: AgentId, home: string): boolean
   return current === path.resolve(home, configDirName);
 }
 
-/**
- * For a symlink-adopted harness, point `~/.<config>` at this account's slot
- * or throw. Does not write the harness default — the caller records that only
- * after this succeeds.
- */
+/** For a symlink-adopted harness, point `~/.<config>` at this account's slot or throw. Does not
+ * write the harness default; the caller records that only after this succeeds. */
 export function ensureAdoptedDefaultRepoint(
   agent: AgentId,
   account: { id: string; name: string; agent: AgentId },
@@ -197,11 +176,8 @@ async function matchLegacyIdentityHome(
   return null;
 }
 
-/**
- * Resolve the spawn HOME for a native account on THIS device.
- * Existing slot, then a provisionable worker slot, then a leftover `homes`
- * label, then identity match across installed homes, then fail loud.
- */
+/** Resolve the spawn HOME for a native account on this device: existing slot, provisionable worker
+ * slot, leftover `homes` label, identity match across installed homes, then fail loud. */
 export async function resolveNativeSpawnHome(
   agent: AgentId,
   account: { id: string; name: string; agent: AgentId },

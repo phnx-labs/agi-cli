@@ -1,14 +1,6 @@
-/**
- * Best-effort Ghostty tab-number detection for `agents sessions --active`.
- *
- * Ghostty (macOS) exposes read-only AppleScript: every tab has an `index` and a
- * `name` (title); every surface a `working directory`. It exposes NO per-tab env
- * var and NO tty/pid on a surface — so a session is matched to its tab by
- * `working directory` (with title as a tiebreak). This is display sugar only:
- * one bounded, non-fatal osascript call, run by the renderer, never on the
- * discovery / --json / --waiting path. Any failure (Ghostty not running,
- * Automation permission denied, timeout) degrades silently to no tab number.
- */
+/** Best-effort Ghostty tab-number detection for `agents sessions --active`. Ghostty's AppleScript
+ * exposes tab index/name and surface working directory, but no env var, tty or pid, so match by
+ * working directory (title as tiebreak). Display sugar; any failure yields no number. */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -43,11 +35,9 @@ const ENUM_SCRIPT = `tell application "Ghostty"
   return out
 end tell`;
 
-/**
- * Enumerate every Ghostty surface (window/tab/cwd/title) via one read-only
- * osascript call. Returns [] on ANY failure — Ghostty not running, Automation
- * permission not granted, timeout, or a parse miss. Never throws, never prompts.
- */
+/** Enumerate every Ghostty surface (window/tab/cwd/title) via one read-only osascript call. Returns
+ * [] on ANY failure (not running, Automation permission missing, timeout, parse miss). Never
+ * throws, never prompts. */
 export async function enumerateGhosttyTabs(timeoutMs = 1500): Promise<GhosttySurface[]> {
   if (process.platform !== 'darwin') return [];
   let stdout: string;
@@ -79,23 +69,16 @@ function cwdKey(p: string | undefined): string {
   return (p ?? '').replace(/\/+$/, '');
 }
 
-/**
- * Normalize a tab title / hint for containment matching: drop a leading run of
- * non-alphanumerics (Ghostty prefixes the title with a spinner glyph like `⠐ `
- * or `✳ ` while the agent runs) and lowercase. Without this, a title that starts
- * with the session's exact topic still fails a substring test.
- */
+/** Normalize a tab title or hint for containment matching: drop a leading run of non-alphanumerics
+ * (Ghostty prefixes a spinner glyph like `⠐ ` while an agent runs) and lowercase, or an
+ * exact-topic title fails the substring test. */
 function normText(s: string): string {
   return s.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase().trim();
 }
 
-/**
- * Assign a Ghostty tab number to each `host === 'ghostty'` session by matching
- * its cwd to a surface's working directory; ties (same cwd) are broken by title
- * containment against the session's label/topic/kind. Deliberately conservative:
- * a session that can't be uniquely resolved gets NO number — a wrong jump target
- * is worse than none. Pure and unit-tested.
- */
+/** Assign a Ghostty tab number to each `host === 'ghostty'` session by matching cwd to a surface's
+ * working directory; ties break by title containment against label/topic/kind. A session not
+ * uniquely resolved gets NO number: a wrong jump target is worse. Pure. */
 export function assignGhosttyTabs(
   sessions: ActiveSession[],
   surfaces: GhosttySurface[],

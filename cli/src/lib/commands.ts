@@ -1,11 +1,5 @@
-/**
- * Slash command management -- discovery, installation, and syncing.
- *
- * Commands are markdown files in ~/.agents/commands/ exposed as `/command-name`
- * shortcuts by agents. This module discovers them, converts between formats
- * (markdown for Claude/Codex, TOML for Gemini), and installs them into
- * agent version homes.
- */
+/** Slash command management: discovery, installation and syncing of markdown commands in
+ * ~/.agents/commands/, converting to TOML for Gemini. */
 
 import * as fs from 'fs';
 import { compareVersions } from './agent-spec/primitives.js';
@@ -74,11 +68,8 @@ function parseAgentsField(raw: unknown): AgentId[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-/**
- * Whether a slash command should sync to the given agent@version. Checks
- * frontmatter `agents` / `since` / `until` after the agent-level commands
- * (or commands-as-skills) capability gate.
- */
+/** Whether a slash command syncs to agent@version: frontmatter `agents` / `since` / `until` after
+ * the agent-level commands (or commands-as-skills) capability check. */
 export function commandAppliesTo(
   agent: AgentId,
   version: string,
@@ -370,10 +361,8 @@ export function installCommand(
   return { path: targetPath, method: 'copy', warnings: validation.warnings };
 }
 
-/**
- * Path to the commands dir of a specific version home (not the active one).
- * Respects per-agent commandsSubdir (e.g. 'prompts' for codex).
- */
+/** Commands dir of a specific version home (not the active one), respecting per-agent
+ * commandsSubdir (e.g. `prompts` for codex). */
 export function getVersionCommandsDir(agent: AgentId, version: string): string {
   const home = getVersionHomePath(agent, version);
   return path.join(home, agentConfigDirName(agent), AGENTS[agent].commandsSubdir);
@@ -401,10 +390,8 @@ export function listCommandsInVersionHome(agent: AgentId, version: string): stri
     .sort();
 }
 
-/**
- * Check if a command installed in a specific version matches the central source.
- * Handles markdown-to-TOML conversion for Gemini.
- */
+/** Check whether a command installed in a version matches the central source, handling
+ * markdown-to-TOML for Gemini. */
 function versionCommandMatches(agent: AgentId, version: string, commandName: string): boolean {
   const sourcePath = path.join(getCommandsDir(), `${commandName}.md`);
   if (!fs.existsSync(sourcePath)) return false;
@@ -451,15 +438,9 @@ export interface VersionCommandDiff {
 /**
  * Compare a version home's commands against central. Returns the reconciliation diff.
  */
-/**
- * Flattened names of plugin-bundled commands (`<plugin>-<command>`), matching
- * exactly how `syncPluginToVersion` installs a plugin's `commands/<cmd>.md` as a
- * command-skill (plugins.ts → `installCommandSkillToVersion(agentDir,
- * `${plugin.name}-${cmd}`, …)`). These are source-managed by their plugin, so
- * the orphan detector must NOT flag them — else `prune cleanup` proposes
- * deleting live plugin commands (swarm-plan, code-review, …). Scans user +
- * system + extra marketplaces (no project layer), matching the trusted sources.
- */
+/** Flattened names (`<plugin>-<command>`) of plugin-bundled commands, as `syncPluginToVersion`
+ * installs them. Source-managed by their plugin, so the orphan detector must not flag them (else
+ * `prune cleanup` deletes live plugin commands). Scans user, system, extras. */
 export function listPluginCommandNames(): Set<string> {
   const names = new Set<string>();
   for (const plugin of discoverPlugins()) {
@@ -520,10 +501,8 @@ export function diffVersionCommands(agent: AgentId, version: string): VersionCom
   };
 }
 
-/**
- * Install a single command from central into a specific version home.
- * Handles markdown-to-TOML conversion when the agent requires it.
- */
+/** Install one command from central into a version home, converting markdown to TOML when the agent
+ * requires it. */
 export function installCommandToVersion(
   agent: AgentId,
   version: string,
@@ -597,10 +576,7 @@ export function installCommandToVersion(
   return { success: true };
 }
 
-/**
- * Remove a single command from a specific version home.
- * Soft-deletes to ~/.agents/.trash/commands/.
- */
+/** Remove one command from a version home; soft-deletes to ~/.agents/.trash/commands/. */
 export function removeCommandFromVersion(
   agent: AgentId,
   version: string,
@@ -636,10 +612,8 @@ export function removeCommandFromVersion(
   return { success: true };
 }
 
-/**
- * Iterate all (agent, version) pairs that support commands and are installed,
- * optionally scoped to a single agent/version.
- */
+/** Iterate all installed (agent, version) pairs that support commands, optionally scoped to one
+ * agent/version. */
 export function iterCommandsCapableVersions(filter?: { agent?: AgentId; version?: string }): Array<{ agent: AgentId; version: string }> {
   const pairs: Array<{ agent: AgentId; version: string }> = [];
   const agents = filter?.agent ? [filter.agent] : capableAgents('commands');
@@ -704,10 +678,8 @@ function normalizeContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
 }
 
-/**
- * Check if installed command content matches source content.
- * Handles format conversion (markdown to TOML for Gemini).
- */
+/** Check whether installed command content matches source, handling format conversion (markdown to
+ * TOML for Gemini). */
 function commandContentMatches(
   agentId: AgentId,
   commandName: string,
@@ -741,12 +713,8 @@ function commandContentMatches(
   }
 }
 
-/**
- * Get the project-scoped commands directory for an agent.
- * Claude: .claude/commands/
- * Codex: .codex/prompts/
- * Cursor: .cursor/commands/
- */
+/** Project-scoped commands directory for an agent (Claude `.claude/commands/`, Codex
+ * `.codex/prompts/`, Cursor `.cursor/commands/`). */
 function getProjectCommandsDirs(agentId: AgentId, cwd: string = process.cwd()): string[] {
   const agent = AGENTS[agentId];
   const dirs: string[] = [];
@@ -774,10 +742,7 @@ function listCommandsFromDir(dir: string, exts: string[]): string[] {
     .map((f) => f.replace(/\.(md|toml)$/, ''));
 }
 
-/**
- * List installed commands with scope information.
- * Pass options.home to read from a version-managed agent's home directory.
- */
+/** List installed commands with scope; pass options.home to read a version-managed agent's home. */
 export function listInstalledCommandsWithScope(
   agentId: AgentId,
   cwd: string = process.cwd(),
@@ -835,10 +800,8 @@ function getCommandDescription(filePath: string): string | undefined {
   }
 }
 
-/**
- * Install a command to central ~/.agents/commands/ directory.
- * Shims will symlink this to per-agent directories for synced agents.
- */
+/** Install a command to central ~/.agents/commands/; shims symlink it into per-agent directories
+ * for synced agents. */
 export function installCommandCentrally(
   sourcePath: string,
   commandName: string
@@ -876,10 +839,8 @@ export function installCommandCentrally(
   }
 }
 
-/**
- * List commands from user (~/.agents/commands/) and system (~/.agents/.system/commands/) dirs.
- * User dir takes priority; deduplication preserves first occurrence.
- */
+/** List commands from user (~/.agents/commands/) and system (~/.agents/.system/commands/) dirs;
+ * user wins and dedup keeps the first occurrence. */
 export function listCentralCommands(): string[] {
   const seen = new Set<string>();
   for (const dir of [getUserCommandsDir(), getCommandsDir()]) {

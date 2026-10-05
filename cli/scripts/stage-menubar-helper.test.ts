@@ -1,19 +1,5 @@
-/**
- * stage-menubar-helper.sh — stages the PUBLISHED AGI Menu helper (PHNX-4036).
- *
- * The helper's source left this repo for phnx-labs/agi-menu, so nothing here can
- * build it; the only thing a release or a developer can do is fetch the signed
- * bundle the helper's own release published on `menubar/v<floor>` and verify it.
- * These tests EXECUTE the script (no mocks):
- *
- *  - against a real local HTTP server serving a fixture "release", so the sha256
- *    gate, the optional provenance sidecar, the 404 path, and the off-macOS
- *    refusal are all exercised offline and deterministically;
- *  - against the REAL published release at the floor in helper-versions.ts, when
- *    the network is reachable — the test that proves the address the script
- *    resolves is the one that actually serves the helper, and (on macOS) that the
- *    published bundle passes codesign + Gatekeeper + the DR-pin gate end to end.
- */
+/** Stages the published AGI Menu helper (PHNX-4036). Its source is in phnx-labs/agi-menu, so the
+ * only thing to do here is fetch the signed bundle from `menubar/v<floor>` and verify it. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -91,11 +77,8 @@ function publish(dir: string, opts: { sidecar?: boolean; wrongSha?: boolean } = 
   return { zip };
 }
 
-/**
- * Run the script asynchronously. The fixture HTTP server lives in THIS process,
- * so a spawnSync here would block the event loop the server needs to answer —
- * the script's curl would wait on a socket nobody services.
- */
+/** Run the script asynchronously: the fixture HTTP server lives in this process, so spawnSync would
+ * block the event loop it needs and the script's curl would wait on an unserviced socket. */
 function run(
   root: string,
   args: string[],
@@ -202,10 +185,9 @@ describeUnix('stage-menubar-helper.sh', () => {
   });
 
   it('refuses to stage an extracted bundle off macOS, before downloading anything', async () => {
-    // A real Linux box has no codesign/spctl, so an extracted bundle could never
-    // be verified there. The script must say so up front rather than download
-    // 2 MB and then die — and must not touch bin/. `uname` is stubbed on PATH
-    // so this runs the genuine branch on a macOS test host too.
+    // A Linux box has no codesign/spctl, so an extracted bundle could never be verified. The
+    // script must say so up front rather than download 2 MB and die, and must not touch bin/.
+    // `uname` is stubbed on PATH so this runs the genuine branch on a macOS host too.
     const root = fixture();
     const release = path.join(root, 'release');
     publish(release);

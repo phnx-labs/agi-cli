@@ -1,30 +1,6 @@
-/**
- * Async, deadline-bounded, process-group-killable subprocess exec (PHNX-3695).
- *
- * The daemon runs every background service on ONE Node event loop. A
- * synchronous `execFileSync`/`spawnSync` on a service tick blocks that loop for
- * the whole life of the child — and while it is blocked NOTHING else on the loop
- * runs, including the supervisor's per-tick deadline timer and the browser IPC
- * server's socket handlers. That is the wedge PHNX-3411 fixed the *symptom* of:
- * the browser `version` probe (a trivial synchronous handler) "accepts but never
- * replies" because the loop that would reply is frozen inside a sync spawn.
- *
- * `execFileBounded` is the non-blocking replacement for those tick-path spawns.
- * It spawns with async `child_process.spawn`, so the event loop keeps serving
- * other work while the child runs, and it bounds the child two ways:
- *
- *  - a `timeoutMs` deadline: on expiry it SIGTERMs the child, then SIGKILLs it
- *    after {@link KILL_GRACE_MS} if it ignored the term — the same escalation
- *    `sshExecAsync` uses (ssh-exec.ts).
- *  - a process GROUP kill: the child is spawned as its own group leader
- *    (`detached` on POSIX) so the signal reaches the whole subtree, not just the
- *    direct child. A bare `child.kill()` would leave grandchildren running — the
- *    orphaned-`ps`/`powershell` leak class. Windows uses `taskkill /T`.
- *
- * It never throws for a non-zero exit, a signal, or a spawn error: every outcome
- * is reported in the returned {@link BoundedExecResult} so a caller on a tick
- * path can branch on it instead of wrapping every call in try/catch.
- */
+/** Async, deadline-bounded, process-group-killable subprocess exec (PHNX-3695): sync spawns on a
+ * tick freeze the shared loop (PHNX-3411). Bounds the child by `timeoutMs` (SIGTERM, then
+ * SIGKILL) and kills its whole group (no orphaned grandchildren). Never throws; returns a result. */
 
 import { spawn } from 'child_process';
 
@@ -51,10 +27,8 @@ interface BoundedExecResult {
   timedOut: boolean;
 }
 
-/**
- * Run `file args` with a hard deadline, killing the whole process group on
- * timeout. Resolves (never rejects) with the captured output and outcome.
- */
+/** Run `file args` with a hard deadline, killing the whole process group on timeout. Resolves
+ * (never rejects) with captured output and the outcome. */
 export function execFileBounded(
   file: string,
   args: string[],

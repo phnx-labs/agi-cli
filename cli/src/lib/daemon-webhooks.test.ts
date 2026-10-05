@@ -130,11 +130,9 @@ describe('startHostedWebhookReceivers', () => {
   });
 
   it('survives a bind failure: the conflicting receiver is skipped, the rest still bind', async () => {
-    // A REAL occupied port. `server.listen()` reports EADDRINUSE as an async
-    // 'error' event, not a throw — so before this was awaited, the event reached
-    // the process-level uncaughtException handler and killed the whole daemon
-    // (with it: the secrets broker, scheduler, monitors, browser IPC, self-heal).
-    // Nothing here is mocked: the squatter is an actual listening HTTP server.
+    // A real occupied port: `server.listen()` reports EADDRINUSE as an async 'error' event, which
+    // used to hit the process-level uncaughtException handler and kill the whole daemon. The
+    // squatter is an actual listening HTTP server.
     const squatter = http.createServer(() => {});
     await new Promise<void>((resolve) => squatter.listen(0, '127.0.0.1', resolve));
     const takenPort = (squatter.address() as AddressInfo).port;
@@ -240,12 +238,9 @@ describe('startHostedWebhookReceivers', () => {
   });
 
   it('fails a receiver LOUD when its signing secret cannot be resolved', async () => {
-    // A bundle whose secret can't be resolved (here: no standalone `secrets`
-    // executable at all — DIST-1, no fallback engine) must NOT bind unverifiable
-    // ingress, and the reason must reach the daemon log rather than being
-    // swallowed. This holds regardless of WHY the resolve failed, so it runs
-    // without needing the real standalone installed; the exact "bundle absent"
-    // failure text is covered by the real-standalone block below.
+    // A bundle whose secret can't be resolved (here, no standalone `secrets` executable; DIST-1,
+    // no fallback) must not bind unverifiable ingress, and the reason must reach the daemon log.
+    // Holds regardless of why it failed.
     addHostedReceiver({ bundle: 'daemon-webhooks-test-absent-bundle', port: 8791 });
     const logs: { level: string; message: string }[] = [];
     const hosted = await startHostedWebhookReceivers({ log: (level, message) => logs.push({ level, message }) });

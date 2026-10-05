@@ -175,11 +175,9 @@ describe('execFileShellSpec', () => {
   });
 });
 
-// Real Windows spawn round-trip: prove that a command line composed by
-// composeWin32CommandLine, spawned with { shell: true } and an EMPTY args array,
-// reconstructs the child's argv BYTE-EXACT — including spaces, embedded quotes,
-// cmd metacharacters, backslashes, unicode, and a command PATH that has a space.
-// This exercises the exact DEP0190-safe path the agent run/shim spawns use.
+// Real Windows spawn round-trip: a line from composeWin32CommandLine, spawned with `{ shell: true
+// }` and an EMPTY args array, must reconstruct the child's argv BYTE-EXACT (spaces, quotes, cmd
+// metacharacters, backslashes, unicode): the DEP0190-safe path agent run/shim spawns use.
 describe('composeWin32CommandLine spawn round-trip (win32)', () => {
   const runOnWin32 = process.platform === 'win32' ? it : it.skip;
 

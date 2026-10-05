@@ -5,14 +5,9 @@ import { tmpdir } from 'os';
 import simpleGit from 'simple-git';
 import { pullRepo } from '../src/lib/git.js';
 
-// Per-run unique dir (RUSH-2839): a fixed shared path collided across
-// concurrent runs — or a run after a killed run left the dir behind — with
-// `local` half-cloned or `.git/config` wiped mid-test by the other run,
-// surfacing as "destination path already exists" or "Author identity
-// unknown" (the sandboxed test HOME from tests/setup.ts has no global git
-// identity to fall back on once the just-configured local config is gone).
-// mkdtempSync gives every beforeEach its own directory, matching the
-// established pattern in src/lib/git.test.ts (fs.mkdtempSync(...) per suite).
+// Per-run unique dir (RUSH-2839): a fixed shared path collided across concurrent or killed runs,
+// leaving `local` half-cloned or `.git/config` wiped ("destination path already exists", "Author
+// identity unknown"). mkdtempSync per beforeEach, matching src/lib/git.test.ts.
 let TEST_DIR: string;
 let REMOTE_DIR: string;
 let LOCAL_DIR: string;
@@ -75,11 +70,9 @@ describe('pullRepo', () => {
     expect(after).toBe(before);
   });
 
-  // REVERSED deliberately. These asserted that ANY dirt refuses the pull — the
-  // behavior that stranded merged changes on every box carrying an unrelated
-  // local edit (a modified agents.yaml, a machine-local dotfile). pullRepo now
-  // shares `dirtyTreeRefusal` with syncRepoGit: it fast-forwards past dirt the
-  // incoming commits do not touch, and refuses only when they do.
+  // REVERSED deliberately: these asserted that any dirt refuses the pull, which stranded merged
+  // changes on every box with an unrelated local edit. pullRepo now shares `dirtyTreeRefusal` with
+  // syncRepoGit: it fast-forwards past dirt the incoming commits do not touch.
   it('pulls past uncommitted changes the incoming commits do not touch', async () => {
     writeFileSync(join(LOCAL_DIR, 'dirty.txt'), 'uncommitted change');
 
@@ -107,11 +100,9 @@ describe('pullRepo', () => {
     expect(readFileSync(join(LOCAL_DIR, 'README.md'), 'utf8')).toBe('# Modified');
   });
 
-  // REVERSED deliberately (RUSH-2056). This asserted that divergence alone
-  // refuses the pull — the behavior that broke fleet distribution. pullRepo
-  // auto-commits the machine's own devices/<host> pin just before pulling, so
-  // every device eventually diverged and could never pull again, with nothing
-  // in conflict. It now rebases, as its own doc comment always claimed.
+  // REVERSED deliberately (RUSH-2056): this asserted divergence alone refuses the pull, which broke
+  // fleet distribution: pullRepo auto-commits the machine's devices/<host> pin before pulling, so
+  // every device diverged and could never pull. It now rebases, as its doc always claimed.
   it('rebases a diverged branch instead of refusing when nothing conflicts', async () => {
     // Remote and local each add a DIFFERENT file → diverged, no conflict.
     writeFileSync(join(REMOTE_DIR, 'remote-only.txt'), 'remote');

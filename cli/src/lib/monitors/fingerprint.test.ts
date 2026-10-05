@@ -1,13 +1,6 @@
-/**
- * Tests for the double-trigger guard.
- *
- * The bug: a monitor's NAME is not its identity. `writeMonitor` overwrites by
- * name and nothing compares arguments, so two watchers can poll the same source
- * and fire the same action under different names — one trigger, fired twice.
- * Observed on one box: `open-pr-watch`, `pr-ci-fail`, three stale `pr2222-*`
- * watchers and an agent-added lander, all polling the same PR queue, added
- * without a single warning.
- */
+/** Tests for the double-trigger guard. A monitor's NAME is not its identity: `writeMonitor`
+ * overwrites by name and nothing compares arguments, so two watchers can poll the same source and
+ * fire the same action under different names (seen once on a single PR queue). */
 
 import { describe, it, expect } from 'vitest';
 import { monitorFingerprint, findDuplicateMonitor } from './fingerprint.js';
@@ -124,11 +117,9 @@ describe('findDuplicateMonitor', () => {
   });
 });
 
-/**
- * A monitor can arrive from arbitrary YAML (`agents monitors add ./watcher.yml`).
- * `validateMonitor` checks named fields; the fingerprint walks the whole object
- * graph — so a recursive anchor is valid to one and cyclic to the other.
- */
+/** A monitor can arrive from arbitrary YAML (`agents monitors add ./watcher.yml`).
+ * `validateMonitor` checks named fields; the fingerprint walks the whole object graph, so a
+ * recursive anchor is valid to one and cyclic to the other. */
 describe('hostile input from a YAML file', () => {
   it('does not blow the stack on a recursive anchor', () => {
     const source: any = { type: 'poll', command: 'x', interval: '2m' };

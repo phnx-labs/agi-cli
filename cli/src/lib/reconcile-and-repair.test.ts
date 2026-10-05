@@ -1,13 +1,6 @@
-/**
- * Superset proof: `repairAfterSync` — the pass `agents sync` runs at the tail of
- * every reconcile — repairs a broken managed hook runtime shim that
- * `syncResourcesToVersion` (sync's own prune+write) never touches. This is the
- * exact class of finding the old `doctor --fix` fixed and plain sync did not.
- *
- * Runs in a subprocess with HOME=testHome because the path constants in state.ts
- * capture HOME at module-load (same harness as hooks/install.test.ts, whose shim
- * fixtures this reuses).
- */
+/** Superset proof: `repairAfterSync` (run at the tail of every `agents sync`) repairs a broken
+ * managed hook runtime shim that `syncResourcesToVersion` never touches, the class `doctor --fix`
+ * handled. Subprocess with HOME=testHome since state.ts captures HOME at load. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -31,11 +24,9 @@ afterEach(() => {
   fs.rmSync(testHome, { recursive: true, force: true });
 });
 
-/**
- * Seed a claude version installed with a managed hook whose generated runtime
- * shim does NOT yet exist — the "shim source mismatch" the yosemite-s1 CRITICALs
- * flagged. Mirrors seedClaudeVersionWithGeneratedShim in hooks/install.test.ts.
- */
+/** Seed a claude version with a managed hook whose generated runtime shim does NOT yet exist (the
+ * "shim source mismatch" the yosemite-s1 CRITICALs flagged); mirrors
+ * seedClaudeVersionWithGeneratedShim in hooks/install.test.ts. */
 function seedClaudeVersionWithManagedHook(version: string, hookName: string, event: string): void {
   // Binary stub so listInstalledVersions / isVersionInstalled see the version.
   const binDir = path.join(userDir, '.history', 'versions', 'claude', version, 'node_modules', '.bin');

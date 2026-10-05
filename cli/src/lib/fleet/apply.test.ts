@@ -260,11 +260,9 @@ describe('diffFleet — secrets surfacing', () => {
   });
 
   it('does NOT skip a prototype-named bundle when remoteBundles is a plain object', () => {
-    // Defence in depth, and the case that actually distinguishes the two fixes.
-    // parseRemoteBundles returns a null-prototype map, so `in` happens to be safe
-    // on ITS output — but `remoteBundles` is a plain field any caller can fill,
-    // and a `{}` literal (what every other fixture here uses) inherits toString.
-    // Under `in` this device would be judged already-provisioned and skipped.
+    // Defence in depth: parseRemoteBundles returns a null-prototype map where `in` is safe, but
+    // `remoteBundles` is a plain field any caller can fill, and a `{}` literal inherits toString.
+    // Under `in` this device would be judged already provisioned and skipped.
     const plainLiteral = new Map<string, DeviceProbe>([
       ['s1', { ...converged.get('s1')!, remoteBundles: { somethingElse: 't' } }],
     ]);

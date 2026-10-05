@@ -1,30 +1,6 @@
-/**
- * PHNX-3072: the vitest suite must be structurally unable to launch the
- * developer's desktop opener (`open` / `xdg-open` / `gnome-open`).
- *
- * `tests/setup.ts` already sandboxes HOME so a test cannot write the real
- * `~/.agents`. PATH was left alone, so a unit test that reached a real
- * `spawn('open' | 'xdg-open')` resolved the developer's binary. That shipped:
- * `open-url.test.ts` drove the non-injected viewer path, every Mac `bun run test`
- * opened example.com, and Linux CI stayed green because `xdg-open` was absent
- * (ENOENT in ~4ms). The specific test was fixed in agents-cli#2937; this
- * module closes the class.
- *
- * Installed once per fork from tests/setup.ts: stub binaries are prepended to
- * PATH so a PATH-resolved spawn cannot reach `/usr/bin/open`. Child processes
- * that inherit `env: {...process.env}` get the stubs for free, the same way
- * they inherit the sandboxed HOME. This is a prefix, not a cage — git/node/the
- * CLI still resolve from the rest of PATH.
- *
- * An unauthorized spawn still fails the file via the afterAll tripwire
- * (`assertNoUnauthorizedOpenerSpawn`). Set `AGENTS_TEST_ALLOW_OPENER=1` to
- * declare intent (the probe tests in opener-sandbox.test.ts do this). The
- * stubs still run — a test can never launch the real handler.
- *
- * Absolute paths (`/usr/bin/open`) skip PATH by construction; those call
- * sites (today: `setup-computer.ts`) are a different class. The incident
- * this closes is PATH-resolved spawn, which is how `open-url.ts` launches.
- */
+/** PHNX-3072: setup.ts sandboxed HOME but not PATH, so a real `spawn('open'|'xdg-open')` hit the
+ * developer's binary. Stub openers are prepended to PATH per fork. An unauthorized spawn fails the
+ * file via the afterAll tripwire; AGENTS_TEST_ALLOW_OPENER=1 declares intent. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -42,11 +18,8 @@ function basenameOf(command: string): string {
   return (i === -1 ? command : normalized.slice(i + 1)).toLowerCase();
 }
 
-/**
- * True when `command` is a known desktop opener basename or path to one.
- * `open` here is the macOS Launch Services tool, not an agents subcommand —
- * those go through `node dist/index.js open …` and never match.
- */
+/** True when `command` is a known desktop opener basename or path. `open` is the macOS Launch
+ * Services tool, not an agents subcommand (those run via `node dist/index.js open ...`). */
 export function isDesktopOpenerCommand(command: string): boolean {
   const base = basenameOf(command);
   return (DESKTOP_OPENER_BASENAMES as readonly string[]).includes(base);
@@ -93,10 +66,8 @@ interface InstallOpenerSandboxOpts {
   tmp: string;
 }
 
-/**
- * Install the opener sandbox into this process: stub dir on PATH, env pins.
- * Idempotent enough to call once per fork from setup.ts.
- */
+/** Install the opener sandbox into this process (stub dir on PATH, env pins); idempotent enough to
+ * call once per fork from setup.ts. */
 export function installOpenerSandbox(opts: InstallOpenerSandboxOpts): { stubDir: string; tripwireDir: string } {
   const stubDir = path.join(opts.tmp, 'opener-stubs');
   const tripwireDir = path.join(opts.tmp, 'opener-tripwire');
@@ -120,12 +91,9 @@ export function openerSandboxTripped(): string | null {
   return body.length > 0 ? body : null;
 }
 
-/**
- * Fail the test file if any desktop opener was spawned without
- * `AGENTS_TEST_ALLOW_OPENER=1`. Wired from tests/setup.ts afterAll — same
- * shape as the HOME leak tripwires, but local (not CI-only): the original
- * bug was invisible on Linux CI and only hurt developers running the suite.
- */
+/** Fail the test file if a desktop opener was spawned without `AGENTS_TEST_ALLOW_OPENER=1`; wired
+ * from setup.ts afterAll like the HOME tripwires, but local, since the bug only hurt developers,
+ * not Linux CI. */
 export function assertNoUnauthorizedOpenerSpawn(): void {
   if (openerAllowed()) return;
   const log = openerSandboxTripped();

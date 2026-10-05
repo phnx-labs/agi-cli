@@ -1,8 +1,4 @@
-/**
- * Provider barrel — importing this registers every built-in channel provider.
- * "App" providers register themselves the same way (registerChannelProvider),
- * so nothing here is privileged over an extension.
- */
+/** Provider barrel: importing it registers every built-in channel provider, same as app providers. */
 import { registerChannelProvider } from '../registry.js';
 import { mailboxProvider } from './mailbox.js';
 import { rushProviders } from './rush.js';

@@ -3,12 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Seeded registry presets (SEEDED_REGISTRIES) are resolved in memory by
-// getRegistries rather than written into agents.yaml — writing them from the
-// read path dirtied that git-tracked file and deadlocked `agents repo pull`
-// (RUSH-1925). registry.ts and state.ts both resolve HOME at import time, so
-// each test points HOME at a throwaway dir and re-imports fresh. Real files,
-// real yaml, no mocks.
+// Seeded registry presets (SEEDED_REGISTRIES) are resolved in memory by getRegistries, not written
+// to agents.yaml: writing from the read path dirtied that tracked file and deadlocked `agents repo
+// pull` (RUSH-1925). Each test points HOME at a throwaway dir and re-imports; no mocks.
 let TMP = '';
 
 async function freshRegistry() {
@@ -86,10 +83,9 @@ describe('seeded registry presets', () => {
   });
 
   it('keeps the preset url when a partial update disables it', async () => {
-    // A seeded preset has no stored entry to merge with, so setRegistry must fall
-    // back to SEEDED_REGISTRIES. Without that, `registry disable` persisted only
-    // {enabled:false}, dropping url — and since a stored entry outranks the
-    // in-memory seed, the preset stayed broken even after re-enabling.
+    // A seeded preset has no stored entry to merge with, so setRegistry falls back to
+    // SEEDED_REGISTRIES. Otherwise `registry disable` persisted only {enabled:false}, dropping
+    // url, and the broken stored entry outranked the seed after re-enabling.
     writeMetaFile('registries:\n  mcp: {}\n  skill: {}\n');
 
     const { getRegistries, setRegistry } = await freshRegistry();

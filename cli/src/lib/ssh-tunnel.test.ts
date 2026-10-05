@@ -1,11 +1,5 @@
-/**
- * The generic `ssh -L` tunnel is shared fleet plumbing: `agents browser` drives
- * a remote CDP endpoint through it, and `agents computer --device` resolves a
- * device name through `resolveRemoteDevice` here before handing the answer to
- * the standalone engine. Both the option-injection sink and the hardened
- * baseline composition are pinned, since a regression in either is silent —
- * the tunnel still opens, it is just unhardened or attacker-influenced.
- */
+/** The generic `ssh -L` tunnel is shared fleet plumbing: `agents browser` drives remote CDP through
+ * it and `agents computer --device` resolves a device name with `resolveRemoteDevice` here. */
 import { describe, expect, it } from 'vitest';
 import { buildTunnelArgs, startSSHTunnel } from './ssh-tunnel.js';
 import { SSH_OPTS } from './ssh-exec.js';

@@ -1,15 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { decideRoutineAuthReadiness, decideHostAuthFromPing } from './routine-readiness.js';
 
-/**
- * The ONE decision both readiness paths share (PHNX-4116). Pure, so these run the
- * real code with no mocks. The bug this covers: after the PR dropped the
- * `no_evidence` row from `probeLocalFleetAuth`, a `--host <worker>` routine on
- * claude/kimi/droid found no row, fell to the literal `'unconfigured'`, and was
- * reported `agent_auth_failed` with a valid token on disk. The fix is the
- * absent-row + launchability fallback below — the same one the local path uses,
- * so both reach the same answer for the same box.
- */
+/** The ONE decision both readiness paths share (PHNX-4116), pure so these run real code. Bug: after
+ * `probeLocalFleetAuth` dropped `no_evidence`, a `--host <worker>` routine found no row, fell to
+ * `'unconfigured'` and was reported `agent_auth_failed` with a valid token on disk. */
 describe('decideRoutineAuthReadiness (shared local/host decision)', () => {
   it('worker with no probe row but a launchable token → ready', () => {
     // A worker drops its `no_evidence` row, so `row` is absent; the token on disk
@@ -40,11 +34,9 @@ describe('decideRoutineAuthReadiness (shared local/host decision)', () => {
   });
 });
 
-/**
- * The host path parses the REMOTE box's `devices ping --local --json` payload and
- * runs the shared decision. `decideHostAuthFromPing` is pure over that payload
- * TEXT so the exact worker/headed/revoked payloads are tested without SSH.
- */
+/** The host path parses the REMOTE box's `devices ping --local --json` payload and runs the shared
+ * decision; `decideHostAuthFromPing` is pure over the payload TEXT so worker/headed/revoked
+ * payloads are tested without SSH. */
 describe('decideHostAuthFromPing (remote `devices ping --local --json` → readiness)', () => {
   const now = Date.now();
 

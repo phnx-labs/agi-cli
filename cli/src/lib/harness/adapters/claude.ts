@@ -9,82 +9,33 @@ export const claudeAdapter: HarnessAdapter = {
 
   applyExecConfigEnv(result, ctx) {
     const { versionHome } = ctx;
-    // The per-account `claude setup-token` only resolves when there is a version
-    // home to key it to; version===null (claude unresolved / not installed) yields
-    // null, exactly as the routines path treats it (`runner.ts:1017-1021`). The
-    // token decision below runs even then, so an ambient inherited value is stripped
-    // on the routines/provisioned path regardless of whether a version resolved.
-    // resolveClaudeSetupToken is injected (see ExecConfigEnvCtx) to keep this
-    // adapter import-leaf — importing claude-account-token here would drag the
-    // secrets/sqlite graph into shims.ts.
+    // The per-account `claude setup-token` resolves only with a version home; version===null yields
+    // null, as in the routines path (`runner.ts:1017-1021`).
     const setupToken = versionHome ? ctx.resolveClaudeSetupToken(versionHome) : null;
     if (versionHome) {
       result.CLAUDE_CONFIG_DIR = path.join(versionHome, '.claude');
-      // A managed pin lives in a per-version dir; Claude Code's own background
-      // auto-updater would rewrite that pinned binary in place (and has left it
-      // half-swapped and broken). Disable it so a pin stays a pin. Honor an
-      // explicit user value — from process.env (already in result) or from
-      // options.env (spread over result below).
+      // A managed pin lives in a per-version dir, and Claude Code's background auto-updater would
+      // rewrite the pinned binary in place (it has left it half-swapped). Disable it so a pin stays
+      // a pin, honoring an explicit user value from process.env or options.env.
       if (result.DISABLE_AUTOUPDATER === undefined) {
         result.DISABLE_AUTOUPDATER = '1';
       }
     }
-    // The `auth` bundle's setup-token exists so a run with NO human present
-    // authenticates without the Touch-ID-gated login item — usage probes,
-    // routines, dispatched runs (claude-account-token.ts). It is a WORKER
-    // credential. Exactly one kind of run defers to the per-version login
-    // instead: ANY run on a `personal`/`desktop` (headed) device — the user's
-    // own interactive box (zion), marked `config.role: personal`. That box
-    // holds a real per-version login and is the single origin of it, so every
-    // run there — interactive TUI OR a headless one-shot like `agents run
-    // claude "fix the bug"` — MUST use that login, not the setup-token. Keying
-    // the credential on DEVICE ROLE, not run mode, is RUSH-2395's fix: gating on
-    // `ctx.interactive` alone sent a headless run on the laptop onto the
-    // setup-token and hijacked the login.
-    //
-    // A WORKER device carries no such login regardless of interactive/headless:
-    // an interactive run there is a remotely dispatched TUI (`agents run claude
-    // --interactive --device <worker>`), not a human sitting at that box's own
-    // Keychain-trusted session — the same worker credential headless runs use is
-    // the only credential that exists to authenticate it. Treating `interactive`
-    // as "defer to native login" regardless of device role left a keychain-less
-    // worker with NO injected token and a per-version `.credentials.json` that
-    // was never written, so the run landed on Claude Code's login screen instead
-    // of authenticating (PHNX-3502).
-    //
-    // macOS cannot cheaply confirm a home's login first (probing the Keychain
-    // raises an authorization sheet per installed version on the `agents run` hot
-    // path — agents.ts `isClaudeCredentialFileBlank`), so the headed-device path
-    // defers to Claude Code, which reads its own ACL-trusted login item without a
-    // prompt and asks a present human to log in only if the login is missing.
+    // The `auth` bundle's setup-token is a worker credential for runs with no human present.
+    // Any run on a headed (personal/desktop) device uses its native login: credential keys on
+    // device role, not run mode (RUSH-2395). Worker runs, even interactive, use it (PHNX-3502).
     const headedDevice = isHeadedDeviceRole(ctx.deviceRole);
     if (headedDevice) {
-      // Drop an INHERITED copy of OUR OWN setup-token: a launch from inside a
-      // headless agent's shell inherits that agent's injected value via
-      // sanitizeProcessEnv(process.env) and would keep authenticating as it,
-      // overriding the login this branch is protecting. Matched by VALUE, so a
-      // token the user exported deliberately is a different string and is left
-      // alone (#2383). This is NARROWER than the worker path below, which
-      // overwrites-or-deletes unconditionally and never inspects the inherited
-      // value — a DIFFERENT account's inherited setup-token passing through this
-      // equality check is the adjacent hole RUSH-2360 leaves as follow-up (it does
-      // not silently run on a *shared, rotating* token, which is what caused the
-      // RUSH-1822 logout storm).
+      // Drop an inherited copy of our own setup-token: a launch inside a headless agent's shell
+      // inherits its injected value and would keep authenticating as it. Matched by value, so a
+      // user-exported token is left alone (#2383). Another account's token passing is RUSH-2360.
       if (setupToken && result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {
         delete result.CLAUDE_CODE_OAUTH_TOKEN;
       }
     } else {
-      // Any run on a NON-personal device (worker, dispatched, provisioned box) —
-      // interactive OR headless: mirror the routines path (`runner.ts`)
-      // UNCONDITIONALLY. Inject the per-account setup-token when one resolves —
-      // it replaces any ambient shared value inherited from the launcher. When
-      // NONE resolves, STRIP the ambient CLAUDE_CODE_OAUTH_TOKEN so a run on a
-      // provisioned box can never silently authenticate as the shared, rotating
-      // token an earlier version of this path let through — the RUSH-1822
-      // fleet-wide-logout hazard, tracked by RUSH-2360. A missing login then
-      // fails loud (401) against this home's own credential instead of quietly
-      // borrowing another's. options.env still wins below for an explicit
-      // caller override.
+      // Any run on a non-personal device, interactive or headless, mirrors `runner.ts`: inject
+      // the per-account setup-token if one resolves, else strip ambient CLAUDE_CODE_OAUTH_TOKEN so
+      // it never uses the shared rotating token (RUSH-1822, RUSH-2360). Missing login fails loud.
       if (setupToken) {
         result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
       } else {
@@ -115,11 +66,9 @@ fi
 `;
   },
 
-  // NOTE: the worker branch above strips the token and returns; a MISSING worker
-  // credential is caught before spawn by claudeWorkerLoginTrapPreflight (below),
-  // which fails loud for an interactive run instead of letting Claude Code fall
-  // through to its "Select login method" screen. A headless run keeps the
-  // strip-and-401 behavior.
+  // The worker branch strips the token and returns; a missing worker credential is caught before
+  // spawn by claudeWorkerLoginTrapPreflight, which fails loud for interactive runs instead of
+  // dropping to "Select login method". A headless run keeps strip-and-401.
 
   routineModeArgs(cmd, ctx) {
     const mode = ctx.mode;
@@ -137,38 +86,16 @@ fi
   },
 };
 
-/**
- * Fail-loud preflight for the worker login-screen trap — the sibling of the
- * PHNX-3502 fix. On an EXPLICIT `role: worker` device every Claude run
- * authenticates from the synced `setup-token`, never an interactive login (owner
- * rule / credential-management invariant 7). When NO setup-token resolves for the
- * account this run selected, `applyExecConfigEnv` strips any ambient token and
- * the harness launches with no credential. A HEADLESS run then fails loud with a
- * 401 — but an INTERACTIVE dispatched TUI (`agents run claude --interactive
- * --device <worker>`, the usual `--device auto` landing) instead drops to Claude
- * Code's own "Select login method" screen. Answering it does an interactive OAuth
- * on a headless box, minting a native login the worker path never reads and never
- * syncs; Anthropic later expires it and the next run repeats the prompt — the
- * 10-minute re-login loop the operator sees.
- *
- * This gate refuses that run BEFORE spawn with the real fix (pin or mint a
- * durable account) instead of the useless login prompt. It is interactive-only
- * because the headless 401 is already loud. Pure: the caller (spawnAgentLeased)
- * resolves the inputs and renders the returned message, exactly like
- * codexSandboxPreflight. Returns null when the run may proceed.
- */
+/** Fail-loud preflight for the worker login-screen trap (sibling of PHNX-3502). On an explicit
+ * `role: worker` device with no setup-token, an interactive run would hit Claude's login screen
+ * and mint an unsynced login; refuse before spawn. Pure; returns null when the run may proceed. */
 export function claudeWorkerLoginTrapPreflight(args: {
   agent: AgentId;
   interactive: boolean;
   deviceRole?: ConfiguredDeviceRole;
-  /**
-   * Will a Claude credential actually reach the child at spawn? The caller ORs
-   * the resolved worker setup-token with an explicit `--env
-   * CLAUDE_CODE_OAUTH_TOKEN=…` override — `buildExecEnv` merges `options.env`
-   * LAST and unconditionally, so that override wins even the worker branch's
-   * strip and authenticates the run. Gating on the setup-token alone would
-   * falsely refuse that sanctioned escape hatch (forwarded across `--device`).
-   */
+  /** Will a Claude credential reach the child at spawn? The caller ORs the worker setup-token
+   * with an explicit `--env CLAUDE_CODE_OAUTH_TOKEN=...`; buildExecEnv merges options.env last,
+   * so it wins even the worker strip. */
   hasWorkerCredential: boolean;
   machine?: string;
 }): string | null {
@@ -176,19 +103,9 @@ export function claudeWorkerLoginTrapPreflight(args: {
   // A headless run with no token fails loud with a 401 already; only an
   // interactive run falls through to Claude Code's login screen.
   if (!args.interactive) return null;
-  // Gate ONLY an EXPLICIT `role: worker` box — not a headed box, and NOT an
-  // UNMARKED one. The owner rule guarantees a real worker holds no native login
-  // (it authenticates from the synced setup-token), so no token there genuinely
-  // means the login screen with nothing behind it. A headed box authenticates
-  // from its own native login (its login prompt is the correct first-run flow).
-  // An UNMARKED box is deliberately spared: it never receives a synced setup-token
-  // (auth-sync pushes only to `role=worker` peers), so it is typically an ordinary
-  // machine authenticating from a native login the operator just never marked —
-  // gating it would false-refuse every such laptop, a far larger surface than the
-  // marked-worker case this closes. `--device auto` lands on an explicit worker
-  // once any worker is marked in the fleet (filterAutoPool), which is the primary
-  // trap; a directly-named `--device <unmarked-box>` is left as it was on main
-  // (unprotected — a bootstrap-window residual, not a regression).
+  // Gate only an explicit `role: worker` box, not headed or unmarked ones. A real worker holds no
+  // native login (owner rule), so no token means a login screen with nothing behind it. Unmarked
+  // boxes get no synced token and usually have a native login, so gating them would false-refuse.
   if (args.deviceRole !== 'worker') return null;
   // A credential will reach the child (worker setup-token, or an explicit
   // --env CLAUDE_CODE_OAUTH_TOKEN override) — proceed.

@@ -1,7 +1,5 @@
-/**
- * RUSH-2320 #2 — skills detector skillDirsMatch is stat-first:
- * size mismatch → miss; identical content → match (even when mtimes differ).
- */
+/** RUSH-2320 #2: the skills detector's skillDirsMatch is stat-first: size mismatch is a miss;
+ * identical content matches even when mtimes differ. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

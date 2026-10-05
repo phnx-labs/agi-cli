@@ -1,18 +1,11 @@
-/**
- * Server-Sent Events parser and terminal renderer for cloud task output.
- *
- * Used by `agents cloud logs -f` to stream live output from a running task
- * and by the post-dispatch follow mode to show progress inline.
- */
+/** Server-Sent Events parser and terminal renderer for cloud task output, used by `agents cloud
+ * logs -f` and post-dispatch follow. */
 
 import chalk from 'chalk';
 import type { CloudEvent, CloudTaskStatus } from './types.js';
 
-/**
- * Translate a (server-emitted SSE event name, raw data string) pair into a
- * typed CloudEvent. Unknown event names are surfaced as `{ type: 'unknown' }`
- * rather than dropped — that's the whole point of widening the taxonomy.
- */
+/** Translate an SSE (event name, data) pair into a typed CloudEvent; unknown names surface as `{
+ * type: 'unknown' }` rather than being dropped. */
 function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEvent {
   let parsed: Record<string, unknown> = {};
   try {
@@ -57,10 +50,8 @@ function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEve
   }
 }
 
-/**
- * Parse a Server-Sent Events stream into CloudEvents.
- * Handles `event:`, `data:`, keepalive comments, and multi-line data.
- */
+/** Parse a Server-Sent Events stream into CloudEvents, handling `event:`, `data:`, keepalive
+ * comments and multi-line data. */
 export async function* parseSSE(response: Response): AsyncIterable<CloudEvent> {
   if (!response.body) return;
 
@@ -107,10 +98,8 @@ export async function* parseSSE(response: Response): AsyncIterable<CloudEvent> {
   }
 }
 
-/**
- * Render a stream of CloudEvents to the terminal.
- * Returns the final status and summary when the stream ends.
- */
+/** Render a stream of CloudEvents to the terminal; returns the final status and summary when the
+ * stream ends. */
 export async function renderStream(
   events: AsyncIterable<CloudEvent>,
   options?: { json?: boolean },

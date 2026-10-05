@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# supervise.sh — health + self-heal for the shared CI runner box (ci-runner-fsn1)
-# and the crabbox idle-reaper. Designed to run from launchd/cron on mac-mini
-# (needs: ~/.ssh/ci-runner-ops key, gh auth, and hetzner access via either an
-# unlocked `agents secrets` hetzner.com bundle or ~/.config/infra-ci/hcloud-token).
-#
-#   supervise.sh [--once]     one pass (default), prints a summary line
-#
-# Heal ladder per dead runner unit: systemctl restart over SSH -> verify on the
-# GitHub API -> re-register (phnx units: fresh org token minted via gh, pushed
-# over SSH; muqsitnawaz units self-heal via their on-box PAT). The box itself
-# being unreachable is reported, not rebuilt (full re-provision is a script).
+# supervise.sh: health and self-heal for the shared CI runner box (ci-runner-fsn1) and the crabbox
+# idle-reaper, run from launchd/cron on mac-mini. Per dead unit: restart over SSH, verify on
+# GitHub, re-register. An unreachable box is reported, not rebuilt.
 set -uo pipefail
 
 BOX_IP="${CI_BOX_IP:-78.46.183.46}"
@@ -49,10 +41,9 @@ for u in runner@1 runner@2 runner@3 runner@4 runner-phnx@1 runner-phnx@2; do
   fi
 done
 
-# GitHub-side view: an org runner stuck offline with an active unit means
-# registration drift — re-register the phnx units (their token path is ours).
-# The org endpoints need org admin; if gh can't (403), GitHub-side healing is
-# skipped and unit-state checks carry the health signal.
+# GitHub-side view: an org runner offline with an active unit means registration drift, so
+# re-register the phnx units. Org endpoints need org admin; on 403 GitHub-side healing is skipped
+# and unit-state checks carry the health signal.
 GH_ORG_OK=1
 gh api orgs/phnx-labs/actions/runners --jq '.runners | length' >/dev/null 2>&1 || GH_ORG_OK=0
 [ "$GH_ORG_OK" = 0 ] && log "NOTE gh lacks org runner read (403) — GitHub-side checks/heals skipped; unit checks only"

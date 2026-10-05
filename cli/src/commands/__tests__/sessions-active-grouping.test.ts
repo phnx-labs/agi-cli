@@ -1,11 +1,6 @@
-/**
- * Tests for the pure grouping function backing `agents sessions --active`.
- *
- * The renderer (renderActiveSessions) couples grouping with chalk+console
- * output, which is awkward to assert against. groupActiveSessions extracts
- * the logic so workspace/window splits, sort orders, and the cloud/unknown
- * bucket rules can be tested in isolation.
- */
+/** Tests the pure grouping function behind `agents sessions --active`. renderActiveSessions couples
+ * grouping with chalk+console, so groupActiveSessions extracts workspace/window splits, sort
+ * orders and cloud/unknown bucket rules for isolated testing. */
 
 import { describe, it, expect } from 'vitest';
 import { groupActiveSessions } from '../sessions.js';

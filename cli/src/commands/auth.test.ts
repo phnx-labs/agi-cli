@@ -5,13 +5,9 @@ import * as path from 'path';
 import * as http from 'http';
 import { Command } from 'commander';
 
-/**
- * The `agents auth` command layer, driven against a REAL HTTP server standing in
- * for Phoenix ID (no mocked fetch, no mocked seam) — so these cover what the
- * seam-level tests cannot: the poll loop's branches, the signed-out paths, the
- * space resolution helpers, and that a user-actionable failure prints one clean
- * line rather than a Node stack dump.
- */
+/** The `agents auth` command layer, driven against a real HTTP server standing in for Phoenix ID
+ * (no mocked fetch). Covers what seam-level tests cannot: the poll loop's branches, signed-out
+ * paths, space resolution, and a clean one-line failure instead of a Node stack dump. */
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-auth-cmd-'));
 process.env.AGENTS_STATE_DIR = path.join(HOME, 'state');

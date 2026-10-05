@@ -1,14 +1,6 @@
-/**
- * Hook profiling — reads `hook.fire` events from the daily JSONL logs that
- * generated shims (see `cache.ts`) emit on every invocation, and aggregates
- * per-hook timing + cache stats.
- *
- * Every hook gets a generated shim now (resolveHookCommand in hooks.ts) —
- * `cache:`, `matches:`, or a bare `matcher:` (e.g. git-guard/rm-guard) are all
- * enough to opt in. The only hooks NOT in this profile are ones with none of
- * the three, since a pure lifecycle hook with nothing to gate/cache/match runs
- * the raw script path with no timing wrapper at all.
- */
+/** Hook profiling: aggregates timing and cache stats from `hook.fire` events in the daily JSONL
+ * logs. Only hooks with none of `cache:`, `matches:` or `matcher:` get no shim, so they are
+ * absent here. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLogsDir } from '../state.js';
@@ -26,16 +18,11 @@ export interface HookProfileRow {
   cacheStalePct: number;
   cacheMissPct: number;
   errorCount: number;
-  /**
-   * Fraction (0-1) of fires with a real crash exit (exit 1 / other nonzero
-   * except intentional PreToolUse deny code 2). Exit 2 is blockRate.
-   */
+  /** Fraction (0-1) of fires with a real crash exit (nonzero other than the PreToolUse deny code
+   * 2). */
   errorRate?: number;
-  /**
-   * Count of intentional deny/block exits (PreToolUse exit 2). Deny-by-design
-   * guards (ask-user-question-guard, git-guard, plan-html-reminder) use this
-   * path — not a crash.
-   */
+  /** Count of intentional deny/block exits (PreToolUse exit 2), which deny-by-design guards use;
+   * not a crash. */
   blockCount: number;
   /** Fraction (0-1) of fires with exit code 2 (intentional deny/block). */
   blockRate?: number;
@@ -54,11 +41,8 @@ interface RawFireEvent {
   exit?: number;
 }
 
-/**
- * Load every `hook.fire` event from the last `days` daily log files.
- * Lines that aren't JSON or aren't `hook.fire` events are silently skipped —
- * the events log is multiplexed (version.switch, secrets.get, …).
- */
+/** Load every `hook.fire` event from the last `days` daily logs; the log is multiplexed, so
+ * other lines are skipped. */
 export function loadHookFireEvents(days = 7, logsDir: string = getLogsDir()): RawFireEvent[] {
   if (!fs.existsSync(logsDir)) return [];
   const today = new Date();
@@ -121,13 +105,9 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
       blockCount: blocks,
       ...(errors > 0 ? { errorRate: Math.round((errors / n) * 1000) / 1000 } : {}),
       ...(blocks > 0 ? { blockRate: Math.round((blocks / n) * 1000) / 1000 } : {}),
-      // timeoutRate is not derivable here: the daily JSONL a shim writes only
-      // covers fires that reached their own trailing printf — an externally
-      // enforced timeout (the agent harness killing the process) never gets
-      // that far, so this log has no timeout signal at all. The warehouse
-      // path (asHookRows in commands/perf.ts) is the one that can see it,
-      // via the perf-spool `status:"timeout"` sample OpenCode's generated
-      // plugin writes directly (hooks.ts's recordTimeoutSample).
+      // timeoutRate is not derivable here: a harness-enforced timeout kills the shim before it
+      // logs, so this log has no timeout signal. The warehouse path (asHookRows in
+      // commands/perf.ts) sees it via perf-spool samples.
     });
   }
 

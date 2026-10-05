@@ -27,10 +27,9 @@ SKIP_TESTS=false
 TEST_TARGET=()
 VERSION=""
 SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)\.[0-9]+)?$'
-# A while/shift loop, not `for arg in "$@"`: the for-loop form snapshots the
-# argument list, so `shift` cannot consume a flag's VALUE and `$2` refers to the
-# script's second positional rather than the next token. That worked only while
-# every flag here was value-less; --device takes one.
+# A while/shift loop, not `for arg in "$@"`: the for-loop snapshots the argument list, so `shift`
+# cannot consume a flag's value and `$2` is the script's second positional. That worked only while
+# every flag was value-less; --device takes one.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=true; shift ;;
@@ -75,11 +74,9 @@ bun install --silent
 dim "  Compiling TypeScript"
 bun run build >/dev/null 2>&1
 
-# Bundle the session-tracker SessionStart hook helper into the CLI dist.
-# `agents sync` and `agents add` register hook.sh in each harness's native config;
-# that only works if the helper travels with the installed CLI tarball. Build the
-# package here rather than requiring a prior manual build — a conditional copy
-# silently shipped a CLI with the hook permanently disabled on any clean checkout.
+# Bundle the session-tracker SessionStart hook helper into the CLI dist: `agents sync`/`add`
+# register hook.sh per harness, which works only if the helper ships in the tarball. Build it
+# here; a conditional copy shipped a CLI with the hook disabled on clean checkouts.
 ST_ROOT=../packages/session-tracker
 [ -d "$ST_ROOT" ] || { echo "error: $ST_ROOT missing — monorepo layout expected" >&2; exit 1; }
 dim "  Building session-tracker hook helper"
@@ -89,10 +86,9 @@ mkdir -p dist/session-tracker/dist
 cp -R "$ST_ROOT/dist/"* dist/session-tracker/dist/
 cp "$ST_ROOT/src/hook.sh" dist/session-tracker/dist/hook.sh
 
-# TypeScript emits CLI entrypoints with mode 644. npm pack preserves the mode,
-# and npm install in newer versions does NOT auto-chmod the bin target, so
-# users see `zsh: permission denied: agents` when invoking through the global
-# shim. Set executable bits on every file declared in `package.json#bin`.
+# TypeScript emits CLI entrypoints with mode 644, npm pack preserves it, and newer npm does not
+# auto-chmod the bin target, giving `zsh: permission denied: agents` via the global shim. Set
+# executable bits on every file in `package.json#bin`.
 node -e "
   const fs = require('fs');
   const bin = require('./package.json').bin || {};

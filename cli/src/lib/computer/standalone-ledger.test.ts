@@ -136,12 +136,9 @@ describe('merging the two ledgers', () => {
 
 describe('the installed producer\'s real record shape', () => {
   it('attributes a no-host record to the observing machine, not to `unknown`', () => {
-    // Observed on installed computer 0.1.5: the record carries NO host, NO
-    // hostname and NO machineId. `groupIntoComputerRuns` then fell back to
-    // `machine: 'unknown'`, the projected row's device read `unknown`, and the
-    // action vanished under any device filter — while its capture.host correctly
-    // said the observing box. The default belongs at this source, because this
-    // ledger is per-machine by construction.
+    // Observed on installed computer 0.1.5: records carry no host, hostname or machineId, so rows
+    // fell to `machine: 'unknown'` and vanished under device filters. The default belongs at this
+    // source since the ledger is per-machine.
     const dir = ledgerDir();
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
       line({ command: 'run', ts: '2026-09-13T15:20:00Z', invocationId: 'inv-real', task: 'read the screen' })

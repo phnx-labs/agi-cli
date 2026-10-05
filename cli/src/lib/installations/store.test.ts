@@ -1,12 +1,6 @@
-/**
- * The installation record is the frozen identity of an install. These pin the
- * behaviours that identity depends on: it is minted once and never re-minted,
- * migration infers the release from a pre-frozen directory name, and a record a
- * newer CLI wrote is refused rather than misread.
- *
- * Real filesystem, real records — HOME is redirected to a temp dir so `state.ts`
- * resolves the versions dir there.
- */
+/** The installation record is the frozen identity of an install. These tests pin that it is
+ * minted once and never re-minted, migration infers the release from a pre-frozen dir name, and
+ * a newer CLI's record is refused. Real filesystem, HOME redirected. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -179,10 +173,9 @@ describe('installation store', () => {
     fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\n');
 
     expect(store.listInstalledVersions('claude')).toEqual(['2.0.65']);
-    // `agents view` enumerates through this function and must leave every
-    // version home byte-identical — the record migration belongs to the
-    // record-based paths, never to a read. (The first version of this rule
-    // migrated on sight and broke exactly that invariant in CI.)
+    // `agents view` enumerates through this function and must leave every version home byte-
+    // identical: record migration belongs to the record-based paths, never a read (the first
+    // version migrated on sight and broke this invariant in CI).
     expect(fs.existsSync(path.join(dir, 'installation.json'))).toBe(false);
   });
 

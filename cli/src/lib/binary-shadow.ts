@@ -1,10 +1,6 @@
-/**
- * Detect `agents` binaries that could shadow the currently running CLI.
- *
- * Scheduled command routines invoke the bare name `agents`. When an older install
- * appears earlier on PATH than the current binary, routines silently run stale
- * code (RUSH-2431). This module finds those shadows so `agents doctor` can warn.
- */
+/** Detect `agents` binaries that could shadow the running CLI. Scheduled routines invoke bare
+ * `agents`, so an older install earlier on PATH silently runs stale code (RUSH-2431); `agents
+ * doctor` warns on these shadows. */
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -24,15 +20,9 @@ function safeRealpath(p: string): string {
   catch { return p; }
 }
 
-/**
- * Whether two path spellings identify the same file.
- *
- * Two spellings of one file rarely compare equal on Windows: `realpathSync` does
- * not expand 8.3 short names, so a path rooted at `os.tmpdir()`
- * (`C:\Users\RUNNER~1\...` on a GitHub runner) never matches the long form
- * (`C:\Users\runneradmin\...`) that `where` reports. Compare by device+inode
- * first and fall back to case-insensitive resolved spellings.
- */
+/** Whether two path spellings identify the same file. On Windows `realpathSync` doesn't expand 8.3
+ * short names (`RUNNER~1` vs `runneradmin`), so compare device+inode first and fall back to
+ * case-insensitive resolved spellings. */
 export function sameFile(a: string, b: string): boolean {
   try {
     const aStat = fs.statSync(a);
@@ -47,17 +37,9 @@ export function sameFile(a: string, b: string): boolean {
     : aReal === bReal;
 }
 
-/**
- * Find `agents` installs that are NOT the currently running binary.
- *
- * Checks two sources:
- *   1. The current PATH: if `which agents` / `where agents` resolves to a
- *      different real binary than the one executing this code, it is an active
- *      shadow.
- *   2. Well-known install directories: any executable `agents` whose realpath
- *      differs from the current entry is a latent shadow — it may win under a
- *      different PATH (e.g. the daemon's service-managed PATH).
- */
+/** Find `agents` installs that aren't the running binary: an active shadow where `which`/`where
+ * agents` resolves elsewhere, or a latent shadow where a well-known install dir holds a different
+ * executable that could win under another PATH (e.g. the daemon's). */
 export function detectAgentsBinaryShadows(
   currentBin: string = getAgentsBinPath(),
   extraDirs: readonly string[] = defaultWellKnownDirs(),

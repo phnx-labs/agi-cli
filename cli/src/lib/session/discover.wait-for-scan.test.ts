@@ -1,10 +1,6 @@
-/**
- * RUSH-2682: the cold-miss repair must ACTUALLY repair. When another live
- * process already holds the single-flight scan claim, a repair with
- * `waitForScan` waits (bounded) for that scan to finish before reading the
- * index, instead of returning the pre-scan snapshot as if it were the answer.
- * `waitForScanToSettle` is the bounded wait.
- */
+/** RUSH-2682: the cold-miss repair must ACTUALLY repair. When another live process holds the
+ * single-flight scan claim, a repair with `waitForScan` waits (bounded) via `waitForScanToSettle`
+ * before reading the index, not returning the pre-scan snapshot. */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

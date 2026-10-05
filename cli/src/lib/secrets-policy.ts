@@ -1,13 +1,6 @@
-/**
- * Agents-owned fleet policy for the secrets engine boundary (PHNX-3989 CTX-1,
- * delta-spec OWN-1). The standalone `secrets` engine has no concept of a
- * "reserved" per-harness credential store, resource profiles, device roles, or
- * fleet election — none of that is portable secret-storage behavior, so it
- * lives here rather than in the engine. Every actual read/write against a
- * bundle or raw item resolves through the process client (`secrets-client.ts`);
- * this module only decides WHICH bundle/key, WHO may reach it, and WHERE it
- * gets pushed.
- */
+/** Agents-owned fleet policy at the secrets engine boundary (PHNX-3989 CTX-1, OWN-1). The standalone
+ * has no concept of reserved per-harness stores, resource profiles, device roles or fleet election,
+ * so that lives here. Reads/writes go through `secrets-client.ts`. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -48,15 +41,9 @@ import {
   type StorableCredentialKind,
 } from './reserved-stores.js';
 
-// --- reserved per-harness credential stores (PHNX-3940 / PHNX-3989) --------
-//
-// Re-exported from the leaf module `reserved-stores.ts` rather than declared
-// here: `claude-account-token.ts` needs these constants AND is itself a
-// dependency of this module's fleet-sync helpers below, so declaring them
-// here would form a real circular import (reproduced as a TDZ
-// ReferenceError under real ESM evaluation order, outside vitest's
-// mock-tolerant transform). Keep the public surface unchanged for existing
-// importers of `secrets-policy.js`.
+// Re-exported from the leaf module `reserved-stores.ts`: `claude-account-token.ts` needs these
+// constants and is a dependency of this module's fleet-sync helpers, so declaring them here would
+// form a circular import (a TDZ ReferenceError under real ESM order). Public surface unchanged.
 export {
   AUTH_STORE_ALIAS,
   AUTH_BUNDLE_BACKEND,
@@ -74,37 +61,26 @@ export {
 };
 
 
-// --- resource-profile -> allowedBundles (CTX-1) -----------------------------
-//
-// A resource profile scopes WHICH bundle names a run may reach. The standalone
-// has no concept of a profile; agents-cli computes the allowed set from the
-// full bundle listing and forwards it as `SecretsContext.allowedBundles` on
-// every bounded request. Absent (no active profile) means full trust, matching
-// the client's own documented default.
+// Resource profile to allowedBundles (CTX-1): a profile scopes WHICH bundle names a run may reach.
+// The standalone has no profile concept, so agents-cli computes the allowed set from the full
+// listing and forwards it as `SecretsContext.allowedBundles`.
 
 /** Filter `names` down to the ones the active resource profile allows for `secrets`. */
 function filterBundleNamesForActiveProfile(names: string[]): string[] {
   return filterNamesForActiveResourceProfile('secrets', names);
 }
 
-/**
- * `SecretsContext.allowedBundles` for the active resource profile, or
- * `undefined` when no profile is active (full trust — the client's default).
- * `allNames` is the caller's already-fetched full bundle listing (e.g. from
- * `listBundlesSync()`), so this stays a pure filter with no extra round trip.
- */
+/** `SecretsContext.allowedBundles` for the active resource profile, or `undefined` (full trust, the
+ * client's default). `allNames` is the caller's already-fetched listing, so this is a pure filter
+ * with no round trip. */
 export function resolveAllowedBundlesForActiveProfile(allNames: string[]): string[] | undefined {
   const filtered = filterBundleNamesForActiveProfile(allNames);
   return filtered.length === allNames.length ? undefined : filtered;
 }
 
-/**
- * The `SecretsContext` a run should pass to every bundle resolution it makes:
- * the run's harness as the opaque `scope`, plus `allowedBundles` computed from
- * a fresh full bundle listing when a resource profile is active (a stale
- * listing could exclude a bundle created after the profile was set). No
- * profile active means full trust and no extra round trip.
- */
+/** The `SecretsContext` a run passes to every bundle resolution: the harness as opaque `scope`, plus
+ * `allowedBundles` from a FRESH full listing when a profile is active (a stale one could exclude a
+ * bundle created after the profile was set). No profile means full trust and no round trip. */
 export async function resolveSecretsContextForRun(scope?: string): Promise<SecretsContext | undefined> {
   if (!getActiveResourceProfile()) return scope ? { scope } : undefined;
   const allNames = (await listBundles()).map((b) => b.name);
@@ -141,15 +117,9 @@ export function assertRemoteBundleFlagsUnsupported(
   );
 }
 
-// ---------------------------------------------------------------------------
-// Fleet sync of the reserved file-backed `auth` bundle (PHNX-2371/PHNX-3609).
-//
-// Every daemon publishes only a safe auth readiness verdict into its owned
-// fleet-shared state file. A deterministic ready publisher reads those
-// verdicts and transfers the actual bundle only to a peer reporting `missing`.
-// Secret values never enter Git; the exceptional provisioning transfer is SSH,
-// async and kill-bounded so it never blocks the daemon event loop.
-// ---------------------------------------------------------------------------
+// Fleet sync of the reserved file-backed `auth` bundle (PHNX-2371/PHNX-3609): each daemon publishes
+// only a safe auth readiness verdict into its fleet-shared state file; a deterministic ready
+// publisher transfers the bundle only to a peer reporting `missing`. Secret values never enter Git.
 
 /** Each import/read-back SSH operation gets this deadline plus the SSH hard-kill grace. */
 const AUTH_SYNC_PUSH_DEADLINE_MS = 20_000;
@@ -210,15 +180,9 @@ interface AuthSyncDeps {
   sshTarget?: (device: DeviceProfile) => string;
 }
 
-/**
- * The one device that pushes credentials this tick. A ready HEADED device
- * (`personal`/`desktop`) wins over any ready worker: the headed box is where
- * tokens are minted (invariant 7), so it is the copy of record; a worker holds
- * only what was once pushed to it. Name order breaks ties so every box elects
- * the same publisher from the same shared verdicts. Before this rule the sort
- * was by name alone, which elected `mac-mini` (a worker with a 6-day-old copy)
- * over `zion`, and zion then skipped every peer as a non-publisher.
- */
+/** The one device that pushes credentials this tick. A ready HEADED device (`personal`/`desktop`)
+ * beats any ready worker, since tokens are minted there (invariant 7); name order breaks ties so
+ * every box elects the same publisher. */
 export function electPublisher(
   ready: readonly string[],
   roleOf: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>,
@@ -268,10 +232,8 @@ export async function publishReservedAuthVerdict(
   }
 }
 
-/**
- * Publish local readiness, elect one ready source, then asynchronously provision
- * only peers whose shared verdict says the bundle is missing.
- */
+/** Publish local readiness, elect one ready source, then asynchronously provision only the peers
+ * whose shared verdict says the bundle is missing. */
 export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<AuthSyncResult> {
   const result: AuthSyncResult = { publisher: null, stateChanged: false, pushed: [], skipped: [], errors: [] };
   const published = await publishReservedAuthVerdict(deps);
@@ -344,68 +306,20 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Reserved-store sync, generalized to every portable account (PHNX-3940 T6).
-//
-// The path above pushes ONE bundle (`auth`) to peers reporting a bundle-coarse
-// `missing` verdict. That under-pushes: a peer already holding `auth` (verdict
-// `ready`) never receives a newly-added account's key, so a new account never
-// propagates. It also pushes to any peer regardless of role, and a headed peer
-// must never receive a durable key (owner invariant 7).
-//
-// The functions below fix both. The plan is per ACCOUNT and per KEY
-// (`<ENV>_<accountId>`), not per bundle, and targets `role=worker` peers only.
-//
-// PRESENCE IS FIRST-HAND + ROTATION-AWARE (PHNX-4116). Each device's account-
-// state daemon publishes a per-account verdict row into `accounts.rows`
-// (`account-state-daemon-service.ts`), and the usage-sync SSH exchange stores
-// each peer's reply at `devices/<peer>/daemon-state.json`. A key counts as
-// present on a peer only when BOTH hold:
-//   1. FIRST-HAND — the peer's own reply reports a NON-`missing` verdict for the
-//      account (its slot materialized). This is what a publisher-side memo alone
-//      could never see: a key removed on the worker out of band flips the next
-//      verdict to `missing`, so the push resumes within a tick.
-//   2. ROTATION — the fingerprint (`workerCredential.mintedAt`) we last delivered
-//      to that peer matches the account's CURRENT fingerprint. A re-mint
-//      (`accounts login`) rotates the reserved key and bumps `mintedAt` while the
-//      peer's OLD token keeps authenticating, so its verdict stays non-`missing`;
-//      verdict alone would read `present` forever and the rotated key would never
-//      reach the worker. The delivery memo is a LOCAL rotation cursor keyed per
-//      (peer, bundle, key) → fingerprint, never synced, never the primary signal.
-// A peer reply with no `accounts.rows` field at all (an older CLI) is not proof
-// of an empty inventory, so the plan FAILS CLOSED and skips it (INFO), rather
-// than treating "no rows" as "holds nothing" and pushing every key blindly.
-//
-// INVARIANT 1 (transport, retain nothing): materializing a worker slot happens
-// on the box where the key LANDED (`reconcileLocalWorkerSlots` ->
-// `provisionWorkerSlot`); the credential itself only ever moves over the
-// existing encrypted SSH bundle push (the client's `pushBundleToHostAsync`),
-// which writes nothing on the sender beyond its existing store. A native
-// OAuth/session file is never transported (`fleet/auth-sync.ts`
-// `isCredentialSafeToPropagate` stays false).
-// ---------------------------------------------------------------------------
+// Reserved-store sync for every portable account (PHNX-3940 T6), per ACCOUNT and KEY, to
+// `role=worker` peers only (invariant 7). A key is present on a peer only with a first-hand
+// non-missing verdict AND a matching delivered fingerprint (PHNX-4116); no rows: fail closed.
 
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
 
-/**
- * Skip reason for a peer that has never sent a daemon-state reply (no
- * `devices/<peer>/daemon-state.json`). auth-sync logs these at INFO — a
- * brand-new or never-dialed worker legitimately has no reply on an early tick,
- * so it is informational, not a warning. Stable so the service classifies the
- * skip without matching a substring.
- */
+/** Skip reason for a peer that has never sent a daemon-state reply. Logged at INFO since a new or
+ * never-dialed worker legitimately has none on an early tick. Stable so the service classifies it
+ * without substring matching. */
 export const SKIP_REASON_NO_PEER_REPLY = 'no daemon-state reply from this peer yet';
 
-/**
- * Skip reason for a peer whose reply exists but carries no `accounts.rows` field
- * at all (an older CLI that does not publish per-account verdicts, or a partial
- * state written before the account-state daemon ran). Without those rows there is
- * no first-hand knowledge of what the peer holds, so the plan FAILS CLOSED and
- * skips rather than pushing every key blindly. auth-sync logs it at INFO — it is
- * transient during a rolling upgrade. An EMPTY `accounts.rows` array (a peer with
- * no registered account) is NOT this case: it is a legitimate "holds nothing",
- * and its keys are (correctly) pushed to provision it.
- */
+/** Skip reason for a peer whose reply carries no `accounts.rows` (older CLI or partial state). With
+ * no first-hand knowledge the plan FAILS CLOSED rather than push every key blindly; INFO, transient
+ * in a rolling upgrade. An EMPTY array is a legitimate "holds nothing" and is pushed to. */
 export const SKIP_REASON_NO_ACCOUNT_ROWS = 'daemon-state reply carries no account rows (fail closed)';
 
 /** One account's durable worker credential, resolved to (bundle, key). */
@@ -416,13 +330,9 @@ export interface ReservedSyncAccount {
   bundle: string;
   /** Storage key `<ENV>_<accountId>` (or the legacy email-keyed claude key). */
   key: string;
-  /**
-   * The credential's rotation fingerprint: `workerCredential.mintedAt` for a T1
-   * row, `'legacy'` for a pre-T1 claude row. A re-mint (`accounts login`) bumps
-   * `mintedAt`, so this changes even though the OLD token still authenticates —
-   * which is why presence is gated on BOTH the peer's verdict AND a delivered-
-   * fingerprint match (see {@link peerPresentKeys}).
-   */
+  /** The credential's rotation fingerprint: `workerCredential.mintedAt` for a T1 row, `'legacy'` for
+   * a pre-T1 claude row. A re-mint bumps it though the old token still authenticates, so presence
+   * needs the peer's verdict AND a delivered-fingerprint match ({@link peerPresentKeys}). */
   fingerprint: string;
 }
 
@@ -433,24 +343,15 @@ export interface ReservedSyncPeer {
   headed: boolean;
   reachable: boolean;
   pinned: boolean;
-  /**
-   * Whether this peer has ever sent a daemon-state reply on this box
-   * (`devices/<peer>/daemon-state.json` exists). Without one there is no
-   * first-hand knowledge of what it holds, so the peer is skipped this tick.
-   */
+  /** Whether this peer has ever sent a daemon-state reply here (`devices/<peer>/daemon-state.json`
+   * exists); without one there is no first-hand knowledge, so it is skipped this tick. */
   hasReply: boolean;
-  /**
-   * Whether the peer's reply actually carried an `accounts.rows` array (present,
-   * even if empty). A reply file with no such field (older CLI, partial state)
-   * has no first-hand inventory, so the plan skips it fail-closed rather than
-   * pushing blindly. See {@link SKIP_REASON_NO_ACCOUNT_ROWS}.
-   */
+  /** Whether the peer's reply carried an `accounts.rows` array (even if empty). Without the field
+   * (older CLI, partial state) there is no first-hand inventory, so the plan skips fail-closed. See
+   * {@link SKIP_REASON_NO_ACCOUNT_ROWS}. */
   hasAccountRows: boolean;
-  /**
-   * bundle -> keys the peer is KNOWN to hold: its own reply verdict says present
-   * AND the fingerprint we last delivered to it matches the current one. Absent ⇒
-   * none known.
-   */
+  /** bundle -> keys the peer is KNOWN to hold: its own verdict says present AND the fingerprint last
+   * delivered matches the current one. Absent means none known. */
   presentKeys: Record<string, ReadonlySet<string>>;
 }
 
@@ -458,16 +359,9 @@ type ReservedSyncPlanItem =
   | { action: 'push'; device: string; bundle: string; keys: string[] }
   | { action: 'skip'; device: string; reason: string };
 
-/**
- * Pure plan: for each worker peer, push each bundle it is missing at least one
- * key of. Deterministic (peers and bundles sorted) so it pins exactly in tests.
- * A headed peer is skipped BEFORE any key comparison -- it never receives a key;
- * a peer with no reply yet (`hasReply: false`) is skipped next -- there is no
- * first-hand knowledge of what it holds, so nothing is pushed to it this tick;
- * a peer whose reply carries no `accounts.rows` field (`hasAccountRows: false`)
- * is skipped FAIL-CLOSED for the same reason (an older CLI's reply is not proof
- * of an empty inventory), rather than pushing every key blindly.
- */
+/** Pure plan: for each worker peer, push each bundle it lacks at least one key of; deterministic
+ * (sorted). A headed peer is skipped first (never receives a key); a peer with no reply, or no
+ * `accounts.rows` (fail-closed), is skipped since nothing is first-hand known of what it holds. */
 export function planReservedStoreSync(
   accounts: ReservedSyncAccount[],
   peers: ReservedSyncPeer[],
@@ -507,14 +401,8 @@ export function planReservedStoreSync(
   return items;
 }
 
-/**
- * Every portable account's durable worker credential, resolved to (bundle, key).
- * A T1 row carries `workerCredential`; a claude row predating T1 has none, so it
- * falls back to the legacy `auth` bundle keyed by the account email -- the
- * legacy fallback for claude rows that predate T1. An account with no derivable
- * durable credential (per-device harness, or a non-claude row with no
- * `workerCredential`) is not a sync target.
- */
+/** Every portable account's durable worker credential as (bundle, key). A T1 row carries
+ * `workerCredential`; a pre-T1 claude row falls back to the legacy `auth` bundle keyed by email. */
 export function reservedSyncTargets(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>): ReservedSyncAccount[] {
   const out: ReservedSyncAccount[] = [];
   for (const account of listNativeAccounts(meta)) {
@@ -528,11 +416,9 @@ export function reservedSyncTargets(meta: Pick<Meta, 'accounts' | 'deviceAccount
   return out;
 }
 
-// --- per-account presence from the peer's own reply ------------------------
-// A peer's daemon-state reply carries a per-account verdict row per registered
-// account (`accounts.rows`, published by `account-state-daemon-service.ts`). The
-// envelope types the rows as opaque, so we narrow the two fields the planner
-// reads: which account, and whether the peer holds a working credential for it.
+// Per-account presence from the peer's own reply: its daemon-state carries a verdict row per
+// account (`accounts.rows`, from `account-state-daemon-service.ts`). The envelope types rows as
+// opaque, so we narrow the two fields the planner reads.
 
 /** The subset of a peer's per-account verdict row this planner reads. */
 export interface PeerAccountVerdict {
@@ -557,29 +443,16 @@ export function readPeerAccountVerdicts(state: FleetSharedDeviceState | undefine
   return out;
 }
 
-/**
- * True when the peer's reply carried an `accounts.rows` array at all (present,
- * even if empty). An older CLI, or a partial state written before the account-
- * state daemon ran, has no such field — and its absence must NOT read as "the
- * peer holds nothing", or the plan would push every key blindly. An EMPTY array
- * (a peer with no registered account) IS a valid first-hand "holds nothing".
- */
+/** True when the peer's reply carried an `accounts.rows` array at all. Its absence (older CLI,
+ * partial state) must NOT read as "holds nothing" or the plan would push every key blindly; an
+ * EMPTY array IS a valid first-hand "holds nothing". */
 export function peerHasAccountRows(state: FleetSharedDeviceState | undefined): boolean {
   return Array.isArray(state?.accounts?.rows);
 }
 
-// --- publisher-side delivery memo (rotation) -------------------------------
-// A peer's verdict says WHETHER it holds a working credential for an account, but
-// not WHICH one: a re-mint (`accounts login`) rotates the reserved key and bumps
-// `workerCredential.mintedAt`, yet the peer's OLD token keeps authenticating, so
-// its verdict stays `live`/`unverified` and never flips to `missing`. Verdict
-// alone would therefore read `present` forever and the new key would never reach
-// the worker. The publisher records the fingerprint it last delivered per
-// (peer, bundle, key); presence requires BOTH the peer's own verdict AND a
-// delivered-fingerprint match, so a re-mint (fingerprint change) re-pushes within
-// a tick while a key removed on the worker (verdict `missing`) also re-pushes.
-// LOCAL publisher bookkeeping, never synced — it is a rotation cursor, not a
-// substitute for the first-hand verdict.
+// Publisher-side delivery memo (rotation): a peer's verdict says WHETHER it holds a working
+// credential, not WHICH; a re-mint keeps the old token authenticating so the verdict never flips to
+// `missing`. The publisher records the fingerprint delivered per (peer, bundle, key).
 
 function deliveryMemoPath(root = getCacheDir()): string {
   return path.join(root, 'reserved-sync-delivered.json');
@@ -602,23 +475,9 @@ function writeDeliveryMemo(memo: Record<string, string>, root = getCacheDir()): 
   fs.writeFileSync(deliveryMemoPath(root), `${JSON.stringify(memo, null, 2)}\n`, 'utf-8');
 }
 
-/**
- * The reserved keys a peer is KNOWN to hold, per bundle. Two conditions must BOTH
- * hold (PHNX-4116):
- *
- * 1. FIRST-HAND — the peer's own daemon-state reply reports a NON-`missing`
- *    verdict for the account, so it has a working credential for it (its slot
- *    materialized). A `missing` verdict, or no row for the account at all, means
- *    it does not — self-correcting: a key removed on the worker flips its next
- *    verdict to `missing` and the push resumes, which a publisher-side memo alone
- *    could never see.
- * 2. ROTATION — the fingerprint we last delivered to this peer (`delivered`)
- *    matches the account's CURRENT fingerprint. A re-mint bumps
- *    `workerCredential.mintedAt` while the old token still authenticates, so the
- *    verdict stays non-`missing`; without this the rotated key would never
- *    propagate. A never-delivered key (no memo entry ⇒ `undefined`) never
- *    matches, so a newly-added account still pushes.
- */
+/** The reserved keys a peer is KNOWN to hold per bundle (PHNX-4116): its own reply reports a
+ * non-`missing` verdict, AND the fingerprint last delivered matches the current one, so a
+ * re-minted key still propagates. A never-delivered key never matches. */
 export function peerPresentKeys(
   accounts: ReservedSyncAccount[],
   verdicts: PeerAccountVerdict[],
@@ -670,12 +529,9 @@ function defaultHasLocalKey(bundle: string, key: string): boolean {
   return readReservedCredential(bundle, key) !== null;
 }
 
-/**
- * Push every portable account's reserved store to the worker peers that are
- * missing it, per key and per role. Reuses the same election as
- * {@link syncReservedAuthBundle} (one deterministic ready publisher pushes) so
- * there is no second scheduler. The daemon runs this each tick.
- */
+/** Push every portable account's reserved store to the worker peers missing it, per key and role.
+ * Reuses the election of {@link syncReservedAuthBundle} (one deterministic publisher), so no second
+ * scheduler. The daemon runs it each tick. */
 export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Promise<ReservedStoreSyncResult> {
   const result: ReservedStoreSyncResult = { publisher: null, adopted: [], pushed: [], skipped: [], errors: [] };
   const localName = deps.localName ?? machineId();
@@ -798,12 +654,9 @@ interface ReconcileWorkerSlotsDeps {
   log?: (level: 'INFO' | 'WARN', message: string) => void;
 }
 
-/**
- * Fire-and-forget the daemon log without pulling its module graph into every
- * consumer of this file: `reconcileLocalWorkerSlots` is synchronous and only
- * runs inside the daemon (where daemon.js is already loaded), so the dynamic
- * import is paid only on the rare tick that actually drops a slot.
- */
+/** Fire-and-forget the daemon log without pulling its module graph into every consumer:
+ * `reconcileLocalWorkerSlots` is synchronous and runs only in the daemon, so the dynamic import is
+ * paid only on the rare tick that drops a slot. */
 function defaultWorkerSlotLog(level: 'INFO' | 'WARN', message: string): void {
   void import('./daemon/daemon.js').then((m) => m.log(level, message)).catch(() => {});
 }
@@ -812,15 +665,9 @@ function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
   return harness === 'claude' ? isClaudeWorkerHomeSeeded(slotDir) : true;
 }
 
-/**
- * Worker-side: after a durable key lands, materialize a slot for each portable
- * account whose credential is now present locally. Runs only on a NON-headed
- * (worker or unmarked) device -- a headed device provisions its slots from an
- * interactive native login (`accounts add`), never from an injected durable key
- * (invariant 7). Idempotent: an account already backed by a fully seeded
- * `durable` slot is skipped; a claude slot provisioned before onboarding was
- * seeded (no `hasCompletedOnboarding`) is provisioned again so it converges.
- */
+/** Worker-side: after a durable key lands, materialize a slot for each portable account whose
+ * credential is now local. Only on a NON-headed device (a headed one provisions from an
+ * interactive native login, invariant 7). Idempotent. */
 export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): ReconcileWorkerSlotsResult {
   const result: ReconcileWorkerSlotsResult = { provisioned: [], dropped: [], skipped: [], errors: [] };
   // `'selfRole' in deps` (not `??`) so a caller can inject an explicit `undefined`
@@ -834,18 +681,9 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
   const slotSeeded = deps.slotSeeded ?? defaultSlotSeeded;
   const byId = new Map(listNativeAccounts(meta).map((account) => [account.id, account]));
 
-  // Drop stale worker slots (PHNX-4116). A `deviceAccounts.slots` record whose
-  // accountId is no longer a registered native account is a leftover from an
-  // older account-id generation — every worker held 8 such duplicates, each a
-  // full HOME carrying a live setup-token in `.claude/.oauth_token`. Delete that
-  // credential (a 0600 file) and drop the record, but KEEP the slot directory:
-  // `.claude/projects` holds session transcripts. Fail closed — an empty
-  // registry is a transient read, and stripping every slot on it would wipe a
-  // healthy box's whole slot set, so drop nothing until the registry answers.
-  // This deletion runs ONLY on a device explicitly marked `worker`: provisioning
-  // above is safe on an unmarked box, but destroying a credential is not — an
-  // unmarked device is not headed (`isHeadedDeviceRole(undefined)` is false) yet
-  // must never run a credential-deleting branch.
+  // Drop stale worker slots (PHNX-4116) whose accountId is no longer registered: delete the
+  // credential, keep the dir (session transcripts). Fail closed on an empty registry, and run only
+  // on a device explicitly marked `worker`, never an unmarked one.
   if (role === 'worker' && byId.size > 0) {
     const stale = Object.values(slots).filter((slot) => !byId.has(slot.accountId));
     const droppable: DeviceAccountSlot[] = [];
@@ -868,13 +706,9 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
       }
     }
   }
-  // Resolve each account to the one (bundle, key) the push plan uses: a T1 row's
-  // reserved `__<harness>__` key, or the legacy `auth` key by email for a claude
-  // row predating T1. Both are worker credentials this box may already hold, so
-  // both get a slot. Skipping the legacy rows here is what left every registered
-  // pre-T1 account without a slot on every worker while its token sat in `auth`:
-  // the picker then fell back to identity-less version homes and Claude showed a
-  // login screen on a headless box (the mac-mini 2026-09-06 incident).
+  // Resolve each account to the one (bundle, key) the push plan uses: a T1 row's `__<harness>__`
+  // key, or the legacy `auth` key by email for a pre-T1 claude row. Both are worker credentials
+  // this box may hold, so both get a slot.
   for (const target of reservedSyncTargets(meta)) {
     const account = byId.get(target.accountId);
     if (!account) continue;

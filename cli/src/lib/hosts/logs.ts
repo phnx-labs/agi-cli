@@ -1,15 +1,6 @@
-/**
- * Shared host-task log viewer — the show-or-follow core behind the
- * top-level `agents logs <id>`.
- *
- * A running task with follow re-enters the offset-tail (`followHostTask`).
- * Otherwise the view is **concise by default**: a bounded tail of the captured
- * combined-stdout, so an agent glancing at a dispatched run never pulls the whole
- * log. `full` opts into the entire raw log. (A host run's real transcript lives
- * on the remote, not the local index — surfacing its rich summary needs remote
- * runs to be discoverable there first; until then the bounded tail is the safe
- * concise default.) Kept in one place so the two commands can never drift.
- */
+/** Shared host-task log viewer behind `agents logs <id>`: follows a running task, otherwise
+ * shows a bounded tail of the captured stdout (`full` opts into the whole raw log) so a glance
+ * never pulls the full log. */
 
 import * as fs from 'fs';
 import chalk from 'chalk';
@@ -29,10 +20,8 @@ interface HostLogResult {
 /** Lines of raw combined-stdout to show in the concise (non-`full`) view. */
 const HOST_LOG_TAIL_LINES = 40;
 
-/**
- * Show (or follow, when running) a dispatched host task. Bounded-tail summary by
- * default; `full` dumps the entire raw combined-stdout log.
- */
+/** Show (or follow, when running) a dispatched host task: bounded tail by default, `full` for
+ * the raw log. */
 export async function showHostTaskLog(id: string, follow: boolean, full = false): Promise<HostLogResult> {
   const task = loadTask(id);
   if (!task) return { found: false };
@@ -69,20 +58,15 @@ export async function showHostTaskLog(id: string, follow: boolean, full = false)
   return { found: true, exitCode: 0 };
 }
 
-/**
- * Machine-readable form of a host-dispatch task's log — the task record plus its
- * combined stdout. Powers `agents logs <id> --json` for the host-task branch.
- * Reconciles a still-'running' record from the remote `.exit` first, like the
- * text path does.
- */
+/** Machine-readable host-task log (task record plus combined stdout) for `agents logs <id>
+ * --json`; reconciles a still-'running' record from the remote `.exit` first, like the text
+ * path. */
 export function hostTaskLogJson(id: string): { found: boolean; task?: HostTask; log?: string | null } {
   const task = loadTask(id);
   if (!task) return { found: false };
-  // reconcileTask returns the healed record; it does NOT mutate its argument in
-  // place. Emit the reconciled task so a run that finished between dispatch and
-  // this one-shot read surfaces its terminal status/exitCode, not a stale
-  // 'running'. (The text path can discard the return — it only reads the log by
-  // id — but this JSON payload carries task.status straight to the consumer.)
+  // reconcileTask returns the healed record without mutating its argument; emit it so a run that
+  // finished since dispatch shows its terminal status/exitCode, since this JSON payload carries
+  // task.status straight to the consumer.
   const reconciled = reconcileTask(task);
   return { found: true, task: reconciled, log: readTaskLog(reconciled) };
 }
@@ -110,15 +94,9 @@ export function tailLines(text: string, n: number): string {
   return note + lines.slice(-n).join('\n') + '\n';
 }
 
-/**
- * Fetch a task's remote log over SSH, write it to the local mirror path (for
- * future instant reads), and return its content. Returns null when the host is
- * unreachable or the remote log is empty/absent.
- *
- * `remoteLog` is a $HOME-prefixed path with a safe (hex) basename — intentionally
- * unquoted so the remote shell expands $HOME, matching the contract in reconcile.ts
- * and progress.ts.
- */
+/** Fetch a task's remote log over SSH, mirror it locally and return it; null when the host is
+ * unreachable or the log empty. `remoteLog` is $HOME-prefixed with a hex basename, left
+ * unquoted so the remote shell expands $HOME. */
 function fetchAndCacheRemoteLog(task: HostTask): Buffer | null {
   const command = task.remoteShell === 'powershell'
     ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`$path = Join-Path $HOME '${task.remoteLog.replace(/^\$HOME\//, '').replace(/'/g, "''")}'; if (Test-Path -LiteralPath $path) { $bytes = [IO.File]::ReadAllBytes($path); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length) }`)}`

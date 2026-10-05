@@ -1,10 +1,6 @@
-/**
- * Host readiness + bootstrap.
- *
- * Before a dispatch we ensure the box is reachable and has agents-cli. Enrollment
- * can additionally install/upgrade agents-cli to match the local version (version
- * parity) using the same shape as scripts/sandbox.sh. We never copy `.history`.
- */
+/** Host readiness and bootstrap: before dispatch, ensure the box is reachable and has agents-
+ * cli; enrollment can install or upgrade it to match the local version (like
+ * scripts/sandbox.sh). `.history` is never copied. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -35,10 +31,8 @@ export function localCliVersion(): string | null {
   return null;
 }
 
-/** ssh command that confirms reachability and echoes the OS. POSIX boxes answer
- * `uname -s`; a Windows target has no `uname` (ssh lands in cmd.exe/PowerShell),
- * so it runs a tiny PowerShell probe. Pure/exported so both branches are
- * unit-testable without ssh. */
+/** ssh command that confirms reachability and echoes the OS: `uname -s` on POSIX, a tiny
+ * PowerShell probe on Windows. Pure and exported so both branches are unit-testable. */
 export function buildProbeCommand(os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
     return `powershell -NoProfile -EncodedCommand ${encodePowershell('[System.Environment]::OSVersion.Platform.ToString()')}`;
@@ -46,11 +40,8 @@ export function buildProbeCommand(os?: string): string {
   return 'uname -s 2>/dev/null || echo unknown';
 }
 
-/**
- * Reachability + OS probe over ssh. `os` is the caller's hint (device-registry
- * platform / enrolled `HostEntry.os`); when it marks the host Windows we take
- * the PowerShell path and report that known platform, otherwise POSIX + uname.
- */
+/** Reachability and OS probe over ssh; `os` is the caller's hint (registry platform or
+ * `HostEntry.os`), taking the PowerShell path for Windows. */
 export function probeHost(target: string, os?: string, extraSshArgs: string[] = []): { reachable: boolean; os?: string } {
   const r = sshExec(target, buildProbeCommand(os), { timeoutMs: 12000, extraSshArgs });
   if (r.code !== 0) return { reachable: false };
@@ -106,30 +97,12 @@ export interface ReadyProbe {
   timedOut?: boolean;
 }
 
-/**
- * Answer every readiness question in ONE ssh round-trip: reachable? (the login
- * shell ran and echoed our sentinel), agents-cli version, and the installed-agent
- * listing. This replaces three sequential probes (`true` + `agents --version` +
- * `agents view`) — 3 handshakes collapse to 1. Reachability keys off the sentinel
- * rather than the exit code, so a command that ran-but-failed is never mistaken
- * for a dead connection (only ssh's own failure drops the sentinel).
- */
-/**
- * The one-shot readiness command (version + sentinel + agent listing). The
- * Windows branch emits the sentinel with `Write-Output` and branches on
- * `$LASTEXITCODE` (no `printf`/`||`); `parseReadyProbe` keys off the sentinel
- * substring, so the missing leading newline vs the POSIX `printf '\n…'` form is
- * absorbed by its `.trim()`. Pure/exported so both branches are unit-testable.
- *
- * With `ingestUsage`, the probe first runs `agents __usage-ingest` on the
- * dispatcher's daemon-state envelope, which the caller pipes to stdin
- * (PHNX-4116): the chosen worker then holds the dispatcher's current usage
- * numbers at dispatch instead of waiting for the next 15-minute usage-sync
- * tick. The ingest writes nothing to stdout (only `--reply` does), so the
- * version/sentinel/listing shape `parseReadyProbe` reads is unchanged. On
- * Windows the `agents.ps1` shim drops ssh-piped stdin, so PowerShell reads it
- * into a temp file and hands the verb `--from <path>`.
- */
+/** Answer every readiness question in one ssh round-trip (sentinel echoed, agents-cli version,
+ * installed-agent listing), replacing three probes. Reachability keys off the sentinel, not the
+ * exit code, so a ran-but-failed command is not mistaken for a dead connection. */
+/** The one-shot readiness command (version, sentinel, agent listing); pure, so POSIX and Windows
+ * branches are testable. With `ingestUsage` it first runs `agents __usage-ingest` on piped
+ * stdin so the worker has current usage (PHNX-4116); Windows uses a temp file. */
 export function buildReadyProbeCommand(os?: string, opts: { ingestUsage?: boolean } = {}): string {
   if (remoteShellFor(os) === 'powershell') {
     const ingest = opts.ingestUsage
@@ -172,12 +145,8 @@ export function viewHasAgent(view: string, agent: string): boolean {
   return new RegExp(`\\b${agent}\\b`, 'i').test(view);
 }
 
-/**
- * True when `version` is a concrete pin the remote must already have installed
- * (e.g. `0.145.0`, `2.1.207`). Aliases (`latest` / `oldest` / `pinned` /
- * `default` / `all` / `any`) resolve against the remote's own install set and
- * are not preflight-checked here.
- */
+/** True when `version` is a concrete pin the remote must already have (e.g. `0.145.0`); aliases
+ * like `latest` resolve on the remote and are not checked. */
 export function isConcreteVersionPin(version?: string | null): boolean {
   if (!version) return false;
   const v = version.trim();
@@ -188,11 +157,8 @@ export function isConcreteVersionPin(version?: string | null): boolean {
   return /^(?!.*\.\.)[A-Za-z0-9._+-]{1,64}$/.test(v);
 }
 
-/**
- * Installed version strings for `agent` from `agents view --json` output.
- * Returns `[]` when the agent row is absent, `undefined` when `view` is not
- * JSON (text `agents list` fallback) so callers can degrade.
- */
+/** Installed version strings for `agent` from `agents view --json`; `[]` when the row is absent,
+ * `undefined` when `view` is not JSON. */
 export function viewAgentVersions(view: string, agent: string): string[] | undefined {
   try {
     const rows = JSON.parse(view) as Array<{
@@ -210,12 +176,9 @@ export function viewAgentVersions(view: string, agent: string): string[] | undef
   }
 }
 
-/**
- * Whether a concrete `agent@version` is installed according to remote view
- * output. JSON path is authoritative; text listing falls back to a whole-token
- * version match. `undefined` only when the text path has the agent but no
- * version token to confirm against (callers treat that as unverified).
- */
+/** Whether a concrete `agent@version` is installed per remote view output; JSON is
+ * authoritative, text falls back to a whole-token match, and `undefined` means unverified
+ * (agent present, no version token). */
 export function viewHasAgentVersion(view: string, agent: string, version: string): boolean | undefined {
   const versions = viewAgentVersions(view, agent);
   if (versions !== undefined) return versions.includes(version);
@@ -250,41 +213,14 @@ interface ViewAgentAccountEligibility {
   signedIn: boolean | undefined;
   /** At least one account can launch immediately or enter the harness login flow. */
   pickerEligible: boolean | undefined;
-  /**
-   * The remote box's own aggregate exclusion reason when it is not signed in
-   * (`runReady.reason` — e.g. `all signed_out`), for the operator-facing
-   * placement error. Undefined when ready, absent, or on an older remote CLI.
-   */
+  /** The remote box's own exclusion reason when not signed in (`runReady.reason`, e.g. `all
+   * signed_out`); undefined when ready, absent or an older CLI. */
   reason?: string;
 }
 
-/**
- * Read the two account gates automatic placement needs from `agents view
- * --json`. A picker may route to a signed-out version because launching it is
- * the login flow, but it must not route to a device whose every signed-in
- * account is throttled.
- *
- * ONE readiness gate, computed on the box that runs (PHNX-4116). The remote box
- * publishes `runReady` — the router's own `collectRunCandidates` →
- * `readinessFromCandidate` verdict over its native slots AND version homes — so
- * this reads that answer rather than re-deriving freshness here. The
- * dispatching box re-deriving from the per-version `versions[]` list was the bug:
- * that list enumerates version homes, misses the account slots a run picks from,
- * and applied a 40-minute usage-freshness refusal a synced-only worker could
- * never satisfy, turning a usage-sync lag into "no ready device" while
- * `--device <name>` on the same box launched fine.
- *
- * An older remote CLI omits `runReady`; the one-release fallback derives the
- * verdict from the per-version list the same way the pre-PHNX-4116 dispatcher
- * did: the strict `launchable` signal (`isLaunchableSignedIn`, PHNX-3466) for
- * sign-in, MINUS a FRESH throttle (`rate_limited`/`out_of_credits` captured
- * within {@link USAGE_STALE_REFUSAL_MAX_AGE_MS}) or a FRESH dead auth verdict
- * (checked within {@link AUTH_PROBE_MAX_AGE_MS}, {@link isDeadVerdict}). A stale
- * reading is UNVERIFIED, not disqualifying (PHNX-4116/#3700), so a usage-sync
- * lag never bars an old-CLI worker `--device <name>` would launch fine — but a
- * throttled-but-launchable worker no longer reads `signedIn: true` and slips
- * into `--device auto`'s pick during a rolling upgrade.
- */
+/** Read the account gates for automatic placement from `agents view --json`: signed-out is
+ * routable, all-throttled is not. One readiness gate, computed on the running box as `runReady`
+ * (PHNX-4116), not re-derived from `versions[]`; older CLIs fall back to `launchable`. */
 export function viewAgentAccountEligibility(view: string, agent: string, now: number = Date.now()): ViewAgentAccountEligibility {
   try {
     const rows = JSON.parse(view) as Array<{
@@ -339,13 +275,9 @@ export function viewAgentAccountEligibility(view: string, agent: string, now: nu
         && version.authVerdict !== undefined
         && authFresh
         && isDeadVerdict(version.authVerdict);
-      // A stale usage/auth reading makes the account UNVERIFIED, not unusable:
-      // the number is ignored (`throttled`/`authBlocked` only trust a fresh one)
-      // and the remote `agents run` weights an unverified account at the floor.
-      // Refusing the whole device on a stale reading turned a fleet-wide
-      // usage-sync lag into "no healthy device can run claude" while
-      // `--device <name>` on the same box launched fine (PHNX-4116/#3700). Only a
-      // FRESH throttle or a FRESH dead auth verdict disqualifies.
+      // A stale usage/auth reading makes the account unverified, not unusable: ignored, weighted at
+      // the floor by the remote `agents run`. Refusing the device turned a usage-sync lag into "no
+      // healthy device" (PHNX-4116/#3700); only a fresh throttle or dead auth disqualifies.
       const ready = launchable && !authBlocked && !throttled;
       return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
     });
@@ -365,22 +297,16 @@ export function viewAgentSignedIn(view: string, agent: string): boolean | undefi
 
 interface EnsureReadyOptions {
   agent: string;
-  /**
-   * Explicit version pin (e.g. `"0.145.0"`). Concrete pins fail loud when the
-   * remote does not have that version installed so a detached `--no-follow`
-   * dispatch never reports "Dispatched" for a pin the box cannot run
-   * (RUSH-2313). Aliases (`latest` / …) are left for the remote CLI to resolve.
-   */
+  /** Explicit version pin (e.g. `"0.145.0"`). Concrete pins fail loud when absent on the remote
+   * so a detached `--no-follow` dispatch never reports "Dispatched" for a pin the box cannot
+   * run (RUSH-2313); aliases are left for the remote CLI. */
   version?: string;
   /** Throw instead of warn when the agent isn't installed remotely. */
   requireAgent?: boolean;
 }
 
-/**
- * Pure readiness verdict for the agent/version half of {@link ensureHostReady}
- * (unit-tested without SSH). Returns warnings for soft agent-missing cases, or
- * throws (via the caller's `throw new Error`) when a concrete pin is missing.
- */
+/** Pure readiness verdict for the agent/version half of ensureHostReady: warnings for soft
+ * agent-missing cases, throws when a concrete pin is missing. */
 export function evaluateHostAgentInstall(
   view: string,
   opts: EnsureReadyOptions,
@@ -405,15 +331,9 @@ export function evaluateHostAgentInstall(
   return { warnings };
 }
 
-/**
- * Verify a host can run the agent: reachable + agents-cli present. Throws with an
- * actionable message otherwise. Agent-not-installed is a warning by default (the
- * remote `agents run` will surface it); pass requireAgent to make it fatal.
- * A concrete `version` pin always fails loud when that version is absent
- * (RUSH-2313) — never a silent "Dispatched" for a pin the box cannot run.
- *
- * One ssh round-trip (`readyProbe`) covers all three checks.
- */
+/** Verify a host can run the agent (reachable, agents-cli present) in one ssh round-trip,
+ * throwing an actionable message otherwise. Agent-not-installed is a warning unless
+ * `requireAgent`; a concrete `version` pin always fails loud when absent (RUSH-2313). */
 export function ensureHostReady(host: Host, opts: EnsureReadyOptions): { warnings: string[] } {
   const target = sshTargetFor(host);
   const probe = readyProbe(target, host.os ?? resolveRemoteOsSync(host.name), hostIdentityArgs(host));

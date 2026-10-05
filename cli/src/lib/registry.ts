@@ -1,10 +1,6 @@
-/**
- * Package registry client -- search, resolve, and install from remote registries.
- *
- * Queries the MCP registry (registry.modelcontextprotocol.io) and future skill
- * registries to find packages, then resolves them into installable entries
- * with transport, runtime, and argument metadata.
- */
+/** Package registry client: search, resolve and install from remote registries (the MCP registry at
+ * registry.modelcontextprotocol.io and future skill registries), resolving packages into
+ * installable entries with transport, runtime and arguments. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,22 +37,9 @@ export function validatedPyPISpec(spec: string): string {
   return spec;
 }
 
-/**
- * Seeded presets offered for `type`, minus any the user has removed.
- *
- * These are resolved here rather than written into agents.yaml. Seeding used to
- * happen on the state READ path and persisted the entry — but agents.yaml is
- * git-tracked in the user's DotAgents repo, so that write left the working tree
- * dirty and every `agents repo pull` aborted with "Working tree has uncommitted
- * changes", naming neither the file nor the cause. Since every `agents`
- * invocation reads state, the dirt returned the instant it was cleared, and the
- * loop could not be escaped through the CLI at all (RUSH-1925).
- *
- * `seededPresets` is the removal tombstone: a key listed there means the user
- * removed that preset, so it is not offered again. Users who were seeded under
- * the old behaviour have the key listed *and* the entry in their own
- * `registries:` block, which still wins below — so nothing disappears for them.
- */
+/** Seeded presets offered for `type`, minus any the user removed, resolved here rather than written
+ * to agents.yaml (RUSH-1925): seeding on the READ path dirtied the tracked file and aborted every
+ * `agents repo pull`. `seededPresets` is the removal tombstone. */
 function offeredSeeds(type: RegistryType, meta: Meta): Record<string, RegistryConfig> {
   const removed = new Set(meta.seededPresets || []);
   const offered: Record<string, RegistryConfig> = {};
@@ -98,12 +81,9 @@ export function setRegistry(
     meta.registries[type] = {};
   }
 
-  // Seeded presets are resolved in memory and never materialized in agents.yaml
-  // (see offeredSeeds), so a partial update — `registry disable`, `enable`, or
-  // `config --api-key` — has nothing stored to merge with. Without the
-  // SEEDED_REGISTRIES fallback it would persist only the changed fields and drop
-  // `url`, and because userRegs wins over the in-memory seed in getRegistries the
-  // preset would stay broken even after re-enabling.
+  // Seeded presets are never materialized in agents.yaml, so a partial update (`registry disable`,
+  // `config --api-key`) has nothing stored to merge with. Without the SEEDED_REGISTRIES fallback it
+  // would drop `url`, and the stored entry would outrank the seed.
   const existing = meta.registries[type][name]
     || DEFAULT_REGISTRIES[type]?.[name]
     || SEEDED_REGISTRIES[type]?.[name];
@@ -128,12 +108,9 @@ export function removeRegistry(type: RegistryType, name: string): boolean {
   return true;
 }
 
-/**
- * Cap every registry network call. Without this a slow or unreachable registry
- * hangs the calling command indefinitely (`agents add`, `agents mcp`, package
- * resolution) — and makes CI flake when the registry is unreachable. On timeout
- * the fetch aborts, callers fall back to their git/no-match path.
- */
+/** Cap every registry network call: otherwise a slow or unreachable registry hangs `agents add`,
+ * `agents mcp` and package resolution indefinitely and flakes CI. On timeout the fetch aborts and
+ * callers fall back to their git/no-match path. */
 const REGISTRY_FETCH_TIMEOUT_MS = 8000;
 
 async function fetchMcpRegistry(
@@ -212,19 +189,9 @@ export async function searchMcpRegistries(
   return results;
 }
 
-/**
- * Convert an MCP server registry entry into an install spec suitable for
- * writing into `manifest.mcp`. Returns `null` if the entry has no package we
- * know how to launch (e.g. only remote endpoints, which the current manifest
- * shape supports via `url`+`transport: 'http'` but isn't yet wired to the
- * registry's `remotes` field).
- *
- * Supported package shapes:
- *   - npm / runtime=node      → `npx -y <name>`
- *   - pypi / runtime=python   → `uvx <name>`
- *   - runtime=docker          → `docker run --rm -i <name>`
- *   - runtime=binary          → `<name>` (assumed to be on PATH)
- */
+/** Convert an MCP registry entry into an install spec for `manifest.mcp`; null if it has no package
+ * we can launch. Supported: npm/node -> `npx -y`, pypi/python -> `uvx`, docker -> `docker run --rm
+ * -i`, binary -> the name on PATH. */
 export function mcpEntryToInstallSpec(
   entry: McpServerEntry
 ): { command?: string; url?: string; transport: 'stdio' | 'http' } | null {
@@ -610,17 +577,9 @@ export function sha256OfFile(file: string): string {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-/**
- * Parse an 'owner/repo' slug from a git remote URL (https or scp-style ssh) or
- * a filesystem-path remote whose path is slug-shaped (`…/github.com/owner/repo`).
- * Returns null if the remote is not a recognizable GitHub-style shape.
- *
- * Backslashes are folded to forward slashes first: a real git URL never
- * contains one, but a local-path remote on Windows does
- * (`C:\…\github.com\org\a.git`), and without the fold the same remote that
- * parses as `org/a` on POSIX returns null on win32 — which made the
- * projects-pull slug verification fail closed as `blocked` there (RUSH-2694).
- */
+/** Parse an 'owner/repo' slug from a git remote URL (https or scp-style ssh) or a slug-shaped path
+ * remote; null if unrecognizable. Backslashes are folded first: a Windows path remote returned
+ * null where POSIX gave `org/a`, making projects-pull fail closed as `blocked` (RUSH-2694). */
 export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
   const s = remoteUrl.trim().replace(/\\/g, '/').replace(/\.git$/, '');
   // https://github.com/owner/repo  or  git@github.com:owner/repo
@@ -628,16 +587,9 @@ export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
   return m ? m[1] : null;
 }
 
-/**
- * Walk a repo's skills/ and build a flat {@link SkillIndexDocument}. Each entry
- * carries the sha256 of its SKILL.md so install can verify integrity after
- * cloning.
- *
- * `repoSlug` is the 'owner/repo' the skills are published under, written into
- * each entry's `repo` field so {@link skillEntryToGitSource} resolves it to
- * `gh:owner/repo`. `identifier` is set to the skill's directory name so
- * `agents install skill:<name>` resolves against this index.
- */
+/** Walk a repo's skills/ and build a flat {@link SkillIndexDocument}, each entry carrying the sha256
+ * of its SKILL.md for post-clone integrity checks. `repoSlug` goes in each entry's `repo` so it
+ * resolves to `gh:owner/repo`; `identifier` is the skill dir name. */
 export function buildSkillIndex(
   repoPath: string,
   repoSlug: string,
@@ -662,13 +614,9 @@ export function buildSkillIndex(
   };
 }
 
-/**
- * Verify a cloned skill's SKILL.md against the sha256 recorded in its registry
- * entry. Returns ok when the entry carries no sha256 — indexes published before
- * integrity hashes (or by third parties) simply skip the check. Returns an
- * error when the file is missing or its hash differs, so install can abort
- * rather than silently trusting a tampered artifact.
- */
+/** Verify a cloned skill's SKILL.md against the sha256 in its registry entry. Entries without a
+ * sha256 (older or third-party indexes) skip the check; a missing file or hash mismatch is an error
+ * so install aborts rather than trust a tampered artifact. */
 export function verifySkillIntegrity(
   repoPath: string,
   entry: Pick<SkillEntry, 'name' | 'path' | 'sha256'>

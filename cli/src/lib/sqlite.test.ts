@@ -1,12 +1,6 @@
-/**
- * The session index writes its rows with a named-parameter bind
- * (`upsertSessionStmt` in session/db.ts). bun:sqlite only matches such an
- * object when its keys carry the SQL sigil unless the DB is opened with
- * `strict: true` — without it every parameter stays NULL and `sessions.short_id`
- * (NOT NULL) rejects the row, so no session ever reaches the index when the CLI
- * runs as the standalone Bun binary. The suite itself runs under Node, so the
- * bun half has to be exercised in a real `bun` subprocess.
- */
+/** The session index writes with a named-parameter bind (`upsertSessionStmt`). bun:sqlite matches
+ * keys only with the SQL sigil unless opened with `strict: true`; otherwise every param is NULL
+ * and `sessions.short_id` rejects the row, so nothing is indexed in the standalone Bun binary. */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
@@ -58,10 +52,9 @@ describe('sqlite shim named-parameter binds', () => {
     db.close();
   });
 
-  // The shim-level tests above pin the binding; this one pins the bug that
-  // motivated the fix — `agents sessions` writing its index (upsertSessionsBatch
-  // in session/db.ts, the codebase's only named bind) from the runtime the
-  // shipped standalone binary embeds.
+  // The shim-level tests pin the binding; this pins the bug that motivated the fix: `agents
+  // sessions` writing its index (upsertSessionsBatch, the only named bind) from the runtime the
+  // standalone binary embeds.
   it('indexes a scanned session when `agents sessions` runs under bun', () => {
     const home = path.join(dir, 'home');
     const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
@@ -86,9 +79,8 @@ describe('sqlite shim named-parameter binds', () => {
 
     const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'sessions', '--all', '--local', '--json'], {
       cwd: process.cwd(),
-      // USERPROFILE too: discover.ts roots its scan at os.homedir(), which
-      // ignores HOME on Windows. With only HOME set, state.ts writes the index
-      // under the temp home while the transcript scan reads the runner's real
+      // USERPROFILE too: discover.ts roots at os.homedir(), which ignores HOME on Windows. With
+      // only HOME set, the index goes to the temp home while the scan reads the runner's real
       // profile, so the session is never found.
       env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_REAL_HOME: home },
       stdio: ['ignore', 'pipe', 'inherit'],

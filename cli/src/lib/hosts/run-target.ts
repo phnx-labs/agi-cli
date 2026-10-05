@@ -1,19 +1,6 @@
-/**
- * Shared host-run dispatch — the one path every surface uses to run an agent on
- * another machine: `agents run --device` (commands/exec.ts), the `host` cloud
- * provider (`agents cloud run --provider host`), and host-placed routines.
- *
- * Wraps the two steps every caller needs and previously lived inline in
- * exec.ts's `--device` branch:
- *   1. resolution — name → capability tag → error, with the same fall-through
- *      semantics as `agents run --device` (only "Multiple hosts tagged…" is a
- *      resolution verdict; "no host tagged" degrades to unknown-host), and
- *   2. headless dispatch — session-id mint (Claude only), detached SSH launch,
- *      and LOCAL session-index registration so the run shows in `agents sessions`.
- *
- * Interactive dispatch stays in exec.ts: it is inherently tied to the caller's
- * TTY and has no other consumers.
- */
+/** Shared host-run dispatch for `agents run --device`, the `host` cloud provider and host-placed
+ * routines: resolution (name, then capability tag) and headless dispatch (session-id mint,
+ * detached SSH launch, session-index registration). Interactive stays in exec.ts. */
 
 import { randomUUID } from 'crypto';
 import type { Host } from './types.js';
@@ -23,11 +10,9 @@ import type { DispatchResult } from './dispatch.js';
 import { registerHostSession, captureRemoteSessionId } from './session-index.js';
 import type { HostCredentials } from './credentials.js';
 
-/**
- * Resolution failed with a user-actionable message the caller should print
- * verbatim. Distinct from `DeviceOffloadUnsupportedError` (which propagates to
- * the top-level catch) so callers can tell "bad name" from "bad auth method".
- */
+/** Resolution failed with a user-actionable message to print verbatim; distinct from
+ * DeviceOffloadUnsupportedError (which propagates to the top-level catch) so callers can tell a
+ * bad name from a bad auth method. */
 export class HostResolutionError extends Error {
   constructor(message: string) {
     super(message);
@@ -35,12 +20,9 @@ export class HostResolutionError extends Error {
   }
 }
 
-/**
- * Resolve a `--device` value the way `agents run` does: exact name (providers →
- * devices → `user@host`), then capability tag. Throws `HostResolutionError`
- * for an ambiguous tag or an unknown name; lets `DeviceOffloadUnsupportedError`
- * (password-auth device) propagate untouched for the top-level catch.
- */
+/** Resolve a `--device` value like `agents run`: exact name (providers, devices, `user@host`),
+ * then capability tag. Throws HostResolutionError for an ambiguous tag or unknown name;
+ * DeviceOffloadUnsupportedError (password-auth device) propagates untouched. */
 export async function resolveHostRunTarget(name: string, opts: { any?: boolean } = {}): Promise<Host> {
   let host = await resolveHost(name);
   if (!host) {
@@ -114,29 +96,14 @@ export function resolveHostSessionId(agent: string, resume?: string, sessionId?:
   return undefined;
 }
 
-/**
- * Dispatch a headless prompt run onto a resolved host, then relate the run's
- * session id back to this launcher for EVERY agent — not just Claude.
- *
- * Claude is the only agent that accepts a forced `--session-id`, so we mint one
- * up front and know it immediately. For every other agent the remote run coins
- * its OWN id; we forward `--emit-session-id` so the remote prints that id as a
- * stdout sentinel (hosts/session-marker.ts), and once the follow returns we parse
- * it out of the mirrored local log and stamp it on the task before registering —
- * so `agents sessions`/resume-by-id can map the discovered session home. On
- * resume the remote session keeps its existing id (passed through, no capture).
- *
- * Returns the task record and the remote exit code (`-1` = follow window closed
- * while the run continues).
- */
+/** Dispatch a headless prompt run onto a host and relate its session id back for every agent:
+ * Claude gets a forced `--session-id`; others print theirs via `--emit-session-id`, parsed from
+ * the mirrored log. Returns the task and exit code (`-1` = follow closed). */
 export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Promise<DispatchResult> {
   const forcedSessionId = resolveHostSessionId(opts.agent, opts.resume, opts.sessionId);
-  // Ask the remote to print its resolved id whenever we did NOT force one (every
-  // non-Claude agent, and Claude-on-resume where the id is already known). No-op
-  // when the run isn't followed — nothing tails the log to catch the marker.
-  // `run auto` with an explicit --session-id is the exception: the id is only
-  // ADOPTED when the remote picks claude, so a non-claude pick must still emit
-  // the marker for its own coined id.
+  // Ask the remote to print its id whenever we did not force one; a no-op when unfollowed. `run
+  // auto` with `--session-id` is the exception: the id is adopted only if the remote picks claude,
+  // so a non-claude pick must still emit.
   const emitSessionId = (!forcedSessionId || opts.agent === 'auto') && !opts.resume && opts.follow !== false;
   const result = await dispatchToHost(host, {
     agent: opts.agent,

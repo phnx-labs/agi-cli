@@ -9,15 +9,9 @@ import {
   type CodexParserState,
 } from '../discover.js';
 
-// Differential parity harness (B-3, Codex). Proves that resuming a Codex parse
-// from a persisted continuation and folding in appended lines is BYTE-FOR-BYTE
-// identical to a full parse of the whole file, for EVERY field of
-// CodexSessionScan. Real temp files, real fs — no mocks.
-//
-// The full ground truth is computed by resuming from offset 0 over an empty
-// prior (a single incremental pass equals a full parse), so the harness needs no
-// import of the private scanCodexSession — scanCodexSessionIncremental(fp, 0,
-// fresh) IS a full parse.
+// Differential parity harness (B-3, Codex): resuming from a persisted continuation and folding in
+// appended lines is byte-identical to a full parse for every CodexSessionScan field. Real temp
+// files. Ground truth is scanCodexSessionIncremental(fp, 0, fresh), itself a full parse.
 
 let dir: string;
 
@@ -42,11 +36,8 @@ function jsonl(lines: object[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n');
 }
 
-/**
- * Seed the file with chunk 0, bootstrap a continuation, then APPEND each
- * subsequent chunk and resume from the persisted offset. Returns the final
- * incremental scan and the ground-truth full scan of the final file.
- */
+/** Seed the file with chunk 0, bootstrap a continuation, append each later chunk and resume from
+ * the persisted offset. Returns the final incremental scan and the full-scan ground truth. */
 async function replay(chunks: string[]) {
   const fp = path.join(dir, 'rollout.jsonl');
   expect(chunks.length).toBeGreaterThan(0);
@@ -280,10 +271,9 @@ describe('codex incremental parity — partial trailing line', () => {
   });
 
   it('a COMPLETE record missing only its trailing newline is deferred, then counted EXACTLY once', async () => {
-    // The non-atomic-append bug class prix-cloud caught for Claude: a writer
-    // appends a full, valid record and only later appends its '\n'. Codex
-    // messageCount is additive with NO dedup, so a double-apply would show up as
-    // messageCount 1→2 and contentText carrying the message twice.
+    // Non-atomic-append bug class: a writer appends a full valid record and only later its '\n'.
+    // Codex messageCount has no dedup, so a double-apply would show messageCount 1 to 2 and
+    // duplicated contentText.
     const fp = path.join(dir, 'complete-unterminated.jsonl');
     const l1 = JSON.stringify({ type: 'response_item', timestamp: '2026-06-28T00:00:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first message' }] } });
     fs.writeFileSync(fp, l1 + '\n');

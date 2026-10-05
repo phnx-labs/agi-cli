@@ -1,10 +1,6 @@
-/**
- * Top-level resource profiles.
- *
- * These are distinct from model-provider run profiles in lib/profiles.ts. A
- * resource profile is a global mode switch stored in agents.yaml that filters
- * the resolved DotAgents resource view and secrets bundles.
- */
+/** Top-level resource profiles, distinct from model-provider run profiles in lib/profiles.ts: a
+ * global mode switch in agents.yaml that filters the resolved DotAgents resource view and secrets
+ * bundles. */
 
 import { readMeta, updateMeta } from './state.js';
 import { brandProfileName } from './brand.js';
@@ -41,10 +37,9 @@ function getResourceProfilePreset(name: string): ResourceProfilePreset | null {
 }
 
 function getActiveResourceProfileName(): string | null {
-  // A white-label brand pins its own profile; when running under a brand
-  // (AGENTS_BRAND set) that preset wins over the global `profiles.active`, so
-  // every resource filter that keys off the active profile becomes brand-scoped.
-  // See lib/brand.ts.
+  // A white-label brand pins its own profile: under AGENTS_BRAND that preset wins over the global
+  // `profiles.active`, so every filter keyed off the active profile becomes brand-scoped (see
+  // lib/brand.ts).
   const branded = brandProfileName();
   if (branded) return branded;
   return readMeta().profiles?.active ?? null;

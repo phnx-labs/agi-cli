@@ -1,31 +1,6 @@
-/**
- * RUSH-2492 — `agents sessions focus|attach|resume|exec --resume <id>` (and the
- * `sessions.ts` resolver consumers: `preview`, the bare `agents sessions <id>`,
- * and `--resolve`) must NOT hard-abort session resolution when a fleet peer is
- * offline. All of them switch on the outcome of `resolveSessionMetadataValue`.
- *
- * This drives the REAL call-site action — `resolveSessionMetadata`, the export
- * backing `agents sessions --resolve <selector> --json` — against an injected
- * fan-out (the documented `deps.gatherRemoteList` seam, the same one the
- * RUSH-2203 local-hit test in sessions.test.ts uses). No mocking of the
- * resolution decision itself: the fan-out RESULTS are fed as data, exactly the
- * shape `metadataResolveOutcome` reads. Unlike testing `resolveSessionMetadataValue`
- * directly (which stayed green through all four call sites' original hard-abort
- * bug — the resolver itself never changed), this exercises the branch that DID
- * change: what the call site does with a `partial` outcome.
- *
- *   1. A session that lives on a REACHABLE peer resolves even when an unrelated
- *      device is offline → the action prints the resolved session as JSON and
- *      exits 0. It does NOT abort just because another device didn't answer.
- *   2. A session found on NO reachable device stays `partial` (the offline peer
- *      may be hiding it) → the action now warns + reports not-found with exit
- *      code 1, never the old hard "could not resolve" abort at exit code 2.
- *
- * Acceptance: reverting the `resolveSessionMetadata`/sibling partial-branch
- * fixes in sessions.ts (e.g. `git show main:src/commands/sessions.ts >
- * src/commands/sessions.ts`) restores the old `exit(2)` + "Partial session
- * resolution: ... did not answer." wording, which fails both assertions below.
- */
+/** RUSH-2492: `sessions focus|attach|resume|exec --resume <id>` and resolver consumers must not
+ * hard-abort when a fleet peer is offline. Drives the real `resolveSessionMetadata` with an
+ * injected fan-out; found on a reachable peer exits 0; found nowhere warns, exits 1. */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -34,11 +9,9 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 
-/** Drive the real `resolveSessionMetadata` call site (backs `agents sessions
- * --resolve <selector> --json`) in a child process, so HOME (hence the SQLite
- * session index) is a throwaway temp dir, never the developer's real
- * sessions.db, and so the call site's own `process.exit(...)` cannot kill the
- * test runner. */
+/** Drive the real `resolveSessionMetadata` call site (behind `sessions --resolve <selector>
+ * --json`) in a child process, so HOME (hence the SQLite index) is a temp dir, never the
+ * developer's sessions.db, and the call site's `process.exit(...)` can't kill the runner. */
 function runResolveSessionMetadata(
   selector: string,
   fanout: { sessions: unknown[]; unreachable: string[] },

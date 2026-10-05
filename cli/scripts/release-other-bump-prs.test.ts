@@ -1,14 +1,6 @@
-/**
- * Detecting an EARLIER release's still-open version-bump PR before folding
- * .changelog/next/* for a new target, by running the REAL helper (PHNX-3084).
- *
- * The case that matters: v1.2.3 published but its async version-bump PR never
- * merged (a CHANGELOG conflict a human has to fix), so .changelog/next/* stays
- * queued on main. A later `release.sh 1.2.4` then re-reads those fragments and
- * folds v1.2.3's notes under v1.2.4. release.sh's same-target STUCK_BUMP_PR retry
- * only ever queries release/v<current-target>, so it is blind to this. This
- * helper is what release.sh calls to refuse the fold until the stuck PR lands.
- */
+/** Detects an earlier release's still-open version-bump PR before folding .changelog/next/* for a
+ * new target, using the real helper (PHNX-3084). If v1.2.3's bump PR never merged, a later release
+ * folds v1.2.3's notes under v1.2.4; the same-target STUCK_BUMP_PR retry cannot see this. */
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';

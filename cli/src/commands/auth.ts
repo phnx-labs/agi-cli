@@ -23,12 +23,9 @@ import {
 import { setHelpSections } from '../lib/help.js';
 import { runOrDie } from '../lib/format.js';
 
-/**
- * `agents auth` — sign in to Phoenix ID, the account layer behind team spaces.
- * Signing in is optional: every local feature works with no account. Everything
- * here goes through `lib/identity`; this file builds no URLs and reads no
- * credential files of its own.
- */
+/** `agents auth` signs in to Phoenix ID, the account layer behind team spaces. Signing in is
+ * optional; every local feature works without an account. Everything goes through `lib/identity`;
+ * this file builds no URLs and reads no credential files. */
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

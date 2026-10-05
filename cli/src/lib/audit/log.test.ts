@@ -132,11 +132,9 @@ describe('audit hash chain (legacy file still verifies)', () => {
   });
 
   it('serializes concurrent appends so the chain never forks', async () => {
-    // The real race: N `agents run` processes (parallel teams/routines dispatch)
-    // append at once. Without the advisory lock each reads the same last hash
-    // and writes prevHash=H, forking the chain into a false "tampered" verdict.
-    // Exercise it with REAL OS-level concurrency — one bun subprocess per writer,
-    // each importing the actual appendAuditRecord (no mocking of code under test).
+    // The real race: N `agents run` processes (parallel teams/routines) append at once. Without
+    // the advisory lock each reads the same last hash and writes prevHash=H, forking the chain
+    // into a false "tampered" verdict. Exercised with one bun subprocess per writer.
     const log = tmpLog();
     const worker = path.join(path.dirname(log), 'worker.ts');
     fs.writeFileSync(
@@ -172,10 +170,8 @@ describe('audit hash chain (legacy file still verifies)', () => {
   }, 60_000);
 
   it('two interleaved appends still chain and verify', async () => {
-    // Two writers whose critical sections deliberately overlap in wall-clock:
-    // both launch together, each does read-last-hash + append under the lock.
-    // The lock forces a total order, so record 1 links off record 0's hash
-    // rather than both linking off GENESIS.
+    // Two writers with deliberately overlapping critical sections: the lock forces a total order,
+    // so record 1 links off record 0's hash rather than both off GENESIS.
     const log = tmpLog();
     const worker = path.join(path.dirname(log), 'worker2.ts');
     fs.writeFileSync(

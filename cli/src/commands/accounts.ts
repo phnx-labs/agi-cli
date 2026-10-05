@@ -83,13 +83,9 @@ export function parseBundleKey(raw: string): { bundle: string; key: string } {
   return { bundle: raw.slice(0, colon), key: raw.slice(colon + 1) };
 }
 
-/**
- * Copy one value out of an `agents secrets` bundle for `--from-secrets`. The
- * standalone reports failures only as codes, so the bundle, the key, and the
- * repair are named here — and existence is checked first, because a
- * prompt-free (`agentOnly`) read of a bundle that does not exist reports
- * LOCKED rather than NOT_FOUND.
- */
+/** Copy one value out of an `agents secrets` bundle for `--from-secrets`. The standalone reports
+ * failures only as codes, so the bundle, key and repair are named here; existence is checked first
+ * because a prompt-free read of a missing bundle reports LOCKED rather than NOT_FOUND. */
 async function secretFromBundle(raw: string): Promise<string> {
   const { bundle, key } = parseBundleKey(raw);
   let vars: Record<string, unknown>;
@@ -191,10 +187,8 @@ export async function listSwitchableAccounts(agent: AgentId): Promise<UnifiedAcc
   return accountsForHarness(agent);
 }
 
-/**
- * Pin the per-harness default — the `accounts default` write path.
- * Provider accounts must authenticate the harness; native accounts must belong to it.
- */
+/** Pin the per-harness default (the `accounts default` write path). Provider accounts must
+ * authenticate the harness; native accounts must belong to it. */
 export function setDefaultAccount(agentRaw: string, name: string): { agent: AgentId; account: UnifiedAccount } {
   const agent = parseHarness(agentRaw);
   // Scope to the harness this default is FOR: a bare identity (`<email>`) matches
@@ -212,12 +206,8 @@ export function setDefaultAccount(agentRaw: string, name: string): { agent: Agen
     // nameable-by-version-home gate does not apply to `accounts default`.
     if (!isSymlinkAdoptedHarness(agent)) assertNativeAccountNameable(account.agent);
   }
-  // Reference by NAME, not id: defaults sync fleet-wide with `agents repo push/pull`
-  // while account ids are minted per-device, so an id ref breaks on every other
-  // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
-  // registry resolves both, and existing uuid entries still resolve.
-  // Repoint first: a written default whose symlink still points at another
-  // account is a wrong home that looks like success.
+  // Reference by name, not id: defaults sync fleet-wide with `agents repo push/pull` while account
+  // ids are minted per-device, so an id ref breaks elsewhere. The registry resolves both.
   if (account.kind === 'native') ensureAdoptedDefaultRepoint(agent, account, readMeta());
   updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.name } } }));
   return { agent, account };
@@ -284,12 +274,9 @@ export async function runAccountsDefault(
   console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
 }
 
-/**
- * Parse a `logout` target into its parts (pure). Supports `<harness>`,
- * `<harness>@<label>`, `<harness>#<account>`, and a bare account name (no
- * harness). `#` binds tighter than `@` so a `<harness>#<label>` selector is
- * never mis-split on a `@` inside the selector.
- */
+/** Parse a `logout` target (pure): `<harness>`, `<harness>@<label>`, `<harness>#<account>`, or a
+ * bare account name. `#` binds tighter than `@` so a `<harness>#<label>` selector is never
+ * mis-split on an `@` inside it. */
 export function parseLogoutTarget(target: string): { agentRaw: string; installationLabel?: string; identitySelector?: string } {
   const hash = target.indexOf('#');
   if (hash > 0) {
@@ -319,11 +306,9 @@ async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native
   return label;
 }
 
-/**
- * Resolve a `logout` target to the exact `(agent, installed label)` whose home
- * should be signed out — honoring a passed `@label` or `#account` selector
- * instead of always selecting the global default (PHNX-3940).
- */
+/** Resolve a `logout` target to the exact (agent, installed label) whose home should be signed out,
+ * honoring a passed `@label` or `#account` selector instead of always using the global default
+ * (PHNX-3940). */
 export async function resolveLogoutTarget(target: string): Promise<{ agent: AgentId; version: string }> {
   const parsed = parseLogoutTarget(target);
   const meta = readMeta();
@@ -686,10 +671,9 @@ agents accounts rename codex#icloud cloud`,
           const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
           const { getVersionHomePath } = await import('../lib/installations/versions.js');
           const { buildExecEnv } = await import('../lib/exec.js');
-          // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
-          // the resolved home so `logout` signs out THAT account's home — not
-          // whichever the global default happens to be. HOME alone was insufficient
-          // for a config-dir-env harness, which is why a passed @label was ignored.
+          // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to the resolved
+          // home so `logout` signs out that account's home, not the global default. HOME alone was
+          // insufficient for config-dir-env harnesses, so a passed @label was ignored.
           const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
           env.HOME = getVersionHomePath(agent, version);
           lock.assertHeld();

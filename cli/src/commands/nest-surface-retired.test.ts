@@ -1,10 +1,6 @@
-/**
- * RUSH-2989 — leftover top-level aliases nested under their owning groups.
- * Pins that `unshare` / `audit` / `trends` are unregistered at the root and
- * cannot auto-correct. `audit`'s nested home (`events audit`) still exists;
- * `unshare`'s home was removed with the `artifacts` group (PHNX-3992) and
- * `trends` never had one.
- */
+/** RUSH-2989: leftover top-level aliases were nested under their owning groups. Pins that
+ * `unshare`, `audit` and `trends` are unregistered at the root and cannot auto-correct; `events
+ * audit` still exists, `unshare` went with `artifacts` (PHNX-3992), and `trends` never had a home. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -74,10 +70,8 @@ describe('RUSH-2989 nested leftover aliases', () => {
     // top-level name (asserted below), with no nested home.
     const events = program.commands.find((c) => c.name() === 'events');
     expect(events?.commands.map((c) => c.name())).toContain('audit');
-    // The nested `insights trends` alias was itself removed in the recipe
-    // collapse: `agents insights mix` is the one counter surface, so `trends`
-    // survives only as a retired top-level name (asserted below), with no
-    // nested home. `insights mix` remains.
+    // The nested `insights trends` alias was removed in the recipe collapse: `insights mix` is the
+    // one counter surface, so `trends` survives only as a retired top-level name (asserted below).
     const insights = program.commands.find((c) => c.name() === 'insights');
     expect(insights?.commands.map((c) => c.name())).not.toContain('trends');
     expect(insights?.commands.map((c) => c.name())).toContain('mix');

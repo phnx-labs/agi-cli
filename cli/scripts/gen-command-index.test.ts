@@ -1,7 +1,6 @@
-// Exercises the real command tree (no mocks) so a Commander upgrade that renames
-// the introspection API (`registeredArguments`, `.aliases()`, `.options`) — or a
-// command that stops registering — fails here instead of silently producing an
-// empty/wrong index.
+// Exercises the real command tree (no mocks) so a Commander upgrade that renames the introspection
+// API (`registeredArguments`, `.aliases()`, `.options`), or a command that stops registering,
+// fails here instead of silently producing an empty or wrong index.
 
 import { describe, expect, it } from 'vitest';
 import { buildFullCommandTree } from '../src/cli/command-registry.js';
@@ -158,10 +157,9 @@ describe('command index generation', () => {
   });
 
   it('keeps the reserved root anchor free of collisions', async () => {
-    // The generator hands the root the reserved id `agents` because its path is
-    // empty. That is only safe while no top-level group is named `agents` — a
-    // group by that name would mean `agents agents` and silently steal the
-    // root's anchor. Enforce the claim the comment makes instead of trusting it.
+    // The generator gives the root the reserved id `agents` because its path is empty. That is
+    // safe only while no top-level group is named `agents` (`agents agents` would steal the root's
+    // anchor); enforce the claim rather than trust it.
     const nodes = await tree();
     expect(nodes.map((node) => node.name)).not.toContain('agents');
     const html = renderHtml(nodes, rootNode(await buildFullCommandTree(), AGENTS_REFERENCE), AGENTS_REFERENCE);

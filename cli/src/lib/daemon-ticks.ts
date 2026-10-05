@@ -1,19 +1,6 @@
-/**
- * Daemon account-state tick bodies.
- *
- * These two bodies are the `refreshUsage` / `refreshAuth` implementations the
- * supervised `AccountStateDaemonService` (daemon/account-state-daemon-service.ts)
- * runs on its tick, in-process (usage every tick, auth on the slower ~3 min
- * cadence). They are NOT routines and are never fired through the scheduler — the
- * daemon owns usage and authentication health as first-party device state
- * (RUSH-2451); the supervisor bounds each tick with a deadline + AbortSignal so a
- * hung refresh is abandoned and restarted instead of latching (PHNX-3608).
- *
- * `refreshLocalFleetAuthState` is also called by `agents fleet`/`ssh` surfaces
- * that need a fresh local auth snapshot on demand; provider-level work is guarded
- * by the cross-process refresh lease so an explicit CLI refresh and the daemon
- * timer converge on the same published result.
- */
+/** Daemon account-state tick bodies: `refreshUsage` / `refreshAuth` run in-process by the
+ * supervised `AccountStateDaemonService` (usage every tick, auth ~3 min). Not routines; the daemon
+ * owns this as first-party device state (RUSH-2451); a hung tick is restarted (PHNX-3608). */
 
 import type { FleetStatusRow } from './fleet-status.js';
 import { AUTH_PROBE_MAX_AGE_MS, authTargetKey, type AuthProbeRow } from './auth-health.js';
@@ -28,27 +15,11 @@ export function isFreshFleetAuthSnapshot(
     && value.authRows.every(authRow => authRow.health.checkedAt >= minimumCapturedAt);
 }
 
-/**
- * How stale a cached auth verdict may get before the periodic tick re-probes.
- *
- * The auth verdict rides the same rate-limited `/api/oauth/usage` endpoint as
- * the usage probe. Firing it every 3-minute tick on every fleet device drove one
- * per-account request quota to a permanent 429, and the shared backoff then
- * parked usage fleet-wide and froze the usage cache (RUSH-2998). Re-probing at
- * most every 20 minutes cuts that endpoint traffic ~5x while still catching a
- * revocation within one window — and every device keeps a REAL verdict (not a
- * degraded "unverified"), so `agents devices ping --strict` and the run
- * auth-preflight keep working on every host, unlike a publisher/subscriber split
- * that would blind every non-primary box to revocation. Fleet status still
- * publishes every tick — it does not ride that endpoint.
- */
-/**
- * The cached rows still backed by a home on this device, by `authTargetKey`.
- *
- * A row for an uninstalled version is an ORPHAN: the probe enumerates installed
- * homes + account slots, so nothing re-probes it and its `checkedAt` is frozen
- * at whatever the last probe left. Pure — unit-tested.
- */
+/** How stale a cached auth verdict may get before the tick re-probes. The verdict rides the
+ * rate-limited `/api/oauth/usage`; probing every 3-minute tick on every device drove a permanent
+ * 429 and parked usage fleet-wide (RUSH-2998). 20 minutes cuts traffic ~5x. */
+/** Cached rows still backed by a home on this device, by `authTargetKey`. A row for an uninstalled
+ * version is an orphan: nothing re-probes it so `checkedAt` is frozen. Pure. */
 export function installedAuthRows(
   authRows: readonly AuthProbeRow[],
   installedTargets: ReadonlySet<string>,
@@ -56,20 +27,9 @@ export function installedAuthRows(
   return authRows.filter((r) => installedTargets.has(authTargetKey(r.agent, r.version)));
 }
 
-/**
- * True when every cached auth row FOR AN INSTALLED HOME was probed within
- * {@link AUTH_PROBE_MAX_AGE_MS} — i.e. reusing them would not let a verdict get
- * staler than one probe window. No installed row is never fresh (nothing to
- * reuse). Pure — unit-tested.
- *
- * Orphan rows are excluded rather than counted stale (PHNX-4051). Counting them
- * made this permanently false on any box that had ever uninstalled a version:
- * the orphan can never be re-probed, so the tick live-probed the rate-limited
- * `/api/oauth/usage` for every account every 3 minutes, re-arming the per-account
- * 429 backoff and parking the usage refresher — the RUSH-2998 failure the reuse
- * window exists to prevent. Observed on yosemite-m0 (rows dated Sep 2 / Sep 6 for
- * uninstalled Claude versions).
- */
+/** True when every cached auth row for an installed home was probed within AUTH_PROBE_MAX_AGE_MS;
+ * no installed row is never fresh. Pure. Orphans are excluded, not counted stale (PHNX-4051):
+ * counting them kept this false after any uninstall and re-armed the 429 backoff (RUSH-2998). */
 export function isCachedFleetAuthProbeFresh(
   authRows: readonly AuthProbeRow[],
   now: number,
@@ -80,14 +40,9 @@ export function isCachedFleetAuthProbeFresh(
   return installed.length > 0 && installed.every((r) => now - r.health.checkedAt < maxAgeMs);
 }
 
-/**
- * Whether the tick may reuse the cached auth verdict instead of re-probing the
- * rate-limited endpoint. `force` (an on-demand `agents devices ping`) ALWAYS
- * re-probes — the whole point of the command is a genuinely live verdict, and
- * missing this `!force` is exactly how a `--strict` check silently passed a
- * revoked account (the second `runFleetPing` call site, RUSH-2998). Pure —
- * unit-tested so that inversion cannot regress unnoticed.
- */
+/** Whether the tick may reuse the cached auth verdict. `force` (on-demand `agents devices ping`)
+ * always re-probes; missing `!force` is how `--strict` passed a revoked account (RUSH-2998). Pure
+ * and unit-tested against that inversion. */
 export function shouldReuseCachedAuthProbe(
   force: boolean,
   cached: readonly AuthProbeRow[],
@@ -98,15 +53,9 @@ export function shouldReuseCachedAuthProbe(
   return !force && isCachedFleetAuthProbeFresh(cached, now, installedTargets, maxAgeMs);
 }
 
-/**
- * Fleet cache warm: publish THIS host's row for the caches `agents fleet
- * status` / `agents devices list` read (PUBLISH-OWN / READ-UNION, RUSH-2061).
- *
- * `force` is set by on-demand callers (`agents devices ping`) that must return a
- * genuinely live verdict; the periodic daemon tick leaves it unset so it reuses a
- * recent verdict per {@link AUTH_PROBE_MAX_AGE_MS} instead of hammering the
- * rate-limited endpoint every 3 minutes (RUSH-2998).
- */
+/** Fleet cache warm: publish this host's row for the caches `agents fleet status` / `devices list`
+ * read (PUBLISH-OWN / READ-UNION, RUSH-2061). `force` is set by on-demand callers wanting a live
+ * verdict; the periodic tick reuses a recent one (RUSH-2998). */
 export async function refreshLocalFleetAuthState(
   opts?: { force?: boolean; signal?: AbortSignal },
 ): Promise<{ row: FleetStatusRow; authRows: import('./auth-health.js').AuthProbeRow[] }> {
@@ -160,13 +109,9 @@ export async function runFleetCacheWarmTick(signal?: AbortSignal): Promise<void>
   console.log(`fleet cache warm: ${authCount} auth row(s) refreshed, ${row.agents.running} running agent(s) on ${row.host}`);
 }
 
-/**
- * Usage refresh: keep the usage cache the `agents run` router reads
- * (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
- * Every host is its own provider-facing writer — it refreshes only the
- * accounts it holds credentials for, straight from the provider APIs
- * (RUSH-3193 #15; no cross-host broadcast).
- */
+/** Usage refresh: keep the usage cache the `agents run` router reads (RUSH-2061) fresh without the
+ * hot path fetching. Each host refreshes only accounts it holds credentials for, straight from the
+ * provider APIs (RUSH-3193 #15; no cross-host broadcast). */
 export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
   const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
   const { writeClaudeUsageCache, readClaudeUsageCache } = await import('./accounting/usage.js');
@@ -199,24 +144,9 @@ export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
   );
 }
 
-/**
- * Active-sessions warm (RUSH-2062 / RUSH-2484): publish THIS host's live session
- * rows so `agents sessions watch` (and the extension that tails it) receive
- * journal deltas. Publish-own only — no cross-host SSH.
- *
- * Cadence matches {@link DEFAULT_ACTIVE_CACHE_MAX_AGE_MS} so one-shot readers and
- * long-lived watchers share one writer. Without this tick the journal has no
- * continuous producer and Factory freezes after the initial cache snapshot.
- *
- * Gated on reader presence (RUSH-3193): when no `sessions watch` / `feed watch`
- * consumer has checked in within {@link ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS} the
- * expensive `ps`+`lsof` gather is skipped entirely on this scheduled tick. A
- * watcher connecting to a cold/idle daemon is NOT served by this tick alone —
- * {@link noteActiveSessionsJournalReader} only writes a presence timestamp, with
- * no path back to this timer — so the daemon separately runs
- * {@link watchActiveSessionsReaderPresence} to detect that idle→recent edge and
- * fire an out-of-band call into this same function immediately (RUSH-2484).
- */
+/** Active-sessions warm (RUSH-2062 / RUSH-2484): publish this host's live session rows so `agents
+ * sessions watch` gets journal deltas. Gated on reader presence (RUSH-3193): with no recent
+ * watcher the `ps`+`lsof` gather is skipped; a watcher edge fires it. */
 export async function runActiveSessionsWarmTick(
   opts: { gather?: () => Promise<import('./session/active.js').ActiveSession[]>; nowMs?: number } = {},
 ): Promise<{ sessions: number }> {
@@ -226,10 +156,9 @@ export async function runActiveSessionsWarmTick(
     console.log('active-sessions warm: idle (no recent reader), skipping gather');
     return { sessions: 0 };
   }
-  // ONE gather per tick, then fold, then publish. The order is load-bearing:
-  // the publish's per-row merge reads the timeline cache, so folding first is
-  // what puts a CURRENT timeline on the row this tick writes to the journal
-  // rather than the previous tick's (PHNX-3939).
+  // One gather per tick, then fold, then publish. The order is load-bearing: the publish's per-row
+  // merge reads the timeline cache, so folding first puts a current timeline on the row
+  // (PHNX-3939).
   const gather = opts.gather ?? (async () => {
     const { getActiveSessions } = await import('./session/active.js');
     return getActiveSessions({ localOnly: true });
@@ -253,27 +182,9 @@ export async function runActiveSessionsWarmTick(
   return { sessions: r.sessions.length };
 }
 
-/**
- * Session-index warm (RUSH-2682): incrementally scan THIS host's transcript dirs
- * into the local SQLite index on a timer, so a session started HERE reaches this
- * box's index within seconds instead of on the next unrelated `agents sessions*`
- * call. Indexing was otherwise lazy — only `discoverSessions` writes the index,
- * and nothing scheduled it — which inverted freshness: a peer's session arrived
- * via sync in ~0s while a locally-started one sat unindexed for minutes.
- *
- * The scan is incremental (only files whose mtime/size changed) and single-flight
- * across processes via the DB scan claim, so a foreground `agents sessions*` and
- * this tick never double-scan. The daemon is the single scheduled executor,
- * consistent with the one-scheduler rule.
- *
- * Calls `scanSessionsIncremental`, NOT `discoverSessions` (RUSH-2691). A bare
- * `discoverSessions()` ends in a listing query that defaults its cwd filter to
- * `process.cwd()` — the daemon's, i.e. `$HOME` — and caps at 50, so its row count
- * described "sessions whose cwd is exactly $HOME", which is 0 on a normal box no
- * matter how much the scan indexed. The tick reported that 0 every 20s while
- * still paying for the query's existence check and Linear fetch. Scanning
- * directly reports what was actually parsed and skips the query entirely.
- */
+/** Session-index warm (RUSH-2682): incrementally scan this host's transcript dirs into the SQLite
+ * index on a timer, single-flight via the DB scan claim. Uses `scanSessionsIncremental`, not
+ * `discoverSessions` (RUSH-2691), whose listing filters by the daemon's `$HOME` cwd. */
 export async function runSessionIndexWarmTick(): Promise<{ indexed: number; claimed: boolean }> {
   const { scanSessionsIncremental } = await import('./session/discover.js');
   const { claimed, scanned } = await scanSessionsIncremental();
@@ -283,18 +194,9 @@ export async function runSessionIndexWarmTick(): Promise<{ indexed: number; clai
   return { indexed: scanned, claimed: true };
 }
 
-/**
- * Deferred tool-index pass for large-transcript harnesses (PHNX-3411).
- *
- * Kimi (wire.jsonl) and Grok (chat_history.jsonl) scanners produce only
- * metadata — no events. Calling parseSession for those on the warm tick wedges
- * the Node event loop when the transcript is large and active (observed: several
- * seconds per tick on zion, causing browser IPC ECONNREFUSED). This pass fills
- * the gap: it queries recently-active kimi/grok sessions and calls
- * ensureToolIndex, which uses tool_scan_ledger stamps to skip already-current
- * sessions and applies byte/file budget caps so no large transcript monopolises
- * the tick.
- */
+/** Deferred tool-index pass for large-transcript harnesses (PHNX-3411). Kimi and Grok scanners
+ * yield only metadata, and parseSession on the warm tick wedged the event loop (browser IPC
+ * ECONNREFUSED). This calls ensureToolIndex on recent sessions, within byte/file budgets. */
 export async function runDeferredToolIndex(): Promise<{ indexed: number }> {
   const { querySessionsForDeferredToolIndex } = await import('./session/db.js');
   const { ensureToolIndex } = await import('./session/tool-index.js');

@@ -1,13 +1,6 @@
-/**
- * Permissions staleness — every `groups/*.yaml` across user + system
- * contributes to the merged permission set (project layer not consulted by
- * the current sync writer). First-wins on name collision (user > system).
- *
- * The active preset env value (`AGENTS_PERMISSION_PRESET`) is part of the
- * fingerprint too — preset selection changes which groups get applied to
- * the agent config, so a preset switch without a content change still
- * counts as stale.
- */
+/** Permissions staleness: every `groups/*.yaml` across user + system feeds the merged set (project
+ * not consulted by the sync writer); user wins collisions. The active preset
+ * (`AGENTS_PERMISSION_PRESET`) is fingerprinted too, so a preset switch alone counts as stale. */
 
 import * as fs from 'fs';
 import * as path from 'path';

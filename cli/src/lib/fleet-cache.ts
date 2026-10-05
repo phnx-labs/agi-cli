@@ -1,25 +1,11 @@
-/**
- * One synchronous, disk-only read facade over the fleet/usage caches.
- *
- * These readers NEVER touch the network and NEVER SSH — they read the caches
- * the daemon keeps warm (usage snapshot, projected headroom, fleet status) and
- * return instantly. That is the whole point: the routing hot path
- * (`agents run` → rotate.ts), device affinity (smart-launch.ts), and Factory can
- * consult live-ish fleet state without paying a provider fetch or an ssh probe
- * on a latency-sensitive path.
- *
- * Writers live elsewhere (the daemon's `runUsageRefresh` for usage/headroom,
- * `runFleetStatusPublish` for the fleet-status mirror); this module is the read
- * side only.
- */
+/** A synchronous, disk-only read facade over the fleet/usage caches the daemon keeps warm. Never
+ * touches the network or SSH, so the routing hot path (`agents run` rotate.ts), device affinity
+ * and Factory can read fleet state without a provider fetch or ssh probe. */
 import { readHeadroomEntry } from './usage-refresh.js';
 import { readFleetStatus as readFleetStatusMirror, type FleetStatusRow } from './fleet-status.js';
 
-/**
- * The fleet-status union the daemon publishes (own row) and the fleet-status
- * command unions (peer rows) — this host's stats + agent workload for every
- * known host, keyed by host. Cache-only: a cold mirror yields an empty map.
- */
+/** The fleet-status union (daemon's own row plus peer rows from the fleet-status command): host
+ * stats and workload per host. Cache-only; cold yields an empty map. */
 export function readFleetStatus(): Record<string, FleetStatusRow> {
   return readFleetStatusMirror();
 }
@@ -32,11 +18,8 @@ interface AccountHeadroom {
   minutesToLimit: number | null;
 }
 
-/**
- * The daemon-computed headroom for an account, or null when nothing has been
- * published yet. Cache-only — a cold cache simply yields null, and callers
- * degrade to snapshot-only behavior.
- */
+/** The daemon-computed headroom for an account, or null when nothing is published. Cache-only;
+ * callers degrade to snapshot-only behavior. */
 export function readAccountHeadroom(usageKey: string): AccountHeadroom | null {
   const entry = readHeadroomEntry(usageKey);
   if (!entry) return null;

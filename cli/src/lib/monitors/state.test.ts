@@ -178,22 +178,9 @@ describe('fire history', () => {
   });
 });
 
-/**
- * RUSH-2690: a `run` action fires, `dispatchAction` (lib/monitors/dispatch.ts)
- * records `ok: true` from a SYNCHRONOUS 'running' snapshot, and then the
- * dispatched process spawns, fails, and exits with no output — asynchronously,
- * after the fire record is already frozen on disk. `agents monitors runs`
- * showed a healthy `ok` forever because nothing ever revisited it, while
- * `agents monitors logs` (which reads the run record fresh) already told the
- * truth. `resolveFireOutcome` is the render-time fix: it re-reads the run's
- * CURRENT status by runId on every call, so the displayed outcome tracks
- * reality even though the on-disk fire record never changes.
- *
- * Real disk I/O, no mocking: writes an actual RunMeta via `writeRunMeta`
- * (the same writer `settle()` in lib/daemon/runner.ts uses) and an actual fire
- * record via `writeFireRecord`, then reads both back through the real
- * `resolveFireOutcome`.
- */
+/** RUSH-2690: a `run` fire records `ok: true` from a SYNCHRONOUS 'running' snapshot, then fails
+ * asynchronously, so `monitors runs` showed `ok` forever. `resolveFireOutcome` re-reads the run's
+ * CURRENT status per render. Real disk I/O (`writeRunMeta`, `writeFireRecord`), no mocking. */
 describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the run\'s real status)', () => {
   function baseMeta(runId: string, status: RunMeta['status']): RunMeta {
     return {
@@ -274,16 +261,9 @@ describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the 
   });
 });
 
-/**
- * PHNX-2842: a `run` action that exits 0 is not success. The motivating
- * incident: merge-on-green fired, `agents monitors runs` showed `ok`, and the
- * PR stayed OPEN — the agent completed without merging. `completed` used to
- * sit in OK_RUN_STATUSES next to `running`. A declared postcondition is what
- * distinguishes "ran" from "the intended effect happened".
- *
- * Real disk I/O + a real shell: the postcondition is `/bin/sh -c` (or `cmd /c`)
- * via `evaluatePostcondition`, the same seam command sources use. No mocks.
- */
+/** PHNX-2842: a `run` that exits 0 is not success: merge-on-green showed `ok` while the PR stayed
+ * OPEN. `completed` used to count as OK; a declared postcondition distinguishes "ran" from "effect
+ * happened". Real disk I/O and a real shell via `evaluatePostcondition`; no mocks. */
 describe('resolveFireOutcome (PHNX-2842 — completed is not ok unless the postcondition holds)', () => {
   function nodeExit(code: number): string {
     // evaluatePostcondition wraps this in /bin/sh -c or cmd /c.

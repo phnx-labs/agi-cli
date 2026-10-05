@@ -258,20 +258,17 @@ describe('buildDispatchBody', () => {
   });
 
   it('has no upload-consent / token-upload surface anymore (SING-1b regression)', async () => {
-    // The consent gate and the token-upload helpers were removed — a native OAuth
-    // login can never be sent to the cloud, with or without consent. Assert the
-    // module no longer exports any of them, so a future change can't re-introduce
-    // the upload path unnoticed.
+    // The consent gate and token-upload helpers were removed (a native OAuth login is never sent
+    // to the cloud). Assert the module no longer exports them so the upload path cannot return
+    // unnoticed.
     const mod = (await import('./rush.js')) as Record<string, unknown>;
     expect(mod.hasRushUploadConsent).toBeUndefined();
     expect(mod.buildAccountTokensPayload).toBeUndefined();
     expect(mod.accountTokensFingerprint).toBeUndefined();
     expect(mod.RUSH_CONSENT_PATH).toBeUndefined();
     expect(mod.readClaudeCredentialsBlob).toBeUndefined();
-    // readClaudeCredentialsBlob was deleted (RUSH-2359). Cloud dispatch never
-    // sent a token (SING-1b email-only manifest); the leftover helper still
-    // read Keychain / .credentials.json and was the #1767 shape. --lease SING-1b
-    // reads the wrapped blob itself in crabbox/runtimes.ts.
+    // readClaudeCredentialsBlob was deleted (RUSH-2359): cloud dispatch never sent a token
+    // (SING-1b email-only manifest) and the leftover helper was the #1767 shape.
   });
 });
 
@@ -315,10 +312,8 @@ describe('isRushSessionValid', () => {
     expect(isRushSessionValid(p)).toBe(true);
   });
 
-  // PHNX-3645: a Phoenix `pid_` bearer is stored with expires_at: 0, which by
-  // contract means NON-EXPIRING. Reading 0 as an epoch-ms/seconds timestamp put
-  // its expiry at 1970-01-01 and rejected every valid, fresh Phoenix session, so
-  // no Phoenix-authed box could use `agents run --cloud`.
+  // PHNX-3645: a Phoenix `pid_` bearer stores expires_at: 0, meaning non-expiring. Reading 0 as a
+  // timestamp rejected every valid Phoenix session, blocking `agents run --cloud`.
   it('returns true when expires_at is 0 (non-expiring Phoenix pid_ bearer)', () => {
     const p = writeYaml(tmpDir, {
       session: { access_token: 'pid_abc123', expires_at: 0 },

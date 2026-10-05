@@ -194,11 +194,9 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('builds the target path with the TARGET machine separator, not this host\'s', () => {
-    // The target home belongs to whichever box runs the routine. Joining with the
-    // local separator built `\home\remoteuser\...` for a POSIX target when the
-    // scheduler ran on Windows (and the mirror image the other way), so the
-    // separator is inferred from the home itself. Both directions are asserted
-    // here, so the case that is cross-platform on THIS runner is still covered.
+    // The target home belongs to whichever box runs the routine. Joining with the local separator
+    // built `\home\remoteuser\...` for a POSIX target when the scheduler ran on Windows, so the
+    // separator is inferred from the home itself. Both directions are asserted.
     const posixTarget = resolveRoutineExecutionContext({
       name: 'r', kind: 'agent', mode: 'host',
       targetHome: '/home/remoteuser', cwd: 'projects/svc', probe: undefined,
@@ -235,13 +233,9 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('an absolute Windows-shaped cwd overrides a project base instead of being misread as project-relative (RUSH-2393)', () => {
-    // isBareRelative used to check `path.isAbsolute` with the HOST's default
-    // path module. A POSIX daemon dispatching to a Windows target saw
-    // `path.isAbsolute('C:\\Users\\remoteuser\\override')` return false (posix
-    // doesn't recognize a drive letter), so the cwd was misclassified as
-    // project-relative: joined against the project base, found to escape it,
-    // and paused with cwd_not_portable — even though it is a legitimate
-    // absolute override under the target's own home.
+    // isBareRelative used `path.isAbsolute` of the HOST: a POSIX daemon dispatching to a Windows
+    // target saw `C:\Users\...` as relative, so it was misclassified as project-relative and paused
+    // with cwd_not_portable though it is a legitimate absolute override.
     const res = resolveRoutineExecutionContext({
       name: 'r',
       kind: 'agent',

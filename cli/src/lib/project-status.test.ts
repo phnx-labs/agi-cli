@@ -150,10 +150,9 @@ describe('formatDeadSummary', () => {
 });
 
 describe('isDeadStatus — keeps the agents roster consistent with the headline', () => {
-  // The card prints `N live`, a `dead` row, then the agents roster. The roster
-  // used to list every matched session, so a card headed `23 live` went on to
-  // show `crashed x25` — the same corpses the dead row reports, contradicting
-  // the headline. The roster filter and the headline split must never disagree.
+  // The card prints `N live`, a `dead` row, then the agents roster. The roster used to list every
+  // matched session, so `23 live` was followed by `crashed x25`, contradicting the headline. The
+  // roster filter and the headline split must never disagree.
   const EVERY_STATUS = [
     'running', 'idle', 'queued', 'input_required',
     'orphaned', 'abandoned', 'unknown',

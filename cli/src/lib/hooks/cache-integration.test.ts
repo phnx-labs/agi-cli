@@ -1,11 +1,6 @@
-/**
- * End-to-end shim verification: write a real script, generate the shim that
- * wraps it, invoke the shim with `bash` + stdin, then verify cache hits/misses
- * are correctly served on subsequent calls and that the events JSONL accrues.
- *
- * No mocking — this exercises the actual bash codepath every Claude/Codex
- * registration goes through.
- */
+/** End-to-end shim verification with no mocking: write a real script, generate its shim, invoke
+ * it with `bash` and stdin, then verify cache hits/misses on later calls and that the events
+ * JSONL accrues. This is the bash codepath every Claude/Codex registration goes through. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';

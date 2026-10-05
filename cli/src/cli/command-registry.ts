@@ -1,23 +1,6 @@
-/**
- * Lazy command registry.
- *
- * The CLI entry point (src/index.ts) used to statically import every command
- * module and call its `registerXCommand(program)` on every invocation. That
- * loaded the entire command tree (~50 modules) before the first line of output,
- * dominating cold-start latency.
- *
- * This module maps each user-typed top-level command name to a thunk that
- * dynamically imports ONLY the module(s) that command needs. Fast commands
- * (`--version`, `view`, ...) now pay for just the one module they use; the full
- * tree is loaded only on the rare slow paths (unknown-command spellcheck, bare
- * help) via `registerAllEagerCommands` in src/index.ts.
- *
- * Parity is non-negotiable: the name -> loader map below mirrors exactly which
- * module registers which top-level command on `main`. Multi-command modules
- * (versions, packages) map several names to the same loader; `prune` needs BOTH
- * versions (which creates `prune <specs...>`) and prune.js (which attaches the
- * `cleanup` subcommand to it), in that order — see commands/prune.ts.
- */
+/** Lazy command registry. The entry point used to statically import every command module on each
+ * invocation, dominating cold-start latency; this maps each top-level command name to a thunk
+ * importing only its modules. Parity with `main` is a must; `prune` needs versions THEN prune.js. */
 import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -67,10 +50,9 @@ const loadRestore: ModuleLoader = async () => (await import('../commands/trash.j
 export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
 const loadRoute: ModuleLoader = async () => (await import('../commands/route.js')).registerRouteCommands;
 const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
-// PHNX-3989: `agents secrets` is a thin passthrough to the standalone
-// `secrets` CLI (secrets-passthrough.ts). The legacy in-repo engine and its
-// own command registrar are gone (Track D, tasks.md item 7) — the standalone
-// `@phnx-labs/secrets-cli` package is the only implementation.
+// PHNX-3989: `agents secrets` is a thin passthrough to the standalone `secrets` CLI
+// (secrets-passthrough.ts); the legacy in-repo engine is gone and `@phnx-labs/secrets-cli` is the
+// only implementation.
 const loadSecrets: ModuleLoader = async () => (await import('../commands/secrets-passthrough.js')).registerSecretsCommands;
 const loadMenubar: ModuleLoader = async () => (await import('../commands/menubar.js')).registerMenubarCommands;
 const loadSync: ModuleLoader = async () => (await import('../commands/sync.js')).registerSyncCommand;
@@ -104,13 +86,9 @@ const loadAuth: ModuleLoader = async () => (await import('../commands/auth.js'))
 const loadTraces: ModuleLoader = async () => (await import('../commands/traces.js')).registerTracesCommands;
 export const loadReminders: ModuleLoader = async () => (await import('../commands/reminders.js')).registerRemindersCommand;
 
-/**
- * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
- * registered AFTER `applyGlobalHelpConventions` (mirroring main's order: help
- * conventions at module top-level, lazy registration just before parse), so they
- * inherit the root's custom help formatter rather than getting the per-command
- * recursive pass. Keeping that ordering preserves their `--help` output exactly.
- */
+/** Commands whose modules pull in the SQLite-backed session/cloud stack. They register after
+ * `applyGlobalHelpConventions` (mirroring main's order) so they inherit the root's custom help
+ * formatter, preserving their `--help` output exactly. */
 // `roster` was a sessions --active alias — removed; use sessions --active.
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
@@ -119,20 +97,9 @@ export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'message',
 ]);
 
-/**
- * User-typed top-level command name -> ordered list of module loaders to run.
- *
- * Most names map to a single loader. The exceptions encode real coupling on main:
- *  - `add`/`use`/`list`/`remove`/`rm`/`purge` all come from the versions module.
- *  - `registry`/`search`/`install`/`packages` all come from the packages module.
- *  - `trash` and `restore` are separate registrars in the trash module.
- *  - `prune` needs versions FIRST (it creates `prune <specs...>`) then prune.js
- *    (which finds that command and attaches the `cleanup` subcommand).
- *
- * Inline deprecated aliases (memory/perms/exec/jobs/cron) and the inline
- * `upgrade` command are NOT here — they are closures over entry-point state and
- * are handled directly in src/index.ts.
- */
+/** User-typed top-level command name -> ordered module loaders. Exceptions encode real coupling:
+ * add/use/list/remove/rm/purge share the versions module; registry/search/install/packages share
+ * packages; `prune` needs versions first, then prune.js. */
 export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   accounts: [loadAccounts],
   view: [loadView],
@@ -225,17 +192,9 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   traces: [loadTraces],
 };
 
-/**
- * Register every module in {@link COMMAND_LOADERS} onto one fresh program and
- * return it — the full public command tree, deduped by loader identity so a
- * loader mapped to several names (e.g. `add`/`use`/`list` -> versions) runs once.
- *
- * Off the hot path only: the command-index generator (`scripts/gen-command-index.ts`)
- * and the tests build the tree from this. Startup never calls it — src/index.ts
- * registers just the one requested command via `registerEagerForRequest`. The
- * inline aliases/tombstones ({@link INLINE_COMMAND_NAMES}) are NOT included: they
- * are closures over entry-point state that src/index.ts registers directly.
- */
+/** Register every module in {@link COMMAND_LOADERS} onto one fresh program and return the full
+ * public command tree, deduped by loader identity. Off the hot path only; startup registers just
+ * the requested command. */
 export async function buildFullCommandTree(): Promise<Command> {
   const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string };
   const program = configureRootCommand(new Command(), 'agents', packageJson.version);
@@ -243,10 +202,8 @@ export async function buildFullCommandTree(): Promise<Command> {
   return program;
 }
 
-/**
- * Register every module in {@link COMMAND_LOADERS} onto the given program.
- * Used by help paths that need the complete visible command tree.
- */
+/** Register every module in {@link COMMAND_LOADERS} onto the given program, for help paths that
+ * need the complete visible command tree. */
 export async function registerAllCommands(program: Command): Promise<void> {
   const done = new Set<ModuleLoader>();
   for (const loaders of Object.values(COMMAND_LOADERS)) {

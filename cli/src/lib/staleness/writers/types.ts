@@ -1,18 +1,6 @@
-/**
- * Per-(kind, agent) writer contract.
- *
- * The aggregator in `syncResourcesToVersion` (versions.ts) selects names per
- * kind, then dispatches into a writer from `../registry.ts`. The writer owns
- * everything kind-specific: the agent's storage format, the layered source
- * search, the conversion/copy step. Writers MUST be reached only after a
- * `supports(agent, kind, version).ok === true` precheck — they throw when
- * called on a (kind, agent) pair that the capability matrix says is false.
- *
- * The shape is intentionally narrow. Writers don't accept ambient state; the
- * caller passes the names already resolved against availability. Selection is
- * a string[] for most kinds, a PermissionsSelection object for permissions,
- * and a RulesSelection object for rules — see kind-specific writer modules.
- */
+/** Per-(kind, agent) writer contract. `syncResourcesToVersion` selects names per kind and
+ * dispatches to a writer from `../registry.ts`; the writer owns storage format, source search and
+ * copy. Reach writers only after `supports(agent, kind, version).ok`; otherwise they throw. */
 import type { AgentId } from '../../types.js';
 import type { ResourceKind } from './kinds.js';
 
@@ -30,34 +18,18 @@ export interface WriteArgs<Sel> {
 export interface WriteResult {
   /** Names actually written. Empty array = write produced nothing (not an error). */
   synced: string[];
-  /**
-   * Absolute on-disk paths of the artifacts this write materialized (a file or
-   * a dir root per resource, per the agent's layout). Recorded into the sync
-   * manifest as `writtenTargets` so `isStale` can flag a deleted artifact as
-   * stale with one existsSync per path (#2398) — no content reads, keeping the
-   * fast-guard budget (RUSH-2320). Optional: a writer whose artifact path is
-   * not cheaply known (goose recipe YAML, plugins) may omit entries; absence
-   * means "not verified", never a false stale.
-   */
+  /** Absolute paths of artifacts this write materialized, recorded as the manifest's
+   * `writtenTargets` so `isStale` can flag a deleted artifact with one existsSync per path (#2398,
+   * RUSH-2320). Optional: absence means 'not verified', never a false stale. */
   paths?: string[];
-  /**
-   * Per-item failures the writer could not complete, as user-facing sentences.
-   *
-   * `synced: []` alone cannot distinguish "nothing to do" from "refused to
-   * write and said why", which is how an unwritable harness reported success
-   * for its whole life (RUSH-2677). A writer that declines MUST say so here.
-   */
+  /** Per-item failures the writer could not complete, as user-facing sentences. `synced: []` cannot
+   * tell 'nothing to do' from 'refused and said why', which let an unwritable harness report
+   * success (RUSH-2677). A writer that declines must say so here. */
   errors?: string[];
 }
 
-/**
- * Inverse of a write: locate and delete the materialized artifact for one
- * resource `name` from a version home. Used only by the manifest-bounded prune
- * pass (RUSH-2438), which supplies names it has already proven were
- * agents-installed and are gone from source — the writer just owns the layout
- * knowledge (native file vs command-skill dir vs recipe) so prune never
- * re-derives it.
- */
+/** Inverse of a write: locate and delete the artifact for one resource `name` in a version home.
+ * Used only by the manifest-bounded prune (RUSH-2438), which proves names were installed and gone. */
 export interface RemoveArgs {
   /** Agent version (e.g. "1.2.3"). */
   version: string;
@@ -78,14 +50,8 @@ export interface ResourceWriter<Sel = string[]> {
   readonly kind: ResourceKind;
   readonly agent: AgentId;
   write(args: WriteArgs<Sel>): WriteResult;
-  /**
-   * Optional inverse of `write` for the prune pass. Only the name-keyed
-   * file/dir kinds implement it (commands, skills, hooks); kinds whose sync is
-   * a wholesale rewrite (rules, permissions) or that carry their own
-   * reconciliation (plugins via cleanOrphanedPluginSkills) leave it undefined.
-   * Absence is not a silent skip: `pruneRemovedResources` only iterates
-   * `PRUNABLE_KINDS`, and a registry completeness test asserts every writer for
-   * those kinds implements `remove`.
-   */
+  /** Optional inverse of `write` for prune. Only name-keyed file/dir kinds (commands, skills,
+   * hooks) implement it; wholesale rewrites (rules, permissions) and plugins
+   * (`cleanOrphanedPluginSkills`) do not. */
   remove?(args: RemoveArgs): RemoveResult;
 }

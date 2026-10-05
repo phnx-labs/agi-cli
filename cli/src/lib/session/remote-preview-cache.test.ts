@@ -1,20 +1,6 @@
-/**
- * Real-SQLite tests for the PHNX-3999 requester-side remote preview cache:
- * the durable `session_remote_preview_cache` table in `db.ts`, and the
- * orchestration (`getRemoteSessionPreview` in `remote-preview-cache.ts`) that
- * decides fresh-cache-hit / revision-driven refetch / negative-backoff /
- * explicit-refresh without ever touching a real SSH peer. The network
- * boundary (`fetchPeerPreviewEnvelope`) is injected as a counting fake so
- * these tests exercise the real cache/backoff/revision state machine against
- * a real on-disk DB, per this repo's "no mocking the DB" convention — only the
- * network hop (unavailable in this sandbox) is faked, matching the DI pattern
- * already used elsewhere in `sessions.ts` (`FleetResolveDeps`).
- *
- * Each test runs in its own subprocess with HOME pointed at a fresh temp dir,
- * matching `session-preview-cache.test.ts`'s pattern: `getDB()` is a
- * process-wide singleton, so isolation across tests requires a fresh process,
- * not just a fresh temp dir.
- */
+/** Real-SQLite tests for the PHNX-3999 remote preview cache and `getRemoteSessionPreview` (hit,
+ * revision refetch, backoff, refresh). Only the network hop is a counting fake; each test runs in
+ * a subprocess (`getDB()` is a singleton). */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

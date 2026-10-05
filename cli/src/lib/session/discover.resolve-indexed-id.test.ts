@@ -1,21 +1,6 @@
-/**
- * `resolveIndexedSessionById` is the crash-restart resume-by-id fast path
- * (RUSH-2477). It MUST resolve a known id from the local WAL index alone —
- *
- *   1. with NO incremental discovery scan, so none of `tryClaimScan` /
- *      `releaseScan`'s `BEGIN IMMEDIATE` writer transactions fire and dozens of
- *      concurrent resumes never contend the writer lock into `SQLITE_BUSY`
- *      ("database is locked"), the crash the storm produced; and
- *   2. with NO fleet SSH fan-out — it touches only the SQLite reader, so a boot
- *      before the tailnet is up cannot hang or print the doubled
- *      "unreachable ... skipped" list.
- *
- * The concurrency test is the acceptance criterion: >= 20 simultaneous
- * indexed-id resolutions of present-transcript sessions complete with zero
- * throws. It MUST also keep the existence check ON so a contentless phantom row
- * (file gone, no cached content) is rejected exactly as the fleet resolver would
- * — never resolved into a resume of a session with no real transcript.
- */
+/** `resolveIndexedSessionById` is the crash-restart resume-by-id fast path (RUSH-2477). It MUST
+ * resolve from the local WAL index alone: no scan (no SQLITE_BUSY) and no fleet SSH fan-out.
+ * Covers 20+ concurrent resolves, and keeps the existence check so phantoms are rejected. */
 
 import { describe, it, expect, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
@@ -56,11 +41,8 @@ function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
   };
 }
 
-/**
- * Seed a resumable session: an index row AND its transcript on disk, so the
- * existence check (left ON, RUSH-2436) sees a present file and stays read-only —
- * the real crash-restart case, where the crashed tabs' transcripts are on disk.
- */
+/** Seed a resumable session: an index row and its transcript on disk, so the existence check (ON,
+ * RUSH-2436) sees a present file and stays read-only, as in the real crash-restart case. */
 function seed(id: string): void {
   const file = transcriptPath(id);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -98,11 +80,9 @@ describe('resolveIndexedSessionById', () => {
   });
 
   it('rejects a contentless phantom row exactly as the fleet resolver would', async () => {
-    // A row whose transcript file is gone and whose session_text is empty is a
-    // phantom (db.ts existence check). The old discoverSessions path filtered it
-    // and printed "not found"; the fast path MUST too, never resolving it into a
-    // resume of a session with no real transcript. The file is deliberately NOT
-    // created, and the content is empty.
+    // A row whose transcript is gone and whose session_text is empty is a phantom (db.ts existence
+    // check). The old path printed "not found"; the fast path must too, never resolving it into a
+    // resume. The file is deliberately not created.
     const phantom = 'aaaaffff-1111-2222-3333-444455556666';
     upsertSession(meta(phantom), '');
     expect(await resolveIndexedSessionById(phantom)).toEqual([]);
@@ -131,11 +111,9 @@ describe('resolveIndexedSessionById', () => {
 
   it('resolves >= 20 present-transcript ids concurrently with zero SQLITE_BUSY / database-is-locked', async () => {
     for (const id of IDS) seed(id);
-    // Fire every resolve at once — the crash-restart storm. Before the fast path,
-    // each resume ran discoverSessions -> tryClaimScan (BEGIN IMMEDIATE), and 20+
-    // concurrent writers exhausted busy_timeout and threw unhandled SQLITE_BUSY.
-    // With present transcripts the existence check does no writes, so the fast
-    // path stays a pure read at any concurrency.
+    // Fire every resolve at once, the crash-restart storm. Before the fast path each resume ran
+    // discoverSessions -> tryClaimScan (BEGIN IMMEDIATE), and 20+ concurrent writers exhausted
+    // busy_timeout with SQLITE_BUSY. With present transcripts the fast path does no writes.
     const results = await Promise.allSettled(IDS.map((id) => resolveIndexedSessionById(id)));
     const rejected = results.filter((r) => r.status === 'rejected');
     expect(rejected).toEqual([]);

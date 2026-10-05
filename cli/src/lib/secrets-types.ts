@@ -1,15 +1,6 @@
-/**
- * Wire-shared types for the standalone `secrets` CLI (PHNX-3989).
- *
- * The standalone engine (`@phnx-labs/secrets-cli`, extracted from what used to
- * be `cli/src/lib/secrets/**`) owns every one of these shapes; this module only
- * re-declares them so `secrets-client.ts` and its consumers keep exact static
- * types across the process-client boundary with no runtime dependency on the
- * (now deleted) in-repo engine. Keep byte-for-byte in sync with
- * `secrets-cli/src/schema.ts` / `src/core/bundles.ts` — this is the one seam
- * both sides legitimately re-declare rather than share a package for (see the
- * `secrets-client.ts` docblock).
- */
+/** Wire-shared types for the standalone `secrets` CLI (PHNX-3989), re-declared so secrets-client.ts
+ * keeps static types. Keep byte-for-byte in sync with `secrets-cli/src/schema.ts` and
+ * `src/core/bundles.ts`. */
 
 // --- backend / provider vocabulary -----------------------------------------
 
@@ -25,11 +16,8 @@ export interface SecretRef {
   value: string;
 }
 
-/**
- * A bundle value: either a string (literal or provider-prefixed ref) or an
- * object `{value: string}` used to escape a literal that would otherwise be
- * parsed as a ref (e.g. a URL that happens to start with `env:`).
- */
+/** A bundle value: a string (literal or provider-prefixed ref) or `{value: string}` to escape a
+ * literal that would parse as a ref. */
 export type BundleValue = string | { value: string };
 
 /** Remote (bundle@host) push destination backend. */
@@ -58,11 +46,8 @@ export interface VarMeta {
   note?: string;
 }
 
-/**
- * Bundle prompt policy. `hold` (default): one Touch ID per hold window (~7d),
- * then silent via the secrets-agent. `always`: prompt every read. `never`: no
- * biometry ACL — least-safe, automation-only.
- */
+/** Bundle prompt policy. `hold` (default): one Touch ID per ~7d hold window. `always`: prompt every
+ * read. `never`: no biometry ACL, automation-only. */
 export type SecretsPolicy = 'always' | 'hold' | 'never';
 
 /** A named set of environment variable definitions backed by secret stores. */
@@ -147,11 +132,8 @@ export interface KeychainReadContext {
   duration?: string;
   defaultPolicy?: 'hold' | 'always' | 'never';
   forceDuration?: boolean;
-  /**
-   * The caller attests the item(s) carry NO biometry ACL — so the read is
-   * silent even when no one is at the screen. Never pass this for an
-   * ACL-protected item.
-   */
+  /** The caller attests the item(s) carry NO biometry ACL, so the read is silent. Never pass this
+   * for an ACL-protected item. */
   silentNoAcl?: boolean;
 }
 
@@ -174,11 +156,8 @@ export interface PushBundleOptions {
   remoteBackend: RemoteBackend;
   /** Overwrite a key that already exists on the remote. */
   force?: boolean;
-  /**
-   * Ignored. File-backend export never forwards the passphrase (PHNX-2371);
-   * the remote auto-provisions its own machine-local key. Kept on the options
-   * type so existing callers that passed one still compile.
-   */
+  /** Ignored: file-backend export never forwards the passphrase (PHNX-2371). Kept so existing
+   * callers still compile. */
   passphrase?: string;
   /** Label for the audit trail — `export --device` vs `fleet apply`. */
   operation: string;
@@ -190,13 +169,9 @@ export interface PushBundleOptions {
   literalValues?: Record<string, string>;
   /** Per-SSH-operation deadline. Async daemon callers must set this explicitly. */
   timeoutMs?: number;
-  /**
-   * State root (`SECRETS_HOME`) the remote `secrets` runs under for the whole
-   * push (import, read-back verify, literal restoration); remote-relative, a
-   * leading `~/` resolves against the remote user's home. The client wrapper
-   * fills in the user agents dir (`REMOTE_USER_AGENTS_DIR`) so a push lands
-   * where the receiving agents-cli reads (MIG-1 on both ends).
-   */
+  /** State root (`SECRETS_HOME`) the remote `secrets` runs under for the whole push;
+   * remote-relative, `~/` resolves against the remote home. The client wrapper fills in the user
+   * agents dir so a push lands where the receiving agents-cli reads (MIG-1). */
   remoteSecretsHome?: string;
 }
 

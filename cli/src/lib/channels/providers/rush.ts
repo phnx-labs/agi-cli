@@ -1,17 +1,6 @@
-/**
- * Channel providers formerly backed by the Rush daemon's live gateways.
- *
- * The desktop-era `rush message send` (iMessage) and `rush send --channel`
- * (Slack/Telegram/Discord) commands were removed with the daemon in the
- * thin-client trim (PHNX-3839/3933). This module now delivers directly:
- *
- *   - **imessage:** `osascript` → Messages.app (macOS only; Linux boxes
- *     rely on the peer-forward in owner-forward.ts to reach a macOS peer).
- *   - **slack:** Slack Web API `chat.postMessage` via `fetch()`, reading
- *     `SLACK_BOT_TOKEN` from env or the `webhooks` secrets bundle.
- *   - **telegram / discord:** error — no direct transport; openclaw-telegram
- *     is available as a separate provider for Telegram.
- */
+/** Channel providers formerly backed by the Rush daemon, removed in the thin-client trim
+ * (PHNX-3839/3933). imessage uses osascript (macOS only); slack uses the Web API with
+ * `SLACK_BOT_TOKEN`; telegram/discord error. */
 import { execFile } from 'child_process';
 import { platform } from 'os';
 import { promisify } from 'util';

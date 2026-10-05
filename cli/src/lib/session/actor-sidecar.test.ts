@@ -14,13 +14,9 @@ type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 const FILES = path.join(TEST_HOME, 'files');
 fs.mkdirSync(FILES, { recursive: true });
 
-/**
- * RUSH-2019 (P3): the durable sessionId -> actor sidecar makes the session
- * scanner able to attribute a transcript to a person after the launching process
- * is gone. Two things must hold: the record round-trips on disk, and the DB
- * upsert JOINS it to fill the write-once actor column when the scanned meta
- * carries none.
- */
+/** RUSH-2019 (P3): the durable sessionId -> actor sidecar lets the scanner attribute a transcript
+ * to a person after the launcher is gone. It must round-trip on disk, and the DB upsert must join
+ * it to fill the write-once actor column when scanned meta has none. */
 describe('session actor sidecar (RUSH-2019)', () => {
   it('round-trips a written record and skips one with no session id', () => {
     writeSessionActorRecord({ sessionId: 'sid-1', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada', startedAtMs: 1 });
@@ -86,11 +82,8 @@ describe('session actor sidecar (RUSH-2019)', () => {
   });
 });
 
-/**
- * The DB join is the whole point: a scan builds a SessionMeta with NO actor (the
- * transcript can't carry one), upsertSession reads the sidecar and fills the
- * column — so `agents sessions` attributes historical sessions to a person.
- */
+/** The DB join is the point: a scan builds a SessionMeta with no actor (a transcript can't carry
+ * one), and upsertSession fills the column from the sidecar so historical sessions are attributed. */
 describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   beforeAll(() => {
     fs.mkdirSync(FILES, { recursive: true });
@@ -217,10 +210,9 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   });
 
   it('BACKFILLS a null-first row once the sidecar lands (RUSH-2018/2019 fix)', () => {
-    // The bug: a scanner (an older build, or any scan that ran before the actor
-    // sidecar was written) inserts the row with actor NULL. The write-once
-    // ON CONFLICT then locked it to NULL forever, so the sidecar-join could never
-    // attribute it. COALESCE(existing, incoming) must let the join fill a NULL.
+    // The bug: a scanner that ran before the sidecar existed inserted actor NULL, and the
+    // write-once ON CONFLICT locked it NULL forever. COALESCE(existing, incoming) must let the
+    // join fill a NULL.
     upsertSession(scanMeta('backfill-1'), ''); // null-first: no sidecar yet
     expect(getSessionById('backfill-1')?.actor).toBeUndefined();
     // Sidecar appears (the run had stamped it), a later rescan runs the join:

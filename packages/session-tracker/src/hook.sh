@@ -1,20 +1,7 @@
 #!/usr/bin/env bash
-# Polyglot SessionStart hook.
-#
-# Registered as a SessionStart hook in each agent's native config file.
-# Each agent passes the hook payload differently:
-#   - claude/codex/cursor: JSON on stdin with session_id (+conversation_id for cursor)
-#   - grok: GROK_SESSION_ID and GROK_WORKSPACE_ROOT env vars
-#   - hermes: JSON on stdin (on_session_start payload); best-effort field probe
-#   - gemini/antigravity: best-effort stdin-JSON probe
-#
-# Writes ~/.agents/.cache/terminals/sessions/<PPID>.json with the canonical
-# SessionState schema from src/types.ts. Atomic via mktemp + mv.
-#
-# Invocation:
-#   hook.sh <agent>            # required; selects which payload format to parse
-#
-# Silent on success (SessionStart stdout leaks into the model context).
+# Polyglot SessionStart hook registered in each agent's native config. Payload varies: stdin JSON
+# (claude/codex/cursor), GROK_* env (grok), best-effort stdin probes (others). Atomically writes
+# ~/.agents/.cache/terminals/sessions/<PPID>.json. Usage: hook.sh <agent>. Silent on success.
 
 set -euo pipefail
 
@@ -34,10 +21,8 @@ if [ -z "$AGENT" ]; then
   exit 0
 fi
 
-# Read stdin if any (don't block forever).
-# Use `cat` only when stdin is not a TTY — and rely on hosts (claude, codex,
-# cursor) closing stdin promptly. macOS has no `timeout` in PATH by default,
-# so we don't use it.
+# Read stdin if any, without blocking forever: use `cat` only when stdin is not a TTY and rely on
+# hosts (claude, codex, cursor) closing stdin promptly. macOS has no `timeout` by default.
 STDIN_JSON=""
 if [ ! -t 0 ]; then
   STDIN_JSON="$(cat || true)"
@@ -135,18 +120,14 @@ if [ -f "$PRUNE_SCRIPT" ]; then
   node "$PRUNE_SCRIPT" >/dev/null 2>&1 || true
 fi
 
-# Persist launch metadata under the harness's real session id. `agents run`
-# exports the EFFECTIVE mode after capability/headless resolution, plus the
-# shared (non-version-home) history directory. Atomic replacement lets a native
-# resume with an explicit --mode become the new mode for the next resume.
+# Persist launch metadata under the harness's real session id. `agents run` exports the effective
+# mode (after capability/headless resolution) and the shared history dir; atomic replacement lets a
+# native resume with an explicit --mode become the next resume's mode.
 HISTORY_DIR="${AGENTS_HISTORY_DIR:-}"
 RUN_MODE="${AGENTS_RUN_MODE:-}"
-# The agents-cli version-home id this run launched under. Recorded here (not at
-# spawn) for the same reason as RUN_MODE: the harness coins its real session id
-# only after launch, so it must be joined to that id by this hook. A later native
-# resume pins the exact origin version off it, so a session whose transcript
-# carries no derivable version (codex's `.codex-homes/<version>/` home) still
-# resumes natively instead of degrading to `/continue` (PHNX-3626).
+# The agents-cli version-home id this run launched under, recorded here because the harness coins
+# its session id only after launch. A native resume pins its origin version off it, so codex
+# sessions with no derivable version still resume natively, not via `/continue` (PHNX-3626).
 RUN_VERSION="${AGENTS_RUN_VERSION:-}"
 RUN_ACCOUNT_ID="${AGENTS_RUN_ACCOUNT_ID:-}"
 TMUX_SESSION_NAME="${AGENT_TMUX_SESSION_NAME:-}"

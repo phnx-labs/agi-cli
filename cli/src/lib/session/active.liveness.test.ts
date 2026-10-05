@@ -27,11 +27,9 @@ describe('isPidAlive pid-reuse guard', () => {
     expect(isPidAlive(process.pid, Date.now() - 30_000)).toBe(true);
   });
 
-  // The zombie: the pid is alive, but its process began long AFTER the session's
-  // recorded start — i.e. the OS recycled the pid. Passing an ancient startedAtMs
-  // against our own (just-started) process reproduces exactly that shape.
-  // Skipped on Windows, where processStartMs returns null and we fall back to a
-  // bare existence check by design.
+  // The zombie: the pid is alive but its process began long after the session's recorded start
+  // (pid recycled). An ancient startedAtMs against our own process reproduces it. Skipped on
+  // Windows, where processStartMs returns null and falls back to an existence check.
   posixOnly('reports a reused pid as dead (process far newer than recorded start)', () => {
     expect(isPidAlive(process.pid, 1000)).toBe(false);
   });

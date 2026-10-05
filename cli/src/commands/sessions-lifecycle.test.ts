@@ -1,9 +1,6 @@
-/**
- * The session-lifecycle verbs (`focus`/`resume`/`detach`/`attach`/`migrate`) all
- * live under the `sessions` group, not as top-level commands. This pins the
- * grouping introduced when `detach`/`attach` (background/foreground) moved off the
- * top level — and the `migrate` alias rename that freed the `detach` name.
- */
+/** The session-lifecycle verbs (`focus`/`resume`/`detach`/`attach`/`migrate`) live under the
+ * `sessions` group, not top-level. Pins the grouping from moving `detach`/`attach` off the top
+ * level and the `migrate` alias rename that freed the `detach` name. */
 import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
 import { registerSessionsCommands } from './sessions.js';

@@ -1,11 +1,6 @@
-/**
- * End-to-end `agents projects import --from-linear` — the real CLI, real YAML
- * written to a real directory. No mocks: seams are `AGENTS_PROJECTS_DIR` and a
- * throwaway HOME with a stub `linear` on PATH.
- *
- * There is no Factory import path. `~/.agents/factory/projects.json` is never
- * read; import keeps `--from-linear` only.
- */
+/** End-to-end `agents projects import --from-linear`: real CLI, real YAML in a real dir, no mocks
+ * (seams: `AGENTS_PROJECTS_DIR` and a throwaway HOME with a stub `linear` on PATH). There is no
+ * Factory import path; `~/.agents/factory/projects.json` is never read. */
 
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -105,10 +100,8 @@ describe('agents projects import --from-linear', () => {
   /** Read a written def back off disk (the YAML is the contract, not a return value). */
   const def = (name: string) => fs.readFileSync(path.join(projectsDir, `${name}.yaml`), 'utf8');
 
-  // POSIX-only (RUSH-2215): the stub `linear` on PATH is a `#!/bin/sh` recorder
-  // (installLinearCli), which Windows cannot execute as a bare extensionless
-  // file — the import fails with "Could not list Linear projects". The
-  // missing-CLI case below has no stub and still runs on Windows.
+  // POSIX-only (RUSH-2215): the stub `linear` is a `#!/bin/sh` recorder that Windows cannot run as
+  // an extensionless file. The missing-CLI case has no stub and still runs on Windows.
   it.skipIf(process.platform === 'win32')('binds an exact local checkout and leaves the rest to name + link', () => {
     makeCheckout('agents-cli', 'muqsitnawaz/agents-cli');
     makeCheckout('web', 'someone/web');

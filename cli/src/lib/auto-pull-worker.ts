@@ -1,13 +1,6 @@
-/**
- * Detached worker entry point for background sync. See auto-pull.ts for the public API.
- *
- * For the system repo: fast-forward pull (safe — repo is read-only locally).
- * For the user repo + enabled extras: `git fetch` + write a status marker the foreground
- * CLI surfaces on its next invocation.
- *
- * Per-repo lock files at ~/.agents/.system/.fetch/<alias>.lock prevent concurrent fetches.
- * Lock mtime under 5 min => skip (another invocation already in flight).
- */
+/** Detached worker entry for background sync (see auto-pull.ts). The system repo is fast-forward
+ * pulled (local read-only); the user repo and enabled extras get `git fetch` plus a status marker.
+ * Per-repo locks under ~/.agents/.system/.fetch/ skip a fetch when the mtime is under 5 min. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,14 +20,9 @@ import {
   type FetchStatusMarker,
 } from './auto-pull.js';
 
-/**
- * Background auto-pull of ~/.agents/.system/ is off by default. When enabled it
- * silently fast-forwards a tracked source tree that the CLI then reads as a
- * source of skills, hooks, install manifests, and commands — anyone with push
- * access to that upstream gets remote code execution on every user the next
- * time they invoke a command that loads a system resource. Operators that
- * really want the convenience can set AGENTS_AUTO_PULL=1.
- */
+/** Background auto-pull of ~/.agents/.system/ is off by default: it fast-forwards a tree the CLI
+ * reads for skills, hooks, manifests and commands, so anyone with upstream push access would get
+ * remote code execution on users. Set AGENTS_AUTO_PULL=1 to opt in. */
 const ENABLE_AUTO_PULL = process.env.AGENTS_AUTO_PULL === '1';
 
 interface RepoTarget {
@@ -119,11 +107,9 @@ async function processTarget(target: RepoTarget): Promise<void> {
         // by a detached worker.
         await notifyRepo(target);
       } else {
-        // Verify origin is the EXPECTED system remote before fast-forwarding —
-        // the system repo ships hooks that run as shell, so a pull from a
-        // repointed origin is RCE. An unexpected origin is refused, not pulled
-        // (PHNX-2957). The detached worker has no terminal to warn on; the
-        // foreground `agents use` path surfaces the refusal to the operator.
+        // Verify origin is the expected system remote before fast-forwarding: the system repo
+        // ships shell hooks, so a repointed origin is RCE (PHNX-2957). Refuse, don't pull; the
+        // detached worker can't warn, so the foreground `agents use` path surfaces it.
         await tryAutoPullSystemRepo(target.dir);
       }
     } else {
@@ -136,20 +122,16 @@ async function processTarget(target: RepoTarget): Promise<void> {
   }
 }
 
-/**
- * macOS only: fetch the floor AGI Menu release into the verified cache when the
- * installed helper is behind it and no bundle ships with this install, so the
- * next foreground invocation's network-free self-heal has a source to install
- * from (`sourceAppPath` candidate 4). Same lock discipline as the repo targets.
- */
+/** macOS only: fetch the floor AGI Menu release into the verified cache when the installed helper
+ * is behind and no bundle ships with this install, so the next foreground self-heal has a source
+ * (`sourceAppPath` candidate 4). Same lock discipline as the repo targets. */
 async function prefetchMenubarHelperTarget(): Promise<void> {
   if (process.platform !== 'darwin') return;
   const alias = 'menubar-helper';
   if (!tryAcquireLock(alias)) return;
-  // The zip fetch may run up to 15 min (helper-download.ts) while the lock
-  // reads as stale after SYNC_LOCK_TTL_MS, and the download lands through one
-  // shared partial file — so keep the lock's mtime fresh for as long as this
-  // worker is actually fetching, or a second worker races onto the same bytes.
+  // The zip fetch may run up to 15 min (helper-download.ts) while the lock reads stale after
+  // SYNC_LOCK_TTL_MS, and the download uses one shared partial file, so keep the lock mtime fresh
+  // while fetching or a second worker races onto the same bytes.
   const heartbeat = setInterval(() => touchLock(alias), SYNC_LOCK_TTL_MS / 2);
   heartbeat.unref();
   try {
@@ -184,10 +166,9 @@ async function main(): Promise<void> {
 
   await Promise.all([...targets.map(processTarget), prefetchMenubarHelperTarget()]);
 
-  // Stamp the cycle so the next foreground CLI invocation can skip the ~7ms
-  // detached spawn for SYNC_LOCK_TTL_MS (RUSH-2324). Written even when every
-  // target was lock-skipped or the target list was empty — "nothing to do"
-  // is still a completed cycle.
+  // Stamp the cycle so the next foreground invocation can skip the ~7ms detached spawn for
+  // SYNC_LOCK_TTL_MS (RUSH-2324). Written even when all targets were lock-skipped or empty:
+  // nothing to do is a completed cycle.
   markDetachedSyncComplete();
 }
 

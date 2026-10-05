@@ -1,10 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock child_process.spawn so runAcp never launches a real harness; we only
-// assert what env it is handed. The spawned "child" is a stub that never speaks
-// ACP, so runAcp will reject at the protocol handshake — which is fine, the
-// spawn call (and its env) has already happened by then.
+// Mock child_process.spawn so runAcp never launches a real harness; we only assert the env it is
+// handed. The stub never speaks ACP, so runAcp rejects at the handshake, after the spawn call has
+// already happened.
 const spawnMock = vi.fn();
 vi.mock('child_process', () => ({ spawn: spawnMock }));
 

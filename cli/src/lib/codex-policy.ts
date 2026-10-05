@@ -13,14 +13,9 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-/**
- * Writable roots for Codex's `edit` profile: the managed user `.agents` dir, the
- * baseline toolchain caches, and — when `cwd` is inside a repo — that repo's
- * `.agents` directory. The last entry is what lets an in-repo build write under
- * `.agents/worktrees/`; Codex's `workspace-write` sandbox hardcodes `.agents/`
- * read-only, and naming the directory as an explicit writable root is the only
- * thing that overrides it (a nested sub-path does not — bwrap refuses the mount).
- */
+/** Writable roots for Codex's `edit` profile: the managed `.agents` dir, toolchain caches, and the
+ * repo's `.agents` when cwd is in a repo. That last lets builds write `.agents/worktrees/`:
+ * `workspace-write` hardcodes `.agents/` read-only and only an explicit root overrides it. */
 export function codexEditWritableRoots(cwd?: string): string[] {
   const repoAgents = repoAgentsDirForCwd(cwd);
   // Only widen the sandbox for a `.agents` that actually exists — most repos
@@ -51,22 +46,9 @@ const CODEX_PROFILES: Record<Exclude<CodexPolicyMode, 'skip'>, string> = {
   auto: CODEX_AUTO_PROFILE,
 };
 
-/**
- * Canonical Codex safety policy used by every native launch path.
- *
- * Config overrides are deliberately used instead of the legacy `--sandbox`
- * flags: named permission profiles are the only Codex surface that can keep a
- * plan run filesystem-read-only while independently enabling network access.
- *
- * `auto` and `edit` share one sandbox (`:workspace` plus the writable roots) and
- * differ only in `approval_policy`. `edit` is `on-request`: a command the sandbox
- * denies comes back as an approval prompt, which is right when someone is sitting
- * at the terminal. `auto` is `never`: nothing prompts, and a denied command
- * surfaces to the model as a plain command failure — the only behavior that works
- * for an unattended run, where a prompt nobody answers is an agent that has
- * stopped. Autonomy is the approval axis only; neither widens the sandbox, and
- * `skip` remains the sole mode that removes it.
- */
+/** Canonical Codex safety policy for every native launch via config overrides: only named
+ * permission profiles keep a plan run read-only while enabling network. `auto` and `edit` share
+ * one sandbox and differ in `approval_policy`: `edit` is `on-request`; `auto` is `never`. */
 export function codexPolicyArgs(
   mode: CodexPolicyMode,
   writableRoots: string[] = codexEditWritableRoots(),

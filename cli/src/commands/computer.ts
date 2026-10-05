@@ -1,43 +1,6 @@
-/**
- * `agents computer` — the consumer surface over the standalone `computer` CLI
- * (PHNX-4075).
- *
- * WHAT THIS FILE IS NOW. Every verb below forwards its arguments verbatim to the
- * standalone engine and propagates its exit code. agents-cli contributes four
- * things the engine cannot know:
- *
- *   1. the permissions allow list, rendered from `Computer(<bundle-id>)` rules
- *      in the agents resource layer (`lib/computer/policy.ts`);
- *   2. the peer allow list, and `--device <name>` resolved against the fleet —
- *      both carried in the fd-3 context (`lib/computer/context.ts`);
- *   3. the acting actor and agent session, likewise on fd 3;
- *   4. a recorder for the action events the engine streams back on fd 4, so
- *      `agents computer sessions` and `agents sessions --computer` keep their
- *      history (`lib/computer/record.ts`).
- *
- * The remote path is the ENGINE's. `--device <name>` is resolved against the
- * fleet here — that is what the registry, ssh identity and platform check are
- * for — and then forwarded to the engine verbatim, which matches the alias
- * against `context.target` and owns everything downstream of it: pushing the
- * Windows helper, minting and storing its auth token, opening the `ssh -L`
- * tunnel, and hydrating its own transport from the state it wrote. agents-cli
- * keeps no tunnel state and publishes no endpoint: a `COMPUTER_HELPER_TCP` from
- * here would carry a port without the token the daemon demands, so the verb
- * would fail `auth_failed` against a tunnel that was up the whole time.
- *
- * WHY VERB FLAGS ARE NOT REDECLARED HERE. Each passthrough verb declares only
- * `--device` — the one flag the consumer must intercept — and takes everything
- * else as opaque operands via `allowUnknownOption`. Mirroring the engine's flags
- * would create a second, silently drifting copy of its surface: a flag added
- * upstream would be rejected here as unknown until someone noticed. The engine
- * also owns per-verb `--help` for the same reason. What agents-cli keeps is the
- * verb CATALOG — names, one-line descriptions, help groups — because that is
- * what makes the surface discoverable from `agents computer --help`, and a
- * verb the engine drops should fail loud here rather than silently vanish.
- *
- * `sessions` is the one verb that never reaches the engine: it reads agents-cli's
- * own event ledger.
- */
+/** `agents computer` is the consumer surface over the standalone `computer` CLI (PHNX-4075): every
+ * verb forwards verbatim and propagates the exit code. agents-cli adds the permissions and peer
+ * allow lists, `--device`, fd-3 context and an fd-4 recorder. Verb flags are not redeclared. */
 
 import { Command } from 'commander';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -69,14 +32,9 @@ const COMPUTER_HELP_GROUPS = [
   { title: 'History and discovery', names: ['sessions'] },
 ] as const;
 
-/**
- * The verb catalog. Descriptions are the consumer's (they appear in
- * `agents computer --help`); flags are the engine's.
- *
- * This list is the contract with the engine: `computer --verbs` must report the
- * same names. `computer.test.ts` pins it so a drift shows up as a failing test
- * rather than a verb that quietly stops existing.
- */
+/** The verb catalog: descriptions are the consumer's, flags are the engine's. This list is the
+ * contract with the engine (`computer --verbs` must report the same names), pinned by
+ * `computer.test.ts` so drift fails a test. */
 export const COMPUTER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; description: string }> = [
   { name: 'run', description: 'Autonomously drive an app from a natural-language task (model loop over the computer verbs)' },
   { name: 'apps', description: 'List running apps the policy allows, with pid and bundle id' },
@@ -97,13 +55,9 @@ export const COMPUTER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; descripti
   { name: 'wait', description: 'Wait for an element or condition to appear before continuing' },
 ];
 
-/**
- * Pure platform gate. The computer subsystem is macOS-only for LOCAL driving
- * (Accessibility / launchctl). It is NOT blocked off macOS when a remote daemon
- * is reachable — either a configured TCP endpoint (COMPUTER_HELPER_TCP, e.g. a
- * Windows daemon over a tunnel) or a `--device <name>` remote invocation. Kept
- * pure so the gating rule is unit-testable without a live command tree.
- */
+/** Pure platform gate. Computer is macOS-only for local driving (Accessibility/launchctl) but not
+ * blocked off macOS when a remote daemon is reachable: a configured COMPUTER_HELPER_TCP endpoint
+ * or a `--device <name>` invocation. */
 export function shouldBlockOffPlatform(opts: {
   platform: NodeJS.Platform;
   tcpConfigured: boolean;
@@ -117,19 +71,9 @@ export function shouldBlockOffPlatform(opts: {
   return true;
 }
 
-/**
- * Put `--host <address>` on the argv handed to the engine.
- *
- * commander CONSUMES the `--device` it declares, so a verb that only read
- * `opts.device` forwarded an argv with no remote selector in it and the engine
- * — which selects the remote path from its own argv — ran the invocation
- * LOCALLY. That is how `setup --device win-mini` installed the macOS helper on
- * the laptop. The flag is re-inserted immediately after the verb rather than
- * appended, so a verb whose operands are variadic cannot swallow it. A `--host`
- * the caller already typed always wins — it is never overwritten (PHNX-4090).
- *
- * Pure, so the re-insertion is testable without spawning the engine.
- */
+/** Put `--host <address>` on the engine argv: commander consumes `--device`, so a verb reading only
+ * `opts.device` forwarded no remote selector and ran locally. Re-insert it right after the verb
+ * (variadic operands can't swallow it); a caller-typed `--host` always wins (PHNX-4090). */
 export function withHostFlag(argv: string[], host?: string): string[] {
   if (!host) return argv;
   if (argv.some((arg) => arg === '--host' || arg.startsWith('--host='))) return argv;
@@ -137,14 +81,9 @@ export function withHostFlag(argv: string[], host?: string): string[] {
   return [verb, '--host', host, ...rest];
 }
 
-/**
- * Resolve `--device <name>` to the `--host <address>` the engine actually
- * speaks (PHNX-4090). A device's `computer.host` config (`agents config set
- * devices.<name>.computer.host <address>`) wins when set — `vnc://`/`tcp://`
- * carries no ssh identity, `ssh://` still resolves one against the fleet. With
- * no `computer.host`, fall back to the fleet's ssh identity exactly as before
- * (Windows-only — the tunnel this repo has always provisioned).
- */
+/** Resolve `--device <name>` to the `--host <address>` the engine speaks (PHNX-4090). A device's
+ * `computer.host` config wins when set (`vnc://`/`tcp://` carry no ssh identity, `ssh://` still
+ * resolves one); otherwise fall back to the fleet's ssh identity (Windows-only). */
 export async function resolveDeviceHost(device: string): Promise<{ host: string; target: ComputerTargetContext }> {
   const configured = getConfigValue('computer.host', { device }).value as string | undefined;
   if (configured) {
@@ -153,14 +92,9 @@ export async function resolveDeviceHost(device: string): Promise<{ host: string;
       // No ssh identity involved — the transport is RFB or a raw helper socket.
       return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
     }
-    // The configured address IS the connection target — an ssh:// override
-    // naming a different host/user/port than the device registry must actually
-    // take effect, not be silently replaced by the registry's own resolution.
-    // Only the ssh identity (key file flags) comes from the fleet; the target
-    // string forwarded on --host and the one recorded on fd-3 must be the same
-    // `sshTarget(addr)` the engine itself derives from that same --host value,
-    // or the engine's own context-vs-argv match (`resolveContextDevice`) misses
-    // and silently drops the identity args instead of failing loud.
+    // The configured address is the connection target: an ssh:// override naming a different
+    // host/user/port than the registry must take effect. Only the ssh identity comes from the
+    // fleet.
     const resolved = await resolveRemoteDevice(device, {});
     const target = sshTarget(addr);
     return {
@@ -178,13 +112,8 @@ export async function resolveDeviceHost(device: string): Promise<{ host: string;
   };
 }
 
-/**
- * Forward one invocation to the engine and propagate its exit code.
- *
- * A missing standalone is the one failure agents-cli reports itself, because it
- * is the one the engine cannot: it prints the install line and exits 1. There is
- * no fallback engine to reach for — that is the point of the extraction.
- */
+/** Forward one invocation to the engine and propagate its exit code. A missing standalone is the
+ * one failure agents-cli reports itself (install line, exit 1); there is no fallback engine. */
 async function forwardToComputer(opts: {
   argv: string[];
   device?: string;
@@ -241,10 +170,9 @@ export function registerComputerCommand(program: Command): void {
     // server on a headless Linux box or an LXD container). Set it before the gate.
     .option('--vnc <host:port>', 'Drive a GUI desktop over VNC/RFB (x11vnc/Xvnc; port defaults to 5901) instead of a native helper')
     .option('--vnc-password <password>', 'VNC password for --vnc (or set COMPUTER_HELPER_VNC_PASSWORD)')
-    // The whole subsystem is macOS Accessibility / TCC for LOCAL driving. Off
-    // macOS it still works against a remote daemon (COMPUTER_HELPER_TCP set, a
-    // --vnc desktop, or a `--device <name>` invocation). Fail fast with a clear
-    // message only when no remote path is available, instead of a downstream error.
+    // The subsystem is macOS Accessibility/TCC for local driving. Off macOS it works against a
+    // remote daemon (COMPUTER_HELPER_TCP, a --vnc desktop, or `--device`); fail fast with a clear
+    // message only when no remote path is available.
     .hook('preAction', async (_thisCommand, actionCommand) => {
       const globals = actionCommand.optsWithGlobals() as { vnc?: string; vncPassword?: string; device?: string };
       // --vnc selects the RFB transport for every verb under this command.
@@ -316,13 +244,8 @@ function registerComputerSubcommands(program: Command): void {
   registerCommandGroups(program, COMPUTER_HELP_GROUPS);
 }
 
-/**
- * Register every plain verb as an opaque forwarder.
- *
- * `allowUnknownOption` is what makes this thin: commander stops trying to parse
- * flags it does not own and hands them through in `cmd.args`, so the engine's
- * flag surface can grow without a matching edit here.
- */
+/** Register every plain verb as an opaque forwarder: `allowUnknownOption` hands unowned flags
+ * through in `cmd.args`, so the engine's flag surface can grow without an edit here. */
 function registerPassthroughVerbs(program: Command): void {
   for (const verb of COMPUTER_PASSTHROUGH_VERBS) {
     program
@@ -389,9 +312,8 @@ function registerReloadCommand(program: Command): void {
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      // Reload EXISTS to re-render the allow list; doing it before the signal is
-      // the whole command. A `--device` reload bounces the remote daemon, which
-      // enforces no allow list — rendering (and printing) this machine's would
+      // Reload exists to re-render the allow list, so do it before the signal. A `--device` reload
+      // bounces the remote daemon, which enforces no allow list, so rendering this machine's would
       // claim a policy that device never reads.
       await forwardAndExit({ argv: ['reload', ...cmd.args], device: opts.device, record: false });
     });
@@ -407,10 +329,9 @@ function registerStatusCommand(program: Command): void {
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       const json = cmd.args.includes('--json');
-      // The allow list is agents-cli's answer, not the engine's — report it here
-      // so `status` stays the one place that tells you why an app is refused. It
-      // governs the LOCAL helper only: the Windows daemon enforces none, and the
-      // engine reports that device's target, transport and liveness itself.
+      // The allow list is agents-cli's answer, not the engine's, so `status` reports it here as
+      // the one place that says why an app is refused. It governs the local helper only; the
+      // Windows daemon enforces none.
       if (!json && !opts.device) {
         const allowed = loadComputerAllowList();
         const preview = allowed.slice(0, 5).join(', ');
@@ -422,10 +343,9 @@ function registerStatusCommand(program: Command): void {
     });
 }
 
-// sessions — task-first history over the computer.action event ledger (RUSH-2432),
-// the computer counterpart of `agents browser sessions` (RUSH-2407). `agents
-// sessions --computer` (sessions.ts) routes to the same runComputerSessionsCommand.
-// It reads agents-cli's own ledger, so it never reaches the engine.
+// sessions: task-first history over the computer.action event ledger (RUSH-2432), the counterpart
+// of `agents browser sessions`. It reads agents-cli's own ledger and never reaches the engine;
+// `agents sessions --computer` routes to the same runComputerSessionsCommand.
 function registerSessionsCommand(program: Command): void {
   program
     .command('sessions')
@@ -439,34 +359,24 @@ function registerSessionsCommand(program: Command): void {
     });
 }
 
-/**
- * Install the macOS helper through the engine. Used by the `agents setup
- * computer` wizard, which still owns the TCC hand-holding — that is a
- * conversation with the user, not a daemon operation.
- */
+/** Install the macOS helper through the engine, for the `agents setup computer` wizard, which still
+ * owns the TCC hand-holding (a conversation with the user, not a daemon operation). */
 export async function installComputerHelperMacLocal(): Promise<void> {
   const { exitCode } = await forwardToComputer({ argv: ['setup'], record: false });
   if (exitCode !== 0) throw new Error(`\`computer setup\` failed (exit ${exitCode})`);
 }
 
-/**
- * Activate the local daemon through the engine and report whether Accessibility
- * trust is granted, so the wizard knows whether to walk the user to System
- * Settings.
- */
+/** Activate the local daemon through the engine and report whether Accessibility trust is granted,
+ * so the wizard knows whether to walk the user to System Settings. */
 export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean }> {
   const { exitCode } = await forwardToComputer({ argv: ['start'], record: false });
   if (exitCode !== 0) throw new Error(`\`computer start\` failed (exit ${exitCode})`);
   return { trusted: await probeComputerTrust() };
 }
 
-/**
- * Read `trusted` out of `computer status --json`.
- *
- * Tolerant by construction: the engine may print a banner line before its JSON,
- * so scan for the first parseable object rather than assuming the whole stream
- * is JSON. Pure, so the parsing contract is testable without a daemon.
- */
+/** Read `trusted` out of `computer status --json`. Tolerant by construction: the engine may print a
+ * banner before the JSON, so scan for the first parseable object. Pure, so testable without a
+ * daemon. */
 export function parseTrustFromStatusJson(stdout: string): boolean {
   const start = stdout.indexOf('{');
   if (start < 0) return false;
@@ -478,15 +388,9 @@ export function parseTrustFromStatusJson(stdout: string): boolean {
   }
 }
 
-/**
- * Probe Accessibility trust without re-activating. Returns false (never throws)
- * when the engine is absent, the daemon is down, or the probe errors — the
- * wizard polls this while the user grants permissions in System Settings, and a
- * throw there would abort the very flow that fixes it.
- *
- * This is the ONE place agents-cli reads engine stdout instead of passing it
- * through, because it needs an answer rather than a display.
- */
+/** Probe Accessibility trust without re-activating. Returns false when the engine is absent, the
+ * daemon is down or the probe errors, since a throw would abort the wizard flow that polls this
+ * while the user grants permissions. */
 export async function probeComputerTrust(): Promise<boolean> {
   try {
     const { exitCode, stdout } = await forwardToComputer({

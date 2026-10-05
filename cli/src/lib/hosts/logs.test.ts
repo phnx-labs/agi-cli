@@ -5,10 +5,8 @@ import { tmpdir } from 'os';
 import * as state from '../state.js';
 import { sshReachable } from '../ssh-exec.js';
 
-// Redirect the cache dir to a temp tree (real fs, no service mocking) so we can
-// stage real task sidecars + log files the way a dispatch would.
-// Initialized eagerly (not just in beforeEach) so the module-load LOCALHOST_SSH
-// probe below sees a valid dir for ssh's control socket.
+// Redirect the cache dir to a temp tree (real fs) to stage real task sidecars and logs; initialized
+// eagerly so the module-load LOCALHOST_SSH probe sees a valid dir for ssh's control socket.
 let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-hostlogs-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
@@ -141,11 +139,9 @@ describe('hostTaskLogJson', () => {
   });
 });
 
-// Detached-dispatch log retrieval over real ssh (localhost). The literal bug
-// closed by this PR: a --no-follow dispatch captured no local log, so
-// `agents logs <id>` always printed "(no local log captured for this task)".
-// These tests drive a real `ssh localhost cat <file>` through showHostTaskLog to
-// confirm the remote-fetch path works end-to-end.
+// Detached-dispatch log retrieval over real ssh (localhost). Guards the bug where a --no-follow
+// dispatch captured no local log, so `agents logs <id>` always printed "(no local log captured for
+// this task)".
 describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost)', () => {
   it('fetches and prints the remote log when no local log exists (detached dispatch)', async () => {
     // Simulate a detached dispatch: task sidecar exists, local log does NOT, but
@@ -193,11 +189,9 @@ describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost
   });
 });
 
-// hostTaskLogJson must emit the RECONCILED record: a task that finished remotely
-// between dispatch and this one-shot --json read has to surface its terminal
-// status/exitCode, not the stale 'running' it was saved with. Drives a real
-// `ssh localhost cat <.exit>` reconcile, so it's gated on localhost SSH like the
-// fetch tests above.
+// hostTaskLogJson must emit the reconciled record: a task that finished remotely must show its
+// terminal status/exitCode, not a stale 'running'. Uses a real `ssh localhost cat <.exit>`, so
+// gated on localhost SSH.
 describe.skipIf(!LOCALHOST_SSH)('hostTaskLogJson reconciles a finished run before emitting (real ssh)', () => {
   it('surfaces terminal status + exitCode for a running record whose remote .exit is now set', () => {
     // A real local file the ssh-localhost `cat` reads as the remote `.exit`.

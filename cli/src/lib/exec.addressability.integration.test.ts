@@ -1,15 +1,6 @@
-/**
- * Addressability failure must surface to the user with the command that restores
- * it — and it must not false-warn on IDE terminals whose session id is not known
- * until after spawn (RUSH-3066 follow-up / PHNX-3070).
- *
- * This test exercises the real launch path: it plants a fake Claude binary as a
- * managed version, calls execAgent to spawn it interactively, and verifies that
- * the resulting live session is honestly reported un-addressable when we force
- * the host to one with no precise rail (Ghostty). The lazy failure paths
- * (sessions inject, agents message) include a recovery hint that names both
- * `agents sessions resume <id>` and tmux wrapping.
- */
+/** Addressability failure must reach the user with the command that restores it, without
+ * false-warning on IDE terminals whose session id is unknown until after spawn (RUSH-3066 /
+ * PHNX-3070). */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,10 +20,9 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     const binDir = path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9', 'node_modules', '.bin');
     fs.mkdirSync(binDir, { recursive: true });
     const fakeClaude = path.join(binDir, 'claude');
-    // A fake Claude process that the active scanner recognizes: set the process
-    // comm to 'claude' (Node's process.title uses prctl(PR_SET_NAME) on Linux),
-    // write our pid to a marker so the test can identify the launched process,
-    // then stay alive until killed.
+    // A fake Claude process the active scanner recognizes: set the process comm to 'claude'
+    // (process.title uses prctl(PR_SET_NAME) on Linux), write our pid to a marker, then stay alive
+    // until killed.
     fs.writeFileSync(
       fakeClaude,
       '#!/usr/bin/env node\nprocess.title = \'claude\';\nconst fs = require(\'fs\');\nconst marker = process.env.AGENTS_ADDRESSABILITY_MARKER;\nif (marker) fs.writeFileSync(marker, String(process.pid));\nsetInterval(() => {}, 600000);\n',

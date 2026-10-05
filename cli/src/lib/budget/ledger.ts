@@ -1,17 +1,6 @@
-/**
- * Append-only spend ledger (issue #346).
- *
- * Every dispatched run that produces token usage records one JSONL line under
- * `<history>/spend/ledger.jsonl`. The ledger is the shared artifact #323's
- * `agents insights cost` can later read for $ rollups, so the entry shape stays clean
- * and stable: one record = one usage observation attributed to a run.
- *
- * `costUsd` is computed at write time via the canonical pricing module
- * (lib/pricing) so the ledger is self-contained — a reader never needs the
- * pricing table to sum spend. Rollups (`spendForDay`/`spendForAgent`/...) are
- * pure folds over the file; for the modest line counts a developer accrues this
- * is plenty fast, and there's no index to corrupt.
- */
+/** Append-only spend ledger (issue #346): each run with token usage records a JSONL line under
+ * `<history>/spend/ledger.jsonl`, which `agents insights cost` (#323) can read. `costUsd` is
+ * computed at write time via lib/pricing, so readers need no pricing table. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { getHistoryDir } from '../state.js';
@@ -63,11 +52,8 @@ export function localDay(d: Date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-/**
- * Append one spend observation. Computes `costUsd` from the usage via the
- * canonical pricing module (unpriced models contribute $0). Returns the written
- * entry. Creates the spend dir on first write.
- */
+/** Append one spend observation, computing `costUsd` via the pricing module (unpriced models
+ * contribute $0). Returns the entry; creates the spend dir on first write. */
 export function recordSpend(
   input: {
     runId: string;

@@ -60,10 +60,8 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
     const cwd = path.dirname(file);
     const first = computeLiveSignals('grok', file, cwd, true);
     expect(first.state?.activity).toBe('working');
-    // Same path + mtime: the parsed tail is reused and the classification is
-    // recomputed. Replacing the bytes with an unparseable line while pinning the
-    // mtime back proves the second call never re-read the file — only the
-    // memoized events could have produced this state.
+    // Same path + mtime: the parsed tail is reused and classification recomputed. Swapping in an
+    // unparseable line while pinning the mtime proves the second call never re-read the file.
     const { mtime, atime } = fs.statSync(file);
     fs.writeFileSync(file, 'not json\n');
     fs.utimesSync(file, atime, mtime);

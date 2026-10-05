@@ -1,11 +1,6 @@
-/**
- * Live-session metadata publisher as a supervised periodic service.
- *
- * This is the single daemon-owned writer behind `sessions watch`: consumers
- * announce reader presence, and the service publishes an incremental journal
- * snapshot immediately on the idle->active edge and every 15 seconds while a
- * reader remains. Callers consume the row; they do not run their own gather.
- */
+/** Live-session metadata publisher, the single daemon-owned writer behind `sessions watch`: it
+ * publishes an incremental journal snapshot on the idle-to-active edge and every 15 seconds while
+ * a reader remains. Callers consume the row and never gather themselves. */
 
 import { runActiveSessionsWarmTick } from '../daemon-ticks.js';
 import type { DaemonServiceId } from '../daemon-services.js';

@@ -298,10 +298,9 @@ describe('MonitorEngine.runMonitor — a poll FAILURE is not a value change (PHN
 });
 
 describe('MonitorEngine.tick — a stopped engine dispatches nothing (PHNX-3608)', () => {
-  // Under the external scheduler the supervisor owns the tick timer, so a
-  // stopped engine (its monitors service disabled) must honour stop() in tick()
-  // itself — otherwise the next supervised tick would still fire the last-loaded
-  // monitors even though the engine is stopped.
+  // Under the external scheduler the supervisor owns the tick timer, so a stopped engine (monitors
+  // service disabled) must honour stop() in tick() itself, or the next supervised tick would still
+  // fire the last-loaded monitors.
   it('tick() runs monitors while started, and no longer dispatches after stop()', async () => {
     const name = uniq('stopgate');
     writeMonitor(monitor({ name, source: { type: 'command', command: 'echo x' }, condition: { mode: 'every' } }));

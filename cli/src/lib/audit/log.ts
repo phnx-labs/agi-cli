@@ -1,13 +1,6 @@
-/**
- * Run-dispatch recording (issue #347) — now a thin write into the unified
- * event stream (`emit('run.dispatched', …)`). The historical hash-chained file
- * at `~/.agents/.history/audit/log.jsonl` is still readable via
- * `readAuditLog` / `verifyAuditChain` for pre-unification history; new runs do
- * NOT append there. Operators list run outcomes with:
- *
- *   agents events --include runs
- *   agents events audit          # nested alias of the above
- */
+/** Run-dispatch recording (issue #347): a thin write into the unified event stream
+ * (`emit('run.dispatched')`). The old hash-chained audit log.jsonl stays readable via
+ * readAuditLog/verifyAuditChain; new runs don't append there. See `agents events --include runs`. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -39,23 +32,16 @@ export interface AuditRecord {
 /** The caller-supplied fields — the chain fields (`prevHash`/`hash`) are computed here. */
 export type AuditEntry = Omit<AuditRecord, 'prevHash' | 'hash'>;
 
-/**
- * Absolute path to the append-only audit log. Lives under `.history/` — the
- * durable-but-machine-local runtime bucket that is gitignored and never synced
- * by `agents repo push/pull`. Keeping it here (not under a top-level, tracked
- * `~/.agents/` path) means the token-bearing `repo` field can never leak into a
- * version-controlled DotAgents repo, and no cross-machine pull can fork the chain.
- */
+/** Absolute path to the append-only audit log, under `.history/` (machine-local, gitignored, never
+ * synced by `agents repo push/pull`), so the token-bearing `repo` field can't leak into a tracked
+ * repo and no pull can fork the chain. */
 export function getAuditLogPath(): string {
   return path.join(getHistoryDir(), 'audit', 'log.jsonl');
 }
 
-/**
- * Deterministic JSON: object keys sorted recursively so the same logical
- * record always serializes to the same bytes (hashing must be reproducible
- * across processes and machines). Values here are all primitives, but the
- * recursion keeps it correct if the record ever nests.
- */
+/** Deterministic JSON: keys sorted recursively so a logical record always hashes to the same bytes
+ * across processes and machines. Values are primitives today; the recursion keeps it correct if
+ * records nest. */
 function canonicalJSON(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(canonicalJSON).join(',') + ']';
@@ -86,20 +72,9 @@ function readRecords(logPath: string): AuditRecord[] {
   return records;
 }
 
-/**
- * Append one record to the hash chain and return it. Links to the previous
- * record's `hash` (or `GENESIS_HASH` for the first), computes the sealing
- * hash, and writes a single JSONL line. Synchronous so the record is durable
- * before the caller proceeds.
- *
- * Read-last-hash + append run under the canonical advisory file lock
- * (`withFileLock`, backed by proper-lockfile). Without it, two concurrent
- * writers — the norm under parallel teams/routines dispatch — both read the
- * same last hash and both write `prevHash=H`, forking the chain into a false
- * "tampered" verdict. The lock forces a total order so every record links off
- * the genuinely-previous one. `ensureLockTarget` creates the file first because
- * proper-lockfile locks an existing path.
- */
+/** Append one record to the hash chain and return it: link to the previous `hash` (or
+ * GENESIS_HASH), seal, write one JSONL line, synchronously. Read-last-hash + append run under
+ * `withFileLock`; without it parallel writers fork the chain into a false "tampered" verdict. */
 export function appendAuditRecord(entry: AuditEntry, logPath: string = getAuditLogPath()): AuditRecord {
   ensureLockTarget(logPath);
   return withFileLock(logPath, () => {
@@ -112,12 +87,9 @@ export function appendAuditRecord(entry: AuditEntry, logPath: string = getAuditL
   });
 }
 
-/**
- * Walk the chain and confirm every record reproduces. A record is valid when
- * (a) its `prevHash` matches the prior record's `hash` (GENESIS for the first)
- * AND (b) recomputing its sealing hash from its own fields reproduces the
- * stored `hash`. Returns the first failing index in `brokenAt`.
- */
+/** Walk the chain: a record is valid when its `prevHash` matches the prior `hash` (GENESIS for the
+ * first) and recomputing its sealing hash reproduces the stored `hash`. `brokenAt` is the first
+ * failing index. */
 export function verifyAuditChain(logPath: string = getAuditLogPath()): { ok: boolean; brokenAt?: number } {
   let records: AuditRecord[];
   try {
@@ -143,11 +115,8 @@ export function readAuditLog(logPath: string = getAuditLogPath()): AuditRecord[]
   return readRecords(logPath);
 }
 
-/**
- * Resolve a stable repo label for a run: the git remote origin url when the
- * cwd is inside a repo with one, otherwise the cwd itself. Best-effort — any
- * failure falls back to the cwd.
- */
+/** Resolve a stable repo label for a run: the git remote origin url if the cwd is in a repo with
+ * one, else the cwd. Best-effort; any failure falls back to the cwd. */
 function repoLabel(cwd: string): string {
   try {
     const res = spawnSync('git', ['-C', cwd, 'config', '--get', 'remote.origin.url'], {
@@ -161,11 +130,9 @@ function repoLabel(cwd: string): string {
   }
 }
 
-/**
- * Record ONE dispatched run at the single exec chokepoint into the unified
- * event stream. Non-fatal by contract: any failure is caught and warned, never
- * thrown — a log hiccup must not crash a run that already finished.
- */
+/** Record one dispatched run at the single exec chokepoint into the unified event stream.
+ * Non-fatal: any failure is caught and warned, since a log hiccup must not crash a run that
+ * already finished. */
 export function recordDispatchedRun(run: {
   agent:    string;
   version:  string;

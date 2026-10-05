@@ -539,10 +539,9 @@ describe('the client tells a truncated stream from a finished one', () => {
   });
 
   it('rejects a FIN inside a line as a truncated frame instead of exiting as if the stream ended cleanly', async () => {
-    // The production symptom: 8 KiB of a reset, no newline, EOF — and the old
-    // readline client discarded the partial line and resolved. Only a peer that
-    // hangs up mid-line can produce that deterministically, so this is a bare
-    // socket peer: the client cannot tell what process is on the other end.
+    // Production symptom: 8 KiB of a reset, no newline, EOF, which the old readline client
+    // discarded and resolved. Only a peer hanging up mid-line reproduces it deterministically, so
+    // this uses a bare socket peer.
     const endpoint = socketPath();
     const upstream = new FeedWatchState();
     const whole = `${JSON.stringify(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 1, agents: [agentRow('a1', 'zion')], attention: [], tools: [], setup: [] }))}\n`;

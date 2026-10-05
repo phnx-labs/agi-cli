@@ -84,10 +84,9 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
 
   it('a scheduler-derived aligned slot dispatches once and dedups a duplicate delivery (SING-15)', async () => {
     const cfg = commandConfig('slot-derived', 'exit 0');
-    // Drive the slot through the REAL forward-timer derivation, not a hand-injected
-    // clean Date: fireSlot floors croner's jittered currentRun() to the aligned
-    // boundary. A prior bug keyed on the jittered instant, so two deliveries of one
-    // occurrence minted distinct ids and both launched.
+    // Drive the slot through the real forward-timer derivation: fireSlot floors croner's jittered
+    // currentRun() to the aligned boundary. A prior bug keyed on the jittered instant, so two
+    // deliveries of one occurrence minted distinct ids and both launched.
     const cron = new Cron(cfg.schedule, { paused: true });
     const boundary = new Date('2026-08-07T03:00:00.000Z');
     vi.spyOn(cron, 'currentRun').mockReturnValue(new Date(boundary.getTime() + 7));
@@ -167,11 +166,9 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
       pid: process.pid,
       spawnedAt: Date.now() - process.uptime() * 1000,
       status: 'running',
-      // Started well past the 60s timeout below. A run cannot legitimately outlive
-      // its deadline, so it no longer holds the slot even though its recorded pid
-      // is still alive — the month-old `running` records that wedged sandbox-tests
-      // and triage-tickets were exactly this shape (RUSH-2640). A live launcher
-      // WITHIN its window still holds the slot (see the foreground-overlap test).
+      // Started well past the 60s timeout: a run can't legitimately outlive its deadline, so it no
+      // longer holds the slot though its pid is alive. Month-old `running` records wedged
+      // sandbox-tests this way (RUSH-2640). A live launcher within its window still holds it.
       startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
       completedAt: null,
       exitCode: null,

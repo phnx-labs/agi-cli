@@ -1,15 +1,4 @@
-/**
- * Read-only Software Factory state aggregation.
- *
- * ~/.agents/factory.yml example:
- *
- * ceiling: 4
- * max_dispatch_per_tick: 2
- * per_project:
- *   Agents CLI: { weight: 2, cap: 2 }
- * idle_boxes: [yosemite-m1, yosemite-m2]
- * digest: { times: ["09:00", "17:00"], tz: America/Los_Angeles }
- */
+/** Read-only Software Factory state aggregation, read from ~/.agents/factory.yml. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';

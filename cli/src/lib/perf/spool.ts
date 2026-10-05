@@ -1,10 +1,6 @@
-/**
- * Hot-path perf writers — append-only NDJSON spool, no SQLite.
- *
- * Loaded from the CLI root `postAction` and from `events.ts` timing helpers.
- * Must stay free of `../sqlite.js` so ordinary commands never load node:sqlite
- * (which emits ExperimentalWarning on stderr).
- */
+/** Hot-path perf writers: append-only NDJSON spool, no SQLite. Loaded from the CLI root
+ * `postAction` and `events.ts` timing helpers; must stay free of `../sqlite.js` so ordinary
+ * commands never load node:sqlite (which warns on stderr). */
 
 import * as fs from 'fs';
 import * as os from 'os';

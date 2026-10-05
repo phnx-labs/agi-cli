@@ -1,52 +1,6 @@
-/**
- * secrets-client.ts — the ONE process client through which agents-cli talks to
- * the standalone `secrets` CLI (PHNX-3989).
- *
- * This is the agents-owned half of the secrets extraction: a bounded
- * request/response client over the standalone executable's private consumer
- * pipe. It carries NO storage, provider, or broker implementation — every
- * operation is resolved by spawning `secrets __serve` and exchanging one JSON
- * message over inherited pipes (delta-spec RPC-1). The engine lives entirely in
- * the standalone package; agents-cli never rebundles it (DIST-1), so there is
- * deliberately NO fallback to the in-repo `cli/src/lib/secrets/` engine — a
- * missing executable fails loud with install guidance.
- *
- * Transport (matches secrets-cli/src/protocol-server.ts `runProtocolServer`):
- *   - the child reads the request JSON from fd 3 (to EOF) and writes the
- *     response JSON to fd 4; nothing is ever written to the child's stdout.
- *   - async: `spawn` with stdio ['ignore','ignore','inherit','pipe','pipe'];
- *     write+end child.stdio[3], read child.stdio[4] to EOF.
- *   - sync: `spawnSync` only wires stdio 0-2 portably (Bun drops numbered fds
- *     3+), so the fd 3/4 wiring is done in a POSIX shell: the request rides
- *     `spawnSync`'s STDIN — a real pipe/socketpair on every runtime — which the
- *     shell dups onto fd 3 (`3<&0`), and fd 4 is redirected onto the child's
- *     stdout (`4>&1`), which `spawnSync` captures natively. Both fds are then the
- *     SAME anonymous pipe/socketpair the async path hands the standalone, which
- *     is load-bearing: the standalone wraps fd 3 in a `net.Socket`, and a Socket
- *     over a NAMED FIFO reads the request but never fires EOF on macOS, so the
- *     older FIFO wiring hung the read loop for the full timeout. Bounded to
- *     `SYNC_SERVE_TIMEOUT_MS` (30s — sized for a cold Node boot of the
- *     standalone on a loaded box, see the constant) so a broken standalone
- *     fails before the server's 60s deadline. POSIX only; Windows fails loud
- *     pointing at the async path.
- *
- * State root (MIG-1): the standalone selects its state root from `SECRETS_HOME`.
- * agents-cli points it at the user agents dir (`~/.agents`) by default so the
- * user's existing stores are adopted in place — no copy, no re-encryption. An
- * explicit `SECRETS_HOME` in the environment wins (test isolation, power users),
- * matching the standalone's own `state.ts` precedence.
- *
- * Policy (CTX-1): agents-cli passes its harness name as the opaque `scope` and,
- * when a request must be bounded, a resource-profile-filtered `allowedBundles`
- * set. Computing that policy stays in agents-cli (the caller supplies `context`);
- * this client only forwards it.
- *
- * The typed shapes are imported `type`-only from `./secrets-types.js`, a pure
- * re-declaration of the standalone's wire types (no runtime code, nothing in
- * the npm tarball beyond the erased type import) — this repo's own in-process
- * engine (`cli/src/lib/secrets/**`) is gone (PHNX-3989 Track D); the standalone
- * `@phnx-labs/secrets-cli` package is the only implementation.
- */
+/** The ONE process client for the standalone `secrets` CLI (PHNX-3989): spawns `secrets __serve`
+ * and exchanges one bounded JSON message each way over its private pipe (RPC-1). No storage,
+ * provider or broker code, and NO fallback to the in-repo engine (DIST-1). */
 import { spawn, spawnSync } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import { findInPath } from './agent-spec/agents.js';
@@ -71,32 +25,15 @@ import type {
   RcSecretFinding,
 } from './secrets-types.js';
 
-/**
- * Wire contract, mirrored from `secrets-cli/src/protocol.ts`. Both sides MUST
- * agree byte-for-byte; this is the shared schema of the seam, the one thing an
- * independent client legitimately re-declares rather than imports.
- */
+/** Wire contract mirrored from `secrets-cli/src/protocol.ts`; both sides MUST agree byte-for-byte.
+ * The one thing an independent client re-declares rather than imports. */
 export const PROTOCOL_VERSION = 1;
 const MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 /** Just over the server's own 60s deadline, so the server times out first. */
 const SERVE_TIMEOUT_MS = 65_000;
-/**
- * The synchronous path serves the surfaces that resolve secrets before they can
- * continue — `agents view`, the account-catalog rows, and the account listing and
- * setup-token read on the `agents run` launch path. Those must never hang for the
- * standalone's own 60s deadline (the exact hang PHNX-3989 hit when the child ran
- * under Bun), so the sync serve carries a hard bound below it instead of the
- * async path's 65s. The bound covers a COLD PROCESS, not just the operation: every
- * request spawns `secrets __serve` afresh, so it pays a Node boot plus the
- * standalone's module load before the tens-of-milliseconds op runs: ~0.3s on a
- * quiet box, 0.4–2.6s and occasionally more on a desktop at load average ~100
- * (measured 2026-09-12), where the previous 3s bound turned load into a failed
- * launch (`secrets request failed: spawnSync sh ETIMEDOUT` from `agents run`).
- * 30s absorbs that boot under load and still fails a broken or wedged standalone
- * well before its 60s self-deadline. It is NOT a fallback to the embedded engine
- * (DIST-1); the standalone stays the only implementation. Exported so the
- * real-standalone test can assert a round-trip beats the bound.
- */
+/** The sync path serves surfaces that resolve secrets before continuing (`agents view`, account
+ * rows, the `agents run` launch path) and must never hang for the standalone's 60s deadline
+ * (PHNX-3989). 30s covers a cold boot under load (3s failed launches); not a fallback (DIST-1). */
 export const SYNC_SERVE_TIMEOUT_MS = 30_000;
 /** Test seam: a hang test plants a never-answering standalone and must not wait 30s. */
 let syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
@@ -157,13 +94,9 @@ export class SecretsClientError extends Error {
     this.name = 'SecretsClientError';
   }
 
-  /**
-   * Serialize to a plain `{code, message}`. A consumer that folds a failure into
-   * a structure it later `JSON.stringify`s (a teammate's meta.json, a failure
-   * record, a spawn env) must never make the serializer chase this Error's
-   * internal references and throw `Converting circular structure to JSON`
-   * mid-launch — the value here is the two fields a caller actually needs.
-   */
+  /** Serialize to a plain `{code, message}` so a consumer that later `JSON.stringify`s a failure
+   * (teammate meta.json, spawn env) never makes the serializer chase this Error's references and
+   * throw on a circular structure mid-launch. */
   toJSON(): { code: string; message: string } {
     return { code: this.code, message: this.message };
   }
@@ -174,13 +107,9 @@ export function isSecretsClientError(error: unknown, code?: string): error is Se
   return error instanceof SecretsClientError && (code === undefined || error.code === code);
 }
 
-/**
- * Client-side TRANSPORT codes — the standalone could not be reached or spoke a
- * broken protocol. These are the ONLY errors a "degrade when the standalone is
- * unavailable" consumer may swallow: a code from the standalone's own reply
- * (`NOT_FOUND`, `LOCKED`, `WRONG_BACKEND`, `OPERATION_FAILED`, `ACCESS_DENIED`, …)
- * is a real answer and must surface, never be hidden as "unavailable".
- */
+/** Client-side TRANSPORT codes: the standalone was unreachable or spoke a broken protocol. Only
+ * these may be swallowed by a "degrade when unavailable" consumer; a code from the standalone's
+ * own reply (`NOT_FOUND`, `LOCKED`, `WRONG_BACKEND`, ...) is a real answer and must surface. */
 const SECRETS_TRANSPORT_CODES: ReadonlySet<string> = new Set([
   'SECRETS_BIN_MISSING',
   'TIMEOUT',
@@ -198,16 +127,9 @@ export function isSecretsTransportError(error: unknown): error is SecretsClientE
   return error instanceof SecretsClientError && SECRETS_TRANSPORT_CODES.has(error.code);
 }
 
-// --- item naming (the shared identifier scheme of the seam) ---------------
-//
-// Raw item identifiers are part of the wire contract, mapped 1:1 across the
-// cutover (delta-spec MIG-1): the standalone stores a bundle's per-key value at
-// `agents-cli.secrets.<bundle>.<KEY>` and a profile provider token at
-// `agents-cli.<provider>.token`, and a bundle var that reads `keychain:<KEY>`
-// refers to the former. agents-cli derives these names whenever it seeds or
-// reads a raw item (account bundles, profile tokens, the reserved `auth`
-// bundle), so they are declared once here beside the protocol schema rather
-// than re-derived per consumer.
+// Item naming, part of the wire contract mapped 1:1 across the cutover (MIG-1): bundle values at
+// `agents-cli.secrets.<bundle>.<KEY>`, profile tokens at `agents-cli.<provider>.token`. Declared
+// once here beside the protocol schema, not re-derived per consumer.
 const SERVICE_PREFIX = 'agents-cli';
 const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
 
@@ -229,11 +151,8 @@ export function keychainRef(key: string): string {
 export type { BundleValue, SecretRef };
 const REF_PATTERN = /^(keychain|env|file|exec):(.+)$/s;
 
-/**
- * Parse a bundle value into either a literal string or a typed secret ref. A
- * `{ value }` object is an escaped literal (a URL that happens to start with a
- * ref prefix is never misread as a reference).
- */
+/** Parse a bundle value into a literal string or a typed secret ref; a `{ value }` object is an
+ * escaped literal, so a URL that starts with a ref prefix is never misread as a reference. */
 export function parseBundleValue(raw: BundleValue): { literal: string } | { ref: SecretRef } {
   if (typeof raw === 'object' && raw !== null && typeof (raw as { value?: unknown }).value === 'string') {
     return { literal: (raw as { value: string }).value };
@@ -250,19 +169,9 @@ export function parseBundleValue(raw: BundleValue): { literal: string } | { ref:
 
 let cachedBin: string | undefined;
 
-/**
- * Resolve the standalone `secrets` executable: `$SECRETS_BIN` if set, else the
- * `secrets` command on PATH — resolved with `findInPath`, which skips agents-cli's
- * own shims dir. That skip is load-bearing, not tidiness: before PHNX-3989 the
- * shims dir carried a `secrets` command shim that `exec`s `agents secrets`, it
- * sits FIRST on PATH, and it survives an in-place upgrade (its baked entrypoint
- * still exists). A plain `which secrets` returned that shim, so `agents secrets`
- * → shim → `agents secrets` → … spawned an unbounded process chain on every box
- * upgraded from 1.22.84 (the whole fleet, via R5 auto-update). A `secrets` inside
- * our shims dir can never be the standalone, so it is not a candidate at all.
- * Cached for the process. A miss throws with install guidance — there is NO
- * fallback to the embedded engine (DIST-1).
- */
+/** Resolve the standalone `secrets` executable: `$SECRETS_BIN`, else PATH via `findInPath`, which
+ * skips our shims dir: a legacy `secrets` shim there execs `agents secrets` and spawned unbounded
+ * chains fleet-wide. Cached per process; a miss throws, no fallback to the embedded engine. */
 export function resolveSecretsBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.SECRETS_BIN?.trim();
@@ -279,34 +188,17 @@ export function resolveSecretsBin(): string {
   return resolved;
 }
 
-/**
- * How to invoke the resolved binary. A `.js`/`.mjs`/`.cjs` entrypoint (a dev
- * build, or `$SECRETS_BIN` pointing at `dist/index.js`) is run through this
- * process's Node so it works without an executable bit and on Windows; an
- * installed `secrets` shim/binary is spawned directly. Exported so a caller
- * that needs to run an interactive standalone verb directly (e.g. `secrets
- * migrate`, which isn't in this client's op table) can build the same argv.
- */
+/** How to invoke the resolved binary: a `.js`/`.mjs`/`.cjs` entrypoint runs through this process's
+ * Node (no exec bit needed, works on Windows); an installed shim/binary spawns directly. Exported
+ * so callers running interactive standalone verbs (e.g. `secrets migrate`) build the same argv. */
 export function invocation(bin: string): { command: string; prefix: string[] } {
   if (/\.[mc]?js$/.test(bin)) return { command: process.execPath, prefix: [bin] };
   return { command: bin, prefix: [] };
 }
 
-/**
- * Spawn env for the child, applied to a base env (defaults to `process.env`):
- *
- *  - `SECRETS_HOME` defaults to the user agents dir so the standalone adopts the
- *    existing stores in place (MIG-1); an explicit value in the base env wins.
- *  - The standalone renamed every `AGENTS_SECRETS_*` knob to `SECRETS_*`, so a
- *    caller env still carrying the old `AGENTS_SECRETS_PASSPHRASE` (the name
- *    agents-cli's own engine reads — filestore/linux/windows) would be invisible
- *    to `secrets`, which reads only `SECRETS_PASSPHRASE`. Forward it so the child
- *    can decrypt the very file store agents-cli wrote, rather than silently
- *    provisioning a fresh machine-local key. An explicit `SECRETS_PASSPHRASE`
- *    wins — this only bridges the rename, it never overrides.
- *
- * Exported for the seam test (a pure env mapping, no spawn).
- */
+/** Spawn env for the child: `SECRETS_HOME` defaults to the user agents dir so the standalone adopts
+ * existing stores (MIG-1). A legacy AGENTS_SECRETS_PASSPHRASE is forwarded as SECRETS_PASSPHRASE
+ * so the child can decrypt our file store; explicit values always win. */
 export function buildServeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...base,
@@ -331,14 +223,9 @@ function buildRequest(op: string, args: unknown[], context?: SecretsContext): Pr
   return request;
 }
 
-/**
- * Describe what the child actually wrote on fd 4 when it did not parse as JSON,
- * so a wrong `secrets` on PATH (a shim printing usage, an unrelated binary), a
- * child that ran under the wrong runtime and never answered, or a silent write
- * failure is diagnosable from the error alone rather than a bare "non-JSON
- * response". Bounded to 200 bytes; control bytes are stripped so the message
- * stays one readable line.
- */
+/** Describe what the child wrote on fd 4 when it wasn't JSON, so a wrong `secrets` on PATH, a child
+ * under the wrong runtime or a silent write failure is diagnosable from the error, not a bare
+ * "non-JSON response". Bounded to 200 bytes, control bytes stripped. */
 function describeNonJson(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return ' (the standalone wrote nothing to fd 4)';
@@ -357,10 +244,9 @@ function parseResponse(raw: Buffer): unknown {
   if (!parsed || typeof parsed !== 'object') {
     throw new SecretsClientError('INVALID_RESPONSE', 'secrets returned a malformed response envelope');
   }
-  // Every reply carries the protocol it was written against, so version
-  // negotiation rides the answer itself — there is no separate handshake spawn
-  // to pay a cold Node boot for (PHNX-4082). A mismatch is the standalone being
-  // too old or too new, which is actionable; anything else is a broken envelope.
+  // Every reply carries its protocol version, so negotiation rides the answer with no separate
+  // handshake spawn to pay a cold Node boot (PHNX-4082). A mismatch means the standalone is too old
+  // or new (actionable); anything else is a broken envelope.
   if (typeof parsed.v === 'number' && parsed.v !== PROTOCOL_VERSION) {
     throw new SecretsClientError(
       'PROTOCOL_UNSUPPORTED',
@@ -406,14 +292,9 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
     input.on('error', () => {});
     input.end(request);
 
-    // Settle only when BOTH the response has been read to EOF AND the child has
-    // fully exited. The standalone writes its response to fd 4 and closes it
-    // *before* it finishes: on the way out it still releases its proper-lockfile
-    // lock dir and flushes its meta/events log under the store's `.cache`.
-    // Resolving on fd-4 EOF alone let the caller (e.g. a test tearing down its
-    // throwaway SECRETS_HOME) race those trailing writes — an ENOTEMPTY rmdir.
-    // Awaiting child exit makes the store quiescent the instant secretsRequest
-    // resolves, so no consumer needs a cleanup retry.
+    // Settle only when the response is read to EOF AND the child has exited: it closes fd 4 before
+    // finishing, still releasing its proper-lockfile lock and flushing its log. Resolving on fd-4
+    // EOF let callers (a test removing its SECRETS_HOME) race those writes (ENOTEMPTY).
     const out = child.stdio[4] as Readable;
     const chunks: Buffer[] = [];
     let size = 0;
@@ -463,36 +344,9 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   }
   const { command, prefix } = invocation(resolveSecretsBin());
   const request = Buffer.from(JSON.stringify(buildRequest(op, args, context)));
-  // The standalone's private protocol reads the request from fd 3 and writes the
-  // response to fd 4, wrapping BOTH in a `net.Socket` (secrets-cli
-  // `runProtocolServer`). It also REFUSES a plain file or tty for either — fd 3/4
-  // MUST be a pipe or socket (`PRIVATE_PIPE_REQUIRED`) — so no secret is ever
-  // staged to disk. But `spawnSync` only wires stdio 0-2 portably — the Bun
-  // runtime (this repo runs its whole CLI suite as `bun src/index.ts`, so the CLI-
-  // integration tests spawn agents-cli under Bun) silently DROPS numbered fds 3+,
-  // so the numbered-fd wiring is done in a POSIX shell.
-  //
-  // The request rides `spawnSync`'s STDIN, which every runtime backs with a real
-  // pipe/socketpair, and the shell dups it onto fd 3 (`3<&0`); fd 4 is dup'd from
-  // the captured stdout pipe (`4>&1`), then the child's own fd 1 is sent to
-  // /dev/null (`1>/dev/null`, AFTER `4>&1` so fd 4 keeps the pipe) — so the
-  // response channel (fd 4) is structurally the ONLY writer to the captured
-  // stream and a stray write to the standalone's own stdout can never corrupt the
-  // fd-4 bytes. Crucially, fd 3 and fd 4 are now the SAME anonymous
-  // pipe/socketpair the async path hands the standalone via `spawn` numbered
-  // stdio, rather than a named FIFO: a `net.Socket` wrapped around a named FIFO
-  // reads the request but never fires EOF on macOS, so the standalone's
-  // `for await (const chunk of input)` on fd 3 would hang for the full timeout
-  // (the bug the old FIFO wiring hit — spawnSync's stdout IS a socketpair, so fd 4
-  // was fine, but the FIFO on fd 3 never EOF'd). `exec` so the wrapper `sh`
-  // BECOMES the standalone (same PID): `spawnSync` waits on the real process, so
-  // on return the store is fully flushed and its lock dir released, and a timeout
-  // SIGTERM lands on the standalone itself rather than orphaning a wedged child.
-  // The response never touches disk. The shell wiring is parent-runtime-agnostic
-  // — `spawnSync`'s stdio is a socketpair under both Node and Bun — so fd 3 EOFs
-  // whenever the standalone itself runs under Node. (A standalone that `invocation`
-  // launches under BUN still hits its own PHNX-3989 EOF hang regardless of the
-  // wiring; that stays bounded by SYNC_SERVE_TIMEOUT_MS below, as before.)
+  // The standalone reads fd 3 and writes fd 4 via `net.Socket` and REFUSES a file or tty, so no
+  // secret touches disk. Bun drops fds 3+ in spawnSync, so a POSIX shell dups stdin/stdout onto
+  // them (same anonymous pipe, not a FIFO: no EOF on macOS) and `exec`s so timeouts hit the child.
   const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
   const script = `exec ${serve} 3<&0 4>&1 1>/dev/null`;
   const result = spawnSync('sh', ['-c', script], {
@@ -512,12 +366,9 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
           'check with `secrets --version`.',
       );
     }
-    // A standalone that exits before draining fd 3 leaves `spawnSync`'s stdin
-    // write with EPIPE, yet its exit status and everything it wrote to fd 4 are
-    // still returned. Like the async path (`input.on('error', () => {})`), the
-    // outcome is whatever reached fd 4 — an empty or non-JSON answer is the
-    // diagnostic, not the errno. Seen on the GitHub-hosted runner, where a
-    // planted `exit 0` standalone exits faster than the request is written.
+    // A standalone exiting before draining fd 3 gives `spawnSync`'s stdin write EPIPE, yet its
+    // status and fd-4 output are still returned. As in the async path, the outcome is what reached
+    // fd 4 (an empty or non-JSON answer is the diagnostic).
     if (err.code !== 'EPIPE') {
       throw new SecretsClientError('SPAWN_FAILED', `secrets request failed: ${err.message}`);
     }
@@ -531,12 +382,9 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
 
 // --- primitives ------------------------------------------------------------
 
-/**
- * Send one operation to the standalone secrets CLI and await its typed result.
- * Spawns `secrets __serve` once for the operation; `parseResponse` checks the
- * protocol on the reply it already carries. Throws a {@link SecretsClientError}
- * carrying the server's `{code, message}` on failure.
- */
+/** Send one operation to the standalone and await its typed result: spawns `secrets __serve` once;
+ * `parseResponse` checks the protocol on the reply. Throws a {@link SecretsClientError} with the
+ * server's `{code, message}` on failure. */
 export async function secretsRequest<T = unknown>(
   op: string,
   args: unknown[] = [],
@@ -545,11 +393,8 @@ export async function secretsRequest<T = unknown>(
   return (await serveOnce(op, args, context)) as T;
 }
 
-/**
- * Synchronous sibling of {@link secretsRequest} for the consumers that resolve
- * secrets on a synchronous path (e.g. building a child env before spawn).
- * Bounded by a spawn timeout. POSIX only.
- */
+/** Synchronous sibling of {@link secretsRequest} for consumers resolving secrets on a synchronous
+ * path (e.g. building a child env before spawn). Bounded by a spawn timeout; POSIX only. */
 export function secretsRequestSync<T = unknown>(
   op: string,
   args: unknown[] = [],
@@ -570,21 +415,9 @@ export function _setSyncServeTimeoutForTest(ms: number): void {
   syncServeTimeoutMs = ms;
 }
 
-// --- typed wrappers -------------------------------------------------------
-//
-// The resolve/read/write/raw-CRUD ops today's consumers hit — one thin, typed
-// forward each onto the two primitives above; the standalone remains the single
-// implementation. Async by default; the read-hot operations agents-cli resolves
-// synchronously carry a `*Sync` sibling.
-//
-// This is deliberately NOT the standalone's full op table. The remaining
-// bundle-metadata ops it also exposes — `bundlePolicy`,
-// `readBundleIfDecryptable`, `keychainItemsForBundle`, `migrateLegacyBundles`
-// — get their wrapper as the consumer-conversion wave (tasks.md item 6) lands
-// each caller that needs it, so a wrapper always ships with a real call site
-// and a test rather than as speculative unused surface. (`describeBundle`,
-// `bundleBackend`, `renameBundle`, `rotateBundleSecret`, and the `sync.*` /
-// `rc-hygiene.*` groups have landed with the consumers that needed them.)
+// Typed wrappers for the resolve/read/write/raw-CRUD ops consumers hit, each a thin forward onto
+// the two primitives (async, with `*Sync` siblings for read-hot ops). Deliberately NOT the full op
+// table.
 
 // bundles.*
 export function readAndResolveBundleEnv(
@@ -609,12 +442,9 @@ export function listBundlesSync(context?: SecretsContext): SecretsBundle[] {
   return secretsRequestSync('bundles.listBundles', [], context);
 }
 
-/**
- * Per-key kind breakdown (`literal`/`file`/`onepassword`/…) of an already-resolved
- * bundle — the cosmetic `[secrets] Resolved <name>: N keys (…)` summary line. Pure
- * over the bundle document server-side; the wrapper forwards the object the caller
- * already holds from {@link readAndResolveBundleEnv} so the same shape is described.
- */
+/** Per-key kind breakdown (`literal`/`file`/`onepassword`/...) of an already-resolved bundle, for
+ * the cosmetic `[secrets] Resolved <name>: N keys (...)` line; the wrapper forwards the object the
+ * caller already holds. */
 export function describeBundle(bundle: SecretsBundle, context?: SecretsContext): Promise<BundleEntryInfo[]> {
   return secretsRequest('bundles.describeBundle', [bundle], context);
 }
@@ -746,11 +576,8 @@ export function listKeychainItems(prefix: string): Promise<string[]> {
   return secretsRequest('index.listKeychainItems', [prefix]);
 }
 
-/**
- * True when `keychain`-backend items are being routed to the standalone's
- * encrypted file store (headless Linux/Windows with no reachable keyring):
- * on such a host no test or probe can reach a real OS keychain.
- */
+/** True when `keychain`-backend items route to the standalone's encrypted file store (headless
+ * Linux/Windows without a reachable keyring), so no test or probe can reach a real OS keychain. */
 export function keychainUsesFileFallback(): Promise<boolean> {
   return secretsRequest('index.keychainUsesFileFallback', []);
 }
@@ -777,16 +604,9 @@ export function remoteResolveEnv(
   return secretsRequest('remote.remoteResolveEnv', [target, bundle, opts ?? {}]);
 }
 
-/**
- * The user agents dir as the RECEIVING agents-cli resolves it — `~/.agents` on
- * every box, the same root {@link buildServeEnv} pins the local standalone to
- * (MIG-1). A push must name it, because the remote `secrets` otherwise runs
- * under its own default `~/.secrets`: the import succeeds, the file store there
- * is keyed by a different machine-local passphrase, and the receiving daemon's
- * `readReservedCredential` never finds the bundle (yosemite-m0, 2026-09-07:
- * `pushed __cursor__` on the publisher, `no readable durable key` on the worker).
- * Remote-relative on purpose — the local absolute dir means nothing over there.
- */
+/** The user agents dir as the RECEIVING agents-cli resolves it (`~/.agents`); a push must name it,
+ * or the remote `secrets` imports into its default `~/.secrets` under a different passphrase and
+ * the worker never finds the bundle. Remote-relative on purpose. */
 export const REMOTE_USER_AGENTS_DIR = '~/.agents';
 
 /** Fill in the remote state root unless the caller named one. Pure, for the seam test. */
@@ -838,12 +658,9 @@ export function masterPassphraseInEnvSync(context?: SecretsContext): boolean {
   return secretsRequestSync('rc-hygiene.masterPassphraseInEnv', [], context);
 }
 
-// --- env sanitization (EXEC-1: deny loader/interpreter overrides) ----------
-//
-// Pure, engine-free — every spawn boundary strips these before either an
-// injected secrets env or the bare process env reaches a child, so a bundle
-// (or an inherited shell) can never smuggle a loader/interpreter override into
-// an agent's process.
+// Env sanitization (EXEC-1): every spawn boundary strips loader/interpreter overrides before an
+// injected secrets env or the bare process env reaches a child, so a bundle or inherited shell
+// can't smuggle one into an agent's process. Pure, engine-free.
 
 /** True for a dynamic-loader or language-interpreter override env var. */
 function isLoaderOrInterpreterEnv(name: string): boolean {

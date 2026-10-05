@@ -98,11 +98,9 @@ describe('routineStartNotification — threshold', () => {
   });
 });
 
-// RUSH-2030: the daemon fires the START ping unconditionally, so a pre-spawn
-// failure (executeJobDetached throws before spawning) must emit a matching
-// failure banner from the daemon catch block — otherwise the user is left with
-// an orphaned "Routine started" and no finish, breaking "exactly one start +
-// one finish". This is the builder the catch path calls.
+// RUSH-2030: the daemon fires the START ping unconditionally, so a pre-spawn failure needs a
+// matching failure banner from the catch block, else an orphaned "Routine started" breaks "exactly
+// one start + one finish". This is the builder the catch path calls.
 describe('routineStartFailedNotification — closes the orphaned-start gap', () => {
   it('emits a failure banner carrying the error reason and the runs-folder action', () => {
     const n = routineStartFailedNotification(agentConfig(), 'prepareJobHome: ENOSPC');
@@ -186,10 +184,9 @@ describe('routineAgent — the notification avatar', () => {
   });
 
   it('shows the Claude avatar for a workflow routine (the harness workflows run on)', () => {
-    // A workflow routine has no `agent` field (routines.ts JobConfig.agent is
-    // omitted for workflows, and validation rejects setting both). It runs via
-    // `agents run <workflow>`, which delegates to claude — so both the start and
-    // finish banners carry the Claude mark (runner.ts effectiveAgent).
+    // A workflow routine has no `agent` field (JobConfig.agent is omitted and validation rejects
+    // both) and runs via `agents run <workflow>`, which delegates to claude, so start and finish
+    // banners carry the Claude mark (runner.ts effectiveAgent).
     const cfg = agentConfig({ agent: undefined, workflow: 'deploy' });
     expect(routineAgent(cfg)).toBe('claude');
     expect(routineStartNotification(cfg)!.agent).toBe('claude');

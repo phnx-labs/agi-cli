@@ -1,28 +1,13 @@
-/**
- * Per-harness auth capability table (PHNX-3940).
- *
- * One row per `ALL_AGENT_IDS` entry. Governs `accounts add` / connect login
- * argv, identity strength, the durable worker credential (if any), and the
- * config-dir env that pins a slot. Completeness is pinned by the test against
- * `ALL_AGENT_IDS` — a new harness without a row is a type error and a failing
- * test, never a silent skip.
- *
- * Values are taken from evidence-harness-auth.md (2026-09-06) and the adapters
- * under `lib/harness/adapters/`. `LOGIN_INVOCATIONS` is the connect-era subset
- * (claude, codex) derived from this table so existing connect callers keep
- * working until T4 folds connect into `accounts add`.
- */
+/** Per-harness auth capability table (PHNX-3940), one row per `ALL_AGENT_IDS` entry: `accounts
+ * add`/connect login argv, identity strength, durable worker credential, and the config-dir env
+ * that pins a slot. The test pins completeness, so a new harness without a row is a type error. */
 import type { AgentId } from './types.js';
 
 type HarnessIdentityKind = 'strong' | 'email' | 'opaque';
 
-/**
- * Durable worker credential, or `none` when the harness must log in per box.
- * Codex and Grok are both: an API key (portable, bills the API) OR a
- * per-device device-auth login (the subscription seat — ChatGPT plan,
- * SuperGrok, X Premium+; never stored in the reserved store because it is a
- * rotating session, so each box signs in for itself).
- */
+/** Durable worker credential, or `none` when the harness must log in per box. Codex and Grok
+ * offer both an API key (portable, bills the API) and a per-device device-auth login (the
+ * subscription seat), which is a rotating session never stored in the reserved store. */
 type HarnessWorkerKind =
   | 'setup-token'
   | 'none'
@@ -45,11 +30,8 @@ interface HarnessAuthCapability {
 export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   claude: { login: ['auth', 'login'], status: ['auth', 'status'], identity: 'strong', worker: 'setup-token', slotEnv: 'CLAUDE_CONFIG_DIR' },
   codex: { login: ['login'], status: ['login', 'status'], identity: 'strong', worker: ['api-key:OPENAI_API_KEY', 'per-device:device-auth'], slotEnv: 'CODEX_HOME' },
-  // `--device-auth` pins the device-code flow: bare `grok login` defaults to
-  // `--oauth`, the loopback browser flow, which opens whatever browser profile
-  // the OS defaults to. The device-code screen prints the URL + code instead,
-  // so the human finishes it in the browser profile they choose — which is
-  // what makes it usable over an SSH shell on a worker.
+  // `--device-auth` pins the device-code flow: bare `grok login` defaults to the loopback `--oauth`
+  // flow, which opens the OS default browser profile.
   grok: { login: ['login', '--device-auth'], status: null, identity: 'strong', worker: ['api-key:XAI_API_KEY', 'per-device:device-auth'], slotEnv: 'GROK_HOME' },
   // auth.json has no email claim; identity is the sorted provider-id join
   // (`resolveOpenCodeAccountId`). NATIVE_ACCOUNT_CAPABILITIES.opencode.inspection
@@ -84,23 +66,16 @@ export function harnessWorkerKinds(agent: AgentId): HarnessWorkerKind[] {
   return Array.isArray(worker) ? worker : [worker];
 }
 
-/**
- * True when this harness has no portable worker credential and must log in
- * per box. `worker: 'none'` (kimi, antigravity, …) and a sole `per-device…`
- * kind both count; a dual path like Codex (API key OR device-auth) does not.
- */
+/** True when the harness has no portable worker credential and must log in per box: `worker:
+ * 'none'` (kimi, antigravity) or a sole `per-device` kind. A dual path like Codex (API key or
+ * device-auth) does not count. */
 export function harnessWorkerIsPerDevice(agent: AgentId): boolean {
   return harnessWorkerKinds(agent).every((kind) => kind === 'none' || kind.startsWith('per-device'));
 }
 
-/**
- * Native-login invocation per harness. Only harnesses with a REAL, finite login
- * COMMAND that connect currently drives — connect fails clearly for anything
- * else rather than faking a flow that never signs the user in. Verified against
- * the installed CLIs (PHNX-3940): `claude auth login --help` → "Sign in to your
- * Anthropic account" with `--email`; `codex login` drives the OAuth flow.
- * Args are the `HARNESS_AUTH.login` values for the same ids.
- */
+/** Native-login invocation per harness, only for those with a real finite login command that
+ * connect drives; connect fails clearly for the rest rather than faking a flow. Verified
+ * against installed CLIs (PHNX-3940): `claude auth login` (`--email`) and `codex login`. */
 export interface LoginInvocation {
   /** argv passed to the installed binary to start the native login. */
   args: string[];

@@ -57,25 +57,16 @@ export function matchInjectSelector(session: ActiveSession, token: string): bool
   return false;
 }
 
-/**
- * The `--device` selector, normalized to a single host string. `optsWithGlobals()`
- * merges the parent `sessions` command's variadic `-D, --device <target...>` over
- * this subcommand's scalar `--device`, so a single `--device box` arrives as
- * `['box']` — which flowed straight into `sshExec` and crashed on
- * `host.startsWith` (PHNX-3688). Delegates to the shared
- * {@link normalizeSingleDeviceOption} (also used by `sessions resume`,
- * PHNX-3940) rather than re-implementing the array/scalar coercion here.
- */
+/** The `--device` selector as a single host string. `optsWithGlobals()` merges the parent's
+ * variadic `-D, --device <target...>` over this scalar, so `--device box` arrived as `['box']` and
+ * crashed `host.startsWith` in `sshExec` (PHNX-3688). */
 export function normalizeInjectDevice(value: string | string[] | undefined): string | undefined {
   return normalizeSingleDeviceOption(value, 'sessions inject');
 }
 
-/**
- * The `agents sessions inject` argv to re-run ON a device (its tmux panes live
- * there, so resolution must happen there). Every flag rides along EXCEPT
- * `--device`: the command runs on the device, resolving locally. Pure so the
- * forwarded invocation is asserted without an SSH hop (PHNX-3688).
- */
+/** The `sessions inject` argv to re-run on a device (its tmux panes live there, so resolution
+ * happens there). Every flag is forwarded except `--device`. Pure so the forwarded invocation is
+ * asserted without an SSH hop (PHNX-3688). */
 export function buildRemoteInjectArgv(sessionId: string, text: string, options: InjectOptions): string[] {
   const argv = ['agents', 'sessions', 'inject', sessionId, text];
   if (options.enter === false) argv.push('--no-enter');
@@ -86,20 +77,12 @@ export function buildRemoteInjectArgv(sessionId: string, text: string, options: 
   return argv;
 }
 
-/**
- * Resolve `device` (registry alias or `user@host`) to an ssh target and re-run
- * `agents sessions inject` there, so a bare session id + `--device` resolves on
- * the box that actually holds the session's tmux panes. The tool-native form of
- * the `agents ssh <device> "agents sessions inject <id> …"` workaround (PHNX-3688).
- */
-/**
- * Resolve `--device` to an ssh target. A registered device becomes its
- * `user@dnsName`; a bare unknown name (an ad-hoc `user@host` or ssh_config alias)
- * is handed to ssh verbatim (`resolveHost` returns null for it). A registered
- * device we CANNOT dial — password-auth, addressless — throws its typed error and
- * is NOT degraded to the raw name, which could ssh a coincidentally-matching but
- * unrelated `~/.ssh/config` Host (PHNX-3688 review).
- */
+/** Resolve `device` (registry alias or `user@host`) to an ssh target and re-run `sessions inject`
+ * there, so a bare session id resolves on the box holding its tmux panes. The tool-native form of
+ * the `agents ssh <device>` workaround (PHNX-3688). */
+/** Resolve `--device` to an ssh target: a registered device becomes `user@dnsName`; a bare unknown
+ * name (`user@host`, ssh_config alias) goes to ssh verbatim. A registered device we can't dial
+ * throws its typed error, never degraded to the raw name (PHNX-3688). */
 export async function resolveInjectSshTarget(device: string): Promise<string> {
   const host = await resolveHost(device);
   return host ? sshTargetFor(host) : device;

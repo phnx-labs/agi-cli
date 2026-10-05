@@ -16,10 +16,9 @@ import {
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
 
-// Profile tokens (`agents-cli.<provider>.token`) and account bundles are
-// keychain items in the standalone — on a headed macOS box that is the
-// operator's login keychain, so the blocks that write them run only where the
-// standalone routes keychain items to its encrypted file store.
+// Profile tokens and account bundles are keychain items in the standalone, which on a headed macOS
+// box is the operator's login keychain, so the blocks that write them run only where the
+// standalone uses its encrypted file store.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 let TEST_ROOT: string;
@@ -248,14 +247,9 @@ describe('forkNeedsWizard / addNeedsWizard — when the interactive wizard shoul
 });
 
 describe('the wizard-vs-error gate uses isInteractiveTerminal(), not a stdout-only check', () => {
-  // Regression test: the `add`/`fork` actions originally gated the wizard on
-  // `process.stdout.isTTY` alone. That hangs for real — piped stdin with a
-  // forced/inherited stdout TTY (e.g. `agents harness add < /dev/null` under a
-  // process-substitution or captured-stdout runner) reads as "interactive",
-  // launches the wizard, and @inquirer/prompts' select() then blocks forever
-  // reading a stdin that never delivers a keypress. `isInteractiveTerminal()`
-  // (../commands/utils.ts) requires BOTH stdin and stdout to be a TTY, closing
-  // that gap. This test pins the split-TTY case the hang was found in.
+  // Regression: `add`/`fork` gated the wizard on `stdout.isTTY` alone, which hangs with piped
+  // stdin and a forced stdout TTY (select() blocks on a stdin that never delivers).
+  // `isInteractiveTerminal()` requires both; this pins the split-TTY case.
   const origIn = process.stdin.isTTY;
   const origOut = process.stdout.isTTY;
   afterEach(() => {

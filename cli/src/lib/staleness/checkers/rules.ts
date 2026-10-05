@@ -1,18 +1,6 @@
-/**
- * Rules staleness — composed from a layered `rules.yaml` preset definition
- * plus per-layer `subrules/<name>.md` fragments. Fingerprints exactly the
- * source files that contribute to the active preset's composed output.
- *
- * Bug-fixed from v1: the old `resolveRuleFile` looked for `rules/<preset>.md`,
- * a path that never exists (presets live in `rules.yaml`, fragments live in
- * `subrules/`). That made the rules section always report stale. This module
- * uses `composeRulesFromState` to discover the actual source file set per
- * preset/cwd, so freshness reflects real source changes.
- *
- * Special-cased vs. the other checkers: agent + version are needed to read
- * the active preset, so this module doesn't conform to ResourceChecker. The
- * aggregator wires it up explicitly.
- */
+/** Rules staleness: fingerprints exactly the source files (`rules.yaml` preset plus per-layer
+ * `subrules/<name>.md`) that feed the active preset's output, found via `composeRulesFromState`.
+ * v1 looked for a never-existing `rules/<preset>.md` and always reported stale. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,11 +30,8 @@ function rulesDirForLayer(scope: LayerScope, cwd: string): string | null {
   return extras.length > 0 ? path.join(extras[0].dir, 'rules') : null;
 }
 
-/**
- * Resolve the set of source files contributing to the active preset's output.
- * Keys are relative paths within the rules dir (stable across machines).
- * Values are absolute current paths.
- */
+/** Resolve the source files contributing to the active preset's output. Keys are rules-dir-relative
+ * paths (stable across machines); values are absolute current paths. */
 function activeSources(agent: AgentId, version: string, cwd: string): Record<string, string> {
   const result: Record<string, string> = {};
   let compose;

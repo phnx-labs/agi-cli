@@ -1,10 +1,6 @@
-/**
- * `agents reminders` — list your personal operating reminders.
- *
- * The reminders live in `~/.agents/reminders/reminders.yaml` and are surfaced
- * succinctly in the Claude statusline — one per session, chosen from the session
- * id. This command shows the full set (and the file to edit).
- */
+/** `agents reminders` lists your personal operating reminders from
+ * `~/.agents/reminders/reminders.yaml`, which the Claude statusline shows one per session, chosen
+ * from the session id. */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 

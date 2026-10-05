@@ -1,13 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { computeTokPerSec } from './throughput.js';
 
-/**
- * `computeTokPerSec` is the CLI's single source of truth for the live
- * output-token throughput the Fleet shows (issue #741 folded the
- * extension's parallel `computeOutputTokensPerSec` copy into here). These lock
- * the per-format token accounting and the rolling-window cutoff, since a drift
- * here silently mis-reports every running agent's speed.
- */
+/** `computeTokPerSec` is the CLI's single source for the Fleet's output-token throughput (issue
+ * #741 folded the extension's copy into it). Tests lock per-format token accounting and the
+ * rolling-window cutoff. */
 
 const NOW = Date.parse('2026-07-12T12:00:00.000Z');
 const at = (secondsAgo: number) => new Date(NOW - secondsAgo * 1000).toISOString();

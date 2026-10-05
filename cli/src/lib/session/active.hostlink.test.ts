@@ -10,13 +10,9 @@ function row(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'idle', ...over };
 }
 
-/**
- * `foldHostLink` is where a lost host actually changes what the user reads in the
- * status column, so the tests are about PRECEDENCE: the new statuses must replace
- * exactly the ones they improve on and leave the rest alone. Over-reporting is
- * the failure mode that would make the feature worthless — a listing where every
- * headless run says "orphan" trains the user to ignore the word.
- */
+/** `foldHostLink` changes what the status column shows when a host is lost, so these tests are
+ * about precedence: new statuses replace exactly what they improve on. Over-reporting would make
+ * the feature worthless: if every headless run says "orphan", users ignore the word. */
 describe('foldHostLink status precedence', () => {
   it('turns a dead agent under a dead window into `crashed` instead of a bare `closed`', () => {
     const rows = [row({ status: 'closed', windowHeartbeatMs: staleWindow })];
@@ -45,12 +41,9 @@ describe('foldHostLink status precedence', () => {
   });
 
   it('leaves a WORKING session alone with zero tmux clients — a detached remote pane is normal', () => {
-    // SES-18a: a running row is NOT promoted on client absence alone. Since
-    // RUSH-3125 wraps every remote interactive run in a detached pane,
-    // running-with-zero-clients is the normal steady state between check-ins, so
-    // promoting it would relabel every remote agent as orphaned whenever nobody
-    // is attached (the false positive reverted in 6d973b823). Only a lost WINDOW
-    // promotes a running agent — see the next test.
+    // SES-18a: a running row is not promoted on client absence alone. RUSH-3125 wraps every remote
+    // interactive run in a detached pane, so zero clients is the normal steady state; promoting it
+    // was the false positive reverted in 6d973b823. Only a lost WINDOW promotes a running agent.
     const rows = [row({ status: 'running', tmuxClients: 0 })];
     foldHostLink(rows);
     expect(rows[0].status).toBe('running');
@@ -59,10 +52,9 @@ describe('foldHostLink status precedence', () => {
   });
 
   it('promotes a WORKING session to `orphaned` when its owning window was LOST', () => {
-    // PHNX-3183: the genuinely-stranded case. An IDE window that WAS republishing
-    // its heartbeat went stale — the host died uncleanly (crash / reboot / SSH
-    // drop) and the agent outlived it in tmux. Unlike zero-clients above, this is
-    // a positive "a client was expected and is now gone", so it IS flagged.
+    // PHNX-3183: the genuinely stranded case: an IDE window that was republishing its heartbeat
+    // went stale (crash, reboot, SSH drop) while the agent outlived it in tmux. A client was
+    // expected and is gone, so it is flagged.
     const rows = [row({ status: 'running', windowHeartbeatMs: staleWindow })];
     foldHostLink(rows);
     expect(rows[0].status).toBe('orphaned');
@@ -159,14 +151,9 @@ describe('foldHostLink presence honesty', () => {
   });
 });
 
-/**
- * `foldHostLink` rewrites `input_required` to `orphaned`, which quietly moved a
- * session OUT of every consumer that recognised "needs a human" by that status —
- * `--waiting`'s filter and its non-zero exit among them. A session waiting on a
- * question with nobody watching is the most acute case those consumers exist to
- * surface, not one they should drop, so the predicate reads the `activity` the
- * fold never rewrites.
- */
+/** `foldHostLink` rewrites `input_required` to `orphaned`, which hid the session from consumers
+ * keyed on that status (`--waiting`, its exit code). A session waiting on a question with nobody
+ * watching is what they exist for, so the predicate reads `activity`. */
 describe('a lost host does not hide a session that needs a human', () => {
   it('still counts as awaiting after the fold turns it orphaned', () => {
     const rows = [row({ status: 'input_required', activity: 'waiting_input', tmuxClients: 0 })];

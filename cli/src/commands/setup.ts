@@ -1,9 +1,5 @@
-/**
- * First-run setup command.
- *
- * Registers the `agents setup` command which clones the system repo into
- * ~/.agents/.system/ and installs agent CLIs with resource syncing.
- */
+/** First-run `agents setup`: clones the system repo into ~/.agents/.system/ and installs agent CLIs
+ * with resource syncing. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -279,12 +275,8 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
   console.log(chalk.cyan('  agents repo init'));
 }
 
-/**
- * Ensure the system repo exists before running a command that needs it.
- * If ~/.agents/.system/ is not a git repo AND we're in an interactive TTY,
- * prompt the user to run setup now. In non-interactive mode, print a clear
- * error and exit.
- */
+/** Ensure the system repo exists before a command that needs it. If ~/.agents/.system/ is not a git
+ * repo: on a TTY prompt to run setup now; otherwise print a clear error and exit. */
 export async function ensureInitialized(program: Command): Promise<void> {
   const agentsDir = getAgentsDir();
   if (isGitRepo(agentsDir)) return;
@@ -308,12 +300,9 @@ export async function ensureInitialized(program: Command): Promise<void> {
   await runSetup(program, { suppressFooter: true });
 }
 
-/**
- * Interactive "what else do you want to set up?" menu shown after the bare
- * `agents setup` finishes on a TTY. Each pick runs that capability's guided
- * wizard. Never throws — a cancel or an optional wizard's error just skips the
- * rest and lets core setup complete.
- */
+/** Interactive "what else to set up?" menu after bare `agents setup` on a TTY; each pick runs that
+ * capability's wizard. Never throws: a cancel or optional-wizard error skips the rest and lets core
+ * setup complete. */
 type SetupPhase = 'browser' | 'computer' | 'secrets' | 'term' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
 type SetupStatusState = 'ready' | 'missing' | 'n/a';
 interface SetupStatusRow {
@@ -323,10 +312,8 @@ interface SetupStatusRow {
 }
 
 export async function getSetupStatus(): Promise<SetupStatusRow[]> {
-  // Browser readiness is now config + standalone presence (PHNX-4101): the engine
-  // (@phnx-labs/browser-cli) owns profile declarations and launchability, so
-  // agents-cli reads the shared default-profile key it and browser-cli both write
-  // rather than resolving a profile through a deleted in-repo engine.
+  // Browser readiness is config plus standalone presence (PHNX-4101): `@phnx-labs/browser-cli` owns
+  // profiles and launchability, so read the shared default-profile key both CLIs write.
   const browserCliInstalled = browserInstalled();
   const configuredBrowserProfile = getConfigValue('browser.profile').value as string | undefined;
   const browserReady = browserCliInstalled && !!configuredBrowserProfile;

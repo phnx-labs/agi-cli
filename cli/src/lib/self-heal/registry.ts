@@ -1,9 +1,6 @@
-// The self-heal registry + runner.
-//
-// One ordered list of HealChecks; one runner that executes the requested subset,
-// isolating failures (one check throwing never aborts the rest) and aggregating a
-// SelfHealReport. Both front doors — the daemon (by cadence) and `agents doctor`
-// (all, or by id) — call runSelfHeal.
+// The self-heal registry and runner: one ordered list of HealChecks, run by subset with failure
+// isolation (one throw never aborts the rest) into a SelfHealReport. Used by both the daemon (by
+// cadence) and `agents doctor`.
 
 import type {
   HealCheck,

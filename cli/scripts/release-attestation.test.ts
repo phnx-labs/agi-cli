@@ -1,8 +1,6 @@
-/**
- * Exact-tree release attestations, exercised against REAL files and a REAL git
- * repo (no mocks). Parent-commit evidence, lock/policy/toolchain drift, and a
- * missing key must fail closed. Promote checks the on-disk tarball digest.
- */
+/** Exact-tree release attestations, tested against real files and a real git repo. Parent-commit
+ * evidence, lock/policy/toolchain drift, and a missing key must fail closed; promote checks the
+ * on-disk tarball digest. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -110,14 +108,9 @@ describeUnix('release-attestation.sh', () => {
   });
 
   it('policyVersion depends only on file content, not the --repo-root checkout path (RUSH-2749)', () => {
-    // release.sh re-execs into a freshly-named throwaway worktree on every
-    // invocation (.agents/worktrees/release-v<version>-<pid>), and a
-    // producer runs in its own separate worktree too -- so no two real
-    // callers ever share one literal --repo-root. policy_version_of used to
-    // hash the absolute file PATH alongside its content, so identical files
-    // at two different checkouts of the exact same commit produced two
-    // different policyVersion values, and no attestation any producer wrote
-    // could ever satisfy release.sh's own require() call.
+    // release.sh and producers run in separate throwaway worktrees, so no two callers share a
+    // --repo-root. policy_version_of used to hash the absolute path, so identical files at two
+    // checkouts of one commit yielded different policyVersion values.
     const { root, commit } = initRepo();
     const idA = JSON.parse(sh(['identity', '--repo-root', root], root).out);
 
@@ -367,10 +360,9 @@ describeUnix('release-attestation.sh', () => {
     expect(p99).toBeLessThan(10_000);
   });
 
-  // derive mints a release-tree attestation from a green base WITHOUT re-running
-  // the suite -- the redundant second full-suite run per release (PHNX-3237). It
-  // is sound only because a release commit changes version/changelog/command-index
-  // and nothing else; derive fails closed on any other changed path.
+  // derive mints a release-tree attestation from a green base without re-running the suite
+  // (PHNX-3237). It is sound only because a release commit changes version/changelog/command-index
+  // and nothing else; derive fails closed on any other path.
   describe('derive', () => {
     function releaseCommit(root: string, changes: () => void): { tree: string; commit: string } {
       changes();

@@ -1,7 +1,6 @@
-// Pure agent-spec resolution — the engine core. Takes a VersionProvider instead
-// of touching the filesystem, so every branch is unit-testable with in-memory
-// fixtures. Domain = installed versions (`add`/install use a separate npm path).
-// Never calls process.exit; throws AgentSpecError on bad input.
+// Pure agent-spec resolution, the engine core. Takes a VersionProvider instead of the filesystem
+// so every branch is unit-testable with in-memory fixtures. Domain is installed versions. Never
+// calls process.exit; throws AgentSpecError on bad input.
 
 import type { AgentId } from '../types.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError } from '../agents.js';
@@ -15,10 +14,8 @@ import {
   type VersionFilter,
 } from './types.js';
 
-/**
- * Resolve an agent spec (single or comma-list) into concrete installed targets.
- * `@latest`/`@oldest`/`@all` range over installed versions.
- */
+/** Resolve an agent spec (single or comma-list) into concrete installed targets;
+ * `@latest`/`@oldest`/`@all` range over installed versions. */
 export function resolveAgentTargets(
   spec: string,
   provider: VersionProvider,
@@ -81,10 +78,9 @@ export function resolveAgentTargets(
       if (proj) { push(agent, proj, 'project-pin'); continue; }
       const glob = provider.getGlobalDefault(agent);
       if (glob) { push(agent, glob, 'global-default'); continue; }
-      // An isolated-only agent never has a global default — that is the point — so
-      // without this step `--agents codex` threw "No default version set" at a user
-      // who had explicitly run `agents use codex@<v>`. resolveVersion already had
-      // this fallback; the two resolvers had drifted apart.
+      // An isolated-only agent never has a global default, so without this step `--agents codex`
+      // threw "No default version set" after an explicit `agents use codex@<v>`. resolveVersion
+      // had the fallback; the resolvers drifted.
       const iso = provider.getIsolatedDefault(agent);
       if (iso) { push(agent, iso, 'isolated-default'); continue; }
       const installed = provider.listInstalled(agent);
@@ -150,10 +146,8 @@ export function resolveAgentTargets(
   return out;
 }
 
-/**
- * Single-target commands (`run`, `sync`, `inspect`): resolve a spec that must
- * name exactly one installed version. Rejects `@all` / multi-target specs.
- */
+/** Single-target commands (`run`, `sync`, `inspect`): resolve a spec naming exactly one installed
+ * version; rejects `@all` and multi-target specs. */
 export function resolveSingleAgentTarget(
   spec: string,
   provider: VersionProvider,
@@ -170,13 +164,9 @@ export function resolveSingleAgentTarget(
   return { agent: t.agent, version: t.version, source: t.source };
 }
 
-/**
- * Read/list commands: resolve a qualifier into a version filter.
- *   undefined / '' / @any → no filter (show all installed versions)
- *   @default / @pinned    → the literal 'default' sentinel (show the configured default)
- *   @latest/@oldest/x.y.z → a concrete version (throws if not installed)
- * Uniform `@default` handling fixes the prior rules-vs-view inconsistency.
- */
+/** Read/list commands: resolve a qualifier into a version filter. No qualifier or @any: no filter;
+ * @default/@pinned: the `'default'` sentinel; @latest/@oldest/x.y.z: a concrete version (throws if
+ * not installed). Uniform `@default` handling fixes the rules-vs-view inconsistency. */
 export function resolveVersionFilter(
   agent: AgentId,
   qualifier: string | undefined | null,
@@ -191,14 +181,9 @@ export function resolveVersionFilter(
   return { version, source };
 }
 
-/**
- * Concrete version filter for list/display commands whose downstream code
- * filters by an exact version string (not the `'default'` sentinel `view` uses).
- *   undefined / '' / @any → undefined  (no filter → show all installed)
- *   @default / @pinned    → the configured default version, or undefined if none
- *                           is set (falls back to show-all rather than erroring)
- *   @latest/@oldest/x.y.z → a concrete version (throws AgentSpecError if bad)
- */
+/** Concrete version filter for list/display commands that filter by exact version, not the
+ * `'default'` sentinel. @default/@pinned gives the configured default, or undefined (show all) if
+ * none is set; concrete qualifiers throw AgentSpecError if bad. */
 export function resolveListFilter(
   agent: AgentId,
   qualifier: string | undefined | null,

@@ -15,10 +15,9 @@ import {
   projectsEnv,
 } from './routines.test-fixture.js';
 
-// `routines add`/`edit` CLI flag validation slice of the routines.*.test.ts
-// suite (RUSH-2819) — split off the original 2,249-line routines.test.ts
-// (measured ~194s of test time) so vitest can parallelize the file across
-// worker forks. Shared fixtures: routines.test-fixture.ts.
+// `routines add`/`edit` flag-validation slice of the routines.*.test.ts suite (RUSH-2819), split
+// from the 2,249-line routines.test.ts (~194s) so vitest can parallelize it across forks. Shared
+// fixtures: routines.test-fixture.ts.
 
 const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome } = createDaemonHarness('add');
 registerLeakDetector();

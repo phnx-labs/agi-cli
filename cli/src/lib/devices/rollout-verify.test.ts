@@ -1,10 +1,5 @@
-/**
- * The bug under test (RUSH-2446): a fleet rollout reported `ok` on `exit 0` from
- * `agents upgrade`, while a box whose `agents` resolves to the side-by-side dev
- * install (`~/.local/agents-cli-dev`, `scripts/install.sh:38`) kept running old
- * code. These tests drive the real probe against a real dev-shaped install on
- * disk — no mocking of the shell, the parse, or the classifier.
- */
+/** The bug (RUSH-2446): a fleet rollout reported `ok` on `exit 0` from `agents upgrade` while a box
+ * whose `agents` resolves to the side-by-side dev install kept running old code. */
 import { describe, expect, it, afterAll } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -28,11 +23,9 @@ const DEV_VERSION = '0.0.0-dev.deadbee';
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rollout-verify-'));
 afterAll(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
 
-/**
- * Lay down the two real install shapes on disk and a `bin/agents` symlink
- * pointing at one of them, exactly as npm's bin link and `install.sh`'s
- * `~/.local/bin/agents` do. Returns the bin dir to prepend to PATH.
- */
+/** Lay down the two real install shapes on disk with a `bin/agents` symlink to one of them, as
+ * npm's bin link and `install.sh`'s `~/.local/bin/agents` do. Returns the bin dir to prepend to
+ * PATH. */
 function makeInstalls(which: 'dev' | 'global'): string {
   const dir = fs.mkdtempSync(path.join(tmpRoot, `${which}-`));
   const devEntry = path.join(dir, 'agents-cli-dev', 'dist', 'index.js');

@@ -10,16 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv44-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v43 -> v44: backfill duration_ms for harnesses whose scan extractor never
- * derived it (PHNX-3457). rush/grok/kimi/cursor/muse/antigravity left it NULL, so
- * the console median was computed over only the ~48% that carried it. The
- * migration repairs already-indexed rows in place from last_activity − timestamp,
- * no reparse. We seed a pre-v44 `sessions` table with three rows — a NULL-duration
- * row with a real span, a NULL-duration row whose activity == creation (no
- * positive span), and a row that already has a precise duration — stamp the
- * version to 43, then let getDB replay migrateSchema(43).
- */
+/** v43 -> v44: backfill duration_ms for harnesses whose extractor never derived it (PHNX-3457), in
+ * place from last_activity - timestamp with no reparse. Seeds a pre-v44 table with a NULL row with
+ * a real span, a NULL row with no positive span, and a row with a precise duration. */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -27,10 +20,9 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // The full sessions table (id..archived_at) is created by getDB's SCHEMA via
-  // CREATE TABLE IF NOT EXISTS, so a partial pre-seed here would block it and then
-  // fail getDB's post-migration index/repair steps that reference other columns.
-  // Seed the full shape — an authentic pre-v44 DB carries every column through v43.
+  // The full sessions table is created by getDB's SCHEMA via CREATE TABLE IF NOT EXISTS, so a
+  // partial pre-seed would block it and fail the post-migration index/repair steps. Seed the full
+  // authentic pre-v44 shape.
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (

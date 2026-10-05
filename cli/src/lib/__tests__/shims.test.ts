@@ -23,10 +23,9 @@ interface ShimFixtureCase {
   alreadyPresent?: boolean;
 }
 
-// The shim PATH-block rewrite (addShimsToPath) is POSIX shell-rc logic and
-// operates on LF-delimited lines. Git can check these text fixtures out with
-// CRLF on Windows, so fold to LF on read — otherwise the comparison fails on a
-// pure line-ending difference that never occurs in a real POSIX rc file.
+// The shim PATH-block rewrite (addShimsToPath) is POSIX shell-rc logic on LF lines. Git can check
+// fixtures out with CRLF on Windows, so fold to LF on read; otherwise a line-ending difference that
+// never occurs in a real rc file fails the comparison.
 const toLF = (s: string): string => s.replace(/\r\n/g, '\n');
 
 function readShimFixture(name: string): { meta: ShimFixtureCase; before: string; after: string } {

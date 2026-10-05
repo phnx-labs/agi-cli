@@ -4,10 +4,9 @@ type WatchCallback = (
   filename: string | Buffer | null,
 ) => void;
 
-// Plain top-level const captured by closure in the vi.mock factory below.
-// Bun's test runner does not hoist vi.mock, and vitest's hoister sees the
-// const declared above the factory, so this works in both runners without
-// vi.hoisted (which is not available in Bun's native test runner).
+// Plain top-level const captured by closure in the vi.mock factory below: Bun's test runner does
+// not hoist vi.mock, so this works in both runners without vi.hoisted (unavailable in Bun's native
+// runner).
 const watchState: { callbacks: WatchCallback[] } = { callbacks: [] };
 
 // Pull the real fs via the alternate `node:fs` specifier so vi.mock('fs')

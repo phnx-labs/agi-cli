@@ -20,10 +20,9 @@ import { addAccount } from './account-registry.js';
 // Keychain item for 'openrouter' provider: agents-cli.openrouter.token
 const KEYCHAIN_ITEM = profileKeychainItem('openrouter');
 
-// Profile tokens and account bundles are keychain items, so on a headed macOS
-// box the real standalone would reach the operator's login keychain; the
-// credential-backed cases run where keychain items are file-backed (headless
-// Linux/Windows, CI). Every test gets its own empty standalone store.
+// Profile tokens and account bundles are keychain items, so on a headed macOS box the real
+// standalone would use the operator's login keychain; credential-backed cases run where items are
+// file-backed (headless Linux/Windows, CI). Each test gets its own empty standalone store.
 const fileBacked = await standaloneKeychainIsFileBacked();
 useFreshSecretsHome();
 

@@ -1,8 +1,5 @@
-/**
- * Pure display helpers for `agents routines list`.
- *
- * No external dependencies. All functions are pure (no I/O, no side effects).
- */
+/** Pure display helpers for `agents routines list`: no external dependencies, no I/O, no side
+ * effects. */
 
 // ---------------------------------------------------------------------------
 // humanizeCron
@@ -10,12 +7,8 @@
 
 const DAY_NAMES = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
 
-/**
- * Convert a cron expression to a human-readable phrase.
- *
- * Handles the common patterns. For anything unrecognized, returns the raw
- * expression so the user still sees something useful. NEVER throws.
- */
+/** Convert a cron expression to a human-readable phrase for the common patterns; anything
+ * unrecognized returns the raw expression. NEVER throws. */
 export function humanizeCron(expr: string, _tz?: string): string {
   try {
     const parts = expr.trim().split(/\s+/);
@@ -101,15 +94,8 @@ function formatTime12(hour: number, minute: number): string {
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/**
- * Convert a next-run Date into a human phrase relative to `now`.
- *
- * - null            → '-'
- * - same calendar day  → 'today 9:00 AM'
- * - next calendar day  → 'tomorrow 9:00 AM'
- * - within 7 days   → 'Mon 9:00 AM'
- * - further out      → 'Jun 15, 9:00 AM'
- */
+/** Convert a next-run Date to a phrase relative to `now`: null -> '-', same day 'today 9:00 AM',
+ * next day 'tomorrow 9:00 AM', within 7 days 'Mon 9:00 AM', further 'Jun 15, 9:00 AM'. */
 export function humanizeNextRun(date: Date | null, now: Date, tz?: string): string {
   if (!date) return '-';
 
@@ -158,28 +144,13 @@ export function humanizeNextRun(date: Date | null, now: Date, tz?: string): stri
 // formatRepoLink
 // ---------------------------------------------------------------------------
 
-/**
- * Maximum display length for a repo cell. Display strings longer than this
- * are truncated with an ellipsis so column alignment is preserved.
- * Consumers that render the column should use this constant as the column width.
- */
+/** Maximum display length for a repo cell; longer strings are truncated with an ellipsis to keep
+ * columns aligned, and renderers should use it as the column width. */
 export const REPO_DISPLAY_MAX = 24;
 
-/**
- * Parse a repo string into a display label and an optional hyperlink target.
- *
- * Rules:
- *   - null / undefined / empty / non-string → display '-', href null
- *   - 'owner/name' (one slash)              → display 'owner/name', href 'https://github.com/owner/name/pulls'
- *   - 'https://...' or 'http://...'         → display hostname+path, href the URL verbatim
- *   - anything else                         → display raw string, href null
- *
- * The display string is truncated to REPO_DISPLAY_MAX characters (with a
- * trailing '…') when it would otherwise exceed the column width. The href
- * is always the full untruncated URL so hyperlinks remain functional.
- *
- * NEVER throws — mirrors the contract of humanizeCron.
- */
+/** Parse a repo string into a display label and optional href: 'owner/name' links to GitHub pulls,
+ * an http(s) URL shows host+path, anything else shows raw with no href. Display truncates to
+ * REPO_DISPLAY_MAX; href stays full. Never throws. */
 export function formatRepoLink(repo: unknown): { display: string; href: string | null } {
   if (repo == null || typeof repo !== 'string' || repo.trim() === '') {
     return { display: '-', href: null };

@@ -1,11 +1,6 @@
-/**
- * Unified config key grammar for `agents config`.
- *
- * Translates user-facing dotted keys like `run.claude@*.tier.best` into the
- * existing storage locations (run.defaults, model.tiers, config.*,
- * defaultBrowserProfile, deviceConfig.*) so the new command barrel can sit on
- * top of the current YAML schema without a migration.
- */
+/** Unified config key grammar for `agents config`: translates dotted keys like
+ * `run.claude@*.tier.best` into existing storage (run.defaults, model.tiers, config.*,
+ * defaultBrowserProfile, deviceConfig.*) without a migration. */
 
 import { AGENTS } from './agents.js';
 import type { AgentId } from './types.js';
@@ -15,12 +10,9 @@ import { VERSION_RE } from './run-defaults.js';
 /** The top-level scope of a unified config key. */
 export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates' | 'menubar';
 
-/**
- * The AGI Menu preference leaf names under `menubar.menu.*` (PHNX-3999). The
- * types, defaults, and enum validation for each live in `device-config.ts`'s
- * CONFIG_KEYS (user scope); this list is only the parser's allow-set so an
- * unknown `menubar.menu.<x>` fails loud here instead of at the store.
- */
+/** AGI Menu preference leaf names under `menubar.menu.*` (PHNX-3999). Types and defaults live in
+ * `device-config.ts` CONFIG_KEYS; this is only the parser's allow-set so an unknown key fails loud
+ * here. */
 export const MENUBAR_MENU_PROPERTIES = [
   'defaultProject',
   'workingRowsShown',
@@ -96,10 +88,8 @@ export interface ParsedSummarizerConfigKey {
   property: 'enabled' | 'baseUrl' | 'model';
 }
 
-/**
- * The managed-harness auto-update switch (PHNX-3940): `updates.auto` (global)
- * or `updates.<agent>.auto` (one harness — `agent` is set).
- */
+/** The managed-harness auto-update switch (PHNX-3940): `updates.auto` (global) or
+ * `updates.<agent>.auto` (one harness, `agent` set). */
 export interface ParsedUpdatesConfigKey {
   scope: 'updates';
   property: 'auto';
@@ -178,29 +168,9 @@ export function formatAgentVersion(agent: AgentId, version: string): string {
   return `${agent}@${version}`;
 }
 
-/**
- * Parse a unified config key into its structured representation.
- *
- * Supported forms:
- *   run.<agent@version>.model
- *   run.<agent@version>.mode
- *   run.<agent@version>.effort
- *   run.<agent@version>.tier.<cheap|default|best|ultra>
- *   interactive.host
- *   auto.pool
- *   browser.profile
- *   project.root
- *   devices.<name>.role
- *   devices.<name>.max-agents
- *   devices.<name>.scheduler
- *   devices.<name>.daemon
- *   devices.<name>.watchdog
- *   devices.<name>.tmux
- *   devices.<name>.browser.remote-control
- *   devices.<name>.browser.task-idle-minutes
- *   devices.<name>.notes
- *   devices.<name>.browser.profile
- */
+/** Parse a unified config key into its structured form. Supported:
+ * `run.<agent@version>.{model,mode,effort,tier.<level>}`, `interactive.host`, `auto.pool`,
+ * `browser.profile`, `project.root`, and `devices.<name>.{role,max-agents,scheduler,daemon,...}`. */
 export function parseConfigKey(key: string): ParsedConfigKey {
   const raw = key.trim();
   if (!raw) throw new Error('Config key is required.');
@@ -383,11 +353,8 @@ export function listKnownConfigKeys(): string[] {
   return keys;
 }
 
-/**
- * Map a parsed device property to the internal device-config key name.
- * This is the bridge between the friendly `agents config` surface and the
- * existing CONFIG_KEYS registry in lib/device-config.ts.
- */
+/** Map a parsed device property to the internal device-config key name: the bridge from `agents
+ * config` to the CONFIG_KEYS registry in lib/device-config.ts. */
 export function devicePropertyToConfigName(property: DeviceConfigProperty): string {
   switch (property) {
     case 'role':
@@ -419,10 +386,7 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
   }
 }
 
-/**
- * Map a parsed key to the human-readable "where is this stored" note.
- * Useful for `agents config list --source` output.
- */
+/** Map a parsed key to a human-readable storage note, for `agents config list --source`. */
 export function configKeyStorageHint(parsed: ParsedConfigKey): string {
   switch (parsed.scope) {
     case 'run':

@@ -11,13 +11,9 @@ export interface MemoryCacheOptions<K extends {} = string, V extends {} = {}> {
   now?: () => number;
 }
 
-/**
- * Correctness-first process-local cache defaults.
- *
- * The cache is always bounded, never returns stale values, and does not extend
- * an entry's life merely because it was read. Durable/cross-process state must
- * continue to live in SQLite or an atomic on-disk snapshot.
- */
+/** Correctness-first process-local cache: always bounded, never returns stale values, reads don't
+ * extend an entry's life. Durable or cross-process state belongs in SQLite or an atomic on-disk
+ * snapshot. */
 export function createMemoryCache<K extends {}, V extends {}>(
   options: MemoryCacheOptions<K, V>,
 ): LRUCache<K, V> {

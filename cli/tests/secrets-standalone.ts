@@ -1,26 +1,6 @@
-/**
- * The real standalone `secrets` CLI for the test suite (PHNX-3989).
- *
- * agents-cli talks to secrets only through `src/lib/secrets-client.ts`, which
- * spawns the published `@phnx-labs/secrets-cli` executable — so every test that
- * touches an account bundle, a profile token, or the reserved `auth` bundle
- * needs that executable, not a mock (repo rule: real services only). This
- * module resolves it once per machine:
- *
- *   1. `AGENTS_TEST_SECRETS_BIN` / `SECRETS_BIN` already set → use it as-is (a
- *      secrets-cli checkout's `dist/index.js`, or an operator-installed shim).
- *   2. Otherwise install the pinned published version into a per-version prefix
- *      under the OS temp dir with `npm i -g --prefix <prefix>` — exactly the
- *      artifact a user installs — and reuse it across runs and forks. The
- *      install is serialized by a directory lock so parallel vitest forks (or
- *      two suites on one box) never race the same prefix.
- *
- * `tests/global-setup.ts` calls {@link ensureStandaloneSecretsBin} in the main
- * process before any fork spawns, so `SECRETS_BIN` is inherited everywhere;
- * `tests/setup.ts` pins the per-fork posture (no broker, deterministic file-store
- * passphrase); {@link useFreshSecretsHome} gives one test file — or one test — its
- * own empty `SECRETS_HOME`.
- */
+/** The real standalone `secrets` CLI for the suite (PHNX-3989): tests need the published
+ * `@phnx-labs/secrets-cli`, not a mock. Uses `AGENTS_TEST_SECRETS_BIN`/`SECRETS_BIN` if set, else
+ * installs the pinned version into a per-version temp prefix, directory-locked against fork races. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -43,19 +23,9 @@ function installPrefix(): string {
   return path.join(os.tmpdir(), `agents-secrets-cli-${STANDALONE_SECRETS_VERSION}`);
 }
 
-/**
- * The installed `secrets` executable to hand the client as `SECRETS_BIN`.
- *
- * On POSIX this is the npm-created **bin shim** (`<prefix>/bin/secrets`, a
- * `#!/usr/bin/env node` launcher), NOT the raw `dist/index.js`. This matters
- * because the repo runs its whole CLI suite as `bun src/index.ts`: pointing at
- * the `.js` makes the client spawn the standalone through the PARENT's runtime
- * (`process.execPath` → Bun), and the standalone deadlocks reading the inherited
- * protocol fds under Bun. The shim's shebang pins the child to Node regardless of
- * who spawned it — exactly what a real `npm i -g` install resolves from PATH in
- * production. On Windows (async path only; the sync path is refused there) the
- * shim is a `.cmd`, so fall back to the `.js` entry run via Node.
- */
+/** The `secrets` executable for `SECRETS_BIN`: on POSIX the npm bin shim, not `dist/index.js`, since
+ * the suite runs under Bun and a `.js` path would run the standalone through Bun, which deadlocks
+ * on inherited fds. On Windows (async path) use the `.js` via Node. */
 function installedEntry(prefix: string): string {
   if (process.platform === 'win32') {
     return path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'secrets-cli', 'dist', 'index.js');
@@ -94,11 +64,8 @@ function withInstallLock<T>(lock: string, fn: () => T): T {
   }
 }
 
-/**
- * Resolve the standalone `secrets` executable for this test run, installing the
- * pinned published version on first use. Returns the path to hand to
- * `SECRETS_BIN`.
- */
+/** Resolve the standalone `secrets` executable for this run, installing the pinned published version
+ * on first use; returns the path for `SECRETS_BIN`. */
 export function ensureStandaloneSecretsBin(): string {
   const explicit = process.env.AGENTS_TEST_SECRETS_BIN?.trim() || process.env.SECRETS_BIN?.trim();
   if (explicit) return explicit;
@@ -127,14 +94,9 @@ export function ensureStandaloneSecretsBin(): string {
   });
 }
 
-/**
- * Give the enclosing describe/file a fresh, empty standalone state root per
- * test: `SECRETS_HOME` is pointed at a new temp dir before each test and the
- * previous value restored after. The process-local setup-token memo
- * (`claude-account-token.ts`) is dropped with it — a fresh store must never be
- * served a token memoized against the previous one. Returns a getter for the
- * current root.
- */
+/** Give the file a fresh empty standalone state root per test: `SECRETS_HOME` is pointed at a new
+ * temp dir and restored after, and the process-local setup-token memo (`claude-account-token.ts`)
+ * is dropped so a fresh store is never served a stale token. */
 export function useFreshSecretsHome(): () => string {
   let home = '';
   let saved: string | undefined;
@@ -157,14 +119,9 @@ export function useFreshSecretsHome(): () => string {
 
 let fileBacked: Promise<boolean> | undefined;
 
-/**
- * True when the standalone routes `keychain`-backend items to its encrypted
- * file store on this host (headless Linux/Windows with no keyring). Tests that
- * exercise keychain-backed bundles or profile tokens gate on this, because on
- * a headed macOS box the same calls would reach the operator's real login
- * keychain (there is no per-test keychain to isolate); file-backed bundles
- * (the reserved `auth` bundle, reserved stores) run everywhere.
- */
+/** True when the standalone routes `keychain` items to its encrypted file store (headless
+ * Linux/Windows). Keychain-backed tests gate on this, since on a headed macOS box they would reach
+ * the operator's real login keychain; file-backed bundles run everywhere. */
 export function standaloneKeychainIsFileBacked(): Promise<boolean> {
   if (!fileBacked) {
     const saved = process.env.SECRETS_HOME;

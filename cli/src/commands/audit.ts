@@ -1,15 +1,6 @@
-/**
- * `agents events audit` — thin alias of `agents events --include runs`.
- *
- * New run-dispatch outcomes land in the unified event stream as `run.dispatched`
- * (see lib/audit/log.ts::recordDispatchedRun). This command does not own a
- * separate store or query path — it only sets the default family filter.
- *
- *   agents events audit              ≡ agents events --include runs
- *   agents events audit list         ≡ same
- *   agents events audit verify       walks the legacy hash-chain file if present
- *                                    (pre-unification history only)
- */
+/** `agents events audit` is a thin alias of `agents events --include runs`: run-dispatch outcomes
+ * land in the unified event stream as `run.dispatched`, so this owns no store or query path.
+ * `audit verify` walks the legacy hash-chain file if present (pre-unification history only). */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

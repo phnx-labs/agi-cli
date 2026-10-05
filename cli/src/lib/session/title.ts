@@ -1,34 +1,6 @@
-/**
- * Daemon-generated session TITLES (PHNX-3797).
- *
- * The headline on a session row answers "what is this session about?", so it has
- * to be anchored in what the USER asked for. It used to be the agent's latest
- * transcript line — verbose, rolling, and unrecognizable to the person who
- * started the run. The fix is a two-rung answer:
- *
- *  1. INSTANT, free: the user's own first message (already in the index) is the
- *     honest fallback shown from the moment the session appears.
- *  2. UPGRADED, once: this module asks a CHEAP model (via a swappable
- *     {@link SessionTitleProvider}; the default {@link CloudSessionTitleProvider}
- *     uses the `cheap` tier — haiku on Claude — through the same
- *     `agents run --model <tier>` resolution every other call uses) for a short
- *     ACTION + OBJECT headline of what the session is doing, and persists it in
- *     the session index.
- *
- * Generation happens ONCE per session, in the daemon, and is keyed by
- * {@link sessionTitleSourceKey} — a hash of the user text the title was derived
- * from — so a sweep that sees a stored key matching the row's current text skips
- * it (the cache hit) and regenerates only when that first user message actually
- * changed, or when an operator asks explicitly
- * (`agents sessions backfill titles --refresh`). There is no per-tick model call
- * and no per-client generation: the daemon writes one value, every consumer
- * (local list, picker, `sessions watch --json`, the fleet mirror, AGI EXT) reads
- * it off the row.
- *
- * Everything here except {@link runSessionTitleTick} is pure, and the tick takes
- * an injectable runner seam, so the whole path is testable without spawning a
- * harness.
- */
+/** Daemon-generated session titles (PHNX-3797), anchored in what the user asked, not the agent's
+ * latest line. Rung 1: the user's first message, instantly. Rung 2: a cheap model's ACTION+OBJECT
+ * title, made ONCE in the daemon, keyed by sessionTitleSourceKey; consumers read the row. */
 
 import { createHash } from 'node:crypto';
 import type { AgentId } from '../types.js';
@@ -36,20 +8,9 @@ import type { AgentId } from '../types.js';
 // read by render paths that must not pull the SQLite index into a listing.
 import type { SessionTitleCandidateRow } from './db.js';
 
-/**
- * The phrase every generated-title prompt carries. Load-bearing twice over:
- * `traces/sync.ts` classifies a session whose topic matches it as internal
- * `utility` plumbing rather than agent work, and {@link isSessionTitlePrompt}
- * uses it to keep the titler from titling its OWN spawned sessions — which
- * would otherwise be a runaway loop, since each generation creates one more
- * untitled session.
- *
- * It is a STABLE sentinel, not the human-readable instruction: keep it exact and
- * keep `traces/sync.ts`'s matching regex in sync when it changes. The surrounding
- * prompt (see {@link renderSessionTitlePrompt}) asks for an action+object headline
- * of 4–8 words; the sentinel deliberately carries no word budget so the two never
- * drift.
- */
+/** The phrase every title prompt carries, a stable sentinel (not the human instruction).
+ * `traces/sync.ts` uses it to classify the session as `utility`, and isSessionTitlePrompt uses it
+ * so the titler never titles its own sessions (a runaway loop). */
 export const SESSION_TITLE_PROMPT_MARKER = 'Generate a concise session headline';
 
 /** Hard ceiling on a stored title; the prompt asks for far less. */
@@ -86,38 +47,25 @@ export function sessionTitleSourceText(input: SessionTitleInput): string {
   return raw.length > SESSION_TITLE_INPUT_MAX_CHARS ? raw.slice(0, SESSION_TITLE_INPUT_MAX_CHARS) : raw;
 }
 
-/**
- * Stable identity of the text a title was generated from. Storing this beside
- * the title is what makes "already titled" distinguishable from "the user's
- * first message changed" without keeping a second copy of that text.
- * Empty text yields `null`: there is nothing to title.
- */
+/** Stable identity of the text a title was generated from, stored beside the title so 'already
+ * titled' differs from 'first message changed' without keeping a copy of the text. Empty text
+ * yields `null`. */
 export function sessionTitleSourceKey(input: SessionTitleInput): string | null {
   const text = sessionTitleSourceText(input);
   if (!text) return null;
   return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-/**
- * True when this text is one of the titler's OWN prompts. The titler runs a real
- * harness, which writes a real transcript, which lands in the index as another
- * untitled session — so without this guard every title generated would create
- * work for the next sweep, forever.
- */
+/** True when this text is one of the titler's own prompts. The titler runs a real harness whose
+ * transcript becomes another untitled session, so without this guard every title would create work
+ * for the next sweep forever. */
 export function isSessionTitlePrompt(...values: Array<string | null | undefined>): boolean {
   return values.some((v) => typeof v === 'string' && v.includes(SESSION_TITLE_PROMPT_MARKER));
 }
 
-/**
- * The one-shot prompt handed to the cheap model.
- *
- * It asks for a descriptive ACTION + OBJECT headline (a verb phrase naming the
- * concrete task, "Triage the AGI board", "Rename browser profile — default
- * confusion"), not a single terse noun ("Triage") and not a full sentence — the
- * headline slot has to tell the person who started the run what the session is
- * doing at a glance. The word budget is soft in the prompt and hard-enforced by
- * {@link sanitizeGeneratedTitle}'s {@link SESSION_TITLE_MAX_WORDS} ceiling.
- */
+/** The one-shot prompt for the cheap model: an action + object headline ("Triage the AGI board"),
+ * not a bare noun or a sentence. The word budget is soft here and hard-enforced by
+ * sanitizeGeneratedTitle's SESSION_TITLE_MAX_WORDS. */
 export function renderSessionTitlePrompt(input: SessionTitleInput): string {
   const text = sessionTitleSourceText(input);
   const context = [
@@ -142,13 +90,9 @@ export function renderSessionTitlePrompt(input: SessionTitleInput): string {
   ].join('\n');
 }
 
-/**
- * Reduce a model reply to a storable title, or `undefined` when it produced
- * nothing usable. Takes the first non-empty line (a chatty model puts the title
- * first), strips wrapping quotes/backticks and trailing punctuation, and applies
- * the word + character ceilings. A reply that is really a refusal or an
- * explanation fails the ceilings and is dropped rather than shown.
- */
+/** Reduce a model reply to a storable title, or undefined. Takes the first non-empty line, strips
+ * wrapping quotes and trailing punctuation, and applies word and character ceilings; a refusal or
+ * explanation fails them and is dropped. */
 export function sanitizeGeneratedTitle(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   const firstLine = raw.split('\n').map((l) => l.trim()).find((l) => l.length > 0);
@@ -170,56 +114,22 @@ export function sanitizeGeneratedTitle(raw: string | null | undefined): string |
   return title || undefined;
 }
 
-/**
- * Compile-time guard: resolves to `T` only when `T` actually declares a
- * `generatedTitle` key, and to `never` otherwise.
- *
- * This exists because structural typing makes the obvious signature useless. A
- * parameter typed `{ generatedTitle?: string }` is satisfied by an object type
- * that has no such property at all, so passing a projection that DROPPED the
- * field — the watchdog's `SessionOutcome`, which copied `label`/`name`/`topic`
- * off the session and left `generatedTitle` behind — compiles cleanly and
- * silently degrades {@link sessionHeadline} back to `label || topic`. That is a
- * real bug this feature shipped once and a lexical lint cannot see, since the
- * call site looks correct. `keyof` includes optional keys, so every legitimate
- * carrier (`SessionMeta`, `ActiveSession`, a `Pick<>` that names it) still
- * passes; only a type that never modelled the rung is rejected.
- */
+/** Compile-time guard: resolves to `T` only if `T` declares a `generatedTitle` key, else `never`. A
+ * parameter typed `{ generatedTitle?: string }` accepts types lacking it, which let the watchdog's
+ * `SessionOutcome` silently degrade the headline to `label || topic`. */
 type CarriesTitleRung<T> = 'generatedTitle' extends keyof T ? T : never;
 
-/**
- * The headline for an INDEXED session row, on the same ladder the live path uses
- * (`deriveSessionRecap`, active.ts): `/rename` label → daemon-generated title →
- * first-prompt topic. Every `agents sessions` surface that shows "what this
- * session is" reads it from here, so the CLI and the watch stream can never
- * disagree about a session's name (PHNX-3797).
- *
- * A caller whose row type does not carry `generatedTitle` fails to compile
- * (see {@link CarriesTitleRung}) — fix the projection to carry the field rather
- * than casting past this.
- */
+/** Headline for an indexed row on the live ladder (`deriveSessionRecap`): `/rename` label,
+ * generated title, first-prompt topic; every `agents sessions` surface reads it here (PHNX-3797).
+ * A row type lacking `generatedTitle` fails to compile (CarriesTitleRung): fix it, don't cast. */
 export function sessionHeadline<
   T extends { label?: string | null; generatedTitle?: string | null; topic?: string | null },
 >(row: CarriesTitleRung<T>): string | undefined {
   return row.label || row.generatedTitle || row.topic || undefined;
 }
 
-/*
- * Proof that {@link CarriesTitleRung} still does its job, checked by the ORDINARY
- * `tsc` run (`bun run build`, CI's `check:typecheck`) rather than by a test.
- *
- * A guard nobody proved can fail is not a guard, so this has to be asserted
- * somewhere. It deliberately lives in typechecked SOURCE and not in a
- * `*.test.ts`: `tsconfig.json` excludes `src/**\/*.test.ts`, so a test could only
- * check a type by spawning its own compiler — which is what this feature did
- * first, at ~15s of required-CI wall time for one assertion (PHNX-3797). Here the
- * same two properties cost nothing and are verified on every build, not only on
- * the runs where impact selection happens to pick that test file up.
- *
- * Weakening the guard to `type CarriesTitleRung<T> = T` breaks the build on
- * `_rungLessRowIsRejected`; over-tightening it so a legitimate optional carrier
- * resolves to `never` breaks it on `_realCarrierIsAccepted`.
- */
+/* Proof that CarriesTitleRung still works, checked by the ordinary `tsc` run rather than a test
+ * (tests are excluded from tsconfig; spawning a compiler cost ~15s of required CI, PHNX-3797). */
 type IsNever<T> = [T] extends [never] ? true : false;
 type AssertTrue<T extends true> = T;
 type AssertFalse<T extends false> = T;
@@ -232,11 +142,8 @@ type _rungLessRowIsRejected = AssertTrue<IsNever<CarriesTitleRung<RungLessRow>>>
 // A real carrier — optional key included — must still be callable.
 type _realCarrierIsAccepted = AssertFalse<IsNever<CarriesTitleRung<SessionTitleCandidateRow>>>;
 
-/**
- * Runs the cheap model once and returns its raw stdout. Injectable so tests
- * exercise the whole tick — candidate selection, key comparison, persistence —
- * without spawning a harness.
- */
+/** Runs the cheap model once and returns its raw stdout. Injectable so tests cover the whole
+ * tick without spawning a harness. */
 export type SessionTitleRunner = (prompt: string, signal?: AbortSignal) => Promise<string>;
 
 /** The harness the titler runs as on this box, or null when none is installed. */
@@ -254,13 +161,9 @@ export async function resolveSessionTitleAgent(): Promise<string | null> {
   return null;
 }
 
-/**
- * The real runner: ONE `agents run <agent> --mode plan --model cheap <prompt>`
- * subprocess. `--mode plan` keeps it read-only (it must never touch a repo), and
- * `--model cheap` goes through the same tier resolution every other run uses, so
- * the box's own catalog picks haiku (or its per-harness equivalent) rather than
- * this module hardcoding a model id that ages out.
- */
+/** The real runner: one `agents run <agent> --mode plan --model cheap <prompt>` subprocess. `--mode
+ * plan` keeps it read-only, and `--model cheap` uses the normal tier resolution instead of a
+ * hardcoded model id that ages out. */
 export async function defaultSessionTitleRunner(prompt: string, signal?: AbortSignal): Promise<string> {
   const [{ getAgentsInvocation }, { execFile }, { promisify }] = await Promise.all([
     import('../daemon/daemon.js'),
@@ -279,24 +182,9 @@ export async function defaultSessionTitleRunner(prompt: string, signal?: AbortSi
   return stdout;
 }
 
-/**
- * A pluggable backend that turns a session's user text into a raw headline reply
- * — the ONE part of title generation that varies by model host (PHNX-3797).
- *
- * The tick decides WHICH sessions need a title, caches by source key, sanitizes,
- * and persists — none of that is provider-specific, so only the model call itself
- * sits behind this interface. The shipped default is
- * {@link CloudSessionTitleProvider} (one cheap cloud-model subprocess). A LOCAL
- * backend — e.g. an ollama 1–3B instruct model over HTTP — is a drop-in: implement
- * `generate` and hand the instance to {@link runSessionTitleTick} (or construct
- * {@link SessionTitleService} with it). No call site inside the tick changes, and
- * the shared {@link sanitizeGeneratedTitle} still enforces the word/character
- * ceilings on whatever text the backend returns.
- *
- * `generate` returns the model's RAW reply (the tick owns sanitizing). It MAY
- * throw — harness missing, signed out, timed out — and the tick treats a throw as
- * "no title this sweep", leaving the row on the user's own words and backing off.
- */
+/** Pluggable backend turning a session's user text into a raw headline reply, the one
+ * model-host-specific part of title generation (PHNX-3797). A local backend (e.g. ollama) is a
+ * drop-in; sanitizeGeneratedTitle enforces ceilings. A throw means no title this sweep. */
 export interface SessionTitleProvider {
   /** Stable id for logs/diagnostics (e.g. `'cloud'`, `'ollama'`). */
   readonly name: string;
@@ -304,12 +192,9 @@ export interface SessionTitleProvider {
   generate(input: SessionTitleInput, signal?: AbortSignal): Promise<string>;
 }
 
-/**
- * The default, shipped provider: render the shared prompt and run it through a
- * {@link SessionTitleRunner} — by default {@link defaultSessionTitleRunner}, the
- * one cheap `agents run --model cheap` subprocess. Tests inject a fake runner (or
- * a whole fake provider) to exercise the tick without spawning a harness.
- */
+/** The default provider: renders the shared prompt and runs it through a SessionTitleRunner
+ * (defaults to the cheap `agents run --model cheap` subprocess). Tests inject a fake runner or
+ * provider. */
 export class CloudSessionTitleProvider implements SessionTitleProvider {
   readonly name = 'cloud';
   constructor(private readonly runner: SessionTitleRunner = defaultSessionTitleRunner) {}
@@ -330,17 +215,12 @@ export interface SessionTitleTickOptions {
   id?: string;
   /** Regenerate even when the stored key still matches the row's user text. */
   force?: boolean;
-  /**
-   * The generation backend. Defaults to {@link defaultSessionTitleProvider}
-   * (the cheap cloud model). Swap this for a local model without touching the
-   * tick. Takes precedence over {@link SessionTitleTickOptions.run}.
-   */
+  /** The generation backend; defaults to defaultSessionTitleProvider (cheap cloud model). Swap in a
+   * local model without touching the tick. Takes precedence over `run`. */
   provider?: SessionTitleProvider;
-  /**
-   * Shortcut seam for the cloud provider's raw model call — wrapped in a
-   * {@link CloudSessionTitleProvider} when no {@link provider} is given. Kept for
-   * the daemon service and the tests that inject only the subprocess.
-   */
+  /** Shortcut seam for the cloud provider's raw model call, wrapped in CloudSessionTitleProvider
+   * when no `provider` is given. Kept for the daemon service and tests that inject only the
+   * subprocess. */
   run?: SessionTitleRunner;
   signal?: AbortSignal;
   nowMs?: number;
@@ -359,12 +239,9 @@ export interface SessionTitleTickResult {
   titles: Array<{ id: string; title: string }>;
 }
 
-/**
- * Decide what one sweep should do, without touching the model. Pure over its
- * inputs so the "generate once, then cache-hit" property is directly testable:
- * a candidate is work only when its user text yields a key AND that key differs
- * from the one stored beside its title (or `force`).
- */
+/** Decide what one sweep does without touching the model. Pure, so 'generate once, then cache-hit'
+ * is testable: a candidate is work only when its user text yields a key that differs from the
+ * stored one (or `force`). */
 export function selectSessionsNeedingTitle(
   rows: SessionTitleCandidateRow[],
   opts: { limit: number; force?: boolean } = { limit: SESSION_TITLE_MAX_PER_TICK },
@@ -385,15 +262,9 @@ export function selectSessionsNeedingTitle(
   return { pending, cached };
 }
 
-/**
- * One titling sweep: pick the sessions whose headline is still the raw user
- * message, generate a title for at most {@link SessionTitleTickOptions.limit} of
- * them, and persist each. Best-effort by contract — a failed generation leaves
- * the row untitled, which the ladder renders as the user's own first message.
- *
- * Throws only for an explicit {@link SessionTitleTickOptions.id} that matches no
- * indexed session (a caller error); the periodic sweep never throws.
- */
+/** One titling sweep: pick sessions whose headline is still the raw user message, generate for at
+ * most `limit`, and persist each. Best-effort: a failure leaves the row untitled. Throws only for
+ * an explicit `id` matching no session. */
 export async function runSessionTitleTick(
   options: SessionTitleTickOptions = {},
 ): Promise<SessionTitleTickResult> {

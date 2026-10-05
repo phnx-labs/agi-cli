@@ -1,22 +1,6 @@
-/**
- * Register the `agents://` URL scheme with the OS so a click in an artifact
- * routes to the machine-only `agents _callback <url>` verb (see url.ts +
- * commands/open.ts). Humans manage the handler with `agents setup url-scheme`.
- *
- * A browser page cannot spawn a shell; a registered URL scheme is the
- * OS-sanctioned hand-off. Each platform gets its own handler:
- *   - Linux:   a `.desktop` entry claiming `x-scheme-handler/agents`, made the
- *              default via `xdg-mime`.
- *   - macOS:   a tiny AppleScript app whose `on open location` runs the CLI;
- *              its Info.plist declares the `agents` scheme, registered with
- *              LaunchServices via `lsregister`.
- *   - Windows: `HKCU\Software\Classes\agents` shell-open-command registry keys.
- *
- * The content generators below are pure and unit-tested. The `register*` /
- * `unregister*` / `status*` functions apply them and never throw — they return a
- * {@link SchemeStatus} so callers (setup, `agents setup url-scheme register`,
- * doctor) can report without a try/catch.
- */
+/** Register the `agents://` URL scheme with the OS so an artifact click routes to the machine-only
+ * `agents _callback <url>` verb (url.ts, commands/open.ts); managed via `agents setup url-scheme`.
+ * Linux: a `.desktop` entry plus `xdg-mime`; macOS: an AppleScript app with `on open location`. */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -39,22 +23,14 @@ interface SchemeStatus {
 // Invocation resolution — the absolute command the handler runs.
 // ---------------------------------------------------------------------------
 
-/**
- * POSIX single-quote a path so a space or metacharacter in it can never break
- * out of the handler command.
- */
+/** POSIX single-quote a path so a space or metacharacter cannot break out of the handler command. */
 export function shQuote(p: string): string {
   return `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Resolve how the OS handler should invoke this CLI, as an already-quoted
- * command prefix (without the `open <url>` suffix).
- *
- * A macOS GUI app does NOT inherit the shell PATH, so the handler must use an
- * absolute path. Prefer the `agents` shim on PATH (directly executable); fall
- * back to `<node> <entry>` for a bare JS install.
- */
+/** Resolve how the OS handler invokes this CLI, as a quoted command prefix. A macOS GUI app does
+ * not inherit the shell PATH, so use an absolute path: the `agents` shim on PATH, else `<node>
+ * <entry>` for a bare JS install. */
 function resolveAgentsInvocation(platform: NodeJS.Platform = os.platform()): string {
   const onPath = whichAgents(platform);
   if (onPath) return platform === 'win32' ? `"${onPath}"` : shQuote(onPath);
@@ -93,11 +69,8 @@ export function linuxDesktopEntry(invocation: string): string {
   ].join('\n');
 }
 
-/**
- * AppleScript whose `on open location` handler fires when macOS routes an
- * `agents://` URL to the app. `quoted form of` makes the URL a single safe
- * shell argument — the URL is never concatenated unquoted.
- */
+/** AppleScript whose `on open location` handler fires when macOS routes an `agents://` URL to the
+ * app; `quoted form of` keeps the URL one safe shell argument. */
 export function macAppleScriptSource(invocation: string): string {
   // Escape the (already shell-quoted) invocation for an AppleScript double-quoted
   // string literal, so a `"` or `\` in the install path cannot break osacompile.

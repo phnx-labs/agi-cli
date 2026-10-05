@@ -1,25 +1,6 @@
-/**
- * Human overrides for the cost-tier -> model mapping.
- *
- * The auto-ranking (lib/model-tiers.ts) is a best guess; for subscription harnesses
- * with no price signal (Kimi, Cursor) it can be wrong. A user pins the right model
- * per tier with `agents models tier set <agent[@version]> <tier> <model>`, which
- * writes here — the user never hand-edits the file.
- *
- * Stored under agents.yaml, same selector shape as run.defaults:
- *
- *   model:
- *     tiers:
- *       "kimi:*":                 # applies to every installed kimi
- *         best: kimi-code/k3
- *         default: kimi-code/kimi-for-coding
- *       "kimi:0.19.2":            # a specific version wins over the wildcard
- *         best: kimi-code/k3-256k
- *
- * Resolution (most-specific-first): `<agent>:<version>` beats `<agent>:*` beats the
- * auto-ranking. resolveTierMap (model-tiers.ts) applies the result and falls back to
- * auto for any tier whose overridden id isn't in that version's catalog.
- */
+/** Human overrides for the cost-tier model mapping, since auto-ranking can be wrong without a price
+ * signal. `agents models tier set` writes agents.yaml `model.tiers`; `<agent>:<version>` beats
+ * `<agent>:*` beats auto, which is the fallback if the id isn't in the catalog. */
 import type { AgentId } from './types.js';
 import { readMeta, updateMeta } from './state.js';
 import { parseRunDefaultSelector } from './run-defaults.js';
@@ -59,10 +40,8 @@ function sortedSelectors<T>(map: Record<string, T>): Record<string, T> {
   return Object.fromEntries(Object.entries(map).sort(([a], [b]) => a.localeCompare(b)));
 }
 
-/**
- * The effective tier overrides for an (agent, version): the `<agent>:*` wildcard
- * merged under the exact `<agent>:<version>` selector (exact wins per-tier).
- */
+/** The effective tier overrides for an (agent, version): the `<agent>:*` wildcard merged under the
+ * exact `<agent>:<version>` selector (exact wins per tier). */
 export function resolveTierOverrideFrom(
   all: Record<string, unknown>,
   agent: AgentId,
@@ -129,11 +108,9 @@ export function clearTierOverride(selectorInput: string, tierInput?: string): bo
       delete tiers[parsed.selector];
       changed = true;
     }
-    // Drop the emptied container rather than leaving `model: {tiers: {}}` in the
-    // shared agents.yaml — the same discipline lib/hosts/providers/local.ts uses
-    // for an emptied `hosts:`. A vestigial empty map is a real diff on a tracked
-    // file that every machine syncs, so clearing the last override would show up
-    // as a spurious local change on whichever box happened to run the command.
+    // Drop the emptied container rather than leave `model: {tiers: {}}` in the shared agents.yaml
+    // (as hosts/providers/local.ts does for `hosts:`); a vestigial empty map is a spurious diff on
+    // a file every machine syncs.
     if (Object.keys(tiers).length > 0) {
       model.tiers = tiers;
       return { ...meta, model };

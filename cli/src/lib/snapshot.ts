@@ -1,18 +1,6 @@
-/**
- * `agents devices snapshot` — one-process fleet consumer snapshot.
- *
- * Consumers (Factory watchdog, menubar, fleet scripts) used to fork:
- *   agents view <agent> --json  × N harnesses
- *   agents sessions --active --json
- *   agents feed --json          (sometimes)
- *
- * That is N+2 process starts per poll tick. This module gathers the same
- * shapes in one invocation so poll count drops to 1 without redefining
- * `agents sync status` (which stays the UnifiedSyncStatus sync contract).
- *
- * Stores are not merged — inventory still comes from view, active rows from
- * sessions, blocks from feed. Only the reader is consolidated.
- */
+/** `agents devices snapshot`: one-process fleet snapshot for consumers (Factory watchdog, menubar,
+ * scripts) that forked `agents view` per harness, `sessions --active` and `feed` (N+2 starts per
+ * tick). */
 
 import { machineId } from './machine-id.js';
 import { listBlocks, type OpenBlock } from './feed/feed.js';
@@ -49,10 +37,8 @@ export type SnapshotSessionRow = {
   [key: string]: unknown;
 };
 
-/**
- * Stable machine-readable contract for `agents devices snapshot --json`.
- * Bump `version` only on breaking shape changes.
- */
+/** Stable machine-readable contract for `agents devices snapshot --json`. Bump `version` only
+ * on breaking shape changes. */
 export interface FleetSnapshot {
   version: 1;
   /** Host that produced this snapshot (machineId). */
@@ -111,10 +97,8 @@ export function summarizeFeedBlocks(
   };
 }
 
-/**
- * Assemble a snapshot payload from already-gathered pieces. Pure so tests do
- * not need live process scans or network.
- */
+/** Assemble a snapshot from already-gathered pieces. Pure so tests need no live process scans
+ * or network. */
 export function assembleSnapshot(parts: {
   host: string;
   capturedAt: string;
@@ -143,11 +127,9 @@ export function assembleSnapshot(parts: {
   };
 }
 
-/**
- * Gather inventory + active sessions (+ optional feed/sync) in one process.
- * Default `local: true` keeps the common poll path free of SSH fan-out; pass
- * `local: false` (or hosts) to match full `sessions --active` fleet scope.
- */
+/** Gather inventory and active sessions (plus optional feed/sync) in one process. Default `local:
+ * true` avoids SSH fan-out; pass `local: false` (or hosts) for full `sessions --active` fleet
+ * scope. */
 export async function computeSnapshot(
   opts: ComputeSnapshotOptions = {},
 ): Promise<FleetSnapshot> {

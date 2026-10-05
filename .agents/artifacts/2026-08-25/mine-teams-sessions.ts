@@ -1,13 +1,8 @@
 #!/usr/bin/env bun
 
-/**
- * Mine original fleet transcripts for agents-teams invocations.
- *
- * Discovery uses the bounded sessions.db tool index. Evidence comes from the
- * original transcript bodies streamed by `agents sessions export` on the host
- * that owns each session. Output is permanently anonymized: raw identifiers,
- * commands, outputs, and transcript excerpts never leave this process.
- */
+/** Mine original fleet transcripts for agents-teams invocations: discovery uses the sessions.db
+ * tool index, evidence comes from transcript bodies via `agents sessions export`. Output is
+ * permanently anonymized: raw identifiers never leave this process. */
 
 type ToolCall = {
   timestamp?: string;

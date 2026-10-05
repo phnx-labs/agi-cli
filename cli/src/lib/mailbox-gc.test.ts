@@ -138,17 +138,9 @@ describe('mailbox GC', () => {
     expect(archived.dropped).toBe('expired');
   });
 
-  // RUSH-2840: archiveAllPending() used to hand-roll its own write-tmp-then-
-  // rename inline; it now routes through the shared atomicWriteJsonSync. This
-  // pins that the archive write is still atomic: a write that cannot complete
-  // must leave both the not-yet-archived inbox message AND any pre-existing
-  // consumed record untouched, with no stray tmp file -- never a torn record
-  // silently swallowed by archiveAllPending's own best-effort catch. Only a
-  // NEW-file create can be blocked by directory permissions (renaming over an
-  // existing entry is not), so this pre-seeds a same-named consumed file and
-  // makes the consumed dir read-only, forcing the write's first fs call (the
-  // tmp-file create) to fail. Skipped where chmod cannot block a create
-  // (Windows / root).
+  // RUSH-2840: pins that archiveAllPending()'s atomic write, when it fails, leaves the pending
+  // message and any existing consumed record untouched with no stray tmp file. Pre-seed a consumed
+  // file and make the dir read-only so the tmp create fails. Skipped on Windows/root.
   const canBlockFileCreate =
     process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
   const itBlocksCreate = canBlockFileCreate ? it : it.skip;

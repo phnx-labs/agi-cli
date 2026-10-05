@@ -1,24 +1,6 @@
-/**
- * RUSH-2639. Every service manifest this CLI writes must carry the caller's HOME
- * and a HOME-namespaced identifier.
- *
- * The bug this pins: the daemon's plist was fixed in isolation, and the two
- * other manifests — the menu-bar helper and the `agents computer` helper — kept
- * omitting HOME. The computer helper is no longer this CLI's to render: the
- * standalone `computer` engine writes and registers its own manifest
- * (PHNX-4075) and inherits `HOME`/`AGENTS_REAL_HOME` from the process that
- * spawns it, so it sees the redirected home directly and owns that safety.
- * launchd applies a manifest's `EnvironmentVariables` on top of
- * the LOGIN SESSION's environment, never the caller's, so those two handed their
- * child the account home. Under the hermetic harness (tests/setup.ts redirects
- * HOME to a fork-private sandbox) that child then bootstrapped `~/.agents` in the
- * REAL home — the macOS-only leak that failed the 1.22.40 release CI, with
- * `.system`, `.history`, `.cache`, and `routines` appearing in the runner's home.
- *
- * The check is per-generator rather than one assertion on a shared helper: a
- * generator that stops calling the helper is exactly the regression, and only a
- * test that reads the rendered manifest can catch it.
- */
+/** RUSH-2639: every service manifest this CLI writes must carry the caller's HOME and a
+ * HOME-namespaced identifier. Pins the leak where the menu-bar manifest omitted HOME, so its child
+ * bootstrapped the real `~/.agents` under the hermetic harness. Checked per generator. */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

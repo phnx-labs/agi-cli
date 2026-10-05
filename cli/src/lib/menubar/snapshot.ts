@@ -20,56 +20,34 @@ import { getCliVersion } from '../version.js';
 import type { DeviceStats } from '../devices/health.js';
 import type { WatchdogTickResult } from '../watchdog/runner.js';
 
-/**
- * One registered fleet device, for the menu-bar's collapsible DEVICES section.
- * Sourced from the local registry read (`loadDevices`) — no network probe — so
- * it carries only local persisted state (name, platform, preferred status,
- * whether it is the interactive host, whether it is this machine). Live load% is merged in
- * on the Swift side from the daemon-warmed `.fleet-stats.json`; online/offline
- * is deliberately NOT claimed here (the registry's cached tailscale flag is
- * documented as stale in both directions — registry.ts isLikelyOnline).
- */
+/** One registered fleet device for the menu's DEVICES section, from the local registry (no network
+ * probe). Live load% is merged by the Swift side; online/offline is deliberately not claimed (the
+ * registry's tailscale flag is stale both ways; registry.ts isLikelyOnline). */
 interface MenubarDevice {
   name: string;
   platform: string;
-  /**
-   * Physical form factor for a factual hardware icon: `laptop` | `desktop` |
-   * `server` | `unknown` (PHNX-3999). A shared device-scope config fact set
-   * explicitly per device — never inferred from `platform`. `unknown` when unset.
-   */
+  /** Physical form factor for a hardware icon: `laptop` | `desktop` | `server` | `unknown`
+   * (PHNX-3999). A device-scope config fact set explicitly, never inferred from `platform`;
+   * `unknown` when unset. */
   formFactor: string;
   interactive: boolean;
   isLocal: boolean;
   preferred: boolean;
-  /**
-   * The operator's role mark — `worker` | `personal` | `desktop`, or `unknown`
-   * when the device was never marked (PHNX-3999 F25). Read from the same
-   * device-scope config `--device auto` consults, so the menu shows the fact that
-   * governs placement rather than a second notion of it.
-   */
+  /** The operator's role mark: `worker` | `personal` | `desktop`, or `unknown` when never marked
+   * (PHNX-3999 F25). Read from the same device-scope config `--device auto` uses, so the menu
+   * shows the fact that governs placement. */
   role: string;
-  /**
-   * True when automatic placement (`agents run --device auto`) may pick this
-   * device: the verdict of the ONE canonical pool filter, so a `personal` box the
-   * user sits at reads as ineligible here exactly as it behaves there.
-   */
+  /** True when `agents run --device auto` may pick this device: the verdict of the ONE canonical
+   * pool filter, so a `personal` box the user sits at reads as ineligible here as it behaves
+   * there. */
   autoEligible: boolean;
   /** Hardware facts and the current reading, or null when never observed. */
   stats: MenubarDeviceStats | null;
 }
 
-/**
- * One device's hardware facts and last reading, projected from the fleet-stats
- * cache the CLI already keeps (`~/.agents/.cache/.fleet-stats.json`).
- *
- * Cache-only by construction: the snapshot never probes the fleet, so opening
- * Settings costs nothing and a device nobody has measured says so. Every value
- * is `null` when that number was not observed — never 0, which would render as a
- * real "idle, empty disk" reading. `stale` carries the CLI's own freshness bound
- * so the menu can label an old reading instead of showing it as live, and
- * `observedAt` / `specsObservedAt` give the observation age F25 asks for
- * (hardware totals survive an unreachable probe; current-state readings do not).
- */
+/** One device's hardware facts and last reading from the fleet-stats cache
+ * (`~/.agents/.cache/.fleet-stats.json`); never probes the fleet. Unobserved values are `null`,
+ * never 0 (it would read as idle). `stale` carries the freshness bound. */
 interface MenubarDeviceStats {
   reachable: boolean;
   observedAt: string;
@@ -85,14 +63,9 @@ interface MenubarDeviceStats {
   specsObservedAt: string | null;
 }
 
-/**
- * The person signed in on this machine, for the menu's avatar. Every field comes
- * from a local read: the Phoenix ID session file (`agents auth login`) and the
- * cached `gh api user` record (`github/viewer.ts`). `avatarUrl` is the Phoenix
- * profile picture when the session carries one, else the GitHub avatar, else
- * null (the menu draws initials). `avatarSource` names which one it is.
- * The whole field is null when neither source knows anyone.
- */
+/** The person signed in here, for the avatar, from local reads only: the Phoenix session file and
+ * the cached `gh api user` record. `avatarUrl` is the Phoenix picture, else GitHub's, else null
+ * (initials); `avatarSource` says which. Null when neither knows anyone. */
 export interface MenubarMe {
   name: string | null;
   email: string | null;
@@ -101,16 +74,9 @@ export interface MenubarMe {
   avatarSource: 'phoenix' | 'github' | null;
 }
 
-/**
- * Pure: fold the Phoenix session and the GitHub viewer into the snapshot's `me`.
- *
- * One person, never a blend of two. With a Phoenix session, that session IS the
- * person: name, email and picture come from it, and the `gh` account contributes
- * (`github`, plus a fallback name and picture) only when its public profile email
- * is the session's email — a shared box whose `gh` is signed in as someone else
- * must not lend that person's face. Without a session, the `gh` account is the
- * only identity there is, so it supplies everything but `email`.
- */
+/** Pure: folds the Phoenix session and GitHub viewer into `me`, one person, never a blend. With a
+ * session, `gh` contributes only when its public email matches, so a shared box's other `gh` login
+ * can't lend its face. Without one, `gh` supplies all but `email`. */
 export function resolveMenubarMe(session: PhoenixSession | null, viewer: GithubViewer | null): MenubarMe | null {
   const sessionEmail = session?.email?.trim() || null;
   const github = !session
@@ -133,12 +99,9 @@ export function resolveMenubarMe(session: PhoenixSession | null, viewer: GithubV
 interface MenubarSnapshot {
   version: 1;
   capturedAt: string;
-  /**
-   * The installed CLI version that produced this snapshot — the same string
-   * `agents --version` prints (RUSH-2688). The snapshot is emitted by whatever
-   * `agents` binary is on PATH, so this is resolved at runtime, letting the menu
-   * bar show its own version in the header and making a stale menu bar visible.
-   */
+  /** The installed CLI version that produced this snapshot (what `agents --version` prints,
+   * RUSH-2688), resolved at runtime since whatever `agents` is on PATH emits it; lets the menu
+   * show its version and a stale menu bar be visible. */
   cliVersion: string;
   routines: Record<string, unknown>[];
   recentSessions: Record<string, unknown>[];
@@ -146,23 +109,13 @@ interface MenubarSnapshot {
   devices: MenubarDevice[];
   /** Who is signed in on this machine; see {@link MenubarMe}. */
   me: MenubarMe | null;
-  /**
-   * AGI Menu preferences (PHNX-3999), keyed by the full `menubar.menu.*` config
-   * name, carrying the EFFECTIVE value — the stored value, else the registered
-   * default. The native menu consumes this from the snapshot it already polls
-   * rather than a second preference-read mechanism. `menubar.menu.defaultProject`
-   * is omitted when unset (it has no default); every other key is always present.
-   * Writes stay one `agents config set/unset <key>` per setting. Scalar values
-   * only (string, number, boolean): every shipped menu decodes this map as
-   * scalars, and one array value would fail its whole snapshot decode.
-   */
+  /** AGI Menu preferences (PHNX-3999) by full `menubar.menu.*` name with the EFFECTIVE value
+   * (stored, else default). `defaultProject` is omitted when unset. Writes stay `agents config
+   * set/unset`. Scalars only: one array would fail every shipped menu's snapshot decode. */
   menuPreferences: Record<string, unknown>;
-  /**
-   * The list-valued `menubar.menu.*` preferences (pinned projects, tab order,
-   * hidden tabs), same keying and default rule as `menuPreferences`. A separate
-   * field so a menu that predates list preferences ignores it instead of failing
-   * to decode the snapshot.
-   */
+  /** List-valued `menubar.menu.*` preferences (pinned projects, tab order, hidden tabs), same
+   * keying and default rule. A separate field so a menu predating list preferences ignores it
+   * instead of failing to decode the snapshot. */
   menuListPreferences: Record<string, string[]>;
   watchdog: {
     enabled: boolean;
@@ -170,11 +123,9 @@ interface MenubarSnapshot {
   };
 }
 
-/**
- * The effective AGI Menu preferences map for the snapshot: each `menubar.menu.*`
- * key's stored value, or its registered default when unset. A key with neither
- * (only `defaultProject`) is omitted so the native app keeps its own default.
- */
+/** The effective AGI Menu preferences map: each `menubar.menu.*` key's stored value, or its
+ * registered default. A key with neither (only `defaultProject`) is omitted so the native app
+ * keeps its own default. */
 export function buildMenuPreferences(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [name, value] of effectiveMenuPreferences()) {
@@ -204,11 +155,8 @@ function effectiveMenuPreferences(): Array<[string, unknown]> {
   return out;
 }
 
-/**
- * The full registered-device roster for the menu bar, from the local registry
- * file only (no ssh, no stats probe) — as cheap as `buildRoutineListJson()`, so
- * it rides the same 3-minute snapshot poll instead of a second timer.
- */
+/** The full registered-device roster for the menu bar, from the local registry only (no ssh, no
+ * stats probe), cheap enough to ride the 3-minute snapshot poll. */
 async function buildMenubarDevices(): Promise<MenubarDevice[]> {
   const reg = await loadDevices();
   const roster = Object.keys(reg);
@@ -240,14 +188,9 @@ async function buildMenubarDevices(): Promise<MenubarDevice[]> {
     }));
 }
 
-/**
- * Project one cached {@link DeviceStats} row into the snapshot shape, or `null`
- * when the device has no cached reading at all.
- *
- * `?? null` rather than a default: an absent number means "not observed", and the
- * menu renders that as unavailable. A 0 would be indistinguishable from a real
- * measurement of an idle box or a full disk.
- */
+/** Projects one cached DeviceStats row into the snapshot shape, or `null` with no reading. `??
+ * null`, not a default: an absent number means "not observed"; 0 would look like a real idle box
+ * or full disk. */
 export function projectDeviceStats(row: DeviceStats | undefined): MenubarDeviceStats | null {
   if (!row) return null;
   return {
@@ -293,13 +236,9 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
   ]);
   const active = readActiveSessionsCache('local');
   const rawSessions = active?.sessions ?? [];
-  // The raw cache is never filtered at write time (RUSH-2336) — it retains
-  // queued/closed/crashed rows so `--queued`/`--closed`/`--crashed` can
-  // recover them, and the daemon's warm-tick gather (unlike the CLI's own
-  // local gather) never stamps `machine` on a row. Stamp self here — this IS
-  // the 'local' scope by construction — then apply the ONE canonical
-  // bare-active selector so the menubar never shows a retained dead/queued
-  // row nor a process row of unverified liveness.
+  // The raw cache is never filtered at write time (RUSH-2336) and the daemon's warm-tick never
+  // stamps `machine`. Stamp self here (this IS the 'local' scope), then apply the ONE canonical
+  // bare-active selector so no dead/queued or unverified-liveness row shows.
   const self = machineId();
   for (const s of rawSessions) if (!s.machine) s.machine = self;
   const activeSessions = rawSessions.filter(isRunningLiveSession);

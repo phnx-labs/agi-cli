@@ -1,20 +1,6 @@
-/**
- * Boot-time profiler for the `agents run` pre-exec phase (PHNX-3585).
- *
- * The AGI EXT "New Claude" boot spends the whole `agents run` wrapper cost
- * BEFORE the harness prints anything — version resolution, account rotation,
- * config sync, login preflight. This module makes that window measurable
- * without a debugger: gate it on `AGENTS_PROFILE_BOOT=1` and the run path
- * stamps named marks, then flushes a per-stage timeline to stderr the instant
- * before the child is spawned (the moment the wrapper's work ends).
- *
- * All marks are `performance.now()` values, which Node measures from
- * `performance.timeOrigin` ≈ process start — so a mark's absolute value is
- * "ms since the `agents` process began", and consecutive marks give the cost
- * of each stage. When the env flag is off, every function here is a couple of
- * cheap branches and pushes nothing, so it is safe to leave wired on the hot
- * path (the committed `scripts/bench-boot.sh` benchmark drives it).
- */
+/** Boot-time profiler for the `agents run` pre-exec phase (PHNX-3585): version resolution,
+ * rotation, config sync and login preflight. With `AGENTS_PROFILE_BOOT=1` the run path stamps
+ * marks (ms since process start) and flushes a timeline to stderr before spawn. */
 import { performance } from 'node:perf_hooks';
 
 const ENABLED =
@@ -29,21 +15,16 @@ interface BootMark {
 const marks: BootMark[] = [];
 let flushed = false;
 
-/**
- * Record a named stage boundary. No-op unless `AGENTS_PROFILE_BOOT` is set, so
- * this is free to call unconditionally on the launch path.
- */
+/** Record a named stage boundary. No-op unless `AGENTS_PROFILE_BOOT` is set, so it is free to call
+ * on the launch path. */
 export function bootMark(label: string): void {
   if (!ENABLED) return;
   marks.push({ label, at: performance.now() });
 }
 
-/**
- * Print the collected timeline to stderr, once. Called right before the harness
- * child is spawned (the end of the pre-exec window) and again as an
- * `process.on('exit')` backstop for launch paths that error out before spawn.
- * `reason` labels the final boundary (e.g. `spawn`, `exit`).
- */
+/** Print the collected timeline to stderr once, right before the harness child spawns and again as
+ * a `process.on('exit')` backstop for paths that error before spawn. `reason` labels the final
+ * boundary. */
 export function flushBootProfile(reason: string): void {
   if (!ENABLED || flushed) return;
   flushed = true;

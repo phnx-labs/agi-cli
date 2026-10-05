@@ -1,18 +1,6 @@
-/**
- * `agents setup term` — install the standalone `term` CLI if missing (PHNX-4092).
- *
- * The PTY engine lives in `@phnx-labs/term-cli` (extracted PHNX-4091);
- * agents-cli never rebundles it. The setup-token mint behind `agents accounts
- * add` / `agents accounts login` (auth-mint.ts → term-driver.ts) spawns `term`
- * on demand and fails loud when it is absent, so onboarding installs it here
- * like every other standalone tool.
- *
- * Unlike browser/computer/secrets there is nothing to configure — no profile,
- * no OS permission, no migrate step. A missing binary is a routine install
- * (`agents clis install term` via the system `clis/term.yaml`, then a pinned
- * `npm i -g`, both handled by installSetupTool), and once it is on PATH the
- * tool is ready.
- */
+/** `agents setup term`: install the standalone `term` CLI (`@phnx-labs/term-cli`, PHNX-4092) if
+ * missing; agents-cli never rebundles it (PHNX-4091). The accounts add/login token mint spawns it
+ * on demand and fails loud when absent. Nothing to configure; installSetupTool handles install. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

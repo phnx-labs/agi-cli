@@ -1,22 +1,6 @@
-/**
- * Portable session bundle — the on-the-wire format behind `agents sessions
- * export` / `import` (RUSH-1710 / RUSH-1711).
- *
- * A bundle is a self-describing NDJSON stream: the FIRST line is a
- * {@link BundleHeader}, every subsequent line is one {@link BundleRecord} (one
- * constituent file of a session). NDJSON — not tar — because the bundle has to
- * pipe cleanly over `agents ssh … export --stdout | … import -` (RUSH-1712)
- * without any external archiver on either box, stays inspectable with `head`,
- * and lets each file body carry its own encryption envelope.
- *
- * This module owns the FORMAT and the import PLACEMENT only; selecting which
- * sessions to export (which needs the session DB) lives in the export command.
- * Placement reuses the sync mirror model verbatim: a foreign machine's session
- * lands at {@link mirrorPath}(spec, originMachine, relKey), exactly where the
- * cross-machine sync writes it — so the existing scanner indexes it as a
- * machine-tagged row and "local always wins" falls out of the scanner's
- * live-home-first dedup with no extra logic here.
- */
+/** Portable session bundle: the wire format behind `agents sessions export`/`import`
+ * (RUSH-1710/1711): NDJSON, a {@link BundleHeader} line then one {@link BundleRecord} per file.
+ * NDJSON, not tar, so it pipes over ssh with no archiver. Import reuses the sync mirror model. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -93,11 +77,9 @@ interface BuildRecordOpts {
   redact: boolean;
   /** Non-null → seal each body with this key; null → plaintext bodies. */
   encryptKey: Buffer | null;
-  /**
-   * Literal secret values to mask verbatim during redaction (value-aware pass):
-   * e.g. live credentials from an injected secrets bundle, so they never leak in
-   * an exported transcript regardless of format. Only used when `redact` is set.
-   */
+  /** Literal secret values to mask verbatim during redaction (value-aware pass), e.g. live
+   * credentials from an injected secrets bundle, so they never leak in an export of any format.
+   * Only used when `redact` is set. */
   knownSecrets?: readonly string[];
 }
 
@@ -106,12 +88,9 @@ export function specForAgent(agentId: string): SyncAgentSpec | undefined {
   return SYNC_AGENTS.find(s => s.id === agentId);
 }
 
-/**
- * Read one file and turn it into a bundle record. The hash and size are always
- * computed over the PLAINTEXT (post-redaction) body, so they equal what lands on
- * disk after import — keeping dedup byte-exact whether or not the bundle is
- * encrypted.
- */
+/** Read one file into a bundle record. Hash and size are computed over the plaintext
+ * (post-redaction) body, so they equal what lands on disk after import and dedup stays byte-exact
+ * whether or not the bundle is encrypted. */
 export function buildRecord(file: FileToExport, opts: BuildRecordOpts): BundleRecord {
   let body = fs.readFileSync(file.absPath, 'utf-8');
   if (opts.redact) body = redactSecrets(body, opts.knownSecrets);
@@ -159,11 +138,8 @@ export function makeHeader(args: {
   };
 }
 
-/**
- * Merge record sets from several bundles (e.g. a fan-out pull across hosts),
- * deduping by agent + origin machine + session + file so the same session seen
- * from two peers lands once. First occurrence wins.
- */
+/** Merge record sets from several bundles (e.g. a fan-out pull), deduping by agent + origin machine
+ * + session + file so a session seen from two peers lands once. First occurrence wins. */
 export function mergeRecords(sets: BundleRecord[][]): BundleRecord[] {
   const seen = new Set<string>();
   const out: BundleRecord[] = [];
@@ -185,13 +161,9 @@ export function serializeBundle(header: BundleHeader, records: BundleRecord[]): 
   return lines.join('\n') + '\n';
 }
 
-/**
- * Write a serialized bundle to disk owner-only (0600). A bundle carries raw
- * transcript bodies — even redacted, never world/group-readable — and encryption
- * is opt-in, so the file mode is the baseline confidentiality guard. `mode` on
- * `writeFileSync` only applies when the file is created, so we `chmod` too to
- * clamp an existing (possibly looser) file on overwrite.
- */
+/** Write a serialized bundle owner-only (0600): it carries raw transcript bodies and encryption is
+ * opt-in, so the file mode is the baseline guard. `mode` applies only on create, so also `chmod`
+ * to clamp an existing looser file. */
 export function writeBundleFile(outPath: string, wire: string): void {
   fs.writeFileSync(outPath, wire, { encoding: 'utf-8', mode: 0o600 });
   fs.chmodSync(outPath, 0o600);
@@ -241,13 +213,9 @@ interface PlanImportOpts {
   decryptKey: Buffer | null;
 }
 
-/**
- * Compute where each record lands and whether it duplicates / conflicts with an
- * existing file. Pure w.r.t. the filesystem it reads (no writes). Dedup is
- * byte-exact: a target that already holds an identical body is `dup`; a target
- * that holds a DIFFERENT body is `conflict` (only overwritten with --overwrite).
- * An agent with no sync spec is `unknown` and never placed.
- */
+/** Compute where each record lands and whether it duplicates or conflicts, with no writes. Dedup is
+ * byte-exact: an identical target is `dup`, a different body is `conflict` (replaced only with
+ * --overwrite), an agent with no sync spec is `unknown` and never placed. */
 export function planImport(bundle: ParsedBundle, opts: PlanImportOpts): ImportPlanItem[] {
   return bundle.records.map((record): ImportPlanItem => {
     const spec = specForAgent(record.agent);
@@ -284,11 +252,8 @@ interface WriteImportOpts {
   decryptKey: Buffer | null;
 }
 
-/**
- * Materialize a plan to disk. `dup` records are always skipped (local wins);
- * `conflict` records are replaced only when `overwrite` is set; `unknown` records
- * are counted and skipped.
- */
+/** Materialize a plan to disk. `dup` records are skipped (local wins), `conflict` records are
+ * replaced only when `overwrite` is set, and `unknown` records are counted and skipped. */
 export function writeImport(plan: ImportPlanItem[], opts: WriteImportOpts): WriteResult {
   const res: WriteResult = { placed: 0, skipped: 0, overwritten: 0, conflicts: 0, unknown: 0 };
   for (const item of plan) {

@@ -1,25 +1,6 @@
-/**
- * Fleet distribution of identity-keyed Claude usage over SSH (PHNX-4116).
- *
- * A headed device can read authoritative usage; a worker's setup-token cannot
- * (credential-management.md invariant 5: a worker never polls
- * `/api/oauth/usage`). So the headed daemon's `usage-sync` tick dials every
- * dialable peer in parallel with `agents __usage-ingest --reply`, sending this
- * box's own daemon-state envelope on stdin; the peer merges the usage rows into
- * its cache newest-wins and prints its own envelope back, which the headed box
- * stores in `~/.agents/devices/<peer>/daemon-state.json` stamped `receivedAt`.
- * Workers never initiate. A peer that times out is skipped this tick and never
- * blocks another. Only usage rows, verdicts, and session digests move here —
- * never a credential (invariant 7: roles never cross).
- *
- * This replaced a git exchange over the fleet-synced user repo: every daemon
- * committed its own file each tick, so the shared store reached 1.1 GiB /
- * 18,358 commits with 100% of the last 2,000 being `chore(devices): publish
- * <device> daemon state`, and a worker's clone fell 10k commits behind with
- * `git fetch timed out` on every tick — a valid setup-token could not be
- * scheduled because a repo was bloated. Git now carries human-authored
- * resources only; `devices/<device>/daemon-state.json` is untracked.
- */
+/** Fleet distribution of Claude usage over SSH (PHNX-4116): the headed daemon dials each peer with
+ * `agents __usage-ingest --reply`; workers never initiate or poll (invariant 5); only usage,
+ * verdicts and digests move, never credentials (invariant 7). Replaced a repo-bloating git sync. */
 import { isHeadedDeviceRole, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import {
   FLEET_SHARED_STATE_VERSION,
@@ -59,11 +40,9 @@ function usageMeterSignature(row: CachedUsageSnapshot): string {
   });
 }
 
-/**
- * Keep the previously published `capturedAt` when meters have not moved and
- * the last publish is still inside the heartbeat. Stops statusline re-renders
- * from rewriting the own-state file every few seconds.
- */
+/** Keep the previously published `capturedAt` when meters have not moved and the last publish is
+ * inside the heartbeat, so statusline re-renders do not rewrite the own-state file every few
+ * seconds. */
 export function mergeUsageRowsForPublish(
   previous: Record<string, CachedUsageSnapshot> | undefined,
   next: Record<string, CachedUsageSnapshot>,
@@ -91,11 +70,8 @@ export interface UsageSyncPayload {
   rows: Record<string, CachedUsageSnapshot>;
 }
 
-/**
- * The exchange envelope (v2), identical in both directions: a device's own
- * daemon-state envelope. `errors` carries the replying peer's non-fatal
- * publisher failures so the headed box can log them against that peer.
- */
+/** The v2 exchange envelope, identical in both directions: a device's own daemon-state. `errors`
+ * carries the replying peer's non-fatal publisher failures. */
 export interface FleetStateExchangePayload {
   v: 2;
   state: FleetSharedDeviceState;
@@ -167,15 +143,9 @@ export interface PublishOwnFleetStateResult {
   errors: string[];
 }
 
-/**
- * Refresh every field this device owns in its own state file: the usage
- * snapshot (headed only), the session digests, and the reserved-auth readiness
- * verdict. Run before the envelope is sent (the headed tick) or printed back
- * (`__usage-ingest --reply`) so a peer always receives current fields. Each
- * publisher is independent: one failing is reported in `errors` and the others
- * still land. All three writers are the async, non-blocking variants
- * (`updateFleetSharedDeviceStateAsync` underneath).
- */
+/** Refresh every field this device owns in its state file: usage (headed only), session digests,
+ * and reserved-auth verdict, before the envelope is sent or printed. Publishers are independent: a
+ * failure goes to `errors` and the others still land. All writers are async and non-blocking. */
 export async function publishOwnFleetState(
   options: PublishUsageSnapshotOptions = {},
 ): Promise<PublishOwnFleetStateResult> {
@@ -208,11 +178,8 @@ interface BuildPayloadOptions {
   userAgentsDir?: string;
   cachePath?: string;
   role?: ConfiguredDeviceRole;
-  /**
-   * Send only the usage rows (read live from the cache, headed only) — the
-   * placement probe's shape: the dispatcher hands the chosen worker current
-   * numbers without the sessions/auth fields the tick carries.
-   */
+  /** Send only usage rows, read live from the cache (headed only): the placement probe's shape,
+   * giving the chosen worker current numbers without the sessions/auth fields. */
   usageOnly?: boolean;
   errors?: string[];
 }
@@ -237,12 +204,9 @@ export function formatFleetStateReply(payload: FleetStateExchangePayload): strin
   return `${FLEET_STATE_REPLY_MARKER}\n${JSON.stringify(payload)}\n`;
 }
 
-/**
- * Parse what a peer sent — a v2 exchange envelope, or the legacy v1 bare-rows
- * envelope from an older headed peer. Throws a clear message on anything else;
- * the caller decides whether that is exit code 2 (the receiver) or a per-peer
- * error (the headed tick).
- */
+/** Parse what a peer sent: a v2 envelope or the legacy v1 bare-rows envelope. Throws a clear
+ * message on anything else; the caller decides between exit 2 (receiver) and a per-peer error
+ * (headed tick). */
 export function parseFleetStateExchangeInput(raw: string): FleetStateExchangePayload | UsageSyncPayload {
   let parsed: unknown;
   try {
@@ -284,11 +248,8 @@ export function parseFleetStateReply(stdout: string): FleetStateExchangePayload 
   return payload;
 }
 
-/**
- * Rows as the receiver stores them: provenance `sync` (so the trust window is
- * `USAGE_SYNC_TRUST_MS`, not the local-capture bar) and the poller pinned to the
- * device that actually read the endpoint, defaulting to the sender.
- */
+/** Rows as the receiver stores them: provenance `sync` (trust window USAGE_SYNC_TRUST_MS) and the
+ * poller pinned to the device that read the endpoint, defaulting to the sender. */
 function stampSyncRows(rows: Record<string, CachedUsageSnapshot>, sender: string): Record<string, CachedUsageSnapshot> {
   const out: Record<string, CachedUsageSnapshot> = {};
   for (const [identity, incoming] of Object.entries(rows)) {
@@ -312,13 +273,9 @@ export interface ApplyPeerStateResult {
   receivedAt: number;
 }
 
-/**
- * Take a peer's envelope in: store it as that peer's file (stamped `receivedAt`)
- * and merge its usage rows into this box's cache newest-wins. The same step runs
- * on both ends — the worker on the pushed envelope, the headed box on the reply.
- * Both writes take their file lock asynchronously: this runs on the daemon tick
- * once per peer, and a `sleepSync` lock there freezes every other service.
- */
+/** Store a peer's envelope as that peer's file (stamped `receivedAt`) and merge its usage rows
+ * newest-wins. Runs on both ends. Both writes lock asynchronously: it runs per peer on the daemon
+ * tick, and a `sleepSync` lock would freeze every other service. */
 export async function applyPeerFleetState(
   state: FleetSharedDeviceState,
   options: ApplyPeerStateOptions = {},
@@ -392,13 +349,9 @@ export interface ExchangeResult {
   outcomes: PeerExchangeOutcome[];
 }
 
-/**
- * The headed publisher's fan-out: dial every peer in parallel, each under its
- * own timeout, and apply each reply as it arrives. Never throws for a peer — a
- * timeout, an old CLI with no `--reply`, or a reply naming the wrong device is
- * that peer's `error` and the others are unaffected. A non-headed device skips:
- * workers never initiate (they only answer), so a worker's tick is a no-op here.
- */
+/** The headed publisher's fan-out: dial every peer in parallel under its own timeout and apply each
+ * reply as it arrives. A peer's timeout, old CLI, or wrong-device reply is that peer's `error`,
+ * never a throw. Non-headed devices skip, since workers only answer. */
 export async function exchangeFleetStateWithPeers(options: ExchangeOptions = {}): Promise<ExchangeResult> {
   const device = options.device ?? machineId();
   const self = normalizeHost(device);

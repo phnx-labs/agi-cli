@@ -1,9 +1,6 @@
-/**
- * The session-title service (PHNX-3797) against a REAL session index: only the
- * model call is injected. The property under test is cost containment — a box
- * with no usable harness must stop spawning one subprocess per session every two
- * minutes, and must resume the moment generation works again.
- */
+/** Session-title service (PHNX-3797) against a real session index; only the model call is injected.
+ * Under test is cost containment: a box with no usable harness must stop spawning a subprocess per
+ * session every two minutes, and resume when generation works. */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

@@ -384,10 +384,9 @@ describe('shims - generateShimScript', () => {
   });
 
   test('shim does not use --version flag, which collides with the top-level CLI version flag', () => {
-    // Commander's `.version()` on the top-level program intercepts any
-    // `--version <value>` before subcommands see it — passing --version to
-    // `sync` or `refresh-rules` would silently print the CLI version and
-    // exit 0 instead of running the subcommand. Guard against regression.
+    // Commander's top-level `.version()` intercepts any `--version <value>` before subcommands see
+    // it, so passing it to `sync` or `refresh-rules` would print the CLI version and exit 0. Guard
+    // against regression.
     for (const agent of ['claude', 'codex', 'cursor', 'opencode', 'openclaw'] as const) {
       const script = generateShimScript(agent);
       expect(script, `${agent} shim must not pass --version to subcommands`).not.toMatch(/--version[ =]"?\$VERSION/);

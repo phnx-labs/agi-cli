@@ -1,8 +1,6 @@
-/**
- * PHNX-3605 scheduler lifecycle integration. Drives the real routines CLI
- * against a real compiled daemon and proves stop/start are SIGHUP service
- * transitions, not aliases for whole-daemon teardown.
- */
+/** PHNX-3605 scheduler lifecycle integration: drives the real routines CLI against a real compiled
+ * daemon to prove stop/start are SIGHUP service transitions, not aliases for whole-daemon
+ * teardown. */
 
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';

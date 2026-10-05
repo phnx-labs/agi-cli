@@ -1,16 +1,6 @@
-/**
- * Device resource probing for `agents devices list`.
- *
- * One SSH round-trip per device gathers load average, memory pressure, disk, and core
- * count (mac + linux via a POSIX snippet, windows via a CIM one-liner), parsed
- * into a {@link DeviceStats}. Probes run in parallel with a bounded timeout so
- * the list stays responsive — a slow or hung box degrades to "no stats" instead
- * of blocking the whole table.
- *
- * The parsers are pure and unit-tested (health.test.ts). They mirror the ones in
- * AGI EXT (apps/ext/src/core/deviceHealth.ts) — kept as a
- * separate copy on purpose: the CLI does not import across packages.
- */
+/** Device resource probing for `agents devices list`: one SSH round-trip per device gathers load,
+ * memory pressure, disk, and core count into {@link DeviceStats}. Probes run in parallel with a
+ * bounded timeout, so a hung box degrades to "no stats". */
 
 import { execFile } from 'child_process';
 import type { DeviceProfile } from './registry.js';
@@ -20,34 +10,14 @@ import { buildSshInvocation, writeAskpassShim } from './connect.js';
  * Tailscale path. Short enough that the list never hangs on a wedged box. */
 export const PROBE_TIMEOUT_MS = 2_500;
 
-/**
- * Probe budget for a device whose last handshake was DERP-relayed
- * ({@link DeviceTailscale.direct} === false).
- *
- * This constant used to not exist: 2.5s was applied to every device and its
- * docstring claimed to be "long enough for a cold relayed SSH handshake". That
- * was false, and on a fleet with no direct paths it broke `--device auto`
- * outright (PHNX-3682). Measured on a 9-box relayed fleet, probed in parallel
- * with cold paths: 1686/1805/1914/2688/2706/2749/3082/5586/6588 ms — six of nine
- * over budget, every one of them healthy (rc=0 within 10s). Warm, the same
- * probes take 512-872ms, which is what made the failure intermittent.
- *
- * A relayed hop pays DERP path setup on top of the TCP+SSH handshake, so it
- * gets the same budget the readiness probe already allows
- * (`READY_PROBE_TIMEOUT_MS`) rather than the direct-path one.
- */
+/** Probe budget for a device whose last handshake was DERP-relayed ({@link DeviceTailscale.direct}
+ * === false). A flat 2.5s broke `--device auto` (PHNX-3682): cold relayed handshakes took
+ * 1686-6588 ms on healthy boxes. */
 export const RELAYED_PROBE_TIMEOUT_MS = 8_000;
 
-/**
- * The probe budget for one device. A relayed peer gets
- * {@link RELAYED_PROBE_TIMEOUT_MS}; a direct (or unknown-path) peer keeps the
- * tight {@link PROBE_TIMEOUT_MS}. Windows keeps its own larger budget, which
- * already exceeds both.
- *
- * `direct` is only meaningful when a tailscale snapshot exists — a
- * `via:"manual"` device never gets a peer entry, so absence is "unknown path",
- * not "relayed", and must not silently widen every manual device's budget.
- */
+/** The probe budget for one device: relayed peers get {@link RELAYED_PROBE_TIMEOUT_MS}, direct or
+ * unknown-path peers keep {@link PROBE_TIMEOUT_MS}; Windows keeps its larger budget. A
+ * `via:"manual"` device has no tailscale snapshot, so absence is "unknown", not "relayed". */
 export function probeBudgetMs(device: DeviceProfile): number {
   if (device.shell === 'powershell') return WIN_PROBE_TIMEOUT_MS;
   return device.tailscale && device.tailscale.direct === false
@@ -64,12 +34,9 @@ const SEP = '---AGSTAT---';
 /** One-shot remote snapshot: load, memory, core count, then root filesystem. */
 export const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null); echo ${SEP}; df -Pk / 2>/dev/null | tail -1`;
 
-/** Windows equivalent, one labeled line via CIM. PowerShell 5.1-safe: no `||`
- * chaining, plain string concatenation. `LoadPercentage` is $null on some
- * hosts/VMs, which concatenates to an empty field — the parser treats that as
- * "no load signal" and headroom falls back to memory pressure alone.
- * wrapRemoteCommand base64-encodes this for powershell-shell devices, so the
- * quoting survives ssh intact. */
+/** Windows equivalent: one labeled line via CIM, PowerShell 5.1-safe (no `||`). `LoadPercentage` is
+ * $null on some hosts/VMs, giving an empty field the parser reads as "no load signal" (headroom
+ * uses memory pressure alone). wrapRemoteCommand base64-encodes this so quoting survives ssh. */
 const WIN_PROBE_SNIPPET = `$os = Get-CimInstance Win32_OperatingSystem; $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output ('AGWINSTAT load=' + $cpu + ' freeKb=' + $os.FreePhysicalMemory + ' totalKb=' + $os.TotalVisibleMemorySize + ' ncpu=' + $env:NUMBER_OF_PROCESSORS + ' diskFreeKb=' + ($disk.FreeSpace / 1KB) + ' diskTotalKb=' + ($disk.Size / 1KB))`;
 
 export function localProbeInvocation(platform: NodeJS.Platform): { file: string; args: string[] } {
@@ -81,13 +48,9 @@ export function localProbeInvocation(platform: NodeJS.Platform): { file: string;
 export interface DeviceStats {
   host: string;
   reachable: boolean;
-  /**
-   * The probe exceeded its budget rather than being refused or unresolvable.
-   * Only meaningful when `reachable` is false — it separates "this box did not
-   * answer in time" from "this box actively could not be reached", so callers
-   * report a slow link honestly instead of calling a healthy device offline
-   * (PHNX-3682).
-   */
+  /** The probe exceeded its budget rather than being refused or unresolvable. Only meaningful when
+   * `reachable` is false: it separates "did not answer in time" from "could not be reached", so a
+   * slow link is not reported as an offline device (PHNX-3682). */
   timedOut?: boolean;
   loadAvg1?: number;
   ncpu?: number;
@@ -227,10 +190,8 @@ export function parseProbeOutput(host: string, stdout: string, fetchedAt: number
  * numbers, mirroring how garbage POSIX output degrades. */
 export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: number): DeviceStats {
   const m = stdout.match(/AGWINSTAT load=([0-9.]*) freeKb=([0-9]+) totalKb=([0-9]+) ncpu=([0-9]+)(?: diskFreeKb=([0-9.]+) diskTotalKb=([0-9.]+))?/);
-  // Unparseable output still means the probe RAN — the box answered, we just
-  // could not read it. Stamp specsFetchedAt anyway so a hardware-fact carry
-  // forward (retainHardwareFacts, RUSH-3096) has a real observation moment
-  // instead of undefined.
+  // Unparseable output still means the probe ran. Stamp specsFetchedAt anyway so a hardware-fact
+  // carry-forward (retainHardwareFacts, RUSH-3096) has a real observation time.
   if (!m) return { host, reachable: true, fetchedAt, specsFetchedAt: fetchedAt };
   const loadPercent = m[1] === '' ? undefined : parseFloat(m[1]);
   const freeKb = parseInt(m[2], 10);
@@ -304,13 +265,9 @@ export function probeDeviceStats(
   let env: Record<string, string>;
   try {
     const shim = writeAskpassShim();
-    // buildSshInvocation joins the cmd with spaces and hands the string to the
-    // remote login shell, which evaluates the snippet's `;`/`||` directly — no
-    // `sh -c` wrapper needed (and a wrapper would only re-quote the first token).
-    // For powershell devices it base64-encodes the snippet instead.
-    // agentOnly: this is a read-only stats probe. A password-auth device must
-    // resolve its bundle broker-only — never force a foreground Touch ID sheet
-    // just to render the load/mem columns of `agents devices` (RUSH-1970).
+    // buildSshInvocation joins the cmd with spaces for the remote login shell, so no `sh -c`
+    // wrapper; powershell devices get base64. agentOnly: a read-only stats probe must resolve a
+    // password bundle broker-only, never forcing a Touch ID sheet (RUSH-1970).
     ({ args, env } = buildSshInvocation(device, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], shim, {}, { agentOnly: true }));
   } catch {
     return Promise.resolve({ host, reachable: false, fetchedAt });

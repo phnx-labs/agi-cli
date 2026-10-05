@@ -1,13 +1,6 @@
-// Generic Cloudflare orchestration — plain `fetch` against the CF REST API (the
-// repo has no CF wrapper). Create an R2 bucket, upload a module Worker with an R2
-// binding, set secrets via the Workers Secrets API, enable the free
-// `*.workers.dev` subdomain, and map a custom domain when the token owns the zone.
-//
-// This was `lib/share/provision.ts`. The artifact share engine moved out to
-// `@phnx-labs/artifacts-cli` (PHNX-3992), but `agents traces` provisions its own
-// isolated Cloudflare-backed store with the SAME primitives — so the generic
-// layer relocated here (share-specific lifecycle/collab/managed helpers left
-// with the share engine). `traces/provision.ts` is now the only consumer.
+// Generic Cloudflare orchestration over plain `fetch`: create an R2 bucket, upload a module Worker
+// with an R2 binding, set secrets, enable `*.workers.dev`, map a custom domain. Relocated from
+// `lib/share/provision.ts` (PHNX-3992); `traces` is the consumer.
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 

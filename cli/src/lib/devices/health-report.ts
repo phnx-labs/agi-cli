@@ -48,10 +48,9 @@ export interface FleetHealthRow {
    *  an offline row. Sourced from the registry's tailscale snapshot / reachability
    *  verdict. Undefined when never recorded. */
   lastSeen?: string;
-  /** This host's self-reported harness inventory (resources / agent versions /
-   *  repo state) from its `doctor --json` `fleet` field, for cross-device
-   *  divergence detection (RUSH-2027). Undefined for an unreachable box or an
-   *  older CLI that doesn't emit it. */
+  /** This host's self-reported harness inventory (resources, agent versions, repo state) from its
+   * `doctor --json` `fleet` field, for divergence detection (RUSH-2027). Undefined for an
+   * unreachable box or an older CLI that does not emit it. */
   inventory?: FleetInventory;
   /** This host's live agent workload (running-agent count + per-context / per-
    *  agent breakdown), from the fleet-status mirror / read-union (RUSH-2061).
@@ -140,11 +139,9 @@ export function buildFleetHealthReport(
     });
   }
 
-  // Cross-device harness divergence (RUSH-2027): compare every device's
-  // self-reported inventory against the local baseline and roll the findings up
-  // into one warning per affected device. Only runs when a baseline (`self`) is
-  // named and at least one device carries an inventory — an older-CLI fleet with
-  // no `fleet` field simply produces no divergence warning.
+  // Cross-device harness divergence (RUSH-2027): compare every device's inventory against the
+  // local baseline, one warning per affected device. Runs only when a baseline (`self`) is named
+  // and some device carries an inventory; an older-CLI fleet produces no warning.
   if (opts.self && rows.some((r) => r.inventory)) {
     const divergence = compareFleetInventories(
       rows.map((r) => ({ name: r.name, inventory: r.inventory ?? null })),
@@ -220,16 +217,9 @@ function loadLabel(stats: DeviceStats | undefined): string {
   return `${load}/${mem}`;
 }
 
-/**
- * Compact per-host auth cell. Four buckets, deliberately distinct so the column
- * doesn't cry wolf on healthy accounts:
- *   `●{live}`     green  — live-verified
- *   `·{present}`  gray   — signed in but no live probe (codex/grok/…): benign
- *   `◐{degraded}` yellow — soft/self-healing (expired/limited/error)
- *   `○{revoked}`  red    — server rejected the token: re-login now
- * A host with no cached auth rows shows "—"; an unreachable/skipped row shows
- * "-" like the other probe columns.
- */
+/** Compact per-host auth cell in four buckets so the column does not cry wolf: `●` green
+ * live-verified; `·` gray signed in, no live probe; `◐` yellow soft/self-healing; `○` red token
+ * rejected, re-login now. No cached auth rows shows "—"; unreachable/skipped shows "-". */
 function authLabel(row: FleetHealthRow): string {
   if (row.error || row.skipped) return chalk.gray('-');
   const s = row.auth;
@@ -309,12 +299,9 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
   return lines;
 }
 
-/**
- * "as of …" line so cache-served output is honest about age and points at the
- * refresh flag. Stats age comes from `stats.fetchedAt`, auth age from the
- * cached rollup's `oldestCheckedAt`; either may be absent. Returns null when the
- * table carries no timestamped data at all (nothing to date).
- */
+/** "as of ..." line so cache-served output is honest about age and points at the refresh flag.
+ * Stats age is `stats.fetchedAt`, auth age is the rollup's `oldestCheckedAt`; null when the table
+ * has no timestamped data. */
 export function freshnessFooter(rows: FleetHealthRow[], now: number = Date.now()): string | null {
   const oldestStats = oldestAcross(rows, (r) => r.stats?.fetchedAt);
   const oldestAuth = oldestAcross(rows, (r) => r.auth?.oldestCheckedAt);
@@ -325,10 +312,8 @@ export function freshnessFooter(rows: FleetHealthRow[], now: number = Date.now()
   return `  updated ${parts.join(' · ')} — pass --refresh (--live) for a live probe`;
 }
 
-// ---------------------------------------------------------------------------
-// Summary view (default): rollup + NEEDS ATTENTION + OS groups + footer.
-// The full grid above is kept for `--verbose`. (RUSH-1966)
-// ---------------------------------------------------------------------------
+// Summary view (default): rollup, NEEDS ATTENTION, OS groups, footer. The full grid above is kept
+// for `--verbose` (RUSH-1966).
 
 /** Collapse a long dev build (`0.0.0-dev.<sha>[-dirty]`) to `dev`/`dev-dirty`;
  *  released semver is shown verbatim. Keeps the version column narrow and stops
@@ -371,11 +356,9 @@ function isGenuinelyOffline(row: FleetHealthRow): boolean {
   return row.online === 'offline' || (!row.online && Boolean(row.error || row.skipped));
 }
 
-/** A CLI count is only worth flagging when it's stark — the box is missing more
- *  than two-thirds of the known agent CLIs (e.g. 1/9), which signals a
- *  broken/half-set-up box. A normal partial install (a box that just doesn't run
- *  every agent) is not a problem, so this deliberately does NOT fire at 4/9 or
- *  6/9. The full count stays visible under `--verbose`. */
+/** A CLI count is flagged only when stark: the box is missing more than two-thirds of the known
+ * agent CLIs (e.g. 1/9), signalling a half-set-up box. A normal partial install does not fire
+ * (4/9, 6/9). The full count stays under `--verbose`. */
 function starkCliGap(row: FleetHealthRow): { installed: number; total: number } | null {
   const { installed, total } = installedCliCount(row);
   return total > 0 && installed * 3 < total ? { installed, total } : null;
@@ -390,11 +373,8 @@ interface FleetAttentionItem {
   fix: string;
 }
 
-/**
- * The actionable problems only — each with the command that fixes it. Order:
- * offline boxes, CLI gaps, active-version config drift, then version skew.
- * A healthy fleet returns `[]` (the caller prints an all-clear line).
- */
+/** The actionable problems only, each with its fixing command. Order: offline boxes, CLI gaps,
+ * active-version config drift, version skew. A healthy fleet returns `[]`. */
 export function buildFleetAttentionItems(report: FleetHealthReport, now: number = Date.now()): FleetAttentionItem[] {
   const items: FleetAttentionItem[] = [];
   // 1) Genuinely-offline boxes (not `unknown`/unconfigured), each individually.
@@ -468,12 +448,9 @@ function versionCell(row: FleetHealthRow): string {
   return shortVersion(row.version);
 }
 
-/**
- * The default `agents fleet status` view (RUSH-1966): a one-line rollup, a
- * NEEDS ATTENTION list of only the actionable problems (each with its fix
- * command), quiet per-device rows grouped by OS, and an honest footer. The full
- * auth/CLI/sync grid moves behind `--verbose` ({@link renderFleetMatrix}).
- */
+/** The default `agents fleet status` view (RUSH-1966): a one-line rollup, a NEEDS ATTENTION list of
+ * actionable problems with fix commands, quiet per-device rows grouped by OS, and a footer. The
+ * full auth/CLI/sync grid is behind `--verbose` ({@link renderFleetMatrix}). */
 export function renderFleetSummary(
   report: FleetHealthReport,
   opts: { self?: string; now?: number } = {},

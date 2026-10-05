@@ -53,10 +53,9 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain('npm config set prefix "$HOME/.local"');
     // A missing CLI must abort with a diagnostic, not run into `agents: command not found`.
     expect(script).toContain('exit 96');
-    // First-run setup is gated on the SAME postcondition the run-side gate checks
-    // (~/.agents/.system is a git repo, ensureInitialized in commands/setup.ts), and
-    // a setup that leaves it absent aborts the bootstrap instead of being swallowed.
-    // `-e` matches isGitRepo's existsSync (a gitfile counts too).
+    // First-run setup is gated on the same postcondition the run-side gate checks
+    // (`~/.agents/.system` is a git repo), and a setup that leaves it absent aborts the bootstrap.
+    // `-e` matches isGitRepo's existsSync (a gitfile counts).
     expect(script).toContain('if [ ! -e "$HOME/.agents/.system/.git" ]; then');
     expect(script).toContain('setup_out=$(agents setup 2>&1)');
     expect(script).toContain(`exit ${LEASE_BOOTSTRAP_FAILED_CODE}`);
@@ -137,10 +136,9 @@ describe('buildBootstrapScript', () => {
   });
 
   it('REFUSES to copy a base runtime native credential (SING-1b) — the profile auth is portable, the native login is not', () => {
-    // A profile-dispatch run carries its own portable auth (ANTHROPIC_BASE_URL /
-    // AUTH_TOKEN), which is fine. But `credentialRuntimes: ['claude']` ALSO asks
-    // to copy the native Claude OAuth login to the leased box — that is the
-    // forbidden transfer, so the bootstrap must refuse rather than serialize it.
+    // A profile-dispatch run's portable auth is fine, but `credentialRuntimes: ['claude']` also
+    // asks to copy the native Claude OAuth login, the forbidden transfer, so the bootstrap must
+    // refuse rather than serialize it.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-profile-'));
     const credPath = path.join(tmpDir, 'claude.json');
     fs.writeFileSync(credPath, '{"oauthAccount":{"emailAddress":"a@b.com"}}');
@@ -259,11 +257,9 @@ describe('buildBootstrapScript', () => {
 
 describe('leaseAndRun — refuses a native OAuth copy BEFORE leasing a box (SING-1b, no leak)', () => {
   it('rejects a signed-in native runtime before any crabbox interaction', async () => {
-    // credPath is SET, so `assertNoNativeOAuthTransfer` at the very top of
-    // leaseAndRun throws — before crabboxFind / crabboxWarmup ever runs, so no box
-    // is leased (nothing to pay for or leak). If the refusal lived only inside
-    // buildBootstrapScript (post-warmup), this call would instead reach the crabbox
-    // layer and fail with a different error (or hang on a real lease).
+    // credPath is set, so `assertNoNativeOAuthTransfer` at the top of leaseAndRun throws before
+    // crabboxFind / crabboxWarmup, so no box is leased. If the refusal lived only in
+    // buildBootstrapScript it would reach crabbox and fail differently.
     const signedIn: DetectedRuntime[] = [
       { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: '/tmp/claude-signedin.json' },
     ];
@@ -285,11 +281,9 @@ describe('leaseWorkspaceId', () => {
 // POSIX-only: stands up a `#!/bin/sh` fake crabbox on PATH, which Windows can
 // neither resolve nor execute (see crabbox/cli.test.ts for the same pattern).
 describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes', () => {
-  // Hermetic lease-bundle resolution: leaseAndRun → crabboxFind → crabboxEnv would
-  // otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a locked
-  // `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
-  // dev-machine-only failure unrelated to the reuse/bootstrap flow under test. Pin
-  // readMeta → {} and the process client's listBundlesSync → [] so no lease bundle is found.
+  // Hermetic lease-bundle resolution: otherwise leaseAndRun auto-detects the developer's real
+  // provider-token bundle and its agentOnly read throws "not unlocked" (SEC-13), a dev-only
+  // failure. Pin readMeta to {} and listBundlesSync to [].
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
@@ -373,10 +367,9 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes'
         runtimes: ['claude'],
         detected,
         reuseBox: 'warm-one',
-        // This test exercises box-reuse + bootstrap-script generation, NOT the
-        // push-from-local copy (covered by the buildBootstrapScript F1 test). Keep
-        // it off so leaseAndRun never spawns a real `rsync -e ssh` to the fake
-        // TEST-NET box address — that would hang on ConnectTimeout in CI.
+        // Tests box reuse and bootstrap-script generation, not push-from-local copy. Keep it off
+        // so leaseAndRun never spawns a real `rsync -e ssh` to the fake TEST-NET address, which
+        // would hang on ConnectTimeout in CI.
         copySetup: false,
         onData: (chunk) => { output += chunk; },
         onPhase: (phase) => { phases.push(phase.kind); },
@@ -436,11 +429,9 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     };
   }
 
-  /**
-   * A fake crabbox with a pool: `list` serves `boxes` until a `warmup` flips the
-   * warmed marker, then serves `boxes + warmedBoxes`; `status --id <slug>`
-   * reports ready=true only for `readySlugs`. Every invocation is logged.
-   */
+  /** A fake crabbox with a pool: `list` serves `boxes` until a `warmup` flips the marker, then
+   * `boxes + warmedBoxes`; `status --id` reports ready only for `readySlugs`. Every invocation is
+   * logged. */
   function setupPoolFake(opts: {
     boxes: unknown[];
     readySlugs: string[];
@@ -621,10 +612,9 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
   });
 
   it('stops a box THIS run provisioned when its bootstrap failed — even without --fresh or --keep-box', async () => {
-    // Empty pool → warmup a fresh box; the box-side bootstrap exits
-    // LEASE_BOOTSTRAP_FAILED_CODE BEFORE the agent marker (agents setup did not
-    // complete). A newly created, unusable box is pure cost, so it is torn down
-    // despite a normal (non --fresh) lease.
+    // Empty pool means warmup a fresh box; the box-side bootstrap exits
+    // LEASE_BOOTSTRAP_FAILED_CODE before the agent marker. A new unusable box is pure cost, so it
+    // is torn down despite a normal (non --fresh) lease.
     const fake = setupPoolFake({ boxes: [], readySlugs: [], runExit: LEASE_BOOTSTRAP_FAILED_CODE, runEmitsMarker: false });
     const { result, phases, calls } = await runWithPool(fake);
 

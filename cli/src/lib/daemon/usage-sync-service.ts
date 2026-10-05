@@ -1,37 +1,13 @@
-/**
- * Fleet state exchange as a `PeriodicService` (PHNX-3392 usage-sync,
- * PHNX-3792 session mirror, PHNX-4051 auth verdict, PHNX-4116 SSH transport).
- *
- * Each tick: (1) refreshes every field this box owns in its own
- * `devices/<device>/daemon-state.json` — a headed box's Claude usage snapshot,
- * EVERY box's lightweight session digests, and the reserved-auth readiness
- * verdict; (2) on a headed box (`personal`/`desktop`) only, dials every dialable
- * peer in parallel with `agents __usage-ingest --reply`, sending that envelope
- * on stdin and storing each peer's reply as `devices/<peer>/daemon-state.json`
- * stamped `receivedAt` (`exchangeFleetStateWithPeers`); (3) folds the peers'
- * session digests into the local index so the picker renders remote-host
- * previews inline. A worker never initiates: its state leaves the box only as
- * the reply to a headed peer's dial, and a headed peer's usage rows arrive on
- * that same dial.
- *
- * There is no git in this tick. The exchange used to be a commit/rebase/push of
- * the fleet-synced user repo, which needed a cross-process lock, a 45 s
- * process-tree deadline, an 8-minute kickoff offset from auth-sync to dodge that
- * lock, and untracked-collision backups — and still wedged every clone behind a
- * bloated remote. Peers that time out are skipped this tick; none blocks another.
- */
+/** Fleet state exchange (PHNX-3392, PHNX-3792, PHNX-4051, PHNX-4116). Each tick refreshes this
+ * box's own `devices/<device>/daemon-state.json`; a headed box then dials every peer with `agents
+ * __usage-ingest --reply` and stamps each reply `receivedAt`. Workers never initiate; no git. */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { USAGE_SYNC_INTERVAL_MS } from '../accounting/usage-sync.js';
 
-/**
- * The usage-sync tick cadence. Exported because auth-sync's credential-push
- * freshness gate is the CONSUMER of this producer's cadence: it skips the
- * pushes when the last exchange is older than one usage-sync interval, so it
- * must track this constant rather than its own equal-by-coincidence literal.
- * Sourced from `usage-sync.ts`'s `USAGE_SYNC_INTERVAL_MS` rather than a
- * second literal, so the two files can't drift out of sync with each other.
- */
+/** The usage-sync tick cadence, exported because auth-sync's credential-push freshness check
+ * consumes it: it skips pushes when the last exchange is older than one interval. Sourced from
+ * `USAGE_SYNC_INTERVAL_MS` so the two cannot drift. */
 export const USAGE_SYNC_TICK_MS = USAGE_SYNC_INTERVAL_MS;
 const USAGE_SYNC_DEADLINE_MS = 2 * 60_000;
 /** Let the daemon's registry/device probes settle before the first fan-out. */

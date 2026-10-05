@@ -1,16 +1,6 @@
-/**
- * Isolated Cloudflare resource choices for the managed session-backup store.
- *
- * The managed sessions backend is the Phoenix-gated, zero-setup path behind
- * `agents sessions export --to-r2` / `import --from-r2` for a signed-in user —
- * the sessions analogue of the managed `agents traces sync` store. A signed-in
- * user never has to provision their own `r2.backups` bucket; the CLI talks to
- * this already-live Worker under their Phoenix bearer.
- *
- * Mirrors `lib/traces/config.ts` + `managedTracesBaseUrl()`. The endpoint host
- * is its own subdomain (a separate Worker + bucket from traces/share), so the
- * blast radius of a bug or a quota exhaustion is one surface, not three.
- */
+/** Isolated Cloudflare resource choices for the managed session-backup store, the zero-setup
+ * Phoenix-gated path behind `sessions export --to-r2` / `import --from-r2`. Mirrors
+ * `lib/traces/config.ts`; its own subdomain, Worker and bucket limit blast radius to one surface. */
 
 /** Managed sessions Worker domain — its own subdomain, separate from traces/share. */
 export const DEFAULT_SESSIONS_DOMAIN = 'sessions.agents-cli.sh';

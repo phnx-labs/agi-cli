@@ -254,11 +254,8 @@ function fullName(type: AgentType, version: string | null | undefined): string {
   return version ? `${name} ${version}` : name;
 }
 
-/**
- * One-line operator nudge after `teams start`: teammates are briefed to post
- * IMPORTANT milestones to the feed (RUSH-2250), and this is how to watch them.
- * Print-only — no engine behavior.
- */
+/** One-line operator nudge after `teams start`: teammates post IMPORTANT milestones to the feed
+ * (RUSH-2250), and this says how to watch them. Print-only, no engine behavior. */
 export function printFeedHint(team: string): void {
   console.log(
     chalk.gray('Tip: teammates post IMPORTANT milestones to the feed (') +
@@ -269,20 +266,9 @@ export function printFeedHint(team: string): void {
   );
 }
 
-/**
- * Resolve a teammate spec to its execution target.
- *
- * Accepts:
- *  - `claude`            — default version of an installed agent
- *  - `claude@2.1.112`    — pinned version of an installed agent
- *  - `<profile-name>`    — runs through `agents run <profile>`, with the
- *                          profile's host agent used as the underlying
- *                          AgentType for event parsing and CLI checks.
- *
- * `agent` is always the underlying harness so event parsers, CLI-availability
- * checks, and version pins keep working. `profileName` is set only when the
- * spec resolved through a profile.
- */
+/** Resolve a teammate spec to its execution target: `claude` (default version), `claude@2.1.112`
+ * (pinned), or `<profile-name>` (runs via `agents run <profile>`). `agent` is always the underlying
+ * harness for event parsing, CLI checks and pins; `profileName` is set only for profiles. */
 function parseTeammate(spec: string): {
   agent: AgentType;
   version: string | null;
@@ -545,12 +531,9 @@ export function cloudDispatchOptions(
  * teammate whose CLI may not be signed in. Warn-only — never blocks `start`.
  * Local teammates only; cloud teammates authenticate through their provider.
  */
-/**
- * Advisory line for a version-pinned teammate whose account can't serve a run
- * right now. A pinned target (`agents run <agent>@<version>`) bypasses account
- * rotation — the pin IS the target — so unlike a bare teammate it can't route
- * around a throttled/expired account; it will launch and likely 429 at once.
- */
+/** Advisory line for a version-pinned teammate whose account cannot serve a run now. A pin bypasses
+ * account rotation, so it cannot route around a throttled or expired account and will launch and
+ * likely 429 at once. */
 function throttleWarningLine(
   agent: AgentType,
   version: string,
@@ -1039,10 +1022,9 @@ async function resolveTeammateSessions(
   return map;
 }
 
-// Default compact renderer — one block per teammate, optimized for the
-// orchestrator scanning "what state, what did you touch, what did you say
-// last." Caller passes the projected AgentStatusSummary; for the full
-// verbose layout use printAgentDetail above.
+// Default compact renderer: one block per teammate for an orchestrator scanning state, what was
+// touched and the last message. Takes the projected AgentStatusSummary; `printAgentDetail` is the
+// verbose layout.
 function printAgentSummary(s: AgentStatusSummary): void {
   const delivery: TeammateDelivery =
     (s.delivery as TeammateDelivery | undefined) ??
@@ -1142,10 +1124,8 @@ async function printTeamStatus(team: string, result: import('../lib/teams/api.js
   console.log(chalk.gray(`cursor: ${result.cursor}`));
 }
 
-// Compact default renderer — no session-file dive, no per-teammate
-// 15-line preview. One block per teammate, suitable for the orchestrator
-// scanning what each agent did. Use `printTeamStatus` (above) for the
-// verbose/legacy layout.
+// Compact default renderer: no session-file dive or per-teammate 15-line preview, one block per
+// teammate for the orchestrator. `printTeamStatus` is the verbose/legacy layout.
 function printTeamSummary(
   team: string,
   result: import('../lib/teams/api.js').TaskStatusSummaryResult
@@ -1174,14 +1154,9 @@ function printTeamSummary(
   console.log(chalk.gray('Raw log:     agents teams logs --team ' + team + ' --teammate <name>'));
 }
 
-// Classify a team into a single bucket for --status filtering.
-//  - empty:    no teammates (created but nobody added yet)
-//  - waiting:  only staged teammates — call `teams start` to kick them off
-//  - working:  at least one teammate still running
-//  - failed:   at least one teammate failed or was stopped (any failure wins —
-//              even if others finished, you want to know about the failure)
-//  - stranded: everyone finished, but at least one has uncommitted work and no PR
-//  - done:     everyone finished successfully, no failures, no stranded work
+// Classify a team into one --status bucket: empty (no teammates), waiting (only staged; `teams
+// start`), working (one running), failed (any failed/stopped, which wins), stranded (all finished,
+// uncommitted work and no PR), done (all succeeded).
 function classifyTeamStatus(t: TaskInfo): 'empty' | 'waiting' | 'working' | 'stranded' | 'done' | 'failed' {
   if (t.agent_count === 0) return 'empty';
   if (t.running > 0) return 'working';

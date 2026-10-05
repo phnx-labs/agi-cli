@@ -75,10 +75,9 @@ describe('pruneStaleWorkflowSubagents — fail-closed cleanup (issue #401)', () 
   }
 
   it('removes a stale non-permitted workflow subagent while preserving the user\'s own', () => {
-    // Shared per-agent agents dir as left by a PRIOR unrestricted run: it holds
-    // a workflow subagent (`danger.md`) that this scoped run does NOT permit,
-    // plus the user's own hand-placed subagent (`myhelper.md`) and the permitted
-    // `security.md`.
+    // Shared per-agent agents dir left by a prior unrestricted run: it holds a subagent
+    // (`danger.md`) this scoped run does not permit, the user's own `myhelper.md`, and the
+    // permitted `security.md`.
     const shared = makeSharedDir({
       'security.md': 'stale security',
       'danger.md': 'leftover from unrestricted run',

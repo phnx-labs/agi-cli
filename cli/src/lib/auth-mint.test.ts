@@ -251,11 +251,9 @@ describe('driveSetupTokenMint', () => {
   });
 });
 
-// A named provider account (seedNamedAccount → addAccount) is a bundle with no
-// explicit backend, which the real standalone would put in the operator's login
-// keychain on a headed macOS box; those blocks run only where keychain items
-// are file-backed (headless Linux/Windows, CI). The reserved `auth` bundle is
-// written with `backend: 'file'` and runs everywhere.
+// A named provider account (seedNamedAccount -> addAccount) has no explicit backend, so the real
+// standalone would use the login keychain on a headed macOS box; those blocks run only where items
+// are file-backed (headless Linux/Windows, CI). The reserved `auth` bundle is `backend: 'file'`.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 /** A real version home signed into EMAIL (writes .claude.json), removed after each test. */
@@ -298,11 +296,9 @@ describe('seedReservedAuthToken — the reserved file-backed auth bundle', () =>
     expect(first).toEqual({ bundle: '__claude__', key });
     // The worker slot reads the raw item (readReservedCredential) …
     expect(readReservedCredential('__claude__', key)).toBe(TOKEN);
-    // … and the daemon push reads the store AS A BUNDLE (pushBundleToHost →
-    // readAndResolveBundleEnv). A bare raw item with no bundle record made every
-    // reserved-store push fail with "Invalid bundle name" / OPERATION_FAILED and
-    // left every worker without a Cursor/Codex/Grok key — so this is the read
-    // that must succeed, on a FILE-backed, policy-never bundle.
+    // The daemon push reads the store as a bundle (pushBundleToHost). A bare raw item with no
+    // bundle record made every reserved-store push fail ("Invalid bundle name") and left workers
+    // without a Cursor/Codex/Grok key, so this read must succeed on a file-backed bundle.
     expect(bundleExistsSync('__claude__')).toBe(true);
     expect(bundleBackendSync('__claude__')).toBe('file');
     const resolved = readAndResolveBundleEnvSync('__claude__', { caller: 'test', agentOnly: true, keyMode: 'storage' });
@@ -350,10 +346,9 @@ describe('seedReservedAuthToken — the reserved file-backed auth bundle', () =>
   });
 
   it('reports not-ready instead of crashing when the standalone secrets CLI is unreachable (PHNX-3385)', () => {
-    // `agents setup` / `agents doctor` call this as a read-only probe; both the
-    // account-registry read and the auth-bundle read go through the client, so
-    // a missing / unspawnable `secrets` executable must degrade to "cannot
-    // confirm", never throw out of the status command.
+    // `agents setup`/`agents doctor` call this as a read-only probe through the client, so a
+    // missing or unspawnable `secrets` executable must degrade to "cannot confirm", never throw
+    // out of the status command.
     const savedBin = process.env.SECRETS_BIN;
     process.env.SECRETS_BIN = path.join(os.tmpdir(), 'no-such-secrets-cli');
     _resetSecretsClientForTest();

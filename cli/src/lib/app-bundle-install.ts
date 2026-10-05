@@ -1,25 +1,6 @@
-/**
- * Atomic, serialized install of a macOS `.app` bundle to a stable user path.
- *
- * Used by the menu-bar helper (`lib/menubar/install-menubar.ts`), which is
- * (re)installed on the hot path of ordinary `agents` invocations. (A second
- * helper this module used to also serve, the secrets keychain broker, moved
- * out of this repo entirely with the standalone `secrets` engine —
- * PHNX-3989 — and installs itself now.) It previously did a non-atomic
- * `rm -rf dest` + `cp -R src dest` straight onto the live bundle. That copy takes
- * long enough that a concurrent reader (Gatekeeper, or an exec of the bundle) sees
- * a half-written `.app` — a truncated Mach-O / mismatched `_CodeSignature` hash —
- * which macOS reports as **"is damaged and can't be opened."** On a busy box dozens
- * of concurrent invocations raced the same path, so the dialog fired intermittently.
- *
- * {@link copyAppBundle} stages the copy in a sibling directory and swaps it into
- * place with renames, so a reader sees either the old or the new complete bundle,
- * never a half-written one — the only moment `dest` is briefly absent is the
- * sub-millisecond gap between the two renames (vs the seconds-long `cp`), and a
- * failed copy never touches the live bundle. {@link withInstallLock} serializes concurrent
- * installers (via the shared `withFileLock`) so a burst of invocations installs
- * once instead of stampeding.
- */
+/** Atomic, serialized install of a macOS `.app` bundle to a stable user path, used by the menu-bar
+ * helper on the hot path of ordinary invocations. The old `rm -rf` + `cp -R` let a concurrent
+ * reader see a half-written bundle ("is damaged"). Now staged, renamed into place, and locked. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
@@ -32,13 +13,9 @@ import { withFileLock, ensureLockTarget } from './fs-atomic.js';
 const INSTALL_LOCK_STALE_MS = 60_000;
 const INSTALL_LOCK_ACQUIRE_TIMEOUT_MS = 60_000;
 
-/**
- * Copy an `.app` bundle to `dest` atomically. Stages into a sibling dir, then
- * swaps with renames — the window where `dest` is absent shrinks from the
- * seconds-long `cp` to a single microsecond rename, and a failed copy leaves the
- * existing bundle untouched. Serialize concurrent callers with {@link withInstallLock}
- * so the two-step swap never races another swap.
- */
+/** Copy an `.app` bundle to `dest` atomically: stage in a sibling dir and swap with renames, so
+ * `dest` is absent only for one rename and a failed copy leaves the existing bundle intact.
+ * Serialize callers with withInstallLock. */
 export function copyAppBundle(
   src: string,
   dest: string,
@@ -79,20 +56,14 @@ export function copyAppBundle(
   fs.rmSync(backup, { recursive: true, force: true });
 }
 
-/**
- * Serialize installs across the many concurrent `agents` invocations that pass
- * through the helper-install path, so a burst copies once instead of stampeding
- * the atomic swap. Locks a sentinel file beside the bundle (the bundle itself may
- * not exist yet on first install) via the shared {@link withFileLock}.
- */
+/** Serialize installs across concurrent `agents` invocations so a burst copies once. Locks a
+ * sentinel file beside the bundle (which may not exist on first install) via withFileLock. */
 export function withInstallLock(dest: string, fn: (heartbeat: () => void) => void): void {
   const lockTarget = `${dest}.install-lock`;
   ensureLockTarget(lockTarget);
-  // Pass proper-lockfile's `heartbeat` straight through: the install body is a
-  // fully SYNCHRONOUS chain of blocking `spawnSync`s (`cp -R`, then codesign /
-  // spctl), so the event loop never turns and proper-lockfile's own async mtime
-  // refresh can't fire. Callers invoke heartbeat() between those steps to keep a
-  // long hold from ageing past staleMs and being broken by a contending peer.
+  // Pass proper-lockfile's `heartbeat` through: the install body is synchronous blocking
+  // `spawnSync`s (`cp -R`, codesign, spctl), so the event loop never turns and its async mtime
+  // refresh can't fire. Callers call heartbeat() between steps so the lock isn't broken as stale.
   withFileLock(lockTarget, (heartbeat) => fn(heartbeat), {
     staleMs: INSTALL_LOCK_STALE_MS,
     acquireTimeoutMs: INSTALL_LOCK_ACQUIRE_TIMEOUT_MS,

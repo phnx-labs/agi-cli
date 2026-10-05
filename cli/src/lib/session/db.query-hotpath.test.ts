@@ -1,13 +1,6 @@
-/**
- * RUSH-2211: the three query hot-path fixes in querySessions/ftsSearch.
- *   1. The default listing sort uses the bare `last_activity` column (not
- *      `IFNULL(last_activity, timestamp)`) so idx_sessions_last_activity serves it.
- *   2. The post-query existence check batches `fs.existsSync` per directory
- *      (`findMissingFilePaths`) instead of one stat syscall per row, but must
- *      still drop exactly the rows whose file vanished.
- *   3. Label-first search (`ftsSearch`) routes through the FTS5 `label` column
- *      instead of a leading-wildcard `LOWER(label) LIKE '%q%'` table scan.
- */
+/** RUSH-2211 query hot-path fixes: (1) the default sort uses bare `last_activity` so
+ * idx_sessions_last_activity serves it; (2) the existence check batches `fs.existsSync` per
+ * directory; (3) label-first `ftsSearch` uses the FTS5 `label` column, not a LIKE scan. */
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

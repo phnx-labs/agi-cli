@@ -10,10 +10,8 @@ import {
   type CachedUsageSnapshot,
 } from './usage.js';
 
-// Real files, no mocks: the export → ingest → read path is the cross-machine
-// merge contract beneath the fleet-shared user-repo snapshot. A publisher's
-// cache is exported, merged into a worker's cache newest-wins, and read back
-// through the normal reader.
+// Real files, no mocks: export, newest-wins merge into a worker's cache, and read back through the
+// normal reader. This is the cross-machine merge contract.
 
 function row(capturedAt: string | null, usedPercent = 12): CachedUsageSnapshot {
   return {

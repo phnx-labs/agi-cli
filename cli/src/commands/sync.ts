@@ -421,13 +421,9 @@ function repoChoiceLabel(repo: string): string {
   }
 }
 
-/**
- * Interactive bare `agents sync` (TTY, no flags): two checklists — which
- * DotAgent repos to sync FROM, and which installed agents to sync INTO. Then
- * freshen the selected git-syncable repos (pull-only) and reconcile the chosen
- * repos' resources into each selected agent's default version, registering
- * hooks so synced hook scripts actually fire.
- */
+/** Interactive bare `agents sync` (TTY, no flags): pick repos to sync from and agents to sync into,
+ * freshen the git-syncable repos (pull-only), then reconcile into each agent's default version,
+ * registering hooks so synced hook scripts fire. */
 async function runInteractiveReconcile(
   opts: SyncOpts,
   outLog: (msg: string) => void,
@@ -543,12 +539,9 @@ async function runInteractiveReconcile(
   if (repairHadFailures(umbrellaRepair)) process.exitCode = 1;
 }
 
-/**
- * The umbrella verb: bare `agents sync` (no agent) makes this machine current.
- * Resolves the flags + a secrets passphrase (env-only for now; tokenized auth
- * arrives with `agents secrets vault unlock`) and runs the fetch+reconcile stages, then prints
- * a one-line summary. Stage failures are non-fatal and surfaced as warnings.
- */
+/** The umbrella verb: bare `agents sync` makes this machine current. Resolves flags and a secrets
+ * passphrase (env-only for now) and runs fetch+reconcile, then prints a summary. Stage failures are
+ * non-fatal warnings. */
 async function runUmbrella(
   opts: SyncOpts,
   quiet: boolean,

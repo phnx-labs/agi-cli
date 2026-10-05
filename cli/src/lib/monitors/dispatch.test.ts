@@ -8,17 +8,9 @@ import { dispatchAction } from './dispatch.js';
 import type { MonitorConfig, MonitorEvent } from './config.js';
 import type { Meta } from '../types.js';
 
-/**
- * The monitor `notify` action used to exec openclaw directly with no target, so
- * it inherited a hardcoded owner number and had no missing-binary guard (raw
- * ENOENT). It now routes through the one owner-send seam (sendToOwner →
- * lookupTransport). Real path: a fake `openclaw` on PATH records the argv.
- *
- * POSIX-only (RUSH-2215): the openclaw-telegram provider resolves the binary
- * with `which openclaw` and execs it, and the fake is a `#!/bin/sh` recorder —
- * neither works on Windows (no `which`; an extensionless shell script is not
- * executable), so these assertions can only run on a POSIX host.
- */
+/** The monitor `notify` action used to exec openclaw with no target, inheriting a hardcoded owner
+ * number and no missing-binary guard. It now routes through the one owner-send seam (sendToOwner).
+ * POSIX-only (RUSH-2215): the provider uses `which` and the fake is a `#!/bin/sh` recorder. */
 describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves the owner, fails loud on a missing binary)', () => {
   let tmp: string;
   let record: string;
@@ -105,10 +97,9 @@ describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves t
   });
 
   it('an unresolvable notifyChannel returns ok:false — it does not exit the process', async () => {
-    // `agents monitors add --notify <channel>` validates nothing (commands/monitors.ts),
-    // so a typo lands in the config and reaches here. Resolving through the
-    // die()-capable resolveTransport used to process.exit() and take the whole
-    // monitor daemon down with it (engine.ts try/catch can't catch an exit).
+    // `agents monitors add --notify <channel>` validates nothing (commands/monitors.ts), so a typo
+    // reaches here. The die()-capable resolveTransport used to process.exit() and take the monitor
+    // daemon down (engine.ts's try/catch can't catch an exit).
     const monitor = {
       ...notifyMonitor(),
       action: { type: 'notify', notifyChannel: 'not-a-real-channel' },
@@ -120,16 +111,9 @@ describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves t
   });
 });
 
-/**
- * RUSH-2500: dispatchAction run/routine must return ok:false (not ok:true) when
- * executeJobDetached returns a skipped/blocked RunMeta. Before the fix the return
- * was unconditionally ok:true, so monitors logs showed "skipped" while monitors
- * runs showed "ok" — the two surfaces disagreed and the action never ran.
- *
- * Uses a child process (same shape as the daemon-survival test) so HOME is set
- * before any module-level state constants are resolved, letting us plant a fake
- * active run without touching the real ~/.agents/.history.
- */
+/** RUSH-2500: dispatchAction run/routine must return ok:false when executeJobDetached returns a
+ * skipped/blocked RunMeta (it was always ok:true, so `monitors logs` and `monitors runs`
+ * disagreed). Uses a child process so HOME is set before module state resolves. */
 describe('dispatchAction run (skipped run returns ok:false)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   let home: string;
@@ -191,25 +175,9 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
   });
 });
 
-/**
- * RUSH-2681: a monitor's `run` action was refused by the ROUTINES activation
- * manifest. `jobRunsOnThisDevice` (lib/scheduling/routines.ts) consulted
- * `routineEnabledOnThisDevice` FIRST and short-circuited on its answer, and a
- * monitor's synthesized job name is never in that manifest (nothing under
- * monitors/ writes one), so every fire recorded
- * `skipReason: "wrong_owner"` with the empty-allowlist message
- * `Job '<name>' can only run on: ` and no action ever ran — measured 5/5 fires on
- * yosemite-s1 at 1.22.39.
- *
- * Real path, in a child process so HOME is set before the state module resolves
- * its path constants: the manifest is materialized through the real writer
- * (`replaceEnabledRoutines`), then `dispatchAction` runs for real. The assertions
- * are on the two gates this fix opens, not on the agent's exit: the run record
- * must carry neither `skipReason: "wrong_owner"` (the eligibility gate,
- * runner.ts:363) nor `readiness.code: "execution_context_missing"` (the readiness
- * gate behind it). Whatever the spawned agent then does under a temp HOME is not
- * what is being asserted.
- */
+/** RUSH-2681: a monitor's `run` was refused by the ROUTINES activation manifest (its synthesized
+ * job name is never in it), recording `skipReason: "wrong_owner"` on every fire. Real path in a
+ * child process; asserts neither `wrong_owner` nor `execution_context_missing`. */
 describe('dispatchAction run (the routines activation manifest does not refuse a monitor)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   let home: string;
@@ -267,9 +235,8 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
     expect(out.result.error ?? '').not.toMatch(/can only run on/);
     const meta = latestRunMeta(monitorName);
     expect(meta.skipReason).not.toBe('wrong_owner');
-    // The gate behind it: a monitor owns no project and had no field able to
-    // supply a cwd, so the run was then blocked with `execution_context_missing`
-    // — inert for a second reason. dispatchAction now defaults the job's cwd to
+    // The gate behind it: a monitor owns no project and had no field to supply a cwd, so the run
+    // was blocked with `execution_context_missing`. dispatchAction now defaults the job's cwd to
     // the target home.
     expect(meta.readiness?.code).not.toBe('execution_context_missing');
   });
@@ -307,12 +274,9 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
   });
 });
 
-/**
- * The daemon-survival guarantee, proven in a real child process — the same shape
- * as the review's live repro. An in-process assertion can't distinguish "returned
- * a result" from "would have exited", so this runs dispatchAction for real and
- * requires the process to reach the line after it and exit 0.
- */
+/** The daemon-survival guarantee, proven in a real child process: an in-process assertion can't
+ * tell "returned a result" from "would have exited", so this runs dispatchAction for real and
+ * requires the process to reach the next line and exit 0. */
 describe('dispatchAction notify (process survives an unresolvable channel)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   let fixtureDir: string;

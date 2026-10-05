@@ -5,12 +5,9 @@ import { stripForeignConfigDir, slotAwareConfigEnvBash } from '../adapter.js';
 export const museAdapter: HarnessAdapter = {
   id: 'muse',
 
-  // Muse has no MUSE_CONFIG_DIR. Config is XDG-based:
-  //   $XDG_CONFIG_HOME/muse  (settings, skills, hooks, auth)
-  //   $XDG_DATA_HOME/muse    (sessions, plugins)
-  // Pin both into the version home so multi-version isolation matches
-  // Claude's CLAUDE_CONFIG_DIR / Codex's CODEX_HOME, and so Muse never
-  // resolves through the adopt-time ~/.config/muse symlink (SymlinkOrReparse).
+  // Muse has no MUSE_CONFIG_DIR; config is XDG-based (`$XDG_CONFIG_HOME/muse` for settings,
+  // skills, hooks, auth; `$XDG_DATA_HOME/muse` for sessions, plugins). Pin both into the version
+  // home so Muse is isolated and never resolves through the adopt-time ~/.config/muse symlink.
   applyExecConfigEnv(result, ctx) {
     if (ctx.versionHome) {
       result.XDG_CONFIG_HOME = path.join(ctx.versionHome, '.config');

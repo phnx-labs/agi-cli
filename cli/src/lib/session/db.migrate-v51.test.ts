@@ -10,17 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv51-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v50 -> v51 (PHNX-4154): session_text rows move to the rowid of the sessions
- * row they describe, so a delete or content read is a rowid seek instead of a
- * scan of the whole FTS content by the UNINDEXED session_id.
- *
- * Unlike the older migration tests this one does not hand-write a legacy
- * schema: it lets the real getDB() build a current database, then downgrades
- * ONLY session_text to the pre-v51 shape (FTS5-assigned rowids, inserted out of
- * step with the sessions rows, plus a duplicate and an orphan) and stamps the
- * version back to 50. Reopening runs exactly the v51 rebuild.
- */
+/** v50 -> v51 (PHNX-4154): session_text rows move to the rowid of their sessions row, so deletes
+ * and reads are rowid seeks, not a full FTS scan by UNINDEXED session_id. Downgrades only
+ * session_text to the pre-v51 shape (plus a duplicate and an orphan), stamps 50, reopens. */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -98,11 +90,9 @@ describe('schema migration v50 -> v51 (session_text keyed by sessions.rowid)', (
   });
 
   it('addresses session_text by rowid everywhere in db.ts, never by the UNINDEXED session_id', () => {
-    // A `session_id = ?` predicate on session_text is the full scan this
-    // migration exists to remove; the statement builders share
-    // SESSION_TEXT_ROWID so a new call site cannot quietly reintroduce it.
-    // Scoped to the runtime half of the module: the historical migrations
-    // above getDB() legitimately wrote the pre-v51 shape.
+    // A `session_id = ?` predicate on session_text is the full scan this migration removes;
+    // statement builders share SESSION_TEXT_ROWID so a new call site cannot reintroduce it. Scoped
+    // to the runtime half of db.ts, since older migrations legitimately wrote the pre-v51 shape.
     const source = fs.readFileSync(path.join(__dirname, 'db.ts'), 'utf-8');
     const runtime = source.slice(source.indexOf('export function getDB('));
     expect(runtime.length).toBeGreaterThan(0);

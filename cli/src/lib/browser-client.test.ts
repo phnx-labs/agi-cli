@@ -1,11 +1,6 @@
-/**
- * The pure half of the fd-3 / fd-4 contract with the standalone `browser` engine
- * (PHNX-4101): bin resolution, how a bin is invoked, and the NDJSON framing rules.
- *
- * The wiring half — real pipes, real fds, real exit codes — is exercised by the
- * real `browser` binary at runtime; there is deliberately no stand-in engine
- * fixture, which would only prove the client agrees with itself.
- */
+/** The pure half of the fd-3/fd-4 contract with the standalone `browser` engine (PHNX-4101): bin
+ * resolution, invocation, and NDJSON framing. The wiring (real pipes, fds, exit codes) is
+ * exercised by the real binary; a stand-in engine would only prove the client agrees with itself. */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';

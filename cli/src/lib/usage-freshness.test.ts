@@ -1,12 +1,6 @@
-/**
- * W3 usage freshness: real home-layout / real shared-store path, no mocks.
- *
- *  1. Two headed boxes publish; a worker applies each envelope over the SSH
- *     exchange (applyPeerFleetState) and balanced auto-picks (no picker) on
- *     synced rows 10 min old.
- *  2. A worker / setup-token-only box lists zero poll accounts, so
- *     runUsageRefresh issues zero usage API calls.
- */
+/** W3 usage freshness, real layout and store, no mocks: two headed boxes publish and a worker
+ * auto-picks on 10-minute-old rows; a setup-token-only box lists zero poll accounts and makes zero
+ * API calls. */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';

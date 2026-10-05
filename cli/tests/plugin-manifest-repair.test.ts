@@ -1,17 +1,6 @@
-/**
- * Tests for the Claude-invalid plugin-manifest auto-repair
- * (`repairableManifestFields` / `repairPluginManifestFile` in
- * plugin-marketplace.ts).
- *
- * The real bug these guard: a plugin.json with a bare-name `skills`/`commands`
- * field (e.g. `"skills": ["loop"]`) makes Claude Code silently reject the ENTIRE
- * plugin — no commands or skills load. The repair strips those fields (Claude
- * auto-discovers from the dirs). The load-bearing edges:
- *   - bare names are detected; "./"-relative entries are left alone
- *   - the `agents` field is NEVER touched (agents-cli overloads it as AgentId[])
- *   - the write-back preserves the rest of the manifest and is idempotent
- *   - dryRun reports without writing
- */
+/** Tests for the Claude-invalid plugin-manifest auto-repair: a bare-name `skills`/`commands` field
+ * makes Claude Code silently reject the whole plugin, so the repair strips them. `./` entries stay,
+ * the `agents` field is never touched, write-back is idempotent. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

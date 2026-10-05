@@ -1,9 +1,6 @@
-/**
- * Rules detector — reports whether the composed instructions file exists in
- * the version home. Uses the active rules preset name as the detected
- * "resource name" so the diff stays meaningful (one preset = one synced
- * name, mirroring what getAvailableResources surfaces under `memory`).
- */
+/** Rules detector: reports whether the composed instructions file exists in the version home, using
+ * the active rules preset name as the resource name (one preset = one synced name, as
+ * `getAvailableResources` surfaces under `memory`). */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';

@@ -1,23 +1,6 @@
-/**
- * Pending-device sentinel dir is the contract between the daemon probe (writer)
- * and the menu-bar helper (reader). Real bugs this guards:
- *   1. reconcile must ADD a sentinel for a new pending device and REMOVE one for
- *      a device that is no longer pending (registered/ignored/left the tailnet) —
- *      a stale sentinel would show a phantom "NEW DEVICE" forever.
- *   2. the file content is the platform (so the tray can label it) and survives
- *      a read-back.
- *   3. clearPendingSentinel removes exactly one and is a no-op when absent (the
- *      Register/Ignore actions call it; a throw would surface as a CLI error).
- *   4. a path-traversal name can never escape the sentinel dir.
- *   5. a device the user has ignored is never written as a sentinel, even when
- *      the caller passes it in a stale `pending` set (the probe/ignore race,
- *      RUSH-2495) — the writer re-subtracts the persisted ignore-list.
- *   6. a device already in the registry is never written as a sentinel either —
- *      hermetic/test pollution that empties the registry view while writing the
- *      live devices-pending dir would otherwise surface every fleet box as NEW.
- *   7. pruneDismissedPendingSentinels removes registered/ignored sentinels
- *      without needing a live tailscale probe (soft-fail recovery).
- */
+/** The pending-device sentinel dir is the contract between the daemon probe (writer) and the
+ * menu-bar helper (reader). Guards: reconcile adds and removes sentinels; a path-traversal name
+ * cannot escape the dir; ignored (RUSH-2495) or registered devices are never written. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
@@ -111,10 +94,9 @@ describe('pending-device sentinels', () => {
   });
 
   it('never re-surfaces a device already in the registry, even in a stale pending set', async () => {
-    // Hermetic runs that redirect AGENTS_DEVICES_DIR empty the registry view
-    // while still writing the live devices-pending dir — every tailnet node
-    // then lands as NEW, including boxes already on the real roster. The
-    // writer re-subtracts the live registry so those phantoms are dropped.
+    // Hermetic runs that redirect AGENTS_DEVICES_DIR empty the registry view while still writing
+    // the live devices-pending dir, so every tailnet node would land as NEW, including real roster
+    // boxes. The writer re-subtracts the live registry to drop those phantoms.
     await upsertDevice('zion', {
       platform: 'macos',
       address: { via: 'tailscale', dnsName: 'zion.example.ts.net' },

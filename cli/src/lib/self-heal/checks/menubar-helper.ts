@@ -1,7 +1,5 @@
-// menubar-helper check — keeps the installed AGI Menu on the newest published
-// build. Discovery + trigger for the helper's auto-update: the daemon runs this
-// on the periodic cadence; the same call runs right after `agents upgrade`.
-// Detect-only under dryRun (what `agents doctor` shows); the repair is the
+// menubar-helper check: keeps the installed AGI Menu on the newest published build. Runs
+// periodically in the daemon and after `agents upgrade`. Detect-only under dryRun; repair is the
 // verified download + atomic swap + restart in `updateMenubarHelperIfNewer`.
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';

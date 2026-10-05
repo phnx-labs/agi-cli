@@ -3,10 +3,8 @@ import { collectLocalFleetInventory, collectLocalFleetSignIn } from './fleet-inv
 import { listInstalledVersions } from '../installations/versions.js';
 import { ALL_AGENT_IDS } from '../agents.js';
 
-// Real-path: exercise the live install (no mocking). The dev machine that runs
-// the suite may have any set of installed versions — the invariants below hold
-// regardless of what is installed, so the test is deterministic without pinning
-// a fixture home.
+// Real-path: exercise the live install, no mocking. The invariants hold for whatever versions the
+// dev machine has installed, so the test is deterministic without a fixture home.
 describe('collectLocalFleetInventory populates signIn (RUSH-2069)', () => {
   it('emits a signIn entry for every agent that has installed versions, one row per version', async () => {
     const inv = await collectLocalFleetInventory(process.cwd());

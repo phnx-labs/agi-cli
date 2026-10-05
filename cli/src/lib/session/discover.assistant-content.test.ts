@@ -1,13 +1,6 @@
-/**
- * Regression: prior-session search only indexed what the USER asked, never
- * what the agent ANSWERED. `session_text` pushed only `role === 'user'` text
- * (`ClaudeParseState.userTexts`); an assistant-only phrase was unsearchable —
- * `agents sessions "<phrase>"` returned 0 results even though the transcript
- * on disk clearly contained it.
- *
- * Real fs + real sqlite + the real Claude incremental scan (discoverSessions),
- * under a throwaway HOME. No mocking.
- */
+/** Regression: prior-session search only indexed what the user asked, not what the agent answered
+ * (`session_text` held only `role === 'user'` text), so an assistant-only phrase returned 0
+ * results. Real fs + sqlite + the real Claude incremental scan under a throwaway HOME. No mocking. */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -204,10 +197,9 @@ describe('CONTENT_INDEX_VERSION forces re-extraction of an unchanged file (mtime
     // Sanity: the real first scan already indexed it (this PR's fix).
     expect(db.ftsSearch(phrase).some(h => h.sessionId === id)).toBe(true);
 
-    // Simulate a row written by an OLDER build that predates assistant-text
-    // extraction: its ledger stamp carries a stale extractor_version, and its
-    // FTS row has no assistant content, even though the file on disk is
-    // unchanged (same mtime/size as when that older build scanned it).
+    // Simulate a row from an older build predating assistant-text extraction: a stale
+    // extractor_version in the ledger and an FTS row with no assistant content, though the file is
+    // unchanged.
     const fp = sessionFile(id);
     const before = fs.statSync(fp);
     const canonical = fs.realpathSync(fp);

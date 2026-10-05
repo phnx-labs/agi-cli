@@ -7,10 +7,9 @@ import { fileURLToPath } from 'url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// Regression: bare `agents` must print the root help. The lazy-startup path
-// registers no subcommands for a bare invocation, and commander only
-// auto-displays help on an empty parse when subcommands exist — so without the
-// explicit bare-invocation branch in src/index.ts the CLI exits silently.
+// Regression: bare `agents` must print root help. The lazy-startup path registers no subcommands
+// and commander only auto-shows help when they exist, so without the bare-invocation branch in
+// src/index.ts the CLI exits silently.
 describe('bare `agents` invocation', () => {
   it('prints the root help instead of exiting silently', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bare-home-'));

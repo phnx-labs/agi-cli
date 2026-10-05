@@ -221,10 +221,9 @@ describe('backfillResourceUsage — historical one-shot, idempotent + fail-loud 
 
 describe('queryResourceUsageStats — plugin/source provenance never splits a resource (SES-IF-4b)', () => {
   beforeAll(() => {
-    // The exact split the reviewer caught: the SAME resource `plugdup:widget`,
-    // recorded with a resolved plugin in one session and an unresolved (NULL)
-    // plugin in another (its cwd didn't discover the plugin). Grouping on plugin
-    // would fracture it into two rows, each with a partial count.
+    // The split the reviewer caught: the same resource `plugdup:widget` recorded with a resolved
+    // plugin in one session and a NULL plugin in another. Grouping on plugin would split it into
+    // two partial rows.
     seedSession('sessF', { agent: 'claude', timestamp: '2026-06-15T00:00:00.000Z' });
     seedSession('sessG', { agent: 'claude', timestamp: '2026-06-16T00:00:00.000Z' });
     seedUsage('sessF', 'skill', 'plugdup:widget', { plugin: 'plugdup', source: 'plugdup', count: 2 });

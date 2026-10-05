@@ -83,10 +83,9 @@ describe('resolveRunningPackageRoot', () => {
   });
 
   it('maps the Bun virtual __dirname to the real root via process.execPath', () => {
-    // The reported bug: under the compiled standalone binary Bun sets
-    // __dirname to /$bunfs/root, so <__dirname>/.. was "/$bunfs" — a path that
-    // exists nowhere. It was then reported as a phantom second install and
-    // rejected by deriveGlobalPrefix, so every self-upgrade failed.
+    // Bug: under the compiled standalone binary Bun sets __dirname to /$bunfs/root, so
+    // <__dirname>/.. was "/$bunfs", reported as a phantom second install and rejected by
+    // deriveGlobalPrefix, failing every self-upgrade.
     const { packageRoot, execPath } = makeCompiledInstall('bunfs');
 
     const resolved = resolveRunningPackageRoot('/$bunfs/root', execPath);
@@ -248,10 +247,8 @@ describe('installPackageIntoPrefix', () => {
   });
 
   it('verification catches an install that landed in a different prefix', { timeout: 120_000 }, async () => {
-    // Reproduces the divergent-prefix incident end-to-end: the "running"
-    // copy lives in prefix A at 1.0.0, the install writes 2.0.0 into prefix
-    // B, and verification against A's root must fail rather than report a
-    // successful upgrade.
+    // Reproduces the divergent-prefix incident: the running copy is in prefix A at 1.0.0, the
+    // install writes 2.0.0 into prefix B, and verification against A must fail.
     const prefixA = makeTempDir('prefix-a');
     const prefixB = makeTempDir('prefix-b');
     const runningRoot = path.join(prefixA, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
@@ -457,10 +454,8 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
   });
 
   it('resolves a shim pointing at the compiled binary to the same root as the JS entry', () => {
-    // The reported false positive: ~/.local/bin/agents -> dist/bin/agents is
-    // first on PATH and is the copy that runs, but the scan only recognized
-    // dist/index.js. The running copy was invisible here while its sibling
-    // npm bin was reported — one install looked like two.
+    // False positive: ~/.local/bin/agents -> dist/bin/agents is first on PATH and runs, but the
+    // scan only recognized dist/index.js, so one install looked like two.
     const base = makeTempDir('compiled');
     const real = makeInstall(base, 'npm-prefix', '1.20.73');
     const compiled = path.join(real.packageRoot, 'dist', 'bin', 'agents');
@@ -598,10 +593,8 @@ describe('buildMultiInstallInventory', () => {
 });
 
 describe('manualUninstallCommand (RUSH-2705)', () => {
-  // The two POSIX-literal cases are layout-specific (nvm / a bare checkout under
-  // /srv exist only on POSIX): on win32, path resolution rewrites the literal to
-  // D:\home\... and the expectation can never hold. The bun case stays — it
-  // builds its path from os.homedir(), so it is platform-correct everywhere.
+  // The two POSIX-literal cases are layout-specific (nvm, /srv) and cannot hold on win32 path
+  // resolution. The bun case builds from os.homedir(), so it stays.
   it.skipIf(process.platform === 'win32')('pins the peer npm prefix for a POSIX global layout (the nvm duplicate case)', () => {
     const root = '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
     expect(manualUninstallCommand(root)).toBe(
@@ -620,10 +613,8 @@ describe('manualUninstallCommand (RUSH-2705)', () => {
   });
 });
 
-/**
- * RUSH-2324: short-TTL cache for the multi-install PATH scan that every
- * ordinary CLI invocation runs via maybeWarnMultiInstall. Real fs only.
- */
+/** RUSH-2324: short-TTL cache for the multi-install PATH scan run by maybeWarnMultiInstall on every
+ * invocation. Real fs only. */
 describe('multi-install scan cache (RUSH-2324)', () => {
   const NOW = 1_700_000_000_000;
   const runningRoot = '/prefix/lib/node_modules/@phnx-labs/agents-cli';
@@ -987,12 +978,9 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
 });
 
 describe('sweepStaleInstallStaging', () => {
-  /**
-   * npm's own retire-path naming (@npmcli/arborist `lib/retire-path.js`):
-   * `.<basename>-<8-char sha1(base64, alnum-only) of the full path>`,
-   * sibling to the directory it retires. Reproduced here (not imported) so the
-   * test proves the sweep matches npm's real scheme, not just its own guess.
-   */
+  /** npm's own retire-path naming (@npmcli/arborist `lib/retire-path.js`): `.<basename>-<8-char
+   * sha1 of full path>`. Reproduced, not imported, so the test proves the sweep matches npm's
+   * scheme. */
   function npmRetirePath(from: string): string {
     const dir = path.dirname(from);
     const base = path.basename(from);
@@ -1008,18 +996,14 @@ describe('sweepStaleInstallStaging', () => {
     fs.mkdirSync(packageRoot);
     fs.writeFileSync(path.join(packageRoot, 'package.json'), '{"name":"@phnx-labs/agents-cli"}');
 
-    // Simulate a crash mid-reify: the retire-rename completed (the live
-    // package moved to its staging path) but the final rename never ran, so
-    // the staging dir is left behind non-empty — the exact orphan this bug
-    // report describes.
+    // Simulate a crash mid-reify: the retire-rename completed but the final rename never ran,
+    // leaving the staging dir non-empty.
     const stagingPath = npmRetirePath(packageRoot);
     fs.mkdirSync(stagingPath);
     fs.writeFileSync(path.join(stagingPath, 'package.json'), '{"name":"@phnx-labs/agents-cli","version":"old"}');
 
-    // Prove the failure is real, not asserted from prose: a second reify's
-    // retire-rename (renaming the CURRENT live package out of the way again,
-    // onto the same deterministic path) hits ENOTEMPTY on this actual
-    // filesystem, exactly as it does for npm.
+    // Prove the failure is real: a second reify's retire-rename onto the same deterministic path
+    // hits ENOTEMPTY on this filesystem, as it does for npm.
     let threw: NodeJS.ErrnoException | undefined;
     try {
       fs.renameSync(packageRoot, stagingPath);
@@ -1076,12 +1060,9 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     computer: 'dist/computer.js',
   };
 
-  /**
-   * A real npm-global-shaped POSIX install: `<prefix>/lib/node_modules/...`
-   * with the four shipped bin targets on disk. Returns the prefix + package
-   * root; the caller decides which (if any) `<prefix>/bin/*` links to create,
-   * so a test can model the healthy box or the stranded one.
-   */
+  /** A real npm-global-shaped POSIX install (`<prefix>/lib/node_modules/...` with the four bin
+   * targets). The caller decides which `<prefix>/bin/*` links to create to model a healthy or
+   * stranded box. */
   function makeInstall(label: string): { prefix: string; packageRoot: string; binDir: string } {
     const prefix = fs.realpathSync(makeTempDir(label));
     const packageRoot = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
@@ -1202,10 +1183,9 @@ describe('resolveRunningPackageRoot', () => {
   }
 
   it('walks up from a module nested under dist/lib/… to the package root, not one level up', () => {
-    // The daemon's self-update tick called this from dist/lib/daemon and got
-    // `dist/lib` back, so deriveGlobalPrefix threw "not an npm-managed install"
-    // on every tick, fleet-wide — the running daemon never relaunched onto a
-    // release (2026-09-07).
+    // Bug: the daemon's self-update tick got `dist/lib` back, so deriveGlobalPrefix threw "not an
+    // npm-managed install" every tick fleet-wide and no daemon relaunched onto a release
+    // (2026-09-07).
     const root = makeInstall();
     expect(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'daemon'))).toBe(root);
     expect(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'self-heal', 'checks'))).toBe(root);

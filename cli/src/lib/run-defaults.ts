@@ -1,16 +1,5 @@
-/**
- * Selector-based defaults for `agents run`.
- *
- * Stored under agents.yaml:
- *
- *   run:
- *     defaults:
- *       "claude:*":
- *         mode: auto
- *         model: opus
- *       "claude:2.1.45":
- *         mode: plan
- */
+/** Selector-based defaults for `agents run`, stored in agents.yaml as `run.defaults` keyed by
+ * selector (`"claude:*"`, `"claude:2.1.45"`) with values like `mode` and `model`. */
 
 import type { AgentId, Mode, RunConfig, RunDefaults, RunEffort } from './types.js';
 import { ALL_MODES } from './types.js';

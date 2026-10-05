@@ -73,10 +73,9 @@ describe('costOfUsageNoCache', () => {
   });
 
   it('can fall BELOW the cache-aware cost in a cache-write-heavy session', () => {
-    // Claude prices a cache write at 1.25x input (opus: cacheWrite 6.25e-6 vs input
-    // 5e-6), so repricing writes DOWN to the input rate lowers the total when writes
-    // dominate and reads are small. This is why no-cache is not an unconditional
-    // upper bound — the output savings line is guarded accordingly (RUSH-2287 review).
+    // Claude prices a cache write at 1.25x input, so repricing writes down to the input rate lowers
+    // the total when writes dominate and reads are small. So no-cache is not an unconditional upper
+    // bound; the output savings line is guarded accordingly (RUSH-2287 review).
     const args = {
       model: 'claude-opus-4',
       inputTokens: 100_000,

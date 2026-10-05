@@ -1,11 +1,6 @@
-/**
- * Shared resource list and detail view.
- *
- * Provides a reusable picker (TTY) / table (piped) presentation layer
- * for resource-type commands (plugins, subagents, skills, etc.). Each
- * resource supplies rows with sync targets; this module handles layout,
- * filtering, and paging.
- */
+/** Shared resource list and detail view: a picker (TTY) or table (piped) for resource commands
+ * (plugins, subagents, skills, ...); each supplies rows with sync targets, and this module handles
+ * layout, filtering and paging. */
 
 import chalk from 'chalk';
 import { truncate, padVisible, termLink } from '../lib/format.js';
@@ -46,20 +41,13 @@ interface ResourceViewOptions {
   filterVersion?: string;
   /** Emit machine-readable JSON instead of the picker/table (for agents/scripts). */
   json?: boolean;
-  /**
-   * Show the "Synced" column. Default true — the central-storage commands all
-   * answer "which agent versions have this?". `agents inspect <repo>` does not:
-   * there the repo IS the source, and empty `targets` would render the
-   * misleading "no installed versions". Set false to drop the column entirely.
-   */
+  /** Show the "Synced" column (default true: central-storage commands answer 'which agent versions
+   * have this?'). `agents inspect <repo>` sets false: the repo is the source, and empty `targets`
+   * would read 'no installed versions'. */
   showSync?: boolean;
-  /**
-   * Cap for the Name column. Defaults to NAME_CAP (22), which suits the
-   * central-storage commands. Kinds whose rows have no description — hooks are
-   * all script names and no prose — want a wider cap, otherwise four pairs of
-   * `00-agent-verify-work-complete…` truncate to the same string while the
-   * empty Description column wastes the rest of the terminal.
-   */
+  /** Cap for the Name column, default NAME_CAP (22). Kinds with no description (hooks are script
+   * names) want a wider cap, else long variants truncate identically while the empty Description
+   * column wastes the terminal. */
   nameCap?: number;
   /** Per-row OSC-8 link target, keyed by row name; makes names clickable. */
   linkFor?: (row: ResourceRow) => string | undefined;
@@ -178,12 +166,9 @@ interface ResourceLayout {
   syncW: number;
 }
 
-/**
- * Pure column arithmetic. Decides table vs. cards for the effective terminal
- * width and sizes the flexible Description column from whatever is left after the
- * fixed columns and a capped Sync column — so the table fits `cols` instead of
- * the old fixed 22+10+16+42+∞ layout that overflowed every narrow terminal.
- */
+/** Pure column arithmetic: pick table vs cards for the effective width and size the flexible
+ * Description column from what remains after the fixed columns and a capped Sync column, so the
+ * table fits `cols` (the old fixed layout overflowed narrow terminals). */
 export function resourceLayout(
   cols: number,
   o: { hasExtra: boolean; hasExtra2: boolean; nameW: number; syncW: number },

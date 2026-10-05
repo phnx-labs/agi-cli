@@ -1,16 +1,6 @@
-/**
- * Reachability write-back + resolver (RUSH-1965).
- *
- * The bug: a device reachable right now rendered "offline" because the
- * online/offline word read only the cached `tailscale.online` snapshot, which
- * the live probe never corrected. These tests pin the fix end-to-end through
- * the REAL registry IO (no mocking):
- *   1. resolver precedence — a live stat / written-back verdict beats the cache.
- *   2. a reachable `via:"manual"` device (no tailscale field) round-trips
- *      probe → registry → render to "online".
- *   3. a fresh live verdict overrides a stale `tailscale.online:false` cache.
- *   4. writeReachability is a no-op when the verdict is unchanged (no churn).
- */
+/** Reachability write-back + resolver (RUSH-1965). The bug: a reachable device rendered "offline"
+ * because the word read only the cached `tailscale.online` snapshot, which the live probe never
+ * corrected. Pinned through real registry IO: a live verdict beats the cache. */
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
@@ -18,10 +8,9 @@ import * as os from 'os';
 import * as path from 'path';
 import type { DeviceStats } from './health.js';
 
-// Redirect the device registry dir to a test-private temp so writes never touch
-// the user's real ~/.agents/.history/devices (RUSH-2042). getDevicesDir() reads
-// AGENTS_DEVICES_DIR at call time — immune to the module-cache race a plain HOME
-// override loses once any static import of state.ts has already run.
+// Redirect the device registry dir to a test-private temp so writes never touch the user's real
+// ~/.agents/.history/devices (RUSH-2042). getDevicesDir() reads AGENTS_DEVICES_DIR at call time,
+// avoiding the module-cache race a plain HOME override loses once state.ts has been imported.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reachability-test-'));
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 

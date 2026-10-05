@@ -1,15 +1,6 @@
-/**
- * Interactive, task-first `agents browser sessions` / `agents sessions --browser`
- * view (RUSH-2407). Backs the TTY path only — non-TTY, `--json`, `--open`, and
- * `--no-interactive` all fall straight through to the existing flat printer in
- * `lib/browser/sessions-list.ts` (unchanged, so `--json` stays a stable surface).
- *
- * Reuses the same `itemPicker` + `buildPreview` primitives as the ordinary
- * session picker (`sessions-picker.ts`) — same search/filter/quit help, and the
- * preview pane for a linked task IS the canonical session digest, not a
- * second renderer. Interactive routing and the browse loop live in
- * `sessions-picker-factory.ts` (shared with the computer twin).
- */
+/** Interactive, task-first `agents browser sessions` / `agents sessions --browser` view
+ * (RUSH-2407), TTY path only: non-TTY, `--json`, `--open` and `--no-interactive` fall through to
+ * the flat printer in `lib/browser/sessions-list.ts`. */
 import { showFile } from '../lib/open-url.js';
 import chalk from 'chalk';
 import { itemPicker } from '../lib/picker.js';
@@ -176,11 +167,8 @@ export function shouldOpenInteractiveBrowserSessions(opts: BrowserSessionsComman
   return browserSessionsPicker.shouldOpen(opts, isTTY);
 }
 
-/**
- * Shared entry point for `agents browser sessions` and `agents sessions
- * --browser`. Replaces direct calls to `runBrowserSessions` at both call
- * sites so the interactive routing decision lives in one place.
- */
+/** Shared entry point for `agents browser sessions` and `agents sessions --browser`, so the
+ * interactive routing decision lives in one place. */
 export async function runBrowserSessionsCommand(opts: BrowserSessionsCommandOpts): Promise<void> {
   await browserSessionsPicker.run(opts);
 }

@@ -1,28 +1,6 @@
-/**
- * verify-menubar-helper.sh — the bundle gate for the staged menu-bar helper.
- *
- * Since PHNX-4036 the bundle at bin/MenubarHelper.app is the PUBLISHED release
- * staged by scripts/stage-menubar-helper.sh (source: phnx-labs/agi-menu), and
- * this gate is what that script runs after extraction. The checks are the same
- * ones that used to guard `npm pack`, and the incident they pin still applies:
- *
- * The regression this pins (RUSH-3031): 1.22.44 was packed on a Linux
- * attestation-producer box (no codesign, no xcrun), where every Apple-tool
- * signature/notarization check silently no-op'd, so an un-stapled, THIN
- * (single-arch) dev bundle shipped and Gatekeeper rejected it on every Mac
- * ("AGI Menu is not notarized/valid on this machine; skipping launch") — the
- * menu bar died fleet-wide until a manual rollback to 1.22.43. Off-Mac the
- * gate must still fail closed on (a) a bundle with no stapled ticket
- * (`Contents/CodeResources` is a plain file `stapler staple` writes, so its
- * absence is provable anywhere) and (b) a thin binary (the Mach-O fat magic
- * bytes are plain bytes on disk, readable with `od` on any OS).
- *
- * Runs the REAL script against real fixture bundles; xcrun/codesign absence
- * is the genuine environment on the Linux boxes that produce attestations
- * (no mocking) — including on a macOS test host, via a constructed PATH that
- * genuinely excludes codesign/xcrun (see buildLinuxLikePath below), so these
- * cases are exercised everywhere rather than skipped on macOS.
- */
+/** The bundle gate for the staged menu-bar helper (PHNX-4036). RUSH-3031: 1.22.44 was packed on a
+ * Linux producer with no codesign/xcrun, so checks silently no-op'd and an un-stapled, thin bundle
+ * shipped; Gatekeeper rejected it on every Mac. */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -31,14 +9,9 @@ import * as path from 'node:path';
 
 const VERIFY = path.resolve(__dirname, 'verify-menubar-helper.sh');
 
-/**
- * A PATH containing ONLY the POSIX tools verify-menubar-helper.sh needs
- * (dirname, od, tr) and genuinely lacking codesign/xcrun — the real Linux
- * attestation-producer environment. Built from symlinks to whatever this
- * test host actually has, rather than hardcoding `/usr/bin` (which on macOS
- * DOES carry codesign/xcrun, so a naive minimal PATH still leaks them and
- * silently skips the very checks this test means to exercise off-Mac).
- */
+/** A PATH with only the POSIX tools the script needs (dirname, od, tr) and genuinely no
+ * codesign/xcrun, built from symlinks to the host's tools; a minimal /usr/bin PATH would leak them
+ * on macOS and skip the checks. */
 function buildLinuxLikePath(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-gate-path-'));
   for (const tool of ['dirname', 'od', 'tr']) {

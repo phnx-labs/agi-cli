@@ -1,18 +1,6 @@
-/**
- * The shared feed collector's lifecycle as a `DaemonService`.
- *
- * WHY THE DAEMON OWNS IT. Dialing every peer over ssh and holding those
- * connections open is an ACTION on the fleet, so by the repo's one-scheduler /
- * one-executor rule it belongs to the daemon and not to a UI surface. Before
- * this service, every consumer of `agents feed watch --json` ran its own
- * `watchFleetFeed`, which is N ssh children per peer for N readers. The daemon
- * runs one, and the readers attach over a socket (`feed/hub-server.ts`).
- *
- * The server binds on start, but the fan-out itself is DEMAND-GATED by the hub:
- * with no client connected there is no `watchFleetFeed`, so an idle box holds no
- * peer connections — the same idle-cost rule `SessionStateService` follows for
- * its gather.
- */
+/** The shared feed collector's lifecycle as a `DaemonService`. The daemon owns it because dialing
+ * every peer over ssh is an action on the fleet (one-scheduler / one-executor rule); before, each
+ * `agents feed watch --json` reader ran its own N ssh children. Readers now attach over a socket. */
 
 import { BaseDaemonService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -26,11 +14,9 @@ export class FeedStreamService extends BaseDaemonService {
   private server: FeedHubServer | null = null;
 
   protected async onStart(ctx: DaemonContext): Promise<void> {
-    // Two collectors, one socket. The fleet hub holds one ssh child per peer plus
-    // this box's rows; the local hub is this box ONLY and cannot fan out, so a
-    // reader that wants just this machine never causes a peer dial. They are
-    // separate hubs rather than one filtered stream because demand must be
-    // separate too: a local-only reader must not start the fleet fan-out.
+    // Two collectors, one socket. The fleet hub holds one ssh child per peer plus this box's rows;
+    // the local hub is this box only and can't fan out. They are separate hubs because demand must
+    // be separate: a local-only reader must not start the fleet fan-out.
     const fleet = new FeedHub({ watch: watchFleetFeed });
     this.server = new FeedHubServer(fleet, undefined, sharedLocalFeedHub());
     await this.server.start();

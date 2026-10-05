@@ -1,13 +1,6 @@
-/**
- * Shared login-state LOOK. One place decides how "signed in / logged out"
- * renders and what the login command is, so `agents doctor`, `agents view`, and
- * the `agents run` preflight banner all read identically.
- *
- * The signal is `AccountInfo.signedIn` from `getAccountInfo` (file-based, cheap,
- * no Keychain ACL prompt). It is advisory — opaque-credential agents (Kimi,
- * Antigravity) and keychain-bound Claude can false-negative — so callers that act
- * on it (the run preflight) WARN and continue; they never block.
- */
+/** Shared login-state look, so `agents doctor`, `agents view` and the `agents run` preflight banner
+ * read alike. `signedIn` is advisory (it can false-negative), so callers warn and continue,
+ * never block. */
 import chalk from 'chalk';
 import { addWorkerRefusal } from './accounts/add.js';
 import { AGENTS } from './agents.js';
@@ -25,14 +18,9 @@ export type AccountVerdict =
 
 export type AccountProvisioning = 'portable' | 'per-device';
 
-/**
- * The exact command that logs a given agent in — for warn banners and nudges.
- * Driven off the registry `cliCommand` with the per-agent subcommand overrides
- * (verified against the real CLIs): codex/grok/opencode run the finite login
- * subcommand `HARNESS_AUTH` wires (`loginSubcommand`), claude logs in from
- * inside its TUI via `/login`, and the remaining agents (kimi, gemini, …) start
- * their device/oauth flow on launch.
- */
+/** The exact command that logs a given agent in, from the registry `cliCommand` plus per-agent
+ * overrides: codex/grok/ opencode use the finite subcommand `HARNESS_AUTH` wires, claude logs in
+ * via `/login` in its TUI, the rest start a device/oauth flow on launch. */
 export function loginHint(agentId: AgentId): string {
   const cli = AGENTS[agentId]?.cliCommand ?? agentId;
   switch (agentId) {
@@ -50,40 +38,22 @@ export function loginHint(agentId: AgentId): string {
   }
 }
 
-/**
- * Harnesses that log back in through a finite native subcommand runnable via
- * `agents run <agent>@<version> -- <args>`. Claude logs in from inside its TUI
- * (`/login`); cursor and the rest start their device/oauth flow on launch.
- */
+/** Harnesses that log back in through a finite native subcommand runnable via `agents run
+ * <agent>@<version> -- <args>`. Claude uses `/login` in its TUI; cursor and the rest start their
+ * device/oauth flow on launch. */
 export const SUBCOMMAND_LOGIN_AGENTS: readonly AgentId[] = ['codex', 'grok', 'opencode'];
 
-/**
- * The finite native login subcommand (`login`, `login --device-auth`,
- * `auth login`) for a {@link SUBCOMMAND_LOGIN_AGENTS} harness, read from the one
- * `HARNESS_AUTH` row so every surface that spells it — the hint, the per-version
- * fix, `agents doctor` — agrees. Null for every other harness.
- */
+/** The finite native login subcommand for a SUBCOMMAND_LOGIN_AGENTS harness, read from the one
+ * `HARNESS_AUTH` row so the hint, the per-version fix and `agents doctor` agree. Null for other
+ * harnesses. */
 export function loginSubcommand(agent: AgentId): string | null {
   if (!SUBCOMMAND_LOGIN_AGENTS.includes(agent)) return null;
   return HARNESS_AUTH[agent].login!.join(' ');
 }
 
-/**
- * Exact action shown beside a non-live account. Every emitted command exists
- * today — never a planned surface and never a hidden verb:
- * - Per-device harnesses (kimi/antigravity) repair on the box itself: run the
- *   harness there (`loginHint`) and complete its native login.
- * - Named accounts re-auth through `agents accounts login <harness>#<name>`.
- *   A known account with no slot on a headed device is onboarded with
- *   `agents accounts add <harness> <name>`. A worker never runs an
- *   interactive login — the hint is `add.ts`'s worker refusal (add on the
- *   personal device; this box is provisioned from the durable credential).
- * - Unnamed legacy homes use the same version-targeted command shape as
- *   doctor, so the hint never logs a different/default home in by accident.
- * - `unverified` / `no_evidence` emit nothing: the probe could not confirm state
- *   (codex/grok have no probe endpoint; a worker's token lacks the usage scope),
- *   so there is nothing to repair.
- */
+/** Exact action shown beside a non-live account; every emitted command exists today. Per-device
+ * harnesses (kimi/antigravity) repair on the box via `loginHint`. Named accounts use `agents
+ * accounts login <harness>#<name>` or `accounts add`; workers never log in interactively. */
 export function fixFor(input: {
   agent: AgentId;
   verdict: AccountVerdict;
@@ -115,37 +85,12 @@ export function fixFor(input: {
   return `agents run ${agent}@${version}`;
 }
 
-/**
- * Whether `agents run` should probe login state before launching. True only for
- * a launch that actually opens the interactive TUI — where discovering a logged-out
- * account after the fact wastes time. Suppressed when there is no preamble surface
- * (`--json`/`--quiet`), when the check is explicitly disabled
- * (`--no-auth-check` / `AGENTS_NO_AUTH_CHECK=1`), or when a rotation already picked a
- * signed-in account.
- *
- * `forceInteractive` is load-bearing: a resume of a non-native-resume agent
- * (`agents run kimi --resume`, also grok/opencode/gemini) rewrites the prompt to
- * `/continue <id>` — so `hasPrompt` is true even though the run still opens the TUI.
- * Keying only off `hasPrompt` would silently skip the warning on exactly those
- * agents (the ones the feature is for), so the resume's `forceInteractive` flag is
- * consulted directly.
- */
-/**
- * Is a Claude run on this box going to authenticate from an ambient
- * `CLAUDE_CODE_OAUTH_TOKEN` rather than a per-version login?
- *
- * `AccountInfo.signedIn` is `!!email` read from a version home's `.claude.json`
- * (agents.ts), so a version with no account written there reports signed-out —
- * even though Claude Code authenticates fine from the env token and the run
- * succeeds. Rendering that as "logged out" sends people hunting a login that is
- * not missing (a real fleet incident: every version on a box read as locked out
- * while all of them answered a live prompt).
- *
- * It is also the more useful warning: an ambient token is ONE account, so every
- * version on the box resolves to it and balanced rotation across them rotates
- * nothing. `env` is a parameter so the branch is testable without mutating the
- * process environment.
- */
+/** Whether `agents run` probes login before launch: only when it opens the interactive TUI. Off
+ * for `--json`/`--quiet`, `--no-auth-check`/`AGENTS_NO_AUTH_CHECK=1`, or a signed-in rotation.
+ * `forceInteractive` is load-bearing: `/continue <id>` resumes set `hasPrompt` yet open the TUI. */
+/** Is a Claude run on this box authenticating from an ambient `CLAUDE_CODE_OAUTH_TOKEN` rather than
+ * a per-version login? `signedIn` is read from `.claude.json`, so such versions read 'logged out'
+ * though the run works (a fleet incident). */
 export function ambientClaudeToken(
   agentId: AgentId | string,
   env: NodeJS.ProcessEnv = process.env,
@@ -167,11 +112,9 @@ export function shouldCheckLoginBeforeLaunch(o: {
   return o.interactive === true || o.forceInteractive === true || (!o.hasPrompt && o.headless !== true);
 }
 
-/**
- * Colored `✓ signed in <account>` / `✗ logged out` badge. When signed in and an
- * account label is derivable (email, else an account id), it is appended in cyan;
- * opaque-credential agents with no email still read as signed in.
- */
+/** Colored `signed in <account>` / `logged out` badge. When signed in and an account label (email,
+ * else id) is derivable, it is appended in cyan; opaque-credential agents with no email still read
+ * as signed in. */
 export function formatSignInBadge(
   info: Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'> | null | undefined,
 ): string {

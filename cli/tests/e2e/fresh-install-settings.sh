@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# E2E regression test for issues #112/#137: installing agents-cli on a machine
-# with existing Claude Code / Codex user config must not lose any settings.
-#
-# Builds the CLI from the current checkout, packs it, and replays the full
-# fresh-machine flow (npm install -> setup -> import -> launch sync) inside a
-# clean node:24 Linux container. Requires a running docker daemon (colima ok).
-#
-# Usage: bash tests/e2e/fresh-install-settings.sh
+# E2E regression for #112/#137: installing agents-cli over existing Claude Code/Codex config must
+# not lose settings. Builds, packs, and replays npm install, setup, import and launch sync in a
+# clean node:24 container (needs docker). Usage: bash tests/e2e/fresh-install-settings.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

@@ -1,9 +1,5 @@
-/**
- * Tests for the ticket/PR column helper (Feature 3). The ref used to jam
- * against a truncated topic inside the badge blob; ticketLabel pulls it into a
- * dedicated column, and its precedence (ticket over PR) is the bit worth
- * pinning so a session tied to both doesn't flip between them.
- */
+/** Tests the ticket/PR column helper. ticketLabel moves the ref out of the truncated topic into its
+ * own column; its precedence (ticket over PR) is pinned so a session tied to both doesn't flip. */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ActiveSession } from '../../lib/session/active.js';
@@ -160,10 +156,8 @@ describe('formatPickerLabel', () => {
     expect(row).not.toContain('ghostty');
   });
 
-  // The browser showed which terminal a session ran in but never WHAT it was
-  // doing, so a session that had lost its host looked exactly like a healthy
-  // one in the row list — the whole point of the new statuses is that you can
-  // see them where you are already looking.
+  // The browser showed which terminal a session ran in but not what it was doing, so a session
+  // that lost its host looked healthy. The new statuses must be visible where users already look.
   it('renders the live status word when the status column is on', () => {
     const live = { context: 'terminal', kind: 'claude', status: 'orphaned' } as ActiveSession;
     const row = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, live));
@@ -316,10 +310,9 @@ describe('team badge — the orchestrator end of the lineage', () => {
   });
 
   it('takes its width out of the topic, not out of the row', () => {
-    // The badge is a segment, not a column: adding it must shrink the topic cell
-    // rather than widen the row, or every fixed-width column after it misaligns.
-    // (At the Math.max(16, ...) topic floor there is nothing left to give back,
-    // which is why this asserts against a width with slack in it.)
+    // The badge is a segment, not a column: adding it must shrink the topic cell rather than widen
+    // the row, or later fixed-width columns misalign. At the Math.max(16, ...) topic floor nothing
+    // can give back, so this asserts at a width with slack.
     const prev = process.env.COLUMNS;
     process.env.COLUMNS = '160';
     try {

@@ -1,19 +1,13 @@
-/**
- * Redaction is a secret-leak guard: any text that gets logged (daemon logs) or
- * exported (session transcripts) runs through `redactSecrets` first. These tests
- * pin the token classes that must never survive — in particular the AWS / GitHub
- * / npm token forms that a prior *private* daemon copy of this function silently
- * missed, leaking them into `~/.agents/.../logs.jsonl`.
- */
+/** Redaction is a secret-leak guard for logged (daemon logs) and exported (transcripts) text. These
+ * tests pin token classes that must never survive, notably the AWS/GitHub/npm forms that a prior
+ * private daemon copy of this function missed, leaking them into `~/.agents/.../logs.jsonl`. */
 
 import { describe, it, expect } from 'vitest';
 import { redactSecrets, knownSecretValuesFromEnv, sanitizeForTerminal } from './redact.js';
 
-// Token fixtures are ASSEMBLED FROM FRAGMENTS at runtime (via `j`) so no
-// contiguous token literal ever appears in this source file — GitHub push
-// protection / secret scanners flag file text, not runtime-joined strings.
-// The joined values below are synthetic (repeating/placeholder bodies), not
-// live credentials. `j` is a plain concatenation.
+// Token fixtures are ASSEMBLED FROM FRAGMENTS at runtime (via `j`) so no contiguous token literal
+// appears in source; GitHub push protection and scanners flag file text, not joined strings. The
+// values are synthetic placeholders, not live credentials.
 const j = (...parts: string[]): string => parts.join('');
 const B36 = '1234567890abcdefghijklmnopqrstuvwxyz'; // 36-char classic GitHub body
 

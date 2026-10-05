@@ -1,7 +1,5 @@
-/**
- * Fuzzy string matching for user-provided identifiers.
- * Auto-corrects typos like "cladue" -> "claude" based on Levenshtein distance.
- */
+/** Fuzzy matching for user-provided identifiers: auto-corrects typos like "cladue" to "claude"
+ * by Levenshtein distance. */
 
 /** Levenshtein edit distance between two strings. */
 export function levenshtein(a: string, b: string): number {
@@ -21,12 +19,8 @@ export function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
-/**
- * Damerau-Levenshtein (optimal string alignment) distance.
- * Counts a transposition of two adjacent characters as a single edit,
- * so `cladue` -> `claude` is distance 1, matching the user's notion of
- * "one misspelling."
- */
+/** Damerau-Levenshtein (optimal string alignment) distance. A transposition counts as one edit,
+ * so `cladue` to `claude` is 1. */
 export function damerauLevenshtein(a: string, b: string): number {
   const m = a.length, n = b.length;
   if (m === 0) return n;
@@ -59,10 +53,8 @@ interface FuzzyOptions {
   damerau?: boolean;
 }
 
-/**
- * Fuzzy match an input string against a list of candidates.
- * Returns the single best match within tolerance, or null if no match or ambiguous.
- */
+/** Fuzzy-matches an input against candidates. Returns the single best match within tolerance, or
+ * null if none or ambiguous. */
 export function fuzzyMatch<T extends string>(
   input: string,
   candidates: readonly T[],
@@ -101,10 +93,8 @@ export function fuzzyMatch<T extends string>(
   return atMinDist.length === 1 ? atMinDist[0].candidate : null;
 }
 
-/**
- * Preset configurations for different identifier types.
- * Based on pairwise distance analysis of candidate pools.
- */
+/** Preset configurations per identifier type, based on pairwise distance analysis of candidate
+ * pools. */
 export const FUZZY_PRESETS = {
   /** Agents: 1 mistype (insertion/deletion/substitution/transposition). Damerau so `cladue`->`claude` is 1. */
   agents: { maxDistance: 1, damerau: true },

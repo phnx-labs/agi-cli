@@ -5,13 +5,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-// End-to-end tests for the unified `agents devices config` surface and the
-// retired-subcommand tombstones (configure / note / set / set-interactive /
-// enable / disable / prefer / unprefer). Spawns the REAL CLI against a
-// throwaway HOME (same pattern as ssh.test.ts) — no mocking; the assertions
-// read the actual files the commands wrote: per-device docs under
-// devices/<name>/agents.yaml (device layer) and central agents.yaml
-// fleet.defaults.config (fleet layer).
+// End-to-end tests for the unified `agents devices config` surface and the retired-subcommand
+// tombstones. They spawn the real CLI against a throwaway HOME (no mocking) and assert files
+// written: per-device docs and central agents.yaml fleet.defaults.config.
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 

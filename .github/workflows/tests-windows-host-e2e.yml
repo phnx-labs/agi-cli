@@ -1,33 +1,8 @@
 name: Windows-host e2e (tailnet)
 
-# Runs the live Windows-host integration suites (issue #864, split out of #561):
-# browser/drivers/ssh.e2e.test.ts drives the REAL
-# remote runtime against win-mini over the tailnet — daemon push + scheduled
-# task + ssh -L tunnel + JSON-RPC roundtrip, and the Edge-over-CDP browser path.
-# They are env-gated on AGENTS_TEST_WIN_HOST and skip everywhere else.
-#
-# Runner: the `crabbox-ci` org runner pool (ci-runner-fsn1, Hetzner) — two
-# persistent org-scoped runners labeled [crabbox-ci, tailnet], joined to the
-# tailnet with fleet SSH reach to win-mini. The vitest setup file hermetically
-# redirects AGENTS_DEVICES_DIR (RUSH-2042); the e2e seeder
-# (cli/tests/seed-e2e-win-host.ts) copies win-mini from the real fleet
-# registry or synthesizes it from `ssh -G win-mini` into that private dir so
-# resolveRemoteDevice can dial. The pool is an org runner group restricted to
-# agents-cli + agi-cli.
-#
-# LABEL RULE: `crabbox-ci` may only appear in workflows with trusted triggers
-# (push to main / schedule / workflow_dispatch). Never on pull_request — this
-# repo is public and the runner is self-hosted, so fork PRs must never execute
-# code on it. This workflow deliberately has NO pull_request trigger. Keep it
-# that way.
-#
-# Tool versions are NOT pinned here — setup-bun reads from package.json.
-#
-# This used to also drive the computer subsystem's Windows helper: build the
-# win-x64 daemon exe, push it to win-mini, register a scheduled task. That whole
-# half moved to the standalone `computer` CLI (PHNX-4075) and is tested in its
-# repo. What remains is the BROWSER's real ssh tunnel against a real Windows
-# host, which is agents-cli's own code.
+# Runs the live Windows-host integration suites (issue #864): browser/drivers/ssh.e2e.test.ts
+# drives the real remote runtime against win-mini over the tailnet. Env-gated on
+# AGENTS_TEST_WIN_HOST. Its runner is self-hosted and the repo public: never add pull_request.
 
 on:
   push:

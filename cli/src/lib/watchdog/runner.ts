@@ -1,39 +1,6 @@
-/**
- * Watchdog runner — the CONSUMER that wires the merged pure pieces into a
- * working auto-nudge (RUSH-1415). The `agents watchdog` command drives it, so
- * the whole loop runs WITHOUT the Swift menu-bar.
- *
- * One tick:
- *
- *   getActiveSessions()                            (session/active.ts)
- *     -> classifyTerminal(...) per session         (watchdog/watchdog.ts)  — which are idle?
- *       -> readWatchdogTail(...) for the idle ones  (watchdog/read.ts)      — task + transcript tail
- *         -> the watchdog AGENT judges them ALL at once (watchdog/watchdog-agent.ts)
- *              — idle-but-unfinished -> nudge; idle-and-done / needs-human -> skip
- *           -> resolveInjectTargetForSession(...)  (terminal/resolve.ts)   — THE safety gate: addressable or an honest refusal
- *             -> injectIntoTerminal(target,text)   (terminal/inject.ts)    — deliver into the EXACT split, then CONFIRM
- *
- * There is no heuristic decider — no regex over the tail guessing done-vs-stuck.
- * The agent is the whole decider, given every idle session's task + tail in ONE
- * `agents run --mode plan` call per tick. The safety gate is absolute: a nudge is
- * delivered ONLY when the resolver returns `addressable: true`, and it is booked in
- * the cooldown ledger ONLY when delivery is CONFIRMED. On `addressable: false` the
- * reason is recorded to a state file the menu-bar can surface and the session is
- * SKIPPED — never a guessed / frontmost target.
- *
- * Persistence (all under ~/.agents/.cache/state/watchdog/, tray-readable):
- *   - nudges.json  — { [sessionId]: lastNudgeMs } — enforces the cooldown.
- *   - flags.json   — { [sessionId]: { reason, host, atMs } } — un-addressable stalls.
- *   - last-tick.json — the full outcome list from the most recent tick.
- *   - policy/<sessionId> — per-session sentinel: off | keep | handsoff.
- *   - rotate/<sessionId>.json — the in-place rotate state machine (rotate.ts).
- *   - rotate-skips.json — zero-healthy skip suppression: { [sessionId]: suppressUntilMs }.
- *
- * The pure logic (classifyTerminal) is imported and never re-implemented; the
- * runner only supplies its I/O (sessions, tails, clock, policy, the agent decider,
- * injection) — each an injectable seam so runner.test.ts drives real synthetic
- * sessions without a live terminal or a real `agents run`.
- */
+/** Watchdog runner (RUSH-1415), driven by `agents watchdog`: classify sessions, read tails of idle
+ * ones, ONE batched agent call decides nudge vs skip. A nudge is delivered only if `addressable:
+ * true` and booked only when confirmed. State: ~/.agents/.cache/state/watchdog/. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -143,55 +110,35 @@ export interface WatchdogTickOptions {
   tailFor?: (s: ActiveSession) => string[];
   /** Per-session policy. Default = the on-disk sentinel. */
   policyFor?: (s: ActiveSession) => WatchdogPolicy;
-  /**
-   * The decider seam: given an idle candidate, decide nudge vs skip and craft the
-   * message. Production leaves this unset — the tick judges every idle session in
-   * ONE batched `agents run … --mode plan` call (watchdog-agent.ts). Tests inject a
-   * synthetic per-candidate decider so the decision path is exercised without
-   * shelling out.
-   */
+  /** The decider seam: per idle candidate, nudge vs skip and the message. Production leaves it unset
+   * (one batched `agents run --mode plan` call); tests inject a synthetic decider. */
   smartDecider?: SmartDecider;
-  /**
-   * The batched agent decider used in production (all idle candidates → one call).
-   * Default `makeWatchdogAgentDecider`. Tests inject one (e.g. returning an empty
-   * map) to exercise the batched path and the no-verdict fallback without shelling
-   * out. Ignored when `smartDecider` (the per-candidate test seam) is set.
-   */
+  /** The batched agent decider used in production (default `makeWatchdogAgentDecider`); tests inject
+   * one to exercise the batched path. Ignored when `smartDecider` is set. */
   agentDecider?: WatchdogAgentDecider;
   /** Open feed block for a session (parked-on-question detection). Default reads the feed. */
   openBlockFor?: (s: ActiveSession) => OpenBlock | null;
   /** Inject primitive. Default injectIntoTerminal — tests capture the resolved target. */
   injectFn?: (target: InjectTarget, text: string, opts: { dryRun?: boolean; enter?: boolean }) => Promise<InjectResult>;
-  /**
-   * Publish a declared block on the owner's feed. Default publishBlock() — tests
-   * inject a collector so no real feed dir is touched.
-   */
+  /** Publish a declared block on the owner's feed (default publishBlock()); tests inject a
+   * collector. */
   publishBlockFn?: (block: OpenBlock) => void;
   /** Override the canonical watchdog.log path (tests point at a tmp file). */
   logPath?: string;
 
   // --- rotate seams (watchdog/rotate.ts) ---
-  /**
-   * In-place rotate of rate-limited sessions. Default = `watchdog.rotate` in
-   * agents.yaml (on). Only acts when `nudge` is also set (a dry tick never
-   * rotates).
-   */
+  /** In-place rotate of rate-limited sessions; default is `watchdog.rotate` in agents.yaml (on).
+   * Acts only when `nudge` is set; a dry tick never rotates. */
   rotate?: boolean;
   /** Bounded wait for the relaunched TUI to come live. Default 60s. */
   rotateReadinessMs?: number;
-  /**
-   * First-party health gate run BEFORE rotating. Default defaultRotateGate()
-   * (collectHarnessCandidates + pickHarnessWeighted — the same selection
-   * `agents run auto` makes). Tests inject a synthetic verdict.
-   */
+  /** Health check run before rotating; default defaultRotateGate() makes the same selection as
+   * `agents run auto`. Tests inject a verdict. */
   rotateGate?: () => Promise<RotateGateResult>;
   /** New session id for the relaunch. Default crypto.randomUUID(). Tests pin it. */
   newSessionIdFor?: () => string;
-  /**
-   * Readiness probe: is the relaunched TUI live? Default: a transcript for the
-   * new session id resolves under a known harness layout, OR a fresh active
-   * session (started after the rotate began) exists in this tick's scan.
-   */
+  /** Readiness probe: is the relaunched TUI live? Default: the new session id's transcript resolves,
+   * or a fresh active session started after the rotate began exists. */
   tuiLiveFor?: (state: RotateState, sessions: ActiveSession[]) => boolean;
   /** Delay between exit-sequence keystrokes. Default 300ms; tests set 0. */
   rotateKeyDelayMs?: number;
@@ -261,13 +208,9 @@ export interface WatchdogTickResult {
     /** Sessions the tick moved through the rotate machine (any phase). */
     rotating: number;
   };
-  /**
-   * RUSH-2007 Layer C: per-session presence reconciled from this tick's active
-   * scan. `transitions` carries only the sessions whose connect/disconnect status
-   * flipped this tick — an interactive drop is a reconnect-nudge candidate, a
-   * headless remote a keep-alive. Surfaced for the tray/status; does not alter the
-   * nudge decisions above.
-   */
+  /** RUSH-2007 Layer C: per-session presence from this tick's scan. `transitions` holds only
+   * sessions whose status flipped (interactive drop: reconnect-nudge candidate; headless remote:
+   * keep-alive). Does not alter nudge decisions. */
   presence: {
     connected: number;
     disconnected: number;
@@ -303,10 +246,8 @@ function readNudgeLedger(dir: string): Record<string, number> {
   return readJsonFile<Record<string, number>>(path.join(dir, 'nudges.json'), {});
 }
 
-/**
- * On-disk per-session policy sentinel: `<stateDir>/policy/<sessionId>` whose
- * contents are `off` | `keep` | `handsoff`. Absent / unreadable / unknown → keep.
- */
+/** On-disk per-session policy sentinel `<stateDir>/policy/<sessionId>`: `off` | `keep` | `handsoff`;
+ * absent, unreadable or unknown means keep. */
 function readPolicySentinel(dir: string, sessionId: string): WatchdogPolicy {
   if (!sessionId) return 'keep';
   let raw: string;
@@ -343,40 +284,25 @@ export interface NudgeDecision {
   nudge: boolean;
   reason: string;
   text?: string;
-  /**
-   * On a skip, `true` = the agent judged the session genuinely needs the human
-   * (surface it — self-file reminder / owner page); `false` / absent = idle-and-
-   * done, leave it alone. Gates the self-file reminder so a finished session is
-   * never poked.
-   */
+  /** On a skip, `true` = the agent judged the session genuinely needs the human (self-file reminder
+   * or owner page); `false`/absent = idle and done. A finished session is never poked. */
   needsHuman?: boolean;
 }
 
 // --- delivery planning ------------------------------------------------------
 
-/**
- * How a decided nudge should be delivered. The four outcomes mirror the
- * answer-router contract: a running/looping agent gets the message in its mailbox
- * (seen at the next tool call); a parked-on-question agent gets it typed into the
- * EXACT split (inject) or, when headless, re-entered via resume; and a parked
- * agent with no addressable rail is refused (flagged, never a guessed target).
- */
+/** How a decided nudge is delivered: a looping agent gets it in its mailbox (next tool call); a
+ * parked agent gets it injected into its exact split, or resumed if headless; with no addressable
+ * rail it is refused and flagged, never a guessed target. */
 type DeliveryPlan =
   | { via: 'inject'; rail: InjectRail; target: InjectTarget }
   | { via: 'resume' }
   | { via: 'mailbox'; mailboxId: string }
   | { via: 'refuse'; reason: string; hint?: string };
 
-/**
- * Pick the delivery mechanism. resolveAnswerRoute (answer-router.ts) chooses
- * mailbox vs resume vs refuse; resolveInjectTargetForSession (resolve.ts) supplies
- * the precise inject target — CRUCIALLY it handles the vscodium rail that the
- * answer-router's own resolver cannot, so an IDE-terminal (VS Codium / Cursor /
- * VS Code) session parked on a question is injected into its exact terminal rather
- * than being downgraded to resume/refuse. When a precise rail exists it wins
- * (that includes a stalled non-parked agent, so the v1 terminal-inject path is
- * preserved and no nudge is stranded in a mailbox the agent will never poll).
- */
+/** Pick the delivery mechanism: resolveAnswerRoute chooses mailbox/resume/refuse;
+ * resolveInjectTargetForSession supplies the inject target and handles the vscodium rail the
+ * router cannot. A precise rail wins, so no nudge strands in an unread mailbox. */
 function planDelivery(
   session: ActiveSession,
   chosenText: string,
@@ -394,10 +320,9 @@ function planDelivery(
   }
   // No precise rail: honor the answer-router's parked-agent decision.
   if (route.kind === 'resume') return { via: 'resume' };
-  // Mailbox is correct ONLY for a still-looping agent that has an OPEN question
-  // block — it is seen at the next tool call. A stalled agent that simply stopped
-  // (no open block) would never poll the mailbox, so it is flagged instead of
-  // silently dropping a nudge into a spool it will never read.
+  // Mailbox is right only for a still-looping agent with an open question block. A stalled agent
+  // with no open block never polls it, so it is flagged instead of dropping a nudge into an unread
+  // spool.
   if (route.kind === 'mailbox' && isOpenQuestionBlock(block)) return { via: 'mailbox', mailboxId };
   return {
     via: 'refuse',
@@ -473,15 +398,9 @@ function rotateOutcomeReason(s: RotateState): string {
   }
 }
 
-/**
- * Advance ONE in-flight rotate by a single tick. Only `awaiting-tui` normally
- * spans ticks (the exit sequence kills the old session, so the machine resumes
- * here on the next pass); `exiting`/`launching`/`replaying` persisted on disk
- * are crash residue — the first two fall through to the readiness probe (the
- * launch may or may not have landed; the probe/deadline decides), a `replaying`
- * residue re-delivers the replay. On the readiness deadline the session is
- * FAILED + flagged and the machine stops — never blind-type into a dead shell.
- */
+/** Advance ONE in-flight rotate by a tick. Only `awaiting-tui` normally spans ticks; persisted
+ * `exiting`/`launching` are crash residue that fall to the readiness probe, `replaying`
+ * re-delivers. At the deadline the session is failed and flagged, never blind-typed. */
 async function advanceRotate(state: RotateState, deps: RotateAdvanceDeps): Promise<RotateState> {
   let s = state;
   const fail = (error: string): RotateState => {
@@ -546,12 +465,9 @@ async function advanceRotate(state: RotateState, deps: RotateAdvanceDeps): Promi
 
 // --- the tick ---------------------------------------------------------------
 
-/**
- * Run ONE watchdog pass. Returns a structured outcome per live session; injects
- * only when `opts.nudge` is set AND the safety gate says addressable AND policy
- * permits. Persists the cooldown ledger, un-addressable flags, and a last-tick
- * snapshot to the tray-readable state dir.
- */
+/** Run ONE watchdog pass, returning an outcome per live session. Injects only when `opts.nudge` is
+ * set, the safety check says addressable, and policy permits. Persists the cooldown ledger, flags,
+ * and last-tick snapshot. */
 export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<WatchdogTickResult> {
   const nowMs = opts.nowMs ?? Date.now();
   const nudgeText = opts.nudgeText ?? DEFAULT_NUDGE_TEXT;
@@ -564,14 +480,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   const injectFn = opts.injectFn ?? injectIntoTerminal;
   const publishBlockFn = opts.publishBlockFn ?? publishBlock;
 
-  // Rotate seams (watchdog/rotate.ts). The config is read fresh per tick
-  // (readMeta is mtime-cached), so a `watchdog.rotate` flip is honored on the
-  // next pass. The default readiness probe (defaultTuiLiveFor) treats the
-  // new-session-id transcript as PRIMARY (a claude pick honors --session-id)
-  // with a CORRELATED fallback: a fresh active session counts only when it
-  // started after the rotate began AND shares the old session's cwd and
-  // machine — an unrelated fresh session on a busy box must never satisfy it
-  // (that would type the replay into a bare shell when the relaunch failed).
+  // Rotate seams. Config is read per tick. The default readiness probe treats the new-session-id
+  // transcript as primary, with a correlated fallback (after rotate, same cwd and machine); an
+  // unrelated session must never satisfy it, or the replay lands in a bare shell.
   const rotateEnabled = opts.rotate ?? isWatchdogRotateEnabled();
   const rotateGate = opts.rotateGate ?? defaultRotateGate;
   const newSessionIdFor = opts.newSessionIdFor ?? (() => crypto.randomUUID());
@@ -581,13 +492,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
 
   const sessions = opts.sessions ?? (await getActiveSessions());
 
-  // RUSH-2007 Layer C — reconcile per-session presence from this tick's active
-  // scan and persist it. Additive: it derives connect/disconnect from what this
-  // tick actually saw and surfaces the flips (interactive drop => reconnect-nudge
-  // candidate, headless remote => keep-alive) for the tray/status, without
-  // touching the nudge decisions below. Uses the tick's own session view (fleet-
-  // wide when the caller passes gatherRemoteActive results), so it adds no SSH
-  // fan-out of its own.
+  // RUSH-2007 Layer C: reconcile and persist per-session presence from this tick's active scan
+  // (fleet-wide if the caller passes remote results). Additive: surfaces flips for the tray without
+  // touching nudge decisions or adding SSH fan-out.
   const presenceResult = reconcilePresence(loadPresence(dir), observedFromActive(sessions), nowMs);
   savePresence(presenceResult.next, dir);
   const presence = {
@@ -618,14 +525,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     logEvents, flags,
   };
 
-  // --- decide, once, with the AGENT ------------------------------------------
-  // Classify every session up front, collect the idle ones (with their task +
-  // tail), and hand the WHOLE idle set to the watchdog agent in ONE call
-  // (WD-GAP-1: the decider sees the fleet at once, not a lone tail). Tails are
-  // cached so the main loop below does not re-read them. Tests inject a
-  // per-candidate `smartDecider`; production runs one batched
-  // `agents run --mode plan` (watchdog-agent.ts). A session the agent returns no
-  // verdict for is a SAFE skip, never a blind nudge.
+  // Decide once with the agent: classify every session, collect idle ones (task + tail), and give
+  // the whole set to the watchdog agent in ONE call (WD-GAP-1); tails are cached. A session with no
+  // verdict is a safe skip, never a blind nudge.
   const tailCache = new Map<string, string[]>();
   const idleCandidates: { session: ActiveSession; candidate: WatchdogCandidate }[] = [];
   for (const session of sessions) {
@@ -641,10 +543,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     if (st.kind !== 'stalled') continue;
     const tail = tailFor(session);
     tailCache.set(sid, tail);
-    // Rotate takes precedence over the nudge agent: a session with an in-flight
-    // rotate (or in the failed-rotate cooldown) or a HARD account-limit tail is
-    // owned by the rotate machine in the loop below — a capped account cannot be
-    // "Continue."d, so the agent must not judge it (and is never even consulted).
+    // Rotate takes precedence over the nudge agent: a session with an in-flight or failed-cooldown
+    // rotate, or a hard account-limit tail, is owned by the rotate machine; "Continue." cannot fix
+    // a capped account.
     if (rotateEnabled) {
       const inflight = readRotateState(dir, sid);
       if (inflight && (isInflightPhase(inflight.phase) || (inflight.phase === 'failed' && (inflight.suppressUntilMs ?? 0) > nowMs))) continue;
@@ -677,10 +578,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       // Production: ONE batched agent call for every idle session this tick.
       const decide = opts.agentDecider ?? makeWatchdogAgentDecider(opts.smartAgent ?? 'claude');
       const verdicts = await decide(idleCandidates.map((e) => e.candidate));
-      // A decider outage (agent unavailable / timeout) returns no verdicts while
-      // idle sessions exist — surface it as an error so it is not an invisible
-      // no-op tick (the watchdog silently steering nothing is the failure mode
-      // this whole subsystem exists to prevent).
+      // A decider outage returns no verdicts while idle sessions exist; surface it as an error so
+      // the tick is not an invisible no-op (the watchdog silently steering nothing is what this
+      // subsystem prevents).
       if (verdicts.size === 0) {
         logEvents.push({
           ts: nowMs, kind: 'error',
@@ -700,13 +600,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
                 // never silently abandon an unfinished session (the highest-risk state).
                 needsHuman: d.action === 'skip' ? d.needsHuman ?? true : undefined,
               }
-            // No verdict for this session — the agent couldn't decide (partial or a
-            // decider outage). A NEUTRAL safe-skip: NOT "done" (needsHuman stays
-            // undefined, so it is never logged as finished and the reminder never
-            // fires), nothing booked, so the next tick re-evaluates it once the
-            // decider is back. Marking it done (needsHuman:false) would let an
-            // outage abandon every idle session; marking it needsHuman would spam a
-            // "you're stuck" reminder into every idle terminal on any outage.
+            // No verdict (agent undecided or outage): a neutral safe-skip, not "done" and not
+            // needsHuman, nothing booked, so the next tick re-evaluates. Marking done would
+            // abandon idle sessions on an outage; needsHuman would spam reminders.
             : { nudge: false, reason: 'watchdog agent returned no verdict — retry next tick' },
         );
       }
@@ -793,10 +689,8 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       stalledForMs: status.stalledForMs,
     };
 
-    // --- rotate path (watchdog/rotate.ts) -----------------------------------
-    // An in-flight rotate OWNS this session: advance the machine, never nudge.
-    // A stalled session whose tail shows a HARD LIMIT rotates in place instead
-    // of nudging — "Continue." cannot unspend a capped account.
+    // An in-flight rotate owns this session: advance the machine, never nudge. A tail showing a
+    // hard limit rotates in place, since "Continue." cannot unspend a capped account.
     if (rotateEnabled) {
       const sid = session.sessionId;
       const inflight = readRotateState(dir, sid);
@@ -845,12 +739,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
           continue;
         }
 
-        // First-party health gate — the SAME selection `agents run auto` would
-        // make. Zero healthy → ONE skip event per cooldown window, terminal
-        // untouched. Cooldown = earliestResetAcross (gate) → parsed tail reset
-        // → 30m default, whichever is known first. A gate THROW degrades to a
-        // skip for this session — it must never abort the whole tick (which
-        // would skip last-tick.json and every other session's decision).
+        // First-party health check, the same selection as `agents run auto`. Zero healthy: one
+        // skip event per cooldown (earliest reset, else tail reset, else 30m), terminal untouched.
+        // A gate throw degrades to a skip for this session, never aborting the tick.
         let gate: RotateGateResult;
         try {
           gate = await rotateGate();
@@ -1004,11 +895,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     });
 
     if (!decision.nudge) {
-      // Brain explicitly concluded "leave for human" (needsHuman === true). Inject a
-      // self-file reminder into the agent's terminal so it knows to post a feed block.
-      // Cheap deterministic skips (session done, no stall) are NOT reminder-worthy —
-      // guard on needsHuman so a finished session is never poked.
-      // Gated by the same cooldown as a nudge to prevent re-firing every 2-minute tick.
+      // Brain concluded "leave for human" (needsHuman === true): inject a self-file reminder so
+      // the agent posts a feed block. Cheap skips (done, no stall) are not reminder-worthy; same
+      // cooldown as a nudge.
       if (decision.needsHuman) {
         const lastNudgeMs = ledger[session.sessionId ?? ''] ?? 0;
         const cooldownMs = thresholds.cooldownMs;
@@ -1031,10 +920,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
               }
               ledgerUpdates[session.sessionId] = nowMs;
             } else {
-              // Un-addressable → we can't reach the terminal to remind it, so the ONLY
-              // way to reach Muqsit is to file a declared block on the agent's behalf.
-              // This is the most important case: the session genuinely needs the human
-              // AND the watchdog can't even nudge it. Never let it silently vanish.
+              // Un-addressable: the terminal cannot be reached, so the only way to reach the owner
+              // is a declared block on the agent's behalf. The most important case; never let it
+              // vanish silently.
               const mailboxId = mailboxIdForActiveSession(session) ?? session.sessionId;
               const machineHost = session.provenance?.host ?? 'unknown';
               const runtime = session.kind;
@@ -1069,13 +957,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     const addressable = plan.via === 'inject' ? true : undefined;
 
     if (plan.via === 'refuse') {
-      // No addressable rail and not headless-resumable — flag, NEVER guess.
-      // This branch is reached ONLY for a nudge-worthy (decision.nudge === true)
-      // drive-forward poke, which is NEVER needsHuman (needsHuman is set only when
-      // decision.nudge === false). So we do NOT page the owner here — a short "just
-      // needs a poke" stall must not text Muqsit's phone. Owner-paging for an
-      // un-addressable session happens only on the confirmed needsHuman skip path
-      // above. Here we only flag it for the tray.
+      // No addressable rail and not headless-resumable: flag, never guess. Reached only for a
+      // drive-forward poke (nudge === true, never needsHuman), so the owner is not paged; owner
+      // paging happens only on the confirmed needsHuman path above. Only flagged for the tray.
       flags[session.sessionId] = { reason: plan.reason, host: session.host, atMs: nowMs };
       outcomes.push({
         ...base, decision: 'skip', addressable: false,
@@ -1087,14 +971,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       continue;
     }
 
-    // handsoff = detect + flag, but never deliver via inject/mailbox.
-    // This branch is reached ONLY for a nudge-worthy (decision.nudge === true)
-    // drive-forward poke, which is NEVER needsHuman. A hands-off policy means "don't
-    // nudge it forward" — it must NOT translate into paging Muqsit for a poke. So we
-    // only flag it for the tray, no owner page. A genuinely needs-human session (even
-    // under hands-off) is paged by the confirmed-needsHuman skip path above, which
-    // does not consult policy — hands-off silences the forward nudge, not the
-    // "it's actually stuck" signal.
+    // handsoff = detect and flag, never deliver. Reached only for a drive-forward poke, so it must
+    // not page the owner. A genuinely needs-human session is paged by the needsHuman path above,
+    // which ignores policy: hands-off silences the forward nudge, not the "actually stuck" signal.
     if (policy === 'handsoff') {
       flags[session.sessionId] = {
         reason: `handsoff: would nudge via ${viaLabel(plan)} but policy is hands-off`,
@@ -1119,11 +998,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       continue;
     }
 
-    // Deliver. injectDryRun exercises the path without a real side effect: inject
-    // still calls injectFn (which honors dryRun), mailbox/resume are short-circuited.
-    // `confirmed` distinguishes a delivery we KNOW reached the agent (tmux/iterm,
-    // mailbox, resume) from one merely dispatched (vscodium's fire-and-forget
-    // --open-url). Only a CONFIRMED delivery is booked as a landed nudge.
+    // Deliver. injectDryRun exercises the path without side effects. `confirmed` distinguishes a
+    // delivery known to reach the agent (tmux/iterm, mailbox, resume) from one merely dispatched
+    // (vscodium fire-and-forget `--open-url`); only a confirmed delivery is booked as landed.
     let delivered: { ok: boolean; confirmed: boolean; error?: string };
     if (plan.via === 'inject') {
       try {
@@ -1155,11 +1032,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
         nudgeText: chosenText,
       });
     } else if (delivered.ok && !delivered.confirmed) {
-      // Dispatched but UNCONFIRMED (vscodium --open-url handed off, but the ext may
-      // have no-op'd the verb). Do NOT claim it landed — record `undelivered` in
-      // history so the phantom-nudge is visible. Still start the cooldown so a
-      // possibly-working ext session is not re-nudged every tick; the honest
-      // `undelivered` signal tells the operator to ship the swarm-ext ack.
+      // Dispatched but unconfirmed (vscodium may have no-op'd the verb): do not claim it landed;
+      // record `undelivered` so the phantom nudge is visible, and still start the cooldown so the
+      // session is not re-nudged every tick.
       ledgerUpdates[session.sessionId] = nowMs;
       logEvents.push({
         ts: nowMs, kind: 'undelivered', terminalId: session.sessionId, agentType: candidate.agentType,
@@ -1180,12 +1055,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     }
   }
 
-  // Advance in-flight rotates the in-loop path did NOT touch — critically the
-  // common case where the exit sequence killed the old harness, so the old
-  // session dropped out of the active-session list and only this sweep can
-  // finish the machine (readiness → replay, or deadline → fail + flag). Runs
-  // even when rotate was just disabled so a mid-flight machine is never
-  // stranded; a dry tick advances state but never injects (mayInject).
+  // Advance in-flight rotates the in-loop path did not touch: after the exit sequence kills the old
+  // harness it drops out of the active list, so only this sweep can finish the machine. Runs even
+  // if rotate was just disabled; a dry tick never injects (mayInject).
   for (const inflight of listInflightRotates(dir)) {
     if (advancedRotates.has(inflight.sessionId)) continue;
     await advanceRotate(inflight, rotateDeps);

@@ -1,9 +1,5 @@
-/**
- * Poll-http source evaluator.
- *
- * GETs the URL; the observation is `<status>\n<body>` so a status flip OR a body
- * change both register as a diff. Uses the built-in fetch (Node 22+).
- */
+/** Poll-http source evaluator: GETs the URL; the observation is `<status>\n<body>` so a status flip
+ * or body change both diff. Uses the built-in fetch (Node 22+). */
 
 import type { MonitorSource } from '../config.js';
 import type { Observation } from './types.js';

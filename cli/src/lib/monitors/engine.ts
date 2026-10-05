@@ -1,16 +1,6 @@
-/**
- * Monitor evaluate/fire loop.
- *
- * Modeled on the routines daemon: a single MonitorEngine lives inside runDaemon()
- * beside the cron JobScheduler. On each tick it evaluates every enabled monitor
- * that is DUE and owned by this device, applies the condition through the native
- * state-diff store, and on a fire dispatches the action, writes a fire record, and
- * updates state. A per-monitor rate limit auto-pauses a firehose.
- *
- * v1 covers the poll model (command, poll, poll-http, file, device). Push sources
- * (ws, webhook) return null from `evaluate` — they deliver through `subscribe` /
- * the webhook receiver, wired in a follow-up; the engine treats them as inert.
- */
+/** Monitor evaluate/fire loop, modeled on the routines daemon: one MonitorEngine in runDaemon()
+ * beside the cron scheduler. Each tick evaluates every enabled, DUE monitor this device owns and
+ * on a fire dispatches and records it. Push sources (ws, webhook) are inert in v1. */
 
 import {
   listMonitors,
@@ -39,21 +29,15 @@ import { readRunMeta } from '../scheduling/routines.js';
 export const MONITOR_ENGINE_TICK_MS = 5_000;
 /** Default evaluation cadence for sources that carry no explicit interval. */
 const DEFAULT_INTERVAL_MS = 60_000;
-/**
- * Consecutive failed polls before the engine escalates a drought to the owner.
- * A monitor that looks healthy (enabled, daemon up) but whose source errors
- * every poll does no real work — the "every signal reads healthy while zero work
- * happened" failure RUSH-2485 is about. One notification per drought.
- */
+/** Consecutive failed polls before the engine escalates a drought to the owner. A monitor that
+ * looks healthy but errors every poll does no real work (RUSH-2485: every signal reads healthy
+ * while zero work happened). One notification per drought. */
 const DROUGHT_THRESHOLD = 5;
 /** Poll-model source types the engine actually evaluates on a cadence; ws/webhook are push-only and inert here. */
 export const POLL_SOURCE_TYPES = new Set(['command', 'poll', 'poll-http', 'file', 'device']);
 
-/**
- * Whether a monitor's liveness has crossed into a drought worth notifying the
- * owner about: enough consecutive failed checks, and not already notified for
- * this drought. Pure so the branch is unit-testable without a real notify.
- */
+/** Whether a monitor's liveness crossed into a drought worth notifying the owner about: enough
+ * consecutive failed checks and not already notified. Pure. */
 export function shouldEscalateDrought(liveness: MonitorLivenessLike): boolean {
   return liveness.consecutiveErrors >= DROUGHT_THRESHOLD && !liveness.droughtNotifiedAt;
 }
@@ -86,32 +70,25 @@ function buildEvent(monitor: MonitorConfig, summary: string, payload: Record<str
   return { monitorName: monitor.name, firedAt: new Date().toISOString(), summary, payload };
 }
 
-/**
- * Apply a monitor's condition to an observation. Pure (reads state, never
- * writes), so both the tick loop and the `test` dry-run share it.
- */
+/** Applies a monitor's condition to an observation. Pure (reads state, never writes), shared by the
+ * tick loop and the `test` dry-run. */
 export function decideFire(monitor: MonitorConfig, observation: Observation): FireDecision {
   const cond = monitor.condition;
   const raw = observation.raw;
   const payload = observation.meta ?? {};
   const dedupeKey = cond.dedupeKey;
 
-  // A snapshot the source flagged as an OBSERVATION FAILURE (a poll that exited
-  // non-zero or emitted a transport/auth/rate-limit error) is never a value
-  // change: don't fire, don't move the baseline — so an empty→error→empty flap
-  // can't read as two value changes (PHNX-3510). The engine records it as a
-  // failed check separately, feeding the drought health streak.
+  // A snapshot the source flagged as an OBSERVATION FAILURE (non-zero exit,
+  // transport/auth/rate-limit error) is never a value change: don't fire or move the baseline, so
+  // empty/error/empty can't read as two changes (PHNX-3510). Counted as a failed check.
   if (observation.failed) {
     return { fire: false, value: raw, dedupeKey, persist: false, event: null };
   }
 
   if (cond.mode === 'every') {
-    // Fire on every tick that carries a real observation. An empty (or
-    // whitespace-only) observation means "nothing to report": firing an action
-    // with an empty {event} is never useful, and skipping it lets a poll whose
-    // command yields no rows (e.g. no mergeable PR) stay silent while still
-    // re-firing every tick the set is non-empty — the retry semantics a
-    // silently-failed action dispatch needs (RUSH-2488).
+    // Fire on every tick carrying a real observation. An empty or whitespace-only one means
+    // "nothing to report", so a poll with no rows stays silent yet re-fires each tick while
+    // non-empty: the retry semantics a failed dispatch needs (RUSH-2488).
     if (raw.trim() === '') {
       return { fire: false, value: raw, dedupeKey, persist: false, event: null };
     }
@@ -223,10 +200,9 @@ export class MonitorEngine {
 
   /** Evaluate every due monitor once. Overlap-guarded so a slow cycle never stacks. */
   async tick(): Promise<void> {
-    // A stopped engine dispatches nothing (PHNX-3608): under the external
-    // scheduler the supervisor owns the timer, so a `stop()` (monitors service
-    // disabled) must be honoured HERE — otherwise the next supervised tick would
-    // still fire the last-loaded monitors even though the engine is stopped.
+    // A stopped engine dispatches nothing (PHNX-3608): the supervisor owns the timer under the
+    // external scheduler, so `stop()` (monitors service disabled) must be honoured here, or the
+    // next supervised tick fires the last-loaded monitors.
     if (!this.running || this.ticking) return;
     this.ticking = true;
     try {
@@ -241,14 +217,9 @@ export class MonitorEngine {
     }
   }
 
-  /**
-   * Evaluate one monitor once and record the outcome. Public so the daemon tick
-   * and tests drive the exact same path. A "failed check" is an evaluation that
-   * produced no observation, threw, OR fired an action that failed — all three
-   * are "the monitor ran and accomplished nothing", the drought signal. A poll
-   * that observes and either fires cleanly or matches nothing is a success and
-   * resets the streak.
-   */
+  /** Evaluates one monitor once and records the outcome; public so the tick and tests share the
+   * path. A "failed check" is no observation, a throw, or a fired action that failed (ran,
+   * accomplished nothing: the drought signal). Clean fires and no-match polls reset the streak. */
   async runMonitor(monitor: MonitorConfig): Promise<void> {
     // Push-only sources (ws/webhook) deliver through subscribe, not this loop —
     // they return null from evaluate by design, so they have no poll to record.
@@ -261,12 +232,9 @@ export class MonitorEngine {
       if (!observation) {
         checkError = 'source produced no observation';
       } else if (observation.failed) {
-        // The poll ran but did not OBSERVE (non-zero exit, or a transport/auth/
-        // rate-limit error in its output). Skip it entirely: no decideFire, no
-        // fire, watched-state untouched — so no empty→error→empty flap dispatches
-        // an agent on a dead premise. Record it as a failed check so a sustained
-        // streak escalates as a drought, the same health surface `--postcondition`
-        // uses on the action side (PHNX-3510).
+        // The poll ran but did not OBSERVE (non-zero exit, or transport/auth/rate-limit error):
+        // skip it, no decideFire, state untouched, so no flap dispatches an agent on a dead
+        // premise. Recorded as a failed check so a streak escalates as a drought (PHNX-3510).
         checkError = `poll failed: ${observation.failureReason ?? 'observation failure'}`;
         this.logFn(
           'WARN',
@@ -289,13 +257,9 @@ export class MonitorEngine {
     this.afterCheck(monitor, checkedAt, checkError);
   }
 
-  /**
-   * Record the poll heartbeat and, on a sustained failure streak, escalate a
-   * drought to the owner exactly once. The heartbeat is what makes a
-   * polling-but-not-matching monitor visibly distinct from one the engine never
-   * touched (RUSH-2485); the streak is what turns "every poll fails and the owner
-   * never hears about it" into one notification.
-   */
+  /** Records the poll heartbeat and, on a sustained failure streak, escalates a drought to the
+   * owner exactly once. The heartbeat distinguishes a polling-but-not-matching monitor from one
+   * the engine never touched (RUSH-2485). */
   private afterCheck(monitor: MonitorConfig, checkedAt: string, error?: string): void {
     const liveness = recordCheck(monitor.name, checkedAt, error);
     if (error && shouldEscalateDrought(liveness)) {
@@ -363,13 +327,9 @@ export class MonitorEngine {
       result = { kind: monitor.action.type, ok: false, error: (err as Error).message };
     }
 
-    // Best-effort snapshot of the run's status AT THIS INSTANT — the same
-    // synchronous view `dispatchAction` just returned from. For the async-race
-    // case (RUSH-2690) this reads 'running': the dispatched process is still
-    // in flight, `ok` was frozen on that transient state, and the real outcome
-    // is not known yet. Recorded so a future reconciliation pass can find
-    // exactly the fires whose `ok` needs revisiting; `resolveFireOutcome`
-    // (state.ts) never trusts this field — it re-reads the run fresh instead.
+    // Best-effort snapshot of the run's status AT THIS INSTANT. In the async race (RUSH-2690) it
+    // reads 'running' and `ok` was frozen on that transient state; recorded so a later pass can
+    // find fires to revisit. `resolveFireOutcome` (state.ts) never trusts it.
     const runStatusAtFire = result.runId ? readRunMeta(monitor.name, result.runId)?.status : undefined;
 
     // Snapshot the postcondition with `{event}` already interpolated so a later

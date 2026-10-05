@@ -2,12 +2,8 @@ import chalk from 'chalk';
 import { IsolationBoundaryError } from './installations/shims.js';
 import { listInstalledVersions } from './installations/versions.js';
 
-/**
- * Turn an {@link IsolationBoundaryError} into guidance. The boundary is enforced by a
- * throw so it cannot be forgotten; this is what keeps that from surfacing as a stack
- * trace. The remedy is always the same shape, because the protection is derived from
- * the isolated copies themselves: drop them and the agent is ordinary again.
- */
+/** Turns an IsolationBoundaryError into user guidance instead of a stack trace. The remedy is
+ * always the same: drop the isolated copies and the agent is ordinary again. */
 export function explainIsolationBoundary(err: IsolationBoundaryError): void {
   const versions = listInstalledVersions(err.agent);
   console.error(chalk.red(`\n${err.agent} is installed only as isolated copies.`));

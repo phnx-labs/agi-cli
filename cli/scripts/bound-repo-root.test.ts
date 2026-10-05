@@ -17,20 +17,16 @@ function bound(dir: string): void {
   execFileSync('bash', [BOUND, dir], { stdio: 'pipe' });
 }
 
-// RUSH-3178. `test.sh --device` ships the tree without `.git`, and a directory
-// with no `.git` sitting under a git ANCESTOR has `rev-parse --show-toplevel`
-// escape to that ancestor. In production the ancestor is `~/.agents` (the
-// DotAgents repo) and ssh is merely what puts the tree there — the mechanism is
-// a plain git/filesystem fact, so any git ancestor reproduces it with no network.
+// RUSH-3178. `test.sh --device` ships the tree without `.git`, and a directory with no `.git`
+// under a git ancestor makes `rev-parse --show-toplevel` escape to it (in production `~/.agents`).
+// That is a plain git/filesystem fact, so any git ancestor reproduces it with no network.
 describe('bound-repo-root.sh', () => {
   it('bounds a .git-less tree that would otherwise escape to a git ancestor', () => {
     const ancestor = tmp('bound-ancestor-');
     git('init -q', ancestor);
-    // The ancestor MUST have a real commit. `~/.agents` is a live, continuously
-    // committed repo, and `git rev-parse --verify HEAD` walks up into it just as
-    // `--show-toplevel` does. An ancestor left commit-less has an unborn HEAD —
-    // the one detail that made an earlier version of this test pass while
-    // production stayed broken. Keep the commit.
+    // The ancestor must have a real commit: `~/.agents` is continuously committed, and `git
+    // rev-parse --verify HEAD` walks up into it like `--show-toplevel`. A commit-less ancestor has
+    // an unborn HEAD, which once made this test pass while production stayed broken.
     fs.writeFileSync(path.join(ancestor, 'ancestor.txt'), 'x');
     git('add -A', ancestor);
     git('-c user.email=t@t -c user.name=t commit -q -m ancestor', ancestor);

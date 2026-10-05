@@ -1,26 +1,15 @@
-/**
- * Round-trip, concurrency, and corruption guarantees for the device registry.
- *
- * registry.json is the source of truth for how to reach every host. The real
- * bugs this guards against:
- *   1. A profile written by upsertDevice() must survive a reload byte-for-byte.
- *   2. Concurrent upserts must all land (lock + atomic rename serializes the
- *      read-modify-write window) — a stomp would silently drop a host.
- *   3. A malformed file must throw, not silently return {} that the next write
- *      would clobber (the data-loss path).
- *   4. `shell` is always re-derived from `platform` so the two can never drift.
- */
+/** Round-trip, concurrency, and corruption guarantees for the device registry (the source of truth
+ * for reaching every host): a profile survives reload byte-for-byte; concurrent upserts all land;
+ * a malformed file throws rather than returning {}; `shell` is always re-derived from `platform`. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Redirect the device registry dir to a test-private temp so writes never touch
-// the user's real ~/.agents/.history/devices (RUSH-2042). state.ts's
-// getDevicesDir() reads AGENTS_DEVICES_DIR at call time, so this is immune to the
-// module-cache race that made a plain HOME override leak (state.ts pins HOME at
-// module load; a later HOME change is too late once any static import ran).
+// Redirect the device registry dir to a test-private temp so writes never touch the user's real
+// ~/.agents/.history/devices (RUSH-2042). getDevicesDir() reads AGENTS_DEVICES_DIR at call time,
+// unlike a HOME override, which leaks because state.ts pins HOME at module load.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-registry-test-'));
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 
@@ -108,12 +97,9 @@ describe('device registry corruption surfacing', () => {
   });
 });
 
-/**
- * Which devices a cross-fleet sweep dials. Both directions below were live on a
- * real 17-device fleet and together made `agents sessions --resolve` unable to
- * ever answer: the manual box holding the transcript was skipped, while two
- * sleeping boxes were dialed and their timeouts read as doubt.
- */
+/** Which devices a cross-fleet sweep dials. Both directions were live on a real 17-device fleet and
+ * made `agents sessions --resolve` unable to answer: the manual box holding the transcript was
+ * skipped while two sleeping boxes were dialed and their timeouts read as doubt. */
 describe('isDialableDevice', () => {
   it('dials a manually-registered device that the live probe reached', () => {
     // The real yosemite-s1: address.via 'manual', so it never gets a tailscale
@@ -128,10 +114,9 @@ describe('isDialableDevice', () => {
   });
 
   it('a failed probe never removes a peer the snapshot still calls online', () => {
-    // The probe runs on a short SSH budget and produces false negatives on a
-    // congested tailnet — it was observed calling the LOCAL machine unreachable.
-    // Excluding on it would hide sessions on healthy boxes, so a negative probe
-    // must not override a snapshot that says online.
+    // The probe runs on a short SSH budget and gives false negatives on a congested tailnet (it
+    // called the local machine unreachable). Excluding on it would hide sessions on healthy boxes,
+    // so a negative probe must not override a snapshot saying online.
     expect(isDialableDevice({
       name: 'mac-mini',
       platform: 'macos',
@@ -152,10 +137,9 @@ describe('isDialableDevice', () => {
   });
 
   it('keeps dialing a manual device even after a probe says it is unreachable', () => {
-    // The deliberate cost of "a probe may only ADD a peer": a manual device has
-    // no tailscale block to say offline, so a confirmed-dead one stays in the
-    // sweep until it is removed from the registry. Pinned so the tradeoff is a
-    // decision on record, not an accident.
+    // The deliberate cost of "a probe may only add a peer": a manual device has no tailscale block
+    // to say offline, so a confirmed-dead one stays in the sweep until removed. Pinned so the
+    // tradeoff is on record.
     expect(isDialableDevice({
       name: 'dead-manual',
       platform: 'linux',
@@ -190,10 +174,9 @@ describe('isDialableDevice', () => {
   });
 
   it('treats a never-probed manual device as unknown-not-offline, so it is still dialed', () => {
-    // Matches ssh.ts renderDeviceTable and the ext's isDeviceOnline: offline only
-    // when a tailscale block SAYS offline. Without this, a manual device stays
-    // invisible to the sweep until something happens to probe it — the same class
-    // of bug as yosemite-s1 above, just before the first probe.
+    // Matches ssh.ts renderDeviceTable and the ext's isDeviceOnline: offline only when a tailscale
+    // block says offline. Otherwise a manual device stays invisible to the sweep until probed, the
+    // same bug class as yosemite-s1 above.
     expect(isDialableDevice({
       name: 'unknown-manual',
       platform: 'linux',
@@ -203,10 +186,9 @@ describe('isDialableDevice', () => {
 });
 
 describe('device-name validation — shape vs policy', () => {
-  // The split is load-bearing and its failure mode is invisible to CI: it only
-  // bites a fleet that already owns a node named `auto`, so nothing here would
-  // fail if the two validators were re-merged. These tests are the only thing
-  // standing between that and a fleet-wide `agents devices sync` abort.
+  // The split is load-bearing and its failure is invisible to CI: it only bites a fleet that
+  // already owns a node named `auto`, so nothing here fails if the two validators are re-merged.
+  // These tests are the only guard against a fleet-wide `agents devices sync` abort.
 
   it('assertValidDeviceName is SHAPE-ONLY, so observed names keep working', async () => {
     const { assertValidDeviceName } = await import('./registry.js');
@@ -250,10 +232,9 @@ describe('device-name validation — shape vs policy', () => {
     try {
       await expect(addIgnored('auto')).resolves.toBeTruthy();
     } finally {
-      // The ignore list lives in `fleet.ignored` in agents.yaml, keyed off HOME
-      // rather than AGENTS_DEVICES_DIR, so this file's beforeEach cannot sweep
-      // it. Harmless while this is the last test; a trap for the next one
-      // appended after it.
+      // The ignore list lives in `fleet.ignored` in agents.yaml, keyed off HOME rather than
+      // AGENTS_DEVICES_DIR, so this file's beforeEach cannot sweep it. Harmless while this is the
+      // last test; a trap for the next one.
       await removeIgnored('auto');
     }
   });

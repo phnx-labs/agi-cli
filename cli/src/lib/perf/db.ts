@@ -1,9 +1,6 @@
-/**
- * Disposable performance warehouse — SQLite under ~/.agents/.cache/perf/.
- *
- * Opened only by `agents insights perf` / `hooks profile` (read path). Writers use
- * {@link recordSample} in `./spool.ts` (NDJSON, no SQLite).
- */
+/** Disposable performance warehouse: SQLite under ~/.agents/.cache/perf/, opened only by `agents
+ * insights perf` / `hooks profile` (read path). Writers use {@link recordSample} in `./spool.ts`
+ * (NDJSON, no SQLite). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -17,11 +14,9 @@ import type { AggregateOptions, PerfAggregateRow, PerfPhaseStat } from './types.
 
 export type { AggregateOptions, PerfAggregateRow, PerfPhaseStat, PerfSample } from './types.js';
 
-/**
- * Parse the `phases` map from a sample's meta_json. Fail-soft: a row with no
- * meta_json, malformed JSON, or a non-numeric phase value contributes nothing
- * rather than throwing (the warehouse must survive any writer's shape).
- */
+/** Parses the `phases` map from a sample's meta_json. Fail-soft: missing meta_json, malformed JSON
+ * or a non-numeric phase contributes nothing rather than throwing (the warehouse must survive any
+ * writer's shape). */
 function parsePhases(metaJson: string | null): Record<string, number> | undefined {
   if (!metaJson) return undefined;
   let parsed: unknown;
@@ -211,14 +206,9 @@ function maybeRetain(db: Database.Database): void {
   }
 }
 
-/**
- * Aggregate samples by (kind, label) with p50/p95/p99. Drains the spool first.
- *
- * `opts.project` scopes the query to samples whose recorded `cwd` resolves to
- * that project key (see project-key.ts) — resolution runs per unique cwd
- * (memoized) rather than per row, since `resolveProjectKey` does a filesystem
- * walk and a warehouse query can carry many rows sharing the same cwd.
- */
+/** Aggregates samples by (kind, label) with p50/p95/p99, draining the spool first. `opts.project`
+ * scopes to samples whose `cwd` resolves to that project key (project-key.ts); resolution is
+ * memoized per unique cwd since `resolveProjectKey` walks the filesystem. */
 export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[] {
   const db = openDb();
   if (!db) return [];
@@ -308,11 +298,9 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     if (r.cache === 'hit') b.hits++;
     else if (r.cache === 'stale-prefetch') b.stale++;
     else if (r.cache === 'miss' || r.cache === 'none') b.misses++;
-    // Exit classes (Claude/Codex PreToolUse convention):
-    //   0 → allowed
-    //   2 → intentional deny/block (not a crash)
-    //   1 / other nonzero → real error
-    // Timeouts are recorded via status, not exit_code, so they don't double-count.
+    // Exit classes (Claude/Codex PreToolUse): 0 allowed; 2 intentional deny/block (not a crash);
+    // 1/other nonzero real error. Timeouts are recorded via status, not exit_code, so they don't
+    // double-count.
     if (r.status === 'timeout') b.timeouts++;
     else if (typeof r.exit_code === 'number') {
       if (r.exit_code === 2) b.blocks++;

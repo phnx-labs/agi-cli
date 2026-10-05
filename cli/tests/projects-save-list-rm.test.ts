@@ -1,10 +1,6 @@
-/**
- * End-to-end contract for projects list/save/rm machine surface:
- *   - list --json: definitions only, zero session scan
- *   - list --json --with-agents: local active counts only
- *   - save --json: stdin ProjectDef → validate → atomic write → saved def
- *   - rm --json: machine-readable success/error
- */
+/** End-to-end contract for the projects list/save/rm machine surface: `list --json` definitions only
+ * (no session scan); `--with-agents` local active counts; `save --json` stdin ProjectDef validated
+ * and written atomically; `rm --json` machine-readable result. */
 
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';

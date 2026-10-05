@@ -2,12 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { dedupeBySession } from './active.js';
 import type { ActiveSession } from './active.js';
 
-// Regression for the "Fleet is flooded with identical .openclaw rows" bug.
-// An OpenClaw gateway on mac-mini spawns N `codex` worker processes. The process
-// scan (listUnattributedActive) picks each one up, but none carries a session id,
-// transcript file, or cloud handle — so every worker used to skip dedupe entirely
-// and render as its own row: N copies of ".openclaw · bg · 0s ago". At the time
-// this was reported there were ~40 of them, burying every real session.
+// Regression for "Fleet flooded with identical .openclaw rows": an OpenClaw gateway spawns N
+// `codex` workers with no session id, transcript or cloud handle, so each skipped dedupe and
+// rendered as its own row (~40 at the time).
 
 const worker = (pid: number, cwd = '/Users/muqsit/.agents/openclaw/home/.openclaw'): ActiveSession => ({
   context: 'headless',

@@ -4,15 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import type { HostTask } from './tasks.js';
 
-// Isolate the sessions DB under a temp HOME. state.js freezes its base dir at
-// module load (state.ts:34,107 — `HOME = process.env.HOME ?? os.homedir()`,
-// then `SESSIONS_DIR = ...`), and db.js binds DB_PATH from it at db.ts:15-16,
-// both at *import* time — not lazily. Static top-level imports are hoisted, so
-// they would run the state.js/db.js module bodies BEFORE the HOME assignment
-// below and bind DB_PATH to the runner's real HOME, breaking isolation under
-// CI sharding. So set HOME with a plain statement first, then pull in the
-// modules via a top-level `await import` (which runs after it) — the same
-// hermetic pattern as session/__tests__/db.test.ts.
+// Isolate the sessions DB under a temp HOME. state.js and db.js bind their paths at import time,
+// and static imports are hoisted above the HOME assignment, breaking isolation under CI sharding;
+// so set HOME first, then top-level `await import` (same pattern as session/__tests__/db.test.ts).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hostsession-'));
 process.env.HOME = TEST_HOME;
 

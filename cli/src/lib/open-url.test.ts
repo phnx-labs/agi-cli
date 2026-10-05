@@ -3,13 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Drives the REAL viewer policy against a real device-config store under a temp
-// HOME. Profile DECLARATIONS and viewer suitability (Arc/Firefox/launchable) are
-// the standalone `browser` CLI's now (PHNX-4101); agents-cli's `resolveViewer`
-// only resolves the viewer NAME from config, then `showUrl` delegates the actual
-// open to `browser show`. Nothing here spawns a browser or an OS opener: the OS
-// branch goes through the injected `spawnOpen`, and the `browser show` branch is
-// forced to fail (a nonexistent BROWSER_BIN) so it deterministically falls back.
+// Drives the REAL viewer policy against a real device-config store under a temp HOME. Viewer
+// profiles belong to the standalone `browser` CLI (PHNX-4101); `resolveViewer` only resolves the
+// NAME. Nothing spawns a browser: `spawnOpen` is injected, `browser show` forced to fail.
 
 let testHome = '';
 
@@ -103,10 +99,9 @@ describe('showFile — which kinds a browser tab is right for', () => {
   });
 
   it('tries the viewer for an .html artifact, and says so when it cannot reach it', async () => {
-    // The `browser show` attempt fails here (nonexistent BROWSER_BIN) and falls
-    // back to the OS handler — that is correct, and the stderr line names the
-    // profile, so it is proof the .html went to the viewer branch; a .png never
-    // produces one.
+    // The `browser show` attempt fails here (nonexistent BROWSER_BIN) and falls back to the OS
+    // handler, as intended; the stderr line names the profile, proving the .html went to the
+    // viewer branch (a .png never produces one).
     const { setConfigValue, showFile } = await fresh();
     setConfigValue('browser.viewer', 'work');
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -133,11 +128,9 @@ describe('showFile — which kinds a browser tab is right for', () => {
 });
 
 describe('trySpawn — detection without blocking', () => {
-  // Tested directly, NOT through showUrl. Driving the non-injected path meant
-  // spawning the real platform opener against a real URL, so `bun run test` on
-  // any Mac opened example.com in the developer's browser; on Linux CI xdg-open
-  // is absent so it ENOENT'd and nobody noticed. These use binaries that exist
-  // (or provably do not) and open nothing.
+  // Tested directly, NOT through showUrl: the non-injected path spawned the real platform opener,
+  // so `bun run test` opened example.com on any Mac (on Linux CI xdg-open was absent and ENOENT'd
+  // unnoticed). These use binaries that exist (or provably don't) and open nothing.
 
   it('detects a missing binary instead of reporting success', async () => {
     const { trySpawn } = await fresh();

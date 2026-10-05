@@ -1,13 +1,6 @@
-/**
- * Tests for the declarative subagent-target registry. These lock the two
- * things the registry exists to guarantee:
- *   1. Every subagents-capable agent has a shape (no silently-half-wired agent).
- *   2. The generic engine round-trips install -> list -> remove for each layout,
- *      including agents (droid, copilot) that were previously missing arms in
- *      the hand-written per-agent chains.
- *
- * No mocking -- real temp directories on the actual filesystem.
- */
+/** Tests for the declarative subagent-target registry: every subagents-capable agent has a
+ * shape, and the generic engine round-trips install, list and remove for each layout.
+ * No mocking; real temp directories. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -93,14 +86,8 @@ describe('generic engine round-trips (copilot: previously unwired for install/re
 });
 
 describe('Codex TOML listing (readMeta must not use markdown frontmatter)', () => {
-  /**
-   * Codex custom agents are flat `.toml` files with `name` / `description` /
-   * `developer_instructions` — no YAML `---` block. The default
-   * `metaFrontmatterSkip` reader returns null on TOML, so
-   * `listInstalledSubagentsRich` dropped every codex target and
-   * `agents subagents list` reported them as `missing` while the files sat
-   * on disk and Codex loaded them fine (#2399).
-   */
+  /** Codex custom agents are flat `.toml` files with no YAML `---` block. The default reader
+   * returned null on TOML, so `agents subagents list` reported codex targets as `missing` (#2399). */
   it('installs, lists rich metadata, and removes a codex subagent', () => {
     const home = mkTemp();
     const src = makeSubagentDir('code-reviewer');
@@ -186,14 +173,9 @@ describe('trashSubagentFromHome (soft-delete semantics per layout)', () => {
 });
 
 describe('Kimi subagents are Claude-shaped agent markdown', () => {
-  /**
-   * kimi-code >= 0.29.0 discovers agent FILES from its brand home's `agents/`
-   * dir and parses them as markdown with YAML frontmatter (`name` +
-   * `description`, kebab-case name). It has no loader for the `version: 1` /
-   * `agent:` YAML agentspec — that schema belongs to the older, separate
-   * `kimi-cli` product — so a `.yaml` written here is never read by any
-   * kimi-code session. Pin the format so the two cannot drift apart again.
-   */
+  /** kimi-code >= 0.29.0 reads agent FILES from its `agents/` dir as markdown with YAML
+   * frontmatter. It has no loader for the older kimi-cli `agent:` YAML agentspec, so a `.yaml`
+   * written here is never read. Pins the format. */
   it('writes <name>.md with frontmatter, not a yaml + system.md pair', () => {
     const home = mkTemp();
     writeSubagentToHome('kimi', home, { name: 'code-reviewer', path: makeSubagentDir('code-reviewer') });
@@ -213,13 +195,9 @@ describe('Kimi subagents are Claude-shaped agent markdown', () => {
     expect(listInstalledSubagentsRich('kimi', home).map((s) => s.name)).toEqual(['code-reviewer']);
   });
 
-  /**
-   * The target must describe ONLY the current shape. Folding the pre-markdown
-   * layout is `migrateKimiSubagentsToMarkdown`'s job (lib/migrate.ts), so a
-   * write here must not reach for files it did not create -- doing so made the
-   * project-sync collision check veto its own write, and made an orphaned
-   * `<name>.system.md` unreachable by `agents prune cleanup`.
-   */
+  /** The target describes ONLY the current shape; folding the old layout is
+   * `migrateKimiSubagentsToMarkdown`'s job (lib/migrate.ts). Reaching for files it did not
+   * create made the collision check veto its own write and hid orphans from `prune cleanup`. */
   it('claims only the file it writes', () => {
     // Widening `occupied` to the legacy pair made project sync's collision
     // check veto its own write over a stray `<name>.yaml`.

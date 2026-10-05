@@ -1,20 +1,6 @@
-/**
- * Desktop notification when a headless `agents run` finishes (`--notify`).
- *
- * The notifying process is the one that OWNS the run. That is the whole point:
- * the menu bar's quick dispatch used to post its completion notice from the
- * dispatching MenubarHelper's process-termination callback, so a helper that
- * restarted (an upgrade, a crash) took the callback with it — the run kept
- * going, reparented to launchd, and no notification could ever fire. Posting
- * from the run process instead means the notice survives anything that happens
- * to the menu bar, and `notifyDesktop` spawns a FRESH one-shot notifier, so it
- * does not need a helper to have been running at dispatch time either.
- *
- * Armed once via `process.on('exit')` so it covers every way the run command
- * terminates — local spawn, `--device` dispatch, `--lease` box, the error path —
- * rather than being sprinkled over ~50 `process.exit` call sites where the next
- * new exit path would silently miss it.
- */
+/** Desktop notification when a headless `agents run` finishes (`--notify`), posted by the process
+ * that OWNS the run: the menu bar helper's termination callback was lost when the helper restarted.
+ * Armed once via `process.on('exit')` to cover every exit path. */
 import * as path from 'path';
 import { notifyDesktop, type DesktopNotification } from './menubar/notify-desktop.js';
 
@@ -45,10 +31,8 @@ function shorten(text: string, max = BODY_MAX): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/**
- * The finish notification for one run. Pure — the exit handler and the tests
- * both build through here, so what ships is what is asserted.
- */
+/** The finish notification for one run. Pure: the exit handler and tests both build through here, so
+ * what ships is what is asserted. */
 export function buildRunFinishNotification(
   ctx: RunNotifyContext,
   exitCode: number,
@@ -82,12 +66,8 @@ export function buildRunFinishNotification(
   return n;
 }
 
-/**
- * Post the finish notification when this process exits. Best-effort by
- * construction: `notifyDesktop` swallows its own failures, and a run killed
- * outright (SIGKILL) never reaches an exit handler — that is the documented
- * limit, not a case to paper over.
- */
+/** Post the finish notification when this process exits. Best-effort: `notifyDesktop` swallows its
+ * failures, and a SIGKILLed run never reaches an exit handler (the documented limit). */
 export function armRunFinishNotification(ctx: RunNotifyContext): void {
   process.on('exit', (code) => {
     notifyDesktop(buildRunFinishNotification(ctx, code));

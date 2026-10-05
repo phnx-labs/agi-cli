@@ -1,12 +1,6 @@
-/**
- * Subagents writer. Every agent's on-disk layout (target dir, file/dir shape,
- * transform) is declared once in the subagent registry; this writer is generic
- * and iterates the registry instead of a per-agent `else if` chain.
- *
- * Source-side discovery is `listInstalledSubagents` from lib/subagents.ts —
- * it reads user + system layers only (project layer excluded for the same
- * defense as commands/skills/hooks).
- */
+/** Subagents writer. Each agent's on-disk layout is declared once in the subagent registry; this
+ * writer is generic and iterates it. Source discovery is `listInstalledSubagents` (user + system
+ * only; project excluded as for commands/skills/hooks). */
 import * as fs from 'fs';
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';

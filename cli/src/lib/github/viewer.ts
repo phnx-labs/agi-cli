@@ -1,12 +1,6 @@
-/**
- * The authenticated GitHub user (`gh api user`) — login, display name, avatar.
- *
- * One REST read, cached twice: gh's own HTTP cache (`--cache 24h`) and a small
- * disk record here (`<cache>/github-viewer.json`) so a frequent reader such as
- * the menu-bar snapshot spawns no `gh` at all on the common path. The record
- * never holds an email: GitHub's public profile email is kept only as a SHA-256
- * digest, enough to tell whether this account belongs to a known person.
- */
+/** The authenticated GitHub user (`gh api user`): login, display name, avatar. One REST read
+ * cached by gh (`--cache 24h`) and in `<cache>/github-viewer.json` so readers spawn no `gh`.
+ * The record never holds an email; the public email is kept only as a SHA-256 digest. */
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -121,13 +115,9 @@ interface CachedViewerOptions {
   nowMs?: number;
 }
 
-/**
- * The viewer from the disk record, refreshed through `gh` only when the record
- * is missing or past its window. The read is the record's writer (the
- * `devices/stats-cache.ts` pattern): no daemon timer, and the refresh is capped
- * at {@link VIEWER_REFRESH_TIMEOUT_MS}. A failed refresh keeps the last viewer
- * gh named and only moves the retry clock, so a blip never erases the avatar.
- */
+/** The viewer from the disk record, refreshed through `gh` only when missing or past its window.
+ * The read is the record's writer (no daemon timer), capped at VIEWER_REFRESH_TIMEOUT_MS. A failed
+ * refresh keeps the last viewer and only moves the retry clock, so a blip never erases the avatar. */
 export async function cachedViewer(opts: CachedViewerOptions = {}): Promise<GithubViewer | null> {
   const file = viewerCachePath(opts.cacheDir);
   const nowMs = opts.nowMs ?? Date.now();

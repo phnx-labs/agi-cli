@@ -1,40 +1,6 @@
-/**
- * Insights command — one observe verb for "how work looks".
- *
- * Two data paths under one name (do not re-split into peer top-level commands):
- *
- *   agents insights              HOW you work (transcript content: tools, friction,
- *                                rhythm, edits) — split by Claude account by default
- *   agents insights mix          COUNTERS (sessions index + usage.db recipes:
- *                                harness/model mix, token ratios, secrets, browser)
- *   agents insights mix <recipe> One baked mix recipe (harness-mix, tools-per-session, …)
- *   agents insights query        Raw usage.db rows
- *
- * Sibling observe verbs under this same group (different questions):
- *
- *   agents insights cost    what you spent ($ and duration)
- *   agents insights output  what shipped (burn vs PRs and commits)
- *   agents insights perf    latency (hooks, CLI commands, agent.run) — not popularity
- *   agents view             live quota headroom (per account, with auth state)
- *   agents sessions stats   which skills/slash-commands were explicitly invoked
- *
- * Why mix lives here (not a second top-level `trends`): two abstract "analytics"
- * nouns taught agents and humans to guess. One verb, two engines — cheap SQL mix
- * vs transcript facets. `perf` (latency) is also nested here now (PHNX-3391) —
- * performance is an insight, kept a distinct sub-verb so it is never confused with mix.
- *
- * Modelled on Claude Code's `/insights`, with the difference that motivated it: that
- * command reads one account's directory, while `balanced` rotation sprays sessions
- * across every signed-in account. This reads the whole index and reports the accounts
- * apart — see lib/session/claude-accounts.ts for how a transcript is attributed.
- *
- * The deterministic report makes zero network calls. `--narrative` is opt-in and adds
- * the coaching prose by piping the AGGREGATE (never raw transcripts) through a headless
- * `claude -p`.
- *
- * Former top-level `agents trends` is `agents insights mix` (one section:
- * `agents insights mix <recipe>`; `--list` names them).
- */
+/** `agents insights`, one observe verb with two engines (do not re-split into peer top-level
+ * commands): bare = HOW you work from transcript facets; `mix [recipe]` = counters from the
+ * sessions index and usage.db; `query` = raw usage.db rows; siblings `cost`, `output`, `perf`. */
 
 import type { Command } from 'commander';
 import * as fs from 'fs';
@@ -123,15 +89,9 @@ function resolveGroup(by: string | undefined): GroupDim {
   process.exit(1);
 }
 
-/**
- * Sessions too short to say anything about how you work.
- *
- * Inspired by the filter `/insights` applies, but NOT identical and deliberately not
- * claimed to be: `/insights` counts USER messages, while `messageCount` on the index
- * counts both roles, so the same threshold is a weaker bar here. Matching it exactly
- * would mean parsing every session just to decide whether to parse it. The dropped
- * count is always reported, never silent.
- */
+/** Sessions too short to say anything about how you work. Similar to `/insights`' filter but not
+ * identical: it counts USER messages, while the index's `messageCount` counts both roles. Matching
+ * exactly would mean parsing every session; the dropped count is always reported. */
 function isSubstantive(m: SessionMeta, minMessages: number): boolean {
   if ((m.messageCount ?? 0) < minMessages) return false;
   if ((m.durationMs ?? 0) < 60_000) return false;
@@ -153,11 +113,8 @@ function groupLabelFor(m: SessionMeta, dim: GroupDim, key: string): string {
   return key;
 }
 
-/**
- * Load facets for every in-scope session, parsing only what the cache does not
- * already hold. A cold first run parses every transcript once; after that only files
- * whose (mtime, size) changed are re-read.
- */
+/** Load facets for every in-scope session, parsing only what the cache lacks: a cold run parses
+ * each transcript once, afterwards only files whose (mtime, size) changed are re-read. */
 async function collectFacets(
   rows: SessionMeta[],
   onProgress: (done: number, total: number) => void,
@@ -386,10 +343,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   // Output
   out.push('');
   out.push(chalk.bold('What you changed'));
-  // Gate on whether anything was actually measured, not on whether an edit-shaped call
-  // was seen. Codex patches through `exec`, so it can log edit-class calls and still
-  // expose no line arguments to count — rendering that as "0 lines" would read as "wrote
-  // nothing" for a harness that wrote plenty.
+  // Render only if something was actually measured, not merely an edit-shaped call: Codex patches
+  // through `exec`, so it can log edit calls with no line arguments, and '0 lines' would misread
+  // as 'wrote nothing'.
   if (all.linesTouchedAfter > 0 || all.linesTouchedBefore > 0) {
     // "touched", not "+/-": these are the before/after line counts of each edit, so an
     // Edit with unchanged context lines counts them on both sides. Not a diffstat, and
@@ -401,12 +357,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     out.push(`  ${chalk.gray('lines touched  —  not measurable for this harness (edits go through the shell)')}`);
   }
   out.push(`  ${chalk.gray(`${all.filesCreated} created, ${all.filesModified} modified, ${all.filesDeleted} deleted`)}`);
-  // Same not-measurable rule as the lines above. These are substring-matched from
-  // shell command TEXT, and not every harness exposes it — the codex parser populates
-  // `command` for `exec_command` but not plain `exec`, its dominant tool — so gate on
-  // whether we had anything to search rather than on seeing a shell-shaped tool call.
-  // When we did, the count is real, and still disagrees with `agents insights output`, which
-  // counts deduped SHAs from git log.
+  // Same not-measurable rule: counts are substring-matched from shell command text, which not
+  // every harness exposes (codex fills `command` for `exec_command`, not plain `exec`), so gate on
+  // having something to search. The count differs from `insights output`.
   if (all.shellCommandsSeen > 0) {
     out.push(`  ${chalk.gray(`${all.gitCommits} commits · ${all.gitPushes} pushes (seen in shell commands)`)}`);
   } else {
@@ -458,11 +411,9 @@ interface ReportMeta {
   overlap: ReturnType<typeof detectOverlap>;
 }
 
-/**
- * The opt-in coaching layer. Pipes the AGGREGATE through a headless `claude -p` — never
- * raw transcripts, unlike `/insights`, which ships session text to the API. Reuses
- * whatever account the shim resolves, so there is no API key handling here.
- */
+/** The opt-in coaching layer: pipes the aggregate, never raw transcripts (unlike `/insights`),
+ * through a headless `claude -p` using whatever account the shim resolves, so no API key handling
+ * here. */
 async function renderNarrative(payload: unknown): Promise<void> {
   const prompt = [
     'You are reading a developer\'s own coding-session telemetry, already aggregated.',

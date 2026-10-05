@@ -180,10 +180,8 @@ describe('FTS5 session_text schema (smoke test)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Claude session titles: `/rename` (custom-title) > Claude auto (ai-title).
-// The first prompt remains the topic; both title events can repeat and last wins.
-// ---------------------------------------------------------------------------
+// Claude session titles: `/rename` (custom-title) beats Claude auto (ai-title). The first prompt
+// remains the topic; both title events can repeat and the last wins.
 
 describe('scanClaudeSession title resolution', () => {
   let dir: string;
@@ -353,11 +351,9 @@ describe('shouldDeferRecentAppend', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Grok stores one directory per session with a structured summary.json. The
-// scanner reads that (not the JSONL event streams) for metadata. Fixture shape
-// mirrors a real ~/.grok/sessions/<enc-cwd>/<uuid>/summary.json.
-// ---------------------------------------------------------------------------
+// Grok stores one directory per session with a structured summary.json, which the scanner reads
+// for metadata (not the JSONL streams). Fixture mirrors
+// ~/.grok/sessions/<enc-cwd>/<uuid>/summary.json.
 
 describe('readGrokMeta', () => {
   let dir: string;
@@ -404,10 +400,9 @@ describe('readGrokMeta', () => {
   });
 
   it('resolves the version from a Windows (backslash) grok_home path (RUSH-2286)', () => {
-    // The Grok CLI writes grok_home in the writing host's native separators; a
-    // Windows-authored summary is backslash-separated. The summary lives in a
-    // tmp dir (no versions/grok path on disk), so grok_home is the ONLY version
-    // source — before the fix the `/`-only regex left version undefined here.
+    // The Grok CLI writes grok_home in the host's native separators, so a Windows-authored summary
+    // is backslash-separated. With no versions/grok path on disk, grok_home is the only version
+    // source; the `/`-only regex used to leave version undefined.
     const fp = writeSummary({
       info: { id: uuid, cwd: 'C:\\Users\\muqsit\\src' },
       generated_title: 'Windows session',
@@ -453,10 +448,9 @@ describe('isCompleteSessionId', () => {
     expect(isCompleteSessionId('019fbd2f-971a-7fb0-a213-3709a27cd12b')).toBe(true);
   });
 
-  // The prefixed shapes are the ones the index actually holds — verified against
-  // a live 12,507-row index: session_+UUID (kimi, rush) and ses_+26-char ULID
-  // (opencode). `ses_` is NOT a UUID, so it needs its own shape, and `api-`
-  // appears zero times and is deliberately not claimed.
+  // Prefixed shapes verified against a live 12,507-row index: session_+UUID (kimi, rush) and
+  // ses_+26-char ULID (opencode). `ses_` is not a UUID, so it needs its own shape; `api-` appears
+  // zero times and is not claimed.
   it('accepts session_ + UUID, the shape kimi and rush mint', () => {
     expect(isCompleteSessionId('session_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
   });

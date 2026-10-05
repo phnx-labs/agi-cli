@@ -1,23 +1,6 @@
-/**
- * Commands writer.
- *
- * Two physical formats, selected per-(agent, version) at write time. Most
- * agents receive one format; dual-write registry targets receive both:
- *
- *  - command-as-skill — fires when `shouldInstallCommandAsSkill(agent, version)`
- *    is true. Used for Codex >= 0.117.0 (commands capability ends, skills
- *    capability remains) and agents with skills but no native command-file dir
- *    such as Kimi. Cursor also receives this format in addition to its IDE
- *    command file. Writes `{agentDir}/skills/<name>/SKILL.md` with the
- *    `agents_command` marker; the agent picks it up as a slash-command equivalent.
- *
- *  - native command file — `{agentDir}/<commandsSubdir>/<name>.md` (or .toml
- *    when the agent's format is toml). Standard path for Claude, Codex
- *    < 0.117.0, Cursor, OpenCode, Copilot, Amp, Roo, Antigravity.
- *
- * Source resolution is `resolveCommandSource` (user → system → extras —
- * project layer intentionally excluded).
- */
+/** Commands writer, two formats chosen per (agent, version); dual-write targets get both.
+ * Command-as-skill (when `shouldInstallCommandAsSkill`: Codex >= 0.117.0, Kimi, plus Cursor)
+ * writes `{agentDir}/skills/<name>/SKILL.md` with the `agents_command` marker. */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
@@ -123,10 +106,9 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
         } catch { /* already gone / inaccessible */ }
       }
 
-      // Command-as-skill dir (Codex >=0.117, Kimi; Cursor dual-write). Gated on
-      // it currently being a command-skill, and removeCommandSkillFromVersion
-      // re-checks the `agents_command` marker before deleting — so a real skill
-      // of the same name is never destroyed by a command prune.
+      // Command-as-skill dir (Codex >=0.117, Kimi, Cursor dual-write). Gated on it currently being
+      // a command-skill, and removeCommandSkillFromVersion re-checks the `agents_command` marker,
+      // so a real same-named skill is never destroyed by a command prune.
       if (listCommandSkillsInVersion(agentDir).includes(name)) {
         if (removeCommandSkillFromVersion(agentDir, name).success) removed = true;
       }
@@ -141,17 +123,8 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
   };
 }
 
-// Built lazily on first access — see lazy-map.ts for the cycle rationale.
-//
-// Registration covers two cases:
-//   - native commands (claude, codex < 0.117.0, grok, etc.) — `commands` cap
-//   - commands-as-skills (kimi, codex >= 0.117.0)
-//   - dual-write commands plus command-skills (cursor)
-//
-// Agents that have skills but use a NATIVE non-file slash-command system
-// (openclaw → Gateway-based commands) are NOT registered. They declare
-// `nativeCommandRuntime: true` to opt out — their own runtime resolves slash
-// commands, so there's nothing to write and nothing to convert.
+// Built lazily on first access (see lazy-map.ts for the cycle). Covers native commands (claude,
+// codex < 0.117.0, grok), commands-as-skills (kimi, codex >= 0.117.0) and dual-write (cursor).
 export const commandsWriters = lazyAgentMap<ResourceWriter<string[]>>(() => {
   const m: Partial<Record<AgentId, ResourceWriter<string[]>>> = {};
   for (const id of MANAGED_AGENT_IDS) {

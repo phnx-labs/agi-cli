@@ -3,16 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// End-to-end parity for the LIVE Claude scan path (B-2). Proves that wiring
-// scanClaudeSessionIncremental into discoverSessions produces a DB row that is
-// IDENTICAL, field for field, to a from-scratch FULL reparse — even when PR /
-// ticket / title signals STRADDLE two scans, and that a truncation forces a full
-// reparse. Real fs, real sqlite, real discovery under a throwaway HOME. No mocks.
-//
-// The from-scratch ground truth is computed inside the SAME DB by writing the
-// final file content to a DIFFERENT session id (no prior ledger row → the code
-// takes the FULL path for it) and comparing its row to the incrementally-scanned
-// session's row. Every field except the id/short-id/filePath must match.
+// End-to-end parity for the live Claude scan (B-2): the incremental DB row equals a from-scratch
+// reparse even when signals straddle two scans; truncation forces a full reparse. No mocks. Ground
+// truth is the same content under a different session id.
 
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
@@ -54,24 +47,15 @@ function appendTranscript(id: string, events: object[]): void {
   fs.appendFileSync(sessionFile(id), events.map(line).join('\n') + '\n', 'utf-8');
 }
 
-/**
- * Push a file's mtime forward by `plusSeconds` past now so an append is never
- * seen as a clock-rewind, and so the ledger stamp actually changes (a second
- * write inside the same wall-clock second can leave mtime identical, which the
- * ledger reads as "unchanged" and skips).
- */
+/** Push a file's mtime `plusSeconds` past now so an append is never read as a clock-rewind and the
+ * ledger stamp actually changes (same-second writes can leave mtime identical). */
 function bumpMtimeToNow(fp: string, plusSeconds: number): void {
   const t = Math.floor(Date.now() / 1000) + plusSeconds;
   fs.utimesSync(fp, t, t);
 }
 
-/**
- * Push every ledger row's scanned_at back past the 5s active-append debounce so a
- * grown file re-scanned in the same test tick is NOT deferred by
- * shouldDeferRecentAppend. Real appends arrive seconds apart; the test compresses
- * that by aging the stamp instead of sleeping. Run before every scan — harmless
- * on a cold ledger (no rows to age).
- */
+/** Push every ledger row's scanned_at back past the 5s active-append debounce so a regrown file is
+ * not deferred by shouldDeferRecentAppend. Run before every scan; harmless on a cold ledger. */
 function agePriorScans(): void {
   db.getDB().prepare('UPDATE scan_ledger SET scanned_at = ?').run(Date.now() - 60_000);
 }
@@ -83,21 +67,16 @@ async function runScan(): Promise<void> {
 
 /** The set of session-row fields that MUST match between incremental + full. */
 const PARITY_FIELDS = [
-  // NOTE: `version` is deliberately excluded — it is now write-once launch
-  // metadata (COALESCE'd from the launch sidecar, like actor/harness/mode, which
-  // are likewise not compared here), so an incremental row legitimately PRESERVES
-  // a recorded origin version that a from-scratch reparse of rewritten content
-  // cannot re-derive (PHNX-3626). Its scan-derivation is covered by db upsert
-  // tests instead.
+  // `version` is excluded: it is write-once launch metadata (COALESCE'd from the launch sidecar,
+  // like actor/harness/mode), so an incremental row keeps a recorded origin version a reparse
+  // cannot re-derive (PHNX-3626). Db upsert tests cover it.
   'agent', 'timestamp', 'lastActivity', 'project', 'cwd', 'gitBranch',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
   'isTeamOrigin', 'prUrl', 'prNumber', 'worktreeSlug', 'ticketId', 'createdTickets',
   'spawnedTeam', 'plan',
-  // RUSH-3091/3095: these are accumulated across a RESUMED parse (the tallies
-  // live in the durable ClaudeParserState, which is why it went v3 -> v4). If
-  // hydrate ever stops restoring them, a resumed scan reports the transcript's
-  // TAIL instead of its total — and this parity check is the thing that catches
-  // it, so they belong here rather than only in a unit test.
+  // RUSH-3091/3095: these accumulate across a resumed parse (tallies live in the durable
+  // ClaudeParserState, v3 to v4). If hydrate stops restoring them, a resumed scan reports only the
+  // tail, and this parity check catches it.
   'subAgentCount', 'backgroundShellCount',
 ] as const;
 
@@ -111,11 +90,8 @@ function assertRowParity(incId: string, fullId: string): void {
   }
 }
 
-/**
- * Compute the from-scratch ground truth for a set of events: write them to a
- * brand-new id (no prior ledger continuation → FULL parse), scan, and return
- * that id so its row can be compared field-for-field.
- */
+/** Compute the from-scratch ground truth: write the events under a brand-new id (no prior ledger
+ * continuation, so FULL parse), scan, and return the id to compare field for field. */
 let groundTruthCounter = 0;
 async function groundTruth(events: object[]): Promise<string> {
   const id = `ground-truth-${groundTruthCounter++}`;
@@ -387,12 +363,9 @@ describe('B-2 live incremental scan parity', () => {
     await runScan();
     const priorOffset = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!).offset as number;
 
-    // Replace the path IN PLACE with a DIFFERENT session (distinct first
-    // timestamp) whose byte length is LARGER than the stored offset and whose
-    // mtime moves forward — the exact shape metadata cannot tell from an append.
-    // Size-grew + mtime-forward alone would wrongly resume from priorOffset and
-    // fold session B's bytes into session A's hydrated accumulator; the identity
-    // re-check must catch the session change and force FULL.
+    // Replace the path in place with a different session (new first timestamp), larger than the
+    // stored offset with a later mtime. Size + mtime alone would fold B's bytes into A's
+    // accumulator; the identity re-check must force FULL.
     discover.__resetClaudeScanBranchCountsForTest();
     const sessionB = [
       { type: 'user', timestamp: '2026-07-01T09:00:00.000Z', cwd: '/home/u/other', gitBranch: 'PROJ-7', version: '2.2.0', message: { role: 'user', content: `restored different session ${'x'.repeat(400)}` } },

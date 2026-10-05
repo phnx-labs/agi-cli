@@ -1,16 +1,6 @@
-/**
- * Shared version resolution for the exec-time config-dir env pin. Every
- * config-dir harness branch in the old buildExecEnv computed this identically:
- * an explicit `--version` is used unconditionally; an auto-resolved version is
- * only pinned when it is actually installed on disk.
- *
- * The caller (buildExecEnv) invokes this and passes the result into the adapter
- * via ExecConfigEnvCtx — the adapters MUST NOT import installations/versions
- * themselves, because that module imports shims.ts and shims.ts imports the
- * harness barrel, which would close an import cycle (versions → shims → harness →
- * adapter → versions). That cycle forced esbuild/tsx to emit CJS for part of the
- * graph and broke sqlite.ts's top-level await in subprocess-spawning tests.
- */
+/** Shared version resolution for the exec-time config-dir env pin: an explicit `--version` is
+ * used unconditionally; an auto-resolved one is pinned only if installed. Adapters must not
+ * import installations/versions: that closes an import cycle that broke sqlite.ts top-level await. */
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from '../installations/versions.js';
 import type { AgentId } from '../types.js';
 

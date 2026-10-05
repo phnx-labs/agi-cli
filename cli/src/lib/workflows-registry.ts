@@ -1,19 +1,6 @@
-/**
- * Workflow target registry — the ONE place that says how each
- * workflows-capable harness stores a synced workflow on disk.
- *
- * `WORKFLOW_TARGETS` is the declarative shape (container dir, file layout,
- * transform, ownership marker); the engine below (`listWorkflowsForAgent`,
- * `syncWorkflowToVersion`, `removeWorkflowFromVersion`,
- * `workflowContentMatches`) and the staleness detector are generic over it, so
- * adding a harness is one entry here plus its `workflows` capability flag in
- * `agent-spec/agents.ts` — never another `if (agent === '...')` arm in the
- * writer, the lister, the remover, the doctor drift check, and the detector.
- * A completeness test pins `Object.keys(WORKFLOW_TARGETS)` to
- * `capableAgents('workflows')` so the flag and the shape cannot drift.
- *
- * Same pattern as `SUBAGENT_TARGETS` in `subagents-registry.ts`.
- */
+/** Workflow target registry: the one place saying how each workflows-capable harness stores a
+ * workflow. The engine is generic over `WORKFLOW_TARGETS`, so a new harness is one entry plus its
+ * capability flag; a test pins the keys to `capableAgents('workflows')` (like `SUBAGENT_TARGETS`). */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from './types.js';
@@ -41,17 +28,12 @@ interface WorkflowSource {
   path: string;
 }
 
-/**
- * The complete on-disk contract for one harness's workflows. Every operation
- * is expressed here so the engine below never branches on the agent id.
- */
+/** The complete on-disk contract for one harness's workflows; the engine never branches on agent id. */
 interface WorkflowTarget {
   /** Noun used in ownership errors, e.g. "Kimi skill", "Grok workflow". */
   readonly label: string;
-  /**
-   * Absolute container dir for `versionHome`. A harness whose native store is
-   * HOME-global (antigravity) ignores `versionHome` and resolves from `$HOME`.
-   */
+  /** Absolute container dir for `versionHome`; a HOME-global store (antigravity) ignores
+   * `versionHome` and uses `$HOME`. */
   dir(versionHome: string): string;
   /** Names of the workflows in `dir` that agents-cli manages (lister + detector). */
   names(dir: string): string[];
@@ -59,18 +41,12 @@ interface WorkflowTarget {
   write(dir: string, wf: WorkflowSource): void;
   /** Paths workflow `name` occupies in `dir`; empty when it is not installed. */
   occupied(dir: string, name: string): string[];
-  /**
-   * Ownership of what sits at `name` in `dir`: `null` when nothing is there,
-   * `true` when agents-cli wrote it (or the format has no ownership marker),
-   * `false` when a user-authored file of the same name is in the way.
-   */
+  /** Ownership of what sits at `name` in `dir`: `null` if nothing, `true` if agents-cli wrote it (or
+   * no marker exists), `false` if a user-authored file is in the way. */
   managed(dir: string, name: string): boolean | null;
-  /**
-   * True when the installed copy byte-matches what `write` would render from
-   * `wf.path` NOW — the drift predicate `agents doctor` uses. Re-renders the
-   * current source through the same transform the writer uses (never a stored
-   * hash), so a body edit to the source surfaces as drift under an unchanged name.
-   */
+  /** True when the installed copy byte-matches what `write` would render from `wf.path` now (the
+   * `agents doctor` drift predicate). Re-renders through the writer's transform, never a stored
+   * hash, so source body edits show as drift. */
   matches(dir: string, wf: WorkflowSource): boolean;
 }
 
@@ -94,10 +70,8 @@ function renderedMatches(homePath: string, expected: string): boolean {
 
 // ── layouts ──────────────────────────────────────────────────────────────────
 
-/**
- * One rendered `<name><ext>` file per workflow, owned via a marker the
- * transform embeds (antigravity, openclaw, grok).
- */
+/** One rendered `<name><ext>` file per workflow, owned via a transform-embedded marker (antigravity,
+ * openclaw, grok). */
 function renderedFile(opts: {
   label: string;
   dir: (versionHome: string) => string;
@@ -134,10 +108,8 @@ function renderedFile(opts: {
   };
 }
 
-/**
- * Kimi flow skill: a `<name>/SKILL.md` directory whose frontmatter carries
- * `type: flow` and the `agents_workflow` marker.
- */
+/** Kimi flow skill: a `<name>/SKILL.md` directory whose frontmatter has `type: flow` and the
+ * `agents_workflow` marker. */
 const kimiFlowSkill: WorkflowTarget = {
   label: 'Kimi skill',
   dir: (versionHome) => path.join(versionHome, '.kimi-code', 'skills'),
@@ -166,11 +138,8 @@ const kimiFlowSkill: WorkflowTarget = {
   },
 };
 
-/**
- * Goose recipe: `<name>.yaml` plus a `<name>.subrecipes/` dir holding one YAML
- * per selected workflow subagent. Goose has no ownership marker, so presence
- * is ownership.
- */
+/** Goose recipe: `<name>.yaml` plus a `<name>.subrecipes/` dir with one YAML per selected workflow
+ * subagent. No ownership marker; presence is ownership. */
 const gooseRecipe: WorkflowTarget = {
   label: 'Goose recipe',
   dir: (versionHome) => path.join(versionHome, '.config', 'goose', 'recipes'),
@@ -208,11 +177,8 @@ const gooseRecipe: WorkflowTarget = {
   },
 };
 
-/**
- * The canonical bundle copied verbatim: `<name>/WORKFLOW.md` (plus its
- * subagents/ tree) under `{versionHome}/workflows/`. No marker — the dir is
- * agents-cli's by construction.
- */
+/** The canonical bundle copied verbatim: `<name>/WORKFLOW.md` (plus subagents/) under
+ * `{versionHome}/workflows/`. No marker; the dir is agents-cli's by construction. */
 const workflowBundle: WorkflowTarget = {
   label: 'Workflow',
   dir: (versionHome) => path.join(versionHome, 'workflows'),
@@ -243,12 +209,8 @@ const workflowBundle: WorkflowTarget = {
 
 // ── the registry ─────────────────────────────────────────────────────────────
 
-/**
- * Single source of truth for how each workflows-capable harness stores
- * workflows. The keys MUST match `capableAgents('workflows')` (the `workflows`
- * flag in `agent-spec/agents.ts`): the capability flag is the version gate,
- * this table is the shape.
- */
+/** Single source of truth for how each workflows-capable harness stores workflows. Keys MUST match
+ * `capableAgents('workflows')`: the capability flag is the version gate, this table is the shape. */
 export const WORKFLOW_TARGETS: Partial<Record<AgentId, WorkflowTarget>> = {
   claude: workflowBundle,
   kimi: kimiFlowSkill,
@@ -295,12 +257,9 @@ export function listWorkflowsForAgent(agent: AgentId, versionHome: string): stri
   return target.names(target.dir(versionHome));
 }
 
-/**
- * Materialize the central bundle at `workflowPath` as `name` in `agent`'s
- * `versionHome`, in that harness's native layout. Refuses to clobber a
- * user-authored file of the same name (the ownership marker is the tell) and
- * is idempotent over an agents-cli-managed one.
- */
+/** Materialize the central bundle as `name` in `agent`'s `versionHome` in that harness's layout.
+ * Refuses to clobber a user-authored file of the same name (the ownership marker is the tell);
+ * idempotent over a managed one. */
 export function syncWorkflowToVersion(
   workflowPath: string,
   name: string,
@@ -345,12 +304,9 @@ export function removeWorkflowFromVersion(
   }
 }
 
-/**
- * True when workflow `name` materialized in `agent`'s `versionHome` byte-matches
- * what the writer would produce NOW from `sourcePath` — the content-drift
- * predicate `agents doctor` uses. Returns false when the home copy is absent
- * (surfaced as `missing` at the name level, not here).
- */
+/** True when workflow `name` in `agent`'s `versionHome` byte-matches what the writer would produce
+ * now from `sourcePath` (the `agents doctor` drift predicate). False when absent (reported as
+ * `missing` at the name level). */
 export function workflowContentMatches(
   agent: AgentId,
   versionHome: string,

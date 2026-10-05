@@ -1,11 +1,6 @@
-/**
- * Permission management commands for controlling agent access boundaries.
- *
- * Implements `agents permissions` -- list, add, remove, and view permission
- * sets (allow/deny rules for bash, tools, and filesystem). Supports importing
- * from agent config files, GitHub repos, and YAML, with merge/replace
- * semantics and multi-version targeting.
- */
+/** `agents permissions`: list, add, remove and view permission sets (allow/deny rules for bash,
+ * tools, filesystem), with import from agent configs, GitHub or YAML, merge/replace semantics and
+ * multi-version targeting. */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -103,16 +98,9 @@ When to use:
       const cwd = process.cwd();
 
       // Helper to render permissions for a specific version
-      /**
-       * Print one harness's permission block.
-       *
-       * claude/opencode/codex keep their native renderings (Codex in particular
-       * has no rule list — showing its sandbox mode is more useful than the
-       * blanket grants that mode widens into). Every other allowlist-capable
-       * harness renders the canonical allow/deny that `PERMISSION_TARGETS` reads
-       * back, which is what makes `permissions list` answer for all 13 rather
-       * than three (RUSH-2676).
-       */
+      /** Print one harness's permission block. claude/opencode/codex keep native renderings (Codex
+       * has no rule list, so its sandbox mode is shown); every other allowlist-capable harness
+       * renders the canonical allow/deny that `PERMISSION_TARGETS` reads back (RUSH-2676). */
       const renderPermissionBody = (agentId: AgentId, perms: unknown) => {
         if (agentId === 'claude') {
           const claudePerms = perms as { permissions: { allow: string[]; deny: string[] } };
@@ -456,13 +444,9 @@ Examples:
           spinner.succeed('Using local path');
         }
 
-        // Is this a harness config agents-cli knows how to read?
-        //
-        // This used to hardcode `.json`/`.jsonc`/`.toml` plus a `.claude`/
-        // `.opencode`/`.codex` substring, which excluded the ten other harnesses
-        // the CLI writes -- and excluded hermes twice over, since
-        // its config is YAML. The registry already answers this by matching
-        // each harness's own declared path, so ask it (RUSH-2676).
+        // Is this a harness config agents-cli can read? It hardcoded `.json`/`.jsonc`/`.toml` plus
+        // `.claude`/`.opencode`/`.codex` substrings, excluding ten other harnesses (hermes' config
+        // is YAML). The registry already matches each harness's declared path (RUSH-2676).
         const isAgentConfig = detectPermissionAgentFromPath(localPath) !== null;
 
         if (isAgentConfig) {

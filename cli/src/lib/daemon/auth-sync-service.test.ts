@@ -1,18 +1,6 @@
-/**
- * The auth-sync tick's non-git duties (PHNX-4116 PR 5). This service no longer
- * gates its credential pushes on a fleet-wide exchange-freshness marker: the old
- * `readLastSuccessfulExchangeMs` gate that skipped EVERY push when the newest
- * exchange across the fleet went stale is gone. Each tick now reconciles worker
- * slots and runs both push arms unconditionally; the arms plan per peer off that
- * peer's OWN first-hand daemon-state reply, and a peer that has never replied is
- * surfaced at INFO, not WARN.
- *
- * These tests drive the real `AuthSyncService.tick()` (BasePeriodicService,
- * deadline + health path included) with the leaf collaborators mocked, so they
- * assert the tick's orchestration without a live ~/.agents. The per-peer planning
- * itself is unit-tested in `secrets-policy.test.ts`, and the exchange end to end
- * in `usage-ingest.e2e.test.ts`.
- */
+/** The auth-sync tick's non-git duties (PHNX-4116 PR 5). It no longer gates pushes on a fleet-wide
+ * exchange-freshness marker: each tick reconciles worker slots and runs both push arms, planning
+ * per peer off that peer's own daemon-state reply; a never-replied peer logs at INFO. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DaemonContext } from './service.js';

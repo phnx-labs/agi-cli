@@ -1,34 +1,6 @@
-/**
- * Attention reconciliation — the CLI-owned merge that turns the feed's open-block
- * ledger and the session state engine's lifecycle output into ONE attention
- * lifecycle. This is the canonical contract Tracks B (feed stream + answer) and C
- * (AGI EXT projection) build on: the extension renders {@link AttentionItem}, it
- * never decides authority itself.
- *
- * The rule, strongest evidence first (see {@link reconcileAttention}):
- *   1. An OPEN feed block wins — it is explicit and answerable. Its KIND comes
- *      from what the harness actually raised (`notificationType`): only a
- *      `permission_prompt` is a permission; an `idle_prompt` ("the turn ended and
- *      you have been idle") is not a request at all and yields nothing here; an
- *      unrecorded subtype cannot be answered from a banner and reads as
- *      `unverified` (PHNX-3999). A hook-raised block the transcript has already
- *      moved past — a tool result or new assistant work stamped after the block
- *      was written, or a dead process — is resolved by that later evidence and
- *      yields nothing, whatever the block file still says.
- *   2. Otherwise the session lifecycle candidate (a structural plan handoff or
- *      option question, or a decaying prose question) becomes the attention item.
- *      A lifecycle `permission` claim (only an older peer's state engine still
- *      makes one) is `unverified`, never approvable.
- *   3. Otherwise a CLI-supplied pull-request signal can raise a review item.
- *   4. A resolution tombstone suppresses any candidate whose generation it already
- *      resolved, until the session advances strictly past the recorded cursor —
- *      so an answered item can never silently resurrect (the RUSH-1522 class).
- *
- * The reconciler is PURE: no filesystem, no transcript parsing, and the only
- * clock is the `nowMs` the caller hands in. It does not re-detect anything — it
- * models and reconciles the output the existing question / permission /
- * declared-block / answer / clear paths already produce.
- */
+/** Attention reconciliation (canonical; the extension never decides authority): an open feed block
+ * wins, kind from `notificationType` (`idle_prompt` yields nothing, PHNX-3999); else the session
+ * lifecycle; else a PR signal. A tombstone stops resurrection (RUSH-1522). Pure. */
 import { createHash } from 'node:crypto';
 import type { ActiveSession } from '../session/active.js';
 import type { StructuredQuestion } from '@phnx-labs/sessions-cli/reader';
@@ -46,15 +18,9 @@ import {
   type SourceCursor,
 } from './feed.js';
 
-/**
- * What an attention item is asking of the operator. `unverified` is a request
- * record whose pending state this CLI could not confirm — a hook-raised prompt
- * with no transcript cursor to check it against that has aged past
- * {@link UNVERIFIED_PROMPT_AGE_MS}, a notification whose subtype the writer did
- * not record, or a lifecycle `permission` claim from a peer running an older
- * state engine. It carries no choices: the only honest action is to open the
- * session and look (PHNX-3999).
- */
+/** What an attention item asks of the operator. `unverified` is a request this CLI could not
+ * confirm (aged hook prompt with no cursor, unrecorded subtype, or an old peer's `permission`
+ * claim); it carries no choices, so the only action is to open the session (PHNX-3999). */
 export type AttentionKind =
   | 'question'
   | 'permission'
@@ -68,22 +34,16 @@ export type AttentionKind =
 /** How an answer can be routed back to the waiting agent. */
 export type ReplyCapability = 'terminal' | 'tmux' | 'cloud' | 'team' | 'none';
 
-/**
- * One answerable choice on an attention item. Extends {@link BlockOption} with a
- * stable `id` the UI echoes back when the operator picks it, and an optional
- * `deliveryKey` (the harness-native keystroke / selection token) that Track B's
- * answer router resolves the reply rail with.
- */
+/** One answerable choice: extends BlockOption with a stable `id` the UI echoes back and an
+ * optional `deliveryKey` (harness-native selection token) the answer router resolves the reply
+ * rail with. */
 export interface AttentionChoice extends BlockOption {
   id: string;
   deliveryKey?: string;
 }
 
-/**
- * The canonical operator-facing attention record. One reconciled thing that needs
- * a human, whatever produced it. This is the public envelope Tracks B and C
- * consume — a stability contract, not an internal shape.
- */
+/** The canonical operator-facing attention record: one reconciled thing that needs a human. A
+ * public envelope with a stability contract. */
 export interface AttentionItem {
   /** Stable identity: `host/session/generation`. A new generation is a new item. */
   key: string;
@@ -100,23 +60,15 @@ export interface AttentionItem {
   choices?: AttentionChoice[];
   replyCapability: ReplyCapability;
   safeDefault?: string;
-  /**
-   * Clusters IDENTICAL asks across different agents for batch triage. It is a hash
-   * of the RAW question intent (kind + verbatim question text + option labels) —
-   * deliberately NOT the UI-normalized display text, so two agents asking the same
-   * thing collapse even when the floor renders them differently.
-   */
+  /** Clusters identical asks across agents for batch triage: a hash of the raw question intent
+   * (kind, verbatim text, option labels), deliberately not the UI-normalized display text. */
   fingerprint: string;
   /** Where in the source this generation sits — the fence a resolution compares against. */
   sourceCursor?: SourceCursor;
 }
 
-/**
- * A pull-request attention signal, supplied BY the CLI (Track B refreshes it on a
- * bounded TTL and hands it in). Track A only consumes the computed `needsHuman`
- * flag — it never reaches into the extension's PR board or recomputes review
- * state. Fields mirror the `gh pr view` projection so Track B can populate it.
- */
+/** A pull-request attention signal supplied by the CLI (refreshed on a bounded TTL). Only the
+ * computed `needsHuman` flag is consumed; fields mirror the `gh pr view` projection. */
 export interface PullRequestAttentionSignal {
   number: number;
   title?: string;
@@ -140,11 +92,8 @@ function attentionKey(host: string, sessionId: string, generation: string): stri
   return `${host}/${sessionId}/${generation}`;
 }
 
-/**
- * Fingerprint of an ask's raw intent. Uses the verbatim question text and option
- * labels (NOT display-normalized text) so identical asks from different agents
- * share a fingerprint for batch triage.
- */
+/** Fingerprint of an ask's raw intent (verbatim question and option labels, not display text) so
+ * identical asks share one for batch triage. */
 export function attentionFingerprint(kind: AttentionKind, question?: BlockQuestion): string {
   const optionLabels = (question?.options ?? []).map((o) => o.label).join('\u0001');
   const material = `${kind}\u0000${question?.text ?? ''}\u0000${optionLabels}`;
@@ -168,15 +117,8 @@ function slugId(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-/**
- * Choices for a `question` item: the harness's own option list, each with a
- * stable `id` (the label slug, else its selection key, else the 1-based index).
- * A session lifecycle question carries per-option keys from the
- * {@link StructuredQuestion} the state engine parsed, which become the choice's
- * `deliveryKey`; a feed block carries none, so `deliveryKey` stays absent and the
- * answer router matches the label back to the TUI digit — the same value, but it
- * also stays readable in the mailbox fallback rather than a bare digit.
- */
+/** Choices for a `question` item from the harness's option list, each with a stable `id` (label
+ * slug, else selection key, else index). */
 function questionChoices(question?: BlockQuestion, structured?: StructuredQuestion): AttentionChoice[] | undefined {
   const options = question?.options;
   if (!options?.length) return undefined;
@@ -191,27 +133,9 @@ function questionChoices(question?: BlockQuestion, structured?: StructuredQuesti
   });
 }
 
-/**
- * Harness-native keystrokes for a permission prompt's canonical choices. Claude
- * Code's permission prompt is a numbered select-list — option 1 is "Yes", option
- * 2 is "Yes, and don't ask again for this session", and Esc is "No". The
- * session-scoped option 2 is added here from the live prompt ordering; the
- * state detector no longer models permission prompts itself (PHNX-3999). A harness whose permission prompt exposes no
- * verified session-scoped option omits `approve-session`.
- *
- * ASSUMPTION — `approve-session`'s `deliveryKey: '2'` is asserted for every Claude
- * permission item, not derived from the live prompt. Claude renders a 3-option
- * select-list for most tool permissions, but a few prompt shapes offer only
- * "Yes" / "No" (no per-session variant). We do NOT capture the prompt over a PTY
- * to count its options — that read is not on the reconcile path — so on a
- * 2-option prompt this still offers "Approve for session", and answering it
- * types `2`+Enter, which Claude treats as a plain one-time approve rather than
- * erroring. The safe degradation (a session-scope answer falling back to a
- * one-time approve) is why this is asserted rather than gated: it never denies or
- * mis-routes, only under-delivers the "don't ask again" scope on the rare 2-option
- * prompt. Gating on real option count would require a per-item PTY capture; that
- * is the follow-up if the under-delivery proves to matter (PHNX-4004).
- */
+/** Harness-native keystrokes for a permission prompt: Claude's list is 1 Yes, 2 Yes for this
+ * session, Esc No (PHNX-3999). `approve-session` asserts key `2`; on a rare 2-option prompt it
+ * degrades to a one-time approve, never a deny (gating needs a PTY capture, PHNX-4004). */
 function permissionChoices(harness: string): AttentionChoice[] {
   const choices: AttentionChoice[] = [{ id: 'approve', label: 'Approve', deliveryKey: '1' }];
   if (harness === 'claude') choices.push({ id: 'approve-session', label: 'Approve for session', deliveryKey: '2' });
@@ -227,13 +151,9 @@ function planReviewChoices(): AttentionChoice[] {
   ];
 }
 
-/**
- * The answerable choices for one attention item. Permission and plan-review
- * carry canonical harness-native choices regardless of the question text;
- * everything else (question, declared, review) derives from the option list the
- * source supplied. An `unverified` record carries none — there is no confirmed
- * prompt for a choice to land in, so a banner must not invent approval buttons.
- */
+/** Answerable choices for one item. Permission and plan-review use canonical harness-native
+ * choices; others derive from the source's option list. An `unverified` record carries none,
+ * since no confirmed prompt exists to land a choice in. */
 function choicesForItem(
   kind: AttentionKind,
   harness: string,
@@ -283,25 +203,14 @@ function generationForSession(session: ActiveSession): string {
   return session.lastActivityMs != null ? `t${session.lastActivityMs}` : `s${session.sessionId ?? ''}`;
 }
 
-/**
- * How long a hook-raised permission prompt is trusted on the hook's word alone
- * when the session offers no transcript cursor to verify it against (a cloud or
- * remote row, or a peer running an older CLI). Past this age with nothing to
- * check, the record is `unverified`: the banner keeps the session findable but
- * offers no Approve.
- */
+/** How long a hook-raised permission prompt is trusted on the hook's word alone when no
+ * transcript cursor can verify it (cloud, remote, or older CLI). Past this age it is
+ * `unverified`: findable, but no Approve. */
 export const UNVERIFIED_PROMPT_AGE_MS = 30 * 60_000;
 
-/**
- * What a harness Notification actually asked for. The hook records the event's
- * `notification_type`; that subtype — not the fact that a notification fired — is
- * the evidence. `idle_prompt` means "the turn ended and the user has been idle for
- * a minute": nothing is pending, so it yields no request (the live bug behind
- * PHNX-3999 was rendering it with Approve/Deny). An `elicitation_dialog` is the
- * harness asking for input on a tool's behalf — a question whose reply contract
- * the block does not carry, so it exposes no invented choices. A block whose
- * writer recorded no subtype cannot say what it asked; it is `unverified`.
- */
+/** What a Notification asked for, from the hook's `notification_type`. `idle_prompt` means
+ * nothing is pending and yields no request (the PHNX-3999 bug rendered it with Approve/Deny).
+ * `elicitation_dialog` exposes no invented choices; a block with no subtype is `unverified`. */
 function kindFromNotification(notificationType: string | undefined): AttentionKind | undefined {
   switch (notificationType) {
     case 'permission_prompt':
@@ -330,15 +239,9 @@ function kindFromBlock(block: OpenBlock): AttentionKind | undefined {
   }
 }
 
-/**
- * Whether the session has produced evidence that a hook-raised prompt was
- * answered or is moot, whatever the block file still says: a dead process cannot
- * be showing a dialog, and a transcript event stamped strictly after the block
- * was written (a tool result, a new assistant turn) means the agent moved past
- * the prompt. The comparison is against {@link ActiveSession.lastEventMs} — the
- * harness stamp on the last meaningful event — never the file mtime, which every
- * hook firing (including the one that wrote this block) advances.
- */
+/** Whether the session shows a hook-raised prompt was answered or moot: a dead process, or a
+ * transcript event stamped after the block. Compares against ActiveSession.lastEventMs, never
+ * file mtime, which every hook firing advances. */
 function resolvedByLaterEvidence(block: OpenBlock, session: ActiveSession): boolean {
   if (session.pidAlive === false) return true;
   const cursor = block.sourceCursor?.lastActivityMs;
@@ -346,25 +249,18 @@ function resolvedByLaterEvidence(block: OpenBlock, session: ActiveSession): bool
   return cursor != null && eventMs != null && eventMs > cursor;
 }
 
-/**
- * Whether a permission block can be confirmed as still pending. With both cursors
- * in hand the answer is exact: {@link resolvedByLaterEvidence} already ruled out
- * later work, so an unadvanced transcript IS the pending dialog. Without a
- * cursor to compare, the hook's own word is trusted only while the block is
- * younger than {@link UNVERIFIED_PROMPT_AGE_MS}.
- */
+/** Whether a permission block is confirmably pending. With both cursors, an unadvanced
+ * transcript is the pending dialog; without one, the hook's word is trusted only while younger
+ * than UNVERIFIED_PROMPT_AGE_MS. */
 function permissionVerifiable(block: OpenBlock, session: ActiveSession, nowMs: number): boolean {
   if (block.sourceCursor?.lastActivityMs != null && session.lastEventMs != null) return true;
   const openedMs = Date.parse(block.ts);
   return Number.isFinite(openedMs) && nowMs - openedMs < UNVERIFIED_PROMPT_AGE_MS;
 }
 
-/**
- * An open feed block — the strongest, answerable evidence — or undefined when the
- * block is not a request (an idle reminder) or the session has already moved past
- * it. A permission the session cannot confirm degrades to `unverified` rather than
- * offering an Approve that may land in an empty prompt.
- */
+/** An open feed block (the strongest, answerable evidence), or undefined when it is not a
+ * request or the session moved past it. An unconfirmable permission degrades to `unverified`
+ * rather than offering an Approve that may hit an empty prompt. */
 function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: number): AttentionCandidate | undefined {
   const question = block.questions[0];
   let kind = kindFromBlock(block);
@@ -393,17 +289,9 @@ function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: num
   return { item, generation };
 }
 
-/**
- * The session lifecycle fallback. It reads ONLY the state engine's already-computed
- * output ({@link ActiveSession.activity}/`awaitingReason`/`question`) — it does not
- * parse a transcript. A structural signal (plan handoff, or a question the harness
- * surfaced with discrete options) is `lifecycle`; a bare prose question the engine
- * inferred is the decaying `heuristic`. A `permission` reason is a claim only an
- * older peer's state engine still makes, from elapsed time rather than a harness
- * event; it is projected as `unverified` (heuristic, no choices) so the operator
- * is pointed at the session, never handed an Approve for a dialog that may not
- * exist.
- */
+/** The session lifecycle fallback; reads only the state engine's computed output and parses no
+ * transcript. Structural signals are `lifecycle`, an inferred prose question the decaying
+ * `heuristic`. An older peer's `permission` claim is projected `unverified`, never approvable. */
 function attentionFromSession(session: ActiveSession, nowMs: number): AttentionCandidate | undefined {
   if (session.activity !== 'waiting_input') return undefined;
   const reason = session.awaitingReason;
@@ -482,14 +370,9 @@ function resolutionFenceMs(resolution: AttentionResolution): number | undefined 
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/**
- * Whether a resolution tombstone already covers this candidate — the
- * anti-resurrection gate. It covers when the tombstone is for this session AND
- * either the exact generation was already resolved, or the candidate's source
- * cursor has not advanced strictly past the tombstone's fence. When advancement
- * cannot be proven (no comparable cursor) it covers, the conservative default:
- * a resolved item stays gone rather than flicker back (RUSH-1522).
- */
+/** Whether a resolution tombstone already covers this candidate (anti-resurrection): same
+ * session and either the generation was resolved or the cursor has not advanced strictly past
+ * the fence. With no comparable cursor it covers, so a resolved item stays gone (RUSH-1522). */
 function coveredByResolution(candidate: AttentionCandidate, resolution?: AttentionResolution): boolean {
   if (!resolution) return false;
   if (resolution.blockId !== blockIdForSession(candidate.item.sessionId)) return false;
@@ -500,12 +383,8 @@ function coveredByResolution(candidate: AttentionCandidate, resolution?: Attenti
   return true;
 }
 
-/**
- * Reconcile the feed block ledger, the session lifecycle, a CLI-supplied PR
- * signal, and the latest resolution tombstone into one attention item — or
- * `undefined` when nothing needs a human. Pure; the extension never chooses
- * authority.
- */
+/** Reconciles the block ledger, session lifecycle, CLI-supplied PR signal and latest tombstone
+ * into one attention item, or undefined. Pure. */
 export function reconcileAttention(input: {
   block?: OpenBlock;
   session: ActiveSession;

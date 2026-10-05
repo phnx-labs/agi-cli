@@ -22,12 +22,9 @@ function sleep(ms: number): void {
   Atomics.wait(buf, 0, 0, ms);
 }
 
-/**
- * Shared no-lease broker. A submit is a request for admission to a standing
- * Crabbox — never a box lease or a caller-chosen checkout. Scheduler
- * membership is reconstructed from disk so sequential CLI submits share
- * the same caps.
- */
+/** Shared no-lease broker: a submit requests admission to a standing Crabbox, never a box lease or
+ * caller-chosen checkout. Scheduler membership is rebuilt from disk so sequential CLI submits share
+ * the same caps. */
 export class Broker {
   readonly layout: CiLayout;
   scheduler: FairScheduler;

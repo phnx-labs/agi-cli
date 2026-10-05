@@ -1,10 +1,5 @@
-/**
- * Source-evaluator registry: source.type → evaluator.
- *
- * The engine looks up the evaluator by type and calls its poll-model `evaluate`.
- * Push-based sources (ws, webhook) return null from `evaluate` and deliver
- * observations through their `subscribe` instead.
- */
+/** Source-evaluator registry: source.type to evaluator. The engine calls the poll-model `evaluate`;
+ * push sources (ws, webhook) return null and deliver through `subscribe`. */
 
 import type { MonitorSourceType, MonitorSource } from '../config.js';
 import type { Observation, SourceEvaluator } from './types.js';

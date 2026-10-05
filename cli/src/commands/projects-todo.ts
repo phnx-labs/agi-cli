@@ -1,7 +1,5 @@
-/**
- * `agents projects todo add|list|done|undo` — quick to-dos in Linear, the verbs
- * behind AGI Menu's Home to-do line. The logic lives in `lib/quick-todo.ts`.
- */
+/** `agents projects todo add|list|done|undo`: quick to-dos in Linear, the verbs behind AGI Menu's
+ * Home to-do line; logic in `lib/quick-todo.ts`. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

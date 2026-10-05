@@ -1,8 +1,5 @@
-/**
- * Unit coverage for the hermetic e2e device seeder (RUSH-2042 / win-host e2e).
- * Real filesystem only — no mocks. Exercises the pure helpers and the seeder
- * against temp dirs that stand in for the real + private registries.
- */
+/** Unit coverage for the hermetic e2e device seeder (RUSH-2042), real filesystem only, no mocks: the
+ * pure helpers and the seeder against temp dirs standing in for the real and private registries. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

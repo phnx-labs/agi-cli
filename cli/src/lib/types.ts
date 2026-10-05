@@ -1,10 +1,4 @@
-/**
- * Core type definitions for agents-cli.
- *
- * Every data structure that flows between modules lives here: agent identity,
- * configuration schemas, resource tracking, registry types, and permission
- * formats for each supported agent.
- */
+/** Core type definitions for agents-cli: every data structure flowing between modules. */
 
 import type { CloudProviderId } from './cloud/types.js';
 import type { FeedBroadcastConfig } from './feed-broadcast.js';
@@ -16,17 +10,12 @@ export function isAgentId(value: string): value is AgentId {
   return (AGENT_IDS as readonly string[]).includes(value);
 }
 
-/**
- * How THIS box authenticates one account slot (PHNX-3940). Native OAuth stays
- * on the headed device that minted it; a worker uses a durable credential;
- * per-device harnesses log in on each box.
- */
+/** How this box authenticates one account slot (PHNX-3940): native OAuth on the headed device, a
+ * durable credential on workers, per-box login for per-device harnesses. */
 export type AccountAuthMode = 'native' | 'durable' | 'per-device';
 
-/**
- * Live auth verdict vocabulary (mirrors lib/auth-health.ts AuthVerdict).
- * Duplicated here so Meta can name the field without importing the probe module.
- */
+/** Live auth verdict vocabulary, mirroring `lib/auth-health.ts`; duplicated to avoid importing the
+ * probe. */
 export type AuthVerdictName =
   | 'live'
   | 'revoked'
@@ -36,11 +25,8 @@ export type AuthVerdictName =
   | 'unconfigured'
   | 'error';
 
-/**
- * Per-(account, device) materialization of an Account row. Lives in the device
- * doc (`deviceAccounts.slots`), never the fleet-synced central file — slot
- * paths are per box. Native OAuth files stay inside `slotDir` on this device.
- */
+/** Per-(account, device) slot, kept in the device doc, never the fleet-synced file (paths are per
+ * box). */
 export interface DeviceAccountSlot {
   accountId: string;
   /** `~/.agents/.history/accounts/<harness>/<accountId>/` — HOME-shaped, no binary. */
@@ -55,10 +41,7 @@ export interface DeviceAccountSlot {
 /** Whether a worker can be provisioned from a durable credential, or must log in per box. */
 export type AccountProvisioning = 'portable' | 'per-device';
 
-/**
- * Pointer to the durable worker credential in a reserved store. Never the
- * secret value itself — that stays in the secrets backend.
- */
+/** Pointer to the durable worker credential in a reserved store; never the secret itself. */
 export interface NativeAccountWorkerCredential {
   bundle: string;
   key: string;
@@ -66,11 +49,8 @@ export interface NativeAccountWorkerCredential {
   mintedAt: string;
 }
 
-/**
- * Fleet-synced native-account row (central `accounts.native` or a device-scoped
- * copy). Additive fields from account-model v2 (PHNX-3940); existing rows
- * migrate in place with these absent.
- */
+/** Fleet-synced native-account row; account-model v2 fields (PHNX-3940) are additive, absent on old
+ * rows. */
 export interface NativeAccountRecord {
   id: string;
   name: string;
@@ -89,38 +69,16 @@ export type RunStrategy = 'pinned' | 'available' | 'balanced';
 
 export type RunEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 
-/**
- * Reserved `<agent>` keyword for `agents run auto` — full-auto dispatch:
- * host (14d launch affinity) → harness (best-account headroom, weighted) →
- * account (balanced). Lives in lib (not commands/) because both the run
- * command (exec.ts) and the host dispatch layer (hosts/dispatch.ts, which
- * arms the chain-hop guard for remote `run auto`) must agree on it.
- */
+/** Reserved `<agent>` keyword for `agents run auto`: host affinity, then harness, then account.
+ * Lives in lib because exec.ts and hosts/dispatch.ts must agree on it. */
 export const RUN_AUTO_KEYWORD = 'auto';
 
-/**
- * Env var a host dispatcher exports into the remote SHELL when it dispatches
- * `agents run auto`: tells the remote CLI its host layer is already resolved,
- * so it must not re-run affinity and chain-hop to a third host. It rides the
- * shell-export prelude (hosts/dispatch.ts `remoteRunShellPrelude`) because
- * `--env` flags only reach the spawned AGENT's env — the remote CLI's own
- * process.env (which exec.ts `runAutoDefaultsToAffinity` reads) never sees them.
- */
+/** Env var exported into the remote shell for `agents run auto` so it does not re-run affinity and
+ * hop again. It rides the shell prelude because `--env` reaches only the spawned agent. */
 export const RUN_AUTO_HOST_RESOLVED_ENV = 'AGENTS_RUN_AUTO_HOST_RESOLVED';
 
-/**
- * Env var a host dispatcher exports into the remote SHELL when it opens an
- * INTERACTIVE `--device` run: tells the remote CLI that this agent's stdio is a
- * network link, so the run must be detached (tmux-wrapped) to outlive it.
- *
- * Rides the same shell-export prelude as {@link RUN_AUTO_HOST_RESOLVED_ENV},
- * and for the same reason — exec.ts `resolveTmuxWrap` reads the remote CLI's own
- * `process.env`, which `--env` flags (they reach only the spawned AGENT) never
- * touch.
- *
- * Set ONLY on the interactive path. A headless `--device` dispatch is already
- * detached with setsid by `launchDetached`, so it neither needs nor gets this.
- */
+/** Env var exported for an interactive `--device` run: stdio is a network link, so detach (tmux).
+ * Interactive only; a headless dispatch is already detached by `launchDetached`. */
 export const REMOTE_INTERACTIVE_ENV = 'AGENTS_REMOTE_INTERACTIVE';
 
 /** Per-agent run strategy config. */
@@ -140,24 +98,12 @@ export type RunConfig = Partial<Record<AgentId, AgentRunConfig>> & {
   defaults?: Record<string, RunDefaults>;
 };
 
-/**
- * What to do when a configured budget cap would be exceeded (issue #346).
- * `block` refuses to launch (or kills a running child) and exits non-zero so
- * CI/headless/teams/cloud all inherit the decision. `warn` prints the overrun
- * but proceeds — useful for soft rollout / observability-only.
- */
+/** Action when a budget cap would be exceeded (#346): `block` refuses/kills and exits non-zero;
+ * `warn` prints the overrun and proceeds. */
 export type BudgetOnExceed = 'block' | 'warn';
 
-/**
- * `budget:` block in agents.yaml — cross-vendor spend guardrails (issue #346).
- *
- * Resolution is project > user (same precedence as `run:`); see
- * `resolveBudgetConfig` in lib/budget/config.ts. Every cap is in USD. A cap is
- * "unset" when undefined — only set caps are enforced. `per_agent` caps apply
- * to one agent's spend; the top-level caps (`per_run`, `per_day`,
- * `per_project`) aggregate ACROSS every vendor the CLI dispatches, which is the
- * cross-vendor property no single-vendor control has.
- */
+/** `budget:` in agents.yaml: cross-vendor spend guardrails (#346), project > user, caps in USD. Only
+ * set caps are enforced; `per_agent` is one agent, the rest aggregate across vendors. */
 export interface BudgetConfig {
   /** Display currency. Only "USD" is priced today; carried for forward-compat. */
   currency?: string;
@@ -171,11 +117,8 @@ export interface BudgetConfig {
   per_project?: number;
   /** block (refuse/kill) or warn (proceed). Defaults to block. */
   on_exceed?: BudgetOnExceed;
-  /**
-   * Interactive confirm threshold (USD). When a run's pre-flight estimate is at
-   * or above this, prompt before launching (unless --yes). Does NOT gate a hard
-   * block — a cap breach always blocks regardless of this value.
-   */
+  /** Confirm threshold (USD): at or above this pre-flight estimate, prompt unless --yes. Never
+   * relaxes a hard cap block. */
   require_confirm_over?: number;
 }
 
@@ -199,56 +142,31 @@ export interface AgentConfig {
   commandsDir: string;
   commandsSubdir: string;
   skillsDir: string;
-  /**
-   * Agent resolves slash-commands through its own runtime (e.g. openclaw's
-   * Gateway), so agents-cli commands must NOT be converted into skills for it.
-   * Skills-capable agents WITHOUT a native command-file dir convert commands to
-   * skills by default; set this to opt such an agent out of that conversion.
-   */
+  /** Agent resolves slash-commands itself (e.g. openclaw), so commands must not be converted to
+   * skills. Set to opt a skills-capable agent without a command dir out of conversion. */
   nativeCommandRuntime?: boolean;
   hooksDir: string;
-  /**
-   * Directory (relative to a plugin's install dir) the agent reads its plugin
-   * manifest from, when it differs from the canonical `.claude-plugin/`. Codex
-   * uses `.codex-plugin`, Droid `.factory-plugin`. Set to `.` when the agent
-   * reads the manifest from the plugin ROOT (Copilot). syncPluginToVersion
-   * mirrors `.claude-plugin/plugin.json` into this dir.
-   */
+  /** Dir under a plugin where the agent reads its manifest if not `.claude-plugin/`
+   * (`.codex-plugin`, `.factory-plugin`, `.` for Copilot); syncPluginToVersion mirrors
+   * `plugin.json` there. */
   pluginManifestDir?: string;
   instructionsFile: string;
   format: 'markdown' | 'toml';
   variableSyntax: string;
   supportsHooks: boolean;
   nativeAgentsSkillsDir?: boolean;
-  /**
-   * The harness loads a plugin's bundled skills itself, namespaced
-   * `<plugin>:<skill>`, from the plugin registration sync writes. Sync must
-   * then NOT also flatten them into top-level `skills/<name>/`: the flat copy
-   * is a second, un-namespaced registration of the same skill, so every
-   * plugin skill showed twice (`/continue` and `/sessions:continue`). Harnesses
-   * without this flag only see plugin skills through the flattened copies.
-   */
+  /** The harness loads plugin skills itself, namespaced `<plugin>:<skill>`; sync must not also
+   * flatten them into `skills/`, which listed every plugin skill twice (`/continue`,
+   * `/sessions:continue`). */
   nativePluginSkills?: boolean;
-  /**
-   * Directories under the version home's `skills/` that the harness itself
-   * writes (Claude Code's `synced` bucket). The sync never placed them, so the
-   * full-sync orphan sweep and skill cleanup must never remove them.
-   */
+  /** Dirs under `skills/` the harness itself writes (Claude's `synced`); sweeps must never remove
+   * them. */
   ownedSkillDirs?: readonly string[];
-  /**
-   * This agent's *own* cloud backend. `agents cloud run --agent <id>` routes
-   * here when no `--provider` is given (precedence: --provider > this >
-   * cloud.default_provider > rush). Undefined means the agent has no native
-   * cloud and falls back to the configured default.
-   */
+  /** This agent's own cloud backend: `agents cloud run --agent` routes here without `--provider`
+   * (--provider > this > cloud.default_provider > rush). Undefined means no native cloud. */
   cloudProvider?: CloudProviderId;
-  /**
-   * Set when the upstream vendor has retired this agent's CLI. A warning-only
-   * deprecation leaves the agent manageable; a hard deprecation keeps the id
-   * parseable for legacy state but excludes it from install/import/sync targets.
-   * Point `replacement` at the successor agent so messages can suggest a
-   * migration path.
-   */
+  /** Set when the vendor retired this CLI: warning-only stays manageable; hard stays parseable but
+   * is excluded from install/import/sync. `replacement` names the successor. */
   deprecated?: {
     /** Vendor that retired it, e.g. "Google". */
     by: string;
@@ -266,18 +184,10 @@ export interface AgentConfig {
   capabilities: {
     hooks: Capability;
     mcp: Capability;
-    /**
-     * Whether `mcp add --transport http` is supported. Only true for agents
-     * whose CLI accepts an HTTP-transport MCP server registration; false for
-     * agents that only accept stdio (registerMcp skips HTTP registration with
-     * a clear reason).
-     */
+    /** Whether `mcp add --transport http` works; false for stdio-only agents (registration skips
+     * with a reason). */
     mcpHttp: Capability;
-    /**
-     * Whether HTTP-MCP registration accepts `--header` args. Independent of
-     * `mcpHttp`: only Claude's CLI takes headers today; Codex/Gemini accept
-     * HTTP MCP but reject header args.
-     */
+    /** Whether HTTP-MCP registration accepts `--header`; only Claude's CLI does today. */
     mcpHeaders: Capability;
     allowlist: Capability;
     skills: Capability;
@@ -286,52 +196,26 @@ export interface AgentConfig {
     subagents: Capability;
     rules: RulesCapability;
     workflows: Capability;
-    /**
-     * Portable knowledge-store memory (`agents memory` / ~/.agents/memory/).
-     * Distinct from `rules` (instructions). When true, sync fans facts into
-     * the agent version home (see memoryTargetDir).
-     */
+    /** Portable knowledge-store memory (`agents memory`), distinct from `rules`; sync fans facts
+     * into the home. */
     memory: Capability;
-    /**
-     * Permission modes this agent natively supports. Modes outside this set
-     * are gated by buildExecCommand: `auto` silently degrades to `edit`,
-     * `skip` errors with a clear message naming the supported modes.
-     */
+    /** Permission modes natively supported; others are gated by buildExecCommand (`auto` degrades to
+     * `edit`, `skip` errors). */
     modes: Mode[];
-    /**
-     * Whether `plan` mode works in a HEADLESS run (`--prompt`/`-p`). Some CLIs
-     * list a `plan` mode that only works interactively — kimi refuses `--prompt`
-     * combined with `--plan`, and grok's `--permission-mode plan` silently stalls
-     * a headless run at its ExitPlanMode gate. Absent (undefined) means true:
-     * headless plan is assumed to work unless a agent opts out with `false`, in
-     * which case a headless `--mode plan` request auto-downgrades to `auto`
-     * (see resolveHeadlessMode). Interactive plan is unaffected.
-     */
+    /** Whether `plan` works headless; kimi refuses `--prompt` with `--plan`, grok stalls at
+     * ExitPlanMode. Absent means true; `false` downgrades headless `--mode plan` to `auto`. */
     headlessPlan?: boolean;
-    /**
-     * Whether the agent natively resolves `@path/to/file` imports inside its
-     * rules file at session start. If false, agents-cli must pre-compile the
-     * rules file (inline all @-imports) when syncing it into the version home.
-     */
+    /** Whether the agent natively resolves `@path` imports in its rules file; if not, sync
+     * pre-compiles it. */
     rulesImports?: boolean;
-    /**
-     * Whether the agent can open an interactive REPL session when launched with
-     * NO prompt (bare invocation). Agents whose CLI exits immediately without a
-     * prompt (e.g. cursor-agent) must declare `false` here; agents that open a
-     * TUI/REPL with no args declare `true`. Used by the `auto` harness picker
-     * to avoid routing a prompt-less interactive run to a harness that would
-     * exit silently (RUSH-2185, EXEC-23a).
-     */
+    /** Whether a bare invocation opens a REPL; agents that exit without a prompt (cursor-agent) say
+     * `false`. The `auto` picker uses it to avoid such harnesses (RUSH-2185, EXEC-23a). */
     interactiveRepl?: Capability;
   };
 }
 
-/**
- * A capability flag for an agent feature. `true` means supported on every
- * installed version; `false` means never supported. The object form gates by
- * semver: `since` is the minimum version that ships the feature, `until` is
- * exclusive upper bound (set when a feature is removed in a later release).
- */
+/** Capability flag: `true` on every version, `false` never; the object form gates by semver (`since`
+ * minimum, `until` exclusive upper bound). */
 export type Capability = boolean | { since?: string; until?: string };
 
 /** Rules sync writes one composed instructions file per supported agent. */
@@ -339,16 +223,9 @@ export type RulesCapability = false | { file: string };
 
 /** Names of every gateable capability on AgentConfig. */
 export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory' | 'interactiveRepl';
-/**
- * Permission modes controlling agent autonomy.
- *   plan  read-only investigation; no writes, no shell side-effects
- *   edit  may edit files; prompts for shell/risky operations
- *   auto  smart classifier auto-approves safe operations, prompts for risky ones
- *   skip  bypasses every permission prompt (dangerously-skip-permissions)
- *
- * `full` is accepted as a permanent silent alias for `skip` via normalizeMode().
- * Per-agent support is declared on AgentConfig.capabilities.modes.
- */
+/** Permission modes: plan (read-only), edit (prompts on risky shell), auto (classifier), skip
+ * (bypass). `full` is a permanent silent alias of `skip` (normalizeMode); support is in
+ * capabilities.modes. */
 export type Mode = 'plan' | 'edit' | 'auto' | 'skip';
 
 /** Every canonical mode in declaration order. Useful for iteration / validation. */
@@ -381,10 +258,7 @@ export interface HookConfig {
   dataFile?: string;
 }
 
-/**
- * Predicate set for declaring when a hook should fire within its declared event.
- * All predicates AND together. Empty/missing matches: hook always fires.
- */
+/** Predicates for when a hook fires within its event; all AND together; empty always fires. */
 export interface HookMatches {
   prompt_contains?: string;          // substring of user prompt
   prompt_matches?: string;           // regex applied to user prompt
@@ -393,48 +267,23 @@ export interface HookMatches {
   git_dirty?: boolean;               // working tree has changes
   cwd_includes?: string | string[];  // cwd contains any of these substrings
   project_has?: string;              // project root contains this file
-  /**
-   * Permission modes the hook fires in (e.g. `plan`). Unlike the other
-   * predicates this one is fail-open on absence: an input that carries no
-   * permission_mode/permissionMode field passes, because only some harnesses
-   * (Claude Code) report the live mode — an explicit non-listed value skips.
-   */
+  /** Modes the hook fires in. Fail-open on absence: an input with no mode field passes, since only
+   * some harnesses report the live mode. */
   permission_mode?: string | string[];
-  /**
-   * Permission modes the hook must NOT fire in (e.g. `plan`). The inverse of
-   * `permission_mode`, and the correct predicate for gating a guard off in one
-   * mode: expressing that with the allowlist means enumerating every other
-   * mode, which silently stops firing when a harness adds or renames one. Same
-   * fail-open-on-absence rule — an input with no mode field still fires — so an
-   * unknown mode errs toward running the hook, never toward skipping it.
-   */
+  /** Modes the hook must not fire in; the inverse of `permission_mode`, which would otherwise break
+   * when a harness adds a mode. Same fail-open rule when no mode field is present. */
   permission_mode_not?: string | string[];
 }
 
-/**
- * Cache scoping. Determines which cache file a hook invocation reads/writes:
- *  - `global`      one file per hook, shared across cwds/sessions. Right for
- *                  SessionStart hooks pulling org-wide context (Linear sprint).
- *  - `per-cwd`     keyed on the working directory the hook fires from.
- *  - `per-session` keyed on the agent's session_id (read from stdin JSON).
- *  - `per-project` keyed on the nearest git repo root above cwd.
- */
+/** Cache scoping: `global` (one file per hook), `per-cwd`, `per-session` (session_id from stdin),
+ * `per-project` (nearest git root). */
 export type HookCacheKey = 'global' | 'per-cwd' | 'per-session' | 'per-project';
 
 /** Prefetch strategy when the cache is stale. */
 export type HookCachePrefetch = 'none' | 'background';
 
-/**
- * Full hook cache config. Authors usually use the shorthand string form
- * (`HookCache`) below. Shorthand examples in hooks.yaml:
- *
- *   cache: 5m          # → { ttl: 300, key: 'global', prefetch: 'none' }
- *   cache: 5m-bg       # → { ttl: 300, key: 'global', prefetch: 'background' }
- *   cache:             # full form
- *     ttl: 1h
- *     key: per-cwd
- *     prefetch: background
- */
+/** Full hook cache config; authors usually use the `HookCache` shorthand (`5m`, `5m-bg`). Fields:
+ * ttl, key (global/per-cwd/...), prefetch (none/background). */
 export interface HookCacheConfig {
   /** TTL in seconds or duration string ("30s", "5m", "1h"). */
   ttl: number | string;
@@ -449,12 +298,8 @@ export type HookCache = string | HookCacheConfig;
 export interface ManifestHook {
   script: string;
   events: string[];
-  /**
-   * Seconds before the hook is killed (default 600). In agents.yaml this may be
-   * written as a bare number (seconds) or a duration string (`5s`, `2m`,
-   * `1h30m`); `parseHookManifest` normalizes it to a seconds number here, so
-   * consumers always see a number.
-   */
+  /** Seconds before the hook is killed (default 600); a number or duration string (`5s`, `1h30m`)
+   * that `parseHookManifest` normalizes to seconds. */
   timeout?: number;
   matcher?: string;
   /** @deprecated Use the agent capability table; field is ignored. */
@@ -465,12 +310,8 @@ export interface ManifestHook {
   override?: boolean;
   /** Optional pre-filter predicates evaluated before invoking the script. */
   matches?: HookMatches;
-  /**
-   * Opt-in caching. When set, the registrar generates a per-hook shim
-   * under the hook shims dir that handles cache lookup, stale-while-revalidate,
-   * and per-invocation timing/logging, then registers that shim with the agent
-   * instead of the raw script. The underlying script is unchanged.
-   */
+  /** Opt-in caching: the registrar registers a generated per-hook shim (cache lookup,
+   * stale-while-revalidate, timing/logging) instead of the raw script, which is unchanged. */
   cache?: HookCache;
 }
 
@@ -587,14 +428,8 @@ export const DEFAULT_REGISTRIES: Record<RegistryType, Record<string, RegistryCon
   skill: {},
 };
 
-/**
- * Third-party registries pre-seeded on first install for discoverability.
- *
- * These ship into new users' agents.yaml once, but are not "defaults" — after
- * seeding they behave like any user-added registry (listable, disable-able,
- * removable). Removed users can `agents registry remove <name>` to opt out;
- * once removed they don't come back.
- */
+/** Third-party registries pre-seeded once on first install; afterwards they behave like user-added
+ * ones, and `agents registry remove <name>` opts out permanently. */
 export const SEEDED_REGISTRIES: Record<RegistryType, Record<string, RegistryConfig>> = {
   mcp: {},
   skill: {
@@ -662,11 +497,8 @@ export interface SkillEntry {
   tags?: string[];
   /** Registry-specific trust signal (e.g. 'builtin', 'trusted', 'community'). */
   trustLevel?: string;
-  /**
-   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by the registry
-   * index. When present, install verifies the cloned SKILL.md against it and
-   * aborts on mismatch.
-   */
+  /** Lowercase hex sha256 of the skill's SKILL.md from the registry index; install aborts on
+   * mismatch. */
   sha256?: string;
 }
 
@@ -697,25 +529,15 @@ export interface ResolvedPackage {
   source: string;
   mcpEntry?: McpServerEntry;
   skillEntry?: SkillEntry;
-  /**
-   * Plugin install spec (`name@url`, path, or bare source) when `type === 'plugin'`.
-   * Same grammar as `agents plugins install <spec>`.
-   */
+  /** Plugin install spec (`name@url`, path, or bare source) when `type === 'plugin'`. */
   pluginSpec?: string;
 }
 
 /** Categories of resources that can be synced into an agent version home. */
 export type ResourceType = 'commands' | 'skills' | 'hooks' | 'memory' | 'mcp' | 'permissions' | 'subagents' | 'plugins' | 'workflows';
 
-/**
- * A resource selection pattern stored in agents.yaml versions:
- *   "system:*"      — all resources from ~/.agents/.system/
- *   "user:*"        — all resources from ~/.agents/
- *   "rush:*"        — all resources from ~/.agents-rush/  (extra repo alias)
- *   "project:*"     — all resources from .agents/ in the project root
- *   "user:foo"      — specifically "foo" from ~/.agents/
- *   "!user:temp"    — exclude "temp" from the user repo
- */
+/** Resource selection pattern in agents.yaml `versions`: `<repo>:*` (system, user, extra alias,
+ * project), `<repo>:name` for one resource, and a leading `!` to exclude. */
 export type ResourcePattern = string;
 
 /** Sync specification for a specific agent@version, keyed by resource type. */
@@ -773,30 +595,17 @@ export interface PluginManifest {
   description: string;
   version: string;
   agents?: AgentId[];
-  /**
-   * Who published the plugin, per the official plugin format. Every plugin.json
-   * in this repo already carries one; it was missing from this interface, so
-   * `loadPluginManifest`'s cast passed it through un-typed and no surface read it.
-   * Accepts the shorthand string form as well as the object form.
-   */
+  /** Who published the plugin, per the official format (string or object); previously untyped. */
   author?: string | { name: string; email?: string; url?: string };
   /** Interactive config fields prompted at install time. Values stored in .user-config.json. */
   userConfig?: PluginUserConfigField[];
   /** Other plugin names this plugin depends on. Missing deps produce a warning. */
   dependencies?: string[];
-  /**
-   * Inline hook configuration (or a path to a hooks JSON file) declared directly
-   * in the manifest, per the official plugin format — an execution surface even
-   * when the plugin ships no `hooks/` directory. Untyped because the shape is a
-   * path string or an inline event map; capability detection only needs to know
-   * whether it is present and non-empty.
-   */
+  /** Inline hook config (or a path to a hooks JSON file) in the manifest; an execution surface even
+   * with no `hooks/` dir. Untyped: capability detection only checks it is non-empty. */
   hooks?: unknown;
-  /**
-   * Inline MCP-server configuration (or a path to an MCP JSON file) declared
-   * directly in the manifest — an execution surface even when the plugin ships
-   * no `.mcp.json`. Untyped for the same reason as `hooks`.
-   */
+  /** Inline MCP-server config (or path to an MCP JSON file) in the manifest; an execution surface
+   * even with no `.mcp.json`. Untyped like `hooks`. */
   mcpServers?: unknown;
 }
 
@@ -812,11 +621,8 @@ export interface DiscoveredPlugin {
   commands: string[];
   /** Subagent .md files in the plugin's agents/ directory (names without extension). */
   agentDefs: string[];
-  /**
-   * Workflow directory names under the plugin's `workflows/` (each must contain
-   * WORKFLOW.md). Phase 5 packaging: plugins may package workflows as entrypoints;
-   * `agents run <name>` resolves them via project > user > plugin > extra > system.
-   */
+  /** Workflow dir names under `workflows/` (each needs WORKFLOW.md); `agents run <name>` resolves
+   * them project > user > plugin > extra > system. */
   workflows: string[];
   /** Memory fact basenames from the plugin's memory/ directory (without .md). */
   memory: string[];
@@ -832,50 +638,26 @@ export interface DiscoveredPlugin {
   hasMcp: boolean;
   /** Whether the plugin root contains a settings.json with non-permission keys to merge. */
   hasSettings: boolean;
-  /**
-   * Marketplace this plugin was discovered in (from marketplaceNameFor() of the
-   * owning MarketplaceSpec): "agents-cli" (user repo), "agents-<alias>" (extra
-   * repo), or "agents-project" (project repo). Absent on hand-built plugins
-   * (e.g. workflow-scoped) — those default to the user marketplace on sync.
-   */
+  /** Marketplace the plugin was found in ("agents-cli", "agents-<alias>", "agents-project"); absent
+   * on hand-built plugins, which default to the user marketplace on sync. */
   marketplace?: string;
-  /**
-   * Absolute path to the DotAgents repo root containing this plugin — the
-   * grandparent of `root` (`<repo>/plugins/<name>` → `<repo>`), true for every
-   * marketplace kind (user/system/extra/project). DotAgents repos are
-   * git-tracked (plugins.ts), so this pairs with {@link snapshotSha}.
-   */
+  /** Absolute path to the DotAgents repo root containing this plugin (grandparent of `root`); the
+   * repo is git-tracked, so this pairs with `snapshotSha`. */
   repoRoot: string;
-  /**
-   * Short HEAD sha of `repoRoot`'s git checkout, lazily resolved (a getter,
-   * not computed at discovery time) and memoized per repoRoot
-   * (`git.ts` `resolveSnapshotSha`) — see `ResolvedResource.snapshotSha` for
-   * the identical rationale. `undefined` when `repoRoot` isn't a git repo.
-   */
+  /** Short HEAD sha of `repoRoot`, lazily resolved and memoized (`git.ts` `resolveSnapshotSha`);
+   * `undefined` when not a git repo. */
   readonly snapshotSha: string | undefined;
 }
 
-/**
- * Identifies one DotAgents repo that contributes a plugin marketplace. Each
- * repo synthesizes its own catalog and registers under its own name:
- *   user    — ~/.agents/plugins/         → "agents-cli"   (the canonical name)
- *   extra   — ~/.agents-<alias>/plugins/ → "agents-<alias>" (e.g. "agents-extras")
- *   project — <cwd>/.agents/plugins/     → "agents-project"
- *
- * `root` on the extra/project variants is the absolute path to that repo's
- * plugins/ directory (the source side). The user variant needs no path — it is
- * always ~/.agents/plugins/ via getPluginsDir().
- */
+/** One DotAgents repo contributing a marketplace: user (`~/.agents/plugins/`, "agents-cli"), extra
+ * ("agents-<alias>"), project ("agents-project"); `root` is the repo's plugins/ dir. */
 export type MarketplaceSpec =
   | { kind: 'user' }
   | { kind: 'extra'; alias: string; root: string }
   | { kind: 'project'; root: string }
   | { kind: 'system'; root: string };
 
-/**
- * A marketplace found on the source side (before any per-version sync), with
- * its resolved name, source plugins directory, and catalog description.
- */
+/** A marketplace found on the source side, before per-version sync. */
 export interface DiscoveredMarketplace {
   spec: MarketplaceSpec;
   /** e.g. "agents-cli", "agents-extras", "agents-project". */
@@ -911,49 +693,30 @@ export interface InstalledSubagent {
   frontmatter: SubagentFrontmatter;
 }
 
-/**
- * Extra DotAgent repo registered as user-level config alongside ~/.agents/.
- * Managed clones default to ~/.agents-<alias>/ as peer dirs; user-owned repos
- * may live anywhere on disk via the `path` field. ~/.agents/ wins on name
- * collisions; extras are searched in insertion order after the user repo.
- */
+/** Extra DotAgent repo as user-level config: managed clone at `~/.agents-<alias>/` or any `path`.
+ * `~/.agents/` wins name collisions; extras are searched in insertion order. */
 export interface ExtraRepoConfig {
   url: string;
   path?: string;
   enabled: boolean;
 }
 
-/**
- * A white-label brand — a personally-named CLI (e.g. `jack`) that IS agents-cli,
- * minted by `agents setup mine` / `agents mine`. The brand's shim exports
- * `AGENTS_BRAND=<name>`; the entrypoint reads it to present under this name and
- * apply the customization below. Portable user config — rides `agents repo
- * push/pull`. See lib/brand.ts.
- */
+/** A white-label brand: a personally-named CLI that is agents-cli (`agents setup mine`); its shim
+ * exports `AGENTS_BRAND=<name>`. Portable config, rides `agents repo push/pull`. See lib/brand.ts. */
 export interface BrandConfig {
   /** The brand name; also the binary name on PATH. */
   name: string;
   /** Built-in top-level commands this brand hides/disables (e.g. `["teams"]`). */
   disabledCommands?: string[];
-  /**
-   * Resource-profile preset this brand pins (a key in `profiles.presets`). When
-   * the CLI runs under this brand, that preset becomes the active profile, so
-   * skills/plugins/mcp/hooks/etc. filter to the brand's curated set. Defaults to
-   * `mine-<name>`.
-   */
+  /** Resource-profile preset this brand pins (a key in `profiles.presets`); defaults to
+   * `mine-<name>`. */
   profile?: string;
   /** False to keep the config but stop minting/using the brand. */
   enabled: boolean;
 }
 
-/**
- * An actor -- a responsible entity behind a run (a human today, a top-level
- * agent later). Keyed in the `actors:` map by a short slug. Every field is
- * optional enrichment over what `tailscale whois` already resolves: pin a
- * preferred git email, add a github handle, or override the display name.
- * `login` is the tailnet login-name to match against (defaults to the map key).
- * See lib/actor.ts.
- */
+/** An actor behind a run, keyed by slug; all fields enrich what `tailscale whois` resolves. `login`
+ * is the tailnet login to match (defaults to the key). See lib/actor.ts. */
 export interface ActorConfig {
   /** 'human' (default) or 'agent'. Only humans get personal git credit. */
   kind?: 'human' | 'agent';
@@ -965,11 +728,8 @@ export interface ActorConfig {
   github?: string;
   /** Tailnet login-name this entry matches. Defaults to the map key. */
   login?: string;
-  /**
-   * Phoenix (work) identity id — bridges this person's tailnet login (often a
-   * personal email) to their stable internal work identity, so session/commit
-   * attribution survives whichever email they are signed into tailscale with.
-   */
+  /** Phoenix (work) identity id, bridging a tailnet login to the stable work identity for
+   * attribution. */
   phoenixId?: string;
 }
 
@@ -978,105 +738,51 @@ export interface Meta {
   /** Preferred provider account per harness. Explicit --account wins. */
   accounts?: {
     defaults?: Partial<Record<AgentId, string>>;
-    /**
-     * Named harness-owned identities. Metadata only; OAuth credentials stay in
-     * the harness home. Central-synced via agents.yaml; labels bind to
-     * `(agent, identityKey)`.
-     */
+    /** Named harness-owned identities. Metadata only; OAuth credentials stay in the harness home. */
     native?: Record<string, NativeAccountRecord>;
     /** Exact installation/custom-harness target -> stable account id. */
     bindings?: Record<string, string>;
   };
-  /**
-   * Device-scoped slice of {@link Meta.accounts}, written as `accounts:` in
-   * `~/.agents/devices/<machine>/agents.yaml` (PHNX-3315). Holds this box's own
-   * `scope: 'device'` native identities and the bindings that target them, so a
-   * per-box login no longer rewrites the fleet-shared central `agents.yaml` (and
-   * its identity PII no longer lands on that one file). The effective account
-   * view is the union of central (fleet-shared `defaults` + `scope:'version'`
-   * natives) and every device doc's block; only this machine writes this key.
-   */
+  /** Device-scoped slice of `Meta.accounts`, in the device agents.yaml (PHNX-3315): this box's
+   * `scope: 'device'` identities, so a per-box login no longer rewrites the shared file. Only this
+   * machine writes it. */
   deviceAccounts?: {
     native?: Record<string, NativeAccountRecord>;
     bindings?: Record<string, string>;
-    /**
-     * THIS box's leftover account⇄home map (PHNX-3940): stable account id → a
-     * local installation label (`acct-*` from the retired connect verb). Device-
-     * scoped: a label minted here is not assumed to exist on another box, so it
-     * lives in the device doc, never the fleet-synced central `accounts.native`
-     * identity row. `nativeAccountHome` still reads it so T5/T7 can resolve a
-     * legacy home; spawn-time HOME is {@link DeviceAccountSlot slots}.
-     */
+    /** This box's leftover account-to-home map (PHNX-3940): `acct-*` labels from the retired
+     * connect verb. Device-scoped (never the synced central row); `nativeAccountHome` reads it. */
     homes?: Record<string, string>;
-    /**
-     * Leftover in-flight connect map from the retired verb
-     * (PHNX-3940). No writer remains; state still round-trips the field so an
-     * older device doc does not fail to load.
-     */
+    /** Leftover in-flight connect map from the retired verb (PHNX-3940); kept so older device docs
+     * load. */
     pendingConnects?: Record<string, string>;
-    /**
-     * THIS box's account slots (PHNX-3940): stable account id → HOME-shaped
-     * dir under `~/.agents/.history/accounts/<harness>/<accountId>/`. Device-
-     * scoped: a slot path is local and a native OAuth file never leaves this
-     * box. Replaces `homes` as the spawn-time HOME; `homes` remains the
-     * installation-label map so leftover `acct-*` labels still resolve.
-     */
+    /** This box's account slots (PHNX-3940): HOME-shaped dirs under `~/.agents/.history/accounts/`.
+     * Device-local so native OAuth files never leave the box; replaces `homes` as spawn-time HOME. */
     slots?: Record<string, DeviceAccountSlot>;
   };
   agents?: Partial<Record<AgentId, string>>;
-  /**
-   * Per-agent preferred ISOLATED version — which copy a bare `agents run <agent>`
-   * resolves to when the agent has no global default.
-   *
-   * Kept separate from `agents` on purpose. An entry there is the global default,
-   * which owns the launcher, the bare shim and the real `~/.<agent>` config
-   * symlink, and arms the self-heal `shadowing` check. An isolated copy must never
-   * acquire any of that, so it cannot be recorded in the same place — the
-   * separation is what keeps `getGlobalDefault` incapable of returning one.
-   */
+  /** Per-agent preferred isolated version for a bare `agents run <agent>` with no global default.
+   * Kept apart from `agents`: a global default owns the launcher and shim, which an isolated copy
+   * must not. */
   isolatedAgents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
-  /**
-   * Cost-tier overrides for `--model cheap|default|best|ultra`. Keyed by the same
-   * `<agent>:<version>` selector run.defaults uses (`kimi:*`, `kimi:0.19.2`); each
-   * value maps a tier to a concrete model id. Written by `agents models tier set`,
-   * never hand-edited. Resolution: exact version selector wins over `<agent>:*`,
-   * which wins over the auto-ranking. See lib/model-tier-overrides.ts.
-   */
+  /** Cost-tier overrides for `--model cheap|default|best|ultra`, keyed by `<agent>:<version>`,
+   * written by `agents models tier set`. Exact version beats `<agent>:*` beats auto-ranking. */
   model?: {
     tiers?: Record<string, Partial<Record<'cheap' | 'default' | 'best' | 'ultra', string>>>;
   };
-  /**
-   * Daemon watchdog config. `rotate` (default `on`) lets the watchdog rotate a
-   * rate-limited session IN PLACE onto a healthy account/harness via
-   * `agents run auto` — see lib/watchdog/rotate.ts. Set `off` to keep the
-   * nudge-only behavior (the Factory `agents.watchdog.autoRotate: false`
-   * migration writes `off` here).
-   */
+  /** Daemon watchdog config: `rotate` (default `on`) rotates a rate-limited session in place via
+   * `agents run auto` (lib/watchdog/rotate.ts); `off` keeps nudge-only. */
   watchdog?: {
     rotate?: 'on' | 'off';
   };
-  /**
-   * `agents run --lease` config. `secretsBundle` names the keychain secrets bundle
-   * whose provider token (e.g. `HCLOUD_TOKEN`) crabbox uses to reach the cloud API.
-   * When unset, the bundle is resolved by env (`AGENTS_LEASE_SECRETS_BUNDLE`) then
-   * auto-detected (the first bundle that declares a provider token key).
-   */
+  /** `agents run --lease` config: `secretsBundle` names the keychain bundle with the provider token
+   * (e.g. `HCLOUD_TOKEN`); unset uses `AGENTS_LEASE_SECRETS_BUNDLE`, then auto-detect. */
   lease?: {
     secretsBundle?: string;
   };
-  /** macOS secrets-agent config. `policy` is the default prompt policy for
-   * bundles without an explicit per-bundle policy: `hold` (the default) asks
-   * once per hold window (7 days out of the box), `always` asks every time.
-   * `auto` (default on) lets the
-   * first real keychain read of a `hold` bundle populate the broker so
-   * concurrent runs read silently — set it `false` to force a prompt on every read.
-   * `holdMs` caps how long an unlocked/auto-cached bundle is held before the next
-   * read re-prompts (default 7 days; e.g. 86400000 for a 24h cap). Clamped to
-   * [1 minute, 30 days]. `durable` (default off) makes every `agents secrets
-   * unlock` survive sleep + reboot as well as upgrade/restart — the same effect as
-   * passing `--durable` per unlock; off means the secure split default (survive
-   * upgrade/restart, re-lock on sleep). */
+  /** macOS secrets-agent: `policy` default `hold` asks once per `holdMs` window (7d, clamped 1
+   * min-30 d), `always` every time; `auto` lets the first read populate the broker; `durable`
+   * survives sleep/reboot. */
   secrets?: {
     /** Default storage backend used when `agents secrets create/import` create a
      * new bundle without `--backend` or `--synced`. */
@@ -1093,18 +799,9 @@ export interface Meta {
   };
   /** Spend guardrails (issue #346). User-global caps; project agents.yaml overrides. */
   budget?: BudgetConfig;
-  /**
-   * `agents feed post` fan-out. `broadcast` maps a sink name to either an argv
-   * template (`command:`, run for each post) or an in-process channel delivery
-   * (`channel:`, the same registry `agents send` use). Channel
-   * sinks may set `message:` with feed placeholders; a missing placeholder
-   * skips that sink, so `{ticket}` cleanly gates a tracker-specific channel. Thus
-   * mirroring to a tracker, a messaging CLI, or a channel provider is the
-   * operator's config rather than an integration compiled into this CLI. When
-   * this is unset/empty, an important-level post falls back to `notify.owner`
-   * implicitly (RUSH-2123) — see lib/feed-broadcast.ts and
-   * docs/observability.md.
-   */
+  /** `agents feed post` fan-out: `broadcast` maps a sink to an argv `command:` or a `channel:`
+   * delivery; a missing `message:` placeholder skips that sink. Unset: important posts go to
+   * `notify.owner` (RUSH-2123). */
   feed?: {
     broadcast?: FeedBroadcastConfig;
   };
@@ -1112,139 +809,64 @@ export interface Meta {
     enabled?: BetaFeatureName[];
   };
   registries?: Record<RegistryType, Record<string, RegistryConfig>>;
-  /**
-   * Top-level resource profiles. Activating one filters the resolved resource
-   * set across commands, skills, hooks, rules, MCP, permissions, and secrets.
-   * Model-provider run profiles are separate YAML files under profiles/.
-   */
+  /** Top-level resource profiles: activating one filters commands, skills, hooks, rules, MCP,
+   * permissions and secrets. Model-provider run profiles are separate YAML under profiles/. */
   profiles?: ResourceProfilesConfig;
   // Per-version resource tracking
   versions?: Partial<Record<AgentId, Record<string, VersionResources>>>;
   // Git remote source URL (when ~/.agents/.system/ is a git repo)
   source?: string;
-  /**
-   * Projects root for the `agents run --project <slug>` shorthand, e.g.
-   * `~/src/github.com/<user>`. Auto-inferred from the repo you launch inside and
-   * cached here; stored home-relative (`~/…`) so it resolves on remote hosts too.
-   */
+  /** Projects root for `agents run --project <slug>`; auto-inferred, cached home-relative (`~/...`)
+   * so it resolves on remote hosts. */
   projectRoot?: string;
-  /**
-   * Extra DotAgent repos merged after ~/.agents/. Managed clones live as peer
-   * dirs at ~/.agents-<alias>/; user-owned repos can point at arbitrary paths
-   * via the `path` field.
-   */
+  /** Extra DotAgent repos merged after `~/.agents/`: managed clones at `~/.agents-<alias>/` or any
+   * `path`. */
   extraRepos?: Record<string, ExtraRepoConfig>;
-  /**
-   * White-label brands keyed by name. Each mints a personally-named binary
-   * (e.g. `jack`) that runs agents-cli under that name with its own disabled
-   * commands + curated resource profile. See lib/brand.ts.
-   */
+  /** White-label brands keyed by name, each a personally-named binary with its own disabled commands
+   * and curated profile. See lib/brand.ts. */
   brands?: Record<string, BrandConfig>;
-  /**
-   * Actors keyed by slug -- who is behind a run. Enriches or overrides the
-   * identity `tailscale whois` resolves (git email, github handle, display
-   * name, human vs agent). See lib/actor.ts.
-   */
+  /** Actors keyed by slug (who is behind a run); overrides what `tailscale whois` resolves. See
+   * lib/actor.ts. */
   actors?: Record<string, ActorConfig>;
-  /**
-   * Removal tombstones for SEEDED_REGISTRIES presets, keyed like `skill.hermes`.
-   *
-   * Seeded presets are resolved in memory by `getRegistries` (see
-   * `offeredSeeds`) rather than written into agents.yaml — persisting them from
-   * the read path dirtied this git-tracked file and deadlocked
-   * `agents repo pull` (RUSH-1925). A key listed here means the user ran
-   * `registry remove` on that preset, so it is no longer offered.
-   *
-   * Entries written by the pre-RUSH-1925 seeding also appear here; those files
-   * carry the registry in their own `registries:` block too, which takes
-   * precedence, so the preset stays exactly as configured.
-   */
+  /** Removal tombstones for SEEDED_REGISTRIES (key like `skill.hermes`). Seeds resolve in memory,
+   * not into agents.yaml: persisting them dirtied the tracked file and deadlocked `agents repo
+   * pull` (RUSH-1925). */
   seededPresets?: string[];
-  /**
-   * Hook manifest entries keyed by hook name. Folded into agents.yaml so the
-   * user has a single file to sync. Each entry shape matches ManifestHook
-   * (script, events, timeout, matches, enabled).
-   */
+  /** Hook manifest entries keyed by hook name, folded into agents.yaml so there is one file to sync. */
   hooks?: Record<string, ManifestHook>;
-  /**
-   * Browser profiles declared by this machine. Written as `browser:` in
-   * `~/.agents/devices/<machine>/agents.yaml`. The fleet registry is the union
-   * of every device file; central `agents.yaml` is not a browser-profile store.
-   */
+  /** Browser profiles declared by this machine (`browser:` in the device agents.yaml); fleet view is
+   * the union. */
   deviceBrowser?: Record<string, BrowserProfileConfig>;
-  /**
-   * User-scope config block (`config:` in central agents.yaml). Holds the
-   * user-scope keys from the device-config registry (`lib/device-config.ts`) —
-   * currently `interactiveHost`. Syncs fleet-wide via `agents repo push/pull`.
-   * Device-scope keys live in the per-device doc
-   * `devices/<name>/agents.yaml` `config:` block, layered over the fleet-wide
-   * defaults in {@link Meta.fleet} (`fleet.defaults.config`).
-   */
+  /** User-scope config block (`config:` in central agents.yaml), synced fleet-wide; device-scope
+   * keys live in the per-device doc over `fleet.defaults.config`. Keys: lib/device-config.ts. */
   config?: Record<string, unknown>;
-  /**
-   * Routine names enabled on this machine. In memory this stays distinct from
-   * portable user config; state.ts writes it as top-level `routines:` in
-   * `~/.agents/devices/<machine>/agents.yaml`. Presence in the list is the whole
-   * activation state: absent means disabled on this device.
-   */
+  /** Routine names enabled on this machine (top-level `routines:` in the device doc); absent means
+   * disabled. */
   deviceRoutines?: string[];
-  /**
-   * Machine-local operator config — the device-scope keys whose `visibility` is
-   * `machine` (see lib/device-config.ts). state.ts writes it as `config:` inside
-   * `~/.agents/devices/<machine>/agents.yaml`, which is gitignored, so it never
-   * reaches the fleet-shared agents.yaml.
-   *
-   * These are the keys nothing off-box reads. Keeping them out of the shared file
-   * is both a churn fix (13 machines were writing one tracked path) and a
-   * security one: `browser.remote-control` gates whether OTHER machines may drive
-   * this box's browser, so syncing one box's opt-in to the rest was wrong.
-   */
+  /** Machine-local operator config (device-scope keys with `visibility` `machine`), in the
+   * gitignored device doc. Keeps them out of the shared file: 13 machines churned one path, and
+   * syncing `browser.remote-control` opt-in was wrong. */
   deviceConfig?: Record<string, unknown>;
-  /**
-   * Agent-host registry keyed by host name (the `--device` dispatch overlay). Portable user
-   * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
-   * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and
-   * are never copied. `inline` hosts carry their own address/user.
-   */
+  /** Agent-host registry keyed by host name (the `--device` overlay), synced via `agents repo
+   * push/pull`. `ssh-config` hosts are only an overlay (connection details stay in ~/.ssh/config);
+   * `inline` carry their own. */
   hosts?: Record<string, HostEntry>;
-  /**
-   * Device-scoped agent-host registry, written as `hosts:` in
-   * `~/.agents/devices/<machine>/agents.yaml` (PHNX-3315). Locally-discovered
-   * SSH hosts and inline registrations land here so one box's enrollment no
-   * longer rewrites the fleet-shared `hosts:` map (the source of pull conflicts).
-   * The effective host view is the union across every device doc (plus any
-   * lingering central legacy entries); only this machine writes this key.
-   */
+  /** Device-scoped host registry (`hosts:` in the device doc, PHNX-3315), so one box's enrollment no
+   * longer rewrites the shared `hosts:` map. The effective view is the union; only this machine
+   * writes it. */
   deviceHosts?: Record<string, HostEntry>;
-  /**
-   * Declarative fleet profile (`agents apply` / `ag apply`). Additive to the
-   * schema — project `agents:` version-pins are untouched. Declares which agents
-   * every device should have, which config to sync, and how login propagates.
-   * `fleet.defaults.config` is also the fleet-wide DEFAULTS layer of the
-   * device-config store (`agents devices config --fleet <key> <value>`) — read
-   * between the built-in default and the per-device doc's `config:` block.
-   * Full shape in `lib/fleet/types.ts` (FleetManifest).
-   */
+  /** Declarative fleet profile (`agents apply`): agents per device, config to sync, login
+   * propagation. `fleet.defaults.config` is also the fleet-wide defaults layer of the device-config
+   * store. */
   fleet?: import('./fleet/types.js').FleetManifest;
-  /**
-   * Device-scoped slice of {@link Meta.fleet}: THIS box's own discovery
-   * decisions and dismissals, written as `fleet:` in
-   * `~/.agents/devices/<machine>/agents.yaml` (PHNX-3315). Each box records only
-   * its own choices here, so N boxes no longer rewrite one shared
-   * `fleet.discovery`/`fleet.ignored` map (the guaranteed pull conflict). The
-   * effective fleet view is computed as a UNION across every device doc (plus
-   * lingering central legacy) at read time; only this machine writes this key.
-   */
+  /** Device-scoped slice of `Meta.fleet`: this box's discovery decisions and dismissals (PHNX-3315),
+   * so N boxes stop rewriting one shared map. Unioned at read time; only this machine writes it. */
   deviceFleet?: {
     discovery?: Record<string, 'approved' | 'ignored'>;
     ignored?: import('./fleet/types.js').IgnoredDeviceEntry[];
   };
-  /** Legacy artifact-share endpoint (Cloudflare R2 + Worker), synced fleet-wide
-   * via `agents repo push/pull`. Artifact sharing moved to the standalone
-   * `artifacts` CLI (PHNX-3992), so agents-cli no longer writes this — but
-   * `shareRuntimeEnv` (`lib/share-runtime.ts`) still reads `baseUrl` to decide
-   * whether to inject the `share` bundle's write token into spawned agents. The
-   * write token lives in the `share` secrets bundle, not here. */
+  /** Legacy artifact-share endpoint, fleet-synced; sharing moved to the `artifacts` CLI (PHNX-3992).
+   * `shareRuntimeEnv` still reads `baseUrl` to decide whether to inject the `share` write token. */
   share?: {
     baseUrl?: string;
     accountId?: string;
@@ -1257,14 +879,9 @@ export interface Meta {
      * (legacy; a config from before this field existed has no hash). */
     templateHash?: string;
   };
-  /**
-   * Owner/channel notification config for `agents send`.
-   * `owner` is the address expanded by `--to owner` and by `agents send --to owner`
-   * (channel + target). `transports` maps a user-facing channel name to the
-   * provider that actually delivers it — explicit, one provider per channel,
-   * no fallback. Omitted keys default to name-identity (channel `slack` ->
-   * provider `slack`).
-   */
+  /** Owner/channel notification config for `agents send`: `owner` is what `--to owner` expands to;
+   * `transports` maps a channel to its one provider (no fallback; omitted keys default to same
+   * name). */
   notify?: {
     owner?: { channel: string; to: string };
     transports?: Record<string, string>;
@@ -1316,10 +933,8 @@ export interface HumanOwner {
   policy?: HumanPolicy;
 }
 
-/**
- * Versioned humans.yaml config — owner identity, channels, and notification
- * policy. Written to ~/.agents/humans.yaml by `migrateHumans()`.
- */
+/** Versioned humans.yaml (owner identity, channels, notification policy), written by
+ * `migrateHumans()`. */
 export interface HumansConfig {
   /** Schema version. Always 1. */
   version: 1;
@@ -1349,49 +964,22 @@ export interface BrowserProfileConfig {
   browser: 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'firefox' | 'custom';
   binary?: string;
   electron?: boolean;
-  /**
-   * Selects which CDP page target represents the visible UI when the
-   * browser/app exposes more than one. Format: `url:<substring>` or
-   * `title:<substring>`. Recommended for Electron apps that ship hidden
-   * helper WebContents (background services, OAuth windows, file://
-   * shells); without an explicit filter the connector falls back to a
-   * skip-invisible heuristic before picking the first page target.
-   * Only consulted when `electron` is true.
-   */
+  /** Selects the visible CDP page target (`url:<substring>` or `title:<substring>`); recommended for
+   * Electron apps with hidden helper WebContents. Used only when `electron` is true. */
   targetFilter?: string;
-  /**
-   * Endpoint presets. Accepts two shapes for backward compatibility:
-   *   - Legacy: `string[]` of CDP URLs; first entry is the default.
-   *   - New:    `{ [presetName]: { target, binary?, targetFilter? } }`.
-   */
+  /** Endpoint presets: legacy `string[]` of CDP URLs (first is default), or `{ [presetName]: {
+   * target, binary?, targetFilter? } }`. */
   endpoints: string[] | Record<string, { target: string; binary?: string; targetFilter?: string }>;
   /** Preset name to use when `--endpoint` is not passed to `start`. */
   defaultEndpoint?: string;
-  /**
-   * How `agents browser` obtains a live browser for this profile (PHNX-3967):
-   *   - `launch` (default when absent): agents-cli spawns the browser itself
-   *     under a managed `--user-data-dir` when nothing is serving CDP on the port.
-   *   - `attach-only`: agents-cli NEVER spawns a rival window. It attaches to a
-   *     browser the user (or a one-time command) already started with remote
-   *     debugging, and fails loud with a relaunch hint when none is there. This
-   *     is how "enforce one window" is expressed — Arc is inherently attach-only,
-   *     and a canonical signed-in Comet uses it so agents can't spawn a second,
-   *     logged-out instance. Pairs with a durable {@link userDataDir}.
-   */
+  /** How `agents browser` gets a browser (PHNX-3967): `launch` (default) spawns one under a managed
+   * `--user-data-dir`; `attach-only` never spawns a rival window and fails loud if none is running. */
   launchPolicy?: 'attach-only' | 'launch';
-  /**
-   * Absolute durable `--user-data-dir` for this profile's browser (PHNX-3967).
-   * When absent, an attach-only profile resolves a default durable dir outside
-   * `~/.agents/.cache` (`getBrowserDurableDir()`), so a one-time sign-in survives
-   * quit+relaunch and `profiles remove`'s cache sweep. Also the value the
-   * ownership guard compares a running instance against to reject a port-squatter.
-   */
+  /** Absolute durable `--user-data-dir` (PHNX-3967); absent, attach-only uses a default outside
+   * `~/.agents/.cache` so sign-in survives. Also what the guard compares to reject a port-squatter. */
   userDataDir?: string;
-  /**
-   * Chromium profile directory inside {@link userDataDir} (`Default`,
-   * `Profile 1`, ...) for a profile discovered from the browser's own store
-   * (PHNX-4042). Launch passes it as `--profile-directory`.
-   */
+  /** Chromium profile dir inside `userDataDir` (`Default`, `Profile 1`) from the browser's own store
+   * (PHNX-4042); passed as `--profile-directory`. */
   profileDirectory?: string;
   chrome?: {
     headless?: boolean;

@@ -1,36 +1,6 @@
-/**
- * Daemon harness-update service (PHNX-3940).
- *
- * Runs the automatic-update pass (`installations/update-runtime.ts`) on a
- * schedule so a managed, transactional npm harness (Claude, Codex, …) stays
- * current with no operator action, subject to the `updates.auto` /
- * `updates.<agent>.auto` switches and each installation's own update policy.
- *
- * The pass itself does real, synchronous filesystem work per installation —
- * staging an npm install into a sibling directory, `fs.renameSync`/`fs.cpSync`
- * swaps, `fs.rmSync` cleanup — potentially across several installations in one
- * tick. Running that inline on the daemon's own event loop would stall every
- * other service (browser IPC, the scheduler, monitors) for the
- * duration, the same class of problem `self-update-service.ts` solves for the
- * CLI's OWN upgrade by installing into a fresh process it then exits into.
- * Here there is no "exit and let the supervisor restart" option (the daemon
- * itself isn't what's being updated), so instead this tick SPAWNS a bounded
- * child (`agents __harness-update-run`) over a Node IPC channel and only waits
- * on that child — every sync fs call happens in the child's own event loop /
- * thread pool, never this one.
- *
- * Cancellation is COOPERATIVE and cross-platform (PHNX-3940). On the tick's
- * deadline or daemon shutdown — both delivered as the supervisor aborting the
- * tick's `AbortSignal` — the daemon does NOT force-kill the child (execFile's
- * `timeout`/`signal` would, unconditionally on Windows, mid-swap). It SENDS the
- * child an IPC cancel message; the child stops at its next safe boundary (see
- * `installations/update-cancellation.ts` + `update.ts`'s `shouldCancel`) and
- * exits on its own, and the daemon waits for that TRUE exit. A wedged child that
- * ignores the request past a generous grace — never the normal path, since the
- * child's own npm/probe work is bounded — is force-reaped only as an
- * orphan-prevention backstop, and that abnormal case is reported as a failure,
- * never as a clean pass.
- */
+/** Daemon harness-update service (PHNX-3940): runs the automatic-update pass
+ * (`installations/update-runtime.ts`) on a schedule so managed npm harnesses stay current, per
+ * `updates.auto` and policy. Sync fs work runs in a child, cancelled via IPC, not killed mid-swap. */
 
 import { spawn, type ChildProcess } from 'child_process';
 import { BasePeriodicService, type DaemonContext } from './service.js';
@@ -40,24 +10,15 @@ import { HARNESS_UPDATE_CHILD_CMD, cancelMessage } from '../installations/update
 
 /** Runs every 15 minutes — a design decision, not an externally-fixed cadence (PHNX-3940). */
 const HARNESS_UPDATE_TICK_MS = 15 * 60_000;
-/**
- * Cancellation deadline per tick. A real pass can touch several installations, each an npm
- * install (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch
- * probes; 10 minutes leaves headroom for a handful of harnesses in one pass
- * while staying comfortably under the 15-minute cadence above.
- */
+/** Cancellation deadline per tick. A pass can touch several installations, each an npm install
+ * (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch probes; 10 minutes leaves
+ * headroom while staying under the 15-minute cadence. */
 const HARNESS_UPDATE_DEADLINE_MS = 10 * 60_000;
 /** First tick fires 60 seconds after daemon boot — long enough for shims/PATH to settle, short enough that a fresh box doesn't wait a full interval for its first check. */
 const HARNESS_UPDATE_STARTUP_DELAY_MS = 60_000;
-/**
- * How long to wait for the child to exit AFTER a cooperative cancel before
- * force-reaping it as an orphan backstop. The child's own work is bounded — one
- * npm install (`INSTALL_TIMEOUT_MS` = 120s in strategies.ts) plus two launch
- * probes, then a fast synchronous swap — so a healthy child stops well within
- * this window. A slow staging/postinstall can also exhaust it, but a delivered
- * cancel prevents that stage from committing. The backstop kills the process
- * group on POSIX and the worker on Windows; the tick reports a failure.
- */
+/** How long to wait for the child to exit after a cooperative cancel before force-reaping it. Its
+ * work is bounded (one npm install of 120s plus two probes, then a fast swap), so a healthy child
+ * stops well inside this. The backstop kills the process group on POSIX and the worker on Windows. */
 const HARNESS_UPDATE_CANCEL_GRACE_MS = 3 * 60_000;
 
 interface HarnessUpdateOutcome {
@@ -76,11 +37,8 @@ export interface CooperativeChildResult {
   cancelled: boolean;
 }
 
-/**
- * Dependency seam so tests can assert the tick's decision/spawn logic without
- * actually installing anything. Production always uses
- * {@link defaultHarnessUpdateDeps}.
- */
+/** Dependency seam so tests can assert the tick's decision/spawn logic without installing anything.
+ * Production uses {@link defaultHarnessUpdateDeps}. */
 export interface HarnessUpdateDeps {
   runAutoUpdatePass(signal: AbortSignal): Promise<CooperativeChildResult>;
 }
@@ -94,22 +52,9 @@ function defaultHarnessUpdateDeps(): HarnessUpdateDeps {
   };
 }
 
-/**
- * Spawn `command args` as a child over a Node IPC channel and drive it to a TRUE
- * completion, requesting a cooperative stop (never a kill) when `signal` aborts —
- * the supervisor aborts it on the tick's deadline OR on daemon shutdown.
- *
- * Resolves with the child's real exit code and captured output. Rejects only on:
- *   - a spawn failure (missing binary) — a genuine service failure; and
- *   - the child having to be force-reaped past the grace window, or dying to an
- *     external signal — never a clean pass, so the tick logs it as ERROR instead
- *     of reading a killed process as a completed update.
- *
- * A non-zero exit with no kill is resolved (not rejected): the pass exits
- * non-zero for a per-installation vendor error, which is a normal tick outcome.
- *
- * Exported for the real-subprocess cancellation tests.
- */
+/** Spawn `command args` over a Node IPC channel and drive it to a TRUE completion, requesting a
+ * cooperative stop (never a kill) when `signal` aborts (tick deadline or daemon shutdown).
+ * Resolves with the real exit code and output; rejects on spawn failure or a force-reap. */
 export function driveCooperativeChild(
   command: string,
   args: string[],
@@ -160,9 +105,8 @@ export function driveCooperativeChild(
     function requestCancel(): void {
       if (cancelRequested || settled) return;
       cancelRequested = true;
-      // Cooperative: a message the child reads at its next safe boundary. NEVER a
-      // signal — that would interrupt a swap (and is fatal on Windows, which has
-      // no cooperative SIGTERM). If the channel is already gone the child's own
+      // Cooperative: a message the child reads at its next safe boundary, never a signal (it would
+      // interrupt a swap and is fatal on Windows). If the channel is gone the child's own
       // `disconnect` handler cancels it, so a failed send is not an error.
       try { child.send(cancelMsg, () => {}); } catch { /* channel closed; disconnect handles it */ }
       graceTimer = setTimeout(() => {
@@ -206,11 +150,9 @@ export function driveCooperativeChild(
   });
 }
 
-/**
- * Core decision + spawn, shared so a future on-demand trigger (mirroring
- * `triggerSelfUpdateInBackground`) can reuse it. Returns rather than throws —
- * the periodic tick logs the outcome and moves on either way.
- */
+/** Core decision + spawn, shared so a future on-demand trigger (like
+ * `triggerSelfUpdateInBackground`) can reuse it. Returns rather than throws; the periodic tick
+ * logs the outcome and moves on. */
 export async function runHarnessUpdateTick(
   ctx: DaemonContext,
   signal: AbortSignal,

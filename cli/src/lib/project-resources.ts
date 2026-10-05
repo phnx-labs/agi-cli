@@ -58,18 +58,9 @@ export function syncProjectResourcesToAgent(
 
   if (next.size > 0 || manifest) {
     writeProjectManifest(agentRoot, Array.from(next).sort());
-    // The sync is a code generator: the per-harness dir it writes into the
-    // project tree (.factory/, .opencode/, …) is a regenerable copy of
-    // .agents/{commands,skills,…}, refreshed on every launch. Left untracked it
-    // dirties `git status` and can block `git merge`/`checkout` when a stray
-    // commit of the same path collides. So the generator owns its ignore rule:
-    // reconcile a per-agent marker block listing exactly the paths it manages.
-    // That block lives in `.git/info/exclude` — git's per-clone, uncommitted
-    // ignore file — NOT the tracked `.gitignore`: these entries are never
-    // committed upstream, so writing them into `.gitignore` left every launch
-    // with a permanent `M .gitignore` that blocked `git pull` (PHNX-3718).
-    // Passing the manifest set (empty when a sync clears a harness) also prunes
-    // the block. See PHNX-3717 for the self-managed-ignore feature.
+    // The sync is a code generator whose per-harness dir would dirty `git status`, so it owns an
+    // ignore block in `.git/info/exclude`, not the tracked `.gitignore`, which left a permanent `M
+    // .gitignore` blocking `git pull` (PHNX-3718, PHNX-3717).
     reconcileManagedIgnore(projectRoot, agent, agentRoot, Array.from(next).sort());
   }
 
@@ -104,21 +95,9 @@ function gitignoreMarkers(agent: AgentId): { begin: string; end: string } {
   };
 }
 
-/**
- * Turn the manifest's managed paths (relative to agentRoot) into anchored,
- * POSIX, `referenceRoot`-relative ignore entries. `referenceRoot` is the
- * directory the anchored `/…` patterns resolve against — the git worktree root
- * for a `.git/info/exclude` block, since git anchors info/exclude patterns at
- * the top of the working tree (not at the harness dir). Two guards keep it
- * honest:
- *   - drop any path that escapes the harness config dir (e.g. grok writes
- *     commands back into the tracked `.agents/` tree via a `../` subdir —
- *     ignoring that would hide tracked source; separate bug, PHNX-3718);
- *   - the manifest only ever holds paths the sync itself generated (pre-existing
- *     user/committed files are skipped and never recorded), so ignoring exactly
- *     these never masks a hand-authored or committed file (e.g. a repo that
- *     commits its own `.claude/CLAUDE.md` keeps it — it is not in the manifest).
- */
+/** Turn the manifest's managed paths into anchored POSIX ignore entries relative to `referenceRoot`
+ * (the worktree root for info/exclude). Drops paths escaping the harness dir (grok, PHNX-3718); the
+ * manifest holds only sync-generated paths, so committed files are never masked. */
 export function managedGitignoreEntries(agentRoot: string, referenceRoot: string, managed: string[]): string[] {
   const root = path.resolve(agentRoot);
   const entries = new Set<string>();
@@ -142,21 +121,9 @@ interface GitExcludeTarget {
   worktreeRoot: string;
 }
 
-/**
- * Ask git where the local, per-clone ignore file lives and where the worktree
- * top is, resolved robustly for every layout by delegating to git itself:
- *   - normal repo → `<root>/.git/info/exclude`;
- *   - monorepo subdir → the same file even when `.git` is several levels up
- *     (`projectRoot`, the parent of `.agents/`, is not the git root);
- *   - linked worktree / submodule → `.git` is a FILE (`gitdir: …`), and
- *     `--git-path info/exclude` resolves to the shared COMMON dir so the block
- *     applies across every worktree.
- * `--path-format=absolute` forces absolute paths regardless of the `-C` cwd.
- * One `git rev-parse` yields both paths (exclude path first, worktree root
- * second), so the launch path spawns git ONCE, not twice.
- * Returns null when `dir` is not inside a git repo (git exits non-zero), which
- * fails the feature open (no-op) exactly like the old in-tree check did.
- */
+/** Ask git (one `rev-parse`) for the per-clone ignore file and worktree top: normal repo, monorepo
+ * subdir, or linked worktree/submodule (shared common dir via `--git-path info/exclude`).
+ * `--path-format=absolute` forces absolute paths. Null outside a git repo (fails open). */
 function resolveGitExcludeTarget(dir: string): GitExcludeTarget | null {
   try {
     const out = execFileSync(
@@ -166,11 +133,9 @@ function resolveGitExcludeTarget(dir: string): GitExcludeTarget | null {
     );
     const [excludePath, worktreeRoot] = out.split('\n').map((l) => l.trim());
     if (!excludePath || !worktreeRoot) return null;
-    // Fail open on anything that isn't a clean pair of ABSOLUTE paths. A git
-    // older than 2.31 (predates `--path-format`) echoes the unrecognized flag
-    // back on stdout instead of erroring, which would otherwise shift the parse
-    // and have mkdirSync create a stray `--path-format=absolute` dir. The
-    // absolute-path check turns that into a clean no-op.
+    // Fail open unless both are ABSOLUTE paths: git older than 2.31 echoes the unknown
+    // `--path-format` flag on stdout, shifting the parse so mkdirSync creates a stray
+    // `--path-format=absolute` dir.
     if (!path.isAbsolute(excludePath) || !path.isAbsolute(worktreeRoot)) return null;
     return { excludePath, worktreeRoot };
   } catch {
@@ -190,23 +155,9 @@ function isTrackedByGit(dir: string, absPath: string): boolean {
   }
 }
 
-/**
- * Apply this agent's managed block to ignore-file content, IN PLACE — used both
- * to write the block into `.git/info/exclude` and to strip a leftover block from
- * a legacy tracked `.gitignore` (entries `[]` prunes).
- *
- * In-place replacement (not strip-then-append) is load-bearing: appending would
- * move this agent's block behind every other agent's block on each resync, so in
- * a repo synced by 2+ harnesses whichever one launched last would get bumped to
- * the end — rewriting `.gitignore` on every launch forever. Replacing the block
- * where it already sits keeps the file byte-stable once written.
- *
- * Returns the new content, `content` unchanged when there is nothing to do, or
- * `null` when the block is unparseable (a begin marker with no matching end —
- * hand-truncated or a botched merge). In that case we refuse to edit rather than
- * treat everything to EOF as the block and silently delete the user's rules
- * below the orphaned marker.
- */
+/** Apply this agent's managed block to ignore-file content IN PLACE (also strips a legacy block from
+ * `.gitignore` when entries is `[]`). Replace, not append: appending would move the block behind
+ * other agents' on each resync and rewrite the file every launch. Null for an unparseable block. */
 function applyManagedBlock(content: string, begin: string, end: string, entries: string[]): string | null {
   const lines = content.split('\n');
   const bi = lines.indexOf(begin);
@@ -216,11 +167,9 @@ function applyManagedBlock(content: string, begin: string, end: string, entries:
     if (entries.length > 0) {
       return [...lines.slice(0, bi), begin, ...entries, end, ...lines.slice(ei + 1)].join('\n');
     }
-    // Prune the block, tidying the blank lines that hugged it. Unreached on the
-    // reconcileManagedIgnore write path (its entries always include the manifest,
-    // so entries.length is never 0 there), but the load-bearing case for
-    // stripLegacyManagedGitignoreBlock, which calls with entries=[] to migrate a
-    // leftover block out of the tracked .gitignore.
+    // Prune the block, tidying hugging blank lines. Unreached on the reconcileManagedIgnore path
+    // (entries include the manifest), but load-bearing for stripLegacyManagedGitignoreBlock, which
+    // passes entries=[].
     const before = lines.slice(0, bi);
     const after = lines.slice(ei + 1);
     while (before.length && before[before.length - 1].trim() === '') before.pop();
@@ -234,25 +183,9 @@ function applyManagedBlock(content: string, begin: string, end: string, entries:
   return body.length > 0 ? `${body}\n\n${block}\n` : `${block}\n`;
 }
 
-/**
- * Reconcile a per-agent managed block in `.git/info/exclude` so the generated
- * per-harness resource dir never shows as untracked dirt — WITHOUT dirtying the
- * tracked `.gitignore`. Idempotent and convergent: replaces the block in place
- * and writes only when the content actually changes, so the launch hot path does
- * not churn the file (or its watchers) every run — even in a project synced by
- * several harnesses. When a sync clears a harness's resources the block does not
- * vanish: it shrinks to the lone `.agents-managed.json` entry (that file still
- * sits in the harness dir and must stay ignored), so the block is only ever
- * fully pruned by hand, never via this call path. Fails open (no-op) outside a
- * git working tree.
- *
- * Also self-heals repos dirtied by the previous behavior: PHNX-3717 wrote these
- * blocks into `<projectRoot>/.gitignore`, which is never committed upstream, so
- * every launch left a permanent `M .gitignore` that blocked `git pull`
- * (PHNX-3718). `stripLegacyManagedGitignoreBlock` removes this agent's leftover
- * block from that tracked file on the next launch, cleaning the diff instead of
- * stranding it.
- */
+/** Reconcile a per-agent managed block in `.git/info/exclude` so the generated harness dir never
+ * shows untracked, without dirtying `.gitignore`. Idempotent; written only on change; fails open
+ * outside git. Self-heals PHNX-3717's `.gitignore` blocks (PHNX-3718). */
 function reconcileManagedIgnore(
   projectRoot: string,
   agent: AgentId,
@@ -267,12 +200,9 @@ function reconcileManagedIgnore(
   if (!target) return; // not a git repo — fail open
 
   const { begin, end } = gitignoreMarkers(agent);
-  // Ignore the manifest marker file too, not just the synced resources: the
-  // sync always writes `<agentRoot>/.agents-managed.json`, so without this the
-  // harness dir still shows as untracked in `git status` on the strength of that
-  // one file (defeating the whole point). It lives at agentRoot, so it resolves
-  // through the same anchoring + escape guard as any managed path. Anchored to
-  // the worktree root, since info/exclude patterns resolve against the tree top.
+  // Ignore the manifest marker file too: the sync always writes `<agentRoot>/.agents-managed.json`,
+  // which otherwise keeps the harness dir untracked. Same anchoring and escape guard, anchored to
+  // the worktree root.
   const entries = managedGitignoreEntries(agentRoot, target.worktreeRoot, [MANIFEST_FILE, ...managed]);
 
   let original = '';
@@ -290,15 +220,9 @@ function reconcileManagedIgnore(
   fs.renameSync(tmp, target.excludePath);
 }
 
-/**
- * Remove this agent's leftover managed block from a tracked `<projectRoot>/
- * .gitignore` written by the pre-PHNX-3718 behavior. Strips ONLY the fenced
- * block (leaving every hand-written rule untouched), never creates the file,
- * and never touches a `.gitignore` that carries no block of ours. If stripping
- * empties a file we created (its only content was our block), the empty file is
- * removed when git does not track it — an empty untracked `.gitignore` would
- * still read as `?? .gitignore` dirt, the very thing this migration clears.
- */
+/** Remove this agent's leftover managed block from a tracked `.gitignore` written before PHNX-3718.
+ * Strips ONLY the fenced block, never creates the file, and removes it if that empties an untracked
+ * file we created (it would read as `?? .gitignore`). */
 function stripLegacyManagedGitignoreBlock(projectRoot: string, agent: AgentId): void {
   const gitignorePath = path.join(projectRoot, '.gitignore');
   let original: string;
@@ -327,28 +251,9 @@ function stripLegacyManagedGitignoreBlock(projectRoot: string, agent: AgentId): 
 const DETRACK_BEGIN = '# BEGIN agents-cli detracked (managed)';
 const DETRACK_END = '# END agents-cli detracked (managed)';
 
-/**
- * Stop git tracking `relPath` in the DotAgents clone at `repoDir` and keep it
- * locally ignored — the PHNX-3718 pattern, applied to a shared config file the
- * user repo should no longer carry (e.g. the duplicated CHANGELOG.md; the
- * canonical copy ships in `.system/`).
- *
- * The ignore entry goes in `.git/info/exclude`, NOT `.gitignore`: a tracked
- * `.gitignore` block would itself show as `M .gitignore` on every clone and
- * reintroduce the exact dirty-tree-blocks-pull failure this whole effort exists
- * to kill. info/exclude is per-clone and never committed, so the working tree
- * stays clean at rest.
- *
- * Idempotent and convergent: when the path is still tracked it is removed from
- * the index (the working file is kept) AND that removal is committed — a bare
- * `git rm --cached` would leave a staged deletion, which is itself a dirty tree
- * that re-arms the very pull trip this exists to prevent. The single removal
- * commit also propagates the de-track fleet-wide: peers pull it and converge,
- * their next run finding nothing to untrack. The exclude block is rewritten in
- * place, unioning `relPath` with any entries already there, so a second run is a
- * no-op. Fails open outside a git repo. Returns whether the path was untracked
- * by this call (a signal for the caller's one-time log).
- */
+/** Stop tracking `relPath` in the DotAgents clone and ignore it via `.git/info/exclude`, not
+ * `.gitignore` (PHNX-3718). The `git rm --cached` is COMMITTED (a bare one leaves a dirty staged
+ * deletion) so peers converge. Idempotent; fails open outside git. */
 export function detrackViaGitExclude(repoDir: string, relPath: string): boolean {
   const target = resolveGitExcludeTarget(repoDir);
   if (!target) return false; // not a git repo — nothing to de-track or ignore.
@@ -357,15 +262,13 @@ export function detrackViaGitExclude(repoDir: string, relPath: string): boolean 
   const abs = path.join(repoDir, relPath);
   if (isTrackedByGit(repoDir, abs)) {
     try {
-      // Unstage anything else first so the removal commit records ONLY this
-      // path's deletion — a mixed reset (index only, worktree untouched). At
-      // migration time the index is already clean; this just makes the scope
-      // guaranteed rather than assumed.
+      // Unstage anything else first so the removal commit records ONLY this path's deletion (mixed
+      // reset: index only). The index is normally clean at migration time; this guarantees the
+      // scope.
       execFileSync('git', ['-C', repoDir, 'reset', '-q'], { stdio: ['ignore', 'ignore', 'ignore'] });
-      // --cached keeps the working file; the commit records the removal so the
-      // tree is clean at rest and the de-track converges across the fleet. A
-      // pathspec commit would re-read the still-present worktree file and undo
-      // the removal, so the commit takes the staged index (just this deletion).
+      // --cached keeps the working file; the commit records the removal so the de-track converges
+      // across the fleet. A pathspec commit would re-read the still-present worktree file and undo
+      // it, so the commit takes the staged index.
       execFileSync('git', ['-C', repoDir, 'rm', '--cached', '--quiet', '--', relPath], {
         stdio: ['ignore', 'ignore', 'ignore'],
       });
@@ -377,10 +280,9 @@ export function detrackViaGitExclude(repoDir: string, relPath: string): boolean 
       );
       untrackedNow = true;
     } catch {
-      // rm/commit can fail (e.g. mid-rebase, index.lock); the ignore entry below
-      // still lands and the next migration run retries the untrack. Fail open —
-      // but roll back a staged-but-uncommitted removal so we never LEAVE a dirty
-      // staged deletion behind (which would re-arm the pull trip).
+      // rm/commit can fail (mid-rebase, index.lock); the ignore entry below still lands and the
+      // next run retries. Fail open, but roll back a staged-uncommitted removal so no dirty staged
+      // deletion is left behind.
       try {
         execFileSync('git', ['-C', repoDir, 'reset', '-q', '--', relPath], {
           stdio: ['ignore', 'ignore', 'ignore'],
@@ -464,15 +366,9 @@ function projectEntries(projectAgentsDir: string, kind: ProjectKind): fs.Dirent[
   }
 }
 
-/**
- * Manifest paths are persisted to `.agents-managed.json`, which lives in the
- * version-controlled project dir and therefore travels between machines. Store
- * them POSIX-style: `path.join` yields `skills\myskill` on Windows, and a
- * manifest carrying that would silently fail to match — and so fail to clean up
- * its managed files — when the same project is synced on macOS or Linux.
- * Normalizing on both write and read also repairs manifests written by earlier
- * Windows builds.
- */
+/** Manifest paths persist in `.agents-managed.json` in the version-controlled project dir, so store
+ * them POSIX-style: `path.join` yields `skills\myskill` on Windows, which wouldn't match on
+ * macOS/Linux. Normalizing on write and read repairs old manifests. */
 function toPosixRel(rel: string): string {
   return rel.replace(/\\/g, '/');
 }
@@ -492,13 +388,9 @@ function skip(dest: string, projectRoot: string, result: ProjectResourceSyncResu
   result.skipped.push(path.relative(projectRoot, dest));
 }
 
-/**
- * One human line for the files a project sync left alone because you already
- * wrote them. This is the normal steady state — every sync of a project whose
- * `.claude/commands/` you hand-authored hits it — so it is a single grouped
- * line, not one wrapped warning per file, and it says "yours" rather than the
- * internal "user-owned". Returns null when nothing was skipped.
- */
+/** One human line for files a sync left alone because you wrote them. This is the normal steady
+ * state, so it is a single grouped line, not a warning per file, saying "yours" rather than
+ * "user-owned". Null when nothing was skipped. */
 export function formatKeptProjectResources(skipped: string[]): string | null {
   if (skipped.length === 0) return null;
   const rels = [...skipped].sort((a, b) => a.localeCompare(b)).map(toPosixRel);

@@ -1,18 +1,6 @@
-/**
- * Per-box hosted webhook receivers: config + daemon host (RUSH-2548).
- *
- * `~/.agents/daemon/webhooks.yaml` declares which signed webhook receivers THIS
- * box hosts — bundle, local port, rate limit, and an optional public Tailscale
- * Funnel port. The daemon's `webhook-receiver` service reads it and binds one
- * receiver per entry, drawing each receiver's signing secret through the
- * standalone `secrets` CLI (an agentOnly read via secrets-client.ts — no
- * `AGENTS_SECRETS_PASSPHRASE`, no `nohup`). An absent or empty file hosts
- * nothing, so an unconfigured box binds nothing.
- *
- * This is per-box operational state (a public receiver runs on exactly one box),
- * so it is deliberately NOT part of the fleet-synced device config — it mirrors
- * `services.yaml` / daemon-services.ts, not `agents config`.
- */
+/** Per-box hosted webhook receivers (RUSH-2548): `~/.agents/daemon/webhooks.yaml` declares the
+ * signed receivers this box hosts (bundle, port, rate limit, optional Funnel port). The
+ * `webhook-receiver` service binds one per entry, reading secrets via the `secrets` CLI. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -75,10 +63,8 @@ function coerceReceiver(item: unknown): HostedReceiverConfig | null {
   return rc;
 }
 
-/**
- * Read the hosted-receivers config. A missing or malformed file yields an empty
- * receiver list — never throws — so a box with no config hosts nothing.
- */
+/** Read the hosted-receivers config; a missing or malformed file yields an empty list, never
+ * throws. */
 export function readDaemonWebhooksConfig(): DaemonWebhooksConfig {
   try {
     const raw = fs.readFileSync(getDaemonWebhooksConfigPath(), 'utf-8');
@@ -103,11 +89,8 @@ export function hostedReceiverPort(receiver: HostedReceiverConfig): number {
   return receiver.port ?? DEFAULT_WEBHOOK_PORT;
 }
 
-/**
- * Declare a receiver on this box, replacing any existing entry on the same port.
- * Port is the identity because two receivers cannot bind one port — a second
- * `add` on a port is an edit, never a silently ignored duplicate.
- */
+/** Declare a receiver, replacing any entry on the same port. Port is the identity since two
+ * receivers can't bind one port, so a second `add` is an edit, never a silently ignored duplicate. */
 export function addHostedReceiver(receiver: HostedReceiverConfig): DaemonWebhooksConfig {
   const port = hostedReceiverPort(receiver);
   const existing = readDaemonWebhooksConfig().receivers.filter((r) => hostedReceiverPort(r) !== port);
@@ -116,12 +99,9 @@ export function addHostedReceiver(receiver: HostedReceiverConfig): DaemonWebhook
   return next;
 }
 
-/**
- * Drop the receiver bound to `port`. Returns the removed entry, or null when
- * nothing was declared there. The caller is responsible for taking down any
- * public Funnel the removed entry declared — leaving it up would keep a public
- * `https://<host>.ts.net` route pointed at a port nothing serves.
- */
+/** Drop the receiver bound to `port`; returns the removed entry or null. The caller must take down
+ * any public Funnel it declared, else a public `https://<host>.ts.net` route points at a port
+ * nothing serves. */
 export function removeHostedReceiver(port: number): HostedReceiverConfig | null {
   const { receivers } = readDaemonWebhooksConfig();
   const removed = receivers.find((r) => hostedReceiverPort(r) === port);
@@ -130,13 +110,9 @@ export function removeHostedReceiver(port: number): HostedReceiverConfig | null 
   return removed;
 }
 
-/**
- * Resolve a receiver's signing secrets from its bundle. Reads `agentOnly` (no
- * Touch ID — the daemon is a background service, SEC-13): a broker-held or
- * file-store bundle resolves silently; a locked bundle THROWS the actionable
- * unlock message, which fails the receiver LOUD rather than binding with no
- * verifiable signature. Throws when neither webhook secret is present.
- */
+/** Resolve a receiver's signing secrets from its bundle via `agentOnly` read (no Touch ID; SEC-13).
+ * A locked bundle throws the unlock message, failing the receiver loud rather than binding without
+ * verifiable signatures. Throws if neither secret is present. */
 export function resolveReceiverSecrets(bundle: string): WebhookSecrets {
   const { env } = readAndResolveBundleEnvSync(bundle, { caller: 'daemon webhook-receiver', agentOnly: true });
   const secrets: WebhookSecrets = {};
@@ -178,29 +154,14 @@ function reconcileFunnel(publicPort: FunnelPort, localPort: number, log: Logger)
   });
 }
 
-/**
- * Start every receiver declared in `webhooks.yaml`. A receiver that cannot start
- * — an unreadable secret (locked bundle, no webhook secret) or a failed bind
- * (the port is already taken by a foreground `agents webhooks serve`, another
- * daemon, or anything else) — is skipped with a loud WARN and does NOT take the
- * others, or the daemon, down. Returns a handle that stops them all.
- *
- * This is async because a bind failure is only observable asynchronously:
- * `server.listen()` surfaces EADDRINUSE as an `'error'` event, so a `try/catch`
- * around the start call never sees it and the event reaches the process-level
- * `uncaughtException` handler (`index.ts`), which exits 1 for the supervisor to
- * restart — a crash loop that would take the scheduler, monitors, browser IPC,
- * and self-heal down with it. `waitForListening` is what turns that into one
- * skipped receiver.
- */
+/** Start every receiver in `webhooks.yaml`. One that can't start (unreadable secret, or a taken
+ * port) is skipped with a WARN and doesn't take down the others or the daemon. Async because
+ * EADDRINUSE arrives as an `'error'` event try/catch never sees; it once crash-looped the daemon. */
 export async function startHostedWebhookReceivers(opts: {
   log: Logger;
-  /**
-   * How a receiver's signing secrets are resolved. Defaults to
-   * `resolveReceiverSecrets` (the real secrets-client read). Injectable for the same
-   * reason `FireWebhookOptions.dispatch` is — so a test can exercise the bind
-   * path against real sockets without a machine-local secrets bundle.
-   */
+  /** How a receiver's signing secrets resolve; defaults to `resolveReceiverSecrets`. Injectable
+   * (like `FireWebhookOptions.dispatch`) so tests can exercise the bind path on real sockets
+   * without a local secrets bundle. */
   resolveSecrets?: (bundle: string) => WebhookSecrets;
 }): Promise<HostedWebhookReceivers> {
   const { log } = opts;

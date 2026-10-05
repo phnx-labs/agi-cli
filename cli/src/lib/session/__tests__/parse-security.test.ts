@@ -1,13 +1,6 @@
-/**
- * Security regressions for the session parser:
- *   1. Terminal escape sequences embedded in untrusted session content must not
- *      survive parseSession() — otherwise `agents sessions` becomes a clipboard
- *      hijack / scrollback wipe / alt-screen takeover gadget for any malicious
- *      assistant message or tool output.
- *   2. Multi-hundred-MB session blobs must trip the size cap with a clean
- *      error rather than OOMing the CLI or exceeding V8's
- *      ERR_STRING_TOO_LONG ceiling.
- */
+/** Security regressions: (1) terminal escape sequences in untrusted content must not survive
+ * parseSession() (clipboard hijack, scrollback wipe, alt-screen takeover); (2) multi-hundred-MB
+ * blobs must trip the size cap with a clean error, not OOM. */
 
 import { describe, expect, test, afterAll } from 'vitest';
 import * as fs from 'fs';

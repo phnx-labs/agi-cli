@@ -1,29 +1,6 @@
-/**
- * Resource self-heal tick as a `PeriodicService` (RUSH-3193 P3).
- *
- * Fills missing resources, repairs invalid manifests, and fast-forwards
- * pristine stale plugins. Conservative 'safe' mode: never overwrites
- * hand-edited content. Does not run when the daemon's state directory no
- * longer exists — that is the state-dir self-check's signal to shut down;
- * background maintenance must not recreate the tree while it is mid-exit.
- *
- * The pass runs in a child process (`agents __self-heal-run`, see
- * `self-heal/child.ts`), never on this event loop. `runSelfHeal` byte-compares
- * every synced resource in every version home with synchronous reads; inline,
- * one pass on a box with many version homes held the loop for over a minute,
- * every other service breached its tick deadline, the supervisor exited for an
- * OS restart, and the restarted daemon ran self-heal again 30 s later. That
- * loop pinned a core indefinitely.
- *
- * The attempt time is persisted BEFORE the child is spawned, and a tick inside
- * the interval since the last attempt is skipped. A daemon restart therefore
- * does not re-run the pass early, even if the previous attempt died with the
- * daemon.
- *
- * The first tick is still staggered by `SELF_HEAL_KICKOFF_MS` (30 s) so
- * shims/PATH settle after daemon start, through the supervisor's generic
- * `startupDelayMs` contract (`service.ts`).
- */
+/** Resource self-heal as a `PeriodicService` (RUSH-3193 P3), 'safe' mode (never overwrites edits).
+ * Runs in a child (`agents __self-heal-run`), never this loop: inline it starved every deadline.
+ * Attempt time persisted before spawn so restarts don't rerun early; skipped if state dir is gone. */
 
 import * as fsp from 'fs/promises';
 import * as path from 'path';
@@ -44,11 +21,9 @@ const SELF_HEAL_KICKOFF_MS = 30_000;
 const SELF_HEAL_CANCEL_GRACE_MS = 30_000;
 /** Records when the last pass was started, so a restart does not start another inside the interval. */
 const LAST_ATTEMPT_FILE = 'self-heal-last-attempt';
-/**
- * The supervisor's setInterval fires the next tick one interval after the PREVIOUS
- * tick started, but the stamp is written a few ms into that tick. Without slack the
- * scheduled tick reads as "recent" and the pass slips a whole interval (6h → 12h).
- */
+/** The supervisor's setInterval fires one interval after the previous tick started, but the stamp
+ * is written a few ms into it. Without slack the scheduled tick reads as recent and the pass slips
+ * a whole interval (6h to 12h). */
 const SELF_HEAL_SKIP_SLACK_MS = 5 * 60_000;
 
 /** Async `existsSync` — never a synchronous stat on the daemon tick loop (PHNX-3695). */
@@ -102,12 +77,9 @@ export type SelfHealTickOutcome =
   | { ran: false; reason: 'no-daemon-dir' | 'recent' | 'stamp-unwritable' }
   | { ran: true; exitCode: number | null; cancelled: boolean; summary?: SelfHealChildSummary };
 
-/**
- * One tick: skip when the state dir is gone or the last attempt is inside the
- * interval; otherwise record the attempt, run the child, and log what it changed.
- * A child that fails to run or exits non-zero is logged and returned, never
- * thrown, so it is not mistaken for a hung tick.
- */
+/** One tick: skip when the state dir is gone or the last attempt is inside the interval; otherwise
+ * record the attempt, run the child, and log what it changed. A child that fails or exits non-zero
+ * is logged and returned, never thrown. */
 export async function runSelfHealTick(
   ctx: DaemonContext,
   signal: AbortSignal,

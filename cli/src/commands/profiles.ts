@@ -1,11 +1,6 @@
-/**
- * Custom-harness profile helpers (shared by `agents harness`).
- *
- * Named bundles of (host CLI, endpoint, model, keychain auth) live under
- * ~/.agents/profiles/*.yml. The user-facing surface is `agents harness`
- * (add/fork/edit/list/view/remove). This module keeps the shared write helpers
- * (`addProfile`, `ensureProviderToken`, …) that harness and the run path use.
- */
+/** Custom-harness profile helpers shared by `agents harness`: named bundles of (host CLI, endpoint,
+ * model, keychain auth) in `~/.agents/profiles/*.yml`. Keeps the shared write helpers
+ * (`addProfile`, `ensureProviderToken`, ...) used by harness and the run path. */
 
 import chalk from 'chalk';
 import { readStdinSync } from '../lib/format.js';
@@ -37,11 +32,8 @@ import { isInteractiveTerminal } from './utils.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { findAccount } from '../lib/account-registry.js';
 
-/**
- * Pure helper: builds a Profile from collected wizard inputs. Extracted so the
- * shape of preset->profile mapping for the `create` wizard is unit-testable
- * without mocking @inquirer/prompts.
- */
+/** Pure helper: build a Profile from collected wizard inputs, so the preset-to-profile mapping is
+ * unit-testable without mocking @inquirer/prompts. */
 export function buildProfileFromCollection(
   name: string,
   preset: Preset,
@@ -109,43 +101,9 @@ export interface AddProfileOptions {
   fromSecrets?: string;
 }
 
-/**
- * Copy a value from an `agents secrets` bundle into a profile's own keychain
- * item — a one-time copy, not a live link. `spec` is `<bundle>` or
- * `<bundle>:<key>`; the key is required only when the bundle has more than one.
- *
- * Reads the bundle value via {@link getKeychainToken} — this pops Touch ID on
- * macOS once, for that bundle-namespaced item (`agents-cli.secrets.*`, gated by
- * the standalone's user-presence rule for `agents-cli.secrets.*` items) — then writes
- * it to `profileKeychainItem(provider)`, a plain `agents-cli.<provider>.token`
- * item. That item matches neither the `agents-cli.secrets.` nor
- * `agents-cli.bundles.` prefix, so every later read of the harness's own key is
- * silent — no repeat Touch ID prompt.
- *
- * Provider precedence: an explicit `--auth-provider` on the same call always
- * wins (freshest intent); otherwise, only when the profile already has a real
- * auth binding (`profile.auth` is set), its own `provider` (so editing an
- * already-provisioned harness rotates its existing key without repeating
- * `--auth-provider`); otherwise the bundle's own name. The `profile.auth`
- * gate matters because `profileFromHostModel`/`forkProfile` default
- * `profile.provider` to the *host* id (e.g. `claude`) even when no auth is
- * attached yet — trusting that default here would silently overwrite the
- * host's own keychain item (`agents-cli.claude.token`) on a bare `--host
- * --model --from-secrets` add with no `--auth-provider`.
- *
- * Attaches `profile.auth` when the profile has none yet (a bare `--host
- * --model` harness, or a native-host fork with no prior auth binding).
- *
- * `allowInheritedAuth` (default `true`) gates the "reuse `profile.auth`'s own
- * provider" branch above. It must be `false` when `profile` came from
- * **forking** an already-provisioned harness: `forkProfile` copies `auth` by
- * reference from the source when no `--auth-provider` override is given, so
- * `profile.auth` being set there means "the SOURCE harness's binding", not
- * "this harness's own" — trusting it would silently overwrite the source's
- * shared keychain item. Editing a harness's own already-established auth is
- * the one case where reuse is genuinely correct, so callers on that path keep
- * the default.
- */
+/** Copy a value from an `agents secrets` bundle (`<bundle>` or `<bundle>:<key>`) into the profile's
+ * own keychain item, once. Provider: `--auth-provider`, then `profile.auth`'s, else the bundle
+ * name; never the defaulted host id, which would overwrite the host's keychain item. */
 export async function applyFromSecrets(
   profile: Profile,
   spec: string,
@@ -210,14 +168,9 @@ export async function applyFromSecrets(
   }
 }
 
-/**
- * Create a profile ("custom harness"). Two paths:
- *  - `--host <agent> --model <id>`: one-shot custom harness from a host + model
- *    (no preset needed). This is what makes a model like Muse Spark a named,
- *    runnable harness.
- *  - otherwise: apply a built-in preset (existing behavior).
- * `label` only tunes the success wording (Profile vs Harness). Throws on error.
- */
+/** Create a profile (custom harness): `--host <agent> --model <id>` makes a one-shot harness (how a
+ * model like Muse Spark becomes a named, runnable harness), otherwise apply a built-in preset.
+ * `label` only tunes the success wording. Throws on error. */
 export async function addProfile(name: string, opts: AddProfileOptions, label: 'Profile' | 'Harness' = 'Profile'): Promise<void> {
   validateProfileName(name);
   const account = opts.account ? findAccount(opts.account) : null;

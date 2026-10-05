@@ -1,17 +1,6 @@
-/**
- * Canonical watchdog event log (watchdog-brain-v2).
- *
- * The Fleet renders a read-only "Watchdog activity" card from the JSONL
- * feed at ~/.agents/.cache/logs/watchdog.log. That feed was historically written
- * by the retired extension-side watchdog; now the always-on CLI watchdog owns it.
- *
- * The event SHAPE here is a deliberate, verbatim replica of the reader in
- * apps/ext/src/core/watchdogLog.ts (WatchdogEvent / WatchdogEventKind /
- * WATCHDOG_LOG_PATH / the trim cap). The repo forbids cross-app imports
- * (CLAUDE.md repo map), so the two files are kept in sync by hand — a change to
- * the Factory reader's shape must be mirrored here. There is no import between
- * them.
- */
+/** Canonical watchdog event log (watchdog-brain-v2): the JSONL feed behind the Fleet's "Watchdog
+ * activity" card. The shape is a hand-synced replica of apps/ext/src/core/watchdogLog.ts (no
+ * cross-app imports); mirror reader changes. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -115,11 +104,8 @@ export function formatEvent(ev: WatchdogEvent): string {
   return JSON.stringify(ev);
 }
 
-/**
- * Cap on retained log lines. Mirrors the Factory reader's expectation that the
- * writer trims (watchdogLog.ts trimToLast). Large enough to keep a useful
- * history, small enough to bound the file the UI polls.
- */
+/** Cap on retained log lines, mirroring the reader's expectation that the writer trims
+ * (watchdogLog.ts trimToLast); bounds the file the UI polls. */
 const WATCHDOG_LOG_MAX_LINES = 5000;
 export const WATCHDOG_TAIL_MAX_CHARS = 4096;
 
@@ -147,13 +133,9 @@ export function trimToLast(text: string, maxLines: number): string {
   return lines.slice(lines.length - maxLines).join('\n') + '\n';
 }
 
-/**
- * Append events to the log under a file lock, trimming to WATCHDOG_LOG_MAX_LINES
- * so the file never grows unbounded. Concurrent watchdog ticks share the lock so
- * their appends never interleave into a corrupt line. Best-effort: a filesystem
- * error is swallowed (the Factory card tolerates a stale/missing log), never
- * throwing into the tick.
- */
+/** Append events under a file lock and trim to WATCHDOG_LOG_MAX_LINES; concurrent ticks never
+ * interleave a line. Best-effort: filesystem errors are swallowed (the Fleet card tolerates a stale
+ * log). */
 export function appendWatchdogEvents(
   events: WatchdogEvent[],
   opts: { logPath?: string; maxLines?: number } = {},

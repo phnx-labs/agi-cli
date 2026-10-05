@@ -33,9 +33,8 @@ describe('getModelPricing normalization', () => {
 
   it('prices the Claude 5 line, which cannot fall back to Claude 4', () => {
     // Regression guard: matching is dash-bounded, so `claude-opus-5` does NOT match the
-    // `claude-opus-4` key. Before these entries existed it returned null and 478 real
-    // sessions priced to $0 — silently, because an unpriced model contributes nothing
-    // rather than erroring.
+    // `claude-opus-4` key. Before these entries existed it returned null and 478 real sessions
+    // priced to $0 silently.
     const opus5 = getModelPricing('claude-opus-5');
     expect(opus5).not.toBeNull();
     expect(opus5!.inputPerToken).toBe(0.000005);   // $5 / MTok
@@ -51,12 +50,9 @@ describe('getModelPricing normalization', () => {
   });
 
   it('keeps every Claude model family shipped to date priced', () => {
-    // The failure mode is silence: a model absent from the table prices to $0 and no
-    // command reports it. This list is maintained by hand and therefore CANNOT catch a
-    // model that ships after it was written — `getModelPricing('claude-opus-6')`
-    // returns null with this suite green. It guards against a regression that REMOVES
-    // an entry, not against a future addition. Catching the latter needs a check
-    // against the live pricing page, which this offline suite deliberately does not do.
+    // A model absent from the table prices to $0 silently. This hand-kept list guards against
+    // REMOVING an entry, not against a model shipping later (`claude-opus-6` returns null with this
+    // suite green); that needs a live pricing-page check this offline suite doesn't do.
     for (const id of [
       'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5',
       'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5',

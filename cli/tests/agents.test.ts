@@ -57,21 +57,17 @@ describe('droid (Factory AI)', () => {
     expect(capableAgents('hooks')).toContain('droid');
     expect(capableAgents('plugins')).toContain('droid');
     expect(capableAgents('skills')).toContain('droid');
-    // RUSH-1864: Factory Missions (`/missions`, `droid exec --mission`) are a
-    // real multi-step orchestrator, but they are invoke-only. There is no
-    // auto-discovered install dir for named mission templates (cold install has
-    // no ~/.factory/missions/; that path is per-session runtime state only).
-    // Keep workflows:false so the registry never demands a writer we can't
-    // provide — do not fabricate a discovery dir.
+    // RUSH-1864: Factory Missions are invoke-only, with no auto-discovered install dir for
+    // templates (~/.factory/missions/ is per-session runtime state). Keep workflows:false so the
+    // registry never demands a writer we can't provide.
     expect(capableAgents('workflows')).not.toContain('droid');
     expect(AGENTS.droid.capabilities.workflows).toBe(false);
   });
 
   it('resolves MCP config to ~/.factory/mcp.json and parses the written shape back', () => {
-    // Guards the writer/reader contract: installMcpToFactoryConfig writes
-    // `mcpServers` JSON to <home>/.factory/mcp.json; the detector reads via
-    // getMcpConfigPathForHome + parseMcpConfig. A path or format drift (e.g.
-    // defaulting to settings.json or a TOML parser) would break sync silently.
+    // Guards the writer/reader contract: installMcpToFactoryConfig writes `mcpServers` JSON to
+    // <home>/.factory/mcp.json and the detector reads it via getMcpConfigPathForHome +
+    // parseMcpConfig. A path or format drift would break sync silently.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-droid-mcp-'));
     try {
       const configPath = getMcpConfigPathForHome('droid', home);
@@ -121,10 +117,9 @@ describe('warp (Warp Agent CLI)', () => {
     // Warp reads the Claude .mcp.json schema (url + headers).
     expect(capableAgents('mcpHttp')).toContain('warp');
     expect(capableAgents('mcpHeaders')).toContain('warp');
-    // No matching install surface for these: hooks (no event->shell registration),
-    // allowlist (profile-based permissions, not a tool allow/deny list), commands
-    // (native/server slash-commands), plugins (no Claude marketplace manifest),
-    // subagents (server-side cloud agents), workflows, memory.
+    // No matching install surface: hooks (no event->shell registration), allowlist (profile-based),
+    // commands (native slash-commands), plugins (no Claude manifest), subagents (server-side),
+    // workflows, memory.
     expect(capableAgents('hooks')).not.toContain('warp');
     expect(capableAgents('allowlist')).not.toContain('warp');
     expect(capableAgents('commands')).not.toContain('warp');
@@ -316,14 +311,9 @@ describe('codex subagents (TOML custom agents)', () => {
 });
 
 describe('kimi subagents (Claude-shaped agent markdown)', () => {
-  /**
-   * kimi-code discovers agent FILES from its brand home's `agents/` dir and
-   * parses them as markdown with YAML frontmatter. It has no loader for the
-   * `version: 1` / `agent:` YAML agentspec (that schema belongs to the older,
-   * separate `kimi-cli` product), so a `.yaml` written here is read by nothing.
-   * Discovery landed in kimi-code 0.29.0 — before that, the four agent profiles
-   * are compiled into the bundle with no filesystem loader at all.
-   */
+  /** kimi-code discovers agent files from its brand home's `agents/` dir as markdown with YAML
+   * frontmatter, and has no loader for the older kimi-cli `version: 1` / `agent:` YAML agentspec,
+   * so a `.yaml` here is read by nothing. Discovery landed in kimi-code 0.29.0. */
   it('is capable of subagents only from 0.29.0', () => {
     expect(capableAgents('subagents')).toContain('kimi');
     expect(supports('kimi', 'subagents', '0.29.0').ok).toBe(true);

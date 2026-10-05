@@ -1,11 +1,6 @@
-/**
- * Auth persistence across version switches (RUSH-1318): droid/antigravity/kimi
- * store login as files inside the per-version config home. Switching versions
- * repoints the ~/.<config> symlink to a home that was never logged in, silently
- * logging the CLI out. carryForwardAuthFiles seeds the target home with the
- * freshest credential; getAccountInfo falls back to the active HOME config so
- * non-active versions still report the account-global sign-in state.
- */
+/** Auth persistence across version switches (RUSH-1318): droid/antigravity/kimi store login
+ * inside the per-version config home, so repointing the symlink silently logged the CLI out.
+ * carryForwardAuthFiles seeds the target; getAccountInfo falls back to the active HOME config. */
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -63,16 +58,9 @@ function makeJwt(payload: Record<string, unknown>): string {
   return `${b64({ alg: 'ES256', typ: 'JWT' })}.${b64(payload)}.sig`;
 }
 
-/**
- * Write a Droid credential the REAL way: a JSON blob carrying a WorkOS
- * access-token JWT, encrypted AES-256-GCM as `ivB64:tagB64:ctB64`, keyed by the
- * base64 contents of auth.v2.key (identical to agents.test.ts writeDroidCredential
- * and to what the CLI writes). Identity derives from the JWT's email/org/sub, so
- * the guard sees the account through the same decrypt path production uses.
- * Returns the exact ciphertext written so callers can assert byte-equality after
- * a carry. `.key` is per-account (a fresh random key) so a foreign source can
- * never be decrypted with the destination account's key — exactly production.
- */
+/** Write a Droid credential the real way: a JSON blob with a WorkOS JWT, AES-256-GCM encrypted
+ * as `ivB64:tagB64:ctB64`, keyed by auth.v2.key, so the guard decrypts it as production does.
+ * `.key` is per-account, so a foreign source can't decrypt with the destination's key. */
 function writeDroidCred(
   home: string,
   claims: Record<string, unknown>,

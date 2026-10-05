@@ -1,11 +1,6 @@
-/**
- * Tests for the loop driver wired into executeJob (issue #400).
- *
- * Proves:
- *   1. A job with config.loop runs through runLoop (the loop driver is invoked,
- *      counting iterations via the injectable runIteration seam).
- *   2. A job without config.loop does NOT invoke the loop driver.
- */
+/** Tests for the loop driver wired into executeJob (#400): a job with config.loop runs through
+ * runLoop (iterations counted via the injectable runIteration seam); a job without it does not
+ * invoke the driver. */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, mkdtempSync, writeFileSync } from 'fs';
@@ -23,10 +18,9 @@ const hoistedState: LoopTestState =
   ((globalThis as Record<string, unknown>)['__agents_cli_runner_loop_test_state__'] as LoopTestState | undefined)
   ?? (((globalThis as Record<string, unknown>)['__agents_cli_runner_loop_test_state__'] = { TEST_DIR: '' }) as LoopTestState);
 
-// Partial mock: keep the real state.js exports (getModelsCachePath, loaded at
-// models.ts import time, and getMailboxRootDir, used by runLoop) and override
-// only the path getters to the isolated TEST_DIR. A full replacement drops
-// those transitive exports and fails under vitest (the CI runner).
+// Partial mock: keep the real state.js exports (getModelsCachePath, getMailboxRootDir) and override
+// only the path getters to TEST_DIR; a full replacement drops transitive exports and fails under
+// vitest in CI.
 vi.mock('../src/lib/state.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/state.js')>();
   const gt = globalThis as Record<string, unknown>;
@@ -126,10 +120,9 @@ describe('executeJob — loop driver (issue #400)', () => {
   });
 
   it('stamps harnessName on loop ExecOptions for a custom-harness profile (PHNX-2935)', async () => {
-    // The loop path resolves the profile to its host agent and spawns
-    // in-process via runLoop — it never re-enters `agents run <name>`, so
-    // ExecOptions.harnessName must be set here or a deepseek loop-routine
-    // is recorded as claude.
+    // The loop path resolves the profile to its host agent and spawns in-process via runLoop, never
+    // re-entering `agents run <name>`, so ExecOptions.harnessName must be set here or a deepseek
+    // loop-routine is recorded as claude.
     mkdirSync(join(hoistedState.TEST_DIR, 'profiles'), { recursive: true });
     writeFileSync(
       join(hoistedState.TEST_DIR, 'profiles', 'deepseek.yml'),

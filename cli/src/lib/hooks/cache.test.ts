@@ -156,10 +156,9 @@ describe('generateHookShim', () => {
   });
 
   it('getHookShimPath returns the state.ts-resolved shims dir for production callers', () => {
-    // The root is whatever getHookShimsDir() resolves to (AGENTS_HOOK_SHIMS_DIR
-    // in this test run — see tests/setup.ts's hermeticity redirect). Doesn't
-    // matter what root — what matters is that production callers (who don't
-    // pass `paths`) get `<that dir>/<name>.sh` consistently.
+    // The root is whatever getHookShimsDir() resolves to (AGENTS_HOOK_SHIMS_DIR in tests, via
+    // tests/setup.ts). What matters is that production callers (no `paths`) consistently get `<that
+    // dir>/<name>.sh`.
     expect(toPosix(getHookShimPath('foo'))).toBe(`${toPosix(getHookShimsDir())}/foo.sh`);
   });
 
@@ -283,11 +282,9 @@ describe('generateHookShim', () => {
   });
 });
 
-// ─── missing source ──────────────────────────────────────────────────────────
-//
-// Observed on zion 2026-09-14/15: every shimmed guard exited 127 for ~17 hours
-// because the embedded SOURCE path was gone, and Claude Code treats any exit
-// but 2 as "allow". A PreToolUse shim must deny instead.
+// Missing source. Observed on zion 2026-09-14/15: every shimmed guard exited 127 for ~17 hours
+// because the embedded SOURCE path was gone, and Claude Code treats any exit but 2 as "allow". A
+// PreToolUse shim must deny instead.
 
 describe('generated shim — missing source', () => {
   let tmp: string;

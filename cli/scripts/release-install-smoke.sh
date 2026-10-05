@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-#
-# Real install smoke for a pretested agents-cli tarball (RUSH-2666).
-# Installs the exact .tgz into a throwaway prefix with npm and runs the
-# installed binary. Never rebuilds the package.
-#
-# Usage: release-install-smoke.sh <tarball.tgz> [expected-version]
-#
+# Real install smoke for a pretested agents-cli tarball (RUSH-2666): installs the exact .tgz into
+# a throwaway prefix with npm and runs the binary. Never rebuilds the package. Usage:
+# release-install-smoke.sh <tarball.tgz> [expected-version]
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }

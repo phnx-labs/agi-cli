@@ -1,8 +1,6 @@
-/**
- * A refused update names WHAT holds the installation (PHNX-4116 follow-up):
- * the operator saw "Account home is in use; retry after its sessions finish"
- * with a one-hour-old session on another tty and no way to find it.
- */
+/** A refused update names what holds the installation (PHNX-4116 follow-up): the operator saw
+ * "Account home is in use; retry after its sessions finish" with a one-hour-old session on
+ * another tty and no way to find it. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

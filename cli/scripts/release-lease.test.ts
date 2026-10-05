@@ -1,16 +1,6 @@
-/**
- * The release mutex, exercised against a REAL git remote.
- *
- * No mocking: each test builds an actual bare repo on disk, points two working
- * clones at it as `origin`, and runs the real `release-lease.sh`. That is the
- * whole critical path — the mutual exclusion IS `git push` semantics, so a test
- * that stubbed git would prove nothing.
- *
- * What this pins down is the failure that jammed the pipeline on 2026-08-02:
- * two agents on two machines entered release.sh at once, and the second one only
- * discovered the collision at the publish gate, after the first had already
- * merged and tagged.
- */
+/** The release mutex, tested against a real git remote with two clones; mutual exclusion is `git
+ * push` semantics, so stubbing git would prove nothing. Pins the 2026-08-02 jam: two agents
+ * entered release.sh at once and the second found out at the publish gate. */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
@@ -69,14 +59,9 @@ function procState(pid: number): string {
 /** Long-lived parents of the zombies below; torn down with each temp root. */
 const zombieParents: ChildProcess[] = [];
 
-/**
- * A real, unreaped zombie: a Python parent forks, lets its child exit, and then
- * deliberately never calls wait(2), so the exited child stays in the process
- * table. Bash cannot provide this fixture portably because macOS Bash reaps a
- * completed background job while the shell is still blocked. This is exactly
- * the shape a SIGKILLed release.sh leaves behind, and `ps -p <pid>` still lists
- * it.
- */
+/** A real unreaped zombie: a Python parent forks, lets the child exit, and never wait(2)s. Bash
+ * cannot do this portably since macOS Bash reaps background jobs. This is the shape a SIGKILLed
+ * release.sh leaves; `ps -p` still lists it. */
 function spawnZombie(): number {
   const pidFile = path.join(root, `zombie-${zombieParents.length}.pid`);
   const parent = spawn('python3', ['-c', [
@@ -115,14 +100,8 @@ function currentHolder(cwd: string) {
   return m?.[1] ?? '';
 }
 
-/**
- * Push a lease that is genuinely `ageMin` minutes old, by backdating the commit
- * exactly the way an abandoned release's lease would look. Using a real old
- * timestamp (rather than `--ttl-min 0`) is what makes the reclaim tests
- * meaningful: with TTL 0 every lease is instantly reclaimable, so a second
- * reclaim succeeds for the wrong reason and the compare-and-swap is never
- * exercised.
- */
+/** Push a lease that is genuinely `ageMin` minutes old by backdating the commit. With `--ttl-min 0`
+ * every lease is reclaimable, so reclaim tests would pass for the wrong reason. */
 function plantStaleLease(
   cwd: string,
   version: string,
@@ -187,14 +166,9 @@ describeWin('release-lease: mutual exclusion across machines', () => {
     git(boxA, 'config', 'user.name', 'shared');
     git(boxB, 'config', 'user.email', 'shared@test.local');
     git(boxB, 'config', 'user.name', 'shared');
-    // The shared timestamp must be NOW, not a literal: the script measures lease
-    // age from the committer timestamp (`lease_age_min` → `git log --format=%ct`),
-    // so a fixed past date makes the loser see a "stale" lease older than the
-    // TTL and reclaim it — two winners, and the test fails from the moment the
-    // literal is more than TTL minutes in the past (it did: merged 2026-09-04
-    // 03:00Z with '2026-09-04T12:00:00Z', red from 12:30Z on, and the failing
-    // attestation wedged every release since). One value computed once keeps
-    // both commits byte-identical except for claim-id, which is the point.
+    // The shared timestamp must be NOW, not a literal: lease age is measured from the committer
+    // timestamp, so a fixed past date makes the loser reclaim a stale lease. One value computed
+    // once keeps both commits identical except claim-id.
     const fixed = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     const env = { GIT_AUTHOR_DATE: fixed, GIT_COMMITTER_DATE: fixed };
     const [a, b] = await Promise.all([
@@ -326,11 +300,9 @@ describeWin('release-lease: releasing what you do not own', () => {
 });
 
 describeWin('release-lease: a long healthy release must not lose its lease', () => {
-  // The defect this pins: the TTL is "how long since the holder proved it was
-  // alive", NOT "how long a release takes". Measured on this repo, the CI matrix
-  // alone has run 57 minutes and release 1.20.77 took 186 minutes wall clock —
-  // both longer than any sane TTL. Without renewal, a healthy release would have
-  // its lease reclaimed mid-flight and two releasers would run at once.
+  // The TTL is how long since the holder proved it was alive, not how long a release takes: CI
+  // alone has run 57 minutes and release 1.20.77 took 186. Without renewal a healthy release would
+  // be reclaimed mid-flight and two releasers would run.
   it('renewing keeps a lease that would otherwise be reclaimable', () => {
     lease(boxA, ['claim', '1.20.82']);
 
@@ -363,12 +335,9 @@ describeWin('release-lease: a long healthy release must not lose its lease', () 
 });
 
 describeWin('release-lease: a renew must not orphan our own lease', () => {
-  // The race: `renew` pushes sha2, then writes sha2 to the token file. Those are
-  // not atomic. A `release` (or `verify`) landing between them reads sha1, sees
-  // sha2 on origin, and — matching only the latest token — would conclude the
-  // lease was reclaimed and "leave it alone", orphaning OUR OWN lease until the
-  // TTL expires. Ownership is therefore membership in the set of shas this run
-  // pushed, not equality with the most recent one.
+  // The race: `renew` pushes sha2 then writes the token, non-atomically, so a `release` in between
+  // sees sha1, finds sha2 on origin, and orphans our own lease until TTL. Ownership is membership
+  // in the set of shas this run pushed, not equality with the latest.
   it('release still drops a lease that renew rotated', () => {
     lease(boxA, ['claim', '1.20.82']);
     lease(boxA, ['renew']); // origin now holds sha2
@@ -445,16 +414,9 @@ describeWin('release-lease: status', () => {
   });
 });
 
-/**
- * RUSH-2274: an externally killed release (SIGKILL, a severed ssh, a rebooted
- * box) never reaches its trap, so its lease stays on origin. Before this, the
- * only cure was the TTL: for up to 30 minutes `status` read `held` while nothing
- * was releasing, and nothing distinguished that from a healthy long release.
- *
- * These tests use REAL processes — a spawned `sleep` stands in for the release
- * run, and killing it is the external kill. Faking liveness would prove nothing,
- * since the whole mechanism is a live `ps` probe.
- */
+/** RUSH-2274: an externally killed release never reaches its trap, so its lease stays on origin and
+ * was cured only by the 30-minute TTL. These tests use real processes (a spawned `sleep` as the
+ * release, killed externally) since the mechanism is a live `ps` probe. */
 describeWin('release-lease: a killed holder must not wedge the pipeline', () => {
   const victims: ChildProcess[] = [];
 

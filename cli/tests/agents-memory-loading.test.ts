@@ -1,21 +1,6 @@
-/**
- * E2E: confirm each agent natively loads cwd/<INSTRUCTIONS_FILE>.
- *
- * Two passes per agent:
- *   1. Plain workspace file: writes cwd/<INSTRUCTIONS_FILE> directly with a
- *      unique token, runs the agent, asserts the token appears in the reply.
- *      Confirms the load-bearing assumption behind compileRulesForProject:
- *      an agent launched in a workspace with cwd/<INSTRUCTIONS_FILE> reads
- *      it natively, no shim help required.
- *
- *   2. Project rules pipeline: writes cwd/.agents/rules/AGENTS.md with an
- *      @-import to a fragment, runs compileRulesForProject(cwd), then runs
- *      the agent and asserts the inlined fragment token appears. Proves the
- *      whole pipeline: project rules dir → compiled cwd/AGENTS.md → agent.
- *
- * Real $HOME, real auth, real user-level rules in effect — no HOME override.
- * Opt-in: AGENTS_E2E=1 (real LLM calls; costs API tokens).
- */
+/** E2E: each agent natively loads cwd/<INSTRUCTIONS_FILE> (premise of compileRulesForProject), plain
+ * and via a compiled project rules @-import, using a unique token. Real HOME, auth and rules;
+ * opt-in with AGENTS_E2E=1 (costs API tokens). */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';

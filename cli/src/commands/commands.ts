@@ -1,11 +1,6 @@
-/**
- * Slash command management for extending agents with custom markdown commands.
- *
- * Implements `agents commands` -- list, add, remove, sync, prune, and view
- * markdown files that agents invoke mid-session as slash commands. Central
- * storage lives in ~/.agents/commands/ and commands are synced to individual
- * version homes.
- */
+/** Slash command management: `agents commands` lists, adds, removes, syncs, prunes and views the
+ * markdown files agents invoke as slash commands. Central storage is ~/.agents/commands/, synced
+ * to individual version homes. */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -567,10 +562,8 @@ Examples:
     });
 }
 
-/**
- * Build the row data for `agents commands list`. Each row = one central
- * command with a sync-status target per (agent, version) in scope.
- */
+/** Build the row data for `agents commands list`: one row per central command, with a sync-status
+ * target per (agent, version) in scope. */
 function buildCommandRows(opts: {
   filterAgent?: AgentId;
   filterVersion?: string;

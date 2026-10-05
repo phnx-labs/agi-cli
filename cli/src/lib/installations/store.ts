@@ -16,21 +16,9 @@ import { INSTALLATION_RECORD_FILE, INSTALLATION_SCHEMA, type Installation } from
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Persistence for {@link Installation} records.
- *
- * The record lives at `<versionDir>/installation.json` rather than in one
- * central index: the version dir is what `agents trash`/`agents prune` move,
- * copy and restore wholesale, so keeping identity inside it means identity
- * travels with the install instead of dangling in a registry that forgets to
- * follow. It is also why the file name is registered in versions.ts's
- * `PRESERVED_ON_CLEAN_REINSTALL` — a repair reinstall must not mint a new id.
- *
- * Path/enumeration plus frozen installation records. Depends on Node builtins,
- * installations-local modules, and base lib (`state`/`fs-atomic`/`primitives`/
- * `agents`/`shims`/`platform`) — never `plugins/`, `rules/`, `session/`, or
- * `devices/`, so those modules can import this file without an import cycle.
- */
+/** Persistence for Installation records at `<versionDir>/installation.json`, not a central
+ * index: `agents trash`/`prune` move the dir wholesale, so identity travels with it. Depends
+ * only on base lib, never `plugins/`, `rules/`, `session/` or `devices/`, to avoid cycles. */
 
 /** Directory holding one installation. Same path as {@link getVersionDir}. */
 export function installationDir(agent: AgentId, label: string): string {
@@ -77,10 +65,8 @@ function assertValidRecord(value: unknown, file: string): Installation {
   return record as Installation;
 }
 
-/**
- * Read the record for one installation, or null when the version dir has none.
- * Never mints — use {@link ensureInstallation} for the migrating read.
- */
+/** Read the record for one installation, or null when the version dir has none; never mints (use
+ * ensureInstallation for the migrating read). */
 export function readInstallation(agent: AgentId, label: string): Installation | null {
   const file = installationRecordPath(agent, label);
   let raw: string;
@@ -110,16 +96,9 @@ export function writeInstallation(installation: Installation): void {
   atomicWriteFileSync(file, `${JSON.stringify(installation, null, 2)}\n`);
 }
 
-/**
- * Read the record for an existing version dir, minting and persisting one on
- * first sight. This is the migration path for every installation created before
- * frozen identity existed: their directory name IS their release, so the
- * migrated record seeds `label === releaseVersion` and dates the install from
- * the directory's own mtime rather than pretending it was created now.
- *
- * Throws when the version dir does not exist — an installation record must never
- * describe an install that isn't there.
- */
+/** Read the record for an existing version dir, minting one on first sight (the migration for
+ * installs predating frozen identity): the dir name is the release, so it seeds `label ===
+ * releaseVersion` and dates from the dir's mtime. Throws if the dir doesn't exist. */
 export function ensureInstallation(agent: AgentId, label: string): Installation {
   const existing = readInstallation(agent, label);
   if (existing) return existing;
@@ -159,11 +138,8 @@ export function ensureInstallationLocked(agent: AgentId, label: string, legacyCr
   return migrated;
 }
 
-/**
- * Create the record for a freshly-installed version dir. Idempotent: a repeat
- * `agents add` of the same label keeps the original id (identity is frozen) and
- * only records the release if it actually moved.
- */
+/** Create the record for a freshly installed version dir. Idempotent: a repeat `agents add` of
+ * the same label keeps the original id and only records the release if it moved. */
 export function createInstallation(
   agent: AgentId,
   label: string,
@@ -195,11 +171,8 @@ export function createInstallation(
   return created;
 }
 
-/**
- * Move an installation's recorded release forward, preserving identity. Returns
- * the persisted record. Call only AFTER the new release is live on disk — the
- * record is the claim that it is.
- */
+/** Move an installation's recorded release forward, preserving identity; call only after the new
+ * release is live on disk, since the record is the claim that it is. */
 export function recordRelease(installation: Installation, releaseVersion: string): Installation {
   const at = nowIso();
   const next: Installation = {
@@ -227,10 +200,8 @@ export function listInstallationLabels(agent: AgentId): string[] {
     .sort();
 }
 
-/**
- * Every installation of an agent, migrating records as needed. A version dir
- * that disappears mid-scan is skipped rather than failing the whole listing.
- */
+/** Every installation of an agent, migrating records as needed; a version dir that disappears
+ * mid-scan is skipped rather than failing the listing. */
 export function listInstallations(agent: AgentId): Installation[] {
   const out: Installation[] = [];
   for (const label of listInstallationLabels(agent)) {
@@ -243,22 +214,14 @@ export function listInstallations(agent: AgentId): Installation[] {
   return out;
 }
 
-/**
- * The label of the single managed installation every harness gets under the
- * account model v2 (PHNX-3940). One managed install per harness per device;
- * accounts live in credential slots beside it, and a second home is an expert
- * `--isolated` copy, never another managed install.
- */
+/** The label of the single managed installation every harness gets under account model v2
+ * (PHNX-3940): one per harness per device, accounts live in credential slots beside it, and a
+ * second home is an expert `--isolated` copy, never another managed install. */
 export const MANAGED_INSTALLATION_LABEL = 'main';
 
-/**
- * Resolve the ONE managed installation of a harness, or null when the harness
- * has no managed install yet. The winner is deterministic: the `main` label
- * first, then the recorded global default (the install the user actually
- * launches), then the first remaining non-isolated installation by label.
- * Isolated copies (`agents add --isolated`) never count — they are expert
- * second homes, not the managed install.
- */
+/** Resolve the one managed installation of a harness, or null. The winner is deterministic: the
+ * `main` label, then the recorded global default, then the first non-isolated installation by
+ * label; isolated copies (`agents add --isolated`) never count. */
 export function resolveManagedInstallation(agent: AgentId): Installation | null {
   const managed = listInstallations(agent).filter((i) => !isVersionIsolated(agent, i.label));
   if (managed.length === 0) return null;
@@ -275,17 +238,9 @@ export interface EnsureHarnessInstallationResult {
   installed: boolean;
 }
 
-/**
- * The taught entry point for "make this harness runnable" (PHNX-3940): return
- * the harness's single managed installation, installing the current release
- * into the `main` label when the harness is not installed yet. `release` pins
- * the fresh install to a concrete release (recorded as a pinned update policy
- * by `installVersion`); it has no effect when an installation already exists —
- * moving an existing install is `agents update <agent> --to <release>`'s job.
- *
- * Throws (fail loud) when the install fails; never returns a half-installed
- * record.
- */
+/** The entry point for "make this harness runnable" (PHNX-3940): return the harness's managed
+ * installation, installing the current release into `main` if absent. `release` pins a fresh
+ * install only. Throws on failure; never returns a half-installed record. */
 export async function ensureHarnessInstallation(
   agent: AgentId,
   opts: { release?: string; onProgress?: (message: string) => void } = {},
@@ -315,33 +270,14 @@ export function getVersionDir(agent: AgentId, version: string): string {
   return path.join(getVersionsDir(), agent, version);
 }
 
-/**
- * Grok binaries are never trusted below this size when picking among several
- * `grok-*` candidates with no exact version match (see
- * {@link resolveGrokFallbackBinary}). Grok's real native binary is ~100MB+; a
- * stray non-binary artifact sharing the `grok-*` naming pattern (a wrapper or
- * alias script) is at most a few hundred bytes, so 1MB comfortably separates
- * the two without depending on file content.
- */
+/** Grok binaries are not trusted below this size when picking among `grok-*` candidates with no
+ * exact version match (resolveGrokFallbackBinary): the real binary is ~100MB+ and a stray
+ * wrapper/alias script is a few hundred bytes, so 1MB separates them without sniffing content. */
 const MIN_GROK_BINARY_BYTES = 1_000_000;
 
-/**
- * Pick the real grok binary among `grok-*` entries in `downloadsDir` when NO
- * filename carries the pinned version string. Grok self-updates its binary in
- * place while running under the shim, so a version-home's downloads dir can
- * accumulate several `grok-*` files whose names have drifted away from that
- * version-home's pinned version (RUSH-2459: on yosemite-s0, version-home
- * `0.2.82` held `grok-1.0.0-linux-aarch64` after grok self-updated, plus a
- * stale, unrelated 99-byte `grok-0.2.118-linux-aarch64` wrapper script that
- * happened to sort alphabetically first).
- *
- * Never blindly take whatever `fs.readdirSync` returns first — that is exactly
- * the bug this replaces. Instead: exclude anything under
- * {@link MIN_GROK_BINARY_BYTES} (rejects wrapper/alias artifacts on size
- * alone, no content sniffing needed) and, among the survivors, prefer the most
- * recently modified — the file grok's self-updater actually wrote last.
- * Returns null (fail loud, never guess) when nothing survives the size filter.
- */
+/** Pick the real grok binary among `grok-*` entries when no filename carries the pinned version
+ * (RUSH-2459: a stale 99-byte wrapper sorted first). Exclude files under MIN_GROK_BINARY_BYTES,
+ * prefer the newest, return null when none survive. */
 export function resolveGrokFallbackBinary(downloadsDir: string): string | null {
   let entries: string[];
   try {
@@ -365,14 +301,9 @@ export function resolveGrokFallbackBinary(downloadsDir: string): string | null {
   return best ? path.join(downloadsDir, best.name) : null;
 }
 
-/**
- * Grok's own current-release pointer, `<grokHome>/bin/grok`, resolved to the
- * real binary, or null when absent or not a real binary. Grok's updater keeps
- * it current in both of its layouts (`bin/grok -> ../downloads/grok-<v>-<arch>`
- * and the newer `bin/grok -> grok-<v>`, which never touches downloads/), so it
- * is the only location that tracks `grok update`. Mirrors the shim's
- * `_resolve_grok_current`.
- */
+/** Grok's own current-release pointer, `<grokHome>/bin/grok`, resolved to the real binary, or
+ * null if absent or not a real binary. Its updater keeps it current in both layouts, so it
+ * alone tracks `grok update`. Mirrors the shim's `_resolve_grok_current`. */
 export function resolveGrokCurrentBinary(grokHome: string): string | null {
   try {
     const target = fs.realpathSync(path.join(grokHome, 'bin', 'grok'));
@@ -408,36 +339,25 @@ export function getBinaryPath(agent: AgentId, version: string): string {
     return path.join(grokDownloads, `grok-${releaseVersion}`);
   }
   if (agent === 'droid') {
-    // Factory.ai's installer drops a standalone native binary (no npm package,
-    // nothing in node_modules/.bin). The binary is global, not per-version —
-    // config isolation rides the ~/.factory symlink switch, not a separate
-    // binary per version. Install location is platform-specific:
-    //   macOS/Linux: ~/.local/bin/droid       (curl app.factory.ai/cli | sh)
-    //   Windows:     %USERPROFILE%\bin\droid.exe  (irm app.factory.ai/cli/windows | iex)
-    // Mirror the shim's `droid` branch so isVersionInstalled/`agents view`
-    // agree with what actually executes.
+    // Factory.ai's installer drops one global native binary (not per-version; config isolation
+    // rides the ~/.factory symlink): ~/.local/bin/droid, or %USERPROFILE%\bin\droid.exe on Windows.
+    // Mirror the shim's `droid` branch so isVersionInstalled agrees with what executes.
     return IS_WINDOWS
       ? path.join(getHomeDir(), 'bin', 'droid.exe')
       : path.join(getHomeDir(), '.local', 'bin', 'droid');
   }
   if (agent === 'muse') {
-    // Muse Code install script drops a self-updating launcher at
-    // ~/.local/bin/muse (curl -fsSL https://dev.meta.ai/install.sh | sh).
-    // Same global-binary shape as droid: one binary for every version dir,
-    // config isolation via version-home HOME rewrite. Mirror the shim's
-    // `muse` branch so isVersionInstalled / agents view / agents import
-    // agree with what executes.
+    // Muse Code's installer drops a self-updating launcher at ~/.local/bin/muse: one global binary
+    // for every version dir, config isolation via version-home HOME rewrite, like droid. Mirror the
+    // shim's `muse` branch so installed checks match what executes.
     return IS_WINDOWS
       ? path.join(getHomeDir(), 'bin', 'muse.exe')
       : path.join(getHomeDir(), '.local', 'bin', 'muse');
   }
   if (agent === 'warp') {
-    // Warp Agent CLI installs a single global, self-updating `warp` binary at
-    // ~/.local/bin/warp via the curl installer (Windows: the agent-cli.ps1) —
-    // like droid/muse. Resolve the real binary on PATH (findInPath skips our own
-    // shims dir) so isVersionInstalled / agents view agree with what executes.
-    // When warp is not installed, fall back to its default install path so
-    // isVersionInstalled reports uninstalled honestly.
+    // Warp Agent CLI installs one global self-updating `warp` at ~/.local/bin/warp. Resolve it on
+    // PATH (findInPath skips our shims dir) so isVersionInstalled matches what executes; when
+    // absent, use the default path so it reports uninstalled honestly.
     const onPath = findInPath('warp');
     if (onPath) return onPath;
     return IS_WINDOWS
@@ -448,21 +368,9 @@ export function getBinaryPath(agent: AgentId, version: string): string {
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);
 }
 
-/**
- * Does this agent resolve to ONE global binary that is the same file regardless
- * of the `version` argument? (droid → always `~/.local/bin/droid`.) Computed
- * generically by probing `getBinaryPath` with two distinct versions rather than
- * hardcoding an agent id, so it stays correct if another global-binary agent is
- * added.
- *
- * This is the narrower cousin of `isSelfUpdatingAgent`: every global-binary
- * agent is self-updating, but grok is self-updating WITHOUT a global binary — it
- * stores a real per-version binary copy under each version-home
- * (`versions/grok/<v>/home/.grok/downloads/grok-<v>`), so its version-homes are
- * genuinely distinct and must NOT be collapsed. Gate the single-binary
- * collapse/live-version logic on THIS predicate; gate pin-refusal / "switch
- * profile" copy on `isSelfUpdatingAgent`.
- */
+/** Does this agent resolve to one global binary regardless of `version`? Computed by probing
+ * `getBinaryPath` with two versions, not an agent id. Narrower than `isSelfUpdatingAgent`: grok
+ * self-updates but keeps a real per-version copy, so its homes must not be collapsed. */
 export function isGlobalBinaryAgent(agent: AgentId): boolean {
   return getBinaryPath(agent, '0.0.0-probe-a') === getBinaryPath(agent, '0.0.0-probe-b');
 }
@@ -480,14 +388,9 @@ export function invalidateLiveVersionCache(agent?: AgentId): void {
   else liveVersionCache.clear();
 }
 
-/**
- * Resolve the version the ONE globally-installed binary actually reports via
- * `<cli> --version`, cached for {@link LIVE_VERSION_TTL_MS}. For a self-updating
- * global-binary agent (droid) this is the single source of truth for "which
- * version is installed" — the on-disk version-dir NAMES are just stale labels
- * left behind by successive `agents add`/self-update cycles. Returns null when
- * the binary isn't on PATH or the probe fails.
- */
+/** Resolve the version the one global binary reports via `<cli> --version`, cached for
+ * LIVE_VERSION_TTL_MS. For a self-updating global-binary agent (droid) this is the truth; on-
+ * disk version-dir names are stale labels. Null when not on PATH or the probe fails. */
 export async function getCliVersionFromPath(agent: AgentId): Promise<string | null> {
   const agentConfig = AGENTS[agent];
   try {
@@ -507,45 +410,24 @@ export async function getLiveVersion(agent: AgentId): Promise<string | null> {
   return version;
 }
 
-/**
- * Synchronous, non-blocking read of the live-version cache — returns the value
- * only if a recent {@link getLiveVersion} call already warmed it, else null.
- * `listInstalledVersions` is sync and must not shell out, so it prefers this
- * warm value (accurate) and otherwise falls back to the newest on-disk dir.
- */
+/** Synchronous, non-blocking read of the live-version cache: the value only if a prior
+ * getLiveVersion warmed it, else null. `listInstalledVersions` is sync and must not shell out,
+ * so it prefers this warm value and otherwise uses the newest on-disk dir. */
 export function getCachedLiveVersion(agent: AgentId): string | null {
   const cached = liveVersionCache.get(agent);
   if (cached && Date.now() - cached.at < LIVE_VERSION_TTL_MS) return cached.version;
   return null;
 }
 
-/**
- * Get the isolated HOME directory for a specific agent version.
- * Each version has its own config isolation (like jobs sandbox).
- */
+/** Get the isolated HOME directory for a specific agent version; each version has its own config
+ * isolation. */
 export function getVersionHomePath(agent: AgentId, version: string): string {
   return path.join(getVersionDir(agent, version), 'home');
 }
 
-/**
- * Resolve the REAL launch binary for an npm-package agent version: the file the
- * installed package's `bin` entry points to — e.g.
- * node_modules/@anthropic-ai/claude-code/bin/claude.exe on Windows. This is the
- * executable that the node_modules/.bin/<cli>.cmd wrapper ultimately execs (and
- * what `agents run` spawns), NOT the wrapper itself.
- *
- * The distinction is load-bearing: npm leaves the tiny node_modules/.bin/<cli>
- * and <cli>.cmd wrappers in place even after a vendor auto-updater destroys the
- * multi-hundred-MB real binary the wrapper points at. Keying "installed" on the
- * wrapper (getBinaryPath) — or on the version dir — therefore reports a gutted
- * install as healthy, and `agents run` then dies at spawn with
- * "'...claude.exe' is not recognized".
- *
- * Returns null for agents without an npm package (grok/droid/installScript,
- * whose getBinaryPath already resolves the real per-host binary) or when the
- * installed package.json can't be read/parsed — callers fall back to the
- * generic getBinaryPath check in those cases.
- */
+/** Resolve the real launch binary for an npm-package agent version: the file the package's `bin`
+ * points to, not the `.bin/<cli>` wrapper, which npm leaves behind after a vendor auto-updater
+ * destroys the binary. Null for non-npm agents. */
 function getPackageBinaryPath(agent: AgentId, version: string): string | null {
   const agentConfig = AGENTS[agent];
   if (!agentConfig.npmPackage) return null;
@@ -569,26 +451,18 @@ function getPackageBinaryPath(agent: AgentId, version: string): string | null {
   return path.join(pkgRoot, rel);
 }
 
-/**
- * Check if a specific version is installed.
- *
- * Probes the actual launch binary (the same executable the shims run), not just
- * the version dir or the node_modules/.bin/<cli> wrapper. For npm agents that
- * means statting the package's real `bin` target (getPackageBinaryPath), so a
- * present-but-gutted install (vendor auto-updater destroyed the binary) reports
- * as NOT installed and `agents add` re-runs its install step to repair it.
- */
+/** Check if a version is installed by probing the actual launch binary (what the shims run), not
+ * the version dir or wrapper. A present-but-gutted install (vendor auto-updater destroyed the
+ * binary) reports NOT installed, so `agents add` re-runs its install to repair it. */
 export function isVersionInstalled(agent: AgentId, version: string): boolean {
   const packageBinary = getPackageBinaryPath(agent, version);
   if (packageBinary !== null) return fs.existsSync(packageBinary);
   return fs.existsSync(getBinaryPath(agent, version));
 }
 
-// Per-process cache for listInstalledVersions. The agent's versions dir mtime
-// changes whenever a version dir is added or removed (install/remove), so a
-// stamp match means the installed set is unchanged and we skip the readdir +
-// N binary stats. Mirrors the readMeta() cache in state.ts. Hot path:
-// resolveAgentTargets and every enumerate-style consumer hit this.
+// Per-process cache for listInstalledVersions: the versions dir mtime changes when a version dir is
+// added or removed, so a stamp match skips the readdir and N binary stats. Mirrors the readMeta()
+// cache in state.ts; hot path for every enumerate-style consumer.
 const installedVersionsCache = new Map<AgentId, { stamp: number; versions: string[] }>();
 
 /** Drop the installed-versions cache (call after install/remove mutations). */
@@ -597,14 +471,9 @@ export function invalidateInstalledVersionsCache(agent?: AgentId): void {
   else installedVersionsCache.clear();
 }
 
-/**
- * Choose the single canonical version-dir to represent a self-updating
- * global-binary agent (droid). All its version dirs map to ONE binary, so
- * exactly one is real; the rest are stale labels. Prefer, in order: the dir the
- * live config symlink points at (what actually runs), the recorded global
- * default, the live `--version` (when the cache is warm), else the newest dir.
- * `versions` MUST be sorted ascending. Callers guarantee it is non-empty.
- */
+/** Choose the canonical version-dir for a self-updating global-binary agent (droid). Prefer the
+ * dir the config symlink points at, the recorded default, the live `--version`, else the
+ * newest. `versions` must be sorted ascending and non-empty. */
 export function pickCanonicalGlobalBinaryVersion(agent: AgentId, versions: string[]): string {
   const symlinkVersion = getConfigSymlinkVersion(agent);
   if (symlinkVersion && versions.includes(symlinkVersion)) return symlinkVersion;
@@ -615,31 +484,17 @@ export function pickCanonicalGlobalBinaryVersion(agent: AgentId, versions: strin
   return versions[versions.length - 1];
 }
 
-/**
- * Collapse a global-binary agent's phantom version dirs to the single canonical
- * one (see {@link pickCanonicalGlobalBinaryVersion}). No-op for npm-packaged and
- * per-version agents (claude/codex/grok/…), whose version dirs are genuinely
- * distinct installs.
- */
+/** Collapse a global-binary agent's phantom version dirs to the single canonical one
+ * (pickCanonicalGlobalBinaryVersion); no-op for npm-packaged and per-version agents, whose dirs
+ * are distinct installs. */
 function collapseGlobalBinaryVersions(agent: AgentId, versions: string[]): string[] {
   if (!isGlobalBinaryAgent(agent) || versions.length === 0) return versions;
   return [pickCanonicalGlobalBinaryVersion(agent, versions)];
 }
 
-/**
- * List all installed versions for an agent (cached by versions-dir mtime).
- *
- * For a self-updating global-binary agent (droid) every version dir resolves to
- * the SAME binary, so this collapses them to a single canonical entry — one
- * install, one row in `agents view`, never the phantom set of semver dir names.
- *
- * A directory is an installation only when it has a working launch binary.
- * Account credential slots (PHNX-3940, `~/.agents/.history/accounts/**`) are
- * HOME-shaped dirs with no binary and no `installation.json`, so they can
- * never appear here. Record-less pre-frozen installs are reported as-is; their
- * migration belongs to the record-based paths (`listInstallations`), never to
- * this read surface.
- */
+/** List installed versions for an agent (cached by versions-dir mtime). A global-binary agent
+ * (droid) collapses to one entry. A dir counts only with a working launch binary, so credential
+ * slots never appear; record-less pre-frozen installs are reported as-is. */
 export function listInstalledVersions(agent: AgentId): string[] {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
   let stamp: number;
@@ -662,14 +517,9 @@ export function listInstalledVersions(agent: AgentId): string[] {
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    // Probe the real launch binary (isVersionInstalled), not just the
-    // node_modules/.bin wrapper — a gutted install must not count as healthy
-    // in the balanced account/version picker. A dir with no working binary
-    // (a slot, a partial download) is not an installation at all. Read-only:
-    // `agents view` enumerates through here and must leave every version home
-    // byte-identical (issue #2058), so a record-less pre-frozen install is
-    // reported as-is — its migration belongs to the record-based paths
-    // (listInstallations), never to a read surface.
+    // Probe the real launch binary (isVersionInstalled), not the `.bin` wrapper, so a gutted
+    // install isn't healthy. Read-only: `agents view` must leave every version home byte-identical
+    // (issue #2058), so record migration belongs to `listInstallations`.
     if (isVersionInstalled(agent, entry.name)) {
       versions.push(entry.name);
     }
@@ -688,45 +538,30 @@ export function getGlobalDefault(agent: AgentId): string | null {
   return meta.agents?.[agent] || null;
 }
 
-/**
- * Get the preferred ISOLATED version for an agent — the copy a bare
- * `agents run <agent>` falls back to when there is no global default.
- */
+/** Get the preferred isolated version for an agent: the copy a bare `agents run <agent>` falls
+ * back to when there is no global default. */
 export function getIsolatedDefault(agent: AgentId): string | null {
   const meta = readMeta();
   return meta.isolatedAgents?.[agent] || null;
 }
 
-/**
- * Path to the sentinel file that marks a version as an isolated install.
- *
- * It lives at the version-dir root (a sibling of `home/`), so it is carried
- * along when `softDeleteVersionDir` moves the whole directory to trash and is
- * restored intact by `agents restore`. Its mere presence is the marker;
- * the contents are an informational timestamp only.
- */
+/** Path to the sentinel marking a version as an isolated install, at the version-dir root beside
+ * `home/`, so `softDeleteVersionDir` carries it to trash and `agents restore` returns it
+ * intact. Presence is the marker; the contents are an informational timestamp only. */
 function getIsolatedMarkerPath(agent: AgentId, version: string): string {
   return path.join(getVersionDir(agent, version), '.isolated');
 }
 
-/**
- * Mark an installed version as an isolated install (`agents add --isolated`).
- *
- * Isolated versions are fully self-contained: they never become the global
- * default and never own the user's real `~/.<agent>` config directory. This
- * flag is what keeps every "adopting" code path away from them.
- */
+/** Mark an installed version as isolated (`agents add --isolated`): fully self-contained, never
+ * the global default and never owning the user's real `~/.<agent>`. This flag keeps every
+ * adopting code path away from it. */
 export function markVersionIsolated(agent: AgentId, version: string): void {
   fs.writeFileSync(getIsolatedMarkerPath(agent, version), `${new Date().toISOString()}\n`, { mode: 0o600 });
 }
 
-/**
- * Whether a version was installed as an isolated install (`agents add --isolated`).
- *
- * Used to exclude such versions from global-default promotion and from any
- * flow that would touch the user's real `~/.<agent>` directory, and to gate the
- * `--isolated` safety check on `agents remove`.
- */
+/** Whether a version was installed isolated; used to exclude it from global-default promotion
+ * and any flow touching the real `~/.<agent>`, and to gate the `--isolated` safety check on
+ * `agents remove`. */
 export function isVersionIsolated(agent: AgentId, version: string): boolean {
   return fs.existsSync(getIsolatedMarkerPath(agent, version));
 }
@@ -765,10 +600,8 @@ export function getProjectVersion(agent: AgentId, startPath: string): string | n
   return null;
 }
 
-/**
- * Get the resolved version for an agent in the current context.
- * Checks project manifest first, then global default.
- */
+/** Get the resolved version for an agent in the current context: project manifest first, then
+ * the global default. */
 export function resolveVersion(agent: AgentId, projectPath?: string): string | null {
   // Check project manifest
   if (projectPath) {
@@ -782,15 +615,9 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
   const globalDefault = getGlobalDefault(agent);
   if (globalDefault) return globalDefault;
 
-  // Last resort: the preferred isolated copy. Strictly a fallback — a global
-  // default always wins, so nothing changes for anyone who has one. Without this,
-  // an isolated-only user cannot reach their installs by bare name at all: the
-  // resolution chain ended here, so `agents run codex` fell through to whatever
-  // `codex` meant on PATH, and only `agents run codex@<version>` worked.
-  //
-  // The pointer is verified on read. It survives in agents.yaml across a trash +
-  // restore cycle, but a version removed for good would otherwise leave a dangling
-  // pin that resolves to a directory that is not there.
+  // Last resort: the preferred isolated copy, strictly a fallback (a global default always wins).
+  // Without it an isolated-only user couldn't use bare names: `agents run codex` fell through to
+  // PATH. The pointer is verified on read, since it can dangle after a permanent removal.
   const isolated = getIsolatedDefault(agent);
   if (isolated && isVersionInstalled(agent, isolated) && isVersionIsolated(agent, isolated)) {
     return isolated;
@@ -798,11 +625,8 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
   return null;
 }
 
-/**
- * Get the effective HOME directory for an agent.
- * If version-managed with a resolved version, returns the version's home directory.
- * Otherwise returns the real HOME.
- */
+/** Get the effective HOME for an agent: the version's home directory if version-managed with a
+ * resolved version, else the real HOME. */
 export function getEffectiveHome(agentId: AgentId): string {
   const resolved = resolveVersion(agentId, process.cwd());
   if (resolved && isVersionInstalled(agentId, resolved)) {

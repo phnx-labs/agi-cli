@@ -1,14 +1,6 @@
-/**
- * Post-run guard against silently stranded work.
- *
- * A headless `agents run` in a writable mode can end with the agent having
- * committed on a branch but never pushed it — the CLI's exit path does no git
- * work, so those commits sit invisible in a worktree until someone audits the
- * box. This module detects that state and prints a loud stderr warning with the
- * exact push / PR commands. It is advisory only: it never pushes, never mutates
- * the repo, and never throws (a non-repo cwd or any git error yields an inert
- * result), so it can sit on the run's exit path without ever breaking it.
- */
+/** Post-run guard against stranded work: a headless writable run can end with commits never pushed.
+ * Prints a stderr warning with the push/PR commands. Advisory only: never pushes, mutates, or
+ * throws. */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import chalk from 'chalk';
@@ -19,12 +11,8 @@ const execFileAsync = promisify(execFile);
 // a commit subject, so splitting on it never truncates a subject with spaces.
 const SEP = '\x1f';
 
-/**
- * Whether a just-finished run should be checked for stranded work: only
- * writable modes can leave commits (plan is read-only), and only non-interactive
- * runs need the warning (an interactive user sees their own shell). Centralizes
- * the gate so every exit path in the run command applies it identically.
- */
+/** Whether a finished run should be checked: only writable modes (plan is read-only) and only
+ * non-interactive runs. Centralized so every exit path applies it identically. */
 export function shouldWarnUnpushed(mode: string, interactive: boolean): boolean {
   return mode !== 'plan' && !interactive;
 }
@@ -49,14 +37,8 @@ async function git(args: string[], cwd: string): Promise<string> {
   return stdout.trim();
 }
 
-/**
- * Inspect `cwd` for commits on the current branch that have not reached any
- * remote. Uses `git log --not --remotes` so it is correct even when the branch
- * has no upstream set: commits already present on some `origin/*` ref are NOT
- * reported (no false positive), and a never-pushed branch reports all its
- * commits. Returns an inert result — never throws — for a non-repo cwd, a
- * detached HEAD, or a repo with no remotes (nothing to push to).
- */
+/** Commits on the current branch not on any remote, via `git log --not --remotes` (works without an
+ * upstream). Inert, never throws, for a non-repo, detached HEAD, or no remotes. */
 export async function getUnpushedState(cwd: string): Promise<UnpushedState> {
   let branch: string;
   try {
@@ -109,10 +91,8 @@ export async function getUnpushedState(cwd: string): Promise<UnpushedState> {
   return { isRepo: true, branch, hasUpstream, unpushed };
 }
 
-/**
- * Render the warning for an unpushed state, or null when there is nothing to
- * warn about. Split out from the printer so it is directly testable.
- */
+/** Render the warning for an unpushed state, or null when nothing to warn about; split out for
+ * testing. */
 export function formatUnpushedWarning(state: UnpushedState, cwd: string): string | null {
   if (!state.isRepo || !state.branch || state.unpushed.length === 0) return null;
 
@@ -129,11 +109,8 @@ export function formatUnpushedWarning(state: UnpushedState, cwd: string): string
   return lines.join('\n');
 }
 
-/**
- * If the just-finished run left committed-but-unpushed work in `cwd`, print a
- * loud stderr warning with the exact push / PR commands. Non-fatal by contract:
- * any failure is swallowed so it can never break a run's exit path.
- */
+/** If the run left committed-but-unpushed work in `cwd`, print a loud stderr warning with push/PR
+ * commands. Failures are swallowed so the run's exit path never breaks. */
 export async function warnUnpushedWork(cwd: string): Promise<void> {
   try {
     const warning = formatUnpushedWarning(await getUnpushedState(cwd), cwd);

@@ -1,18 +1,6 @@
-/**
- * Tests for {@link foldExecutionMachine} — the attribution that decides WHICH
- * BOX a live session runs on (RUSH-2479).
- *
- * The bug this pins: `agents run --device <peer>` leaves a live shim process on
- * the DISPATCHING box carrying the remote run's session id. Nothing on that
- * local process knows the agent is elsewhere, so the row was tagged with the
- * dispatcher — `--device <dispatcher>` claimed a session that was not running
- * there, and its preview dead-ended at "full transcript not indexed here"
- * because the transcript lives on the peer. The dispatch already recorded the
- * truth in the session index (`hosts/session-index.ts` writes
- * `machine: normalizeHost(task.host)`); this folds it back onto the live row.
- *
- * Pure — the index lookup is injected, so no SQLite and no live process table.
- */
+/** Tests for {@link foldExecutionMachine}: which box a live session runs on (RUSH-2479). `agents
+ * run --device <peer>` leaves a shim on the dispatching box with the remote session id, so the row
+ * got the dispatcher's name. The session index records the truth; this folds it onto the live row. */
 
 import { describe, it, expect } from 'vitest';
 import { foldExecutionMachine, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from './active.js';
@@ -81,12 +69,9 @@ describe('foldExecutionMachine', () => {
   });
 });
 
-/**
- * `machine` says WHERE THE AGENT EXECUTES. `sessionProcessIsLocal` says where the
- * PROCESS is. For an offloaded run those differ, and conflating them is what made
- * `agents go`/`focus` send a LOCAL tmux pane id to a peer's tmux server — pane ids
- * are small per-server integers, so that can attach an unrelated session.
- */
+/** `machine` is where the agent executes; `sessionProcessIsLocal` is where the process is. For an
+ * offloaded run they differ, and conflating them sent a local tmux pane id to a peer's server,
+ * which can attach an unrelated session. */
 describe('sessionProcessIsLocal', () => {
   it('calls an offloaded run LOCAL — its shim, pane and window are on this box', () => {
     expect(sessionProcessIsLocal({ machine: 'yosemite-s0', offloadedFrom: 'zion' }, 'zion')).toBe(true);
@@ -108,11 +93,9 @@ describe('sessionProcessIsLocal', () => {
     expect(sessionProcessIsLocal(row, 'zion')).toBe(true);
   });
 
-  // The three-box case. These rows travel: `--active --json` spreads them and the
-  // fan-out preserves their foreign `machine`, so a box that is NEITHER the
-  // dispatcher nor the executor sees them. Answering "local" there sent the
-  // caller down the local-tmux path with another box's pane id — the same
-  // attach-an-unrelated-pane hazard, one machine over.
+  // Three-box case: rows travel via `--active --json` fan-out with their foreign `machine`, so a
+  // box that is neither dispatcher nor executor sees them. Answering "local" there risks the same
+  // unrelated-pane attach.
   it('calls A-dispatched-to-B REMOTE when asked on a third box C', () => {
     expect(sessionProcessIsLocal({ machine: 'B', offloadedFrom: 'A' }, 'C')).toBe(false);
   });

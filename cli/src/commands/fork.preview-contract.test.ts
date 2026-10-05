@@ -1,12 +1,6 @@
-/**
- * Real-path contract test: fork builds its recap from the REAL output of
- * `agents sessions preview <id> --json`, so a drift in that JSON's shape (e.g.
- * dropping `topic`, the field the recap's label falls back to) must fail a test —
- * not silently degrade every unnamed session's recap. This seeds a real session
- * (real temp HOME, real sqlite row, real transcript), runs the real
- * `renderSessionPreview` producer, and feeds its real stdout into the real
- * `buildForkRecap` consumer — no hand-written fixture between them.
- */
+/** Real-path contract test: fork builds its recap from the real output of `agents sessions preview
+ * <id> --json`, so shape drift (e.g. dropping `topic`) must fail a test; seeded with a real
+ * session, no hand-written fixture. */
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

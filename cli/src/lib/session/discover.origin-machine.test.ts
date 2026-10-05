@@ -1,31 +1,15 @@
-/**
- * `queryIndexedSessions` must not clobber the EXECUTION host an offloaded run
- * recorded (RUSH-2486 / RUSH-2479 criterion 2).
- *
- * A host dispatch (`agents run --device <peer>`) upserts an index row on the
- * DISPATCHER with `machine = <peer>` and an EMPTY `file_path` (the transcript is
- * on the peer — `registerHostSession`, `lib/hosts/session-index.ts`). The read
- * path re-derived `machine` from the transcript path for every row, and
- * `machineForSessionFile('')` falls back to THIS box — so the dispatcher's own
- * pool row was re-attributed to itself (`<dispatcher>`), while the executing
- * peer's fan-out row keeps `<peer>`. Two `machine:id` keys survive
- * `mergeLocalFirst`, and `agents sessions <id>` read as "ambiguous (2 sessions)".
- *
- * The origin-from-path derivation must stay the source for live-home files and
- * synced mirrors, whose recorded machine already equals it — only the empty-file
- * case must keep the recorded execution host.
- */
+/** `queryIndexedSessions` must not clobber the EXECUTION host of an offloaded run (RUSH-2486 /
+ * RUSH-2479). Dispatch rows carry `machine = <peer>` and empty `file_path`; re-deriving from the
+ * path blamed THIS box (two `machine:id` keys). */
 
 import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Pin this box's id and isolate the DB under a temp HOME BEFORE db.js/state.js/
-// origin-machine.js capture them at import time (same hermetic pattern as
-// hosts/session-index.test.ts). `AGENTS_SYNC_MACHINE_ID` fixes machineId() so
-// the "this box" the derivation falls back to is a known value, distinct from
-// the peer under test.
+// Pin this box's id and isolate the DB under a temp HOME BEFORE db.js/state.js/origin-machine.js
+// capture them at import. `AGENTS_SYNC_MACHINE_ID` fixes machineId() so the fallback "this box"
+// differs from the peer under test.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-originmachine-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;

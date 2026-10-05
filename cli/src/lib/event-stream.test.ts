@@ -74,10 +74,9 @@ describe('readUnifiedEvents', () => {
 
   it('finds a matching-bundle record older than the newest `limit` window (no data loss)', () => {
     setup();
-    // `share` is the OLDEST read; two NEWER `prod` reads follow. A post-filter
-    // applied AFTER query()'s limit cutoff would let the two `prod` records exhaust
-    // limit:2 and silently drop `share` (the bug). Filtering bundle INSIDE the scan
-    // must still surface `share`.
+    // `share` is the oldest read, followed by two newer `prod` reads. A post-filter after
+    // query()'s limit cutoff would let the `prod` records exhaust limit:2 and drop `share` (the
+    // bug); filtering bundle inside the scan must still surface it.
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share' });
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });

@@ -54,10 +54,9 @@ describe('syncProjectResourcesToAgent', () => {
   });
 
   it('cleans up a manifest written on Windows, with backslash-separated paths', () => {
-    // .agents-managed.json travels with the version-controlled project dir, so
-    // a manifest minted by a Windows build (or by a pre-fix version of this
-    // code) can be read on POSIX. Its entries must still match, or the cleanup
-    // pass silently leaves previously managed files behind.
+    // `.agents-managed.json` travels with the version-controlled project dir, so a manifest minted
+    // on Windows or by a pre-fix version can be read on POSIX. Its entries must still match, or
+    // cleanup silently leaves managed files behind.
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');
     fs.mkdirSync(projectAgentsDir, { recursive: true });
@@ -235,10 +234,9 @@ describe('syncProjectResourcesToAgent — self-managed ignores in .git/info/excl
     return git;
   }
 
-  // Build a real git repo with one project command. Managed ignores now land in
-  // `.git/info/exclude`, so the helper hands back that path — and the .git dir
-  // must be a genuine repo (git rev-parse resolves the exclude path), not a
-  // faked empty `.git` directory.
+  // Build a real git repo with one project command. Managed ignores land in `.git/info/exclude`, so
+  // the helper returns that path and `.git` must be a genuine repo (git rev-parse resolves it), not
+  // a faked empty dir.
   function makeRepoWithCommand(): {
     project: string;
     projectAgentsDir: string;

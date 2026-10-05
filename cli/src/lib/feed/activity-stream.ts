@@ -1,22 +1,6 @@
-/**
- * Incremental reader for the activity log directory.
- *
- * `readRecentActivity` answers "what happened since T?" by tailing and parsing
- * every session log in the directory. That is the right shape for a one-shot
- * `agents feed` render and the wrong shape for `agents feed watch`, which asks
- * the same question twice a second for as long as a VS Code window is open: on
- * a real operator box the directory holds 1,437 logs / 64 MB, so every tick
- * re-read and re-parsed the whole corpus to emit, almost always, nothing.
- *
- * This reader keeps a per-file cursor instead. The opening scan opens no files
- * at all — it records each log's size, inode, and mtime — so only bytes appended
- * *after* the stream started are ever read. Steady-state cost is one `stat` per
- * changed file plus a parse of exactly the appended bytes.
- *
- * The emitted events, their order, and the `sinceMs` filter match
- * `readRecentActivity` for everything appended while the stream is open; the
- * equivalence is pinned by `activity-stream.test.ts`.
- */
+/** Incremental reader for the activity log directory, for `agents feed watch` (polled twice a
+ * second; a real box holds 1,437 logs / 64 MB). Keeps a per-file cursor: the opening scan
+ * records size, inode and mtime without opening files, so only later-appended bytes are read. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getActivityDir } from '../state.js';
@@ -55,21 +39,13 @@ interface FileCursor {
   partial: Buffer;
   /** True when `partial` starts mid-record and must not be parsed. */
   partialIsFragment: boolean;
-  /**
-   * The last {@link ACTIVITY_ANCHOR_BYTES} bytes already consumed, once this
-   * reader has actually read from the file. Growth alone cannot tell an append
-   * from an in-place rewrite that happens to be longer, so those bytes are
-   * re-verified — they ride the same read, at no extra syscall — and a mismatch
-   * restarts the file rather than parsing the middle of a record.
-   */
+  /** The last ACTIVITY_ANCHOR_BYTES already consumed. Growth alone cannot distinguish an append
+   * from a longer in-place rewrite, so these bytes are re-verified on the same read and a
+   * mismatch restarts the file. */
   anchor: Buffer;
-  /**
-   * Last observed size, mtime, and ctime, so an untouched file is never opened.
-   * ctime is load-bearing, not belt-and-braces: a same-size in-place rewrite
-   * that restores mtime is invisible to the other three, and the byte cursor
-   * would then sit past content it never read. The sibling tail reader keys its
-   * cache the same way for the same reason (`activity.ts` `activityStamp`).
-   */
+  /** Last observed size, mtime and ctime, so an untouched file is never opened. ctime is
+   * load-bearing: a same-size rewrite that restores mtime is invisible to the others (same
+   * keying as `activityStamp` in activity.ts). */
   size: number;
   mtimeNs: number;
   ctimeNs: number;
@@ -78,10 +54,8 @@ interface FileCursor {
 interface ActivityStreamOptions {
   /** Override the activity dir (tests). */
   root?: string;
-  /**
-   * Newest bytes read from one file in one tick. A burst larger than this keeps
-   * only the tail, exactly as `readRecentActivity`'s bounded tail does.
-   */
+  /** Newest bytes read from one file in one tick; a larger burst keeps only the tail, like
+   * `readRecentActivity`. */
   maxBytesPerRead?: number;
   /** Full stat sweep cadence, covering anything the directory watcher misses. */
   sweepMs?: number;
@@ -89,10 +63,8 @@ interface ActivityStreamOptions {
   watch?: boolean;
 }
 
-/**
- * A cursor over the activity directory. Construct it at the moment the caller's
- * activity cursor starts, then call {@link read} once per tick.
- */
+/** A cursor over the activity directory: construct it when the caller's cursor starts, then call
+ * read once per tick. */
 export class ActivityStream {
   private readonly dir: string;
   private readonly maxBytesPerRead: number;
@@ -112,21 +84,16 @@ export class ActivityStream {
     this.maxBytesPerRead = options.maxBytesPerRead ?? ACTIVITY_TAIL_BYTES;
     this.sweepMs = options.sweepMs ?? ACTIVITY_SWEEP_MS;
     this.watchRequested = options.watch ?? true;
-    // A log directory that does not exist yet (nothing has logged activity
-    // since boot) means fs.watch below throws ENOENT and never retries except
-    // on the bounded sweep cadence — the very first session's activity can
-    // then sit unwatched for up to `sweepMs` before it is even noticed.
-    // Creating it up front lets the watcher arm immediately.
+    // If the log directory doesn't exist yet, fs.watch throws ENOENT and only retries on the sweep
+    // cadence, leaving early activity unwatched for up to `sweepMs`. Creating it up front lets the
+    // watcher arm immediately.
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch { /* best-effort: sweep() covers a dir that still isn't there */ }
     this.sweep(Date.now());
     this.armWatcher();
   }
 
-  /**
-   * Events appended since the last call, newest first, filtered to `sinceMs`
-   * inclusive — the same shape and order `readRecentActivity({ sinceMs })`
-   * returns for those events.
-   */
+  /** Events appended since the last call, newest first, filtered to `sinceMs` inclusive; same
+   * shape and order as `readRecentActivity`. */
   read(sinceMs: number, nowMs = Date.now()): ActivityEvent[] {
     const out: ActivityEvent[] = [];
     for (const name of this.candidates(nowMs)) {
@@ -158,11 +125,8 @@ export class ActivityStream {
     return names;
   }
 
-  /**
-   * Stat every log, marking the ones that could have changed. Opens nothing: a
-   * log the opening scan sees is registered past its own bytes, so history is
-   * never replayed onto the stream.
-   */
+  /** Stats every log and marks those that may have changed. Opens nothing: logs seen by the
+   * opening scan are registered past their own bytes, so history is never replayed. */
   private sweep(nowMs: number): void {
     this.lastSweepMs = nowMs;
     let names: string[];
@@ -189,11 +153,9 @@ export class ActivityStream {
       }
       if (changed(cursor, stat)) this.dirty.add(name);
     }
-    // A cursor is dropped only when its log is gone. There is deliberately no
-    // size cap: the map cannot outgrow the directory this sweep already had to
-    // enumerate, so a cap bounds nothing the readdir does not — while dropping
-    // a live log's cursor would re-register it as new work on the next sweep
-    // and replay a bounded tail of it onto the stream as duplicates.
+    // A cursor is dropped only when its log is gone. No size cap: the map cannot outgrow the
+    // directory the sweep already enumerates, and dropping a live log's cursor would replay a tail
+    // of it as duplicates.
     for (const name of [...this.cursors.keys()]) if (!seen.has(name)) this.cursors.delete(name);
     this.started = true;
   }
@@ -226,14 +188,9 @@ export class ActivityStream {
     const stat = this.statOf(name);
     if (!stat) { this.cursors.delete(name); return []; }
     let cursor = this.cursors.get(name);
-    // Unseen, replaced, truncated, or rewritten in place at the same length:
-    // restart from a bounded tail of the file as it now stands. The caller's
-    // `sinceMs` drops whatever predates the stream.
-    //
-    // The same-length case is why ctime is tracked. Growth is caught by the
-    // 64-byte anchor and a shrink by the offset compare, but a rewrite that
-    // lands on exactly the previous size moves neither, and the early return
-    // below would otherwise retire the file for good with content unread.
+    // Unseen, replaced, truncated or rewritten-in-place logs restart from a bounded tail; the
+    // caller's `sinceMs` drops older events. ctime is tracked for the same-length case: the anchor
+    // catches growth and the offset compare catches a shrink.
     if (!cursor || cursor.identity !== stat.identity || stat.size < cursor.offset
       || (stat.size === cursor.size && stat.ctimeNs !== cursor.ctimeNs)) {
       cursor = this.freshCursor(stat);

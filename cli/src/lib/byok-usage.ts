@@ -1,12 +1,6 @@
-/**
- * BYOK (Bring Your Own Key) budget fetcher.
- *
- * For custom harnesses that use a provider's API key stored in the keychain
- * (e.g. OpenRouter), this module fetches the account's credit/usage data so
- * `agents view` can show a budget bar alongside the harness detail row — the
- * same bar style the native usage system uses, just sourced from the provider
- * API rather than the CLI's own usage tracking.
- */
+/** BYOK (Bring Your Own Key) budget fetcher. For custom harnesses using a provider API key in the
+ * keychain (e.g. OpenRouter), fetch the account's credit/usage so `agents view` shows a budget
+ * bar, sourced from the provider API rather than the CLI's own usage tracking. */
 
 import type { Profile } from './profiles.js';
 import { getKeychainTokenSync, hasKeychainTokenSync } from './secrets-client.js';
@@ -197,16 +191,9 @@ export function renderByokBar(result: ByokUsageResult): string {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Fetch the BYOK budget for a harness.
- *
- * Returns `null` when the harness has no registered BYOK provider or no auth.
- * Returns a `ByokUsageResult` with `budget: null` when the token is absent
- * from the keychain (so the caller can skip rendering a bar without error).
- *
- * Ordinary reads are cache-only. Explicit refreshes are serialized per provider
- * credential across every agents-cli process on the device.
- */
+/** Fetch the BYOK budget for a harness. Null when the harness has no BYOK provider or no auth; a
+ * `ByokUsageResult` with `budget: null` when the token is absent from the keychain (caller skips
+ * the bar). Reads are cache-only; explicit refreshes are serialized per provider credential. */
 export async function getByokUsageForHarness(
   profile: Profile,
   opts?: { forceRefresh?: boolean },

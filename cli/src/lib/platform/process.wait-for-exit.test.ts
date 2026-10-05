@@ -1,15 +1,6 @@
-/**
- * `stopDaemon` used to SIGTERM the daemon, schedule a `setTimeout` escalation,
- * and clear the pid file immediately. Two failure modes fell out of that: in a
- * short-lived process (the npm postinstall) the timer never fired at all, and
- * clearing the pid file while the old daemon still ran made `isDaemonRunning()`
- * report false, so `startDaemon()` launched a SECOND daemon. Its hosted broker
- * then unlinked the live socket and rebound, orphaning the first broker with
- * every unlocked bundle still in RAM and unreachable.
- *
- * These drive REAL child processes — the point is that the wait is synchronous
- * and actually observes the exit, which a fake clock cannot demonstrate.
- */
+/** Regression: stopDaemon used a timer escalation and cleared the pid file early, so a second
+ * daemon started and orphaned the first broker. These drive REAL child processes, since a fake
+ * clock cannot show the wait is synchronous. */
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
 import { waitForExit, hasExited, isAlive } from './index.js';
@@ -22,10 +13,8 @@ function spawnSleeper(seconds: number) {
   return child;
 }
 
-// POSIX signal semantics. On Windows `process.kill(pid, 'SIGTERM')` maps to
-// TerminateProcess, which kills unconditionally — a process cannot decline it —
-// and there is no zombie state for hasExited to unwrap. stopDaemon takes the
-// win32 killTree branch before waitForExit is ever reached there.
+// POSIX signal semantics only. On Windows SIGTERM is TerminateProcess (unconditional) and there is
+// no zombie state; stopDaemon uses killTree there.
 describe.skipIf(process.platform === 'win32')('waitForExit — the wait stopDaemon relies on', () => {
   it('returns true once a SIGTERMed process is actually gone', () => {
     const child = spawnSleeper(30);
@@ -37,10 +26,8 @@ describe.skipIf(process.platform === 'win32')('waitForExit — the wait stopDaem
   });
 
   it('reports false for a process that ignores SIGTERM, so the caller escalates', async () => {
-    // Traps SIGTERM and keeps running — the case the old code silently mistook
-    // for a clean stop, leaving two daemons alive. The child announces itself
-    // first: signalling before its handler is installed would just kill it and
-    // the test would pass for the wrong reason.
+    // Traps SIGTERM and keeps running. The child announces itself first, so the test does not pass
+    // for the wrong reason by killing it before its handler exists.
     const child = spawn(
       process.execPath,
       ['-e', "process.on('SIGTERM', () => {}); console.log('ready'); setTimeout(() => {}, 30000)"],

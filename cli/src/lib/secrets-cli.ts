@@ -1,16 +1,6 @@
-/**
- * The standalone `secrets` CLI that agents-cli talks to (PHNX-3989).
- *
- * The engine lives in `@phnx-labs/secrets-cli`. This module is the single pin
- * and presence check shared by the process client (`secrets-client.ts`) and
- * `agents setup secrets` — it carries no storage. Presence is `findInPath`,
- * which skips `~/.agents/.cache/shims`: a leftover alias there `exec`s
- * `agents secrets` and would recurse (agi-cli#3532).
- *
- * Keep this file free of `cli-resources` imports: `secrets-client.ts` loads it,
- * and a cycle through the host-CLI parser would pull yaml/spawn into the
- * process-client module graph.
- */
+/** The standalone `secrets` CLI agents-cli talks to (PHNX-3989): single pin and presence check for
+ * `secrets-client.ts` and `agents setup secrets`, no storage. `findInPath` skips the shims dir (a
+ * leftover alias would recurse). No `cli-resources` imports, to keep the client graph small. */
 import { findInPath } from './agent-spec/agents.js';
 
 export const SECRETS_CLI_NAME = 'secrets';
@@ -20,10 +10,8 @@ export const SECRETS_CLI_VERSION = '0.1.5';
 export const SECRETS_CLI_SPEC = `${SECRETS_CLI_PACKAGE}@${SECRETS_CLI_VERSION}`;
 export const SECRETS_CLI_INSTALL_HINT = `npm i -g ${SECRETS_CLI_SPEC}`;
 
-/**
- * True when `$SECRETS_BIN` is set or a real `secrets` executable is on PATH
- * outside agents-cli's shims dir. Does not spawn the binary.
- */
+/** True when `$SECRETS_BIN` is set or a real `secrets` executable is on PATH outside agents-cli's
+ * shims dir; does not spawn it. */
 export function isSecretsPresent(): boolean {
   const explicit = process.env.SECRETS_BIN?.trim();
   if (explicit) return true;

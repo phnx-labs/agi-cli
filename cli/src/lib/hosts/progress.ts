@@ -1,16 +1,6 @@
-/**
- * Follow a dispatched host run by streaming its remote log.
- *
- * The run writes combined output to a log file on the host and its exit code to
- * a sibling `.exit` file. The primary path opens one long-lived
- * `ssh ... tail -f` stream (durable, offset-tracked — a dropped connection
- * reconnects from the saved offset) and finishes when the remote-side watcher
- * emits the exit sentinel. Rich transcript-parser rendering is a fast-follow.
- *
- * Efficiency: a healthy follow holds exactly one ssh process/socket for the
- * whole run instead of spawning once per poll cycle. If the connection drops,
- * the next stream resumes at the byte offset already flushed locally.
- */
+/** Follow a dispatched host run by streaming its remote log over one long-lived `ssh ... tail
+ * -f`, resuming from the saved byte offset after a drop, until the remote watcher emits the
+ * exit sentinel (log and `.exit` files on the host). */
 
 import * as fs from 'fs';
 import { sshExec, sshExecRaw, sshExecRawStream } from '../ssh-exec.js';
@@ -21,39 +11,21 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Cap for the LOCAL mirror of a distributed teammate's remote log. `followHostTask`
- * appends remote bytes into the local mirror forever; a team can spin 10+ chatty
- * remote teammates, so the orchestrator must keep a bounded window (the full log
- * always lives on the host). The teams remote path (agents.ts readNewEvents) writes
- * its own append into each teammate's `stdout.log`, then truncates that file to its
- * trailing `REMOTE_MIRROR_MAX_BYTES` — the parser has already consumed the bytes
- * (status/digest updated via lastReadPos), so trailing-tail history is dead weight.
- */
+/** Cap for the local mirror of a distributed teammate's remote log: 10+ chatty teammates would
+ * grow it forever, and the full log stays on the host. agents.ts readNewEvents truncates to the
+ * trailing bytes after the parser has consumed them. */
 export const REMOTE_MIRROR_MAX_BYTES = 512 * 1024;
 
-/**
- * Pull the new bytes of a remote log since `offset` in ONE ssh round-trip.
- *
- * The teams remote-teammate monitor calls this each poll to advance its offset-tail
- * cursor into the host's log, mirroring only the delta into the local `stdout.log`
- * the stream-json parser consumes. Byte-exact (raw Buffer, no UTF-8 decode) so a
- * multibyte character split at the `tail -c` boundary neither drifts the offset nor
- * renders as U+FFFD — the same discipline `fetchProgress` uses. `bytes.length` is
- * the exact wire count; `newOffset` is `offset + bytes.length`.
- *
- * Returns null on a transient ssh failure (the caller retries next poll without
- * advancing). `remoteLog` is a $HOME-prefixed path with a safe basename; it's
- * shell-quoted defensively even so.
- */
+/** Pull the new bytes of a remote log since `offset` in one ssh round-trip for the teams
+ * monitor. Byte-exact (raw Buffer) so a multibyte char split at the `tail -c` boundary can't
+ * drift the offset. Null on a transient ssh failure; the caller retries without advancing. */
 export function pullRemoteLogDelta(
   target: string,
   opts: { remoteLog: string; offset: number; extraSshArgs?: string[] },
 ): { bytes: Buffer; newOffset: number } | null {
-  // remoteLog is a dispatch-generated `$HOME/.agents/.cache/hosts/<hex>.log` path —
-  // interpolate UNQUOTED so the remote shell expands `$HOME` (shellQuote would
-  // single-quote it into a literal `$HOME`, and the tail would find nothing). The
-  // hex basename is injection-safe, matching fetchProgress below.
+  // remoteLog is a dispatch-generated `$HOME/...<hex>.log` path, interpolated unquoted so the
+  // remote shell expands `$HOME` (shellQuote would make it literal); the hex basename is injection-
+  // safe.
   const remote = `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null`;
   const res = sshExecRaw(target, remote, { timeoutMs: 20000, multiplex: true, extraSshArgs: opts.extraSshArgs });
   if (res.code === null) return null; // ssh itself failed / timed out
@@ -79,31 +51,16 @@ export interface FollowOptions {
 
 const STREAM_EXIT_POLL_SECONDS = 1;
 
-/**
- * Build the per-task sentinel that separates the log tail from the exit-file
- * contents in one combined fetch. The task id (8 hex chars) makes collision with
- * the agent's own output effectively impossible; callers still split on the LAST
- * occurrence so a token echoed into the log can never be mistaken for the real
- * trailing marker.
- */
+/** Per-task sentinel separating the log tail from the exit-file contents in one fetch. The 8-hex
+ * task id makes collision unlikely, and callers split on the last occurrence so an echoed token
+ * is never mistaken for it. */
 export function exitMarker(taskId: string): string {
   return `\n@@AGENTS_HOST_EXIT_${taskId}@@\n`;
 }
 
-/**
- * Split a combined fetch (`<log bytes><marker><exit>`) back into its parts at the
- * BYTE level. Splits on the LAST marker occurrence, so even if the agent's own
- * output happened to echo the token, the real trailing sentinel still wins.
- * Returns null when the marker is absent (a transient fetch miss — the remote
- * shell never ran our printf), telling the caller to retry without advancing.
- *
- * Byte-level (not string) is load-bearing: `logChunk.length` is the EXACT number
- * of log bytes consumed on the wire, which the follow loop adds to its offset. A
- * string split would first UTF-8-decode, turning any multibyte char split at the
- * `tail -c` boundary into a U+FFFD whose re-encoded length ≠ the wire bytes,
- * drifting the offset (see followHostTask). `consumed` is returned explicitly for
- * clarity; it always equals `logChunk.length`.
- */
+/** Split a combined fetch (`<log bytes><marker><exit>`) at the byte level on the last marker;
+ * null when absent (retry, no advance). Byte-level is load-bearing: a UTF-8 decode would turn a
+ * split multibyte char into U+FFFD and drift the offset (see followHostTask). */
 export function splitProgressBytes(
   buf: Buffer,
   taskId: string,
@@ -118,30 +75,21 @@ export function splitProgressBytes(
   };
 }
 
-/**
- * One round-trip: new log bytes since `offset`, the sentinel, then the exit
- * file. Returns null on a transient fetch miss (ssh error / marker absent) so
- * the caller simply retries next cycle without advancing the offset.
- *
- * `remoteLog`/`remoteExit` are $HOME-prefixed paths with safe (hex) basenames —
- * intentionally unquoted so the remote shell expands $HOME.
- */
+/** One round-trip: new log bytes since `offset`, the sentinel, then the exit file; null on a
+ * transient miss so the caller retries. `remoteLog`/`remoteExit` are $HOME-prefixed hex-
+ * basename paths, left unquoted so the remote shell expands $HOME. */
 export function fetchProgress(
   target: string,
   opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; extraSshArgs?: string[]; remoteShell?: 'posix' | 'powershell' },
 ): { logChunk: Buffer; exit: string } | null {
-  // Derive the printf format from the SAME exitMarker the parser splits on, so
-  // the emitted sentinel and the one we look for can never desync. The marker's
-  // only escape-sensitive bytes are its newlines (→ `\n`); it carries no `%`,
-  // single-quote, or other printf/shell-special chars (task id is hex).
+  // Derive the printf format from the same exitMarker the parser splits on so they cannot desync;
+  // only its newlines need escaping.
   const printfArg = exitMarker(opts.taskId).replace(/\n/g, '\\n');
   const remote = opts.remoteShell === 'powershell'
     ? buildWindowsProgressCommand(opts)
     : `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null; printf '${printfArg}'; cat ${opts.remoteExit} 2>/dev/null`;
-  // Raw bytes (no UTF-8 decode): the log tail must be counted and re-emitted
-  // byte-for-byte so a multibyte char split at the `tail -c` boundary neither
-  // drifts the offset nor renders as U+FFFD. The exit code is pure ASCII → safe
-  // to decode to a string for the caller's `.trim()`.
+  // Raw bytes (no UTF-8 decode) so the log tail is counted and re-emitted byte-for-byte; the ASCII
+  // exit code is safe to decode.
   const res = sshExecRaw(target, remote, { timeoutMs: 20000, extraSshArgs: opts.extraSshArgs });
   const parts = splitProgressBytes(res.stdout, opts.taskId);
   if (!parts) return null;
@@ -165,18 +113,9 @@ export function buildWindowsProgressCommand(opts: { remoteLog: string; remoteExi
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
 }
 
-/**
- * Remote shell for the persistent follow stream.
- *
- * Protocol: stream `tail -c +<offset+1> -f <log>` as raw stdout until `.exit`
- * becomes non-empty, give tail one more polling interval to flush final bytes,
- * stop it, then print the same per-task sentinel and `cat` the exit file on
- * stderr. Keeping the terminal frame off stdout lets log bytes pass through
- * live without buffering and without confusing agent output for our marker.
- * `remoteLog`/`remoteExit` are dispatch-generated `$HOME` paths with safe hex
- * basenames (or absolute paths in localhost integration tests), so they stay
- * unquoted to preserve `$HOME` expansion just like `fetchProgress`.
- */
+/** Remote shell for the persistent follow stream: `tail -c +<offset+1> -f <log>` until `.exit`
+ * is non-empty, one more poll to flush, then the sentinel and `cat` of the exit file on stderr,
+ * keeping the frame off stdout. Paths stay unquoted for `$HOME` expansion. */
 export function buildStreamingFollowCommand(opts: {
   remoteLog: string;
   remoteExit: string;
@@ -212,10 +151,8 @@ export function parseStreamingExitFrame(stderr: Buffer, taskId: string): Buffer 
   return stderr.subarray(idx + marker.length);
 }
 
-/**
- * File identity (`dev:ino`) of a path on the remote host, or null if it can't be
- * stat'd. GNU (`-c`) then BSD (`-f`) format, so it works on Linux and macOS hosts.
- */
+/** File identity (`dev:ino`) of a remote path, or null if it can't be stat'd; GNU `-c` then BSD
+ * `-f`, so Linux and macOS both work. */
 function readRemoteFileId(target: string, remotePath: string, extraSshArgs?: string[]): string | null {
   const res = sshExec(
     target,
@@ -226,12 +163,8 @@ function readRemoteFileId(target: string, remotePath: string, extraSshArgs?: str
   return id || null;
 }
 
-/**
- * True when the local mirror file IS the very file we're tailing — the
- * localhost-as-host case, where `remoteLog` ($HOME-expanded) and `localLogPath`
- * resolve to the same inode. Appending our read bytes back into it would feed the
- * tail and multiply the log, so the caller must skip the mirror write.
- */
+/** True when the local mirror is the very file being tailed (localhost-as-host, same inode);
+ * appending would feed the tail, so the caller must skip the mirror write. */
 export function mirrorAliasesSource(localId: string | null, remoteId: string | null): boolean {
   return localId !== null && remoteId !== null && localId === remoteId;
 }
@@ -245,10 +178,9 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
   let offset = 0;
   let waitMs = fastMs;
 
-  // localhost-as-host guard: when the local mirror and the remote log are the
-  // same physical file, appending our read bytes back would feed the tail and
-  // multiply the log (a plain `--host localhost` follow otherwise tripled it).
-  // Detect via file identity and echo-only in that case.
+  // localhost-as-host guard: if the mirror and the remote log are the same file, appending read
+  // bytes feeds the tail and multiplies the log (a plain `--host localhost` follow tripled it);
+  // detect by file identity and echo only.
   let mirror = true;
   try {
     const s = fs.statSync(local);

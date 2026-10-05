@@ -45,23 +45,9 @@ interface RegistryAccountInput {
   secretPresent: boolean;
 }
 
-/**
- * Which provider accounts can authenticate `agent`. An account is a candidate for
- * harness H only when its provider adapter has an `envFor(H, kind)` mapping
- * (`providerAuthenticatesHarness`, the same check the account UI uses) — so a
- * Cursor key never enters Claude's pool and a Claude setup-token never enters
- * Codex's. This is registry-driven, no per-harness `else if`: a harness gets a
- * provider-account pool exactly when the adapter table maps a provider to it —
- * today claude, codex, grok, cursor, opencode (plus gemini/antigravity). A harness
- * with only a native OAuth login and no provider adapter — kimi — returns `[]`
- * here and keeps balancing its native logins only.
- *
- * `accountKey` is synthetic here (`${agent}:name=${name}`) — a stable per-account
- * key so balancing can include it immediately; the real agent-scoped identity
- * (email / org uuid) is backfilled by identity capture and replaces it. `email`
- * is null until then, which routes the account as usage-unverified but still a
- * candidate, never excluded.
- */
+/** Which provider accounts can authenticate `agent`: only those whose adapter has `envFor(H, kind)`
+ * (a Cursor key never enters Claude's pool); no adapter (kimi) returns []. `accountKey` is
+ * synthetic until identity capture backfills it; null `email` = unverified, still a candidate. */
 export function registryPoolCandidates(
   records: RegistryAccountRecord[],
   agent: AgentId,

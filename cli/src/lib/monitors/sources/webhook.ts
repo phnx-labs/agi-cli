@@ -1,9 +1,5 @@
-/**
- * Webhook source evaluator.
- *
- * Webhooks are push-based (an inbound signed HTTP delivery), so the poll-model
- * `evaluate` returns null.
- */
+/** Webhook source evaluator. Webhooks are push-based (inbound signed HTTP delivery), so the
+ * poll-model `evaluate` returns null. */
 
 import type { MonitorSource } from '../config.js';
 import type { Observation } from './types.js';

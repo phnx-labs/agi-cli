@@ -3,11 +3,9 @@ import { capacityWeight, UNVERIFIED_WEIGHT, PROJECTION_HORIZON_MIN } from './cap
 
 describe('capacityWeight — a missing usage signal fails CLOSED (PHNX-3392, GWT-E5c)', () => {
   it('an unverifiable account (null snapshot) never outdraws a verified-healthy one', () => {
-    // The worker-box bug: a setup-token account cannot read /api/oauth/usage
-    // (403, RUSH-2392), so its snapshot is null. Scoring null as full capacity
-    // made a weekly-exhausted account the balanced router's TOP pick. The null
-    // arm must stay BELOW any verified account with real headroom — reverting
-    // `capacityWeight(null, …)` to 100 turns this red.
+    // Worker-box bug: a setup-token account cannot read /api/oauth/usage (403, RUSH-2392), so its
+    // snapshot is null. Scoring null as full capacity made an exhausted account the top pick; null
+    // must stay below verified.
     expect(capacityWeight(null, null)).toBeLessThan(capacityWeight(41, null));
     // A 99%-used verified account legitimately ties the unverified floor (1)
     // — it has nearly no headroom; the contract is only that real headroom

@@ -1,23 +1,6 @@
-/**
- * One address grammar for every `--host` an extracted CLI accepts (PHNX-4090).
- *
- * This file is copied verbatim into agents-cli, computer-cli, browser-cli and
- * secrets-cli, each with the same test vectors — deliberately not a published
- * package, so no engine grows a runtime dependency on another. Keep the four
- * copies identical; a change lands in all of them in the same delivery.
- *
- *   ssh://[user@]host[:ssh-port]   the authority port is the SSH port, never 9222
- *   cdp://host[:port]              default 9222
- *   vnc://host[:port]              default 5901
- *   tcp://host:port                no default — a helper RPC endpoint needs one
- *   wss://host/path, ws://…        a remote DevTools socket
- *   firefox-bidi://host[:port]     the browser's BiDi endpoint
- *   [user@]host                    implicit ssh://
- *
- * A query (`?port=9222&os=windows`) is preserved for the consumer that knows
- * what it means. Passwords never travel in an address: `user:secret@host` fails
- * loud, and so does any scheme not listed above.
- */
+/** One address grammar for every `--host` an extracted CLI accepts (PHNX-4090). Copied verbatim
+ * into agents-cli, computer-cli, browser-cli and secrets-cli with the same test vectors; keep the
+ * four identical. Passwords in an address fail loud. */
 
 export const ADDRESS_SCHEMES = ['ssh', 'cdp', 'vnc', 'tcp', 'wss', 'ws', 'firefox-bidi'] as const;
 
@@ -121,10 +104,8 @@ export function sshTarget(addr: Address): string {
   return addr.user ? `${addr.user}@${addr.host}` : addr.host;
 }
 
-/**
- * OpenSSH options carrying a non-default SSH port. `-o Port=N` rather than
- * `-p`/`-P` so the same argv serves both `ssh` and `scp`.
- */
+/** OpenSSH options for a non-default SSH port. `-o Port=N` rather than `-p`/`-P` so one argv serves
+ * both `ssh` and `scp`. */
 export function sshPortArgs(addr: Address): string[] {
   if (addr.scheme !== 'ssh') {
     throw new Error(`expected ssh:// or user@host, got ${addr.scheme}:// (${addr.raw})`);
@@ -151,11 +132,9 @@ export function tcpEndpoint(addr: Address): string {
   return `${addr.host}:${addr.port}`;
 }
 
-/**
- * The DevTools port a browser endpoint means. On `ssh://` the authority port is
- * the SSH port, so the DevTools port comes only from `?port=`; `cdp://` and
- * `ssh://` default to 9222, path-addressed sockets (`wss://`) have none.
- */
+/** The DevTools port a browser endpoint means. On `ssh://` the authority port is the SSH port, so
+ * it comes only from `?port=`; `cdp://` and `ssh://` default to 9222; path-addressed sockets
+ * (`wss://`) have none. */
 export function browserEndpointPort(addr: Address): number | undefined {
   const fromQuery = addr.query.port ? Number.parseInt(addr.query.port, 10) : undefined;
   if (fromQuery !== undefined) {

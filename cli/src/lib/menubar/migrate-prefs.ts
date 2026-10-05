@@ -1,30 +1,6 @@
-/**
- * One-time, CLI-owned migration of AGI Menu preferences from the macOS
- * UserDefaults domain `com.phnx-labs.agents-menubar` into the registered
- * `menubar.menu.*` config keys (PHNX-3999).
- *
- * Why here: before the preferences became `agents config` keys, the stable menu
- * bar stored them in its own UserDefaults. A user upgrading must keep those
- * settings, but the CLI is now the single source of truth and syncs fleet-wide,
- * so the values are lifted into config ONCE and then owned there.
- *
- * The rules (from the integration contract) are all fail-safe:
- *   - macOS only. On any other platform this is a no-op (Linux derives canonical
- *     config only).
- *   - The PRODUCTION domain only — never the dev bundle
- *     `com.phnx-labs.agents-menubar.dev` (we simply never read it).
- *   - Import only KNOWN keys ({@link MENUBAR_MENU_PROPERTIES}) that are still
- *     UNSET in config — an already-set (synced) value is never overridden.
- *   - One-shot, gated by a sentinel, so a later `agents config unset` cannot
- *     resurrect the legacy value on the next run.
- *
- * The stable app stores each preference under its FULL `menubar.menu.*` key name
- * (the Swift MenuPreferences local-cache key), so the migration matches on the
- * full name. If a key is stored under a different name, it simply is not matched
- * and the migration stays a safe no-op for it. The read uses `defaults export
- * <domain> -` piped through `plutil` (NOT `defaults read <domain> -json`, which
- * treats `-json` as a key and errors).
- */
+/** One-time, CLI-owned migration of AGI Menu prefs from UserDefaults `com.phnx-labs.agents-menubar`
+ * into `menubar.menu.*` config (PHNX-3999). Fail-safe: macOS only, production domain, known UNSET
+ * keys, one-shot via sentinel. Reads `defaults export <domain> -` via `plutil`. */
 
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -41,14 +17,9 @@ function sentinelPath(): string {
   return path.join(getRuntimeStateDir(), 'menubar-prefs-migrated');
 }
 
-/**
- * Pure plan step: which UserDefaults entries should be imported. The stable app
- * stores each preference under its FULL `menubar.menu.*` key name (the Swift
- * MenuPreferences local-cache key), so we match on the full name — only known
- * keys that are present in `userDefaults` AND currently unset in config
- * (`isUnset`) are imported, so an already-set value is preserved. Values are
- * returned raw; the caller coerces + validates them against each key's spec.
- */
+/** Pure plan: which UserDefaults entries to import. Matches the FULL `menubar.menu.*` key name;
+ * only known keys present in `userDefaults` and unset in config (`isUnset`) are imported. Values
+ * are returned raw; the caller coerces and validates. */
 export function planMenubarPrefMigration(
   userDefaults: Record<string, unknown>,
   isUnset: (fullName: string) => boolean,
@@ -63,13 +34,9 @@ export function planMenubarPrefMigration(
   return plan;
 }
 
-/**
- * Coerce a raw UserDefaults value to the type its config key expects. The
- * `plutil` scalar output is text, but a bool can arrive as
- * 0/1 or "true"/"false" and an int as a numeric string, so normalize before
- * validation. Returns undefined for a value that cannot be coerced (skipped,
- * never forced).
- */
+/** Coerces a raw UserDefaults value to its config key's type: bools may arrive as 0/1 or
+ * "true"/"false", ints as numeric strings. Returns undefined when it can't be coerced (skipped,
+ * never forced). */
 export function coerceMenubarPrefValue(name: string, raw: unknown): unknown {
   const type = configKeySpec(name).type;
   if (type === 'bool') {
@@ -86,19 +53,9 @@ export function coerceMenubarPrefValue(name: string, raw: unknown): unknown {
   return typeof raw === 'string' ? raw : undefined;
 }
 
-/**
- * Read known scalar preferences from the production domain.
- *
- * `defaults read <domain> -json` does NOT exist — `defaults read` treats `-json`
- * as a KEY name and errors. The correct read is `defaults export <domain> -`,
- * which writes the domain's plist to stdout (an EMPTY plist, exit 0, when the
- * domain is absent — a legitimate "nothing to migrate"), read one known scalar key at a time with `plutil -extract … raw`. Other
- * defaults may contain dates or data that cannot be represented as JSON.
- *
- * Returns `{ ok }` so the caller can tell a genuine read/convert FAILURE (do not
- * write the sentinel — retry next run) from an ABSENT domain (ok, empty values —
- * mark done). A failure never fabricates an empty map.
- */
+/** Reads known scalar prefs from the production domain via `defaults export <domain> -` (empty
+ * plist when absent) and `plutil -extract ... raw` per key. Returns `{ ok }` so a read FAILURE
+ * (retry, no sentinel) differs from an ABSENT domain (done). */
 function readUserDefaultsDomain(): { ok: boolean; values: Record<string, unknown> } {
   try {
     const plist = execFileSync('defaults', ['export', USER_DEFAULTS_DOMAIN, '-'], {
@@ -124,11 +81,8 @@ function readUserDefaultsDomain(): { ok: boolean; values: Record<string, unknown
   }
 }
 
-/**
- * Run the one-shot migration. macOS only, gated by the sentinel, best-effort:
- * any failure is swallowed (a migration must never break the snapshot read that
- * calls it) and a failed read remains eligible for a later retry.
- */
+/** Runs the one-shot migration: macOS only, gated by the sentinel, best-effort. Failures are
+ * swallowed so the snapshot read that calls it never breaks, and a failed read stays retryable. */
 export function migrateMenubarPreferencesFromUserDefaults(): void {
   if (process.platform !== 'darwin') return;
   const sentinel = sentinelPath();

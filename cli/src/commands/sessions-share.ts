@@ -1,19 +1,6 @@
-/**
- * `agents sessions share <id>` — publish one session transcript as a link.
- *
- * Renders the session locally — `renderSessionMarkdownDocument()` (redacted
- * transcript) and `renderSessionHtmlDocument()` (self-contained branded page) —
- * then publishes it through the standalone `artifacts` CLI (`artifacts share`),
- * the single home for artifact sharing since PHNX-3992. agents-cli holds no
- * share engine of its own; this command contributes the session-specific
- * rendering and redaction, and forwards the finished page to `artifacts share`.
- *
- * Unlisted by default, unlike `artifacts share` (public by default). A transcript
- * carries file paths, command output, error text, and whatever a tool printed —
- * strictly more than a plan does — so it does not belong in the public `/<user>`
- * gallery unless the operator asks for it with `--public`. The URL itself stays
- * world-readable: unlisted is a capability URL, not a secret.
- */
+/** `agents sessions share <id>` publishes one transcript as a link via the standalone `artifacts
+ * share` (PHNX-3992). Unlisted by default, unlike `artifacts share`: a transcript carries paths,
+ * output and errors, so `--public` is opt-in. Unlisted is a capability URL, not a secret. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -70,13 +57,9 @@ export function defaultSessionSlug(session: SessionMeta): string {
   return `session-${session.shortId || session.id}`;
 }
 
-/**
- * Build the `artifacts share` argv for a session publish.
- *
- * Extracted so the mapping is testable directly. The security-relevant default
- * is `--visibility unlisted` — it inverts `artifacts share`'s public default, and
- * a test that re-implements this mapping would still pass with it flipped.
- */
+/** Build the `artifacts share` argv for a session publish, extracted so the mapping is testable.
+ * The security-relevant default is `--visibility unlisted`, inverting `artifacts share`'s public
+ * default; a test re-implementing the mapping would still pass with it flipped. */
 export function buildArtifactsShareArgs(
   session: SessionMeta,
   options: Pick<ShareOptions, 'public' | 'slug' | 'label' | 'expire' | 'force' | 'cover'>,
@@ -177,17 +160,9 @@ Manage published sessions with 'artifacts share list' and 'artifacts share delet
       reasoning,
       knownSecrets: redact ? knownSecretValuesFromEnv() : undefined,
     });
-    // Emails on top of what the renderer masks. Almost every real transcript
-    // carries a few — git author addresses, `gh api user`, a pasted log — and
-    // `artifacts share` refuses a body containing any (its own scan). Masking
-    // them means the published page genuinely does not carry them; the
-    // alternative, telling people to pass --force, trains everyone to bypass the
-    // gate that also catches real credentials.
-    //
-    // Applied to the RENDERED PAGE, not the Markdown, so the text that is masked
-    // is exactly the text the publish scan will see. Markdown escaping stands
-    // between the two: `foo\@example.com` hides from the pattern in the Markdown
-    // and reappears as a live address once marked drops the backslash.
+    // Mask emails on top of the renderer: nearly every transcript has some and `artifacts share`
+    // refuses a body containing any; advising `--force` trains bypassing the check that also
+    // catches credentials. Apply to the rendered page, not Markdown.
     const page = renderSessionHtmlDocument(session, markdown, { redacted: redact });
     const html = redact ? redactEmails(page) : page;
 
@@ -225,10 +200,9 @@ Manage published sessions with 'artifacts share list' and 'artifacts share delet
       try {
         result = JSON.parse(proc.stdout) as ArtifactsShareResult;
       } catch {
-        // A 0 exit with non-JSON stdout (a version-skewed `artifacts` that
-        // printed a banner before the JSON, or one predating `--json` here) must
-        // fail loud with the bytes it actually returned, not an uncaught parse
-        // stack trace — mirroring `secrets-client.ts`'s `parseResponse`.
+        // A 0 exit with non-JSON stdout (a version-skewed `artifacts` printing a banner, or
+        // predating `--json`) must fail loud with the bytes returned, not an uncaught parse trace,
+        // mirroring `secrets-client.ts`'s `parseResponse`.
         const preview = proc.stdout.trim().slice(0, 200);
         process.stderr.write(chalk.red(
           `artifacts share returned a non-JSON response${preview ? `: ${preview}` : ' (empty output)'}\n`,

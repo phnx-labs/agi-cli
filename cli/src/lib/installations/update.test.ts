@@ -1,16 +1,6 @@
-/**
- * The update transaction, exercised against a real filesystem.
- *
- * These use the strategy seam with a REAL strategy — it genuinely stages files,
- * genuinely swaps directories, and the binaries it stages are real executables
- * the launch probe really runs — so the swap, the probe gate, and the rollback
- * are the production code paths. What it avoids is a multi-hundred-megabyte
- * vendor fetch per assertion, not the logic under test.
- *
- * The behaviour that matters here is the one a broken update would cost you:
- * a release that cannot launch must never replace one that can, and a reference
- * to the installation must survive a release change.
- */
+/** The update transaction on a real filesystem with a real strategy: it stages files, swaps
+ * directories and runs real staged executables through the launch probe, so swap, probe and
+ * rollback are production paths. A release that can't launch must never replace one that can. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -37,14 +27,9 @@ function versionDir(label: string): string {
 
 const IS_WIN = process.platform === 'win32';
 
-/**
- * A real, launchable stand-in for a vendor binary: prints a version and exits 0.
- *
- * Windows gets the `.cmd` wrapper alongside, because that is what the launch
- * probe actually runs there (`verifyBinaryLaunches`) — writing only the
- * extensionless file made every probe on Windows report a vacuous pass, so the
- * three tests that assert a FAILED launch never saw one.
- */
+/** A real, launchable stand-in for a vendor binary. Windows also gets the `.cmd` wrapper the
+ * launch probe runs (`verifyBinaryLaunches`); with only the extensionless file every Windows
+ * probe passed vacuously and failed-launch tests never saw a failure. */
 function writeLaunchableBinary(binDir: string, release: string): void {
   fs.mkdirSync(binDir, { recursive: true });
   const file = path.join(binDir, 'claude');
@@ -53,14 +38,9 @@ function writeLaunchableBinary(binDir: string, release: string): void {
   if (IS_WIN) fs.writeFileSync(`${file}.cmd`, `@echo off\r\necho ${release}\r\n`);
 }
 
-/**
- * A release that is present but cannot start — the gutted-install case.
- *
- * POSIX: no launch target at all, which the probe reports as "binary not found".
- * Windows: the `.cmd` wrapper survives a gutted install and is what emits the
- * "is not recognized" message the probe matches, so reproduce that rather than
- * deleting the wrapper (a missing `.cmd` is treated as healthy by design).
- */
+/** A release that is present but cannot start (the gutted-install case). POSIX: no launch target
+ * ("binary not found"). Windows: the `.cmd` wrapper survives and emits the "is not recognized"
+ * message the probe matches (a missing `.cmd` is treated as healthy by design). */
 function writeUnlaunchableBinary(binDir: string): void {
   fs.mkdirSync(binDir, { recursive: true });
   if (IS_WIN) {
@@ -87,10 +67,8 @@ function writeLiveRelease(label: string, release: string): void {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'live', release }));
 }
 
-/**
- * A real npm-shaped strategy: stages into a sibling dir on disk and reuses the
- * production commit/undo, so the swap under test is the shipped one.
- */
+/** A real npm-shaped strategy: stages into a sibling dir and reuses the production commit/undo,
+ * so the swap under test is the shipped one. */
 function fileStrategy(
   target: string,
   opts: { launchable: boolean; commit: UpdateStrategy['commit'] }
@@ -273,10 +251,9 @@ describe('updateInstallation', () => {
   });
 
   it('restores the version directory even when the strategy is not transactional', async () => {
-    // An installer-driven harness cannot put the VENDOR binary back, but it
-    // still displaced this installation's own tree — gating the undo on
-    // `transactional` left the broken release live and orphaned the working one
-    // in rollback material nothing ever deleted.
+    // An installer-driven harness can't put the vendor binary back, but it still displaced this
+    // installation's own tree; gating the undo on `transactional` left the broken release live and
+    // orphaned the working one in rollback material nothing deleted.
     const { update, store, strategies } = await load();
     writeLiveRelease('2.0.65', '2.0.65');
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');

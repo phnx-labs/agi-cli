@@ -1,36 +1,7 @@
 #!/usr/bin/env bash
-#
-# Decide whether a target version is an acceptable next release, and say which
-# KIND of bump it is.
-#
-# Extracted from release.sh so the arithmetic can be tested directly: it is pure
-# (four version strings in, one word out) while release.sh needs a clean main, a
-# logged-in npm, and gh auth before it reaches this point. See
-# scripts/validate-bump.test.ts.
-#
-# usage: validate-bump.sh <published-latest> <package-json-version> <shim-latest> <target>
-#
-# On success prints the bump kind to stdout and exits 0:
-#   patch | minor | major        a single step from the PUBLISHED latest
-#   shim-catchup                 target == published latest, republishing the
-#                                frozen @companion shim which is still behind
-#   phnx-catchup                 target == the version main already carries,
-#                                when main is ahead of the registry
-#   patch-from-main              the next patch AFTER an unpublishable main (see
-#                                below)
-#
-# On failure prints the accepted versions to stderr and exits 1.
-#
-# Why patch-from-main exists: release.sh refuses to publish a merged release PR
-# whose squash pulled in concurrent main commits, because the tree that would
-# ship is no longer the tree CI tested. Its refusal advises cutting the next
-# patch through the normal release PR flow — but patch+1 is measured from the
-# REGISTRY, so with main at 1.20.75 and npm at 1.20.74 both 1.20.75 (blocked by
-# that guard) and 1.20.76 (a skipped version) were rejected, leaving no
-# patch-level path forward. This opens exactly that one step, and only while
-# package.json is strictly ahead of the registry. It is not a bypass: the
-# resulting release still earns its own release PR, full cross-platform matrix,
-# merge, tag and publish against the exact tree being shipped.
+# Decide whether a target version is an acceptable next release and which bump it is. Extracted
+# from release.sh so the arithmetic is testable. patch-from-main opens one step after an
+# unpublishable main; it is not a bypass, since the release still earns its own PR and CI.
 
 set -euo pipefail
 

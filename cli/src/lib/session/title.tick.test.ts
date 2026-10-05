@@ -1,9 +1,6 @@
-/**
- * The titling sweep against a REAL session index (PHNX-3797). Only the model
- * call is injected — that is the module's declared boundary (the same seam the
- * watchdog agent uses); candidate selection, the source-key cache, persistence,
- * and the scan upsert's preservation of a written title all run for real.
- */
+/** The titling sweep against a real session index (PHNX-3797). Only the model call is injected;
+ * candidate selection, source-key cache, persistence and the scan upsert's preservation of a
+ * written title run for real. */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

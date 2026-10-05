@@ -58,10 +58,9 @@ describe('execFileBounded', () => {
   });
 
   it('does NOT block the event loop while the child runs', async () => {
-    // A synchronous execFileSync of this sleep would freeze the loop for its
-    // whole duration, so a timer scheduled alongside it could not fire until it
-    // returned. With execFileBounded the loop stays live: the timer fires while
-    // the child is still running.
+    // A synchronous execFileSync of this sleep would freeze the loop for its whole duration, so a
+    // timer scheduled alongside could not fire until it returned. With execFileBounded the loop
+    // stays live: the timer fires while the child is still running.
     let timerFired = false;
     const t = setTimeout(() => { timerFired = true; }, 100);
     const execPromise = execFileBounded('node', ['-e', 'setTimeout(()=>{}, 700)'], { timeoutMs: 5_000 });

@@ -1,12 +1,6 @@
-/**
- * agents devices config — per-device settings.
- *
- * Split out of a single 18-test `ssh.device-config.test.ts` that ran ~44s
- * locally (151s on a loaded worker) — 8.4s per test, and one of the files
- * setting the suite's floor: vitest parallelises across FILES and runs one
- * file's tests sequentially in a single worker. Shared spawn harness lives in
- * `device-config-test-harness.ts`.
- */
+/** agents devices config: per-device settings. Split from an 18-test file (~44s, 151s loaded) since
+ * vitest parallelises across files, not tests; shared spawn harness in
+ * `device-config-test-harness.ts`. */
 import { describe, expect, it } from 'vitest';
 import {
   guardedHome,

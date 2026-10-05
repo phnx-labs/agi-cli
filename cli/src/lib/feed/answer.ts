@@ -1,38 +1,6 @@
-/**
- * Deliver one operator answer to one open attention item (PHNX-3999).
- *
- * The AGI Menu abandons a reply at 30s, so every path here is bounded and every
- * outcome is reported from real evidence:
- *
- *   - **Match before enrichment.** The requested key names its session, so the
- *     candidate set is that session alone and the optional `gh pr view` read
- *     runs only for a key whose generation is a PR review. Enriching every
- *     active session first spent one 15s-bounded `gh` call per session on a
- *     question that never needed one.
- *   - **Unknown stays unknown.** Three outcomes are distinct and never merged: a
- *     confirmed failure (nothing was sent, the claim is released, retry is safe),
- *     an unconfirmed delivery (something may have landed, the claim is KEPT), and
- *     a real receipt. A timeout is unconfirmed, never a failure.
- *   - **Receipts are read, never synthesized, and never over-read.** `queued`
- *     means a rail took the answer and nothing more; only the agent's own
- *     `consumed`/`continued` resolves the item; `dropped`/`expired` are failures.
- *   - **Replay is de-duplicable or refused.** A claim stranded by a kill is
- *     adopted only on the mailbox rail, where the queued message's block id makes
- *     re-delivery detectable, and only through a compare-and-swap on the claim so
- *     two retries cannot both adopt it. A keystroke or resume rail cannot be
- *     replayed safely, so it reports unknown and points at the session.
- *   - **Exact tokens across the hop.** A remote answer is quoted with the
- *     canonical `shellQuote` and run through the canonical bounded `sshExecAsync`,
- *     so newlines and shell metacharacters arrive byte-identical, and the returned
- *     receipt is verified to belong to the key that was asked about.
- *
- *   - **A claim is not a resolution.** The claim is taken `pending`
- *     (`recordAnswer`'s two-phase option): it locks the item against a second
- *     surface but leaves the block `open` and writes no tombstone, so the card
- *     stays in the operator's feed. Only a real receipt calls
- *     `confirmAnswerResolution` and lets the item leave. A delivery that never
- *     confirms can no longer make the request silently disappear.
- */
+/** Delivers one operator answer to one open attention item (PHNX-3999), bounded for the AGI Menu's
+ * 30s. Outcomes stay distinct: confirmed failure (claim released), unconfirmed (claim kept; a
+ * timeout is never a failure), or a real receipt. The claim is `pending`; only a receipt resolves. */
 import { spawn } from 'node:child_process';
 import { getActiveSessions, type ActiveSession } from '../session/active.js';
 import { resolveAnswerRoute, resumeArgv, type AnswerRoute } from '../answer-router.js';
@@ -63,35 +31,21 @@ import { reconcileAttention, type AttentionItem } from './attention.js';
 import { readPullRequestStatus } from './pr-status.js';
 import { getAgentsInvocation } from '../daemon/daemon.js';
 
-/**
- * Total budget for one answer. Sits below the AGI Menu's 30s abandon so the
- * operator always gets a typed verdict instead of a timeout.
- */
+/** Total budget for one answer; below the AGI Menu's 30s abandon so the operator gets a typed
+ * verdict, not a timeout. */
 export const ANSWER_DEADLINE_MS = 20_000;
 /** Slice of the budget the optional PR-review enrichment may spend. */
 export const PR_ENRICHMENT_BUDGET_MS = 4_000;
 /** Budget for the forwarded leg — the remote repeats the local work under its own deadline. */
 export const REMOTE_ANSWER_TIMEOUT_MS = 25_000;
-/**
- * A claim older than this with no receipt was stranded by a kill, not left in
- * flight: it exceeds a full local deadline plus the remote leg, so no live
- * delivery can still be running behind it.
- */
+/** A claim older than this with no receipt was stranded by a kill: it exceeds a full local
+ * deadline plus the remote leg. */
 export const STRANDED_CLAIM_MS = 60_000;
-/**
- * How long to watch a `resume` child before giving up on a verdict. A resume
- * runs the agent's whole next turn — minutes — so waiting for exit would blow the
- * operator deadline on every headless answer. Only a clean early exit is booked;
- * a non-zero exit or a still-running child is unknown, because neither proves
- * the agent did or did not accept the prompt.
- */
+/** How long to watch a `resume` child for a verdict. A resume runs the whole next turn, so only
+ * a clean early exit is booked; a non-zero exit or still-running child is unknown. */
 export const RESUME_SETTLE_MS = 2_000;
-/**
- * How long a caller that LOST the claim waits for the holder's receipt before
- * reporting unknown. The holder is mid-delivery — a double-clicked answer is the
- * common case — so a short wait turns "I can't tell" into the real receipt,
- * without ever delivering a second copy.
- */
+/** How long a caller that lost the claim waits for the holder's receipt before reporting
+ * unknown, without sending a second copy. */
 export const HOLDER_RECEIPT_WAIT_MS = 400;
 const HOLDER_RECEIPT_POLL_MS = 20;
 
@@ -117,11 +71,8 @@ export class AnswerError extends Error {
   }
 }
 
-/**
- * An UNCONFIRMED outcome: something may have been delivered. The claim is kept
- * so a retry cannot double-send, and the operator is offered a delivery check
- * rather than a resend.
- */
+/** An unconfirmed outcome: something may have been delivered. The claim is kept so a retry
+ * cannot double-send; offer a delivery check. */
 export class AnswerUnknownError extends Error {
   constructor(message: string) {
     super(message);
@@ -129,19 +80,13 @@ export class AnswerUnknownError extends Error {
   }
 }
 
-/**
- *   delivered        — this call handed the answer to a rail.
- *   already_answered — another claim owns it; the reported evidence is that claim's.
- *   unknown          — something may have landed; do NOT resend, check delivery.
- *   failed           — confirmed: nothing was delivered.
- */
+/** delivered: this call handed the answer to a rail. already_answered: another claim owns it.
+ * unknown: may have landed, do not resend. failed: confirmed nothing was delivered. */
 export type AnswerStatus = 'delivered' | 'already_answered' | 'unknown' | 'failed';
 
-/**
- *   receipt     — a real {@link MessageReceipt} exists on the block.
- *   unconfirmed — no receipt evidence either way. The card must NOT be cleared.
- *   failed      — confirmed failure, including a `dropped`/`expired` receipt.
- */
+/** receipt: a real MessageReceipt exists on the block. unconfirmed: no evidence either way, so
+ * the card must not be cleared. failed: confirmed failure, including a `dropped`/`expired`
+ * receipt. */
 export type AnswerDelivery = 'receipt' | 'unconfirmed' | 'failed';
 
 export interface FeedAnswerResult {
@@ -150,12 +95,8 @@ export interface FeedAnswerResult {
   delivery: AnswerDelivery;
   /** The block's real receipt. Absent means no rail ever reported one. */
   receipt?: MessageReceipt;
-  /**
-   * The AGENT's own evidence that it received the answer — a `consumed` or
-   * `continued` receipt. A `queued` receipt is delivery, never resolution, so it
-   * leaves this false. Removal of the item from the feed resolves the card on
-   * its own; this flag only ever adds evidence, it never withholds it.
-   */
+  /** The agent's own evidence of receipt (`consumed` or `continued`). A `queued` receipt is
+   * delivery, not resolution, so it leaves this false. */
   resolved: boolean;
   /** Human explanation for a failure, an unknown, or an unconfirmed delivery. */
   reason?: string;
@@ -165,11 +106,8 @@ export interface FeedAnswerResult {
   blockId?: string;
   /** The device that owns the item — the exact target a delivery check re-queries. */
   host?: string;
-  /**
-   * Stable identity of the delivery attempt (the claim timestamp). A delivery
-   * check correlates its read-only answer with the attempt it is checking, so
-   * "still unconfirmed" is distinguishable from "a newer attempt replaced it".
-   */
+  /** Stable identity of the delivery attempt (the claim timestamp), so a delivery check can tell
+   * "still unconfirmed" from "a newer attempt". */
   attempt?: string;
 }
 
@@ -179,11 +117,8 @@ interface VerifiedOperator { id?: string; verified: boolean; label?: string }
 
 export interface ParsedAttentionKey { host: string; sessionId: string; generation: string }
 
-/**
- * Split `<host>/<session>/<generation>` (attention.ts `attentionKey`). Fails
- * loud on a malformed key: the old `slice(0, indexOf('/'))` returned a truncated
- * host for a key with no separator, which then routed the answer at random.
- */
+/** Splits `<host>/<session>/<generation>` (attention.ts `attentionKey`). Fails loud on a
+ * malformed key: the old slice returned a truncated host and misrouted the answer. */
 export function parseAttentionKey(key: string): ParsedAttentionKey {
   const first = key.indexOf('/');
   const last = key.lastIndexOf('/');
@@ -196,11 +131,8 @@ export function parseAttentionKey(key: string): ParsedAttentionKey {
   return { host: key.slice(0, first), sessionId: key.slice(first + 1, last), generation: key.slice(last + 1) };
 }
 
-/**
- * Whether THIS machine owns the item. The exact local/remote choice: the key's
- * host is compared through the same {@link normalizeHost} the machine id is
- * minted with, so `Yosemite-M4.local` and `yosemite-m4` are one machine.
- */
+/** Whether this machine owns the item; the key's host goes through normalizeHost, so
+ * `Yosemite-M4.local` and `yosemite-m4` match. */
 export function answerOwnerIsLocal(host: string, self: string = machineId()): boolean {
   return normalizeHost(host) === normalizeHost(self);
 }
@@ -212,15 +144,9 @@ function isPullRequestGeneration(generation: string): boolean {
 
 // --- receipt semantics ------------------------------------------------------
 
-/**
- * What a stored receipt proves. The lifecycle vocabulary is fixed by
- * `MessageReceipt`, and each member means exactly one thing here:
- *   queued            — a rail took the answer. Delivery, never resolution.
- *   consumed/continued— the agent itself acknowledged it. This resolves the item.
- *   dropped/expired   — terminal failure; it is the newest truth for its message
- *                       (the write rank puts it top precisely so it cannot be
- *                       regressed), which is exactly why it must not read as success.
- */
+/** What a stored receipt proves: `queued` is delivery, never resolution; `consumed`/`continued`
+ * is the agent's own ack and resolves; `dropped`/`expired` is terminal failure (ranked top on
+ * write so it cannot regress) and must not read as success. */
 export function classifyReceipt(receipt: MessageReceipt): { delivery: AnswerDelivery; resolved: boolean } {
   if (receipt.status === 'consumed' || receipt.status === 'continued') return { delivery: 'receipt', resolved: true };
   if (receipt.status === 'queued') return { delivery: 'receipt', resolved: false };
@@ -233,11 +159,8 @@ interface Deadline { endMs: number }
 function startDeadline(totalMs: number): Deadline { return { endMs: Date.now() + totalMs }; }
 function remainingMs(deadline: Deadline): number { return deadline.endMs - Date.now(); }
 
-/**
- * Bound one delivery await. Expiry is UNKNOWN, not failure: the rail's own child
- * may still land the answer, so the claim stays and the operator is sent to a
- * delivery check.
- */
+/** Bounds one delivery await. Expiry is UNKNOWN, not failure: the rail's child may still land
+ * the answer, so the claim stays. */
 async function withinDeadline<T>(work: Promise<T>, deadline: Deadline, what: string): Promise<T> {
   const budget = remainingMs(deadline);
   if (budget <= 0) throw new AnswerUnknownError(`${what} had no budget left; delivery is unknown.`);
@@ -276,11 +199,8 @@ function blockFromAttention(attention: AttentionItem, session: ActiveSession): O
 interface ResolvedTarget { block: OpenBlock; attention: AttentionItem; session: ActiveSession }
 interface MatchOutcome { hit?: ResolvedTarget; observed?: AttentionItem }
 
-/**
- * Reconcile one session against the requested key. `pullRequest` is passed only
- * on the enrichment pass — `reconcileAttention` consults it last
- * (`attentionFromPullRequest`), so a block- or session-derived match never needed it.
- */
+/** Reconciles one session against the requested key. `pullRequest` is passed only on the
+ * enrichment pass, since `reconcileAttention` consults it last. */
 function matchSession(
   session: ActiveSession,
   key: ParsedAttentionKey,
@@ -377,15 +297,9 @@ interface ClaimOutcome {
   lost?: FeedAnswerResult;
 }
 
-/**
- * Take over a claim a kill stranded, atomically.
- *
- * `rollbackAnswerClaim` compares `answeredAt` before releasing, so it IS the
- * compare-and-swap: exactly one racer can release this exact claim, and it
- * re-takes it immediately under `recordAnswer`'s `O_EXCL`. A racer that loses
- * either the release or the re-take finds a live marker and reports
- * `already_answered` instead of delivering a second copy.
- */
+/** Takes over a claim a kill stranded, atomically: `rollbackAnswerClaim` compares `answeredAt`
+ * before releasing, so it is the compare-and-swap, and the re-take uses `recordAnswer`'s
+ * O_EXCL. A losing racer reports `already_answered` instead of double-delivering. */
 function adoptStrandedClaim(
   block: OpenBlock, stranded: AnswerRecord, operator: VerifiedOperator, verified: boolean, root?: string,
 ): AnswerRecord | undefined {
@@ -408,10 +322,8 @@ function adoptStrandedClaim(
   return getAnswerRecord(block.blockId, root);
 }
 
-/**
- * Wait briefly for the claim holder to record its receipt. Read-only — it polls
- * the block's own receipt list and never claims, routes or resends.
- */
+/** Waits briefly for the claim holder's receipt. Read-only: polls the block's receipt list,
+ * never claims, routes or resends. */
 async function awaitHolderReceipt(
   blockId: string, waitMs: number, origin: ReceiptOrigin, root?: string,
 ): Promise<MessageReceipt | undefined> {
@@ -445,13 +357,9 @@ function heldClaimResult(
   };
 }
 
-/**
- * Take the claim, or reconcile the one already on disk against the block's real
- * receipts. A stranded claim is adopted only when `replayable` — the mailbox rail,
- * where the queued message's block id makes a second enqueue detectable. A
- * keystroke or resume rail may already have landed before the kill and cannot be
- * de-duplicated, so it stays unknown.
- */
+/** Takes the claim or reconciles the one on disk against real receipts. A stranded claim is
+ * adopted only when `replayable` (mailbox rail, where the queued block id makes a second
+ * enqueue detectable); keystroke and resume rails cannot be de-duplicated, so stay unknown. */
 async function claimOrReconcile(
   block: OpenBlock,
   attentionKey: string,
@@ -515,17 +423,9 @@ async function deliverMailbox(
   origin: ReceiptOrigin, mailboxRoot?: string,
 ): Promise<DeliveryOutcome> {
   const dir = mailboxDir(block.mailboxId, mailboxRoot);
-  // An adopted claim may already have enqueued before it was killed. The whole
-  // spool is scanned — inbox, processing AND consumed (`readBox`, not `peek`) —
-  // because a kill AFTER the agent drained the message would otherwise look
-  // like nothing was ever sent and enqueue the answer a second time.
-  //
-  // The match is on the ASK (block id + generation), not just the block id: a
-  // block id is per SESSION, so an already-consumed message answering question N
-  // would otherwise suppress a genuine delivery for question N+1. It is NOT keyed
-  // on the attempt: adopting a stranded claim necessarily mints a NEW attempt, so
-  // requiring an attempt match would never find the message the killed run queued
-  // and would duplicate the answer.
+  // An adopted claim may already have enqueued. Scan the whole spool (inbox, processing, consumed
+  // via `readBox`), or a kill after the agent drained it re-sends. Match on the ask (block id +
+  // generation), never the attempt: adoption mints a new attempt.
   const existing = adopted
     ? readBox(dir).find((msg) => msg.blockId === block.blockId && msg.generation === origin.generation)
     : undefined;
@@ -539,17 +439,9 @@ async function deliverMailbox(
   };
 }
 
-/**
- * Re-enter a headless agent with the answer as its next user turn.
- *
- * Nothing here can prove non-delivery. A non-zero exit does NOT mean the prompt
- * never ran — the agent may have acted on it and then crashed — and a process
- * still running is not evidence the prompt was accepted either. Both are
- * therefore UNKNOWN, which keeps the claim and sends the operator to a delivery
- * check instead of a resend. Only a clean exit is booked, as `queued`: the
- * resume command completed, which is the rail taking the answer — not the agent
- * acknowledging it, which is what `consumed`/`continued` mean.
- */
+/** Re-enters a headless agent with the answer as its next user turn. Nothing can prove
+ * non-delivery: a non-zero exit may follow acting on the prompt, and a running process proves
+ * nothing, so both are UNKNOWN (claim kept). A clean exit is booked as `queued`, not consumed. */
 async function deliverResume(
   route: AnswerRoute, block: OpenBlock, claimedAt: string, operator: VerifiedOperator,
   attentionKey: string, deadline: Deadline, origin: ReceiptOrigin,
@@ -584,15 +476,9 @@ async function deliverResume(
   return { receipt: { msgId: `resume-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label, ...origin } };
 }
 
-/**
- * Drive a keystroke rail.
- *
- * A failure here is UNKNOWN, not a confirmed failure: the tmux/iTerm path writes
- * the text and its Enter as two separate sends (terminal/inject.ts, the Ink-safe
- * split), so a reported error can mean the text already landed in the composer
- * and only the submit failed. Every check that can prove nothing was sent —
- * rail completeness, paste capability — runs BEFORE the claim instead.
- */
+/** Drives a keystroke rail. A failure is UNKNOWN: tmux/iTerm sends text and Enter separately
+ * (terminal/inject.ts), so the text may have landed with only the submit failing. Checks that
+ * can prove nothing was sent run before the claim. */
 async function deliverInject(
   route: AnswerRoute, block: OpenBlock, answer: string, claimedAt: string, operator: VerifiedOperator,
   origin: ReceiptOrigin, deadline: Deadline,
@@ -604,12 +490,9 @@ async function deliverInject(
     ...(isMultilineFreeText(route, answer) ? { paste: true } : {}),
   });
   if (!delivered.ok) {
-    // `writes === 0` means no write was even issued, so nothing landed and the
-    // item is cleanly retryable. Anything past the first write is ambiguous: the
-    // text may sit in the composer with only its submit missing.
-    // `started === 0` is the ONLY proof nothing reached the terminal. A spec that
-    // was started and then failed or timed out may have written bytes first, so
-    // `writes` (which counts COMPLETED specs) cannot license a retry.
+    // `writes === 0` means no write was issued, so the item is cleanly retryable. Only `started ===
+    // 0` proves nothing reached the terminal: a started spec that failed or timed out may have
+    // written bytes, and `writes` counts only completed specs.
     if (delivered.started === 0) {
       throw new AnswerError(
         `${delivered.error ?? `Failed to deliver over ${route.kind}`} — no keystroke was sent.`,
@@ -628,11 +511,8 @@ async function deliverInject(
   return { receipt: { msgId: `inject-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label, ...origin } };
 }
 
-/**
- * Everything provable BEFORE a claim is taken. Each of these means nothing was
- * sent, so raising here keeps the item cleanly retryable instead of parking it
- * in an unknown state.
- */
+/** Everything provable before a claim is taken. Each means nothing was sent, so raising here
+ * keeps the item retryable. */
 function preflightRoute(route: AnswerRoute, answer: string, attentionKey: string): void {
   if (route.kind === 'refuse') throw new AnswerError(route.reason, 'refused');
   if (route.kind === 'mailbox' || route.kind === 'resume') return;
@@ -647,12 +527,8 @@ function preflightRoute(route: AnswerRoute, answer: string, attentionKey: string
 
 // --- entry points -----------------------------------------------------------
 
-/**
- * Read-only reconciliation of an attention item's delivery state — what powers
- * "Check delivery" on an unconfirmed answer. It NEVER claims, routes, adopts or
- * resends; it reports the stored claim and the block's real receipt so an
- * operator can tell "still unconfirmed" from "the agent has it".
- */
+/** Read-only reconciliation of delivery state, behind "Check delivery". Never claims, routes,
+ * adopts or resends; reports the stored claim and real receipt. */
 export function checkAnswerDelivery(
   attentionKey: string, feedRoot?: string, expectedAttempt?: string,
 ): FeedAnswerResult {
@@ -668,10 +544,8 @@ export function checkAnswerDelivery(
     })
     : undefined;
 
-  // A block id is per SESSION, so its claim and receipts belong to whatever
-  // generation the session is on NOW. Checking an older card against them would
-  // report the NEXT question's receipt as this question's answer, which is the
-  // one way a read-only check can still lie.
+  // A block id is per session, so its claim and receipts belong to the current generation. Checking
+  // an older card against them would report the next question's receipt as this one's.
   const block = readBlock(blockId, feedRoot);
   const resolution = readResolution(blockId, feedRoot);
   const liveGeneration = block ? blockGeneration(block) : resolution?.generation;
@@ -779,10 +653,8 @@ export async function claimAndRouteAttentionAnswer(input: {
       `Delivering '${input.attentionKey}' over ${route.kind}`,
     );
   } catch (error) {
-    // Only a CONFIRMED failure releases the claim. Past this point the code is
-    // inside a rail that may already have written bytes, so anything unexpected
-    // is UNKNOWN too — keeping the claim is what stops a retry double-sending
-    // behind a delivery that may have landed.
+    // Only a confirmed failure releases the claim. Past this point a rail may have written bytes,
+    // so anything unexpected is UNKNOWN; keeping the claim stops a retry from double-sending.
     if (error instanceof AnswerError) {
       rollbackAnswerClaim(block.blockId, claim.answeredAt, restoreBlock, restoreResolution, input.feedRoot);
       throw error;
@@ -793,12 +665,9 @@ export async function claimAndRouteAttentionAnswer(input: {
   const { delivery, resolved } = classifyReceipt(delivered.receipt);
   try {
     recordMessageReceipt(block.blockId, delivered.receipt, input.feedRoot);
-    // Only the AGENT's own acknowledgement resolves the item. A `queued` receipt
-    // says a rail took the answer and nothing more, so the card stays up until
-    // the mailbox drain records `consumed` (which promotes it through
-    // `recordMessageReceipt`) or the transcript moves past the block. The
-    // generation + attempt binding stops a slow delivery from resolving the ask
-    // the agent has since moved on to.
+    // Only the agent's own acknowledgement resolves the item; `queued` means a rail took it, so the
+    // card stays until `consumed` or the transcript moves past the block. The generation + attempt
+    // binding stops a slow delivery from resolving a later ask.
     if (resolved) {
       confirmAnswerResolution(block.blockId, input.feedRoot, {
         generation: key.generation, answeredAt: claim.answeredAt,
@@ -820,10 +689,8 @@ export async function claimAndRouteAttentionAnswer(input: {
   };
 }
 
-/**
- * The remote `agents feed answer` argv for a forwarded answer. Exported so the
- * exact tokens that cross the hop are asserted directly.
- */
+/** The remote `agents feed answer` argv for a forwarded answer, exported so the tokens that
+ * cross the hop are asserted directly. */
 export function remoteAnswerArgv(input: {
   attentionKey: string; choiceId?: string; text?: string; operatorId?: string;
   check?: boolean; attempt?: string;
@@ -837,21 +704,9 @@ export function remoteAnswerArgv(input: {
   return argv;
 }
 
-/**
- * Forward a fleet attention answer to the device that owns its scope.
- *
- * Every token is POSIX-quoted with the canonical {@link shellQuote} before the
- * remote login shell parses it, so a multiline answer or one carrying `$`, `"`,
- * `` ` ``, `;` or a newline arrives byte-identical. The transport is the
- * canonical bounded {@link sshExecAsync} — it disables ControlMaster whenever a
- * timeout is set, so the bound actually tears the remote command down instead of
- * orphaning it behind a control socket.
- *
- * A timeout is reported UNKNOWN: the remote may well have delivered before the
- * link was cut, so the operator is offered a delivery check, never an implicit
- * resend. The returned receipt is verified to be about the key that was asked
- * for, so a mismatched or truncated remote reply cannot be trusted as one.
- */
+/** Forwards a fleet attention answer to the device owning its scope. Tokens are POSIX-quoted with
+ * shellQuote so they arrive byte-identical, over bounded sshExecAsync. A timeout is UNKNOWN (offer
+ * a delivery check, never a resend); the receipt must match the asked key. */
 export async function forwardFeedAnswer(input: {
   host: string;
   attentionKey: string;
@@ -870,10 +725,9 @@ export async function forwardFeedAnswer(input: {
     attentionKey: input.attentionKey, host: input.host,
   });
 
-  // The caller enforces the bound, not the transport. `sshExecAsync` resolves on
-  // the child's `close`, which a remote peer still holding the pipe can delay
-  // past the kill it already issued — so the operator's verdict is raced against
-  // the deadline directly and returns on time regardless.
+  // The caller enforces the bound, not the transport: `sshExecAsync` resolves on child `close`,
+  // which a remote still holding the pipe can delay past the kill, so the verdict is raced against
+  // the deadline directly.
   const settled = await Promise.race([
     sshExecAsync(input.host, remoteCmd, { timeoutMs }).then((value) => ({ value })),
     new Promise<{ value?: undefined }>((resolve) => {
@@ -886,13 +740,9 @@ export async function forwardFeedAnswer(input: {
     return unknown(`Answering on '${input.host}' did not finish in ${timeoutMs}ms — it may already have been delivered.`);
   }
 
-  // Once ssh has been handed the command there is NO way to prove the remote did
-  // not run it. Exit 255 covers both "could not connect" and "connection dropped
-  // after the answer was delivered", and a dropped link can lose stdout, so even
-  // an echoed start marker is not proof of its own absence. Every post-dispatch
-  // remote outcome is therefore UNKNOWN — the operator gets "check delivery",
-  // never a retry that could double-send. (A locally-detectable fault, such as an
-  // invalid ssh target, throws from `sshExecAsync` before anything is dispatched.)
+  // Once ssh has the command there is no way to prove the remote did not run it: exit 255 covers
+  // both connect failure and a link dropped after delivery, and stdout can be lost. So every
+  // post-dispatch outcome is UNKNOWN: check delivery, never a retry that could double-send.
   if (result.code === SSH_CONN_FAILURE_CODE) {
     return unknown(`ssh to '${input.host}' failed (exit 255)${result.stderr.trim() ? `: ${result.stderr.trim()}` : ''}; whether the answer ran there is unknown.`);
   }
@@ -915,11 +765,8 @@ const ANSWER_STATUSES: readonly AnswerStatus[] = ['delivered', 'already_answered
 const ANSWER_DELIVERIES: readonly AnswerDelivery[] = ['receipt', 'unconfirmed', 'failed'];
 const RECEIPT_STATUSES: readonly MessageReceipt['status'][] = ['queued', 'consumed', 'continued', 'dropped', 'expired'];
 
-/**
- * Validate a forwarded result as a whole, not just its key: an off-key, truncated
- * or shape-invalid reply is not evidence about THIS request, and a caller that
- * trusted one would report another item's outcome as this one's.
- */
+/** Validates a forwarded result as a whole: an off-key, truncated or malformed reply is not
+ * evidence about this request. */
 function remoteResultProblem(
   parsed: FeedAnswerResult, attentionKey: string, requestedAttempt?: string,
 ): string | undefined {

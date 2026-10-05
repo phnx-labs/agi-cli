@@ -1,17 +1,6 @@
-/**
- * Tests for the hooks soft-delete prune logic.
- *
- * removeHookFromVersion() moves hook files to trash instead of hard-deleting.
- * diffVersionHooks() classifies version-home hooks as toAdd / toUpdate / matched / orphans.
- *
- * Both functions rely on path constants from state.ts that are not injectable.
- * We redirect them by spying on the two exported state getters they call through:
- *   - getVersionsDir()       → controls getVersionHomePath() → getVersionHooksDir()
- *   - getTrashHooksDir()     → controls the trash destination
- *   - getUserHooksDir()      → controls getCentralHooksDir() (used by diffVersionHooks)
- *
- * Spies must be set up BEFORE importing hooks.ts so ESM live bindings pick them up.
- */
+/** Tests for hooks soft-delete: removeHookFromVersion moves files to trash and diffVersionHooks
+ * classifies them. The state.ts path getters are not injectable, so they are spied on BEFORE
+ * importing hooks.ts so ESM live bindings pick them up. */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync, chmodSync, readdirSync, statSync } from 'fs';

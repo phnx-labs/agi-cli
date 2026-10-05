@@ -1,12 +1,6 @@
-/**
- * `agents devices snapshot` — one-process consumer snapshot for pollers.
- *
- * Replaces the N× `view --json` + `sessions --active --json` (+ optional feed)
- * fork storm with a single command. Does NOT replace `agents sync status`, which
- * remains the UnifiedSyncStatus sync contract for menubar / Agency drift.
- *
- * JSON shape: {@link FleetSnapshot} in `lib/snapshot.ts` (version: 1).
- */
+/** `agents devices snapshot`: one-process snapshot for pollers, replacing the N x `view --json` +
+ * `sessions --active --json` fork storm. Not a replacement for `agents sync status` (the
+ * UnifiedSyncStatus contract). Shape: {@link FleetSnapshot}, version 1. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

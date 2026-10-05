@@ -1,16 +1,6 @@
-/**
- * Centralized event logging for agents-cli.
- *
- * Structured JSONL audit logs at ~/.agents/.history/events/YYYY-MM-DD/events.jsonl with
- * lossless numbered gzip rotation at 10 MiB and bounded retention.
- *
- * Features:
- * - Rich metadata: hostname, platform, arch, pid, timezone
- * - Timing helpers: measure operation duration automatically
- * - Truncation: long inputs/outputs are trimmed with ellipsis
- * - Permissions: logs dir is 0700, files are 0600 (owner-only)
- * - Performance tracking: withTiming() wrapper for any async function
- */
+/** Centralized event logging: JSONL audit logs at
+ * ~/.agents/.history/events/YYYY-MM-DD/events.jsonl with lossless numbered gzip rotation at 10
+ * MiB and bounded retention. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -23,17 +13,9 @@ import { stampProvenance, resetEventProvenanceForTest } from '../event-provenanc
 import type { ActorKind } from '../actor.js';
 import { recordSample } from '../perf/spool.js';
 
-/**
- * Perf warehouse write. SYNCHRONOUS by design (PHNX-3497): `recordSample` is an
- * `appendFileSync` that never opens SQLite (see perf/spool.ts), so calling it
- * directly costs one file append and lands the row before this function returns.
- * It MUST NOT be deferred behind a `void import().then(...)`: the `agent.run`
- * timer ends at the very tail of `agents run`, and the CLI process exits before
- * any deferred microtask runs — so a fire-and-forget spool write was silently
- * lost on every foreground run, leaving the PHNX-3468 startup-phase surface with
- * no data. (Hooks were unaffected only because their shim appends the spool line
- * synchronously in bash.)
- */
+/** Perf warehouse write, SYNCHRONOUS by design (PHNX-3497): `recordSample` is an appendFileSync
+ * that never opens SQLite. It must not be deferred: the CLI exits before a deferred write runs,
+ * which silently lost every foreground sample for PHNX-3468's startup-phase surface. */
 function recordPerfTiming(payload: {
   label: string;
   durationMs: number;
@@ -68,11 +50,9 @@ function recordPerfTiming(payload: {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Resolved lazily: events.ts is imported transitively by most CLI surfaces, and
-// import itself must stay side-effect free. Tests may override the exact path.
-// AGENTS_EVENTS_PATH redirects the sink — a test seam like AGENTS_SECRETS_AGENT_DIR:
-// unlike _resetForTest it survives a bare reset AND propagates to CLI subprocesses
-// a test spawns, so fixture events can never land in the user's real log (#910).
+// Resolved lazily: events.ts is imported by most surfaces and import must stay side-effect free.
+// AGENTS_EVENTS_PATH redirects the sink as a test seam that survives a reset and reaches spawned
+// CLI subprocesses, so fixture events never land in the real log (#910).
 let _eventsPath: string | undefined;
 let _eventsPathOverride = false;
 let _legacyMigrationChecked = false;
@@ -106,11 +86,9 @@ function eventsDir(date: Date = new Date()): string {
   return path.dirname(eventsPath(date));
 }
 
-/**
- * The directory today's ledger is appended to. Exported for the tool-activity
- * collector, which watches it instead of re-running `agents computer sessions`
- * on a timer to notice a new `computer.action` (see `feed/tool-activity.ts`).
- */
+/** The directory today's ledger is appended to; exported for the tool-activity collector, which
+ * watches it instead of polling `agents computer sessions` for new `computer.action` events
+ * (feed/tool-activity.ts). */
 export function getEventsDir(): string {
   return eventsDir();
 }
@@ -158,12 +136,9 @@ export type EventType =
   // Run-dispatch outcome (single chokepoint in exec — replaces the separate
   // hash-chained audit/log.jsonl product; readable via --include runs)
   | 'run.dispatched'
-  // Pre-launch marker emitted RIGHT BEFORE the harness child is spawned, on the
-  // device that will run it — unlike `run.dispatched` (which fires only at
-  // FINALIZE, post-exit), this records a launch that then sits stuck at a login
-  // screen and never finalizes. Carries `launchedLoggedOut` so a launch into a
-  // logged-out version is visible instead of silent (the yosemite-m3 2.1.219
-  // incident). See spawnAgent in lib/exec.ts.
+  // Pre-launch marker emitted right before the harness child spawns, on the device that will run
+  // it. Unlike `run.dispatched` (at finalize), it records a launch stuck at a login screen, and
+  // `launchedLoggedOut` makes that visible (yosemite-m3 2.1.219 incident).
   | 'run.launch'
   // Daemon lifecycle (always-on process: browser IPC, scheduler, monitors)
   | 'daemon.start'
@@ -189,11 +164,8 @@ export type EventType =
   | 'browser.screenshot'
   // Computer (native desktop automation via the computer-helper daemon)
   | 'computer.action'
-  // Secrets (no values logged) — the value-free lifecycle vocabulary the
-  // in-repo secrets engine used to funnel through its own emitSecretAudit
-  // chokepoint. That engine (and its audit emission) moved out of this repo
-  // entirely with the standalone `secrets` engine (PHNX-3989); this vocabulary
-  // stays as the stable event-name union other callers may still use.
+  // Secrets lifecycle vocabulary, value-free. The engine that emitted it moved out with the
+  // standalone `secrets` engine (PHNX-3989); these names stay as the stable event-name union.
   | 'secrets.get'
   | 'secrets.unlocked'
   | 'secrets.create'
@@ -280,15 +252,9 @@ export type EventType =
   | 'info'
   | 'debug';
 
-/**
- * Every {@link EventType}, as a runtime-checkable table.
- *
- * Typed `Record<EventType, true>` on purpose: the object literal is
- * exhaustiveness-checked at COMPILE time, so adding a member to the union
- * without adding it here fails `tsc`. That is what keeps the runtime validator
- * (`isEventType`, used by `agents events emit` to reject an unknown kind from an
- * out-of-process producer) from silently drifting behind the union.
- */
+/** Every EventType as a runtime-checkable `Record<EventType, true>`, so adding a union member
+ * without adding it here fails `tsc`. That keeps `isEventType` (used by `agents events emit` to
+ * reject unknown kinds) from drifting behind the union. */
 const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'agent.run.start': true, 'agent.run.end': true, 'agent.spawn.start': true, 'agent.spawn.end': true,
   'run.dispatched': true,
@@ -351,10 +317,9 @@ const AUDIT_EVENTS: ReadonlySet<string> = new Set([
   // browser.* / computer.action stay info — they are already on the event stream;
   // elevating them to audit would flood the security lane (see events.test.ts).
   'daemon.start', 'daemon.stop', 'daemon.error',
-  // An external process reaching into the user's editor (the CLI's
-  // vscodium-agent backend driving `/spawn` / `/inject` / `/focus`) is a
-  // "who reached in from outside" fact, which is what the audit lane answers.
-  // The other factory.* kinds are ordinary info — a palette press is not audit.
+  // An external process reaching into the editor (vscodium-agent driving
+  // `/spawn`/`/inject`/`/focus`) is a "who reached in" fact for the audit lane; other factory.*
+  // kinds are ordinary info.
   'factory.uri',
 ]);
 
@@ -370,13 +335,9 @@ export interface EventMeta {
   tz: string;
   tzName: string;
   hostname: string;
-  /**
-   * Normalized, joinable device id (`machine-id.ts::machineId()`) — the same key
-   * `agents devices`/session-sync use, so an event can be matched to a device.
-   * `hostname` is the raw `os.hostname()`; `machineId` is `zion` for `Zion.local`.
-   * Optional on the type so legacy records (pre-provenance-floor) and the activity
-   * stream still parse; `emit()` always stamps it on the operational log.
-   */
+  /** Normalized, joinable device id from `machine-id.ts::machineId()` (the key `agents devices`
+   * and session-sync use; `zion` for `Zion.local`). Optional so legacy records and the activity
+   * stream still parse; `emit()` always stamps it on the operational log. */
   machineId?: string;
   platform: NodeJS.Platform;
   arch: string;
@@ -471,16 +432,9 @@ function ensureLogsDir(): void {
   }
 }
 
-/**
- * Move root-level and interim flat-history event families into dated directories.
- *
- * The common case is a whole-family rename into an empty destination. A
- * Each segment is assigned to the local calendar day of its filesystem mtime;
- * new writes are split by day at source. A partially completed migration keeps
- * the destination active file authoritative and assigns a fresh archive number,
- * so no record is overwritten or silently discarded. The legacy active-file
- * lock serializes this with older installed processes that still append there.
- */
+/** Moves root-level and interim flat-history event families into dated directories. Segments go
+ * to the local day of their mtime; a partial migration keeps the destination active file
+ * authoritative and takes a fresh archive number, so nothing is overwritten. */
 function migrateLegacyEventLogs(userDir: string = userAgentsDir()): number {
   if (_eventsPathOverride || _legacyMigrationChecked) return 0;
   _legacyMigrationChecked = true;
@@ -571,10 +525,7 @@ function migrateLegacyEventLogs(userDir: string = userAgentsDir()): number {
 
 // ─── Redaction ────────────────────────────────────────────────────────────────
 
-/**
- * Replace a prompt string with length + short SHA so we can correlate runs
- * without persisting the raw text. Returns the fields to spread into a payload.
- */
+/** Replaces a prompt with length plus short SHA to correlate runs without persisting raw text. */
 export function redactPrompt(prompt: string | null | undefined): { prompt_length?: number; prompt_sha256?: string } {
   if (prompt == null) return {};
   return {
@@ -598,10 +549,7 @@ function promptMarker(value: string): string {
   return `[REDACTED prompt length=${prompt_length} sha256=${prompt_sha256}]`;
 }
 
-/**
- * Mask argv entries that look like tokens or secret paths. Preserves structure
- * for debugging but drops the sensitive substring.
- */
+/** Masks argv entries that look like tokens or secret paths, preserving structure for debugging. */
 export function redactArgs(args: string[] | undefined): string[] | undefined {
   if (!args) return undefined;
   const result: string[] = [];
@@ -660,10 +608,7 @@ export function redactArgs(args: string[] | undefined): string[] | undefined {
 
 // ─── Truncation ───────────────────────────────────────────────────────────────
 
-/**
- * Truncate a string to maxLength, adding ellipsis if truncated.
- * Returns undefined for null/undefined input.
- */
+/** Truncates a string to maxLength with an ellipsis; undefined for null/undefined. */
 export function truncate(
   str: string | null | undefined,
   maxLength: number = DEFAULT_TRUNCATE_LENGTH
@@ -748,18 +693,9 @@ export function detectCaller(
 
 // ─── Core API ─────────────────────────────────────────────────────────────────
 
-/**
- * Emit a structured event to the append-only audit log.
- *
- * @param event - The event type
- * @param payload - Event-specific data (agent, version, cwd, etc.)
- * @param overrides - Envelope fields the CALLER owns rather than the writer.
- *   Only `ts` today: a batched out-of-process producer (`agents events emit`)
- *   records when each event HAPPENED, but flushes them together later, so
- *   stamping write-time would collapse a whole batch onto the flush instant and
- *   corrupt every `--since` boundary. `ts` stays in RESERVED_META_KEYS so a
- *   *payload* still cannot inject it — this explicit channel is the only way in.
- */
+/** Emits a structured event to the append-only audit log. `overrides` holds envelope fields the
+ * caller owns: only `ts`, so a batched out-of-process producer (`agents events emit`) keeps
+ * each event's real time and `--since` boundaries stay correct. */
 /** Build the JSONL line + target path for an event, or null when logging is disabled. Shared by {@link emit} and {@link emitAsync}. */
 function prepareEventWrite(event: EventType, payload: EventPayload, overrides: { ts?: string }): { logPath: string; line: string; isNew: boolean } | null {
   if (isDisabled()) return null;
@@ -815,15 +751,9 @@ export function emit(event: EventType, payload: EventPayload = {}, overrides: { 
   }
 }
 
-/**
- * Async, non-blocking counterpart of {@link emit} for callers on the daemon's
- * shared event loop (PHNX-3695). `emit` acquires the event-log lock with
- * `withFileLock` → `sleepSync` (`Atomics.wait`), which HALTS the loop for up to
- * 30s under contention (a peer appending to the same log). `emitAsync` acquires
- * it with `withFileLockAsync`, so the loop keeps turning. The under-lock body is
- * identical (a µs-scale append + a rare rotate). Best-effort like `emit`: never
- * throws; a caller on a tick fires it and moves on.
- */
+/** Async counterpart of `emit` for the daemon's shared event loop (PHNX-3695): `emit` takes the
+ * lock via `sleepSync` (Atomics.wait), halting the loop up to 30s under contention. `emitAsync`
+ * uses `withFileLockAsync`; same body, best-effort, never throws. */
 export async function emitAsync(event: EventType, payload: EventPayload = {}, overrides: { ts?: string } = {}): Promise<void> {
   try {
     const prepared = prepareEventWrite(event, payload, overrides);
@@ -837,15 +767,8 @@ export async function emitAsync(event: EventType, payload: EventPayload = {}, ov
 /** Last log path this process chmod'd — avoids a redundant chmod per append. */
 let _chmoddedPath: string | undefined;
 
-/**
- * Convenience wrapper for timed operations.
- * Returns a function to call when the operation completes.
- *
- * @example
- * const done = emitStart('agent.run.start', { agent: 'claude' });
- * // ... do work ...
- * done({ exitCode: 0 }); // emits agent.run.end with durationMs
- */
+/** Convenience wrapper for timed operations; returns a function to call on completion, which
+ * emits the end event with durationMs. */
 export function emitStart(
   startEvent: EventType,
   payload: EventPayload = {}
@@ -886,24 +809,15 @@ export function emitRoutineEnd(meta: RoutineEndMeta): void {
   emit('routine.end', routineEndPayload(meta));
 }
 
-/**
- * Async, non-blocking `routine.end` for the daemon heartbeat tick (PHNX-3695):
- * the reaper (`reapExitedRunningJobs`) runs on the shared event loop, so it emits
- * through {@link emitAsync} rather than the `sleepSync`-locked {@link emit}.
- */
+/** Async `routine.end` for the daemon heartbeat tick (PHNX-3695): the reaper runs on the shared
+ * loop, so it uses `emitAsync` rather than the `sleepSync`-locked `emit`. */
 export async function emitRoutineEndAsync(meta: RoutineEndMeta): Promise<void> {
   await emitAsync('routine.end', routineEndPayload(meta));
 }
 
 // ─── Timing Utilities ─────────────────────────────────────────────────────────
 
-/**
- * Measure execution time of a synchronous function.
- * Emits a perf.timing event with the duration.
- *
- * @example
- * const result = time('parse-config', () => parseConfig(path));
- */
+/** Measures a synchronous function and emits a perf.timing event with the duration. */
 export function time<T>(label: string, fn: () => T, payload: EventPayload = {}): T {
   const start = Date.now();
   try {
@@ -947,17 +861,8 @@ export function time<T>(label: string, fn: () => T, payload: EventPayload = {}):
   }
 }
 
-/**
- * Create a timing context for measuring multiple phases of an operation.
- * Useful for tracking startup time vs execution time.
- *
- * @example
- * const timer = createTimer('agent.run', { agent: 'claude' });
- * // ... setup work ...
- * timer.mark('startup'); // records startup time
- * // ... main work ...
- * timer.end({ exitCode: 0 }); // records total time and emits event
- */
+/** Creates a timing context for multiple phases (e.g. startup vs execution); `mark` records a
+ * phase and `end` emits the total. */
 export function createTimer(label: string, payload: EventPayload = {}): {
   mark: (phase: string) => number;
   end: (endPayload?: EventPayload) => void;
@@ -1000,16 +905,8 @@ export function createTimer(label: string, payload: EventPayload = {}): {
 
 // ─── Command Tracking ─────────────────────────────────────────────────────────
 
-/**
- * Emit a command.start event with CLI args.
- * Returns a done() function to emit command.end with duration.
- *
- * @example
- * // At CLI entry point:
- * const done = emitCommand('run', process.argv.slice(2));
- * // ... execute command ...
- * done({ exitCode: 0 });
- */
+/** Emits a command.start event with CLI args; returns a done() function that emits command.end
+ * with duration. */
 export function emitCommand(
   command: string,
   args: string[] = [],
@@ -1023,12 +920,9 @@ export function emitCommand(
   });
 }
 
-/**
- * Emit a friction event — a structured, point-of-use record of a failure or
- * block the CLI just hit. `surface` is the subsystem (teams, browser, secrets,
- * guard, …); `failureId` is a stable slug that lets the nightly routine group
- * the same failure across sessions (e.g. 'remote-cwd-on-add', 'not-installed').
- */
+/** Emits a friction event: a point-of-use record of a failure the CLI hit. `surface` is the
+ * subsystem; `failureId` is a stable slug so the nightly routine can group the same failure
+ * across sessions. */
 export function emitFriction(
   surface: string,
   failureId: string,
@@ -1237,12 +1131,7 @@ function maybePruneLocked(force: boolean): void {
 
 // ─── Query ────────────────────────────────────────────────────────────────────
 
-/**
- * Read events from log files within a date range.
- *
- * @param options - Query options
- * @returns Array of event records
- */
+/** Reads events from log files within a date range. */
 export function query(options: {
   startDate?: Date;
   endDate?: Date;
@@ -1318,11 +1207,8 @@ export function query(options: {
   return results;
 }
 
-/**
- * Scan event logs once for a set of session IDs and return browser/computer
- * usage flags for each. O(files) instead of O(N × files) — safe to call
- * outside a SQLite write transaction.
- */
+/** Scans event logs once for a set of session IDs and returns browser/computer usage flags:
+ * O(files), safe outside a SQLite write transaction. */
 export function queryToolUsageForSessions(
   sessionIds: ReadonlySet<string>,
 ): Map<string, { usedBrowser: boolean; usedComputer: boolean }> {

@@ -105,10 +105,9 @@ describe('resolveMessageTarget', () => {
   });
 });
 
-// RUSH-2366 follow-up: `agents message` could not reach a detached
-// `agents run --device <host> --no-follow` dispatch — resolveMessageTarget
-// returns 'none' because getActiveSessions() has no visibility into it, even
-// though `agents devices ps` shows the same dispatch running with a live pid.
+// RUSH-2366 follow-up: `agents message` could not reach a detached `agents run --device <host>
+// --no-follow` dispatch, since getActiveSessions() can't see it (resolveMessageTarget returns
+// 'none') though `agents devices ps` shows it live.
 describe('decideHostTaskRoute', () => {
   it('returns not-found when no host task matches the target', () => {
     expect(decideHostTaskRoute(null, 'nope')).toEqual({ kind: 'not-found' });

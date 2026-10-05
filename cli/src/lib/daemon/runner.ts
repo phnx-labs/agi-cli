@@ -1,18 +1,6 @@
-/**
- * Job execution engine for routines.
- *
- * Builds agent-specific CLI commands from job configs, spawns them with
- * sandboxed or unsandboxed environments, captures stdout to log files,
- * enforces timeouts, and extracts the final assistant report from the
- * agent's stream-JSON output.
- *
- * Version/account selection mirrors `agents run`: when a routine does not pin
- * `version:`, the runner uses the configured run strategy (default `balanced`)
- * to pick a healthy install, pins the absolute binary via `getBinaryPath`, and
- * arms same-agent failover across other healthy accounts when a rate/usage
- * limit is detected mid-run (foreground `executeJob` only — detached daemon
- * fires once with the pre-flight pick).
- */
+/** Routine job runner: builds agent CLI commands, spawns them (sandboxed or not), logs stdout,
+ * enforces timeouts. Version/account selection mirrors `agents run`; same-agent failover on rate
+ * limits applies to foreground `executeJob` only. */
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -89,14 +77,8 @@ import { isCustomHarnessName, readProfile } from '../profiles.js';
 import { findAccount, findUnifiedAccount, listNativeAccounts, resolveAccountSelection, resolveCredentialAccount } from '../account-registry.js';
 import { recordRunAuthOutcome, type RunAuthOutcome } from '../auth-health.js';
 
-/**
- * Record a routine run's auth outcome as a per-account FACT (PHNX-4116). A worker
- * runs entirely through routines and never probes, so an auth failure here — or a
- * clean success that clears a stale failure — is the honest evidence `agents view`
- * renders as `last used ok` / `last auth failure`. Best-effort: resolves the slot
- * from the routine's account name so the fact lands on the right row, and never
- * throws (a run it cannot attribute is simply not recorded).
- */
+/** Record a routine run's auth outcome as a per-account fact (PHNX-4116), rendered by `agents
+ * view`. Best-effort: never throws; a run it cannot attribute to an account slot is not recorded. */
 function recordRoutineAuthOutcome(
   agent: AgentId,
   accountName: string | undefined,
@@ -127,26 +109,9 @@ export class RoutineAlreadyRunningError extends Error {
 const ROUTINE_LAUNCH_LOCK_STALE_MS = 30_000;
 const ROUTINE_LAUNCH_LOCK_WAIT_MS = 10_000;
 
-/**
- * The prior run of this routine that still holds the active-run slot, or null.
- *
- * ONLY a run still marked `running` can hold the slot. Every terminal status —
- * completed / failed / timeout / missed / blocked / skipped — releases it the
- * moment it is reached (RUSH-2640). A `failed`/`timeout` record used to keep the
- * slot while its pid stayed alive, but that conflated two different operations:
- * cleaning up a leftover process group (reapTerminalRoutineProcesses's job) with
- * occupying the slot. A daemon-launched run that reached a terminal state while
- * still carrying the daemon's own pid (a host run that threw `target_unreachable`
- * before spawning a child) then held the slot forever, because the daemon never
- * dies and `isPidOurs` never went false — every later scheduled slot was refused
- * with `already has an active run` while the routine was silently dead.
- *
- * A `running` record is also aged out past its own timeout: a run cannot
- * legitimately outlive its configured deadline, so past that window it is a
- * wedged record (a daemon that died mid-run, a missed child-exit event, a reused
- * pid an old record without `spawnedAt` reads as "ours"), not a live run — and it
- * never holds the slot regardless of what its recorded pid now points at.
- */
+/** The prior run still holding this routine's active-run slot, or null. Only a `running` record
+ * holds it; every terminal status releases it immediately (RUSH-2640), so a daemon-pid terminal
+ * record cannot wedge the slot. A `running` record past its own timeout never holds it. */
 function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta | null {
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
   const now = Date.now();
@@ -166,14 +131,9 @@ function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta 
   return null;
 }
 
-/**
- * Consecutive trailing `skipped`/`active_run` records — a routine that keeps
- * being refused because a prior run "still owns" the slot. After the slot is
- * released correctly on terminal states (see {@link activeRoutineRun}) this can
- * only accumulate for a genuine long-overlap or a new wedge; either way it means
- * the routine has stopped firing on schedule and should be surfaced, not left to
- * pile up silently. `runs` is oldest→newest (listRuns sorts by run id).
- */
+/** Count of consecutive trailing `skipped`/`active_run` records: a routine refused because a prior
+ * run still owns the slot. A growing streak means the routine stopped firing and must be surfaced.
+ * `runs` is oldest to newest. */
 export function activeRunSkipStreak(runs: RunMeta[]): number {
   let streak = 0;
   for (let i = runs.length - 1; i >= 0; i--) {
@@ -187,22 +147,9 @@ export function activeRunSkipStreak(runs: RunMeta[]): number {
 /** How many consecutive active-run skips before a routine's stall is surfaced. */
 const SKIP_STREAK_ALERT_THRESHOLD = 3;
 
-/**
- * The pid to stamp on a launcher's provisional active claim, or null when the
- * launcher is this box's routines daemon.
- *
- * The claim pid exists so a launcher that dies between claiming the slot and
- * spawning the child releases the slot quickly (`isPidOurs` goes false) instead
- * of wedging it for the full timeout. That fast recovery only helps a SHORT-LIVED
- * foreground launcher (`agents routines run`): the daemon never dies between
- * claim and spawn, and recording ITS pid is actively harmful — the daemon
- * outlives every run, so `isPidOurs` never goes false and a claim finalized to a
- * terminal state before its child spawned kept the slot and drew
- * `reapTerminalRoutineProcesses` at the daemon's own process group on every tick
- * (RUSH-2640, requirement: never record the daemon's own pid as a run's pid). So
- * the daemon records no claim pid; the timeout window bounds a daemon that
- * crashes mid-claim instead.
- */
+/** The pid to stamp on a launcher's provisional claim, or null when the launcher is the routines
+ * daemon. The daemon outlives every run, so recording its pid keeps `isPidOurs` true forever and
+ * aims the reaper at the daemon itself (RUSH-2640). */
 export function launcherClaimPid(): number | null {
   try {
     // Mirrors daemon.ts readDaemonPid() (PID_FILE = 'daemon.pid'); read directly
@@ -254,13 +201,9 @@ async function withRoutineLock<T>(config: JobConfig, launch: () => Promise<T>): 
   }
 }
 
-/**
- * Reject placement/body combinations the runner cannot execute — before the
- * attempt is allocated, so an invalid config (host+workflow, cloud+command, …)
- * throws cleanly rather than allocating a run record it can never satisfy. These
- * mirror the defensive guards inside `executeJobOnHost`/`executeJobOnCloud`;
- * `validateJob` already rejects the same combinations at add/edit time.
- */
+/** Reject placement/body combinations the runner cannot execute (host+workflow, cloud+command, ...)
+ * before the attempt is allocated. Mirrors the guards in `executeJobOnHost`/`executeJobOnCloud`;
+ * `validateJob` rejects the same at add/edit time. */
 function assertRunnablePlacement(config: JobConfig): void {
   const strategy = resolveHostStrategy(config);
   if (strategy === 'host' || strategy === 'fleet') {
@@ -317,13 +260,9 @@ function writeActiveClaim(config: JobConfig, attempt: RoutineAttempt): RunMeta {
     ...runProvenance(config),
     ...attempt.stamp,
     ...(config.workflow ? { workflow: config.workflow } : config.command ? { command: config.command } : config.agent ? { agent: config.agent } : {}),
-    // The launcher owns this provisional claim until the command/agent child
-    // replaces it with its own pid. Recording a SHORT-LIVED foreground launcher's
-    // pid makes a crash between lock release and child spawn recoverable instead
-    // of wedging the routine for its full configured timeout. The long-lived
-    // daemon records no pid here (see launcherClaimPid): its pid never dies, so
-    // recording it wedged the slot forever and mis-aimed the process reaper at the
-    // daemon itself (RUSH-2640).
+    // The launcher owns this provisional claim until the child replaces it with its own pid, so a
+    // short-lived foreground launcher crash is recoverable. The daemon records no pid here (see
+    // launcherClaimPid); doing so wedged the slot and mis-aimed the reaper (RUSH-2640).
     pid: launcherClaimPid(),
     // `isPidOurs` compares this value with the OS process birth time. The
     // daemon may have been alive for days before claiming a routine, so the
@@ -339,19 +278,9 @@ function writeActiveClaim(config: JobConfig, attempt: RoutineAttempt): RunMeta {
   return meta;
 }
 
-/**
- * Allocate a routine attempt BEFORE any placement / version / sandbox / preflight
- * / dispatch work, so every rejected, skipped, or blocked fire leaves exactly one
- * visible terminal record. Runs inside {@link withRoutineLock}. Enforces, in order:
- *
- *  1. single-fire — a scheduled slot atomically claims its (routine, UTC) run
- *     directory; a duplicate cron delivery for the same slot returns the original
- *     attempt and spawns nothing.
- *  2. non-overlap — a prior run of this routine that is still active makes this
- *     attempt a `skipped`/`active_run` record linking the live run.
- *  3. readiness — an unresolved/blocked execution context (bad cwd, non-portable
- *     path, missing project base, …) makes this a `blocked` record.
- */
+/** Allocate a routine attempt before any placement/version/sandbox/dispatch work so every rejected,
+ * skipped or blocked fire leaves one terminal record. Runs inside withRoutineLock. Order:
+ * single-fire (duplicate cron slot returns the original), non-overlap, readiness (`blocked`). */
 function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): AttemptAllocation {
   const scheduledForIso = trigger.scheduledFor
     ? (typeof trigger.scheduledFor === 'string' ? trigger.scheduledFor : trigger.scheduledFor.toISOString())
@@ -402,10 +331,9 @@ function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): Att
     };
   }
 
-  // Gate on deprecation alone, not ROUTINE_AGENT_IDS membership — a retired
-  // harness leaves the command table (gemini did), and the legacy routine must
-  // still land a visible 'blocked' record, never a generic buildJobCommand
-  // failure (RUSH-2202).
+  // Check deprecation alone, not ROUTINE_AGENT_IDS membership: a retired harness leaves the
+  // command table, and the legacy routine must still get a visible 'blocked' record, not a generic
+  // buildJobCommand failure (RUSH-2202).
   if (!config.workflow && config.agent && !isCustomHarnessName(config.agent) && isAgentHardDeprecated(config.agent as AgentId)) {
     const reason = hardDeprecationError(config.agent as AgentId);
     return {
@@ -459,14 +387,9 @@ function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): Att
   return { proceed: true, attempt: { runId, stamp } };
 }
 
-/**
- * Emit a loud, once-per-wedge warning when a routine has been refused its slot
- * for {@link SKIP_STREAK_ALERT_THRESHOLD} consecutive scheduled runs. Fires only
- * when the streak first reaches the threshold (not on every later skip), so a
- * genuinely-stalled routine surfaces once instead of piling up silent `skipped`
- * records the way RUSH-2640 did. Runs on the daemon's own stderr, so it lands in
- * the daemon log the operator reads.
- */
+/** Warn once, on the daemon's stderr, when a routine has been refused its slot for
+ * SKIP_STREAK_ALERT_THRESHOLD consecutive scheduled runs. Fires only when the streak first reaches
+ * the threshold, so a stalled routine surfaces once (RUSH-2640). */
 function surfaceWedgedRoutine(config: JobConfig, terminal: RunMeta): void {
   if (terminal.status !== 'skipped' || terminal.skipReason !== 'active_run') return;
   const streak = activeRunSkipStreak(listRuns(config.name));
@@ -478,13 +401,9 @@ function surfaceWedgedRoutine(config: JobConfig, terminal: RunMeta): void {
   );
 }
 
-/**
- * Claim one routine attempt under the short launch lock, then execute after
- * releasing it. The persisted `running` claim makes a concurrent entry point
- * skip immediately instead of waiting for a foreground run to finish. `run` is
- * the placement/command/agent dispatch, invoked only when the attempt proceeds;
- * `wrapTerminal` adapts a pre-spawn terminal record into the caller's return type.
- */
+/** Claim one routine attempt under the short launch lock, then execute after releasing it, so a
+ * concurrent entry point skips instead of waiting on a foreground run. `run` is the dispatch,
+ * invoked only when the attempt proceeds; `wrapTerminal` adapts a pre-spawn terminal record. */
 async function runWithAttempt<T>(
   config: JobConfig,
   trigger: RoutineTrigger,
@@ -522,15 +441,9 @@ async function runWithAttempt<T>(
 
 function terminateRoutineTree(pid: number | null): void {
   if (!pid) return;
-  // Never take THIS process down. Both kills below are unconditional SIGKILLs,
-  // so a RunMeta naming the reaper's own pid -- a reused pid, a record written
-  // by the process now doing the reaping, or a hand-written fixture -- makes the
-  // reaper SIGKILL itself, and via `-pid` its whole process group with it. There
-  // is no recovery from that: the run is never finalized, and on the daemon it
-  // takes the scheduler down mid-sweep. daemon.ts:457 already refuses to evict an
-  // incumbent whose pid is `process.pid` for exactly this reason; the reap path
-  // needs the same guard. Skipping the kill still lets the caller finalize the
-  // run record, which is the part that matters.
+  // Never take this process down: both kills below are unconditional SIGKILLs, so a RunMeta naming
+  // the reaper's own pid (reused pid, fixture) would kill itself and its group. daemon.ts:457
+  // already refuses to evict `process.pid`. Skipping the kill still lets the caller finalize.
   if (pid === process.pid) return;
   if (process.platform === 'win32') {
     killTree(pid);
@@ -547,29 +460,18 @@ function terminateRoutineTree(pid: number | null): void {
   } catch { /* already exited */ }
 }
 
-/**
- * Where each agent's transcript files live under an overlay HOME, mirroring
- * `SESSION_ROOT_SPECS` (session/discover.ts) — the CLI's own source of truth
- * for which on-disk trees hold live session files. Kept in this shape (not a
- * shared import) because `archiveRoutineTranscripts` only needs a flat
- * root+ext pair to `walkForFiles`, not the version-home/backup fan-out
- * `getAgentSessionDirs` does for live discovery.
- *
- * `opencode` is deliberately absent: `SESSION_ROOT_SPECS` itself has no entry
- * for it — its transcripts live in one incrementally-scanned SQLite db
- * (`scanOpenCodeIncremental`), not a per-session file tree — so there is
- * nothing here to mirror without inventing a new discovery path.
- */
+/** Where each agent's transcript files live under an overlay HOME, mirroring `SESSION_ROOT_SPECS`
+ * (session/discover.ts); a flat root+ext pair is all `archiveRoutineTranscripts` needs. `opencode`
+ * is absent on purpose: `SESSION_ROOT_SPECS` has no entry (its transcripts live in one SQLite db). */
 const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; ext: string }>>> = {
   claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
   codex: [{ root: ['.codex', 'sessions'], ext: '.jsonl' }],
   cursor: [{ root: ['.cursor', 'projects'], ext: '.jsonl' }],
   antigravity: [{ root: ['.gemini', 'antigravity-cli', 'conversations'], ext: '.db' }],
   droid: [{ root: ['.factory', 'sessions'], ext: '.jsonl' }],
-  // Kimi splits a session across two files (session/discover.ts:4382-4384):
-  // state.json (title/timestamps) and agents/main/wire.jsonl (the actual
-  // conversation). Both extensions are needed — .json alone archives only
-  // the metadata shell and silently drops every message.
+  // Kimi splits a session across state.json (title/timestamps) and agents/main/wire.jsonl (the
+  // conversation), per session/discover.ts:4382. Both extensions are needed; .json alone archives
+  // only metadata and drops every message.
   kimi: [
     { root: ['.kimi-code', 'sessions'], ext: '.json' },
     { root: ['.kimi-code', 'sessions'], ext: '.jsonl' },
@@ -579,15 +481,9 @@ const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; 
   muse: [{ root: ['.local', 'share', 'muse', 'sessions'], ext: '.jsonl' }],
 };
 
-/**
- * Working directory for a routine's LOCAL child, resolved from its explicit
- * `project`/`cwd` execution anchor via {@link resolveJobExecutionContext} — never
- * inferred from `repo` (which is external repository identity only) and never the
- * daemon's launch cwd. A command routine with neither field lands in `$HOME`
- * (housekeeping); an unresolved/blocked agent context also falls back to `$HOME`
- * so a caller that reaches this (past the readiness gate) has a valid directory,
- * but the gate should have paused such a routine before it ever spawned.
- */
+/** Working directory for a routine's local child, from its explicit `project`/`cwd` anchor via
+ * resolveJobExecutionContext; never inferred from `repo`, never the daemon's launch cwd. A command
+ * routine with neither field, or an unresolved/blocked agent context, lands in `$HOME`. */
 export function routineSpawnCwd(
   config: Pick<JobConfig, 'name' | 'project' | 'cwd' | 'agent' | 'workflow' | 'command'>,
 ): string {
@@ -595,22 +491,9 @@ export function routineSpawnCwd(
   return ctx.absoluteCwd ?? os.homedir();
 }
 
-/**
- * Bake the daemon-job argv skeleton from AGENT_COMMANDS.
- *
- * The two tables used to be independent copies of the same launch decision.
- * Argv now comes from AGENT_COMMANDS.base / promptFlag / jsonFlags / modeFlags.
- * Two documented exceptions, not a second table:
- *   - kimi uses `--prompt` (long form). `-p` is the exec alias; combining
- *     either with --plan/--auto/--yolo aborts, so routineModeArgs emits no
- *     mode flag. The daemon has always spawned the long form.
- *   - claude places `--verbose` (from jsonFlags) before the prompt and bakes
- *     modeFlags.plan so claudeAdapter.routineModeArgs can splice
- *     plan → acceptEdits / auto / skip.
- *
- * Returns undefined when `agent` is outside ROUTINE_AGENT_IDS (grok and every
- * other harness the daemon does not fire locally).
- */
+/** Bake the daemon-job argv skeleton from AGENT_COMMANDS (base / promptFlag / jsonFlags /
+ * modeFlags). Exceptions: kimi uses the long `--prompt` form with no mode flag; claude puts
+ * `--verbose` before the prompt. Undefined for agents outside ROUTINE_AGENT_IDS. */
 export function bakeRoutineArgv(agent: string): string[] | undefined {
   if (!ROUTINE_AGENT_IDS.includes(agent)) return undefined;
   const template = AGENT_COMMANDS[agent as AgentId];
@@ -641,10 +524,9 @@ export function bakeRoutineArgv(agent: string): string[] | undefined {
 
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
 export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwardAccount = true): string[] {
-  // Workflow branch: delegate to `agents run <workflow>` which handles subagent
-  // injection, WORKFLOW.md orchestration, and model selection via frontmatter.
-  // appendModelAndReasoning is intentionally skipped — the workflow frontmatter
-  // owns model selection. No --timeout flag: the runner enforces its own SIGTERM/SIGKILL.
+  // Workflow branch: delegate to `agents run <workflow>`, which handles subagent injection and
+  // WORKFLOW.md orchestration. Model selection comes from the workflow frontmatter, so
+  // appendModelAndReasoning is skipped; no --timeout since the runner enforces SIGTERM/SIGKILL.
   if (config.workflow) {
     const cmd = ['agents', 'run', config.workflow, resolvedPrompt, '--mode', config.mode];
     if (config.account && forwardAccount) cmd.push('--account', config.account);
@@ -655,35 +537,27 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
   // reach buildJobCommand (execute*Job branches out first), and validateJob guarantees agent.
   const agent = config.agent!;
 
-  // Resume branch: reopen an EXISTING session via `agents run <agent> --resume <id>`
-  // instead of starting fresh. The real session resumes with its full prior context
-  // (index-based lookup, cwd-independent) and `resolvedPrompt` becomes its next turn —
-  // so a self-scheduled wake (e.g. /hibernate) is handled by the session that scheduled
-  // it, not a fresh, context-less agent that would refuse an "opaque" instruction.
+  // Resume branch: reopen an existing session via `agents run <agent> --resume <id>` with
+  // `resolvedPrompt` as its next turn, so a self-scheduled wake (e.g. /hibernate) is handled by
+  // the session that scheduled it, with its full prior context.
   if (config.resume) {
     const cmd = ['agents', 'run', agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
     if (config.account && forwardAccount) cmd.push('--account', config.account);
     return cmd;
   }
 
-  // Custom-harness branch: delegate to `agents run <name>`, which owns profile
-  // resolution (host binary, model env, provider auth) — the same delegation
-  // the workflow and resume branches use. The profile pins its own version and
-  // auth, so no command template, binary pinning, or account-env injection
-  // applies here.
+  // Custom-harness branch: delegate to `agents run <name>`, which owns profile resolution (host
+  // binary, model env, provider auth). The profile pins its own version and auth, so no command
+  // template, binary pinning, or account-env injection applies.
   if (isCustomHarnessName(agent)) {
     const cmd = ['agents', 'run', agent, resolvedPrompt, '--mode', config.mode];
     if (config.account && forwardAccount) cmd.push('--account', config.account);
     return cmd;
   }
 
-  // Native slot accounts share one managed binary version, so the baked
-  // harness argv cannot identify which login to spawn. Dispatch through
-  // `agents run <agent>#<name>` (the same seam as resume/custom) so T5
-  // spawn-time resolution selects the slot. `--account` is an agents-cli
-  // flag; the harness binary would ignore or reject it.
-  // Provider/durable-pinned accounts stay on the harness argv + env-injection
-  // path: `#name` is a native selector and would not inject their bundle.
+  // Native slot accounts share one managed binary version, so dispatch through `agents run
+  // <agent>#<name>` to let spawn-time resolution select the slot. `--account` is an agents-cli
+  // flag the harness would reject. Provider/durable-pinned accounts stay on the argv + env path.
   if (config.account && forwardAccount && !findAccount(config.account)) {
     const spec = config.version
       ? `${agent}@${config.version}#${config.account}`
@@ -708,20 +582,18 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
   // Canonicalize mode (accepts legacy `full` as alias for `skip`).
   const mode = normalizeMode(config.mode);
 
-  // Routine launch-arg quirks (the harness axis of Move 3): each per-agent arm
-  // moves to its harness adapter; runner appends model/reasoning flags after,
-  // exactly as every arm did. Agents with no routine quirk have no adapter
-  // override, so they skip both — the old behavior for an entry with no arm.
+  // Per-harness routine launch-arg quirks live in the harness adapter; the runner appends
+  // model/reasoning flags after. Agents with no routine quirk have no adapter override and skip
+  // both.
   const routineAdapter = resolveHarnessAdapter(agent as AgentId);
   if (routineAdapter.routineModeArgs) {
     routineAdapter.routineModeArgs(cmd, { mode, config, resolveHeadlessMode });
     appendModelAndReasoning(cmd, config);
   }
 
-  // allow.dirs → harness-specific grants. Codex is handled in its branch above
-  // (workspace_roots). Claude / Kimi / Cursor take --add-dir; Grok gets rules
-  // (+ sandbox widen when GROK_SANDBOX is on). Reject leading '-' so a routine
-  // YAML can't smuggle an argv flag past the sandbox as an allow.dirs entry.
+  // allow.dirs maps to harness-specific grants: Codex is handled above (workspace_roots);
+  // Claude/Kimi/Cursor take --add-dir; Grok gets rules. Reject a leading '-' so routine YAML
+  // cannot smuggle an argv flag past the sandbox as an allow.dirs entry.
   if (config.allow?.dirs?.length && agent !== 'codex') {
     for (const dir of config.allow.dirs) {
       if (dir.startsWith('-')) {
@@ -736,13 +608,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
   return cmd;
 }
 
-/**
- * Append the agent's canonical model flag and reasoning flags to a command.
- *
- * Pass-through model resolution: validates against the installed (agent, version)
- * catalog when possible and writes a warning to stderr on miss, but never blocks.
- * Reasoning level (config.config.reasoning) maps to per-agent flags via models.ts.
- */
+/** Append the agent's canonical model flag and reasoning flags (config.config.reasoning via
+ * models.ts) to a command. Pass-through resolution: warns on stderr when the model is missing from
+ * the installed catalog, but never blocks. */
 function appendModelAndReasoning(cmd: string[], config: JobConfig): void {
   // Only called from buildJobCommand's agent path AFTER the custom-harness
   // branch returned — config.agent is a native id here.
@@ -775,21 +643,9 @@ function generateRunId(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
-/**
- * Agents whose config dir `buildExecEnv` relocates OUT of the sandbox overlay HOME
- * into their per-version home (exec.ts: CLAUDE_CONFIG_DIR / CODEX_HOME). A routine
- * spawned for one of these writes its transcript under the version home, NOT the overlay
- * the sandbox generated — so the archiver has to read it there. Both are version-pinned
- * (never self-updating), so `RunMeta.version` names a real home.
- *
- * Scoped to the agents whose archived transcript the DISCOVERY side can already index as
- * origin='routine' — `readRoutineArchiveMeta` (session/discover.ts) has a branch for
- * claude and codex but not kimi. Kimi also relocates (KIMI_CODE_HOME) and hits the same
- * bug, but archiving it here without a discovery branch would only copy files that are
- * never indexed; adding a kimi reader (its session spans state.json + wire.jsonl under a
- * `session_<uuid>` dir) is the separate follow-up that lets kimi join this set. Muse
- * (XDG, self-updating) and copilot (no transcript spec) are likewise out of scope.
- */
+/** Agents whose config dir `buildExecEnv` relocates out of the sandbox overlay HOME into the
+ * per-version home (CLAUDE_CONFIG_DIR / CODEX_HOME), so the archiver must read transcripts there.
+ * Limited to claude and codex, the only ones indexable as origin='routine'. */
 const CONFIG_DIR_RELOCATED_AGENTS = new Set<AgentId>(['claude', 'codex']);
 
 /** Whether this run's transcript lands in a SHARED per-version home (accumulating every
@@ -798,14 +654,9 @@ function usesSharedTranscriptHome(agent: AgentId, version: string | undefined): 
   return Boolean(version) && CONFIG_DIR_RELOCATED_AGENTS.has(agent);
 }
 
-/**
- * The directories the child actually writes a transcript to for one spec — resolved to
- * match `buildExecEnv` (exec.ts), the single decision-point for where the transcript
- * lands, so the archiver can never drift from it. For a config-dir-relocated agent that
- * is the per-version home (`.claude`, `.codex`, …); for everyone else it is the sandbox
- * overlay HOME. Codex may run from a SUN_LEN-safe short home on macOS (codex-home.ts),
- * so both candidates are returned and the caller skips whichever does not exist.
- */
+/** Directories the child actually writes a transcript to, matching `buildExecEnv` (exec.ts) so the
+ * archiver cannot drift: the per-version home for relocated agents, else the overlay HOME. Codex
+ * may use a SUN_LEN-safe short home on macOS, so both candidates are returned. */
 function routineTranscriptSourceRoots(
   agent: AgentId,
   version: string | undefined,
@@ -827,13 +678,9 @@ function transcriptBasePath(runDir: string): string {
   return path.join(runDir, '.transcript-base.json');
 }
 
-/**
- * Record every transcript file already present in the child's transcript dirs BEFORE
- * the run spawns. When the transcript lands in a shared per-version home, this baseline
- * is what lets the archiver copy only the file THIS run produced instead of sweeping in
- * every sibling session that home holds (which would mis-tag them all `origin='routine'`
- * under this run's name). Called once per run, before spawn.
- */
+/** Record every transcript file already in the child's transcript dirs before spawn. In a shared
+ * per-version home this baseline lets the archiver copy only this run's file instead of
+ * mis-tagging sibling sessions as `origin='routine'`. */
 export function snapshotRoutineTranscriptBase(
   meta: Pick<RunMeta, 'jobName' | 'agent' | 'version'>,
   runDir: string,
@@ -916,25 +763,17 @@ export function archiveRoutineTranscripts(
   }
 }
 
-/**
- * Build the argv for a command-mode routine: run the shell string directly
- * through the platform shell. No agent binary, no rotation, no sandbox.
- */
+/** Build the argv for a command-mode routine: the shell string runs directly through the platform
+ * shell, with no agent binary, rotation, or sandbox. */
 function buildShellCommand(command: string): string[] {
   return process.platform === 'win32'
     ? ['cmd', '/c', command]
     : ['/bin/sh', '-c', command];
 }
 
-/**
- * Real (un-sandboxed) environment for a command routine. Command routines do
- * `npm i -g` / `git pull` and need the actual $HOME / $PATH, not the sandbox
- * overlay. Only TZ is injected when the routine pins a timezone.
- *
- * The current binary's directory is prepended to PATH so bare `agents` invocations
- * resolve to the same install on Windows (where shell-function injection is not
- * available) and as a fallback on POSIX for invocations like `command agents`.
- */
+/** Real (un-sandboxed) env for a command routine, which needs the actual $HOME/$PATH (`npm i -g`,
+ * `git pull`); only TZ is injected when pinned. The current binary's directory is prepended to
+ * PATH so bare `agents` resolves to the same install. */
 function commandSpawnEnv(config: JobConfig): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   if (config.timezone) env.TZ = config.timezone;
@@ -952,16 +791,9 @@ function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Build a POSIX shell function that forwards `agents <sub...>` to the SAME binary
- * currently running. Command routines shell out to the bare name `agents`
- * (e.g. `agents repo pull system`); without this, the routine resolves `agents`
- * through its inherited PATH, which can pick up a stale install in an nvm/system
- * Node prefix that shadows the current binary (RUSH-2431).
- *
- * Uses getCliLaunch so the relaunch is correct for both JS installs
- * (`node <entry> <sub...>`) and compiled standalone binaries (`<bin> <sub...>`).
- */
+/** Build a POSIX shell function forwarding `agents <sub...>` to the binary currently running, so
+ * command routines do not hit a stale install shadowing it in PATH (RUSH-2431). Uses getCliLaunch
+ * so it works for JS installs and compiled standalone binaries. */
 function agentsShellFunction(): string {
   const launch = getCliLaunch(['__ac_placeholder__']);
   const parts: string[] = [launch.command];
@@ -974,24 +806,17 @@ function agentsShellFunction(): string {
   return `agents() { ${invocation} "$@"; }`;
 }
 
-/**
- * Wrap a command-routine shell string so any bare `agents` invocation resolves
- * to the current binary. On POSIX this injects an `agents` shell function; on
- * Windows it is left unchanged and commandSpawnEnv prepends the current binary's
- * directory to PATH instead.
- */
+/** Wrap a command-routine shell string so bare `agents` resolves to the current binary: an `agents`
+ * shell function on POSIX; unchanged on Windows, where commandSpawnEnv prepends the binary's
+ * directory to PATH. */
 function wrapCommandRoutine(command: string): string {
   if (process.platform === 'win32') return command;
   return `${agentsShellFunction()}\n${command}`;
 }
 
-/**
- * Detached command routines write their own exit code to `<runDir>/exit-code`
- * (see the wrapper in executeCommandJobDetached). `monitorRunningJobs` reads it
- * to recover the true terminal status when the daemon restarted between spawn and
- * exit and so missed the in-process `child.on('exit')`. Returns null when the
- * file is absent/unparseable (child killed or crashed before writing it).
- */
+/** Detached command routines write their exit code to `<runDir>/exit-code` (see
+ * executeCommandJobDetached); `monitorRunningJobs` reads it to recover the status after a daemon
+ * restart. Null when the file is absent or unparseable (child killed before writing it). */
 function readCommandExitCode(runDir: string): number | null {
   try {
     const raw = fs.readFileSync(path.join(runDir, 'exit-code'), 'utf-8').trim();
@@ -1010,11 +835,8 @@ interface RoutineLaunchPlan {
   rotation: RotateResult | null;
   /** True when `config.version` pinned the target (no rotation). */
   pinned: boolean;
-  /**
-   * When true, `buildJobCommand` appends `--account`. Native slot accounts
-   * share one managed-install version, so the pin is forwarded rather than
-   * treated as implied by the version. False only when the caller opts out.
-   */
+  /** When true, `buildJobCommand` appends `--account`: native slot accounts share one
+   * managed-install version, so the pin must be forwarded. False only when the caller opts out. */
   forwardAccount?: boolean;
 }
 
@@ -1037,15 +859,9 @@ export function claudeVersionIsAuthenticated(version: string): boolean {
   }
 }
 
-/**
- * Resolve the version/account chain for a routine the same way `agents run`
- * does: honor an explicit `version:` pin; otherwise use the configured run
- * strategy (default `balanced`) so credit-exhausted / rate-limited accounts
- * are skipped pre-flight, and synthesize a same-agent failover chain from the
- * other healthy accounts for mid-run rate limits.
- *
- * Workflows are left alone — `agents run <workflow>` owns selection.
- */
+/** Resolve the version/account chain for a routine like `agents run`: honor an explicit `version:`
+ * pin, else use the run strategy (default `balanced`) to skip exhausted accounts pre-flight and
+ * build a same-agent failover chain for mid-run rate limits. Workflows are left to `agents run`. */
 export async function resolveRoutineLaunch(
   config: JobConfig,
   cwd: string = process.cwd(),
@@ -1063,10 +879,8 @@ export async function resolveRoutineLaunch(
     return { chain: [], rotation: null, pinned: false };
   }
   if (config.agent && isCustomHarnessName(config.agent)) {
-    // A custom harness pins its own version/auth in the profile, so there is
-    // no version/account chain to resolve here — `agents run <name>` owns it
-    // (matching exec's "strategy ignored: custom harness pins its own
-    // version/auth").
+    // A custom harness pins its own version/auth in the profile, so there is no chain to resolve;
+    // `agents run <name>` owns it.
     return { chain: [], rotation: null, pinned: false };
   }
 
@@ -1088,13 +902,9 @@ export async function resolveRoutineLaunch(
     if (unified?.kind !== 'native') (deps.resolveCredentialAccount ?? resolveCredentialAccount)(selectedCredential, agent);
   }
   if (config.account && !explicitCredential) {
-    // A native routine account is named by its durable name; the version matcher
-    // keys on the identity (email/accountKey), so translate before resolving,
-    // and refuse a login that belongs to a different harness. Scope the lookup to
-    // the routine's own harness: `identityLabel` defaults to the login's email, so
-    // `account: <email>` matches every harness that identity is signed into, and
-    // un-scoped this resolved whichever row the store ordered first — then rejected
-    // it on the very next line.
+    // A native routine account is named by its durable name but the version matcher keys on
+    // identity (email/accountKey), so translate first and refuse a login from another harness.
+    // Scope the lookup to the routine's harness: unscoped, `identityLabel` matched the first row.
     const unified = findUnifiedAccount(config.account, meta, undefined, agent);
     if (unified?.kind === 'native' && unified.agent !== agent) {
       throw new Error(`Routine '${config.name}' account '${config.account}' is a ${unified.agent} login and cannot authenticate ${agent}.`);
@@ -1155,10 +965,9 @@ export async function resolveRoutineLaunch(
     exhausted = resolved.exhausted;
     noVerifiedUsage = resolved.noVerifiedUsage ?? false;
     if (noVerifiedUsage) {
-      // Entirely stale usage (PHNX-2526): a routine is unattended, so there is
-      // no picker to divert to — it fails loud below rather than launch on a
-      // stale number. Do NOT log `rotation.picked` as a pick; it is the refused
-      // stale candidate, kept only for the failover chain.
+      // Entirely stale usage (PHNX-2526): an unattended routine has no picker, so it fails loud
+      // below rather than launch on a stale number. Do not log `rotation.picked` as a pick; it is
+      // the refused stale candidate, kept only for the failover chain.
       process.stderr.write(
         `[agents] routine ${config.name}: ${strategy} found no ${agent} account with fresh usage — refusing to route on stale data\n`,
       );
@@ -1194,9 +1003,8 @@ export async function resolveRoutineLaunch(
     );
   }
 
-  // Zero healthy accounts is NOT a "fall back to the default pin" case — that
-  // pin is exactly the exhausted account an unattended routine would hammer
-  // every tick (RUSH-2132). Throwing fails the job run (nonzero), and the
+  // Zero healthy accounts must not fall back to the default pin: that is the exhausted account an
+  // unattended routine would hammer every tick (RUSH-2132). Throwing fails the run nonzero; the
   // message text is the contract the Factory watchdog tail-detects.
   if (exhausted) {
     throw new Error(formatNoHealthyAccountError(agent, strategy, exhausted));
@@ -1254,11 +1062,9 @@ export async function resolveRoutineLaunch(
   };
 }
 
-/**
- * Rewrite `cmd[0]` to the absolute binary for `agent@version` when installed.
- * Bypasses the bare-name shim so a sandboxed HOME / missing default pin cannot
- * surface as "agents: no version of X configured".
- */
+/** Rewrite `cmd[0]` to the absolute binary for `agent@version` when installed, bypassing the
+ * bare-name shim so a sandboxed HOME or missing default pin cannot fail with "no version
+ * configured". */
 export function pinJobBinary(cmd: string[], agent: AgentId, version: string | undefined): string[] {
   if (!version || cmd.length === 0) return cmd;
   if (!isVersionInstalled(agent, version)) return cmd;
@@ -1269,27 +1075,12 @@ export function pinJobBinary(cmd: string[], agent: AgentId, version: string | un
   return next;
 }
 
-/**
- * Whether a job's command is dispatched through `agents run` (so `cmd[0] === 'agents'`)
- * rather than the agent binary directly. True for workflow jobs and for resume jobs.
- * Such commands must NOT be binary-pinned (pinning rewrites cmd[0] to the agent binary,
- * producing a broken `<binary> run …`) and must not receive a version-pinned spawn env.
- */
-/**
- * Assert a routine's account can be dispatched to the resolved placement, BEFORE
- * any off-box dispatch (placement is resolved before {@link resolveRoutineLaunch}),
- * at the top of both the foreground and detached paths:
- *
- * - **native** account → rejected for host AND cloud: a native login is a
- *   device-local harness credential that cannot be forwarded off-box.
- * - **provider** account + **cloud** → rejected (fail loud): the cloud dispatch
- *   has no secure way to inject a device-local provider bundle yet.
- * - **provider** account + **host** → allowed: the host dispatch forwards the
- *   account NAME (the remote resolves its own local bundle — no secret copied).
- *
- * `account` is injectable so the guard is unit-tested for both modes without a
- * registry or a real dispatch.
- */
+/** Whether a job's command goes through `agents run` (`cmd[0] === 'agents'`): workflow and resume
+ * jobs. Such commands must not be binary-pinned (that yields a broken `<binary> run ...`) or get a
+ * version-pinned spawn env. */
+/** Assert a routine's account can be dispatched to the resolved placement before any off-box
+ * dispatch. Native accounts are rejected for host and cloud (device-local credential);
+ * provider+cloud is rejected (no secure bundle injection); provider+host is allowed. */
 export async function assertRoutineAccountLocalForPlacement(
   config: Pick<JobConfig, 'name' | 'account'>,
   mode: 'host' | 'cloud',
@@ -1331,12 +1122,9 @@ export async function dispatchPlacedJob(
   return (deps.cloud ?? executeJobOnCloud)(config, { detached: false }, attempt);
 }
 
-/**
- * Build the options passed to `dispatchPromptToHost` for a host routine. Split
- * out so the execution boundary is unit-testable: it MUST forward the routine's
- * `account` by name (the remote resolves its own local bundle; no secret copied)
- * — dropping it silently ran the remote under the wrong identity.
- */
+/** Build the options passed to `dispatchPromptToHost` for a host routine. It must forward the
+ * routine's `account` by name (the remote resolves its own bundle, no secret copied); dropping it
+ * silently ran the remote under the wrong identity. */
 export function buildHostDispatchOptions(
   config: JobConfig,
   ctx: { remoteCwd: string | undefined; runDir: string; detached: boolean },
@@ -1365,12 +1153,9 @@ export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'res
   );
 }
 
-/**
- * Inject a provider account's env into a routine spawn. Native accounts do not
- * belong here — they re-enter `agents run <agent>#<name>` so T5 slot resolution
- * picks the HOME. A provider-pinned routine stays on this path so the durable
- * credential is still in the child env (PHNX-3940 T5 seam / T7).
- */
+/** Inject a provider account's env into a routine spawn. Native accounts re-enter `agents run
+ * <agent>#<name>` so slot resolution picks the HOME; provider-pinned routines stay on this path so
+ * the durable credential is in the child env (PHNX-3940). */
 export function mergeRoutineProviderEnv(
   env: Record<string, string>,
   config: Pick<JobConfig, 'account' | 'agent' | 'workflow' | 'resume'>,
@@ -1386,11 +1171,8 @@ export function mergeRoutineProviderEnv(
   return env;
 }
 
-/**
- * Merge sandbox/base env with the canonical per-version exec env
- * (CLAUDE_CONFIG_DIR / CODEX_HOME / …) so routines share account isolation
- * with `agents run`.
- */
+/** Merge sandbox/base env with the per-version exec env (CLAUDE_CONFIG_DIR / CODEX_HOME / ...) so
+ * routines share account isolation with `agents run`. */
 export function buildRoutineSpawnEnv(
   baseEnv: Record<string, string>,
   agent: AgentId,
@@ -1410,29 +1192,15 @@ export function buildRoutineSpawnEnv(
   for (const [k, v] of Object.entries(execEnv)) {
     if (v !== undefined) out[k] = v;
   }
-  // CLAUDE_CODE_OAUTH_TOKEN comes in two flavours, and only one is safe for a
-  // routine. KEEP a per-account `claude setup-token` (long-lived, NON-rotating,
-  // keyed to this home's own account) that buildExecEnv injected from the reserved
-  // `auth` bundle (resolveClaudeSetupToken) — that is the durable cure for the
-  // single-use-refresh-token revocation storm: a setup-token never rotates, so a
-  // scheduled routine can't land on a sibling home's just-rotated-out credential.
-  // STRIP an INHERITED ambient value instead: buildExecEnv spreads process.env
-  // (exec.ts) and sanitizeProcessEnv leaves credentials, so a daemon env that
-  // happens to carry a shared/rotating CLAUDE_CODE_OAUTH_TOKEN would otherwise make
-  // every routine run on that one token — the RUSH-1822 fleet-wide-logout path.
-  // Distinguish by value: only the resolved setup-token survives.
-  // Authoritative: buildExecEnv injects the setup-token but then spreads the caller
-  // env over it, so an ambient CLAUDE_CODE_OAUTH_TOKEN would win — re-assert here.
+  // Keep a per-account `claude setup-token` injected by buildExecEnv (long-lived, non-rotating, so
+  // a routine cannot land on a sibling home's rotated-out credential). Strip an inherited ambient
+  // CLAUDE_CODE_OAUTH_TOKEN: it would put every routine on one rotating token (RUSH-1822).
   const setupToken = agent === 'claude' && version
     ? resolveClaudeSetupToken(getVersionHomePath('claude', version))
     : null;
-  // A headed device (personal or desktop — the user's own interactive box or a
-  // headed always-on box) uses the per-version login for EVERY run, routines
-  // included — the setup-token is a worker-only credential (RUSH-2395, mirrors
-  // the claude adapter's headed-device branch). On a headed box, only strip an
-  // inherited copy of the account's OWN setup-token by value so a leaked ambient
-  // value can't override the login; a token the user set deliberately is a
-  // different string and survives.
+  // A headed device uses the per-version login for every run, routines included; the setup-token
+  // is worker-only (RUSH-2395). On a headed box only strip an inherited copy of the account's own
+  // setup-token by value; a token the user set deliberately survives.
   if (isHeadedDeviceRole(selfConfiguredDeviceRole())) {
     if (setupToken && out.CLAUDE_CODE_OAUTH_TOKEN === setupToken) delete out.CLAUDE_CODE_OAUTH_TOKEN;
   } else if (setupToken) {
@@ -1461,11 +1229,8 @@ interface SpawnAttemptResult {
   pid: number | null;
 }
 
-/**
- * Spawn one attempt, capture logs to `attemptLogPath`, enforce timeout.
- * Rate-limit scanning uses only this attempt's log (not prior failover output).
- * The attempt log is also appended into `combinedLogPath` for a continuous trail.
- */
+/** Spawn one attempt, log to `attemptLogPath`, enforce the timeout. Rate-limit scanning uses only
+ * this attempt's log; the log is also appended to `combinedLogPath` for a continuous trail. */
 function spawnJobAttempt(
   cmd: string[],
   env: Record<string, string>,
@@ -1543,36 +1308,19 @@ function spawnJobAttempt(
   });
 }
 
-/**
- * Execute a job synchronously (waits for completion or timeout before resolving).
- *
- * When `config.loop` is set the job is routed through the loop driver (`runLoop`
- * from loop.ts) instead of a single spawn — same driver as `agents run --loop` and
- * workflow `loop:` blocks (issue #400). The optional `deps` parameter provides
- * injectable seams (runIteration, sleep, writeCheckpoint) used by tests; production
- * callers omit it and get the defaults.
- *
- * Single-shot path: pre-flight version/account selection + mid-run rate-limit
- * failover across healthy same-agent accounts (RUSH-1016).
- */
-/**
- * Actor provenance for a routine run (RUSH-2020): `actor` is the routine's
- * CREATOR (carried from the job config), `triggeredBy` is whoever kicked off THIS
- * run (`resolveActor().id` — a person for a manual run, `UNRESOLVED@<host>` for an
- * unattended scheduled fire). Spread into every RunMeta so a fired cron traces
- * back to the person who scheduled it.
- */
+/** Execute a job synchronously, waiting for completion or timeout. With `config.loop` set it goes
+ * through `runLoop` (loop.ts), the same driver as `agents run --loop` (issue #400). The
+ * single-shot path does pre-flight account selection plus mid-run rate-limit failover (RUSH-1016). */
+/** Actor provenance for a routine run (RUSH-2020): `actor` is the routine's creator, `triggeredBy`
+ * is whoever started this run (`UNRESOLVED@<host>` for an unattended fire). Spread into every
+ * RunMeta so a cron fire traces to the person who scheduled it. */
 function runProvenance(config: JobConfig): { actor?: string; triggeredBy: string } {
   return { ...(config.actor ? { actor: config.actor } : {}), triggeredBy: resolveActor().id };
 }
 
-/**
- * Inject the routine creator's actor into a run's base env so the fired agent
- * INHERITS it (the `AGENTS_ACTOR` path in actor.ts) instead of re-resolving to
- * `UNRESOLVED@<host>` on an unattended fire — so its session, events, and commits
- * all attribute to the person who scheduled the routine (RUSH-2020). Mutates and
- * returns the same env object for call-site brevity.
- */
+/** Inject the routine creator's actor into the run's base env so the fired agent inherits it
+ * (`AGENTS_ACTOR`, actor.ts) rather than resolving to `UNRESOLVED@<host>` (RUSH-2020). Mutates and
+ * returns the same env object. */
 function injectRoutineActor(env: Record<string, string>, config: JobConfig): Record<string, string> {
   if (config.actor && !env.AGENTS_ACTOR) env.AGENTS_ACTOR = config.actor;
   return env;
@@ -1595,9 +1343,8 @@ export async function executeJob(
 }
 
 async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, attempt: RoutineAttempt): Promise<RunResult> {
-  // Placement (hostStrategy / bare host:) — body may run on another machine
-  // over SSH or in the cloud; local version selection / sandbox / spawn then
-  // do not apply. Sync callers (manual `routines run`, catchup) follow the
+  // Placement (hostStrategy / bare host:): the body may run on another machine over SSH or in the
+  // cloud, so local version selection, sandbox and spawn do not apply. Sync callers follow the
   // remote run to completion when possible.
   {
     const { resolvePlacementTarget } = await import('../routines-placement.js');
@@ -1627,14 +1374,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
 
   const resolvedPrompt = resolveJobPrompt(config);
 
-  // Resume must run against the REAL home: `--resume <id>` resolves the session from
-  // the agent's config dir, and the sandbox overlay home has only a freshly-generated
-  // config with no session store. So a resume job is never sandboxed, regardless of
-  // `config.sandbox` (see the resume branch in buildJobCommand).
-  // Resume needs the REAL home (session store); a custom harness needs it too —
-  // the delegated `agents run <name>` resolves ~/.agents (profiles, setup
-  // sentinel, version homes) from HOME, which the overlay would hide. Exec
-  // still isolates the run in the host version home it swaps HOME into.
+  // Resume must use the real home: `--resume <id>` reads the session store from the agent's config
+  // dir, which the sandbox overlay lacks, so a resume job is never sandboxed. A custom harness
+  // needs it too: the delegated `agents run <name>` resolves ~/.agents from HOME.
   const useSandbox = config.sandbox !== false && !config.resume && !(config.agent && isCustomHarnessName(config.agent));
   const overlayHome = useSandbox ? prepareJobHome(config, primaryVersion) : undefined;
 
@@ -1649,13 +1391,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
     config,
   );
 
-  // Workflows run via `agents run <workflow>` which delegates to claude under the hood.
-  // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
-  // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
-  // Custom harness/profile name (e.g. `deepseek`) stays on harnessName; the
-  // HOST CLI is effectiveAgent. The loop path spawns in-process via runLoop
-  // and never re-enters `agents run`, so it must stamp harnessName itself
-  // (PHNX-2935) — same field commands/exec.ts sets on ExecOptions.
+  // Workflows delegate to claude, so 'claude' is the effective agent for report extraction when
+  // workflow is set; command jobs branched out earlier. A custom harness name stays on
+  // harnessName; the loop path never re-enters `agents run`, so it stamps harnessName (PHNX-2935).
   const harnessName = !config.workflow && config.agent && isCustomHarnessName(config.agent)
     ? config.agent
     : undefined;
@@ -1689,12 +1427,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // copies only THIS run's transcript out of a shared per-version home (RUSH-2271).
   snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
-  // Auth preflight: if the resolved account is provably signed out (revoked or
-  // unconfigured), record a terminal `blocked`/`agent_auth_failed` run with the
-  // re-login repair instead of spawning a doomed run that 401s and burns a
-  // session (PHNX-3415). `blocked` (readiness rejection, no body ran) is kept
-  // distinct from `failed` (a body ran and errored) per RT-7. Cache-only + fails
-  // OPEN — see fireTimeAuthReadiness.
+  // Auth preflight: a provably signed-out account records a terminal `blocked`/`agent_auth_failed`
+  // run with the re-login repair instead of a doomed 401 run (PHNX-3415). `blocked` (no body ran)
+  // stays distinct from `failed` per RT-7. Cache-only and fails open.
   const preflightVersion = launch.chain[0]?.version;
   // Dynamic import breaks the routine-readiness -> scheduling/routines -> runner cycle.
   const { fireTimeAuthReadiness } = await import('../routine-readiness.js');
@@ -1780,11 +1515,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
       process.stderr.write(`[agents] routine ${config.name}: running ${label}\n`);
     }
 
-    // A rate-limit failover spawns the NEXT chain entry, whose version/account has
-    // its own per-version transcript home. Re-point meta.version at the attempt that
-    // is about to run and re-baseline that home, so the archiver reads the transcript
-    // where THIS attempt writes it — not chain[0]'s home (RUSH-2271). The pre-loop
-    // snapshot already covered chain[0]; this makes every later attempt correct too.
+    // A rate-limit failover spawns the next chain entry, which has its own per-version transcript
+    // home. Re-point meta.version and re-baseline that home so the archiver reads where this
+    // attempt writes, not chain[0]'s home (RUSH-2271).
     meta.version = attemptVersion;
     snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
@@ -1820,12 +1553,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
     }
 
     if (attempt.status === 'completed') {
-      // Exit code alone is unreliable for auth: a logged-out Claude can exit 0
-      // with a `result` event carrying is_error:true (terminal_reason
-      // "completed"). Consult the SAME structural signal the detached path uses
-      // so both paths agree — raw text is deliberately NOT used here, so a
-      // genuinely-completed run that merely mentions an auth phrase stays a
-      // success (processFailed:false).
+      // Exit code alone is unreliable for auth: a logged-out Claude can exit 0 with a `result`
+      // event carrying is_error:true. Use the same structural signal as the detached path; raw
+      // text is not used, so a completed run that merely mentions an auth phrase stays a success.
       if (isAuthFailureFromLog(attempt.logText, effectiveAgent, { processFailed: false })) {
         const reason = authFailureReason(attempt.logText) ?? 'authentication_failed';
         recordRoutineAuthOutcome(attemptAgent, config.account, attemptVersion, { ok: false, verdict: 'revoked', detail: reason });
@@ -1863,11 +1593,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
       continue;
     }
 
-    // Auth failure — the agent is logged out / token revoked. Unlike a rate
-    // limit it is not self-healing by failover (every chain entry on the same
-    // account fails identically), so rate-limit is classified first (above) and
-    // auth only when NOT rate-limited. Classified so the failure is visible and,
-    // critically, so the login-error text is never persisted as the report.
+    // Auth failure (logged out / token revoked) is not healed by failover, so classify rate-limit
+    // first and auth only when not rate-limited. Classifying it keeps the failure visible and
+    // stops the login-error text being persisted as the report.
     const authFailed = !rateLimited && (
       isAuthFailureFromLog(attempt.logText, effectiveAgent, { processFailed: true }) ||
       (attempt.error ? detectAuthFailure(attempt.error) : false)
@@ -1912,11 +1640,8 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   return { meta, reportPath: null };
 }
 
-/**
- * Dispatch a routine to the agent's native cloud provider (or the configured
- * default). Writes a local run record with `cloudTaskId` so list/runs still
- * work; does not wait for cloud completion on the detached path.
- */
+/** Dispatch a routine to the agent's native cloud provider (or the configured default). Writes a
+ * local run record with `cloudTaskId`; does not wait for cloud completion on the detached path. */
 async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean }, attempt: RoutineAttempt): Promise<RunResult> {
   if (config.workflow) {
     throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'workflow:'.`);
@@ -2154,13 +1879,9 @@ async function executeCommandJobForeground(config: JobConfig, attempt: RoutineAt
   return { meta, reportPath: null };
 }
 
-/**
- * Optional lifecycle callbacks for a detached routine run. The daemon passes an
- * `onFinish` that fires the branded finish/output notification (RUSH-2030) — it
- * runs from the in-process settle() when the child exits, the only seam that
- * observes the live running→terminal transition (the monitor tick would already
- * see a finalized record and skip it). Never let a hook throw into finalization.
- */
+/** Optional lifecycle callbacks for a detached routine run. The daemon's `onFinish` fires the
+ * finish/output notification (RUSH-2030) from the in-process settle(), the only seam that sees the
+ * running-to-terminal transition. A hook must never throw into finalization. */
 interface RoutineHooks {
   /** Called once with the finalized meta when the run reaches a terminal state. */
   onFinish?: (meta: RunMeta) => void;
@@ -2187,11 +1908,9 @@ export async function executeJobDetached(
 }
 
 async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAttempt, hooks?: RoutineHooks): Promise<RunMeta> {
-  // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
-  // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
-  // Either way the in-process onFinish hook does not fire for off-box routines
-  // (the monitor tick observes an already-finalized record), so notify-desktop
-  // sends the finish notification only for local detached runs below (RUSH-2030).
+  // Placement: dispatch off-box and return; the monitor finalizes host: runs, cloud runs stay
+  // terminal when dispatch ends. The in-process onFinish hook does not fire for off-box routines,
+  // so the finish notification is sent only for local detached runs (RUSH-2030).
   {
     const { resolvePlacementTarget } = await import('../routines-placement.js');
     const target = await resolvePlacementTarget(config);
@@ -2240,14 +1959,9 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
     cmd = pinJobBinary(cmd, config.agent as AgentId, version);
   }
 
-  // Resume must run against the REAL home: `--resume <id>` resolves the session from
-  // the agent's config dir, and the sandbox overlay home has only a freshly-generated
-  // config with no session store. So a resume job is never sandboxed, regardless of
-  // `config.sandbox` (see the resume branch in buildJobCommand).
-  // Resume needs the REAL home (session store); a custom harness needs it too —
-  // the delegated `agents run <name>` resolves ~/.agents (profiles, setup
-  // sentinel, version homes) from HOME, which the overlay would hide. Exec
-  // still isolates the run in the host version home it swaps HOME into.
+  // Resume must use the real home: `--resume <id>` reads the session store from the agent's config
+  // dir, which the sandbox overlay lacks, so a resume job is never sandboxed. A custom harness
+  // needs it too: `agents run <name>` resolves ~/.agents from HOME.
   const useSandbox = config.sandbox !== false && !config.resume && !(config.agent && isCustomHarnessName(config.agent));
   const overlayHome = useSandbox ? prepareJobHome(config, version) : undefined;
 
@@ -2304,10 +2018,9 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // copies only THIS run's transcript out of a shared per-version home (RUSH-2271).
   snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
-  // Auth preflight (mirrors executeJob): a provably signed-out resolved account
-  // records a terminal `blocked`/`agent_auth_failed` run with the re-login repair
-  // instead of spawning a doomed run that 401s and burns a session (PHNX-3415).
-  // Cache-only + fails OPEN — see fireTimeAuthReadiness.
+  // Auth preflight (mirrors executeJob): a provably signed-out account records a terminal
+  // `blocked`/`agent_auth_failed` run instead of a doomed 401 run (PHNX-3415). Cache-only and
+  // fails open; see fireTimeAuthReadiness.
   const preflightVersion = launch.chain[0]?.version;
   // Dynamic import breaks the routine-readiness -> scheduling/routines -> runner cycle.
   const { fireTimeAuthReadiness } = await import('../routine-readiness.js');
@@ -2393,12 +2106,9 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   return { ...meta };
 }
 
-/**
- * Detached (fire-and-forget) execution for a command-mode routine. Mirrors the
- * agent detached flow: write an initial running record, spawn the shell command
- * un-sandboxed, unref, then record the pid. The daemon does not wait for exit;
- * `monitorRunningJobs` reaps the record on the next tick.
- */
+/** Detached (fire-and-forget) execution for a command routine: write a running record, spawn the
+ * shell un-sandboxed, unref, record the pid. The daemon does not wait; `monitorRunningJobs` reaps
+ * the record on the next tick. */
 function executeCommandJobDetached(config: JobConfig, attempt: RoutineAttempt, hooks?: RoutineHooks): RunMeta {
   const timer = createTimer('agent.run', {
     jobName: config.name,
@@ -2413,11 +2123,9 @@ function executeCommandJobDetached(config: JobConfig, attempt: RoutineAttempt, h
   const stdoutPath = path.join(runDir, 'stdout.log');
   const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
 
-  // Wrap the shell so the child records its own exit code to <runDir>/exit-code.
-  // The in-process `child.on('exit')` below writes the terminal record while the
-  // daemon is alive (the common case); the file lets monitorRunningJobs recover
-  // the real status if the daemon restarted between spawn and exit. (win32 relies
-  // on the exit event only.)
+  // Wrap the shell so the child writes its own exit code to <runDir>/exit-code. `child.on('exit')`
+  // records the terminal state while the daemon is alive; the file lets monitorRunningJobs recover
+  // the status after a daemon restart (win32 relies on the exit event only).
   const exitCodePath = path.join(runDir, 'exit-code');
   // Run the command in a SUBSHELL `( … )` so that if it calls `exit`, only the
   // subshell exits — the outer shell still captures `$?` and writes the file.
@@ -2545,12 +2253,9 @@ export function extractReport(stdoutPath: string, agentType: AgentId): string | 
   }
 }
 
-/** Derive the final status of a detached run by reading the agent's stream-json
- *  tail. Detached children fire-and-forget, so we never see their exit code
- *  directly — but Claude's stream-json terminates with a `type: result` line
- *  that carries `is_error`. If we find it, the run completed cleanly (modulo
- *  agent-reported error). If not, the process likely died mid-stream and the
- *  caller should treat the run as failed. */
+/** Derive the final status of a detached run from the tail of the agent's stream-json. Its exit
+ * code is never seen, but Claude's stream ends with a `type: result` line carrying `is_error`; if
+ * absent, the process likely died mid-stream and the run is failed. */
 export function inferFinalStatusFromLog(
   stdoutPath: string,
   agent: AgentId,
@@ -2581,20 +2286,14 @@ export function inferFinalStatusFromLog(
 
 const MAX_WALL_CLOCK_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Verify that a PID still belongs to the process we spawned, not a recycled
- * OS PID. Uses the recorded `spawnedAt` (epoch ms) from meta.json and
- * compares against the process's actual start time via `ps`. Returns true
- * when the PID is alive AND plausibly ours.
- */
+/** Verify a PID still belongs to the process we spawned, not a recycled one, by comparing the
+ * recorded `spawnedAt` (epoch ms) with the process start time from `ps`. True when the PID is
+ * alive and plausibly ours. */
 /** Bound the identity `ps` — a hung `ps` must never freeze its caller for long (matches routine-process-cleanup's probe). */
 const PS_IDENTITY_TIMEOUT_MS = 5_000;
 
-/**
- * Pure: does a `ps -o etime=` value place the process's birth within 30s of when
- * we recorded spawning it? An empty/unknown reading conservatively reads as ours
- * — never reap a run on a doubtful identity probe.
- */
+/** Pure: does a `ps -o etime=` value place the process's birth within 30s of the recorded spawn?
+ * An empty or unknown reading counts as ours, so a run is never reaped on a doubtful probe. */
 function etimeIndicatesOurs(etime: string, spawnedAt: number): boolean {
   if (!etime) return true;
   const parts = etime.replace(/-/g, ':').split(':').reverse();
@@ -2607,17 +2306,9 @@ function etimeIndicatesOurs(etime: string, spawnedAt: number): boolean {
   return Math.abs(processStartMs - spawnedAt) < 30_000;
 }
 
-/**
- * Synchronous identity check for callers OTHER than the periodic heartbeat tick:
- * the `agents routines list/status` builders and stop-time enumeration (both in
- * short-lived CLI processes), plus the scheduler's fire-time slot-claim
- * (`activeRoutineRun`) and status projection (`isRunGenuinelyInFlight`). Those
- * last two DO run in-process on the daemon's event loop, but are event-driven
- * (they fire when a job is dispatched, not on a fixed cadence) and the `ps` here
- * is now bounded to {@link PS_IDENTITY_TIMEOUT_MS} — they are not the
- * unconditional every-tick scan PHNX-3695 targets. The heartbeat tick's own scan
- * uses the non-blocking {@link isPidOursAsync} instead.
- */
+/** Synchronous identity check for callers other than the heartbeat tick: `agents routines
+ * list/status`, stop-time enumeration, and the fire-time slot claim. Those are event-driven and
+ * the `ps` is bounded by PS_IDENTITY_TIMEOUT_MS, unlike the every-tick scan (PHNX-3695). */
 function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
   try {
     process.kill(pid, 0);
@@ -2635,13 +2326,9 @@ function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
   }
 }
 
-/**
- * Async, deadline-bounded twin of {@link isPidOurs} for the daemon's heartbeat
- * tick (`reapExitedRunningJobs`) — the `ps` probe runs on the shared event loop,
- * so it MUST NOT block it (PHNX-3695). Same semantics: dead pid → not ours;
- * no recorded `spawnedAt` or Windows → assume ours; a failed/empty probe reads
- * as ours (conservative — never reap on a doubtful probe).
- */
+/** Async, deadline-bounded twin of isPidOurs for the heartbeat tick (`reapExitedRunningJobs`); the
+ * `ps` probe must not block the shared event loop (PHNX-3695). Dead pid is not ours; no
+ * `spawnedAt` or Windows assumes ours; a failed or empty probe reads as ours. */
 async function isPidOursAsync(pid: number, spawnedAt: number | undefined): Promise<boolean> {
   if (!isAlive(pid)) return false;
   if (spawnedAt === undefined) return true;
@@ -2651,21 +2338,16 @@ async function isPidOursAsync(pid: number, spawnedAt: number | undefined): Promi
   return etimeIndicatesOurs(res.stdout.trim(), spawnedAt);
 }
 
-/**
- * Finalize one `host:`-placed run by healing its host-task sidecar against the
- * remote `.exit` (lib/hosts/reconcile.ts). Mutates + persists the meta only
- * when the sidecar reached a terminal state.
- */
+/** Finalize one `host:`-placed run by healing its host-task sidecar against the remote `.exit`
+ * (lib/hosts/reconcile.ts). Mutates and persists the meta only when the sidecar reached a terminal
+ * state. */
 /** Apply a healed host-task's terminal state to the local run record. Shared by the sync and async host reconcilers. */
 function applyHealedHostRun(
   meta: RunMeta,
   healed: { status: string; exitCode?: number | null; finishedAt?: string | null },
-  // The routine-end emit acquires the event-log file lock. On the daemon
-  // heartbeat tick (finalizeHostRunAsync) that MUST be the async, non-blocking
-  // variant, or the synchronous `withFileLock` (lockSync + Atomics.wait, up to
-  // 30s under contention) freezes the whole event loop — the exact wedge PHNX-3695
-  // targets, on a path guard-no-sync-io does not scan (PHNX-3727). The sync CLI
-  // path (finalizeHostRun) keeps the default synchronous emit.
+  // The routine-end emit takes the event-log file lock. On the heartbeat tick it must be the async
+  // variant: the sync `withFileLock` (up to 30s under contention) freezes the event loop
+  // (PHNX-3695, PHNX-3727). The sync CLI path (finalizeHostRun) keeps the synchronous default.
   emit: (m: RunMeta) => void = emitRoutineEnd,
 ): void {
   if (healed.status !== 'completed' && healed.status !== 'failed') return;
@@ -2687,13 +2369,9 @@ function finalizeHostRun(meta: RunMeta): void {
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
 
-/**
- * Async twin of {@link finalizeHostRun} for the daemon heartbeat tick
- * (PHNX-3695). A `host:`-placed run's remote `.exit` is read over ssh; on the
- * tick that read MUST be async (`reconcileHostTaskAsync` → `sshExecAsync`) or a
- * single 6s ssh timeout freezes the whole event loop — the exact bug class this
- * effort targets, worse than the local `ps` probe.
- */
+/** Async twin of finalizeHostRun for the heartbeat tick (PHNX-3695). The remote `.exit` is read
+ * over ssh and must be async (`reconcileHostTaskAsync`), or one 6s ssh timeout freezes the whole
+ * event loop. */
 async function finalizeHostRunAsync(meta: RunMeta): Promise<void> {
   try {
     const task = loadHostTask(meta.hostTaskId!);
@@ -2703,16 +2381,9 @@ async function finalizeHostRunAsync(meta: RunMeta): Promise<void> {
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
 
-/**
- * PIDs of the in-flight detached routine children on THIS device — every local
- * run record still marked `running` whose spawned process is genuinely alive
- * (`isPidOurs`, so a dead-and-reused pid does not count). These are the `unref`'d
- * spawns that survive a daemon exit in their own process group (SING-11a): a
- * takeover must not kill them and `stopDaemon` reports them rather than pretending
- * the process tree is clean (SING-12). Scoped to `getRunsDir()`, which is under
- * this state dir's HOME, so a different state dir's children are invisible here.
- * `host:`-placed runs have no local pid and are excluded.
- */
+/** PIDs of in-flight detached routine children on this device: `running` local records whose
+ * process is genuinely alive (`isPidOurs`). They survive a daemon exit in their own group
+ * (SING-11a), so a takeover must not kill them and `stopDaemon` reports them (SING-12). */
 export function listLiveRoutineChildren(): number[] {
   const runsDir = getRunsDir();
   if (!fs.existsSync(runsDir)) return [];
@@ -2744,20 +2415,9 @@ export function listLiveRoutineChildren(): number[] {
   return pids;
 }
 
-/**
- * Whether a run record marked `running` is genuinely in flight right now. A
- * `running` status alone is not enough: `writeActiveClaim` stamps a provisional
- * claim as `running` with `pid: null` BEFORE the child spawns, and
- * `monitorRunningJobs()` does not reap a null-pid record (it has no process to
- * probe, and ages it out only past the configured timeout — up to a week). So a
- * daemon crash in that spawn window leaves a `running` record for a run that is
- * not running (RUSH-2640). A caller answering "is one running now?" MUST gate on
- * this, mirroring `listLiveRoutineChildren`'s local-liveness test:
- * - a local child is in flight only while its pid is still ours (alive, same
- *   birth time — a dead-and-reused pid does not count);
- * - a `host:`-placed run has no local pid by design and is in flight until its
- *   remote `.exit` is reconciled (`finalizeHostRun`).
- */
+/** Whether a `running` record is genuinely in flight; callers MUST gate on it. A provisional claim
+ * is `running` with `pid: null` and isn't reaped, so a crash leaves a phantom (RUSH-2640). Local:
+ * pid still ours; `host:` run: until its remote `.exit` is reconciled. */
 export function isRunGenuinelyInFlight(meta: RunMeta): boolean {
   if (meta.status !== 'running') return false;
   if (meta.hostTaskId) return true;
@@ -2765,23 +2425,9 @@ export function isRunGenuinelyInFlight(meta: RunMeta): boolean {
   return isPidOurs(meta.pid, meta.spawnedAt);
 }
 
-/**
- * Reconcile ONE `running` record once its process identity is known (`ours` =
- * the recorded pid is still genuinely the child we spawned). Shared verbatim by
- * the synchronous {@link monitorRunningJobs} (off-loop callers) and the async
- * {@link reapExitedRunningJobs} (daemon heartbeat tick) so there is one copy of
- * the finalize/timeout/report logic — only the surrounding directory/`ps` IO
- * differs by sync-vs-async flavor. Caller has already confirmed `meta.status`
- * is `running`. The finalize/report/archive helpers stay synchronous: they run
- * ONLY when a run actually transitions (times out or its process exited), a
- * conditional/rare event, not the every-tick scan the loop-starvation fix
- * (PHNX-3695) targets. The one exception is the `routine.end` EVENT emit, whose
- * file lock CAN block for up to 30s under contention even on that rare path — so
- * the emitter is injected: the off-loop sync caller passes `emitRoutineEnd`
- * (synchronous, so a short-lived CLI process flushes it before exit), the daemon
- * tick passes a fire-and-forget `emitRoutineEndAsync` (the long-lived daemon
- * flushes it, and the shared event loop is never blocked on the lock).
- */
+/** Reconcile one `running` record once its process identity is known. Shared by sync
+ * monitorRunningJobs and async reapExitedRunningJobs so finalize/timeout/report logic has one
+ * copy. routine.end emitter is injected: async on the daemon tick, as its lock blocks (PHNX-3695). */
 function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: string, ours: boolean, emitEnd: (meta: RunMeta) => void): void {
   // Host-placed runs (meta.hostTaskId) are handled by the caller, sync or async
   // — their remote `.exit` read is ssh I/O that must stay off the daemon tick's
@@ -2793,13 +2439,9 @@ function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: 
   // parse or extract. Reap them on pid liveness alone.
   const isCommandRun = Boolean(meta.command) || !meta.agent;
 
-  // Age-out runs FIRST, before the null-pid guard below, so a wedged record
-  // still marked `running` past its deadline is always finalized — a
-  // provisional launcher claim whose daemon crashed before spawning a child
-  // (pid null), or an old record whose recorded pid was reused, would
-  // otherwise linger as `running` forever (RUSH-2640). Only kill a process
-  // group that is genuinely still ours; terminating a reused pid would kill
-  // an unrelated process, and a null pid has nothing to kill.
+  // Age-out runs first, before the null-pid guard, so a wedged `running` record past its deadline
+  // is always finalized (a provisional claim whose daemon crashed, or a reused pid) (RUSH-2640).
+  // Kill a process group only when it is still ours.
   const wallClockMs = Date.now() - Date.parse(meta.startedAt);
   const timeoutMs = meta.timeoutMs ?? MAX_WALL_CLOCK_MS;
   if (Number.isFinite(wallClockMs) && wallClockMs > timeoutMs) {
@@ -2818,11 +2460,9 @@ function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: 
 
   if (!ours) {
     if (isCommandRun) {
-      // Command routines normally record their own terminal status via
-      // child.on('exit') (so this record would already be non-'running' and
-      // skipped above). Reaching here means the daemon restarted mid-run and
-      // missed the exit event — recover the true code from the exit-code file
-      // the child wrote; its absence means the child was killed/crashed.
+      // Command routines normally record their own status via child.on('exit'). Reaching here
+      // means the daemon restarted mid-run and missed it, so recover the code from the exit-code
+      // file; its absence means the child was killed or crashed.
       const ec = readCommandExitCode(runDirPath);
       finalizeRunMeta(meta, ec === 0 ? 'completed' : 'failed', ec);
     } else {
@@ -2843,15 +2483,9 @@ function reconcileRunningRecord(meta: RunMeta, jobRunsPath: string, runDirName: 
   }
 }
 
-/**
- * Scan all runs marked "running" and finalize any whose process has exited.
- *
- * SYNCHRONOUS — for OFF-loop callers only (the `agents routines list/status`
- * builders and CLI best-effort orphan reaps), which run in short-lived CLI
- * processes where a bounded synchronous `ps`/scan cannot starve a served event
- * loop. The daemon's own heartbeat tick MUST use {@link reapExitedRunningJobs}
- * instead — a sync scan there would freeze the shared event loop (PHNX-3695).
- */
+/** Scan all `running` runs and finalize any whose process has exited. Synchronous, for off-loop
+ * callers only (`agents routines list/status`, CLI orphan reaps); the daemon tick must use
+ * reapExitedRunningJobs (PHNX-3695). */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
   if (!fs.existsSync(runsDir)) return;
@@ -2889,14 +2523,9 @@ export function monitorRunningJobs(): void {
   }
 }
 
-/**
- * Async, non-blocking twin of {@link monitorRunningJobs} for the daemon's
- * heartbeat tick (PHNX-3695). Identical reconciliation via
- * {@link reconcileRunningRecord}, but the directory walk uses `fs/promises` and
- * the pid-identity probe uses the deadline-bounded {@link isPidOursAsync}, so
- * the every-tick scan never freezes the shared event loop — the freeze that
- * left the browser IPC `version` probe unanswered.
- */
+/** Async, non-blocking twin of monitorRunningJobs for the heartbeat tick (PHNX-3695): same
+ * reconcileRunningRecord, but `fs/promises` and the deadline-bounded isPidOursAsync, so the
+ * every-tick scan never freezes the event loop. */
 export async function reapExitedRunningJobs(): Promise<void> {
   const runsDir = getRunsDir();
   let jobDirs: fs.Dirent[];

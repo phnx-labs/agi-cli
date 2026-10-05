@@ -117,20 +117,14 @@ describe('buildSetupRsyncArgs', () => {
 });
 
 describe('copySetupToBox', () => {
-  // The fake transport below is a set of `#!/bin/sh` scripts dropped on PATH
-  // without a .cmd/.exe extension, which Windows can neither resolve nor
-  // execute: any case that actually reaches the transport dies in findCrabbox
-  // (cli.ts:74) with "crabbox is not installed or not on PATH" before testing
-  // the behavior it claims to. Those cases carry `itPosix`. Cases that return
-  // before the transport (the empty-file-set early return, setup-copy.ts:141)
-  // still run everywhere — don't widen this to the whole suite.
+  // The fake transport is `#!/bin/sh` scripts on PATH, which Windows can't resolve, so cases
+  // reaching the transport die in findCrabbox (cli.ts:74). Those use `itPosix`; cases returning
+  // earlier (setup-copy.ts:141) run everywhere.
   const itPosix = it.skipIf(process.platform === 'win32');
 
-  // Hermetic lease-bundle resolution: copySetupToBox → crabboxSshArgv → crabboxEnv
-  // would otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a
-  // locked `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
-  // dev-machine-only failure unrelated to the rsync/ssh copy flow under test. Pin
-  // readMeta → {} and the process client's listBundlesSync → [] so no lease bundle is found.
+  // Hermetic lease-bundle resolution: otherwise copySetupToBox auto-detects the developer's real
+  // provider-token bundle and its agentOnly read throws "not unlocked" (SEC-13). Pin readMeta to
+  // {} and listBundlesSync to [].
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
@@ -141,11 +135,9 @@ describe('copySetupToBox', () => {
     resetCrabboxSecretsMemosForTest();
   });
 
-  /**
-   * Install a fake `crabbox` (emits the ssh command for `ssh --id`), `rsync`, and
-   * `ssh` on PATH — matching the real transport: copySetupToBox first asks crabbox
-   * for its per-lease ssh invocation, then rsyncs over it.
-   */
+  /** Install a fake `crabbox` (emits the ssh command for `ssh --id`), `rsync` and `ssh` on PATH,
+   * matching the real transport: crabbox gives the per-lease ssh invocation, then rsync runs over
+   * it. */
   function withFakeTransport(
     exit: { rsync: number; ssh: number; crabboxResolves?: boolean },
     fn: (ctx: { rsyncLog: string; sshLog: string }) => Promise<void>,

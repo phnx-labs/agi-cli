@@ -1,14 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-/**
- * Canonicalize `target` by `realpath`-resolving its longest EXISTING ancestor and
- * re-appending the not-yet-created tail. A plain `realpathSync(target)` throws when
- * `target` (a fresh output dir, a not-yet-written file) does not exist — but any
- * symlink in the part that DOES exist (the target itself, or an ancestor) is
- * exactly the escape hatch a containment check must resolve before comparing.
- * Unlike `path.resolve` (which only normalizes `..`), this follows links.
- */
+/** Canonicalizes `target` by `realpath`-resolving its longest EXISTING ancestor and re-appending
+ * the not-yet-created tail. Plain `realpathSync` throws on a missing target, yet a symlink in the
+ * existing part is the escape containment checks must resolve. */
 export function realpathExistingPrefix(target: string): string {
   let current = path.resolve(target);
   const tail: string[] = [];
@@ -25,11 +20,9 @@ export function realpathExistingPrefix(target: string): string {
   }
 }
 
-/**
- * True when `name` is a safe single path segment: non-empty, not '.'/'..',
- * free of path separators and null bytes, and within the filename length limit.
- * Dot-prefixed names like '.env.example' are allowed.
- */
+/** True when `name` is a safe single path segment: non-empty, not '.'/'..', no path separators or
+ * null bytes, within the filename length limit. Dot-prefixed names like '.env.example' are
+ * allowed. */
 export function isSafeSegmentName(name: string): boolean {
   return (
     !!name &&
@@ -39,13 +32,9 @@ export function isSafeSegmentName(name: string): boolean {
   );
 }
 
-/**
- * Resolve base + name while preventing path-traversal attacks.
- * Rejects path separators, null bytes, '.' and '..', and any resolved path
- * that escapes the base directory. Dot-prefixed names like '.env.example'
- * are allowed — actual traversal is caught by the containment check below.
- * Allows spaces, unicode, and other common filename characters.
- */
+/** Resolves base + name while preventing path traversal: rejects separators, null bytes, '.' and
+ * '..', and any resolved path escaping the base. Dot-prefixed names are allowed (traversal is
+ * caught by the containment check); spaces and unicode are fine. */
 export function safeJoin(base: string, name: string): string {
   if (!isSafeSegmentName(name)) {
     throw new Error(`Invalid name: ${name}`);
@@ -55,12 +44,9 @@ export function safeJoin(base: string, name: string): string {
   return resolved;
 }
 
-/**
- * Assert that `target` (which may legitimately contain path separators, e.g. a
- * multi-segment relative key) stays within `root` after normalization. Use this
- * where a caller must accept nested relative paths but the input is untrusted —
- * `safeJoin` is stricter and only allows single segments.
- */
+/** Asserts `target` (which may contain separators, e.g. a multi-segment relative key) stays within
+ * `root` after normalization. For untrusted nested relative paths; `safeJoin` is stricter (single
+ * segments). */
 export function assertWithin(root: string, target: string): string {
   const base = path.resolve(root);
   const resolved = path.resolve(target);

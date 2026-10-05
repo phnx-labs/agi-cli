@@ -76,11 +76,9 @@ describe('harness column migration (v41)', () => {
   });
 
   it('adds the harness column when schema_version is missing (migrateSchema skipped)', () => {
-    // currentVersion === undefined stamps SCHEMA_VERSION and never calls
-    // migrateSchema. The v41 ALTER lives only inside migrateSchema, so a
-    // sessions table that already exists without `harness` would stay that
-    // way — and the next upsertSession INSERT naming the column would throw
-    // — unless the unconditional post-migration repair adds it (PHNX-2935).
+    // currentVersion === undefined stamps SCHEMA_VERSION without calling migrateSchema, so a
+    // pre-existing sessions table lacking `harness` would stay that way and the next upsert would
+    // throw, unless the post-migration repair adds it (PHNX-2935).
     const db = getDB();
     db.exec(`ALTER TABLE sessions DROP COLUMN harness`);
     db.prepare(`DELETE FROM meta WHERE key = 'schema_version'`).run();

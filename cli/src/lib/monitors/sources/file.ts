@@ -1,11 +1,6 @@
-/**
- * File source evaluator.
- *
- * The observation is the file's content (bounded) plus mtime/size in meta, so an
- * on-change monitor fires on any edit. For a directory, the observation is a
- * sorted listing with per-entry mtime/size. Push-follow reuses followFile
- * (lib/log-follow.ts) — the same cross-platform tail the routines log viewer uses.
- */
+/** File source evaluator: the observation is the file's (bounded) content plus mtime/size in meta,
+ * so on-change fires on any edit. A directory yields a sorted listing with per-entry mtime/size.
+ * Push-follow reuses followFile (lib/log-follow.ts). */
 
 import * as fs from 'fs';
 import * as path from 'path';

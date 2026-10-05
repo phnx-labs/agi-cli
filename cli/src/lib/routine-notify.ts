@@ -1,26 +1,6 @@
-/**
- * Routine lifecycle desktop notifications (RUSH-2030).
- *
- * The daemon fires a branded notification when a scheduled routine starts and
- * when it finishes (success or failure), routed through the MenubarHelper
- * companion (notify-desktop.ts) so it carries the agents-cli mark.
- *
- * Anti-spam threshold (Acceptance Criteria #4 — "define a sensible threshold so
- * users are not spammed"):
- *   - Agent / workflow routines: notify on BOTH start and finish. These are the
- *     runs whose output a user actually wants surfaced.
- *   - Command routines (deterministic housekeeping — version checks, `git pull`,
- *     notify shims that can fire every minute): notify only on FAILURE. A green
- *     housekeeping run is noise; a broken one is worth a ping. No start ping.
- *   - "Notable output" is folded into the single finish notification rather than
- *     sent as a third message: on failure the error reason, on success the first
- *     line of the run's report (the user-facing result) when the routine produced
- *     one. One start + one finish per run — never a stream.
- *
- * The pure builders (`routineStartNotification` / `routineFinishNotification`)
- * return `null` when the threshold says "don't notify", and are unit-tested; the
- * `notifyRoutine*` wrappers do the filesystem read + dispatch for the daemon.
- */
+/** Routine lifecycle desktop notifications (RUSH-2030) via the MenubarHelper. Agent/workflow
+ * routines notify on start AND finish; command routines (housekeeping) only on FAILURE. Notable
+ * output folds into the single finish notification. Pure builders return `null` when suppressed. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -37,16 +17,9 @@ export function routineKind(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>
   return 'agent';
 }
 
-/**
- * The harness a routine runs on, for the notification's right-hand avatar, or
- * undefined when none owns it. A command routine is deterministic housekeeping
- * with no agent, so it gets no avatar. An agent routine names its own harness.
- * A workflow routine has no `agent` field (the schema omits it — routines.ts
- * `JobConfig.agent` and the validation that rejects setting both), and it runs
- * via `agents run <workflow>`, which delegates to claude under the hood — so its
- * avatar is the Claude mark, matching `effectiveAgent` on the finish path
- * (runner.ts). Start and finish banners therefore show the same avatar.
- */
+/** The harness a routine runs on, for the notification avatar, or undefined. Command routines have
+ * none; agent routines name theirs; workflow routines have no `agent` field and run via `agents run
+ * <workflow>`, which delegates to claude, so they get the Claude mark (as `effectiveAgent`). */
 export function routineAgent(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string | undefined {
   const kind = routineKind(r);
   if (kind === 'command') return undefined;
@@ -74,12 +47,9 @@ export function formatDuration(ms: number | undefined): string | null {
   return remMin ? `${hr}h ${remMin}m` : `${hr}h`;
 }
 
-/**
- * First non-empty line of a run report, trimmed to a notification-sized snippet.
- * This is the "notable output" surfaced on a successful finish — the routine's
- * own user-facing result. Returns null for an empty/whitespace report so the
- * caller falls back to a plain "Completed" body.
- */
+/** First non-empty line of a run report trimmed to a notification-sized snippet, the "notable
+ * output" on a successful finish; null for an empty report so the caller falls back to a plain
+ * "Completed" body. */
 export function notableSnippet(report: string | null | undefined, maxLen = 140): string | null {
   if (!report) return null;
   const firstLine = report
@@ -95,11 +65,8 @@ function openAction(filePath: string | null | undefined): string | undefined {
   return filePath ? `open:${filePath}` : undefined;
 }
 
-/**
- * Notification for a routine START, or null when the threshold suppresses it
- * (command-mode housekeeping). Clicking opens the runs folder
- * (~/.agents/.history/runs).
- */
+/** Notification for a routine START, or null when the threshold suppresses it (command-mode
+ * housekeeping); clicking opens the runs folder (~/.agents/.history/runs). */
 export function routineStartNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
 ): DesktopNotification | null {
@@ -113,16 +80,9 @@ export function routineStartNotification(
   };
 }
 
-/**
- * Notification for a routine that failed to even START — `executeJobDetached`
- * threw before the child was spawned, so no run record and no finish will ever
- * exist. The daemon fires the START notification unconditionally, so this closes
- * the "exactly one start + one finish" invariant: the orphaned start gets its
- * matching failure banner (RUSH-2030). Unlike a green finish this is never
- * suppressed — a broken start is worth a ping for every routine kind, including
- * command housekeeping. Clicking opens the runs folder (~/.agents/.history/runs)
- * since there is no run report to open.
- */
+/** Notification for a routine that failed to even START (`executeJobDetached` threw before spawn, so
+ * no run record or finish exists). Closes the "exactly one start + one finish" invariant
+ * (RUSH-2030). Never suppressed; clicking opens the runs folder. */
 export function routineStartFailedNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
   error: string,
@@ -136,13 +96,9 @@ export function routineStartFailedNotification(
   };
 }
 
-/**
- * Notification for a routine FINISH, or null when the threshold suppresses it
- * (a successful command-mode housekeeping run). Success carries the report's
- * first line when present (the notable output); failure carries the reason.
- * Clicking opens the run report/log when one is available, else the runs folder
- * (~/.agents/.history/runs).
- */
+/** Notification for a routine FINISH, or null when the threshold suppresses it (a successful
+ * command-mode run). Success carries the report's first line, failure the reason; clicking opens
+ * the run report/log if available, else the runs folder (~/.agents/.history/runs). */
 export function routineFinishNotification(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'duration' | 'agent' | 'workflow' | 'command'>,
   opts: { report?: string | null; artifactPath?: string | null } = {},
@@ -210,11 +166,8 @@ export function notifyRoutineStart(config: JobConfig): void {
   if (n) notifyDesktop(n);
 }
 
-/**
- * Daemon glue: fire the "failed to start" notification when a routine trigger
- * threw before spawning a child. Pairs with the unconditional START ping so a
- * pre-spawn failure never leaves an orphaned "Routine started". Best-effort.
- */
+/** Daemon glue: fire the "failed to start" notification when a trigger threw before spawning a
+ * child, so the unconditional START ping never leaves an orphaned "Routine started". Best-effort. */
 export function notifyRoutineStartFailed(config: JobConfig, error: string): void {
   notifyDesktop(routineStartFailedNotification(config, error));
 }

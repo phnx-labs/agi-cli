@@ -10,11 +10,8 @@ export interface CacheOpen {
   mode: CacheMode;
 }
 
-/**
- * Content-addressed Bun cache. Fork (restore-only) clients may read a
- * completed digest and must never write. Trusted same-repo jobs populate
- * via atomic rename after a successful install.
- */
+/** Content-addressed Bun cache: fork (restore-only) clients may read a completed digest and never
+ * write; trusted same-repo jobs populate it by atomic rename after a successful install. */
 export class ForkSafeCache {
   constructor(private readonly opts: CacheOpen) {
     if (!/^[0-9a-f]{8,128}$/.test(opts.lockfileDigest)) {

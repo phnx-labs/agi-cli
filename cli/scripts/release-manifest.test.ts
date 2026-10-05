@@ -1,13 +1,6 @@
-/**
- * Helper release-manifest reuse, exercised against REAL helper inputs (no mocks).
- * A missing helper or an input-digest change must fail — there is no rebuild.
- *
- * One helper, and it has no source here: menubar lives in phnx-labs/agi-menu
- * (PHNX-4036), so its input is the floor pin in cli/src/lib/helper-versions.ts —
- * the one file that decides which published MenubarHelper.app.zip the CLI
- * installs. The computer helpers left with the standalone `computer` engine
- * (PHNX-4075) and must now be REFUSED as unknown, which is pinned below.
- */
+/** Helper release-manifest reuse, tested against real helper inputs. A missing helper or an
+ * input-digest change must fail; there is no rebuild. Only menubar (PHNX-4036) exists; computer
+ * helpers must be refused as unknown (PHNX-4075). */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -266,10 +259,9 @@ describeUnix('release-manifest.sh', () => {
     expect(fs.readFileSync(copied.out.trim())).toEqual(fs.readFileSync(asset));
   });
 
-  // PHNX-4075: the computer helpers left this repo with the standalone engine,
-  // which resolves and verifies its own releases. Recording one here would put
-  // an extracted helper back on THIS CLI's release path, so the script must
-  // refuse the name outright rather than silently digesting a missing tree.
+  // PHNX-4075: the computer helpers left with the standalone engine, so recording one would put an
+  // extracted helper back on this CLI's release path. The script must refuse the name outright
+  // rather than digest a missing tree.
   it('refuses an extracted helper rather than recording it on this CLI\'s release', () => {
     for (const helper of ['computer-mac', 'computer-win']) {
       const r = sh(['input-digest', '--repo-root', REPO, '--helper', helper]);

@@ -1,21 +1,6 @@
-/**
- * Direct coverage for the R2 backup COMMAND layer (RUSH-2437) — the functions
- * `agents sessions export --to-r2` / `import --from-r2` actually call, not just
- * the low-level R2Client (that is `lib/session/sync/r2.test.ts`). Two tiers:
- *
- *  - Pure, always-run: the fail-loud gates (`r2ExportGateError`,
- *    `r2ImportGateError`), the object-key selection (`r2KeyForRecord`), and the
- *    backup-key resolution (`resolveR2BackupKey`) against the real standalone
- *    `secrets` engine (PHNX-3989) in a fresh, isolated store — no mocking of
- *    the resolver.
- *  - MinIO-gated round-trip: `uploadToR2` → `pullFromR2` against a real
- *    S3-compatible endpoint, so the ACTUAL command functions (not a hand-copied
- *    wire format) are exercised end-to-end. SKIPS when AGENTS_TEST_R2_ENDPOINT is
- *    unset — see r2.test.ts for the MinIO one-liner.
- *
- * No HTTP mocking anywhere (repo "real services only" rule). Precedent for
- * importing + unit-testing a command helper directly: sessions-export-resolve.test.ts.
- */
+/** Direct coverage for the R2 backup command layer (RUSH-2437): what `sessions export --to-r2` /
+ * `import --from-r2` call. Always-run tier: fail-loud checks and key derivation against the real
+ * `secrets` engine. MinIO tier: real S3 round-trip, skipped without AGENTS_TEST_R2_ENDPOINT. */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -242,11 +227,9 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
   });
 });
 
-// ── MANAGED round-trip through the real Worker (workerd/miniflare) ─────────────
-// The managed path uploads through SessionsHttpClient to the real managed Worker
-// source in workerd, whose default verifier calls a real local Phoenix HTTP
-// service. It proves every uploaded record body is an ENCRYPTED envelope, restore
-// round-trips, and a fresh box recovers the escrowed DEK without r2.backups.
+// MANAGED round-trip through the real Worker (workerd/miniflare): SessionsHttpClient uploads to
+// the managed Worker, whose verifier calls a real local Phoenix service. Proves uploaded bodies
+// are encrypted envelopes, restore round-trips, and a fresh box recovers the escrowed DEK.
 
 describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
   let mf: Miniflare | undefined;

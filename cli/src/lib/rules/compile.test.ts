@@ -256,11 +256,9 @@ describe('compileRulesForProject', () => {
 
 describe('compileRulesForProject — reserved roots (RUSH-2725)', () => {
   it('refuses to compile $HOME as a project when ~/.agents is the user layer', async () => {
-    // The user layer's own home satisfies the `<cwd>/.agents/rules` existence
-    // test, so without the guard $HOME compiled as a "project" — writing
-    // ~/AGENTS.md and injecting the whole ruleset twice per session. state.ts
-    // captures HOME at import, so re-import the module graph with HOME pointed
-    // at the fixture.
+    // The user layer's own home satisfies the `<cwd>/.agents/rules` test, so without the guard
+    // $HOME compiled as a "project", writing ~/AGENTS.md and injecting rules twice. state.ts
+    // captures HOME at import, so re-import with HOME at the fixture.
     const prevHome = process.env.HOME;
     process.env.HOME = tmpDir;
     vi.resetModules();

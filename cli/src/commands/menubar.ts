@@ -1,11 +1,6 @@
-/**
- * `agents menubar` — manage the macOS menu-bar helper.
- *
- * The helper is a no-Dock status-bar app that surfaces running sessions, agents
- * needing input, and routines, and launches new sessions. It auto-installs on
- * upgrade (runMigration -> installMenubarLaunchAgentOnUpgrade) for every macOS
- * user; these commands are the manual override.
- */
+/** `agents menubar`: manual override for the macOS menu-bar helper (a no-Dock app showing sessions,
+ * agents needing input and routines), which auto-installs on upgrade via
+ * installMenubarLaunchAgentOnUpgrade. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -57,21 +52,18 @@ function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
     console.log(chalk.gray('  Fix it with `agents menubar setup`.'));
   }
   if (s.foreignInstances.length > 0) {
-    // RegisterEventHotKey is first-come, so the helper that registered the
-    // chord first owns Cmd-Shift-V/O. A process list cannot say which that
-    // was — only that a rival exists — so report the conflict, not a winner.
-    // The loser has no other symptom: its chords simply never fire.
+    // RegisterEventHotKey is first-come, so whichever helper registered first owns Cmd-Shift-V/O.
+    // A process list can't say which, so report the conflict, not a winner; the loser's only
+    // symptom is chords that never fire.
     const n = s.foreignInstances.length;
     console.log(chalk.yellow(`\n  ${n} other AGI Menu process${n === 1 ? '' : 'es'} running — ${n === 1 ? 'it' : 'they'} may hold Cmd-Shift-V/O instead of the installed one:`));
     for (const p of s.foreignInstances) console.log(chalk.gray(`    ${p.pid}  ${p.executable}`));
     console.log(chalk.gray('  End them with `agents menubar setup`.'));
   }
   if (s.stale) {
-    // Not "runs on next startup": the self-heal only reinstalls from the install
-    // that owns the helper, or from another one once the takeover cooldown has
-    // passed (mayInstallMenubarHelper) — so on a box with several agents-cli
-    // copies this can persist for a while. `setup` bypasses the gate and is the
-    // immediate fix.
+    // Not 'runs on next startup': self-heal reinstalls only from the owning install, or from
+    // another after the takeover cooldown (mayInstallMenubarHelper), so with several agents-cli
+    // copies this can persist. `setup` bypasses that check and is the immediate fix.
     console.log(chalk.yellow('\n  Installed AGI Menu is stale — `agents menubar setup` updates it now.'));
   } else if (!s.serviceInstalled && !s.disabledByUser) {
     console.log(chalk.gray('\n  Set it up with `agents menubar setup`.'));

@@ -1,16 +1,6 @@
-/**
- * Resource selection patterns for agents.yaml versions: entries.
- *
- * Pattern syntax: [!]source:name
- *   "system:*"     — all resources from ~/.agents/.system/
- *   "user:*"       — all resources from ~/.agents/
- *   "rush:*"       — all resources from ~/.agents-rush/  (extra repo alias)
- *   "project:*"    — all resources from .agents/ in the project root
- *   "user:foo"     — specifically the resource named "foo" from ~/.agents/
- *   "!user:temp"   — exclude "temp" from the user repo
- *
- * Evaluation rule: union all inclusions, then subtract all exclusions.
- */
+/** Resource selection patterns for agents.yaml `versions:` entries: `[!]source:name`, where source
+ * is system, user, project or an extra-repo alias (`rush:*`) and name is `*` or a resource.
+ * Evaluation: union all inclusions, then subtract all exclusions (e.g. `!user:temp`). */
 
 interface ParsedPattern {
   negate: boolean;
@@ -33,18 +23,9 @@ export function isLegacyName(p: string): boolean {
   return !p.startsWith('!') && !p.includes(':');
 }
 
-/**
- * Expand a list of patterns against an available name→source map.
- * Returns the union of matching names with exclusions subtracted.
- *
- * Supports comma-grouped names to avoid repeating the source prefix:
- *   "system:brain-scan,mq"  →  includes brain-scan and mq from system
- *   "!user:temp,draft"      →  excludes temp and draft from user
- *
- * Note: in YAML flow sequences ([...]) a comma inside a pattern requires
- * quoting ("system:brain-scan,mq"). Block-style items and yaml.stringify
- * output handle this automatically.
- */
+/** Expand patterns against a name->source map: union of matches minus exclusions. Comma-grouped
+ * names avoid repeating the prefix (`system:brain-scan,mq`, `!user:temp,draft`). In YAML flow
+ * sequences a pattern containing a comma needs quoting; block items and yaml.stringify handle it. */
 export function expandPatterns(
   patterns: string[],
   available: Map<string, string>,
@@ -75,12 +56,9 @@ export function expandPatterns(
   return [...included].filter(n => !excluded.has(n));
 }
 
-/**
- * Build the default pattern list for a resource type.
- * Order: system → user → alias1 → alias2 → ... → project (base-to-override).
- * @param extraAliases  Alias names of enabled extra repos, in insertion order.
- * @param includeProject  Whether to append "project:*". False for hooks (security).
- */
+/** Build the default pattern list for a resource type, ordered system, user, extra aliases, project
+ * (base to override). `extraAliases` are enabled extra repos in insertion order; `includeProject`
+ * is false for hooks (security). */
 export function defaultPatterns(extraAliases: string[] = [], includeProject = true): string[] {
   const patterns: string[] = ['system:*', 'user:*'];
   for (const alias of extraAliases) {

@@ -1,13 +1,6 @@
-/**
- * Cross-platform `tail -f`.
- *
- * Replaces spawning the POSIX `tail` binary (absent on Windows) with a poll-based
- * follower that behaves identically on every platform and needs no external
- * dependency. Reads bytes appended since the last position every `intervalMs`;
- * resets to 0 if the file shrinks (truncation / log rotation). The active timer
- * keeps the event loop alive, so callers just register a SIGINT handler that
- * calls the returned stop().
- */
+/** Cross-platform `tail -f`: a poll-based follower replacing the POSIX `tail` binary (absent on
+ * Windows). Reads bytes appended every `intervalMs` and resets to 0 if the file shrinks
+ * (rotation). Callers register SIGINT and call the returned stop(). */
 import * as fs from 'fs';
 
 export interface FollowOptions {

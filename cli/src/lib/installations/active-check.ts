@@ -1,22 +1,6 @@
-/**
- * Real-process-state "is this installation busy right now?" check (PHNX-3940).
- *
- * A leaf module deliberately kept free of `update.js`/`update-runtime.js`
- * imports so both can depend on it without an import cycle: `update.ts` needs
- * it for the pre-commit re-check (narrowing the launch/update race), and
- * `update-runtime.ts` (which itself calls into `update.ts`) needs it for the
- * plan-time deferral decision.
- *
- * Two independent signals, either one is enough to defer:
- *   - A live OS process whose command line names this installation's own
- *     version-dir path — a real process-table scan, not this box's session
- *     registry, so a harness launched by a bare generated shim with no
- *     session bookkeeping still defers correctly.
- *   - A live launch lease (`shims.ts`) — catches a launch that started after
- *     the process-table scan ran but hasn't hit the process table yet, e.g.
- *     mid-staging of a long npm install. See `shims.ts`'s docblock for what
- *     this does and does not close (it narrows the race, not eliminates it).
- */
+/** Real-process-state "is this installation busy?" check (PHNX-3940), a leaf free of `update.js`
+ * imports to avoid a cycle. Either signal defers: a live OS process naming its version dir, or
+ * a live launch lease (`shims.ts`), which narrows the launch race. */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -26,11 +10,8 @@ import type { Installation } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Raw process-table snapshot, one command line per entry. Injectable so tests
- * can drive real string matching without shelling out or requiring a live
- * agent process on the test box.
- */
+/** Raw process-table snapshot, one command line per entry; injectable so tests can drive real
+ * string matching without shelling out or a live agent process. */
 export interface ProcessSnapshot {
   listCommandLines(): Promise<string[]>;
   /** Optional richer listing (pid, elapsed, tty) for naming a blocking process. */
@@ -91,28 +72,17 @@ export const realProcessSnapshot: ProcessSnapshot = {
     : listProcessRowsPosix()),
 };
 
-/**
- * Does any live process reference this installation's own directory? Matches
- * on the absolute version-dir path rather than the bare CLI command name, so
- * it distinguishes between installations of the same agent (two Claude
- * installs are two different directories) and catches every way the binary
- * ends up running under that path: an `agents run` session, a bare generated
- * PATH/`.cmd` shim exec'd directly with no session bookkeeping at all, or a
- * routine/teammate process — all of them carry the resolved absolute binary
- * path in their command line, since none of the launch surfaces exec a bare
- * relative name.
- */
+/** Does any live process reference this installation's own directory? Matches the absolute
+ * version-dir path, not the bare command name, so two installs of one agent differ and every
+ * launch surface counts (`agents run`, bare shim, routine/teammate). */
 export function installationLooksActive(installation: Pick<Installation, 'agent' | 'label'>, commandLines: string[]): boolean {
   const versionDir = getVersionDir(installation.agent, installation.label);
   return commandLines.some((line) => line.includes(versionDir));
 }
 
-/**
- * Whether this installation appears to be busy right now: a live launch
- * lease, or a live process naming its directory per a fresh OS process-table
- * scan. On a scan failure, defers (returns true) rather than risking an
- * update to a harness this check simply failed to observe.
- */
+/** Whether this installation appears busy: a live launch lease, or a live process naming its
+ * directory per a fresh process-table scan. On scan failure it defers (returns true) rather
+ * than risk updating a harness it failed to observe. */
 export async function isInstallationLikelyActive(
   installation: Pick<Installation, 'agent' | 'label'>,
   snapshot: ProcessSnapshot = realProcessSnapshot,
@@ -145,13 +115,9 @@ function shortenArgs(args: string, versionDir: string): string {
   return trimmed.length > 110 ? `${trimmed.slice(0, 107)}...` : trimmed;
 }
 
-/**
- * Same verdict as {@link isInstallationLikelyActive}, plus WHAT is holding the
- * installation, so a refused update can name the session to finish instead of
- * "in use; retry later" (PHNX-4116 follow-up: an operator on yosemite-s0 had a
- * one-hour-old resumed session on another tty and no way to see it from the
- * refusal).
- */
+/** Same verdict as isInstallationLikelyActive, plus what holds the installation, so a refused
+ * update can name the session to finish (PHNX-4116 follow-up: an operator had a one-hour-old
+ * resumed session on another tty and no way to see it). */
 export async function describeInstallationActivity(
   installation: Pick<Installation, 'agent' | 'label'>,
   snapshot: ProcessSnapshot = realProcessSnapshot,

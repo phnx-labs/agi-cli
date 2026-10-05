@@ -1,39 +1,6 @@
-/**
- * Launch-time project compile. Invoked by the agent shim's hot path (via
- * `agents sync --launch`) between version resolve and binary exec.
- *
- * Three responsibilities, all skip-fast when there's nothing to do:
- *
- * 1. Compile project rules from `<cwd>/.agents/rules/` into `<cwd>/AGENTS.md`
- *    (+ per-agent symlinks). Delegates to compileRulesForProject, which is
- *    the same helper management-side `agents sync` uses.
- *
- * 2. Copy project resources from `<cwd>/.agents/{commands,skills,subagents,workflows}`
- *    into the agent's workspace-local discovery dir (`<cwd>/.claude/`,
- *    `<cwd>/.codex/`, etc.) with an ownership manifest at
- *    `<cwd>/.{agent}/.agents-managed.json`. The manifest is the only clobber
- *    authority: paths it lists are removed and refreshed, pre-existing paths it
- *    does not list are skipped as user-owned.
- *
- * 3. Synthesize four scope-grouped plugin marketplaces under the version's
- *    `<versionHome>/.{agent}/plugins/marketplaces/` (for plugin-capable agents):
- *      - agents-cli         ← ~/.agents/plugins/*           (user scope, legacy name)
- *      - agents-system      ← ~/.agents/.system/plugins/*
- *      - extras-<alias>     ← ~/.agents-<alias>/plugins/*   (per enabled extra)
- *      - agents-project     ← <cwd>/.agents/plugins/*
- *    Each plugin is copied in (skip-fast via mtime cache), the marketplace
- *    catalog is rewritten only when contents change, and the marketplace is
- *    registered in known_marketplaces.json. Upstream marketplaces like
- *    "claude-plugins-official" are left untouched. Project- and extras-
- *    scope plugins do NOT auto-enable exec surfaces (.mcp.json, hooks, bin/,
- *    scripts/) — user must explicitly `agents plugins enable` them.
- *
- * Heavy work (version-home reconciliation, hook registration, MCP merging)
- * stays in `agents sync` without --launch and is NOT touched here. The
- * launch path is filesystem-only and skip-fast: sub-50ms when no source
- * has changed, scales linearly only with newly-modified plugins on the
- * change path.
- */
+/** Launch-time project compile run by the shim via `agents sync --launch`: compiles project rules
+ * into AGENTS.md, copies project resources under an ownership manifest (`.agents-managed.json`),
+ * and synthesizes plugin marketplaces. Project/extras plugins never auto-enable exec surfaces. */
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -86,15 +53,9 @@ interface LaunchSyncResult {
   marketplaces: Record<string, string[]>;
 }
 
-/**
- * Run the launch-time project compile. Safe to call on every agent launch:
- * each step is idempotent and skips when its inputs are missing.
- *
- * After a successful run, touches the shim-side skip-fast sentinel at
- * `~/.agents/.cache/launch-sync/<agent>@<version>@<projectslug>` so the next
- * shim invocation can skip the node spawn entirely when no source dir is
- * newer than the sentinel (shim schema v17+).
- */
+/** Run the launch-time compile; safe every launch (idempotent). On success touches the shim's
+ * skip-fast sentinel in `~/.agents/.cache/launch-sync/` so the shim can skip the node spawn when
+ * nothing changed. */
 export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
   const result: LaunchSyncResult = {
     rulesCompiled: false,
@@ -129,17 +90,9 @@ export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
   return result;
 }
 
-/**
- * Path of the shim's skip-fast sentinel for this (agent, version, cwd) tuple.
- * Must match the SHIM-SIDE format in src/lib/installations/shims.ts (PROJECT_SLUG derivation),
- * which is the canonical `toPortableKey` mapping: drop the Windows drive colon
- * and fold `\`, `/`, and ` ` → `_`. On POSIX this is byte-identical to the old
- * `/` and ` ` → `_` slug; on Windows it yields a legal filename (no `C:\`).
- *
- * Cache leak note: this dir accumulates one zero-byte file per
- * (agent, version, project) tuple ever launched. Disk impact is negligible
- * (inodes only). A periodic GC belongs in `agents prune` — follow-up.
- */
+/** Path of the shim's skip-fast sentinel for (agent, version, cwd); must match the shim's
+ * PROJECT_SLUG (`toPortableKey`: drop the drive colon, fold `\`, `/`, space to `_`). One zero-byte
+ * file per tuple accumulates; GC belongs in `agents prune`. */
 function launchSentinelPath(agent: AgentId, version: string, cwd: string): string {
   const slug = toPortableKey(cwd);
   // Prefer $HOME (respects test overrides + matches bash's $HOME expansion in
@@ -166,12 +119,9 @@ interface PluginScope {
   spec: MarketplaceSpec;
   marketplaceName: string;
   pluginsDir: string;
-  /**
-   * When false, plugins with exec surfaces (.mcp.json, hooks, bin/, scripts/,
-   * non-trivial settings.json) are copied but NOT auto-enabled. User must
-   * explicitly `agents plugins enable` them. Protects against hostile
-   * `git clone` registering an attacker MCP server via project plugins.
-   */
+  /** When false, plugins with exec surfaces (.mcp.json, hooks, bin/, scripts/, non-trivial
+   * settings.json) are copied but not auto-enabled; the user must run `agents plugins enable`.
+   * Protects against a hostile `git clone` registering an attacker MCP server via project plugins. */
   autoEnableExecSurfaces: boolean;
   /** Precedence rank used to resolve cross-scope plugin name collisions. Higher wins. */
   precedence: number;
@@ -325,12 +275,8 @@ function pruneLosingScopeEnables(
   }
 }
 
-/**
- * Hash the plugin set so we can skip-fast when nothing changed since the
- * last launch. Includes the source path (catches moves), the .claude-plugin/
- * plugin.json content (catches metadata edits), and the file-mtime+size
- * fingerprint of every file in the plugin (catches code edits).
- */
+/** Hash the plugin set to skip fast when nothing changed: source path (moves), plugin.json content
+ * (metadata edits), and per-file mtime+size (code edits). */
 function computeScopeHash(plugins: DiscoveredPlugin[]): string {
   const hash = crypto.createHash('sha256');
   for (const plugin of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {

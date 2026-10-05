@@ -1,16 +1,6 @@
-/**
- * Detached-session store — the record `agents sessions detach` writes and both
- * `agents sessions resume` and the active-session scan read to know an agent is
- * "backgrounded": running headless with no terminal, continuing its task
- * unattended.
- *
- * One file per detached session under `~/.agents/.system/detached/<id>.json`.
- * Presence is DERIVED, never asserted: a record only means "this session was
- * detached to a headless continuation"; whether it is still `background`
- * (that continuation is alive) or `parked` (it has exited) is decided live from
- * the recorded pid + its start-time fingerprint. That keeps the store honest
- * even across a crash that never ran `attach`.
- */
+/** Detached-session store: the record `agents sessions detach` writes and `sessions resume` reads,
+ * one file per session at `~/.agents/.system/detached/<id>.json`. `background` vs `parked` is
+ * derived live from the recorded pid and start-time fingerprint, never asserted. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { getSystemAgentsDir } from '../state.js';
@@ -25,11 +15,9 @@ interface DetachRecord {
   cwd?: string;
   /** pid of the detached headless continuation `agents sessions detach` spawned. */
   headlessPid: number;
-  /**
-   * Start-time fingerprint of {@link headlessPid} at spawn, so a liveness check
-   * survives PID reuse: the pid is only "our" continuation if it still occupies
-   * the process we launched. Null when the platform capture failed.
-   */
+  /** Start-time fingerprint of {@link headlessPid} at spawn, so liveness survives PID reuse: the
+   * pid is ours only if it still occupies the process we launched. Null when platform capture
+   * failed. */
   headlessStartTime: string | null;
   detachedAtMs: number;
 }
@@ -95,12 +83,9 @@ export function isHeadlessAlive(rec: DetachRecord): boolean {
   return true;
 }
 
-/**
- * Stop the detached continuation before a local foreground resume starts.
- * The start-time check in {@link isHeadlessAlive} prevents signalling a reused
- * PID; a continuation that ignores SIGTERM fails closed instead of running
- * alongside a second process against the same transcript.
- */
+/** Stop the detached continuation before a local foreground resume. The start-time check in {@link
+ * isHeadlessAlive} avoids signalling a reused PID; a continuation that ignores SIGTERM fails
+ * closed instead of running beside a second process on the same transcript. */
 export async function takeOverDetachedSession(sessionId: string): Promise<boolean> {
   const rec = readDetachRecord(sessionId);
   if (!rec) return false;
@@ -125,13 +110,8 @@ export async function takeOverDetachedSession(sessionId: string): Promise<boolea
   return true;
 }
 
-/**
- * Presence for a session id from the detach store alone:
- *   - no record            -> undefined (caller decides: `attached` for a live
- *                             interactive row, nothing for cloud/team rows)
- *   - record + pid alive    -> `background` (headless continuation running)
- *   - record + pid exited   -> `parked` (the run finished; transcript is durable)
- */
+/** Presence from the detach store alone: no record -> undefined (caller decides); record + pid
+ * alive -> `background`; record + pid exited -> `parked` (transcript durable). */
 export function presenceFromStore(sessionId: string): Presence | undefined {
   const rec = readDetachRecord(sessionId);
   if (!rec) return undefined;

@@ -1,12 +1,6 @@
-/**
- * The launch/update mutual exclusion (PHNX-3940): a launch and an automatic
- * update of the SAME installation must never both be mid-flight against its
- * live files at once. Real filesystem (HOME redirected to a temp dir), real
- * `proper-lockfile` locking against real files, real launch-lease bookkeeping
- * — no mocked vendor network. The fake `UpdateStrategy` is the same seam
- * `update.ts`'s own docblock names for exercising the transaction without a
- * real npm fetch.
- */
+/** The launch/update mutual exclusion (PHNX-3940): a launch and an automatic update of the same
+ * installation must never both be mid-flight. Real filesystem, real `proper-lockfile` locks and
+ * leases; only the vendor fetch is faked via the `UpdateStrategy` seam. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

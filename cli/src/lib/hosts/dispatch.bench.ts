@@ -1,46 +1,14 @@
-/**
- * Benchmark for the `--device`/`--device` dispatch hot path: host resolution
- * (registry.ts:196 matchHost, registry.ts:296 resolveHost) and the pure SSH
- * command-building functions (dispatch.ts, remote-cmd.ts) every offload
- * caller (`run --device`, `agents ssh`, `agents teams start --device`) runs
- * before the actual SSH round-trip.
- *
- * No mocking. `tests/setup.ts` (a vitest setupFile, so it also applies to
- * `vitest bench`) redirects AGENTS_DEVICES_DIR to a fork-private temp dir for
- * hermeticity (state.ts:613 getDevicesDir reads it at CALL time, never at
- * module load — see the comment there), so a bare `loadDevices()` call in
- * this fork sees an EMPTY registry, not this machine's real fleet. Rather
- * than fight that isolation (or depend on whichever devices happen to be
- * enrolled on the machine running the bench, which would make the numbers
- * non-reproducible across boxes and leak real hostnames/IPs into a committed
- * file), this file seeds ITS OWN fork-private registry with data shaped
- * exactly like a real fleet: 14 devices — matching the actual device count
- * measured directly against this machine's live
- * ~/.agents/.history/devices/registry.json (8765 bytes, 14 entries) on
- * 2026-08-06 — spanning macos/linux/windows platforms, tailscale addresses,
- * and key auth, the same shape `devices/registry.ts:94` DeviceProfile
- * defines and `agents devices sync` writes for real.
- *
- * agents.yaml (state.ts:1124 readMeta) and ~/.ssh/config (ssh-config.ts:67
- * listSshConfigHosts) are NOT redirected by setup.ts, so those two read this
- * machine's REAL files — same "real ~/.agents layout" philosophy as
- * exec.bench.ts. This box's agents.yaml has no top-level `hosts:` overlay
- * (verified directly), so every overlay lookup below is a real miss.
- *
- * Not wired into `vitest run` (vitest.config.ts:18 include is *.test.ts
- * only) — run by hand: `npx vitest bench --run dispatch.bench.ts`.
- */
+/** Benchmark for the `--device` dispatch hot path: host resolution and the pure SSH command
+ * builders. It seeds its own fork-private 14-device registry because tests/setup.ts empties the
+ * real one. Not in `vitest run`; run by hand with `npx vitest bench --run dispatch.bench.ts`. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, bench } from 'vitest';
 import type { DispatchOptions } from './dispatch.js';
 
-// Read at CALL time by state.ts:613 getDevicesDir(), so reassigning it here
-// (this file's imports run AFTER tests/setup.ts's own assignment) safely
-// repoints every loadDevices()/loadDevicesSync() call below at a registry
-// this file controls, with no lock/network contention and no risk of ever
-// touching a real fleet file.
+// state.ts getDevicesDir() reads this at call time, so reassigning it repoints loadDevices() at a
+// registry this file controls.
 const BENCH_DEVICES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosts-bench-devices-'));
 process.env.AGENTS_DEVICES_DIR = BENCH_DEVICES_DIR;
 

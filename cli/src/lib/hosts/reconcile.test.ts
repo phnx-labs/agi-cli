@@ -5,11 +5,9 @@ import { tmpdir } from 'os';
 import * as state from '../state.js';
 import { sshReachable } from '../ssh-exec.js';
 
-// Redirect the cache dir to a temp tree (real fs, no service mocking) so
-// reconcile can read/write real task sidecars the way a dispatch would.
-// Initialized eagerly (not just in beforeEach) so the module-load reachability
-// probe below sees a valid dir for ssh's control socket; beforeEach reassigns it
-// per test.
+// Redirect the cache dir to a temp tree (real fs) so reconcile reads and writes real task sidecars;
+// initialized eagerly so the module-load reachability probe sees a valid dir for ssh's control
+// socket.
 let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-reconcile-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
@@ -21,10 +19,8 @@ it('uses a valid reachability command for each remote shell', () => {
 });
 import { saveTask, loadTask, terminalPatch, type HostTask } from './tasks.js';
 
-// The heal path needs a real ssh round-trip (no mocking, per repo policy). Gate
-// it on localhost being ssh-reachable so it exercises the true path where a host
-// is available (dev machines, self-hosted runners) and skips cleanly where it
-// isn't (hosted CI), rather than flaking.
+// The heal path needs a real ssh round-trip (no mocking); gate on localhost being ssh-reachable so
+// it runs on dev machines and skips on hosted CI.
 const LOCALHOST_SSH = sshReachable('localhost', 5000);
 
 function makeTask(overrides: Partial<HostTask> = {}): HostTask {

@@ -7,25 +7,14 @@ import * as yaml from 'yaml';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 
-/**
- * Shared fixture for the routines.*.test.ts suite slices (RUSH-2819).
- *
- * routines.test.ts was one 2,249-line file measured at ~194s of test time —
- * one of the slowest files in CI, serializing an entire fork while every
- * other selected file finished. The suite is split into topical slices so
- * vitest's per-file fork parallelism can spread the subprocess-heavy tests
- * across workers; the helpers each slice shares live here.
- *
- * Every test spawns the real CLI (`node --import tsx src/index.ts routines ...`)
- * against an isolated mkdtemp HOME — no live ~/.agents state, no mocks, no
- * imported writeJob/readJob. Modeled on `routines-webhook.test.ts`.
- */
+/** Shared fixture for the routines.*.test.ts slices (RUSH-2819): routines.test.ts was one
+ * 2,249-line file (~194s) serializing a fork, so it is split into slices. Every test spawns the
+ * real CLI against an isolated mkdtemp HOME, no mocks. */
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
-// `--import` takes a module specifier, not a path: a bare Windows path like
-// `D:\a\...\tsx\dist\loader.mjs` is parsed as a URL with protocol 'd:' and the
-// child dies with ERR_UNSUPPORTED_ESM_URL_SCHEME before running the CLI. Same
+// `--import` takes a module specifier, not a path: a bare Windows path like `D:\a\...\loader.mjs`
+// parses as a URL with protocol 'd:' and the child dies with ERR_UNSUPPORTED_ESM_URL_SCHEME. Same
 // pattern as sessions.test.ts:21.
 export const TSX_IMPORT = pathToFileURL(require.resolve('tsx')).href;
 export const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -138,22 +127,9 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-/**
- * Per-file isolated-daemon harness (RUSH-2367, RUSH-2819). Each slice that
- * spawns a real `__daemon-run` process against an isolated HOME calls this
- * once at module scope and registers its own leak detector — the tracked pid
- * set MUST be private to the file that spawned it, since vitest's per-file
- * fork isolation means the leak sweep only ever needs to answer for what THIS
- * file started.
- *
- * `fileSlug` MUST be unique per test file: it names the mkdtemp prefix
- * `makeDaemonHome` uses, and the CI leak sweep matches ONLY that prefix.
- * The suite slices run in parallel forks, so a sweep over the shared
- * `agents-routines-test-` prefix would catch a sibling file's still-running
- * daemon and kill it mid-test — exactly what failed the first CI run of the
- * RUSH-2819 split (run 32552954164: add's sweep killed a live daemon whose
- * HOME belonged to a concurrently running slice).
- */
+/** Per-file isolated-daemon harness (RUSH-2367, RUSH-2819): each slice spawning a real daemon
+ * registers its own leak detector. `fileSlug` must be unique per file: it names the mkdtemp prefix
+ * the CI leak sweep matches, so a shared one would kill a sibling's daemon. */
 export function createDaemonHarness(fileSlug: string): {
   startIsolatedDaemon: (home: string) => { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> };
   stopIsolatedDaemon: (child: ReturnType<typeof spawn>) => Promise<void>;
@@ -161,15 +137,9 @@ export function createDaemonHarness(fileSlug: string): {
   makeDaemonHome: (opts?: Omit<Parameters<typeof makeHome>[0], 'tmpPrefix'>) => string;
 } {
   const homePrefix = path.join(os.tmpdir(), `agents-routines-${fileSlug}-`);
-  /**
-   * Every daemon pid spawned via `startIsolatedDaemon` in this file, live for as
-   * long as `stopIsolatedDaemon` has not yet reaped it. Backstops the per-test
-   * try/finally: this file's `afterAll` (registered via `registerLeakDetector`)
-   * asserts the set is empty and force-kills + fails the suite on anything left
-   * in it — a leaked real daemon process is exactly the RUSH-2367 bug (three
-   * left running for up to 3.5 days on a fleet box, invisible to `agents daemon`
-   * because each served its own fixture HOME/registry).
-   */
+  /** Every daemon pid spawned via `startIsolatedDaemon` in this file and not yet reaped by
+   * `stopIsolatedDaemon`. Backstops the per-test try/finally: `afterAll` asserts it is empty and
+   * force-kills leftovers (RUSH-2367: three daemons ran up to 3.5 days). */
   const trackedDaemonPids = new Set<number>();
 
   /** Start the real scheduler foreground process against an isolated HOME. */
@@ -180,16 +150,14 @@ export function createDaemonHarness(fileSlug: string): {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
-        // Without this override the daemon inherits the parent vitest process's real
-        // AGENTS_HISTORY_DIR (pointing at ~/.agents/.history). The daemon's SIGTERM
-        // sweep then reads live session records from the production history directory
-        // and kills real tmux-wrapped processes every five-minute tick (RUSH-2545).
+        // Without this override the daemon inherits the vitest parent's real AGENTS_HISTORY_DIR
+        // (`~/.agents/.history`), and its SIGTERM sweep reads production session records and kills
+        // real tmux-wrapped processes every five minutes (RUSH-2545).
         AGENTS_HISTORY_DIR: path.join(home, '.agents', '.history'),
         AGENTS_SKIP_MIGRATION: '1',
-        // PHNX-2545 test-home tripwire: name the isolated home this daemon must
-        // resolve its state dir under. If the HOME override above ever failed to
-        // reach the child, runDaemon()'s assertTestDaemonHome() refuses to boot
-        // instead of ticking its scheduler against the operator's real host.
+        // PHNX-2545 test-home tripwire: name the isolated home this daemon must resolve its state
+        // dir under, so if the HOME override fails to reach the child, runDaemon()'s
+        // assertTestDaemonHome() refuses to boot.
         AGENTS_DAEMON_TEST_HOME: home,
       },
       detached: true,
@@ -254,33 +222,9 @@ export function createDaemonHarness(fileSlug: string): {
     }
   }
 
-  /**
-   * Suite-level leak detector (RUSH-2367). Every per-test try/finally above
-   * already reaps its own daemon on success, failure, or a thrown assertion —
-   * but nothing in JS runs if the whole vitest worker is killed externally
-   * before reaching `finally`, which is what actually produced three real
-   * orphaned daemons found alive on a fleet box for up to 3.5 days: their
-   * fixture HOME dirs still existed (the `finally`'s `fs.rmSync` never ran
-   * either), so no amount of in-test cleanup logic would have caught it. This
-   * is the second line of defense, not a substitute for the self-terminate
-   * guard in the daemon itself (`runDaemon`'s state-dir check).
-   *
-   * Two checks, after every test in this file has run:
-   *  1. Always: nothing THIS run spawned via `startIsolatedDaemon` may still be
-   *     alive — `trackedDaemonPids` is only ever non-empty here if a bug (not
-   *     an external kill) let one slip past its own test's `finally`.
-   *  2. CI only: sweep for any OTHER live `__daemon-run` process whose HOME
-   *     sits under THIS FILE's unique `agents-routines-<fileSlug>-` prefix —
-   *     a leak from a previous interrupted run of this same file. Scoped to
-   *     the per-file prefix because sibling slices run in parallel forks and
-   *     legitimately have live daemons under their own prefixes. POSIX-only
-   *     (`/proc`); best-effort and skipped where `/proc` is unavailable
-   *     (macOS CI legs).
-   *
-   * Either check force-kills what it finds and fails the suite — a silent
-   * "still running, we'll get it next time" is exactly how the original three
-   * accumulated.
-   */
+  /** Suite-level leak detector (RUSH-2367), the second line of defense after the per-test
+   * try/finally. After all tests: nothing spawned here may be alive; on CI/POSIX, sweep `/proc`
+   * for `__daemon-run` with this file's prefix. Leftovers fail the suite. */
   function registerLeakDetector(): void {
     afterAll(() => {
       const leaks: string[] = [];

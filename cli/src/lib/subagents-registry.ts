@@ -1,34 +1,6 @@
-/**
- * Declarative subagent-target registry.
- *
- * Each subagents-capable agent gets ONE table entry (`SUBAGENT_TARGETS`)
- * describing how a central subagent (`~/.agents/subagents/<name>/`) is
- * materialized into that agent's home, how it is enumerated, and where it lives
- * on disk. Generic install / list / detect / orphan / remove logic iterates the
- * table instead of the near-identical `else if (agent === '...')` chains that
- * used to be copy-pasted across `subagents.ts`, the staleness writer, and the
- * staleness detector -- roughly O(agents x operations) arms.
- *
- * Adding a *standard* integration is now one line here (plus the `subagents`
- * capability flag in `agents.ts`, the version gate). Three layout builders cover
- * every current agent, so most entries are a single call:
- *
- *   - `flatFile`  one `<name><ext>` file, body from a `transform` fn.
- *                 (claude, grok, pi, droid, codex, opencode, copilot,
- *                  cursor, goose, kimi)
- *   - `dirFile`   a `<name>/` directory holding one generated `<file>`.
- *                 (antigravity: `<name>/agent.md`)
- *   - `dirCopy`   copy the whole source directory to `<name>/`, applying
- *                 renames, detected by a `marker` file. (openclaw)
- *
- * Every agent now uses a builder; there are no bespoke handlers left. Legacy
- * on-disk layouts are folded once by `lib/migrate.ts`, never by a target --
- * a target describes the CURRENT shape and nothing else.
- *
- * The per-agent `transform`/metadata parsers are the escape hatch: they live in
- * `subagents.ts` and are referenced by the table, so the generic engine has zero
- * per-agent branches. See `docs/orchestration.md`.
- */
+/** Declarative subagent-target registry: one `SUBAGENT_TARGETS` entry per capable agent, replacing
+ * per-agent `else if` chains. Builders: `flatFile`, `dirFile`, `dirCopy`; per-agent transforms
+ * live in `subagents.ts`. Legacy layouts are folded by `lib/migrate.ts`. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from 'smol-toml';
@@ -62,10 +34,8 @@ interface SubagentMeta {
   path: string;
 }
 
-/**
- * The complete on-disk contract for one agent's subagents. Every operation is
- * expressed here so the engine below never branches on the agent id.
- */
+/** The complete on-disk contract for one agent's subagents, so the engine never branches on
+ * agent id. */
 interface SubagentTarget {
   /** Absolute container dir under a home root (a version home or an agent home). */
   dir(home: string): string;
@@ -77,13 +47,8 @@ interface SubagentTarget {
   occupied(dir: string, name: string): OccupiedEntry[];
   /** Rich metadata for `name`; `null` skips it from the listing. */
   read(dir: string, name: string): SubagentMeta | null;
-  /**
-   * True when the installed subagent `sub` in `dir` byte-matches what `write`
-   * would materialize from `sub.path` NOW — the content-drift check `agents
-   * doctor` uses. Re-renders the CURRENT source through the same transform the
-   * writer uses (never a stored hash), so a prompt-body edit to the source
-   * surfaces as drift even though the filename is unchanged.
-   */
+  /** True when the installed subagent byte-matches what `write` would produce from `sub.path` NOW,
+   * the drift check `agents doctor` uses. It re-renders the current source, never a stored hash. */
   matches(dir: string, sub: { name: string; path: string }): boolean;
 }
 
@@ -134,12 +99,8 @@ function metaGooseYaml(filePath: string, name: string): SubagentFrontmatter | nu
   }
 }
 
-/**
- * Codex custom-agent TOML: name / description / model (optional).
- * Codex writes no YAML frontmatter — without this reader, `flatFile.read`
- * drops every installed `.toml` and `agents subagents list` reports codex
- * targets as `missing` even when the files are present and Codex loads them.
- */
+/** Codex custom-agent TOML: name / description / model (optional). Without this reader,
+ * `flatFile.read` drops every installed `.toml` and `agents subagents list` shows `missing`. */
 function metaToml(filePath: string, name: string): SubagentFrontmatter | null {
   try {
     const cfg = TOML.parse(fs.readFileSync(filePath, 'utf-8')) as {
@@ -158,11 +119,8 @@ function metaToml(filePath: string, name: string): SubagentFrontmatter | null {
 
 // ── shared fs primitive ──────────────────────────────────────────────────────
 
-/**
- * Copy every file in `src` into `dest` (created if missing), applying
- * `rename` (source filename -> target filename) on the way. Directories in
- * `src` are skipped -- subagents are flat file sets. Throws on fs error.
- */
+/** Copy every file in `src` into `dest` (created if missing), applying `rename`. Directories
+ * are skipped (subagents are flat file sets). Throws on fs error. */
 export function copyDirWithRename(
   src: string,
   dest: string,
@@ -339,11 +297,8 @@ function dirCopy(opts: {
 
 // ── the registry ─────────────────────────────────────────────────────────────
 
-/**
- * Single source of truth for how each subagents-capable agent stores subagents.
- * The keys MUST match `capableAgents('subagents')` (the `subagents` flag in
- * `agents.ts`): the capability flag is the version gate, this table is the shape.
- */
+/** Single source of truth for how each subagents-capable agent stores subagents. Keys MUST match
+ * `capableAgents('subagents')`: the capability flag is the version gate, this table the shape. */
 export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   // Tier 1 -- flat markdown, Claude-compatible flatten.
   claude: flatFile({ subdir: ['.claude', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
@@ -387,11 +342,8 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
     transform: transformSubagentForAntigravity,
   }),
   openclaw: dirCopy({ subdir: ['.openclaw'], marker: 'AGENTS.md', rename: { 'AGENT.md': 'AGENTS.md' } }),
-  // Kimi discovers Claude-shaped agent markdown from its brand home's `agents/`
-  // dir (`USER_BRAND_DIRS = ["agents"]`, kimi-code >= 0.29.0). Frontmatter
-  // name/description + body, kebab-case name -- the same shape as claude/grok.
-  // The pre-markdown files agents-cli used to write here are swept once by
-  // `migrateKimiSubagentsToMarkdown` (lib/migrate.ts), not by this target.
+  // Kimi discovers Claude-shaped agent markdown in its `agents/` dir (kimi-code >= 0.29.0).
+  // Pre-markdown files are swept once by `migrateKimiSubagentsToMarkdown`, not by this target.
   kimi: flatFile({ subdir: ['.kimi-code', 'agents'], ext: '.md', transform: transformSubagentForClaude, readMeta: metaFrontmatterFallback }),
 };
 
@@ -402,11 +354,8 @@ export function subagentTarget(agent: AgentId): SubagentTarget | undefined {
 
 // ── generic engine (zero per-agent branches) ─────────────────────────────────
 
-/**
- * Materialize central subagent `sub` into `home` for `agent`. Returns whether a
- * write happened (false when the agent has no registry entry). Throws only on
- * unexpected fs errors -- bulk callers wrap per-item.
- */
+/** Materialize central subagent `sub` into `home` for `agent`. Returns whether a write happened
+ * (false with no registry entry). Throws only on unexpected fs errors; bulk callers wrap it. */
 export function writeSubagentToHome(
   agent: AgentId,
   home: string,
@@ -425,12 +374,8 @@ export function listInstalledSubagentNames(agent: AgentId, home: string): string
   return target.names(target.dir(home));
 }
 
-/**
- * True when subagent `name` installed for `agent` under `home` byte-matches what
- * the writer would produce NOW from `sourceDir` — the content-drift predicate
- * `agents doctor` uses. Returns false when the agent has no registry entry
- * (nothing could have been written) so an unexpected home copy reads as drift.
- */
+/** True when subagent `name` under `home` byte-matches what the writer would produce NOW from
+ * `sourceDir`, the drift check `agents doctor` uses. False when the agent has no registry entry. */
 export function subagentContentMatches(
   agent: AgentId,
   home: string,
@@ -442,11 +387,8 @@ export function subagentContentMatches(
   return target.matches(target.dir(home), { name, path: sourceDir });
 }
 
-/**
- * Rich listing of subagents installed for `agent` under `home`, with parsed
- * metadata. Enumerates names, then reads each -- entries whose metadata is
- * unreadable (per the target's reader) are dropped.
- */
+/** Rich listing of subagents installed for `agent` under `home`, with parsed metadata.
+ * Entries with unreadable metadata are dropped. */
 export function listInstalledSubagentsRich(agent: AgentId, home: string): InstalledSubagent[] {
   const target = SUBAGENT_TARGETS[agent];
   if (!target) return [];
@@ -460,10 +402,8 @@ export function listInstalledSubagentsRich(agent: AgentId, home: string): Instal
   return out;
 }
 
-/**
- * Remove subagent `name` for `agent` from `home` (hard delete). No-op success
- * when the agent has no registry entry or nothing is installed.
- */
+/** Remove subagent `name` for `agent` from `home` (hard delete). No-op success when the agent
+ * has no registry entry or nothing is installed. */
 export function removeSubagentFromHome(
   agent: AgentId,
   home: string,
@@ -483,11 +423,8 @@ export function removeSubagentFromHome(
   }
 }
 
-/**
- * Soft-delete subagent `name` for `agent` from `home` into `trashDir`, stamping
- * each moved entry. Files land as `<basename>.<stamp>`, directories as
- * `<stamp>/`. No-op success when nothing is installed.
- */
+/** Soft-delete subagent `name` into `trashDir`, stamping each entry (`<basename>.<stamp>` for
+ * files, `<stamp>/` for directories). No-op success when nothing is installed. */
 export function trashSubagentFromHome(
   agent: AgentId,
   home: string,

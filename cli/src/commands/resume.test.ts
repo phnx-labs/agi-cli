@@ -63,10 +63,9 @@ describe('resumeLocalFallbackSource (prefer-device, fall back to local — PHNX-
     const peerOwned = session({ machine: 'yosemite-m3' });
     // Before: the session names a peer, so recovery would hop there.
     expect(sessionRecoveryPeer(peerOwned, (h) => h === 'zion')).toBe('yosemite-m3');
-    // After: the fallback source names THIS box, so `sessionRecoveryPeer` returns
-    // undefined and the delegated `agents run --resume` resolves recovery locally
-    // (→ a labelled /continue replay from the synced mirror) instead of bouncing
-    // back to the unreachable owner.
+    // After the fix the fallback source names this box, so `sessionRecoveryPeer` returns undefined
+    // and `agents run --resume` recovers locally (a labelled /continue replay from the synced
+    // mirror) instead of bouncing to the unreachable owner.
     const local = resumeLocalFallbackSource(peerOwned, 'zion');
     expect(local.machine).toBe('zion');
     expect(sessionRecoveryPeer(local, (h) => h === 'zion')).toBeUndefined();

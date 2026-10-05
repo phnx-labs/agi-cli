@@ -1,13 +1,6 @@
-/**
- * Tests for the content-aware plugin diff detail (`describePluginDrift` in
- * doctor-diff.ts) — what makes `agents doctor` report exactly how a version's
- * marketplace MIRROR of a plugin diverges from its central source, instead of a
- * useless presence-only "ok".
- *
- * The cases that matter: a stale mirror version, a Claude-invalid manifest, and
- * the plugin's bundled skills/commands that never reached the mirror (the
- * system-repo content the user cares about). A faithful mirror returns null.
- */
+/** Tests for `describePluginDrift`: how `agents doctor` reports a marketplace mirror diverging from
+ * its central source. Cases: stale mirror version, Claude-invalid manifest, bundled
+ * skills/commands missing; a faithful mirror returns null. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

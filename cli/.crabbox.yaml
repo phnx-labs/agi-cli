@@ -1,8 +1,6 @@
-# Crabbox config for agents-cli's remote test runs (scripts/sandbox.sh).
-# `profile` is a stable label: scripts/sandbox.sh acquires a box by this profile
-# (never by slug, which is ephemeral), so a reaped box is transparently replaced
-# by its successor. A dedicated profile keeps this repo's warm pool separate from
-# other repos' boxes instead of colliding on the `default` fallback.
+# Crabbox config for agents-cli's remote test runs (scripts/sandbox.sh). `profile` is a stable
+# label, since the script acquires a box by profile (never the ephemeral slug), so a reaped box is
+# replaced; a dedicated profile keeps this repo's warm pool apart from other repos.
 profile: agents-cli
 class: cpx62
 sync:

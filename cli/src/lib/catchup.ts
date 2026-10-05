@@ -1,39 +1,6 @@
-/**
- * Catch-up: run a routine whose scheduled fire this device missed.
- *
- * Fires are in-process croner timers, and croner only ever schedules forward
- * from "now". A daemon that is down, asleep, or wedged when a routine comes due
- * therefore loses that fire outright — `loadAll()` rebuilds every Cron looking
- * only at the future (scheduler.ts), so nothing replays it. Detection has always
- * existed (`detectOverdueJobs`), but it ran once at daemon startup and only
- * logged plus popped a notification; the routine still never ran.
- *
- * This module closes that loop. A missed fire is:
- *
- *   1. CLAIMED — `claimMissedFire` writes a real run with status `missed`,
- *      stamped at the time the fire was DUE, so `agents routines runs <name>`
- *      shows the gap instead of the listing showing a weeks-old `completed` as
- *      though it were current. The write is an atomic claim (see below), and
- *      only the claimant proceeds to step 2.
- *   2. RUN — unless the routine sets `catchup: false`, it is executed late via
- *      the same `executeJobDetached` path `agents routines catchup` already used.
- *
- * The `missed` record is also what makes this idempotent, so there is no
- * separate ledger to keep in sync. `detectOverdueJobs` compares the most recent
- * expected fire against `getLatestRun(...).startedAt`; a `missed` record stamped
- * at `expectedAt` advances that comparison, so the same missed fire is never
- * reconsidered — across ticks, daemon restarts, or a restart storm. (A job that
- * is overdue by definition has no run later than `expectedAt`, so the
- * back-stamped record always sorts last in `listRuns`.)
- *
- * That comparison alone is not enough when two callers overlap, because both
- * can read the same overdue set before either writes. The claim in
- * `claimMissedFire` closes that: the record's directory is created with a
- * non-recursive `mkdir`, an atomic test-and-set, and only the caller that wins
- * it runs the routine. This holds across processes — the daemon's timer and a
- * human running `agents routines catchup` — which neither an in-process flag
- * nor `withFileLock` (synchronous; this pass awaits a spawn) can cover.
- */
+/** Catch-up: run a routine whose scheduled fire this device missed. croner only schedules forward,
+ * so a down daemon loses the fire. claimMissedFire records a `missed` run stamped at the due time
+ * via an atomic non-recursive mkdir; only the claimant runs it late, across processes. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -52,11 +19,8 @@ export interface CatchupOutcome {
   name: string;
   /** The fire that was missed. */
   expectedAt: Date;
-  /**
-   * `ran` — re-run late. `recorded` — miss logged, not re-run (`catchup: false`
-   * or a dry run). `claimed-elsewhere` — a concurrent pass or process already
-   * owns this fire. `error` — could not start the late run.
-   */
+  /** `ran`: re-run late. `recorded`: miss logged, not re-run (`catchup: false` or dry run).
+   * `claimed-elsewhere`: another pass owns this fire. `error`: late run failed to start. */
   result: 'ran' | 'recorded' | 'claimed-elsewhere' | 'error';
   /** Run id of the late run, when one was started. */
   runId?: string;
@@ -64,11 +28,8 @@ export interface CatchupOutcome {
   error?: string;
 }
 
-/**
- * Is this routine allowed to run late? Default true — a routine you scheduled
- * is one you expect to have run, so losing a fire silently is never the helpful
- * default. `catchup: false` opts out a routine whose worth expires with its slot.
- */
+/** Whether a routine may run late. Defaults to true; `catchup: false` opts out a routine whose
+ * worth expires with its slot. */
 export function shouldCatchUp(job: Pick<JobConfig, 'catchup'>): boolean {
   return job.catchup !== false;
 }
@@ -78,32 +39,9 @@ export function missedRunId(expectedAt: Date): string {
   return expectedAt.toISOString().replace(/[:.]/g, '-');
 }
 
-/**
- * CLAIM a missed fire: atomically record that it never happened, and report
- * whether this caller is the one that recorded it.
- *
- * Returns the run on a successful claim, or `null` when another caller already
- * claimed the same (routine, expected-fire) pair. That return value is the
- * concurrency control for the whole module — only the claimant runs the routine
- * late, so a fire can never be spawned twice.
- *
- * The atomicity is the non-recursive `mkdir` of the run directory: on every
- * POSIX filesystem that is a single test-and-set, failing with EEXIST if the
- * directory is already there. It therefore holds between the daemon's timer and
- * a human running `agents routines catchup` in a separate process — which an
- * in-process re-entrancy flag cannot cover, and which a lock cannot cover either
- * (`withFileLock` is synchronous and this pass awaits a spawn).
- *
- * The run id is derived from `expectedAt` rather than "now" so the same missed
- * fire always maps to the same directory — that is what makes the claim
- * meaningful — and so the record sorts into `listRuns` (lexical over ISO run
- * ids) at the point the gap actually occurred.
- *
- * Deliberately at-most-once: a process that dies between claiming and spawning
- * leaves the fire un-run. That is the right trade for something that starts
- * agent processes — a double spawn costs real work and money, while the miss is
- * still on the record for a human to see and re-run.
- */
+/** Atomically claim a missed fire; returns the run, or null if another caller already claimed this
+ * (routine, expected-fire) pair. Atomicity is the non-recursive mkdir of the run dir, named from
+ * `expectedAt`. At-most-once by design: a crash between claim and spawn leaves the miss on record. */
 export function claimMissedFire(job: JobConfig, expectedAt: Date): RunMeta | null {
   const runId = missedRunId(expectedAt);
   const runDir = getRunDir(job.name, runId);
@@ -142,13 +80,8 @@ interface CatchupOptions {
   overdue?: OverdueJob[];
 }
 
-/**
- * Record — and, unless opted out, re-run — every routine this device missed.
- *
- * Device scoping is already enforced upstream: `detectOverdueJobs` skips a job
- * pinned elsewhere (overdue.ts), so a fleet of machines never all catch up the
- * same routine.
- */
+/** Record, and unless opted out re-run, every routine this device missed. Device scoping is
+ * enforced upstream: `detectOverdueJobs` skips jobs pinned elsewhere (overdue.ts). */
 export async function runCatchup(opts: CatchupOptions = {}): Promise<CatchupOutcome[]> {
   const overdue = opts.overdue ?? detectOverdueJobs(opts.now ?? new Date());
   const outcomes: CatchupOutcome[] = [];

@@ -1,7 +1,5 @@
-/**
- * Tests for the `gh` overload delegate — argument parsing, target resolution,
- * the empty/pending "not green yet" trap, and render fidelity.
- */
+/** Tests for the `gh` overload delegate: argument parsing, target resolution, the empty/pending
+ * "not green yet" trap, and render fidelity. */
 
 import { describe, expect, it } from 'vitest';
 import {

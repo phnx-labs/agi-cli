@@ -102,10 +102,9 @@ describe('feed watch reconcile cadence', () => {
   });
 
   it('reconciles on the timed cadence when no directory watcher could arm', async () => {
-    // Start with no feed dir at all, the state of a box that has never posted:
-    // `watchAttentionStores` has nothing to subscribe to, so the timed pass is
-    // the ONLY path left. It has to exist — a PR verdict also changes with no
-    // local file write, and that is what the cadence is sized for.
+    // Start with no feed dir, as on a box that never posted: `watchAttentionStores` has nothing to
+    // subscribe to, so the timed pass is the only path left. It must exist, since a PR verdict also
+    // changes with no local file write.
     fs.rmSync(getFeedDir(), { recursive: true, force: true });
     const harness = start({ reconcileMs: 50, sessionId: 'live-timed', withFeedDir: false });
     await settle(80);

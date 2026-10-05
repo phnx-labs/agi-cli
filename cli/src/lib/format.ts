@@ -1,35 +1,22 @@
-/**
- * Shared terminal-formatting helpers.
- *
- * These small utilities were previously copy-pasted across ~20 command and lib
- * files, and had drifted into behavior differences (truncation ellipsis `...`
- * vs `…` vs `.`; `relTime` long "5 minutes ago" vs short "5m ago"; a
- * `visibleWidth` regex missing its `\x1b` escape). This module is the single
- * canonical home — every consumer imports from here.
- */
+/** Shared terminal-formatting helpers, the single canonical home for utilities that were
+ * copy-pasted across ~20 files and drifted (ellipsis style, long vs short relTime, a
+ * `visibleWidth` regex missing its `\x1b` escape). */
 import chalk from 'chalk';
 import { readSync } from 'node:fs';
 import { emitFriction } from './feed/events.js';
 
 /** Options for {@link die} — opt into machine-readable failure output. */
 interface DieOptions {
-  /**
-   * Emit a machine-readable `{"error", "hint"?}` object to **stdout** instead of
-   * red text on stderr. Pass `isJsonMode(options)` from a `--json` command so an
-   * agent parsing stdout gets a structured reason instead of an empty stream and
-   * a bare nonzero exit (RUSH-1830).
-   */
+  /** Emits a machine-readable `{"error", "hint"?}` to stdout instead of red stderr text. Pass
+   * `isJsonMode(options)` from a `--json` command so an agent gets a structured reason, not an
+   * empty stream and a bare nonzero exit (RUSH-1830). */
   json?: boolean;
   /** Optional recovery hint — the command to run instead. Included in both modes. */
   hint?: string;
 }
 
-/**
- * Render a fatal error to the right stream. Pure — no I/O, no `process.exit` — so
- * the human-vs-agent split is unit-testable. A `--json` caller gets
- * `{"error","hint"?}` on **stdout** (where a JSON consumer reads); a human gets
- * red text (plus a gray hint line) on **stderr**.
- */
+/** Renders a fatal error to the right stream. Pure (no I/O or exit) so the split is testable:
+ * `--json` gets `{"error","hint"?}` on stdout, humans get red text plus a gray hint on stderr. */
 export function formatDie(
   msg: string,
   opts: DieOptions = {},
@@ -44,12 +31,8 @@ export function formatDie(
   return { stream: 'stderr', text: lines.join('\n') };
 }
 
-/**
- * Print `msg` and exit the process with `code`. Humans get red text on stderr;
- * a `--json` caller (pass `{ json: true }`) gets `{"error","hint"?}` on stdout so
- * an agent has a parseable reason. Backward-compatible: `die(msg)` / `die(msg, code)`
- * keep the original red-stderr behavior.
- */
+/** Prints `msg` and exits with `code`: red stderr for humans, `{"error","hint"?}` on stdout for
+ * `{ json: true }`. `die(msg)` and `die(msg, code)` keep the original behavior. */
 export function die(msg: string, code = 1, opts: DieOptions = {}): never {
   const { stream, text } = formatDie(msg, opts);
   // Keep console.* (not process.std*.write): the suite spies on console.error /
@@ -59,14 +42,9 @@ export function die(msg: string, code = 1, opts: DieOptions = {}): never {
   process.exit(code);
 }
 
-/**
- * Await a command action and turn a thrown Error into a clean `die(message)`
- * instead of Node's raw stack dump — bootstrap's parseAsync catch deliberately
- * rethrows plain Errors as engineering bugs, so a command whose helpers throw
- * user-actionable errors (auth, org) wraps its `.action(...)` call site with
- * this. The helpers keep throwing so tests can assert on them. Pass `json`
- * so a `--json` caller still gets the structured `{"error"}` payload.
- */
+/** Awaits a command action and turns a thrown Error into `die(message)` instead of a stack dump
+ * (bootstrap deliberately rethrows plain Errors as bugs). Helpers keep throwing so tests can
+ * assert on them; pass `json` so `--json` callers still get the structured payload. */
 export async function runOrDie(fn: () => void | Promise<void>, opts: DieOptions = {}): Promise<void> {
   try {
     await fn();
@@ -75,12 +53,9 @@ export async function runOrDie(fn: () => void | Promise<void>, opts: DieOptions 
   }
 }
 
-/**
- * `die()` with a structured friction event attached. Use this at CLI error
- * chokepoints so the nightly routine can classify and rank recurring failures
- * without re-parsing transcripts. `surface` is the subsystem (teams, browser,
- * secrets, guard, …); `failureId` is a stable slug (e.g. 'remote-cwd-on-add').
- */
+/** `die()` with a structured friction event, for CLI error chokepoints so the nightly routine
+ * can rank recurring failures without re-parsing transcripts. `surface` is the subsystem and
+ * `failureId` a stable slug (e.g. 'remote-cwd-on-add'). */
 export function dieFriction(
   surface: string,
   failureId: string,
@@ -92,22 +67,15 @@ export function dieFriction(
   die(msg, code, opts);
 }
 
-/**
- * Truncate `s` to at most `max` characters, appending a single-char ellipsis
- * (`…`) when shortened. Character-count based (not ANSI/width aware — use
- * `truncateToWidth` from `session/width.ts` for colored strings).
- */
+/** Truncates `s` to at most `max` characters with a single-char `…`. Character-count based; use
+ * `truncateToWidth` (`session/width.ts`) for colored strings. */
 export function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…';
 }
 
-/**
- * Format an ISO timestamp as a compact relative age: "just now", "5m ago",
- * "3h ago", "2d ago". The canonical short form — the long "5 minutes ago"
- * variant that once lived in `cloud.ts` is deliberately dropped. (For the
- * session-list long form with calendar fallback, see
- * `formatRelativeTime` in `session/relative-time.ts`.)
- */
+/** Formats an ISO timestamp as a compact relative age ("just now", "5m ago", "3h ago", "2d
+ * ago"), the canonical short form. For the session-list long form with calendar fallback see
+ * `formatRelativeTime` in `session/relative-time.ts`. */
 export function relTime(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (secs < 10) return 'just now';
@@ -131,12 +99,7 @@ export function humanDuration(ms: number): string {
   return hh ? `${d}d ${hh}h` : `${d}d`;
 }
 
-/**
- * Human-readable byte size. Previously copy-pasted into five files
- * (`commands/prune.ts`, `commands/inspect.ts`,
- * `commands/sessions.ts`, `lib/browser/sessions-list.ts`) — this is the
- * canonical home.
- */
+/** Human-readable byte size; canonical home for a helper that was copy-pasted into five files. */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -149,13 +112,8 @@ export function formatBytes(n: number): string {
   return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
 }
 
-/**
- * True when an error came from the user cancelling a prompt (Ctrl+C).
- *
- * Lives here rather than in `commands/utils.ts` so `lib/` callers
- * (`drift-sync.ts`, `refresh.ts`) don't have to import upward out of `lib/`
- * into the command layer. `commands/utils.ts` re-exports it.
- */
+/** True when an error came from the user cancelling a prompt (Ctrl+C). Lives here so `lib/`
+ * callers don't import upward into the command layer; `commands/utils.ts` re-exports it. */
 export function isPromptCancelled(err: unknown): boolean {
   return err instanceof Error && (
     err.name === 'ExitPromptError' ||
@@ -178,10 +136,8 @@ export function parseCommaSeparatedList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/**
- * Visible column width of `s`, ignoring ANSI SGR color codes (e.g. chalk
- * wrappers). Matches the full CSI sequence including the `\x1b` escape.
- */
+/** Visible column width of `s`, ignoring ANSI SGR codes; matches the full CSI sequence including
+ * the `\x1b` escape. */
 export function visibleWidth(s: string): number {
   // eslint-disable-next-line no-control-regex
   return s.replace(/\x1b\[[0-9;]*m/g, '').length;
@@ -220,10 +176,8 @@ export function readStdinSync(): string {
   return Buffer.concat(chunks).toString('utf-8').trim();
 }
 
-/**
- * Wrap `text` in an OSC 8 hyperlink to `filePath` (as a `file://` URL) when
- * stdout is a TTY; otherwise return `text` unchanged.
- */
+/** Wraps `text` in an OSC 8 hyperlink to `filePath` (a `file://` URL) when stdout is a TTY;
+ * otherwise returns `text` unchanged. */
 export function termLink(text: string, filePath: string): string {
   if (!filePath || !process.stdout.isTTY) return text;
   const url = `file://${filePath}`;

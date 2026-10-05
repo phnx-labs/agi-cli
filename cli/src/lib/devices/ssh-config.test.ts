@@ -1,12 +1,5 @@
-/**
- * ssh_config render correctness.
- *
- * The rendered include is what makes plain ssh / scp / rsync / `agents
- * sessions --device` resolve logical device names. Real bugs guarded: emitting a
- * Host with no HostName (ssh would fall through to DNS), preferring the IP over
- * the friendlier DNS name, dropping the User line, or churning the file order
- * between runs (noisy diffs).
- */
+/** ssh_config render correctness: the rendered include lets plain ssh/scp/rsync and `agents
+ * sessions --device` resolve logical device names. */
 import { describe, expect, it } from 'vitest';
 import { renderSshConfig, hostNameFor } from './ssh-config.js';
 import type { DeviceProfile, DeviceRegistry } from './registry.js';

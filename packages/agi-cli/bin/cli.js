@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// agi-cli is the front-brand alias of @phnx-labs/agents-cli. The commands
-// `agents`, `ag`, and `agi` all resolve here and exec the exact same tool.
-//
-// We spawn the canonical entry as the process' main module (rather than
-// importing it in-process) so that any `argv[1]`-based main-module guard in
-// the canonical CLI fires correctly, regardless of how it was invoked.
+// agi-cli is the front-brand alias of @phnx-labs/agents-cli (`agents`, `ag`, `agi` all exec the
+// same tool). The canonical entry is spawned as the main module, not imported, so any
+// `argv[1]`-based main-module guard fires correctly.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 

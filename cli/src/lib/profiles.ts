@@ -1,10 +1,5 @@
-/**
- * Profile management -- named bundles of (host CLI, endpoint, model, auth).
- *
- * Profiles let users run agents against alternative providers (OpenRouter,
- * custom endpoints) without reconfiguring the agent CLI itself. Stored as
- * YAML files under ~/.agents/profiles/.
- */
+/** Profile management: named bundles of (host CLI, endpoint, model, auth) for running agents against
+ * alternative providers, stored as YAML under ~/.agents/profiles/. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,57 +36,31 @@ export interface Profile {
     envVar: string;
     keychainItem: string;
   };
-  /**
-   * When true, the host manages its own login and the keychain token named by
-   * `auth` is optional: if it is not stored, no auth env var is injected and the
-   * run proceeds on the host's own credentials (e.g. `opencode auth`). Without
-   * this flag a missing keychain item is a hard error at exec time.
-   */
+  /** When true, the host manages its own login and the keychain token named by `auth` is optional:
+   * if absent, no auth env var is injected. Without it a missing keychain item is a hard error at
+   * exec time. */
   authOptional?: boolean;
   description?: string;
   preset?: string;
   provider?: string;
-  /**
-   * Stored for backward-compatible YAML parsing only — no longer read for
-   * display. `profileLabel()` always derives the display name from `name` via
-   * the vendor/brand table. Old YAML files that carry this key still parse
-   * correctly; it is simply ignored.
-   */
+  /** Kept only for backward-compatible YAML parsing; ignored. `profileLabel()` derives the display
+   * name from `name`. */
   label?: string;
-  /**
-   * Name of the harness this one was forked from — either a native agent id
-   * (`claude`, `opencode`) or another custom harness. Display-only lineage:
-   * the fork is a full copy, so deleting the source never affects it.
-   */
+  /** Harness this one was forked from (native agent id or custom harness). Display-only lineage; the
+   * fork is a full copy, so deleting the source never affects it. */
   forkedFrom?: string;
-  /**
-   * Optional secondary model retried on the same host when the primary model
-   * env value hits a rate limit. Reuses the `--fallback` cascade in
-   * `runWithFallback` (src/lib/exec.ts) — the swap is expressed as an
-   * envOverride on a same-agent FallbackEntry, so only the model env var
-   * changes; auth, base URL, and every other profile env value are preserved.
-   */
+  /** Secondary model retried on the same host when the primary hits a rate limit, via the
+   * `--fallback` cascade in `runWithFallback` (src/lib/exec.ts). Expressed as an envOverride on a
+   * same-agent FallbackEntry, so only the model env var changes. */
   fallback_model?: string;
-  /**
-   * Per-tier model ids for this harness's OWN catalog, keyed by the same cost
-   * tiers `agents run --model cheap|default|best|ultra` uses for a native
-   * agent. Lets a custom harness (which runs through a host agent's binary,
-   * e.g. `deepseek-flash` hosted on `claude`) resolve a tier against its own
-   * models instead of colliding with the host agent's native catalog
-   * (`resolveTier` in model-tiers.ts, which only knows native agents).
-   * An unset tier clamps to the next CHEAPER tier that IS set (see
-   * `resolveProfileTierModel`). Omitted entirely -> tiers are not supported
-   * for this profile and a requested tier falls back to the harness's single
-   * pinned model, unchanged from before this field existed.
-   */
+  /** Per-tier model ids (cheap|default|best|ultra) for this harness's own catalog, so it doesn't
+   * collide with its host agent's. An unset tier clamps to the next cheaper one; omitted entirely,
+   * the single pinned model is used. */
   models?: Partial<Record<ModelTier, string>>;
 }
 
-/**
- * Stable, machine-readable summary used by `agents view` and `--json`.
- * `agent` is the underlying harness (claude/codex/...) so consumers can
- * group profiles under installed agents without reparsing host strings.
- */
+/** Stable machine-readable summary for `agents view` and `--json`; `agent` is the underlying harness
+ * so consumers can group profiles without reparsing host strings. */
 export interface ProfileSummary {
   name: string;
   /** Human-facing header label — always derived from `name` via the vendor/brand table. */
@@ -138,12 +107,8 @@ export function profileExists(name: string): boolean {
   return fs.existsSync(profilePath(name));
 }
 
-/**
- * True when `name` is a custom harness (a profile that is not shadowing a
- * native agent id) — the predicate routines/monitors use to accept an
- * `agent:` value that `agents run` will resolve as a profile. A native id
- * always reads as native, matching exec's resolution order.
- */
+/** True when `name` is a custom harness (a profile not shadowing a native agent id), used by
+ * routines/monitors to accept an `agent:` value; a native id always reads as native. */
 export function isCustomHarnessName(name: string): boolean {
   if (!PROFILE_NAME_PATTERN.test(name)) return false;
   return !(ALL_AGENT_IDS as readonly string[]).includes(name) && profileExists(name);
@@ -186,10 +151,9 @@ function migrateLegacyProfileAuth(profile: Profile, file: string): void {
   }
   const migratedAccount = findAccount(accountName)!;
   const oldItem = profile.auth.keychainItem;
-  // Reference by NAME, not id: profiles sync fleet-wide with `agents repo push`
-  // while account ids are minted per-device, so an id ref breaks on every other
-  // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
-  // registry resolves both, and `accounts rename` already rewrites name refs.
+  // Reference by NAME, not id: profiles sync fleet-wide via `agents repo push` but account ids are
+  // minted per device, so an id ref breaks elsewhere ("Unknown account '<uuid>'"). The registry
+  // resolves both, and `accounts rename` rewrites name refs.
   profile.account = migratedAccount.name;
   profile.provider = provider;
   delete profile.auth;
@@ -270,12 +234,8 @@ export function profileModelLabel(profile: Profile): string {
   return key ? profile.env[key] : '-';
 }
 
-/**
- * Return the env var key that carries this profile's model (e.g.
- * `ANTHROPIC_MODEL`), or null when the profile has no recognizable model env.
- * `fallback_model` swaps THIS key so provider selection, auth, and base URL
- * are all preserved on retry.
- */
+/** The env var key carrying the profile's model (e.g. `ANTHROPIC_MODEL`), or null; `fallback_model`
+ * swaps this key so provider, auth and base URL are preserved on retry. */
 export function profileModelEnvKey(profile: Profile): string | null {
   for (const key of MODEL_ENV_KEYS) {
     if (profile.env[key]) return key;
@@ -325,15 +285,9 @@ function inlineAuthToken(profile: Profile): string | undefined {
   return undefined;
 }
 
-/**
- * Build a non-secret auth identity/status label for list surfaces.
- *
- * - Inline JWT in env: decode locally and show email / preferred_username / sub.
- * - Inline opaque token in env: masked prefix/suffix (user explicitly stored it
- *   in the YAML, so they accept the leak in their own output).
- * - Keychain-backed auth: provider + "stored" or "missing" (non-prompting).
- * - No auth at all: provider only.
- */
+/** Non-secret auth label for list surfaces: an inline JWT is decoded (email/username/sub); an
+ * inline opaque token is masked prefix/suffix; keychain auth shows provider + "stored"/"missing"
+ * without prompting; no auth shows the provider only. */
 export function profileAuthLabel(profile: Profile): string {
   const provider = profileProviderLabel(profile);
   const token = inlineAuthToken(profile);
@@ -362,10 +316,8 @@ export function profileAuthLabel(profile: Profile): string {
   return provider;
 }
 
-/**
- * Curated vendor/brand display names, matched case-insensitively per token.
- * Entries with a space (e.g. 'Moonshot AI') are single-token → multi-word expansions.
- */
+/** Curated vendor/brand display names matched case-insensitively per token; entries with a space
+ * (e.g. 'Moonshot AI') expand one token to several words. */
 const VENDOR_TABLE: ReadonlyArray<readonly [string, string]> = [
   ['deepseek', 'DeepSeek'],
   ['openai', 'OpenAI'],
@@ -394,14 +346,9 @@ function tokenToDisplayName(token: string): string {
   return token.charAt(0).toUpperCase() + token.slice(1);
 }
 
-/**
- * Header label for the harness — derived from `profile.name` by splitting on
- * `[-_]` and mapping each token through the vendor/brand table. Never reads
- * the stored `label` field; old YAML files with a `label:` key are unaffected.
- *
- * Examples: `deepseek-flash` → `'DeepSeek Flash'`, `spark` → `'Spark'`,
- * `deepseek_chat_v3` → `'DeepSeek Chat V3'`.
- */
+/** Header label derived from `profile.name` by splitting on `[-_]` and mapping tokens through the
+ * vendor table; never reads the stored `label`. E.g. `deepseek-flash` -> 'DeepSeek Flash',
+ * `deepseek_chat_v3` -> 'DeepSeek Chat V3'. */
 export function profileLabel(profile: Profile): string {
   return profile.name.split(/[-_]/).map(tokenToDisplayName).join(' ');
 }
@@ -423,11 +370,8 @@ export function profileSummary(profile: Profile): ProfileSummary {
   };
 }
 
-/**
- * Build a profile from a preset. The keychain item is shared across all
- * profiles that point at the same provider, so adding kimi + deepseek prompts
- * for the OpenRouter key exactly once.
- */
+/** Build a profile from a preset. The keychain item is shared across profiles on the same provider,
+ * so kimi + deepseek prompt for the OpenRouter key once. */
 export function profileFromPreset(profileName: string, preset: Preset, version?: string): Profile {
   return {
     name: profileName,
@@ -445,11 +389,8 @@ export function profileFromPreset(profileName: string, preset: Preset, version?:
   };
 }
 
-/**
- * Env var each host CLI reads to override its model. Mirror of the read-side
- * `MODEL_ENV_KEYS` above, keyed by agent so a one-shot `--device <agent> --model
- * <id>` writes the model onto the var that host actually honors.
- */
+/** Env var each host CLI reads to override its model; mirror of the read-side `MODEL_ENV_KEYS`,
+ * keyed by agent so `--device <agent> --model <id>` writes the var that host honors. */
 const MODEL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   claude: 'ANTHROPIC_MODEL',
   opencode: 'OPENCODE_MODEL',
@@ -498,12 +439,9 @@ interface HostModelOptions {
   description?: string;
 }
 
-/**
- * Build a custom-harness profile from a host CLI + model in one shot, without a
- * preset. The model lands on the host's model env var ({@link modelEnvKeyForHost});
- * auth is attached only when both `provider` and `authEnvVar` are supplied
- * (hosts that manage their own login — e.g. opencode — need neither).
- */
+/** Build a custom-harness profile from a host CLI + model without a preset; the model lands on the
+ * host's model env var. Auth is attached only when both `provider` and `authEnvVar` are given
+ * (hosts with their own login, e.g. opencode, need neither). */
 export function profileFromHostModel(name: string, host: AgentId, model: string, opts: HostModelOptions = {}): Profile {
   const env: Record<string, string> = { [modelEnvKeyForHost(host)]: model };
   if (opts.baseUrl) {
@@ -543,11 +481,8 @@ export interface ForkProfileOptions {
   description?: string;
 }
 
-/**
- * Copy an existing harness under a new name, applying overrides. The fork is a
- * full copy — env, auth binding, and fallback model all carry over — so the two
- * diverge from here and deleting the source never affects the fork.
- */
+/** Copy a harness under a new name with overrides. A full copy (env, auth binding, fallback model),
+ * so the two diverge and deleting the source never affects the fork. */
 export function forkProfile(source: Profile, name: string, opts: ForkProfileOptions = {}): Profile {
   validateProfileName(name);
   const sourceHost = source.host.agent;
@@ -603,16 +538,9 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
   return forked;
 }
 
-/**
- * Edit an existing profile in-place, applying overrides without changing its
- * name or lineage. Reuses {@link forkProfile}'s validation and override logic
- * (model swap, base-URL validation, auth repoint), then restores the original
- * `forkedFrom` so an edit never self-references the profile.
- *
- * Note: this returns the updated `Profile` object but does NOT write it to
- * disk — callers should follow up with `writeProfile(result)` if persistence
- * is needed.
- */
+/** Edit a profile in place, reusing forkProfile's validation and overrides, then restore the
+ * original `forkedFrom` so an edit never self-references. Returns the updated Profile without
+ * writing it; callers persist with `writeProfile`. */
 export function editProfile(source: Profile, opts: ForkProfileOptions = {}): Profile {
   const edited = forkProfile(source, source.name, opts);
   // forkProfile sets forkedFrom = source.name; for an in-place edit that would
@@ -621,14 +549,8 @@ export function editProfile(source: Profile, opts: ForkProfileOptions = {}): Pro
   return edited;
 }
 
-/**
- * Rename a profile on disk, then rewrite `forkedFrom` in every other profile
- * that pointed at the old name so lineage display never goes stale.
- *
- * Throws if `oldName` does not exist or `newName` already exists. There is no
- * `--force` / overwrite path — a collision is a hard error directing the user
- * to remove the target first.
- */
+/** Rename a profile on disk and rewrite `forkedFrom` in other profiles pointing at the old name.
+ * Throws if `oldName` is missing or `newName` exists; there is no overwrite path. */
 export function renameProfile(oldName: string, newName: string): void {
   validateProfileName(newName);
   if (!profileExists(oldName)) {
@@ -650,19 +572,15 @@ export function renameProfile(oldName: string, newName: string): void {
   }
 }
 
-/**
- * Resolve a profile into the env block that should be injected into the
- * spawned agent process. Reads the token from keychain at exec time so the
- * profile YAML never holds secrets.
- */
+/** Resolve a profile into the env block injected into the spawned agent, reading the token from the
+ * keychain at exec time so YAML never holds secrets. */
 export function resolveProfileEnv(profile: Profile): Record<string, string> {
   const env: Record<string, string> = { ...profile.env };
   if (profile.account) {
     if (!findAccount(profile.account)) {
-      // The commonest cause: the profile synced here via `agents repo push/pull`
-      // but its account ref was minted on another device (legacy id refs), so
-      // the bare "Unknown account" from the registry gives the user nothing to
-      // act on. Name the harness and the repair.
+      // Commonest cause: the profile synced via `agents repo push/pull` but its account ref was
+      // minted on another device (legacy id refs). The bare registry "Unknown account" is
+      // unactionable, so name the harness and the repair.
       throw new Error(
         `Harness '${profile.name}' references account '${profile.account}', which does not exist on this device. ` +
         `Accounts are per-machine; pick one from 'agents accounts list' and repoint with ` +
@@ -704,42 +622,22 @@ interface ResolvedProfileRun {
   version?: string;
   env: Record<string, string>;
   profileName: string;
-  /**
-   * Same-host model swap for the `--fallback` cascade. Present only when the
-   * profile declares `fallback_model` AND the profile has an identifiable
-   * model env key to swap. `envKey` names the var (e.g. `ANTHROPIC_MODEL`),
-   * `model` is the value to write on the retry attempt.
-   */
+  /** Same-host model swap for the `--fallback` cascade; present only when the profile declares
+   * `fallback_model` and has a model env key. `envKey` is the var, `model` the retry value. */
   fallbackModel?: { envKey: string; model: string };
-  /**
-   * Set when the caller requested a cost tier (`--model cheap|default|...`)
-   * but this profile has no `models:` entry to resolve it against (not even a
-   * cheaper tier to clamp to). `env` is returned unmodified — the harness's
-   * single pinned model — and this note is informational only, matching the
-   * "using harness default" convention exec.ts's native tier block already
-   * uses; the caller prints it, it never throws.
-   */
+  /** Set when a cost tier was requested but the profile has no `models:` entry to resolve it (not
+   * even a cheaper tier). `env` is unmodified (the pinned model); the note is informational,
+   * printed by the caller, never thrown (matches exec.ts's "using harness default"). */
   tierNote?: string;
-  /**
-   * Concrete model id callers should forward as `ExecOptions.model`. Set when:
-   * - `requestedModel` was a cost-tier token resolved against this profile's
-   *   `models:` map, OR
-   * - no `--model` was requested and this is an OpenCode host whose pin lives
-   *   in `OPENCODE_MODEL` (OpenCode does not read that env var, so the pin
-   *   has to become `--model` on the argv).
-   * Undefined when the caller already passed a concrete `--model`, or when
-   * tier resolution degraded (see `tierNote`).
-   */
+  /** Concrete model id to forward as `ExecOptions.model`: set when a cost tier resolved via
+   * `models:`, or on an OpenCode host with no `--model` (OpenCode ignores OPENCODE_MODEL, so the
+   * pin becomes `--model`). Undefined otherwise. */
   resolvedModel?: string;
 }
 
-/**
- * Resolve a requested cost tier against a profile's `models:` map. An unset
- * tier clamps to the next CHEAPER tier that IS set (ultra -> best -> default
- * -> cheap), mirroring the clamp semantics of `bucketRungs` in
- * model-tiers.ts. Returns null when the profile declares no `models:` at all,
- * or none of the tiers at-or-below the request are set.
- */
+/** Resolve a cost tier against the profile's `models:` map; an unset tier clamps to the next cheaper
+ * set one (ultra > best > default > cheap), mirroring `bucketRungs` in model-tiers.ts. Null when no
+ * `models:` or no tier at or below the request is set. */
 function resolveProfileTierModel(
   profile: Profile,
   tier: ModelTier,
@@ -754,19 +652,9 @@ function resolveProfileTierModel(
   return null;
 }
 
-/**
- * Resolve a name into (agent, version, env). Throws if the name is not a
- * profile. Callers are expected to try agent-id resolution first and fall
- * back to this when that fails, so we don't need a "isProfile" probe.
- *
- * `requestedModel` is the caller's raw `--model` value. When it is a cost-tier
- * token (`cheap`/`default`/`best`/`ultra`), it is resolved against the
- * profile's OWN `models:` map (see `resolveProfileTierModel`) and substituted
- * into `env` as a concrete model id BEFORE returning — so exec.ts's native
- * tier-resolution block (which indexes the HOST agent's catalog, e.g. Claude's
- * own models) never sees a tier token for a profile-based run, and can't
- * collide the profile's harness identity with its host's catalog.
- */
+/** Resolve a name into (agent, version, env); throws if not a profile. A cost-tier `requestedModel`
+ * resolves against the profile's own `models:` map and is substituted into `env`, so exec.ts's
+ * native tier block never sees it. */
 export function resolveProfileForRun(name: string, requestedModel?: string): ResolvedProfileRun {
   const profile = readProfile(name);
   const env = resolveProfileEnv(profile);
@@ -795,17 +683,11 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
         resolved.tierNote = `no "${requestedModel}" model configured on profile '${profile.name}'; using its "${tierPick.clampedFrom}" tier (${tierPick.model})`;
       }
     }
-    // No `models:` opt-in at all, or no rung to clamp to: leave `env` and
-    // `requestedModel` untouched. `agents commands/exec.ts`'s own profile-tier
-    // guard (the "cost tiers don't apply to profile ..." discard) still sees
-    // the raw tier token downstream and handles the message -- this function
-    // doesn't compete with that canonical fallback for the no-opt-in case.
+    // No `models:` opt-in or no rung to clamp to: leave `env` and `requestedModel` untouched;
+    // exec.ts's profile-tier guard handles the message, so this doesn't compete with it.
   }
-  // OpenCode does not honor OPENCODE_MODEL (unlike claude/codex/gemini/grok,
-  // whose host CLIs read their MODEL env var). Copy the pin into resolvedModel
-  // so callers set ExecOptions.model and buildExecCommand emits `--model`.
-  // An explicit `--model` (including a cost-tier token the caller may still
-  // discard) wins and is left alone.
+  // OpenCode doesn't honor OPENCODE_MODEL, so copy the pin into resolvedModel so buildExecCommand
+  // emits `--model`. An explicit `--model` (even a cost-tier token the caller may discard) wins.
   if (resolved.resolvedModel === undefined && !requestedModel && profile.host.agent === 'opencode') {
     const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost('opencode');
     const pinned = env[envKey];

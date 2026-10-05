@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# prepack gate: refuse to pack unless dist/bin/agents is exactly the signed +
-# notarized binary that scripts/sign-cli-binary.sh produced (issue #315).
-# Mirrors scripts/verify-menubar-helper.sh, plus two checks that helper does
-# not need:
-#   - the embedded version must match package.json - the binary is rebuilt
-#     every release, and a stale binary+pin pair from an earlier release
-#     matches its own sha, so the sha alone cannot catch it;
-#   - codesign --verify + a Developer ID authority check, macOS only. A Linux
-#     release box cannot run codesign; there the sha pin (produced by the
-#     macOS sign run and pulled back by scripts/remote-sign-mac.sh) still
-#     guarantees bit-identical content.
+# prepack gate: refuse to pack unless dist/bin/agents is exactly the signed, notarized binary
+# scripts/sign-cli-binary.sh produced (issue #315). The embedded version must match package.json
+# (a stale binary+pin pair matches its own sha); codesign --verify on macOS, the sha pin on Linux.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -36,15 +28,9 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 
-# scripts/build-bin.sh bakes the version in as `const VERSION = "<v>";` and
-# bun's bundler carries it into the binary as `var VERSION = "<v>";` (no
-# minification here) — or, when it merges adjacent declarations, as
-# `var VERSION = "<v>", NEXT_CONST = …;` (observed with bun 1.3.14 once the
-# RUSH-2335 bootstrap split put another const right after VERSION). Grep only
-# up to the closing quote so declaration merging can't false-fail the gate;
-# the quoted version is already an exact match. -a because grep otherwise
-# refuses to match inside a binary. Runs even where the Mach-O cannot execute
-# (Linux release box).
+# build-bin.sh bakes the version as `const VERSION = "<v>";` and bun carries it into the binary as
+# `var VERSION = "<v>"`, possibly merged with the next const (bun 1.3.14, RUSH-2335). Grep only up
+# to the closing quote so merging cannot false-fail. -a because grep refuses binaries.
 version="$(node -p "require('./package.json').version")"
 if ! LC_ALL=C grep -aqF "VERSION = \"$version\"" "$BIN"; then
   echo "dist/bin/agents does not embed version $version - stale binary; re-run scripts/sign-cli-binary.sh" >&2

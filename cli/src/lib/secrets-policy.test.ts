@@ -304,10 +304,9 @@ describe('peerPresentKeys', () => {
     expect(peerPresentKeys(accounts, [], deliveredCurrent).auth).toBeUndefined();
   });
 
-  // --- rotation: a re-mint must re-push even while the OLD token authenticates.
-  // `accounts login <harness>#<name>` rotates the reserved key and bumps
-  // `workerCredential.mintedAt`, so the account's fingerprint changes (F1 → F2)
-  // while the peer's verdict stays `live` (its old token still works).
+  // Rotation: a re-mint must re-push even while the OLD token authenticates. `accounts login
+  // <harness>#<name>` bumps `workerCredential.mintedAt`, so the fingerprint changes (F1 to F2)
+  // while the peer's verdict stays `live`.
   describe('rotation (delivered-fingerprint gate)', () => {
     const remintedAccounts = [acct({ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'RK', fingerprint: 'F2' })];
     const live = [verdict({ accountId: 'a1', verdict: 'live' })];
@@ -405,10 +404,9 @@ describe('reconcileLocalWorkerSlots', () => {
     expect(res.errors[0]).toMatchObject({ accountId: 'a1', message: expect.stringContaining('still not fully seeded') });
   });
 
-  // The mac-mini 2026-09-06 gap: every registered claude row predated T1 (no
-  // `workerCredential`), so the loop skipped all 8 while their tokens sat in the
-  // legacy `auth` bundle on the box. A legacy row resolves to (auth, email key)
-  // exactly as the push plan does, and gets a slot from the same key.
+  // The mac-mini 2026-09-06 gap: every claude row predated T1 (no `workerCredential`), so the loop
+  // skipped all 8 while their tokens sat in the legacy `auth` bundle. A legacy row resolves to
+  // (auth, email key) as the push plan does and gets a slot from that key.
   it('provisions a legacy claude row (no workerCredential) from its email-keyed auth token', () => {
     const legacy: NativeAccountRecord = { id: 'l1', name: 'dev', agent: 'claude', identityKey: 'claude:account=b:org=o', scope: 'version', identityLabel: 'dev@getrush.ai' };
     const kimi: NativeAccountRecord = { id: 'k1', name: 'kimi', agent: 'kimi', identityKey: 'kimi:user=k', scope: 'version', identityLabel: 'k@x.io' };
@@ -436,10 +434,9 @@ describe('reconcileLocalWorkerSlots', () => {
   });
 });
 
-// End to end through the real standalone secrets store and the real slot
-// writer: a legacy row + its token in a file-backed `auth` bundle ⇒ a durable
-// slot with a 0600 `.oauth_token` and the seeded email the claude adapter keys
-// the token on at spawn. No mocks; HOME is the vitest sandbox (tests/setup.ts).
+// End to end through the real standalone store and slot writer: a legacy row plus its token in a
+// file-backed `auth` bundle yields a durable slot with a 0600 `.oauth_token` and the seeded email
+// the claude adapter keys on. No mocks; HOME is the vitest sandbox.
 describe('reconcileLocalWorkerSlots through the real auth bundle', () => {
   useFreshSecretsHome();
   const created: string[] = [];
@@ -492,11 +489,8 @@ describe('reconcileLocalWorkerSlots through the real auth bundle', () => {
   });
 });
 
-// A worker holds a slot for every current account AND stale duplicates from an
-// older account-id generation (8 per box, PHNX-4116). Each stale slot is a full
-// HOME with a live `.claude/.oauth_token`. The reconcile drops the record and
-// deletes the credential, but keeps the dir (`.claude/projects` = transcripts).
-// Real sandbox meta + real files; no mocks.
+// A worker holds slots for every current account AND stale duplicates from an older account-id
+// generation (8 per box, PHNX-4116), each a full HOME with a live `.claude/.oauth_token`.
 describe('reconcileLocalWorkerSlots drops stale slots (PHNX-4116)', () => {
   const created: string[] = [];
   function resetMeta(): void {
@@ -662,11 +656,8 @@ describe('electPublisher', () => {
   });
 
   it('syncReservedStores adopts legacy raw reserved items locally before planning and surfaces adoption errors', async () => {
-    // 1.22.84–1.22.89 wrote `__<harness>__` keys as bare file items with no
-    // bundle record, which the bundle push cannot read. The tick repairs that
-    // on the publisher first, so a key added under the old code propagates
-    // the moment the new release runs — and an adoption failure is reported
-    // against the local box instead of being swallowed.
+    // 1.22.84-1.22.89 wrote `__<harness>__` keys as bare file items with no bundle record, which
+    // the bundle push can't read.
     const root = tempStore();
     // mac-mini has replied WITH an account-rows array (present, empty) but no
     // verdict for this account, so the fail-closed no-rows skip does not apply
@@ -695,10 +686,9 @@ describe('electPublisher', () => {
   });
 });
 
-// The default `adoptLegacy` path of syncReservedStores — the dynamic import of
-// auth-mint and the real adoption against the standalone — with no stub. This
-// is the box a 1.22.84–1.22.89 `accounts add cursor` left behind: the worker key
-// sits at its item name with no bundle record. No peers, so nothing is pushed.
+// The default `adoptLegacy` path of syncReservedStores, with the dynamic import of auth-mint and
+// real adoption against the standalone, no stub: the box a 1.22.84-1.22.89 `accounts add cursor`
+// left behind (worker key at its item name, no bundle record). No peers, so nothing is pushed.
 describe('syncReservedStores adopts a legacy raw reserved item through the real standalone', () => {
   useFreshSecretsHome();
 

@@ -1,9 +1,6 @@
-/**
- * One lock for install, migration, launch, update, and policy changes.
- * Keep its target OUTSIDE the installation directory: a fresh install must
- * acquire exclusion before publishing a directory that readers can migrate.
- * Every holder agrees on the stale threshold so none breaks a live npm install.
- */
+/** One lock for install, migration, launch, update and policy changes. Its target stays outside
+ * the installation dir so a fresh install gets exclusion before publishing a dir readers can
+ * migrate. All holders share the stale threshold so none breaks a live npm install. */
 import * as path from 'node:path';
 import { ensureLockTarget, type FileLockOptions } from '../fs-atomic.js';
 import { getHistoryDir } from '../state.js';

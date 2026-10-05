@@ -15,17 +15,9 @@ import {
   type CodexParserState,
 } from '../discover.js';
 
-// RUSH-2843. scanClaudeSessionResumable / scanCodexSessionResumable are the ONE
-// place that decides incremental-vs-full reparse for a transcript, and until
-// this file existed neither was invoked by any test: they were module-private,
-// and the parity suites (incremental-parity.test.ts:283-285,
-// codex-incremental-parity.test.ts:222-253) computed the branch in the TEST
-// body — so they asserted that a full parse equals a full parse. The comment
-// there conceded it ("the resumable contract (B-2 will wire this) is: …").
-//
-// Every case below drives the real function and asserts the `mode` it returned,
-// so a wrong branch fails here instead of silently producing a session row that
-// carries another conversation's data. Real files, real fs, no mocks.
+// RUSH-2843: scanClaudeSessionResumable / scanCodexSessionResumable decide incremental vs full
+// reparse, yet no test invoked them; the parity suites computed the branch in the test body. Each
+// case drives the real function and asserts `mode`. Real files, no mocks.
 
 let dir: string;
 
@@ -121,12 +113,9 @@ describe('scanClaudeSessionResumable — the full-vs-incremental decision', () =
   });
 
   it('TRUNCATION with the identity UNCHANGED still falls back to FULL', async () => {
-    // The case above shrinks AND changes the first turn, so the identity check
-    // would force FULL on its own and the size guard is never the deciding
-    // factor — verified by mutation: deleting `currentFileSize > prior.offset`
-    // left that test green. Here the same session is rewritten shorter (its
-    // first user turn is byte-identical), so the size guard is the ONLY thing
-    // standing between a stale offset and a parse that reads past EOF.
+    // The case above also changes the first turn, so the identity check forces FULL alone
+    // (deleting `currentFileSize > prior.offset` left it green). Here the first turn is
+    // byte-identical, so the size guard alone prevents a stale offset reading past EOF.
     const fp = path.join(dir, 's.jsonl');
     const first = claudeLines('2026-06-28T00:00:00.000Z', 'kept');
     const seed = await seedClaude(fp, jsonl([...first, ...claudeLines('2026-06-28T01:00:00.000Z', 'dropped later')]));
@@ -177,15 +166,9 @@ describe('scanClaudeSessionResumable — the full-vs-incremental decision', () =
   });
 
   it('a prior continuation with no recorded identity falls back to FULL', async () => {
-    // The file must yield NO identity either. An earlier version of this test
-    // only blanked prior.timestamp and left the file with a derivable one, so
-    // the *comparison* ('2026-06-28…' === undefined -> false) returned FULL and
-    // the `prior.timestamp !== undefined` clause was never the deciding factor —
-    // deleting that clause left the test green. With BOTH sides undefined,
-    // `undefined === undefined` is TRUE, so without the clause the scan resumes
-    // from a stale offset into a different session's bytes. That is reachable on
-    // real data: claudeSessionIdentityAt returns undefined when no user or
-    // assistant event appears within its 1 MiB budget (discover.ts:4209-4212).
+    // The file must yield no identity either: with both sides undefined, `undefined === undefined`
+    // is true, so without the `prior.timestamp !== undefined` clause the scan resumes into another
+    // session's bytes. Reachable via claudeSessionIdentityAt's 1 MiB budget.
     const fp = path.join(dir, 's.jsonl');
     const anonymous = (n: number) => [{ type: 'summary', summary: `preamble ${n}`, leafUuid: `u${n}` }];
     const seed = await seedClaude(fp, jsonl(anonymous(1)));
@@ -292,11 +275,9 @@ describe('scanCodexSessionResumable — the full-vs-incremental decision', () =>
   });
 
   it('a prior continuation with no recorded rollout id falls back to FULL', async () => {
-    // Same reasoning as the Claude twin: the rollout must yield NO id either,
-    // or the id COMPARISON returns FULL and the `prior.sessionId !== undefined`
-    // clause is never load-bearing. A rollout with no session_meta line never
-    // sets state.sessionId (discover.ts:4399), so both sides are undefined and
-    // `undefined === undefined` would flip canIncrement true without the clause.
+    // Same as the Claude twin: the rollout must yield no id, or the id comparison returns FULL and
+    // the `prior.sessionId !== undefined` clause is never load-bearing. A rollout with no
+    // session_meta line leaves state.sessionId unset.
     const fp = path.join(dir, 'r.jsonl');
     const turn = (text: string) => [
       { type: 'response_item', timestamp: '2026-06-28T00:00:30.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } },

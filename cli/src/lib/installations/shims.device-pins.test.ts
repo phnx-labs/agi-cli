@@ -100,12 +100,9 @@ describe('shim resolves the MACHINE-LOCAL default pin', () => {
     expect(out).not.toContain('no default set');
   });
 
-  // Regression (PR #2482 review): an inline-empty agents map (`"agents": {}`,
-  // emitted by the config migration when a legacy doc carried `agents: {}`)
-  // followed by an isolatedAgents block must NOT leak — the old awk entered on
-  // `/^  "agents":/` and only exited on a standalone `}` line, so it scraped
-  // the isolated pin as the GLOBAL default. The shim must land on the
-  // "no default set" path and never reference the isolated version.
+  // Regression (PR #2482 review): an inline-empty `"agents": {}` map before an isolatedAgents
+  // block must not leak. The old awk exited only on a standalone `}` line, scraping the isolated
+  // pin as the global default; the shim must take the "no default set" path.
   test.skipIf(process.platform === 'win32')('an inline-empty agents map never leaks an isolatedAgents pin as the default', () => {
     const work = tmp();
     const userDir = path.join(work, '.agents');

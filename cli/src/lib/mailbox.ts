@@ -1,20 +1,6 @@
-/**
- * Agent mailbox — a file-spool that lets a message reach an already-running
- * agent mid-flight. One box per logical agent, keyed by a unique-per-launch id
- * (session UUID / teams agentId / loop runId), so boxes are disjoint and a
- * message can never reach the wrong agent (see docs / plan velvety-conjuring-popcorn).
- *
- * Layout: <root>/<mailboxId>/{inbox,processing,consumed}/<msgId>.json
- *   inbox/      pending, written by `agents message`
- *   processing/ claimed by a drain (claim-first = crash-safe)
- *   consumed/   archived after delivery (and dropped mismatches)
- *
- * A box has a SINGLE consumer — the owning agent, whose tool calls (and thus
- * hook-driven drains) are sequential. Writers may be concurrent; each enqueue
- * is atomic (temp-write + rename), so a drain never observes a partial file.
- * Delivery is at-least-once: an interrupted drain leaves the message in
- * processing/, and the next drain recovers it. Consumers dedup by `msgId`.
- */
+/** Agent mailbox: file-spool delivering messages to a running agent, one box per per-launch id:
+ * `<root>/<mailboxId>/{inbox,processing,consumed}/<msgId>.json`. Atomic enqueue, one consumer,
+ * claim-first at-least-once (interrupted drains recovered), so consumers dedup by `msgId`. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
@@ -28,11 +14,8 @@ export const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
 /** Env var that overrides {@link DEFAULT_TTL_SECONDS} with a duration like "24h" or "3600". */
 export const MAILBOX_TTL_ENV = 'AGENTS_MAILBOX_TTL';
 
-/**
- * Resolve the default mailbox TTL in seconds. Honors `AGENTS_MAILBOX_TTL`
- * (parsed by {@link parseDuration}); falls back to 24h. A malformed env value
- * fails loud instead of silently disabling expiry.
- */
+/** Default mailbox TTL in seconds: `AGENTS_MAILBOX_TTL` (via parseDuration), else 24h. A malformed
+ * value fails loud rather than disabling expiry. */
 function resolveDefaultTtlSeconds(): number {
   const raw = process.env[MAILBOX_TTL_ENV];
   if (raw == null || raw === '') return DEFAULT_TTL_SECONDS;
@@ -59,37 +42,22 @@ export interface MailboxMessage {
   expiresAt?: string;
   /** The message body. */
   text: string;
-  /**
-   * The feed block this message answers. Set by `agents message` when the
-   * target has an open block, so the drain can surface consumed/continued
-   * receipts back to the feed store.
-   */
+  /** The feed block this message answers, set by `agents message` when the target has an open
+   * block, so the drain can send receipts back to the feed store. */
   blockId?: string;
-  /**
-   * Which ASK of that block this message answers, and which claim sent it. A
-   * blockId is per SESSION and is reused by every generation of that session's
-   * questions, so without these a `consumed` receipt raised on drain cannot say
-   * WHICH question it acknowledges -- and a late one for question N would
-   * resolve question N+1 (PHNX-3999). Carried on the message so the binding
-   * survives the process that enqueued it.
-   */
+  /** Which ASK of the block this message answers, and which claim sent it. A blockId is reused by
+   * every question of a session, so without these a late `consumed` receipt for question N would
+   * resolve N+1 (PHNX-3999). */
   generation?: string;
   attempt?: string;
-  /**
-   * Drop reason when a message is archived without delivery (expired, dead box, etc.).
-   * Set by the TTL/liveness layer, not by writers.
-   */
+  /** Drop reason when archived without delivery (expired, dead box, etc.); set by the TTL/liveness
+   * layer, not by writers. */
   dropped?: string;
 }
 
-/**
- * A mailboxId must be a single, separator-free path segment. Real ids (session
- * UUID / teams agentId / loop runId) already satisfy this; rejecting anything
- * else fails loud instead of silently misrouting — a message whose id contained
- * a `/` would nest under a different dir than the `to` stamp it is matched
- * against, and would be dropped with no error. Also blocks `.`/`..` traversal
- * once `agents message` starts accepting external target ids.
- */
+/** A mailboxId must be one separator-free path segment. Reject anything else loudly: an id with `/`
+ * would nest under a different dir than its `to` stamp and be dropped silently. Also blocks
+ * `.`/`..` traversal from external target ids. */
 export function isValidMailboxId(mailboxId: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(mailboxId) && mailboxId !== '.' && mailboxId !== '..';
 }
@@ -122,20 +90,15 @@ function ensureDirs(boxDir: string): void {
 
 let seq = 0;
 
-/**
- * `<epochMs>-<seq>-<rand>` — sorts by filename in FIFO order. The per-process
- * monotonic `seq` breaks ties within the same millisecond (so a single writer's
- * order is preserved); `rand` keeps it unique across processes/hosts.
- */
+/** `<epochMs>-<seq>-<rand>`, FIFO by filename. Per-process `seq` breaks same-millisecond ties;
+ * `rand` keeps ids unique across processes and hosts. */
 function newMsgId(): string {
   const s = String(seq++).padStart(6, '0');
   return `${Date.now()}-${s}-${randomUUID().slice(0, 8)}`;
 }
 
-/**
- * Enqueue a message into `boxDir` atomically. Returns the msgId. The `to` field
- * is stamped so a drain can refuse a message that lands in the wrong box.
- */
+/** Enqueues a message into `boxDir` atomically and returns the msgId. `to` is stamped so a drain
+ * can refuse a message in the wrong box. */
 export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string; blockId?: string; generation?: string; attempt?: string; ttlSeconds?: number }): string {
   assertValidMailboxId(msg.to);
   ensureDirs(boxDir);
@@ -216,13 +179,8 @@ function archiveDropped(boxDir: string, name: string, reason: string): void {
   }
 }
 
-/**
- * Move expired messages from inbox/ and processing/ into consumed/ with a
- * `dropped: expired` marker. Called by drain/peek before returning messages.
- *
- * When a dropped message carries a `blockId`, a failure receipt is surfaced
- * back to the feed store so the sender sees the bounce.
- */
+/** Moves expired messages from inbox/ and processing/ to consumed/ marked `dropped: expired`. When
+ * one has a `blockId`, a failure receipt goes to the feed store so the sender sees the bounce. */
 export function sweepExpired(
   boxDir: string,
   boxId: string = path.basename(boxDir),
@@ -273,15 +231,9 @@ function jsonFiles(dir: string): string[] {
   return names.filter((n) => n.endsWith('.json')).sort();
 }
 
-/**
- * Consume a file already sitting in `processing/`: read, verify it is addressed
- * to this box, then archive to `consumed/`. Returns the message iff valid AND
- * addressed here; a mismatched/corrupt file is archived (dropped) so it never
- * loops. Returns null when the file vanished (a racing drain took it).
- *
- * When the message carries a `blockId`, the consumed event is surfaced back to
- * the feed store so the operator can see delivery confirmation.
- */
+/** Consumes a file already in `processing/`: verifies it is addressed to this box, then archives to
+ * `consumed/`. Mismatched or corrupt files are archived (dropped) so they never loop; null when a
+ * racing drain took it. A `blockId` surfaces the consumed event to the feed store. */
 function consumeClaimed(boxDir: string, name: string, expectedTo: string): MailboxMessage | null {
   const src = path.join(processingDir(boxDir), name);
   const dest = path.join(consumedDir(boxDir), name);
@@ -308,14 +260,9 @@ function consumeClaimed(boxDir: string, name: string, expectedTo: string): Mailb
   return msg;
 }
 
-/**
- * Drain the box: return every pending message addressed to it, in FIFO order,
- * removing them from the queue. Claim-first (inbox → processing → consumed) so
- * an interrupted drain is recovered on the next call (at-least-once). Corrupt
- * files and messages addressed to a different box are dropped, not returned.
- *
- * `boxId` defaults to the box's directory name — the id it was created under.
- */
+/** Drains the box: returns pending messages in FIFO order, claim-first (inbox, processing,
+ * consumed) so an interrupted drain is recovered next call (at-least-once). Corrupt or
+ * misaddressed files are dropped. `boxId` defaults to the directory name. */
 export function drain(boxDir: string, boxId: string = path.basename(boxDir), now: Date = new Date()): MailboxMessage[] {
   ensureDirs(boxDir);
   sweepExpired(boxDir, boxId, now);
@@ -389,10 +336,8 @@ export interface CommsMsg {
   box: string;
 }
 
-/**
- * Enumerate the box ids under `root` (directory names that are valid mailbox
- * ids). Read-only; does not create the root. Sorted for stable output.
- */
+/** Lists box ids under `root` (valid mailbox-id directory names), sorted. Read-only; does not
+ * create the root. */
 export function listBoxes(root: string = getMailboxRootDir()): string[] {
   let names: string[];
   try {
@@ -403,13 +348,9 @@ export function listBoxes(root: string = getMailboxRootDir()): string[] {
   return names.filter((n) => isValidMailboxId(n) && fs.statSync(path.join(root, n)).isDirectory()).sort();
 }
 
-/**
- * Read every message in a box across all three buckets (inbox, processing,
- * consumed) WITHOUT consuming, sweeping, or archiving anything. Unlike `peek`,
- * this includes `consumed/` — the delivered history — so callers can surface a
- * communication log. Each row is tagged with its bucket. Sorted FIFO by msgId
- * (which is time-sortable), oldest first.
- */
+/** Reads every message across inbox, processing and consumed WITHOUT consuming, sweeping or
+ * archiving, unlike `peek`, so callers can show a communication log. Rows are tagged with their
+ * bucket, oldest first by msgId. */
 export function readBox(boxDir: string): StoredMessage[] {
   const out: StoredMessage[] = [];
   const buckets: [string, MailboxState][] = [
@@ -427,11 +368,8 @@ export function readBox(boxDir: string): StoredMessage[] {
   return out;
 }
 
-/**
- * Poll the complete spool and yield each message once when its box/msgId pair
- * first appears. Existing messages establish the initial baseline unless
- * `backfill` is requested; moving a message between buckets does not re-emit it.
- */
+/** Polls the whole spool and yields each message once when its box/msgId pair first appears.
+ * Existing messages are the baseline unless `backfill`; moving between buckets does not re-emit. */
 export async function* watchMessages(
   root: string,
   opts: { signal?: AbortSignal; intervalMs?: number; backfill?: boolean },

@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# One-shot: create the npmjs.com secrets bundle and cut the release.
-#
-# Workaround: the bundled keychain helper at
-# ~/Library/Application Support/agents-cli/Agents CLI.app is failing writes
-# with OSStatus -34018 on this machine (macOS 26.4). Reads still work, so we
-# write the bundle items directly via the `security` CLI in the schema
-# agents-cli expects, then let the helper read them as usual.
+# One-shot: create the npmjs.com secrets bundle and cut the release. Workaround: the bundled
+# keychain helper fails writes with OSStatus -34018 (macOS 26.4) while reads still work, so write
+# the items directly via `security` in the schema agents-cli expects.
 
 set -euo pipefail
 

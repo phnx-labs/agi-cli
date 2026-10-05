@@ -19,34 +19,22 @@ import { recordRunAuthOutcome } from './auth-health.js';
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
 
-// The private subcommand this feature runs. It is only ever invoked internally,
-// so ANY command that contains it — under any binary name or path (`agents`,
-// `agents-dev`, `ag`, an absolute path, a wrapper) — IS this status-line
-// producer, and delegating to it recurses without bound. Match the subcommand,
-// not the exact `agents __claude-statusline` string, or a delegate seeded with a
-// differently-named binary (e.g. `agents-dev __claude-statusline`) fork-bombs the
-// machine: each render spawns a copy that reads the same delegate and spawns
-// another, forever.
+// Match the private `__claude-statusline` subcommand, not the exact `agents ...` string: any
+// binary name or path delegating to it recurses without bound (e.g. `agents-dev` fork-bombed the
+// machine).
 const STATUSLINE_SUBCOMMAND = '__claude-statusline';
 
-// Set on the child env before spawning a delegate. If it is already present we
-// are ourselves running as someone's delegate, so we refuse to delegate again —
-// a hard depth-1 backstop that bounds the blast radius even if a self-reference
-// somehow slips past isStatusLineSelfReference(). One hop is the contract:
-// installClaudeStatusLine only ever preserves a single prior command.
+// Set on the child env when spawning a delegate; if present we refuse to delegate again, a depth-1
+// backstop if a self-reference slips past isStatusLineSelfReference().
 const DELEGATE_GUARD_ENV = 'AGENTS_CLAUDE_STATUSLINE_DELEGATED';
 
 // A hung or slow delegate must never pin a status-line render open — the render
 // is re-invoked on every refresh, so an unbounded delegate accumulates processes.
 const DELEGATE_TIMEOUT_MS = 5_000;
 
-/**
- * True when `command` re-invokes THIS status-line producer (our private
- * `__claude-statusline` subcommand) under any binary name or path. Delegating to
- * such a command is the fork bomb, so both the read side (renderDelegate) and the
- * write side (installClaudeStatusLine) treat it as "not a real external
- * producer" and never chain to it.
- */
+/** True when `command` re-invokes this status-line producer under any binary name or path. Both
+ * read and write sides treat it as not a real external producer, since delegating to it is the
+ * fork bomb. */
 export function isStatusLineSelfReference(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
@@ -125,42 +113,25 @@ export function ingestClaudeStatusLineUsage(
   return true;
 }
 
-/**
- * Where the running Claude keeps the config this render attributes to: the version
- * home when the launch shim set CLAUDE_CONFIG_DIR, otherwise the real HOME — the
- * same resolution Claude Code applies, so a Claude launched without the shim (IDE
- * extension, direct binary) still shows the account it is actually signed into.
- */
+/** Where the running Claude keeps its config: the version home if the shim set CLAUDE_CONFIG_DIR,
+ * else the real HOME, matching Claude Code's own resolution. */
 export function claudeHomeFromEnv(env: NodeJS.ProcessEnv): string {
   return versionHomeFromEnv(env) ?? os.homedir();
 }
 
-/**
- * The identity of the running Claude, read ONCE per render from the `.claude.json`
- * of the home it is actually running with: it keys the usage ingest above and
- * names the account part below. Null when the home has never signed in. Sync and
- * file-only on purpose — this runs on every status-line refresh.
- */
+/** Identity of the running Claude, read once per render from its home's `.claude.json`; null if
+ * never signed in. Sync and file-only because it runs on every refresh. */
 export function readClaudeIdentity(claudeHome: string): ClaudeHomeIdentity | null {
   return readClaudeHomeConfig(claudeHome)?.identity ?? null;
 }
 
-/**
- * The registered native account for the running Claude's identity (`agents
- * accounts` — `work`, `dev`, …), or null when that login is unnamed.
- */
+/** The registered native account (`agents accounts`) for the running Claude, or null if unnamed. */
 export function resolveNativeAccount(identity: ClaudeHomeIdentity | null): NativeAccount | null {
   return identity ? findNativeAccountByIdentity(readMeta(), 'claude', identity) : null;
 }
 
-/**
- * Format the signed-in account as a statusline part ('' when never signed in).
- * A named login renders its registered NAME — the short handle the owner chose
- * (`work`, `dev`), which is what tells eight same-harness logins apart at a
- * glance. An unnamed login renders the label every other account-aware surface
- * (`agents view`, `agents accounts`) uses: the email, plus the org name for a
- * multi-seat Team/Enterprise seat.
- */
+/** Format the signed-in account as a statusline part ('' if never signed in): a named login shows
+ * its registered name; an unnamed one shows the email plus org name for Team/Enterprise seats. */
 export function formatAccountPart(
   identity: ClaudeHomeIdentity | null,
   account: NativeAccount | null,
@@ -190,11 +161,7 @@ export function renderDelegate(payload: string, versionHome: string): string {
   return result.status === 0 ? result.stdout.trim() : '';
 }
 
-/**
- * Format a reminder as a dimmed statusline part (empty string when none). The
- * ◆ marker distinguishes it from the host/model/usage parts, and the ANSI dim
- * keeps it quiet next to the live figures.
- */
+/** Format a reminder as a dimmed statusline part (empty when none); a diamond marks it. */
 export function formatReminderPart(short: string | undefined): string {
   const text = short?.trim();
   return text ? `\x1b[2m◆ ${text}\x1b[22m` : '';
@@ -222,11 +189,8 @@ export function renderClaudeStatusLine(
   return parts.join(' · ');
 }
 
-/**
- * Resolve the per-session reminder for the statusline, or '' when none is
- * configured. A malformed reminders file is swallowed here on purpose — a broken
- * prompt is worse than a missing reminder — while `agents reminders` surfaces it.
- */
+/** Resolve the per-session reminder, or ''. A malformed reminders file is swallowed on purpose (a
+ * broken prompt is worse than none); `agents reminders` surfaces it. */
 export function resolveReminderPart(sessionId?: string): string {
   try {
     return formatReminderPart(pickReminderForSession(loadReminders(), sessionId)?.short);

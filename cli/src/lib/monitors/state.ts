@@ -1,15 +1,6 @@
-/**
- * Native per-monitor state-diff store.
- *
- * This is the one genuinely new primitive monitors add over routines: a
- * last-observed-*value* store. Routines persist per-*run* metadata but have no
- * last-seen value, so hand-built watchers (the RUSH-1107 SSL watcher) re-invented
- * state-diffing through a markdown memory file every time. This store kills that.
- *
- * Layout (sibling of the runs layout, atomic writes like writeRunMeta):
- *   ~/.agents/.history/monitors/<name>/state.json      # last-seen hash/value + fire bookkeeping
- *   ~/.agents/.history/monitors/<name>/fires/<id>/…    # fire history
- */
+/** Native per-monitor state-diff store: monitors' one new primitive over routines, a
+ * last-observed-VALUE store. Layout under `~/.agents/.history/monitors/<name>/`: `state.json`
+ * (hash/value, fire bookkeeping) and `fires/<id>/`; atomic writes. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -37,18 +28,9 @@ interface MonitorState {
 
 const MAX_STORED_VALUE = 4096;
 
-/**
- * Per-monitor liveness heartbeat, recorded on EVERY poll — fire or not, match or
- * not. This is deliberately a separate record from MonitorState: change-detection
- * state (lastHash/lastValue) is written only when a monitor fires or establishes
- * a baseline, so a monitor that polls steadily but never matches leaves no
- * change-detection trace. Without a heartbeat, `view` on such a monitor showed
- * `state: null` — indistinguishable from a monitor the engine never touched, the
- * exact confusion RUSH-2485 reports. The heartbeat makes "never checked" (no
- * record) visibly distinct from "checked N times, not matching" (recent record,
- * zero fires). Kept in its own file so it can never perturb the baseline logic in
- * decideFire/hasChanged.
- */
+/** Per-monitor liveness heartbeat, recorded on EVERY poll. Separate from MonitorState (written only
+ * on a fire or baseline) so a monitor that polls but never matches isn't `state: null`, like one
+ * never touched (RUSH-2485). Its own file, so it can't perturb decideFire. */
 export interface MonitorLiveness {
   monitorName: string;
   /** RFC3339 timestamp of the last poll attempt. */
@@ -103,10 +85,8 @@ function writeStateRaw(state: MonitorState): void {
   fs.renameSync(tmp, statePath);
 }
 
-/**
- * Record a new observation as the monitor's last-seen state, preserving fire
- * bookkeeping. Truncates the stored raw value so a firehose can't bloat disk.
- */
+/** Records a new observation as the monitor's last-seen state, preserving fire bookkeeping.
+ * Truncates the stored raw value so a firehose can't bloat disk. */
 export function writeState(
   name: string,
   value: string,
@@ -127,12 +107,9 @@ export function writeState(
   return state;
 }
 
-/**
- * The de-dupe signature for an observation. When `dedupeKey` is set, the
- * signature is the first regex match of dedupeKey against the observation (so
- * "the same event" is same matched token); otherwise it is the full observation.
- * An unmatched dedupeKey falls back to the full observation.
- */
+/** The de-dupe signature for an observation: the first regex match of `dedupeKey` against it (so
+ * "the same event" is the same matched token), else the full observation. An unmatched dedupeKey
+ * falls back to the full observation. */
 export function dedupeSignature(observation: string, dedupeKey?: string): string {
   if (!dedupeKey) return observation;
   try {
@@ -148,11 +125,8 @@ function hashSignature(observation: string, dedupeKey?: string): string {
   return createHash('sha256').update(dedupeSignature(observation, dedupeKey)).digest('hex');
 }
 
-/**
- * True when `observation`'s de-dupe signature differs from the monitor's
- * last-seen signature (or the monitor has never been observed). Pure read — the
- * caller persists the new value via writeState only on a real fire.
- */
+/** True when the observation's de-dupe signature differs from the last-seen one (or the monitor was
+ * never observed). Pure read; the caller persists via writeState only on a real fire. */
 export function hasChanged(name: string, observation: string, dedupeKey?: string): boolean {
   const prev = readState(name);
   if (!prev) return true;
@@ -170,15 +144,9 @@ export function readLiveness(name: string): MonitorLiveness | null {
   }
 }
 
-/**
- * Record one poll attempt as the monitor's liveness heartbeat — the single call
- * the engine makes on every evaluation, regardless of fire/match. A successful
- * observation clears `lastError`/`consecutiveErrors` and any drought flag; a
- * failed one (source threw or produced nothing) records the error and increments
- * the consecutive-failure counter the drought escalation reads. Written
- * atomically (temp + rename) like writeStateRaw, and never touches state.json, so
- * change-detection is untouched.
- */
+/** Records one poll attempt as the liveness heartbeat, the engine's single per-evaluation call.
+ * Success clears `lastError`/`consecutiveErrors` and the drought flag; failure records the error
+ * and bumps the counter drought escalation reads. Atomic; never touches state.json. */
 export function recordCheck(
   name: string,
   checkedAt: string,
@@ -216,10 +184,8 @@ export function markDroughtNotified(name: string, at: string): void {
   fs.renameSync(tmp, livenessPath);
 }
 
-/**
- * Append a fire timestamp and return the pruned window (fires within `windowMs`).
- * The engine uses the returned length to decide whether the rate limit tripped.
- */
+/** Appends a fire timestamp and returns the pruned window (fires within `windowMs`); the engine
+ * uses its length to decide whether the rate limit tripped. */
 export function recordFireTime(name: string, now: number, windowMs: number): number[] {
   const prev = readState(name);
   const times = [...(prev?.fireTimes ?? []), now].filter((t) => now - t <= windowMs);
@@ -249,25 +215,12 @@ interface FireRecord extends MonitorEvent {
   action?: string;
   ok?: boolean;
   error?: string;
-  /**
-   * The dispatched run's status AT FIRE TIME, best-effort (RUSH-2690).
-   * `dispatchAction` (lib/monitors/dispatch.ts) only sees a synchronous
-   * snapshot: `executeJobDetached` writes `status: 'running'` before spawning
-   * and returns immediately — the real outcome (`completed`/`failed`/`timeout`)
-   * lands later, asynchronously, in `executeJobDetachedClaimed`'s own
-   * `settle()` on child exit/error (lib/daemon/runner.ts). So a fire recorded
-   * `runStatusAtFire: 'running'` had its `ok` frozen before the run actually
-   * finished — that is the signal a future reconciliation pass (a daemon tick
-   * that revisits `running`-at-fire records and patches `ok` for real) would
-   * scan for. Never used to gate `ok` itself; `resolveFireOutcome` re-reads the
-   * run fresh on every call instead of trusting this snapshot.
-   */
+  /** The dispatched run's status AT FIRE TIME, best-effort (RUSH-2690). `executeJobDetached` writes
+   * 'running' and returns at once; the real outcome lands later in `settle()`, so `ok` was frozen
+   * early. Marks fires to revisit; never gates `ok` (`resolveFireOutcome` re-reads the run). */
   runStatusAtFire?: RunMeta['status'];
-  /**
-   * The action's postcondition command, snapshotted at fire time with `{event}`
-   * already interpolated (PHNX-2842). `resolveFireOutcome` runs this once the
-   * dispatched run has settled `completed`.
-   */
+  /** The action's postcondition command, snapshotted at fire time with `{event}` interpolated
+   * (PHNX-2842). `resolveFireOutcome` runs it once the run has settled `completed`. */
   postcondition?: string;
   /** Result of the postcondition check, persisted after the first evaluation. */
   postconditionOk?: boolean;
@@ -306,21 +259,16 @@ interface ReconciledFireOutcome {
   ok: boolean;
   /** The run's live terminal status, when a runId is present and resolvable. */
   runStatus?: RunMeta['status'];
-  /**
-   * Present when a `completed` run had a postcondition to assert (PHNX-2842).
-   * `met` = the command exited 0; `none` = ran but the intended effect did not
-   * happen (the fire must not read as `ok`).
-   */
+  /** Present when a `completed` run had a postcondition (PHNX-2842): `met` = exited 0; `none` = ran
+   * but the intended effect didn't happen (must not read as `ok`). */
   effect?: 'met' | 'none';
   /** Why the fire is not ok, when the postcondition failed. */
   error?: string;
 }
 
-/**
- * Run a fire's postcondition command. Exit 0 means the intended effect happened;
- * anything else (nonzero, timeout, spawn error, empty command) is "no effect".
- * Real `/bin/sh -c` (or `cmd /c`) — the same seam command sources use.
- */
+/** Runs a fire's postcondition command: exit 0 means the effect happened; anything else (nonzero,
+ * timeout, spawn error, empty command) is "no effect". Real `/bin/sh -c` (`cmd /c`), as command
+ * sources use. */
 export function evaluatePostcondition(command: string): { ok: boolean; error?: string } {
   const trimmed = command.trim();
   if (!trimmed) return { ok: false, error: 'postcondition not met: empty command' };
@@ -359,34 +307,9 @@ function persistPostcondition(fire: FireRecord, result: { ok: boolean; error?: s
   });
 }
 
-/**
- * Reconcile a fire's frozen `ok` against its dispatched run's REAL, current
- * status — the render-time fix for RUSH-2690 — and, when the run has settled
- * `completed`, against a declared postcondition (PHNX-2842).
- *
- * `writeFireRecord` (this module) persists `ok` once, at fire time, from
- * `dispatchAction`'s synchronous return. For a `run`/`routine` action that
- * return is a snapshot: `executeJobDetached` writes `status: 'running'` before
- * spawning and hands that back immediately, so `dispatchAction`'s negative
- * check (`skipped`/`blocked`/`failed`) never sees the async outcome that lands
- * later via `settle()` — a run that goes on to fail, time out, or otherwise
- * never produce output still reads `ok: true` in `agents monitors runs`
- * forever, while `agents monitors logs` (which reads the run record fresh)
- * shows the real status. Re-reading the run here, at DISPLAY time, closes that
- * gap without touching the write path or the frozen historical record on disk.
- *
- * A fire with no `runId` (a `notify`/`webhook-out` action, or a `run`/`routine`
- * dispatch that never got a runId at all) has nothing to reconcile against —
- * its frozen `ok` is the only signal and is returned as-is.
- *
- * `completed` is not success by itself. An agent that exits 0 without doing
- * the job (merge-on-green that never merged) used to record `ok` because
- * `OK_RUN_STATUSES` treated `completed` as healthy. When the fire carries a
- * `postcondition` command, this function runs it once the run has settled and
- * returns `ok: false, effect: 'none'` when it fails — distinguishing "ran but
- * no effect" from a working fire. The result is persisted on the fire record
- * so later listings do not re-exec the command.
- */
+/** Reconciles a fire's frozen `ok` against the run's REAL current status (RUSH-2690) and, for
+ * `completed` runs, a declared postcondition (PHNX-2842), at DISPLAY time, leaving the write path
+ * alone. A failing postcondition gives `ok: false, effect: 'none'`. No `runId`: frozen `ok`. */
 export function resolveFireOutcome(jobName: string, fire: FireRecord): ReconciledFireOutcome {
   if (!fire.runId) return { ok: fire.ok !== false };
   const run = readRunMeta(jobName, fire.runId);

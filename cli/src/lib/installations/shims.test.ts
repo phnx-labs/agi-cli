@@ -90,11 +90,9 @@ describe('generateVersionedAliasScript', () => {
   });
 
   it('anchors every agents-owned path on the real home and takes the launch lease before any HOME swap', () => {
-    // A slot launch (PHNX-3940 T5) hands the alias HOME=<slot dir> with the real
-    // home in AGENTS_REAL_HOME. Anchoring on $HOME made `agents run cursor#gmail`
-    // on a worker answer "cursor@main not installed", and — with cursor's own
-    // HOME swap ahead of the lease call — `agents __launch-lease` fail with
-    // "No installation directory for cursor@main" (yosemite-m0, 2026-09-07).
+    // A slot launch (PHNX-3940 T5) hands the alias HOME=<slot dir> with the real home in
+    // AGENTS_REAL_HOME. Anchoring on $HOME made `agents run cursor#gmail` answer "cursor@main not
+    // installed" and `__launch-lease` fail (yosemite-m0, 2026-09-07).
     const script = generateVersionedAliasScript('cursor', 'main');
     expect(script).toContain('export AGENTS_REAL_HOME="${AGENTS_REAL_HOME:-$HOME}"');
     expect(script).toContain('BINARY="$AGENTS_REAL_HOME/.agents/.history/versions/cursor/main/node_modules/.bin/cursor-agent"');
@@ -111,11 +109,9 @@ describe('generateVersionedAliasScript', () => {
   });
 
   it('yields the claude config-dir pin to an account-slot launch and consumes the marker', () => {
-    // A slot launch (PHNX-3940 T5) pins CLAUDE_CONFIG_DIR to the slot in
-    // buildExecEnv and stamps the slot in AGENTS_EXEC_HOME; the alias used to
-    // re-export the version home unconditionally, so on yosemite-m1 (2026-09-10)
-    // a run picked as one account onboarded from scratch and wrote its history
-    // into the shared version home. The block below is the generated one, run for real.
+    // A slot launch (PHNX-3940 T5) pins CLAUDE_CONFIG_DIR to the slot, but the alias re-exported
+    // the version home unconditionally, so a run picked as one account onboarded from scratch and
+    // wrote history into the shared home (yosemite-m1, 2026-09-10).
     const script = generateVersionedAliasScript('claude', '2.1.196');
     const start = script.indexOf('# Claude stores OAuth credentials');
     const end = script.indexOf('# Managed installs are pinned', start);
@@ -228,13 +224,9 @@ describe('generateVersionedAliasScript', () => {
 });
 
 describe('grok binary resolution order', () => {
-  // Grok ships a native binary (not an npm package). It lands in the versioned
-  // home's .grok/downloads when the installer runs with GROK_HOME set (via the
-  // shim, a correct `agents add grok`, or a grok self-update under the shim).
-  // Both generated shims must check the versioned home FIRST, then fall back to
-  // the global ~/.grok/downloads for pre-fix installs. The pre-fix bug checked
-  // only the global dir, so a pinned grok that installed into the versioned home
-  // failed with "grok@<version> not installed".
+  // Grok's native binary lands in the versioned home's .grok/downloads when installed with
+  // GROK_HOME set. Both shims must check the versioned home first, then the global
+  // ~/.grok/downloads; checking only the global dir made a pinned grok fail "not installed".
 
   it('checks the versioned home before the global ~/.grok/downloads in the dispatcher shim', () => {
     const script = generateShimScript('grok');
@@ -351,13 +343,9 @@ describe('grok binary resolution order', () => {
   });
 
   it('never execs a stray non-binary artifact that sorts before the real self-updated binary (RUSH-2459)', () => {
-    // Reproduces the exact bug on yosemite-s0: version-home "0.2.82" held a
-    // real self-updated grok-1.0.0-linux-aarch64 PLUS a stale, unrelated
-    // 99-byte grok-0.2.118-linux-aarch64 wrapper script that exec'd
-    // cursor-agent — no filename carries the pinned version "0.2.82", so the
-    // dispatcher's fallback used to pick whichever `ls` sorted first, which
-    // was the tiny wrapper. It must now reject anything under the size floor
-    // and pick the real (padded-to-realistic-size) binary instead.
+    // Reproduces the yosemite-s0 bug: version-home 0.2.82 held a real grok-1.0.0 plus a stale
+    // 99-byte grok-0.2.118 wrapper that exec'd cursor-agent. With no filename carrying the pin, the
+    // fallback picked the wrapper; it must reject files under the size floor.
     const dir = makeTempDir();
     const home = path.join(dir, 'home');
     const project = path.join(dir, 'project');
@@ -617,10 +605,8 @@ describe('shimTargetsFor (drop the vestigial bash shim on Windows)', () => {
 
 describe('onDiskShimFile (exists/remove must match what createShim writes)', () => {
   // Regression guard: createShim writes only `<cmd>.cmd` on Windows, so
-  // shimExists/removeShim/readShimSchemaVersion must stat the SAME file. Deriving
-  // this from shimTargetsFor makes the two sides impossible to drift apart — the
-  // bug where the write side skipped the bare file but the check side still
-  // looked for it (orphaned .cmd on remove, regenerate-every-launch).
+  // shimExists/removeShim/readShimSchemaVersion must stat the same file. Deriving it from
+  // shimTargetsFor stops the two sides drifting (orphaned .cmd on remove, regenerate-every-launch).
   it('returns the .cmd companion on Windows', () => {
     expect(onDiskShimFile('claude', 'win32')).toBe('claude.cmd');
   });

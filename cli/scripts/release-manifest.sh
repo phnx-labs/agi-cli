@@ -53,10 +53,8 @@ usage() {
   exit 2
 }
 
-# The computer helpers (computer-mac / computer-win) left this repo with the
-# standalone `computer` engine (PHNX-4075): that engine resolves and verifies its
-# own helper releases, so they are no longer helpers of THIS CLI and must not be
-# recorded in its manifest.
+# The computer helpers left with the standalone `computer` engine (PHNX-4075), which verifies its
+# own releases, so they must not be recorded in this manifest.
 KNOWN_HELPERS="menubar"
 
 CMD="${1:-}"
@@ -119,21 +117,16 @@ helper_paths() {
   local root="$1" name="$2"
   case "$name" in
     menubar)
-      # No source here (phnx-labs/agi-menu). The input that selects the published
-      # build is the floor table; a floor bump is the only thing that changes
-      # which MenubarHelper.app.zip the CLI installs, and it re-records from that
-      # published release -- never a rebuild.
+      # No source here (phnx-labs/agi-menu): the floor table selects the published build, and a
+      # floor bump re-records from that release, never a rebuild.
       printf '%s\n' "$root/cli/src/lib/helper-versions.ts"
       ;;
   esac
 }
 
-# Hashes $path (a file or a directory tree) with each entry keyed by its path
-# RELATIVE to $root, never the absolute path. input_digest_of's digest is
-# recorded once (by the producer) and re-verified elsewhere (require_helpers,
-# on a different machine or a differently-pid-suffixed worktree) -- an
-# absolute path bakes in that machine/worktree's on-disk location, so the
-# recorded digest can never match a re-derivation anywhere else (RUSH-2766).
+# Hashes $path with each entry keyed by its path relative to $root. The digest is recorded by the
+# producer and re-verified elsewhere, so an absolute path could never match a re-derivation
+# (RUSH-2766).
 hash_tree() {
   local root="$1" path="$2" out="" f rel
   if [[ -f "$path" ]]; then
@@ -206,10 +199,9 @@ put_helper() {
   fi
   local plat
   plat="${PLATFORM:-darwin}"
-  # Provenance of a helper published from another repo (menubar-source.txt on
-  # the release: repo/commit/tag/version). Optional -- releases cut before the
-  # sidecar existed have none -- but when given it must be a JSON object, so a
-  # reader never has to guess the shape.
+  # Provenance of a helper published from another repo (menubar-source.txt:
+  # repo/commit/tag/version). Optional for older releases, but when given it must be a JSON
+  # object.
   local source
   source="${SOURCE_JSON:-null}"
   jq -e 'type == "object" or . == null' <<<"$source" >/dev/null 2>&1 \

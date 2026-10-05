@@ -1,13 +1,6 @@
-/**
- * Leaked-daemon detection (W4, PHNX-3736) — against REAL daemon-shaped
- * processes, no mocks. A stand-in child (`node -e … __daemon-run`) is exactly
- * what the box-wide `ps` scan matches for a real daemon, and each test owns
- * its child's death.
- *
- * The suite runs under a redirected HOME (tests/setup.ts), so the pid-file
- * ownership record these tests write lands in the fork-private sandbox, never
- * in the developer's real daemon dir.
- */
+/** Leaked-daemon detection (W4, PHNX-3736) against REAL daemon-shaped processes, no mocks: a
+ * stand-in `node -e ... __daemon-run` child is what the box-wide `ps` scan matches. The suite runs
+ * under a redirected HOME, so records land in a fork-private sandbox. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -42,12 +35,9 @@ describe.skipIf(process.platform === 'win32')('findLeakedDaemons (W4, PHNX-3736)
   const children: ChildProcess[] = [];
 
   it('getDaemonDirForHome answers the same address state.ts’s DAEMON_DIR layout does (drift guard)', () => {
-    // The helper duplicates state.ts's layout because state.ts cannot be
-    // edited without blowing the required impact gate's budget (see the
-    // helper's comment). If state.ts's DAEMON_DIR chain ever moves, this
-    // fails here instead of silently un-owning the production daemon. The
-    // suite redirects HOME and deliberately never sets AGENTS_DAEMON_DIR
-    // (tests/setup.ts:131), so both sides resolve the same sandbox address.
+    // The helper duplicates state.ts's layout because editing state.ts would blow the required
+    // impact check's budget. If state.ts's DAEMON_DIR chain moves, this fails instead of silently
+    // un-owning the production daemon (tests/setup.ts:131).
     expect(getDaemonDirForHome(process.env.HOME!)).toBe(getDaemonDir());
   });
 
@@ -100,13 +90,9 @@ describe.skipIf(process.platform === 'win32')('findLeakedDaemons (W4, PHNX-3736)
   });
 
   it('never flags the daemon the REAL account home’s records name (RUSH-2368 through a new door)', () => {
-    // The suite itself runs under a redirected HOME, so this test IS the
-    // redirected-HOME caller: the ownership check must reach the real account
-    // home's records (getDaemonDirForHome(os.userInfo().homedir)) and exclude
-    // whatever they name. On a box with a live production daemon this is the
-    // exact assertion that keeps `agents doctor` from printing
-    // `kill <production-daemon-pid>`; on a box with no recorded daemon there
-    // is nothing to assert.
+    // The suite runs under a redirected HOME, so this test is the redirected-HOME caller: the
+    // ownership check must reach the real account home's records and exclude what they name. It
+    // keeps `agents doctor` from printing `kill <production-daemon-pid>`.
     const realPid = readDaemonPid(getDaemonDirForHome(os.userInfo().homedir));
     if (!realPid) return;
     expect(findLeakedDaemons().some((d) => d.pid === realPid)).toBe(false);

@@ -1,17 +1,6 @@
-/**
- * `agents sessions focus [id]` — take me to a live session, however it's reachable.
- *
- * Same detection as `go`, but where `go` *refuses* an un-attachable session,
- * `focus` **opens a new tab and resumes it** — locally, or on the remote over SSH
- * (via the terminal launch engine's `openSurfaces`, `host` = the peer). So:
- *   - in tmux (local/remote)   -> attach the live pane (join it, no fork)
- *   - in Ghostty               -> focus its tab
- *   - headless / plain / etc.  -> new tab + `resume` (a copy if it's mid-run — the
- *                                  original keeps going; a clean continue if it's idle)
- *
- * NOTE: joining a live process without forking is only possible via tmux — that's
- * why `--tmux`-wrapped launches are worth it for sessions you'll want back live.
- */
+/** `agents sessions focus [id]` takes you to a live session: attaches a live tmux pane, focuses a
+ * Ghostty tab, or otherwise opens a new tab and resumes (a copy if mid-run). Only tmux can join a
+ * live process without forking. */
 
 import type { Command } from 'commander';
 import fs from 'node:fs';
@@ -57,18 +46,9 @@ import { setHelpSections } from '../lib/help.js';
 
 /** Options for `sessions focus` — device scope + the `--active` live-state filters. */
 interface FocusOptions {
-  /**
-   * Resolve the target from the launcher's AGENT_LAUNCH_ID instead of a session
-   * id (RUSH-3125).
-   *
-   * A `--device` launcher mints this id BEFORE it opens the connection and
-   * forwards it, so it is the one handle that is still known after the link
-   * dies. A session id is not: only Claude is handed one up front, and every
-   * other harness's real id had to be read back off the peer — over the very
-   * link that just dropped — which is why a blink left a Grok or Codex tab with
-   * nothing to reconnect to. The lookup runs HERE, on the box that owns the hook
-   * records, so it needs no network at the moment it is needed most.
-   */
+  /** Resolve the target from the launcher's AGENT_LAUNCH_ID instead of a session id (RUSH-3125).
+   * The id is minted before the connection opens, so it survives a dropped link; the lookup runs
+   * locally against the hook records. */
   launchId?: string;
   local?: boolean;
   attachOnly?: boolean;
@@ -151,11 +131,9 @@ function statusWord(status: LiveStatusFilter): string {
 
 export function registerFocusCommand(program: Command): void {
   const cmd = program
-    // Hidden, but deliberately NOT warned. `sessions resume <id>` dispatches by
-    // spawning `agents sessions focus <id>` (buildSessionLifecycleArgs), so a
-    // deprecation notice here would print on every ordinary resume. focus is now
-    // the internal lifecycle dispatcher; `resume` is the surface. Do not add a
-    // console.warn here without first removing that delegation.
+    // Hidden but deliberately not warned: `sessions resume <id>` spawns `agents sessions focus
+    // <id>` (buildSessionLifecycleArgs), so a deprecation notice would print on every resume. Do
+    // not add a warning without removing that delegation.
     .command('focus', { hidden: true })
     .argument('[selector]', 'Session id/prefix, agent@version, or topic/path search')
     .option('--launch-id <id>', 'Target the run by its launcher AGENT_LAUNCH_ID instead of a session id (resolved from this machine\'s hook records)')
@@ -235,40 +213,30 @@ export function registerFocusCommand(program: Command): void {
   });
 }
 
-/**
- * Which fallback fires when a session has no attach rail. `--attach-only` (the old
- * `go`) refuses; the default opens a new tab and resumes a copy. Pure so it's testable
- * without touching `jumpTo`'s side effects.
- */
+/** Which fallback fires when a session has no attach rail: `--attach-only` refuses; the default
+ * opens a new tab and resumes a copy. Pure so it is testable without `jumpTo`'s side effects. */
 export function selectFallback(attachOnly: boolean | undefined): UnreachableFallback {
   return attachOnly ? refuseFallback : resumeInNewTab;
 }
 
 export async function focusAction(id: string | undefined, opts: FocusOptions): Promise<void> {
-  // RUSH-3125: `--launch-id` names the run by the handle its launcher minted,
-  // and this box holds the hook record that maps it to the real session id — a
-  // local read, so it still works when the network that started the run is gone.
-  // Resolved up front into the ordinary id path: everything below, including the
-  // attach-else-resume recovery, is identical once we know which session it is.
+  // RUSH-3125: `--launch-id` resolves the run via the hook record on this box, a local read that
+  // works when the network is gone. It is resolved up front into the ordinary id path, so the
+  // attach-else-resume recovery is unchanged.
   if (opts.launchId) {
     if (id) {
       console.error(chalk.red('Pass a session id or --launch-id, not both — they name the same thing two ways.'));
       process.exitCode = 1;
       return;
     }
-    // Read the launch-id index directly rather than through
-    // `resolveHookSessionRecord`: that helper kind-guards every hit, which exists
-    // to stop a REUSED PID crossing harnesses. A launch id is a per-launch uuid
-    // and cannot collide, and the caller here is a reattach that deliberately
-    // does not assume which harness the peer picked (`run auto` chooses it
-    // remotely), so demanding a kind would reject the exact case this serves.
+    // Read the launch-id index directly: `resolveHookSessionRecord` kind-guards hits to stop
+    // reused PIDs crossing harnesses, but a launch id is a per-launch uuid and `run auto` picks
+    // the harness remotely, so demanding a kind would reject this case.
     const { loadHookSessionIndex } = await import('../lib/session/hook-sessions.js');
     const resolved = loadHookSessionIndex().byLaunchId.get(opts.launchId)?.session_id;
     if (!resolved) {
-      // Fail loud: a launch id with no record means the harness never got far
-      // enough to write one (it died at startup, or it has no SessionStart
-      // hook). Silently opening the picker here would strand an automated
-      // reattach in an interactive prompt nobody is watching.
+      // Fail loud: no record means the harness died at startup or lacks a SessionStart hook;
+      // opening the picker would strand an automated reattach in a prompt nobody watches.
       console.error(chalk.red(`No session recorded for launch id ${opts.launchId} on ${machineId()}.`));
       console.error(chalk.gray('  The run may have failed before its SessionStart hook fired.'));
       console.error(chalk.gray('  Look for it:  agents sessions --active'));
@@ -305,28 +273,16 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       return;
     }
 
-    // A live local tmux alias — or a bare 8-hex short id naming exactly one
-    // live local pane — attaches immediately, before any fleet SSH.
-    // `collectSessionCandidates` fans out twice (transcript pool + live
-    // roster), so a selector that is already a pane on THIS box used to print
-    // two unreachable-device lists and stall on offline peers (~2 min measured
-    // on yosemite-s0 for `sessions resume ag-claude-0145ab8f --attach-only`)
-    // and only then attach. SES-41 / PHNX-3292: an alive `ag-<agent>-<8hex>`
-    // pane is attached by name; the pane is sufficient, no fleet SSH needed. A
-    // dead/absent pane falls through to id resolution.
+    // A live local tmux alias, or a bare 8-hex id naming one live local pane, attaches before any
+    // fleet SSH (SES-41 / PHNX-3292). Otherwise two fan-outs stalled ~2 min on offline peers; a
+    // dead or absent pane falls through to id resolution.
     if (await attachLocalLiveSelector(textSelector, hosts)) {
       return;
     }
 
-    // RUSH-2477: an id selector for a LOCAL indexed session resolves against the
-    // WAL index alone — a plain read, no write-heavy discovery scan (none of
-    // `tryClaimScan`/`releaseScan`'s `BEGIN IMMEDIATE` writer lock) and no
-    // boot-time fleet SSH fan-out. This is the crash-restart storm path: dozens
-    // of `sessions resume <id>` at once must not each take the writer lock or
-    // dial the not-yet-up tailnet. A genuine miss, an ambiguous prefix, or a
-    // peer-owned row falls through to the fleet resolver below unchanged — the
-    // narrow win is the exact case the storm hits, with no behaviour change for
-    // a session that lives on another box.
+    // RUSH-2477: a local indexed id resolves from the WAL index alone, with no discovery scan,
+    // writer lock, or fleet SSH, so a crash-restart storm of `sessions resume <id>` neither
+    // contends for the lock nor dials a down tailnet. Misses fall through.
     if (idLookup && hosts.length === 0 && looksLikeIdSelector(textSelector)) {
       const self = machineId();
       const localMatch = dedupeSessionsByLogicalId(
@@ -374,12 +330,9 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
           self,
         )
       : [];
-    // Not live (or remote-scoped): an alias still carries the session's shortid,
-    // so resolve by THAT rather than handing the whole `ag-<agent>-<shortid>`
-    // string to the resolver — which treats an unmatched alias as a keyword
-    // query and answered `"ag-claude-dead5678" matches 200 sessions` for a pane
-    // whose process had simply exited. SES-41 requires an alias to resolve to one
-    // canonical session id.
+    // Not live or remote-scoped: resolve by the alias's shortid, since passing the whole
+    // `ag-<agent>-<shortid>` string to the resolver is treated as a keyword query (200 matches for
+    // an exited pane). SES-41 requires an alias to resolve to one session id.
     if (textSelector && isAgentTmuxAlias(textSelector)) {
       const short = shortIdFromName(textSelector);
       if (short) {
@@ -394,10 +347,8 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
     if (exact.length === 0 && textSelector && looksLikeIdentitySelector(textSelector)) {
       const outcome = await resolveSessionMetadataValue(textSelector, { local, hosts });
       if (outcome.kind === 'partial') {
-        // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
-        // resolver already resolves an id found on the reachable fleet (SES-9a),
-        // so reaching here means the session was not found on any device we COULD
-        // reach — it may live on an unreachable peer, which we could not check.
+        // RUSH-2492: an unreachable peer is a warning, not a failure; the session was not found on
+        // any reachable device, but may live on an unreachable one we could not check.
         const offline = outcome.failedPeers;
         console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
         console.error(chalk.red(`No session matching "${textSelector}" on any reachable device (${offline.length} unreachable, not checked).`));
@@ -415,15 +366,9 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
         process.exitCode = 1;
         return;
       }
-      // The fleet resolver is authoritative for an id/identity selector — the same
-      // one `resume`/`preview` use, and it already fanned out across the reachable
-      // fleet. Focus the session it found even when that session falls outside the
-      // candidate-pool DISPLAY filters (project scope, time window, device): those
-      // filters scope the browsable list, not an exact id lookup. Requiring the
-      // resolved row to ALSO be in the filtered pool is what made focusing a
-      // peer-owned (or older / other-project) session need `--device`. Prefer the
-      // pool's row when it carries the already-gathered live status, else fall back
-      // to the resolved metadata (focusResolvedSession hops to the owner from it).
+      // The fleet resolver is authoritative for an id selector, so focus its result even when
+      // display filters (project, window, device) exclude it; those scope the browsable list, not
+      // exact lookups. Prefer the pool row for live status, else the resolved metadata.
       const filteredMatch = sessions.find((session) => session.id === outcome.session.id);
       exact = [focusTargetForResolved(filteredMatch, outcome.session)];
     }
@@ -514,29 +459,15 @@ function looksLikeIdentitySelector(selector: string | undefined): selector is st
   );
 }
 
-/**
- * Rank two rows that are the same logical session, best first.
- *
- * Prefer the row that can actually be acted on: a real transcript over a
- * phantom index entry (a purged copy indexes with an empty `filePath`), then
- * this machine's copy over a peer mirror — resuming is machine-bound, so the
- * local row is the one whose harness state exists here.
- */
+/** Rank rows of the same logical session, best first: a real transcript over a phantom index entry
+ * (purged copies have empty `filePath`), then this machine's copy over a peer mirror, since
+ * resuming is machine-bound. */
 function sessionRowRank(s: SessionMeta, self?: string): number {
   return (s.filePath ? 4 : 0) + (self && s.machine === self ? 2 : 0) + (s._remote ? 0 : 1);
 }
 
-/**
- * Collapse rows that are the SAME logical session.
- *
- * A transcript syncs across the fleet, so one session appears once per machine
- * holding a copy. SES-IF-2a: "Synced copies sharing the same full id MUST count
- * as one logical session." `fleetCandidatesByQuery` already groups this way, but
- * this path filtered raw rows instead — so `focus <full-uuid>` answered
- * "is ambiguous (2 sessions). Use more of the id." with no longer id to give.
- * Measured on zion: one of the two rows had no transcript at all
- * ("Session transcript not available (file no longer exists). Path: ").
- */
+/** Collapse rows that are the same logical session; synced copies sharing a full id count as one
+ * (SES-IF-2a). Without this, `focus <full-uuid>` reported ambiguity with no longer id to give. */
 export function dedupeSessionsByLogicalId(rows: SessionMeta[], self?: string): SessionMeta[] {
   const byId = new Map<string, SessionMeta>();
   for (const row of rows) {
@@ -607,15 +538,9 @@ async function pickFocusCandidates(
   }
 }
 
-/**
- * The session to focus once an id/identity selector has resolved across the
- * fleet. Prefer the already-gathered candidate-pool row (it carries the live
- * status collected for the picker), but fall back to the resolver's own metadata
- * when the resolved session is not in the filtered pool — a peer-owned, older, or
- * other-project session that the display filters excluded. Returning the resolved
- * session there (instead of rejecting it) is what lets `focus <id>` reach a
- * peer-owned session without `--device`, matching `resume`/`preview`.
- */
+/** The session to focus once an id selector resolved across the fleet: prefer the candidate-pool
+ * row (it has live status), else the resolver's metadata, so a peer-owned or filtered-out session
+ * is reachable without `--device`. */
 export function focusTargetForResolved(
   poolMatch: SessionMeta | undefined,
   resolved: SessionMeta,
@@ -642,10 +567,9 @@ export async function focusResolvedSession(
     return;
   }
   if (reconnectReattach) {
-    // The reconnect loop expected this pane to be alive. It isn't — the peer
-    // rebooted, tmux crashed, or the agent exited while the link was down.
-    // Warn before any recovery attempt (local resume OR remote hop) so the
-    // user always knows their original context was not directly recovered.
+    // The reconnect loop expected this pane alive but it is not (peer reboot, tmux crash, or agent
+    // exit). Warn before any recovery so the user knows the original context was not directly
+    // recovered.
     console.error(chalk.yellow(
       `\nWarning: ${meta.shortId}'s pane is gone (reboot, tmux crash, or agent exited).`
     ));
@@ -710,26 +634,17 @@ function describeScope(statuses: LiveStatusFilter[], hosts: string[]): string {
   return parts.length ? ` (${parts.join(' ')})` : '';
 }
 
-/**
- * How a single selected live session opens in its new tab.
- *  - `attach` — a live tmux pane joined in the tab (a second client, no fork),
- *    local (`sh -c`) or remote (`ssh -tt`). tmux is the only rail that can be
- *    *joined* without forking (see the file header).
- *  - `resume` — no attach rail, so resume a copy in the tab (the original keeps
- *    running); never a silent drop.
- *  - `skip` — not resumable AND no rail: reported, not dropped.
- */
+/** How one live session opens in its new tab: `attach` joins the live tmux pane (no fork), `resume`
+ * opens a copy, and `skip` reports a session that is neither resumable nor attachable instead of
+ * dropping it. */
 type FocusSurfacePlan =
   | { kind: 'attach'; command: string[]; note: string }
   | { kind: 'resume'; command: string[]; note: string }
   | { kind: 'skip'; note: string };
 
-/**
- * Shell that resolves a tmux pane to its session and attaches it — the exact form
- * `jumpTo` uses, minus the pre-select-window nicety, so a batch tab joins the live
- * session (a second client) without forking. Reused for local and (wrapped in ssh)
- * remote panes.
- */
+/** Shell that resolves a tmux pane to its session and attaches it, as `jumpTo` does minus the
+ * window pre-select, so a batch tab joins the live session without forking. Used locally and
+ * wrapped in ssh for remote panes. */
 export function tmuxAttachScript(mux: { socket?: string; pane: string }): string {
   const sock = mux.socket ? `-S ${shellQuote(mux.socket)} ` : '';
   const p = shellQuote(mux.pane);
@@ -741,11 +656,8 @@ export function tmuxAttachScript(mux: { socket?: string; pane: string }): string
   );
 }
 
-/**
- * Decide how one live session opens as a tab. Pure over the session + a
- * `resumeCommandFor` resolver (injected so the local version-pinned resume command
- * and the tests stay decoupled from `discoverSessions`).
- */
+/** Decide how one live session opens as a tab. Pure over the session and an injected
+ * `resumeCommandFor`, so tests stay decoupled from `discoverSessions`. */
 export function planFocusSurface(
   s: ActiveSession,
   self: string,
@@ -805,10 +717,8 @@ interface OpenFocusTabsDeps {
   attachOnly?: boolean;
 }
 
-/**
- * Open each selected live session as a tab: attach its live pane where one exists,
- * else resume a copy. Reuses `resume`'s backend resolution + flood guard.
- */
+/** Open each selected live session as a tab: attach its live pane where one exists, else resume a
+ * copy. Reuses `resume`'s backend resolution and flood guard. */
 export async function openFocusTabs(
   targets: ActiveSession[],
   self: string,
@@ -921,14 +831,9 @@ async function richMetaById(id: string): Promise<SessionMeta | undefined> {
   }
 }
 
-/**
- * `focus`'s fallback for a session with no attach rail: reopen it and hand you to it.
- *   - remote → resume ON the peer over SSH (foreground) — the peer resolves the pinned
- *              version and holds the transcript, and `-tt` delivers you there.
- *   - local  → resume in a new tab in your terminal, version-pinned via the indexed meta.
- * Note: for a session that's still mid-run, this opens a COPY (the original keeps going);
- * only tmux can *join* a live one without forking (see the header).
- */
+/** `focus`'s fallback for a session with no attach rail: remote resumes on the peer over SSH
+ * (`-tt`), local resumes in a new version-pinned tab. A mid-run session opens a copy; only tmux
+ * can join a live one without forking. */
 const resumeInNewTab: UnreachableFallback = async (s, remote) => {
   const id = s.sessionId ?? '';
   if (!id) {

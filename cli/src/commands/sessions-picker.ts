@@ -225,14 +225,9 @@ function remoteDigestForPreview(session: SessionMeta, machine: string): RemoteDi
   return pending;
 }
 
-/**
- * Validate + scrub a peer-supplied preview digest before any of it reaches this
- * terminal. Peer JSON is untrusted at this boundary — the same rule
- * `sanitizeMeta` applies to fan-out rows — so every string is stripped of
- * terminal escapes and every list re-shaped field by field. Anything that
- * doesn't look like the v1 digest is rejected, so a version-skewed peer
- * degrades to the metadata card instead of a corrupted pane.
- */
+/** Validate and scrub a peer-supplied preview digest before it reaches this terminal. Peer JSON is
+ * untrusted (as in `sanitizeMeta`): strip terminal escapes from every string and re-shape each
+ * list field. Anything not matching the v1 digest is rejected, degrading to the metadata card. */
 export function sanitizeRemoteDigest(raw: unknown): SessionPreviewDigest | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const d = raw as Record<string, unknown>;
@@ -386,13 +381,9 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
       archived.plugins = getSessionPlugins(session.id);
       return { digest: archived, events: [] };
     }
-    // No file on disk AND no archived digest: a metadata-only row (a Rush
-    // dispatch/audit row, a synthesized attach-only entry, a live session not
-    // yet indexed) with nothing to read (PHNX-3999). Callers that only
-    // destructure `digest` (the picker's "not indexed here" note) are
-    // unaffected; a JSON caller reading `error` gets a truthful reason instead
-    // of a `preview: null` that looks identical to "this session genuinely has
-    // no content yet".
+    // No file on disk and no archived digest: a metadata-only row (Rush dispatch/audit, attach-
+    // only entry, live session not yet indexed) with nothing to read (PHNX-3999). A JSON caller
+    // gets a truthful `error` instead of a `preview: null` that looks like 'no content yet'.
     return { events: [], error: 'no local transcript for this session (metadata-only entry, no archived digest)' };
   }
   const safe = sanitizeMeta(session);
@@ -409,47 +400,17 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
   });
   if (!digest) {
     if (sourceStamp.size > PREVIEW_DIGEST_MAX_PARSE_BYTES) {
-      // A full `parseSession` on a cache miss is a synchronous, unbounded
-      // whole-file parse with no time/byte cap of its own (PHNX-3999) — real
-      // 6.3 MiB and 35.7 MiB screenshot-heavy transcripts on this fleet both
-      // lacked a computed digest/timeline, consistent with this path not
-      // finishing in a reasonable request budget for either. `PREVIEW_DIGEST_MAX_PARSE_BYTES`
-      // is deliberately smaller than the daemon's own background-work ceiling
-      // (see that constant's own doc) so this catches both real cases.
-      //
-      // This IS genuinely partial, not empty: rather than parsing nothing,
-      // `readSessionTail` (`tail.ts`) reads only the LAST 128 KiB of the file
-      // (already the live-view's own bounded reader, reused verbatim — no new
-      // parse logic) for a real recent-events window on the two harnesses it
-      // supports (Claude/Codex); event-derived fields below (toolCalls,
-      // toolTags, etc.) reflect that tail window, not the whole session, which
-      // `partialReason` states explicitly.
-      //
-      // `firstUser` is NEVER set from the tail fold: a tail window's "first
-      // user message IN THAT WINDOW" is a mid-session follow-up on any
-      // multi-turn session, not the session's actual original request, and
-      // there is no honest way to tell the two apart from the tail alone.
-      // Falling back to it would silently mislabel a follow-up as the
-      // original ask. Preference order for the CANONICAL original request:
-      // (1) the already-indexed `SessionMeta.firstUserMessage` (zero
-      // extra I/O); (2) failing that, a bounded HEAD read (`readSessionHead`,
-      // `tail.ts` — the mirror of the tail reader, first ~32 KiB from byte 0,
-      // where a session's opening turn always lives) so a row with no indexed
-      // value yet still gets the REAL original request rather than nothing.
-      // Only when neither is available does `firstUser` stay empty —
-      // `partial`/`partialReason` already say why detail is missing, which is
-      // the truthful signal, never a guessed value. The digest is cached
-      // against this stamp so the bound is paid once per transcript version,
-      // not once per call.
+      // Full `parseSession` on a cache miss is a synchronous, unbounded parse (PHNX-3999): 6-36
+      // MiB transcripts lacked a digest. Over `PREVIEW_DIGEST_MAX_PARSE_BYTES`, read only the last
+      // 128 KiB (`partialReason` says so); `firstUser` never comes from the tail.
       events = readSessionTail(session.filePath, session.agent);
       digest = buildSessionPreviewDigest(events, safe);
       if (session.firstUserMessage) {
         digest.firstUser = session.firstUserMessage;
       } else {
-        // Reuse the canonical extractor (rejects synthetic/system-injected
-        // turns, unwraps a Grok/Cursor <user_query> wrapper) rather than a
-        // bespoke inline find — the same rules SessionMeta.firstUserMessage
-        // itself was built with.
+        // Reuse the canonical extractor (rejects synthetic/system-injected turns, unwraps a
+        // Grok/Cursor `<user_query>` wrapper), the same rules `SessionMeta.firstUserMessage` was
+        // built with.
         digest.firstUser = firstUserMessageFromEvents(readSessionHead(session.filePath, session.agent)) ?? '';
       }
       digest.partial = true;
@@ -488,18 +449,13 @@ export function buildPreview(session: SessionMeta): string {
 
   const safe = sanitizeMeta(session);
 
-  // Remote session: the transcript is on the peer's disk, so there is nothing to
-  // parse here. The common case is now a fleet-synced MIRROR row (PHNX-3792): its
-  // topic + first-user snippet + metadata are already local, so the compact card
-  // renders INLINE with no per-row SSH. The live SSH digest fetch stays as the
-  // fallback for a never-synced row (or a peer whose digest was already fetched
-  // this session), and `space` still reads the full transcript live over SSH.
+  // Remote session: the transcript is on the peer's disk. The common case is a fleet-synced mirror
+  // row (PHNX-3792) whose topic, first-user snippet and metadata are local, so the card renders
+  // inline with no per-row SSH. The live SSH fetch remains the fallback for never-synced rows.
   if (remote) {
-    // A fleet-synced MIRROR row is the explicit signal that this box already
-    // holds the peer session's topic + first-user snippet locally (PHNX-3792):
-    // render inline with NO per-row SSH. An ordinary remote row (a live fan-out
-    // row, or a never-synced host-dispatch stub) is NOT treated as synced — it
-    // keeps the live digest fetch below, so this change is scoped to mirror rows.
+    // A fleet-synced mirror row is the explicit signal that this box already holds the peer
+    // session's topic and first-user snippet (PHNX-3792): render inline with no SSH. An ordinary
+    // remote row (live fan-out, never-synced host-dispatch stub) keeps the live digest fetch.
     const fetched = remoteDigestCache.get(remoteDigestKey(session.id, remote));
     if (fetched?.state === 'ready') {
       // A richer live digest already landed this session (changed files, tool
@@ -616,14 +572,9 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     line4.push(chalk.blue(linkUrl(session.prUrl, label)));
   }
 
-  // Lead with the session's human title: `session.label` — an agent-generated
-  // name / `/rename`, else the `--name` launch handle — else the daemon-generated
-  // title (PHNX-3797), which is a short technical NAME, not a restatement of the
-  // prompt. NOT `session.topic`: the topic is the derived first-prompt, already
-  // shown on the `Prompt:` line, so using it here too would print the same text
-  // twice. A session with neither keeps that `Prompt:` line as its topic
-  // indicator and simply leads with the agent line. Wrapped to the pane (the
-  // header sits at column 0, full terminal width).
+  // Lead with the session's human title: `session.label` (agent-generated name, `/rename`, else
+  // the `--name` handle), else the daemon-generated title (PHNX-3797). Not `session.topic`: it is
+  // the first prompt already on the `Prompt:` line, so it would print twice.
   const title = (session.label || session.generatedTitle || '').trim();
   const titleLines = title
     ? wrapToWidth(title, terminalWidth()).map(l => chalk.bold.white(l))
@@ -637,47 +588,21 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   ].join('\n');
 }
 
-/**
- * Body lines available from SessionMeta alone (no transcript parse) — used for
- * remote / unindexed sessions so checklist progress still surfaces when the
- * parser teammate (or a prior scan) has populated `session.todos`.
- */
-/**
- * The session's place in a team, from whichever end it sits at: the orchestrator
- * that ran `agents teams create` (from the scan-derived `spawnedTeam`), or a
- * teammate (from its `meta.json`, via `classifyTeamSession`). Empty for a session
- * with no team involvement, which is the overwhelming majority.
- *
- * Deliberately no live teammate counts: tallying a team means reading every
- * record under the teams-agents dir, which runs to thousands of files on a busy
- * machine — far too much for a pane that repaints as the cursor moves. The line
- * names the command that does report them instead.
- */
-/**
- * The "what did this session leave running" segments of the Doing line.
- *
- * Prefers a DERIVED count (fresh, from the transcript the caller just parsed)
- * and falls back to the PERSISTED column, which is what lets a remote/unindexed
- * row — rendered from `SessionMeta` alone, with no events — show fan-out at all.
- * That fallback is the whole reason the counts are columns (RUSH-3091/3095).
- *
- * A count of 0 or undefined renders NOTHING. Both are real states — "scanned,
- * none found" and "this harness cannot report it" — and a literal "0 background
- * shells" would assert "nothing is running" for a harness that simply does not
- * record them.
- *
- * Wording is "left behind", not "running": a transcript records a start and
- * never a death (see extractBackgroundShells).
- */
+/** Body lines from SessionMeta alone (no transcript parse), for remote/unindexed sessions, so
+ * checklist progress surfaces when `session.todos` was populated by the parser or a prior scan. */
+/** The session's place in a team, from either end: the orchestrator that ran `agents teams create`
+ * or a teammate (`meta.json`, via `classifyTeamSession`); empty for most. No live teammate counts:
+ * tallying reads thousands of files, too much for a pane repainting per cursor move. */
+/** What this session left running (Doing line). Prefers a derived count (fresh from the
+ * transcript), else the persisted column so a remote row shows fan-out (RUSH-3091/3095). 0 or
+ * undefined renders nothing; wording is 'left behind' (transcripts record starts, not deaths). */
 export function formatFanOut(
   session: SessionMeta,
   derived?: { subAgentCount?: number; backgroundShellCount?: number },
 ): string[] {
-  // DERIVED wins when the caller has one. It is computed from the transcript as
-  // it stands right now, whereas the persisted column is only as fresh as the
-  // last scan — for a live session those disagree within seconds. The persisted
-  // value is the fallback that makes a remote/unindexed row (no events, so no
-  // derived value) render at all, which is the whole reason it is a column.
+  // Derived wins when present: it is computed from the transcript as it stands, while the
+  // persisted column is only as fresh as the last scan (they disagree within seconds for a live
+  // session). The persisted value is the fallback that lets a remote/unindexed row render at all.
   const subAgents = derived?.subAgentCount ?? session.subAgentCount ?? 0;
   const shells = derived?.backgroundShellCount ?? session.backgroundShellCount ?? 0;
   const out: string[] = [];
@@ -717,10 +642,9 @@ function formatMetaOnlyBody(session: SessionMeta): string {
   const termWidth = process.stdout.columns || 80;
   const valueWidth = termWidth - VERB_GUTTER - 5;
 
-  // Same verb-led rows as the digest body (RUSH-2757), from SessionMeta alone.
-  // Prefer the fuller first genuine user turn over the one-line topic when the
-  // row carries it (a fleet-synced mirror row does — PHNX-3792) so the inline
-  // card reads like the originating prompt, not just its title.
+  // Same verb-led rows as the digest body (RUSH-2757), from SessionMeta alone. Prefer the fuller
+  // first genuine user turn over the one-line topic when the row has it (a fleet-synced mirror row
+  // does, PHNX-3792), so the inline card reads like the originating prompt.
   const asked = session.firstUserMessage?.trim() || session.topic?.trim();
   if (asked) {
     lines.push(verbLabel('Asked') + chalk.white(`"${truncate(asked, valueWidth)}"`));
@@ -776,16 +700,9 @@ function extractModel(events: SessionEvent[]): string | undefined {
  * listing's rule, so the pane and the row agree on what counts as a one-shot. */
 const TIMING_SPAN_MIN_MS = 60_000;
 
-/**
- * The three timing facts the header reports: when the session was created, when
- * it was last active, and how long it ran. Reads the parsed transcript when
- * there is one and otherwise the indexed `SessionMeta`, so a remote or
- * unindexed session — which has no local transcript to parse — still reports
- * them instead of silently dropping the whole line.
- *
- * `lastActive` and `lasted` are omitted for a session whose whole life was under
- * a minute: there they just restate `created`.
- */
+/** The three timing facts for the header: created, last active, and how long it ran. Reads the
+ * parsed transcript if present, else the indexed `SessionMeta`, so remote or unindexed sessions
+ * still report them. `lastActive` and `lasted` are omitted when the session was under a minute. */
 export function extractTiming(
   session: Pick<SessionMeta, 'timestamp' | 'lastActivity' | 'durationMs'>,
   events: SessionEvent[],
@@ -855,22 +772,9 @@ const DIRS_TOUCHED_MAX = 5;
 // can't bloat the cached JSON. The `changes` counts stay the true totals.
 const CHANGED_FILES_MAX = 200;
 
-/**
- * Bound for an uncached `loadSessionPreviewDigest` parse (PHNX-3999).
- *
- * Deliberately SMALLER than the daemon's own
- * `TIMELINE_PASS_MAX_WHOLE_FILE_BYTES` (16 MiB, `timeline-pass.ts`) — that
- * number bounds BACKGROUND work the daemon tick can afford to spend; this one
- * bounds a SYNCHRONOUS request an interactive caller (the Menu, with its own
- * end-to-end latency budget) is actively waiting on. Two real screenshot-heavy
- * transcripts on this fleet (6.3 MiB and 35.7 MiB) both lacked any computed
- * digest/timeline — a 16 MiB threshold here would still miss the smaller one.
- * The exact per-byte cost of `parseSession` is not measured in this change;
- * 4 MiB is a conservative invariant (well under the 6.3 MiB failure case,
- * comfortably above ordinary non-screenshot transcript sizes), not a timing
- * guarantee — verify against real transcripts before relying on a specific
- * elapsed-time bound.
- */
+/** Bound for an uncached `loadSessionPreviewDigest` parse (PHNX-3999), below the daemon's 16 MiB
+ * `TIMELINE_PASS_MAX_WHOLE_FILE_BYTES`: that bounds background work, this a synchronous request an
+ * interactive caller waits on; 16 MiB would still miss the 6.3 MiB failure. */
 const PREVIEW_DIGEST_MAX_PARSE_BYTES = 4 * 1024 * 1024;
 
 export interface SessionPreviewDigest {
@@ -886,15 +790,9 @@ export interface SessionPreviewDigest {
   backgroundShellCount?: number;
   toolTags: string[];
   changes: ReturnType<typeof changeCounts>;
-  /**
-   * The per-file source paths behind `changes`. `changes` keeps the roll-up
-   * counts every existing consumer already reads; `changedFiles` carries the
-   * real path + op the CLI computed at scan time (via classifyFileChanges) and
-   * used to discard — kept so a consumer that renders a per-file diff list (the
-   * AGI EXT Fleet detail panel, PHNX-2973) has the paths, not just the totals.
-   * Capped so a session that rewrote thousands of files can't bloat the cached
-   * digest / JSON payload; the `changes` counts stay the true totals.
-   */
+  /** The per-file source paths behind `changes` (path + op from classifyFileChanges at scan time),
+   * kept so a per-file diff list (AGI EXT Fleet panel, PHNX-2973) has paths, not just totals.
+   * Capped so a session rewriting thousands of files can't bloat the cached digest. */
   changedFiles: FileChange[];
   dirs: string[];
   repos: string[];
@@ -907,15 +805,9 @@ export interface SessionPreviewDigest {
   firstError?: string;
   toolHistogram: ReturnType<typeof toolHistogram>;
   test: ReturnType<typeof detectTestResult>;
-  /**
-   * True when this digest was built WITHOUT parsing the transcript (PHNX-3999):
-   * the file exceeded {@link PREVIEW_DIGEST_MAX_PARSE_BYTES} and no cached
-   * digest existed yet. `firstUser`/`lastAssistant` fall back to the already-
-   * indexed `SessionMeta.firstUserMessage`/`lastUserMessage` (cheap, no parse)
-   * rather than being silently empty; every event-derived field (toolCalls,
-   * changedFiles, artifacts, etc.) stays at its zero-value default because it
-   * genuinely was not computed, not because nothing happened.
-   */
+  /** True when the digest was built without parsing the transcript (PHNX-3999): the file exceeded
+   * {@link PREVIEW_DIGEST_MAX_PARSE_BYTES} with no cached digest. `firstUser`/`lastAssistant` fall
+   * back to indexed fields; event-derived fields stay zero because uncomputed. */
   partial?: boolean;
   partialReason?: string;
 }
@@ -938,12 +830,9 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
     ? 0
     : undefined;
   const toolTags = new Set<string>();
-  // usedBrowser/usedComputer are computed at scan time from a sessionId-scoped
-  // events-log read (session/db.ts detectToolUsage), NOT a transcript regex —
-  // undefined means a legacy row this scanner hasn't computed the field for
-  // yet, so only THEN does classifySessionTool's transcript-derived guess run
-  // below (mirrors directoriesTouched's prefer-persisted/fall-back-to-derived
-  // pattern for recentDirectoriesTouched).
+  // usedBrowser/usedComputer are computed at scan time from a sessionId-scoped events-log read
+  // (session/db.ts detectToolUsage), not a transcript regex; undefined means a legacy row, and
+  // only then does classifySessionTool's transcript-derived guess run.
   const knownToolUsage = session.usedBrowser !== undefined;
 
   for (const event of events) {
@@ -1146,12 +1035,9 @@ function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta
     }
   }
 
-  // Details ▸ — the folded long tail: session id, skills, plugins, hooks, links,
-  // dirs, repos, capability tags. One width-capped line instead of seven labeled
-  // rows (a long tail used to wrap and swamp the whole pane); links stay
-  // clickable (OSC 8), hook failures stay red. Full lists go to the cap — it is
-  // the ONLY bounding, so its `… +N more` tail accounts for every hidden item
-  // (pre-slicing here made overflow vanish with no trace).
+  // Details ▸ is the folded long tail (session id, skills, plugins, hooks, links, dirs, repos,
+  // capability tags) as one width-capped line instead of seven rows; links stay clickable, hook
+  // failures red. Its `… +N more` accounts for every hidden item.
   const details: string[] = [
     session.filePath ? chalk.gray(linkPath(session.filePath, session.id.slice(0, 8))) : chalk.gray(session.id.slice(0, 8)),
     ...skills.map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : '')),
@@ -1178,12 +1064,9 @@ function classifySessionTool(tool: string, command: string): string[] {
   return tags;
 }
 
-/**
- * Unique directories the session touched, compact and human-readable.
- * Prefer `session.recentDirectoriesTouched` — the scan records it on the row, so
- * it is present for remote rows whose transcript we can't parse here — otherwise
- * derive from the file-change + tool paths already available.
- */
+/** Unique directories the session touched, compact. Prefer `session.recentDirectoriesTouched`
+ * (recorded at scan, so present for remote rows we can't parse), otherwise derive from the file-
+ * change and tool paths available. */
 function directoriesTouched(
   session: SessionMeta,
   events: SessionEvent[],
@@ -1191,10 +1074,9 @@ function directoriesTouched(
 ): string[] {
   const fromMeta = session.recentDirectoriesTouched;
   if (Array.isArray(fromMeta) && fromMeta.length > 0) {
-    // The scan stores ABSOLUTE paths, so they go through the same relativizer the
-    // derived branch below uses — otherwise adopting this field (which a remote row
-    // needs, having no transcript to derive from) would turn every local preview's
-    // `Dirs:` line from `src/lib · docs` into a column of full home-rooted paths.
+    // The scan stores absolute paths, so they go through the same relativizer as the derived
+    // branch; otherwise adopting this field (needed for remote rows) would turn every local
+    // `Dirs:` line from `src/lib · docs` into full home-rooted paths.
     const seen = new Set<string>();
     for (const raw of fromMeta) {
       const dir = relativizeDir(sanitizeForTerminal(String(raw).trim()), session.cwd);
@@ -1222,17 +1104,9 @@ function directoriesTouched(
     .slice(0, DIRS_TOUCHED_MAX);
 }
 
-/**
- * Claude names its per-project transcript store `~/.claude/projects/<slug>`, where
- * `<slug>` is the cwd with every `/` AND `.` replaced by `-` — so `/Users/me/app`
- * → `-Users-me-app` and `.agents/worktrees/x` → `--agents-worktrees-x`. That slug
- * leaks into transcript paths as a leading segment (`<slug>/<session-id>/…`).
- *
- * The encoding is LOSSY and irreversible (`-`, `/`, and `.` all collapse to `-`),
- * so we never try to decode it back to a path. Instead we ENCODE the comparison
- * targets (cwd, the worktree marker) into the same slug space and match there. See
- * {@link relativizeDir}. `encodeClaudeSlug` mirrors Claude's own transform.
- */
+/** Claude names its per-project store `~/.claude/projects/<slug>`, the cwd with every `/` and `.`
+ * replaced by `-`, leaking into transcript paths. The encoding is lossy, so never decode it:
+ * encode the comparison targets into slug space and match there ({@link relativizeDir}). */
 function encodeClaudeSlug(absPath: string): string {
   return absPath.replace(/[/.]/g, '-');
 }
@@ -1240,15 +1114,10 @@ function encodeClaudeSlug(absPath: string): string {
 /** The `.agents/worktrees/<name>` marker, Claude-slug-encoded (`/.` → `--`). */
 const SLUG_WORKTREE_RE = /--agents-worktrees-(.+)$/;
 
-/**
- * Join display tokens with ` · `, stopping before the line exceeds `maxWidth`
- * and appending `… +N more` for the rest. Keeps the Dirs line on one row.
- */
-/**
- * Join pre-styled items with ` · ` up to a visible width, then `… +N more`.
- * Width is measured ANSI-aware (stringWidth), so colored / OSC 8-linked items
- * are not miscounted; items arrive already styled and are not recolored.
- */
+/** Join display tokens with ` · `, stopping before the line exceeds `maxWidth` and appending `… +N
+ * more`, keeping the Dirs line on one row. */
+/** Join pre-styled items with ` · ` up to a visible width, then `… +N more`. Width is ANSI-aware
+ * (stringWidth) so colored/OSC 8 items aren't miscounted; items are not recolored. */
 function joinWidthCapped(items: string[], maxWidth: number): string {
   let out = '';
   let width = 0;
@@ -1281,25 +1150,22 @@ export function relativizeDir(filePath: string, cwd?: string): string | undefine
   }
   let dir = path.posix.dirname(norm);
 
-  // Claude project-slug form: a leading `-`-segment (`-home-me-…`) that carries
-  // the cwd, lossily encoded. Handle it in SLUG SPACE — never lossy-decode to a
-  // fake path. The slug is the first path segment; any real `/`-subdirs after it
-  // are Claude's internal storage (`<session-id>/scratchpad|tasks`), not code.
+  // Claude project-slug form: a leading `-`-segment (`-home-me-...`) carrying the lossily encoded
+  // cwd. Handle it in slug space, never decode to a fake path. Real subdirs after the slug are
+  // Claude's internal storage (`<session-id>/scratchpad|tasks`), not code.
   if (dir.startsWith('-')) {
     const slash = dir.indexOf('/');
     const slug = slash === -1 ? dir : dir.slice(0, slash);
-    // CWD FIRST: if the slug is (or is under) this session's own cwd, the leaked
-    // path is Claude's internal projects-storage scratch (`<id>/scratchpad`) —
-    // not a meaningful code dir — so drop it like node_modules. Precedence over
-    // the worktree collapse so a session editing its OWN worktree isn't relabeled.
+    // CWD first: if the slug is (or is under) the session's own cwd, the leaked path is Claude's
+    // internal projects-storage scratch, not a code dir, so drop it like node_modules. This
+    // precedes the worktree collapse so a session editing its own worktree isn't relabeled.
     if (cwd) {
       const cwdSlug = encodeClaudeSlug(cwd.replace(/\\/g, '/').replace(/\/$/, ''));
       if (slug === cwdSlug || slug.startsWith(cwdSlug + '-')) return undefined;
     }
-    // Only a DIFFERENT worktree than cwd reaches here: a worktree encodes its
-    // `/.agents/worktrees/<name>` marker as `--agents-worktrees-<name>`, so
-    // collapse to the worktree name to disambiguate. (The name may contain `-`;
-    // we can't losslessly re-split it, so show the whole encoded remainder.)
+    // Only a different worktree than cwd reaches here: its `/.agents/worktrees/<name>` marker
+    // encodes as `--agents-worktrees-<name>`, so collapse to the worktree name. The name may
+    // contain `-` and can't be re-split losslessly, so show the whole encoded remainder.
     const wtSlug = slug.match(SLUG_WORKTREE_RE);
     if (wtSlug) return `⧉ ${wtSlug[1]}`;
     // An unattributable slug: don't invent a `/`-joined fake path. Show only the
@@ -1347,11 +1213,9 @@ export function renderLastResponse(
     rendered = cleaned;
   }
 
-  // `marked-terminal` runs with `reflowText` off, so a paragraph with no hard
-  // breaks renders as one long line that overflows the pane. Wrap any line whose
-  // VISIBLE width exceeds the budget; leave lines that already fit untouched so
-  // rendered-markdown indentation (lists, code blocks) is preserved. The text is
-  // ANSI-coloured, so width is measured with `stringWidth`, never `String.length`.
+  // `marked-terminal` runs with `reflowText` off, so a paragraph without hard breaks renders as
+  // one overflowing line. Wrap any line wider than the budget, leaving fitting lines untouched to
+  // keep indentation. Measure with `stringWidth` (ANSI-colored text), never `String.length`.
   const all = rendered
     .replace(/\s+$/, '')
     .split('\n')

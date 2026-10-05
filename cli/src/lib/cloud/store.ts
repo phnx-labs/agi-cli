@@ -1,10 +1,5 @@
-/**
- * Local SQLite persistence for cloud-dispatched tasks.
- *
- * Every dispatch, status poll, and list query flows through this module so
- * that task history survives across CLI invocations without hitting the
- * remote provider each time.
- */
+/** Local SQLite persistence for cloud-dispatched tasks, so history survives across CLI invocations
+ * without hitting the provider each time. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,12 +44,8 @@ function db(): Database.Database {
   return _db;
 }
 
-/**
- * Release the tasks.db connection so the file (and its WAL sidecars) can be
- * removed. The mirror of `closeDB()` in `../session/db.ts`, which this module
- * had no counterpart for — on Windows an open handle makes the file
- * un-unlinkable, so anything tearing down a temp home must close this too.
- */
+/** Release the tasks.db connection so the file and WAL sidecars can be removed. Mirror of
+ * `closeDB()` in ../session/db.ts; on Windows an open handle makes the file un-unlinkable. */
 export function closeStore(): void {
   if (_db) {
     _db.close();
@@ -80,10 +71,8 @@ export function insertTask(task: CloudTask): void {
     task.createdAt,
     task.updatedAt,
   );
-  // Every cloud dispatch flows through here, so this is the one chokepoint that
-  // reconciles the cloud store with the session index: register a session row
-  // keyed by the real execution id so the launch is mappable to a session
-  // immediately, not only after a later proxy discovery (see session-index.ts).
+  // Every cloud dispatch flows through here, the one chokepoint that registers a session row keyed
+  // by the real execution id (see session-index.ts).
   registerCloudSession(task);
 }
 
@@ -108,10 +97,8 @@ export function updateTaskStatus(id: string, status: CloudTaskStatus, extra?: Pa
   params.push(id);
 
   db().prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-  // Keep the session index in lockstep with the store on every poll: refresh the
-  // row so its `[cloud/<status>]` label tracks the task's lifecycle (and picks up
-  // a newly-opened PR url). Reads the just-written row so the label reflects the
-  // update we just made, not a stale snapshot.
+  // Keep the session index in step on every poll: refresh the row so its `[cloud/<status>]` label
+  // tracks the lifecycle and picks up a new PR url, reading the just-written row.
   const updated = getTaskById(id);
   if (updated) registerCloudSession(updated);
 }

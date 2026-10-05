@@ -4,15 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Resuming a session from an ISOLATED install was broken 100% of the time.
-//
-// `buildResumeCommand` returns `<cli>@<version> resume <id>`, and the guard checked
-// for that launcher with `findExecutable` — a plain PATH lookup. But the shims
-// directory is deliberately absent from PATH for an isolated install, which is the
-// whole promise of `--isolated`. So the alias was never found, the guard concluded
-// the version was uninstalled, and it fell back to spawning `<cli> "/continue <id>"`
-// — feeding a slash command into the TUI as a prompt. Neither CLI has `/continue`
-// (codex documents `/resume`), so the session simply never resumed.
+// Resume from an isolated install used to fail: the guard looked up the `<cli>@<version>` launcher
+// on PATH, but isolated installs keep shims off PATH, so it fell back to feeding `/continue <id>`
+// to the TUI as a prompt.
 describe.skipIf(process.platform === 'win32')('resuming an isolated session', () => {
   let home: string;
   const V = '9.9.4';

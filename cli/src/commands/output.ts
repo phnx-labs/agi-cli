@@ -1,20 +1,6 @@
-/**
- * Output command — productivity: token *burn* vs shipped *output*.
- *
- * Nested as `agents insights output`. `agents insights cost` answers "what did
- * we burn?" (dollars + duration). This joins that burn to what actually shipped —
- * real generated (output) tokens plus PRs and commits across every git identity —
- * so you can see burn-vs-output and ratios like $/PR and output-tokens/$. Pure
- * SQLite + local git/gh, no server, no telemetry — the same offline spirit as cost.
- *
- * Why not just show `token_count`? Because that number sums cache-read/-write
- * context re-counted every turn and is dominated by cheap re-reads (often ~100x
- * the real generation). `output_tokens` (scanned per-agent into the session DB)
- * is the honest "work produced" signal, and it is what this command leads with.
- *
- * `--all-hosts` fans the same rollup across every online device (`ag devices`)
- * over SSH and merges — one fleet-wide burn-vs-output view.
- */
+/** `agents insights output`: token burn vs shipped output. Joins `insights cost` burn to real
+ * output tokens plus PRs and commits across every git identity ($/PR, output-tokens/$).
+ * `token_count` is dominated by re-counted cache reads (~100x), so `output_tokens` leads. */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as os from 'os';
@@ -131,12 +117,9 @@ The burn is split into input / cache-read / cache-write where the harness record
 (Claude/Codex/Gemini/Droid). --pricing no-cache reprices cached tokens at the input rate,
 so you can see what caching is saving. --json always carries both actual and no-cache costs.
 `)
-    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide by name
-    // with the `insights` parent's own options, so commander binds them to the
-    // parent at parse time and the leaf's plain opts() never sees them. Merging
-    // ancestor opts is what the sibling `insights mix` recipes already do
-    // (mix-commands.ts) — without it every flag on this command is silently
-    // dropped (e.g. `agents insights output --json` printed the human table).
+    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide with the `insights`
+    // parent's options, so commander binds them there and the leaf's opts() misses them, as
+    // `insights mix` recipes handle; otherwise `insights output --json` printed the table.
     .action(async (_options: OutputOptions, command: Command) => {
       await outputAction(command.optsWithGlobals() as OutputOptions);
     });

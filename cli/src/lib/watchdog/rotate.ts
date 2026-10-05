@@ -1,32 +1,6 @@
-/**
- * Watchdog rotate — in-place rotation of a rate-limited session onto a healthy
- * account/harness, inside the SAME terminal tab (one-watchdog; follow-up to
- * RUSH-2132 / PR #1875).
- *
- * When a stalled session's transcript tail shows a hard limit ("You've hit your
- * weekly limit · resets …"), the daemon watchdog rotates it instead of nudging:
- *
- *   1. DETECT  — classifyTailForRotate() matches the tail against the limit
- *      patterns (ported from apps/ext/src/core/autoRotate.ts) and parses the
- *      `resets <time>` clause when present.
- *   2. GATE    — defaultRotateGate() runs the SAME first-party selection
- *      `agents run auto` would (collectHarnessCandidates + pickHarnessWeighted,
- *      ../rotate.ts). Zero healthy → ONE `rotate` skip event per cooldown window
- *      and the terminal is left untouched. No `agents view` subprocess anywhere.
- *   3. RELAUNCH — the per-harness exit sequence (ported from apps/ext
- *      prewarm.ts PREWARM_CONFIGS) is injected, then
- *      `agents run auto --interactive --session-id <uuid>`.
- *   4. REPLAY   — when the new session's TUI is live (bounded wait, default
- *      60s), the resume replay is injected. On timeout the session is flagged
- *      and the machine stops — never blind-type into a dead shell.
- *
- * The machine spans ticks (the exit sequence kills the old session, so it drops
- * out of the active-session list before the new TUI is live): state persists at
- * <watchdog-state>/rotate/<sessionId>.json as
- * exiting → launching → awaiting-tui → replaying → done | failed.
- *
- * Config: `watchdog.rotate: on|off` in agents.yaml (default on), read per tick.
- */
+/** Watchdog rotate: move a rate-limited session onto a healthy account/harness in the SAME tab
+ * (RUSH-2132): detect the limit, check `agents run auto` selection, inject exit and relaunch,
+ * replay once the TUI is live (default 60s, else flag and stop). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,14 +18,9 @@ import { resolveWatchdogSessionPath } from './read.js';
 
 // --- detection ---------------------------------------------------------------
 
-/**
- * Agent-reported hard-limit texts, matched against a session transcript tail.
- * Ported verbatim from apps/ext/src/core/autoRotate.ts RATE_LIMIT_PATTERNS —
- * kept specific on purpose: a transcript carries prose, so a loose "rate limit"
- * match would rotate terminals whose agent merely DISCUSSED limits. The first
- * two patterns cover the weekly/session variants, including claude's
- * "You've hit your weekly limit · resets <time>" form.
- */
+/** Agent-reported hard-limit texts matched against a transcript tail, ported from apps/ext
+ * autoRotate.ts. Kept specific on purpose: a loose "rate limit" match would rotate terminals whose
+ * agent merely discussed limits. */
 const ROTATE_LIMIT_PATTERNS: RegExp[] = [
   /you'?ve hit your [\w-]*\s?limit/i,
   /hit your (weekly|daily|usage|session) limit/i,
@@ -64,13 +33,8 @@ type RotateTailVerdict =
   | { kind: 'none' }
   | { kind: 'rate_limited'; resetsAtMs?: number };
 
-/**
- * Classify a transcript tail for the rotate decision: does it show a hard
- * account limit (rotate this session) or not (leave it to the nudge path)?
- * Unlike the retired extension path there is NO `no healthy` tail parsing here —
- * the health gate is a first-party function call (defaultRotateGate), not a
- * cross-package string contract.
- */
+/** Classify a transcript tail: hard account limit (rotate) or not (nudge path). Unlike the retired
+ * extension path there is no `no healthy` tail parsing; the health gate is a first-party call. */
 export function classifyTailForRotate(tailLines: string[], nowMs: number): RotateTailVerdict {
   if (tailLines.length === 0) return { kind: 'none' };
   const tail = tailLines.join('\n');
@@ -80,16 +44,9 @@ export function classifyTailForRotate(tailLines: string[], nowMs: number): Rotat
   return { kind: 'none' };
 }
 
-/**
- * Parse the `resets <time>` clause of a limit line into an epoch-ms horizon.
- * Ported from apps/ext/src/core/autoRotate.ts parseResetTimeMs (behavior
- * verbatim): the ISO form (milliseconds + Z) is matched EXPLICITLY and first —
- * a generic capture stops at the milliseconds dot and drops the Z, which makes
- * Date.parse read LOCAL time (the suppression would end hours off). Time-of-day
- * forms like `7am` / `7:30pm` with an optional `(Area/City)` IANA zone cover
- * claude's own limit text. Returns undefined when no usable reset is present or
- * the parsed time is already past (caller falls back to its default cooldown).
- */
+/** Parse the `resets <time>` clause into an epoch-ms horizon (ported from autoRotate.ts). The ISO
+ * form is matched first and explicitly: a generic capture drops the Z and Date.parse reads local
+ * time. Undefined when absent or already past. */
 export function parseRotateResetMs(text: string, nowMs: number): number | undefined {
   const iso = /resets\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)\b/i.exec(text);
   if (iso) {
@@ -158,12 +115,8 @@ function nextOccurrenceMs(
 
 // --- exit sequences ------------------------------------------------------------
 
-/**
- * Clean-exit key sequences per harness, ported verbatim from apps/ext
- * prewarm.ts PREWARM_CONFIGS. Injected as RAW BYTES with no trailing Enter — a
- * literal \x03 written to the pty IS Ctrl+C (SIGINT), \x1b IS Esc. claude's Ink
- * TUI needs the Esc first to leave any open mode before the interrupt pair.
- */
+/** Clean-exit key sequences per harness, ported from apps/ext prewarm.ts. Injected as raw bytes with
+ * no Enter (\x03 is Ctrl+C, \x1b is Esc); claude's Ink TUI needs Esc first to leave any open mode. */
 export const ROTATE_EXIT_SEQUENCES: Record<string, string[]> = {
   claude: ['\x1b', '\x03', '\x03'], // Esc, Ctrl+C, Ctrl+C (Esc first for Claude)
   codex: ['\x03', '\x03'], // Ctrl+C twice
@@ -180,16 +133,9 @@ export function exitSequenceFor(agent: string): string[] {
 
 // --- launch + replay text ------------------------------------------------------
 
-/**
- * The rotate relaunch, typed into the same tab: full auto — the CLI resolves
- * host (affinity) → harness (cross-harness headroom) → account (balanced) and
- * exits nonzero when every layer is exhausted. Ported from apps/ext
- * autoRotate.ts buildAutoRotateLaunchCommand. A terminal on a REMOTE device
- * rotates ON that device (`--device`); a local terminal omits it. `--session-id`
- * is honored only when the CLI picks claude (existing claude-only semantics)
- * and ignored otherwise — passing it unconditionally keeps the terminal's
- * AGENT_SESSION_ID aligned with the session Claude actually creates.
- */
+/** The rotate relaunch typed into the same tab: `agents run auto` (nonzero when exhausted). A remote
+ * terminal rotates on that device (`--device`). `--session-id` is honored only for claude but
+ * always passed, keeping AGENT_SESSION_ID aligned. */
 export function buildRotateLaunchCommand(opts: { host?: string; sessionId: string }): string {
   let cmd = 'agents run auto --interactive';
   if (opts.host) {
@@ -204,11 +150,8 @@ function shellQuoteHost(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * The harness-agnostic replay injected once the new TUI is live: load the OLD
- * session's transcript, assess, continue. This is the same instruction shape
- * the CLI's own `continue` flow uses.
- */
+/** The harness-agnostic replay injected once the new TUI is live: load the old transcript, assess,
+ * continue (same shape as the CLI's `continue` flow). */
 export function buildRotateReplayText(oldSessionId: string): string {
   return (
     `Resume previous work by loading session ${oldSessionId}. ` +
@@ -239,27 +182,19 @@ export interface RotateState {
   target: InjectTarget;
   /** Remote device the terminal lives on, when provenance says ssh. */
   host?: string;
-  /**
-   * The old session's cwd — correlates the readiness fallback: a fresh active
-   * session only counts as the relaunched TUI when it runs in the SAME project.
-   */
+  /** The old session's cwd; the readiness fallback counts a fresh session only if it runs in the
+   * same project. */
   cwd?: string;
-  /**
-   * The machine the old session runs on (provenance host = os.hostname()) —
-   * the second half of the readiness-fallback correlation, so a fresh session
-   * on ANOTHER box never satisfies it.
-   */
+  /** The old session's machine (os.hostname()); a fresh session on another box never satisfies the
+   * readiness fallback. */
   machineHost?: string;
   startedAtMs: number;
   updatedAtMs: number;
   /** awaiting-tui deadline: startedAtMs + readiness budget. */
   deadlineMs: number;
   error?: string;
-  /**
-   * Set on the transition to `failed`: the tick will not re-begin a rotate for
-   * this session until then (default +15m). Without it a session whose old TUI
-   * ignored the exit sequence re-enters begin → deadline → failed every tick.
-   */
+  /** Set on the transition to `failed`: no new rotate for this session until then (default +15m),
+   * else a session whose old TUI ignored the exit sequence re-enters every tick. */
   suppressUntilMs?: number;
 }
 
@@ -324,11 +259,8 @@ export function listInflightRotates(dir: string): RotateState[] {
 
 // --- zero-healthy skip ledger ----------------------------------------------------
 
-/**
- * One `rotate` skip event per cooldown window, tracked as
- * <watchdog-state>/rotate-skips.json: { [sessionId]: suppressUntilMs }. A skip
- * inside the window logs nothing and touches nothing.
- */
+/** One `rotate` skip event per cooldown window, tracked in <watchdog-state>/rotate-skips.json as {
+ * [sessionId]: suppressUntilMs }; skips inside the window log nothing. */
 function readRotateSkipLedger(dir: string): Record<string, number> {
   try {
     return JSON.parse(fs.readFileSync(path.join(dir, 'rotate-skips.json'), 'utf8')) as Record<string, number>;
@@ -355,21 +287,14 @@ export function recordRotateSkip(dir: string, sessionId: string, suppressUntilMs
 
 // --- config ---------------------------------------------------------------------
 
-/**
- * `watchdog.rotate` in agents.yaml (default ON — it is safe now: the health gate
- * is first-party and the readiness wait is bounded). Read fresh per tick so a
- * flip mid-run is honored on the next pass.
- */
+/** `watchdog.rotate` in agents.yaml (default on; safe now that the health check is first-party and
+ * the readiness wait is bounded). Read per tick so a flip is honored next pass. */
 export function isWatchdogRotateEnabled(): boolean {
   return readMeta().watchdog?.rotate !== 'off';
 }
 
-/**
- * Persist `watchdog.rotate: on|off`. Called by the `agents watchdog rotate
- * on|off` subcommand (commands/watchdog.ts) — the rotate-only switch the
- * Factory migration uses so a user who opted out of autoRotate keeps nudging
- * (rather than `agents watchdog disable`, which disables the whole watchdog here).
- */
+/** Persist `watchdog.rotate: on|off`, called by `agents watchdog rotate on|off` (the rotate-only
+ * switch the Factory migration uses so an opted-out user keeps nudging). */
 export function setWatchdogRotateEnabled(on: boolean): void {
   const meta = readMeta();
   meta.watchdog = { ...(meta.watchdog ?? {}), rotate: on ? 'on' : 'off' };
@@ -387,14 +312,9 @@ export interface RotateGateResult {
   detail: string;
 }
 
-/**
- * The first-party health gate: run the SAME selection `agents run auto` would —
- * collectHarnessCandidates over every installed harness, pickHarnessWeighted.
- * Zero healthy → the caller suppresses rotation until earliestResetAcross (or
- * the parsed tail reset, or the default cooldown) and leaves the terminal alone.
- * No `agents view` subprocess, no Keychain probe: collection is cache-only
- * (collectRunCandidates reads daemon-written snapshots, readOnly).
- */
+/** The first-party health check: the same selection `agents run auto` makes
+ * (collectHarnessCandidates, pickHarnessWeighted). Zero healthy suppresses rotation until the
+ * earliest reset or cooldown. Cache-only; no `agents view` subprocess or Keychain probe. */
 export async function defaultRotateGate(): Promise<RotateGateResult> {
   const byHarness = await collectHarnessCandidates();
   const pick = pickHarnessWeighted(byHarness);
@@ -415,13 +335,9 @@ export async function defaultRotateGate(): Promise<RotateGateResult> {
 /** Transcript layouts to probe for the new session (mirrors read.ts's table). */
 const ROTATE_TRANSCRIPT_AGENTS = ['claude', 'codex', 'droid'];
 
-/**
- * Default TUI-liveness probe for the relaunched session: the new session's
- * transcript resolves under any known harness layout. `--session-id` is honored
- * on a claude pick; for other harnesses the runner's readiness check ALSO
- * accepts a fresh active session (started after the rotate began), so a codex
- * pick with an unknown id is still detected.
- */
+/** Default TUI-liveness probe for the relaunched session: the new session's transcript under any
+ * harness layout. `--session-id` is honored on a claude pick; for others a fresh active session
+ * started after the rotate also counts. */
 function defaultRotateTranscriptLive(newSessionId: string): boolean {
   return ROTATE_TRANSCRIPT_AGENTS.some(
     (agent) => resolveWatchdogSessionPath(newSessionId, agent) !== undefined,
@@ -435,20 +351,9 @@ function normalizeCwd(cwd: string | undefined): string | undefined {
   return n === '' ? '/' : n;
 }
 
-/**
- * The readiness FALLBACK correlation. A fresh active session counts as the
- * relaunched TUI only when ALL of these hold:
- *   - it is not the old session and started at/after the rotate began;
- *   - it runs in the SAME cwd (trailing-slash normalized); and
- *   - it runs on the SAME machine (provenance host = os.hostname(), the same
- *     field provenance.ts populates).
- * An unrelated fresh session — another project, another host, a remote
- * teammate — must NEVER satisfy readiness: on a busy fleet box an
- * uncorrelated "any new session" match fires on the first sweep regardless of
- * whether the relaunch came up, and when `agents run auto` failed loud after
- * the gate that types the replay into a bare shell. When the state lacks cwd
- * or host the fallback cannot correlate and only the transcript probe counts.
- */
+/** Readiness fallback: a fresh active session counts as the relaunched TUI only if not the old one,
+ * started after the rotate began, with the same cwd and machine. Otherwise it could pass even if
+ * the relaunch failed, typing the replay into a bare shell. */
 export function isCorrelatedRelaunch(state: RotateState, s: ActiveSession): boolean {
   if (!s.sessionId || s.sessionId === state.sessionId) return false;
   if ((s.startedAtMs ?? 0) < state.startedAtMs) return false;
@@ -458,12 +363,8 @@ export function isCorrelatedRelaunch(state: RotateState, s: ActiveSession): bool
   return normalizeCwd(s.cwd) === cwd && s.provenance?.host === host;
 }
 
-/**
- * The default TUI-liveness probe. The new-session-id transcript is PRIMARY (a
- * claude pick honors `--session-id`); the correlated fresh-session fallback
- * (isCorrelatedRelaunch) covers non-claude picks whose id we can't know a
- * priori.
- */
+/** The default TUI-liveness probe: the new-session-id transcript is primary (claude honors
+ * `--session-id`); the correlated fresh-session fallback covers non-claude picks. */
 export function defaultTuiLiveFor(state: RotateState, sessions: ActiveSession[]): boolean {
   if (defaultRotateTranscriptLive(state.newSessionId)) return true;
   return sessions.some((s) => isCorrelatedRelaunch(state, s));

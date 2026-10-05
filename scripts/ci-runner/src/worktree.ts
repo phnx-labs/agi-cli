@@ -15,10 +15,8 @@ function git(cwd: string, args: string[]): void {
   }
 }
 
-/**
- * Namespaced detached worktree from a per-repo mirror. Two runs of the same
- * repository never share a checkout.
- */
+/** Namespaced detached worktree from a per-repo mirror; two runs of the same repository never share
+ * a checkout. */
 export function ensureMirror(layout: CiLayout, sourceGitDir: string, owner: string, repo: string): string {
   const dest = mirrorPath(layout, owner, repo);
   mkdirSync(dirname(dest), { recursive: true });

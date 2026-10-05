@@ -271,10 +271,9 @@ describe('Claude native status line', () => {
   });
 
   it('never saves our own command (under a dev binary name) as a delegate — the fork bomb', () => {
-    // Reproduces the seed of the fork bomb: settings.json points the status line
-    // at `agents-dev __claude-statusline`. installClaudeStatusLine must NOT
-    // preserve that as a delegate, or every render would spawn a copy that reads
-    // the same delegate and spawns another, without bound.
+    // Reproduces the fork-bomb seed: settings.json points the status line at `agents-dev
+    // __claude-statusline`, which must not be preserved as a delegate or every render spawns
+    // another.
     const home = tempHome();
     const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
     const settingsPath = path.join(home, '.claude', 'settings.json');
@@ -321,10 +320,8 @@ describe('Claude native status line', () => {
     const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
     const sentinel = path.join(home, 'delegate-was-spawned');
     fs.mkdirSync(path.dirname(delegate), { recursive: true });
-    // A command that (a) IS a self-reference — it ends in our private subcommand
-    // — and (b) would create a sentinel file if it were ever executed. With the
-    // pre-fix exact-string guard this `agents-dev`-shaped command was spawned and
-    // recursed; the fix must return '' WITHOUT running it.
+    // A self-referencing delegate that would create a sentinel file if executed. The pre-fix
+    // exact-string guard spawned and recursed; the fix must return '' without running it.
     fs.writeFileSync(delegate, `sh -c 'touch "${sentinel}"' __claude-statusline\n`);
     expect(renderDelegate('', home)).toBe('');
     expect(fs.existsSync(sentinel)).toBe(false);

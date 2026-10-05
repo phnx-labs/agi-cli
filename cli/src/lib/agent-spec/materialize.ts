@@ -1,25 +1,6 @@
-/**
- * Native-home materializer (PHNX-3838).
- *
- * `materializeAgentPackage` is the harness-adapter layer: it takes the ONE
- * canonical result `resolveAgentPackage` already decided and projects it into
- * a fresh, isolated native home for one harness (Claude Code, Codex, or
- * OpenCode). It reuses the codebase's existing native-projection primitives
- * instead of re-deriving per-harness format knowledge:
- *
- *   - `agentConfigDirName` / `AGENTS[..].capabilities.rules.file` (agent-spec/agents.ts)
- *     for instructions placement
- *   - `subagentTarget(...)` + its registered transforms (subagents-registry.ts)
- *     for subagent projection
- *   - `writeMcpConfig` (lib/mcp.ts) for per-harness MCP config format
- *   - `registerHooksToSettings` (lib/hooks/install.ts) for per-harness hook
- *     registration, including its stale-registration GC
- *
- * It writes a deterministic, unsigned `materialization-receipt.json` — every
- * `target` path it lists is a path THIS materializer owns, so a second run
- * whose resource set shrank can prune exactly those paths without touching
- * anything else in the output home.
- */
+/** Native-home materializer (PHNX-3838): `materializeAgentPackage` projects the canonical
+ * `resolveAgentPackage` result into a fresh native home for Claude Code, Codex or OpenCode. A
+ * deterministic `materialization-receipt.json` of owned paths lets a rerun prune only those. */
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -76,15 +57,9 @@ function removePath(p: string): void {
   }
 }
 
-/**
- * Fail closed: every effective resource's kind must be a supported capability
- * on this harness+version. MCP carries two finer-grained sub-capabilities the
- * coarse `mcp` flag does not cover — `mcpHttp` (remote transport at all) and
- * `mcpHeaders` (custom headers on a remote server) — mirroring the check
- * `registerMcp` already applies (agent-spec/agents.ts). Skipping these let a
- * harness with `mcpHttp: false` (e.g. opencode) or `mcpHeaders: false` (e.g.
- * codex) silently receive an http/sse server or a header it cannot express.
- */
+/** Fail closed: every effective resource kind must be supported on this harness+version, including
+ * MCP's finer `mcpHttp` and `mcpHeaders`, as `registerMcp` checks. Skipping them let opencode
+ * (`mcpHttp: false`) or codex (`mcpHeaders: false`) silently receive config it cannot express. */
 function assertCapabilitiesSupported(resources: ResolvedResource[], harness: AgentId, harnessVersion: string): void {
   const unsupported: string[] = [];
   for (const r of resources) {
@@ -114,19 +89,9 @@ function assertCapabilitiesSupported(resources: ResolvedResource[], harness: Age
   }
 }
 
-/**
- * The load-bearing containment invariant: every path this materializer is about
- * to write to (or delete) must, once symlinks in its existing prefix are
- * resolved, stay inside `realOutputHome` (the realpath of the output home). The
- * writers form their targets by APPENDING the harness config dir + resource name
- * to `outputHome` — so a symlink planted at that join point (e.g. an
- * `outputHome/.claude` symlink → the live `~/.claude`) redirects the write
- * outside the output home. `resolveOutputHome`'s front-door guard can't see that
- * child; this check, in the materializer that every writer already funnels
- * through, is what protects a direct (Factory / Prix Cloud) caller too. Called
- * BEFORE any `mkdirSync`/`copyFileSync`/`rmSync`, since `mkdir -p` would happily
- * traverse the symlink first.
- */
+/** Containment invariant: every path to write or delete must stay inside `realOutputHome` once
+ * symlinks in its prefix resolve. Writers append config dir + name to `outputHome`, so a planted
+ * symlink (e.g. `outputHome/.claude` -> live `~/.claude`) escapes. Runs before any mkdir. */
 function assertTargetContained(realOutputHome: string, target: string, label: string): void {
   const canonical = realpathExistingPrefix(target);
   if (canonical !== realOutputHome && !canonical.startsWith(realOutputHome + path.sep)) {
@@ -137,16 +102,9 @@ function assertTargetContained(realOutputHome: string, target: string, label: st
   }
 }
 
-/**
- * The final-leaf guard, stricter than {@link assertTargetContained}: it also
- * refuses a symlink planted AT the leaf itself. `assertTargetContained` resolves
- * an existing leaf symlink and catches it only when the target is outside — but a
- * DANGLING leaf symlink (its target does not exist yet) resolves via the leaf's
- * real parent, reads as contained, and then `copyFileSync`/`writeFileSync`/
- * `chmodSync` FOLLOWS it and creates/overwrites the file at the link's
- * destination. So `lstat` the leaf and reject any symlink outright. Called
- * immediately before each write/chmod of a concrete destination file.
- */
+/** The final-leaf guard, stricter than assertTargetContained: also refuses a symlink at the leaf. A
+ * dangling leaf symlink reads as contained, then copyFileSync/writeFileSync/chmodSync follows it
+ * and writes at its destination, so `lstat` the leaf and reject any symlink before each write. */
 function assertLeafSafe(realOutputHome: string, leaf: string, label: string): void {
   assertTargetContained(realOutputHome, leaf, label);
   let lst: fs.Stats | undefined;
@@ -203,19 +161,9 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
   return path.relative(outputHome, occupied.path);
 }
 
-/**
- * MCP servers write into one shared per-harness config file that may also
- * carry unrelated content the materializer does not own (an oauth account, a
- * project list — anything the real harness binary writes into that same file
- * once the pod actually runs it). `writeMcpConfig`'s `overwrite` mode already
- * preserves every other top-level key; `allowEmpty: true` is what lets THIS
- * call — which always knows the complete current mcp resource set, including
- * zero — converge the mcp section to exactly that set, rather than the
- * generic path-based pruner deleting the whole file when the package's last
- * mcp resource is removed (that would take the unrelated content with it).
- * Runs whenever the file already exists so a package with zero mcp resources
- * that never wrote one doesn't spuriously create an empty config.
- */
+/** MCP servers write into one shared per-harness config that may hold content the materializer
+ * doesn't own (an oauth account, a project list). `writeMcpConfig` `overwrite` preserves other
+ * top-level keys; `allowEmpty` converges mcp to the exact set (even zero) instead of deleting it. */
 function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputHome: string, realOutputHome: string): string[] {
   const configPath = getMcpConfigPathForHome(harness, outputHome);
   if (resources.length === 0 && !fs.existsSync(configPath)) return [];
@@ -252,22 +200,18 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
   // agent-config-dir ancestor, so a symlink there is caught before either write.
   assertTargetContained(realOutputHome, hooksDir, `${harness} hooks dir`);
   fs.mkdirSync(hooksDir, { recursive: true });
-  // The hooks-dir guard catches a symlinked ANCESTOR, but registerHooksToSettings
-  // (called below) writes a per-harness settings/registrar leaf under that dir's
-  // sibling config root — settings.json, codex hooks.json/config.toml, the
-  // opencode plugin. A symlink planted AT one of those leaves would redirect that
-  // write; fail loud here, before any hook script is copied.
+  // The hooks-dir guard catches a symlinked ancestor, but registerHooksToSettings writes a
+  // settings/registrar leaf (settings.json, codex hooks.json/config.toml, the opencode plugin)
+  // elsewhere. A symlink at one would redirect that write, so fail loud before any hook is copied.
   for (const settingsLeaf of hookRegistrationTargets(harness, outputHome)) {
     assertLeafSafe(realOutputHome, settingsLeaf, `${harness} hook settings`);
   }
   const manifest: Record<string, ManifestHook> = {};
   for (const r of resources) {
     const { def, scriptPath } = r.hook!;
-    // The hook name is attacker-controlled (it comes from the package's
-    // hooks/*.yaml `name:`) and is used as a filename here — a name like
-    // '../../../.config/foo' would copy + chmod +x OUTSIDE the output home.
-    // Require a single safe path segment AND re-assert containment before the
-    // write, failing loud rather than escaping.
+    // The hook name is attacker-controlled (package hooks/*.yaml `name:`) and used as a filename:
+    // a name like '../../../.config/foo' would copy and chmod +x outside the output home. Require
+    // one safe segment and re-assert containment before the write.
     if (!isSafeSegmentName(r.name)) {
       throw new AgentPackageError(`${harness}: hook name '${r.name}' is not a safe single path segment`, 'invalid-resource');
     }
@@ -285,11 +229,9 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
     manifest[r.name] = { script: destScript, events: def.events, matcher: def.matcher, timeout: def.timeout };
     targets.set(r.name, path.relative(outputHome, destScript));
   }
-  // `skipGlobalShimSweep`: this manifest is the PACKAGE's hooks only, so the
-  // default orphan-shim sweep would delete every unrelated `.sh` from the ONE
-  // process-global shim dir (`~/.agents/.cache/shims/hooks/`) — the operator's
-  // real hooks. Materialization is isolated to `outputHome`, so it must never
-  // GC that global directory (PHNX-3838).
+  // `skipGlobalShimSweep`: this manifest is the package's hooks only, so the default orphan-shim
+  // sweep would delete the operator's real hooks from the process-global shims dir.
+  // Materialization is isolated to `outputHome` and must never GC that directory (PHNX-3838).
   const result = registerHooksToSettings(harness, outputHome, manifest, undefined, { skipGlobalShimSweep: true });
   if (result.errors.length > 0) {
     throw new AgentPackageError(`${harness}: failed to register hook(s) — ${result.errors.join('; ')}`, 'invalid-resource');
@@ -302,18 +244,9 @@ function packageRef(resolved: ResolvedAgentPackage): string {
   return `${resolved.manifest.slug}@${resolved.digest.slice(0, 12)}`;
 }
 
-/**
- * True when `rel` is a target this pruner may safely delete: a non-empty,
- * `..`-free RELATIVE path whose CANONICAL form (symlinks in its existing prefix
- * resolved) stays strictly inside `realOutputHome`. The receipt is unsigned and
- * sits inside the output home, so a planted receipt could carry a `target` of
- * `../../victim`, `/etc/passwd`, OR an innocuous-looking `skills/keep.txt` sitting
- * one level under a symlinked ancestor (`outputHome/skills` → a victim dir) — a
- * purely textual containment check misses the last shape because `removePath`'s
- * `lstat` only refuses to follow the FINAL component, still traversing symlinked
- * ancestors. Realpath-verify before deleting; skip (never delete) anything that
- * escapes.
- */
+/** True when `rel` is a safe prune target: a non-empty, `..`-free relative path whose canonical
+ * form stays inside `realOutputHome`. The unsigned receipt could be planted with `../../victim` or
+ * a symlinked ancestor, which a textual check misses. Realpath-verify; skip escapes. */
 function isSafeContainedTarget(realOutputHome: string, outputHome: string, rel: unknown): boolean {
   if (typeof rel !== 'string' || rel.length === 0 || rel.includes('\0')) return false;
   if (path.isAbsolute(rel)) return false;
@@ -363,15 +296,9 @@ function readPriorReceipt(outputHome: string): MaterializationReceipt | null {
   return isValidReceipt(parsed) ? parsed : null;
 }
 
-/**
- * Materialize `resolved` into a fresh native home for `options.harness`. Fails
- * closed (throws `AgentPackageError`, writes nothing new) when the harness is
- * not declared supported by the package, or when any effective resource needs
- * a capability the harness+version does not have. Idempotent and
- * deterministic: re-running against the same `outputHome` with the same
- * inputs produces a byte-identical receipt and prunes any managed path this
- * materializer previously wrote that the current resource set no longer needs.
- */
+/** Materialize `resolved` into a fresh native home for `options.harness`. Fails closed (throws
+ * `AgentPackageError`, writes nothing new) for an unsupported harness or missing capability.
+ * Idempotent: same inputs give a byte-identical receipt and prune managed paths no longer needed. */
 export function materializeAgentPackage(resolved: ResolvedAgentPackage, options: MaterializeOptions): MaterializationReceipt {
   const { harness, harnessVersion, outputHome } = options;
   if (!resolved.manifest.execution.harnesses.supported.includes(harness)) {
@@ -386,10 +313,9 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
   assertCapabilitiesSupported(resources, harness, harnessVersion);
 
   fs.mkdirSync(outputHome, { recursive: true });
-  // The output home now exists, so realpath it once: every write/delete target
-  // is verified against THIS canonical root, so a symlink planted at the
-  // harness-config-dir join point (or a symlinked ancestor named by a stale
-  // receipt) can't redirect a write/delete outside the output home.
+  // The output home now exists, so realpath it once: every write/delete is verified against this
+  // canonical root, so a planted symlink at the config-dir join or a symlinked ancestor named by a
+  // stale receipt can't escape.
   const realOutputHome = fs.realpathSync(outputHome);
   const prior = readPriorReceipt(outputHome);
   // 'mcp' is excluded: it's a shared config file `materializeMcp` converges

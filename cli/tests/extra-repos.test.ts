@@ -1,10 +1,5 @@
-/**
- * Tests for `agents repo` extras — multi-repo DotAgent support.
- *
- * These tests verify that `listInstalledSkills` merges skills from the primary
- * ~/.agents/ repo with any extras registered via `agents repo add`, and that
- * primary always wins on name collisions.
- */
+/** Tests for `agents repo` extras (multi-repo DotAgent): `listInstalledSkills` merges skills from
+ * ~/.agents/ with extras added via `agents repo add`, and the primary wins name collisions. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

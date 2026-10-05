@@ -102,17 +102,9 @@ describe('resource profiles', () => {
     expect(JSON.parse(result.stdout)).toEqual(['keep']);
   });
 
-  // PHNX-3989: the standalone `secrets` engine has no concept of a resource
-  // profile (DEP-1) — the old in-repo engine used to auto-filter listBundles()
-  // and auto-reject readAndResolveBundleEnv() for an inactive bundle, INSIDE
-  // bundles.ts. That enforcement point is gone with the engine; the policy now
-  // lives entirely in agents-cli (`secrets-policy.ts`'s
-  // resolveSecretsContextForRun / resolveAllowedBundlesForActiveProfile),
-  // which computes the allowed set from a real (unfiltered) bundle listing and
-  // forwards it as `SecretsContext.allowedBundles` for the standalone to
-  // enforce server-side. This proves the agents-cli-owned half: the computed
-  // context is exactly the profile-restricted set, derived from the real
-  // standalone's own listing.
+  // PHNX-3989: the standalone `secrets` engine has no resource-profile concept, so the policy
+  // lives in agents-cli (`secrets-policy.ts`): it computes the allowed set from a real listing and
+  // forwards it as `SecretsContext.allowedBundles`. This proves that set is profile-restricted.
   it('computes SecretsContext.allowedBundles from the active profile against the real bundle listing', () => {
     const home = makeHome();
     const result = runProbe(home, `

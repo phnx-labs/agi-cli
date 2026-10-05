@@ -68,10 +68,9 @@ describe('real host probes (no mocks)', () => {
       expect(['ok', 'denied', 'no-tool']).toContain(probe);
 
       const restrict = readApparmorRestrict();
-      // When AppArmor restricts unprivileged userns and `unshare` is present, the
-      // probe must observe the denial — this is the exact PHNX-3285 condition and
-      // the whole reason the preflight exists. (Guard on 'no-tool' so a box without
-      // util-linux doesn't fail the assertion.)
+      // When AppArmor restricts unprivileged userns and `unshare` exists, the probe must observe
+      // the denial (the PHNX-3285 condition). Guarded on 'no-tool' so a box without util-linux
+      // doesn't fail.
       if (restrict === '1' && probe !== 'no-tool') {
         expect(probe).toBe('denied');
       }

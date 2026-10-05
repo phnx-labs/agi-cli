@@ -1,44 +1,6 @@
-/**
- * browser-client.ts — the ONE process client through which agents-cli talks to
- * the standalone `browser` CLI (@phnx-labs/browser-cli, PHNX-4101).
- *
- * This is the agents-owned half of the browser extraction, and it is
- * deliberately small. agents-cli no longer carries the CDP/BiDi/Arc drivers, a
- * browser IPC service, a chrome-data/profile store, a network-capture pipeline,
- * or the remote SSH driving loop — the standalone engine owns all of it, exactly
- * as `secrets` took the keychain engine (PHNX-3989), `computer` took the
- * accessibility engine (PHNX-4075) and `sessions` took the transcript engine
- * (PHNX-4012). What stays here is what only the fleet CLI can know: which device
- * a `--device` name resolves to, whether this machine consents to being driven,
- * who the acting session is, and where an action must be recorded.
- *
- * THERE IS NO FALLBACK. A missing executable throws `BROWSER_BIN_MISSING` with
- * install guidance (DIST-1) rather than silently driving a bundled engine —
- * agents-cli has none to drive, and a fallback would re-couple the two release
- * trains this extraction exists to separate.
- *
- * Transport — inherited-fd passthrough, not request/response (matches
- * browser-cli's `bin/browser.cjs` launcher, which forwards fds 3-16):
- *
- *   - stdio 0/1/2 are INHERITED. The engine owns the user's terminal: its
- *     stdout is the command's stdout, its `--json` is the command's `--json`,
- *     its prompts reach a real tty. agents-cli never re-formats engine output,
- *     which is what keeps the surface honest as the engine evolves.
- *   - fd 3 (`BROWSER_CONTEXT_FD`) carries ONE JSON object — the consumer context
- *     built by `lib/browser/context.ts` — written and closed immediately, so the
- *     engine reads to EOF and proceeds. The document is read once, before command
- *     parsing; a malformed one is a hard error, an absent one the standalone case.
- *   - fd 4 (`BROWSER_EVENTS_FD`) carries NDJSON action events back: one JSON
- *     object per line, each an action the engine actually performed. agents-cli
- *     turns those into feed events and `sessions --browser` history
- *     (`lib/browser/record.ts`). The engine may emit none; it must never block
- *     on this pipe.
- *
- * Both fds are anonymous pipes on the child's side, the same shape
- * `computer-client.ts` and `secrets-client.ts` settled on after a named FIFO
- * wedged macOS reads. The context is pushed rather than pulled so the engine
- * needs no callback into agents-cli — one direction each way, no reentrancy.
- */
+/** The one process client to the standalone `browser` CLI (@phnx-labs/browser-cli, PHNX-4101). The
+ * engine owns drivers, profiles and capture; this keeps device resolution, driving consent, acting
+ * session and action recording. Missing executable: `BROWSER_BIN_MISSING` (DIST-1); no fallback. */
 
 import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';
@@ -73,27 +35,17 @@ function browserEntrypoint(bin: string): string {
   return existsSync(launcher) ? launcher : bin;
 }
 
-/**
- * Accept only the real standalone `browser` executable, never agents-cli's own
- * `browser` command shim (`exec "$AGENTS_BIN" browser`, `installations/shims.ts`)
- * — resolving that would recurse into this process. `findInPath` already skips
- * `~/.agents/.cache/shims`; this guard is the second line, mirroring
- * `isStandaloneComputer` (agents-cli never shipped a `dist/browser.js` bin, but
- * the check stays symmetric and future-proof against one).
- */
+/** Accept only the real standalone `browser` executable, never agents-cli's own `browser` shim
+ * (`exec "$AGENTS_BIN" browser`), which would recurse. `findInPath` already skips the shims dir;
+ * this is the second line, symmetric with `isStandaloneComputer`. */
 export function isStandaloneBrowser(bin: string): boolean {
   let real = browserEntrypoint(bin);
   try { real = realpathSync(real); } catch { /* spawn reports missing explicit paths */ }
   return !/\.(cmd|ps1)$/i.test(real) && !real.endsWith(path.join('dist', 'browser.js'));
 }
 
-/**
- * Resolve the standalone executable. `BROWSER_BIN` wins so a dev build can be
- * driven without touching PATH.
- *
- * Resolution uses `findInPath`, which skips `~/.agents/.cache/shims` — see
- * `isStandaloneBrowser` for why that skip is load-bearing.
- */
+/** Resolve the standalone executable; `BROWSER_BIN` wins for dev builds. Uses `findInPath`, which
+ * skips `~/.agents/.cache/shims` (see isStandaloneBrowser). */
 export function resolveBrowserBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.BROWSER_BIN?.trim();
@@ -127,15 +79,9 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-/**
- * One action the engine performed, as it appears on the NDJSON events fd.
- *
- * This is the engine's wire shape (browser-cli integration contract §2), not a
- * translation of it: the engine emits `{event: "browser.action", ts, command,
- * invocationId, pid, task, profile, url, host, sessionId, launchId, actor}`.
- * `command` — not `verb` — is the field that names the action, and it is what
- * marks a line as an action event.
- */
+/** One action the engine performed on the NDJSON events fd: the engine's own wire shape
+ * (browser-cli contract §2), `{event: "browser.action", ts, command, ...}`. `command`, not `verb`,
+ * names the action and marks a line as an action event. */
 export interface BrowserActionEvent {
   /** Always `browser.action` on this stream. */
   event?: string;
@@ -163,16 +109,9 @@ export interface BrowserActionEvent {
   [key: string]: unknown;
 }
 
-/**
- * Split a growing buffer into complete NDJSON lines. Pure so the framing rules —
- * blank lines skipped, a non-JSON line dropped rather than crashing the CLI, a
- * trailing partial line carried forward — are unit-testable without a spawn.
- *
- * A malformed line is dropped, not thrown: these events are telemetry riding
- * alongside a user-visible action that already happened. Failing the command
- * because its receipt was unreadable would be strictly worse than losing the
- * receipt. The action itself already failed loud on its own channel if it failed.
- */
+/** Split a growing buffer into complete NDJSON lines. Pure: blank lines skipped, a trailing partial
+ * line carried forward. Malformed lines are dropped, not thrown: they are telemetry for an action
+ * that already happened, and failing the command over an unreadable receipt would be worse. */
 export function parseEventLines(
   buffer: string,
 ): { events: BrowserActionEvent[]; rest: string } {
@@ -201,14 +140,9 @@ interface RunBrowserOptions {
   context: unknown;
   /** Called once per action event the engine reports on fd 4. */
   onEvent?: (event: BrowserActionEvent) => void;
-  /**
-   * Capture the engine's stdout instead of inheriting the terminal.
-   *
-   * Used only where agents-cli must READ an answer rather than show it (the
-   * setup readiness probe polling `status --json`). Verbs never capture:
-   * re-printing engine output would make agents-cli a formatter for a surface
-   * it no longer owns.
-   */
+  /** Capture the engine's stdout instead of inheriting the terminal, only where agents-cli must
+   * read an answer (the setup readiness probe polling `status --json`). Verbs never capture, or
+   * agents-cli would format output for a surface it no longer owns. */
   capture?: boolean;
 }
 
@@ -218,14 +152,9 @@ interface RunBrowserResult {
   stdout: string;
 }
 
-/**
- * Run the standalone engine with the consumer context on fd 3 and the action
- * event stream on fd 4. Resolves with the engine's exit code; the caller
- * propagates it so `agents browser` exits exactly as the engine did.
- *
- * Throws `BROWSER_BIN_MISSING` when the standalone is not installed. Every other
- * failure is the engine's own, reported on the inherited stderr.
- */
+/** Run the standalone engine with the consumer context on fd 3 and action events on fd 4. Resolves
+ * with the engine's exit code so `agents browser` exits as the engine did. Throws
+ * `BROWSER_BIN_MISSING` if not installed; other failures are the engine's, on inherited stderr. */
 export async function runBrowser(opts: RunBrowserOptions): Promise<RunBrowserResult> {
   const bin = resolveBrowserBin();
   const { command, prefix } = invocation(bin);

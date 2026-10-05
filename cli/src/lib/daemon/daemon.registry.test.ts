@@ -1,15 +1,6 @@
-/**
- * Daemon registry, auto-start circuit breaker, and misc daemon utilities:
- * stopResidueArtifacts, ensureDaemonStarted, the RUSH-2418 auto-start circuit
- * breaker, anchorDaemonCwd, the ephemeral-root detectors,
- * schedulerGateTransition, and the instance registry + reaper.
- *
- * RUSH-2819: split out of daemon.test.ts (2201 lines / 88 tests / ~112s in CI)
- * so vitest can parallelize this suite across worker forks. Shared helpers
- * live in daemon.test-fixture.ts; the manifest/plist/systemd tests live in
- * daemon.test.ts; spawn/single-instance/self-terminate tests live in
- * daemon.lifecycle.test.ts; shutdown semantics live in daemon.stop.test.ts.
- */
+/** Daemon registry, auto-start circuit breaker and misc utilities: stopResidueArtifacts,
+ * ensureDaemonStarted, the RUSH-2418 breaker, anchorDaemonCwd, ephemeral-root detectors, instance
+ * registry and reaper. Split from daemon.test.ts (RUSH-2819) for per-file fork parallelism. */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -48,17 +39,9 @@ async function spawnDaemonStandIn(): Promise<ReturnType<typeof spawn>> {
   return child;
 }
 
-// The other half of the registry rule (RUSH-2421 review). The marker is named by
-// pid, so it is unambiguously the stopped daemon's — but it is only RESIDUE once
-// that daemon is DEAD. Deleting it while the process still lives erases the very
-// record `findSurvivingStateDirDaemons` enumerates, so the NEXT `agents daemon
-// stop` finds an empty registry and a cleared pid file and reports `ok: true`
-// with the daemon still running.
-//
-// Tested against the enumerator directly rather than through `agents daemon
-// stop`: driving the whole command would require a pid that survives SIGKILL,
-// which nothing does, and pointing it at a live pid we control would SIGTERM the
-// test runner itself.
+// The other half of the registry rule (RUSH-2421 review): the pid-named marker is residue only
+// once that daemon is DEAD. Deleting it while the process lives erases what
+// `findSurvivingStateDirDaemons` enumerates, so the next `stop` says `ok: true` while it runs.
 describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)', () => {
   let dir = '';
   let prev: string | undefined;
@@ -121,10 +104,9 @@ describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)'
   });
 
   it.skipIf(process.platform === 'win32')('treats a ZOMBIE stopped daemon as dead, not alive', () => {
-    // A SIGKILLed child stays in the process table until its parent reaps it,
-    // and kill(pid, 0) SUCCEEDS on a zombie — so an isAlive-keyed rule kept the
-    // entry of a daemon that was already gone. The survivor scan, which matches
-    // a live `__daemon-run`, does not include a zombie.
+    // A SIGKILLed child stays in the process table until reaped and kill(pid, 0) succeeds on a
+    // zombie, so an isAlive-keyed rule kept the entry of an already-gone daemon. The survivor scan
+    // matches only a live `__daemon-run`.
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
     const pid = child.pid!;
     child.kill('SIGKILL');
@@ -150,15 +132,9 @@ describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)'
   });
 });
 
-/**
- * #415: the daemon must be always-on for any background need, not only after
- * `routines add`. `ensureDaemonStarted` is the shared side-effect entrypoint any
- * such background-need path calls. It must reuse the single `startDaemon`
- * entrypoint, so the #414 single-instance guard makes a second call a no-op
- * rather than a relaunch. The pid file names a real daemon-shaped process so
- * the production command-identity check is exercised rather than bypassed
- * with the test pid.
- */
+/** #415: the daemon must be always-on for any background need, not only after `routines add`.
+ * `ensureDaemonStarted` reuses the single `startDaemon` entrypoint, so the #414 guard makes a
+ * second call a no-op. The pid file names a real daemon-shaped process so the identity check runs. */
 describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
   let priorPid: number | null = null;
 
@@ -195,13 +171,9 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
     }
   });
 
-  // RUSH-3021: the vitest suite itself runs under a redirected HOME
-  // (tests/setup.ts), which is exactly the state this gate keys on. Without
-  // the gate, this call would attempt a real detached launch into the
-  // sandbox HOME — the leaked child that outlives its test and races the
-  // temp-home teardown rm (ENOTEMPTY; #2860's reviewer flagged the gap).
-  // Fails on ungated code: startDaemon() would return a spawn attempt
-  // (non-null) and write a pid file.
+  // RUSH-3021: the vitest suite runs under a redirected HOME (tests/setup.ts), the state this gate
+  // keys on. Without it this would launch a real detached daemon into the sandbox HOME, a leaked
+  // child racing teardown (ENOTEMPTY; #2860 review). Fails on ungated code.
   it('refuses to LAUNCH under a redirected HOME (no seam), while reporting stays allowed', async () => {
     const savedSeam = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
     const daemon = await spawnDaemonStandIn();
@@ -224,14 +196,9 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
   });
 });
 
-// W4 (PHNX-3736): RUSH-3021 gated ensureDaemonStarted's AUTO-start under a
-// redirected HOME but left the EXPLICIT startDaemon() open — the path the e2e
-// harness took when it launched the `HOME=/tmp/pin-e2e-<pid>` daemon that then
-// ran 4+ days on yosemite-s1, invisible to the real install's pid-file
-// takeover because it keeps its own pid file under the temp home. startDaemon
-// now refuses the launch unless the caller opted in with
-// AGENTS_ALLOW_TEST_DAEMON=1. The vitest suite itself runs under a redirected
-// HOME (tests/setup.ts), which is exactly the state the guard keys on.
+// W4 (PHNX-3736): RUSH-3021 gated AUTO-start under a redirected HOME but left explicit
+// startDaemon() open, the path an e2e harness used to launch a temp-HOME daemon that ran 4+ days
+// on yosemite-s1. startDaemon now refuses unless AGENTS_ALLOW_TEST_DAEMON=1.
 describe('redirected-HOME launch guard (W4, PHNX-3736)', () => {
   const BAD_BIN = '/nonexistent/agents-cli-does-not-exist';
   let saved: string | undefined;
@@ -283,16 +250,9 @@ describe('redirected-HOME launch guard (W4, PHNX-3736)', () => {
   });
 });
 
-// RUSH-2418: `daemon-health.ts`'s `consecutiveFailures` was write-only telemetry
-// — recorded, surfaced by `agents daemon status`, and consulted by nothing. So a
-// daemon that died on boot was relaunched by EVERY foreground command that
-// wanted one (secrets unlock, browser start, watchdog, ...): an application-level
-// crash loop the OS supervisor's throttle cannot even see, because each attempt
-// is a fresh service start rather than a respawn.
-//
-// This drives the REAL failure path — an unspawnable daemon binary, five times —
-// and asserts the sixth AUTO-start refuses while the explicit override still
-// runs.
+// RUSH-2418: `consecutiveFailures` was write-only telemetry, so a daemon dying on boot was
+// relaunched by every foreground command: a crash loop the OS throttle can't see. This drives the
+// real failure (unspawnable binary, five times) and asserts the sixth AUTO-start refuses.
 describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
   let tmpHome = '';
   const saved: Record<string, string | undefined> = {};
@@ -330,11 +290,9 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
     if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  // THE case this breaker exists for, and the one an outcome-shaped check
-  // cannot see: a daemon binary that SPAWNS FINE and then dies. `startDetached`
-  // returns a real `child.pid`, so the launcher has no error to observe — the
-  // first version of this fix counted only unspawnable binaries and let ten
-  // consecutive crash-loop starts through with the breaker still closed.
+  // The case this breaker exists for: a daemon binary that spawns fine then dies. `startDetached`
+  // returns a real `child.pid`, so the launcher sees no error; the first fix counted only
+  // unspawnable binaries and let ten crash-loop starts through.
   it.skipIf(process.platform === 'win32')(
     'counts a daemon that spawns successfully and then dies — not just an unspawnable binary',
     () => {
@@ -390,10 +348,9 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
       // cause rather than on the breaker.
       expect(() => startDaemon(BAD_BIN)).toThrow(/no PID/i);
 
-      // An already-live daemon is still reported while the breaker is open — it
-      // gates launching one, not answering "is one up?". Without this ordering a
-      // stale streak would make a healthy daemon read as absent to every caller
-      // that branches on the return value.
+      // An already-live daemon is still reported while the breaker is open: it gates launching,
+      // not answering "is one up?". Otherwise a stale streak would make a healthy daemon read as
+      // absent.
       const daemon = await spawnDaemonStandIn();
       try {
         writeDaemonPid(daemon.pid!);
@@ -411,13 +368,9 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
     30_000,
   );
 
-  // The third layer (RUSH-2418): `src/index.ts` awaited runDaemon() with no
-  // try/catch and there was no `uncaughtException`/`unhandledRejection` handler
-  // anywhere in cli/src, so a startup throw died on Node's default handler
-  // — a raw stack to whatever the service manager had on stdout, nothing in
-  // logs.jsonl, and an exit code that depended on how it died. Drive the real
-  // `__daemon-run` entrypoint into a startup failure and assert it now exits
-  // non-zero deterministically with a named reason.
+  // Third layer (RUSH-2418): `src/index.ts` awaited runDaemon() with no try/catch and no
+  // `uncaughtException`/`unhandledRejection` handler, so a startup throw left a raw stack and an
+  // inconsistent exit code. Assert a deterministic non-zero exit with a named reason.
   it.skipIf(process.platform === 'win32')(
     'a startup failure exits non-zero with a named reason instead of a raw stack',
     async () => {
@@ -459,17 +412,13 @@ describe('anchorDaemonCwd', () => {
     }
   });
 
-  // Windows refuses to remove a directory that is a live process's cwd, so the
-  // rmSync below throws EBUSY and the test fails on its own setup. That is not a
-  // gap in coverage: the state being reproduced — a process standing in a
-  // directory that no longer exists — cannot arise on Windows for the same
-  // reason. The recovery this asserts is POSIX-only by construction.
+  // Windows refuses to remove a directory that is a live process's cwd (EBUSY), and a process
+  // standing in a deleted directory can't arise there for the same reason, so this recovery is
+  // POSIX-only by construction.
   it.skipIf(process.platform === 'win32')('recovers a deleted working directory by anchoring to home', () => {
-    // Reproduce the exact routine-outage failure: the daemon is running with its
-    // cwd inside a directory (a git worktree, in the real incident) that then gets
-    // removed out from under it. A process cannot chdir out of a deleted directory
-    // on its own, so every job it spawns inherits the dead cwd and Bun crashes with
-    // `ENOENT: Bun could not find a file` at startup. anchorDaemonCwd must recover.
+    // Reproduce the routine-outage failure: the daemon's cwd (a git worktree in the incident) is
+    // removed, so every job it spawns inherits the dead cwd and Bun crashes with `ENOENT`.
+    // anchorDaemonCwd must recover.
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-cwd-'));
     const realTmp = fs.realpathSync(tmp);
     process.chdir(realTmp);
@@ -505,10 +454,9 @@ describe('anchorDaemonCwd', () => {
 });
 
 describe('describeEphemeralDaemonRoot', () => {
-  // A daemon launched from an ephemeral path wedges on every dynamic import once
-  // that path is removed — the /tmp/rv-head incident. This predicate is what
-  // both the launch-time check (validateDaemonBinary) and the runtime startup
-  // self-check (warnEphemeralDaemonRoot) share, so it must classify precisely.
+  // A daemon launched from an ephemeral path wedges on every dynamic import once it is removed
+  // (the /tmp/rv-head incident). Shared by the launch check (validateDaemonBinary) and startup
+  // self-check (warnEphemeralDaemonRoot), so it must classify precisely.
   it('flags a git worktree entry', () => {
     expect(describeEphemeralDaemonRoot('/home/u/.agents/worktrees/rv/cli/src/index.ts')).toBe('a git worktree');
   });
@@ -537,11 +485,9 @@ describe('describeEphemeralDaemonRoot', () => {
 });
 
 describe('warnEphemeralDaemonRoot', () => {
-  // The runtime startup self-check: it must warn (return the message) for an
-  // ephemeral launch root, stay silent (null) for a stable one, and never throw
-  // — including when the bin resolver itself throws (getAgentsBinPath can, when a
-  // shim's main entry is missing). resolveBin is injected so all three branches
-  // hit the real code path without mocking the module.
+  // The startup self-check must warn (return the message) for an ephemeral root, return null for a
+  // stable one, and never throw, even when the bin resolver throws. `resolveBin` is injected so
+  // all branches hit real code.
   it('warns for an ephemeral launch root (the /tmp/rv-head case)', () => {
     const msg = warnEphemeralDaemonRoot(() => '/tmp/rv-head/cli/src/index.ts');
     expect(msg).not.toBeNull();

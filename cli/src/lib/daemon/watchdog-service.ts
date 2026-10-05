@@ -1,12 +1,6 @@
-/**
- * Watchdog tick as a `PeriodicService` (RUSH-3193 P3).
- *
- * Nudges this host's own stalled agent sessions. Gated on the `watchdog.enabled`
- * device-config flag (`agents watchdog enable`), so the timer always fires but
- * only does work when the user opted in — the check happens inside the tick
- * itself, not the enable/disable registration gate, matching the pre-migration
- * inline behavior (daemon.ts previously `WATCHDOG_TICK_MS`-interval closure).
- */
+/** Watchdog tick as a `PeriodicService` (RUSH-3193 P3): nudges this host's own stalled sessions.
+ * The timer always fires but the tick checks the `watchdog.enabled` device-config flag (`agents
+ * watchdog enable`) itself, as the pre-migration inline code did. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';

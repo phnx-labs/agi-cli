@@ -28,10 +28,9 @@ for (const id of [sessionA, sessionB, sessionC]) {
 let shell: ChildProcess | undefined;
 
 async function startTab(count: number, layout = 'siblings', kind = 'claude'): Promise<number[]> {
-  // A fresh directory per tab: overwriting a binary that an earlier tab's process is
-  // still executing fails with ETXTBSY. The basename stays `claude` because the
-  // scan recognises agents by process name. macOS kills a relocated copy of an
-  // arm64e platform binary at exec (exit 137), so there it is a symlink instead.
+  // A fresh directory per tab: overwriting a binary an earlier tab is executing fails with
+  // ETXTBSY. The basename stays `claude` (the scan matches by process name); on macOS a relocated
+  // arm64e binary is killed at exec (137), so use a symlink.
   const binary = path.join(root, `bin-${tabCount++}`, 'claude');
   fs.mkdirSync(path.dirname(binary), { recursive: true });
   if (process.platform === 'darwin') fs.symlinkSync('/bin/sleep', binary);

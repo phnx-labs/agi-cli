@@ -1,11 +1,6 @@
-/**
- * WebSocket source evaluator.
- *
- * ws is push-based: each frame is an observation. The poll-model `evaluate`
- * returns null (there is nothing to snapshot on a tick); real observations arrive
- * through `subscribe`, which opens a persistent client (the same `ws` client
- * lib/browser/cdp.ts uses — not the platform undici WebSocket).
- */
+/** WebSocket source evaluator. ws is push-based: each frame is an observation, so `evaluate`
+ * returns null and `subscribe` opens a persistent client (the same `ws` client as
+ * lib/browser/cdp.ts, not undici's). */
 
 import WSWebSocket from 'ws';
 import type { MonitorSource } from '../config.js';

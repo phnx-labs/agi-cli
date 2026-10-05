@@ -34,11 +34,8 @@ function device(name = 'peer-a'): DeviceProfile {
   } as DeviceProfile;
 }
 
-/**
- * A real executable standing in for ssh. It records each invocation, writes the
- * given stderr, and exits with the given code — the shape of a peer that cannot
- * be reached.
- */
+/** A real executable standing in for ssh: records each invocation, writes the given stderr and
+ * exits with the given code, like an unreachable peer. */
 function fakeSsh(dir: string, body: string): string {
   const bin = path.join(dir, 'fake-ssh');
   fs.writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });

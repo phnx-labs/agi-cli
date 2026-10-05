@@ -366,12 +366,8 @@ describe('webhook signature verification', () => {
   });
 });
 
-/**
- * The receiver acks 202 BEFORE dispatching (RUSH-2548), so a test that asserts
- * on dispatch must wait for the settle callback rather than the HTTP response.
- * `hit` is wired to both onDelivery and onDeliveryError so a failed settle
- * releases the waiter too — otherwise a regression hangs instead of failing.
- */
+/** The receiver acks 202 before dispatch (RUSH-2548), so tests wait for the settle callback. `hit`
+ * is wired to onDelivery and onDeliveryError so a regression fails instead of hanging. */
 function settleWaiter() {
   let settled = 0;
   let waiters: { target: number; release: () => void }[] = [];
@@ -537,10 +533,8 @@ describe('startWebhookServer', () => {
         trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
       }),
     ];
-    // A dispatch that only completes when the test says so — standing in for the
-    // real 15-20s agent run that used to hold the HTTP socket open past Linear's
-    // delivery timeout. If the ack still waited on dispatch, the request below
-    // would never return and this test would time out rather than pass.
+    // A dispatch that completes only when the test says so, standing in for a real 15-20s agent
+    // run; if the ack waited on dispatch, this test would time out.
     let signalDispatchStarted!: () => void;
     const dispatchStarted = new Promise<void>((resolve) => { signalDispatchStarted = resolve; });
     let releaseDispatch!: () => void;
@@ -604,10 +598,8 @@ describe('startWebhookServer', () => {
       expect(response.status).toBe(202);
       expect(JSON.parse(response.body)).toMatchObject({ ok: true, accepted: true, deliveryId: 'linear:delivery-async' });
 
-      // The async window is exactly where dedup can regress: `deliveryStore.seen`
-      // reports only COMPLETED deliveries, so between the ack and the settle it
-      // says false and only the in-flight set stops a retry re-firing the job.
-      // Retry the SAME delivery id here, while dispatch is still held open.
+      // `deliveryStore.seen` reports only completed deliveries, so mid-flight dedup relies on the
+      // in-flight set. Retry the same delivery id while dispatch is held open.
       const midFlightRetry = await send();
       expect(midFlightRetry.status).toBe(200);
       expect(JSON.parse(midFlightRetry.body)).toMatchObject({ ok: true, duplicate: true });
@@ -892,10 +884,8 @@ describe('startWebhookServer', () => {
         req.end(payload);
       });
 
-      // The failing dispatch no longer surfaces as a 4xx — the delivery was
-      // already acked. What still holds is the LEDGER: the delivery is not
-      // marked complete, so a retry of the same id re-runs only the match that
-      // failed, and the one after that is a plain duplicate.
+      // A failing dispatch is no longer a 4xx (already acked); the ledger still holds: the delivery
+      // stays unmarked, so a retry re-runs only the failed match.
       expect((await send()).status).toBe(202);
       await waiter.until(1);
       const retry = await send();
@@ -1049,12 +1039,8 @@ describe('startWebhookServer', () => {
     }
   });
 
-  // RUSH-2722: a `run.command` handler shells out via `exec()`, which only
-  // resolves once the child process exits. Before this fix, the "fired" log
-  // rode `onDelivery` — settled only after that exit — so verifying a delivery
-  // fired meant waiting out however long the shelled-out command (a real agent
-  // run in production) took to finish. `onMatch` must fire immediately after
-  // the ack, well before the slow command settles.
+  // RUSH-2722: `run.command` resolves only on exit, so the "fired" log used to wait for it.
+  // `onMatch` must fire right after the ack, before the slow command settles.
   it.skipIf(process.platform === 'win32')('reports onMatch immediately, before a slow run.command handler settles', async () => {
     const secret = 'linear-secret';
     const webhookDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-onmatch-'));

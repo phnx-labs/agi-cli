@@ -1,10 +1,6 @@
-/**
- * Account attribution over a real on-disk version layout.
- *
- * Every fixture is a real directory tree with real `.claude.json` files — no mocking,
- * per the repo rule. The first test is the regression guard for the bug this module
- * exists to fix: one process-global email stamped onto every Claude session.
- */
+/** Account attribution over a real on-disk version layout (real `.claude.json` files, no mocks).
+ * The first test guards the bug this module fixes: one process-global email stamped onto every
+ * Claude session. */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -259,11 +255,9 @@ describe('account slots (PHNX-3940)', () => {
 
   it('accepts a launch-recorded account id (tier 1c) for a row outside every home, '
     + 'truthfully preferring it over the CURRENT login of a shared legacy home', () => {
-    // Simulates the exact "current login in legacy home does not prove history" bug:
-    // 2.1.219's live home reports ModSquad TODAY, but this particular row was actually
-    // launched under the River account slot (recorded at launch time, e.g. an older
-    // in-place rotation through that shared home before slots existed). A recorded
-    // launch id must not be silently outranked by "whichever login is there now".
+    // Simulates "current login in a legacy home does not prove history": 2.1.219's live home
+    // reports ModSquad today, but this row was launched under the River slot. A launch-recorded id
+    // must not be outranked by whichever login is there now.
     const index = buildClaudeAccountIndex();
     const outsideEveryHome = path.join(historyDir(), 'runs', 'job-legacy', 'transcript.jsonl');
 

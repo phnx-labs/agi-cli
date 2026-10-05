@@ -1,11 +1,6 @@
-/**
- * RUSH-2454: --help/--version must not load migrate.js (hosts/routine graph).
- *
- * Spawns the real CLI entry under a Node custom loader that records every
- * resolved module URL. Asserts the documentation paths never resolve
- * migrate.ts/migrate.js, while a non-docs command with a missing sentinel
- * does (proving the loader sees loads, not that the gate is a no-op).
- */
+/** RUSH-2454: --help/--version must not load migrate.js (hosts/routine graph). Spawns the real CLI
+ * under a Node loader that records resolved module URLs; docs paths must never resolve it while a
+ * non-docs command with a missing sentinel does. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -88,11 +83,9 @@ function loadedMigrateStrict(logPath: string): { migrate: boolean; fold: boolean
   let migrate = false;
   let fold = false;
   for (const line of lines) {
-    // RUSH-2454's target is the INSTALLATIONS migrate — the hosts/routine graph
-    // folded at bootstrap. Match only `lib/installations/migrate.ts|js` (not
-    // migrate-fold/migrate-targets, and NOT `lib/accounts/migrate.ts`, which is
-    // the separate PHNX-3940 account-slot migration a signin-badge render legitimately
-    // pulls in when an account exists — a false positive this gate never meant to catch).
+    // RUSH-2454 targets the installations migrate: match only `lib/installations/migrate.ts|js`,
+    // not migrate-fold/migrate-targets or `lib/accounts/migrate.ts` (the PHNX-3940 slot migration,
+    // a legitimate import).
     if (/\/migrate-fold\.(ts|js)/.test(line)) fold = true;
     else if (/\/installations\/migrate\.(ts|js)(\?|#|$)/.test(line)) migrate = true;
   }
@@ -165,12 +158,8 @@ describe('migration bootstrap gate (RUSH-2454)', () => {
     const { loader, log } = writeLoader(scratch);
     const home = path.join(scratch, 'home');
     fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
-    // ensureInitialized needs a .git in the system dir for non-setup commands;
-    // use a command that is SETUP_EXEMPT or skip init — `uninstall --help` is
-    // still help. Use `events --help`? That's help gated.
-    //
-    // `agents doctor` goes through ensureInitialized. Plant a minimal system
-    // repo so ensureInitialized does not exit hard.
+    // ensureInitialized needs a .git in the system dir for non-setup commands, and `agents doctor`
+    // goes through it. Plant a minimal system repo so it does not exit hard.
     fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
     // No v19 sentinel → needRun true → import migrate.js

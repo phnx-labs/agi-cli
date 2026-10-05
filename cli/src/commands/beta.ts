@@ -1,8 +1,5 @@
-/**
- * `agents setup beta` — enable or disable preview features like factory.
- * Nested under setup because opting into a preview is machine configuration,
- * not its own noun (RUSH-2981).
- */
+/** `agents setup beta` enables or disables preview features like factory. Nested under setup
+ * because opting into a preview is machine configuration, not its own noun (RUSH-2981). */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import {

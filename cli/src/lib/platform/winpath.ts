@@ -1,22 +1,6 @@
-/**
- * Windows User PATH + execution-policy primitives.
- *
- * The single place that mutates the Windows User PATH. It reads and writes the
- * RAW registry value via `Microsoft.Win32.Registry` (NOT the .NET
- * `[Environment]::*Environment*Variable` API, which expands `%VAR%` references
- * on read and downgrades REG_EXPAND_SZ to REG_SZ on write — issue #308,
- * dotnet/runtime#89695 / #1442). The prepend/dedup itself is computed in TS
- * (`computeNewUserPath`, the single source of truth) so it has unit coverage on
- * every OS; PowerShell is used only for the registry primitives. Because a raw
- * `SetValue` does NOT broadcast the change (the old `[Environment]` API did), the
- * write script broadcasts WM_SETTINGCHANGE itself so a new terminal picks up the
- * PATH without re-login.
- * Consumers: `shims.ts` (shims dir) and `scripts/postinstall.js` (npm global-bin
- * dir, so the `agents` command itself resolves).
- *
- * Leaf module — imports only `child_process` and `path` so it is cheap to load
- * from the npm lifecycle script without pulling the rest of the CLI.
- */
+/** Windows User PATH + execution-policy primitives; the only place that mutates User PATH. Uses the
+ * RAW registry value: the .NET Environment API expands %VAR% and downgrades REG_EXPAND_SZ (#308).
+ * Prepend/dedup is computed in TS; the write script broadcasts WM_SETTINGCHANGE. */
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 
@@ -27,16 +11,8 @@ interface WinPathResult {
   error?: string;
 }
 
-/**
- * Compute the new User PATH from the RAW (unexpanded) current value. Pure and
- * OS-independent — the single source of truth for the prepend/dedup logic.
- *
- * Idempotent: returns `{ changed: false }` (value unchanged, verbatim) when
- * `dir` is already the first `;`-split entry. Otherwise removes every existing
- * occurrence of `dir` and prepends it, dropping empty segments — matching POSIX
- * `export PATH="${dir}:$PATH"`. `%VAR%` segments are preserved verbatim (never
- * expanded), which is the #308 regression this fix targets.
- */
+/** Compute the new User PATH from the RAW current value. Pure. Unchanged if `dir` is already first;
+ * otherwise remove all occurrences, prepend, drop empty segments. %VAR% is kept verbatim (#308). */
 export function computeNewUserPath(currentRaw: string, dir: string): { changed: boolean; value: string } {
   const parts = currentRaw.split(';').filter((p) => p !== '');
   if (parts.length > 0 && parts[0] === dir) {
@@ -46,16 +22,8 @@ export function computeNewUserPath(currentRaw: string, dir: string): { changed: 
   return { changed: true, value: [dir, ...others].join(';') };
 }
 
-/**
- * Decide whether to write the User PATH back as REG_EXPAND_SZ (ExpandString) vs
- * REG_SZ (String). Pure — testable on any host.
- *
- * True (expandable) when the original value was already ExpandString, when the
- * raw value contains a `%VAR%` reference, or when `Path` was absent (default to
- * ExpandString — Windows' native Path type). Only a plain String value with no
- * `%` stays REG_SZ. `originalKind` is the .NET RegistryValueKind name
- * (`ExpandString`/`String`/…) or `null`/`Absent` when `Path` had no value.
- */
+/** Whether to write PATH back as REG_EXPAND_SZ: true if the original was ExpandString, the raw
+ * value has %VAR%, or Path was absent. Only plain String without % stays REG_SZ. Pure. */
 export function shouldWriteExpandable(originalKind: string | null, rawValue: string): boolean {
   if (originalKind === null || originalKind === 'Absent') return true;
   if (originalKind === 'ExpandString') return true;
@@ -85,10 +53,8 @@ const READ_SCRIPT = [
   '}',
 ].join('\n');
 
-// Writes the computed value back with the preserved kind and broadcasts
-// WM_SETTINGCHANGE (raw SetValue does not, unlike the old [Environment] API).
-// The value comes in via AGENTS_WINPATH_VALUE so it is never interpolated into
-// the script text (preserves the no-injection property for '%'-laden paths).
+// Writes the value back with the preserved kind and broadcasts WM_SETTINGCHANGE. The value arrives
+// via env var, never interpolated into the script (no injection).
 const WRITE_SCRIPT = [
   "$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)",
   "if ($null -eq $key) { $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment') }",
@@ -137,17 +103,9 @@ function parseReadOutput(out: string): { kind: string | null; raw: string } {
   return { kind, raw };
 }
 
-/**
- * Prepend `dir` to the Windows User PATH. Idempotent: a no-op when `dir` is
- * already first; moves it to the front when it exists but is positioned later
- * (e.g. appended by an older install) so it overrides conflicting entries.
- *
- * Reads the RAW registry value (preserving `%VAR%` and the REG_EXPAND_SZ type),
- * computes the new value in TS via `computeNewUserPath`, and only writes when
- * the value actually changes — preserving the original value type and
- * broadcasting WM_SETTINGCHANGE. `dir` and the computed value are passed via env
- * vars so they are never interpolated into the script text.
- */
+/** Prepend `dir` to the Windows User PATH; idempotent, moves an existing later entry to front.
+ * Reads raw, computes in TS, writes only on change, preserving type and broadcasting. Values pass
+ * via env vars. */
 export function prependToWindowsUserPath(dir: string): WinPathResult {
   try {
     const readOut = runPowerShell(READ_SCRIPT);
@@ -167,10 +125,7 @@ export function prependToWindowsUserPath(dir: string): WinPathResult {
   }
 }
 
-/**
- * The effective PowerShell execution policy (e.g. `Restricted`, `RemoteSigned`),
- * or null if it can't be determined (PowerShell missing / errored).
- */
+/** The effective PowerShell execution policy (e.g. `Restricted`), or null if undeterminable. */
 export function getEffectiveExecutionPolicy(): string | null {
   try {
     const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], {
@@ -184,26 +139,16 @@ export function getEffectiveExecutionPolicy(): string | null {
   }
 }
 
-/**
- * Whether a policy blocks running unsigned local `.ps1` scripts — which is what
- * npm and agents-cli generate (`npm.ps1`, `agents.ps1`). Under these the bare
- * `agents` / `npm` commands fail in PowerShell with a security error even when
- * on PATH. Pure — testable on any host.
- */
+/** Whether a policy blocks unsigned local `.ps1` scripts (npm.ps1, agents.ps1), making bare
+ * `agents`/`npm` fail in PowerShell even on PATH. Pure. */
 export function blocksLocalScripts(policy: string | null): boolean {
   if (!policy) return false;
   const p = policy.trim().toLowerCase();
   return p === 'restricted' || p === 'allsigned';
 }
 
-/**
- * Resolve the npm global-bin directory (where the generated `agents` /
- * `agents.cmd` launchers live, and where npm expects PATH to point) from the
- * package entrypoint. On Windows npm places bin launchers directly in the
- * prefix root, so the bin dir is the prefix itself.
- *
- * entry = `<prefix>/node_modules/@phnx-labs/agents-cli/dist/index.js` → `<prefix>`
- */
+/** Resolve the npm global-bin dir from the package entrypoint. On Windows launchers sit in the
+ * prefix root, so that is the prefix. */
 export function npmGlobalBinFromEntry(entryJsPath: string): string {
   return path.resolve(path.dirname(entryJsPath), '..', '..', '..', '..');
 }

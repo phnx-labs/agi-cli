@@ -26,12 +26,8 @@ import {
 } from '../lib/profiles.js';
 import { MANAGED_AGENT_IDS, isSelfUpdatingAgent } from '../lib/agents.js';
 
-/**
- * A scripted {@link WizardIO} for driving the engine with no TTY. It records every
- * prompt (so tests can assert which steps ran and which were skipped/disabled) and
- * answers via a matcher over the prompt, so the answers never couple to the private
- * sentinel values of a `select`'s choices.
- */
+/** A scripted WizardIO that drives the engine without a TTY and records every prompt, answering by
+ * matcher so tests never depend on the private sentinel values of a `select`. */
 type Prompt = {
   kind: 'select' | 'input' | 'password' | 'confirm';
   message: string;

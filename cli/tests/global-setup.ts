@@ -1,17 +1,6 @@
-/**
- * Vitest `globalSetup` — runs once in the main process before any worker
- * fork spins up, so it is the right place for whole-run housekeeping that
- * per-fork `tests/setup.ts` cannot do cheaply (it re-runs once per test
- * file).
- *
- * RUSH-2639: `tests/setup.ts` mints a fresh `agents-vitest-<random>` temp dir
- * per fork and removes it in `afterAll`. That cleanup is best-effort — a
- * killed worker (CI timeout, OOM, a hung test forcibly terminated) never
- * reaches `afterAll`, so its temp dir is orphaned under the OS temp root
- * forever. Sweep stale ones (older than STALE_AGE_MS, so an in-flight
- * sibling run on the same machine is never touched) before this run starts,
- * so dangling dirs from past crashed runs cannot accumulate indefinitely.
- */
+/** Vitest `globalSetup`: runs once in the main process. RUSH-2639: setup.ts makes a per-fork
+ * `agents-vitest-<random>` temp dir removed in `afterAll`, but killed workers (CI timeout, OOM)
+ * orphan theirs. Sweep stale ones (older than STALE_AGE_MS) before the run. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,10 +9,9 @@ import { ensureStandaloneSecretsBin } from './secrets-standalone.js';
 const STALE_AGE_MS = 60 * 60 * 1000; // 1 hour — well past any single test file's runtime.
 
 export default function globalSetup(): void {
-  // PHNX-3989: every secrets read/write in the suite goes through the real
-  // standalone `secrets` executable (src/lib/secrets-client.ts, no mocks).
-  // Resolve or install it ONCE here, in the main process, so every fork
-  // inherits SECRETS_BIN instead of racing an npm install per file.
+  // PHNX-3989: every secrets read/write in the suite uses the real standalone `secrets` executable
+  // (no mocks). Resolve or install it once here so every fork inherits SECRETS_BIN instead of
+  // racing an npm install per file.
   const secretsBin = ensureStandaloneSecretsBin();
   process.env.SECRETS_BIN = secretsBin;
   process.env.AGENTS_TEST_SECRETS_BIN = secretsBin;

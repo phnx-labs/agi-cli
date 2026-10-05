@@ -223,10 +223,9 @@ describe('resource resolution', () => {
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.resolved).toMatchObject({ name: 'deploy', repoRoot: userAgentsDir });
-    // JSON.stringify drops an undefined-valued key entirely — asserting its
-    // absence from the SERIALIZED object, not just reading it back as
-    // undefined, is what proves the getter really returned undefined (not a
-    // literal "undefined" string or a thrown-then-caught value).
+    // JSON.stringify drops an undefined-valued key, so asserting its absence from the SERIALIZED
+    // object proves the getter returned undefined, not a literal "undefined" string or a
+    // thrown-then-caught value.
     expect(parsed.resolved.snapshotSha).toBeUndefined();
   });
 });

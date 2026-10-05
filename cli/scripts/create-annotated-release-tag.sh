@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-#
-# Create an annotated v<version> tag whose message is the folded changelog already
-# on that commit (cli/.changelog/<version>.md). Agents write fragments under
-# .changelog/next/; release-changelog.ts folds them before the release commit —
-# do not invent a second notes channel at tag time.
-#
-# Extracted from release.sh so the tag+notes contract is unit-testable without
-# npm/gh/CI — the same reason select-publish-commit.sh and validate-bump.sh exist.
-#
-# Usage: create-annotated-release-tag.sh <version> <commit> [--force]
-# --force rewrites a local tag (already-published recovery / lightweight upgrade).
+# Create an annotated v<version> tag whose message is the folded changelog already on that commit
+# (cli/.changelog/<version>.md); fragments live in .changelog/next/ and release-changelog.ts folds
+# them before the release commit, so there is no second notes channel at tag time.
 set -euo pipefail
 
 [[ $# -eq 2 || $# -eq 3 ]] || {
@@ -32,10 +24,9 @@ notes_path="cli/.changelog/${version}.md"
 }
 
 commit="$(git rev-parse "$commit^{commit}")"
-# apps/cli -> cli flatten (RUSH-3189 follow-up): the folded changelog moved to
-# cli/.changelog/. Re-tagging (--force) an older pre-flatten commit still has it
-# under apps/cli/.changelog/, so fall back to that layout when cli/ is absent at
-# the commit being tagged.
+# apps/cli to cli flatten (RUSH-3189 follow-up): the folded changelog moved to cli/.changelog/,
+# but re-tagging (--force) an older pre-flatten commit finds it under apps/cli/.changelog/, so
+# fall back to that layout when cli/ is absent at the commit.
 git cat-file -e "${commit}:${notes_path}" 2>/dev/null || notes_path="apps/cli/.changelog/${version}.md"
 if ! notes_body="$(git show "${commit}:${notes_path}" 2>/dev/null)"; then
   echo "error: refusing to tag v${version}: ${commit:0:9} has no ${notes_path}" >&2

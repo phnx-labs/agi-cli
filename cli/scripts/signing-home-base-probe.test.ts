@@ -1,25 +1,6 @@
-/**
- * The signing home-base preflight, run against the REAL probe script.
- *
- * The case that matters is RUSH-2535: `release.sh --device zion` (the documented
- * "mac-mini is down" fallback) ran the whole flow -- crabbox tests, merge the PR,
- * push the tag -- and only THEN discovered zion cannot sign, leaving a
- * tagged-but-UNPUBLISHED release (npm at 1.22.35 with v1.22.36 tagged). The probe
- * moves that discovery to the front: an unprovisioned box must fail here, before
- * any git mutation.
- *
- * A fully green OK requires a real provisioned Mac (a Developer ID identity in a
- * headless-unlockable keychain + the apple.com/npmjs.com bundles) -- the release
- * itself exercises that path. On any box we can still assert the two things that
- * make the preflight worth having: it FAILS on an unprovisioned box, and it is
- * READ-ONLY, so running it can never advance a release. We also pin release.sh's
- * call ordering so the check runs before the crabbox, PR, merge, and tag.
- *
- * The provisioning-profile gate this suite used to cover (embedded.provisionprofile,
- * RUSH-2541) was removed with it: that profile only fed the keychain helper's
- * signed build, which moved out of this repo entirely with the standalone
- * `secrets` engine (PHNX-3989).
- */
+/** The signing home-base preflight, run against the real probe. RUSH-2535: `release.sh --device
+ * zion` ran tests, merged the PR and pushed the tag before discovering zion cannot sign.
+ * The probe must fail an unprovisioned box before any git mutation. */
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -37,10 +18,9 @@ function probe() {
 
 describe('signing home-base probe: an unprovisioned box fails fast', () => {
   it('never reports OK on a box missing the signing credentials', () => {
-    // Guard against the probe rounding up to success: a box without the Developer
-    // ID cert / apple.com / npmjs.com bundles is not a home base. (On a genuinely
-    // provisioned Mac this test box would print OK -- that is the release's own
-    // happy path, not this unit's job to fake.)
+    // Guard against the probe rounding up to success: a box without the Developer ID cert and the
+    // apple.com/npmjs.com bundles is not a home base. On a provisioned Mac this would print OK,
+    // which is the release's own happy path.
     const provisioned =
       process.platform === 'darwin' &&
       spawnSync('bash', ['-c', "security find-identity -v -p codesigning 2>/dev/null | grep -q 'Developer ID Application'"])
@@ -54,10 +34,9 @@ describe('signing home-base probe: an unprovisioned box fails fast', () => {
 
 describe('signing home-base probe: it cannot advance a release', () => {
   it('the probe performs no git/gh/npm mutations', () => {
-    // The whole point is to fail BEFORE the merge + tag. A probe that itself ran
-    // a mutation would defeat that, so assert the executable body carries none.
-    // Strip comment lines and string-literal contents first, so a "npm publish"
-    // in the docblock or an error string is not mistaken for a command.
+    // The probe must fail before merge and tag, so assert its executable body carries no mutation.
+    // Strip comment lines and string literals first so a "npm publish" in a docblock or error
+    // string is not mistaken for a command.
     const code = fs
       .readFileSync(PROBE, 'utf-8')
       .split('\n')

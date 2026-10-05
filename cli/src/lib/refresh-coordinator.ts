@@ -23,26 +23,16 @@ function lockTarget(scope: string, key: string): string {
 interface RefreshLeaseOptions<T> {
   scope: string;
   key: string;
-  /**
-   * Re-read the shared result after taking the lease. If another process
-   * refreshed it while this caller waited, return that value instead of
-   * repeating the provider request.
-   */
+  /** Re-read the shared result after taking the lease; if another process refreshed it while this
+   * caller waited, return that instead of repeating the provider request. */
   readCompleted: () => T | null;
   isCompleted: (value: T) => boolean;
   refresh: () => Promise<T>;
 }
 
-/**
- * Serialize refresh work across every agents-cli process on this device.
- *
- * In-process promise maps only protect one Node process. Factory, the daemon,
- * and `agents view` are separate processes, so they need an
- * OS-visible lease. The result is re-read after lock acquisition: a waiter
- * consumes the winner's publication and never calls the provider a second
- * time. `proper-lockfile` supplies heartbeat + stale-owner recovery while an
- * async provider request is in flight.
- */
+/** Serialize refresh work across every agents-cli process on this device: Factory, the daemon and
+ * `agents view` are separate processes and need an OS-visible lease. The result is re-read after
+ * locking so a waiter never calls the provider twice; `proper-lockfile` gives heartbeat. */
 export async function withRefreshLease<T>(options: RefreshLeaseOptions<T>): Promise<T> {
   const target = lockTarget(options.scope, options.key);
   await fs.mkdir(path.dirname(target), { recursive: true });

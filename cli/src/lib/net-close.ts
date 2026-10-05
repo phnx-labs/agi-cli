@@ -1,16 +1,11 @@
-/**
- * Bounded-close helper for a local `net.Server`. Generic — no secrets/engine
- * dependency — so consumers that only needed it for that reason (the webhook
- * receiver, the daemon's webhook service) no longer import `lib/secrets/*`.
- */
+/** Bounded-close helper for a local `net.Server`. Generic (no secrets/engine dependency), so the
+ * webhook receiver and daemon webhook service no longer import `lib/secrets/*`. */
 import type * as net from 'node:net';
 
 const SERVER_CLOSE_TIMEOUT_MS = 5000;
 
-/**
- * Close `server`, resolving once closed or after `timeoutMs`, whichever comes
- * first — a shutdown must never hang on a client that never disconnects.
- */
+/** Closes `server`, resolving once closed or after `timeoutMs`, whichever comes first: a shutdown
+ * must never hang on a client that never disconnects. */
 export function closeServerBounded(
   server: net.Server,
   timeoutMs: number = SERVER_CLOSE_TIMEOUT_MS,

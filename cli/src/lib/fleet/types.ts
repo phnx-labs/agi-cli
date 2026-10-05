@@ -1,24 +1,9 @@
-/**
- * Shared types for the fleet profile-sync feature (`agents apply` / `ag apply`).
- *
- * `agents.yaml` gains an additive `fleet:` block that declares a *profile*: which
- * agents every device should have installed, which config scopes to reconcile,
- * and whether logins/tokens propagate. `apply` reconciles the live fleet to it.
- *
- * These types are the contract shared by the manifest parser (`manifest.ts`),
- * the reconcile engine (`apply.ts`), the auth propagation (`auth-sync.ts`), and
- * the command (`commands/apply.ts`). Runtime probe/diff shapes live here too so
- * the pure diff can be unit-tested without SSH.
- */
+/** Shared types for the fleet profile-sync feature (`agents apply`): the additive `fleet:` block
+ * in `agents.yaml` declares which agents, config scopes and login handling each device gets. */
 
-/**
- * How login/token state propagates to a device.
- * - `sync` (default): push portable credentials where possible, surface the rest
- *   as a manual login.
- * - `skip`: probe/report only; take no login action.
- * (A per-agent interactive `prompt` mode is intentionally not offered yet — it
- * was removed rather than accepted as a silent no-op that behaves like `skip`.)
- */
+/** How login/token state propagates: `sync` (default) pushes portable credentials where possible
+ * and surfaces the rest as a manual login; `skip` only probes/reports. A per-agent interactive
+ * `prompt` mode was removed rather than accepted as a silent no-op. */
 export type FleetLoginMode = 'sync' | 'skip';
 
 /** Defaults applied to every targeted device unless a per-device entry overrides. */
@@ -29,13 +14,9 @@ export interface FleetDefaults {
   sync?: string[];
   /** Login propagation strategy. Default `'sync'`. */
   login?: FleetLoginMode;
-  /**
-   * Fleet-wide config defaults (`agents devices config --fleet <key> <value>`)
-   * — the middle layer of the device-config store: built-in default <
-   * `fleet.defaults.config` < per-device `devices/<name>/agents.yaml`
-   * `config:`. Inert to the reconcile engine (apply never pushes it; it takes
-   * effect through the config read path). Names and non-secret values only.
-   */
+  /** Fleet-wide config defaults (`agents devices config --fleet`): the middle layer of device
+   * config (built-in default, `fleet.defaults.config`, per-device `config:`). Inert to the
+   * reconcile engine; applies via the config read path. Names and non-secret values only. */
   config?: Record<string, unknown>;
 }
 
@@ -44,51 +25,33 @@ export interface FleetDeviceOverride {
   agents?: string[];
   sync?: string[];
   login?: FleetLoginMode;
-  /**
-   * LEGACY home of per-device operator config (#2458); the current store is the
-   * per-device doc `devices/<name>/agents.yaml` `config:` block. Existing
-   * values are folded into the device doc by lib/devices/config-migration.ts
-   * and stripped here — current code never writes this field.
-   */
+  /** LEGACY home of per-device operator config (#2458); the current store is the per-device doc
+   * `devices/<name>/agents.yaml` `config:`. lib/devices/config-migration.ts folds existing
+   * values in and strips them here; current code never writes this field. */
   config?: Record<string, unknown>;
 }
 
-/**
- * The `fleet:` block as it appears in `agents.yaml` (or any `-f` file). `devices`
- * is either the literal string `'all'` (every online registered device minus the
- * source machine) or an explicit map of device-name -> override.
- */
+/** The `fleet:` block as it appears in `agents.yaml` (or any `-f` file). `devices` is `'all'`
+ * (every online registered device minus the source) or an explicit map of device name to
+ * override. */
 export interface FleetManifest {
   defaults?: FleetDefaults;
   devices: 'all' | Record<string, FleetDeviceOverride>;
-  /**
-   * Fleet-wide extras captured by `agents fleet capture` so a fresh machine can
-   * reconstruct the whole environment, not just installed agents. All additive,
-   * portable, and LEAK-FREE — names only, never connection details.
-   *
-   * (Browser profiles are deliberately NOT captured here: the central `browser:`
-   * block already syncs verbatim via `agents repo push/pull`, so duplicating it
-   * would be redundant — and its ssh:// endpoints can carry `user@host`, which
-   * must never be copied into a second location.)
-   */
+  /** Fleet-wide extras captured by `agents fleet capture` so a fresh machine can rebuild the
+   * environment: additive, portable and leak-free (names only, never connection details).
+   * Browser profiles are not captured: their ssh:// endpoints can carry user@host. */
   /** Secrets-bundle NAMES to ensure exist — values live in the keychain and are
    * never captured or pushed; `apply` surfaces missing bundles to recreate. */
   secrets?: { bundles?: string[] };
   /** Routine NAMES that should be active on the fleet (files sync via the repo). */
   routines?: string[];
-  /**
-   * Portable user decisions for Tailscale discovery. A name maps to `approved`
-   * or `ignored`; absence means pending. Connection metadata remains in each
-   * machine's local device registry and is never committed.
-   */
+  /** Portable user decisions for Tailscale discovery: a name maps to `approved` or `ignored`,
+   * absence means pending. Connection metadata stays in each machine's local registry and is
+   * never committed. */
   discovery?: Record<string, 'approved' | 'ignored'>;
-  /**
-   * Tailnet node names the user dismissed from auto-discovery, with who
-   * dismissed each and when. Lives here rather than in a per-device doc because
-   * a dismissed node is deliberately NOT a device — it never enters the
-   * registry, so it has no per-device folder. Syncs fleet-wide with the rest of
-   * `agents.yaml`, so a dismissal on one box stops the suggestion on every box.
-   */
+  /** Tailnet node names dismissed from auto-discovery, with who and when. Kept here, not in a
+   * per-device doc, since a dismissed node is not a device and has no per-device folder; it
+   * syncs with `agents.yaml`, so a dismissal on one box stops the suggestion everywhere. */
   ignored?: IgnoredDeviceEntry[];
 }
 
@@ -102,10 +65,8 @@ export interface IgnoredDeviceEntry {
   ignoredOn: string;
 }
 
-/**
- * A device's desired state after merging defaults with its override and
- * expanding `devices: all`. This is what the reconcile engine drives toward.
- */
+/** A device's desired state after merging defaults with its override and expanding `devices:
+ * all`; what the reconcile engine drives toward. */
 export interface DeviceDesired {
   /** Registered device name (from `agents devices`). */
   device: string;
@@ -117,10 +78,8 @@ export interface DeviceDesired {
   login: FleetLoginMode;
 }
 
-/**
- * What a probe found on one device. Populated from `readyProbe` plus an
- * installed-agents listing; `reachable: false` short-circuits everything else.
- */
+/** What a probe found on one device, from `readyProbe` plus an installed-agents listing;
+ * `reachable: false` short-circuits the rest. */
 export interface DeviceProbe {
   device: string;
   reachable: boolean;
@@ -130,23 +89,13 @@ export interface DeviceProbe {
   cliVersion?: string;
   /** Agent ids currently installed on the device. */
   installedAgents: string[];
-  /**
-   * Installed version strings per agent id (e.g. `{ claude: ['2.1.170', '2.1.207'] }`),
-   * parsed from `agents view --json` on the device. Only populated when the plan
-   * involves a version-pinned spec (`claude@2.1.170`, or a `claude@all` expansion)
-   * — a bare `claude`/`claude@latest` roster never pays for the extra probe. When
-   * undefined, version-pinned specs fall back to id-level presence.
-   */
+  /** Installed versions per agent id, parsed from `agents view --json` on the device. Populated
+   * only when the plan has a version-pinned spec (`claude@2.1.170` or an `@all` expansion), so
+   * bare rosters skip the probe. When undefined, pinned specs fall back to id-level presence. */
   installedVersions?: Record<string, string[]>;
-  /**
-   * Secrets bundles already present on the device: name -> `updated_at` (or ''
-   * when the remote reports none). Only populated when the manifest declares
-   * bundles AND `--provision-secrets` is set — a fleet that uses no bundles
-   * never pays for the extra round trip.
-   *
-   * METADATA ONLY. `agents secrets list --json` returns names and timestamps and
-   * explicitly never values, which is what makes this probe safe to run.
-   */
+  /** Secrets bundles already on the device: name to `updated_at` ('' if none). Populated only
+   * when the manifest declares bundles and `--provision-secrets` is set. Metadata only: `agents
+   * secrets list --json` never returns values, which makes the probe safe. */
   remoteBundles?: Record<string, string>;
   /** Reason string when `reachable` is false or the probe partially failed. */
   note?: string;
@@ -184,11 +133,8 @@ export interface FleetAction {
   detail: string;
 }
 
-/**
- * The full reconcile plan: per-device desired vs probed, plus the flat list of
- * actions. Pure output of `diffFleet(desired, probes)` — drives both `--plan`
- * rendering and the confirm prompt.
- */
+/** The full reconcile plan: per-device desired vs probed plus the flat action list. Pure output
+ * of `diffFleet`; drives `--plan` and the confirm prompt. */
 export interface FleetPlan {
   devices: DeviceDiff[];
   actions: FleetAction[];

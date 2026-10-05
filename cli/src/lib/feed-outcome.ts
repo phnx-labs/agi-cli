@@ -1,21 +1,6 @@
-/**
- * Outcome keys for the agent feed.
- *
- * 1,100 agents is not 1,100 things the operator cares about — dozens of agents
- * map onto each real deliverable (a Linear ticket, a PR, a worktree/epic). The
- * feed groups by **outcome** so one human reasons about initiatives, not
- * processes. Every block is attributed to exactly one outcome; orphans land in
- * the shared "Unassigned" bucket.
- *
- * Precedence (first match wins):
- *   1. ticket   — RUSH-1125 / explicit `ticket` field / ticket-shaped branch
- *   2. pr       — #534 / PR#534 / github.com/.../pull/534
- *   3. worktree — `.agents/worktrees/<slug>` slug (or epic label)
- *   4. unassigned
- *
- * Pure functions, no I/O — unit-testable and shared by `agents feed` rendering
- * and any UI that collapses blocks under deliverables.
- */
+/** Outcome keys for the agent feed: blocks group under one deliverable so an operator reasons
+ * about initiatives, not processes. Precedence, first match wins: ticket, pr, worktree,
+ * unassigned. Pure functions, no I/O. */
 import { detectTicket, extractPrUrl } from '@phnx-labs/sessions-cli/reader';
 import { deriveBlockState, type OpenBlock } from './feed/feed.js';
 
@@ -30,10 +15,7 @@ export interface OutcomeRef {
   label: string;
 }
 
-/**
- * Signals used to derive an outcome. All optional — callers pass whatever they
- * already know (block fields, session meta, free-text questions).
- */
+/** Signals used to derive an outcome; all optional. */
 interface OutcomeSignals {
   ticket?: string | null;
   pr?: string | null;
@@ -52,11 +34,8 @@ const UNASSIGNED: OutcomeRef = {
   label: 'Unassigned',
 };
 
-/**
- * Normalize a PR ref.
- * - Full GitHub URL → `owner/repo#N` (repo identity included)
- * - Bare `#123` / `PR#123` → `#123` (no repo known)
- */
+/** Normalizes a PR ref: a full GitHub URL becomes `owner/repo#N`, a bare `#123` or `PR#123`
+ * becomes `#123`. */
 export function normalizePrRef(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   const trimmed = raw.trim();
@@ -111,10 +90,7 @@ function prFromSignals(s: OutcomeSignals): string | undefined {
   return undefined;
 }
 
-/**
- * Derive the single outcome a block/agent belongs to.
- * Exactly one outcome per call — never ambiguous, never empty.
- */
+/** Derives the single outcome a block belongs to; never ambiguous, never empty. */
 export function deriveOutcome(signals: OutcomeSignals): OutcomeRef {
   const ticket = ticketFromSignals(signals);
   if (ticket) {
@@ -178,20 +154,15 @@ export interface OutcomeGroup {
   };
 }
 
-/**
- * Openness is the canonical {@link deriveBlockState}, never a raw `block.answer`
- * test: a PENDING claim carries an answer record while the block is still
- * `open`, so reading the field directly showed a claimed-but-undelivered
- * question as answered in the operator's own feed (PHNX-3999).
- */
+/** Openness comes from deriveBlockState, never a raw `block.answer` test: a pending claim
+ * carries an answer while still `open`, which showed an undelivered question as answered
+ * (PHNX-3999). */
 function isOpen(block: OpenBlock): boolean {
   return deriveBlockState(block) === 'open' && !block.parkedAt && !block.continuedAt && !block.defaultedAt;
 }
 
-/**
- * Collapse blocks under their outcome. Order: needs-you outcomes first
- * (open count desc), then by label. Unassigned always last among ties of 0 open.
- */
+/** Collapses blocks under their outcome: needs-you outcomes first (open count desc), then label;
+ * Unassigned last among ties. */
 export function groupBlocksByOutcome(blocks: OpenBlock[]): OutcomeGroup[] {
   const byKey = new Map<string, { outcome: OutcomeRef; blocks: OpenBlock[] }>();
   for (const block of blocks) {
@@ -234,19 +205,13 @@ export function groupBlocksByOutcome(blocks: OpenBlock[]): OutcomeGroup[] {
   return groups;
 }
 
-/**
- * Stamp each block with its derived outcome for JSON consumers.
- * Does not mutate the input records.
- */
+/** Stamps each block with its derived outcome for JSON consumers without mutating the input. */
 export function stampBlockOutcomes(blocks: OpenBlock[]): Array<OpenBlock & { outcome: OutcomeRef }> {
   return blocks.map((b) => ({ ...b, outcome: outcomeForBlock(b) }));
 }
 
-/**
- * True when every still-open block under the outcome asks the same question
- * (same cluster of header+text). Fan-out answers are only safe when this holds
- * — otherwise the operator must pick a specific agent.
- */
+/** True when every open block under the outcome asks the same question. Fan-out answers are only
+ * safe then. */
 export function isUnambiguousOutcomeAnswer(group: OutcomeGroup): boolean {
   const open = group.blocks.filter(isOpen);
   if (open.length <= 1) return open.length === 1;
@@ -263,10 +228,7 @@ export function openBlocksForOutcome(group: OutcomeGroup): OpenBlock[] {
   return group.blocks.filter(isOpen);
 }
 
-/**
- * Lightweight session signals used to fill missing ticket/PR/worktree on a
- * block at list time (the publish hook may not have had them yet).
- */
+/** Lightweight session signals used to fill a block's missing ticket/PR/worktree at list time. */
 export interface SessionOutcomeHint {
   sessionId?: string | null;
   agentId?: string | null;
@@ -282,10 +244,8 @@ export interface SessionOutcomeHint {
   routineName?: string | null;
 }
 
-/**
- * Overlay session meta onto a block when the block itself is missing ticket/PR/
- * worktree. Never overwrites a field the block already carries.
- */
+/** Overlays session meta onto a block missing ticket/PR/worktree; never overwrites an existing
+ * field. */
 export function enrichBlockFromSession(block: OpenBlock, hint: SessionOutcomeHint): OpenBlock {
   const next: OpenBlock = { ...block };
   if (!next.ticket && hint.ticketId) next.ticket = hint.ticketId;
@@ -303,10 +263,8 @@ export function enrichBlockFromSession(block: OpenBlock, hint: SessionOutcomeHin
   return next;
 }
 
-/**
- * Build a mailboxId → session-hint index and enrich every block. Pure.
- * Matching order: mailboxId, then sessionId, then agentId.
- */
+/** Builds a mailboxId index and enriches every block. Matching order: mailboxId, sessionId,
+ * agentId. */
 export function enrichBlocksFromSessions(
   blocks: OpenBlock[],
   sessions: SessionOutcomeHint[],

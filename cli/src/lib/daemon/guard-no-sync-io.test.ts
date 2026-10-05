@@ -2,47 +2,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-/**
- * Structural guard (PHNX-3695): no synchronous system call may sit on a daemon
- * SERVICE tick/start path.
- *
- * The daemon drives every background service on ONE Node event loop
- * (`ServiceSupervisor`, supervisor.ts). A synchronous `execFileSync` /
- * `readFileSync` / … inside a `DaemonService`'s `onStart`/`onTick` body freezes
- * that loop for the whole duration of the call — and while it is frozen the
- * supervisor's per-tick deadline timer CANNOT fire and the browser IPC server
- * CANNOT answer, which is the "accept but never reply" wedge (browser/ipc.ts,
- * PHNX-3411). Async equivalents (`fs/promises`, `execFileBounded`) keep the loop
- * live.
- *
- * ## What this guard covers, and what it deliberately does NOT
- *
- * (1) It scans the `DaemonService` implementation files — the tick/start SURFACE,
- * the entry points the supervisor calls directly — and fails with `file:line`
- * if any banned synchronous call survives in their code (comments and string
- * literals are stripped so a doc mention like "async existsSync" is not a hit).
- *
- * (2) The tick bodies hand work to helper functions in OTHER modules, and a full
- * transitive call-graph scan is intractable here: every daemon service
- * transitively imports most of the codebase, so a naive reachability scan flags
- * every `execFileSync`/`readFileSync` anywhere as "tick-reachable" — useless. So
- * for the HOT helpers the ticks call directly, this guard instead PINS that the
- * tick call site uses the async, non-blocking variant (`emitAsync`,
- * `getConfigValueAsync`, `await publish…`, `await reap…`) rather than the
- * synchronous one whose file lock / `ps` / YAML read would freeze the loop. A
- * regression that swaps an async call back to its sync twin fails here.
- *
- * (3) What is OUT of scope, by design: startup/lifecycle code in daemon.ts
- * (pid/lock, install-time launchctl/systemctl) — it runs before the loop serves
- * clients. And CONDITIONAL, rare-transition synchronous fs — the report
- * extraction / transcript archival inside `reconcileRunningRecord`, catchup's
- * overdue-dispatch — which runs only when a run
- * actually ends or a job is dispatched, not on the every-tick scan. Those, plus
- * a few small bounded per-tick reads (the pid registry, `captureProcessStartTime`
- * fingerprints, opt-in watchdog per-session stats), are named as accepted
- * residue in `daemon/AGENTS.md` with a follow-up; they are not thread-halting
- * 30s locks or whole-process-table `ps` scans, which this PR removed.
- */
+/** Structural guard (PHNX-3695): no sync system call on a daemon SERVICE tick/start path, since
+ * one `execFileSync`/`readFileSync` in `onStart`/`onTick` freezes the shared loop (PHNX-3411).
+ * Scans *-service.ts and pins hot helpers' async call sites; daemon.ts startup is out of scope. */
 
 // Synchronous fs / child_process / lock calls that block the event loop.
 const BANNED = /\b(execFileSync|execSync|spawnSync|readFileSync|writeFileSync|appendFileSync|statSync|lstatSync|existsSync|readdirSync|mkdirSync|rmSync|unlinkSync|renameSync|openSync|readSync|writeSync|sleepSync|lockSync|withFileLock)\b/;
@@ -122,11 +84,9 @@ describe('daemon service tick paths are free of synchronous IO', () => {
   });
 });
 
-// (2) The hot helpers each tick calls directly must be invoked through their
-// ASYNC, non-blocking variant. A full transitive scan is intractable (see the
-// docblock), so these pin the specific tick call sites: swap any of these back
-// to its synchronous twin — whose file lock / `ps` / YAML read freezes the
-// shared event loop — and this fails (PHNX-3695).
+// (2) The hot helpers each tick calls must use their ASYNC variant. A full transitive scan is
+// intractable, so this pins the call sites; swapping one back to its sync twin (file lock / `ps` /
+// YAML read freezing the loop) fails (PHNX-3695).
 describe('daemon tick call sites use the async, non-blocking helper variants', () => {
   const daemonDir = __dirname;
   const read = (rel: string) => stripNonCode(fs.readFileSync(path.join(daemonDir, rel), 'utf-8')).join('\n');
@@ -152,10 +112,9 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
   });
 
   it('usage-sync exchange applies each peer reply through async file locks, never the sleepSync ones', () => {
-    // exchangeFleetStateWithPeers → applyPeerFleetState runs on the tick once per
-    // peer reply (PHNX-4116). Its two writers — the peer's daemon-state file and
-    // the usage cache — must take their locks with withFileLockAsync: the sync
-    // twin sleepSyncs the daemon's event loop for up to 30 s under contention.
+    // exchangeFleetStateWithPeers runs applyPeerFleetState per peer reply on the tick (PHNX-4116).
+    // Its two writers (the peer's daemon-state file and the usage cache) must use
+    // withFileLockAsync: the sync twin sleepSyncs the event loop up to 30 s under contention.
     const libDir = path.join(daemonDir, '..');
     const helper = stripNonCode(fs.readFileSync(path.join(libDir, 'accounting', 'usage-sync.ts'), 'utf-8')).join('\n');
     expect(helper).toMatch(/await applyPeerFleetState\(/);
@@ -183,17 +142,9 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
   });
 
   it('host-run async finalize (tick path) emits through the async lock, not sync emitRoutineEnd (PHNX-3727)', () => {
-    // reapExitedRunningJobs → finalizeHostRunAsync → applyHealedHostRun. The heal
-    // ends by emitting routine-end, which acquires the event-log file lock; on the
-    // tick that MUST be emitRoutineEndAsync (withFileLockAsync). Reverting the
-    // injected emitter to the default synchronous emitRoutineEnd would freeze the
-    // loop up to 30s when a host:-placed run finishes under lock contention — the
-    // residual guard-no-sync-io's *-service.ts scan cannot see (it lives in
-    // runner.ts). Scope the pin to the finalizeHostRunAsync call site
-    // specifically: the bare `void emitRoutineEndAsync(m)` also appears at the
-    // pre-existing PHNX-3695 local-pid tick path (reconcileRunningRecord), so
-    // match the unique injected-emitter argument tying reconcileHostTaskAsync to
-    // the async emitter — reverting THIS fix to the sync default fails here.
+    // reapExitedRunningJobs, finalizeHostRunAsync, applyHealedHostRun: the heal emits routine-end,
+    // which takes the event-log lock, so on the tick it MUST be emitRoutineEndAsync (a sync emit
+    // freezes the loop up to 30s). The residual lives in runner.ts, outside the *-service.ts scan.
     expect(read('runner.ts')).toMatch(/reconcileHostTaskAsync\(task\), \(m\) => \{ void emitRoutineEndAsync\(m\)/);
   });
 });

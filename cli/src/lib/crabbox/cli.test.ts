@@ -22,25 +22,16 @@ import {
 } from './cli.js';
 import type { SecretsBundle } from '../secrets-types.js';
 
-// Suites that stand up a fake `crabbox` on PATH are POSIX-only: the fake is a
-// `#!/bin/sh` script with no .cmd/.exe extension, which Windows can neither
-// resolve nor execute, so findCrabbox (cli.ts:74) throws "crabbox is not
-// installed or not on PATH" before the behavior under test runs. The
-// pure-function suites in this file still run everywhere.
+// Suites that stand up a fake `crabbox` on PATH are POSIX-only: the fake is a `#!/bin/sh` script
+// Windows cannot resolve, so findCrabbox (cli.ts:74) throws before the behavior runs.
+// Pure-function suites still run everywhere.
 const describePosix = describe.skipIf(process.platform === 'win32');
 // Same POSIX-only guard for a single test that stands up a fake `crabbox` on PATH.
 const itPosix = it.skipIf(process.platform === 'win32');
 
-/**
- * Hermetic lease-bundle resolution for suites that call crabboxList / crabboxWarmup
- * / crabboxEnv but do not care about secrets. Without this, crabboxEnv auto-detects
- * the DEVELOPER's real provider-token bundle (e.g. a locked `hetzner.com`), and the
- * agentOnly read throws "not unlocked" (SEC-13) — a dev-machine-only failure that
- * has nothing to do with the box parsing / warmup argv under test. Pinning readMeta
- * → {} and the process client's listBundlesSync → [] makes resolveLeaseBundle find
- * nothing, so crabboxEnv injects no lease token (and never spawns the standalone);
- * resetting the memos keeps it isolated per test.
- */
+/** Hermetic lease-bundle resolution for suites that don't care about secrets. Without it crabboxEnv
+ * auto-detects the developer's real provider-token bundle and the agentOnly read throws "not
+ * unlocked" (SEC-13), a dev-machine-only failure. */
 function installHermeticLease(): void {
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
@@ -106,21 +97,9 @@ describe('pickTailscaleBundleFromList', () => {
 
 const REAL_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
 
-/**
- * crabbox's lease + tailscale secrets reads now resolve through the standalone
- * `secrets` process client (PHNX-3989), so these exercise the REAL standalone
- * `secrets __serve` — no mocks (repo rule) — gated on AGENTS_TEST_SECRETS_BIN
- * exactly like secrets-client.test.ts; with it unset the block skips cleanly, so
- * CI (which has no standalone checkout) stays green.
- *
- * A spawn-counting wrapper on $SECRETS_BIN is the seam that proves crabbox's
- * process-lifetime memo: `crabboxEnv` runs on every crabboxWaitReady poll, so the
- * token must resolve ONCE and be served from the memo after — otherwise a lease
- * spends a `secrets __serve` spawn per poll (the per-poll storm the memo kills, now
- * a process spawn per read, not merely a keychain hit). The wrapper appends a line
- * per invocation, then execs the real bin, so the spawn count must not climb across
- * the repeated crabboxEnv calls.
- */
+/** crabbox's lease and tailscale secrets reads go through the standalone `secrets` client
+ * (PHNX-3989), so these use the REAL `secrets __serve` (no mocks), gated on
+ * AGENTS_TEST_SECRETS_BIN and skipped on CI. A spawn-counting wrapper proves one resolve. */
 describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client', () => {
   const ENV_KEYS = [
     'AGENTS_LEASE_SECRETS_BUNDLE',
@@ -259,10 +238,9 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
   });
 
   itPosix('a failed lease read propagates out of crabboxWaitReady before the poll loop runs', async () => {
-    // crabboxWaitReady's first action is crabboxFind -> crabboxList -> crabboxEnv,
-    // which throws synchronously for an unresolvable bundle. A fake `crabbox` on PATH
-    // makes findCrabbox() pass so crabboxEnv is the thing that throws. The injected
-    // `sleep` records any poll iteration; assert it is NEVER called.
+    // crabboxWaitReady's first action reaches crabboxEnv, which throws synchronously for an
+    // unresolvable bundle; a fake `crabbox` on PATH makes findCrabbox() pass. The injected `sleep`
+    // must never be called.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-lease-fail-'));
     fs.writeFileSync(
       path.join(dir, 'crabbox'),
@@ -520,10 +498,9 @@ describePosix('normalizeBox tailscale fields (via crabboxList)', () => {
 describePosix('crabboxList timeout — a slow provider never hangs an ambient command', () => {
   installHermeticLease();
   it('throws (does not hang) when `crabbox list` exceeds timeoutMs', () => {
-    // Fake crabbox: --help is instant (findCrabbox passes), `list` blocks 30s.
-    // With timeoutMs=400 the spawn is killed and we throw a clear message fast —
-    // this is what keeps `agents devices` / `agents ssh <typo>` from blocking on
-    // a slow/unreachable provider API.
+    // Fake crabbox: --help is instant but `list` blocks 30s. With timeoutMs=400 the spawn is
+    // killed and a clear error thrown fast, keeping `agents devices` / `agents ssh <typo>` from
+    // blocking on a slow provider API.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-slow-'));
     fs.writeFileSync(
       path.join(dir, 'crabbox'),

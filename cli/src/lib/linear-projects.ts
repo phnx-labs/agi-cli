@@ -1,16 +1,6 @@
-// Linear project matching for `agents projects link --linear`.
-//
-// A project's identity shows up three ways — a Linear project name ("Agents CLI"),
-// a GitHub repo slug ("phnx-labs/agents-cli"), and a filesystem folder
-// (".../agents-cli"). normalizeProjectKey() collapses all three to one comparison
-// key so they compare equal, and matchLinearProject() binds a repo/folder to the
-// Linear project the user most likely means.
-//
-// Ported from apps/ext/src/core/linearProjects.ts (no cross-package imports —
-// repo rule); keep the two in sync. The matcher half is PURE so it unit-tests
-// without a live `linear` binary; the `linear projects --json` shell-out lives at
-// the bottom (listLinearProjects) and fails LOUD — it's behind an explicit user
-// command, not a best-effort card enrichment.
+// Linear project matching for `agents projects link --linear`: normalizeProjectKey() collapses a
+// Linear name, repo slug or folder path to one key. Ported from
+// apps/ext/src/core/linearProjects.ts; keep in sync. Matcher is pure.
 
 import { execFileSync } from 'child_process';
 
@@ -22,28 +12,15 @@ export interface LinearProjectLite {
   url?: string;
 }
 
-/**
- * Collapse a Linear name / repo slug / folder path to one comparison key:
- * lowercase, keep only the last path segment, strip separators.
- *   "Agents CLI"            -> "agentscli"
- *   "phnx-labs/agents-cli"  -> "agentscli"
- *   "~/src/.../agents-cli"  -> "agentscli"
- */
+/** Collapses a Linear name, repo slug or folder path to one key: lowercase, last path segment only,
+ * separators stripped ("Agents CLI" and "phnx-labs/agents-cli" both give "agentscli"). */
 export function normalizeProjectKey(s: string): string {
   const last = s.toLowerCase().split('/').filter(Boolean).pop() ?? '';
   return last.replace(/[-_\s.]/g, '');
 }
 
-/**
- * Find the Linear project that best matches a repo slug or folder name.
- * Exact normalized match first, then a containment fallback (either direction),
- * so "agents-cli-web" still suggests "Agents CLI" when no exact peer exists.
- *
- * Kept for parity with the Factory original — the `link` command uses
- * {@link pickLinearProject} instead: this one returns the FIRST match (silent
- * on duplicate names), which is fine for a UI suggestion but never for a write
- * path.
- */
+/** Finds the Linear project best matching a repo slug or folder name: exact normalized match, then
+ * containment either way. Returns the FIRST match, so `link` uses pickLinearProject for writes. */
 export function matchLinearProject(
   slugOrName: string,
   projects: LinearProjectLite[],
@@ -58,30 +35,16 @@ export function matchLinearProject(
   });
 }
 
-/**
- * Collapse a Linear **display name** or a directory basename to one comparison
- * key. Deliberately NOT `normalizeProjectKey`: that one keeps only the segment
- * after the last `/`, which is right for an `owner/repo` slug or a filesystem
- * path and wrong for a display name, where `/` is ordinary punctuation. Keying
- * "Rush / Web" the path way yields `web`, which exact-matches an unrelated
- * `web/` checkout — the precise silent mis-binding this whole match path exists
- * to prevent.
- */
+/** Collapses a Linear display name or directory basename to a key. Not normalizeProjectKey: that
+ * keeps only the last `/` segment, so "Rush / Web" would become `web` and mis-bind an unrelated
+ * `web/` checkout. */
 function checkoutMatchKey(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-/**
- * Find the local checkout directory a Linear project name refers to, on EXACT
- * key equality only — never containment. `matchLinearProject`'s containment
- * fallback is right for suggesting a link a human then confirms; this backs
- * `projects import --from-linear`, which writes `root`/`repo` with nobody
- * looking, and "Agents CLI" must not silently bind `agents-cli-web`.
- *
- * Returns `undefined` when nothing matches, and also when SEVERAL dirs key to
- * the same value (`agents-cli` and `agents_cli`) — an ambiguous match is not a
- * match.
- */
+/** Finds the local checkout for a Linear project on EXACT key equality only: `projects import
+ * --from-linear` writes root/repo unattended, so "Agents CLI" must not bind `agents-cli-web`.
+ * Undefined on no match or several (ambiguous). */
 export function matchLocalCheckoutExact(name: string, dirNames: string[]): string | undefined {
   const key = checkoutMatchKey(name);
   if (!key) return undefined;
@@ -95,12 +58,9 @@ export type LinearPick =
   | { kind: 'candidates'; projects: LinearProjectLite[] }
   | { kind: 'none' };
 
-/**
- * Pick the Linear project a query refers to. An exact id or exact normalized
- * name match is confident enough to write; anything weaker (several exact-name
- * peers, or only containment matches) comes back as a candidate LIST for the
- * user to disambiguate — the link command never guesses on a weak signal.
- */
+/** Picks the Linear project a query refers to. An exact id or exact normalized name is confident
+ * enough to write; weaker matches (duplicate names, containment only) return a candidate list for
+ * the user to choose. */
 export function pickLinearProject(query: string, projects: LinearProjectLite[]): LinearPick {
   const q = query.trim();
   if (!q) return { kind: 'none' };
@@ -118,12 +78,9 @@ export function pickLinearProject(query: string, projects: LinearProjectLite[]):
   return containment.length > 0 ? { kind: 'candidates', projects: containment } : { kind: 'none' };
 }
 
-/**
- * List the workspace's Linear projects via the `linear` CLI on PATH. Throws a
- * clear error when the binary is missing, errors, or returns a shape we can't
- * use — this backs an explicit user command, so a silent empty list would send
- * the user down a wrong "no matches" path.
- */
+/** Lists Linear projects via the `linear` CLI on PATH. Throws on a missing binary, error or
+ * unusable shape, since this backs an explicit command and a silent empty list would mislead the
+ * user. */
 export function listLinearProjects(): LinearProjectLite[] {
   let out: string;
   try {
@@ -157,34 +114,16 @@ export function listLinearProjects(): LinearProjectLite[] {
   });
 }
 
-/**
- * The `linear` block a def should carry after binding it to `project`.
- *
- * Pure so the write rule is testable without a `linear` CLI or a filesystem —
- * `agents projects link` is the only caller and does nothing else to the field.
- *
- * Two rules, both learned from real drift:
- *
- * - `name` is REFRESHED, never merely preserved. It used to be written by
- *   spreading `prior`, so a project renamed on the board kept its old label in
- *   the YAML forever — and that label is what the status card, the AGI EXT
- *   Fleet panel (`linearProjectName`), and agents naming the work all read.
- * - `url` is dropped when the projectId CHANGES and the incoming row has none.
- *   Carrying it over would leave a def pointing at the previous project's page
- *   beside the new project's name, and the status card prefers `url` over the
- *   id — so the one field a reader clicks would go to the wrong project.
- *   Re-linking the SAME id keeps a previously stored url, since the CLI's list
- *   row omitting `url` says nothing about whether the project has one.
- */
+/** The `linear` block a def carries after binding to `project`. Pure so the write rule is testable.
+ * `name` is refreshed, not preserved (a renamed project kept its old label). `url` is dropped when
+ * projectId changes and the new row has none; re-linking the same id keeps it. */
 export function nextLinearLink(
   prior: { projectId?: string; url?: string; name?: string } | undefined,
   project: LinearProjectLite,
 ): { projectId: string; url?: string; name: string } {
   const next: { projectId: string; url?: string; name: string } = { projectId: project.id, name: project.name };
-  // A stored url is kept ONLY when the prior block names the same project. Not
-  // `prior.projectId && prior.projectId !== id`: `projects add --linear <url>`
-  // writes `{ url }` with no projectId at all, and treating that as "same
-  // project" carried a url belonging to whatever the user had pasted.
+  // Keep a stored url only when the prior block names the same project. `projects add --linear
+  // <url>` writes `{ url }` with no projectId, which must not count as the same project.
   const url = project.url ?? (prior?.projectId === project.id ? prior?.url : undefined);
   if (url) next.url = url;
   return next;

@@ -1,21 +1,6 @@
-/**
- * Fleet-wide monitor lookup — "is any box already watching this?"
- *
- * A monitor's identity is its ARGUMENTS, not its name or its device. Agents
- * create monitors per work item, so the same shape runs many times over with
- * different arguments (PR #2517 vs #2600) and those must all coexist. The case
- * that must NOT happen is two agents, on two different machines, creating a
- * watcher with the SAME arguments — one work item, two triggers.
- *
- * A local-only check cannot see that: each box reads its own `monitors/` dir and
- * neither sees the other. So the duplicate guard asks the fleet, reusing the
- * same cross-machine fan-out `sessions --active` and `fleet status` already run
- * (`lib/remote-agents-json.ts`).
- *
- * Deliberately NOT solved by syncing `monitors/*.yml` through the DotAgents repo:
- * an agent's per-PR watcher is running state, not config, and syncing would push
- * every one of them onto every box — the accumulation this guard exists to stop.
- */
+/** Fleet-wide monitor lookup: is any box already watching this? Identity is the ARGUMENTS, so
+ * per-work-item monitors coexist but the same arguments on two machines must not. Reuses the
+ * fan-out of `sessions --active`; monitors/*.yml are not synced (running state). */
 
 import { gatherRemoteAgentsJson, type GatherRemoteAgentsJsonDeps } from '../remote-agents-json.js';
 import type { MonitorConfig } from './config.js';
@@ -24,12 +9,9 @@ import { monitorFingerprint } from './fingerprint.js';
 /** Recursion guard: a peer answering the fan-out must not fan out again. */
 export const NO_MONITOR_FANOUT_ENV = 'AGENTS_MONITORS_LOCAL';
 
-/**
- * The owning box's view of a remote monitor, beyond its behavioral identity —
- * enough for `monitors list` to render it (enabled/placement/scope) and show a
- * one-line liveness note without a second round-trip. All optional: a peer on an
- * older CLI may omit them, and the duplicate guard never reads them.
- */
+/** The owning box's view of a remote monitor beyond its behavioral identity: enough for `monitors
+ * list` to render enabled/placement/scope and a liveness note without a second round-trip. All
+ * optional (older peers may omit them); the duplicate guard never reads them. */
 export interface RemoteMonitorDisplay {
   enabled?: boolean;
   owner?: string;
@@ -49,11 +31,8 @@ export interface RemoteMonitor {
   display?: RemoteMonitorDisplay;
 }
 
-/**
- * Parse a peer's `monitors list --json`. Defensive against version skew: a peer
- * on an older CLI may emit a different shape or no JSON at all, and one bad peer
- * must never blank the guard for the rest of the fleet.
- */
+/** Parses a peer's `monitors list --json`. Defensive against version skew: an older peer may emit
+ * another shape or no JSON, and one bad peer must never blank the guard for the rest of the fleet. */
 export function parseRemoteMonitors(stdout: string, machine: string): RemoteMonitor[] {
   let parsed: unknown;
   try {
@@ -113,17 +92,9 @@ interface GatherFleetMonitorsOptions {
   hosts?: string[];
 }
 
-/**
- * Every monitor on every other registered device. Never throws: an unreachable
- * fleet degrades to an empty list plus the names we could not consult, and the
- * caller decides what to say about them.
- *
- * When {@link GatherFleetMonitorsOptions.againstFingerprint} is provided, a peer
- * returning that fingerprint is a definitive clash: the remaining peers are
- * SIGTERM'd immediately rather than burning the rest of the timeout budget.
- * Absence of a clash still waits for the full fleet, because uniqueness is only
- * knowable once every peer has answered.
- */
+/** Every monitor on every other registered device. Never throws: an unreachable fleet gives an
+ * empty list plus the unconsulted names. With `againstFingerprint`, a peer returning it is a
+ * definitive clash and the rest are SIGTERM'd; absence of a clash waits for the whole fleet. */
 export async function gatherFleetMonitors(
   options: GatherFleetMonitorsOptions = {},
 ): Promise<FleetMonitorsResult> {

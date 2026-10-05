@@ -1,23 +1,6 @@
-/**
- * Bookmarked sessions — the durable "keep this one handy" mark a human puts on a
- * session, deliberately kept OUT of the session index.
- *
- * `sessions.db` is a rebuildable CACHE: a reindex or a schema bump throws its
- * rows away and re-derives them from the transcripts on disk. A bookmark is not
- * derivable from a transcript — it is a human's choice — so a column there would
- * be silently lost on the next rebuild. It lives in `~/.agents/.history/` instead,
- * next to the actor sidecars, which is never pruned.
- *
- * One flat set of session ids. The id is the transcript's own uuid, so it is
- * stable and machine-independent — but the file is NOT synced today: session sync
- * carries `.history/backups/` (`lib/session/sync/agents.ts`), not this. Bookmarks
- * are therefore per-machine; carrying them across the fleet would mean adding
- * them to the sync manifest, which this does not do.
- *
- * Reads are memoized against the file's mtime — the picker asks `isBookmarked` once
- * per rendered row, and re-reading a JSON file per row on every keystroke is the
- * kind of cost that makes a TUI feel broken.
- */
+/** Bookmarked sessions: a human's durable mark, kept out of the rebuildable `sessions.db` cache (a
+ * bookmark is not derivable from a transcript), in `~/.agents/.history/`. Not synced today (sync
+ * carries only `.history/backups/`), so per-machine. Reads are memoized on mtime for the picker. */
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,11 +35,8 @@ export function clearBookmarksCache(): void {
   cache = null;
 }
 
-/**
- * Every bookmarked session id. Empty (never throws) when the file is absent,
- * unreadable, or malformed — a corrupt bookmarks file must not take down
- * `agents sessions`.
- */
+/** Every bookmarked session id. Empty (never throws) when the file is absent, unreadable or
+ * malformed: a corrupt file must not take down `agents sessions`. */
 export function listBookmarks(): Set<string> {
   const file = bookmarksFilePath();
   const key = statKey(file);
@@ -90,11 +70,8 @@ function writeBookmarks(ids: Set<string>): void {
   cache = { key: statKey(file), ids };
 }
 
-/**
- * Set (or clear) the bookmark mark on a session. Returns the resulting state, so
- * a caller can report it without a second read. A no-op write is skipped, which
- * keeps the file's mtime — and every other process's memoized read — untouched.
- */
+/** Set or clear the bookmark and return the resulting state. A no-op write is skipped so the file's
+ * mtime, and other processes' memoized reads, stay untouched. */
 export function setBookmark(sessionId: string, on: boolean): boolean {
   const ids = new Set(listBookmarks());
   if (ids.has(sessionId) === on) return on;

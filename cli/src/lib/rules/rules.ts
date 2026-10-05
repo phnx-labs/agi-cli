@@ -1,11 +1,6 @@
-/**
- * Rules file management -- reading, writing, and syncing agent instructions.
- *
- * The canonical rules file (AGENTS.md) gets synced
- * into each agent's config directory under their native name (CLAUDE.md,
- * GEMINI.md, etc.). This module handles reading, managing includes, and
- * refreshing rules files across version homes.
- */
+/** Rules file management: the canonical rules file (AGENTS.md) is synced into each agent's config
+ * dir under its native name (CLAUDE.md, GEMINI.md, ...); this module reads, manages includes and
+ * refreshes rules files across version homes. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,10 +25,8 @@ interface DiscoveredInstructions {
   filename: string;
 }
 
-/**
- * Central rules filename constant.
- * All agents map to this file in ~/.agents/rules/, renamed per-agent when synced.
- */
+/** Central rules filename: all agents map to this file in ~/.agents/rules/, renamed per agent when
+ * synced. */
 const CENTRAL_RULES_FILENAME = 'AGENTS.md';
 const RULES_DOC_FILENAME = 'README.md';
 
@@ -63,14 +56,9 @@ function listRuleMarkdownFiles(rulesDir: string): string[] {
   return files.sort();
 }
 
-/**
- * Get the canonical central rules filename for an agent's instructionsFile.
- * Central storage uses AGENTS.md, which gets renamed per-agent when syncing:
- *   - Claude: AGENTS.md → CLAUDE.md
- *   - Gemini: AGENTS.md → GEMINI.md
- *   - Cursor: AGENTS.md → .cursorrules
- *   - Codex/OpenCode: AGENTS.md → AGENTS.md (no rename)
- */
+/** Canonical central rules filename for an agent's instructionsFile. Central storage uses AGENTS.md,
+ * renamed per agent on sync: Claude CLAUDE.md, Gemini GEMINI.md, Cursor .cursorrules,
+ * Codex/OpenCode unchanged. */
 export function getCentralRulesFileName(agentId: AgentId): string {
   const agent = AGENTS[agentId];
   const instrFile = agent.instructionsFile;
@@ -224,10 +212,8 @@ export function getInstructionsContent(agentId: AgentId, scope: InstructionsScop
   }
 }
 
-/**
- * Install rules files from repo rules/ to central ~/.agents/rules/ directory.
- * Nested presets/ and rules/ fragments are preserved so @imports keep working.
- */
+/** Install rules files from repo rules/ to central ~/.agents/rules/, preserving nested presets/ and
+ * rules/ fragments so @imports keep working. */
 export function installInstructionsCentrally(
   repoPath: string,
   filesToInstall?: string[]

@@ -4,13 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// `agents sessions` scans the union of the user's own `~/.<agent>` and every managed
-// version home. Once agents-cli manages an agent, listing an UNMANAGED install's
-// history by default is a surprise — most visibly after `agents add --isolated`,
-// where keeping the two apart was the entire point.
-//
-// Scoping happens at query time, so the index stays complete and `--unmanaged` needs
-// no re-scan. Nothing is dropped silently: every render path prints what it hid.
+// `agents sessions` scopes to managed version homes once agents-cli manages an agent, so unmanaged
+// history is not a surprise. Scoping happens at query time, so the index stays complete and every
+// render path prints what it hid.
 describe.skipIf(process.platform === 'win32')('agents sessions — managed-only scope', () => {
   let home: string;
 
@@ -121,13 +117,9 @@ describe.skipIf(process.platform === 'win32')('agents sessions — managed-only 
   }, 180_000);
 
   it("counts codex's RELOCATED short home as managed, not as the user's own", () => {
-    // On macOS the versioned home overflows SUN_LEN for codex's control socket, so
-    // the shim relocates it to `<agentsUserDir>/.codex-homes/<version>/.codex` and
-    // symlinks the versioned path at it. Transcripts then live outside `versions/`.
-    // The first cut classified that root under getAgentsDir() (~/.agents/.system)
-    // instead of getUserAgentsDir() (~/.agents), so a relocated install's own
-    // sessions were filed as the user's — the exact case this scoping exists for.
-    // Planted directly (no symlink) so the classifier is what is under test.
+    // On macOS codex's versioned home overflows SUN_LEN, so the shim relocates it to
+    // `<agentsUserDir>/.codex-homes/<version>/.codex`. Regression: the classifier once filed
+    // relocated sessions as the user's own. Planted directly so the classifier is under test.
     plantManagedVersion('0.146.0');
     fs.writeFileSync(path.join(home, '.agents', '.history', 'versions', 'codex', '0.146.0', '.isolated'), 'x\n');
     const relocated = path.join(home, '.agents', '.codex-homes', '0.146.0', '.codex', 'sessions', '2026', '07', '30');

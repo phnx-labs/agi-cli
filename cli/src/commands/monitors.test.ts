@@ -1,10 +1,6 @@
-/**
- * End-to-end CLI subprocess tests for `agents monitors` inspection output.
- *
- * Each test spawns the real CLI against an isolated HOME with real monitor YAML
- * and history files. This catches Commander flag wiring plus stdout/stderr
- * stream regressions without mocking monitor internals.
- */
+/** End-to-end subprocess tests for `agents monitors` inspection output: the real CLI against an
+ * isolated HOME with real monitor YAML and history, catching Commander flag wiring and
+ * stdout/stderr regressions without mocking. */
 import { describe, it, expect } from 'vitest';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -80,13 +76,9 @@ function run(home: string, args: string[], extraEnv: Record<string, string> = {}
       // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
       // spawned CLI resolving the real profile ('agents-cli is not set up').
       USERPROFILE: home,
-      // The pinned PATH keeps the run hermetic on POSIX — it must NOT be
-      // widened to include the running node's dir, because that also exposes a
-      // second globally-installed `agents` (e.g. /opt/homebrew/bin) and the CLI
-      // then prints "Multiple agents-cli installs detected" on stderr. Fixtures
-      // that need node spell it absolutely instead. The pin can't apply on
-      // Windows, where those directories don't exist and the child would lose
-      // node/git entirely (that failure showed as empty stderr).
+      // The pinned PATH keeps the run hermetic on POSIX; don't add node's dir, which exposes a
+      // second global `agents` ('Multiple agents-cli installs detected'). Fixtures needing node
+      // spell it absolutely. Not applicable on Windows, where the child would lose node/git.
       PATH: process.platform === 'win32' ? (process.env.PATH ?? '') : '/usr/local/bin:/usr/bin:/bin',
       AGENTS_SKIP_MIGRATION: '1',
       FORCE_COLOR: '0',
@@ -181,26 +173,17 @@ describe('monitors inspection JSON and stderr', () => {
 
   it('test --json evaluates once, prints the dry-run decision as JSON, and writes no state', () => {
     const home = makeHome();
-    // The monitor command runs through the host shell, so it has to be
-    // shell-portable. printf doesn't exist on cmd.exe, and node -e "..." loses
-    // its quoting there (node received a literal leading quote and threw
-    // SyntaxError). A script file sidesteps shell quoting entirely: the command
-    // doesn't open with a quote, and run() puts the running node's directory on
-    // PATH so the bare name resolves on both platforms.
+    // The monitor command runs through the host shell, so it must be portable: cmd.exe lacks
+    // printf and mangles `node -e "..."` quoting. A script file avoids quoting, and run() puts
+    // node's directory on PATH so the bare name resolves on both platforms.
     const emitter = path.join(home, 'emit-fixture.cjs');
     fs.writeFileSync(emitter, "process.stdout.write('build fail\\nnext\\n');\n");
     writeMonitor(home, {
       name: 'ci',
       enabled: true,
-      // Unquoted: on Windows the quotes survive into the argument and node
-      // looks for a path with literal quote characters in it. mkdtemp paths
-      // carry no spaces on either platform, so they aren't needed.
-      //
-      // POSIX spells node absolutely because the pinned PATH above deliberately
-      // excludes it. Windows can't: process.execPath there is
-      // "C:\Program Files\nodejs\node.exe" and cmd.exe mangles a command line
-      // opening with a quoted path containing spaces — but PATH is inherited on
-      // Windows, so the bare name resolves.
+      // Unquoted: on Windows quotes survive into the argument; mkdtemp paths have no spaces. POSIX
+      // spells node absolutely because the pinned PATH excludes it; Windows can't (execPath has
+      // spaces, cmd.exe mangles a quoted leading path) but inherits PATH.
       source: {
         type: 'command',
         command: process.platform === 'win32' ? `node ${emitter}` : `${process.execPath} ${emitter}`,
@@ -432,13 +415,9 @@ describe('monitors inspection JSON and stderr', () => {
   });
 });
 
-/**
- * PHNX-2842: `agents monitors runs` used to print `ok` for a completed agent
- * that did nothing. Real CLI subprocess against an isolated HOME: fire
- * recorded ok:true off a running snapshot, run later settled completed, and
- * the postcondition (a real node process exiting 1) proves the intended
- * effect did not happen.
- */
+/** PHNX-2842: `agents monitors runs` printed `ok` for a completed agent that did nothing. Real
+ * subprocess, isolated HOME: fire recorded ok:true, run settled completed, and the postcondition
+ * (a node process exiting 1) proves the intended effect did not happen. */
 describe('monitors runs postcondition (PHNX-2842)', () => {
   function writeRun(home: string, name: string, runId: string, status: string): void {
     const dir = path.join(home, '.agents', '.history', 'runs', name, runId);

@@ -1,10 +1,7 @@
 name: Tests
 
-# Required per-PR correctness gate (RUSH-2666). One Linux job named `test`
-# preserves the required-check context used by branch protection and
-# release.sh. It classifies the merge-base → head range, runs only the
-# selected tests/checks, and reuses an exact-tree proof on retry. Unmapped
-# paths fail immediately. Windows is best-effort post-merge only.
+# Required per-PR correctness check (RUSH-2666): one Linux job named `test` keeps the
+# required-check context used by branch protection and release.sh.
 
 on:
   pull_request:
@@ -26,32 +23,9 @@ jobs:
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      # The required check spends far more time INSTALLING than testing. Measured
-      # across recent Linux required runs: `bun install` is 14-22s for 273
-      # packages on every run, whether the impact plan selected 78 test files or
-      # 2, while the release check's actual test execution is 0.27s. That install
-      # is a fixed cost every PR pays, so caching it is the single largest lever
-      # on the required-check budget (AGENTS.md R1) -- and unlike a faster runner
-      # it costs nothing to operate.
-      #
-      # Keyed on BOTH lockfiles, because this caches BOTH node_modules trees that
-      # installCommandsForPlan() targets. Keying on cli/bun.lock alone would serve a
-      # stale packages/session-tracker/node_modules under a key claiming it was
-      # fresh whenever that package's deps moved on their own -- the exact cache
-      # poisoning this step is otherwise careful to avoid. A dependency change in
-      # either misses and reinstalls, which is exactly today's behavior, so a miss
-      # can never be slower than not caching.
-      # restore-keys is deliberately omitted -- a partial restore against a
-      # different lockfile would install ON TOP of stale modules, and
-      # `--frozen-lockfile` is what guarantees the tree matches the lock. Correct
-      # beats warm here: the attestation binds tested tree to published tarball.
-      # Toolchain goes in the key too. `cli/package.json` declares
-      # `trustedDependencies: ["@homebridge/node-pty-prebuilt-multiarch"]`, a NATIVE
-      # addon whose prebuilt binary is Node-ABI-specific, and nothing here pins a
-      # Node version -- the runner image supplies it and GitHub rolls it. A cached
-      # `node_modules` carrying a binary built for the previous ABI would surface as
-      # a confusing native-load failure rather than a clean miss, so a toolchain
-      # change must invalidate the cache.
+      # The required check spends far more time installing (bun install 14-22s) than testing
+      # (0.27s), so caching is the biggest R1 lever. Key on BOTH lockfiles and the toolchain
+      # (node-pty is ABI-specific). No restore-keys: partial restores install over stale modules.
       - name: Toolchain fingerprint for the cache key
         id: toolchain
         run: echo "fp=$(node -v)-$(bun -v)" >> "$GITHUB_OUTPUT"
@@ -124,19 +98,9 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Populate the dependency cache on the DEFAULT BRANCH so pull requests can
-  # actually restore it.
-  #
-  # Without this the cache is dead weight. GitHub scopes caches per ref: a run
-  # restores only from its OWN branch or the default branch, and the required
-  # `test` job runs on `pull_request` ONLY -- so every entry it saved landed under
-  # `refs/pull/<N>/merge`, invisible to every other PR. Measured after shipping
-  # the cache: `deps-cache-hit=0` and `packages installed [21.63s]` on unrelated
-  # PRs, i.e. a permanent cold miss for everyone except a re-run of the same PR.
-  #
-  # This job writes the identical key on push to main, so the first PR after any
-  # lockfile or toolchain change pays the install once and every later PR hits.
-  # It is push-only, so it never joins the required PR check identity.
+  # Populate the dependency cache on the default branch. GitHub restores only from a run's own
+  # branch or the default branch, and the required `test` job runs on `pull_request` only, so its
+  # entries land under refs/pull/<N>/merge. This push-only job writes the same key on main.
   warm-dep-cache:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

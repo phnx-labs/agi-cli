@@ -1,23 +1,6 @@
-/**
- * Which menu-bar helper build to install: the newest published release at or
- * above this CLI's floor.
- *
- * `helper-versions.ts` records a FLOOR (the build this CLI was tested against)
- * and promised that resolution "may pick a NEWER build; it must never pick an
- * older one". Until now nothing resolved upward: every install path downloaded
- * the floor, so a helper fix reached a machine only after a CLI release bumped
- * the floor and the user ran `agents menubar setup`. This module is the
- * missing half — discovery — and it is what makes the helper auto-update.
- *
- * Discovery reads the public release list of `phnx-labs/agi-cli` and keeps
- * only tags shaped `menubar/v<x.y.z>` that carry the helper asset AND its
- * sha256 sidecar (a half-uploaded release is not a candidate). The answer is
- * cached for a day under the CLI's cache dir so the sync startup path and the
- * daemon read a file, never the network; the floor stays the offline answer
- * whenever the network or the cache cannot do better. The verified download
- * (`downloadMenubarHelperApp`: sha256, codesign, Team, designated-requirement
- * pin, notarization) is unchanged — resolution only chooses the version.
- */
+/** Chooses which menu-bar helper build to install: the newest published release at or above this
+ * CLI's floor, so the helper auto-updates. Only `menubar/v<x.y.z>` releases with the asset AND its
+ * sha256 count; cached a day, floor is the offline answer. Download verification is unchanged. */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -50,11 +33,9 @@ interface MenubarResolveCache {
 
 const TAG = /^menubar\/v(\d+\.\d+\.\d+)$/;
 
-/**
- * Pure: the newest candidate at or above `floor`, else the floor. A tag must be
- * exactly `menubar/v<x.y.z>` (no pre-release suffix), not a draft or
- * pre-release, and carry both the zip and its `.sha256`.
- */
+/** Pure: the newest candidate at or above `floor`, else the floor. A tag must be exactly
+ * `menubar/v<x.y.z>` (no pre-release suffix), not a draft or pre-release, with both the zip and
+ * its `.sha256`. */
 export function pickNewestMenubarVersion(candidates: ReleaseCandidate[], floor: string): string {
   let best = floor;
   for (const c of candidates) {
@@ -91,11 +72,8 @@ function writeMenubarResolveCache(file: string, cache: MenubarResolveCache): voi
   } catch { /* a cache that cannot be written is just a cache miss next time */ }
 }
 
-/**
- * The cached answer when it is usable offline: at or above the floor, of any
- * age. Sync and network-free — this is what the startup self-heal and the
- * status/doctor displays read.
- */
+/** The cached answer when usable offline: at or above the floor, of any age. Sync and network-free;
+ * read by the startup self-heal and status/doctor displays. */
 export function cachedMenubarVersion(opts: { floor?: string; cacheFile?: string } = {}): string {
   const floor = opts.floor ?? helperFloor('menubar');
   const cache = readMenubarResolveCache(opts.cacheFile ?? menubarResolveCachePath());
@@ -127,14 +105,9 @@ async function fetchMenubarReleaseCandidates(fetchImpl: FetchLike = fetch as unk
   }));
 }
 
-/**
- * The helper version to install now: the newest published build >= floor.
- *
- * Reads the day-old cache first; re-reads the release list when the cache is
- * missing, stale, or `force` is set; falls back to the cached answer, then the
- * floor, when the network cannot answer. Never throws, never returns a version
- * below the floor.
- */
+/** The helper version to install now: newest published build >= floor. Reads the day-old cache
+ * first; re-reads the release list when missing, stale or `force`; falls back to the cache, then
+ * the floor. Never throws, never below the floor. */
 export async function resolveMenubarVersion(opts: {
   floor?: string;
   cacheFile?: string;

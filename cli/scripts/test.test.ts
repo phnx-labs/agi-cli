@@ -13,17 +13,14 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}) {
   });
 }
 
-// The whole reason this script exists (RUSH-3178): the ~13k-test suite must
-// never quietly land on the machine someone is using. Every assertion here is
-// about that one property — offload is the default, local is opt-in, and an
-// unavailable offload target FAILS instead of falling back.
+// RUSH-3178: the ~13k-test suite must never quietly land on the machine someone is using. Offload
+// is the default, local is opt-in, and an unavailable offload target fails instead of falling
+// back.
 describe('scripts/test.sh — the suite never runs locally by accident', () => {
   it('refuses an unusable --device instead of falling back to local', () => {
-    // A name that is not in the registry now fails at the REGISTRY LOOKUP, before
-    // any ssh is attempted — the address a device is reached at comes from the
-    // registry, not from whatever the local resolver makes of the bare name.
-    // What this test pins is the invariant that survives either path: an
-    // unusable target aborts, and never silently becomes a local run.
+    // A name not in the registry now fails at the registry lookup before any ssh, since the
+    // address comes from the registry. The invariant pinned: an unusable target aborts and never
+    // silently becomes a local run.
     const r = run(['--device', 'no-such-box-xyz.invalid']);
     expect(r.status).not.toBe(0);
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
@@ -59,11 +56,9 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('forwards vitest args through the crabbox path (RUSH-3015 mitigation)', () => {
-    // Regression guard. The crabbox branch used to
-    // ignore VITEST_ARGS entirely -- so the attestation producer's
-    // `-- --retry=2 --maxWorkers=2` was silently dropped on every ordinary run,
-    // removing the very mitigation that stops a good tree from false-failing.
-    // A dropped argument is invisible at runtime, so it needs a test.
+    // Regression guard: the crabbox branch ignored VITEST_ARGS, so the producer's `-- --retry=2
+    // --maxWorkers=2` was silently dropped on every ordinary run. A dropped argument is invisible
+    // at runtime, so it needs a test.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-forward-'));
     const scripts = path.join(dir, 'cli', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
@@ -94,12 +89,9 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(got).toBe('test --retry=2 --maxWorkers=2');
   });
 
-  // --- sharding (RUSH-3230) ------------------------------------------------
-  // The lever that actually moves release time. Measured on a real full run: the
-  // suite is 3079s of CPU at 11.5x parallelism on ONE box, so wall == CPU/workers
-  // (269s) — it is THROUGHPUT-bound, not bound by any single slow file. Adding
-  // boxes divides the CPU; splitting files does not (that only moved the total
-  // 296s -> 269s). These pin the routing, not the arithmetic.
+  // Sharding (RUSH-3230): the suite is 3079s of CPU at 11.5x parallelism on one box, so wall ==
+  // CPU/workers (269s) and it is throughput-bound. Adding boxes divides the CPU; splitting files
+  // only moved 296s -> 269s. These pin the routing, not the arithmetic.
 
   it('requires a worker count, so `--shard` alone cannot fan out to nowhere', () => {
     const r = run(['--shard']);
@@ -135,11 +127,9 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('does not use `mapfile` — macOS ships bash 3.2, where it does not exist', () => {
-    // Caught by running it: `mapfile: command not found` on the interactive Mac
-    // that dispatches the fan-out. bash 4+ only.
-    // Comment lines are exempt: the script explains WHY it avoids mapfile, and a
-    // naive whole-file match flags that explanation — which is how this test
-    // failed on its first run.
+    // Caught by running it: `mapfile: command not found` on the interactive Mac (bash 4+ only).
+    // Comment lines are exempt, since the script explains why it avoids mapfile and a whole-file
+    // match flagged that.
     const code = fs.readFileSync(TEST_SH, 'utf-8')
       .split('\n')
       .filter((l) => !l.trim().startsWith('#'))
@@ -189,16 +179,13 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/has no cli/);
   });
-  // --- the auto path (RUSH-3211) ---------------------------------------------
-  // These stand up a fake `agents` on PATH so the mode resolution can be observed
-  // without a real fleet: `devices pick` answers with a name, `devices list --json`
-  // answers with an empty registry, so the run aborts at the address lookup with a
-  // message that NAMES the picked device. That name is the proof auto resolved.
+  // The auto path (RUSH-3211): a fake `agents` on PATH answers `devices pick` with a name and
+  // `devices list --json` with an empty registry, so the run aborts at the address lookup with a
+  // message naming the picked device, which proves auto resolved.
 
-  // Every fake below answers `devices --help` with a `pick` row. Without it the
-  // fake looks like a CLI that PREDATES the verb, and the script's version
-  // diagnostic fires instead of the behavior under test — an unfaithful fixture
-  // that would make these tests pass for the wrong reason.
+  // Every fake answers `devices --help` with a `pick` row; without it the fake looks like a CLI
+  // that predates the verb and the version diagnostic fires, making these tests pass for the wrong
+  // reason.
   const HELP_STANZA =
     '#!/usr/bin/env bash\n'
     + 'if [ "$2" = "--help" ] || [ "$3" = "--help" ]; then\n'
@@ -276,23 +263,13 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 });
 
-// Every assertion below reproduces a bug that shipped in the first revision of
-// --shard and was caught in review.
-//
-// They all run through `runSealed`, which puts ONLY a bash symlink on PATH. That
-// is not decoration: each of these cases is asserting that a guard fires, and if
-// the guard regresses the script proceeds to the thing the guard was preventing.
-// Measured while mutation-testing this file: deleting the conflict check made
-// `--shard 2 --device box` rsync/ssh at a host called "box" and the run hung
-// until it was killed, and `--here` would have run the full ~13k-test suite on
-// whatever machine CI is using. A sealed PATH turns every one of those into an
-// immediate "rsync not found", so a regression fails in milliseconds instead of
-// hanging or hijacking the machine.
+// Every assertion reproduces a bug from the first --shard revision. They run through `runSealed`,
+// which puts only a bash symlink on PATH, so a regressed guard fails fast with "rsync not found"
+// instead of hanging or running the whole suite on the CI machine.
 describe('scripts/test.sh — the shard flags cannot silently do the wrong thing', () => {
-  // Resolve bash rather than hardcoding /bin/bash: the sealed PATH has to still
-  // contain the interpreter, and a wrong path makes spawnSync fail to launch at
-  // all, which surfaces as `undefined` stderr and assertions that pass or fail
-  // for reasons unrelated to the script.
+  // Resolve bash rather than hardcoding /bin/bash: the sealed PATH must still contain the
+  // interpreter, and a wrong path makes spawnSync fail to launch and surface as `undefined`
+  // stderr.
   const BASH = (() => {
     const found = spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf-8' }).stdout?.trim();
     if (found && fs.existsSync(found)) return found;
@@ -313,10 +290,9 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     }
   }
 
-  // Regression: `--shard 0` passed the numeric regex, hit no floor, ran the
-  // fan-out loop zero times, and printed "All 0 shards passed." with exit 0.
-  // A green result having executed no tests is the worst failure a test runner
-  // has, so the floor is pinned on BOTH spellings.
+  // Regression: `--shard 0` passed the numeric regex, hit no floor, ran zero iterations and
+  // printed "All 0 shards passed." with exit 0. A green run that executed no tests is the worst
+  // runner failure, so the floor is pinned on both spellings.
   it.each([
     ['--shard', '0'],
     ['--shard', '1'],
@@ -337,10 +313,9 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     expect(r.stderr).toMatch(/needs a worker count/);
   });
 
-  // Regression: `--devices onebox` derived SHARDS from the list length and
-  // bypassed the floor entirely, because shard_count_ok was only wired into the
-  // --shard arms. It ran a one-shard fan-out — `--device auto` through far more
-  // machinery — with no warning.
+  // Regression: `--devices onebox` derived SHARDS from the list length and bypassed the floor
+  // because shard_count_ok was only wired into the --shard arms, running a one-shard fan-out with
+  // no warning.
   it('applies the same floor when the count comes from --devices', () => {
     const r = runSealed(['--devices', 'onebox']);
     expect(r.status).not.toBe(0);
@@ -378,16 +353,9 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
   });
 
   it('still allows --devices together with --shard — same mode, not a conflict', () => {
-    // Guards the guard: set_mode must not be so strict that the legitimate
-    // pairing (name the workers AND state the count) starts failing.
-    //
-    // Run with a PATH that has no rsync, so the script dies at the very first
-    // prerequisite check INSIDE the shard branch. That proves parsing accepted
-    // the combination, without dispatching: naming two real-looking hosts and
-    // letting it proceed would rsync/ssh at them for real.
-    // bash itself must stay reachable — a PATH with nothing on it means
-    // spawnSync cannot launch the interpreter and every assertion below reads
-    // `undefined` instead of failing honestly.
+    // Guards the guard: the legitimate pairing (name the workers and state the count) must not
+    // start failing. Run with a PATH lacking rsync so the script dies at the first prerequisite
+    // check, proving parsing accepted the combination without dispatching.
     const r = runSealed(['--devices', 'a,b', '--shard', '2']);
 
     expect(r.stderr).not.toMatch(/conflicts with/);

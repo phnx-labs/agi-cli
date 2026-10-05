@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-#
-# Build the agents-cli standalone Bun executable into ./dist/bin/agents.
-#
-# Cross-compile later with:
-#   BUN_COMPILE_TARGET=bun-linux-x64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-linux-arm64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-darwin-arm64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-darwin-x64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-windows-x64 scripts/build-bin.sh
+# Build the agents-cli standalone Bun executable into ./dist/bin/agents. Cross-compile by setting
+# BUN_COMPILE_TARGET (bun-<os>-<arch>) when running scripts/build-bin.sh.
 
 set -euo pipefail
 

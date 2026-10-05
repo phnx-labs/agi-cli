@@ -1,24 +1,7 @@
 #!/usr/bin/env bun
-/**
- * Server-enforced guard against committing confidential GTM/monetization content
- * to the PUBLIC `.agents/artifacts/` tree (PHNX-3033).
- *
- * `.agents/artifacts/<yyyy-mm-dd>/` is committed by design; anything in it is
- * public. `.agents/artifacts/private/` is gitignored and is the only artifacts
- * subtree that may hold confidential/personal strategy material.
- *
- * The guard inspects added/modified files under `.agents/artifacts/` (excluding
- * the private subtree) and fails loud if a filename or content matches
- * sensitive-strategy signals. It is intentionally conservative: an ambiguous
- * file is rejected with an actionable error that points the author to the
- * private dir or a private repo.
- *
- * Usage in CI:
- *   bun scripts/guard-artifacts-confidential.ts --base <sha> --head <sha>
- *
- * Local / pre-commit usage:
- *   git diff --cached --name-only | bun scripts/guard-artifacts-confidential.ts
- */
+/** Server-enforced guard against committing confidential GTM/monetization content to the PUBLIC
+ * `.agents/artifacts/` tree (PHNX-3033); only gitignored `private/` may hold it. Flags sensitive
+ * filename or content signals in added files. CI: `--base <sha> --head <sha>`. */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -38,10 +21,9 @@ export interface Violation {
 const ARTIFACTS_PREFIX = '.agents/artifacts/';
 const PRIVATE_PREFIX = '.agents/artifacts/private/';
 
-// Filename signals. Case-insensitive; short tokens require word boundaries to
-// avoid false positives on engineering terms (e.g. "array", "churn" in
-// "churn-test" is fine, but "churn" alone is flagged). Longer tokens are
-// distinctive enough to match as substrings.
+// Filename signals, case-insensitive; short tokens need word boundaries to avoid false positives on
+// engineering terms ("churn-test" is fine, "churn" alone is flagged); longer tokens match as
+// substrings.
 const FILENAME_SIGNALS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bgtm\b/, label: 'go-to-market / GTM' },
   { pattern: /monetiz/, label: 'monetization' },

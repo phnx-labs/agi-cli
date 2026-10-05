@@ -830,10 +830,9 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     }
   }
 
-  // Auth column: remote rows already carry the host's self-reported rollup from
-  // its `doctor --json`. Fill the rest (this machine; older remotes that don't
-  // emit it) from this host's local cache — written by `agents fleet ping` and
-  // the daemon's local refresh. A never-probed host rolls up to "—". No network.
+  // Auth column: remote rows carry the host's own rollup from `doctor --json`; fill the rest (this
+  // machine, older remotes) from the local cache written by `agents fleet ping` and the daemon. A
+  // never-probed host shows "—". No network.
   const authCache = readAuthHealthCache();
   for (const row of rows) {
     if (!row.auth) row.auth = summarizeHostAuth(authCache, row.name);
@@ -1096,13 +1095,9 @@ async function probeRemoteHarnesses(
   return parsed.rows ?? [];
 }
 
-/**
- * Gather harness rows across the fleet: THIS host in process, every reachable
- * peer over SSH. Shared by both `harnesses` and `accounts` (they differ only in
- * how the rows are rendered). Honors an optional `--device` allowlist on both
- * the local and remote rows. Bounded by the same per-device + overall deadlines
- * as `fleet ping`, so one unreachable box can never stall the glance.
- */
+/** Gather harness rows across the fleet (this host in process, reachable peers over SSH), shared by
+ * `harnesses` and `accounts`. Honors an optional `--device` allowlist and uses `fleet ping`'s
+ * per-device and overall deadlines, so one unreachable box cannot stall it. */
 export async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise<HostHarnessResult[]> {
   const self = machineId();
   const want = opts.devices?.length ? new Set(opts.devices) : null;
@@ -1206,14 +1201,9 @@ const CELL_PAINT: Record<AuthCellColor, (s: string) => string> = {
   dim: chalk.dim,
 };
 
-/**
- * Color a per-host×agent cell. The numerator counts accounts that are usable
- * right now — live-verified PLUS signed-in-but-unverifiable (codex/grok) — over
- * the total, so a logged-in codex fleet reads "1/1", not a scary "0/1". Color is
- * the shared {@link authCellColor}: red only for revoked (re-login), yellow for
- * soft/expired (self-refreshes), gray for present-but-unverifiable, green when
- * all live.
- */
+/** Color a per-host x agent cell. The numerator counts accounts usable now (live-verified plus
+ * signed-in-but-unverifiable, codex/grok) so a logged-in codex fleet reads "1/1". Color is {@link
+ * authCellColor}: red revoked, yellow soft/expired, gray unverifiable, green all live. */
 function authCell(summary: VerdictSummary, width: number): string {
   if (summary.total === 0) return chalk.dim('·'.padEnd(width));
   const ok = summary.live + summary.present;
@@ -2426,13 +2416,9 @@ function fmtWtSize(n: number): string {
   return `${v.toFixed(v < 10 ? 1 : 0)}${units[i]}`;
 }
 
-/**
- * `agents fleet worktrees` — surface the held set the sweep only counts. Never
- * removes anything; `--push` publishes on-no-remote stranded branches. This is
- * the CLI-native surfacing half of PHNX-3520 (the sweep itself lives in
- * phnx-labs/.agents; it still emits a bare count until a sibling change teaches
- * it to consume this).
- */
+/** `agents fleet worktrees`: surface the held set the sweep only counts. Never removes anything;
+ * `--push` publishes on-no-remote stranded branches. CLI half of PHNX-3520 (the sweep in
+ * phnx-labs/.agents still emits a bare count). */
 async function runWorktreesHeld(opts: WorktreesHeldOptions): Promise<void> {
   if (opts.bucket && !isHeldBucket(opts.bucket)) {
     console.error(chalk.red(`Unknown bucket '${opts.bucket}'. Use one of: ${BUCKET_ORDER.join(', ')}`));
@@ -2649,11 +2635,8 @@ async function doDeviceTaskStop(ref: string): Promise<void> {
   }
 }
 
-/**
- * Parse `--argv`'s JSON array, or report exactly what was wrong and return
- * undefined. Fails loud rather than coercing: a caller that meant to pass argv
- * and typo'd the JSON must not silently get shell-string semantics instead.
- */
+/** Parse `--argv`'s JSON array, or report what was wrong and return undefined. Fails loud: a typo'd
+ * JSON must not silently get shell-string semantics. */
 export function parseArgvJson(raw: string, log: (line: string) => void = (line) => console.error(line)): string[] | undefined {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch (error) {

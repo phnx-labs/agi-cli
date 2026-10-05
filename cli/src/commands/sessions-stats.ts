@@ -1,20 +1,6 @@
-/**
- * `agents sessions stats` — precomputed resource-usage insights.
- *
- * The read side of #12: which skills and slash-commands do you actually invoke,
- * and which installed ones are dead weight? The write side already exists —
- * every scanned transcript's skill/`Skill`-tool + slash-command tallies land in
- * `session_resource_usage` at index time — so this is a cheap SQLite rollup, no
- * re-scan of history. A both-ends view: the most-invoked resources, and the
- * installed-but-never-invoked ones.
- *
- * Signal caveat, surfaced in help and output: only EXPLICIT invocations count
- * (slash commands + `Skill` tool calls). An auto-triggered skill (loaded by
- * description match) emits no event and reads as zero — "0" means "never
- * explicitly invoked", not "never loaded". Skill invocations are recorded for
- * Claude and Kimi (the `Skill`-tool harnesses); slash-commands are Claude-only;
- * other harnesses contribute nothing.
- */
+/** `agents sessions stats`: precomputed resource-usage insights (read side of #12): which skills
+ * and slash-commands you invoke and which installed ones are dead weight. SQLite rollup over
+ * `session_resource_usage`. Only explicit invocations count; auto-triggered skills read 0. */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 
@@ -48,17 +34,9 @@ interface StatsOpts {
 
 const DEFAULT_TOP = 20;
 
-/**
- * The recorded-set the zero-counts must be read against (PHNX-2301). A resource
- * only records an EXPLICIT invocation from a harness that emits the event:
- * `Skill` tool calls come from Claude + Kimi, slash-commands from Claude only
- * (`SKILL_TOOL_NAME_BY_AGENT` in `lib/session/highlights.ts`, slash-command
- * parsing in `lib/session/parse.ts`). A session under any other harness — or an
- * auto-triggered skill, which emits no event on any harness — contributes
- * nothing, so its resources read as 0 whether or not they were used. Keep these
- * in lockstep with the writer: widening them here without a verified transcript
- * tool-name would make the caveat lie about coverage it does not have.
- */
+/** The recorded set the zero-counts must be read against (PHNX-2301): `Skill` tool calls come from
+ * Claude + Kimi, slash-commands from Claude only; other harnesses and auto-triggered skills record
+ * nothing. Keep in lockstep with the writer, or the caveat lies about coverage. */
 const RECORDING_SKILL_HARNESSES = ['claude', 'kimi'] as const;
 const RECORDING_COMMAND_HARNESSES = ['claude'] as const;
 
@@ -70,12 +48,9 @@ interface InstalledResource {
   source: string | null;
 }
 
-/**
- * The both-ends "dead weight" set: installed resources whose identity
- * (kind + name — name already embeds `plugin:short`, so it matches the stored
- * invoked name) never appears in the invoked rows. Sorted kind then name.
- * Pure set-difference so it is unit-testable without touching the filesystem.
- */
+/** The 'dead weight' set: installed resources whose identity (kind + name, name embedding
+ * `plugin:short`) never appears in the invoked rows, sorted kind then name. Pure set difference,
+ * testable without the filesystem. */
 export function diffZeroInvoked(
   installed: InstalledResource[],
   invoked: Array<{ kind: string; name: string }>,

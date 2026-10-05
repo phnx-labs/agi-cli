@@ -7,19 +7,9 @@ import {
   SYNC_BUNDLE,
 } from './config.js';
 
-/**
- * Guards the session-transport secret read CACHE + DEGRADE behavior — the two
- * things `config.ts` itself owns. Bundle policy enforcement, ACL, and the
- * exact prompt/unlock semantics now live entirely in the standalone `secrets`
- * engine (PHNX-3989); those are covered by that repo's own suite, reached only
- * through the process client. Here the client call
- * (`readAndResolveBundleEnvSync`) is the seam under test: spying on it proves
- * (1) the resolution cache stops the daemon's ~90s cycle from re-invoking the
- * client every tick, and (2) SEC-13 — any throw the client raises (a locked
- * bundle, an absent one) degrades `isSyncConfigured` to `false` with no
- * exception ever escaping to a background caller, while `loadR2Config` still
- * surfaces the real error for a caller that wants it.
- */
+/** Guards the secret-read cache and degrade behavior `config.ts` owns (policy and ACL live in
+ * `secrets`, PHNX-3989). Spying on `readAndResolveBundleEnvSync` proves the cache stops per-tick
+ * re-reads and (SEC-13) that client throws degrade `isSyncConfigured` to false without escaping. */
 const VALID_ENV = {
   R2_ACCOUNT_ID: 'acct123',
   R2_BUCKET_NAME: 'agents-sessions',

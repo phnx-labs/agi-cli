@@ -1,28 +1,11 @@
-/**
- * Filesystem linking, platform-aware.
- *
- * POSIX symlinks have no portable equivalent on Windows: directory symlinks and
- * file symlinks both require either Administrator or Developer Mode, while
- * *junctions* (directories only) need no elevation. `createLink` picks the form
- * that works without privilege — junction for directories — and falls back to a
- * copy for file links when the OS refuses the symlink.
- */
+/** Filesystem linking, platform-aware. Windows symlinks need Administrator or Developer Mode while
+ * directory *junctions* don't, so `createLink` uses a junction for directories and falls back to a
+ * copy for file links when the OS refuses the symlink. */
 import * as fs from 'fs';
 
-/**
- * Create a link at `dst` pointing to `src`, portable across platforms.
- *
- * - **Directory** target: junction on Windows (no Developer Mode needed), plain
- *   symlink on POSIX.
- * - **File** target: symlink, falling back to `copyFileSync` when Windows
- *   refuses the symlink (`EPERM`/`ENOSYS` — no Developer Mode). The copy is a
- *   point-in-time snapshot, not a live link; acceptable for the immutable
- *   targets we link (binaries, config files).
- *
- * `dst` must not already exist. Callers that replace atomically should link to a
- * temp name and `rename` over the destination, exactly as before — the copy
- * fallback is non-atomic, so the temp+rename stays the caller's responsibility.
- */
+/** Create a link at `dst` to `src`. Directory: Windows junction, else symlink. File: symlink, copy
+ * fallback on Windows EPERM/ENOSYS (a snapshot). `dst` must not exist; the copy is non-atomic, so
+ * callers link to a temp name and rename. */
 export function createLink(src: string, dst: string): void {
   const win = process.platform === 'win32';
   const isDir = fs.statSync(src).isDirectory();

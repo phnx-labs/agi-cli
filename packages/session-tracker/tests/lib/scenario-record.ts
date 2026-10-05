@@ -8,12 +8,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Per-scenario raw record dumps live here; run-report.ts reads them back. */
 export const SCENARIO_RAW_DIR = path.join(HERE, '..', 'reports', '.scenarios');
 
-/**
- * One observation from a single spawn. The scenario tests emit these; the
- * vitest JSON reporter only carries pass/fail + duration, so the rich
- * per-run telemetry (latency, detection method, the ground-truth vs detected
- * session ids) has to travel out-of-band through these files.
- */
+/** One observation from a single spawn. The vitest JSON reporter carries only pass/fail and
+ * duration, so per-run telemetry (latency, detection method, ground-truth vs detected session ids)
+ * travels out-of-band through these files. */
 export interface ScenarioRecord {
   iteration: number;
   truth: string | null;
@@ -33,11 +30,8 @@ export interface ScenarioRaw {
   records: ScenarioRecord[];
 }
 
-/**
- * Collects records during a scenario and flushes them to
- * tests/reports/.scenarios/<name>.json on teardown. run-report.ts aggregates
- * every file in that directory into the final report.
- */
+/** Collects records during a scenario and flushes them to tests/reports/.scenarios/<name>.json on
+ * teardown; run-report.ts aggregates that directory into the final report. */
 export class ScenarioRecorder {
   private records: ScenarioRecord[] = [];
 

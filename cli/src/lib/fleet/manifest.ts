@@ -1,12 +1,6 @@
-/**
- * Parse + validate the `fleet:` block of a profile manifest and resolve it into
- * per-device desired state.
- *
- * `fleet:` is additive to the `Meta` schema (`types.ts`). Any `-f <file>` that
- * carries a `fleet:` block is a valid manifest, so `ag apply -f agents.yaml`
- * works against the project file. The functions here are pure (no SSH, no
- * registry I/O) so they're fully unit-testable; device enumeration is injected.
- */
+/** Parses and validates the `fleet:` block of a profile manifest into per-device desired state.
+ * `fleet:` is additive to the `Meta` schema, so any `-f <file>` with it is a valid manifest.
+ * Pure (no SSH or registry I/O); device enumeration is injected. */
 
 import * as fs from 'fs';
 import * as yaml from 'yaml';
@@ -74,10 +68,9 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
   } else if (typeof o.devices === 'object' && o.devices !== null && !Array.isArray(o.devices)) {
     const map: Record<string, FleetDeviceOverride> = {};
     for (const [name, ov] of Object.entries(o.devices as Record<string, unknown>)) {
-      // An empty entry (`device: {}`) inherits defaults — represent as {}.
-      // (A per-device `config:` here is the LEGACY #2458 store — parsed through
-      // so reads stay lossless, folded into the per-device doc by the config
-      // migration, never written by current code.)
+      // An empty entry (`device: {}`) inherits defaults. A per-device `config:` is the legacy #2458
+      // store, parsed so reads stay lossless and folded into the per-device doc by the config
+      // migration; current code never writes it.
       map[name] = ov == null ? {} : validateDefaults(ov, `devices.${name}`);
     }
     devices = map;
@@ -160,20 +153,15 @@ interface ResolveContext {
   registeredDevices: string[];
   /** The source machine, always excluded from the target set. */
   source: string;
-  /** Names the bootstrap could not resolve from Tailscale (off-tailnet, ignored,
-   * or a typo). These are SKIPPED with the caller's warning rather than aborting
-   * the whole reconcile — a manifest naming an asleep laptop must not hard-fail
-   * every other device. Without a bootstrap, this is empty and an unregistered
-   * name still throws (genuine misconfig, caught early). */
+  /** Names the bootstrap could not resolve from Tailscale (off-tailnet, ignored, or a typo).
+   * They are skipped with a warning so one asleep laptop does not fail every other device.
+   * Without a bootstrap this is empty and an unregistered name still throws. */
   unresolved?: string[];
 }
 
-/**
- * Expand a manifest into concrete per-device desired states. `devices: all`
- * expands to every online registered device minus the source; an explicit map
- * validates each name against the registry. Devices with no desired agents,
- * sync scopes, and `login: skip` are still returned (probe/report only).
- */
+/** Expands a manifest into per-device desired states: `devices: all` is every online registered
+ * device minus the source; an explicit map validates names against the registry. Devices with
+ * no desired agents or scopes, and `login: skip`, are still returned for probe/report. */
 export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): DeviceDesired[] {
   const defaults = manifest.defaults ?? {};
   const out: DeviceDesired[] = [];
@@ -200,19 +188,9 @@ export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): De
   return out;
 }
 
-/**
- * The message to print when a reconcile resolved zero target devices.
- *
- * An explicitly empty roster (`fleet.devices: {}` — the default on a fresh box)
- * is the ACTIONABLE case: the engine ran fine, there is simply nothing declared
- * to converge, so name the empty key and how to fill it. A gray "nothing to
- * apply" there reads like the command is dead — the exact confusion that made
- * `apply` look like a broken command during the RUSH-2981 surface review
- * (PHNX-3422). Any OTHER zero-target case (a `devices: all` fleet with no online
- * peers, or an explicit roster whose every name was unresolved — off-tailnet,
- * ignored, or a typo, the only names `resolveDesired` drops) already had its
- * reason surfaced above, so it stays a plain note.
- */
+/** The message when a reconcile resolved zero targets. An explicitly empty roster
+ * (`fleet.devices: {}`) is actionable: name the key and how to fill it, not a gray 'nothing to
+ * apply' that made `apply` look broken (PHNX-3422). Other zero-target cases stay a plain note. */
 export function emptyTargetsMessage(
   manifest: FleetManifest,
 ): { style: 'hint' | 'plain'; lines: string[] } {

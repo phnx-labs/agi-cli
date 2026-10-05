@@ -1,18 +1,6 @@
-/**
- * Full CLI bootstrap — loaded only after index.ts's argv fast paths miss.
- *
- * RUSH-2335: `src/index.ts` is a slim shell so `__shim` / `__daemon-run` and
- * the other hidden fast paths can exit without evaluating the commander +
- * self-update + command-registry graph. Everything below that shell lands
- * here via `await import('./bootstrap.js')`. The `__secrets-*` / synchronous
- * broker fast paths that used to justify this shell's one static import moved
- * with the standalone `secrets` engine (PHNX-3989) — `index.ts` now has no
- * static imports at all above this line.
- *
- * This module is the previous body of `index.ts` (command registration, update
- * checks, first-run setup, migrations, parse). Side-effecting top-level code
- * runs on import — that is intentional.
- */
+/** Full CLI bootstrap, loaded only after index.ts's argv fast paths miss (RUSH-2335): index.ts
+ * stays a slim shell so `__shim` and `__daemon-run` exit without evaluating the commander and
+ * registry graph. */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -23,11 +11,9 @@ import { fileURLToPath } from 'url';
 import { detectDevBuild } from './lib/startup/dev-build.js';
 import { configureRootCommand, normalizeResumeDeviceArgs } from './lib/startup/root-command.js';
 import { bootMark } from './lib/boot-profile.js';
-// `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
-// modules are imported dynamically at their use sites: they are needed only on
-// interactive / update / shim-repair paths, never for fast commands like
-// `--version`, `--help`, or `view`. Keeping them off the module-eval path is
-// what gets cold starts under the target.
+// `ora`, `@inquirer/prompts`, `./commands/utils.js` and the agents/versions/shims modules are
+// imported dynamically at their use sites, since fast commands like `--version` and `--help` never
+// need them. This keeps cold starts under the target.
 
 // Get version from package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,16 +41,9 @@ interface NpmPackageMetadata {
   tarball: string;
 }
 
-// Detect dev/working-tree builds and default the noisy startup steps off.
-// Three cases trip this:
-//   1. Dev install (scripts/install.sh) — package.json version stamped 0.0.0-dev.<sha>
-//   2. Running `node dist/index.js` from a working tree — repo root has .git/
-//   3. Running tsx/ts-node from src/ — also has .git/ at the repo root
-// For all three: skip auto-pull (no network noise + no surprise FF on the
-// system repo while iterating), skip migration (a buggy in-progress migration
-// must not scribble on the user's real ~/.agents/), and skip the update prompt
-// (the "0.0.0-dev -> 1.x.y" message is misleading). Each individual env var
-// can still be set explicitly to override (set to '0' to re-enable).
+// Detect dev/working-tree builds and default the noisy startup steps off: auto-pull, migration
+// (must not scribble on the real ~/.agents/) and the update prompt. Each env var can still be set
+// explicitly to override.
 const IS_DEV_BUILD: boolean = detectDevBuild(process.argv[1] || '', VERSION);
 if (IS_DEV_BUILD) {
   if (process.env.AGENTS_NO_AUTOPULL === undefined) process.env.AGENTS_NO_AUTOPULL = '1';
@@ -72,15 +51,9 @@ if (IS_DEV_BUILD) {
   if (process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE === undefined) process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE = '1';
 }
 
-// Command registration is lazy: instead of statically importing every command
-// module on each invocation (which loaded the whole ~50-module tree before the
-// first byte of output), the registry maps a command name to a thunk that
-// imports only what that command needs. See src/cli/command-registry.ts.
-// Individual load* registrars are not imported here — registerEagerForRequest
-// and the lazy path pull them via COMMAND_LOADERS. The full-tree
-// registerAllEagerCommands path was removed (RUSH-2329): unknown/typo commands
-// spellcheck against KNOWN_TOP_LEVEL_COMMANDS and register only the corrected
-// name.
+// Command registration is lazy: the registry maps a command name to a thunk importing only what it
+// needs, instead of loading the ~50-module tree up front. The full-tree registerAllEagerCommands
+// path was removed (RUSH-2329); unknown commands spellcheck against KNOWN_TOP_LEVEL_COMMANDS.
 import {
   COMMAND_LOADERS,
   LAZY_COMMAND_NAMES,
@@ -115,12 +88,9 @@ const program = configureRootCommand(new Command(), BRAND, VERSION);
 registerCommandGroups(program, FRONT_DOOR_COMMAND_GROUPS);
 program.option('--help-all', 'Show help for all commands');
 
-// ─── Audit backbone ────────────────────────────────────────────────────────────
-// One choke point logs every `agents <module> <cmd>` invocation to the structured
-// event log — so team create/disband, agent run, secrets access, and everything
-// else is captured generically (with SSH/remote-user attribution added in emit()),
-// no per-command wiring. `agents events` reads it back. Attached to the root
-// program, so it's inherited by every subcommand regardless of lazy registration.
+// Audit backbone: one choke point logs every `agents <module> <cmd>` invocation to the structured
+// event log (SSH/remote-user attribution added in emit()), with no per-command wiring. `agents
+// events` reads it back. Attached to the root program so every subcommand inherits it.
 
 /** Command path from the acting command up to (but excluding) the `agents` root. */
 function auditCommandPath(cmd: Command): string[] {
@@ -135,14 +105,9 @@ function auditCommandPath(cmd: Command): string[] {
 
 const auditStarts = new WeakMap<Command, number>();
 
-/**
- * Commands that WRITE the event stream, so recording their own invocation would
- * add records to the log they are writing into. `events emit` is batched — one
- * flush every few seconds per open editor window — so auditing it would bury the
- * real events under two `command.*` records per flush. `_internal friction`
- * exists for the same reason (shell guards fire before any `agents` process
- * exists, so they cannot emit in-process) and had the same self-logging bug.
- */
+/** Commands that write the event stream, so recording their own invocation would add records to the
+ * log they write. `events emit` is batched, so auditing it would bury real events; `_internal
+ * friction` is exempt for the same reason (shell guards fire before any `agents` process exists). */
 const AUDIT_EXEMPT_COMMANDS: ReadonlySet<string> = new Set([
   'events emit',
   '_internal friction',
@@ -199,10 +164,9 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
     // Skip the perf reader itself (now `agents insights perf`, PHNX-3391) so it
     // never records its own latency into the board it prints.
     if (durationMs !== undefined && !(parts[0] === 'insights' && parts[1] === 'perf')) {
-      // sessionId/agent are resolvable here the same way emit() resolves them
-      // for command.start/command.end above (the shared provenance floor,
-      // event-provenance.ts) — without this, every command.end perf sample
-      // was anonymous, unlike the audit log record right next to it.
+      // sessionId/agent resolve here the same way emit() resolves them for
+      // command.start/command.end (event-provenance.ts); without this every command.end perf
+      // sample was anonymous.
       const { sessionId, agent } = stampProvenance();
       void import('./lib/perf/spool.js').then(({ recordSample }) => {
         recordSample({
@@ -272,14 +236,9 @@ const UPDATE_CHECK_FILE = getUpdateCheckPath();
 // PATH + known install roots (~1ms warm).
 const MULTI_INSTALL_SCAN_FILE = path.join(path.dirname(UPDATE_CHECK_FILE), '.multi-install-scan');
 
-/**
- * Warn once when this machine contains a different agents-cli install than the
- * copy that is currently running (or several). Divergent installs
- * are how self-updates "succeed" without changing the command the user types.
- * The warning re-fires only when the set of install roots or their helper-copy
- * safety changes. Dev builds are included because old dev copies can still
- * overwrite the shared macOS helper bundle non-atomically.
- */
+/** Warn once when a different agents-cli install than the running copy exists on the machine:
+ * divergent installs are how self-updates "succeed" without changing the command the user types.
+ * Re-fires only when the install roots or their helper-copy safety change. */
 function maybeWarnMultiInstall(): void {
   const sentinel = path.join(getRuntimeStateDir(), 'multi-install-warned');
   let runningRoot: string;
@@ -317,11 +276,9 @@ function maybeWarnMultiInstall(): void {
   for (const info of inventory) {
     console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
-  // RUSH-2705/2713: only advertise the `agents sync --prune-clis` purge for copies it
-  // will really delete. A duplicate sync won't auto-purge (a healthy >=1.22.30
-  // peer, OR a pre-1.22.30 copy left alone only because no fixed peer exists — the
-  // latter is genuinely vulnerable, not healthy) makes it a remedy that no-ops
-  // forever — name the manual removal command instead.
+  // RUSH-2705/2713: advertise the `agents sync --prune-clis` purge only for copies it will really
+  // delete. A duplicate it won't auto-purge (a healthy >=1.22.30 peer, or a vulnerable pre-1.22.30
+  // copy with no fixed peer) would make it a no-op remedy, so name the manual removal command.
   const peers = inventory.filter((info) => !info.running);
   console.error(chalk.gray('Upgrades apply to the running copy.'));
   if (peers.some((info) => info.autoPurgeable)) {
@@ -381,24 +338,18 @@ function printResolvedPackage(metadata: NpmPackageMetadata): void {
 
 async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<void> {
   const packageRoot = resolveRunningPackageRoot(__dirname);
-  // Download the published tarball and prove its bytes match the registry
-  // integrity BEFORE installing anything. A `name@version` spec would let the
-  // package manager fetch and install whatever the registry serves with no
-  // hash check on our side; instead we verify here and install the LOCAL, now
-  // trusted .tgz. A mismatch throws and nothing below runs — fail closed.
+  // Download the published tarball and prove its bytes match the registry integrity before
+  // installing, then install the local trusted .tgz. A `name@version` spec would let the package
+  // manager install whatever the registry serves unchecked. A mismatch throws (fail closed).
   const tarball = await downloadVerifiedTarball(metadata.tarball, metadata.integrity);
   try {
-    // Clear any orphaned npm reify staging dir from a prior crashed upgrade
-    // BEFORE the package manager stages the new one (PHNX-3393) — otherwise
-    // npm's rename onto that exact, deterministic path fails ENOTEMPTY and
-    // every subsequent upgrade dead-ends there forever. bun does not use
-    // npm's retire-path staging scheme, so this only needs to run once, ahead
-    // of both package-manager branches below.
+    // Clear any orphaned npm reify staging dir from a crashed upgrade before the package manager
+    // stages the new one (PHNX-3393); otherwise npm's rename onto that deterministic path fails
+    // ENOTEMPTY and every upgrade dead-ends. bun does not use that scheme.
     await sweepStaleInstallStaging(packageRoot);
-    // Upgrade with the package manager that owns this install. A bun global
-    // install lives at <bunGlobalDir>/node_modules/... (no `lib` segment), so an
-    // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
-    // never touch the running copy — npm exits 0, the verify below fails.
+    // Upgrade with the package manager that owns this install. A bun global install lives at
+    // <bunGlobalDir>/node_modules (no `lib`), so `npm install --prefix` would write elsewhere and
+    // never touch the running copy; npm exits 0 and the verify fails.
     if (detectPackageManager(packageRoot) === 'bun') {
       await installPackageWithBun(tarball);
     } else {
@@ -414,14 +365,9 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   }
   await verifyInstalledVersion(packageRoot, metadata.version);
   await refreshAliasShims(packageRoot);
-  // PHNX-2768: the npm install above can leave the package at the new version
-  // but the global bin links GONE — the state that stranded zion (package at
-  // 1.22.40, `/opt/homebrew/bin/{agents,ag,browser,computer}` missing, every
-  // `agents` invocation "command not found"). The upgrade OWNS those links, so
-  // it restores any that npm dropped and fails LOUD when one cannot be made to
-  // resolve — never returning a box the package upgraded but cannot run. Only
-  // the npm-prefix POSIX layout has these symlinks; bun and Windows use their
-  // own bin shims and are out of scope.
+  // PHNX-2768: the npm install can leave the package at the new version with the global bin links
+  // gone, which stranded zion. The upgrade owns those links, restores any npm dropped and fails
+  // loud if one cannot resolve. Only the npm-prefix POSIX layout has these symlinks.
   if (detectPackageManager(packageRoot) !== 'bun' && process.platform !== 'win32') {
     const prefix = deriveGlobalPrefix(packageRoot);
     const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
@@ -446,15 +392,9 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
       );
     }
   }
-  // The macOS Keychain helper this used to force-refresh on upgrade moved with
-  // the standalone `secrets` engine (PHNX-3989) — it downloads and verifies its
-  // own helper release now, off this CLI's upgrade path entirely.
-  //
-  // The menu-bar helper still rides this path: an installed release build moves
-  // to the newest published one (verified download, atomic swap at the same
-  // path and identity so the Accessibility grant survives, restart). The new
-  // package is on disk, so the import resolves the fresh module. Best-effort;
-  // the daemon's self-heal tick repeats it every six hours.
+  // The Keychain helper moved with the standalone `secrets` engine (PHNX-3989) and refreshes
+  // itself off this upgrade path. The menu-bar helper still rides this path: an installed release
+  // build moves to the newest published one. Best-effort; the daemon's self-heal tick repeats it.
   if (process.platform === 'darwin') {
     try {
       const { updateMenubarHelperIfNewer } = await import('./lib/menubar/install-menubar.js');
@@ -515,11 +455,9 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
       spinner.succeed(`Upgraded to ${metadata.version}`);
       await showWhatsNew(VERSION, metadata.version);
       console.log();
-      // Re-exec the verified install's entrypoint and exit. PATH lookup of
-      // `agents` could resolve a different copy (dev build, another prefix)
-      // than the one that was just upgraded. getCliLaunch resolves the JS-vs-
-      // standalone shape — never hand-roll `[process.execPath, entrypoint]`,
-      // which hands the bun virtual entry to a compiled binary as a bogus arg.
+      // Re-exec the verified install's entrypoint and exit: PATH lookup of `agents` could resolve
+      // a different copy than the one just upgraded.
+      // Use getCliLaunch; never hand-roll `[process.execPath, entrypoint]` for a compiled binary.
       const { command, args } = getCliLaunch(process.argv.slice(2));
       const result = spawnSync(command, args, {
         stdio: 'inherit',
@@ -535,13 +473,9 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
   }
 }
 
-/**
- * Background update check — fires once per 24h cache window.
- * Network: GET registry.npmjs.org/@phnx-labs/agents-cli/latest.
- * Disable: set AGENTS_CLI_DISABLE_AUTO_UPDATE=1 in shell rc.
- *
- * Fire-and-forget; never blocks the CLI's foreground operation.
- */
+/** Background update check, once per 24h cache window: GET
+ * registry.npmjs.org/@phnx-labs/agents-cli/latest. Fire-and-forget, never blocks the foreground.
+ * Disable with AGENTS_CLI_DISABLE_AUTO_UPDATE=1 in the shell rc. */
 function refreshUpdateCacheInBackground(): void {
   fetch('https://registry.npmjs.org/@phnx-labs/agents-cli/latest', {
     signal: AbortSignal.timeout(2000),
@@ -592,10 +526,9 @@ async function maybeBootstrapShimIntegration(
   if (!verboseStartup && (!process.stdin.isTTY || !process.stdout.isTTY)) {
     return;
   }
-  // Pure documentation paths must never trigger interactive repair — mirrors
-  // the isDocumentationRequest gate around ensureInitialized below. Covers
-  // both bare `agents --version` (requestedCommand === undefined) and
-  // `agents <subcommand> --help` (requestedCommand === subcommand name).
+  // Pure documentation paths must never trigger interactive repair, mirroring the
+  // isDocumentationRequest check around ensureInitialized. Covers bare `agents --version` and
+  // `agents <subcommand> --help`.
   if (isDocumentationRequest) {
     return;
   }
@@ -603,15 +536,9 @@ async function maybeBootstrapShimIntegration(
     return;
   }
 
-  // Past the documentation/non-TTY guards: heal the shim/shadow/PATH conditions
-  // through the unified self-heal registry — the SAME checks the daemon runs, but
-  // driven silently on this interactive invocation so a user who never starts the
-  // daemon still gets healed. Regenerating stale shims, adopting symlink launchers,
-  // and adding the shims dir to PATH now happen without any output. The only thing
-  // that ever prints is a ONE-TIME notice for what a machine can't silently fix
-  // (a real native binary shadowing the shim) or is worth saying once (a PATH entry
-  // just added). Suppression is persistent and keyed to the condition — a new
-  // terminal no longer re-nags (the old per-PPID sentinel did, every shell).
+  // Past the documentation and non-TTY checks, heal shim/shadow/PATH conditions through the
+  // unified self-heal registry, silently, so users who never start the daemon still get healed.
+  // Only a one-time notice prints, for what a machine can't silently fix.
   const { runInteractiveShimHeal } = await import('./lib/shim-heal.js');
   const { summarizeSelfHeal } = await import('./lib/self-heal/registry.js');
   const { noticeLines, report } = await runInteractiveShimHeal();
@@ -623,11 +550,9 @@ async function maybeBootstrapShimIntegration(
   }
 }
 
-// --- Inline command registrars ----------------------------------------------
-// These commands are defined here rather than in a command module because they
-// close over entry-point-local state (program re-parsing, VERSION, the npm
-// upgrade helpers). The lazy registrar and the all-commands fallback below both
-// call them, so the behavior is identical to the old eager registration.
+// Inline command registrars: defined here because they close over entry-point-local state (program
+// re-parsing, VERSION, the npm upgrade helpers). The lazy registrar and the all-commands fallback
+// both call them, so behavior matches the old eager registration.
 
 // memory is a first-class resource command (see commands/memory.ts via
 // COMMAND_LOADERS). The old memory→rules tombstone was removed in RUSH-1330.
@@ -672,12 +597,9 @@ function registerJobsCronAliasCommand(p: Command, alias: string): void {
     });
 }
 
-/**
- * Removed `check` command (RUSH-1234) — re-parses as `doctor --check`, forwarding
- * any remaining flags so `check --quiet` / `check --json` / `check --devices` keep
- * working and the drift-gate exit code survives the rename. The notice goes to
- * stderr so `--json` stdout stays clean for CI parsers.
- */
+/** Removed `check` command (RUSH-1234): re-parses as `doctor --check`, forwarding remaining flags
+ * so `check --quiet/--json/--devices` and the drift-check exit code survive. The notice goes to
+ * stderr so `--json` stdout stays clean for CI. */
 function registerCheckTombstoneCommand(p: Command): void {
   p.command('check', { hidden: true })
     .allowUnknownOption()
@@ -691,11 +613,9 @@ function registerCheckTombstoneCommand(p: Command): void {
     });
 }
 
-/**
- * Removed `resources` command (RUSH-1234) — re-parses as `view --merged` (the
- * cross-layer, first-wins resource table now lives there; `agents inspect <target>`
- * covers per-agent / per-repo detail). Forwards remaining flags like `--json`.
- */
+/** Removed `resources` command (RUSH-1234): re-parses as `view --merged`, where the cross-layer
+ * first-wins table now lives (`agents inspect <target>` covers per-agent/per-repo detail).
+ * Forwards remaining flags like `--json`. */
 function registerResourcesTombstoneCommand(p: Command): void {
   p.command('resources', { hidden: true })
     .allowUnknownOption()
@@ -709,13 +629,9 @@ function registerResourcesTombstoneCommand(p: Command): void {
     });
 }
 
-/**
- * Removed `hq` command — the JSON bridge for the interactive Agents HQ floor
- * (`agents hq floor --json`). No UI ever consumed it (apps/ext has zero
- * references) and it had no external users, so it is gone with no replacement.
- * Kept as a hidden tombstone so a stale invocation gets a clear message and a
- * non-zero exit instead of commander's raw "unknown command".
- */
+/** Removed `hq` command, the JSON bridge for the Agents HQ floor. No UI consumed it and it had no
+ * external users, so it is gone with no replacement. Kept as a hidden tombstone so a stale
+ * invocation gets a clear message and non-zero exit instead of commander's raw "unknown command". */
 function registerHqTombstoneCommand(p: Command): void {
   p.command('hq', { hidden: true })
     .allowUnknownOption()
@@ -725,16 +641,9 @@ function registerHqTombstoneCommand(p: Command): void {
     });
 }
 
-/**
- * Hidden `agents _internal <sub>` namespace for machine-to-machine calls that
- * are not user-facing. Subcommands:
- *   - `friction` — shell guard hooks (git-guard, rm-guard, …) self-report a
- *     block into the event log before they exit 2; they run before any
- *     `agents` process exists, so they cannot emit in-process.
- *   - `mergeable-prs` — the `pr-merge-on-green` built-in poll. Prints
- *     `owner/repo#n` for this user's CI-green, non-author-approved open PRs
- *     (cwd-independent `--repo`). Empty stdout is a silent observation.
- */
+/** Hidden `agents _internal <sub>` namespace for machine-to-machine calls: `friction` and
+ * `mergeable-prs` (the `pr-merge-on-green` poll; prints `owner/repo#n` for CI-green,
+ * non-author-approved open PRs). */
 function registerInternalCommand(p: Command): void {
   const internal = p.command('_internal', { hidden: true });
   internal
@@ -826,10 +735,9 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
               `Could not purge ${purge.failed.length} stale install${purge.failed.length === 1 ? '' : 's'}; re-run agents sync --prune-clis.`,
             ));
           }
-          // RUSH-2705/2713: duplicates --fix won't auto-purge (a healthy
-          // >=1.22.30 peer, or a pre-1.22.30 copy with no fixed peer to fall back
-          // to — not healthy) — name the command that removes them instead of
-          // leaving a silent nag behind.
+          // RUSH-2705/2713: duplicates --fix won't auto-purge (a healthy >=1.22.30 peer, or a
+          // pre-1.22.30 copy with no fixed peer) get the command that removes them named, instead
+          // of a silent nag.
           for (const u of purge.unresolved) {
             console.log(chalk.gray(
               `Duplicate ${u.version} at ${u.packageRoot} left in place; remove it with: ${u.manualRemoveCommand}`,
@@ -846,10 +754,9 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
         if (isPromptCancelled(err)) return;
         spinner.fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
         console.log(chalk.gray(`Run manually: agents upgrade ${version ? version + ' ' : ''}--yes`));
-        // A failed upgrade MUST exit non-zero (PHNX-2768). The fleet rollout
-        // keys a box `ok` on `agents upgrade` exiting 0 alone; exiting 0 on
-        // failure is what let a stranded box (package upgraded, bin links gone)
-        // be reported merely `unverified` instead of `failed`.
+        // A failed upgrade must exit non-zero (PHNX-2768). The fleet rollout keys a box `ok` on
+        // `agents upgrade` exiting 0, and exiting 0 on failure let a stranded box (package
+        // upgraded, bin links gone) read `unverified` instead of `failed`.
         process.exitCode = 1;
       }
 }
@@ -865,14 +772,9 @@ async function reg(loader: ModuleLoader): Promise<void> {
   (await loader())(program);
 }
 
-/**
- * Register exactly the command(s) the requested top-level name needs.
- * Returns false when the name maps to no known command (typo / unknown).
- *
- * Lazy commands (sessions/teams/cloud) are intentionally NOT handled here — they
- * must register after applyGlobalHelpConventions to match main's ordering.
- * Inline aliases/tombstones load their target module via COMMAND_LOADERS.
- */
+/** Register exactly the command(s) the requested top-level name needs; returns false for an unknown
+ * name. Lazy commands are not handled here: they must register after applyGlobalHelpConventions to
+ * match main's ordering. Inline aliases/tombstones load their target via COMMAND_LOADERS. */
 async function registerEagerForRequest(name: string): Promise<boolean> {
   switch (name) {
     case 'perms':
@@ -916,10 +818,9 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
   return true;
 }
 
-// Safety-net for unknown commands that still reach commander (should be rare
-// after the pre-parse spellcheck below). Candidates come from the plain-string
-// KNOWN_TOP_LEVEL_COMMANDS set so this path never depends on every module
-// having been registered (RUSH-2329).
+// Safety net for unknown commands that still reach commander (rare after the pre-parse
+// spellcheck). Candidates come from the plain-string KNOWN_TOP_LEVEL_COMMANDS set so this never
+// depends on every module being registered (RUSH-2329).
 program.on('command:*', (operands) => {
   const unknown = operands[0];
   const { closest, minDist } = closestTopLevelCommand(unknown, KNOWN_TOP_LEVEL_COMMANDS);
@@ -927,16 +828,9 @@ program.on('command:*', (operands) => {
   if (minDist === 1 && closest && !RETIRED_TOP_LEVEL_COMMANDS.has(unknown)) {
     const args = process.argv.slice(2);
     args[0] = closest;
-    // The typo'd name was unknown, so the top-level --device router (which ran
-    // before commander parsing, against the ORIGINAL name) could not have
-    // routed it - it correctly fell through to reach this handler at all
-    // (that fallthrough is this ticket's own fix). But falling through to a
-    // plain local re-parse means a routing flag on a corrected REAL
-    // host-routable command (e.g. `docto --device box`, corrected to `doctor`)
-    // silently ran LOCALLY instead of remotely, with no error - worse than
-    // the loud "does not support --device" this ticket replaced. Re-run the
-    // router with the CORRECTED name before falling through to local parse;
-    // it already no-ops when no routing flag is present. RUSH-2022 review r2.
+    // The --device router ran on the original typo'd name, so it fell through to here. A plain
+    // local re-parse would silently run a corrected `docto --device box` locally, not remotely,
+    // so re-run the router with the CORRECTED name first (RUSH-2022 review r2).
     void (async () => {
       // Register only the corrected command — never the full tree (RUSH-2329).
       if (LAZY_COMMAND_NAMES.has(closest)) {
@@ -969,10 +863,9 @@ program.on('command:*', (operands) => {
 // and whether the update check + background sync run at all.
 const passedArgs = normalizeResumeDeviceArgs(process.argv.slice(2));
 process.argv.splice(2, process.argv.length - 2, ...passedArgs);
-// Commander owns `--version` on the root command and otherwise intercepts it
-// even after `sessions`, before the subcommand can parse its version filter.
-// Rewrite only that value-taking nested form; bare `agents --version` and every
-// other command retain the root documentation flag unchanged.
+// Commander owns `--version` on the root and intercepts it even after `sessions`, before the
+// subcommand can parse its version filter. Rewrite only that value-taking nested form; bare
+// `agents --version` and other commands keep the root flag.
 if (passedArgs[0] === 'sessions') {
   const nestedVersionIndex = passedArgs.indexOf('--version', 1);
   if (nestedVersionIndex >= 0) {
@@ -995,25 +888,15 @@ const helpOrVersionRequested = passedArgs.some(
 );
 const isDocumentationRequest = helpOrVersionRequested || helpAllRequested;
 
-// White-label: a brand can hide built-in top-level commands. A hidden command
-// must behave as if it doesn't exist under this brand (unknown-command +
-// spellcheck), while `agents` itself is unaffected. `brandDisabled` is empty for
-// the unbranded CLI, so all of this is a no-op there.
+// White-label: a brand can hide built-in top-level commands, which must behave as nonexistent
+// (unknown-command plus spellcheck) under that brand. `brandDisabled` is empty for the unbranded
+// CLI, making this a no-op there.
 const brandDisabled = disabledCommandsForActiveBrand();
 const requestedIsDisabled = requestedCommand !== undefined && brandDisabled.has(requestedCommand);
 
-// `--device` passthrough: run this invocation on a remote machine over SSH instead
-// of locally. Handled before any local command registration / update check /
-// background sync — a remote run needs none of that. Only the allowlisted
-// read-only + config + teams commands route here; `run`/`sessions` are absent
-// from the table and fall through to their own richer `--device` handling below.
-// `--help`/`--version` stay local (docs must work without a reachable host).
-//
-// RUSH-2374: gate the dynamic import on a routing flag actually being present.
-// Without this, every named invocation paid ~187ms to load passthrough.js only
-// for maybeRunOnHost to return false after four flagValue scans. The presence
-// scan itself is the same work those four scans do, at ~0.001ms on an 11-token
-// argv — free next to the module graph it avoids on the majority path.
+// `--device` passthrough runs this invocation over SSH before local registration, update check or
+// sync; only allowlisted read-only, config and teams commands route here (not `run`/`sessions`).
+// RUSH-2374: load passthrough.js only when a routing flag is present (saved ~187ms per command).
 if (
   requestedCommand !== undefined &&
   !isDocumentationRequest &&
@@ -1067,11 +950,8 @@ if (!helpAllRequested) {
 if (isLazyRequest && !requestedIsDisabled) {
   for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
 } else if (requestedIsUnknown && requestedCommand) {
-  // Spellcheck from the plain-string name set. KNOWN_TOP_LEVEL_COMMANDS already
-  // includes lazy names (sessions/teams/cloud/…) and inline aliases/tombstones,
-  // so `agents session` still suggests `sessions` without loading either module.
-  // Insertion order matches COMMAND_LOADERS key order + INLINE_COMMAND_NAMES,
-  // preserving the historical first-seen tie-break of registerAllEagerCommands.
+  // Spellcheck from the plain-string name set, which already includes lazy names and inline
+  // aliases/tombstones, so `agents session` suggests `sessions` without loading either module.
   const candidates = [...KNOWN_TOP_LEVEL_COMMANDS].filter((name) => !brandDisabled.has(name));
   const { closest, minDist } = closestTopLevelCommand(requestedCommand, candidates);
 
@@ -1121,27 +1001,17 @@ if (brandDisabled.size > 0) {
   }
 }
 
-// --help-all is a custom root option: render the full (non-compact) tree and
-// exit before migrations/update checks. It is not the built-in --help, so
-// commander would otherwise treat a bare program-with-subcommands as missing a
-// command and exit with an error after displaying help.
+// --help-all is a custom root option: render the full non-compact tree and exit before migrations
+// and update checks. It is not the built-in --help, so commander would otherwise treat a bare
+// program-with-subcommands as missing a command and error.
 if (helpAllRequested) {
   program.outputHelp();
   process.exit(0);
 }
 
-// `agents update --check` (with or without a <target>) is a pure read-only
-// preview of the automatic-update plan — it reports what `--auto` WOULD do and
-// changes nothing (`planAutoUpdates` reads installation SNAPSHOTS, never
-// mutating disk). So it MUST NOT fire the mutating startup steps every other
-// real command runs: the CLI self-update check + multi-install sentinel, the
-// detached background repo sync, the legacy-fold and migration passes, the
-// macOS menu-bar install, and the interactive shim self-heal — each writes to
-// ~/.agents or a helper dir the user did not ask to touch (PHNX-3940). It is
-// NOT a documentation request: it still parses, resolves installations, and
-// routes over `--device`, so it is gated separately from isDocumentationRequest
-// rather than folded into it (which would also skip the passthrough router).
-// Re-read the command after spell correction, allowing leading root flags.
+// `agents update --check` is a pure read-only preview, so it must not fire the mutating startup
+// steps: self-update check, background repo sync, migrations, menu-bar install, shim self-heal
+// (PHNX-3940).
 const isReadOnlyUpdatePreview =
   !isDocumentationRequest &&
   passedArgs.find((arg) => !arg.startsWith('-')) === 'update' &&
@@ -1190,18 +1060,9 @@ if (firstRun) {
 // from a broken/half-setup state (that is exactly when you want to tear down).
 const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 
-// Fold legacy ~/.agents-system/ into ~/.agents/.system/ BEFORE ensureInitialized
-// runs. ensureInitialized checks for .git inside the new path; if the user is
-// upgrading from a layout where .git lives under the legacy path, the check
-// would fail and exit before the migrator ever runs. Also runs outside the
-// sentinel guard below because the sentinel was set by pre-fold releases and
-// would otherwise skip this step on every existing install. Idempotent —
-// no-ops when legacy is missing or already a symlink.
-//
-// Skipped for --help/--version/--help-all (RUSH-2454): pure documentation paths
-// must not load any migration graph. Loaded from migrate-fold.js (leaf: fs +
-// createLink), not migrate.js, so a real command pays only the fold hop unless
-// the v20 sentinel is missing and runMigration() is required below.
+// Fold legacy ~/.agents-system/ into ~/.agents/.system/ before ensureInitialized, which exits on
+// a .git still under the legacy path. Runs outside the sentinel guard (pre-fold releases set it).
+// Idempotent; skipped for --help/--version/--help-all, which load no migration graph (RUSH-2454).
 if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isReadOnlyUpdatePreview) {
   try {
     const { foldLegacySystemRepo } = await import('./lib/migrate-fold.js');
@@ -1220,26 +1081,15 @@ if (
   await ensureInitialized(program);
 }
 
-// One-shot idempotent migrations (split-layout, legacy file moves).
-// Each step is internally guarded by existence checks so it's safe to run
-// every invocation. A sentinel file in the system dir short-circuits the
-// scan once a migration version has run, so the hot path stays cheap.
-// AGENTS_SKIP_MIGRATION=1 disables the bootstrap-time run for tests and
-// scripted invocations that prepare their own legacy fixtures.
-//
-// Skipped for --help/--version/--help-all (RUSH-2454): same pure-docs gate as
-// fold, the update check, background sync, ensureInitialized, and the menu-bar
-// self-heal. The sentinel check itself is pure fs and does not load migrate.js
-// — only a missing/stale sentinel pays for
-// `await import('./lib/installations/migrate.js')` (which pulls the
-// hosts/routine/teams/daemon/menubar graph).
+// One-shot idempotent migrations, each guarded by existence checks; a sentinel in the system dir
+// short-circuits the scan once a migration version has run. AGENTS_SKIP_MIGRATION=1 disables this
+// for tests with their own legacy fixtures. Skipped for --help/--version/--help-all (RUSH-2454).
 if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isReadOnlyUpdatePreview) {
   try {
     const sentinel = getMigratedSentinelPath();
-    // Sentinel is keyed to the migration SCHEMA version, not the binary version.
-    // Bumping the suffix re-runs migrations for every user; binary releases that
-    // don't change the schema must NOT re-run (they would destroy user content
-    // when migration steps overlap with user-authored paths). See issue #20.
+    // The sentinel is keyed to the migration schema version, not the binary version. Bumping the
+    // suffix re-runs migrations for every user; binary releases that don't change the schema must
+    // not, since overlapping steps could destroy user content (issue #20).
     const sentinelValue = 'v21';
     let needRun = true;
     try {
@@ -1258,17 +1108,8 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isR
   } catch { /* migration must never block CLI startup */ }
 }
 
-// Auto-enable the macOS menu-bar helper once, for every user. Best-effort and
-// idempotent: installMenubarLaunchAgentOnUpgrade() no-ops when not on darwin,
-// when the user ran `agents menubar disable` (sticky opt-out), when the service
-// is already installed, or when no helper bundle ships with this build. This is
-// a lightweight startup self-heal (two existsSync checks then return) rather
-// than a migration-sentinel bump, so it covers fresh installs AND upgrades
-// without re-running the full migration for the whole user base (issue #20).
-// Skipped for --help/--version/--help-all: those are pure documentation paths,
-// so they pay neither the dynamic import (child_process, the version/layout
-// resolver, the bundle installer) nor the self-heal's filesystem checks — same
-// gate the update check, background sync, and ensureInitialized above already use.
+// Auto-enable the macOS menu-bar helper once, best-effort and idempotent: it no-ops off darwin,
+// after `agents menubar disable`, when already installed, or when no bundle ships.
 if (
   process.platform === 'darwin' &&
   process.env.AGENTS_SKIP_MIGRATION !== '1' &&
@@ -1281,11 +1122,9 @@ if (
   } catch { /* never block CLI startup on the menu bar */ }
 }
 
-// Bare invocation prints the root help. Commander only auto-displays help on
-// an empty parse when subcommands are registered, and the lazy-startup path
-// registers none for a bare call — without this branch, `agents` exits
-// silently. Runs after first-run setup and migrations so those still fire;
-// exits 0 to match `agents --help` (and the pre-fix exit code).
+// Bare invocation prints the root help: commander auto-displays help on an empty parse only when
+// subcommands are registered, and lazy startup registers none for a bare call, so `agents` would
+// exit silently. Runs after first-run setup and migrations; exits 0 like `agents --help`.
 if (passedArgs.length === 0) {
   program.outputHelp();
   process.exit(0);
@@ -1305,25 +1144,19 @@ try {
     process.exit(130);
   }
   if (err instanceof Error) {
-    // (The browser-service-not-running / CDP-unreachable / IPC-down typed errors
-    // were thrown by the in-repo browser engine, deleted with PHNX-4101; the
-    // standalone `browser` CLI now prints its own user-actionable errors and
-    // agents-cli forwards its exit code, so there is nothing to special-case here.)
+    // The browser-service/CDP/IPC typed errors came from the in-repo browser engine, deleted in
+    // PHNX-4101; the standalone `browser` CLI prints its own errors and agents-cli forwards its
+    // exit code, so nothing is special-cased here.
 
-    // A --device targeting a password-auth device throws this from resolveHost.
-    // It carries an actionable message (switch to key auth / enroll as a host);
-    // handling it here covers every resolveHost caller (run, hosts check/rm,
-    // secrets --device) at the source instead of a catch at each call site.
+    // A --device targeting a password-auth device throws this from resolveHost with an actionable
+    // message (switch to key auth or enroll as a host). Handling it here covers every resolveHost
+    // caller at the source instead of per call site.
     if (err.name === 'DeviceOffloadUnsupportedError') {
       console.error(err.message);
       process.exit(1);
     }
-    // The standalone `secrets` CLI is a required external dependency (DIST-1);
-    // when it is missing or a request to it fails, the sync/async client throws
-    // a typed SecretsClientError whose message is user-actionable install
-    // guidance (e.g. SECRETS_BIN_MISSING). Handling it at this choke point means
-    // every call site (doctor, browser, share, …) prints one clear line and
-    // exits 1 instead of dumping a Node stacktrace, without a per-call try/catch.
+    // The standalone `secrets` CLI is a required external dependency (DIST-1). When it is missing
+    // or a request fails, the client throws a typed SecretsClientError with install guidance.
     if (err.name === 'SecretsClientError') {
       console.error(err.message);
       process.exit(1);

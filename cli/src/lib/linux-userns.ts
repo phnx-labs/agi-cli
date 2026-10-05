@@ -1,24 +1,6 @@
-/**
- * Unprivileged user-namespace availability on Linux — the capability Codex's
- * Linux sandbox needs, and the one Ubuntu 23.10+ restricts by default.
- *
- * Codex ≥0.146 implements its `read-only` and `workspace-write` sandbox modes on
- * Linux with a bundled **bubblewrap** (`bwrap`), extracted per-run to
- * `$CODEX_HOME/tmp/arg0/codex-XXXX/` and exec'd from a memfd. bwrap sets up its
- * mounts inside a fresh **unprivileged user namespace** (`--unshare-user`, then a
- * write to `/proc/self/uid_map`). Ubuntu 24.04 ships
- * `kernel.apparmor_restrict_unprivileged_userns=1`, which denies that to an
- * unconfined binary — so bwrap dies with `bwrap: setting up uid map: Permission
- * denied` and a headless Codex run lands zero tools (no file writes, no shell).
- * `danger-full-access` (our `skip` mode) drops the sandbox and is the only mode
- * that avoids bwrap; the legacy Landlock backend is gone (`use_linux_sandbox_bwrap`
- * is `removed`, `use_legacy_landlock` panics under the permission-profile model).
- *
- * This module is the single detector. It is pure at its core
- * ({@link interpretUsernsInputs}) so the decision is unit-testable without a
- * shell, and {@link probeUnprivilegedUserns} gathers the real inputs once per
- * process. See PHNX-3285.
- */
+/** Detects unprivileged userns on Linux (PHNX-3285). Codex >=0.146 sandboxes with bubblewrap, which
+ * needs one; Ubuntu 24.04 denies it by default and a headless run lands zero tools. Only
+ * `danger-full-access` (`skip`) avoids bwrap. Pure core: interpretUsernsInputs. */
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 
@@ -43,30 +25,17 @@ export interface UsernsStatus {
 /** The raw signals the pure interpreter reasons over. */
 interface UsernsInputs {
   platform: NodeJS.Platform;
-  /**
-   * Contents of {@link APPARMOR_USERNS_SYSCTL_PATH} trimmed, or null when the
-   * file is absent (older kernels / no AppArmor userns mediation).
-   */
+  /** Trimmed contents of APPARMOR_USERNS_SYSCTL_PATH, or null when absent (older kernel / no
+   * AppArmor userns mediation). */
   apparmorRestrict: string | null;
-  /**
-   * Result of actually attempting to create a user namespace with a uid map:
-   *   - 'ok'      → the probe created the namespace and mapped root.
-   *   - 'denied'  → the kernel refused the uid_map write (the restricted case).
-   *   - 'no-tool' → the probe binary (`unshare`) was missing or failed to spawn.
-   */
+  /** Result of attempting a user namespace with a uid map: 'ok' (created and mapped root), 'denied'
+   * (kernel refused the uid_map write), 'no-tool' (`unshare` missing or failed to spawn). */
   unshareProbe: 'ok' | 'denied' | 'no-tool';
 }
 
-/**
- * Decide userns availability from raw signals. Pure — no I/O.
- *
- * The definitive signal is the actual probe: if we successfully created a userns
- * and wrote a uid map, the sandbox works regardless of the sysctl (an AppArmor
- * profile may grant a specific binary `userns` even while the global knob is 1).
- * A denied probe is a hard `blocked`. When the probe tool is missing we fall back
- * to the sysctl: `1` → `blocked`, `0`/absent → `unknown` (we could not prove it,
- * and refuse to claim `ok` we did not observe).
- */
+/** Decides userns availability from raw signals, no I/O. The probe is definitive: success means the
+ * sandbox works even if the sysctl is 1; denial is `blocked`. With no probe tool, sysctl `1` is
+ * `blocked`, else `unknown` (never claim `ok` unobserved). */
 export function interpretUsernsInputs(inputs: UsernsInputs): UsernsStatus {
   if (inputs.platform !== 'linux') return { state: 'ok' };
 
@@ -109,12 +78,8 @@ export function readApparmorRestrict(
   }
 }
 
-/**
- * Actually try to create a user namespace and map root inside it — the same
- * operation bwrap performs (`unshare --user --map-root-user`). This is the ground
- * truth: it observes exactly what the kernel/AppArmor policy permits for *this*
- * process, rather than inferring from the sysctl alone.
- */
+/** Attempts the same operation bwrap does (`unshare --user --map-root-user`). This is ground truth
+ * for what the kernel/AppArmor policy permits this process, rather than inferring from the sysctl. */
 export function probeUnshare(): 'ok' | 'denied' | 'no-tool' {
   try {
     execFileSync('unshare', ['--user', '--map-root-user', 'true'], {
@@ -133,11 +98,8 @@ export function probeUnshare(): 'ok' | 'denied' | 'no-tool' {
 
 let cached: UsernsStatus | null = null;
 
-/**
- * Resolve whether an unprivileged user namespace can be created on this host,
- * cached for the process (the answer is a stable property of the box). Non-Linux
- * short-circuits to `ok` without spawning anything.
- */
+/** Whether an unprivileged userns can be created here, cached per process (a stable property of the
+ * box). Non-Linux returns `ok` without spawning anything. */
 export function probeUnprivilegedUserns(
   platform: NodeJS.Platform = process.platform,
 ): UsernsStatus {

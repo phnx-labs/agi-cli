@@ -1,23 +1,6 @@
-/**
- * The delegate behind the `gh` PATH shim (`agents __gh --real-gh <path> -- <argv>`).
- *
- * Agents are statically trained to type `gh pr checks …`; the shim intercepts that
- * habit and routes it here so the rate-limit-prone read runs over REST instead of
- * GraphQL — no new command for an agent to remember. This is the Tier-1 scope:
- * only `gh pr checks` is handled; every other invocation execs the real gh
- * byte-for-byte (the shim already passes non-`pr checks` verbs straight to real gh,
- * and this file passes through defensively for anything it cannot cleanly serve).
- *
- * Two switch modes (see the PHNX-3501 plan):
- *   - `--watch` → EAGER REST: own the poll loop, re-anchored to the live head SHA
- *     each tick, so a superseded run's red can never be reported (PHNX-3042).
- *   - one-shot → LAZY: run real gh first; only translate to REST when it fails with
- *     the exact GraphQL rate-limit signal. An over-budget GraphQL call is rejected
- *     at 0 points, so this is nearly free and never reproduces gh's happy path.
- *
- * Fail-open is the rule: anything not cleanly resolvable (no PR number/URL, an
- * unmappable request) execs real gh rather than returning wrong data.
- */
+/** The delegate behind the `gh` PATH shim: routes `gh pr checks` over REST, not GraphQL. Only that
+ * verb is handled; all else execs real gh. `--watch` polls REST re-anchored to the live head
+ * (PHNX-3042); one-shot falls back to REST only on GraphQL rate limit. Fail open to real gh. */
 
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
@@ -61,11 +44,9 @@ export function repoFromRemote(remoteUrl: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
-/**
- * Resolve `{repo, number}` from the `gh pr checks` argv + cwd, over git/REST only.
- * Returns null (→ caller passes through to real gh) when it can't be resolved
- * cleanly, e.g. no number and no open PR for the current branch.
- */
+/** Resolves `{repo, number}` from the `gh pr checks` argv and cwd over git/REST only. Returns
+ * null (pass through to real gh) when unresolvable, e.g. no number and no open PR for the
+ * branch. */
 export async function resolveTarget(
   ghArgs: string[],
   cwd: string,
@@ -174,15 +155,9 @@ export function renderRollup(input: RollupItem[], json: boolean): string {
 
 const NON_TERMINAL = new Set(['IN_PROGRESS', 'QUEUED', 'PENDING', 'WAITING', 'REQUESTED']);
 
-/**
- * True once CI has settled for this SHA.
- *
- * Check-suites only disambiguate an EMPTY rollup: no checks + no pending suites is
- * "genuinely none" (settled); no checks + a pending suite is "not registered yet"
- * (wait). Once real checks exist we decide on THEM alone and ignore suites — some
- * App integrations (claude/cursor reviewers) register a suite that stays `queued`
- * forever and never posts a run, exactly what `gh pr checks` also ignores.
- */
+/** True once CI has settled for this SHA. Check-suites only disambiguate an empty rollup (none
+ * plus no pending suite is settled, a pending suite means wait). Once real checks exist, ignore
+ * suites: some App reviewers leave a suite `queued` forever. */
 export function isSettled(rollup: RollupItem[], pendingSuites: number): boolean {
   if (rollup.length === 0) return pendingSuites === 0;
   return rollup.every(

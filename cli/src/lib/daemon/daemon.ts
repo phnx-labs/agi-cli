@@ -1,13 +1,8 @@
 import { daemonProcessViewAllowed, recordDaemonProcessView } from '../session/process-view.js';
 
-/**
- * Daemon lifecycle management for the routines scheduler.
- *
- * The daemon is a long-running process that holds a JobScheduler and
- * triggers jobs on their cron schedules. It can be managed via launchd
- * (macOS), systemd (Linux), or as a plain detached process. PID tracking,
- * log output, reload (SIGHUP), and graceful shutdown are handled here.
- */
+/** Daemon lifecycle management for the routines scheduler: a long-running process holding a
+ * JobScheduler, managed via launchd, systemd or a plain detached process. Handles PID tracking,
+ * logs, reload (SIGHUP) and graceful shutdown. */
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -36,16 +31,9 @@ import { emit, emitAsync, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
 import { sleepSync } from '../fs-atomic.js';
 
-/**
- * The live `ServiceSupervisor` for the current `runDaemon()` invocation, or
- * `null` before boot / after shutdown. In-process only — a separate `agents
- * daemon status` process cannot see this; per-service health that must
- * survive across processes goes through `daemon-health.ts` instead (which
- * `ServiceSupervisor` already writes on every tick). This getter exists so a
- * FUTURE same-process consumer (e.g. a `daemon services` live-status IPC
- * handler) can read the supervisor's live state (`running`/`stopped`, plus the
- * failure streak) without needing its own reference to `runDaemon()`'s locals.
- */
+/** The live `ServiceSupervisor` for the current `runDaemon()`, or `null` before boot/after
+ * shutdown. In-process only; cross-process health goes through `daemon-health.ts`. Exists for a
+ * future same-process consumer. */
 let activeServiceSupervisor: ServiceSupervisor | null = null;
 
 /** Health for every service currently registered on the live supervisor, or `null` if the daemon isn't running in this process. */
@@ -63,47 +51,16 @@ const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 
-/**
- * The service-manager identifiers of the REAL install's daemon — never
- * namespaced. A caller under a redirected HOME (a test/e2e harness) uses these
- * to recognize the box's production daemon as owned, where
- * `daemonSystemdUnitName()`/`daemonServiceLabel()` would name only its own
- * sandbox job (W4, PHNX-3736).
- */
+/** Service-manager identifiers of the real install's daemon, never namespaced. A caller under a
+ * redirected HOME (test/e2e harness) uses these to recognize the box's production daemon as owned
+ * (W4, PHNX-3736). */
 export function productionDaemonServiceNames(): { systemdUnit: string; launchdLabel: string } {
   return { systemdUnit: SYSTEMD_UNIT, launchdLabel: PLIST_NAME };
 }
 
-/**
- * RUSH-2639 (residual): launchd/systemd route `unload`/`load`/`list` by the
- * service identifier ALONE, never by the plist/unit file's path. Baking the
- * caller's HOME into the plist content (the earlier RUSH-2639 fix, above)
- * keeps the STARTED daemon inside its sandbox, but every hermetic-test
- * instance and every real interactive install still share the one literal
- * `PLIST_NAME`/`SYSTEMD_UNIT` string. `startDaemonLocked`'s own `unload`
- * before `load` is written to be a no-op ("not loaded, expected") for a
- * plist that has never been loaded — but confirmed on darwin: when a
- * DIFFERENT plist is already loaded under that same label, `unload
- * <this-instance's-own-never-loaded-path>` still tears down the OTHER job
- * (verified directly against real launchctl with two throwaway plists
- * sharing one label — the second job's own `unload` silently kills the
- * first, still alive under a different path). On a machine running several
- * hermetic test forks at once (CI) — or a developer's own suite next to
- * their real always-on daemon — that "other job" is a live daemon with
- * DIFFERENT baked-in state.
- *
- * Namespace the identifier itself whenever HOME has been redirected away
- * from the account's real home. `os.userInfo().homedir` reads the OS/passwd
- * record directly and ignores `$HOME` (unlike `os.homedir()`, which honors
- * it), so comparing the two detects exactly this redirection — true for
- * every hermetic test process, false for every real interactive/production
- * invocation, so a real user's daemon keeps registering under the unchanged
- * production identifier.
- *
- * The rule itself now lives in `service-manifest.ts` — the daemon was the first
- * manifest to need it, not the only one — and is re-exported here because it is
- * part of this module's published surface.
- */
+/** RUSH-2639 (residual): launchd/systemd route `unload`/`load`/`list` by service identifier alone,
+ * so one literal `PLIST_NAME`/`SYSTEMD_UNIT` let an `unload` of a never-loaded plist tear down
+ * another job. Namespace the identifier when HOME is redirected. */
 export { isolatedHomeSuffix };
 
 /** launchd Label for this process's daemon — namespaced under a redirected HOME. */
@@ -121,66 +78,27 @@ export function daemonSystemdUnitName(): string {
 // (PHNX-3608): the pass now runs under the ServiceSupervisor with a deadline +
 // AbortSignal + circuit breaker instead of a bare setInterval.
 
-/**
- * Cadences for the in-process background ticks, named here beside the other
- * tick constants rather than left as inline literals at their `setInterval`
- * (RUSH-2423). Self-heal, state-dir-check, watchdog, and device-probe
- * cadences moved to their own `*-service.ts` files (RUSH-3193 P3, alongside
- * session-index/account-state/etc.) — see those files for the per-service
- * trade-offs (self-heal's 6h/cheap-to-be-late repair cadence, state-dir-check's
- * env override for tests, watchdog/device-probe's shared 3min in-process
- * housekeeping cadence, NOT a routine — RUSH-2495). The secrets broker and its
- * self-heal/reap ticks moved out of this daemon entirely with the standalone
- * `secrets` engine (PHNX-3989 OWN-1) — this daemon no longer hosts that broker.
- */
+/** Cadences for the in-process background ticks, named beside the other tick constants (RUSH-2423).
+ * Self-heal, state-dir-check, watchdog and device-probe cadences moved to their own `*-service.ts`
+ * files (RUSH-3193 P3); the secrets broker left with the standalone engine (PHNX-3989). */
 // Session-index warm interval/deadline live in session-index-service.ts now
 // (RUSH-3193 — migrated onto ServiceSupervisor).
 const WEDGE_THRESHOLD_TICKS = 3;
 const DAEMON_HEARTBEAT_TICK_MS = 60_000;
 
-/**
- * Crash-loop pacing and auto-start bounding (RUSH-2418, PHNX-4116). Two layers,
- * because a daemon that dies during startup must be paced but must NEVER be
- * abandoned:
- *
- * 1. **The OS supervisor paces AND always retries the respawn.** launchd's
- *    `KeepAlive` with `ThrottleInterval=30` (and systemd's `Restart=always`
- *    `RestartSec=30`) relaunch a dead daemon every ~30s. Crucially systemd's
- *    `StartLimitIntervalSec=0` REMOVES the burst cap (PHNX-4116): a repeatedly
- *    deadline-breaching daemon is restarted every ~30s indefinitely rather than
- *    parked in `failed` and left dark until a human runs `systemctl restart`.
- *    The owner requirement is that a wedged daemon always recovers on its own —
- *    "just work like systemd/launchd". A supervised deadline breach is precisely
- *    what forces the exit (see `ServiceSupervisor.exitForRestart`), so the exit
- *    is the recovery, not a failure to give up on.
- * 2. **The application-level circuit breaker** below still stops *auto*-starts
- *    from re-entering the loop from the other direction — a foreground command
- *    that calls `ensureDaemonStarted()` on every invocation. This bounds the
- *    IMPLICIT starts a busy operator would otherwise trigger; the OS-level
- *    unit-restart above is deliberately unbounded.
- */
+/** Crash-loop pacing (RUSH-2418, PHNX-4116), two layers: a daemon dying at startup must be paced
+ * but never abandoned. 1) The OS supervisor paces and always retries (`ThrottleInterval=30`;
+ * `RestartSec=30`, `StartLimitIntervalSec=0`). 2) Foreground auto-starts are bounded. */
 const DAEMON_THROTTLE_SECONDS = 30;
 
-/**
- * How many consecutive failed daemon starts disable the *implicit* auto-start
- * (`ensureDaemonStarted`). This bounds foreground-command auto-starts only; the
- * OS-level unit restart is deliberately unbounded (`StartLimitIntervalSec=0`) so
- * a wedged daemon always recovers (PHNX-4116). `agents daemon start` is the
- * deliberate override and is never gated by this.
- */
+/** Consecutive failed starts that disable the implicit auto-start (`ensureDaemonStarted`). Bounds
+ * foreground-command auto-starts only; the OS unit restart is unbounded (PHNX-4116), and `agents
+ * daemon start` is the override and never gated. */
 export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
 
-/**
- * What a gate re-evaluation must do with the routines scheduler. The daemon
- * re-evaluates `scheduler.enabled` on every SIGHUP reload so flipping the key
- * takes effect without a daemon restart (and `routines add`'s reload signal on
- * a re-enabled box boots the scheduler — the reload is truthful, not a no-op).
- *
- *   running + enabled   → reload (the normal SIGHUP path)
- *   running + !enabled  → stop  (gate flipped off since boot)
- *   !running + enabled  → boot  (gate flipped on since boot)
- *   !running + !enabled → none  (stay dark)
- */
+/** What a gate re-evaluation does with the routines scheduler. `scheduler.enabled` is re-evaluated
+ * on every SIGHUP so flipping it needs no restart: running+enabled reload; running+!enabled stop;
+ * !running+enabled boot; !running+!enabled none. */
 type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
 
 export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
@@ -188,25 +106,9 @@ export function schedulerGateTransition(running: boolean, enabled: boolean): Sch
   return enabled ? 'boot' : 'none';
 }
 
-/**
- * Wrap an async routine so it runs AT MOST ONCE, however many callers fire it.
- *
- * Extracted rather than left as a `let shuttingDown = false` inside runDaemon so
- * the property can actually be tested (RUSH-2423). The daemon's shutdown is
- * reachable from SIGTERM, SIGINT, and the state-dir self-check, but a real
- * shutdown completes in ~26ms, so the re-entrant window is not reachable from
- * outside the process — an end-to-end "send three signals" test passes with the
- * guard removed and proves nothing. The mechanism is what is testable, so the
- * mechanism is what is separated out.
- *
- * The flag is set synchronously before the first `await`, which is what makes
- * this safe: two callers in the same tick cannot both get past it.
- *
- * A rejected `fn` leaves the guard SET — one attempt is all there is, and the
- * rejection propagates to the caller that made it. That is right for shutdown
- * (a failed shutdown must not be silently retried by the next signal) but is
- * the thing to re-examine before giving this a second consumer.
- */
+/** Wrap an async routine so it runs at most once however many callers fire it; the flag is set
+ * before the first await. Extracted to be testable (RUSH-2423). A rejected `fn` leaves the guard
+ * set, so a failed shutdown is never retried by the next signal; re-examine before reuse. */
 export function singleShot(fn: () => Promise<void>): () => Promise<void> {
   let ran = false;
   return async () => {
@@ -230,11 +132,8 @@ function getLockPath(): string {
   return path.join(ensureDaemonDir(), LOCK_FILE);
 }
 
-/**
- * Acquire an exclusive start lock. Returns a release function on success,
- * or null if another process already holds the lock. Uses O_EXCL to
- * atomically create the file — no TOCTOU window.
- */
+/** Acquire an exclusive start lock via O_EXCL (no TOCTOU window). Returns a release function, or
+ * null if another process holds it. */
 function acquireStartLock(): (() => void) | null {
   const lockPath = getLockPath();
   try {
@@ -266,12 +165,9 @@ function acquireStartLock(): (() => void) | null {
   }
 }
 
-/**
- * Stop is a lifecycle mutation just like start/claim, so it must cross the same
- * lock. A claim can legitimately hold the lock through the incumbent's 5s
- * graceful window plus the 2s hard-kill backstop; wait beyond that complete
- * takeover window before failing loud instead of running teardown unlocked.
- */
+/** Stop is a lifecycle mutation like start/claim, so it crosses the same lock. A claim can hold it
+ * through the 5s graceful window plus the 2s hard-kill backstop; wait beyond that, then fail loud
+ * rather than tear down unlocked. */
 const STOP_LOCK_WAIT_MS = 10_000;
 const STOP_LOCK_POLL_MS = 50;
 
@@ -285,14 +181,8 @@ function acquireLifecycleLock(): (() => void) | null {
   }
 }
 
-/**
- * Absolute path to the daemon's structured log.
- *
- * Exported because two commands rebuilt the same path from a hardcoded
- * `'logs.jsonl'` literal (`commands/daemon.ts`, `commands/routines.ts`), so
- * renaming the file would have silently pointed them at nothing (RUSH-2423).
- * One definition, three callers.
- */
+/** Absolute path to the daemon's structured log. Exported because two commands rebuilt it from a
+ * hardcoded `'logs.jsonl'`, so a rename would have pointed them at nothing (RUSH-2423). */
 export function getDaemonLogPath(): string {
   return path.join(ensureDaemonDir(), LOG_FILE);
 }
@@ -368,16 +258,9 @@ export function removeHeartbeat(): void {
   try { fs.unlinkSync(getHeartbeatPath()); } catch { /* already removed */ }
 }
 
-/**
- * A heartbeat is "fresh" when its last tick falls inside the freshness window. A
- * fresh heartbeat whose pid is alive is proof of a live, ticking daemon even
- * when the pid file has been lost, which is why `resolveLiveDaemonPid` trusts it.
- *
- * There is no separate "wedged" verdict any more (PHNX-4116): a daemon whose
- * event loop stalls no longer sits `wedged` waiting for a human — a supervised
- * service that breaches its deadline exits the process, and systemd/launchd
- * restart it. So the daemon is simply `running` or `stopped`.
- */
+/** A heartbeat is fresh when its last tick is inside the freshness window; a fresh heartbeat with a
+ * live pid proves a ticking daemon even if the pid file is lost. No separate "wedged" verdict
+ * (PHNX-4116): a supervised deadline breach exits the process and systemd/launchd restart it. */
 function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
   const elapsed = Date.now() - Date.parse(hb.lastTick);
   return elapsed <= WEDGE_THRESHOLD_TICKS * DAEMON_HEARTBEAT_TICK_MS;
@@ -388,23 +271,9 @@ const STOP_GRACE_MS = 5000;
 /** How long it waits after the hard tree-kill before giving up. */
 const STOP_KILL_GRACE_MS = 2000;
 
-/**
- * Resolve the PID of the live daemon, tolerant of a pid-file/heartbeat desync.
- *
- * The daemon writes the pid file once (on claim/start) but rewrites the
- * heartbeat every tick. If the pid file is lost while the daemon keeps ticking
- * — e.g. an earlier isDaemonRunning() found a stale/reused/dead pid and cleared
- * the file, or it was removed out from under a live daemon — the pid file reads
- * empty even though a daemon is genuinely alive and firing jobs. Reading only
- * the pid file then reports "stopped" for a running scheduler, and (worse) lets
- * claimDaemonInstance() start a SECOND daemon that double-fires every routine.
- *
- * So: trust the pid file only when its pid is a live `__daemon-run`; otherwise
- * trust a FRESH heartbeat whose pid passes the same identity check. Callers that
- * already own daemon.lock may request repair, re-adopting the heartbeat pid or
- * removing the exact stale pid they observed. Read-only liveness probes never
- * mutate shared state outside that lock.
- */
+/** Resolve the live daemon PID, tolerating a pid-file/heartbeat desync. If the pid file is lost
+ * while the daemon ticks, reading only it reports "stopped" and lets claimDaemonInstance() start a
+ * second, double-firing daemon. Also trust a fresh heartbeat; only daemon.lock holders repair. */
 function resolveLiveDaemonPid(repair: boolean = false): number | null {
   const pid = readDaemonPid();
   const pidIdentity = pid !== null ? daemonProcessIdentity(pid) : 'dead';
@@ -430,14 +299,9 @@ function unverifiedLiveDaemonPid(): number | null {
   return null;
 }
 
-/**
- * Check whether a daemon is alive — via the pid file, or a fresh heartbeat when
- * the pid file has been lost (see resolveLiveDaemonPid). The observation itself
- * is read-only; when it finds desync it opportunistically acquires daemon.lock
- * and repeats the observation there before repairing. A contended probe still
- * returns the observed liveness without mutating another lifecycle operation's
- * state.
- */
+/** Whether a daemon is alive via the pid file or a fresh heartbeat (see resolveLiveDaemonPid).
+ * Read-only; on desync it tries to acquire daemon.lock and re-observes there before repairing. A
+ * contended probe returns its observation without mutating. */
 export function isDaemonRunning(): boolean {
   // Fail safe for reporting/start suppression: inability to inspect a live pid
   // is never permission to declare it dead and launch a duplicate.
@@ -455,26 +319,9 @@ export function isDaemonRunning(): boolean {
   }
 }
 
-/**
- * Single-instance claim for the daemon foreground entrypoint.
- *
- * `agents __daemon-run` is reachable directly — a manual invocation, or a
- * service-manager restart that races a still-alive predecessor — bypassing the
- * start lock in startDaemon(). Without this guard runDaemon() would call
- * writeDaemonPid() unconditionally, clobber a live daemon's recorded PID, and
- * run a second JobScheduler concurrently, so every cron routine fires twice.
- *
- * LAST-WINS takeover (SING-11, RUSH-2352): when a live daemon already owns the
- * pid file, this does NOT defer to it — it evicts the incumbent and becomes the
- * survivor, so a second install can never leave two daemons running. Returns true
- * and records our PID once the incumbent is provably dead (its resources
- * released). Returns false when another `__daemon-run` currently holds the
- * O_EXCL start lock, or when the incumbent cannot be safely identified/evicted,
- * in which case the caller must exit without touching further state.
- * The read-evict-write is serialized behind the same start lock startDaemon()
- * uses, so two `_run` processes can't both claim in the window between the
- * liveness check and the write.
- */
+/** Single-instance claim for the foreground entrypoint. `agents __daemon-run` can be reached
+ * directly, bypassing startDaemon()'s lock; otherwise it would clobber the live pid and run a
+ * second JobScheduler, double-firing routines. LAST-WINS (SING-11, RUSH-2352); false: exit. */
 export function claimDaemonInstance(): boolean {
   // A nested caller cannot interpret legacy numeric lock/PID files. Authenticate
   // before acquiring the lock (whose stale-PID cleanup itself mutates state).
@@ -482,12 +329,9 @@ export function claimDaemonInstance(): boolean {
     console.error('Daemon startup requires the owning process namespace. Automatic reuse of a private-container HOME across namespaces is unsupported; run in its owning namespace or use a fresh HOME.');
     return false;
   }
-  // A stop owns this same lock through teardown. Waiting here is load-bearing:
-  // returning false while stopDaemon() holds it lets this replacement exit 0,
-  // then the stop completes with no singleton left alive. The bounded lifecycle
-  // acquisition also preserves concurrent-start serialization: after the first
-  // claimer publishes its pid, the waiter takes the lock and performs the normal
-  // last-wins takeover rather than ever running the read-evict-write unlocked.
+  // A stop owns this lock through teardown. Waiting is load-bearing: returning false while
+  // stopDaemon() holds it lets this replacement exit 0 and the stop finish with no singleton
+  // alive. Bounded acquisition also keeps concurrent starts serialized.
   const release = acquireLifecycleLock();
   if (!release) return false;
   try {
@@ -497,18 +341,14 @@ export function claimDaemonInstance(): boolean {
     // Do not overwrite a live-but-uninspectable owner. This is the non-
     // destructive side of the same fail-closed rule stopDaemon applies.
     if (unverifiedLiveDaemonPid() !== null) return false;
-    // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon
-    // whose pid file was lost is still found and evicted — otherwise a missing
-    // pid file would let both this instance AND the orphaned incumbent run a
-    // JobScheduler at once and double-fire every routine.
+    // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon whose pid file was
+    // lost is still found and evicted; otherwise this instance and the orphan would both run a
+    // JobScheduler and double-fire.
     const existing = resolveLiveDaemonPid(true);
     if (existing !== null && existing !== process.pid) {
-      // Evict, and WAIT for the incumbent to be provably dead — its graceful
-      // handleShutdown releasing its socket bindings (feed-stream hub, monitor)
-      // — before we write our pid and (later, in runDaemon) bind our own.
-      // Binding before the release recreates the two-owners-on-one-socket orphan
-      // documented at stopDaemon below, so the pid file is not written until the
-      // prior owner is gone.
+      // Evict and WAIT for the incumbent to be provably dead (its handleShutdown releasing the
+      // feed-stream hub and monitor sockets) before writing our pid or binding. Binding earlier
+      // recreates the two-owners-on-one-socket orphan documented at stopDaemon.
       if (!evictIncumbentDaemon(existing)) return false;
     }
     writeDaemonPid(process.pid);
@@ -518,21 +358,9 @@ export function claimDaemonInstance(): boolean {
   }
 }
 
-/**
- * SIGTERM a live incumbent daemon and block until it is provably dead, so its
- * graceful handleShutdown has released its socket bindings (the feed-stream hub,
- * the monitor socket) BEFORE the newcomer binds anything of its own (SING-11) —
- * the daemon no longer hosts a secrets broker socket (the standalone `secrets`
- * CLI owns it, PHNX-3989 OWN-1) nor a browser IPC socket (the standalone
- * `browser` CLI owns it, PHNX-4101). Escalates
- * to killTree after the grace window. Passes the POSITIVE pid so the kill reaches
- * only the incumbent daemon — never its detached routine children, which run in
- * their own process groups and must survive takeover (SING-11a); the new daemon
- * re-adopts them via monitorRunningJobs. Synchronous to match claimDaemonInstance's
- * read-evict-write, which runs under the O_EXCL start lock; mirrors stopDaemon's
- * grace-then-escalate shape and constants exactly, because the same
- * proof-of-release requirement applies.
- */
+/** SIGTERM a live incumbent and block until it is provably dead so its sockets (feed-stream hub,
+ * monitor) are released before the newcomer binds (SING-11); escalates to killTree after the grace
+ * window. Passes the positive pid so detached routine children survive (SING-11a). */
 function evictIncumbentDaemon(pid: number): boolean {
   const beforeSignal = daemonProcessIdentity(pid);
   if (beforeSignal === 'dead' || beforeSignal === 'other') return true;
@@ -568,22 +396,9 @@ function getDaemonInstancesDir(): string {
   return path.join(getDaemonDir(), 'instances');
 }
 
-/**
- * Record this daemon in the device's instance registry — a marker file named by
- * pid under `<daemonDir>/instances/`. The registry, not a process scan, is how
- * the reaper enumerates the device singleton: because the dir lives INSIDE the
- * state dir (`AGENTS_DAEMON_DIR` ?? `<HOME>/.agents/.cache/helpers/daemon`), every
- * daemon of one device — however it was launched — registers in the same place,
- * while a genuinely separate install/home or a test fixture registers under its
- * own state dir and is invisible here. This is what fixes the two-entry pile-up:
- * the compiled `dist/bin/agents` binary and the `node <shim>` JS entry have
- * different `process.argv[1]`, so the old launch-entry-scoped `ps` match never
- * reaped across them and duplicates accumulated (78 observed on one box), every
- * routine double-firing. Best-effort — the reaper self-heals a missing/stale
- * marker, and reading another process's ENV to key on the state dir directly is
- * not portable (hardened macOS hides it from `ps`), so identity rides the shared
- * on-disk registry instead. No-op on Windows (POSIX-only reaper).
- */
+/** Record this daemon in the device instance registry: a pid-named marker under
+ * `<daemonDir>/instances/`. The registry, not a process scan, lets the reaper enumerate the device
+ * singleton, since every daemon of one device shares the state dir while test fixtures don't. */
 export function registerDaemonInstance(pid: number = process.pid): void {
   if (process.platform === 'win32') return;
   try {
@@ -600,15 +415,9 @@ export function unregisterDaemonInstance(pid: number = process.pid): void {
   try { fs.rmSync(path.join(getDaemonInstancesDir(), String(pid)), { force: true }); } catch { /* ignore */ }
 }
 
-/**
- * Reap stray duplicate daemons of THIS device — every registrant in the instance
- * registry that is a live `agents __daemon-run` and is neither this process nor
- * the current pid-file owner. A predecessor SIGKILLed/OOM-ed without cleanup, or a
- * duplicate that lost the pid-file write race, would otherwise keep a second
- * scheduler alive and double-fire jobs even after claimDaemonInstance() hands the
- * pid file to the survivor. Also garbage-collects markers whose pid is dead or was
- * reused by an unrelated process. No-op on Windows (POSIX-only).
- */
+/** Reap stray duplicate daemons of this device: registry entries that are a live `agents
+ * __daemon-run` and neither this process nor the pid-file owner. A SIGKILLed predecessor or
+ * pid-file race loser would otherwise keep a second scheduler double-firing. No-op on Windows. */
 export function reapStrayDaemons(keepPid: number = process.pid): { reaped: number; details: string[] } {
   const details: string[] = [];
   let reaped = 0;
@@ -680,12 +489,9 @@ export function reapStrayDaemons(keepPid: number = process.pid): { reaped: numbe
   return { reaped, details };
 }
 
-/**
- * Whether `pid` is a live `agents __daemon-run` process. Reads the process's
- * command line (`ps` on POSIX, Win32_Process on Windows), which — unlike its
- * environment — is visible on hardened macOS too. Guards every signal boundary
- * against killing an unrelated process that reused a recorded daemon pid.
- */
+/** Whether `pid` is a live `agents __daemon-run`, from its command line (`ps` on POSIX,
+ * Win32_Process on Windows), which unlike its environment is visible on hardened macOS. Guards
+ * every signal against killing an unrelated process that reused the pid. */
 type DaemonProcessIdentity = 'daemon' | 'other' | 'dead' | 'unknown';
 
 function daemonProcessIdentity(pid: number): DaemonProcessIdentity {
@@ -744,11 +550,9 @@ export function log(level: string, message: string): void {
       : lvl === 'START' || /starting|started/i.test(message) ? 'daemon.start' as const
       : lvl === 'STOP' || /stopping|stopped|shutting down/i.test(message) ? 'daemon.stop' as const
       : 'daemon.info' as const;
-    // Fire-and-forget the event mirror: `log()` is a synchronous primitive on
-    // every daemon tick's `ctx.log`, and the mirror's event-log lock would
-    // otherwise block the shared event loop for up to 30s under contention
-    // (PHNX-3695). The daemon-log append above is the primary, synchronous sink;
-    // the mirror is best-effort, so a fire-and-forget async write is correct.
+    // Fire-and-forget the event mirror: `log()` is synchronous on every tick's `ctx.log`, and the
+    // mirror's event-log lock could block the loop up to 30s under contention (PHNX-3695). The
+    // daemon-log append is the primary sink; the mirror is best-effort.
     void emitAsync(event, {
       module: 'daemon',
       detail: redactSecrets(message).slice(0, 500),
@@ -769,23 +573,9 @@ export function guardSignalHandler(handler: () => void, onError: (err: unknown) 
 }
 
 /** Main daemon loop: load jobs, schedule crons, monitor runs, and handle signals. */
-/**
- * Anchor the daemon's working directory to a stable, always-present path.
- *
- * The daemon is long-lived and inherits whatever cwd it was launched from — often
- * a git worktree (e.g. a `.agents/worktrees/<slug>/` a session happened to be in).
- * When that directory is later removed (`git worktree remove`, `rm -rf`), the
- * daemon keeps the deleted inode as its cwd — a process cannot chdir out of a
- * deleted directory on its own — and every job it spawns inherits the dead cwd
- * (`spawnJobAttempt` and command runs pass no explicit `cwd`, so the child uses
- * the parent's). Bun then fails `getcwd()` during startup and every routine crashes
- * at 0 seconds with `ENOENT: Bun could not find a file` before the agent even runs.
- *
- * Re-anchoring to the home directory once, at daemon startup, makes the daemon
- * immune regardless of how it was launched (systemd unit, launchd, or a manual
- * `agents __daemon-run` from any directory). Returns the resolved cwd, or null if
- * anchoring failed (logged, non-fatal).
- */
+/** Anchor the daemon's cwd to a stable path. It inherits its launch cwd (often a git worktree);
+ * when that is removed it can't chdir out, so spawned jobs inherit the dead cwd and Bun crashes
+ * with `ENOENT`. Re-anchoring to the home dir at startup fixes it. */
 export function anchorDaemonCwd(): string | null {
   const home = os.homedir();
   try {
@@ -797,22 +587,9 @@ export function anchorDaemonCwd(): string | null {
   }
 }
 
-/**
- * Surface, at the daemon's OWN startup, that it was launched from an ephemeral
- * root that will wedge it if the directory is removed. This is the runtime
- * companion to the launch-time check in validateDaemonBinary (which only runs
- * when the daemon is *spawned* via getDaemonLaunch): a direct
- * `agents __daemon-run` from a temp or worktree build — e.g. a review/verify
- * checkout under /tmp — never passes through that path, so without this the
- * wedge risk stays invisible until jobs start ENOENT-ing on their dynamic
- * imports. Best-effort and non-fatal; the cwd is already handled by
- * anchorDaemonCwd, but a deleted module root can only be flagged, not repaired.
- *
- * `resolveBin` is injectable (defaults to getAgentsBinPath) so the wiring — the
- * predicate call, the WARN, and the non-fatal guard around a throwing resolver —
- * is testable. Returns the warning message it logged, or null when the launch
- * root is stable (or could not be resolved).
- */
+/** Surface at the daemon's own startup that it was launched from an ephemeral root that will wedge
+ * it if removed. Runtime companion to validateDaemonBinary, which only runs on spawn via
+ * getDaemonLaunch; a direct `__daemon-run` from a /tmp build is otherwise invisible. */
 export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinPath): string | null {
   try {
     const bin = resolveBin();
@@ -830,27 +607,9 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
   }
 }
 
-/**
- * Test-home tripwire (PHNX-2545). The routines/daemon test suite spawns real
- * `agents __daemon-run` processes against an isolated /tmp HOME. If that HOME
- * override fails to reach the child — an `env: {...process.env}` spawn that
- * forgot to set it, a login shell that reset HOME — the daemon resolves its
- * state dir under the operator's REAL home and its scheduler/watchdog then tick
- * against shared production state. That is the exact leak the ticket reports:
- * real test daemons found alive on a fleet box, each a second live scheduler
- * racing the legitimate one, in violation of the execution-singularity spec.
- *
- * A test that spawns a daemon sets AGENTS_DAEMON_TEST_HOME to the isolated home
- * it provisioned. When that marker is present, this daemon's resolved state dir
- * MUST sit under it; otherwise the daemon refuses to boot — failing loud before
- * it claims an instance, writes a pid, or fires a single tick (the throw is
- * caught in index.ts's `__daemon-run` handler, logged, and exits non-zero) —
- * rather than running in the wrong directory against the real host. In
- * production the marker is never set, so this is a no-op there.
- *
- * `daemonDir`/`testHome` are injectable so the pure guard is unit-testable
- * without spawning a process; the defaults read the live daemon dir and env.
- */
+/** Test-home tripwire (PHNX-2545): daemon tests spawn real `__daemon-run` against an isolated /tmp
+ * HOME; if the override fails to reach the child it resolves state under the REAL home and ticks
+ * against production. With AGENTS_DAEMON_TEST_HOME set, a state dir outside it refuses to boot. */
 export function assertTestDaemonHome(
   daemonDir: string = getDaemonDir(),
   testHome: string | undefined = process.env.AGENTS_DAEMON_TEST_HOME,
@@ -868,26 +627,14 @@ export function assertTestDaemonHome(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Module-level periodic maintenance helpers (RUSH-2422)
-//
-// These were inline closures inside runDaemon(). Moved here so they are
-// named in stack traces, readable without scrolling through runDaemon's
-// 500-line body, and not recreated on every function invocation.
-//
-// self-heal moved to SelfHealService on the ServiceSupervisor (RUSH-3193 P3)
-// — the supervisor's own per-tick deadline + inFlight guard replaces its local
-// `healing` flag. state-dir-check moved to StateDirCheckService (RUSH-3193
-// P3), registered after `handleShutdown` is declared — see its registration
-// site below. The secrets broker (self-heal, reap, and hosting) moved out of
-// this daemon entirely with the standalone `secrets` engine (PHNX-3989 OWN-1).
-// ---------------------------------------------------------------------------
+// Module-level periodic maintenance helpers (RUSH-2422), moved out of runDaemon()'s closures so
+// they appear in stack traces. Self-heal and state-dir-check moved to supervised services
+// (RUSH-3193 P3); the secrets broker left with the standalone engine (PHNX-3989).
 
 export async function runDaemon(): Promise<void> {
-  // PHNX-2545 test-home tripwire — FIRST, before this daemon claims an instance,
-  // writes a pid, or fires any tick. A test-spawned daemon that lost its isolated
-  // HOME override must refuse to run against the operator's real state rather than
-  // schedule against the real host. No-op in production (the marker is never set).
+  // PHNX-2545 test-home tripwire runs first, before the daemon claims an instance, writes a pid or
+  // ticks, so a test daemon that lost its HOME override refuses to touch real state. No-op in
+  // production (the marker is never set).
   assertTestDaemonHome();
 
   // Lifecycle readers and launchers do not run services. Load their code only
@@ -936,13 +683,9 @@ export async function runDaemon(): Promise<void> {
     import('./tmux-reap-service.js'),
   ]);
 
-  // Install the shared-daemon reload signal boundary BEFORE publishing our PID
-  // in claimDaemonInstance(). Browser/routines clients use that PID to decide a
-  // daemon exists and may request a service reload immediately. POSIX otherwise
-  // applies its default SIGHUP action during the rest of startup and terminates
-  // the whole process — exactly the client-caused eviction PHNX-3605 forbids.
-  // Requests received before services are ready coalesce into one reload and are
-  // applied through the normal guarded handler once startup completes.
+  // Install the SIGHUP reload boundary BEFORE publishing our PID in claimDaemonInstance(): clients
+  // use that PID to request a reload, and POSIX's default SIGHUP action would terminate the
+  // process mid-startup (PHNX-3605). Early requests coalesce into one reload after startup.
   let reloadRequestedDuringStartup = false;
   let liveReloadHandler: (() => void) | null = null;
   const dispatchReloadSignal = () => {
@@ -951,11 +694,9 @@ export async function runDaemon(): Promise<void> {
   };
   if (process.platform !== 'win32') process.on('SIGHUP', dispatchReloadSignal);
 
-  // Single-instance guard (last-wins, SING-11): a direct `agents __daemon-run`
-  // (manual, or a service-manager restart racing a live predecessor) EVICTS the
-  // incumbent and becomes the survivor. claimDaemonInstance returns false only
-  // when a concurrent `__daemon-run` currently holds the start lock — that peer
-  // is mid-takeover and will be the singleton, so this instance stands down.
+  // Single-instance guard (last-wins, SING-11): a direct `__daemon-run` evicts the incumbent.
+  // claimDaemonInstance returns false only when a concurrent `__daemon-run` holds the start lock;
+  // that peer is the singleton, so this one stands down.
   if (!claimDaemonInstance()) {
     if (process.platform !== 'win32') process.removeListener('SIGHUP', dispatchReloadSignal);
     log('WARN', `Another daemon owns lifecycle state or is mid-takeover; this instance (PID ${process.pid}) is exiting`);
@@ -986,12 +727,9 @@ export async function runDaemon(): Promise<void> {
   anchorDaemonCwd();
   warnEphemeralDaemonRoot();
 
-  // Converge the device-config/pins stores (legacy central block /
-  // auto-launch.json / tracked-doc pins → per-device docs + pins file).
-  // Idempotent, cheap no-op once folded. The daemon boots via
-  // `agents __daemon-run`, which bypasses bootstrap's migration sentinel — so
-  // the daemon runs this itself so its scheduler/watchdog gates read the
-  // converged store.
+  // Converge the device-config/pins stores (legacy central block / auto-launch.json / tracked-doc
+  // pins to per-device docs). Idempotent. The daemon boots via `__daemon-run`, bypassing
+  // bootstrap's migration sentinel, so it runs this itself.
   try {
     const { migrateDeviceConfigStores } = await import('../devices/config-migration.js');
     migrateDeviceConfigStores();
@@ -999,12 +737,9 @@ export async function runDaemon(): Promise<void> {
     log('WARN', `device config migration failed: ${(err as Error).message}`);
   }
 
-  // Version-skew one-shot (RUSH-2435): retrofit the current pane-died hook onto
-  // any managed tmux session a pre-fix binary left with a stale one. The 5-min
-  // `tmux-reconcile` routine that used to run this on a poll was deleted
-  // (RUSH-2495) — startup + `ensureSessionHookRepaired` at attach time
-  // (tmux/session.ts) now cover what that poll used to. Idempotent and
-  // non-destructive: a session already at the current schema is a no-op.
+  // Version-skew one-shot (RUSH-2435): retrofit the current pane-died hook onto managed tmux
+  // sessions a pre-fix binary left stale. The `tmux-reconcile` poll routine was deleted
+  // (RUSH-2495); startup plus `ensureSessionHookRepaired` at attach cover it. Idempotent.
   try {
     const { reconcileSessionHooks } = await import('../tmux/session.js');
     const { isTmuxInstalled } = await import('../tmux/binary.js');
@@ -1021,18 +756,13 @@ export async function runDaemon(): Promise<void> {
   let servicesConfig = readDaemonServicesConfig();
   const isEnabled = (id: DaemonServiceId): boolean => servicesConfig.services[id] !== false;
 
-  // The daemon holds NO Claude credential of its own. Routine runs authenticate
-  // exactly like an interactive `agents run`: through the per-account
-  // CLAUDE_CONFIG_DIR login on this device (its own auto-refreshing
-  // .credentials.json). Claude Code's interactive access token is short-lived but
-  // refreshes itself per-device; a routine whose account login has gone dead is
-  // skipped up front by the auth-health preflight (runner.ts) with a re-login
-  // hint, rather than papered over by an injected fallback token.
+  // The daemon holds no Claude credential. Routine runs authenticate like an interactive `agents
+  // run` via the per-account CLAUDE_CONFIG_DIR login, which refreshes itself per-device; a routine
+  // with a dead login is skipped by the auth-health preflight, not given a fallback token.
 
-  // Register this daemon in the device instance registry, then reap any stray
-  // duplicate that slipped past the start lock or was orphaned by a hard-crash —
-  // before it can double-fire jobs. Registration comes first so a racing peer's
-  // reaper can see this pid, and so this reaper never mistakes itself for a stray.
+  // Register in the device instance registry, then reap strays that slipped past the start lock or
+  // were orphaned by a hard crash. Register first so a racing peer's reaper sees this pid and this
+  // reaper never mistakes itself for a stray.
   registerDaemonInstance();
   try {
     const strays = reapStrayDaemons();
@@ -1044,11 +774,9 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
-  // Socket services: monitor engine, account-state, and the feed-stream hub are
-  // all managed by the ServiceSupervisor (RUSH-3193 P2). The secrets broker moved
-  // with the standalone `secrets` engine (PHNX-3989 OWN-1) and the browser IPC
-  // service with the standalone `browser` CLI (PHNX-4101) — this daemon no longer
-  // hosts either; each standalone owns its own lifecycle exclusively.
+  // Monitor engine, account-state and the feed-stream hub are managed by the ServiceSupervisor
+  // (RUSH-3193 P2). The secrets broker (PHNX-3989 OWN-1) and browser IPC (PHNX-4101) moved to
+  // their standalone CLIs, which own their lifecycles.
   const supervisor = new ServiceSupervisor();
 
   if (isEnabled('session-state')) {
@@ -1073,20 +801,14 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('account-auth')) supervisor.register(new AccountAuthService());
   else log('INFO', 'Account-auth service disabled');
 
-  // The routine scheduler handle. Declared HERE — before the CatchupService
-  // registration — because `supervisor.startAll()` below fires each service's
-  // first tick synchronously, so the `catchup` tick reads `scheduler` during
-  // startAll, BEFORE this `let` would initialise if it lived at its old textual
-  // position further down. That was a real TDZ `ReferenceError` on every boot
-  // ("Cannot access 'scheduler' before initialization"), not a race (PHNX-3608).
-  // `bootScheduler`/`stopScheduler` (hoisted below) assign this same binding.
+  // Declare `scheduler` before the CatchupService registration: `supervisor.startAll()` fires each
+  // first tick synchronously, so the `catchup` tick reads it before a later `let` would
+  // initialise, a real TDZ ReferenceError on every boot (PHNX-3608).
   let scheduler: JobScheduler | null = null;
 
-  // Catch-up recovery under the supervisor (PHNX-3608). The closures reference
-  // `scheduler` (declared just above) and `catchupPass` (a hoisted function
-  // declaration). The tick self-gates on the scheduler being booted, so it is a
-  // cheap no-op — including on its immediate first tick during startAll, when
-  // `scheduler` is still null — on a device whose scheduler.enabled gate is off.
+  // Catch-up recovery under the supervisor (PHNX-3608). The tick self-gates on the scheduler being
+  // booted, so it is a cheap no-op (including the first tick, when `scheduler` is null) where
+  // `scheduler.enabled` is off.
   if (isEnabled('catchup')) {
     supervisor.register(new CatchupService({
       isSchedulerBooted: () => scheduler !== null,
@@ -1096,11 +818,9 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Catch-up recovery service disabled');
   }
 
-  // The browser IPC service and its task reaper are the standalone `browser`
-  // CLI's now (@phnx-labs/browser-cli, PHNX-4101): it hosts its own IPC service
-  // and runs its own `prune` reaper. agents-cli no longer constructs a
-  // BrowserService, binds a browser socket, or reaps browser tasks — see
-  // `commands/browser.ts` and `docs/browser.md`.
+  // The browser IPC service and its task reaper belong to the standalone `browser` CLI now
+  // (PHNX-4101); agents-cli no longer constructs a BrowserService, binds a socket or reaps tasks.
+  // See `commands/browser.ts` and `docs/browser.md`.
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
@@ -1111,10 +831,8 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('session-summarizer')) supervisor.register(new SessionSummarizerService());
   else log('INFO', 'Session summarizer service disabled');
 
-  // Attention desktop banners (PHNX-4004) — posts one actionable native banner
-  // per new attention key. Reader-independent: it fires whether or not a
-  // `sessions watch` reader is present, and the notified-ledger is its
-  // idempotency truth across daemon restarts.
+  // Attention desktop banners (PHNX-4004): one actionable native banner per new attention key,
+  // reader-independent, with the notified-ledger as idempotency truth across restarts.
   if (isEnabled('attention-notify')) supervisor.register(new AttentionNotifyService());
   else log('INFO', 'Attention-notify service disabled');
 
@@ -1123,10 +841,8 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('session-title')) supervisor.register(new SessionTitleService());
   else log('INFO', 'Session-title service disabled');
 
-  // Watchdog, device-probe, and self-heal are all periodic services managed
-  // by the ServiceSupervisor (RUSH-3193 P3). Each is gated the same way as
-  // the socket services above; state-dir-check is registered separately,
-  // later, after `handleShutdown` exists (see below).
+  // Watchdog, device-probe and self-heal are supervised periodic services (RUSH-3193 P3), gated
+  // like the socket services. state-dir-check is registered later, after `handleShutdown` exists.
   if (isEnabled('watchdog')) supervisor.register(new WatchdogService());
   else log('INFO', 'Watchdog service disabled');
 
@@ -1160,15 +876,9 @@ export async function runDaemon(): Promise<void> {
   await supervisor.startAll({ log });
   activeServiceSupervisor = supervisor;
 
-  // scheduler.enabled=false in this machine's device doc means NO routines fire
-  // here — the scheduler and its catchup recovery simply never start, while the
-  // daemon keeps its other duties (feed stream, session sync).
-  // The refusal message is the same one the start surfaces
-  // (`routines add` auto-start, manual `routines start`) raise. The gate is
-  // re-evaluated on every SIGHUP reload (handleReload below) via
-  // schedulerGateTransition, so flipping the key never needs a daemon restart.
-  // Also honour the daemon-services toggle so `agents daemon services disable scheduler`
-  // has a single, obvious effect.
+  // scheduler.enabled=false in this machine's device doc means no routines fire here: the
+  // scheduler and catchup never start while the daemon keeps its other duties. Re-evaluated on
+  // every SIGHUP reload (schedulerGateTransition), so no restart is needed.
   const schedulerEnabledAtBoot = isSchedulerEnabled() && isEnabled('scheduler');
   if (!schedulerEnabledAtBoot) {
     try {
@@ -1193,21 +903,18 @@ export async function runDaemon(): Promise<void> {
       ...(config.agent ? { agent: config.agent } : {}),
       ...(config.workflow ? { workflow: config.workflow } : {}),
     });
-    // RUSH-2030: branded desktop notification on start (agent/workflow routines;
-    // suppressed for command housekeeping). Finish/output is fired from the
-    // onFinish hook below — executeJobDetached finalizes the run in-process, so
-    // the monitor tick never sees the live transition. Never let a notification
-    // failure break the trigger.
+    // RUSH-2030: branded desktop notification on start (agent/workflow routines; command
+    // housekeeping suppressed). Finish comes from onFinish since executeJobDetached finalizes
+    // in-process. A notification failure must never break the trigger.
     try { notifyRoutineStart(config); } catch { /* best-effort */ }
     try {
       const meta = await executeJobDetached(config, {
         onFinish: (final) => {
           emitRoutineEnd(final);
           try { notifyRoutineFinish(final); } catch { /* best-effort */ }
-          // RUSH-2288: a failed/timed-out routine also reaches the OWNER's phone
-          // (in-process owner channel stack), not just the local desktop. Green
-          // runs are silent — the builder returns early. Async + swallowed so a
-          // delivery hiccup never blocks the finish path.
+          // RUSH-2288: a failed or timed-out routine also reaches the owner's phone (in-process
+          // owner channel), not just the desktop. Green runs are silent. Async and swallowed so a
+          // delivery hiccup never blocks finish.
           void notifyOwnerRoutineFinish(final)
             .then((r) => {
               if (r.attempts.length && !r.delivered)
@@ -1225,10 +932,9 @@ export async function runDaemon(): Promise<void> {
         status: 'failed',
         detail: redactSecrets(message).slice(0, 500),
       });
-      // RUSH-2030: the START ping already fired unconditionally above. A pre-spawn
-      // failure produces no run record and thus no onFinish, so send a synthetic
-      // "failed to start" finish here — otherwise the user is left with an orphaned
-      // "Routine started" and never told it failed.
+      // RUSH-2030: the START ping already fired. A pre-spawn failure produces no run record and no
+      // onFinish, so send a synthetic "failed to start" finish, else the user is left with an
+      // orphaned "Routine started".
       try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
       // RUSH-2288: the pre-spawn failure (e.g. auth_failed) is exactly the one the
       // per-routine `agents send --to owner` prompt can never send — its agent never ran —
@@ -1245,11 +951,9 @@ export async function runDaemon(): Promise<void> {
   // `scheduler` is declared earlier (before the CatchupService registration) to
   // avoid a TDZ read during supervisor.startAll — see the comment there.
 
-  // Boot the scheduler. Called at daemon start when the gate allows, and again
-  // from handleReload when the gate flips on. Catch-up recovery is a separate
-  // supervised service (CatchupService, registered above) that self-gates on
-  // `scheduler !== null`; here we just kick an immediate supervised pass so a
-  // fresh boot catches up missed fires without waiting a full CATCHUP_TICK_MS.
+  // Boot the scheduler at daemon start when the gate allows and again from handleReload when it
+  // flips on. Catch-up is the supervised CatchupService (self-gates on `scheduler !== null`); here
+  // we kick an immediate pass so a fresh boot doesn't wait a full CATCHUP_TICK_MS.
   function bootScheduler(): void {
     scheduler = new JobScheduler(triggerJob);
     scheduler.loadAll();
@@ -1287,33 +991,16 @@ export async function runDaemon(): Promise<void> {
   // Session-index warm (RUSH-2682) is registered on the supervisor above
   // (RUSH-3193 P2) alongside the socket services.
 
-  // Watchdog and device-probe are now managed by WatchdogService /
-  // DeviceProbeService on the supervisor (RUSH-3193 P3), registered above
-  // alongside the socket services. The supervisor fires an immediate first
-  // tick on start, which replaces device-probe's old `void
-  // runDeviceProbeTick()` kick-off (the 3-minute lag that used to leave the
-  // menubar showing 20 phantom NEW DEVICES after a hermetic leak).
+  // Watchdog and device-probe are WatchdogService / DeviceProbeService on the supervisor
+  // (RUSH-3193 P3). Its immediate first tick replaces the old `runDeviceProbeTick()` kickoff,
+  // whose 3-minute lag left the menubar showing 20 phantom NEW DEVICES.
 
   // Monitor engine is now managed by MonitorEngineService on the supervisor
   // (RUSH-3193 P2). Access it via monitorEngineSvc.getEngine() in handleReload.
 
-  // Backlog recovery: any enabled recurring job whose most-recent expected fire
-  // is older than its most-recent recorded run was missed — the laptop slept,
-  // the machine was off, or the daemon crashed through the fire. croner only
-  // schedules forward from "now", so nothing replays it on its own.
-  //
-  // Every miss is RECORDED as a `missed` run and, unless the routine sets
-  // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
-  // pass alone misses a fire lost while the daemon stayed up but its event loop
-  // was wedged, or one lost across an OS suspend that the process survived.
-  // A pass awaits executeJobDetached per job and an off-box (host/cloud)
-  // dispatch can block for a while. Overlap is now guarded by the supervisor's
-  // per-service inFlight guard (CatchupService) — a slow pass never overlaps the
-  // next supervised tick — rather than a local `catchingUp` flag; and the
-  // idempotency of the `missed` record still guards across passes and daemon
-  // restarts. `signal` aborts at the CatchupService deadline, so a wedged pass is
-  // abandoned + restarted instead of latching (PHNX-3608). Function declaration
-  // (hoisted) so the CatchupService registration above can reference it.
+  // Backlog recovery: an enabled recurring job whose latest expected fire is older than its latest
+  // recorded run was missed (sleep, off, crash); croner only schedules forward. Every miss is
+  // recorded `missed`, run late unless `catchup: false`. Also timed; deadline-aborted (PHNX-3608).
   async function catchupPass(signal?: AbortSignal): Promise<void> {
     try {
       const overdue = detectOverdueJobs();
@@ -1353,10 +1040,9 @@ export async function runDaemon(): Promise<void> {
         }
       }
     } catch (err) {
-      // Ordinary pass errors are logged, not re-thrown: a transient catchup
-      // failure should not be counted as a service failure. A HANG is still
-      // caught — the CatchupService deadline aborts the tick and the supervisor
-      // exits the daemon for an OS restart regardless of this swallow (PHNX-4116).
+      // Ordinary pass errors are logged, not re-thrown: a transient catchup failure shouldn't
+      // count as a service failure. A hang is still caught since the deadline aborts the tick and
+      // the supervisor exits the daemon for an OS restart (PHNX-4116).
       log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
     }
   }
@@ -1364,23 +1050,15 @@ export async function runDaemon(): Promise<void> {
   // The browser IPC server and its orphan reap left this daemon with the
   // standalone `browser` CLI (PHNX-4101) — it hosts its own IPC service now.
 
-  // Webhook receivers: signed webhook receiver(s) + their funnel (RUSH-2548).
-  // Resolves each receiver's signing secret headlessly through the standalone
-  // `secrets` CLI (an agentOnly secrets-client read) — no AGENTS_SECRETS_PASSPHRASE,
-  // no nohup. Binds nothing unless daemon/webhooks.yaml declares a receiver, so an
-  // unconfigured box no-ops.
-  // Signed webhook ingress is owned by WebhookReceiverService, including
-  // per-service failure isolation, measured health, and shutdown cleanup.
+  // Webhook receivers (RUSH-2548): signed receiver(s) plus funnel, owned by WebhookReceiverService
+  // with failure isolation and cleanup. Secrets resolve headlessly via the standalone `secrets`
+  // CLI (agentOnly). Binds nothing unless daemon/webhooks.yaml declares one.
 
-  // Resource self-heal is now managed by SelfHealService on the supervisor
-  // (RUSH-3193 P3), registered above alongside the socket services. The
-  // supervisor's immediate first tick on start replaces the old
-  // SELF_HEAL_KICKOFF_MS (30s) delayed kickoff timer — see self-heal-service.ts.
+  // Resource self-heal is SelfHealService on the supervisor (RUSH-3193 P3); its immediate first
+  // tick replaces the old 30s SELF_HEAL_KICKOFF_MS timer (see self-heal-service.ts).
 
-  // The secrets broker's self-heal and keychain-reap ticks (formerly
-  // SecretsBrokerService / KeychainReapService, RUSH-1817 / RUSH-2232) moved
-  // out of this daemon entirely with the standalone `secrets` engine
-  // (PHNX-3989 OWN-1) — the standalone owns its own broker lifecycle.
+  // The secrets broker's self-heal and keychain-reap ticks (RUSH-1817 / RUSH-2232) moved out with
+  // the standalone `secrets` engine (PHNX-3989 OWN-1), which owns its broker lifecycle.
 
   // RUSH-2501: reap tmux sessions whose panes are all dead. Daemon-only
   // (single executor). Dead managed panes and their orphan helpers are
@@ -1393,11 +1071,9 @@ export async function runDaemon(): Promise<void> {
   // registered on the supervisor further below, once `handleShutdown` exists
   // — see the registration site after its declaration for why.
 
-  // RUSH-2418: startup is over — the scheduler, feed stream, monitor engine and
-  // every background tick are up. Only NOW does this daemon
-  // clear the auto-start failure streak `ensureDaemonStarted` reads. Clearing it
-  // at claim time instead would reset the breaker for a process that dies while
-  // initializing a subsystem, which is exactly the crash loop it exists to stop.
+  // RUSH-2418: startup is over; only now clear the auto-start failure streak `ensureDaemonStarted`
+  // reads. Clearing at claim time would reset the breaker for a process that dies initializing a
+  // subsystem, the crash loop it exists to stop.
   recordSubsystemOk(SUBSYSTEM_DAEMON_START);
 
   const handleReload = () => {
@@ -1416,22 +1092,13 @@ export async function runDaemon(): Promise<void> {
         if (id === 'scheduler') {
           continue;
         }
-        // RUSH-3193 P4: a service the supervisor already owns takes the toggle
-        // live via supervisor.start/stop — no restart needed. monitors is a
-        // supervised service (PHNX-3608): its enable/disable takes effect through
-        // that generic supervisor.start/stop path, so a disabled monitors service
-        // actually stops dispatching (its supervised tick is torn down) instead of
-        // being ticked with the last-loaded set. browser-ipc is deliberately
-        // registered in a stopped state too (PHNX-3605), so a later browser client
-        // can enable that service without restarting the shared daemon. Most other
-        // services are only registered when enabled at boot; one disabled at boot
-        // was never registered, so it falls through to the same "restart to apply"
-        // advice as before.
+        // RUSH-3193 P4: a supervisor-owned service toggles live via supervisor.start/stop, so a
+        // disabled `monitors` stops dispatching (PHNX-3608); browser-ipc is registered stopped
+        // (PHNX-3605). Others disabled at boot were never registered and need a restart.
         if (supervisor.isRegistered(id)) {
-          // A periodic service may be inside a real tick when SIGHUP arrives.
-          // Queue the desired transition behind that exact promise: deadlines
-          // detect a wedge but cannot cancel arbitrary work, and polling here
-          // would create another lifecycle timer outside the supervisor.
+          // A periodic service may be mid-tick when SIGHUP arrives. Queue the transition behind
+          // that promise: deadlines detect a wedge but can't cancel arbitrary work, and polling
+          // here would add a lifecycle timer outside the supervisor.
           const action = supervisor.awaitIdle(id).then(() => now ? supervisor.start(id) : supervisor.stop(id));
           void action
             .then(() => log('INFO', `Service '${id}' ${now ? 'started' : 'stopped'} live (SIGHUP reload)`))
@@ -1467,11 +1134,9 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log('WARN', `Project routines sync failed: ${(err as Error).message}`);
     }
-    // Re-evaluate the scheduler.enabled gate: flipping the key takes effect on
-    // this reload, no daemon restart needed. A `routines add` on a re-enabled
-    // box signals exactly this reload, which boots the scheduler — the
-    // "Scheduler reloaded" it prints is then truthful, not a dead-end.
-    // Also honour the daemon-services toggle.
+    // Re-evaluate the scheduler.enabled gate on reload so flipping it needs no restart; a
+    // `routines add` on a re-enabled box signals this reload, which boots the scheduler, so
+    // "Scheduler reloaded" is truthful. Also honours the daemon-services toggle.
     const schedulerEnabledNow = isSchedulerEnabled() && reloadedEnabled('scheduler');
     const transition = schedulerGateTransition(scheduler !== null, schedulerEnabledNow);
     if (transition === 'boot') {
@@ -1485,12 +1150,9 @@ export async function runDaemon(): Promise<void> {
       const reloaded = scheduler!.listScheduled();
       log('INFO', `Reloaded ${reloaded.length} jobs`);
     }
-    // Refresh monitor CONFIGS when the engine is live and monitors stays enabled
-    // (the common `monitors add/edit` + SIGHUP case). The enable/disable
-    // TRANSITION itself is handled by the generic supervisor.start/stop loop
-    // above (PHNX-3608) — a disabled monitors service is supervisor.stop()'d
-    // there, which tears down its supervised tick so nothing dispatches; an
-    // off-transition leaves getEngine() null, so this reload is correctly skipped.
+    // Refresh monitor configs when the engine is live and monitors stays enabled (`monitors
+    // add/edit` + SIGHUP). The enable/disable transition is handled by the supervisor.start/stop
+    // loop above (PHNX-3608); an off-transition leaves getEngine() null so this is skipped.
     const liveMonitorEngine = monitorEngineSvc.getEngine();
     if (liveMonitorEngine && reloadedEnabled('monitors')) {
       try {
@@ -1501,13 +1163,9 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  // Structurally single-shot (RUSH-2423). Shutdown is reachable from SIGTERM,
-  // SIGINT, and StateDirCheckService's independent `onMissing` callback (which
-  // calls this same handler), and two of those can arrive together — a
-  // service manager that SIGTERMs a daemon whose state dir was just removed.
-  // It was only INCIDENTALLY safe before (every step inside happens to be
-  // idempotent); the guard makes single-shot a property of the function
-  // rather than one that every step added later has to re-earn.
+  // Structurally single-shot (RUSH-2423). Shutdown is reachable from SIGTERM, SIGINT and
+  // StateDirCheckService's `onMissing`, and two can arrive together. It was only incidentally safe
+  // (each step idempotent); the guard makes single-shot a property of the function.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
     // supervisor.stopAll() stops every registered service, including socket
@@ -1527,14 +1185,9 @@ export async function runDaemon(): Promise<void> {
     process.exit(0);
   });
 
-  // State-dir self-check (RUSH-2367 self-terminate guard) is registered on
-  // the supervisor here — AFTER `handleShutdown` above — rather than
-  // alongside watchdog/device-probe/self-heal earlier. The
-  // supervisor fires an immediate first tick on `register()`+`start()`; doing
-  // that before `handleShutdown` exists would reference the const in its
-  // temporal dead zone the moment a mismatch is ever detected. Registering it
-  // here, once `handleShutdown` is a real function, removes that risk
-  // entirely rather than relying on the marker always matching on tick one.
+  // Register the state-dir self-check (RUSH-2367) after `handleShutdown`, not with the other
+  // services: the supervisor fires an immediate first tick on start, which would reference the
+  // const in its temporal dead zone if a mismatch were detected.
   if (isEnabled('state-dir-check')) {
     supervisor.register(new StateDirCheckService({
       lifetimePath,
@@ -1571,15 +1224,9 @@ function xmlEscape(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-/**
- * Write a launchd plist or systemd unit with owner-only permissions atomically.
- *
- * `writeFileSync`'s `mode` is honored only when the file is *created*, so we
- * unlink any pre-existing manifest first. That guarantees every write is a
- * fresh 0600 create — closing the TOCTOU window on new files AND re-locking a
- * stale world-readable manifest left by an older install — since these files
- * embed long-lived credentials.
- */
+/** Write a launchd plist or systemd unit with owner-only permissions atomically. `writeFileSync`'s
+ * `mode` applies only on create, so unlink any existing manifest first: every write is a fresh
+ * 0600 create, closing the TOCTOU window and re-locking a stale world-readable one. */
 export function writeOwnerOnlyServiceManifest(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
@@ -1589,29 +1236,9 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
   fs.writeFileSync(filePath, content, { encoding: 'utf-8', mode: 0o600 });
 }
 
-/**
- * Generate a macOS launchd plist for auto-starting the daemon.
- *
- * The plist never embeds a Claude OAuth token: the daemon holds no Claude
- * credential at all. Routine runs authenticate through the per-account
- * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
- * `agents run`, so no credential ever touches the service manifest.
- *
- * RUSH-2639: launchd does NOT inherit `launchctl load`'s caller's process
- * environment — a spawned daemon only ever sees the login session's default
- * env plus whatever this dict adds/overrides. Before this fix the dict carried
- * only PATH, so HOME resolved to the launchd session's own value regardless of
- * what HOME the process that generated (and loaded) the plist was running
- * under. In production that's a no-op (the login session's HOME already is the
- * real HOME), but under a hermetic test harness that redirects HOME to a
- * fork-private sandbox, a launchd-started daemon silently escaped the sandbox
- * and bootstrapped `~/.agents` (.cache/.history/.system/routines) in the
- * developer's/runner's REAL home. Baking HOME (and the AGENTS_REAL_HOME seam
- * every version-home consumer honors, see tests/setup.ts) into the plist at
- * generation time makes the launchd child inherit the SAME home the caller
- * resolved, exactly like the plain detached-spawn path already does via
- * `env: {...process.env}`.
- */
+/** Generate a macOS launchd plist for the daemon. It never embeds a Claude OAuth token (the daemon
+ * holds no Claude credential). RUSH-2639: launchd doesn't inherit `launchctl load`'s caller
+ * environment, so HOME is pinned in the plist. */
 export function generateLaunchdPlist(
   agentsBin: string = getAgentsBinPath(),
 ): string {
@@ -1657,21 +1284,9 @@ function systemdExecArg(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/**
- * Generate a Linux systemd user unit for auto-starting the daemon.
- *
- * The unit never embeds a Claude OAuth token: the daemon holds no Claude
- * credential at all. Routine runs authenticate through the per-account
- * CLAUDE_CONFIG_DIR login on this device, exactly like an interactive
- * `agents run`, so no credential ever touches the unit file.
- *
- * RUSH-2639: same seam as `generateLaunchdPlist` — a systemd --user unit is
- * started by the user's systemd instance, not the process that generated the
- * unit, so HOME is whatever that session provides unless this file pins it.
- * Baking HOME (and AGENTS_REAL_HOME) in at generation time keeps a
- * hermetic-test-started unit inside its sandbox instead of resolving against
- * the real account home.
- */
+/** Generate a Linux systemd user unit for the daemon. It never embeds a Claude OAuth token (the
+ * daemon holds no Claude credential). RUSH-2639: same seam as `generateLaunchdPlist`: HOME is
+ * whatever the user's systemd session provides unless the unit pins it. */
 export function generateSystemdUnit(
   agentsBin: string = getAgentsBinPath(),
 ): string {
@@ -1703,25 +1318,17 @@ WantedBy=default.target`;
 // `from './daemon.js'` importers of getAgentsBinPath keep resolving.
 export { getAgentsBinPath };
 
-/**
- * Ask the service manager for the daemon's live PID. Used as a fallback when
- * the daemon hasn't yet written its pid file but launchd/systemd already report
- * it running — so a start never has to surface a null PID for a daemon that is
- * in fact up. Returns null when the service isn't running or the query fails.
- *
- * `names` defaults to THIS process's (possibly sandbox-namespaced) job; a
- * caller under a redirected HOME passes `productionDaemonServiceNames()` to
- * ask after the real install's unit instead. Read-only either way.
- */
+/** Ask the service manager for the daemon's live PID, as a fallback when launchd/systemd report it
+ * running before it writes its pid file, so a start never surfaces a null PID. `names` defaults to
+ * this process's job; a redirected-HOME caller passes `productionDaemonServiceNames()`. */
 export function readServiceManagerPid(
   platform: NodeJS.Platform = os.platform(),
   names?: { systemdUnit: string; launchdLabel: string },
 ): number | null {
   const resolved = names ?? { systemdUnit: daemonSystemdUnitName(), launchdLabel: daemonServiceLabel() };
-  // The registration gate exists because a sandboxed process must not REGISTER
-  // or tear down jobs in the real per-user service manager. Asking after an
-  // explicitly named job is read-only — in particular the production unit from
-  // a redirected-HOME caller (W4) — and mutates nothing, so it is let through.
+  // The registration gate exists so a sandboxed process can't register or tear down jobs in the
+  // real service manager. Asking after an explicitly named job is read-only (notably the
+  // production unit from a redirected-HOME caller, W4), so it is allowed.
   if (names === undefined && !serviceManagerRegistrationAllowed().allowed) return null;
   try {
     if (platform === 'linux') {
@@ -1743,30 +1350,16 @@ export function readServiceManagerPid(
   return null;
 }
 
-/**
- * Thrown when a daemon LAUNCH is attempted under a redirected HOME without the
- * explicit test opt-in (W4, PHNX-3736). `bootstrap.ts` prints the message
- * without a stack — this is user-actionable, not an engineering bug.
- */
+/** Thrown when a daemon LAUNCH is attempted under a redirected HOME without the explicit test
+ * opt-in (W4, PHNX-3736). `bootstrap.ts` prints it without a stack: it is user-actionable, not an
+ * engineering bug. */
 export class RedirectedHomeDaemonError extends Error {
   override name = 'RedirectedHomeDaemonError';
 }
 
-/**
- * W4 (PHNX-3736): never LAUNCH a daemon under a redirected (sandbox/test) HOME
- * without an explicit opt-in. A daemon started there keeps its own pid file
- * under the temp home, so the real install's pid-file takeover can never see
- * it — the leaked `HOME=/tmp/pin-e2e-<pid>` daemon that ran 4+ days on
- * yosemite-s1 was launched exactly this way by a headless e2e session that
- * never cleaned up. RUSH-3021 closed this for `ensureDaemonStarted`'s
- * AUTO-start path but left the explicit `startDaemon()` open, which is the
- * path the e2e harness took.
- *
- * Placed after the `already-running` early-return: reporting a live daemon (so
- * `daemon stop` can still kill a leaked one) must stay possible under any
- * HOME. `AGENTS_ALLOW_TEST_DAEMON=1` is the deliberate test/e2e seam — a
- * harness that sets it owns stopping what it starts.
- */
+/** W4 (PHNX-3736): never launch a daemon under a redirected (sandbox/test) HOME without opt-in; its
+ * temp-HOME pid file hides it from the real takeover (one ran 4+ days). Seam:
+ * AGENTS_ALLOW_TEST_DAEMON=1. Placed after `already-running` so a leaked one can still be stopped. */
 function assertDaemonLaunchHomeAllowed(): void {
   const suffix = isolatedHomeSuffix();
   if (!suffix) return;
@@ -1798,10 +1391,9 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
     return { pid, method: 'already-starting' };
   }
 
-  // Released by startDaemonLocked the moment the launch has been ISSUED, and
-  // again here as the backstop for every path that returned before reaching
-  // that point (a throw, or the platform default branch). Idempotent so the
-  // double call is a no-op rather than unlinking a lock a later claimer owns.
+  // Released by startDaemonLocked once the launch is issued, and again here as the backstop for
+  // paths that returned earlier. Idempotent so the double call can't unlink a lock a later claimer
+  // owns.
   let released = false;
   const releaseOnce = () => {
     if (released) return;
@@ -1809,19 +1401,9 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
     releaseLock();
   };
 
-  // RUSH-2418: count starts PESSIMISTICALLY, and let a daemon that reaches
-  // steady state clear the streak itself (`recordSubsystemOk` at the end of
-  // runDaemon's startup). Recording a failure only on an observable error would
-  // miss the crash loop entirely: a daemon that spawns and then dies returns a
-  // perfectly real `child.pid`, so the launcher has no error to see. Every path
-  // out of startDaemonLocked is either pid-truthy or a throw, so an
-  // outcome-shaped check here can only ever catch an unspawnable binary — not
-  // the failure this breaker exists for. Marking the attempt up front and
-  // clearing on proven health inverts that: the streak grows exactly when
-  // starts stop producing a daemon that lives.
-  //
-  // The no-launch returns above (`already-running`, `already-starting`) return
-  // before this point on purpose — they attempted nothing, so they count nothing.
+  // RUSH-2418: count starts pessimistically and let a daemon that reaches steady state clear the
+  // streak (`recordSubsystemOk` at the end of runDaemon's startup). A daemon that spawns then dies
+  // returns a real `child.pid`, so only counting observable errors would miss the crash loop.
   recordSubsystemError(SUBSYSTEM_DAEMON_START, 'start issued; no daemon has reported healthy since');
   try {
     return startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
@@ -1835,58 +1417,32 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
   }
 }
 
-/**
- * Is the auto-start circuit breaker open (RUSH-2418)? True once
- * {@link DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive starts have failed to
- * produce a daemon that reported healthy. Pure read of the persisted health
- * record, and `agents daemon doctor` reports the same record — the message the
- * breaker prints has to lead somewhere that can explain it.
- */
+/** Is the auto-start circuit breaker open (RUSH-2418)? True once DAEMON_AUTOSTART_FAILURE_LIMIT
+ * consecutive starts failed to produce a healthy daemon. Pure read of the persisted health record,
+ * which `agents daemon doctor` also reports. */
 export function isDaemonAutostartCircuitOpen(): boolean {
   const health = readSubsystemHealth(SUBSYSTEM_DAEMON_START);
   return (health?.consecutiveFailures ?? 0) >= DAEMON_AUTOSTART_FAILURE_LIMIT;
 }
 
-/**
- * Bring the always-on daemon up as a side effect of a background-adjacent
- * command (secrets unlock, browser start, ...), not only from `routines add`.
- *
- * Delegates to the single `startDaemon` entrypoint, so it honors the
- * single-instance start lock and is a no-op when a daemon is already running
- * (returns `already-running`). Best-effort: any failure is swallowed and null
- * returned, so ensuring the daemon can never break the foreground command that
- * happened to bring it up. See issue #415.
- */
+/** Bring the always-on daemon up as a side effect of a background-adjacent command (secrets unlock,
+ * browser start), not only `routines add` (#415). Delegates to `startDaemon` (honors the start
+ * lock). Failures are swallowed, returning null, so it never breaks the foreground command. */
 export function ensureDaemonStarted(): { pid: number | null; method: string } | null {
-  // RUSH-2354: honor daemon.enabled — a background-adjacent caller (secrets
-  // unlock, browser start, ...) must not resurrect a daemon the owner
-  // explicitly turned off. `agents daemon start` is the deliberate override
-  // and calls startDaemon() directly instead of going through this helper.
+  // RUSH-2354: honor daemon.enabled; a background-adjacent caller must not resurrect a daemon the
+  // owner turned off. `agents daemon start` is the override and calls startDaemon() directly.
   if (!isDaemonEnabled()) return null;
-  // A live daemon is the answer whatever the failure history says — the breaker
-  // gates LAUNCHING one, never reporting one that is already up. Checked first
-  // so a stale failure streak can't make a healthy daemon read as absent to
-  // callers that branch on this return (e.g. secrets/agent.ts).
+  // A live daemon is the answer whatever the failure history says: the breaker gates launching,
+  // never reporting. Checked first so a stale streak can't make a healthy daemon read as absent
+  // (e.g. secrets/agent.ts).
   if (isDaemonRunning()) return startDaemon();
-  // RUSH-3021: never LAUNCH a daemon from a redirected (sandbox/test) HOME.
-  // #2860 gated service-manager registration on this signal but left the
-  // detached spawn itself ungated, so a test-spawned CLI could fork a daemon
-  // into the test's temp HOME; the child outlives the test and races its
-  // recursive teardown rm (ENOTEMPTY). Placed after the already-running branch
-  // — reporting a live daemon stays allowed, same as the circuit breaker.
-  // AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1 is the test seam for suites
-  // that exercise daemon startup deliberately. The explicit `agents daemon
-  // start` path is gated separately by startDaemon's own redirected-HOME
-  // refusal (AGENTS_ALLOW_TEST_DAEMON=1, W4/PHNX-3736).
+  // RUSH-3021: never launch a daemon from a redirected HOME; a test CLI could fork one that
+  // outlives the test and races its teardown (ENOTEMPTY). Seam:
+  // AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1. `daemon start` is gated by W4 (PHNX-3736).
   if (!serviceManagerRegistrationAllowed().allowed) return null;
-  // RUSH-2418: the auto-start circuit breaker. A daemon that dies during
-  // startup would otherwise be relaunched by EVERY foreground command that
-  // wants one (secrets unlock, browser start, watchdog, ...) — an
-  // application-level crash loop the OS supervisor's throttle cannot see,
-  // because each attempt is a fresh service start rather than a respawn. After
-  // DAEMON_AUTOSTART_FAILURE_LIMIT consecutive failures, refuse and say why.
-  // Deliberately NOT applied in startDaemon(): `agents daemon start` is the
-  // operator's override and must always be able to retry.
+  // RUSH-2418: the auto-start circuit breaker. A daemon dying at startup would be relaunched by
+  // every foreground command: a crash loop the OS throttle can't see. After
+  // DAEMON_AUTOSTART_FAILURE_LIMIT failures, refuse and say why. `agents daemon start` overrides.
   if (isDaemonAutostartCircuitOpen()) {
     process.stderr.write(
       `[agents] daemon auto-start disabled after ${DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive failed starts. ` +
@@ -1901,25 +1457,9 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   }
 }
 
-/**
- * Issue the launch, then wait for the child to record its pid.
- *
- * RUSH-2417: the wait phase MUST NOT hold the start lock. `acquireStartLock`
- * and `claimDaemonInstance` resolve the same `<daemonDir>/daemon.lock`, so a
- * parent that busy-waits on `waitForPid` while still holding it deterministically
- * defeats the child it just launched: the child's `claimDaemonInstance` hits
- * EEXIST, reads a holder pid that IS alive (this process), and exits with the
- * false "another daemon is mid-takeover" warning — every launchd/systemd start
- * on a fresh install. The lock's job is to keep two concurrent `startDaemon()`
- * calls from both launching, and that is done once `launchctl load` /
- * `systemctl start` / the detached spawn has been issued, so `releaseLock()` is
- * called there rather than in the caller's `finally`.
- *
- * Releasing early cannot produce two daemons: launchd (one plist label) and
- * systemd (one unit) are singletons that no-op a second start, and the detached
- * path is covered by `claimDaemonInstance`'s last-wins takeover (SING-11) —
- * a second claimer evicts the incumbent rather than running beside it.
- */
+/** Issue the launch, then wait for the child's pid. RUSH-2417: the wait must NOT hold the start
+ * lock (`claimDaemonInstance` shares `daemon.lock`, so the child would hit EEXIST, falsely
+ * "mid-takeover"). Early release is safe: launchd/systemd are singletons, else SING-11 takeover. */
 function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: number | null; method: string } {
   const platform = os.platform();
   // Same contract on the fallback path: the spawn IS the launch, so the lock is
@@ -1947,10 +1487,9 @@ function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: n
         try {
           execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
         } catch { /* not loaded, expected */ }
-        // launchctl prints `Load failed:` and exits 0 when the label is in a
-        // stuck state from a prior session — so a zero exit code isn't proof
-        // of success. If no pid materializes within the window, give up on
-        // launchd and fall through to a plain detached spawn.
+        // launchctl prints `Load failed:` and exits 0 when the label is stuck from a prior
+        // session, so a zero exit isn't proof of success. If no pid appears within the window,
+        // give up on launchd and fall through to a plain detached spawn.
         execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
         // Launch issued — the child needs this lock to claim (RUSH-2417).
         releaseLock();
@@ -2000,76 +1539,33 @@ function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: n
   return startDetached({ agentsBin });
 }
 
-/**
- * Resolve how to launch the daemon: `node <entry> __daemon-run`, matching the
- * exact form that works under a direct `__daemon-run`.
- *
- * We spawn the Node runtime (`process.execPath`) with the CLI entry as an
- * argument rather than executing the entry path directly. Executing the `.js`
- * path relies on its shebang on POSIX, and on Windows CreateProcess can't run a
- * `.js`/shim directly at all — it gets launched through a transient
- * console-owning wrapper (cmd.exe / the npm shim). When that wrapper exits it
- * closes its console, and the detached daemon sharing that console receives a
- * console-close event that trips its shutdown handler — the daemon comes up,
- * binds its sockets, then tears itself down ~36ms later (#556).
- * Going through `process.execPath` means a real PE/binary is spawned with
- * `detached: true` and no console, so nothing signals the daemon after launch.
- *
- * When the entry isn't a Node script (e.g. a native compiled launcher), run it
- * directly — it owns its own runtime resolution.
- */
+/** Resolve how to launch the daemon: `node <entry> __daemon-run`. Executing the `.js` relies on a
+ * shebang (POSIX), and on Windows a transient console-owning wrapper's exit sends the detached
+ * daemon a console-close event that tears it down ~36ms after binding (#556). */
 export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
   const { warnings } = validateDaemonBinary(agentsBin);
   for (const w of warnings) process.stderr.write(`[agents] ${w}\n`);
   return getCliLaunch(['__daemon-run'], agentsBin);
 }
 
-/**
- * The directory of the Node runtime that generated this service manifest, kept
- * first on the daemon's PATH. Both the shim's shebang and any child routine
- * process then resolve the exact Node that installed the service — never an
- * ancient system node or a pruned nvm version. Replaces the old hardcoded
- * `~/.nvm/versions/node/v24.0.0/bin`, which went stale the moment that patch
- * release was upgraded away and bricked the daemon fleet-wide.
- */
+/** Directory of the Node runtime that generated this manifest, kept first on the daemon's PATH so
+ * the shim's shebang and child routines resolve the exact Node that installed the service.
+ * Replaces a hardcoded nvm path that went stale on upgrade and bricked the fleet. */
 function daemonNodeBinDir(): string {
   return path.dirname(process.execPath);
 }
 
-/**
- * Login-shell user-bin dirs a service-manager-started daemon would otherwise
- * miss. systemd/launchd pin PATH and never source `~/.profile`, so they never
- * see `~/.rush/bin` (where `rush` lands) or `~/.local/bin` (XDG user-bin).
- * Monitor `notify` and dispatched `agents run` children inherit this PATH;
- * without these dirs the rush-backed owner channel fails with
- * `rush CLI not found on PATH` (PHNX-3075) while an interactive shell on the
- * same box succeeds. Uses the same HOME the manifest bakes (RUSH-2639).
- */
+/** Login-shell user-bin dirs a service-manager daemon would miss: systemd/launchd pin PATH and
+ * never source `~/.profile`, so `~/.rush/bin` and `~/.local/bin` are invisible and the rush owner
+ * channel fails `rush CLI not found on PATH` (PHNX-3075). Uses the manifest's HOME (RUSH-2639). */
 function daemonUserBinDirs(): string[] {
   const home = serviceManifestHomeEnv().HOME;
   return [path.join(home, '.rush', 'bin'), localBinDir(home)];
 }
 
-/**
- * The full PATH value the daemon service manifest pins, in order: the directory
- * of the `agents` shim itself FIRST, then the Node runtime dir, then login-shell
- * user-bin dirs (`~/.rush/bin`, `~/.local/bin`), then the platform's system dirs.
- *
- * The shim's own dir must lead so a scheduled `command` routine that shells out
- * to the bare name `agents` (`/bin/sh -c 'agents repo pull system'`) resolves the
- * SAME binary the daemon is running. When the Node runtime dir came first, a
- * stale `agents` install inside that dir (common with nvm or an npm global in the
- * same Node prefix) shadowed the current binary and routines failed with an
- * `unknown command` error against the wrong build.
- *
- * The Node runtime dir stays second so the shim's shebang (`#!/usr/bin/env node`)
- * still resolves the exact Node that installed the service — never an ancient
- * system node or a pruned nvm version. User-bin dirs sit after that pair so a
- * `~/.local/bin/agents` cannot shadow the daemon binary, but `rush` (and other
- * login-shell CLIs) still resolve. Deduped across the whole list, so a
- * Node/shim dir that already appears among the system dirs (e.g. a
- * `/usr/local/bin` install) never doubles.
- */
+/** The PATH the daemon manifest pins, in order: the `agents` shim's own dir first, then the Node
+ * runtime dir, then login-shell user-bin dirs, then system dirs. The shim dir leads so a scheduled
+ * `command` routine shelling out to bare `agents` resolves the running binary, not a stale one. */
 function daemonPathValue(agentsBin: string, systemDirs: readonly string[]): string {
   return [...new Set([
     path.dirname(agentsBin),
@@ -2079,20 +1575,9 @@ function daemonPathValue(agentsBin: string, systemDirs: readonly string[]): stri
   ])].join(':');
 }
 
-/**
- * Build the argv to relaunch the `agents` CLI with the given subcommand args.
- *
- * Resolves the real on-disk binary via getAgentsBinPath(), then dispatches: a
- * `.js` entry runs under node (`node <entry> …`), a native/compiled binary runs
- * directly (`<bin> …`).
- *
- * Callers MUST route self-spawns through this rather than hand-rolling
- * `[process.execPath, process.argv[1], …]`: under the compiled standalone binary
- * (#315) `process.argv[1]` is the bun virtual entry `/$bunfs/root/agents`, so the
- * hand-rolled form becomes `agents /$bunfs/root/agents …` → the CLI receives the
- * bunfs path as a subcommand and dies with "unknown command '/$bunfs/root/agents'".
- * getAgentsBinPath() resolves that virtual entry to the physical process.execPath.
- */
+/** Build the argv to relaunch the `agents` CLI: a `.js` entry runs under node, a compiled binary
+ * runs directly. Callers MUST use this, not `[process.execPath, process.argv[1], ...]`: under the
+ * standalone binary (#315) argv[1] is the bun virtual entry, read as an unknown subcommand. */
 export function getAgentsInvocation(
   subArgs: string[],
   agentsBin: string = getAgentsBinPath(),
@@ -2100,17 +1585,9 @@ export function getAgentsInvocation(
   return getCliLaunch(subArgs, agentsBin);
 }
 
-/**
- * A daemon binary living under an ephemeral path — a git worktree, or a temp
- * directory (`/tmp`, `/var/folders`, `/dev/shm`) — is a latent wedge. The daemon
- * is long-lived but resolves its own job modules by dynamic `import()` rooted at
- * this entry (getAgentsBinPath → process.argv[1]). If that directory is later
- * removed (`git worktree remove`, a `/tmp` cleanup, a review/verify checkout
- * teardown) the running daemon keeps ENOENT-ing on every job it loads —
- * `anchorDaemonCwd` rescues the cwd, but nothing can re-root a deleted module
- * tree. Returns a human phrase naming the ephemeral kind, or null for a stable
- * install path (version home, a global npm prefix, a normal source checkout).
- */
+/** A daemon binary under an ephemeral path (git worktree, `/tmp`, `/var/folders`, `/dev/shm`) is a
+ * latent wedge: it resolves job modules by dynamic `import()` rooted at its entry, so removing
+ * that directory makes every job ENOENT. Returns the ephemeral kind, or null. */
 export function describeEphemeralDaemonRoot(binPath: string): string | null {
   if (/[/\\]\.agents[/\\]worktrees[/\\]/.test(binPath)) return 'a git worktree';
   if (/^(?:\/private)?\/tmp[/\\]|^(?:\/private)?\/var\/folders[/\\]|^\/dev\/shm[/\\]/.test(binPath)) {
@@ -2155,10 +1632,9 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
   const logFd = fs.openSync(logPath, 'a');
 
   const { command, args } = getDaemonLaunch(agentsBin);
-  // fdStdio: the log-file fds make windowsHide inert (libuv skips
-  // CREATE_NO_WINDOW when a stdio fd is inherited), so on Windows the daemon
-  // must DETACH to own no console — otherwise it shares the launcher's console
-  // and a console-close event tears it down when the launcher exits (#556).
+  // fdStdio: log-file fds make windowsHide inert (libuv skips CREATE_NO_WINDOW when a stdio fd is
+  // inherited), so on Windows the daemon must DETACH to own no console, else a console-close event
+  // tears it down when the launcher exits (#556).
   const child = spawn(command, args, {
     stdio: ['ignore', logFd, logFd],
     ...backgroundSpawnOptions({ cwd: os.homedir(), fdStdio: true }),
@@ -2173,10 +1649,9 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
   child.unref();
   fs.closeSync(logFd);
 
-  // `spawn` leaves `pid` undefined only when the process could not be created.
-  // Returning null here (the old `child.pid || null`) let callers report
-  // "PID: null" as if the daemon had started — a start with no PID is a failed
-  // start, so fail loudly instead of manufacturing a phantom success.
+  // `spawn` leaves `pid` undefined only when the process couldn't be created. The old `child.pid
+  // || null` let callers report "PID: null" as a started daemon; a start with no PID is a failed
+  // start, so fail loudly.
   if (!child.pid) {
     throw new Error(`Failed to start daemon: spawning '${command}' produced no PID (binary missing or not executable?)`);
   }
@@ -2194,10 +1669,8 @@ function waitForPid(timeoutMs: number): number | null {
   return readDaemonPid();
 }
 
-/**
- * One piece of daemon state that a graceful `handleShutdown` removes and an
- * escalated kill leaves behind (RUSH-2421).
- */
+/** One piece of daemon state a graceful `handleShutdown` removes and an escalated kill leaves
+ * behind (RUSH-2421). */
 interface StopResidueArtifact {
   label: string;
   present: boolean;
@@ -2207,26 +1680,15 @@ interface StopResidueArtifact {
   stillPresent: () => boolean;
 }
 
-/**
- * Read the pid a state file claims, or null when it is absent/unreadable/not
- * pid-shaped. The lifetime marker stores `<pid>:<epochMs>`; the heartbeat
- * stores JSON with a `pid`.
- */
+/** Read the pid a state file claims, or null when absent, unreadable or not pid-shaped. The
+ * lifetime marker stores `<pid>:<epochMs>`; the heartbeat stores JSON with a `pid`. */
 function claimedPid(read: () => number | null): number | null {
   try { return read(); } catch { return null; }
 }
 
-/**
- * The lifetime marker, heartbeat, and instance-registry entry, described so
- * {@link stopDaemon} can assert them the same way it asserts the two sockets.
- *
- * Ownership, not mere presence, decides: a file naming a pid that is alive and
- * is not the daemon we just stopped belongs to a DIFFERENT daemon (a successor
- * that started during the stop, or a peer serving this state dir), and deleting
- * it would break that live daemon — the same reasoning the broker-socket branch
- * above uses for a standalone owner. Everything else is residue from a provably
- * dead owner and is reclaimed.
- */
+/** The lifetime marker, heartbeat and instance-registry entry, described so stopDaemon can assert
+ * them like the sockets. Ownership, not presence, decides: a file naming a live pid that isn't the
+ * stopped daemon belongs to a successor or peer and must not be deleted. */
 export function stopResidueArtifacts(stoppedPid: number | null, survivors: number[] = []): StopResidueArtifact[] {
   const artifacts: StopResidueArtifact[] = [];
 
@@ -2269,19 +1731,9 @@ export function stopResidueArtifacts(stoppedPid: number | null, survivors: numbe
     artifacts.push({
       label: 'daemon instance registry entry',
       present: fs.existsSync(markerPath),
-      // The marker is named by pid, so it is unambiguously this daemon's — but
-      // "this daemon" is only residue once it is actually DEAD. If the kill did
-      // not land, deleting the marker erases the very record
-      // `findSurvivingStateDirDaemons` enumerates, so the next `agents daemon
-      // stop` would find an empty registry and a cleared pid file and report
-      // `ok: true` with the daemon still running.
-      //
-      // "Dead" is decided by the caller's OWN survivor scan, not by `isAlive`:
-      // a SIGKILLed child is a zombie until its parent reaps it, and `kill(pid,
-      // 0)` succeeds on a zombie. Keyed off `isAlive` this kept the entry of a
-      // daemon that was already gone, so the stop stopped being able to report
-      // its own state truthfully. The survivor scan matches a live
-      // `__daemon-run`, which a zombie is not.
+      // The marker is named by pid but is residue only once that daemon is DEAD; deleting it while
+      // it lives erases what `findSurvivingStateDirDaemons` enumerates, so the next stop reports
+      // `ok: true`. "Dead" comes from the survivor scan, not `isAlive` (zombies).
       ownedByLiveOther: survivors.includes(stoppedPid),
       reclaim: () => unregisterDaemonInstance(stoppedPid),
       stillPresent: () => fs.existsSync(markerPath),
@@ -2291,15 +1743,9 @@ export function stopResidueArtifacts(stoppedPid: number | null, survivors: numbe
   return artifacts;
 }
 
-/**
- * Structured outcome of {@link stopDaemon} (SING-12, RUSH-2355). `stopDaemon`
- * asserts its postcondition instead of assuming it: `ok` is true only when every
- * resource the daemon held is provably released. `surviving` names anything that
- * did not release (a still-live daemon, or a stale socket that could not be
- * cleared) and is what drives a non-zero exit; `detachedChildren` are the
- * in-flight routine children that survive deliberately (SING-11a) and are
- * reported, never killed.
- */
+/** Structured outcome of stopDaemon (SING-12, RUSH-2355): `ok` only when every held resource is
+ * provably released. `surviving` names anything that didn't release and drives a non-zero exit;
+ * `detachedChildren` survive deliberately (SING-11a), reported never killed. */
 interface DaemonStopResult {
   ok: boolean;
   stoppedPid: number | null;
@@ -2309,22 +1755,9 @@ interface DaemonStopResult {
   detachedChildren: number[];
 }
 
-/**
- * Live `__daemon-run` processes still registered in THIS state dir's instance
- * registry, excluding `exclude`. State-dir-scoped by construction: the registry
- * lives inside this state dir, so a daemon serving a DIFFERENT state dir (a test
- * fixture with its own HOME, a separate install/home) registers elsewhere and is
- * invisible here — it is never a stop/takeover target. POSIX-only (the registry
- * and its `ps` liveness probe are); `[]` on Windows.
- *
- * Exported for `agents daemon status`/`doctor`/`services` (RUSH-2368): those
- * commands previously flagged every `__daemon-run` on the box (a raw `ps` scan)
- * as a "duplicate" of this daemon, which misreported test fixtures under their
- * own HOME — and therefore their own state dir and registry — as strays to
- * kill. This registry read is the same scope the reaper (`reapStrayDaemons`)
- * and the stop postcondition (`stopDaemon`) already use, so the display and the
- * reaper agree on what a duplicate is.
- */
+/** Live `__daemon-run` processes in THIS state dir's instance registry, excluding `exclude`.
+ * State-dir-scoped by construction, so a daemon under a different HOME (test fixture, separate
+ * install) is invisible and never a stop/takeover target. POSIX-only; `[]` on Windows (RUSH-2368). */
 function findStateDirDaemonProcesses(exclude: Set<number>): { live: number[]; unverified: number[] } {
   const live: number[] = [];
   const unverified: number[] = [];
@@ -2347,17 +1780,9 @@ export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
   return findStateDirDaemonProcesses(exclude).live;
 }
 
-/**
- * Stop the daemon and ASSERT its postcondition (SING-12, RUSH-2355), unloading it
- * from launchd/systemd if applicable.
- *
- * The SIGTERM → grace → killTree sequence is unchanged; what it adds is
- * verification: after the daemon is gone it checks that no `__daemon-run` for
- * THIS state dir survives and reclaims the state files a killTree escalation
- * (which skips the graceful handleShutdown) can leave stale. The browser IPC
- * socket is no longer among them — it left with the standalone `browser` CLI
- * (PHNX-4101). It never reports success on an unverified stop.
- */
+/** Stop the daemon and assert its postcondition (SING-12, RUSH-2355), unloading from
+ * launchd/systemd if applicable. After SIGTERM, grace, killTree it verifies no `__daemon-run` for
+ * this state dir survives and reclaims stale state files; never reports an unverified stop as ok. */
 export function stopDaemon(): DaemonStopResult {
   const releaseLock = acquireLifecycleLock();
   if (!releaseLock) {
@@ -2476,15 +1901,9 @@ function stopDaemonLocked(): DaemonStopResult {
           process.kill(pid, 'SIGTERM');
         } catch { /* process already exited */ }
 
-        // Wait for it to actually go. This used to be a setTimeout escalation plus
-        // an immediate removeDaemonPid(), which had two failure modes: in a
-        // short-lived process (the npm postinstall) the timer never fired at all,
-        // and clearing the pid file while the old daemon still ran made
-        // isDaemonRunning() report false, so startDaemon() launched a SECOND
-        // daemon. Its hosted broker then unlinked the live socket and rebound,
-        // orphaning the first broker with every unlocked bundle still in its RAM
-        // and unreachable — two brokers on one socket path, seen on a real machine
-        // after an install into a second prefix.
+        // Wait for it to actually go. The old setTimeout escalation plus immediate
+        // removeDaemonPid() never fired in a short-lived process (npm postinstall), and clearing
+        // the pid file early let startDaemon() launch a SECOND daemon (two brokers, one socket).
         if (!waitForExit(pid, STOP_GRACE_MS) && isLiveDaemon(pid)) {
           killTree(pid);
           escalated = true;
@@ -2536,16 +1955,9 @@ function stopDaemonLocked(): DaemonStopResult {
   // the daemon no longer binds it, so there is nothing to reclaim here. browser-cli
   // owns its own socket lifecycle under `~/.agents/.cache/helpers/browser/`.
 
-  // ── The state files a killed daemon cannot clean up itself (RUSH-2421) ─────
-  // handleShutdown removes the lifetime marker, the heartbeat and this pid's
-  // instance-registry entry — but it only runs on the GRACEFUL path. Every
-  // escalation above (killTree, and the whole win32 branch) skips it, so those
-  // three outlive the daemon and the stop reported `ok: true` while its state
-  // dir still described a daemon that no longer exists. Each is stale metadata
-  // with real consequences: a leftover heartbeat is what `resolveLiveDaemonPid`
-  // consults to re-adopt a "live" daemon, and a leftover registry entry is what
-  // `reapStrayDaemons` enumerates. Same shape as the sockets above — reclaim
-  // what a provably dead owner left, never touch what a live one owns.
+  // State files a killed daemon can't clean up (RUSH-2421): handleShutdown removes the lifetime
+  // marker, heartbeat and registry entry only on the graceful path, so escalation left them while
+  // stop said `ok: true`; a stale heartbeat re-adopts a dead daemon.
   for (const artifact of stopResidueArtifacts(pid, [...survivors, ...unverifiedSurvivors])) {
     if (!artifact.present) { released.push(artifact.label); continue; }
     if (artifact.ownedByLiveOther) { released.push(`${artifact.label} (owned by a live daemon)`); continue; }
@@ -2568,14 +1980,9 @@ function stopDaemonLocked(): DaemonStopResult {
   };
 }
 
-/**
- * Get current daemon status including running state, PID, enabled job count, and
- * the supervised-restart history `agents daemon status` renders (PHNX-4116).
- *
- * There is no `wedged` state: a stalled daemon exits for a supervised
- * systemd/launchd restart rather than sitting unresponsive, so the daemon is
- * simply `running` or `stopped`, and its recent restarts are reported instead.
- */
+/** Current daemon status: running state, PID, enabled job count and the supervised-restart history
+ * `agents daemon status` renders (PHNX-4116). No `wedged` state: a stalled daemon exits for a
+ * systemd/launchd restart, so it is `running` or `stopped`. */
 export function getDaemonStatus(): {
   state: 'running' | 'stopped';
   running: boolean;

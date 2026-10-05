@@ -1,10 +1,6 @@
-/**
- * Command / poll source evaluator.
- *
- * Runs a shell command; its stdout is the observation. `poll` re-runs the same
- * command on an interval — the evaluation is identical, so poll.ts delegates
- * here. No agent, no sandbox: a plain `/bin/sh -c` (or `cmd /c` on Windows).
- */
+/** Command / poll source evaluator: runs a shell command and its stdout is the observation. `poll`
+ * re-runs it on an interval (poll.ts delegates here). No agent, no sandbox: plain `/bin/sh -c`
+ * (`cmd /c` on Windows). */
 
 import { execFile } from 'child_process';
 import type { MonitorSource } from '../config.js';
@@ -35,11 +31,9 @@ export function evaluate(source: MonitorSource): Promise<Observation | null> {
             : 0;
         // Surface stderr when stdout is empty.
         const raw = (stdout && stdout.length > 0 ? stdout : stderr ?? '').replace(/\s+$/, '');
-        // A poll that failed to OBSERVE — non-zero exit, or a transport/auth/
-        // rate-limit error shape in its output (which a piped `gh … | jq`
-        // swallows the exit code of) — is not a new value. Flag it so the engine
-        // skips it instead of reading empty→error→empty as two value changes and
-        // dispatching an agent on a dead premise (PHNX-3510).
+        // A poll that failed to OBSERVE (non-zero exit, or a transport/auth/rate-limit shape in
+        // output, which a piped `gh | jq` hides) is not a new value: flag it so the engine skips
+        // it rather than read empty/error/empty as two changes and dispatch an agent (PHNX-3510).
         const failureReason = classifyPollFailure({ exitCode, text: raw });
         resolve({
           raw,

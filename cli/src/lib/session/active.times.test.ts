@@ -4,11 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { sessionFileTimes } from './active.js';
 
-// Regression for the "every running agent shows 0s ago" bug: the process-scan and
-// tmux-scan paths stamped no startedAtMs / lastActivityMs, so the Floor rendered every
-// interactive session as "0s ago" even when its transcript was fully resolved.
-// sessionFileTimes is the single stat that feeds both stamps — it must return a real
-// last-write (mtime) for a live transcript, and NOTHING (not epoch 0) for an absent one.
+// Regression for "every running agent shows 0s ago": process- and tmux-scan paths stamped no
+// startedAtMs/lastActivityMs. sessionFileTimes must return the real mtime for a live transcript,
+// and nothing (not epoch 0) for an absent one.
 
 let dir: string;
 let file: string;

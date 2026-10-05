@@ -1,10 +1,6 @@
-/**
- * Editor identity belongs to the first launch attached to that terminal. The
- * harness inherits it for its own tools, but another `agents run` is a new
- * launch, not another owner of the parent's editor tab. AGENTS_RUNTIME is set
- * by buildExecEnv, whereas an editor's initial launch sets AGENT_TERMINAL_ID
- * (and may already set AGENT_SESSION_ID) without that runtime marker.
- */
+/** Editor identity belongs to the first launch attached to a terminal; a nested `agents run` is a
+ * new launch. AGENTS_RUNTIME (set by buildExecEnv) distinguishes it from an editor's initial
+ * launch. */
 export function launchIdentityEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const result: Record<string, string> = {};
   const terminal = env.AGENT_TERMINAL_ID?.trim();

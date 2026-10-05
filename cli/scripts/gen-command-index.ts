@@ -1,18 +1,6 @@
-// Generate the `agents` command reference with the shared @phnx-labs/cli-docs
-// generator, the one every Phoenix CLI uses:
-//
-//   docs/command-index.md        a grouped, human-scannable index
-//   docs/command-index.json      the canonical, structured API surface
-//   docs/command-reference.html  sidebar command tree + search
-//
-// GENERATED artifacts: never hand-edit them. `npm run gen:index` writes them;
-// `npm run verify:index` (this script with --check) fails CI when they are stale.
-// release.sh regenerates them so the committed index matches the shipped surface.
-//
-// The source of truth is the CLI's lazy loader table: `buildFullCommandTree`
-// registers every module in `COMMAND_LOADERS` onto a throwaway program. Excluded by
-// design: the inline deprecated aliases and tombstones src/index.ts registers as
-// closures over entry-point state.
+// Generate the `agents` command reference with @phnx-labs/cli-docs: docs/command-index.md,
+// command-index.json and command-reference.html. Generated, never hand-edited: `npm run gen:index`
+// writes, `npm run verify:index` fails CI when stale.
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

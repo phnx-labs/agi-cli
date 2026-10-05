@@ -127,17 +127,9 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
       AGENTS_SYNC_MACHINE_ID: DEVICE_ID,
       // Own pins dir — vitest setup.ts pins AGENTS_DEVICES_DIR fork-wide.
       AGENTS_DEVICES_DIR: devicesRuntimeDir(home),
-      // This suite exercises real CLI usage against on-disk fixtures, including
-      // legacy pre-migration `agents.yaml` layouts (`versions:`/`agents:` still
-      // central rather than split into the machine-local history/device files) --
-      // migration running is part of what a real non-dev install does on first
-      // touch, and some fixtures below depend on it actually running. Dev builds
-      // (this repo's own tsx/dist invocations, detectDevBuild()) default
-      // AGENTS_SKIP_MIGRATION on to protect a real developer's ~/.agents/ while
-      // iterating; override that default here since these are throwaway temp
-      // homes, not a real developer's, and the whole point is exercising the
-      // real non-dev-build behavior (RUSH-2749). A specific test can still force
-      // it off via extraEnv.
+      // Exercises real CLI usage against on-disk fixtures incl. legacy pre-migration agents.yaml
+      // layouts, so migration must run. Dev builds default AGENTS_SKIP_MIGRATION on; override it
+      // here since these are temp homes and the point is non-dev behavior (RUSH-2749).
       AGENTS_SKIP_MIGRATION: '0',
       ...extraEnv,
     },
@@ -246,10 +238,8 @@ afterEach(() => {
   }
 });
 
-// Every case here drives the CLI through fake managed-version binaries written
-// as `#!/bin/sh` scripts + `chmod 0o755` (writeFakeManagedVersion / fake npm
-// installer). Shebang scripts don't execute on Windows and chmod is a no-op
-// there, so the spawn path can't be exercised — this is a POSIX-tooling suite.
+// Every case drives the CLI through fake managed-version binaries written as `#!/bin/sh` scripts
+// with chmod 0o755; neither works on Windows, so this is a POSIX-tooling suite.
 describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () => {
   it('shows a plain hint instead of opening a picker', () => {
     const home = makeTempHome();
@@ -490,10 +480,9 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
-    // Mark it isolated the way `agents add --isolated` does: a `.isolated` marker
-    // in the version dir. `use` records which isolated copy a bare `agents run
-    // codex` should reach — it must NOT repoint the real ~/.codex at (or carry
-    // settings into) an isolated home, nor pin it as the global default.
+    // Mark it isolated like `agents add --isolated` (a `.isolated` marker in the version dir).
+    // `use` records which isolated copy a bare `agents run codex` reaches; it must not repoint the
+    // real ~/.codex at an isolated home or pin it as global default.
     fs.writeFileSync(
       path.join(home, '.agents', '.history', 'versions', 'codex', '0.1.0', '.isolated'),
       '',
@@ -769,11 +758,9 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     tempHomes.push(home);
     seedNewerUpdateCache(home, '99.0.0');
 
-    // tsx src/index.ts trips the dev-build auto-detect (.git at repo root)
-    // and disables the update prompt by default. This test verifies the
-    // update prompt itself, so override the auto-detect with an explicit
-    // empty env var (falsy — doesn't trip the disable guard, doesn't
-    // satisfy the "undefined" check in src/index.ts that would re-set it).
+    // tsx src/index.ts trips the dev-build auto-detect (.git at repo root) and disables the update
+    // prompt. This test verifies the prompt, so override with an explicit empty env var (falsy, yet
+    // not undefined, which index.ts would re-set).
     const result = runAgents(home, ['view'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '' });
     const combined = `${result.stdout}\n${result.stderr}`;
 

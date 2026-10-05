@@ -1,13 +1,6 @@
-/**
- * End-to-end fixture helpers for the staleness library.
- *
- * Each test gets a temp directory acting as $HOME, with `.agents/` (user),
- * `.agents/.system/` (system), and `project/.agents/` (project). The
- * `harness()` function spawns a Bun subprocess with HOME=<tmpdir> so the
- * library resolves paths into that temp tree — no module mocking, no
- * `vi.resetModules`, just real filesystem isolation. Works under both
- * `bun test` and `vitest`.
- */
+/** End-to-end fixture helpers for the staleness library. Each test gets a temp $HOME with
+ * `.agents/`, `.agents/.system/` and `project/.agents/`; `harness()` spawns a Bun subprocess with
+ * HOME=<tmpdir>: real filesystem isolation, no module mocking. */
 
 import * as fs from 'fs';
 import * as path from 'path';

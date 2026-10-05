@@ -1,13 +1,6 @@
-/**
- * SSH invocation builder correctness.
- *
- * This is where auth is decided, so the real bugs are security- and
- * connectivity-shaped: password auth must route through the askpass shim and
- * disable pubkey/interactive prompts (else the password never reaches ssh, or
- * ssh hangs on a tty prompt); a Windows command must be wrapped in PowerShell
- * (a bare POSIX command silently fails on cmd); and the target must pass the
- * injection guard.
- */
+/** SSH invocation builder correctness; this is where auth is decided. Password auth must use the
+ * askpass shim and disable pubkey/interactive prompts, Windows commands must be PowerShell-wrapped
+ * (bare POSIX silently fails on cmd), and the target must pass the injection guard. */
 import { describe, expect, it } from 'vitest';
 import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isAgentsBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
@@ -166,11 +159,9 @@ describe('buildSshInvocation', () => {
     expect(env[ASKPASS_AGENT_ONLY_ENV]).toBeUndefined();
   });
 
-  // RUSH-1970: a read-only stats probe (the load/mem columns of `agents devices`)
-  // must resolve a password bundle broker-only, so it never pops a Touch ID sheet
-  // just to render a row. probeDeviceStats (health.ts) calls buildSshInvocation with
-  // agentOnly:true; the askpass subprocess reads ASKPASS_AGENT_ONLY_ENV and forces
-  // a broker-only resolve regardless of TTY.
+  // RUSH-1970: a read-only stats probe must resolve a password bundle broker-only so it never pops
+  // a Touch ID sheet. probeDeviceStats passes agentOnly:true, and the askpass subprocess forces a
+  // broker-only resolve regardless of TTY.
   it('agentOnly stats probe of a password device forces a broker-only askpass resolve', () => {
     const { env } = buildSshInvocation(
       dev({ name: 'pinnacles', user: 'muqsit', auth: { method: 'password', bundle: 'muqsit', bundleKey: 'password' } }),
@@ -453,14 +444,9 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
 });
 
 describe('buildAskpassShimBody', () => {
-  // The bug (#password-auth-on-standalone): the shim used to be hand-rolled from
-  // `[process.execPath, process.argv[1], …]`. On a Bun standalone binary
-  // process.argv[1] is the virtual embedded entry `/$bunfs/root/agents`, so the
-  // shim ran `<binary> /$bunfs/root/agents ssh __askpass`; the CLI saw the
-  // virtual path as a subcommand, died with `unknown command '/$bunfs/root/agents'`,
-  // printed nothing, and handed ssh an EMPTY password -> Permission denied on
-  // every password-auth device. The shim must never carry a /$bunfs path, and
-  // must exec the launch argv resolved by getCliLaunch.
+  // Bug (#password-auth-on-standalone): on a Bun standalone binary process.argv[1] is the virtual
+  // `/$bunfs/root/agents`, so the shim ran an unknown command and handed ssh an empty password.
+  // The shim must never carry a /$bunfs path and must exec the getCliLaunch argv.
   it('standalone binary launch: execs the physical binary, never the /$bunfs virtual entry', () => {
     // getCliLaunch on a standalone build returns { command: <physical binary>, args: ['ssh','__askpass'] }.
     const body = buildAskpassShimBody({ command: '/opt/agents/bin/agents', args: ['ssh', '__askpass'] });

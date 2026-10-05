@@ -1,23 +1,6 @@
-/**
- * Pick a worker device for offloaded machine work — the suite, a build, any job
- * that pins a box for minutes and must never land on the machine someone is
- * sitting at.
- *
- * This is deliberately NOT `resolveDeviceAuto`. That resolver answers "which box
- * should run this AGENT", so it gates on harness installation and a launch-ready
- * account (`smart-launch.ts:200-210`). A vitest run needs neither: it needs a
- * reachable POSIX box with headroom. Gating a test offload on a signed-in Claude
- * account would exclude a perfectly good worker for a reason that has nothing to
- * do with running tests.
- *
- * What it DOES share, on purpose, is everything that decides *where agents may
- * go*: the same {@link listOnlineDeviceNames} pool (so `role=worker` /
- * `role=personal` marks move this surface too), the same
- * {@link probePoolSignals} reachability+load probe (so one cached fleet probe
- * serves both), and the same {@link pickBestDevice} least-loaded ranking. Before
- * this module, `scripts/test.sh` hand-rolled its own resolver in inline Python
- * and therefore could not offer `--device auto` at all.
- */
+/** Pick a worker device for offloaded machine work (the suite, a build) that must never land on the
+ * machine someone is sitting at. Not `resolveDeviceAuto`, which gates on harness install and a
+ * launch-ready account; a vitest run needs only a reachable POSIX box with headroom. */
 import { normalizeHost } from '../machine-id.js';
 import { localMachineId } from '../session/origin-machine.js';
 import { loadDevicesSync } from './registry.js';
@@ -54,25 +37,14 @@ interface WorkerPickOptions {
   probe?: (pool: string[]) => Promise<Map<string, DevicePlacementSignal>>;
 }
 
-/**
- * Platforms a bun/vitest offload can actually run on.
- *
- * Windows is excluded by policy, not by accident: `AGENTS.md` states Windows is
- * not a required PR or ordinary-release platform and `tests.yml` runs it only as
- * a `continue-on-error` post-merge smoke. Silently shipping the tree to
- * `win-mini` would produce a confusing failure for a platform whose result
- * nobody gates on.
- */
+/** Platforms a bun/vitest offload can run on. Windows is excluded by policy: it is not a required
+ * PR or ordinary-release platform (`tests.yml` runs it as a `continue-on-error` smoke), so
+ * shipping the tree to `win-mini` would give a confusing failure nobody gates on. */
 const POSIX_PLATFORMS = ['linux', 'macos'] as const;
 
-/**
- * Resolve the least-loaded eligible worker.
- *
- * Throws — never returns a degraded answer. An offload helper that quietly
- * decided "no worker, run here" would recreate exactly the failure the offload
- * exists to prevent: the operator believes the work went to the fleet while
- * their laptop is pinned. Callers surface the thrown message verbatim.
- */
+/** Resolve the least-loaded eligible worker. Throws, never returns a degraded answer: quietly
+ * deciding "no worker, run here" would pin the operator's laptop while they believe the work went
+ * to the fleet. Callers surface the thrown message verbatim. */
 export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise<WorkerPickPlan> {
   const local = normalizeHost(opts.localMachine ?? localMachineId());
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];

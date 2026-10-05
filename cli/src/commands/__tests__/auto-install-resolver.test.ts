@@ -1,11 +1,6 @@
-/**
- * Tests for resolveAgentTargetsAutoInstalling — the wrapper that catches
- * VersionNotInstalledError, prompts (or auto-installs with --yes), and
- * retries the underlying resolver.
- *
- * installVersion is the only IO-heavy dependency we mock (it shells out to
- * npm). The rest goes through real fs in a tmpdir.
- */
+/** Tests resolveAgentTargetsAutoInstalling, the wrapper that catches VersionNotInstalledError,
+ * prompts (or auto-installs with --yes) and retries the resolver. Only installVersion (shells out
+ * to npm) is mocked; the rest uses real fs in a tmpdir. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

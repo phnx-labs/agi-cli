@@ -1,20 +1,15 @@
-/**
- * Locks the package name and repo URL consistency.
- *
- * The canonical npm package is @phnx-labs/agents-cli, published from
- * github.com/phnx-labs/agents-cli. The old @companion scope is a
- * deprecated mirror. Every reference must use @phnx-labs.
- */
+/** Locks package name and repo URL consistency: the canonical npm package is @phnx-labs/agents-cli,
+ * published from github.com/phnx-labs/agents-cli; the old @companion scope is a deprecated mirror,
+ * and every reference must use @phnx-labs. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-// These two are deliberately DIFFERENT and must not be unified. The npm package
-// keeps its original name — renaming it would orphan every installed CLI — while
-// the GitHub repository was renamed agents-cli -> agi-cli. Code that conflates
-// them ends up depending on GitHub's rename redirect for binary downloads.
+// These two deliberately differ and must not be unified: the npm package keeps its name (renaming
+// would orphan installed CLIs) while the GitHub repo was renamed agents-cli to agi-cli. Conflating
+// them leans on GitHub's rename redirect for binary downloads.
 const NPM_PACKAGE = '@phnx-labs/agents-cli';
 const GITHUB_REPO = 'github.com/phnx-labs/agi-cli';
 

@@ -93,14 +93,9 @@ KEEP=false
 # below to a default SHARD across the fleet (resolve_default_shards), falling
 # back to test.sh's single auto-picked worker only when <2 workers are eligible.
 TEST_TARGET=()
-# Default OFF, matching release.sh's flag of the same name. The helper manifest
-# re-derives every helper's INPUT DIGEST and fails when one moved without a
-# rebuild — correct when a release is publishing helpers, and pure obstruction
-# when it is not. Proven on 2026-08-25: a one-line COMMENT fix in the then-in-repo
-# computer-mac build script (an `apps/cli/` -> `cli/` path in prose) changed the
-# digest and blocked an otherwise-perfect 1.22.49 attestation, for a helper the
-# tarball no longer ships. That helper has since left the repo entirely
-# (PHNX-4075); the hazard the flag guards against has not.
+# Default off, matching release.sh's flag. The helper manifest re-derives every helper's input
+# digest and fails when one moved without a rebuild. That helper has left the repo (PHNX-4075);
+# the hazard the flag guards has not.
 WITH_HELPERS=false
 INHERIT_BASE=""
 while [[ $# -gt 0 ]]; do
@@ -114,27 +109,20 @@ while [[ $# -gt 0 ]]; do
     # two of the three lanes, and a release on a box with no fleet worker in
     # reach had no way to ask for the disposable crabbox it can still use.
     --test-crabbox) TEST_TARGET=(--crabbox); shift ;;
-    # Explicit sharding overrides (mirror test.sh). Absent these AND any other
-    # --test-* flag, the producer shards by default (see resolve_default_shards
-    # below) instead of pinning one box, so the ~13k-test suite finishes in ~1/N
-    # the time. --test-shard <n> fans across n auto-picked workers; --test-devices
-    # a,b,c names them.
+    # Explicit sharding overrides (mirror test.sh). Absent these and any other --test-* flag the
+    # producer shards by default (resolve_default_shards below) instead of pinning one box.
+    # --test-shard <n> fans across n auto-picked workers; --test-devices a,b,c names them.
     --test-shard) [[ -n "${2:-}" ]] || die "--test-shard needs a worker count, e.g. --test-shard 6"; TEST_TARGET=(--shard "$2"); shift 2 ;;
     --test-devices) [[ -n "${2:-}" ]] || die "--test-devices needs a comma-separated list, e.g. --test-devices m1,m2,m3"; TEST_TARGET=(--devices "$2"); shift 2 ;;
-    # Inherit the suite result from an already-green BASE attestation instead of
-    # re-running the ~13k-test suite (PHNX-3237). Sound ONLY for a release commit,
-    # whose tree differs from BASE by version + changelog + generated command-index
-    # and nothing else -- release-attestation.sh derive fails closed on any other
-    # changed path, so a code change can never inherit a stale pass. build + pack
-    # still run, so the recorded tarball is the real release tree's.
+    # Inherit the suite result from an already-green base attestation instead of re-running the
+    # suite (PHNX-3237). Sound only for a release commit (tree differs from base by version,
+    # changelog, command-index): release-attestation.sh derive fails closed on any other path.
     --inherit-suite-from) [[ -n "${2:-}" ]] || die "--inherit-suite-from needs a base attestation JSON path"; INHERIT_BASE="$2"; shift 2 ;;
     --with-helpers) WITH_HELPERS=true; shift ;;
     -h|--help)
-      # Print the WHOLE docblock, not a hardcoded line range. `sed -n '3,32p'`
-      # silently truncated: --with-helpers was documented at ~line 40 and never
-      # appeared in --help at all. A magic number drifts every time the header
-      # grows, and it fails silently — the help just gets quieter. Stop at the
-      # first non-comment line instead, so the range maintains itself.
+      # Print the whole docblock, not a hardcoded line range: `sed -n '3,32p'` silently truncated
+      # and --with-helpers (documented ~line 40) never appeared in --help. Stop at the first
+      # non-comment line so the range maintains itself.
       awk 'NR>2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "$0"
       exit 0
       ;;
@@ -156,21 +144,9 @@ if [[ -n "$INHERIT_BASE" ]]; then
   [[ ${#TEST_TARGET[@]} -eq 0 ]] || die "--inherit-suite-from skips the suite; do not also pass a --test-* target"
 fi
 
-# Default to sharding the suite across the fleet. The suite is throughput-bound
-# (measured ~3079s CPU at ~11.5x parallelism -> ~269s on one box), so the win is
-# dividing the CPU across machines: test.sh --shard N runs ~1/N per box. Each
-# shard still passes --maxWorkers=2 --retry=2 to vitest (below), so the RUSH-3015
-# flake mitigation (integration tests contend on shared version-home state at
-# high parallelism) is preserved PER BOX -- sharding adds machines, it does not
-# raise per-box concurrency. Count eligible workers with the SAME filter test.sh's
-# shard branch applies (headroom != "loaded", scripts/test.sh:~327), so this is the
-# exact pool it will fan across -- counting raw candidates could ask for more shards
-# than test.sh finds eligible, which it downshifts but with a misleading "only N
-# eligible" line on every release. Shard across them (capped). Echo nothing when <2
-# are eligible, so the caller falls back to test.sh's single auto-picked box (its
-# --shard has no silent fallback, so we must resolve the count here rather than
-# demand N boxes and fail a release on a thin fleet). jq/agents missing -> 0 ->
-# single box, never an error.
+# Default to sharding the suite across the fleet: it is throughput-bound (~3079s CPU at ~11.5x
+# parallelism, ~269s on one box), so dividing CPU across machines wins. Each shard keeps
+# --maxWorkers=2 --retry=2 (RUSH-3015 flake mitigation), so per-box concurrency does not rise.
 SHARD_CAP=8
 resolve_default_shards() {
   local n
@@ -200,10 +176,9 @@ TREE="$(git -C "$REPO_ROOT" rev-parse "$SHA^{tree}")"
 
 STORE="${STORE:-${RELEASE_ATTESTATION_DIR:-$REPO_ROOT/.release-attestations}}"
 mkdir -p "$STORE"
-# Resolve to an absolute path NOW, while cwd is still stable -- the rest of
-# this script cd's into the throwaway worktree below, and a relative $STORE
-# would then resolve there instead, silently writing (and losing, on cleanup)
-# the attestation in the wrong directory.
+# Resolve to an absolute path now, while cwd is stable: the script later cd's into the throwaway
+# worktree, and a relative $STORE would silently write (and lose on cleanup) the attestation in
+# the wrong directory.
 STORE="$(cd "$STORE" && pwd)"
 
 mkdir -p "$REPO_ROOT/.agents/worktrees"
@@ -235,24 +210,14 @@ cd "$WT/$CLI_DIR"
 bun install --frozen-lockfile || die "bun install failed for ${SHA:0:12}"
 
 [[ -n "$INHERIT_BASE" ]] || bold "Running the full suite..."
-# RUSH-3007: cutting 1.22.44, the operator exported CI=true by hand to get
-# vitest.config.ts's extended hookTimeout profile (RUSH-2970 trap 5a), which
-# also armed tests/setup.ts's leak tripwires against this box's REAL
-# ~/.agents — a live daemon + active sessions tripped 129/129 test files on
-# hermeticity-guard writes while every individual test (12,559/12,559)
-# passed, and the producer correctly refused to attest. AGENTS_ATTEST_PRODUCER
-# is this script's own explicit, narrower opt-in: it gets the same vitest
-# profile (tests/hermetic-guards.ts:shouldEnableCiTestProfile) WITHOUT arming
-# those tripwires (shouldArmHermeticGuards). Unset CI defensively so a caller
-# shell that still exports it by habit (the exact operator mistake above)
-# cannot re-arm the guards out from under this flag.
+# RUSH-3007: an operator exported CI=true for vitest's hookTimeout profile, arming tests/setup.ts
+# leak tripwires against the real ~/.agents; 129/129 files tripped though every test passed.
+# AGENTS_ATTEST_PRODUCER gets that profile WITHOUT the tripwires; CI is unset defensively.
 unset CI
 export AGENTS_ATTEST_PRODUCER=1
-# Mirrors isVitestWorkerCrashWithZeroFailures (scripts/ci-scope.ts): vitest can
-# exit 1 on an unhandled teardown "Worker exited unexpectedly" after every test
-# passed (RUSH-2215; hit by this producer on a fully green tree, RUSH-2758).
-# Only that exact shape is tolerated -- any 'failed' in the summary, or a
-# missing summary, stays fail-closed.
+# Mirrors isVitestWorkerCrashWithZeroFailures (scripts/ci-scope.ts): vitest can exit 1 on an
+# unhandled teardown "Worker exited unexpectedly" after every test passed (RUSH-2215, RUSH-2758).
+# Only that exact shape is tolerated; any 'failed' or a missing summary stays fail-closed.
 suite_green_despite_worker_crash() {
   local log="$1" files_line tests_line
   grep -q 'Worker exited unexpectedly' "$log" || return 1
@@ -264,27 +229,9 @@ suite_green_despite_worker_crash() {
   grep -qE '(^|[^[:alnum:]])passed([^[:alnum:]]|$)' <<<"$tests_line"
 }
 SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
-# RUSH-3015 follow-up: even with the producer's maxWorkers cap, 2 integration
-# tests (self-heal.integration, drift-sync) flake under parallel load -- they
-# contend on shared version-home state -- plus transient `npm 404` when real-CLI
-# install tests hammer the registry. That flakes ~every producer run and refuses
-# to attest a good tree, blocking releases. Retry re-runs a failed test (a real
-# regression still fails all 3 attempts and stays fail-closed), and --maxWorkers=2
-# cuts contention below the config's producer default of 4. Passed as CLI flags
-# (not vitest.config.ts) on purpose: editing the global-setup config forces
-# ci-scope to select those same flaky files into THIS pr's CI, which self-blocks
-# the fix; and CLI flags override whatever config the attested commit carries, so
-# the mitigation applies to every tree the producer runs, old or new.
-# Offloaded via scripts/test.sh (RUSH-3178). This script must run on a macOS
-# signing box whenever a native helper input changed, and it used to run the
-# whole ~13k-test suite there too -- welding "sign on a Mac" to "pin a Mac for
-# ten minutes". test.sh decides WHERE the suite runs; the Mac keeps only
-# sign/notarize/pack. Default auto-picks a fleet worker; --test-device <box>
-# targets a named box; --test-crabbox uses a disposable crabbox; --test-here
-# restores the old in-place behavior explicitly.
-# bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
-# input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
-# under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.
+# RUSH-3015 follow-up: self-heal.integration and drift-sync flake under load (shared version-home)
+# and real-CLI install tests hit transient `npm 404`. --retry=2 (a regression fails all 3) and
+# --maxWorkers=2 are CLI flags, not vitest.config.ts, so config edits don't self-select flakes.
 if [[ -n "$INHERIT_BASE" ]]; then
   # Inherit mode: the base attestation already proved this tree passes (the diff
   # is version/changelog/command-index only, verified by derive below), so the
@@ -302,25 +249,9 @@ else
   die "suite failed for ${SHA:0:12} -- refusing to attest a red tree (log: $SUITE_LOG)"
 fi
 
-# Sign + notarize the CLI binary headlessly, matching what release.sh's
-# privileged phase did before RUSH-2666 moved build/sign to attestation time.
-# Skipped off a macOS signing box -- and since RUSH-3100 that skip costs nothing,
-# because the tarball no longer carries a helper bundle for `npm pack` to gate
-# on. The claim that "prepack gates fail closed in that case" was the old
-# contract and is no longer what stops an unsigned helper shipping; nothing
-# ships one, from anywhere. This block used to ALSO build + sign the menu-bar
-# helper from cli/menubar; that source moved to phnx-labs/agi-menu (PHNX-4036)
-# and the helper is now only ever consumed as its published release (recorded
-# in the manifest below), so nothing here builds a helper.
-# --with-helpers gates this too (PHNX-3699). An ORDINARY CLI release must sign
-# nothing: since RUSH-3026 the CLI binary and since RUSH-3100 both helper .apps
-# are absent from the tarball, so everything this block produces is unreferenced
-# by the artifact being attested. Owner requirement R3 (../AGENTS.md) states it
-# as law -- "no signing, no notarization on the ordinary path" -- and running it
-# anyway is not merely wasteful: `agents secrets exec apple.com` cannot unlock a
-# Touch-ID-gated bundle from a headless agent, so a macOS release DIED here
-# ("CLI binary sign/notarize failed") even though the signed output ships
-# nowhere. Cutting a HELPER release still signs; that is what --with-helpers is.
+# Sign and notarize the CLI binary headlessly, as release.sh's privileged phase did before
+# RUSH-2666. Skipped off a macOS signing box at no cost: since RUSH-3100 the tarball carries no
+# helper bundle, and nothing ships an unsigned helper. A helper release still signs.
 if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary..."
@@ -334,16 +265,8 @@ if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents 
   agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
     || die "CLI binary sign/notarize failed"
 else
-  # Nothing to do off a signing box: the tarball carries no helper bundle
-  # (RUSH-3100), so `npm pack` neither wants nor gates on one.
-  #
-  # This branch used to SEED the already-signed .apps from the caller checkout,
-  # because `prepack` refused to pack without them and a fresh worktree has an
-  # empty bin/ -- that seeding was the workaround for the very coupling RUSH-3100
-  # removed. With the gates gone the seed copies signed bundles into a tree that
-  # will not ship them, and its own comment ("the prepack gates still decide ...
-  # fails the pack exactly as before") became false the moment they were removed.
-  # A stale comment guarding nothing is worse than no comment, so both are gone.
+  # Nothing to do off a signing box: the tarball carries no helper bundle (RUSH-3100), so `npm
+  # pack` neither wants nor gates on one.
   gray "Not a macOS signing box -- nothing to do: the tarball ships no helper bundle."
 fi
 
@@ -360,33 +283,23 @@ else
 fi
 green "Packed $TGZ_NAME (sha256:$TGZ_DIGEST)"
 
-# Trailing X's, NOT `...XXXXXX.json` (PHNX-3631). BSD/macOS mktemp only
-# substitutes X's at the END of the template; with a `.json` suffix after them it
-# treats the whole string as a LITERAL filename, so the first call creates
-# `agents-cli-attest.XXXXXX.json` and every later call on the same box dies with
-# "mkstemp failed ... File exists". That made every macOS producer run fail --
-# including the one release.sh now performs itself (PHNX-3696) -- while working
-# fine on the Linux CI lane. GNU mktemp accepts trailing X's identically, so this
-# form is correct on both.
+# Trailing X's, not `...XXXXXX.json` (PHNX-3631): BSD/macOS mktemp substitutes X's only at the end
+# of the template, so with a `.json` suffix it takes a literal filename and every later call on
+# the box dies with "File exists", failing every macOS producer run (PHNX-3696).
 ATTEST_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest.json.XXXXXX")"
 if [[ -n "$INHERIT_BASE" ]]; then
-  # Derive the record from the green base: it verifies the release tree differs
-  # from the base tree by version/changelog/command-index only (fail-closed on
-  # any other path) and inherits the base's suite/lock/policy/toolchain, recording
-  # THIS tree's freshly packed tarball. The base's suite tag rides through, so the
-  # record still speaks release.sh's "selected" vocabulary.
+  # Derive the record from the green base: verify the release tree differs from base by
+  # version/changelog/command-index only (fail-closed otherwise) and inherit the base's
+  # suite/lock/policy/toolchain, recording this tree's freshly packed tarball.
   scripts/release-attestation.sh derive \
       --base "$INHERIT_BASE" --tarball "$TGZ_NAME" \
       --repo-root "$WT" --commit "$SHA" \
       > "$ATTEST_TMP" \
       || die "derive failed for ${SHA:0:12} -- the release tree is not a metadata-only descendant of the base; run the full suite instead"
 else
-  # suite is "selected", not "full" or a producer-invented name: release.sh
-  # never passes --suite to `release-attestation.sh require`
-  # (bind_tree_lock_policy defaults an unset --suite to "selected"), so a record
-  # tagged anything else is invisible to it, key-for-key correct on tree/lock/
-  # policy or not. Running the full suite here satisfies "selected" -- it is a
-  # superset -- but the record must still speak the consumer's vocabulary.
+  # The suite is "selected", not "full" or a producer-invented name: release.sh never passes
+  # --suite to `release-attestation.sh require` (bind_tree_lock_policy defaults to "selected"), so
+  # a record tagged otherwise is invisible to it.
   scripts/release-attestation.sh identity --repo-root "$WT" --commit "$SHA" \
     | jq --arg name "$TGZ_NAME" --arg digest "sha256:$TGZ_DIGEST" \
         '. + {schemaVersion: 1, suite: "selected", conclusion: "pass", tarball: {filename: $name, digest: $digest}}' \
@@ -402,40 +315,14 @@ mv "$TGZ_NAME" "$DEST_DIR/$TGZ_NAME"
 green "Wrote $DEST_JSON"
 green "Tarball at $DEST_DIR/$TGZ_NAME"
 
-# ----- Helper manifest (RUSH-2766) -----
-# release.sh consumes $STORE/release-manifest.json at require_helpers (:231)
-# and upload_release_proof (:976), but until now nothing produced it -- same
-# consumer-without-producer class as the attestation itself was before this
-# script existed (RUSH-2749). The manifest is a SINGLE file per store dir,
-# carried forward across producer runs: a helper whose input digest still
-# matches the recorded one keeps its already-attested record untouched; one
-# that drifted is re-recorded from its PUBLISHED release -- nothing is built
-# here. menubar has no source in this repo at all (phnx-labs/agi-menu, PHNX-4036):
-# its input is the floor pin in src/lib/helper-versions.ts, and a drift means
-# the floor moved, so it is re-recorded from the published menubar/v<floor>
-# asset (sha256-verified by scripts/stage-menubar-helper.sh --fetch-only) or
-# fails closed when that release is missing or corrupt.
-# The newest release that carries a helper manifest, falling back to the newest
-# release overall.
-#
-# `gh release list --limit 1` returns whatever was published last, and not every
-# release is a CLI release: helper-only releases have historically been published
-# into the same `v<version>` tag namespace. One of those shadows the last real CLI
-# release, the seed misses, and EVERY helper then reads as "changed" -- hard-failing
-# on a helper this producer never rebuilds. Observed live: v1.22.48
-# (helper-only, 09:54Z) shadowed v1.22.47 and blocked a release.
-#
-# On exhaustion this deliberately echoes the NEWEST tag rather than nothing, so
-# the caller's existing per-reason diagnostics still fire unchanged: an empty
-# list keeps "no published release to seed from", and a newest-release-without-
-# the-asset keeps "<tag> carries no release-manifest.json" naming that tag.
-# Skipping is an ADDITION to the existing behaviour, not a replacement for it.
+# Helper manifest (RUSH-2766): release.sh consumes $STORE/release-manifest.json, which nothing
+# produced (RUSH-2749). One file per store, carried forward: a helper whose digest drifted is
+# re-recorded from its PUBLISHED release, never built here (menubar lives in agi-menu, PHNX-4036).
 newest_release_with_manifest() {
   local tags tag newest=""
-  # Capture the list FIRST so gh's own failure is still reported as a gh failure.
-  # Inside `done < <(...)` the exit status is lost, and an auth/network outage
-  # would silently read as "no published release to seed from" -- erasing exactly
-  # the misconfiguration the caller's diagnostics exist to surface.
+  # Capture the list first so gh's own failure is reported as a gh failure: inside `done < <(...)`
+  # the exit status is lost and an auth or network outage would read as "no published release to
+  # seed from", hiding the misconfiguration the diagnostics exist to surface.
   tags="$(gh release list --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null)" || return 1
   while read -r tag; do
     [[ -n "$tag" && "$tag" != "null" ]] || continue
@@ -457,17 +344,9 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
   MANIFEST_FILE="$STORE/release-manifest.json"
   CLI_VERSION_MANIFEST="$(jq -r .version package.json)"
   if [[ ! -f "$MANIFEST_FILE" ]]; then
-    # Seed from the last published release before falling back to an empty
-    # manifest. Without this, a fresh store has no recorded inputDigest, the
-    # helper loop below reads "input changed", and the recorder re-fetches a
-    # published release on every hand-cut release for a byte-identical helper.
-    # RUSH-2970 trap 1.
-    # Each step is checked on its own rather than chained, so the reason a seed
-    # did not happen is the reason reported. A single `&&` chain collapsed three
-    # distinct outcomes into one branch: a gh that fails on auth read as "no
-    # prior release" — hiding exactly the misconfiguration worth surfacing — and
-    # a repo with zero releases printed the literal string `null`, because
-    # `jq -r '.[0].tagName'` on an empty array emits "null", not "".
+    # Seed from the last published release before falling back to an empty manifest: a fresh store
+    # has no recorded inputDigest, so every helper reads "input changed" and a published release
+    # is re-fetched on each hand-cut release (RUSH-2970 trap 1).
     seed_note=""
     if ! command -v gh >/dev/null 2>&1; then
       seed_note="no gh on PATH"
@@ -498,15 +377,9 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     fi
   }
 
-  # PHNX-4036: menubar is recorded from its PUBLISHED release, with no
-  # source-digest sidecar to compare, because the source is not in this repo.
-  # The proof chain is instead: the floor in
-  # src/lib/helper-versions.ts names one immutable tag; stage-menubar-helper.sh
-  # downloads that tag's asset and refuses a sha256 that differs from the tag's
-  # own .sha256; the recorded assetDigest is the sha of those bytes; and the
-  # optional `source` field carries the release's menubar-source.txt provenance
-  # (repo/commit/tag) when the release has one. A missing or corrupt release
-  # fails closed naming the agi-menu publish step.
+  # PHNX-4036: menubar is recorded from its published release, with no source-digest sidecar since
+  # the source is not in this repo. A missing or corrupt release fails closed naming the agi-menu
+  # publish step.
   record_menubar_from_published() {
     local want_digest="$1" info floor tag zip sha url source
     [[ -x scripts/stage-menubar-helper.sh ]] \

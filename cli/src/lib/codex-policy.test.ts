@@ -45,11 +45,8 @@ describe('codexPolicyArgs', () => {
     expect(auto).not.toContain('--dangerously-bypass-approvals-and-sandbox');
   });
 
-  // The assertions above check auto in isolation, so a later change that adds a
-  // root, a parent, or a network key to auto ALONE — the exact regression
-  // specifications.md EXEC-22a's "auto MUST NOT widen the sandbox beyond edit"
-  // exists to prevent — would pass every one of them. Pin the two profiles
-  // against each other so the sandbox can only ever move for both at once.
+  // Pin auto and edit against each other so the sandbox can only move for both at once; guards
+  // EXEC-22a: auto MUST NOT widen the sandbox beyond edit.
   it('emits a byte-identical sandbox for auto and edit', () => {
     const roots = ['/tmp/agents', '/tmp/cache'];
     expect(codexPermissionProfileConfig('auto', roots))

@@ -1,15 +1,6 @@
-/**
- * `agents sessions resume` — the one resume surface.
- *
- * - Strict single-session: `sessions resume <id> [prompt]` with optional
- *   --mode/--headless/--interactive/--cwd/--quiet/--here (formerly top-level
- *   `agents resume`). Identity resolution + owner-device hop live in resume.ts.
- * - Multi-select: bare `sessions resume` opens a checkbox picker and fans each
- *   pick into a terminal tab/split via the terminal launch engine.
- * - Direct id/alias always takes the strict path; live-pane attach is
- *   `sessions focus`.
- * - `--device` opens the terminal surface on the session origin only.
- */
+/** `agents sessions resume`, the one resume surface: strict `resume <id> [prompt]` (owner hop in
+ * resume.ts); bare `resume` opens a checkbox picker. A direct id/alias always takes the strict
+ * path (live-pane attach is `sessions focus`); `--device` opens the terminal on the origin only. */
 import * as fs from 'fs';
 import chalk from 'chalk';
 import { Option, type Command } from 'commander';
@@ -201,19 +192,14 @@ export async function sessionsResumeAction(
   const explicitSurface = !!(options.iterm || options.ghostty || options.tmux || options.vscodium || options.terminalApp || options.device);
   const direct = !!query && (isDirectResumeSelector(query) || wantsStrictResume(prompt, strictOpts));
 
-  // Direct id/alias (or label with prompt/strict flags) → strict resume
-  // (former top-level `agents sessions resume`). `--attach-only` / `--local`
-  // must go through sessions focus so they cannot silently fork a copy
-  // (AGI EXT still shells `sessions resume <id> --local`).
+  // Direct id/alias (or label with prompt/strict flags) goes to strict resume. `--attach-
+  // only`/`--local` must go through `sessions focus` so they can't silently fork a copy (AGI EXT
+  // still shells `sessions resume <id> --local`).
   if (query && direct && !explicitSurface) {
     const hosts = options.device ? [options.device] : [];
-    // PHNX-3292: a live LOCAL tmux pane (the exact alias, or a unique 8-hex
-    // short id) attaches immediately, before any fleet SSH — the product rule
-    // is "first unique match wins," and a pane already on this box is the
-    // fastest possible match. This applies to bare resume too, not just
-    // `--attach-only`: a prompt/mode/headless/cwd override still means the
-    // caller wants strict resume semantics (a scripted continue), so that
-    // case is excluded via wantsStrictResume.
+    // PHNX-3292: a live local tmux pane (exact alias or unique 8-hex short id) attaches
+    // immediately, before any fleet SSH. Applies to bare resume too; a prompt/mode/headless/cwd
+    // override means strict resume (a scripted continue), excluded via wantsStrictResume.
     if (!options.agent && !options.account && !options.model && !wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
       return;
     }
@@ -441,11 +427,9 @@ export function isDirectResumeSelector(query: string): boolean {
   return looksLikeSessionId(selector) || isAgentTmuxAlias(selector);
 }
 
-/**
- * Local preflight cannot inspect a peer's files or index. Leave peer validation
- * to the existing origin-device recovery hop. --here without a remote surface
- * opts into local recovery and therefore uses the local transcript guard.
- */
+/** Local preflight can't inspect a peer's files or index, so leave peer validation to the origin-
+ * device recovery hop. --here without a remote surface opts into local recovery and so uses the
+ * local transcript guard. */
 export function partitionResumableSelections(
   chosen: SessionMeta[],
   options: Pick<ResumeOptions, 'here' | 'device'> = {},
@@ -551,11 +535,8 @@ export function resumeHostMismatch(
     : `Session ${session.shortId} originated on ${origin}; --device ${requestedHost} cannot move recovery to another device.`;
 }
 
-/**
- * Decide which backend to launch into. Returns a concrete backend, `'inplace'`
- * (resume in the current process — no GUI/tmux available), or `'cancel'` (the
- * user dismissed the chooser).
- */
+/** Decide which backend to launch into: a concrete backend, `'inplace'` (resume in the current
+ * process; no GUI/tmux available), or `'cancel'` (the user dismissed the chooser). */
 export async function resolveBackend(
   options: ResumeOptions,
   ctx: EngineContext,

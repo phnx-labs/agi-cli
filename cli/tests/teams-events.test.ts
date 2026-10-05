@@ -1,10 +1,6 @@
-/**
- * Semantic team-lifecycle audit events. `teams.create` / `teams.disband` are
- * emitted at the registry source (createTeam / ensureTeam / removeTeam), so they
- * fire for every path with team metadata the generic command.* log lacks — and
- * ONLY when a real mutation happened. Driven through the real CLI under a temp
- * HOME; no mocking.
- */
+/** Semantic team-lifecycle audit events: `teams.create`/`teams.disband` are emitted at the registry
+ * source (createTeam/ensureTeam/removeTeam), so they fire for every path and only on a real
+ * mutation. Driven through the real CLI under a temp HOME; no mocking. */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

@@ -5,11 +5,9 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
-// star-nudge.ts -> state.ts resolves HOME at import time, so pin HOME to a
-// throwaway dir BEFORE the module is ever loaded. Done at top-level module
-// scope (runs after the hoisted imports above, none of which load state.ts),
-// then the single dynamic import below picks it up — no vi.resetModules needed,
-// which keeps this compatible with both vitest and `bun test`.
+// star-nudge.ts imports state.ts, which resolves HOME at import time, so pin HOME to a temp dir
+// before the module loads (top-level scope, then one dynamic import). No vi.resetModules, so it
+// works under vitest and `bun test`.
 const savedHome = process.env.HOME;
 const savedCI = process.env.CI;
 const savedOptOut = process.env.AGENTS_NO_NUDGE;
@@ -18,10 +16,9 @@ const savedTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
 
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-nudge-test-'));
 process.env.HOME = TMP_HOME;
-// The nudge sentinel lives under getRuntimeStateDir(), which honors
-// AGENTS_STATE_DIR ahead of HOME — and tests/setup.ts pins that fork-wide. Point
-// it back at this file's own HOME so the sentinel lands where these cases assert,
-// and so the per-case `raceHome` override below still isolates.
+// The sentinel lives under getRuntimeStateDir(), which honors AGENTS_STATE_DIR ahead of HOME, and
+// tests/setup.ts pins that fork-wide. Point it back at this file's HOME so the sentinel lands
+// where the cases assert and `raceHome` still isolates.
 process.env.AGENTS_STATE_DIR = path.join(TMP_HOME, '.agents', '.cache', 'state');
 delete process.env.CI;
 delete process.env.AGENTS_NO_NUDGE;
@@ -102,12 +99,9 @@ describe('maybeShowStarNudge one-time behavior', () => {
   });
 });
 
-// The real reason the guard uses an atomic O_EXCL create: `agents teams` spawns
-// many processes that finish near-simultaneously, and an existsSync+write pair
-// is a cross-process TOCTOU race (a reviewer saw 3 of 5 procs double-print). An
-// in-process test can't reproduce that — it needs genuinely concurrent
-// processes — so we spawn N children against one shared HOME and assert the
-// nudge is printed exactly once. Skipped on Windows (subprocess/tsx-shim churn).
+// Why the guard uses an atomic O_EXCL create: `agents teams` spawns many processes finishing
+// together, and existsSync+write is a cross-process TOCTOU race (a reviewer saw 3 of 5
+// double-print).
 describe('maybeShowStarNudge is race-safe across concurrent processes', () => {
   const tsxBin = fileURLToPath(new URL('../../node_modules/.bin/tsx', import.meta.url));
   const starNudgeSrc = fileURLToPath(new URL('./star-nudge.ts', import.meta.url));

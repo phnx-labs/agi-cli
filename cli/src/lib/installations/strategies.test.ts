@@ -1,10 +1,6 @@
-/**
- * Strategy selection MUST be driven by the agent registry's declared shape, not
- * by an agent id — that is what makes `agents update` cover every harness
- * `agents add` manages, including one added after this file was written. These
- * tests derive their expectations from `AGENTS` for the same reason: hardcoding
- * a harness list here would just move the drift.
- */
+/** Strategy selection must be driven by the agent registry's declared shape, not an agent id, so
+ * `agents update` covers every harness `agents add` manages, including later ones. These tests
+ * derive expectations from `AGENTS`; a hardcoded harness list would just move the drift. */
 import { describe, expect, it } from 'vitest';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, isSelfUpdatingAgent } from '../agents.js';

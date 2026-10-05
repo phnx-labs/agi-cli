@@ -1,17 +1,6 @@
-/**
- * Local host provider: the v1 directory.
- *
- * `list()` is the union of ssh-config `Host` stanzas (read-only, connection
- * details owned by ssh) and inline entries the user registered. The host
- * overlay (caps/os, keyed by name) is merged onto both. We never copy or
- * rewrite ssh config.
- *
- * PHNX-3315: registrations are DEVICE-SCOPED — each box writes only its own
- * `hosts:` block in `devices/<machine>/agents.yaml` (via `Meta.deviceHosts`),
- * so N boxes no longer rewrite one shared `hosts:` map (the pull conflict).
- * Reads are the cross-box UNION of every device doc, plus any lingering central
- * legacy entries drained by the migration.
- */
+/** Local host provider: `list()` unions ssh-config `Host` stanzas (read-only) with inline
+ * entries plus the caps/os overlay; ssh config is never rewritten. PHNX-3315: registrations are
+ * device-scoped (`Meta.deviceHosts`); reads union every device doc plus legacy central entries. */
 
 import { readMeta, updateMeta } from '../../state.js';
 import { unionDeviceHosts } from '../../devices/device-docs.js';

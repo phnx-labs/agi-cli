@@ -1,10 +1,6 @@
-/**
- * Tiny unified-diff helpers for human-readable doctor output.
- *
- * Wraps the `diff` package's createPatch into one call that returns a
- * pre-coloured unified diff (red = removed, green = added, dim = context).
- * Used by `agents doctor --diff`.
- */
+/** Tiny unified-diff helpers for human-readable doctor output: wraps the `diff` package's
+ * createPatch into one call returning a pre-coloured diff (red removed, green added, dim context).
+ * Used by `agents doctor --diff`. */
 
 import chalk from 'chalk';
 import { createPatch } from 'diff';
@@ -18,10 +14,7 @@ interface UnifiedDiffOptions {
   toLabel?: string;
 }
 
-/**
- * Build a unified-diff text comparing two strings. Returns an empty string
- * when contents are identical.
- */
+/** Build a unified-diff text comparing two strings; empty when identical. */
 export function unifiedDiff(
   expected: string,
   actual: string,
@@ -34,10 +27,8 @@ export function unifiedDiff(
   return createPatch(fromLabel, expected, actual, '', '', { context });
 }
 
-/**
- * Colour a unified-diff string for terminal output. Indents each line with
- * a constant prefix so it nests cleanly under a header.
- */
+/** Colour a unified-diff string for terminal output, indenting each line with a constant prefix so
+ * it nests under a header. */
 export function colorizeUnifiedDiff(patch: string, indent = '    '): string {
   const lines = patch.split('\n');
   const out: string[] = [];

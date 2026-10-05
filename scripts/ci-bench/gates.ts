@@ -59,10 +59,8 @@ export function evaluateReleaseTargets(e2eMs: readonly number[]): TargetEvaluati
   );
 }
 
-/**
- * The required aggregator must not `need` the windows job. Skipped-when-unneeded
- * is not enough: the aggregator still waits on that identity.
- */
+/** The required aggregator must not `need` the windows job: skipped-when-unneeded is not enough,
+ * since the aggregator still waits on that identity. */
 export function windowsRequiredFromWorkflow(source: string): WindowsRequiredFinding {
   const aggregator = extractJobBlock(source, 'test') ?? extractJobBlock(source, 'required');
   if (!aggregator) {

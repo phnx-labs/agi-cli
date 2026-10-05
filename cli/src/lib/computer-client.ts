@@ -1,48 +1,6 @@
-/**
- * computer-client.ts — the ONE process client through which agents-cli talks to
- * the standalone `computer` CLI (PHNX-4075).
- *
- * This is the agents-owned half of the computer extraction, and it is
- * deliberately small. agents-cli no longer carries a helper daemon, an RPC
- * transport, an element cache, an RFB client, or an autonomous loop — the
- * standalone engine owns all of it, exactly as `secrets` took the keychain
- * engine (PHNX-3989) and `sessions` took the transcript engine (PHNX-4012).
- * What stays here is what only the fleet CLI can know: which apps the
- * permissions layer allows, which device a `--device` name resolves to, who the
- * acting session is, and where an action must be recorded.
- *
- * THERE IS NO FALLBACK. A missing executable throws `COMPUTER_BIN_MISSING` with
- * install guidance (DIST-1) rather than silently driving a bundled engine —
- * agents-cli has none to drive, and a fallback would re-couple the two release
- * trains this extraction exists to separate.
- *
- * Transport — inherited-fd passthrough, not request/response:
- *
- * The engine's ENVIRONMENT is inherited verbatim — no overlay. Transport
- * selection (`COMPUTER_HELPER_TCP`, `COMPUTER_HELPER_VNC`,
- * `COMPUTER_HELPER_SOCKET`) is the engine's: it opens the `--device` tunnel and
- * hydrates its own endpoint AND the auth token that goes with it. Publishing a
- * bare endpoint from here would hand the daemon a connection it then rejects
- * with `auth_failed`.
- *
- *   - stdio 0/1/2 are INHERITED. The engine owns the user's terminal: its
- *     stdout is the command's stdout, its `--json` is the command's `--json`,
- *     its prompts reach a real tty. agents-cli never re-formats engine output,
- *     which is what keeps the surface honest as the engine evolves.
- *   - fd 3 (`COMPUTER_CONTEXT_FD`) carries ONE JSON object — the consumer
- *     context built by `lib/computer/context.ts` — written and closed
- *     immediately, so the engine reads to EOF and proceeds.
- *   - fd 4 (`COMPUTER_EVENTS_FD`) carries NDJSON action events back: one JSON
- *     object per line, each an action the engine actually performed. agents-cli
- *     turns those into feed events and `sessions --computer` history
- *     (`lib/computer/record.ts`). The engine may emit none; it must never block
- *     on this pipe.
- *
- * Both fds are anonymous pipes on the child's side, the same shape
- * `secrets-client.ts` settled on after a named FIFO wedged macOS reads. The
- * context is pushed rather than pulled so the engine needs no callback into
- * agents-cli — one direction each way, no reentrancy.
- */
+/** The one process client through which agents-cli talks to the standalone `computer` CLI
+ * (PHNX-4075). It keeps only what the fleet CLI knows: app permissions, `--device` resolution,
+ * acting session. No fallback: a missing executable throws `COMPUTER_BIN_MISSING` (DIST-1). */
 
 import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';
@@ -83,15 +41,9 @@ export function isStandaloneComputer(bin: string): boolean {
   return !/\.(cmd|ps1)$/i.test(real) && !real.endsWith(path.join('dist', 'computer.js'));
 }
 
-/**
- * Resolve the standalone executable. `COMPUTER_BIN` wins so a dev build can be
- * driven without touching PATH.
- *
- * Resolution uses `findInPath`, which skips `~/.agents/.cache/shims`. That skip
- * is load-bearing here for the same reason it is in `sessions-client.ts`: a
- * leftover `computer` alias shim execs `agents computer`, and resolving it would
- * recurse into this process (the 1.22.85 secrets fork bomb, agi-cli#3532).
- */
+/** Resolve the standalone executable; `COMPUTER_BIN` wins for dev builds. `findInPath` skips
+ * `~/.agents/.cache/shims` because a leftover `computer` alias shim execs `agents computer` and
+ * would recurse (1.22.85 fork bomb, agi-cli#3532). */
 export function resolveComputerBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.COMPUTER_BIN?.trim();
@@ -114,14 +66,8 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-/**
- * One action the engine performed, as it appears on the NDJSON events fd.
- *
- * This is the engine's wire shape, not a translation of it: the engine emits
- * `{event: "computer.action", command, invocationId, pid, targetPid, bundle,
- * host, task, sessionId, launchId, actor}`. `command` — not `verb` — is the
- * field that names the action, and it is what marks a line as an action event.
- */
+/** One action the engine performed, as on the NDJSON events fd. This is the engine's wire shape,
+ * not a translation: `command` (not `verb`) names the action and marks a line as an action event. */
 export interface ComputerActionEvent {
   /** Always `computer.action` on this stream. */
   event?: string;
@@ -147,16 +93,9 @@ export interface ComputerActionEvent {
   [key: string]: unknown;
 }
 
-/**
- * Split a growing buffer into complete NDJSON lines. Pure so the framing rules —
- * blank lines skipped, a non-JSON line dropped rather than crashing the CLI, a
- * trailing partial line carried forward — are unit-testable without a spawn.
- *
- * A malformed line is dropped, not thrown: these events are telemetry riding
- * alongside a user-visible action that already happened. Failing the command
- * because its receipt was unreadable would be strictly worse than losing the
- * receipt. The action itself already failed loud on its own channel if it failed.
- */
+/** Split a buffer into complete NDJSON lines: skip blank lines, drop a non-JSON line, carry a
+ * trailing partial forward. A malformed line is dropped, not thrown: losing a receipt beats
+ * failing a command whose action already happened. */
 export function parseEventLines(
   buffer: string,
 ): { events: ComputerActionEvent[]; rest: string } {
@@ -185,14 +124,9 @@ interface RunComputerOptions {
   context: unknown;
   /** Called once per action event the engine reports on fd 4. */
   onEvent?: (event: ComputerActionEvent) => void;
-  /**
-   * Capture the engine's stdout instead of inheriting the terminal.
-   *
-   * Used only where agents-cli must READ an answer rather than show it — the
-   * `agents setup computer` wizard polling `status --json` for trust. Verbs
-   * never capture: re-printing engine output would make agents-cli a formatter
-   * for a surface it no longer owns.
-   */
+  /** Capture the engine's stdout instead of inheriting the terminal. Only for where agents-cli must
+   * read an answer (the `agents setup computer` wizard polling `status --json`); verbs never
+   * capture. */
   capture?: boolean;
 }
 
@@ -202,14 +136,9 @@ interface RunComputerResult {
   stdout: string;
 }
 
-/**
- * Run the standalone engine with the consumer context on fd 3 and the action
- * event stream on fd 4. Resolves with the engine's exit code; the caller
- * propagates it so `agents computer` exits exactly as the engine did.
- *
- * Throws `COMPUTER_BIN_MISSING` when the standalone is not installed. Every
- * other failure is the engine's own, reported on the inherited stderr.
- */
+/** Run the standalone engine with the consumer context on fd 3 and the action stream on fd 4;
+ * resolves with its exit code so `agents computer` exits as it did. Throws `COMPUTER_BIN_MISSING`
+ * if not installed. */
 export async function runComputer(opts: RunComputerOptions): Promise<RunComputerResult> {
   const bin = resolveComputerBin();
   const { command, prefix } = invocation(bin);

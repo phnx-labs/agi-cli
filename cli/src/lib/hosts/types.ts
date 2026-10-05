@@ -1,13 +1,6 @@
-/**
- * Agent-host provider contract.
- *
- * A `HostProvider` answers "what are my hosts, and how do I reach them?" — the
- * pluggable directory/metadata/reachability layer. Shipped providers: `local`
- * (ssh-config ∪ inline registry) and `devices` (the Tailscale fleet from
- * `agents devices`); `rush`/`crabbox` remain additive fast-follows behind this
- * same contract. Capability-gated so partial providers are first-class
- * (mirrors the cloud provider registry).
- */
+/** Agent-host provider contract: a `HostProvider` answers "what are my hosts and how do I reach
+ * them?". Shipped: `local` (ssh-config plus inline registry) and `devices` (Tailscale fleet);
+ * `rush`/`crabbox` are fast-follows. Capability-gated so partial providers are first-class. */
 
 import type { HostEntry } from '../types.js';
 
@@ -22,22 +15,15 @@ export interface Host extends HostEntry {
   /** True when the host has an explicit overlay/inline entry in the registry. */
   enrolled?: boolean;
   status?: HostStatus;
-  /**
-   * False when the host is listed for honesty but can't carry a `--device` run
-   * (today: password-auth devices — offload rides BatchMode=yes ssh). Absent
-   * means dispatchable. Cap routing and target pickers filter on this.
-   */
+  /** False when the host is listed but can't carry a `--device` run (today: password-auth
+   * devices, since offload rides BatchMode=yes ssh); absent means dispatchable. Cap routing and
+   * target pickers filter on this. */
   dispatchable?: boolean;
 }
 
-/**
- * Thrown when a device resolves but can't be used as an offload target because
- * it authenticates with a password. The offload path runs over `sshExec`, whose
- * `SSH_OPTS` force `BatchMode=yes` (no password prompts), so only key / ssh-config
- * auth can carry a `--device` run. Named so the top-level catch prints the message
- * cleanly instead of a stack trace. (Lives here, not registry.ts, so providers
- * can throw it without a circular import; registry.ts re-exports it.)
- */
+/** Thrown when a device resolves but authenticates with a password: offload runs over `sshExec`,
+ * whose `SSH_OPTS` force `BatchMode=yes`, so only key/ssh-config auth works. Lives here so
+ * providers can throw it without a cycle; registry.ts re-exports it. */
 export class DeviceOffloadUnsupportedError extends Error {
   constructor(name: string) {
     super(
@@ -77,10 +63,8 @@ export interface HostProvider {
   presence?(name: string): Promise<HostStatus>;
 }
 
-/**
- * The ssh target string for a host: the bare name for ssh-config hosts (ssh
- * resolves HostName/User/Port/Identity), else `user@address` (or `address`).
- */
+/** The ssh target for a host: the bare name for ssh-config hosts (ssh resolves
+ * HostName/User/Port/Identity), else `user@address` (or `address`). */
 export function sshTargetFor(host: Host): string {
   if (host.source === 'ssh-config') return host.name;
   if (!host.address) {

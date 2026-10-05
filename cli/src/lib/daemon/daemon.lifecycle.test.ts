@@ -1,17 +1,6 @@
-/**
- * Daemon lifecycle: spawning, single-instance takeover, and the self-terminate
- * guard.
- *
- * RUSH-2819: split out of daemon.test.ts (2201 lines / 88 tests / ~112s in CI)
- * so vitest can parallelize the process-spawning integration suites across
- * worker forks. This slice drives the REAL compiled CLI (`DIST_ENTRY`) as a
- * subprocess — `startDetached`, `startDaemon`'s launchd/systemd lock-release
- * race, the #414 single-instance last-wins takeover, and the RUSH-2367
- * self-terminate guard on a deleted state dir. Shared helpers live in
- * daemon.test-fixture.ts; the manifest/plist/systemd tests live in
- * daemon.test.ts; shutdown semantics live in daemon.stop.test.ts; registry and
- * misc daemon utilities live in daemon.registry.test.ts.
- */
+/** Daemon lifecycle: spawning, single-instance takeover and the self-terminate guard. Split from
+ * daemon.test.ts (RUSH-2819) so vitest can parallelize. Drives the REAL compiled CLI
+ * (`DIST_ENTRY`): `startDetached`, the lock-release race, the #414 takeover, the RUSH-2367 guard. */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -40,10 +29,8 @@ function probeEndpoint(endpoint: string, timeoutMs = 500): Promise<boolean> {
 }
 
 
-// #556 / #561 (missing e2e coverage): drive the REAL startDetached path and
-// prove the daemon it spawns is always-on — the socket comes up AND is still up
-// after >1s, i.e. it did not self-terminate the way the bug report describes
-// ("Browser IPC server started" then "Daemon shutting down" ~36ms later).
+// #556 / #561: drive the REAL startDetached path and prove the spawned daemon stays up (socket up
+// and still up after >1s), not self-terminating ~36ms after startup as reported.
 describe('startDetached (integration: daemon stays alive)', () => {
   it('spawns a detached daemon whose socket comes up and stays up past 1s', async () => {
     // Exercises the built CLI entry the way `browser start` does. CI runs the
@@ -52,13 +39,9 @@ describe('startDetached (integration: daemon stays alive)', () => {
       execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
     }
 
-    // The daemon binds the feed-stream hub as an AF_UNIX socket at
-    // <HOME>/.agents/.cache/helpers/feed/feed-stream.sock (the browser IPC socket
-    // left with the standalone browser CLI, PHNX-4101). macOS caps AF_UNIX paths
-    // at 104 bytes (sun_path); os.tmpdir() there is the long /var/folders/…/T/…
-    // (~48 chars), so nesting the socket under it overflows and bind() fails.
-    // Root the fake HOME at a short base on POSIX so the socket path stays well
-    // under the limit. Windows uses named pipes (no path-length limit).
+    // The daemon binds the feed-stream hub as an AF_UNIX socket under
+    // <HOME>/.agents/.cache/helpers/feed/. macOS caps AF_UNIX paths at 104 bytes and its long
+    // os.tmpdir() overflows, so use a short base HOME on POSIX.
     const tmpRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
     const tmpHome = fs.mkdtempSync(path.join(tmpRoot, 'agd-'));
     // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
@@ -114,20 +97,9 @@ describe('startDetached (integration: daemon stays alive)', () => {
   }, 30_000);
 });
 
-// RUSH-2417: `agents daemon start` self-contended on its own lock file.
-// `startDaemon` (daemon.ts) and the freshly-launched child's
-// `claimDaemonInstance` both resolve `getLockPath()` -> `<daemonDir>/daemon.lock`,
-// and the launchd/systemd branches busy-waited on `waitForPid(3000)` while STILL
-// holding it (release only happened in startDaemon's outer `finally`). The child
-// therefore always hit EEXIST against a holder that was alive — the parent CLI —
-// and exited with the false "another daemon is mid-takeover" warning, defeating
-// the service-manager fast-start path on every fresh install.
-//
-// The existing last-wins takeover test above calls `startDetached` directly and
-// never opens this window, which is why the bug survived it. These drive the REAL
-// `startDaemon()` sequence with `systemctl` / `launchctl` shims on PATH: the shim
-// launches a stand-in daemon that records whether the start lock was present when
-// it went to claim, then writes the pid file the parent is waiting on.
+// RUSH-2417: `agents daemon start` self-contended on its own lock. The launchd/systemd branches
+// busy-waited on `waitForPid(3000)` while holding `daemon.lock`, so the child hit EEXIST and
+// exited with a false "mid-takeover". These drive the real `startDaemon()` with shims.
 describe('startDaemon (RUSH-2417: the start lock is released before the child-pid wait)', () => {
   let tmpHome = '';
   const saved: Record<string, string | undefined> = {};
@@ -218,10 +190,9 @@ describe('startDaemon (RUSH-2417: the start lock is released before the child-pi
     30_000,
   );
 
-  // The early release must not reintroduce the race it guards: two concurrent
-  // `agents daemon start` invocations must still not both launch. The entry gate
-  // is unchanged — a lock held by a LIVE holder still turns the second caller
-  // into a waiter rather than a second launcher.
+  // The early release must not reintroduce the race: two concurrent `agents daemon start` must
+  // still not both launch. A lock held by a live holder still turns the second caller into a
+  // waiter.
   it.skipIf(process.platform === 'win32')(
     'a concurrent start still defers instead of launching a second daemon',
     () => {
@@ -243,10 +214,9 @@ describe('startDaemon (RUSH-2417: the start lock is released before the child-pi
   );
 });
 
-// #414: enforce a single daemon instance and never report a null PID.
-//  - A second concurrent `__daemon-run` must exit without clobbering the live
-//    daemon's pid file (else two schedulers double-fire every routine).
-//  - A start that produced no OS pid must fail loudly, never surface null.
+// #414: enforce a single daemon instance and never report a null PID. A second concurrent
+// `__daemon-run` must not clobber the live daemon's pid file (else two schedulers double-fire),
+// and a start with no OS pid must fail loudly.
 describe('daemon single-instance (#414)', () => {
   it.skipIf(process.platform === 'win32')(
     'a replacement waits for an in-progress stop lifecycle lock, then claims the singleton',
@@ -349,10 +319,9 @@ describe('daemon single-instance (#414)', () => {
       expect(pidA).toBeTruthy();
       expect(await waitFor(() => readPid() === pidA, 20_000)).toBe(true);
 
-      // Daemon B — a second `__daemon-run` — must EVICT A (last-wins), not defer.
-      // claimDaemonInstance SIGTERMs A, waits for its graceful shutdown to
-      // release its broker socket + browser IPC, then binds and writes its own
-      // pid. Exactly one daemon is ever alive.
+      // Daemon B must evict A (last-wins), not defer: claimDaemonInstance SIGTERMs A, waits for
+      // graceful shutdown to release its sockets, then binds and writes its pid. Exactly one
+      // daemon is ever alive.
       pidB = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'b.log'), env: childEnv }).pid!;
       expect(pidB).toBeTruthy();
       expect(pidB).not.toBe(pidA);
@@ -363,10 +332,8 @@ describe('daemon single-instance (#414)', () => {
       expect(alive(pidB)).toBe(true);
     } finally {
       for (const p of [pidA, pidB]) { try { if (p) process.kill(p, 'SIGKILL'); } catch { /* already gone */ } }
-      // SIGKILL is async: the kernel delivers it but the daemon can still be
-      // mid-write into tmpHome/.agents when we start removing it. Reap both PIDs
-      // first, then retry rmSync — otherwise a write landing during the tree walk
-      // makes rmdir throw ENOTEMPTY (flaky teardown, unrelated to the assertions).
+      // SIGKILL is async, so the daemon may still be writing into tmpHome/.agents during removal.
+      // Reap both PIDs first, then retry rmSync, else ENOTEMPTY makes teardown flaky.
       for (const p of [pidA, pidB]) { if (p) await waitFor(() => !alive(p), 5_000); }
       for (let attempt = 0; ; attempt++) {
         try { fs.rmSync(tmpHome, { recursive: true, force: true }); break; }
@@ -378,14 +345,9 @@ describe('daemon single-instance (#414)', () => {
     }
   }, 60_000);
 
-  // THE CRITICAL REGRESSION TEST (RUSH-2352 correction). The refuted premise of
-  // this ticket's original version was that several `__daemon-run` processes on
-  // one box proved cross-install duplicate schedulers — when in fact three of the
-  // four ran under separate HOMEs (leaked vitest fixtures) and never shared state.
-  // A last-wins takeover that widened its blast radius to "every daemon on the
-  // box" would make that misreading real: it would start SIGTERMing genuinely
-  // separate daemons. This proves the opposite — a daemon serving its OWN state
-  // dir is never a takeover or reap target, no matter what else runs on the box.
+  // The critical regression test (RUSH-2352 correction). The premise that several `__daemon-run`
+  // on one box meant duplicate schedulers was refuted (leaked fixtures). A takeover widened to
+  // every daemon would SIGTERM others; a daemon serving its own state dir is never a target.
   it.skipIf(process.platform === 'win32')(
     'DIFFERENT STATE DIR (the regression this correction exists to prevent): a daemon serving its own HOME survives another pair\'s last-wins takeover completely untouched',
     async () => {
@@ -426,10 +388,9 @@ describe('daemon single-instance (#414)', () => {
       let pidB: number | null = null;
       let pidC: number | null = null;
       try {
-        // Daemon C — a completely separate state dir, standing in for a
-        // developer's own live daemon or another test's leaked fixture (the real
-        // shape behind the refuted premise). Started first and ticking through
-        // the whole A/B takeover below.
+        // Daemon C: a separate state dir, standing in for a developer's own daemon or a leaked
+        // fixture (the real shape behind the refuted premise), started first and ticking through
+        // the A/B takeover.
         pidC = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHomeC, 'c.log'), env: envFor(tmpHomeC) }).pid!;
         expect(pidC).toBeTruthy();
         expect(await waitFor(() => readPid(tmpHomeC) === pidC, 20_000)).toBe(true);
@@ -468,16 +429,9 @@ describe('daemon single-instance (#414)', () => {
   );
 });
 
-/**
- * Self-terminate guard (RUSH-2367). A real daemon whose own state dir
- * disappears out from under it — the exact shape of a leaked test fixture
- * whose /tmp HOME got removed while the process itself somehow survived — has
- * no other way to be reached: a different HOME resolves a different
- * getDaemonDir() and therefore a different instance registry, so no `agents
- * daemon` command, reaper, or takeover can ever see it. Real path: spawns the
- * actual built CLI, deletes its HOME while it is running, and asserts the
- * process exits on its own within a bounded time — no mocking of the check.
- */
+/** Self-terminate guard (RUSH-2367). A daemon whose state dir disappears (a leaked fixture whose
+ * /tmp HOME was removed) can't be reached by any `agents daemon` command, reaper or takeover. Real
+ * path: spawns the built CLI, deletes its HOME and asserts it exits on its own in bounded time. */
 describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () => {
   it.skipIf(process.platform === 'win32')(
     'exits on its own once its state dir is deleted, well inside the check interval',
@@ -522,10 +476,9 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         expect(await waitFor(() => fs.existsSync(lifetimeFile), 20_000)).toBe(true);
         expect(alive(pid)).toBe(true);
 
-        // Removing the lifetime marker is the durable effect of deleting and
-        // recreating the state tree, without racing live heartbeat writes during
-        // recursive removal. Keep the canonical directory present so the old
-        // existsSync(dir) guard would stay alive; only the token guard can exit.
+        // Removing the lifetime marker is the durable effect of deleting and recreating the state
+        // tree, without racing heartbeat writes. The canonical dir stays, so only the token guard
+        // can exit, not the old existsSync(dir) guard.
         fs.unlinkSync(lifetimeFile);
         expect(fs.existsSync(stateDir)).toBe(true);
         expect(fs.existsSync(lifetimeFile)).toBe(false);
@@ -542,13 +495,9 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
   );
 });
 
-/**
- * Test-home tripwire (PHNX-2545). The pure guard, plus a REAL boot: a daemon
- * whose AGENTS_DAEMON_TEST_HOME marker names a home that does NOT contain its
- * resolved state dir — the shape of a test spawn whose isolated HOME override
- * failed to reach the child — must refuse to start rather than schedule its
- * scheduler/watchdog against the operator's real host.
- */
+/** Test-home tripwire (PHNX-2545): the pure guard plus a real boot. A daemon whose
+ * AGENTS_DAEMON_TEST_HOME marker names a home not containing its state dir must refuse to start
+ * rather than schedule against the operator's real host. */
 describe('daemon test-home tripwire (PHNX-2545)', () => {
   it('no-op when the marker is unset (production)', () => {
     expect(() => assertTestDaemonHome('/anywhere/.agents/.cache/helpers/daemon', undefined)).not.toThrow();

@@ -1,18 +1,6 @@
-/**
- * Owner notifier — the one seam for "ping the human" messages.
- *
- * Every human-facing owner notification (feed urgent-block dispatch, monitor
- * `notify` action, `agents send --to owner`) funnels through the single channel seam:
- * `lookupTransport(channel, meta).provider.send(text, opts)`. The recipient comes
- * from `humans.yaml` — never a hardcoded chat id — so changing the
- * owner is honoured by every path at once. `notify.transports` picks the actual
- * provider per host (rush telegram on zion, openclaw-telegram on mac-mini).
- * Best-effort: a delivery failure is returned to the caller, never thrown, so a
- * notification hiccup never blocks the agent. That is why this module resolves
- * with `lookupTransport` and not the `die()`-capable `resolveTransport` — the
- * monitor daemon and the feed-dispatch loop call in here, and `process.exit()`
- * would take them down on a typo'd channel name, bypassing their try/catch.
- */
+/** Owner notifier: the one seam for "ping the human" (urgent feed blocks, monitor `notify`, `agents
+ * send --to owner`) via `lookupTransport`. Recipient from `humans.yaml`. Best-effort: failures are
+ * returned; `die()`-capable resolveTransport is avoided (it would kill the daemon). */
 import type { OpenBlock } from './feed/feed.js';
 import type { Meta } from './types.js';
 import { readMeta } from './state.js';
@@ -35,15 +23,9 @@ export interface OwnerNotifyOptions {
   thread?: string;
   attachments?: string[];
   from?: string;
-  /**
-   * Per-destination body composer (PHNX-3698). The owner policy fans one alert
-   * out to several channels (imessage + slack, …), and only Slack can render a
-   * labeled link — so when set, each destination gets the body shaped for its
-   * OWN resolved provider (Slack → `mrkdwn` `<url|label>` links, everything else
-   * → `plain` the human sentence, no URLs) instead of the single `text` going to
-   * every channel. Absent for callers whose body is already final (urgent
-   * blocks, monitor summaries): `text` is delivered verbatim to every channel.
-   */
+  /** Per-destination body composer (PHNX-3698): only Slack renders labeled links, so each
+   * destination gets the body shaped for its resolved provider. Absent when the body is final
+   * (urgent blocks, monitor summaries): `text` goes verbatim to every channel. */
   composeForFormat?: (format: SinkMessageFormat) => string;
 }
 
@@ -63,11 +45,8 @@ export function formatUrgentBlockMessage(block: OpenBlock): string {
   return `URGENT ${cls.toUpperCase()}${host}: ${header}${text} (cost: ${cost}, id: ${block.blockId})`;
 }
 
-/**
- * Build openclaw argv for a Telegram send (used by the openclaw-telegram
- * provider and its tests). `target` is required — the recipient is always
- * resolved by the caller, never defaulted to a hardcoded number here.
- */
+/** Builds openclaw argv for a Telegram send (the openclaw-telegram provider and its tests).
+ * `target` is required: the caller always resolves the recipient; no hardcoded default number. */
 export function buildOpenClawNotifyArgs(
   text: string,
   opts: { target: string; channel?: string; account?: string },
@@ -88,20 +67,9 @@ export function buildOpenClawNotifyArgs(
   ];
 }
 
-/**
- * Deliver a message to the configured owner through the one channel seam.
- * `channel`/`target` default to the normal owner channel in humans.yaml; `notify.transports`
- * selects the provider per host. A missing owner config or a delivery failure
- * (e.g. openclaw not on PATH) returns a clean `SendResult` error — never a raw
- * ENOENT — so callers surface a consistent, best-effort failure.
- *
- * When local delivery fails because THIS box structurally cannot reach the owner
- * — the rush-backed owner channel is macOS-only, so a headless Linux worker can
- * never ring the phone (PHNX-3303) — the notify is forwarded over SSH to a
- * capable fleet peer that DOES have the provider, mirroring the reroute
- * `agents message` already uses. A successful forward is returned as the result;
- * if no capable peer is reachable, the original clean local error stands.
- */
+/** Delivers a message to the owner via the one channel seam; `channel`/`target` default to
+ * humans.yaml. Failures return a clean `SendResult`, not an ENOENT. If THIS box can't reach the
+ * owner (macOS-only channel, headless Linux, PHNX-3303), it forwards over SSH to a capable peer. */
 export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}): Promise<SendResult> {
   const meta = options.meta ?? readMeta();
   const canonical = getOwnerNotifyDestinationsFromHumans();
@@ -128,12 +96,9 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
   const deliveries: SendResult[] = [];
   for (const { channel, to: target } of addressable) {
     const { provider, providerName, error } = lookupTransport(channel, meta);
-    // Each destination gets the body shaped for the provider it ACTUALLY
-    // delivers through (the same `notify.transports` remap `lookupTransport`
-    // applied), so a Slack destination turns its ticket keys + session crumb
-    // into `<url|label>` links while a sibling iMessage copy stays plain
-    // (PHNX-3698). Without a composer the caller's already-final `text` is used
-    // for every channel.
+    // Each destination gets the body shaped for the provider it ACTUALLY delivers through (the
+    // `notify.transports` remap), so Slack gets `<url|label>` links while a sibling iMessage copy
+    // stays plain (PHNX-3698). Without a composer the caller's final `text` goes to every channel.
     const body = options.composeForFormat
       ? options.composeForFormat(sinkMessageFormat(providerName))
       : text;

@@ -1,11 +1,6 @@
-// Public API for the agent-spec engine. Commands import from here and get the
-// production provider bound automatically; tests import the pure `./resolve.js`
-// core directly and inject a fake provider.
-//
-// One vocabulary, one resolver, reused by every subcommand that accepts
-// `<agent>[@<qualifier>]`. Built for the hot path: exact / @pinned / bare specs
-// resolve with no directory enumeration; only @latest/@oldest/@all enumerate,
-// via the mtime-cached provider.
+// Public API for the agent-spec engine: one vocabulary and resolver for every
+// `<agent>[@<qualifier>]` command. Exact/@pinned/bare specs resolve without enumeration; only
+// @latest/@oldest/@all enumerate, via the mtime-cached provider.
 
 import type { AgentId } from '../types.js';
 import { defaultVersionProvider } from './provider.js';

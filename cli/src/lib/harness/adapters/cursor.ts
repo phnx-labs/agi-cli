@@ -4,11 +4,9 @@ import { stripForeignConfigDir } from '../adapter.js';
 export const cursorAdapter: HarnessAdapter = {
   id: 'cursor',
 
-  // Cursor defaults to one machine-global OS-keychain login on macOS, which
-  // ignores XDG_CONFIG_HOME. Select the file credential store; Cursor writes
-  // that store to HOME-relative ~/.cursor/auth.json, and buildExecEnv already
-  // swaps HOME to the selected version home. Existing keychain credentials
-  // remain untouched.
+  // Cursor defaults to one machine-global OS-keychain login on macOS, ignoring XDG_CONFIG_HOME.
+  // Select the file credential store, which Cursor writes to HOME-relative ~/.cursor/auth.json;
+  // buildExecEnv already swaps HOME to the version home.
   applyExecConfigEnv(result, ctx) {
     if (ctx.versionHome) {
       result.AGENTS_REAL_HOME ||= result.HOME;
@@ -19,18 +17,15 @@ export const cursorAdapter: HarnessAdapter = {
   },
 
   execPreModeArgs(ctx) {
-    // A configured headless run is the workspace trust decision, in plan mode
-    // too: an untrusted cwd otherwise stops on Cursor's trust prompt with no one
-    // to answer it. Keep this narrower than --yolo/-f, which skip already passes
-    // and which also bypasses permission checks.
+    // A configured headless run is the workspace trust decision, in plan mode too: an untrusted cwd
+    // otherwise blocks on Cursor's trust prompt with no one to answer. Kept narrower than
+    // --yolo/-f, which skip already passes and which also bypasses permission checks.
     return ctx.resolvedMode !== 'skip' && !ctx.interactive ? ['--trust'] : undefined;
   },
 
-  // Headless read-only runs use ask mode, not --plan. In plan mode Cursor
-  // delivers its answer through the createPlan tool, which `-p` text output
-  // never prints, so the run exits 0 with an empty stdout. Ask mode is equally
-  // read-only (it refuses file writes) and prints its answer. Interactive plan
-  // keeps --plan, where the TUI renders the plan.
+  // Headless read-only runs use ask mode, not --plan: in plan mode Cursor delivers its answer via
+  // the createPlan tool, which `-p` text output never prints, so the run exits 0 with empty stdout.
+  // Ask mode is equally read-only and prints. Interactive plan keeps --plan.
   execModeArgs(ctx) {
     return ctx.resolvedMode === 'plan' && !ctx.interactive ? ['--mode', 'ask'] : undefined;
   },

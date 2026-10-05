@@ -1,13 +1,6 @@
-/**
- * PHNX-3520 — surfacing the held set of agent worktrees, broken into buckets.
- *
- * Real git only, no mocks: each case builds a bare "origin", a primary checkout
- * with a `.agents/worktrees/<slug>` container, and real linked worktrees in the
- * three held states the sweep collapses into one count. The regression these
- * pin is the ticket's core failure — a worktree whose branch carries commits on
- * no remote (the PHNX-2951 / PHNX-2732 stranded-work class) must surface as its
- * OWN `unmerged-commits` bucket, and `--push` must publish it, never delete.
- */
+/** PHNX-3520: surfacing held agent worktrees by bucket, real git only. Pins the core failure: a
+ * worktree whose branch has commits on no remote (PHNX-2951/PHNX-2732) surfaces as its own
+ * `unmerged-commits` bucket, and `--push` publishes it, never deletes. */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -48,10 +41,8 @@ function configureIdentity(repo: string): void {
   git(repo, ['config', 'commit.gpgsign', 'false']);
 }
 
-/**
- * A bare origin + a clone whose default branch (main) is pushed, with the
- * `.agents/worktrees` container ready. Returns the clone (the "repo root").
- */
+/** A bare origin plus a clone with default branch (main) pushed and the `.agents/worktrees`
+ * container ready; returns the clone (the repo root). */
 function makeRepo(): { repo: string; origin: string } {
   const root = tempDir();
   const origin = path.join(root, 'origin.git');

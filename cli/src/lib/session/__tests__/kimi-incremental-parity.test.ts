@@ -7,13 +7,9 @@ import {
   type KimiParserState,
 } from '../discover.js';
 
-// Differential parity harness (B-4, Kimi). Kimi's wire.jsonl parse is pure
-// additive counters (messageCount, tokenCount, outputTokens) — no straddle, no
-// dedup. Proves that resuming from a persisted offset + counter bases and adding
-// the appended tail's deltas is IDENTICAL to a full parse of the whole
-// wire.jsonl, including the trailing-line discipline (a complete-but-not-yet-
-// terminated last record is deferred, never double-counted). Real temp files,
-// real fs — no mocks.
+// Differential parity harness (B-4, Kimi): wire.jsonl is pure additive counters, so resuming from
+// a persisted offset plus counter bases equals a full parse. A complete-but-unterminated last
+// record is deferred, never double-counted. Real temp files, no mocks.
 
 let dir: string;
 

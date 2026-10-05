@@ -1,11 +1,6 @@
-/**
- * Token-usage → USD cost math, built on the offline pricing table.
- *
- * `costOfUsage` is the single multiply-by-price primitive every other helper
- * (and issue #346's budget pre-flight estimator) routes through. It returns 0
- * for unknown/unpriced models rather than throwing — cost is additive, and a
- * single unknown model in a session shouldn't blow up the whole rollup.
- */
+/** Token-usage to USD cost math on the offline pricing table. `costOfUsage` is the single
+ * multiply-by-price primitive (also used by issue #346's estimator). It returns 0 for
+ * unknown/unpriced models rather than throwing, so one unknown model can't break a rollup. */
 import { getModelPricing } from './table.js';
 
 /** A single usage record: one model and the tokens it consumed in each direction. */
@@ -17,13 +12,9 @@ export interface TokenUsage {
   cacheCreationTokens?: number;
 }
 
-/**
- * USD cost of one usage record. Returns 0 when the model is missing or unpriced
- * (cost is additive — an unknown model contributes nothing, not NaN). Cache
- * read/write tokens are priced at their dedicated rates when the table exposes
- * them, otherwise they fall back to the input rate (the standard LiteLLM
- * convention for models that don't publish a separate cache price).
- */
+/** USD cost of one usage record; 0 when the model is missing or unpriced (additive, never NaN).
+ * Cache tokens use dedicated rates when the table has them, else the input rate (LiteLLM
+ * convention). */
 export function costOfUsage(u: TokenUsage): number {
   if (!u.model) return 0;
   const pricing = getModelPricing(u.model);
@@ -45,14 +36,9 @@ export function costOfUsage(u: TokenUsage): number {
   );
 }
 
-/**
- * USD cost of one usage record priced as if caching were OFF: cache-read and
- * cache-write tokens are billed at the model's full INPUT rate rather than their
- * discounted cache rates. This is the "what would this have cost with no prompt
- * caching?" scenario that `agents insights output --pricing no-cache` models. Output and
- * uncached input are unchanged — only the cache tokens are repriced. Returns 0
- * for a missing/unpriced model, exactly like {@link costOfUsage}.
- */
+/** USD cost of a usage record as if caching were OFF: cache read/write tokens billed at the full
+ * INPUT rate (`agents insights output --pricing no-cache`). Output and uncached input are
+ * unchanged; returns 0 for an unpriced model like costOfUsage. */
 export function costOfUsageNoCache(u: TokenUsage): number {
   if (!u.model) return 0;
   const pricing = getModelPricing(u.model);
@@ -79,10 +65,8 @@ export function costOfSession(usages: TokenUsage[]): number {
   return total;
 }
 
-/**
- * Format a USD amount for human display. Cents-precise, with a "<$0.01" floor
- * so tiny-but-nonzero sessions don't render as "$0.00" and read as free.
- */
+/** Format USD for display, cents-precise with a "<$0.01" floor so tiny nonzero sessions don't read
+ * as free. */
 export function formatUsd(usd: number): string {
   if (!Number.isFinite(usd) || usd <= 0) return '$0.00';
   if (usd < 0.01) return '<$0.01';
@@ -97,11 +81,8 @@ interface EstimatorTokens {
   cacheCreationTokens?: number;
 }
 
-/**
- * Pre-flight cost estimate for a model + token bundle (issue #346's budget
- * gate). Returns the resolved canonical model id (`modelMatched`) so callers
- * can warn when an estimate fell back to $0 because the model is unpriced.
- */
+/** Pre-flight cost estimate for a model + token bundle (issue #346's budget check). Returns the
+ * resolved model id (`modelMatched`) so callers can warn when an unpriced model fell back to $0. */
 export function estimateCost(
   model: string,
   tokens: EstimatorTokens,

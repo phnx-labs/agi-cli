@@ -1,7 +1,5 @@
-/**
- * `agents insights` end to end: real transcripts on disk, a real sqlite index, the
- * registered commander action. No mocking, per the repo rule.
- */
+/** `agents insights` end to end: real transcripts on disk, a real sqlite index, the registered
+ * commander action. No mocking. */
 
 import { describe, expect, it, beforeAll } from 'vitest';
 import * as fs from 'fs';

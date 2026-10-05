@@ -40,13 +40,9 @@ export function resolveFirecrackerBin(): string {
   return which;
 }
 
-/**
- * Warm one-use Firecracker lifecycle.
- *
- * start() always execs the Firecracker binary (FIRECRACKER_BIN or PATH).
- * Missing binary or missing warm snapshot is a hard error — jobs never
- * fall through to the controller host.
- */
+/** Warm one-use Firecracker lifecycle. start() always execs the Firecracker binary (FIRECRACKER_BIN
+ * or PATH); a missing binary or warm snapshot is a hard error, so jobs never fall through to the
+ * controller host. */
 export class FirecrackerPool {
   constructor(private readonly layout: CiLayout) {
     mkdirSync(warmSnapshotPath(layout), { recursive: true });

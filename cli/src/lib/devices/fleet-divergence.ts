@@ -1,30 +1,6 @@
-/**
- * Cross-device harness divergence for `agents doctor` (RUSH-2027).
- *
- * `agents fleet status` already fans out `agents doctor --json` per device and
- * builds a {@link FleetHealthReport} of coarse device health (reachable, CLIs
- * installed, agents-cli version skew, local sync drift). It deliberately does
- * NOT compare fine-grained *resource presence* across devices — so a plugin like
- * `swarm` installed on one box but missing on another is silent until a user
- * types `/swarm:run` on the wrong machine and gets `Unknown command`.
- *
- * This module is the missing comparison. Each device self-reports its installed
- * inventory (resource kinds, per-agent version sets, `.agents`/`.system` repo
- * state) in its `doctor --json` payload; {@link compareFleetInventories} takes
- * the collected per-device inventories and, treating the local machine as the
- * baseline, flags:
- *
- *   1. Resource presence gaps  — a resource present on one device, missing on
- *      another (either direction relative to the local baseline).
- *   2. Agent version gaps      — an agent version installed on one device but
- *      not another (e.g. `yosemite-s0 missing claude@2.1.220`).
- *   3. `.agents`/`.system` repo drift — a device whose config-repo HEAD, branch,
- *      or dirty state diverges from the local baseline.
- *
- * Pure and SSH-free: the SSH fan-out lives in the doctor command; this module
- * only consumes the already-collected payloads, so the divergence logic is
- * unit-tested against fixture inventories with no live fleet.
- */
+/** Cross-device harness divergence for `agents doctor` (RUSH-2027). `agents fleet status` does not
+ * report resource presence, so a plugin missing on one box stays silent until a run fails there.
+ * Flags resource, agent version, and repo drift against the local baseline. Pure, SSH-free. */
 
 /** Resource kinds compared across devices. Mirrors {@link DoctorKind} plus the
  *  top-level `workflows`/`memory` inventory that `getAvailableResources` emits;
@@ -65,13 +41,9 @@ export interface RepoState {
   dirty: boolean;
 }
 
-/**
- * Per-version sign-in state a device self-reports, so the fleet doctor can show
- * every installed version's account (and a provable logged-out) without a second
- * SSH round-trip. `provable` is true only when the credential is absent from BOTH
- * the version home and the active/global HOME (see `credentialPresence`); an
- * unprovable absence (opaque/keychain agent) is a warning, not a critical.
- */
+/** Per-version sign-in a device self-reports, so the fleet doctor shows every version's account
+ * without another SSH round-trip. `provable` is true only when the credential is absent from both
+ * the version home and the active/global HOME; an unprovable absence is a warning, not a critical. */
 export interface FleetVersionSignIn {
   version: string;
   /** A usable local credential was found for this version (or shared globally). */
@@ -83,18 +55,13 @@ export interface FleetVersionSignIn {
   provable: boolean;
 }
 
-/**
- * A deliberately closed summary of one version's generated hook-wrapper
- * runtime. Fleet payloads carry only this state — never the remote wrapper
- * path, embedded source path, or detector text.
- */
+/** A deliberately closed summary of one version's generated hook-wrapper runtime. Fleet payloads
+ * carry only this state, never the remote wrapper path, source path, or detector text. */
 export const FLEET_HOOK_RUNTIME_STATES = ['healthy', 'broken', 'not-applicable'] as const;
 export type FleetHookRuntimeState = typeof FLEET_HOOK_RUNTIME_STATES[number];
 
-/**
- * The self-reported harness inventory a single device emits in `doctor --json`.
- * Comparable device-to-device with no further probing.
- */
+/** The self-reported harness inventory a device emits in `doctor --json`, comparable
+ * device-to-device with no further probing. */
 export interface FleetInventory {
   /** Installed resource names per kind. `rules` here are the top-level rules
    *  files (memory presets), not per-agent compiled AGENTS.md. */
@@ -106,10 +73,8 @@ export interface FleetInventory {
     agents: RepoState | null;
     system: RepoState | null;
   };
-  /** Per-version sign-in state per agent id, for the fleet doctor's accounts
-   *  line and cross-fleet logged-out criticals. Optional — an older CLI that
-   *  predates this field omits it, and the caller degrades to a warning
-   *  ("older agents-cli — can't report per-version sign-in"). */
+  /** Per-version sign-in per agent id, for the accounts line and cross-fleet logged-out criticals.
+   * Optional: an older CLI omits it and the caller degrades to a warning. */
   signIn?: Record<string, FleetVersionSignIn[]>;
   /** Generated hook-wrapper health per installed agent/version. Optional for
    *  wire compatibility with older remotes; a present value is fully validated
@@ -174,13 +139,9 @@ interface RepoDrift {
   blame: 'remote' | 'local';
 }
 
-/** Describe how a remote repo state diverges from the local baseline, or null
- *  when they match. Compares HEAD first (the load-bearing difference), then
- *  branch, then a dirty tree on either side.
- *
- *  HEAD and branch differences are symmetric — by convention the remote is the
- *  one "diverged from the baseline" — but a dirty tree belongs to exactly one
- *  box, and blaming the wrong one sends the user to a clean machine. */
+/** Describe how a remote repo state diverges from the local baseline, or null when they match:
+ * HEAD, then branch, then dirty tree. HEAD and branch differences are symmetric, but a dirty tree
+ * belongs to one box, and blaming the wrong one sends the user to a clean machine. */
 function describeRepoDrift(local: RepoState, remote: RepoState): RepoDrift | null {
   if (local.head && remote.head && local.head !== remote.head) {
     return { detail: `repo diverged: HEAD ${remote.head} != local ${local.head}`, blame: 'remote' };
@@ -199,16 +160,9 @@ function describeRepoDrift(local: RepoState, remote: RepoState): RepoDrift | nul
   return null;
 }
 
-/**
- * Compare a set of per-device inventories against the local baseline and emit
- * every cross-device divergence. The baseline is the device whose name equals
- * {@link baselineName} (the local machine); if that device has no inventory the
- * report is empty (nothing to compare against). Devices with no inventory are
- * recorded under `skippedDevices` and never produce false "missing" findings.
- *
- * Ordering is deterministic (device, then category, then name) so the human and
- * JSON output — and the tests — are stable.
- */
+/** Compare per-device inventories against the local baseline ({@link baselineName}) and emit every
+ * divergence; empty if the baseline has no inventory. Devices with no inventory go to
+ * `skippedDevices` and never produce false "missing" findings. Ordering is deterministic. */
 export function compareFleetInventories(
   devices: DeviceInventory[],
   baselineName: string,

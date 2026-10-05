@@ -1,21 +1,6 @@
-/**
- * Per-PID session registry — the headless equivalent of the swarmify VS Code
- * extension's `live-terminals.json`.
- *
- * On a machine with no terminal extension (a bare SSH/tmux host), the only way
- * `ag sessions --active` can attribute a `ps`-discovered agent process to a
- * session is to guess "newest .jsonl in the cwd" — which collapses N agents
- * sharing one repo onto a single session (all rows show the same topic/id).
- *
- * `ag run` closes that gap by recording, at spawn time, one file per launched
- * agent process keyed by its OS pid: the exact session id it was launched with
- * (Claude is started with `--session-id <uuid>`, so the launcher knows it),
- * plus agent/cwd/tmux pane. The active-sessions headless path reads it back for
- * an exact pid -> session match instead of a heuristic.
- *
- * Best-effort throughout: a failed write or a corrupt file degrades to the old
- * heuristic, never throws into the launch or the listing path.
- */
+/** Per-PID session registry, headless equivalent of the extension's `live-terminals.json`: `ag run`
+ * records the exact session id per pid so `sessions --active` avoids the newest-jsonl guess.
+ * Best-effort; failures degrade to it. */
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
@@ -26,52 +11,28 @@ import { atomicWriteFileSync, withFileLock } from '../fs-atomic.js';
 export interface PidSessionEntry {
   pid: number;
   agent: string;
-  /**
-   * Custom harness / profile name when this pid was launched via
-   * `agents run <profile>` (e.g. `deepseek`). `agent` stays the HOST
-   * CLI (`claude`) so process matching and transcript discovery keep
-   * working. `sessions --active` displays this when set (PHNX-2935).
-   */
+  /** Custom harness/profile name when launched via `agents run <profile>` (e.g. `deepseek`).
+   * `agent` stays the host CLI so process matching works; `sessions --active` shows this
+   * (PHNX-2935). */
   harness?: string;
   /** The launch session id. Present for agents launched with a known id (Claude). */
   sessionId?: string;
   cwd?: string;
-  /**
-   * Resolved actor id (`resolveActor().id`) stamped at spawn — who initiated this
-   * run. A tailnet login/email for a resolved human, or `UNRESOLVED@<host>` when
-   * it can't be determined. Read back by the active-sessions path to surface an
-   * `owner` per session (RUSH-2018), so a co-located fleet shows who launched what.
-   */
+  /** Resolved actor id (`resolveActor().id`) stamped at spawn: a tailnet login/email, or
+   * `UNRESOLVED@<host>`. Surfaced as the session `owner` (RUSH-2018). */
   actor?: string;
-  /**
-   * The actor's kind (`resolveActor().kind`): `'human'` for a person-initiated
-   * run, `'agent'` for one an agent spawned. Pairs with {@link actor} the same way
-   * `AGENTS_ACTOR` / `AGENTS_ACTOR_KIND` do on the exec env.
-   */
+  /** The actor's kind: `'human'` for a person-initiated run, `'agent'` for one an agent
+   * spawned. Pairs with `actor` like `AGENTS_ACTOR_KIND` on the exec env. */
   initiatedBy?: 'human' | 'agent';
-  /**
-   * The launch id minted by `ag run` and exported to the child as
-   * `AGENT_LAUNCH_ID`. The agent's SessionStart hook records the SAME id in its
-   * own state file (`terminals/sessions/<pid>.json`, `launch_id`), so the two
-   * records reconcile by this key even when the hook runs under a DIFFERENT pid
-   * (tmux pane leaf, cmd.exe wrapper) — see resolveHookSessionId in
-   * session/hook-sessions.ts. This
-   * is how a non-Claude launch (whose id we don't know at spawn) gets an exact
-   * session id at listing time instead of the newest-jsonl heuristic.
-   */
+  /** Launch id minted by `ag run` and exported as `AGENT_LAUNCH_ID`. The SessionStart hook records
+   * the same id, so records reconcile even under a different pid (see resolveHookSessionId). Gives
+   * non-Claude launches an exact session id instead of the newest-jsonl heuristic. */
   launchId?: string;
-  /**
-   * `AGENT_TERMINAL_ID` when the launch inherited one (a Factory VS Code tab).
-   * A secondary join key to the hook's `terminal_id`, for agents the extension
-   * spawned. Best-effort — undefined outside the extension.
-   */
+  /** `AGENT_TERMINAL_ID` when inherited (a Factory VS Code tab); a secondary join key to the
+   * hook's `terminal_id`. Undefined outside the extension. */
   terminalId?: string;
-  /**
-   * `$TMUX_PANE` at launch — stored for diagnostics and possible future
-   * disambiguation. NOT currently consulted on read: the listing path keys
-   * purely on pid (stale entries are pruned when the pid dies), so this is
-   * metadata, not an anti-collision key.
-   */
+  /** `$TMUX_PANE` at launch, kept for diagnostics. Not consulted on read: listing keys purely
+   * on pid, so this is not an anti-collision key. */
   tmuxPane?: string;
   startedAtMs: number;
   /** Kernel provenance, captured by the writer; absent on legacy records. */
@@ -140,13 +101,8 @@ export function pidSessionEntryMatchesLiveProcess(entry: PidSessionEntry, startT
   return start === recordedStart;
 }
 
-/**
- * Pull an explicit `--session-id <uuid>` (or `--session-id=<uuid>`) out of a
- * raw agent arg vector. The transparent shim forwards args untouched, but when
- * a launcher (Claude Code background jobs, IDE harnesses) already names the
- * session, recording it gives the same exact pid -> session mapping `ag run`
- * gets from generating the id itself.
- */
+/** Pull an explicit `--session-id <uuid>` (or `=<uuid>`) out of a raw agent arg vector, so
+ * launchers that already name the session get the same exact pid -> session mapping. */
 const SESSION_ID_VALUE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function isSessionIdShape(value: string): boolean {
   return SESSION_ID_VALUE_RE.test(value);
@@ -165,19 +121,9 @@ export function extractSessionIdArg(args: string[]): string | undefined {
   return undefined;
 }
 
-/**
- * Read a live process's original argv (best-effort).
- *
- * Linux: NUL-separated `/proc/<pid>/cmdline`. Darwin: `ps -ww -o args=` then
- * whitespace-split (good enough for Claude's `--session-id <uuid>` tokens;
- * not a full shell-quote parser). Other platforms: undefined.
- *
- * RUSH-2384: the by-pid registry is often empty mid-run (launch pid was a
- * wrapper that exited, prune wiped it, or the agent was not launched via
- * `agents run`). The live process still carries `--session-id` on its argv —
- * the same signal the incident used to prove the session was alive — so the
- * active scan and `agents message` can recover identity without the registry.
- */
+/** Read a live process's argv (best-effort): `/proc/<pid>/cmdline` on Linux, `ps -ww -o args=`
+ * whitespace-split on Darwin, undefined elsewhere. RUSH-2384: the by-pid registry is often empty
+ * mid-run, but the live argv still carries `--session-id`. */
 export function readProcessArgv(pid: number): string[] | undefined {
   if (!pid || pid < 1) return undefined;
   if (process.platform === 'linux') {
@@ -204,11 +150,8 @@ export function readProcessArgv(pid: number): string[] | undefined {
   return undefined;
 }
 
-/**
- * Exact session id a live agent process was launched with, read from its
- * current argv. Undefined when the process is gone, the platform can't expose
- * argv, or the vector carries no `--session-id`.
- */
+/** Exact session id a live process was launched with, from its current argv; undefined if the
+ * process is gone, argv is unavailable, or there is no `--session-id`. */
 export function sessionIdFromLivePid(pid: number): string | undefined {
   const argv = readProcessArgv(pid);
   if (!argv) return undefined;
@@ -309,13 +252,9 @@ export function readLivePidSessionEntry(pid: number, startTime?: string): PidSes
   return pidSessionEntryMatchesLiveProcess(entry, startTime) === true ? entry : undefined;
 }
 
-/**
- * Every recorded launch, one entry per live-or-dead pid. Used to index launches
- * by their `tmuxPane` so the authoritative tmux source can attribute a pane it did
- * NOT wrap (an agent bare-spawned into an existing pane) to its exact launch —
- * the caller filters to live pids. Best-effort: unreadable/corrupt files are
- * skipped, a missing dir yields `[]`.
- */
+/** Every recorded launch, live or dead pid, indexed by `tmuxPane` so a pane the CLI did not wrap
+ * can be attributed to its exact launch; callers filter to live pids. Best-effort: corrupt files
+ * are skipped and a missing dir yields `[]`. */
 export function listPidSessionEntries(): PidSessionEntry[] {
   let files: string[];
   try {
@@ -337,15 +276,9 @@ export function listPidSessionEntries(): PidSessionEntry[] {
   return out;
 }
 
-/**
- * Remove entries whose pid is no longer alive. Best-effort housekeeping.
- *
- * Linux deletion requires the writer's boot and PID namespace to match our own
- * trustworthy proc view. ESRCH in another namespace says nothing about the
- * recorded process. Legacy/corrupt/unreadable ownership is unknown, never dead.
- * Kernel start ticks reject PID reuse without wall-clock heuristics. Other
- * platforms retain the caller's start-time check after checking kernel liveness.
- */
+/** Remove entries whose pid is no longer alive. On Linux, delete only when the writer's boot and
+ * PID namespace match ours; ESRCH elsewhere says nothing. Unknown ownership is never treated as
+ * dead. Kernel start ticks reject PID reuse; other platforms keep the caller's start-time check. */
 export function prunePidSessionRegistry(isAlive?: (pid: number, startedAtMs?: number) => boolean | undefined): void {
   let files: string[];
   try {

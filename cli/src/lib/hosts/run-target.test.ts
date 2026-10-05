@@ -1,17 +1,6 @@
-/**
- * Shared host-run dispatch helper (run-target.ts) — resolution semantics.
- *
- * The real bugs this guards against:
- *   1. `resolveHostRunTarget` must preserve `agents run --device`'s exact
- *      fall-through: exact name first, then capability tag, and only
- *      "Multiple hosts tagged…" is a verdict — "no host tagged" must degrade to
- *      the generic unknown-host error, not leak the cap-lookup message.
- *   2. A password-auth device must propagate `DeviceOffloadUnsupportedError`
- *      untouched (NOT be wrapped in HostResolutionError) — the top-level catch
- *      in index.ts matches on err.name to print it cleanly.
- *   3. The unknown-host message is a contract: exec.ts, the host cloud
- *      provider, and routines all print it verbatim.
- */
+/** resolveHostRunTarget keeps `agents run --device` fall-through: name, then capability tag,
+ * where only "Multiple hosts tagged…" is a verdict. DeviceOffloadUnsupportedError propagates
+ * untouched (index.ts matches err.name); the unknown-host message is a printed contract. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

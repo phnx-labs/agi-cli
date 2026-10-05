@@ -4,12 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// `agents import` adopts: it MOVES ~/.<agent> into a version home, symlinks the
-// original away, sets the global default and creates a shim. That is the opposite of
-// isolation, so with the boundary in place it is refused for an isolated-only agent —
-// and there was no way to bring an existing setup into a sandbox at all. A new
-// isolated copy started empty.
-//
+// `agents import` adopts: it moves ~/.<agent> into a version home, symlinks the original away, sets
+// the default and a shim, the opposite of isolation, so it is refused for an isolated-only agent.
 // `--isolated` copies instead: settings in, original untouched, nothing adopted.
 describe.skipIf(process.platform === 'win32')('agents import --isolated', () => {
   let home: string;
@@ -121,10 +117,9 @@ describe.skipIf(process.platform === 'win32')('agents import --isolated', () => 
   }, 180_000);
 
   it('seeds through a symlinked version home (codex SUN_LEN-safe CODEX_HOME)', () => {
-    // Codex's version home is not a directory: `home/.codex` is a SYMLINK to
-    // `~/.agents/.codex-homes/<version>/.codex`, because the real path is too long for
-    // a unix socket. Seeding used to cpSync a directory straight onto that link and
-    // fail with "Cannot overwrite non-directory", leaving the copy unseeded.
+    // Codex's version home is a symlink (`home/.codex` to `~/.agents/.codex-
+    // homes/<version>/.codex`; the real path is too long for a unix socket). Seeding used to cpSync
+    // a directory onto it and fail with "Cannot overwrite non-directory".
     const v = '0.146.0';
     const vdir = path.join(versionsRoot(), v);
     fs.mkdirSync(path.join(vdir, 'node_modules', '.bin'), { recursive: true });

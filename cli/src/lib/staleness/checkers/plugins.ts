@@ -1,11 +1,6 @@
-/**
- * Plugins staleness — one directory per plugin, marker file is
- * `.claude-plugin/plugin.json`. First-wins across project > user > system
- * > extras. Fingerprints the entire plugin root (skills, commands, hooks,
- * etc. live INSIDE the plugin dir, so a content fingerprint covers them).
- *
- * Not tracked in v1 manifests; same one-time re-sync trade-off as workflows.
- */
+/** Plugins staleness: one directory per plugin (marker `.claude-plugin/plugin.json`), first-wins
+ * across project > user > system > extras. Fingerprints the whole plugin root. Not tracked in v1
+ * manifests: one re-sync, as with workflows. */
 
 import * as fs from 'fs';
 import * as path from 'path';

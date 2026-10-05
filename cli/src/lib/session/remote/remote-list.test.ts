@@ -1,10 +1,6 @@
-/**
- * Tests for parsing a peer's `sessions --json` output during the browse-listing
- * fan-out. Like the --active parser, this must be defensive: a peer may run an
- * older/newer agents whose stdout is truncated, non-JSON, or carries its own
- * `machine` tag — one bad peer must never throw and blank the merged list, and
- * the machine we dialed must win so grouping keys off the computer we asked.
- */
+/** Tests for parsing a peer's `sessions --json` output in the browse fan-out. Parsing must be
+ * defensive (truncated, non-JSON or self-tagged `machine` output) and the dialed machine must
+ * win. */
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -178,10 +174,9 @@ describe('parseRemoteList', () => {
   });
 
   it('carries a peer\'s daemon-generated title through the fan-out (PHNX-3797)', () => {
-    // "A remote session shows the SAME title in the viewer" rests on this parse
-    // SPREADING the peer's row rather than re-listing known fields: a re-listed
-    // projection silently drops the generatedTitle rung and the remote row
-    // headlines its raw prompt instead.
+    // The remote row shows the same title as the viewer only if the parse spreads the peer's row
+    // rather than re-listing known fields; a re-listed projection drops generatedTitle and
+    // headlines the raw prompt (PHNX-3797).
     const stdout = JSON.stringify([{
       id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z',
       filePath: '/peer/a.jsonl',

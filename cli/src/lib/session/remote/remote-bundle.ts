@@ -1,16 +1,6 @@
-/**
- * Multi-device session transfer over the EXISTING SSH fleet transport
- * (RUSH-1712) — no R2, no daemon. `agents sessions export --device <h>` and
- * `agents sessions import --from-host <h>` both run `agents sessions export
- * … --stdout` ON the peer and stream the bundle back over the same SSH path the
- * cross-machine listing already uses (resolveExplicitTargets + ssh-exec), then
- * either write it (export) or import it (import) locally.
- *
- * This deliberately reuses ssh-exec / resolve-target rather than adding a second
- * transport: the raw form `agents ssh boxA 'agents sessions export --stdout' |
- * agents sessions import -` works with plain export/import; this module is just
- * the one-shot wrapper around it.
- */
+/** Multi-device session transfer over the existing SSH fleet transport (RUSH-1712), no R2 or
+ * daemon: export/import run `agents sessions export --stdout` on the peer. Reuses
+ * ssh-exec/resolve-target; no second transport. */
 import chalk from 'chalk';
 import { sshExec } from '../../ssh-exec.js';
 import { shellQuote } from '../../ssh-exec.js';
@@ -35,12 +25,9 @@ interface RemotePullResult {
   errors: string[];
 }
 
-/**
- * Run `agents sessions export …exportArgs --stdout` on each host and parse the
- * streamed bundle. A host that fails (unreachable, remote error, bad output) is
- * collected in `errors` and skipped — one asleep peer never aborts the pull.
- * `exportArgs` must NOT contain --device (the remote export runs for itself only).
- */
+/** Run `agents sessions export …exportArgs --stdout` on each host and parse the bundle. A failing
+ * host goes into `errors` and is skipped. `exportArgs` must not contain --device: the remote
+ * export runs for itself only. */
 export async function pullBundlesFromHosts(hosts: string[], exportArgs: string[]): Promise<RemotePullResult> {
   const targets = await resolveExplicitTargets(hosts);
   const bundles: ParsedBundle[] = [];

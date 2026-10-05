@@ -1,12 +1,6 @@
-/**
- * Git / GitHub "output" collector — the shipped-work half of `agents insights output`.
- *
- * `agents insights cost` answers "what did we burn?"; this answers "what did we ship?".
- * It counts commits (across every author identity, so multi-account totals stay
- * correct regardless of which `gh` login is active) and PRs opened / merged in a
- * time window. Pure `git`/`gh` over child_process — no server, no telemetry,
- * mirroring the offline spirit of the cost rollup.
- */
+/** Git/GitHub "output" collector: the shipped-work half of `agents insights output`. Counts commits
+ * across every author identity (so totals hold whichever `gh` login is active) and PRs
+ * opened/merged in a window. Pure `git`/`gh`; no server or telemetry. */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -28,11 +22,9 @@ interface GitOutputSummary {
   byAuthor: AuthorCommits[];
   prsOpened: number;
   prsMerged: number;
-  /**
-   * Deduped commit SHAs authored by us in the window. Carried so `--all-hosts`
-   * can UNION across machines — a repo cloned on several boxes exposes the same
-   * commits to `git log` on each, so summing counts would multi-count.
-   */
+  /** Deduped commit SHAs authored by us in the window, carried so `--all-hosts` can UNION across
+   * machines: a repo cloned on several boxes exposes the same commits to each `git log`, so
+   * summing counts would multi-count. */
   commitShas: string[];
   /** false when `gh` is missing/unauthed — PR counts are then 0 and not trustworthy. */
   ghAvailable: boolean;
@@ -61,11 +53,8 @@ interface GitOutputOptions {
 /** Directory names never descended into during repo discovery. */
 const SKIP_DIRS = new Set(['node_modules', '.git', '.agents', '.worktrees', 'dist', 'build', '.next', '.cache']);
 
-/**
- * Find git repositories under `root` up to `maxDepth` levels deep. A directory
- * with a `.git` entry is a repo and is NOT descended into (so nested worktrees
- * / submodules don't double-count).
- */
+/** Finds git repositories under `root` up to `maxDepth`. A directory with a `.git` entry is a repo
+ * and is NOT descended into, so nested worktrees/submodules don't double-count. */
 export function findGitRepos(root: string, maxDepth = 4): string[] {
   const repos: string[] = [];
   const walk = (dir: string, depth: number): void => {
@@ -115,10 +104,8 @@ async function repoLog(repoDir: string, sinceIso: string): Promise<CommitRef[]> 
   }
 }
 
-/**
- * Discover the user's own author emails so commit counts exclude teammates.
- * Union of `git config --global user.email` and each repo's local `user.email`.
- */
+/** Discovers the user's own author emails so commit counts exclude teammates: `git config --global
+ * user.email` plus each repo's local `user.email`. */
 async function discoverAuthorEmails(repos: string[]): Promise<string[]> {
   const emails = new Set<string>();
   try {
@@ -142,11 +129,8 @@ async function discoverAuthorEmails(repos: string[]): Promise<string[]> {
   return [...emails];
 }
 
-/**
- * Count commits by our authors across all repos, deduped by SHA (so the same
- * commit reachable via multiple repo clones/worktrees on this machine — or, at
- * the fleet layer, across machines — is counted once), tallied per email.
- */
+/** Counts commits by our authors across all repos, deduped by SHA (the same commit via several
+ * clones/worktrees, or across machines, counts once), tallied per email. */
 export async function collectCommits(
   repos: string[],
   sinceIso: string,
@@ -195,11 +179,9 @@ async function ghSearchCount(args: string[]): Promise<number | null> {
   }
 }
 
-/**
- * Count PRs opened and merged in the window across the given logins. `gh search
- * prs` searches all of GitHub, so one authed gh can cover multiple accounts'
- * logins. Returns ghAvailable=false if gh can't be reached at all.
- */
+/** Counts PRs opened and merged in the window across the given logins. `gh search prs` spans all of
+ * GitHub, so one authed gh covers several accounts. Returns ghAvailable=false if gh can't be
+ * reached. */
 async function collectPrs(
   logins: string[],
   sinceDate: string,
@@ -233,10 +215,8 @@ export function toSearchDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/**
- * Collect the full shipped-work summary for a window: commits (across accounts)
- * plus PRs opened/merged.
- */
+/** Collects the full shipped-work summary for a window: commits (across accounts) plus PRs
+ * opened/merged. */
 export async function collectGitOutput(options: GitOutputOptions): Promise<GitOutputSummary> {
   const reposDir = options.reposDir.replace(/^~(?=$|\/)/, os.homedir());
   const sinceIso = new Date(options.sinceMs).toISOString();

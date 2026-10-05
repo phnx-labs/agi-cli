@@ -42,27 +42,19 @@ export interface PerfAggregateRow {
   meanMs: number;
   maxMs: number;
   minMs: number;
-  /**
-   * Per-sub-phase percentiles parsed from each sample's meta_json `phases`.
-   * Present only when at least one sample in the bucket recorded a phase
-   * (agent.run records `startup` — time from spawnAgent entry to child spawn —
-   * so boot cost is trackable independently of the total run, PHNX-3468).
-   */
+  /** Per-sub-phase percentiles from each sample's meta_json `phases`, present only when a sample
+   * recorded one (agent.run records `startup`, spawnAgent entry to child spawn, so boot cost is
+   * trackable separately, PHNX-3468). */
   phases?: Record<string, PerfPhaseStat>;
   cacheHitPct?: number;
   cacheStalePct?: number;
   cacheMissPct?: number;
   errorCount?: number;
-  /**
-   * Fraction (0-1) of samples with a real crash exit (exit 1 / other nonzero
-   * except the intentional PreToolUse deny code 2). Exit 2 is blockRate.
-   */
+  /** Fraction (0-1) of samples with a real crash exit (exit 1 / other nonzero except the
+   * intentional PreToolUse deny code 2). Exit 2 is blockRate. */
   errorRate?: number;
-  /**
-   * Count of intentional deny/block exits (Claude/Codex PreToolUse exit 2).
-   * Not an error — deny-by-design guards (ask-user-question-guard, git-guard,
-   * plan-html-reminder) exit 2 when they block.
-   */
+  /** Count of intentional deny/block exits (PreToolUse exit 2). Not an error: deny-by-design guards
+   * (ask-user-question-guard, git-guard, plan-html-reminder) exit 2 when they block. */
   blockCount?: number;
   /** Fraction (0-1) of samples with exit code 2 (intentional deny/block). */
   blockRate?: number;

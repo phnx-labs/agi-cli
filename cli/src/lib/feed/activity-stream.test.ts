@@ -17,14 +17,9 @@ function line(sessionId: string, detail: string, ts: string, event = 'status.pos
   return `${JSON.stringify({ v: 1, sessionId, event, ts, detail, host: 'box', runtime: 'headless' })}\n`;
 }
 
-/**
- * Wait until the filesystem's timestamp clock has advanced.
- *
- * Linux stamps ctime from a coarse clock, so two writes inside the same tick
- * share a ctime and the same-length-rewrite guard has nothing to see. That is a
- * property of the filesystem, not of the reader, so the test waits it out
- * instead of asserting through it.
- */
+/** Waits until the filesystem timestamp clock advances: Linux ctime is coarse, so two writes in
+ * one tick share a ctime and the same-length-rewrite check has nothing to see. A filesystem
+ * property, so the test waits it out. */
 async function tickFsClock(dir: string): Promise<void> {
   const probe = path.join(dir, '.tick'); // not *.jsonl, so the stream ignores it
   fs.writeFileSync(probe, 'a');
@@ -143,10 +138,9 @@ describe('incremental activity stream over real files', () => {
   it('reads a same-length in-place rewrite that leaves size and mtime untouched', async () => {
     const dir = root();
     const file = path.join(dir, 's.jsonl');
-    // Two records of identical byte length, so the rewrite moves neither the
-    // size nor the 64-byte anchor behind the cursor, and both states are pinned
-    // to the SAME mtime. ctime is then the only remaining signal; without it
-    // this reader retires the file for good and never emits the rewrite.
+    // Two records of identical byte length leave size and the 64-byte anchor unchanged, and both
+    // share one mtime. ctime is the only remaining signal; without it the reader retires the file
+    // and never emits the rewrite.
     const before = line('s', 'aaaaaaaa', '2026-09-06T00:00:01.000Z');
     const after = line('s', 'bbbbbbbb', '2026-09-06T00:00:02.000Z');
     expect(Buffer.byteLength(after)).toBe(Buffer.byteLength(before));

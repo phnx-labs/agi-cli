@@ -1,10 +1,5 @@
-/**
- * Webhook handler config layer.
- *
- * Handlers are one-off triggers stored in `~/.agents/webhooks/*.yml` (plus
- * project/system layers). They complement routine triggers: a matching webhook
- * can run an agent, workflow, shell command, or delegate to a routine.
- */
+/** Webhook handler config layer: one-off triggers in `~/.agents/webhooks/*.yml` (plus layers). A
+ * match runs an agent, workflow, or command, or delegates to a routine. */
 
 import { exec } from 'child_process';
 import * as fs from 'fs';
@@ -44,32 +39,16 @@ export interface WebhookHandler {
   /** Slack (source: slack) only — restrict to one channel id (`C0…`). Lets a
    *  channel imply a project via a per-channel handler. */
   channel?: string;
-  /**
-   * Where to run the action. A device name (`yosemite-s0`) runs there over SSH;
-   * `fleet` picks any eligible online worker; `fleet/<platform>` (or
-   * `<platform>/fleet`, or a bare `linux`/`macos`/`windows`) restricts that pick
-   * to one platform. Omitted runs locally.
-   */
+  /** Where to run: device name (SSH), `fleet` or `fleet/<platform>` for any eligible worker. Omitted
+   * runs locally. */
   host?: string;
-  /**
-   * Named project (`agents projects`) whose base directory the dispatched
-   * agent/workflow run lands in — the execution anchor, mirroring a routine's
-   * `project`. Without it an agent handler runs at the target's `$HOME` with no
-   * repo checkout to edit. Applies to `run.agent`/`run.workflow` and the
-   * `routine:` delegate; ignored by `run.command` (put a `cd` in the command).
-   */
+  /** Named project (`agents projects`) whose base dir the run lands in; mirrors a routine's
+   * `project`. Ignored by `run.command`; without it an agent runs at the target's `$HOME`. */
   project?: string;
-  /**
-   * Portable execution directory for the dispatched run. A relative value
-   * resolves under `project` when set, otherwise the target's `$HOME`. Mirrors
-   * a routine's `cwd`.
-   */
+  /** Portable execution dir; a relative value resolves under `project`, else `$HOME`. */
   cwd?: string;
-  /**
-   * Permission mode for a dispatched agent/workflow run. Defaults to `auto`
-   * (write with the classifier). Set `skip`/`full` for fully unattended edits,
-   * or `plan` for a read-only run.
-   */
+  /** Permission mode for a dispatched run. Defaults to `auto`; `skip`/`full` unattended, `plan`
+   * read-only. */
   mode?: JobConfig['mode'];
   run?: {
     agent?: AgentId;
@@ -226,20 +205,9 @@ interface HandlerHostResolution {
   hostStrategy?: 'host' | 'fleet';
 }
 
-/**
- * Resolve a handler `host` expression to a concrete host or local execution.
- *
- * - Specific device name (e.g. `yosemite-s0`) → run there over SSH, or locally
- *   if it names this machine.
- * - `fleet` → pick any online worker device.
- * - `fleet/<platform>` or `<platform>/fleet` (e.g. `fleet/linux`, `linux/fleet`)
- *   → pick any online worker on that platform. `linux` alone is accepted as a
- *   shorthand for `fleet/linux`.
- *
- * Throws when a fleet expression matches no eligible device, rather than
- * silently falling back to this machine — `fleet/linux` must never land on a
- * macOS box.
- */
+/** Resolve a handler `host` (device, `fleet`, `fleet/<platform>`, bare `linux`) to a host or local
+ * run. Throws when no device matches rather than falling back, so `fleet/linux` never lands on
+ * macOS. */
 export function resolveHandlerHost(host: string | undefined): HandlerHostResolution {
   if (!host || host.trim() === '') return {};
   const { base, platform } = parseHostPlatform(host);
@@ -256,10 +224,7 @@ export function resolveHandlerHost(host: string | undefined): HandlerHostResolut
   return { host: base, hostStrategy: 'host' };
 }
 
-/**
- * List all webhook handlers, scanning project > user > system webhook dirs.
- * Higher layers shadow lower ones of the same name (first-seen wins).
- */
+/** List webhook handlers across project > user > system dirs; higher layers shadow same names. */
 export function listHandlers(cwd?: string): WebhookHandler[] {
   ensureAgentsDir();
   const seen = new Set<string>();
@@ -319,13 +284,9 @@ export function handlerMatchesWebhook(handler: WebhookHandler, webhook: Incoming
       const data = webhook.payload.data as Record<string, unknown> | undefined;
       const current = (data?.state as Record<string, unknown> | undefined)?.name;
       if (current !== handler.stateTo) return false;
-      // RUSH-2539: `stateTo` is a TRANSITION predicate, not a current-state one.
-      // Linear carries the prior value of each changed field in `updatedFrom`, so a
-      // real state change has `updatedFrom.state` (this codebase's shape) or
-      // `updatedFrom.stateId` (Linear's scalar). With neither, this Issue/update
-      // touched something else (label, assignee, description) while the issue merely
-      // still sits in `stateTo` — matching there re-fires on every later edit
-      // (RUSH-1459 accumulated 11 duplicate plan comments).
+      // RUSH-2539: `stateTo` is a transition predicate; without `updatedFrom.state`/`stateId` the
+      // issue merely sits there, and matching re-fired on every later edit (RUSH-1459: 11 duplicate
+      // comments).
       const updatedTo = webhook.payload.updatedFrom as Record<string, unknown> | undefined;
       if (!updatedTo || (updatedTo.state === undefined && updatedTo.stateId === undefined)) return false;
     }
@@ -352,10 +313,7 @@ export function handlerMatchesWebhook(handler: WebhookHandler, webhook: Incoming
   return true;
 }
 
-/**
- * The `{{slack.*}}` substitution namespace: a Slack message split into an
- * agent-actionable project + prompt, plus the coordinates a reply threads into.
- */
+/** The `{{slack.*}}` namespace: a Slack message split into project + prompt, plus reply coordinates. */
 export interface SlackMessageContext {
   /** The message with a leading bot mention stripped. */
   text: string;
@@ -371,26 +329,15 @@ export interface SlackMessageContext {
   user: string;
   /** Slash command name (`/agents`), or '' for an event delivery. */
   command: string;
-  /**
-   * Slash-command reply URL (`https://hooks.slack.com/commands/…`), or '' for an
-   * event delivery. Slack accepts a POST here for 30 minutes with no token and no
-   * channel membership, so it is the only reply path that works before the app has
-   * been invited to a channel.
-   */
+  /** Slash-command reply URL, or '' for an event. Slack accepts a tokenless POST for 30 minutes, so
+   * it works before the app is invited to a channel. */
   response_url: string;
 }
 
 const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
 
-/**
- * Split a Slack message into a `{{slack.*}}` context. Strips a leading bot
- * mention (`<@U0BOT> …`), then reads an optional `PROJECT:` prefix — a single
- * bare token followed by a colon and a space — as the project, with the
- * remainder the prompt. `AGI: rebase my PR` → project `AGI`, prompt
- * `rebase my PR`; a message with no such prefix leaves `project` empty and the
- * whole text as the prompt. The token pattern forbids slashes, so a project
- * value can never carry a path into a `cwd`/`project` substitution.
- */
+/** Split a Slack message: strip a leading bot mention, read an optional `PROJECT:` prefix. The token
+ * pattern forbids slashes so a project can never carry a path into `cwd`. */
 function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
   const cleaned = asString(payload.text).replace(/^\s*<@[^>]+>\s*/, '').trim();
   const m = /^([A-Za-z0-9][\w.-]*)\s*:\s+([\s\S]+)$/.exec(cleaned);
@@ -406,17 +353,11 @@ function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
   };
 }
 
-/**
- * Build the variable-substitution context for a webhook. Linear events expose
- * `issue` and `updatedFrom`; GitHub events expose `repository`, `pull_request`,
- * and `issue`; Slack events expose the `{{slack.*}}` namespace above.
- */
+/** Build the substitution context for a webhook (Linear, GitHub, or Slack namespace). */
 export function buildWebhookContext(webhook: IncomingWebhook): WebhookContext {
   if (webhook.source === 'slack') {
-    // The `{{slack.*}}` namespace rides an intersection over WebhookContext (a
-    // subtype of it) rather than a field on the shared type, so a Slack-only
-    // addition never touches the scheduling hub every routine test depends on.
-    // `substituteWebhookPrompt`/`getPath` read it dynamically at runtime.
+    // The Slack namespace is an intersection type, not a field on WebhookContext, so a Slack-only
+    // addition never touches the hub every routine test depends on.
     const ctx: WebhookContext & { slack: SlackMessageContext } = {
       source: webhook.source,
       event: webhook.event,
@@ -473,11 +414,7 @@ function dispatchDefault(config: JobConfig): Promise<RunMeta> {
   return import('../daemon/runner.js').then((m) => m.executeJobDetached(config));
 }
 
-/**
- * Execute a handler's action. Runs the configured agent/workflow/command or
- * delegates to a routine, substituting `{{...}}` placeholders from the webhook
- * context.
- */
+/** Execute a handler's action (agent, workflow, command, or routine), substituting `{{...}}`. */
 export async function executeHandler(
   handler: WebhookHandler,
   webhook: IncomingWebhook,
@@ -545,12 +482,9 @@ async function executeHandlerAction(
       ...(substitutedCwd ? { cwd: substitutedCwd } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
-      // A handler is not a routine, so its name can never appear in this device's
-      // routine activation manifest — without this marker the gate answered "not
-      // activated here" and every delivery was skipped while the receiver logged
-      // `fired` (the same shape as RUSH-2681's monitor bug). The `routine:`
-      // delegate below deliberately omits it: that fires a REAL routine, which
-      // keeps its own activation gate.
+      // A handler is never in the routine activation manifest; without this marker every delivery
+      // was skipped (as RUSH-2681). The `routine:` delegate omits it: a real routine keeps its own
+      // check.
       dispatchedBy: 'webhook',
     };
     const dispatch = handler.run.agent

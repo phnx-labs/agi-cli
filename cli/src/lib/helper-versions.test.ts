@@ -37,11 +37,8 @@ describe('helper release tags', () => {
   });
 
   it('lists only the helpers this CLI actually distributes', () => {
-    // The table must not claim a helper agents-cli no longer downloads. The
-    // computer helpers left with the standalone `computer` engine (PHNX-4075),
-    // which resolves and verifies its own releases -- an entry here would be a
-    // lying capability table, and would put the extracted helper back on this
-    // CLI's release path.
+    // The table must not claim a helper agents-cli no longer downloads: the computer helpers left
+    // with the standalone `computer` engine (PHNX-4075), and an entry would be a lying table.
     expect(Object.keys(HELPER_RELEASES).sort()).toEqual(['menubar']);
     expect(() => helperTag('computer-win' as HelperName, '1.0.0')).toThrow(/unknown helper/);
     expect(() => helperTag('computer-mac' as HelperName, '1.0.0')).toThrow(/unknown helper/);

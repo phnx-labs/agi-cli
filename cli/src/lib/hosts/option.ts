@@ -1,14 +1,6 @@
-/**
- * Shared `--device` option registrar. Every command that can run on a remote device
- * declares the flag through here, so its spelling, help text, and companions
- * (`--remote-cwd`, `--no-tty`, `--any`) stay identical everywhere and show up in
- * each command's `--help`.
- *
- * The flags are consumed centrally by `maybeRunOnHost` (passthrough.ts) *before*
- * commander parses, so for a real remote run the local action never sees them.
- * Registering them here still matters: it documents the flag and keeps the local
- * fall-through (e.g. `--device <this-machine>`) from erroring on an unknown option.
- */
+/** Shared `--device` option registrar so spelling, help and companions (`--remote-cwd`, `--no-
+ * tty`, `--any`) stay identical. maybeRunOnHost consumes them before commander parses;
+ * registering still documents them and keeps the local fall-through working. */
 
 import type { Command } from 'commander';
 

@@ -1,9 +1,5 @@
-/**
- * Shared utilities for command implementations.
- *
- * Small helpers used across multiple commands: prompt cancellation detection,
- * table formatting, spinner management, and platform-specific workarounds.
- */
+/** Shared helpers for command implementations: prompt cancellation detection, table formatting,
+ * spinners, and platform workarounds. */
 
 import * as os from 'os';
 import { spawnSync } from 'child_process';
@@ -88,14 +84,9 @@ export function resolveSurface(cmd: Command): Surface {
   };
 }
 
-/**
- * Coerce a `--device` value that may arrive as a scalar or an array to a single
- * host string. A subcommand whose own `--device` collides in name with an
- * ancestor's variadic `-D, --device <target...>` (e.g. `sessions inject`,
- * `sessions resume` under the parent `sessions` command) can receive an array
- * even when the command only ever targets one device — fail loud on more than
- * one rather than guessing the first (PHNX-3688, PHNX-3940).
- */
+/** Coerce a `--device` value (scalar or array) to one host string. A subcommand whose `--device`
+ * collides with an ancestor's variadic `-D, --device <target...>` (e.g. `sessions inject`/`resume`)
+ * can receive an array; fail loud on more than one (PHNX-3688, PHNX-3940). */
 export function normalizeSingleDeviceOption(value: string | string[] | undefined, commandLabel: string): string | undefined {
   const list = value == null ? [] : Array.isArray(value) ? value : [value];
   const hosts = list.map((v) => String(v).trim()).filter((v) => v.length > 0);
@@ -120,13 +111,9 @@ export function requireInteractiveSelection(action: string, alternatives: string
   process.exit(1);
 }
 
-/**
- * Print a properly-cased "missing argument" error for destructive commands and
- * exit. Destructive commands (remove, disband, disable) deliberately do NOT
- * fall back to an interactive picker — typing the name is the safety check.
- *
- * Lists available items so the user can copy-paste, but never auto-selects.
- */
+/** Print a "missing argument" error for destructive commands and exit. They deliberately never
+ * fall back to a picker, since typing the name is the safety check; it lists available items to
+ * copy but never auto-selects. */
 export function requireDestructiveArg(opts: {
   argName: string;       // e.g. 'team', 'name', 'agent'
   command: string;       // e.g. 'agents teams disband'
@@ -184,11 +171,8 @@ export interface RemovalTarget {
   label: string;
 }
 
-/**
- * Prompt user to select which agent/version targets to remove a resource from.
- * If only one target, returns it without prompting. If multiple, shows checkbox.
- * Returns empty array if user cancels or selects nothing.
- */
+/** Prompt to select which agent/version targets to remove a resource from: a single target returns
+ * without prompting, several show a checkbox. Returns an empty array on cancel or no selection. */
 export async function promptRemovalTargets(
   resourceName: string,
   targets: RemovalTarget[],
@@ -236,14 +220,9 @@ export function formatPath(fullPath: string, cwd?: string): string {
   return fullPath;
 }
 
-/**
- * Parse a --agents selector and collect every (agentId, specificVersion) pair
- * the user requested where the version is a concrete x.y.z (not `default`,
- * not `all`, not `latest`) and is NOT currently installed.
- *
- * This is the lookahead the auto-install wrappers use to decide whether to
- * prompt + install before delegating to resolveAgentVersionTargets.
- */
+/** Parse a --agents selector and collect every (agent, version) the user requested with a concrete
+ * x.y.z (not default/all/latest) that is not installed. The lookahead auto-install wrappers use to
+ * decide whether to prompt before resolveAgentVersionTargets. */
 function collectMissingVersions(
   value: string,
   availableAgents: readonly AgentId[]
@@ -279,12 +258,9 @@ function collectMissingVersions(
   return missing;
 }
 
-/**
- * Sequentially install every requested missing version with a per-version
- * spinner. Aborts via process.exit(1) on the first failure — the user
- * already approved the install so a partial-install outcome is worse than
- * a hard stop.
- */
+/** Sequentially install every requested missing version with a per-version spinner. Aborts via
+ * process.exit(1) on the first failure: the user approved the install, so a partial result is worse
+ * than a hard stop. */
 async function installMissingVersions(
   missing: ReadonlyArray<{ agentId: AgentId; version: string }>
 ): Promise<void> {

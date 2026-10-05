@@ -1,11 +1,6 @@
-/**
- * Rules management commands for controlling agent behavior via persistent instructions.
- *
- * Implements `agents rules` -- list, add, view, and remove markdown rule files
- * (AGENTS.md, CLAUDE.md, .cursorrules, etc.) that guide agent behavior across
- * sessions. Central storage lives in ~/.agents/rules/ and rules are synced
- * to individual version homes.
- */
+/** `agents rules`: list, add, view and remove markdown rule files (AGENTS.md, CLAUDE.md,
+ * .cursorrules, ...) that guide agents across sessions. Central storage is `~/.agents/rules/`,
+ * synced to version homes. */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';

@@ -1,21 +1,6 @@
-/**
- * Resolve a remote host's OS family so the SSH command layer can pick the right
- * shell dialect (POSIX `bash -lc` vs Windows PowerShell). See `remoteShellFor`
- * in `remote-cmd.ts` for how the string is consumed.
- *
- * Three sources, in priority order:
- *   1. The config `platform` key (the per-device doc's config.platform,
- *      over the `fleet.defaults.config` fleet default) — the operator's
- *      explicit override, set with `agents devices config <name> platform <os>`.
- *   2. The device registry `platform` (`windows`/`linux`/`macos`), which is
- *      populated fleet-wide by Tailscale sync — the reliable answer for a box
- *      like `win-mini` that was discovered, not hand-enrolled.
- *   3. The enrolled `HostEntry.os` overlay in agents.yaml (the `uname` captured
- *      when the overlay entry was written), for hosts that live only in that overlay.
- *
- * Missing/unknown from all three → `undefined`, which `remoteShellFor` maps to
- * POSIX. Kept synchronous so the sync `agents sessions --device` fan-out can use it.
- */
+/** Resolve a remote host's OS family so the SSH layer picks the shell dialect (see
+ * `remoteShellFor`). Priority: config `platform` key, Tailscale-synced registry `platform`,
+ * then overlay `HostEntry.os`; unknown means POSIX. Synchronous for fan-out. */
 
 import { loadDevicesSync } from '../devices/registry.js';
 import { readDeviceConfigValues } from '../device-config.js';

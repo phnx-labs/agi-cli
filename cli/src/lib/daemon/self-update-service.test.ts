@@ -1,16 +1,6 @@
-/**
- * SelfUpdateService / attemptSelfUpdateAndExit (PHNX-3695).
- *
- * Drives the REAL install path — `npm pack` a tiny fixture package, serve it
- * over a real local HTTP server (standing in for the registry + tarball CDN,
- * following the exact fixture pattern `self-update.test.ts`'s
- * `installPackageIntoPrefix` / `downloadVerifiedTarball` suites use), and
- * install it with the real `installAndVerifyDefault` into a real temp-dir npm
- * prefix. No mocked npm client, no mocked fs/process — only the two boundaries
- * that must be fixture-controlled for a hermetic test (which "latest version"
- * the registry reports, and where "packageRoot" points) are injected, exactly
- * the seam `SelfUpdateDeps` exists for.
- */
+/** SelfUpdateService / attemptSelfUpdateAndExit (PHNX-3695). Drives the real install path: `npm
+ * pack` a fixture, serve it over a local HTTP server, install via `installAndVerifyDefault` into a
+ * temp prefix. Only the registry's latest version and `packageRoot` are injected. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -153,10 +143,9 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('a verify mismatch after a real install is surfaced as a failure, not a false success', { timeout: 120_000 }, async () => {
-    // The registry claims 2.0.0 but the fixture tarball is actually 3.0.0 —
-    // installAndVerifyDefault's verifyInstalledVersion (self-update.ts) must
-    // catch the mismatch against the CLAIMED version, exactly like `agents
-    // upgrade` would refuse to report success on a wrong install.
+    // The registry claims 2.0.0 but the tarball is 3.0.0: installAndVerifyDefault's
+    // verifyInstalledVersion must catch the mismatch against the claimed version, like `agents
+    // upgrade`.
     const { tarballUrl, integrity } = await packAndServe('3.0.0');
     const packageRoot = makeInstalledPackageRoot('1.0.0');
     const { ctx, logs } = makeCtx();
@@ -192,10 +181,9 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('an install another process already upgraded on disk relaunches without touching the registry or installing', async () => {
-    // The fleet case (2026-09-07): every operator-typed `agents` command on a
-    // worker auto-updates the install, so the disk moved 1.22.79 -> 1.22.88
-    // while the daemon kept running the code it booted with. Nothing to
-    // download or verify — exit for the OS-supervisor relaunch.
+    // Fleet case (2026-09-07): operator-typed `agents` commands on a worker auto-update the
+    // install, so the disk moved 1.22.79 to 1.22.88 while the daemon kept running old code.
+    // Nothing to download or verify; exit for the OS-supervisor relaunch.
     const { ctx, logs } = makeCtx();
     const fetchLatestMetadata = vi.fn();
     const installAndVerify = vi.fn();
@@ -310,15 +298,9 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('a deadline abort during a real in-flight install actually kills it, not just abandons the await (PHNX-3695 review)', { timeout: 30_000 }, async () => {
-    // A prior version raced the tick's AbortSignal against the download/install
-    // promises without ever cancelling the underlying fetch/child process, so a
-    // deadline abort left an orphaned `npm install` writing into the shared
-    // prefix while the very next attempt started a fresh install into the same
-    // directory. installAndVerifyDefault now threads `signal` into
-    // downloadVerifiedTarball's own `fetch` option (self-update.ts), which Node
-    // aborts for real. Prove that here with a server that stalls the response
-    // body indefinitely and observes whether the request socket was actually
-    // torn down, not just abandoned by the client.
+    // A prior version raced the tick's AbortSignal against the download/install promises without
+    // cancelling the fetch/child, leaving an orphaned `npm install` in the shared prefix. `signal`
+    // is now threaded into the tarball `fetch`; proved with a stalling server.
     const src = makeTempDir('slow-src');
     fs.writeFileSync(
       path.join(src, 'package.json'),
@@ -372,13 +354,9 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('two concurrent callers share one in-flight attempt — a subsequent request never starts a second install (PHNX-3695 review)', { timeout: 30_000 }, async () => {
-    // The review's second ask: prove the inFlightAttempt guard actually
-    // dedupes overlapping callers (the periodic tick racing an on-demand
-    // request-self-update, or two skewed clients asking at once) onto ONE
-    // real install rather than starting a second one into the same prefix.
-    // Count real HTTP requests the tarball server receives: with the guard
-    // working, two concurrent attemptSelfUpdateAndExit calls download the
-    // tarball exactly once.
+    // Prove the inFlightAttempt guard dedupes overlapping callers (periodic tick, on-demand
+    // request, skewed clients) onto one real install: two concurrent attemptSelfUpdateAndExit
+    // calls must download the tarball exactly once.
     let requestCount = 0;
     const src = makeTempDir('dedupe-src');
     fs.writeFileSync(

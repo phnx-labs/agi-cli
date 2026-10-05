@@ -1,10 +1,6 @@
-// Cloudflare orchestration for the managed session-backup store. The generic
-// request primitives live in cloudflare/provision; only the isolated sessions
-// resource choices and Worker template belong here. Mirrors lib/traces/provision.ts.
-//
-// This is the OPERATOR provisioning path — cutting the `agents-sessions` Worker +
-// bucket + custom domain once. Product traffic never runs it; a signed-in user
-// talks to the already-deployed Worker through `SessionsHttpClient`.
+// Cloudflare orchestration for the managed session-backup store (mirrors lib/traces/provision.ts).
+// Operator-only: cuts the `agents-sessions` Worker, bucket and domain once; users talk to it via
+// `SessionsHttpClient`.
 
 import {
   addCustomDomain,
@@ -64,10 +60,8 @@ export async function provisionSessions(opts: ProvisionSessionsOptions): Promise
     bucketName,
     requestOpts,
   );
-  // No WRITE_TOKEN secret: the managed sessions Worker is Phoenix-only (PHNX-3726).
-  // A static token would be a Phoenix-and-quota bypass with no legitimate caller —
-  // the zero-knowledge BYO path uses the user's own R2 bucket directly, never this
-  // Worker.
+  // No WRITE_TOKEN secret: the managed sessions Worker is Phoenix-only (PHNX-3726). A static token
+  // would bypass Phoenix and quota; the zero-knowledge BYO path uses the user's own bucket.
   await setPhoenixIdBaseSecret(
     opts.apiToken,
     opts.accountId,

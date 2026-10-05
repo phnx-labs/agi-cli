@@ -1,18 +1,6 @@
-/**
- * Target enumeration + `--auto` scorer for `agents sessions migrate` (RUSH-1977).
- *
- * `sessions migrate` relocates a running session onto another machine. This
- * module is the pure decision layer: given the fleet (enrolled hosts + devices
- * from `listAllHosts()`), their live headroom ({@link Headroom} buckets derived
- * from `probeFleetStats()` / the disk stats-cache), and the reusable ephemeral
- * crabbox boxes (`reusableBoxes()`), it enumerates eligible {@link MigrateTarget}s
- * and ranks them for `--auto`.
- *
- * Kept side-effect-free (no ssh, no disk, no clock) so the ranking is a unit test
- * against synthetic Host[]/DeviceStats — the command layer does the probing and
- * hands the results in. The one genuine-bug guard the test pins: the source and
- * the interactive machine (os.hostname()) are never offered as targets.
- */
+/** Target enumeration and `--auto` scorer for `agents sessions migrate` (RUSH-1977). Pure decision
+ * layer with no ssh, disk or clock, so ranking is unit-testable. The source and the interactive
+ * machine (os.hostname()) are never offered as targets. */
 import type { Host } from '../hosts/types.js';
 import type { DeviceStats, Headroom } from '../devices/health.js';
 import { headroom } from '../devices/health.js';
@@ -63,13 +51,9 @@ function platformOf(os: string | undefined): string | undefined {
   return s;
 }
 
-/**
- * Enumerate the fleet + ephemeral targets a session could move to, excluding the
- * interactive machine and the source. A fleet host is eligible only when it is
- * dispatchable and not obviously offline; ephemeral (warm) boxes are always
- * eligible (already provisioned and reachable). `statsByName` supplies live
- * headroom — a missing entry yields 'unknown' (still eligible, just ranked lower).
- */
+/** Enumerate migrate targets, excluding the interactive machine and the source. Fleet hosts must be
+ * dispatchable and not offline; warm ephemeral boxes are always eligible. A missing `statsByName`
+ * entry yields 'unknown' headroom: eligible but ranked lower. */
 export function enumerateTargets(
   hosts: Host[],
   warmBoxes: CrabboxBox[],
@@ -107,14 +91,8 @@ export function enumerateTargets(
   return [...fleet, ...ephemeral];
 }
 
-/**
- * Rank targets for `--auto`. Order:
- *   1. Platform match with the source (a faithful --resume wants the same OS family).
- *   2. Fleet before ephemeral (prefer a warm worker over spinning a box).
- *   3. Headroom (idle > light > busy > loaded > unknown).
- *   4. Name, for a stable tie-break.
- * Returns a new sorted array; does not mutate the input.
- */
+/** Rank `--auto` targets by platform match with the source, fleet before ephemeral, headroom (idle
+ * > light > busy > loaded > unknown), then name. Returns a new array. */
 export function rankTargets(targets: MigrateTarget[], ctx: MigrateContext): MigrateTarget[] {
   const srcPlatform = platformOf(ctx.sourceOs);
   const score = (t: MigrateTarget) => {
@@ -132,11 +110,8 @@ export function rankTargets(targets: MigrateTarget[], ctx: MigrateContext): Migr
   });
 }
 
-/**
- * Pick the single best `--auto` target, or null when nothing is eligible. A
- * fully-loaded ('loaded') fleet is still returned (better than failing the
- * migrate); the command layer can offer `--lease` when this is null.
- */
+/** Pick the best `--auto` target, or null if none is eligible. A fully loaded fleet is still
+ * returned; the command layer can offer `--lease` on null. */
 export function pickBestTarget(
   hosts: Host[],
   warmBoxes: CrabboxBox[],

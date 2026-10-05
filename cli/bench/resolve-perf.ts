@@ -1,19 +1,7 @@
 #!/usr/bin/env tsx
-// Benchmark harness for centralized agent-spec resolution.
-//
-// Measures, against the host's real installed versions:
-//   A. listInstalledVersions — cold (cache busted each call) vs warm (cached)
-//   B. resolveAgentTargets fast paths (exact / @pinned / bare) — meta-only,
-//      no enumeration once warm
-//   C. resolveAgentTargets enumerate paths (@latest / @all)
-//   D. 1000x repeated resolution of the hot-path spec (simulates per-subcommand
-//      resolution across a session) — total + per-call
-//
-// The "fast paths perform zero readdir" invariant is asserted in the unit test
-// (agent-spec.test.ts, via vi.spyOn) — bun makes fs.readdirSync read-only so it
-// can't be instrumented here; this harness measures wall-clock instead.
-//
-// Output: JSON on stdout. Run before/after to diff: `bun bench/resolve-perf.ts`.
+// Benchmark for centralized agent-spec resolution against the host's real installed versions:
+// listInstalledVersions cold vs warm; resolveAgentTargets fast paths and enumerate paths; 1000x
+// repeated hot-path resolution. Output is JSON on stdout: `bun bench/resolve-perf.ts`.
 
 import { performance } from 'perf_hooks';
 import { listInstalledVersions, invalidateInstalledVersionsCache, getGlobalDefault } from '../src/lib/installations/versions.js';

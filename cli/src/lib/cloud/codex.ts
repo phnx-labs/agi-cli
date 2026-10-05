@@ -1,10 +1,5 @@
-/**
- * Codex Cloud provider -- wraps the `codex` CLI for cloud dispatch.
- *
- * Delegates to `codex cloud exec/status/list` subcommands, parsing their
- * JSON or text output into the unified CloudTask format. Streaming is
- * emulated via polling since Codex Cloud lacks an SSE endpoint.
- */
+/** Codex Cloud provider wrapping `codex cloud exec/status/list` into CloudTask. Streaming is
+ * emulated by polling (no SSE endpoint). */
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -109,10 +104,8 @@ export class CodexCloudProvider implements CloudProvider {
       cancel: false,
       message: false,
       multiRepo: false,
-      // `codex cloud exec --env <id> <prompt>` is the only dispatch surface the
-      // codex CLI exposes — it has no flag to attach images or ride-along skills,
-      // and the env bundles its own context at creation time. Both stay false
-      // until the upstream CLI grows an attachment surface.
+      // `codex cloud exec --env <id> <prompt>` is the only dispatch surface: no image or skill
+      // attachment. Both stay false until upstream adds one.
       skills: false,
       images: false,
     };
@@ -130,12 +123,8 @@ export class CodexCloudProvider implements CloudProvider {
       );
     }
 
-    // Codex envs bundle their own repo list — the repos a task can touch are
-    // fixed at env-creation time, not per-dispatch. Passing 2+ repos here is
-    // almost always a misconfiguration: either the user meant to dispatch to
-    // Rush (which does support multi-repo), or they need to create/pick a
-    // Codex env that already contains those repos. Fail loudly rather than
-    // silently ignore the extras.
+    // Codex envs fix their repo list at creation, so 2+ repos is almost always a misconfiguration.
+    // Fail loudly rather than ignore the extras.
     const repos = resolveDispatchRepos(options);
     if (repos.length > 1) {
       throw new Error(
@@ -154,13 +143,9 @@ export class CodexCloudProvider implements CloudProvider {
       throw new Error(`codex cloud exec failed: ${stderr || stdout}`);
     }
 
-    // The task id is the ONLY handle to the just-created execution — status,
-    // list, and the session-index reconcile all key on it. Codex prints it to
-    // stdout (JSON or a task_/id: line); some builds route it to stderr, so scan
-    // both. A synthetic `codex-<ts>` id was the old fallback here — it can never
-    // match the real execution, so it silently broke every follow-up. If the id
-    // genuinely can't be parsed, fail loudly and point at `agents cloud list`
-    // (which recovers the newest execution) rather than persist a bogus id.
+    // The task id is the only handle to the execution (status, list, reconcile); Codex prints it
+    // to stdout or stderr, so scan both. Never persist a synthetic `codex-<ts>` id (can't match);
+    // fail loudly and point at `agents cloud list`.
     const taskId = extractTaskId(stdout) ?? extractTaskId(stderr);
     if (!taskId) {
       throw new Error(

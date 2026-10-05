@@ -1,8 +1,6 @@
-// hook-runtime check — detects and bounded-repairs agents-managed generated
-// hook shims (~/.agents/.cache/shims/hooks/<name>.sh). A native hook command can
-// look wired while its generated wrapper is missing, non-executable, non-file,
-// or broken — silent breakage. Repair runs at most once per unique path per
-// pass (no retry, no sync recursion); unresolved findings stay needsAttention.
+// hook-runtime check: detects and repairs generated hook shims
+// (~/.agents/.cache/shims/hooks/<name>.sh) that are missing, non-executable, non-file, or broken.
+// Repair runs at most once per unique path per pass; unresolved findings stay needsAttention.
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';

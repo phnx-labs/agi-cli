@@ -3,10 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// Real path: recordBrowserAction upserts the durable browser_sessions row that
-// `agents browser sessions` reads. Drives a real sqlite DB under a temp HOME, no
-// mocks (per the repo-wide real-services rule). `vi.resetModules()` re-imports
-// the db module per test so its cached connection re-opens under this test's HOME.
+// Real path: recordBrowserAction upserts the durable browser_sessions row that `agents browser
+// sessions` reads, against a real sqlite DB under a temp HOME. `vi.resetModules()` re-imports the
+// db module per test so its cached connection reopens under that HOME.
 
 let testHome = '';
 

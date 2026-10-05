@@ -1,10 +1,6 @@
-/**
- * Pipeline tests for listMergeableRefs / selectListedMergeable.
- *
- * The gh runner is a table of recorded payloads (the same JSON `gh api` and
- * `gh pr list --repo` return), not a stub of the verdict itself. The live
- * #2847 comment and empty #2849 comments were captured 2026-08-20 via REST.
- */
+/** Pipeline tests for listMergeableRefs / selectListedMergeable. The gh runner is a table of
+ * recorded payloads, not a stub of the verdict; the #2847 comment and empty #2849 comments were
+ * captured 2026-08-20 via REST. */
 
 import { execFile } from 'child_process';
 import * as fs from 'fs';

@@ -1,12 +1,6 @@
-/**
- * Reconcile engine for `agents apply`. The diff (`diffFleet`) is pure and unit-
- * tested; execution (`probeDevice`, `reconcileDevice`, `runFleetApply`) drives
- * the real fleet over SSH and is verified end-to-end against live devices.
- *
- * Flow per device: probe → install/upgrade agents-cli → add missing agents →
- * sync config → propagate login. Every step reuses an existing primitive
- * (`readyProbe`, `bootstrapAgentsCli`, `buildRemoteAgentsInvocation`, `sshExec`).
- */
+/** Reconcile engine for `agents apply`. The diff (`diffFleet`) is pure and unit-tested;
+ * execution drives the real fleet over SSH. Per device: probe, install/upgrade agents-cli, add
+ * missing agents, sync config, surface login guidance, reusing existing primitives. */
 
 import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
@@ -33,12 +27,8 @@ export function agentIdOf(spec: string): string {
   return spec.split('@')[0].trim();
 }
 
-/**
- * The explicit pinned version of a spec, or undefined for an id-level spec.
- * `claude@2.1.170` -> `2.1.170`; `claude`, `claude@latest`, `claude@oldest`, and
- * `claude@all` all return undefined (the label channels install-latest / are
- * expanded upstream, so they diff at id granularity, not per-version).
- */
+/** The pinned version of a spec, or undefined for an id-level spec: `claude@2.1.170` gives
+ * `2.1.170`; bare, `@latest`, `@oldest` and `@all` diff at id granularity. */
 export function pinnedVersion(spec: string): string | undefined {
   const at = spec.indexOf('@');
   if (at < 0) return undefined;
@@ -52,14 +42,9 @@ export function rosterNeedsVersions(desired: DeviceDesired[]): boolean {
   return desired.some((d) => d.agents.some((s) => pinnedVersion(s) !== undefined));
 }
 
-/**
- * Expand any `<agent>@all` spec into one pinned spec per version installed on the
- * source, so `--agent claude@all` replicates THIS machine's exact version set.
- * `versionsOf` returns the source's installed versions for an agent id. Every
- * other spec passes through unchanged; the result is de-duplicated in order.
- * Throws if `@all` names an agent with no installed versions here (nothing to
- * replicate — a clear misconfig, not a silent no-op).
- */
+/** Expands `<agent>@all` into one pinned spec per version installed on the source, so `--agent
+ * claude@all` replicates this machine's version set. Other specs pass through; de-duplicated in
+ * order. Throws if `@all` names an agent with no installed versions (a misconfig, not a no-op). */
 export function expandAllSpecs(specs: string[], versionsOf: (id: string) => string[]): string[] {
   const out: string[] = [];
   for (const spec of specs) {
@@ -79,11 +64,8 @@ export function expandAllSpecs(specs: string[], versionsOf: (id: string) => stri
   return [...new Set(out)];
 }
 
-/**
- * Parse `agents view --json` (the all-agents array form) into a map of agent id
- * -> installed version strings. Tolerant: returns undefined on any parse failure
- * so a version-pinned spec falls back to id-level presence rather than crashing.
- */
+/** Parses `agents view --json` into agent id to installed versions. Returns undefined on parse
+ * failure so a pinned spec falls back to id-level presence. */
 export function parseInstalledVersions(stdout: string): Record<string, string[]> | undefined {
   try {
     const arr = JSON.parse(stdout) as Array<{ agent?: unknown; versions?: unknown }>;
@@ -112,12 +94,9 @@ export interface SourceAuth {
   filesByAgent: Map<string, AuthFilePayload[]>;
 }
 
-/**
- * Bundles `fleet apply` considers for push. The reserved file-backed `auth`
- * bundle is always included when it exists locally — it is the fleet-shared
- * setup-token store and must not wait on `--provision-secrets` / a manifest
- * list (PHNX-2371).
- */
+/** Bundles `fleet apply` considers for push. The reserved file-backed `auth` bundle is always
+ * included when it exists locally, as the fleet-shared setup-token store; it does not wait on
+ * `--provision-secrets` or a manifest list (PHNX-2371). */
 export function fleetSecretsBundles(declared: string[] | undefined): string[] {
   const out = [...(declared ?? [])];
   const auth = inspectReservedAuthBundle();
@@ -168,10 +147,9 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
       } else if (probe.cliVersion !== ctx.targetCliVersion) {
         rowActions.push({ device: d.device, kind: 'upgrade-cli', detail: `agents-cli ${probe.cliVersion} -> ${ctx.targetCliVersion}` });
       }
-      // agents. A version-pinned spec (`claude@2.1.170`, or an expanded
-      // `claude@all` member) is present only when that exact version is on the
-      // device; a bare/latest spec diffs at id granularity. So `--agent claude@all`
-      // installs every missing version even when some claude is already there.
+      // A version-pinned spec (`claude@2.1.170` or an expanded `claude@all` member) is present only
+      // when that exact version is on the device; a bare/latest spec diffs by id. So `claude@all`
+      // installs every missing version even if some claude exists.
       for (const spec of d.agents) {
         const id = agentIdOf(spec);
         const want = pinnedVersion(spec);
@@ -190,13 +168,8 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
       // but a login is established once per agent (its credential is version-shared).
       if (d.login === 'sync') {
         for (const id of [...new Set(d.agents.map(agentIdOf))]) {
-          // SING-1b: a native OAuth / session login MUST NOT be copied between
-          // devices — a rotating token invalidates the fleet on its next refresh
-          // (droid/WorkOS collapsed 10 boxes to 1 overnight). `apply` therefore no
-          // longer propagates any login; it surfaces per-box login / portable
-          // provider-account guidance for every agent that has a login to
-          // establish. An agent with no portable login file, or a source that
-          // isn't signed in, is silently skipped the same on every OS.
+          // SING-1b: a native OAuth/session login must not be copied between devices; a rotating
+          // token invalidates the fleet on its next refresh (droid/WorkOS collapsed 10 boxes to 1).
           if (hasPortableAuthFiles(id)) {
             loginBlocked.push(id);
             rowActions.push({
@@ -208,18 +181,9 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
           }
         }
       }
-      // secrets. Declared once at the manifest level, so every reachable device
-      // is considered. Historically this was ALWAYS a manual reminder — "surfaced,
-      // never pushed" — and that gap is a direct cause of RUSH-1968: an operator
-      // who needed secrets on a worker box had no supported path, so they
-      // hand-exported the file store's master key across the fleet instead.
-      //
-      // It is now pushable, but only deliberately. `--provision-secrets` is off by
-      // default and is a FLAG, not a manifest field: `agents.yaml` is shared, and
-      // a file-level default would mean someone else's `apply -y` silently ships
-      // credential values — the same shape of accident this ticket is about.
-      // Everything the gate refuses stays a `needs-secret` reminder, so nothing
-      // is ever silently skipped.
+      // Secrets, declared once at manifest level. Pushing was manual-only, a direct cause of
+      // RUSH-1968 (operators hand-exported the master key). `--provision-secrets` is an opt-in
+      // flag, not a manifest field, so a shared file can't make `apply -y` ship credentials.
       if (ctx.secretsBundles && ctx.secretsBundles.length > 0) {
         for (const bundle of ctx.secretsBundles) {
           const decision = decideSecretPush(bundle, d, probe, ctx);
@@ -254,34 +218,9 @@ interface SecretPushDecision {
   reason: string;
 }
 
-/**
- * Decide whether `fleet apply` may push one declared bundle to one device.
- *
- * PURE — no ssh, no keychain, no filesystem beyond the injectable pin check — so
- * every branch is unit-testable with no live fleet. Three gates, in order, and
- * each REFUSAL still yields a `needs-secret` reminder rather than silence:
- *
- *   1. `--provision-secrets` must be set. Off by default, and deliberately a
- *      flag rather than an `agents.yaml` field: the manifest is shared, so a
- *      file-level default means someone else's `apply -y` ships credential
- *      values without deciding to (RUSH-1968's shape of accident).
- *   2. The device must be reachable — nothing to push to otherwise.
- *   3. The host key must be PINNED. This moves credential values to another
- *      machine, so it reuses the same bar `agents exec --copy-creds` already
- *      sets (EXEC-34): an unpinned device earns its pin through a normal
- *      `agents ssh <device>` first.
- *
- * Backend follows the platform, and this is the load-bearing default of the
- * whole feature: **file on Linux, keychain on macOS/Windows**. A headless Linux
- * box has no keychain (`lib/secrets/linux.ts`), and the file store there
- * auto-provisions its OWN machine-local key — so each box ends up with an
- * unshared at-rest key and NO passphrase is forwarded. That is the direct
- * alternative to the fleet-wide shared secret this ticket exists to remove.
- *
- * The reserved `auth` bundle is the exception: it is always file-backed
- * (SEC-GAP-3) and is pushed even without `--provision-secrets`, because it is
- * the one fleet-shared setup-token store (PHNX-2371).
- */
+/** Decides whether `fleet apply` may push one bundle to one device. Pure; a refusal still yields
+ * a needs-secret reminder. Needs --provision-secrets (a flag, not a shared-manifest field;
+ * RUSH-1968), reachability and a pinned host key (EXEC-34). `auth` is always pushed (PHNX-2371). */
 export function decideSecretPush(
   bundle: string,
   desired: DeviceDesired,
@@ -299,17 +238,9 @@ export function decideSecretPush(
   if (!probe.reachable) {
     return { push: false, backend, reason: manual };
   }
-  // Already there? Skip — otherwise every `apply` re-resolves the bundle, and a
-  // resolve can prompt for Touch ID, so a converged fleet would nag on every run.
-  //
-  // Known limitation, stated rather than hidden: this compares PRESENCE (and
-  // carries `updated_at` for a future content check). It is a timestamp
-  // heuristic, not a content hash — a bundle whose VALUES changed locally still
-  // reads as present. `--force` is the way to overwrite regardless.
-  // hasOwnProperty, NOT `in`: `in` walks the prototype chain, so a bundle named
-  // `toString` / `constructor` / `valueOf` would read as present on an EMPTY map
-  // and be silently skipped — leaving that device unprovisioned, the worse of the
-  // two errors this gate can make.
+  // Already there? Skip, or every `apply` re-resolves the bundle and can prompt for Touch ID. Known
+  // limitation: this compares presence (with `updated_at` carried for a future content check), not
+  // a content hash, so changed values still read as present;
   if (!ctx.forceSecrets && probe.remoteBundles
       && Object.prototype.hasOwnProperty.call(probe.remoteBundles, bundle)) {
     return { push: false, backend, reason: `secrets bundle '${bundle}' already present on ${device} — pass --force to overwrite` };
@@ -399,15 +330,9 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
   };
 }
 
-/**
- * Narrow a remote `secrets list --json` payload to `name -> updated_at`.
- *
- * Exported and pure so the parse is unit-tested against real payload shapes with
- * no live fleet. Returns `{}` rather than throwing on anything unexpected: the
- * remote runs its own agents-cli version, and a parse failure must degrade to
- * "unknown, so push" — never to "present, so skip", which would silently leave a
- * device unprovisioned.
- */
+/** Narrows a remote `secrets list --json` payload to `name -> updated_at`. Pure and exported for
+ * tests. Returns `{}` rather than throwing: the remote runs its own version, and a parse
+ * failure must mean "unknown, so push", never "present, so skip". */
 export function parseRemoteBundles(stdout: string): Record<string, string> {
   try {
     const parsed = JSON.parse(stdout) as unknown;
@@ -416,10 +341,9 @@ export function parseRemoteBundles(stdout: string): Record<string, string> {
       : Array.isArray((parsed as { bundles?: unknown })?.bundles)
         ? (parsed as { bundles: unknown[] }).bundles
         : [];
-    // Null-prototype: a remote-supplied name is used as a KEY here, so `{}` would
-    // let `__proto__` hit the prototype setter instead of becoming an own
-    // property (and then read back as absent). It also means the presence check
-    // cannot see inherited names.
+    // Null-prototype: a remote-supplied name is used as a key, so with `{}` `__proto__` would hit
+    // the prototype setter and read back absent; it also keeps the presence check from seeing
+    // inherited names.
     const out: Record<string, string> = Object.create(null);
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
@@ -515,14 +439,9 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
   // 4. Native login materialization does not exist. Every agent that needs a login is surfaced as
   // `needs-login` (per-box login / portable-account guidance) in the diff above.
 
-  // 5. secrets provisioning — LAST, and deliberately so. It is the most
-  // sensitive mutation apply performs (credential VALUES crossing to another
-  // machine), so every lower-risk step above is already recorded before we
-  // touch it: a failure here never obscures what did land.
-  //
-  // Resolve ONCE per device even for several bundles is not possible (a resolve
-  // is per bundle), but each bundle resolves once and pushes once — the read can
-  // prompt, so it must not repeat.
+  // Secrets provisioning runs last: it is the most sensitive mutation (credential values crossing
+  // machines), so every lower-risk step is already recorded and a failure never obscures what
+  // landed. Each bundle resolves once and pushes once, since the read can prompt.
   const pushSecrets = row.actions.filter((a) => a.kind === 'push-secret');
   for (const action of pushSecrets) {
     const bundle = action.bundle;
@@ -538,10 +457,9 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
       const out = await pushBundleToHost(bundle, target, {
         remoteBackend: backend,
         operation: `fleet apply ${row.device}`,
-        // No passphrase, ever, from this path. On the file backend the remote
-        // auto-provisions its OWN machine-local key, which is the entire point:
-        // each box gets an unshared at-rest key instead of the fleet-wide shared
-        // secret RUSH-1968 is about.
+        // No passphrase, ever, from this path. On the file backend the remote auto-provisions its
+        // own machine-local key, so each box gets an unshared at-rest key instead of the fleet-wide
+        // shared secret RUSH-1968 is about.
       });
       steps.push({
         kind: 'push-secret',

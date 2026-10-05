@@ -104,12 +104,9 @@ describeSandbox('sandbox.sh credential loading (RUSH-2774)', () => {
   });
 });
 
-// RUSH-3178: the `test` verb bakes in the canonical suite command so no caller
-// hand-composes it — hand-composing is exactly how build.sh and the attestation
-// producer both ended up running the suite in place. These exercise the REAL
-// sandbox.sh end to end, stubbing only the external `crabbox` binary (the same
-// boundary the producer's tests stub `bun`/`npm` at), and capture the command it
-// would have shipped to the box.
+// RUSH-3178: the `test` verb bakes in the canonical suite command so no caller composes it. These
+// tests run the real sandbox.sh end to end, stubbing only the external `crabbox` binary, and
+// capture the command it would ship to the box.
 describeSandbox('sandbox.sh test verb (RUSH-3178)', () => {
   function composeVia(args: string[]): { cmd: string; status: number | null; out: string } {
     const shims = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-verb-'));

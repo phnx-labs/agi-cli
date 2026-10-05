@@ -1,13 +1,6 @@
-/**
- * Tests for the `agents watchdog` command surface (RUSH-1415).
- *
- * Focus: `watchdog status --json` — the read the Swift menu-bar helper decodes to
- * drive its auto-nudge toggle. The parent `watchdog` command ALSO declares --json
- * and greedily parses it before dispatching to `status`, so the flag lands on the
- * parent, not the subcommand. The action reads it via optsWithGlobals(); if that
- * regressed to plain opts.json, `status --json` would silently emit human text and
- * the Swift JSONDecoder would get nothing. These tests lock that behavior.
- */
+/** Tests for `agents watchdog` (RUSH-1415), focused on `watchdog status --json`, which the Swift
+ * menu-bar helper decodes. The parent declares --json and parses it first, so the flag lands on the
+ * parent; the action reads it via optsWithGlobals(), and plain opts.json would emit human text. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { formatWatchdogTickLines, registerWatchdogCommand } from './watchdog.js';

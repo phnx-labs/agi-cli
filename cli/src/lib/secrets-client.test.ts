@@ -1,21 +1,6 @@
-/**
- * Tests for the standalone-secrets process client (secrets-client.ts).
- *
- * The integration block drives the REAL standalone `secrets __serve` server (no
- * mocks — repo rule): it spawns the actual executable and exchanges real wire
- * messages over the fd 3 / fd 4 pipes. It is gated on AGENTS_TEST_SECRETS_BIN
- * pointing at a built standalone entrypoint (e.g. `dist/index.js` from a
- * `secrets-cli` checkout after `bash scripts/build.sh`); with the var unset it
- * skips cleanly, so CI — which has no standalone checkout — stays green. This is
- * the same env-gated real-dependency pattern as the Windows `--device` e2e
- * suites (AGENTS_TEST_WIN_HOST). Point it at the binary to exercise it:
- *
- *   AGENTS_TEST_SECRETS_BIN=/path/to/secrets-cli/dist/index.js \
- *     bun run test src/lib/secrets-client.test.ts
- *
- * Every op runs against a throwaway HOME/SECRETS_HOME so the real user store is
- * never touched (the standalone's file store is keyed off HOME).
- */
+/** Tests for the standalone-secrets process client. The integration block drives the REAL `secrets
+ * __serve` (no mocks) over fd 3/4 pipes, gated on AGENTS_TEST_SECRETS_BIN pointing at a built
+ * entrypoint (skips cleanly in CI), like the Windows `--device` e2e suites. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -89,11 +74,9 @@ describe('resolveSecretsBin', () => {
     }
   });
 
-  // The pre-PHNX-3989 shims dir carried a `secrets` command shim that `exec`s
-  // `agents secrets` — first on PATH, and alive across every in-place upgrade. A
-  // resolver that took it spawned `agents secrets` → shim → `agents secrets` → …
-  // without bound. The real standalone bin further down PATH must win, and with
-  // nothing but the shim the answer is MISSING, never the shim.
+  // The pre-PHNX-3989 shims dir carried a `secrets` shim that `exec`s `agents secrets`, first on
+  // PATH and surviving in-place upgrades; a resolver taking it looped unboundedly. The real
+  // standalone further down PATH must win, and with only the shim the answer is MISSING.
   describe.skipIf(process.platform === 'win32')('never resolves to the legacy shim in agents-cli\'s own shims dir', () => {
     let realDir: string;
     let shimsDir: string;
@@ -205,10 +188,9 @@ describe('item naming (the seam\'s shared identifier scheme)', () => {
 });
 
 describe('SecretsClientError serializes to a plain {code, message}', () => {
-  // A consumer that folds a failure into a JSON.stringify'd structure (a
-  // teammate's meta.json, a failure record, a spawn env) must never make the
-  // serializer chase the Error's internal references and throw `Converting
-  // circular structure to JSON` mid-launch (PHNX-3989 design constraint b).
+  // A consumer that folds a failure into a JSON.stringify'd structure (teammate meta.json, failure
+  // record, spawn env) must never make the serializer chase the Error's internal references and
+  // throw on circular structure mid-launch (PHNX-3989 constraint b).
   it('JSON.stringify yields only code and message', () => {
     expect(JSON.parse(JSON.stringify(new SecretsClientError('LOCKED', 'boom')))).toEqual({
       code: 'LOCKED',
@@ -223,13 +205,9 @@ describe('SecretsClientError serializes to a plain {code, message}', () => {
   });
 });
 
-// The synchronous read-only STATUS path, exercised WITHOUT the real standalone
-// so it runs on every runtime. It reproduces the PHNX-3989 CI failure shapes — a
-// standalone that hangs (the 60s deadlock when it ran under Bun) and one that
-// answers with non-JSON — and pins the hard bound + fd-4 diagnostic that keep a
-// read-only surface from blocking or failing blind. The hang test shortens the
-// bound through the test seam: the shipped 30s absorbs a cold standalone boot on
-// a loaded box, but a planted never-answering mock needs no such headroom.
+// The synchronous read-only STATUS path, tested without the real standalone so it runs on every
+// runtime. Reproduces the PHNX-3989 CI failure shapes (a standalone that hangs, as the 60s Bun
+// deadlock, or answers non-JSON) and pins the hard bound + fd-4 diagnostic.
 describe.skipIf(process.platform === 'win32')('synchronous status path is bounded and diagnosable', () => {
   let dir: string;
   const savedBin = process.env.SECRETS_BIN;
@@ -271,14 +249,9 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('the shipped bound absorbs a cold standalone boot on a loaded box', () => {
-    // 2026-09-12: `agents run claude` died with `spawnSync sh ETIMEDOUT` on a
-    // desktop at load average ~100, where each cold `secrets __serve` spawn took
-    // 0.4–2.6s against the old 3s bound. A standalone that answers after a slow
-    // boot must still be accepted.
-    // One request is one spawn, so the single spawn IS the slow cold boot. Like
-    // the real standalone, the mock drains the request on fd 3 before answering
-    // — a mock that exits without reading races `spawnSync`'s stdin write and
-    // surfaces as EPIPE.
+    // 2026-09-12: `agents run claude` died with `spawnSync sh ETIMEDOUT` at load average ~100,
+    // where each cold `secrets __serve` took 0.4-2.6s against the old 3s bound; a slow-booting
+    // standalone must still be accepted.
     plantServe(
       `cat <&3 >/dev/null; sleep 4; ` +
         `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
@@ -289,12 +262,9 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('one request is one spawn — no handshake round trip precedes the first op', () => {
-    // Every request is a cold `secrets __serve` process (a full Node boot for
-    // the real standalone: 0.3-2.6s on a box at load average ~100). A separate
-    // version-negotiation spawn therefore charged one whole boot to the first
-    // secrets read of EVERY command — 1 of the 7 spawns an `agents run claude`
-    // launch made (PHNX-4082). Counting real executions of a planted standalone
-    // is what pins that: N requests MUST be exactly N spawns.
+    // Every request is a cold `secrets __serve` process (0.3-2.6s boot under load). A separate
+    // version-negotiation spawn charged a whole boot to the first secrets read of EVERY command (1
+    // of 7 spawns per `agents run claude`, PHNX-4082), so N requests MUST be exactly N spawns.
     const tally = path.join(dir, 'spawns');
     plantServe(
       `cat <&3 >/dev/null; echo x >> '${tally}'; ` +
@@ -307,10 +277,9 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a standalone speaking another protocol is named, on any op, not called malformed', () => {
-    // The version check rides every response now, so a standalone that speaks a
-    // version this client does not gets the actionable error on whatever op it
-    // answered — the old handshake-only check reported a later mismatch as a
-    // malformed envelope.
+    // The version check rides every response, so a standalone speaking another protocol version
+    // gets the actionable error on whatever op it answered; the old handshake-only check reported
+    // later mismatches as a malformed envelope.
     plantServe(
       `cat <&3 >/dev/null; printf '%s' '{"v":2,"id":"x","ok":true,"result":{}}' >&4`,
     );
@@ -382,10 +351,9 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     process.env.SECRETS_BIN = REAL_BIN;
     process.env.HOME = home; // the standalone file store lives under $HOME/.agents/.cache/secrets
     process.env.SECRETS_HOME = path.join(home, '.agents');
-    // Set the OLD name on purpose: the client's buildServeEnv must bridge it onto
-    // the standalone's renamed SECRETS_PASSPHRASE, so this exercises that bridge
-    // end-to-end against the real store (a fresh key would still round-trip, so
-    // the bridge is pinned deterministically by the buildServeEnv unit tests too).
+    // Set the OLD name on purpose: buildServeEnv must bridge it onto the standalone's renamed
+    // SECRETS_PASSPHRASE, exercised end to end against the real store (a fresh key would still
+    // round-trip, so the buildServeEnv unit tests pin the bridge too).
     process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase'; // file-backend encryption key
     process.env.SECRETS_NO_AGENT = '1'; // no broker in the test env
     _resetSecretsClientForTest();
@@ -419,13 +387,9 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
   });
 
   it('the synchronous handshake round-trips under the bound (no fd-3 EOF hang)', () => {
-    // Regression for the macOS sync-path hang: the standalone wraps fd 3 in a
-    // `net.Socket`, and a Socket over a NAMED FIFO reads the request but never
-    // fires EOF on macOS — so the old FIFO wiring left `for await (chunk of
-    // input)` blocked until SYNC_SERVE_TIMEOUT_MS fired (`ETIMEDOUT`). Feeding
-    // fd 3 the stdin pipe/socketpair (the async path's fd type) EOFs, so a real
-    // handshake completes as soon as the standalone has booted. A hang would
-    // consume the whole bound, so beating it is the assertion.
+    // Regression for the macOS sync-path hang: a `net.Socket` over a NAMED FIFO reads the request
+    // but never fires EOF on macOS, so the old FIFO wiring blocked until SYNC_SERVE_TIMEOUT_MS
+    // (`ETIMEDOUT`). With the stdin pipe/socketpair on fd 3 it EOFs.
     const t0 = Date.now();
     const result = secretsRequestSync<{ protocol: number }>('handshake', []);
     expect(result.protocol).toBe(PROTOCOL_VERSION);
@@ -448,11 +412,9 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
   });
 
   it('an arbitrarily large synchronous request completes — spawnSync services stdin and fd 4 concurrently, no deadlock', () => {
-    // The request rides spawnSync's stdin (dup'd onto fd 3), and the standalone
-    // drains fd 3 to EOF while spawnSync is still writing it, so there is no size
-    // at which the sync path deadlocks on a full pipe buffer. A name well past any
-    // pipe-buffer bound (~64 KiB on Linux) still round-trips: the server answers
-    // even when it rejects the oversized name, and nothing hangs.
+    // The request rides spawnSync's stdin (dup'd onto fd 3) and the standalone drains it to EOF
+    // while spawnSync writes, so the sync path can't deadlock on a full pipe buffer at any size. A
+    // name past the ~64 KiB pipe bound still round-trips; the server answers even if it rejects it.
     const bigName = 'x'.repeat(200_000);
     let answered = false;
     try {

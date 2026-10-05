@@ -1,14 +1,6 @@
-/**
- * Registry coverage test — the assertion that would have caught the grok
- * silent-skip class. For every (agent, kind) pair where the capability
- * matrix says "supported," both a writer and a detector must exist in the
- * registry, OR the pair must be on the `isExempt` allow-list inside
- * registry.ts.
- *
- * Also exercises the registry's lazy assertion entry point so that any
- * regression that breaks the cycle protection surfaces here, not on a
- * production CLI launch.
- */
+/** Registry coverage test, the assertion that would have caught the grok silent-skip class: every
+ * (agent, kind) the capability matrix supports needs a writer and detector, or an `isExempt` entry
+ * in registry.ts. */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -70,12 +62,9 @@ describe('staleness/registry', () => {
   });
 
   it('kimi has a commands writer + detector for commands-as-skills', () => {
-    // kimi.capabilities.commands === false with an empty commandsSubdir, like
-    // grok — but it has no native command runtime, so commands must convert to
-    // skills. Registration is driven by nativeCommandRuntime, not an agent-id
-    // allowlist; this is the assertion that would have caught the kimi
-    // silent-skip (the "every supported (agent, kind)" check skips kimi because
-    // supports('kimi','commands') is false).
+    // kimi has `capabilities.commands === false` and no native command runtime, so commands must
+    // convert to skills; registration follows nativeCommandRuntime, not an id allowlist. The
+    // generic check skips kimi because supports('kimi','commands') is false.
     expect(WRITERS.commands.kimi).toBeDefined();
     expect(DETECTORS.commands.kimi).toBeDefined();
   });

@@ -1,22 +1,6 @@
-/**
- * RUSH-2007 Layer C — per-session presence tracking, folded into the `agents
- * watchdog` tick (NOT a revived daemon).
- *
- * Each tick the watchdog observes the active sessions across the fleet
- * (`gatherRemoteActive` + the local scan). This module persists one record per
- * session — `{location, device, transport, lastSeen, status}` — and DERIVES
- * `connected` / `disconnected` by diffing consecutive observations: a session
- * present this tick is `connected`; one that was tracked but is now absent (its
- * peer went unreachable, or the interactive client dropped) flips to
- * `disconnected` while its record — and the transition — is surfaced so the tick
- * can act (an interactive drop is a reconnect-nudge candidate; a headless remote
- * is a keep-alive). The store is honest across a crash: it only reflects what the
- * last scan actually saw, never an asserted state.
- *
- * Store: `~/.agents/.cache/state/watchdog/presence.json` — sibling of the tick's
- * existing `nudges/flags/last-tick` files. Best-effort: an unreadable/corrupt
- * file degrades to an empty store, never throws into the tick loop.
- */
+/** RUSH-2007 Layer C: per-session presence in the `agents watchdog` tick; diffs consecutive fleet
+ * observations to derive `connected`/`disconnected` and surface transitions. Store:
+ * `~/.agents/.cache/state/watchdog/presence.json`; a corrupt file reads empty, never throws. */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -113,13 +97,8 @@ interface ActiveSessionLike {
   provenance?: { transport?: string };
 }
 
-/**
- * Map this tick's active sessions to presence observations. A session on a peer
- * carries `machine` (from the fleet fan-out) → `location: 'ssh'`; a local one →
- * `'local'`. `interactive` is true only for a `terminal` context (a tmux/terminal
- * session whose drop is reconnect-worthy) — headless/teams/cloud are not.
- * Sessions with no id are skipped (they can't be tracked or addressed).
- */
+/** Map this tick's active sessions to presence observations: a peer row (has `machine`) is 'ssh',
+ * else 'local'. `interactive` only for a `terminal` context; sessions without an id are skipped. */
 export function observedFromActive(
   sessions: ActiveSessionLike[],
   selfHost: string = os.hostname(),
@@ -150,18 +129,9 @@ export function actionFor(record: PresenceRecord): PresenceAction {
   return 'none';
 }
 
-/**
- * Pure state machine. Given the prior store, the sessions observed THIS tick, and
- * `nowMs`, return the next store plus the set of status transitions.
- *
- * - observed now                 -> `connected`, lastSeen = now (record refreshed)
- * - tracked but absent now       -> `disconnected` (lastSeen kept from prior tick)
- * - `disconnected` older than TTL -> pruned (gone for good)
- *
- * `transitions` carries only sessions whose status actually changed, each with
- * the action the tick should take — so the caller never re-nudges a session that
- * was already disconnected last tick.
- */
+/** Pure state machine: observed now -> `connected` (lastSeen = now); tracked but absent ->
+ * `disconnected`; disconnected past TTL -> pruned. `transitions` holds only status changes, so a
+ * session already disconnected last tick is never re-nudged. */
 export function reconcilePresence(
   prev: Record<string, PresenceRecord>,
   observed: ObservedSession[],

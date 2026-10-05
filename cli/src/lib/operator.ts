@@ -1,27 +1,6 @@
-/**
- * Operator identity registry for multi-human feed controls.
- *
- * The mailbox `from` label is caller-supplied and unverified (same-user-writable).
- * For routine answers that's fine; for high-consequence blocks (merge/deploy/admin)
- * we need a verified operator identity. This module loads a local registry of
- * operators from ~/.agents/operators.yaml and provides the authz check used by
- * `recordAnswer` and `agents message --as`.
- *
- * Registry format (YAML):
- *   operators:
- *     muqsit:
- *       name: Muqsit
- *       admin: true
- *     bisma:
- *       name: Bisma
- *       can:
- *         - merge
- *         - deploy
- *
- * For this release identity is proven by knowing the operator id (local registry
- * membership). A future release can add public-key/totp challenge without changing
- * the call sites.
- */
+/** Operator identity registry for multi-human feed controls. The mailbox `from` label is
+ * unverified; high-consequence blocks (merge/deploy/admin) need a verified operator. Loads
+ * ~/.agents/operators.yaml for `recordAnswer` and `agents message --as`. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -101,14 +80,9 @@ export function isHighConsequenceAllowed(blockConsequence: string | undefined, o
   return canPerform(operatorId, blockConsequence, root);
 }
 
-/**
- * Prove operator identity for high-consequence answers.
- *
- * Knowing an id listed in operators.yaml is not authentication — any same-user
- * process can pass `--as muqsit`. Require the process environment to claim the
- * same id via AGENTS_OPERATOR_ID (typically injected by `agents secrets` /
- * the human's launch context).
- */
+/** Proves operator identity for high-consequence answers. Knowing an id in operators.yaml isn't
+ * authentication (any same-user process can pass `--as muqsit`), so the environment must claim the
+ * same id via AGENTS_OPERATOR_ID (injected by `agents secrets` or the launch context). */
 export function verifyOperatorIdentity(claimedId: string | undefined, root?: string): boolean {
   if (!claimedId) return false;
   if (!isKnownOperator(claimedId, root)) return false;

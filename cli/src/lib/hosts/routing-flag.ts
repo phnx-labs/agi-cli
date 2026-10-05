@@ -1,15 +1,6 @@
-/**
- * Leaf argv helpers for host/device routing flags.
- *
- * Zero imports on purpose. `bootstrap.ts` gates the dynamic
- * `import('./lib/hosts/passthrough.js')` on {@link hasHostRoutingFlag} so the
- * ~187 ms passthrough module graph is never loaded when no routing flag is
- * present (the majority of CLI invocations). That gate must not itself drag
- * in passthrough, remote-cmd, ssh-exec, or the device registry (RUSH-2374).
- *
- * `flagValue` lives here (not in passthrough.ts) for the same reason: the gate
- * and the function body that later reads flag values share one implementation.
- */
+/** Leaf argv helpers for host/device routing flags, with zero imports on purpose: bootstrap.ts
+ * gates the ~187 ms passthrough import on hasHostRoutingFlag, so the gate must not pull in
+ * passthrough, remote-cmd, ssh-exec or the registry (RUSH-2374). */
 
 /** Pull the value of `--device`/`-D`/`--remote-cwd` (any form) out of an argv. */
 export function flagValue(args: string[], long: string, short?: string): string | undefined {
@@ -23,14 +14,9 @@ export function flagValue(args: string[], long: string, short?: string): string 
   return undefined;
 }
 
-/**
- * True when argv carries any device routing flag that {@link maybeRunOnHost}
- * inspects: `--device`/`-D`, `--hosts`, `--devices` (space, `=`, or
- * glued short form).
- *
- * Presence-only — does not validate values. Used by bootstrap before loading
- * passthrough, and by `maybeRunStandaloneOnHost` before strip/route work.
- */
+/** True when argv carries any device routing flag maybeRunOnHost inspects (`--device`/`-D`,
+ * `--hosts`, `--devices`; space, `=` or glued form). Presence-only; used by bootstrap before
+ * loading passthrough and by `maybeRunStandaloneOnHost`. */
 export function hasHostRoutingFlag(args: string[]): boolean {
   return (
     flagValue(args, 'device', 'D') !== undefined ||

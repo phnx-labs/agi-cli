@@ -1,9 +1,6 @@
-/**
- * Addressing a frozen installation. The failure this guards is silently picking
- * the wrong install: once a release can be carried by two installations, and
- * once a label and a release can disagree, "resolve <agent>@<something>" stops
- * having one obvious answer and MUST say so rather than guess.
- */
+/** Addressing a frozen installation: guards against silently picking the wrong install. Once two
+ * installations can carry one release, and a label and a release can disagree, `resolve
+ * <agent>@<something>` has no obvious single answer and must say so rather than guess. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

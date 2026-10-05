@@ -1,16 +1,6 @@
-/**
- * Verifies parseOpenCode reads an OpenCode session out of its SQLite database
- * (session -> message -> part) and normalizes each part into the shared
- * SessionEvent shape: text -> message, reasoning -> thinking, tool ->
- * tool_use (+ tool_result / error for completed calls).
- *
- * The fixture is built here from scratch — a tiny SQLite DB with the real
- * OpenCode `message`/`part` schema. Both the fixture writer and the parser
- * under test read/write through the node/bun SQLite wrapper (the same one
- * production uses), not the `sqlite3` CLI, so this exercises the real critical
- * path on every OS — the `sqlite3` CLI is absent on the Windows runner
- * (issue #751).
- */
+/** Verifies parseOpenCode reads a session from SQLite (session -> message -> part) into
+ * SessionEvent: text -> message, reasoning -> thinking, tool -> tool_use. Real OpenCode schema via
+ * the production SQLite wrapper, not the `sqlite3` CLI (absent on Windows, #751). */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';

@@ -1,18 +1,6 @@
-/**
- * Devices host provider — the Tailscale fleet in the host pool.
- *
- * The real bugs this guards against:
- *   1. A device registered only via `agents devices sync` must appear in
- *      `listAllHosts()` (so cap routing and target pickers see
- *      it) — the gap this provider exists to close.
- *   2. A password-auth device must be LISTED (`dispatchable: false`) but never
- *      resolved for dispatch (typed error) and never picked by cap routing —
- *      a BatchMode=yes ssh run against it would hang forever.
- *   3. An enrolled host must shadow a same-name device (provider order), so
- *      enrolling a device to tag it doesn't create a duplicate row.
- *   4. The `Meta.hosts` overlay (caps) must merge onto device entries so a
- *      device participates in `--device <cap>` routing.
- */
+/** Devices host provider guards: a device registered via `agents devices sync` appears in
+ * `listAllHosts()`; a password-auth device is listed (`dispatchable: false`) but never
+ * dispatched; an enrolled host shadows a same-name device and `Meta.hosts` caps merge in. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -113,11 +101,9 @@ describe('devices in the unified pool', () => {
     // `local` registers first, so the enrolled overlay is still the BASE row —
     // it keeps provider/source/caps/addedAt.
     expect(rows[0].provider).toBe('local');
-    // …but the device owns the connection fields (RUSH-1967). This assertion used
-    // to expect the overlay's '10.0.0.9', which encoded the frozen-route bug as a
-    // contract: `agents devices sync` could move a device and the stale enrolled
-    // address would keep winning — and `resolveHostByCap` hands this very row to
-    // dispatch, so `--device <cap>` dialed the dead address.
+    // The device owns the connection fields (RUSH-1967). The old assertion expected the overlay's
+    // '10.0.0.9', encoding the frozen-route bug: a stale enrolled address won after `devices sync`
+    // moved the device, and `--device <cap>` dialed it.
     expect(rows[0].address).toBe('shared.tail.ts.net');
     expect(rows[0].user).toBe('device-user');
   });

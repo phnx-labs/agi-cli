@@ -1,12 +1,6 @@
-/**
- * Session discovery, search, and rendering commands.
- *
- * Implements `agents sessions` -- the unified interface for finding, browsing,
- * and reading agent conversation transcripts across Claude, Codex, Gemini,
- * and OpenCode. Supports interactive picker mode, text/path search, markdown
- * and JSON rendering, role/turn filtering, artifact inspection, and session
- * resume via agent-native CLI flags.
- */
+/** Session discovery, search, and rendering commands: `agents sessions` finds, browses, and reads
+ * transcripts across harnesses, with picker mode, search, markdown/JSON rendering, filters, and
+ * resume. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -223,11 +217,8 @@ interface SessionsOptions extends SessionFilterOptions {
   plugin?: string;
 }
 
-/**
- * The prioritized harnesses that get a boolean shorthand flag (e.g. `--claude`
- * === `--agent claude`). The rest stay reachable via `--agent <name>`, which
- * also carries version pins like `codex@0.116.0`.
- */
+/** Harnesses with a boolean shorthand flag (`--claude` === `--agent claude`); the rest use `--agent
+ * <name>`, which also carries version pins like `codex@0.116.0`. */
 const AGENT_SHORTHANDS = ['claude', 'codex', 'kimi', 'antigravity', 'grok', 'opencode'] as const;
 
 /**
@@ -243,10 +234,8 @@ function applyAgentShorthands(options: SessionsOptions): void {
 
 type InstalledVersionsForAgent = (agent: SessionAgentId) => string[];
 
-/**
- * Treat a positional `agent@version` as a structured filter only when it names
- * a real installed version. Everything else remains ordinary free-text search.
- */
+/** Treat a positional `agent@version` as a structured filter only when it names a real installed
+ * version; anything else stays free-text search. */
 export function parseInstalledAgentVersionQuery(
   query: string | undefined,
   installedVersions: InstalledVersionsForAgent = (agent) => (
@@ -354,12 +343,8 @@ function createScanProgressTracker(
 }
 
 const PICKER_RECENT_COUNT = 15;
-/**
- * The `--limit` default, shared with its `.option()` registration. Commander fills
- * the default in, so `options.limit` is never falsy — code that wants to know
- * whether the USER set a limit has to compare against this rather than test
- * truthiness.
- */
+/** The `--limit` default, shared with its `.option()` registration. Commander fills it in, so
+ * `options.limit` is never falsy; compare against this to tell whether the user set a limit. */
 const DEFAULT_LIMIT = '50';
 /** Pool size for `--in-team`: one team's rows can sit anywhere in the history. */
 const WHOLE_TEAM_POOL_LIMIT = 5000;
@@ -481,12 +466,8 @@ function formatStartedAt(startedAtMs?: number): string {
   return formatRelativeTime(new Date(startedAtMs).toISOString());
 }
 
-/**
- * Strip terminal/harness noise from a preview so the column stays a single line
- * of plain prose: OSC title escapes, CSI/SGR ANSI, and the harness wrapper tags
- * (`<local-command-stdout>`, `<task-notification>`, `<command-*>`) that leak from
- * a captured transcript tail. Collapses runs of whitespace.
- */
+/** Strip terminal and harness noise from a preview (OSC/CSI escapes, wrapper tags like
+ * `<local-command-stdout>`) and collapse whitespace so the column stays one line of plain prose. */
 export function cleanPreview(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text
@@ -579,10 +560,8 @@ export function formatActiveRowDescription(s: ActiveSession): string {
 
 /** Short human word for a session's activity (falls back to the coarse status). */
 function activityLabel(s: ActiveSession): string {
-  // Lifecycle status wins over any residual parsed activity — a dead/dangling
-  // session must read `closed`/`abandoned`, not the `idle` its stale tail infers.
-  // `crashed`/`orphaned` are the same kind of claim about the session as a whole,
-  // and both outrank the `idle` its last parsed turn would otherwise show.
+  // Lifecycle status wins over residual parsed activity: `closed`/`abandoned`/`crashed`/`orphaned`
+  // describe the whole session and outrank the `idle` its stale tail would infer.
   if (s.status === 'closed' || s.status === 'abandoned') return s.status;
   if (s.status === 'crashed') return 'crashed';
   if (s.status === 'orphaned') return 'orphan';
@@ -592,12 +571,9 @@ function activityLabel(s: ActiveSession): string {
   return s.status === 'input_required' ? 'waiting' : s.status;
 }
 
-/**
- * Index live sessions by their full session UUID so a historical `SessionMeta`
- * row (`meta.id`) can be matched to the session that is still running now.
- * Rows without a sessionId (some cloud/headless probes) are skipped — they
- * can't be correlated back to a transcript on disk.
- */
+/** Index live sessions by full session UUID to match a historical `SessionMeta` (`meta.id`) to a
+ * running one. Rows without a sessionId (some cloud/headless probes) are skipped; they cannot be
+ * correlated. */
 export function indexActiveBySessionId(active: ActiveSession[]): Map<string, ActiveSession> {
   const byId = new Map<string, ActiveSession>();
   for (const a of active) {
@@ -639,14 +615,9 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
   return { glyph: statusColor(a.status)(shape), preview: buildSessionDescription(a) };
 }
 
-/**
- * The one-word live status for a listing row — `working` / `waiting` / `idle`,
- * the same three states the `--active` column shows, so the default list is no
- * longer just a glyph. `waiting` is the actionable "needs you" case (a question /
- * permission / plan-review), kept distinct from `idle` (stopped) and `working`.
- * Empty for a not-live row, and for the rare no-signal `unknown`. Pure +
- * exported for the row tests.
- */
+/** One-word live status for a listing row (`working` / `waiting` / `idle`), matching the `--active`
+ * column. `waiting` is the actionable needs-you case; empty for a non-live row or the no-signal
+ * `unknown`. */
 export function liveStatusWord(a: ActiveSession | undefined): string {
   if (!a) return '';
   // Lifecycle status is definitive — surface it ahead of any parsed activity.
@@ -689,35 +660,9 @@ export function isAwaitingUser(s: ActiveSession): boolean {
   return s.status === 'input_required' || s.activity === 'waiting_input';
 }
 
-/**
- * Whether a row belongs in an unqualified `--active` view (RUSH-2336) — the
- * ONE canonical selector every bare-active surface shares: the CLI's grouped
- * table and `--json` (`renderActiveSessions`), the interactive browser's
- * `--active` filter ({@link applyFilters} in `sessions-browser.ts`), `focus`'s
- * attach gate (`isAttachableLiveSession`), and the menubar snapshot
- * ({@link computeMenubarSnapshot}).
- *
- * The live registry deliberately retains terminally-dead AND not-yet-started
- * rows long enough for `--closed` / `--crashed` / `--queued` and recovery to
- * find them. Presence in that registry therefore is not, by itself, evidence
- * that a session is CURRENTLY active. Explicit lifecycle filters bypass this
- * predicate and select those retained rows through {@link matchesLiveStatus}
- * instead — this function only decides the unqualified default.
- *
- *   - `queued` / `closed` / `crashed` are never active here: queued hasn't
- *     started yet, closed/crashed are unconditionally dead. All three stay
- *     reachable through their explicit filter.
- *   - A cloud row carries no local pid at all — it is active on the
- *     provider's own word (`cloudProvider` + `cloudTaskId`), never a
- *     fabricated pid.
- *   - Every other row is a real OS process (terminal/tmux/headless/team). It
- *     is active only when the row names the machine it runs on, carries a
- *     positive pid, AND has POSITIVELY verified that pid is alive
- *     (`pidAlive === true` — not merely "not known dead"). A live orphaned
- *     row, or a live-but-stuck abandoned row, still qualifies this way since
- *     both carry a genuinely alive pid; unknown liveness (an older peer's
- *     row, or a pid that could never be resolved) does not.
- */
+/** Whether a row belongs in an unqualified `--active` view (RUSH-2336); the one selector every
+ * bare-active surface shares. Queued/closed/crashed are excluded; cloud rows are active by
+ * provider id; others need a machine, a positive pid, and `pidAlive === true`. */
 
 /** Width of the live status column — `crashed` is the longest word it renders. */
 const LIVE_STATUS_W = 8;
@@ -908,16 +853,9 @@ const ROW_VERSION_W = 8;
 const ROW_STATUS_W = 9;
 const ROW_OWNER_W = 9;
 
-/**
- * Fit pre-styled content (which may carry SGR colour AND OSC-8 hyperlinks — the
- * clickable ticket/PR/project badges) into `room` display cells. Returns it raw
- * when it already fits, preserving colour and clickable links; otherwise falls
- * back to a width-safe truncation. `truncateToWidth` strips OSC-8 before cutting
- * (see width.ts), so a too-narrow cell drops the hyperlink cleanly rather than
- * slicing a hyperlink escape in half and corrupting the terminal (RUSH-2205
- * review). Never run pre-linked content through `truncateToWidth` directly — that
- * strips its links even when it fits; go through this helper.
- */
+/** Fit pre-styled content (SGR colour and OSC-8 links) into `room` cells: raw when it fits, else
+ * width-safe truncation. Never pass pre-linked content to `truncateToWidth` directly, as it strips
+ * links even when they fit (RUSH-2205). */
 function fitCell(content: string, room: number): string {
   if (room <= 0) return '';
   return stringWidth(content) <= room ? content : truncateToWidth(content, room);
@@ -1023,12 +961,8 @@ export function ownerLabel(s: ActiveSession): string {
   return at > 0 ? owner.slice(0, at) : owner;
 }
 
-/**
- * Short label for an IDE window. The slice key in live-terminals.json is
- * `${vscode.env.sessionId}-${ext-host pid}`; the trailing pid is the cheap
- * stable disambiguator. We surface it as `ext-pid` so two windows on the
- * same repo are visibly different.
- */
+/** Short label for an IDE window: the trailing pid of the live-terminals.json slice key, shown as
+ * `ext-pid`, so two windows on the same repo are visibly different. */
 function shortWindowLabel(windowId: string): string {
   const m = windowId.match(/-(\d+)$/);
   return m ? `ext-pid ${m[1]}` : `win ${windowId.slice(0, 8)}`;
@@ -1288,10 +1222,8 @@ export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
  * the fan-out), so stdout is always a valid array and the exit stays 0.
  */
 async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
-  // Forward the caller's own filters (query, --limit, --since, …) minus --host,
-  // and guarantee --json so each peer answers with a parseable array. Force
-  // whole-index scope: an explicit --host means "that box's index", not the
-  // slice that happens to sit under the peer's SSH-login home dir.
+  // Forward the caller's filters minus --host and force --json so peers answer parseably. Force
+  // whole-index scope: `--host` means that box's index, not the slice under the SSH-login home.
   const forwarded = ensureWholeIndex(buildForwardedArgs(process.argv, new Set(hosts)));
   if (!forwarded.includes('--json')) forwarded.push('--json');
   const { sessions } = await gatherRemoteList(forwarded, hosts);
@@ -1334,13 +1266,9 @@ async function gatherRemoteComputerSessionRows(hosts?: string[]): Promise<Comput
   return result.items;
 }
 
-/**
- * `running N · idle N · waiting N · queued N · closed N · abandoned N · unknown N`
- * for a bucket of sessions (zero buckets omitted). Same bucketing as the summary so
- * per-group counts reconcile with the `(total)` beside the header — the `unknown`
- * bucket is what keeps an alive-but-opaque row from silently vanishing from the
- * tally. Empty when nothing.
- */
+/** Tally line (`running N · idle N · waiting N ...`, zero buckets omitted) using the summary's
+ * bucketing so group counts reconcile with the header total; the `unknown` bucket keeps
+ * alive-but-opaque rows from vanishing. */
 function groupTally(sessions: ActiveSession[]): string {
   const running = sessions.filter(s => s.status === 'running').length;
   const idle = sessions.filter(s => s.status === 'idle').length;
@@ -1483,13 +1411,9 @@ function hostToken(h: string): string {
   return normalizeHost(h.split('@').pop() || h);
 }
 
-/**
- * Whether the local machine's sessions belong in an `--active` view. Local is
- * included by default; an explicit `--device` list scopes the view to
- * exactly those machines, so local is dropped unless it is itself named (by
- * alias or `user@host`, matched on the normalized machine id). Exported for
- * unit testing without touching SSH or the live process table.
- */
+/** Whether local sessions belong in an `--active` view: included by default; an explicit `--device`
+ * list scopes to those machines, so local is dropped unless named (alias or `user@host`, normalized
+ * machine id). */
 export function shouldIncludeLocal(hosts: string[] | undefined, self: string): boolean {
   if (!hosts || hosts.length === 0) return true;
   return hosts.some(h => hostToken(h) === self);
@@ -1654,12 +1578,9 @@ async function describeEmptyActiveDiscovery(
   return `No active agent sessions found, but discovery was degraded: ${parts.join('; ')}.`;
 }
 
-/**
- * Render the unified active-session view, grouped by machine. Scoping and the
- * fleet sweep live in {@link gatherActiveSessions}; this owns the presentation
- * (the `--waiting` gate, JSON, and the grouped table). A tip is shown when there
- * are no other machines to include.
- */
+/** Render the unified active-session view grouped by machine. Scoping and the sweep live in {@link
+ * gatherActiveSessions}; this owns presentation (`--waiting`, JSON, grouped table), with a tip when
+ * there are no other machines. */
 async function renderActiveSessions(
   asJson: boolean,
   waitingOnly = false,
@@ -1805,23 +1726,15 @@ function printCrossMachineTip(): void {
   ));
 }
 
-/**
- * True when the interactive session browser should open instead of a printed
- * listing: a real TTY, no `--json`, and `--no-interactive` not set. The bare
- * listing and `--active` both default to it; scripts/pipes/agents fall through
- * to the existing printed/JSON paths.
- */
+/** True when the interactive browser should open: a real TTY, no `--json`, and `--no-interactive`
+ * unset. Scripts, pipes and agents fall through to the printed/JSON paths. */
 function useInteractiveBrowser(options: SessionsOptions): boolean {
   return options.interactive !== false && !options.json && isInteractiveTerminal();
 }
 
-/**
- * A bare interactive fleet listing — no query, no render/filter flag — that the
- * `runSessionBrowser` picker can represent. The single predicate shared by the
- * bare-browser branch and the `--device` early-return guard so they can't drift:
- * when this holds, an explicit `--device` scope is folded into the
- * browser (preview-rich, selectable) instead of the legacy per-host raw stream.
- */
+/** A bare interactive fleet listing (no query, render or filter flag) that `runSessionBrowser` can
+ * represent. Shared by the bare-browser branch and the `--device` early-return guard so they cannot
+ * drift. */
 function isBareBrowserListing(options: SessionsOptions, query: string | undefined): boolean {
   return (
     useInteractiveBrowser(options) &&
@@ -2175,12 +2088,8 @@ function linkedSessionMeta(session: SessionMeta): string {
   return chalk.gray('      ' + parts.join(' · '));
 }
 
-/**
- * Render the routine drilldown: canonical run history first, each run linked to
- * its indexed agent session(s). This is the run/session seam made visible — a
- * command routine shows its runs and states plainly that no session is expected;
- * an agent routine shows the same runs plus each run's session metadata.
- */
+/** Render the routine drilldown: run history first, each run linked to its indexed session(s). A
+ * command routine shows its runs and states that no session is expected. */
 export function printRoutineDrilldown(
   drill: RoutineDrilldown,
   liveIndex?: Map<string, ActiveSession>,
@@ -2357,13 +2266,9 @@ export function buildSessionDetailBlock(
   const canDateEvents = sourceStamp !== undefined || events.length === 0;
   const daemonProjection = stamp ? readSessionTimelineAny(session.id, stamp) : undefined;
 
-  // A bounded tail read backs `messages` on EVERY warm cache hit (no fresh
-  // parse this call), REGARDLESS of whether the daemon projection is already
-  // present — this is what fixes a real bug review caught: a warm digest hit
-  // whose daemon timeline HAD landed still fell through to the 2-message
-  // digest summary below, because the tail-read used to be gated on the
-  // on-demand-fold branch only. `messages` and the on-demand fold are two
-  // independent uses of the same cheap, bounded events window.
+  // A bounded tail read backs `messages` on every warm cache hit, even when the daemon projection
+  // exists; previously it was gated on the on-demand-fold branch, so such hits fell back to the
+  // 2-message digest summary. Both use the same events window.
   let foldEvents = events;
   if (foldEvents.length === 0 && session.filePath) {
     foldEvents = readSessionTail(session.filePath, session.agent as SessionAgentId);
@@ -2535,11 +2440,9 @@ export async function renderSessionPreview(
     return;
   }
 
-  // Lead with the live status when the session is still running, so the preview
-  // says working / waiting / idle up front — not just the historical transcript.
-  // The shared snapshot is accepted for at most 15 seconds. The durable preview
-  // below contains no live status, so a long-lived process can never keep a
-  // stale working/waiting headline in its transcript cache.
+  // Lead with live status when the session is still running (working / waiting / idle). The shared
+  // snapshot is accepted for at most 15s, and the durable preview holds no live status, so a stale
+  // headline never persists in the cache.
   let live: ActiveSession | undefined;
   try {
     const loaded = await loadLocalActiveSessions();
@@ -3578,11 +3481,8 @@ function teamTag(session: SessionMeta): string {
   return handle ? `[${handle}] ` : '[team] ';
 }
 
-/**
- * Whether a session belongs to `team`, from either end: it spawned the team, or
- * it is one of the team's teammates. Case-insensitive, matching the SQL
- * predicate behind `querySessions({ spawnedTeam })`.
- */
+/** Whether a session belongs to `team`, as spawner or teammate. Case-insensitive, like the SQL
+ * predicate behind `querySessions({ spawnedTeam })`. */
 export function matchesTeam(session: SessionMeta, team: string): boolean {
   // The needle is peer-derived in the browser: `f.team` comes off the team cycle,
   // which is built from rows another machine sent. Guard it the same way as the
@@ -3599,14 +3499,9 @@ export function matchesTeam(session: SessionMeta, team: string): boolean {
 /** Longest team name rendered in the `team:` row badge before truncation. */
 const TEAM_BADGE_MAX = 10;
 
-/**
- * The `team:<name>` badge for a session that SPAWNED a team — the orchestrator
- * end of the lineage, from the scan-derived `spawnedTeam`. Returned as a plain
- * (uncolored) string plus its display width so callers can reserve the width
- * from the topic budget and color it as their own segment: folding it into the
- * topic string would lose the color, since renderTopicCell strips ANSI and
- * re-whitens every slice.
- */
+/** The `team:<name>` badge for a session that spawned a team (scan-derived `spawnedTeam`), as an
+ * uncolored string plus display width, so callers reserve topic width and color it themselves;
+ * renderTopicCell would strip ANSI. */
 export function teamBadge(session: SessionMeta): { plain: string; width: number } {
   const team = safeTeamText(session.spawnedTeam);
   if (!team) return { plain: '', width: 0 };
@@ -3628,11 +3523,8 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   };
 }
 
-/**
- * Narrowest topic a row is willing to render. The time cell drops its creation
- * field rather than squeeze the topic past this — a row that wraps is worse than
- * a row missing one field.
- */
+/** Narrowest topic a row renders. The time cell drops its creation field before squeezing the topic
+ * below this, since a wrapped row is worse than one missing a field. */
 const MIN_TOPIC_W = 16;
 
 /**
@@ -3938,13 +3830,9 @@ const TEAM_MODE_W = 5;
 /** Longest teammate handle folded into a team-member row before it truncates. */
 const TEAM_HANDLE_W = 16;
 
-/**
- * One row under a team group: `shortId · agent · mode · handle · doing · time`.
- * Unlike {@link flatSessionRow}/{@link treeSessionRow} it drops the
- * `[team/handle]` topic prefix — the group header already names the team — and
- * promotes the teammate's mode and handle to their own cells, the richer
- * identity the `--teams` view exists to show (RUSH-1997).
- */
+/** One team-group row: `shortId · agent · mode · handle · doing · time`. Unlike
+ * flatSessionRow/treeSessionRow it drops the `[team/handle]` prefix (the header names the team) and
+ * promotes mode and handle to cells (RUSH-1997). */
 function teamMemberRow(session: SessionMeta, live?: ActiveSession): string {
   const shown = sessionDisplayAgent(session);
   const agentColor = colorAgent(shown);
@@ -4414,11 +4302,8 @@ export function machineLabeler(machines: string[]): (m: string) => string {
   };
 }
 
-/**
- * Column flags for a picker, computed once over the whole pool so every row
- * aligns: the machine column only earns its width when the listing spans more
- * than one box, the ticket column only when some row carries a PR/ticket ref.
- */
+/** Column flags computed once over the whole pool so rows align: the machine column only when the
+ * listing spans more than one box, the ticket column only when some row has a PR/ticket ref. */
 export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
   const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
   const distinct = [...new Set(machines)];
@@ -4680,13 +4565,9 @@ async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
   return true;
 }
 
-/**
- * Resume a session in the current terminal — a foreground takeover of this
- * process. Used by the single-select picker and by `sessions resume` when the
- * chosen destination is "in place" (unknown emulator / off-macOS, single pick).
- * Falls back to the same resume invocation against the current version when the
- * version-pinned launcher is genuinely missing.
- */
+/** Resume a session in the current terminal (foreground takeover), for the single-select picker and
+ * `sessions resume` in-place. Falls back to the current version when the version-pinned launcher is
+ * missing. */
 export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
   // This function is the LOCAL takeover, and every caller is responsible for
   // routing a peer-owned session before it gets here (the picker above,
@@ -4863,12 +4744,9 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
 // Cloud session source (--cloud)
 // ---------------------------------------------------------------------------
 
-/**
- * Handle `agents sessions --cloud [id] [filters]`.
- * - Without id: list captured cloud-runs, optionally as JSON.
- * - With id: fetch the jsonl, parse with the recorded format, render via
- *   the same pipeline as local sessions (summary / markdown / json).
- */
+/** Handle `agents sessions --cloud [id] [filters]`: without id list captured cloud-runs (optionally
+ * JSON); with id fetch the jsonl, parse with its recorded format, and render through the local
+ * pipeline. */
 async function runCloudSessions(query: string | undefined, options: SessionsOptions): Promise<void> {
   const { discoverCloudSessions, ensureCloudSessionCached } = await import('../lib/session/cloud.js');
 
@@ -4976,11 +4854,8 @@ function formatSearchMessage(options: SessionFilterOptions): string {
   return `Search sessions (${filters.join(', ')}):`;
 }
 
-/**
- * Explicit `--agent` / `--project` / `--routine` flags. Distinct from the
- * listing pool (cwd-scoped, default-capped) that PHNX-2767 hydrates past:
- * these flags MUST still exclude FTS hits after that union.
- */
+/** Explicit `--agent`/`--project`/`--routine` flags. Distinct from the cwd-scoped listing pool that
+ * PHNX-2767 hydrates past: these must still exclude FTS hits after that union. */
 type SessionSearchScope = {
   agent?: string;
   project?: string;
@@ -5570,14 +5445,9 @@ export function isDefinitiveMatch(session: SessionMeta, selector: string): boole
   return !!shortId && session.shortId.toLowerCase() === shortId.toLowerCase();
 }
 
-/**
- * Whether a selector may enable early-exit on the cancellable fan-out: a full
- * UUID, a tmux alias, or an exact 8-hex short id — every shape that is globally
- * unique enough for the first hit to be the only hit worth waiting for. Labels,
- * keywords, and short-id prefixes narrower than 8 hex stay all-settle: their
- * uniqueness (or conflict) is only knowable once every peer has answered. See
- * {@link isDefinitiveMatch}.
- */
+/** Whether a selector may enable early-exit on the cancellable fan-out: a full UUID, tmux alias, or
+ * exact 8-hex short id. Labels, keywords and shorter prefixes stay all-settle until every peer
+ * answers. See {@link isDefinitiveMatch}. */
 export function selectorAllowsEarlyExit(selector: string): boolean {
   const trimmed = selector.trim();
   return FULL_SESSION_ID_RE.test(trimmed) || isAgentTmuxAlias(trimmed) || SHORT_SESSION_ID_RE.test(trimmed);
@@ -5672,15 +5542,9 @@ export function toolSearchForwardedArgs(argv: string[], hosts: string[]): string
  * not an identifier. */
 const SHORT_SESSION_ID_WIDTH = 8;
 
-/**
- * Whether a selector names ONE session precisely enough to resolve from the
- * reachable fleet alone when some peer did not answer (SES-9a).
- *
- * Deliberately stricter than `looksLikeSessionId`, which accepts any 6+ char
- * `[0-9a-f-]` run and so matches ordinary words (`facade`, `decade`, `beaded`).
- * Those are keywords a user typed as a search, not identifiers, and they must
- * keep waiting for every peer.
- */
+/** Whether a selector names ONE session precisely enough to resolve from the reachable fleet when a
+ * peer did not answer (SES-9a). Stricter than `looksLikeSessionId`, which also matches words like
+ * `facade`; those keywords must wait for every peer. */
 export function isUniqueEnoughSelector(selector: string): boolean {
   const trimmed = selector.trim();
   if (isCompleteSessionId(trimmed)) return true;
@@ -5850,14 +5714,9 @@ export async function computeLocalMetadataMatches(
   return hydrated;
 }
 
-/**
- * Resolve an id-shaped selector against the local live-session registry
- * (RUSH-2682). Reads the daemon-warmed active snapshot first (cheap); if that
- * snapshot predates a just-started session and misses, it forces ONE fresh
- * gather before conceding, so a session started seconds ago resolves
- * synchronously. Never throws — a degraded registry read yields no candidates,
- * so the caller falls through to the ordinary not-found path.
- */
+/** Resolve an id-shaped selector against the local live registry (RUSH-2682): the daemon-warmed
+ * snapshot first, then one forced fresh gather if it misses, so a session started seconds ago
+ * resolves. Never throws; a degraded read yields no candidates. */
 export async function liveMetadataMatches(
   selector: string,
   scope: { agent?: string; project?: string },
@@ -6080,10 +5939,9 @@ async function resolveSessionAcrossFleet(
 
   const candidate = candidates[0];
   const { machine } = candidate.hits[0];
-  // Render the remote summary by re-running `sessions <id>` ON the peer. --local
-  // keeps that render on the peer (it owns the transcript); the mode flag matches
-  // the mode the user asked for. No TTY: a summary/markdown/json render is a
-  // one-shot capture, not an interactive resume.
+  // Render the remote summary by re-running `sessions <id>` on the peer, which owns the transcript.
+  // --local keeps it there, the mode flag matches the request, and there is no TTY since it is a
+  // one-shot capture.
   const peerArgs = ['sessions', candidate.id, '--local'];
   const flag = modeFlag(mode);
   if (flag) peerArgs.push(flag);

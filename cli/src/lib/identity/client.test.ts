@@ -4,14 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
 
-/**
- * The seam's contract, driven against a REAL HTTP server (no mocked fetch):
- * the poll-state decoding the CLI depends on, the single-token-source rule, and
- * the fail-loud behavior when nobody is signed in.
- *
- * The server here stands in for Phoenix ID and answers with the exact bodies
- * the real service returns — the shapes were verified live against it.
- */
+/** The seam's contract, driven against a real HTTP server (no mocked fetch): poll-state
+ * decoding, the single-token-source rule, and fail-loud when nobody is signed in. The server
+ * stands in for Phoenix ID with the exact bodies the real service returns, verified live. */
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-identity-'));
 process.env.AGENTS_STATE_DIR = path.join(HOME, 'state');

@@ -7,15 +7,9 @@ import * as path from 'path';
 /** Windows drive-letter absolute path: `C:\` or `C:/`. */
 const WIN_DRIVE_RE = /^[a-zA-Z]:[\\/]/;
 
-/**
- * Does this positional argument look like a filesystem path (vs a search term)?
- *
- * POSIX markers (`.`, `./`, `../`, `/`, `~`) are recognized on every platform —
- * identical to the long-standing behavior. Windows-only shapes (drive-letter
- * `C:\…`, UNC `\\…`, backslash-relative `.\` / `..\`) are recognized ONLY on
- * win32, so a literal `C:\repo` typed on macOS/Linux still resolves as a search
- * term — i.e. no behavior change off Windows.
- */
+/** Does this positional argument look like a path (vs a search term)? POSIX markers (`.`, `./`,
+ * `../`, `/`, `~`) apply on every platform; Windows shapes (`C:\`, UNC, `.\`) only on win32, so
+ * `C:\repo` typed on macOS/Linux stays a search term. */
 export function looksLikePath(query: string, platform: NodeJS.Platform = process.platform): boolean {
   if (
     query === '.' ||
@@ -37,66 +31,43 @@ export function looksLikePath(query: string, platform: NodeJS.Platform = process
   return false;
 }
 
-/**
- * Normalize a path for comparison/prefix-matching: backslashes folded to forward
- * slashes and lowercased on Windows (its filesystem is case-insensitive). On
- * POSIX the input is returned unchanged, so callers behave exactly as before.
- */
+/** Normalizes a path for comparison: on Windows backslashes become forward slashes and the path is
+ * lowercased (case-insensitive FS); on POSIX the input is returned unchanged. */
 export function toComparablePath(p: string, platform: NodeJS.Platform = process.platform): string {
   if (platform === 'win32') return p.replace(/\\/g, '/').toLowerCase();
   return p;
 }
 
-/**
- * Canonical home directory. Use this instead of `process.env.HOME`, which is
- * unset on Windows (where the home is `USERPROFILE`); `os.homedir()` resolves
- * correctly on all three platforms.
- */
+/** Canonical home directory. Use this instead of `process.env.HOME`, which is unset on Windows
+ * (`USERPROFILE`); `os.homedir()` works on all three platforms. */
 export function homeDir(): string {
   return os.homedir();
 }
 
-/**
- * Is this a Windows absolute path — a drive-letter root (`C:\`, `C:/`) or a UNC
- * share (`\\server\share`)? Used by local-source parsing to recognize a native
- * Windows path that the POSIX `/`, `./`, `../` prefixes miss. Caller decides
- * whether to apply it (typically gated on win32).
- */
+/** Is this a Windows absolute path: a drive-letter root (`C:\`, `C:/`) or a UNC share? Used by
+ * local-source parsing to catch native Windows paths the POSIX prefixes miss; the caller decides
+ * whether to apply it (typically gated on win32). */
 export function isWindowsAbsolutePath(p: string): boolean {
   return WIN_DRIVE_RE.test(p) || p.startsWith('\\\\');
 }
 
-/**
- * Fold backslashes to forward slashes. Use when a path is going into a string
- * that must read the same on every OS — a doc-comparable display path, a regex
- * subject, a forward-slash-keyed lookup. Pure string transform; on POSIX input
- * (no backslashes) it returns the value unchanged.
- */
+/** Folds backslashes to forward slashes, for a path going into a string that must read the same on
+ * every OS (display path, regex subject, forward-slash-keyed lookup). Pure; POSIX input is
+ * unchanged. */
 export function toPosix(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
-/**
- * Fold forward slashes to the platform's native separator. The inverse of
- * {@link toPosix}: use when a path from a source that emits POSIX separators on
- * every OS — notably `git`, whose `rev-parse` prints `C:/Users/...` on Windows —
- * must become a native filesystem path so it compares equal to one built with
- * `path.*`. On POSIX (`path.sep === '/'`) it returns the value unchanged.
- */
+/** Folds forward slashes to the native separator, the inverse of {@link toPosix}: for paths from
+ * sources that emit POSIX separators everywhere (`git rev-parse` prints `C:/Users/...` on Windows)
+ * so they compare equal to `path.*` paths. Unchanged on POSIX. */
 export function toNativePath(p: string, sep: string = path.sep): string {
   return sep === '/' ? p : p.replace(/\//g, sep);
 }
 
-/**
- * Derive a filesystem-safe key/slug from an absolute path. Drops the Windows
- * drive colon (`:` is illegal in NTFS filenames / is the ADS separator) and
- * folds path separators and spaces to `_`. For a POSIX path this produces the
- * exact historical slug (`/a/b c` -> `_a_b_c`), so existing on-disk keys are
- * unchanged; on Windows `C:\a\b` -> `C_a_b` instead of an unusable name.
- *
- * Shell mirror (keep byte-identical in any bash shim that recomputes this key):
- *   printf '%s' "$P" | tr -d ':' | tr '\\/ ' '_'
- */
+/** Derives a filesystem-safe key from an absolute path: drops the Windows drive colon and folds
+ * separators and spaces to `_` (POSIX `/a/b c` gives `_a_b_c`, Windows `C:\a\b` gives `C_a_b`).
+ * Shell mirror, keep byte-identical: `printf '%s' "$P" | tr -d ':' | tr '\\/ ' '_'`. */
 export function toPortableKey(p: string): string {
   return p.replace(/^([a-zA-Z]):/, '$1').replace(/[\\/ ]/g, '_');
 }

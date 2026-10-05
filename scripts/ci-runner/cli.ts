@@ -1,10 +1,6 @@
 #!/usr/bin/env bun
-/**
- * Shared untrusted-code executor CLI.
- *
- *   bun scripts/ci-runner/cli.ts submit <request.json>
- *   bun scripts/ci-runner/cli.ts bench [jobCount]
- */
+/** Shared untrusted-code executor CLI. Usage: `bun scripts/ci-runner/cli.ts submit <request.json>`
+ * or `bench [jobCount]`. */
 import { readFileSync } from 'node:fs';
 import { runExecutorBenchmark, writeBenchReport } from './src/benchmark';
 import { Broker } from './src/broker';

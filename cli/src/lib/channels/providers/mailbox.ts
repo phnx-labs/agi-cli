@@ -1,10 +1,5 @@
-/**
- * Mailbox channel provider — delivers to an agent's file-based mailbox.
- *
- * The mailbox is one channel among many. This provider is a thin wrapper over
- * the same `enqueue` seam that `agents message` uses (commands/message.ts), so
- * both callers share one spool at ~/.agents/.history/mailbox/<id>/.
- */
+/** Mailbox channel provider: a thin wrapper over the `enqueue` seam `agents message` uses, so both
+ * share one spool. */
 import { mailboxDir, enqueue, isValidMailboxId } from '../../mailbox.js';
 import type { ChannelProvider, SendOptions, SendResult } from '../registry.js';
 

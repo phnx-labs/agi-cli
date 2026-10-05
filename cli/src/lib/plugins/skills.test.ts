@@ -22,10 +22,8 @@ afterEach(() => {
 const tsxBin = path.resolve('node_modules/.bin/tsx');
 const skillsModuleUrl = pathToFileURL(path.resolve('src/lib/plugins/skills.ts')).href;
 
-/**
- * Spawn a subprocess with an isolated HOME so os.homedir() returns tempHome.
- * Evaluates `expression` after importing from skills.ts and returns the result.
- */
+/** Spawn a subprocess with an isolated HOME and evaluate `expression` after importing from
+ * skills.ts. */
 function runSkills(home: string, expression: string): unknown {
   const child = spawnSync(tsxBin, ['-e', `
     import * as skills from ${JSON.stringify(skillsModuleUrl)};
@@ -63,11 +61,8 @@ function makeSkillDir(parentDir: string, skillName: string, opts: { withRules?: 
   return skillDir;
 }
 
-/**
- * Create a fake installed version for an agent so listInstalledVersions() includes it.
- * listInstalledVersions checks for the binary at versions/<agent>/<version>/node_modules/.bin/<cliCommand>.
- * For claude the cliCommand is 'claude'.
- */
+/** Create a fake installed version so listInstalledVersions() includes it (it checks
+ * versions/<agent>/<version>/node_modules/.bin/<cliCommand>). */
 function fakeInstalledVersion(home: string, agent: string, version: string, cliCommand: string = agent): void {
   const binDir = path.join(home, '.agents', '.history', 'versions', agent, version, 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -75,10 +70,8 @@ function fakeInstalledVersion(home: string, agent: string, version: string, cliC
   fs.writeFileSync(binPath, '#!/bin/sh\necho stub\n', { mode: 0o755 });
 }
 
-/**
- * Create the skills directory for a specific version home and optionally plant a skill.
- * Path: ~/.agents/versions/<agent>/<version>/home/.<agent>/skills/<skillName>/
- */
+/** Create a version home's skills directory, optionally planting a skill, under
+ * ~/.agents/versions/<agent>/<version>/home/.<agent>/skills/<name>/. */
 function plantSkillInVersionHome(
   home: string,
   agent: string,
@@ -219,12 +212,9 @@ describe('removeSkillFromVersion — soft-delete', () => {
 
 // ─── diffVersionSkills — plugin-provided skills are not orphans (PHNX-3185) ─────
 
-/**
- * Create a plugin under a base repo (`~/.agents` or `~/.agents/.system`) that
- * bundles a skill: `plugins/<plugin>/{.claude-plugin/plugin.json, skills/<name>}`.
- * The manifest carries the name+version pluginSkillDirs requires. Returns the
- * bundled skill's source dir so the caller can mirror its content into a home.
- */
+/** Create a plugin under a base repo bundling a skill
+ * (`plugins/<plugin>/{.claude-plugin/plugin.json, skills/<name>}`); the manifest carries the
+ * name+version pluginSkillDirs requires. Returns the skill's source dir. */
 function makePluginSkill(baseRepoDir: string, pluginName: string, skillName: string): string {
   const pluginRoot = path.join(baseRepoDir, 'plugins', pluginName);
   fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
@@ -440,10 +430,9 @@ describe('diffVersionSkills — orphan detection', () => {
     const agent = 'claude';
     const version = '2.0.0';
 
-    // A command-runtime install writes commands as skill wrappers carrying the
-    // `agents_command` marker. It is a command (reconciled by the commands diff),
-    // NOT a skill — it must never surface as a skill orphan, or `prune cleanup`
-    // would delete a live command (tickets, swarm-plan, …).
+    // A command-runtime install writes commands as skill wrappers with the `agents_command` marker.
+    // They are commands, not skills, and must never surface as skill orphans or `prune cleanup`
+    // would delete a live command.
     const skillsDir = path.join(home, '.agents', '.history', 'versions', agent, version, 'home', `.${agent}`, 'skills');
     fs.mkdirSync(path.join(skillsDir, 'tickets'), { recursive: true });
     fs.writeFileSync(

@@ -6,12 +6,9 @@ import { codexEditWritableRoots, codexPolicyArgs } from '../../codex-policy.js';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
 
-/**
- * Shim-script single-quoting — identical to the local `shellQuote` in shims.ts
- * (always wraps in single quotes), NOT ssh-exec's variant (which leaves
- * shell-safe strings unquoted). The generated shim's codex launch args must stay
- * byte-for-byte what shims.ts produced, so the quoting moves with the logic.
- */
+/** Shim-script single-quoting, identical to the local `shellQuote` in shims.ts (always single
+ * quotes), not ssh-exec's variant, so generated shim codex launch args stay byte-for-byte what
+ * shims.ts produced. */
 function shimShellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -21,11 +18,9 @@ export const codexAdapter: HarnessAdapter = {
 
   applyExecConfigEnv(result, ctx) {
     if (ctx.version && ctx.versionHome) {
-      // On macOS the deep versioned home overflows the Unix-socket SUN_LEN
-      // limit for codex's app-server control socket; resolve to a short,
-      // SUN_LEN-safe home (migrating once if needed). See codex-home.ts.
-      // ctx.versionHome is the account slot on a `codex#<account>` launch, so
-      // the short home is keyed by that origin, never by the version alone.
+      // On macOS the deep versioned home overflows the Unix-socket SUN_LEN limit for codex's
+      // app-server control socket, so resolve a short SUN_LEN-safe home (migrating once; see
+      // codex-home.ts). ctx.versionHome is the account slot on a `codex#<account>` launch.
       const originHome = path.join(ctx.versionHome, '.codex');
       const historyDir = getHistoryDir();
       const agentsUserDir = path.dirname(historyDir);
@@ -50,13 +45,9 @@ export const codexAdapter: HarnessAdapter = {
   },
 
   shimExecTail(launchArgs) {
-    // Codex is special: its `workspace-write` sandbox hardcodes any `.agents/`
-    // (and `.codex/`) directory read-only, but agents-cli keeps every worktree at
-    // `<repo>/.agents/worktrees/<slug>`, so an in-repo build under a static shim
-    // would hit `EROFS`. The shim resolves the repo's `.agents` from `$PWD` at RUN
-    // time — worktree-aware, mirroring repoAgentsDirForCwd — and passes it via
-    // Codex's own `--add-dir`. `--add-dir` is added only when the resolved
-    // `.agents` exists.
+    // Codex's `workspace-write` sandbox hardcodes `.agents/` and `.codex/` read-only, but
+    // agents-cli keeps worktrees at `<repo>/.agents/worktrees/<slug>`, so in-repo builds under a
+    // static shim would hit EROFS.
     return `_repo_agents=""
 case "$PWD" in
   */.agents/worktrees/*) _repo_agents="\${PWD%%/.agents/worktrees/*}/.agents" ;;

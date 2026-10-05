@@ -3,16 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// End-to-end parity for the LIVE Codex scan path (B-3). Proves that wiring
-// scanCodexSessionIncremental into discoverSessions produces a DB row IDENTICAL,
-// field for field, to a from-scratch FULL reparse — even when PR / ticket
-// signals STRADDLE two scans and the cumulative token_count updates across an
-// append — and that a truncation forces a full reparse. Real fs, real sqlite,
-// real discovery under a throwaway HOME. No mocks.
-//
-// The from-scratch ground truth is computed inside the SAME DB by writing the
-// final rollout content to a DIFFERENT session id (no prior ledger row → the
-// code takes the FULL path for it) and comparing its row.
+// End-to-end parity for the live Codex scan (B-3): the incremental DB row equals a from-scratch
+// reparse even when PR/ticket signals straddle two scans; truncation forces a full reparse. No
+// mocks. Ground truth is the same content under a different session id (no ledger row, FULL path).
 
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
@@ -65,11 +58,8 @@ async function runScan(): Promise<void> {
   await discover.discoverSessions({ agent: 'codex', all: true });
 }
 
-// `timestamp` and `lastActivity` are excluded: Codex's timestamp is
-// max(session_meta.timestamp, file.mtime) (see pickLatestCodexTimestamp), so two
-// SEPARATE files (the incremental session vs the from-scratch ground truth)
-// carry different mtimes and can never match on those two fields. Every other
-// field is a pure function of the parsed content and must match exactly.
+// `timestamp` and `lastActivity` are excluded: Codex's timestamp is max(session_meta.timestamp,
+// file.mtime), so two separate files have different mtimes. Every other field must match exactly.
 const PARITY_FIELDS = [
   'agent', 'project', 'cwd', 'gitBranch', 'version',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
@@ -87,12 +77,9 @@ function assertRowParity(incId: string, fullId: string): void {
 }
 
 let groundTruthCounter = 0;
-/**
- * Compute the from-scratch ground truth for a set of events: write them to a
- * brand-new rollout file whose session_meta carries a fresh id (no prior ledger
- * continuation → FULL parse). Returns the SESSION id (from session_meta), which
- * is the DB row key — not the file name.
- */
+/** Compute the from-scratch ground truth: write the events to a new rollout file with a fresh
+ * session_meta id (full parse). Returns the session id, which is the DB row key, not the file
+ * name. */
 async function groundTruth(events: object[], sessionId: string): Promise<string> {
   const fileId = `ground-truth-${groundTruthCounter++}`;
   writeRollout(fileId, events);
@@ -119,11 +106,8 @@ afterAll(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-/**
- * Field-rich base events. `sessionId` only sets session_meta.id (the DB row key);
- * the user text is STABLE so topic/contentText parity holds between the
- * incrementally-scanned session and a from-scratch ground truth under a different id.
- */
+/** Field-rich base events. `sessionId` only sets session_meta.id (the row key); user text is stable
+ * so topic/contentText parity holds across ids. */
 function baseEvents(sessionId: string): object[] {
   return [
     { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: sessionId, timestamp: '2026-06-28T00:00:00.000Z', cwd: '/home/u/repo', git: { branch: 'RUSH-42-fix' }, cli_version: '0.9.0', model: 'gpt-5-codex' } },
@@ -244,23 +228,17 @@ describe('B-3 live incremental Codex scan parity', () => {
   });
 
   it('IN-PLACE REWRITE: replacing the path with a DIFFERENT, LARGER session forces FULL (no cross-session corruption)', async () => {
-    // The metadata-only guard (size-grew + mtime-forward) cannot tell an append
-    // from an in-place rewrite/restore that dropped a DIFFERENT, larger rollout at
-    // the same path. Resuming there would fold session B's bytes into an
-    // accumulator hydrated from session A's continuation — and because sessionId is
-    // first-wins, the corrupt row would keep A's id with B's counters folded in.
-    // The session_meta-id re-check (codexSessionIdentityAt) must catch the change
-    // and force FULL. Mirrors the Claude regression test in commit 1c8ff457.
+    // The metadata-only guard (size grew + mtime forward) cannot tell an append from an in-place
+    // rewrite putting a different, larger rollout at the same path. The session_meta-id re-check
+    // (codexSessionIdentityAt) must force FULL. Mirrors the Claude test in commit 1c8ff457.
     const idA = 'sess-inplace-A';
     const fp = writeRollout('inplace-rewrite', baseEvents(idA));
     await runScan();
     const priorOffset = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!).offset as number;
     expect(db.getSessionById(idA), 'session A indexed on first scan').not.toBeNull();
 
-    // Replace the path IN PLACE with a DIFFERENT session (distinct session_meta id
-    // AND first timestamp) whose byte length is LARGER than the stored offset and
-    // whose mtime moves forward — the exact shape metadata cannot tell from an
-    // append.
+    // Replace the path in place with a different session (new id and first timestamp), larger than
+    // the stored offset with a later mtime: the shape metadata cannot tell from an append.
     discover.__resetCodexScanBranchCountsForTest();
     const idB = 'sess-inplace-B';
     const sessionB = [

@@ -1,10 +1,6 @@
-/**
- * Real-path tests for the leaf fold migrator (RUSH-2454).
- *
- * foldLegacySystemRepo lives in migrate-fold.ts so the always-on startup hop
- * does not load migrate.ts's hosts/routine graph. These tests exercise the
- * actual filesystem fold against a temp HOME — no mocks.
- */
+/** Real-path tests for the leaf fold migrator (RUSH-2454): foldLegacySystemRepo lives in
+ * migrate-fold.ts so the startup hop skips migrate.ts's hosts/routine graph. Exercises the actual
+ * filesystem fold against a temp HOME, no mocks. */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

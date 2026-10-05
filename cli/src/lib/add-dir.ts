@@ -1,25 +1,6 @@
-/**
- * Cross-harness application of project / `--add-dir` directory grants.
- *
- * A multi-repo project binds several checkouts; the primary becomes cwd and the
- * rest become grants so the agent can read and write the siblings. How a grant
- * lands depends on the harness:
- *
- * - `native-flag`  — Claude, Kimi, Cursor: repeatable `--add-dir <path>`
- * - `codex-policy` — Codex: folded into the named edit profile's workspace_roots
- *                    (handled in buildExecCommand / codex-policy, not here)
- * - `grok-sandbox` — Grok: OS sandbox is off by default (siblings already
- *                    writable); when a non-off sandbox is active, write a
- *                    project-local profile with `read_write` and select it.
- *                    Always appends a short `--rules` note so the model knows
- *                    the siblings are in scope.
- * - `none`         — harness has no multi-root surface; grants are ignored
- *                    (caller may warn). Not a configuration mistake — the CLI
- *                    has nowhere to put the grant.
- *
- * Capability honesty: only strategies that actually change the launch count as
- * support. Silent no-ops stay `none`.
- */
+/** Cross-harness application of project / `--add-dir` grants. By harness: `native-flag` (Claude,
+ * Kimi, Cursor) repeatable `--add-dir`; `codex-policy` folds into workspace_roots; `grok-sandbox`
+ * writes a project profile plus a `--rules` note; `none` ignores them. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -62,10 +43,8 @@ export function normalizeAddDirs(dirs: string[] | undefined): string[] {
   return out;
 }
 
-/**
- * Append native `--add-dir` flags for harnesses that take them (Claude, Kimi, Cursor).
- * No-op for other strategies — call sites route by ADD_DIR_STRATEGY.
- */
+/** Append native `--add-dir` flags for harnesses that take them (Claude, Kimi, Cursor); call sites
+ * route by ADD_DIR_STRATEGY. */
 function appendNativeAddDirFlags(cmd: string[], dirs: string[]): void {
   for (const dir of dirs) {
     cmd.push('--add-dir', dir);
@@ -75,14 +54,9 @@ function appendNativeAddDirFlags(cmd: string[], dirs: string[]): void {
 /** Profile name written into `.grok/sandbox.toml` under the run cwd. */
 export const GROK_PROJECT_SANDBOX_PROFILE = 'agents-project';
 
-/**
- * Active Grok sandbox profile from the env, if a non-off profile is set.
- * Returns null when sandbox is off / unset / devbox (no widen needed).
- *
- * Only `GROK_SANDBOX` is consulted — a profile set only in config.toml is not
- * visible here (Grok does not expose it on the CLI), so those runs still get
- * the rules note but not a custom widen. Prefer env when launching sandboxed.
- */
+/** Active Grok sandbox profile from the env, or null when off, unset or devbox. Only `GROK_SANDBOX`
+ * is read (config.toml profiles aren't visible on the CLI), so those runs get the rules note but
+ * no custom widen. */
 function grokActiveSandboxProfile(env: NodeJS.ProcessEnv = process.env): string | null {
   const raw = (env.GROK_SANDBOX ?? '').trim();
   if (!raw) return null;
@@ -98,14 +72,9 @@ export function grokNeedsSandboxWiden(env: NodeJS.ProcessEnv = process.env): boo
   return grokActiveSandboxProfile(env) !== null;
 }
 
-/**
- * Ensure `.grok/sandbox.toml` under `cwd` defines `[profiles.agents-project]`
- * with `read_write` covering every grant, **extending the active base profile**
- * (so `GROK_SANDBOX=strict` does not silently widen to `workspace`).
- * Returns the profile name to pass as `--sandbox`, or null when not needed.
- *
- * Idempotent: rewrites only the managed profile block.
- */
+/** Ensure `.grok/sandbox.toml` defines `[profiles.agents-project]` with `read_write` for every
+ * grant, extending the active base profile so `GROK_SANDBOX=strict` doesn't widen to `workspace`.
+ * Returns the `--sandbox` profile name or null; idempotent, rewriting only the managed block. */
 export function ensureGrokProjectSandboxProfile(
   cwd: string,
   dirs: string[],
@@ -175,10 +144,8 @@ export function ensureGrokProjectSandboxProfile(
   return GROK_PROJECT_SANDBOX_PROFILE;
 }
 
-/**
- * Short rules blob so Grok's model treats sibling dirs as in-scope.
- * Wording tracks whether we actually widened the sandbox for write access.
- */
+/** Short rules blob so Grok's model treats sibling dirs as in scope; wording tracks whether the
+ * sandbox was widened for write access. */
 export function grokAddDirRules(dirs: string[], opts: { writeGranted?: boolean } = {}): string {
   const list = dirs.map((d) => `- ${d}`).join('\n');
   const access = opts.writeGranted === false
@@ -191,12 +158,8 @@ export function grokAddDirRules(dirs: string[], opts: { writeGranted?: boolean }
   ].join('\n');
 }
 
-/**
- * Apply directory grants on the argv for harnesses handled here.
- * Codex is intentionally excluded — its path lives next to codexPolicyArgs.
- *
- * @returns true when any argv / on-disk change was made for the grants
- */
+/** Apply directory grants on the argv for harnesses handled here (Codex is excluded; see
+ * codexPolicyArgs). Returns true when any argv or on-disk change was made. */
 export function applyAddDirs(
   agent: AgentId,
   cmd: string[],

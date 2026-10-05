@@ -75,11 +75,9 @@ describe('copyPluginToMarketplace', () => {
     const aliasPath = path.join(dest, 'skills', 'alias');
     const aliasStat = fs.lstatSync(aliasPath);
     expect(aliasStat.isSymbolicLink()).toBe(true);
-    // Node's cpSync rewrites relative symlink targets to absolute paths into
-    // the SOURCE tree when preserving them — that's fine for the consumer
-    // (the original file is still readable) and proves the filter let the
-    // symlink through. The contract we care about: the symlink exists and
-    // resolves to the original content.
+    // Node's cpSync rewrites relative symlink targets to absolute paths into the SOURCE tree when
+    // preserving them; fine for the consumer and proof the filter let it through. The contract: the
+    // symlink exists and resolves to the original content.
     expect(fs.readFileSync(aliasPath + '/SKILL.md', 'utf-8')).toBe('real skill');
   });
 

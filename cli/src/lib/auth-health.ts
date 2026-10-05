@@ -1,21 +1,6 @@
-/**
- * Live auth-health: does an agent account's stored credential actually complete
- * an authenticated request right now?
- *
- * The rest of the CLI reports "signed in" from a local heuristic — a credential
- * file is present and its email decodes — which cannot distinguish a good token
- * from a revoked-but-unexpired one. This module completes a real request per
- * (agent, account) and records the verdict in a small cache that `agents view`
- * (per-version chip), `agents fleet status` (the per-host Auth column, via
- * {@link summarizeHostAuth}), and the run rotation all read. The writers are
- * the daemon (a periodic local refresh) and `agents fleet ping` (which also
- * fans out to write remote hosts' rows into the local cache); everyone else
- * reads.
- *
- * The network probes themselves live in lib/usage.ts (where the per-provider
- * token loaders + endpoints already are); this module classifies their result,
- * covers the best-effort (non-networked) providers, and owns the cache.
- */
+/** Live auth-health: does an account's stored credential complete an authenticated request now?
+ * Local "signed in" can't tell a revoked-but-unexpired token. Records a per-(agent, account)
+ * verdict in a cache read by `agents view`, `agents fleet status` and rotation. */
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -38,38 +23,9 @@ import { selfConfiguredDeviceRole } from './device-config.js';
 import { mayIssueUsageEndpointProbe, trySpendUsageApiCall } from './usage-refresh.js';
 import { machineId } from './machine-id.js';
 
-/**
- * - `live`        — completed an authenticated request (200).
- * - `revoked`     — the server rejected the token (401/403), except Claude
- *                   setup-token `user:profile` scope denials (those are
- *                   `unverified` via `reason: 'usage_scope'` — RUSH-2392).
- * - `expired`     — locally-detected expiry; not network-verified (no refresh on the read path).
- * - `rate_limited`— the account is throttled per its usage snapshot
- *                   ({@link deriveUsageStatusFromSnapshot} / {@link applyUsageHonesty}),
- *                   not per a probe HTTP 429. A 429 from the usage endpoint is
- *                   probe throttling and never produces `rate_limited`: it keeps
- *                   the previous real verdict when one exists within
- *                   {@link AUTH_PROBE_MAX_AGE_MS}, otherwise `unverified` with
- *                   detail `probe throttled (HTTP 429)` (PHNX-4051).
- * - `unverified`  — credential present, not locally expired, but this agent has
- *                   no in-repo probe endpoint (codex/grok), OR the probe
- *                   endpoint cannot prove live for a known non-revocation
- *                   reason (Claude setup-token usage-scope gap — RUSH-2392),
- *                   OR a throttled probe with no fresh previous verdict (PHNX-4051).
- * - `no_evidence` — a credential is present on disk but THIS box has no evidence,
- *                   either way, that it can authenticate: no probe was possible
- *                   (a worker's setup-token box does not probe the usage endpoint)
- *                   and no run outcome has been recorded here yet. Distinct from
- *                   `unverified` (which is "signed in, no probe endpoint exists for
- *                   this harness") — `no_evidence` is "we did not look", the exact
- *                   state PHNX-4116 stops rendering as a verdict word. A worker
- *                   never PUBLISHES this row (it is dropped in
- *                   {@link probeLocalFleetAuth}); it surfaces only as an in-memory
- *                   account-catalog verdict whose display is a FACT (token presence
- *                   + recorded run outcomes), never the word "no_evidence".
- * - `unconfigured`— no usable credential on disk.
- * - `error`       — network/other failure; verdict indeterminate (keep the last known one).
- */
+/** Verdicts: `live` (200); `revoked` (401/403, except the Claude setup-token usage_scope gap,
+ * RUSH-2392); `expired` (local, no refresh); `rate_limited` (per usage snapshot, never a probe
+ * 429, PHNX-4051); `unverified`; `no_evidence` (PHNX-4116); `unconfigured`; `error` (keep last). */
 export type AuthVerdict =
   | 'live'
   | 'revoked'
@@ -90,14 +46,9 @@ export interface AuthHealth {
   account?: string;
   /** Stable registered account id. Display labels are never used as identity. */
   accountId?: string;
-  /**
-   * How this row was observed (PHNX-4116). `probe` (default when absent) is a
-   * network/usage-endpoint probe the daemon ran; `run` is a REAL agent run
-   * outcome recorded on exit — a successful inference (`live`) or an auth failure
-   * (`revoked`/`expired`/`rate_limited`). The auth FACT `agents view` renders
-   * (`last used ok 12m ago` vs `last auth failure 401 …`) reads this so a token's
-   * usability is stated as evidence, not inferred from a stale usage file.
-   */
+  /** How this row was observed (PHNX-4116): `probe` (default) is a daemon network probe; `run` is a
+   * real run outcome recorded on exit (success `live`, or an auth failure). `agents view` states
+   * token usability from this as evidence (`last used ok 12m ago`), not a stale usage file. */
   source?: 'probe' | 'run';
 }
 
@@ -115,10 +66,9 @@ export const LIVE_PROBE_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['claude
 export function classifyHttpStatus(status: number): AuthVerdict {
   if (status >= 200 && status < 300) return 'live';
   if (status === 401 || status === 403) return 'revoked';
-  // 429 is probe throttling, not an account throttle — the account's real
-  // throttle state comes from the usage snapshot (deriveUsageStatusFromSnapshot).
-  // Treating it as `rate_limited` let a burst-throttled endpoint mark every
-  // account LIMITED. See mergeAuthHealthEntries for the keep-or-unverified path.
+  // 429 is probe throttling, not an account throttle; real throttle state comes from the usage
+  // snapshot (deriveUsageStatusFromSnapshot). Treating it as `rate_limited` let a burst-throttled
+  // endpoint mark every account LIMITED. See mergeAuthHealthEntries.
   if (status === 429) return 'error';
   return 'error';
 }
@@ -179,22 +129,14 @@ export function verdictLabel(verdict: AuthVerdict): string {
 /** Roll a set of verdicts (one host×agent's installs) into counts for a matrix cell. */
 export interface VerdictSummary {
   live: number;
-  /**
-   * unverified — signed in, but this agent has no in-repo live-probe endpoint
-   * (codex/grok). A benign, neutral state: the account is present and usable, we
-   * just can't complete a 2xx to prove it. It must NOT be lumped with the soft
-   * `warn` bucket, or a fully-logged-in codex/grok fleet reads as half-degraded
-   * (the exact "cry wolf" the ping matrix used to produce).
-   */
+  /** unverified: signed in, but no in-repo live-probe endpoint (codex/grok). Benign and neutral;
+   * must not join the soft `warn` bucket, or a fully-logged-in codex/grok fleet reads as
+   * half-degraded (the old ping matrix). */
   present: number;
   /** revoked — the server rejected the token (401/403). Genuinely needs re-login. */
   bad: number;
-  /**
-   * expired / rate_limited / error — degraded or unknown, but NOT "re-login now".
-   * `expired` is soft for kimi/droid (their CLIs refresh the token on next launch;
-   * we don't refresh on the read path), so it must not be lumped with revoked or
-   * we'd cry wolf on a self-healing token.
-   */
+  /** expired / rate_limited / error: degraded or unknown, but not "re-login now". `expired` is soft
+   * for kimi/droid (their CLIs refresh on next launch), so lumping it with revoked would cry wolf. */
   warn: number;
   total: number;
 }
@@ -216,15 +158,9 @@ export function summarizeVerdicts(verdicts: AuthVerdict[]): VerdictSummary {
 /** A resolved display color; the caller maps it to chalk. Pure, so it's unit-tested. */
 export type AuthCellColor = 'green' | 'yellow' | 'red' | 'gray' | 'dim';
 
-/**
- * Color for a single verdict in the per-account (`--verbose`) breakdown. This is
- * the one source of truth shared with {@link authCellColor} so the matrix and the
- * account list can never drift — they did: the matrix painted `expired` yellow
- * while the verbose list painted it *red* (lumped with revoked), directly against
- * the {@link VerdictSummary} contract. Red is reserved for `revoked` (the only
- * "re-login now"); `unverified` is a neutral signed-in state (gray);
- * `expired`/`rate_limited`/`error` are soft (yellow).
- */
+/** Color for one verdict in the per-account (`--verbose`) breakdown, shared with authCellColor so
+ * the matrix and list can't drift (they did: expired was yellow in one, red in the other). Red
+ * only for `revoked`; `unverified` gray; `expired`/`rate_limited`/`error` yellow. */
 export function verdictColor(verdict: AuthVerdict): AuthCellColor {
   switch (verdict) {
     case 'live': return 'green';
@@ -236,13 +172,9 @@ export function verdictColor(verdict: AuthVerdict): AuthCellColor {
   }
 }
 
-/**
- * Color for a matrix cell that rolls up several accounts. Red only when a token
- * was genuinely rejected (`revoked`); yellow for soft/expired; green when at least
- * one account is live-verified and none are soft/revoked; gray when accounts are
- * present but unverifiable (codex/grok) — never the alarming yellow the old
- * renderer used, which made a fully-logged-in fleet read as half-broken.
- */
+/** Color for a matrix cell rolling up several accounts: red only on a genuine `revoked`; yellow for
+ * soft or expired; green when one is live-verified and none soft/revoked; gray when unverifiable
+ * (codex/grok), never the old alarming yellow that made a logged-in fleet read as half-broken. */
 export function authCellColor(summary: VerdictSummary): AuthCellColor {
   if (summary.total === 0) return 'dim';
   if (summary.bad > 0) return 'red';
@@ -256,19 +188,9 @@ export function isDeadVerdict(verdict: AuthVerdict): boolean {
   return verdict === 'revoked';
 }
 
-/**
- * A host's rolled-up auth state for the `fleet status` Auth column.
- *
- * The four display buckets are deliberately finer-grained than
- * {@link VerdictSummary}'s live/bad/warn: they separate "present but this agent
- * has no live probe" (`unverified`) and "soft, self-healing expiry"
- * (`expired`/`rate_limited`) from a genuine server rejection (`revoked`). The
- * old three-bucket rollup lumped all of those into `warn` and the column painted
- * them one alarming yellow — so a fleet of perfectly logged-in accounts on
- * codex/grok/etc (which can NEVER be probed live) read as half-degraded. These
- * buckets let the renderer show `unverified` as neutral and reserve red for the
- * only verdict that actually means "re-login now" ({@link isDeadVerdict}).
- */
+/** A host's rolled-up auth state for the `fleet status` Auth column. Four buckets, finer than
+ * VerdictSummary: `unverified` (no live probe) and soft self-healing expiry are split from
+ * `revoked`, since the old rollup painted codex/grok fleets, which can't be probed, as degraded. */
 export interface HostAuthSummary {
   /** Live-verified accounts (a real 2xx). */
   live: number;
@@ -284,16 +206,9 @@ export interface HostAuthSummary {
   oldestCheckedAt: number | null;
 }
 
-/**
- * Roll every cached (agent, version) row for one host into a {@link HostAuthSummary}
- * plus the age of its stalest entry. Pure — reads the map the caller already
- * loaded via {@link readAuthHealthCache}, so `fleet status` renders the Auth
- * column without any network probe. A host with no cached rows yields an empty
- * summary (total 0), which the renderer shows as "—".
- *
- * Keys are `host:agent:version` ({@link authCacheKey}); we match on the `host:`
- * prefix so agent/version segments can never be mistaken for a host.
- */
+/** Roll every cached (agent, version) row for one host into a HostAuthSummary plus the stalest
+ * entry's age. Pure over the map from readAuthHealthCache, so `fleet status` needs no probe; no
+ * rows gives total 0. Matches the `host:` key prefix so segments can't be mistaken for a host. */
 export function summarizeHostAuth(
   cache: Record<string, AuthHealth>,
   host: string,
@@ -335,11 +250,8 @@ export function formatCheckedAge(checkedAt: number, now: number = Date.now()): s
 // Cache identity + IO (single source of truth read by view/fleet/rotation)
 // ---------------------------------------------------------------------------
 
-/**
- * Human account label for display (email, else id). NOT used in the cache key —
- * two installs on one host can hold the same account with independently valid
- * tokens, so the key is keyed by version (below), not account.
- */
+/** Human account label for display (email, else id). Not in the cache key: two installs on one host
+ * can hold the same account with independently valid tokens, so the key is per version. */
 export function authAccountLabel(
   info: Pick<AccountInfo, 'email' | 'accountId' | 'userId'> | null | undefined,
 ): string | undefined {
@@ -351,22 +263,15 @@ export function authCacheKey(host: string, agent: AgentId | string, version: str
   return `${host}:${agent}:${version}`;
 }
 
-/**
- * Host-independent identity of one probe target — the (agent, version) pair
- * {@link authCacheKey} is keyed by. The separator cannot appear in either half,
- * so an agent id can never run into a version the way a `:` join allows.
- */
+/** Host-independent identity of one probe target, the (agent, version) pair authCacheKey keys on.
+ * The separator can't appear in either half, unlike a `:` join. */
 export function authTargetKey(agent: AgentId | string, version: string): string {
   return `${agent}@${version}`;
 }
 
-/**
- * The `version` slot an account SLOT occupies in the auth cache and the probe
- * rows: `slot:<accountId>`. A slot is a HOME-shaped dir, not an installed
- * version, so it needs its own key or its verdict would collide with (or be
- * silently dropped in favor of) whichever version home the account's label
- * happened to match.
- */
+/** The `version` slot an account slot occupies in the auth cache and probe rows:
+ * `slot:<accountId>`. A slot is a HOME-shaped dir, not an installed version, so it needs its own
+ * key or its verdict would collide with a version home sharing the account's label. */
 export function slotAuthVersionKey(accountId: string): string {
   return `slot:${accountId}`;
 }
@@ -377,14 +282,9 @@ interface SlotAuthInstall extends FleetAuthInstall {
   accountId: string;
 }
 
-/**
- * Every registered account's slot on this device (PHNX-3940 T1), as probe
- * targets. Before this the probe walked `listInstalledVersions` only, so a
- * slot's verdict was never re-derived after `accounts add/login` wrote it —
- * a slot re-materialized as `unconfigured` while the device doc was unreadable
- * stayed MISSING forever even though its login was live. A slot whose dir is
- * gone is skipped: there is nothing to probe and the row would only say so.
- */
+/** Every registered account's slot on this device (PHNX-3940 T1) as probe targets. Before, the
+ * probe walked only `listInstalledVersions`, so a slot re-materialized as `unconfigured` stayed
+ * missing though its login was live. A slot whose dir is gone is skipped. */
 export function enumerateSlotInstalls(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   agentIds: readonly AgentId[],
@@ -406,12 +306,9 @@ interface LocalAuthInstall extends FleetAuthInstall {
   accountId?: string;
 }
 
-/**
- * Every (agent, version) home the local auth probe covers on this device —
- * installed version homes plus account slots. {@link probeLocalFleetAuth} probes
- * exactly this set, so it is also the answer to "which cached rows are still
- * backed by something on disk" (PHNX-4051).
- */
+/** Every (agent, version) home the local auth probe covers: installed version homes plus account
+ * slots. probeLocalFleetAuth probes exactly this set, so it also says which cached rows are still
+ * backed (PHNX-4051). */
 function enumerateLocalAuthInstalls(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   agentIds: readonly AgentId[],
@@ -426,12 +323,9 @@ function enumerateLocalAuthInstalls(
   return installs;
 }
 
-/**
- * {@link authTargetKey} for every local probe target — what a cached row must
- * match to still be about this device. A row outside it is an ORPHAN: its home
- * was uninstalled, so nothing will ever re-probe it and its `checkedAt` is
- * frozen at whatever the last probe left (PHNX-4051).
- */
+/** authTargetKey for every local probe target: what a cached row must match to be about this
+ * device. A row outside it is an orphan (home uninstalled, `checkedAt` frozen, nothing re-probes
+ * it; PHNX-4051). */
 export function localAuthTargetKeys(agentIds: readonly AgentId[] = ALL_AGENT_IDS): Set<string> {
   return new Set(enumerateLocalAuthInstalls(readMeta(), agentIds).map((i) => authTargetKey(i.agent, i.version)));
 }
@@ -461,11 +355,8 @@ export function readAuthHealth(host: string, agent: AgentId | string, version: s
   return readAuthHealthCache()[authCacheKey(host, agent, version)] ?? null;
 }
 
-/**
- * Split a cache key back into the install it names, for one host. Returns null
- * for a key that belongs to another host or does not name a known agent — the
- * one place the `host:agent:version` join is undone.
- */
+/** Split a cache key back into the install it names for one host; null for another host's key or an
+ * unknown agent. The one place the `host:agent:version` join is undone. */
 function parseAuthCacheKey(key: string, host: string): { agent: AgentId; version: string } | null {
   const prefix = `${host}:`;
   if (!key.startsWith(prefix)) return null;
@@ -494,15 +385,9 @@ export function readFleetAuthRows(host: string): AuthProbeRow[] {
   return rows;
 }
 
-/**
- * Merge entries into the cache. An incoming `error` verdict (a network blip,
- * not a server rejection) is indeterminate, so it must NOT clobber a prior
- * known verdict — otherwise one 8s timeout flips a `live` chip to `error`,
- * exactly the "cry wolf" the verdict model avoids for `expired`. This is the
- * behaviour promised by the `error` doc on AuthVerdict ("keep the last known
- * one"). A probe-throttled 429 (detail `probe throttled (HTTP 429)`) keeps the
- * previous real verdict when one exists within {@link AUTH_PROBE_MAX_AGE_MS},
- * otherwise becomes `unverified` (PHNX-4051). Pure, so it's unit-tested directly. */
+/** Merge entries into the cache. An incoming `error` (network blip) must not clobber a known
+ * verdict, or one 8s timeout flips `live` to `error`. A probe-throttled 429 keeps the previous
+ * real verdict within AUTH_PROBE_MAX_AGE_MS, else becomes `unverified` (PHNX-4051). Pure. */
 export function mergeAuthHealthEntries(
   current: Record<string, AuthHealth>,
   incoming: Record<string, AuthHealth>,
@@ -524,14 +409,9 @@ export function mergeAuthHealthEntries(
   return merged;
 }
 
-/**
- * Merge one or more entries into the cache (best-effort write).
- *
- * `drop` removes entries the writer knows are gone — it runs on the PRE-merge
- * cache, so an incoming row always wins over a drop of the same key and the two
- * can never fight. Only a writer that knows the full truth for the keys it drops
- * may pass one (see {@link writeFleetAuthRows}).
- */
+/** Merge entries into the cache (best-effort write). `drop` removes known-gone entries on the
+ * pre-merge cache, so an incoming row always wins over a drop of the same key. Only a writer that
+ * knows the full truth for the keys it drops may pass one (see writeFleetAuthRows). */
 export function writeAuthHealthEntries(
   entries: Record<string, AuthHealth>,
   drop?: (key: string) => boolean,
@@ -559,31 +439,14 @@ export function writeAuthHealthEntries(
 // The probe (writer side)
 // ---------------------------------------------------------------------------
 
-/**
- * A usage snapshot this recent is live proof the account's shared setup-token
- * works: the snapshot only exists because an authenticated `/oauth/usage`
- * request succeeded. Matches the periodic tick's own probe window
- * (AUTH_PROBE_MAX_AGE_MS in daemon-ticks.ts — not imported to avoid a cycle;
- * a drift here only widens/narrows evidence freshness, never correctness).
- */
+/** A usage snapshot this recent is live proof the shared setup-token works, since it exists only
+ * because an authenticated `/oauth/usage` request succeeded. Matches AUTH_PROBE_MAX_AGE_MS in
+ * daemon-ticks.ts (not imported, to avoid a cycle; drift only shifts evidence freshness). */
 const FRESH_USAGE_VERDICT_MAX_AGE_MS = 20 * 60_000;
 
-/**
- * A `live` verdict derived from the account's usage cache instead of a second
- * network request (RUSH-3036). The auth probe and the usage fetch hit the SAME
- * rate-limited endpoint with the SAME fleet-shared setup-token, so a fresh
- * successful usage snapshot already proves everything the probe would: paying a
- * second request per account per box was half the fleet's endpoint load.
- *
- * Two guards keep the evidence honest (both review findings on the first cut):
- * the caller must assert this box holds a LOCAL credential for the account
- * (`signedIn`) — a fleet-imported snapshot proves the shared token works, not
- * that THIS box can authenticate, so an unsigned home never derives `live`;
- * and a `forceLive` caller (`agents devices ping --strict`) skips derivation
- * entirely, because its contract is a real request that can surface `revoked`
- * within seconds, not minutes. Returns null when there is no admissible fresh
- * evidence — the caller then live-probes as before.
- */
+/** A `live` verdict derived from the usage cache instead of a second request (RUSH-3036): the probe
+ * and usage fetch hit the same rate-limited endpoint with the same shared setup-token. This box
+ * must hold a local credential (`signedIn`); `forceLive` skips derivation. Null means probe live. */
 function verdictFromFreshUsage(
   usageKey: string | null | undefined,
   signedIn: boolean,
@@ -593,36 +456,26 @@ function verdictFromFreshUsage(
   const snapshot = readClaudeUsageCache(usageKey);
   const capturedAt = snapshot?.capturedAt?.getTime();
   if (!capturedAt || now - capturedAt >= FRESH_USAGE_VERDICT_MAX_AGE_MS) return null;
-  // A `sync`-sourced snapshot arrived from ANOTHER box's poller over the fleet
-  // store — it proves the shared setup-token works SOMEWHERE, not that THIS box
-  // can authenticate (PHNX-4116). Deriving `live` from it is exactly the false
-  // "we did not look here, but a synced file is fresh, so call it live" the
-  // ticket removes. Only a reading THIS box captured itself (statusline/poll)
-  // is admissible live evidence.
+  // A `sync` snapshot came from another box's poller: it proves the shared token works somewhere,
+  // not that this box can authenticate (PHNX-4116). Only a reading this box captured itself
+  // (statusline/poll) is admissible live evidence.
   if (snapshot?.freshness?.source === 'sync') return null;
   const ageMin = Math.max(1, Math.round((now - capturedAt) / 60_000));
   return { verdict: 'live', checkedAt: now, detail: `token proven live by a usage fetch ${ageMin}m ago` };
 }
 
-/**
- * Complete a live auth probe for one (agent, home). For claude/kimi/droid this
- * hits the provider — unless the account's usage cache already holds a fresh
- * successful fetch, which is the same authenticated request and proves the
- * token live without spending a second one (RUSH-3036). For everyone else it
- * reports a best-effort local verdict (`unverified` when a credential is
- * present, `unconfigured` otherwise) — never masquerading as `live`.
- */
+/** Complete a live auth probe for one (agent, home). For claude/kimi/droid this hits the provider,
+ * unless the usage cache holds a fresh successful fetch, which proves the token live without a
+ * second request (RUSH-3036). Others get a local verdict, never `live`. */
 export async function probeAuthHealth(
   agent: AgentId,
   home: string | undefined,
   opts?: {
     cliVersion?: string | null;
     info?: AccountInfo | null;
-    /**
-     * Skip the derived-from-usage shortcut and fire a real network probe
-     * (RUSH-3036). Set by `agents devices ping [--strict]`, whose contract is
-     * a genuinely live request that surfaces `revoked` immediately.
-     */
+    /** Skip the derived-from-usage shortcut and fire a real probe (RUSH-3036). Set by `agents
+     * devices ping [--strict]`, whose contract is a live request that surfaces `revoked`
+     * immediately. */
     forceLive?: boolean;
     /** Daemon tick deadline signal, combined with each probe fetch's own timeout (PHNX-3608). */
     signal?: AbortSignal;
@@ -639,12 +492,9 @@ export async function probeAuthHealth(
       role: selfConfiguredDeviceRole(),
       forceLive: opts?.forceLive,
     })) {
-      // A worker's setup-token cannot read the usage endpoint (RUSH-2392), so this
-      // box has no probe evidence for the account. This is NOT `unverified` (which
-      // conflated it with codex/grok's permanent no-probe-endpoint state): it is
-      // "we did not look here". A worker never publishes it — probeLocalFleetAuth
-      // drops `no_evidence` like `unconfigured` — so the account's facts come from
-      // token presence + recorded run outcomes instead (PHNX-4116).
+      // A worker's setup-token can't read the usage endpoint (RUSH-2392), so there is no probe
+      // evidence: "we did not look here", not `unverified`. A worker never publishes it; facts
+      // come from token presence plus recorded run outcomes (PHNX-4116).
       return {
         verdict: 'no_evidence',
         checkedAt,
@@ -687,37 +537,17 @@ export interface FleetAuthInstall {
   accountId?: string | undefined;
 }
 
-/**
- * A set of installs that share one provider account and MUST be probed once.
- * The live probe runs against `probe` (the representative home); every entry in
- * `members` — the representative included — then receives that one verdict.
- */
+/** A set of installs sharing one provider account that must be probed once. The live probe runs
+ * against `probe` (the representative home); every entry in `members`, representative included,
+ * gets that verdict. */
 interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
   probe: T;
   members: T[];
 }
 
-/**
- * Collapse installs so a live auth probe fires ONCE per (agent, account) rather
- * than once per version home.
- *
- * Several version homes signed into the same provider account share one OAuth
- * rate limit, so probing each of them concurrently — which the daemon did every
- * three minutes across every installed home (RUSH-2111) — raced that limit into
- * a 429 storm that then parked the whole box behind a `Retry-After` penalty (the
- * incident {@link file:./usage-backoff.ts} was written to survive; this removes
- * its cause). Grouping by account means N homes on one account issue ONE request.
- *
- * `isMergeable` scopes the dedup to the installs it actually helps: only agents
- * that make a network probe ({@link LIVE_PROBE_AGENTS}) can 429, so only they are
- * merged. A best-effort agent (its verdict is a cheap local file read, no rate
- * limit) is left per-install — collapsing it would gain nothing and could
- * silently override one home's local `signedIn` verdict with another's. Installs
- * with no resolvable account label, or that `isMergeable` rejects, are never
- * merged: each becomes its own group keyed by version, preserving the old
- * per-install probe (also the `unconfigured` case dropped downstream). Pure: no
- * fs, no network, so the dedup decision is unit-tested directly.
- */
+/** Collapse installs so a live auth probe fires once per (agent, account), not per version home.
+ * Homes on one account share an OAuth rate limit; concurrent probes every three minutes raced it
+ * into a 429 storm and a `Retry-After` penalty (RUSH-2111). Only LIVE_PROBE_AGENTS dedup. Pure. */
 /** Small fixed delay between live probes so one box no longer fires 16 requests in 4s (PHNX-4051). */
 const AUTH_PROBE_SPACING_MS = 150;
 
@@ -727,10 +557,9 @@ export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
 ): FleetAuthProbeGroup<T>[] {
   const groups = new Map<string, FleetAuthProbeGroup<T>>();
   for (const inst of installs) {
-    // Prefer stable accountId (identity) — a version home and its slot share the
-    // same id, so they collapse to ONE probe per identity (PHNX-4051). Fallback
-    // to the display label when no id is known. The `id:`/`acct:`/`ver:` tokens
-    // keep the three branches disjoint.
+    // Prefer the stable accountId: a version home and its slot share it, so they collapse to one
+    // probe per identity (PHNX-4051). Fall back to the display label; the `id:`/`acct:`/`ver:`
+    // tokens keep branches disjoint.
     const mergeKey = (inst as FleetAuthInstall).accountId
       ? `id:${(inst as FleetAuthInstall).accountId}`
       : inst.account
@@ -746,27 +575,16 @@ export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
   return [...groups.values()];
 }
 
-/**
- * Enumerate every installed (agent, version) on THIS host and return one row per
- * install (installs with no credential at all are dropped). Shared by
- * `agents fleet ping --local` and the daemon refresh.
- *
- * The live network probe is deduped by account: homes sharing one provider
- * account are probed ONCE and the verdict is fanned out to each home's row, so
- * the daemon's every-3-minute refresh can no longer fire concurrent same-account
- * requests and self-inflict a 429 (RUSH-2111). Each home still gets its own cache
- * row (the cache key is per-version by design — see {@link authCacheKey}).
- */
+/** Enumerate every installed (agent, version) on this host and return one row per install (no
+ * credential at all is dropped). Shared by `agents fleet ping --local` and the daemon refresh. The
+ * live probe is deduped by account, so refresh can't self-inflict a 429 (RUSH-2111). */
 export async function probeLocalFleetAuth(opts?: {
   cliVersion?: string | null;
   agents?: readonly AgentId[];
   /** Fire real network probes even when fresh usage evidence exists (RUSH-3036) — the `devices ping [--strict]` contract. */
   forceLive?: boolean;
-  /**
-   * Deadline signal from the daemon's supervised auth tick (PHNX-3608). Aborts
-   * the probe's in-flight network work when the tick deadline elapses so it
-   * unwinds instead of leaking a runaway await; on-demand CLI callers omit it.
-   */
+  /** Deadline signal from the daemon's supervised auth tick (PHNX-3608). It aborts in-flight probe
+   * work when the deadline elapses; on-demand CLI callers omit it. */
   signal?: AbortSignal;
 }): Promise<AuthProbeRow[]> {
   const agentIds = opts?.agents ?? ALL_AGENT_IDS;
@@ -775,10 +593,9 @@ export async function probeLocalFleetAuth(opts?: {
     info: AccountInfo | null;
   }
 
-  // Enumerate every install AND every account slot on this device, then resolve
-  // each one's account label. getAccountInfo is a local credential-file read
-  // (no network), so this fan-out is cheap and cannot contribute to the rate
-  // limit the probe grouping below exists to avoid.
+  // Enumerate every install and account slot on this device and resolve each account label.
+  // getAccountInfo is a local file read (no network), so this fan-out is cheap and doesn't add to
+  // the rate limit the grouping avoids.
   const { findNativeAccountByIdentity } = await import('./account-registry.js');
   const meta = readMeta();
   const installs: LocalInstall[] = enumerateLocalAuthInstalls(meta, agentIds).map((inst) => ({ ...inst, info: null }));
@@ -793,11 +610,9 @@ export async function probeLocalFleetAuth(opts?: {
     inst.accountId ??= findNativeAccountByIdentity(meta, inst.agent, inst.info)?.id;
   }
 
-  // Probe once per (agent, identity) — but only for the network-probing agents
-  // that can actually 429; best-effort agents stay per-install (see
-  // groupFleetAuthInstalls). Groups are probed SEQUENTIALLY with a small fixed
-  // delay between them (PHNX-4051) so one box no longer fires 16 requests in
-  // 4s; they target distinct identities, so no same-account concurrency remains.
+  // Probe once per (agent, identity), only for network-probing agents that can 429; best-effort
+  // agents stay per-install. Groups run sequentially with a small delay (PHNX-4051) so one box no
+  // longer fires 16 requests in 4s; distinct identities mean no same-account concurrency.
   const groups = groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent));
   const perGroup: AuthProbeRow[][] = [];
   for (let idx = 0; idx < groups.length; idx++) {
@@ -807,10 +622,9 @@ export async function probeLocalFleetAuth(opts?: {
     health.account = authAccountLabel(rep.info);
     health.accountId = rep.accountId;
     health.source = 'probe';
-    // `unconfigured` (no credential) and `no_evidence` (a worker that cannot probe)
-    // both write NO row: the first has nothing to say, the second says only "we
-    // did not look", which is not a fleet-publishable verdict — the account's
-    // facts come from token presence + recorded run outcomes instead (PHNX-4116).
+    // `unconfigured` and `no_evidence` both write no row: one has nothing to say, the other only
+    // "we did not look", not a fleet-publishable verdict; facts come from token presence and run
+    // outcomes (PHNX-4116).
     if (health.verdict === 'unconfigured' || health.verdict === 'no_evidence') {
       perGroup.push([]);
     } else {
@@ -831,18 +645,9 @@ export async function probeLocalFleetAuth(opts?: {
   return perGroup.flat();
 }
 
-/**
- * Persist a host's probed rows into the cache (keyed by host+agent+version).
- *
- * `installed` — the {@link authTargetKey} set of homes that still exist on
- * `host` ({@link localAuthTargetKeys}) — prunes this host's ORPHAN entries: rows
- * for a version that has since been uninstalled. Nothing re-probes those, so
- * they never age out on their own; they froze the reuse window permanently false
- * and kept surfacing in `agents view` / fleet status (PHNX-4051). Only a caller
- * that enumerated `host`'s real installs may pass it — the `fleet ping` fan-out
- * writes a PEER's rows and cannot enumerate that box's homes, so it omits it and
- * merges as before.
- */
+/** Persist a host's probed rows into the cache. `installed` (the localAuthTargetKeys set) prunes
+ * that host's orphan rows for uninstalled versions, which nothing re-probes and which froze the
+ * reuse window false (PHNX-4051). Only a caller that enumerated installs sets it. */
 export function writeFleetAuthRows(host: string, rows: AuthProbeRow[], installed?: ReadonlySet<string>): void {
   const entries: Record<string, AuthHealth> = {};
   for (const row of rows) {
@@ -857,22 +662,13 @@ export function writeFleetAuthRows(host: string, rows: AuthProbeRow[], installed
   writeAuthHealthEntries(entries, drop);
 }
 
-// ---------------------------------------------------------------------------
-// Run-outcome recording + auth-fact rendering (PHNX-4116)
-//
-// A worker never probes, so the honest evidence that its token authenticates is
-// a REAL run: a successful inference (`live`) or an auth failure. These rows are
-// written with `source: 'run'` and read back as a FACT — `last used ok 12m ago`
-// / `last auth failure 401 Sep 20 14:02` / `not used on this box yet` — instead
-// of the misleading verdict word the ticket removes.
-// ---------------------------------------------------------------------------
+// Run-outcome recording and auth-fact rendering (PHNX-4116). A worker never probes, so honest
+// evidence is a real run: a success (`live`) or auth failure, written with `source: 'run'` and
+// read back as a fact (`last used ok 12m ago`) instead of a misleading verdict word.
 
-/**
- * The installed-version label a run outcome falls back to when the account has no
- * slot on this box: the explicit `version`, else the label derived from `home` (a
- * version home is `<versionDir>/home`, so the label is its parent dir's basename).
- * Null when neither resolves. Pure (no fs) so it is unit-tested directly.
- */
+/** The version label a run outcome falls back to when the account has no slot here: the explicit
+ * `version`, else the label from `home` (a version home is `<versionDir>/home`, so its parent's
+ * basename). Null if neither resolves. Pure. */
 export function runOutcomeVersionKey(opts: { version?: string | null; home?: string | null }): string | null {
   if (opts.version) return opts.version;
   if (opts.home) {
@@ -887,13 +683,9 @@ export type RunAuthOutcome =
   | { ok: true }
   | { ok: false; verdict: 'revoked' | 'expired' | 'rate_limited' | 'error'; detail?: string; resetsAt?: number | null };
 
-/**
- * Record a REAL run's auth outcome into the auth-health cache with
- * `source: 'run'`. Best-effort and never throws: an unattributable run (no
- * accountId/version/home) writes nothing, and the underlying write already
- * swallows IO errors. Keyed exactly as the catalog reads, so the recorded fact
- * surfaces on the same account row.
- */
+/** Record a real run's auth outcome into the auth-health cache with `source: 'run'`. Best-effort,
+ * never throws: an unattributable run writes nothing. Keyed as the catalog reads, so the fact
+ * lands on the same row. */
 export function recordRunAuthOutcome(opts: {
   agent: AgentId | string;
   accountId?: string | null;
@@ -904,11 +696,9 @@ export function recordRunAuthOutcome(opts: {
   host?: string;
   now?: number;
 }): void {
-  // Key exactly as the account catalog READS (slot key first, then the version
-  // label) so the fact lands on the row: the slot key ONLY when a slot dir
-  // actually exists for this account on this box (workers), else the installed
-  // version label (headed native logins have no slot). A last-resort slot key
-  // keeps an attributable-by-id run recorded even with no version hint.
+  // Key as the account catalog reads (slot key, then version label) so the fact lands on the row:
+  // the slot key only when a slot dir exists for this account here (workers), else the installed
+  // version label (headed logins have no slot). A last-resort slot key keeps the run recorded.
   const slotKey = opts.accountId && readSlots(readMeta())[opts.accountId]
     ? slotAuthVersionKey(opts.accountId)
     : null;
@@ -951,15 +741,9 @@ export function factTimestamp(ms: number): string {
   return `${FACT_MONTHS[d.getMonth()]} ${d.getDate()} ${factClock(ms)}`;
 }
 
-/**
- * The auth FACT `agents view` / `agents accounts` render per account per box
- * (PHNX-4116): what actually happened here, with its time — never a word that
- * means "we did not look". A `live` row (a recorded run OR a real probe) reads
- * `last used ok <age>`; a server rejection reads `last auth failure <detail>
- * <time>`; a throttle reads `rate-limited <detail> (<time>)`; anything with no
- * usable evidence — including `no_evidence`/`unverified` — reads `not used on
- * this box yet`.
- */
+/** The auth fact `agents view`/`agents accounts` render per account per box (PHNX-4116): what
+ * happened here, with its time. `live` reads `last used ok <age>`; a rejection `last auth failure
+ * <detail> <time>`; a throttle `rate-limited ...`; no usable evidence `not used on this box yet`. */
 export function formatAuthFact(health: AuthHealth | null | undefined, now: number = Date.now()): string {
   if (!health) return 'not used on this box yet';
   switch (health.verdict) {

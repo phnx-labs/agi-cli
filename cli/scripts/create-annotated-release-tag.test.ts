@@ -1,11 +1,6 @@
-/**
- * Annotated release tags from the folded changelog, exercised by running the
- * REAL create-annotated-release-tag.sh against a REAL git repository (no mocks).
- *
- * release.sh itself cannot run hermetically (it demands live npm + GitHub);
- * extracting the tag+notes contract into create-annotated-release-tag.sh is what
- * makes this path testable — the same reason select-publish-commit.sh exists.
- */
+/** Annotated release tags from the folded changelog, running the real
+ * create-annotated-release-tag.sh against a real git repository (no mocks). release.sh needs live
+ * npm and GitHub, so extracting this contract is what makes the path testable. */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';

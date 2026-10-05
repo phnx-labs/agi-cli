@@ -121,13 +121,9 @@ describe('run.launch fires on the real spawn path, before the harness runs (pers
   });
 
   it('a threaded LOGGED-OUT verdict (the interactive picker case) surfaces launchedLoggedOut:true', async () => {
-    // The picker->logged-out scenario (RUSH-2334 / PHNX-2526): the command
-    // deliberately launches the account the user picked, which can be LOGGED OUT
-    // and is a DIFFERENT candidate than the auto-pick. The command threads the
-    // SELECTED candidate's verdict via ExecOptions.launchSignedIn, and run.launch
-    // must report it verbatim (not re-probe, not read the auto-pick) — otherwise a
-    // logged-out launch reports launchedLoggedOut:false, the exact false-negative
-    // this event exists to prevent (the yosemite-m3 shape).
+    // Picker-to-logged-out case (RUSH-2334 / PHNX-2526): the user may pick a logged-out account
+    // other than the auto-pick. run.launch must report ExecOptions.launchSignedIn verbatim (no
+    // re-probe), else a logged-out launch reports launchedLoggedOut:false.
     const { binDir } = fakeHarness();
     const eventsPath = path.join(binDir, '..', 'events.jsonl');
     _resetForTest(eventsPath);

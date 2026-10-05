@@ -1,11 +1,7 @@
 #!/usr/bin/env bun
-/**
- * Exact impact planner for the required Linux CI check (RUSH-2666).
- *
- * `scripts/ci-scope.ts --base <sha> --head <sha> --json` is the canonical
- * interface. Non-JSON mode prints the changed-file → test/check → reason table.
- * Unmapped production paths fail the policy check; there is no full-suite fallback.
- */
+/** Exact impact planner for the required Linux CI check (RUSH-2666). `scripts/ci-scope.ts --base
+ * <sha> --head <sha> --json` is the canonical interface; non-JSON prints the file-to-test-to-reason
+ * table. Unmapped production paths fail the policy check; there is no full-suite fallback. */
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -64,24 +60,9 @@ interface OwnershipGroup {
   tests?: string[];
   checks?: string[];
   suite?: 'selected' | 'cli-full' | 'metadata-gated';
-  /**
-   * Seconds this group's selection is allowed, overriding {@link IMPACT_BUDGET_SEC}.
-   *
-   * The gate had exactly two tiers — 85s for `selected`, 1200s for `cli-full` — and a
-   * legitimately medium selection had nowhere to sit. `sessions` is the case that
-   * forced it: ANY edit to `cli/src/commands/sessions.ts`, a two-line subcommand
-   * registration included, pulls in the whole `sessions*` suite, measured at 92s of
-   * vitest inside a 122s run (PR #2771, run 32032566960). It could never pass 85s, so
-   * no new `agents sessions <verb>` could merge; `cli-full` would have handed a large
-   * and busy area a 20-minute allowance instead, which is the opposite of the point.
-   *
-   * Only ever RAISES the ceiling — enforced, not merely asserted: the resolution
-   * clamps at {@link IMPACT_BUDGET_SEC}, so a group cannot tighten the gate for
-   * itself, and the highest budget among the matched groups wins because the run
-   * executes the union of their selections. A malformed value throws at manifest
-   * load rather than coercing to the default. Keep any value here justified by a
-   * measured run, not a round number.
-   */
+  /** Seconds this group's selection may take, overriding IMPACT_BUDGET_SEC. Any `sessions.ts` edit
+   * pulls the whole sessions* suite (92s, PR #2771), past 85s. Only RAISES the ceiling; highest
+   * matched wins; malformed throws. Justify by a measured run. */
   budget_sec?: number;
   /** Apply this budget only to a deduplicated CLI test selection this large. */
   budget_min_selected_cli_tests?: number;
@@ -145,10 +126,8 @@ export function loadOwnershipManifest(path = DEFAULT_MANIFEST): OwnershipManifes
   parsed.areas ??= [];
   parsed.groups ??= [];
   parsed.testless ??= [];
-  // Fail loud on a malformed budget rather than coercing it. A string, a zero, or a
-  // negative would otherwise be swallowed by truthiness and silently fall back to
-  // the default — a gate that reads stricter than the manifest says is exactly the
-  // kind of quiet disagreement this policy file exists to prevent.
+  // Fail loud on a malformed budget rather than coercing it: a string, zero or negative would be
+  // swallowed by truthiness and fall back to the default, a gate stricter than the manifest says.
   for (const group of parsed.groups) {
     if (group.budget_min_selected_cli_tests !== undefined && (
       !Number.isSafeInteger(group.budget_min_selected_cli_tests)
@@ -219,12 +198,9 @@ function gitShowFile(ref: string, file: string, cwd: string): string | null {
 
 export type PackageJsonChangeKind = 'version-only' | 'dependency' | 'unknown';
 
-/**
- * A `package.json` diff is `version-only` only when every key besides
- * `version` is byte-identical before vs after. Missing refs, unreadable
- * blobs, and unparsable JSON all fall back to `unknown` — the caller treats
- * that the same as a real dependency change (fail-closed, RUSH-2666).
- */
+/** A `package.json` diff is `version-only` only when every key besides `version` is byte-identical
+ * before and after. Missing refs, unreadable blobs and unparsable JSON fall back to `unknown`,
+ * treated like a real dependency change (fail-closed, RUSH-2666). */
 export function classifyPackageJsonChange(
   file: string,
   repoRoot: string,
@@ -244,19 +220,9 @@ export function classifyPackageJsonChange(
   }
 }
 
-// Rename-aware changed-file parse (PHNX-3200). `--no-renames` reported a `git mv`
-// as an add of the new path PLUS a delete of the old one, so a pure structural
-// move (the #3033 flatten renamed ~2100 files 100%) read as ~2100 *changed* files
-// — selecting suite=cli-full and tripping zero-selection on every moved source
-// that carried no test at its new path. A 100%-similarity move is not a change,
-// so it should select nothing.
-//
-// Parses `git diff --raw -z` (NOT `--name-status`): the raw metadata carries the
-// old and new file MODE, which `--name-status` hides. A `git mv foo.sh bar.sh &&
-// chmod +x bar.sh` is `R100` by content-similarity but flips the executable bit
-// — a real change to a script this repo runs directly. So the destination is
-// selected whenever content changed (similarity < 100) OR the mode changed, and
-// only a truly identical move (same content AND same mode) selects nothing.
+// Rename-aware changed-file parse (PHNX-3200): `--no-renames` read a `git mv` as add plus delete
+// (the #3033 flatten became suite=cli-full). Uses `git diff --raw -z` since it carries file MODE:
+// select the destination if content or mode changed; an identical move selects nothing.
 export function parseRenameAwareRawDiff(z: string): string[] {
   const tokens = z.split('\0');
   const out: string[] = [];
@@ -294,12 +260,9 @@ export function changedFilesBetween(base: string, head: string, cwd = process.cw
     cmd: [
       'git',
       'diff',
-      // Rename-aware: git pairs an add+delete it recognizes (default 50%
-      // similarity) as a single `R<score>` entry, so a structural move stops
-      // reading as two changed files. Sub-threshold moves stay add+delete, which
-      // is correct — they really did change. `--raw` (not `--name-status`) is
-      // what carries the per-file mode, so a rename that also flips +x is not
-      // mistaken for a no-op move.
+      // Rename-aware: git pairs a recognized add+delete (default 50% similarity) as one `R<score>`
+      // entry; sub-threshold moves stay add+delete, which is correct. `--raw` carries the per-file
+      // mode, so a rename that flips +x is not mistaken for a no-op move.
       '--raw',
       '--find-renames',
       '--diff-filter=ACMRTD',
@@ -471,17 +434,9 @@ export function relatedTestsBySource(
   return invertGraphOntoChanged(graph, new Set(changed.map(posix)));
 }
 
-// A test that reads its script-under-test with `readFileSync` at runtime (to
-// assert on its literal source, or via `path.resolve(__dirname, ...)`) has a
-// real dependency edge the static IMPORT_RE graph above can never see — there
-// is no `import "./release.sh"` to find (RUSH-3097). This resolves that one
-// runtime pattern the same way buildImportGraph resolves static imports: a
-// literal filename passed to readFileSync, either inline as
-// `path.resolve(__dirname, 'LIT')` / `path.join(__dirname, 'LIT')`, or via a
-// same-file `const NAME = path.resolve(__dirname, 'LIT')` the read then
-// references by name. It deliberately does not attempt general data-flow
-// analysis beyond that one indirection — a test that hides the path behind
-// anything more dynamic than a same-file constant needs a real import instead.
+// A test reading its script-under-test via `readFileSync` has a dependency edge the static
+// IMPORT_RE graph cannot see (RUSH-3097). Resolve a literal filename passed to readFileSync,
+// inline or via a same-file `const NAME`; deeper dynamic paths need a real import.
 const PATH_VARIABLE_RE = /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:path\.)?(?:resolve|join)\(\s*__dirname\s*,\s*(['"])([^'"]+)\2\s*\)/g;
 const RUNTIME_READ_INLINE_RE = /readFileSync\s*\(\s*(?:path\.)?(?:resolve|join)\(\s*__dirname\s*,\s*(['"])([^'"]+)\1\s*\)/g;
 const RUNTIME_READ_VAR_RE = /readFileSync\s*\(\s*(\w+)\s*[,)]/g;
@@ -599,10 +554,9 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
       selectedForFile += 1;
     };
 
-    // A testless-exempt path never selects tests — including its own changed
-    // test files — and a DELETED test file is a change with nothing left to
-    // run. Both cases come from the same PR shape: removing a tree (apps/ext/**
-    // moved to phnx-labs/agi-ext) must not queue its removed tests as work.
+    // A testless-exempt path never selects tests, and a deleted test file is a change with nothing
+    // to run. Both come from removing a tree (apps/ext/** moved to phnx-labs/agi-ext), which must
+    // not queue its removed tests.
     if (isTestFile(file) && !testless && existsSync(join(repoRoot, file))) {
       addTest(selected, mapping, file, file, 'changed-test');
       mark();
@@ -778,11 +732,9 @@ export function commandForTestFile(file: string, repoRoot: string): RunCommand {
   if (f.startsWith('cli/') && f.endsWith('.test.ts')) {
     return {
       cwd: join(repoRoot, 'cli'),
-      // No `--` before the path: vitest's CLI treats args after `--` as an
-      // opaque pass-through, not a filter, so the file list is silently
-      // dropped and vitest falls back to its full `include` glob. Measured
-      // on PR #2770 (RUSH-2666): the plan selected 3 files, the `--`
-      // invocation ran all 864, "Selected proof" took 15m21s instead of ~13s.
+      // No `--` before the path: vitest treats args after `--` as pass-through, silently dropping
+      // the file list and running the full include glob (PR #2770, RUSH-2666: 3 selected files, all
+      // 864 ran, 15m21s instead of ~13s).
       cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', f.slice('cli/'.length)],
     };
   }
@@ -823,11 +775,9 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
   for (const check of plan.checks) {
     switch (check) {
       case 'typecheck':
-        // Already proven: `bun install` (installCommandsForPlan) runs the CLI's
-        // `prepare` script, which is `npm run build`, which is `tsc`. Running
-        // the build a second time here cost a measured 18s on every selected
-        // run (PR #3568: 126s against a 120s budget, 2113 tests green).
-        // ci-scope.test.ts pins both halves of that invariant.
+        // Already proven: `bun install` runs the CLI's `prepare` script (`npm run build`, i.e.
+        // `tsc`). Running the build again cost a measured 18s per selected run (PR #3568: 126s
+        // against a 120s budget). ci-scope.test.ts pins both halves.
         break;
       case 'command-index':
         out.push({ cwd: cli, cmd: ['bash', 'scripts/verify-command-index.sh'] });
@@ -926,12 +876,9 @@ function parseArgs(argv: string[]): {
   return out;
 }
 
-/**
- * Vitest exits 1 on an unhandled "Worker exited unexpectedly" even when
- * every test file and every test passed. The required Linux `test` check
- * then stays red on a green suite (measured twice on #2622, 863 files /
- * 12206 tests passed, 0 failed).
- */
+/** Vitest exits 1 on an unhandled "Worker exited unexpectedly" even when every test passed, leaving
+ * the required Linux `test` check red on a green suite (twice on #2622: 863 files, 12206 tests
+ * passed, 0 failed). */
 export function isVitestWorkerCrashWithZeroFailures(output: string): boolean {
   if (!/Worker exited unexpectedly/.test(output)) return false;
   const testFilesLine = output.match(/^\s*Test Files\s+.+$/m)?.[0] ?? '';

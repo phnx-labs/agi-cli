@@ -37,16 +37,8 @@ afterAll(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-/**
- * Drives the REAL CLI, because the bug this pins lives in argument parsing and
- * is invisible to a direct call of the action.
- *
- * `agents sessions` declares `--json` AND takes a positional `[query]`, so
- * commander keeps matching parent-known options past the subcommand name and
- * binds `--json` to the PARENT. `sessions bookmark --list --json` therefore
- * printed the human listing while the subcommand's own `options.json` sat
- * undefined — a machine caller silently got prose. Only a real spawn sees it.
- */
+/** Drives the real CLI, since the bug lives in argument parsing. `agents sessions` declares
+ * `--json` and a positional `[query]`, so commander binds `--json` to the parent. */
 describe('agents sessions bookmark (real CLI parse)', () => {
   it('honors --json even though the parent command also declares it', () => {
     const res = run(['sessions', 'bookmark', '--list', '--json']);
@@ -73,15 +65,8 @@ describe('agents sessions bookmark (real CLI parse)', () => {
     expect(parsed.results[0].error).toContain('No session matches');
   });
 
-  // `--bookmarks` was wired into the interactive BROWSER only, so on every path
-  // that skips the browser — --json, --waiting, a pipe, a multi-host scope, an
-  // SSH-fanout peer — the flag silently did nothing and `--active --bookmarks`
-  // returned the whole fleet. That is the exact command the browser's own `y`
-  // copy-cmd hands to an agent.
-  // `--active` discovers real local session state (tmux panes, live processes)
-  // in addition to the fixtures this test seeds — on a busy fleet box that scan
-  // is genuinely slow, and this test drives it through several real CLI spawns.
-  // The default 30s budget is tuned for a lightweight spawn, not this cost.
+  // `--bookmarks` was wired into the interactive browser only, so on every path that skips it the
+  // flag did nothing and `--active --bookmarks` returned the whole fleet.
   it('narrows --active to bookmarked sessions, not just in the browser', () => {
     const registry = path.join(home, '.agents', '.cache', 'terminals', 'live-terminals.json');
     fs.mkdirSync(path.dirname(registry), { recursive: true });

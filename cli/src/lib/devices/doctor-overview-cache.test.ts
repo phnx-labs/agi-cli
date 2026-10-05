@@ -88,10 +88,9 @@ describe('doctor-overview-cache: singleflight coalescing (the bug fix)', () => {
     expect(a.cached).toBeNull();
     expect(a.release).toBeTypeOf('function');
 
-    // Caller B starts while A holds the lock — proper-lockfile makes B block
-    // (retry) until A releases. B must NOT get its own compute token; once A
-    // "computes" (writes the snapshot) and releases, B acquires, double-checks,
-    // and serves A's fresh result.
+    // Caller B starts while A holds the lock, so proper-lockfile blocks B until A releases. B must
+    // not get its own compute token; once A writes the snapshot and releases, B acquires,
+    // double-checks, and serves A's fresh result.
     const bPromise = enterDoctorOverviewGate({}, { dir });
     writeDoctorOverviewCache({ computedBy: 'A' }, { dir });
     a.release!();

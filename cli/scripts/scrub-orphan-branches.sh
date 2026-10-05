@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Drop stale checkpoint/agent branches and orphan stash/reflog entries
-# that may carry pre-scrub personal data, then gc.
-#
-# Run from repo root. Idempotent. Prompts before destructive ops.
+# Drop stale checkpoint/agent branches and orphan stash/reflog entries that may carry pre-scrub
+# personal data, then gc. Run from the repo root. Idempotent; prompts before destructive ops.
 
 set -euo pipefail
 

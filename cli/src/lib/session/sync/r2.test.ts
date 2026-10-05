@@ -1,28 +1,6 @@
-/**
- * Opt-in end-to-end coverage for the R2/S3 backup client (RUSH-2437).
- *
- * Drives the REAL S3-compatible HTTP path — no mocking of the network client, per
- * the repo's "real services only" rule. It talks to whatever S3-compatible
- * endpoint the env points at: Cloudflare R2, MinIO, or any other. It covers the
- * verbs the backup target uses (put / get / head / list / delete) plus the
- * encrypt -> upload -> download -> decrypt round-trip that `sessions export
- * --to-r2` / `import --from-r2` rely on.
- *
- * GATED: SKIPS cleanly when AGENTS_TEST_R2_ENDPOINT is unset, so CI stays green
- * with no object store. To run it against a local MinIO:
- *
- *   docker run -d -p 9000:9000 -e MINIO_ROOT_USER=minioadmin \
- *     -e MINIO_ROOT_PASSWORD=minioadmin minio/minio server /data
- *   # create the bucket once (mc, or the console on :9001), then:
- *   AGENTS_TEST_R2_ENDPOINT=http://127.0.0.1:9000 \
- *   AGENTS_TEST_R2_BUCKET=agents-sessions-test \
- *   AGENTS_TEST_R2_ACCESS_KEY_ID=minioadmin \
- *   AGENTS_TEST_R2_SECRET_ACCESS_KEY=minioadmin \
- *   bun run test -- src/lib/session/sync/r2.test.ts
- *
- * Against real Cloudflare R2, additionally set AGENTS_TEST_R2_ACCOUNT_ID and drop
- * AGENTS_TEST_R2_ENDPOINT to use the account's default endpoint.
- */
+/** Opt-in end-to-end test of the R2/S3 backup client (RUSH-2437) on the real S3 path (R2, MinIO),
+ * including the encrypt-upload-download-decrypt round-trip.
+ * Skips when AGENTS_TEST_R2_ENDPOINT is unset; see the env names below for MinIO or R2. */
 
 import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -151,10 +129,9 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
   });
 
   it('backup wire format: export --to-r2 object round-trips through import --from-r2', async () => {
-    // Exercise the exact object format both command paths use: `export --to-r2`
-    // writes serializeBundle(header, [buildRecord(...)]) at objectKey(...); `import
-    // --from-r2` lists + gets + parseBundle + decryptTranscriptBody. Real file,
-    // real crypto, real MinIO — no command harness, no mocks.
+    // Exercises the exact object format both paths use: `export --to-r2` writes
+    // serializeBundle(header, [buildRecord(...)]) at objectKey(...); `import --from-r2` lists,
+    // gets, parseBundle and decryptTranscriptBody. Real file, crypto and MinIO.
     const encKey = Buffer.from(generateSyncEncKey(), 'base64');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'r2-backup-'));
     const abs = path.join(tmp, 'transcript.jsonl');

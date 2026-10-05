@@ -1,14 +1,7 @@
 #!/usr/bin/env bun
-/**
- * Measure required-CI and release latency against the RUSH-2666 hard
- * targets (CI P99/P99.9/P99.99 <= 90s, release tails <= 180s).
- *
- * Reads recorded GitHub Actions run JSON (see fixtures/). Does not claim
- * a tail percentile without the matching sample-count gate.
- *
- *   bun scripts/ci-bench/cli.ts --input fixtures/required-ci-run.json
- *   bun scripts/ci-bench/cli.ts --input runs.json --workflow .github/workflows/tests.yml --json
- */
+/** Measure required-CI and release latency against the RUSH-2666 hard targets (CI P99/P99.9/P99.99
+ * <= 90s, release tails <= 180s) from recorded run JSON; no tail percentile without its sample
+ * minimum. Usage: bun scripts/ci-bench/cli.ts --input <runs.json> [--workflow F] [--json] */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildReport, formatReport } from './report';

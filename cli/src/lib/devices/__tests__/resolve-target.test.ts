@@ -1,24 +1,14 @@
-/**
- * The fan-out (`resolveExplicitTargets`) and `agents ssh` (`resolveDeviceTarget`)
- * adapters now share ONE core with `run --device` (RUSH-1967). These tests pin,
- * against a REAL registry / overlay / ssh_config (no mocks — repo convention):
- *   - a `--device` token dials the device's live Tailscale route, not the literal;
- *   - the same token resolves to the SAME target string through `resolveHost`
- *     (dispatch) and `resolveExplicitTargets` (fan-out) — one row per divergence
- *     in the ticket table;
- *   - an ssh_config-only alias is now visible to the fan-out;
- *   - `agents ssh` keeps its stricter grammar (devices + literals only).
- */
+/** The fan-out and `agents ssh` adapters share one core with `run --device` (RUSH-1967). Tests use
+ * a real registry/overlay/ssh_config: one token resolves identically everywhere, ssh_config-only
+ * aliases reach the fan-out, and `agents ssh` keeps its stricter grammar. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// HOME must be set before state.ts loads so the device registry, the agents.yaml
-// overlay, and ~/.ssh/config all resolve under the temp root.
-// USERPROFILE too: os.homedir() ignores HOME on Windows, and ssh-config.ts
-// builds ~/.ssh from os.homedir() — with only HOME set, the stanza written
-// below is invisible there and every lookup falls through.
+// HOME must be set before state.ts loads so the registry, agents.yaml overlay, and ~/.ssh/config
+// resolve under the temp root. USERPROFILE too: os.homedir() ignores HOME on Windows, and
+// ssh-config.ts builds ~/.ssh from it.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-target-test-'));
 process.env.HOME = TEST_HOME;
 // Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at

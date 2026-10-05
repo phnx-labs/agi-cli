@@ -1,10 +1,5 @@
-/**
- * `--copy-creds` MUST NOT copy a native OAuth / session login to another device
- * (docs/specifications.md SING-1b). These tests prove the transfer path is gone:
- * for any signed-in native runtime the builder REFUSES loudly (steering to the
- * portable `agents accounts sync` path) and never serializes the credential —
- * the OAuth blob and the runtime auth files never appear in any produced script.
- */
+/** `--copy-creds` must not copy a native OAuth/session login (SING-1b): the builder refuses and
+ * never serializes it. */
 import { describe, it, expect } from 'vitest';
 import {
   buildHostCredentialScript,

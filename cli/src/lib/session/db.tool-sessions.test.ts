@@ -10,18 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-toolsess-'))
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * Durable tool-session metadata (RUSH-2549).
- *
- * The bug these tests pin: browser task identity lived only in the daemon's
- * `tasks.json`, which `saveTaskState` rewrites from the LIVE task map — so
- * stopping a task erased the link to the agent session that drove it, and every
- * finished task in `agents sessions --browser` read "unlinked". Computer-use had
- * the identity right but wrote it to the event ledger, which prunes at 7 days.
- *
- * A real SQLite database on disk, no mocking (repo policy): these exercise the
- * actual write/read path the daemon and the CLI use.
- */
+/** Durable tool-session metadata (RUSH-2549). Browser task identity lived only in the daemon's
+ * `tasks.json`, so stopping a task erased its session link; computer-use used the 7-day event
+ * ledger. Real SQLite on disk, no mocking. */
 const { getSessionsDir } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -137,22 +128,18 @@ describe('browser task identity survives the task (RUSH-2549)', () => {
 
 describe('recovering runs past the read limit (RUSH-2549 review follow-up)', () => {
   it('returns the OLD complement, not the newest N the caller already has', () => {
-    // The recovery caller already holds every recent invocation from the event
-    // ledger and discards anything it has seen. A newest-N read therefore hands
-    // it only rows it will throw away, and returns nothing usable once the table
-    // exceeds the limit — silently restoring the day-8 disappearance this whole
-    // feature removes. Bounding by "older than the ledger reaches" is what makes
-    // recovery work on exactly the busy boxes that need it.
+    // The recovery caller already holds every recent invocation from the event ledger, so a
+    // newest-N read returns only rows it discards and nothing usable past the limit, restoring the
+    // day-8 disappearance. Bound by "older than the ledger reaches".
     const base = 1_700_000_000_000;
     for (let i = 0; i < 10; i++) {
       recordComputerSession({ invocationId: `bounded-${i}`, startedAt: base + i * 1000 });
     }
     const ledgerOldest = base + 7 * 1000; // the ledger still holds the newest three
 
-    // Filter to this test's own rows: both reads are global over a DB shared
-    // with the rest of the file, so a row inserted by another describe (which
-    // defaults startedAt to Date.now(), far above `base`) would otherwise break
-    // this with an unrelated-looking failure.
+    // Filter to this test's own rows: both reads are global over a shared DB, so a row from
+    // another describe (startedAt defaults to Date.now(), far above `base`) would cause an
+    // unrelated-looking failure.
     const mine = (ids: string[]) => ids.filter((id) => id.startsWith('bounded-'));
     const newestOnly = mine(listComputerSessionRecords({ limit: 3 }).map((r) => r.invocationId!));
     const complement = mine(

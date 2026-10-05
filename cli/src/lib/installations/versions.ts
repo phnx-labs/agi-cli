@@ -1,7 +1,5 @@
-/**
- * Version lifecycle, resource sync, and agent@version resolution for agents-cli.
- * Each version lives in an isolated home under ~/.agents/.history/versions/{agent}/{version}/.
- */
+/** Version lifecycle, resource sync and agent@version resolution. Each version lives in an
+ * isolated home under ~/.agents/.history/versions/{agent}/{version}/. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -978,11 +976,8 @@ export async function isOldestInstalled(agent: AgentId): Promise<{ installed: bo
 }
 
 
-/**
- * List every version directory for an agent, including home-only leftovers, for
- * `agents prune cleanup` only. Do NOT use elsewhere — every other call site
- * assumes a working binary.
- */
+/** List every version directory for an agent, including home-only leftovers, for `agents prune
+ * cleanup` only. Do not use elsewhere: every other call site assumes a working binary. */
 export function listInstalledVersionDirs(agent: AgentId): Array<{ version: string; hasBinary: boolean }> {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
   if (!fs.existsSync(agentVersionsDir)) {
@@ -1036,11 +1031,9 @@ export function setIsolatedDefault(agent: AgentId, version: string | undefined):
 }
 
 
-/**
- * Move any `grok-<installedVersion>-...` binary (and its generic platform
- * copy) found directly under `sourceDownloads` into `targetDownloads`.
- * Returns true if the versioned binary was transferred.
- */
+/** Move any `grok-<installedVersion>-...` binary and its generic platform copy from
+ * `sourceDownloads` into `targetDownloads`. Returns true if the versioned binary was
+ * transferred. */
 function transferGrokDownloads(
   sourceDownloads: string,
   targetDownloads: string,
@@ -1084,19 +1077,9 @@ function transferGrokDownloads(
   return true;
 }
 
-/**
- * Grok's official installer writes into ~/.grok/downloads, which (because we
- * symlink ~/.grok to the active version home) resolves to the PREVIOUS default
- * home during `agents add grok@<new>`. Move the freshly-downloaded binary and
- * its generic platform copy into the target version's isolated home so
- * `listInstalledVersions` and the shim resolve the right binary.
- *
- * Self-healing: if `~/.grok`'s current target has nothing matching (e.g. a
- * PAST install mislabeled `installedVersion` as the literal string 'latest',
- * whose regex never matched the real filename, stranding the binary in
- * whatever version was default at the time), sweep every other installed
- * grok version home for the missing file before giving up.
- */
+/** grok's installer writes to ~/.grok/downloads, which resolves to the previous default home
+ * during `agents add`. Move the new binary into the target version home; if absent, sweep other
+ * grok homes for a past mislabeled 'latest' install. */
 function relocateGrokBinaryToVersionHome(
   installationLabel: string,
   copyExisting: boolean,
@@ -1124,21 +1107,9 @@ function relocateGrokBinaryToVersionHome(
   }
 }
 
-/**
- * Grok's version directory is keyed by release number alone, not by account —
- * so two DIFFERENT accounts that both self-update to the identical upstream
- * release ("latest") target the SAME on-disk `versions/grok/<version>/` home.
- * When that happens, the second account's `agents add grok@latest` writes
- * into an already-signed-in directory: grok's own auth flow treats
- * `~/.grok/auth.json` as authoritative for whichever process invoked it, so
- * the second account's credential record lands in a file that still names it
- * as the first account's install everywhere else in agents-cli's bookkeeping.
- *
- * Refuse before that happens: if the target version's home already has a
- * signed-in account whose identity differs from the account currently
- * driving this update (the previous global default), fail loud instead of
- * letting the second account silently displace the first's install.
- */
+/** grok's version dir is keyed by release, not account, so two accounts on the same release
+ * would share one home and one auth.json. Fail loud if the target home already has a different
+ * signed-in account. */
 async function checkGrokAccountCollision(installedVersion: string): Promise<void> {
   const targetHome = getVersionHomePath('grok', installedVersion);
   if (!fs.existsSync(targetHome)) return; // fresh directory, nothing to collide with
@@ -1179,12 +1150,9 @@ export async function installVersion(
     throw new Error(`Invalid version: ${JSON.stringify(version)}`);
   }
 
-  // A caller-supplied installation label decouples the addressable version-dir
-  // name from the vendor release (PHNX-3940): `agents accounts add` mints an
-  // opaque stable label so ten accounts can share the same upstream `latest`
-  // under distinct isolated homes, each with its own native login. It follows
-  // the same identity/release split the installScript branch already uses via
-  // `requestedLabel`, and must be a real label, never a release alias.
+  // PHNX-3940: a caller-supplied installation label decouples the version-dir name from the vendor
+  // release, so many accounts can share upstream `latest` in distinct homes. It must be a real
+  // label, never an alias.
   if (opts?.installationLabel !== undefined) {
     if (!VERSION_RE.test(opts.installationLabel)) {
       throw new Error(`Invalid installation label: ${JSON.stringify(opts.installationLabel)}`);
@@ -1221,15 +1189,9 @@ export async function installVersion(
       }
 
       if (version === 'latest') {
-        // A freshly-installed self-updating binary (grok, …) can take a
-        // moment to become resolvable on PATH right after the installer
-        // exits — retry briefly rather than silently falling back to the
-        // literal string 'latest'. That fallback used to corrupt version
-        // bookkeeping downstream: it creates a bogus `versions/<agent>/latest/`
-        // dir, and for grok specifically defeats relocateGrokBinaryToVersionHome
-        // (its exact-filename regex can never match `grok-latest-...`), which
-        // permanently strands the real downloaded binary in the PREVIOUS
-        // default's downloads dir.
+        // A fresh self-updating binary can take a moment to resolve on PATH, so retry rather than
+        // fall back to the literal 'latest'. That fallback created a bogus latest/ dir and
+        // stranded grok's real binary in the previous default's downloads.
         let probed = await getCliVersionFromPath(agent);
         for (let attempt = 0; !probed && attempt < 2; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1248,11 +1210,9 @@ export async function installVersion(
         await reconcileStaleLatestDir(agent, releaseVersion);
       }
 
-      // Self-updating installers always fetch the current vendor release, but a
-      // concrete requested token is still the stable installation/account slot.
-      // Keeping the two strings separate lets several homes carry the same
-      // release without sharing credentials. `latest` remains the convenient
-      // release-named slot; concrete tokens remain exactly addressable.
+      // Self-updating installers always fetch the current release, but a concrete requested token
+      // stays the stable installation slot. Separating the two lets several homes share a release
+      // without sharing credentials.
       const installationLabel = requestedLabel === 'latest' ? releaseVersion : requestedLabel;
 
       if (agent === 'grok') {
@@ -1278,27 +1238,12 @@ export async function installVersion(
       relocateGrokBinaryToVersionHome(installationLabel, !runInstaller);
     }
 
-    // Symlink the installed binary into the version's node_modules/.bin so
-    // listInstalledVersions (which checks getBinaryPath) sees this version as
-    // installed. Without this, `agents add antigravity@latest` succeeds
-    // but `agents view` shows the agent under "Not Managed" because
-    // listInstalledVersions returns [] — the installer drops the binary in
-    // ~/.local/bin (or similar) rather than the version's node_modules/.bin.
-    //
-    // Agents whose binary is special-cased in getBinaryPath (grok ->
-    // ~/.grok/downloads, droid/muse -> ~/.local/bin/<cli>) need no symlink — and
-    // creating one is actively harmful: `which <cli>` can resolve to OUR OWN
-    // dispatcher shim, because ~/.agents/.cache/shims sits ahead of ~/.local/bin
-    // on PATH. Symlinking node_modules/.bin/<cli> at the shim makes the shim
-    // exec itself forever. So we skip the resolver-backed agents here AND, for
-    // everyone else, filter the shims dir out of the `which` candidates so the
-    // same race can't bite a non-special-cased installScript agent.
+    // Symlink the installed binary into node_modules/.bin so listInstalledVersions sees it. Skip
+    // resolver-backed agents: `which` can return our own shim (shims dir precedes ~/.local/bin),
+    // and linking it would exec itself forever.
     if (agent !== 'grok' && agent !== 'droid' && agent !== 'muse' && agent !== 'warp') {
-      // findInPath is a pure-Node PATH scan that already skips our own shims
-      // dir — so it returns the genuine install, never our dispatcher shim
-      // (which sits ahead of ~/.local/bin on PATH and would otherwise be
-      // captured, producing a self-referential node_modules/.bin/<cli> link
-      // that exec-loops forever).
+      // findInPath is a pure-Node PATH scan that skips our shims dir, so it returns the genuine
+      // install and never a self-referential dispatcher shim link.
       const installedBinary = findInPath(agentConfig.cliCommand);
       if (installedBinary) {
         importInstallScriptBinary(
@@ -1329,16 +1274,9 @@ export async function installVersion(
     return { success: true, installedVersion: installationLabel };
   }
 
-  // Resolve the `latest`/`oldest` aliases to a concrete npm version up front so
-  // the rest of the install path treats them as an ordinary pinned install.
-  // This is what keeps concurrent installs safe: resolving `latest` only AFTER
-  // npm finished meant the install ran in a shared, well-known
-  // `versions/<agent>/latest/` scratch dir that was renamed to the real version
-  // at the end — so a concurrent `agents view` reconcile
-  // (reconcileStaleLatestForAgent) or a second `latest` install could rename
-  // that dir out from under npm mid-extraction and corrupt the install (the
-  // seeded package.json and half-extracted node_modules would vanish, yielding
-  // ENOENT). A concrete dir per version has no shared name to race on.
+  // Resolve `latest`/`oldest` to a concrete npm version up front. Resolving after npm ran used a
+  // shared latest/ scratch dir that a concurrent reconcile or install could rename mid-extraction,
+  // corrupting the install.
   if (version === 'latest' || version === 'oldest') {
     const resolved = version === 'latest'
       ? await getLatestNpmVersion(agent)
@@ -1353,10 +1291,8 @@ export async function installVersion(
     version = resolved;
   }
 
-  // `version` is now the concrete vendor release. The addressable slot is the
-  // caller's opaque installation label when given (connect), else the release
-  // itself — the identity/release split (PHNX-3940). Everything on disk (dir,
-  // alias, record, tracker) keys on `label`; only the npm spec uses `release`.
+  // `version` is now the concrete vendor release. The slot is the caller's opaque label when given,
+  // else the release (PHNX-3940). Disk state keys on `label`; only the npm spec uses `release`.
   const releaseVersion = version;
   const label = opts?.installationLabel ?? releaseVersion;
 
@@ -1370,11 +1306,9 @@ export async function installVersion(
     return { success: false, installedVersion: label, error: `${agent} account home ${label} is in use. Retry after its sessions finish.` };
   }
 
-  // A `clean` (repair) reinstall wipes a possibly partially-extracted
-  // node_modules first. npm treats a present-but-gutted platform package (its
-  // package.json landed, its vendored native binary did not) as already
-  // installed and would skip re-fetching it — so without this the corrupt
-  // vendor/ survives the reinstall and the ENOENT persists. home/ is preserved.
+  // A clean (repair) reinstall wipes a partially extracted node_modules first: npm treats a gutted
+  // platform package as installed and skips re-fetching it, so the corrupt vendor/ would survive.
+  // home/ is preserved.
   if (opts?.clean && fs.existsSync(versionDir)) {
     removeInstallArtifacts(versionDir);
   }
@@ -1391,10 +1325,8 @@ export async function installVersion(
   };
   fs.writeFileSync(path.join(versionDir, 'package.json'), JSON.stringify(packageJson, null, 2));
 
-  // Install the package. `version` is always concrete here (`latest`/`oldest`
-  // were resolved above), so the spec is always pinned. The `@` prefix is
-  // load-bearing: it ensures `version` (which VERSION_RE permits to start with
-  // `-`) is never passed as a standalone npm CLI flag.
+  // `version` is always concrete here, so the spec is pinned. The `@` prefix is load-bearing: it
+  // keeps `version` (VERSION_RE allows a leading `-`) from being parsed as an npm CLI flag.
   const packageSpec = `${agentConfig.npmPackage}@${version}`;
 
   // Set once the install has passed its integrity gate; read after the try so
@@ -1417,19 +1349,17 @@ export async function installVersion(
     onProgress?.(`Installing ${packageSpec}...`);
     await execFileAsync('npm', ['install', packageSpec, '--ignore-scripts'], { cwd: versionDir, shell: winShell });
 
-    // The release installed directly into its final labeled dir (`versionDir` is
-    // keyed on `label`) — no post-install rename, no shared `latest/` dir for a
-    // concurrent process to move out from under us. The addressable slot is the
-    // label; `releaseVersion` is what npm actually staged.
+    // The release installs directly into its final labeled dir, so there is no post-install rename
+    // and no shared latest/ dir for a concurrent process to move. `releaseVersion` is what npm
+    // staged.
     const installedVersion = label;
 
     // Create versioned alias (e.g., claude@2.0.65, or claude@ins_… for connect)
     createVersionedAlias(agent, installedVersion);
 
-    // Claude reads its global config from CLAUDE_CONFIG_DIR/.claude.json —
-    // i.e. inside the per-version .claude dir — while the rest of agents-cli
-    // manages the home-level file. Symlink INSIDE to OUTSIDE so Claude and
-    // agents-cli see the same content.
+    // Claude reads its global config from CLAUDE_CONFIG_DIR/.claude.json, inside the per-version
+    // dir, while agents-cli manages the home-level file. Symlink inside to outside so both see the
+    // same content.
     if (agent === 'claude') {
       try {
         ensureClaudeInsideSymlink(installedVersion);
@@ -1438,20 +1368,9 @@ export async function installVersion(
       }
     }
 
-    // The `npm install` above ran with `--ignore-scripts` — the right posture for
-    // the dependency TREE (never run arbitrary transitive postinstalls), but it
-    // also skips the agent package's OWN postinstall, which for some agents is a
-    // required install step. @anthropic-ai/claude-code ships a ~500-byte stub at
-    // `bin/claude.exe` plus per-arch native binaries as optional deps; its
-    // `postinstall` (`node install.cjs`) is what copies the correct native binary
-    // over the stub. Skip it and every launch dies with "native binary not
-    // installed". So run the first-party package's declared postinstall here —
-    // scoped to that one package, never `prepare` (claude-code's `prepare` is an
-    // unconditional `exit 1` publish guard). Same precedent as the keychain-helper
-    // postinstall re-run after a `--ignore-scripts` upgrade (see index.ts).
-    // Best-effort: the integrity gate below is the real backstop — a still-broken
-    // binary (postinstall failed, or a platform with no published native dep)
-    // fails there with the correct message rather than throwing here.
+    // npm install ran with --ignore-scripts, which also skips the agent package's own postinstall.
+    // claude-code needs it to copy the native binary over a stub, so run that one package's
+    // postinstall, never `prepare`. Best-effort; the integrity gate below is the backstop.
     if (agentConfig.npmPackage) {
       // The install landed in `versionDir` (the labeled dir) with no rename to
       // chase, so the package root is exactly there.
@@ -1461,10 +1380,9 @@ export async function installVersion(
         const postinstall = pkg?.scripts?.postinstall;
         if (typeof postinstall === 'string' && postinstall.trim()) {
           onProgress?.(`Running ${agentConfig.name} postinstall...`);
-          // The declared postinstall is a shell command string (e.g. `node
-          // install.cjs`), so it must run through a shell on ALL platforms —
-          // shell:true, empty args. cwd is the package root; install.cjs anchors
-          // its paths to __dirname, so that is correct and sufficient.
+          // The declared postinstall is a shell command string, so it must run through a shell on
+          // all platforms (shell:true, empty args). cwd is the package root because install.cjs
+          // anchors paths to __dirname.
           await execFileAsync(postinstall, [], { cwd: pkgRoot, shell: true });
         }
       } catch {
@@ -1472,11 +1390,9 @@ export async function installVersion(
       }
     }
 
-    // Integrity gate: confirm the install actually launches, not just that the
-    // JS wrapper landed. A gutted install (wrapper present, native platform
-    // binary missing) otherwise gets silently pinned as the default and crashes
-    // with ENOENT on run. Fail loudly here so `agents add` never records a
-    // broken version as healthy — the caller then won't set it as default.
+    // Integrity gate: confirm the install actually launches, not just that the JS wrapper landed. A
+    // gutted install would otherwise be pinned as default and crash with ENOENT. Fail loudly so it
+    // is never recorded healthy.
     const health = await verifyInstalledBinaryLaunches(agent, installedVersion);
     if (!health.ok) {
       if (fs.existsSync(versionDir)) removeInstallArtifacts(versionDir);
@@ -1504,10 +1420,8 @@ export async function installVersion(
     return { success: false, installedVersion: version, error: (err as Error).message };
   }
 
-  // Freeze this installation's identity (see the installScript branch above).
-  // The label is the frozen identity; the release it carries is recorded
-  // separately so a connect home under an opaque label records the real vendor
-  // release it installed rather than the label string.
+  // Freeze this installation's identity. The label is the frozen identity; the release is recorded
+  // separately so a connect home records the real vendor release, not the label string.
   createInstallation(agent, healthyVersion, releaseVersion, initialUpdatePolicy);
   const trackerInstall = await installSessionTrackerHook(agent, healthyVersion);
   if (!trackerInstall.installed && trackerInstall.error) {
@@ -1518,24 +1432,14 @@ export async function installVersion(
   }, { ...INSTALLATION_LOCK_OPTIONS, realpath: false });
 }
 
-// Version-dir entries that are STATE, not install output, and so must survive a
-// clean reinstall: `home/`, the `.isolated` marker that is the single source
-// of truth for "this copy is walled off", and `installation.json`, which carries
-// this installation's frozen identity. Losing the marker would silently demote
-// an isolated copy to a normal one on its first repair — after which shim
-// self-heal would hand it a bare `<agent>` shim and a PATH entry. Losing the
-// installation record would mint a NEW id for the same install on its first
-// repair, discarding its release history.
+// State, not install output, that survives a clean reinstall: home/, the .isolated marker (losing
+// it demotes an isolated copy), and installation.json (losing it mints a new id and drops release
+// history).
 const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated', '.launch-leases', INSTALLATION_RECORD_FILE, `${INSTALLATION_RECORD_FILE}.lock`]);
 
-/**
- * Remove install artifacts from a version directory, preserving `home/` which
- * contains the user's conversation history, sessions, history.jsonl, tasks,
- * todos, file-history, etc. (and the `.isolated` marker — see
- * PRESERVED_ON_CLEAN_REINSTALL). Used by the install pipeline (NOT by
- * removeVersion) to clean up staging artifacts when a fresh install collides
- * with an existing dir. removeVersion uses soft-delete instead.
- */
+/** Remove install artifacts from a version dir, preserving home/ (conversation history,
+ * sessions) and the .isolated marker. Used by the install pipeline for staging collisions, not
+ * by removeVersion, which soft-deletes. */
 function removeInstallArtifacts(versionDir: string): void {
   for (const entry of fs.readdirSync(versionDir)) {
     if (PRESERVED_ON_CLEAN_REINSTALL.has(entry) || entry.startsWith('.rollback-')) continue;
@@ -1543,35 +1447,12 @@ function removeInstallArtifacts(versionDir: string): void {
   }
 }
 
-/**
- * Fold a stale literal `latest` version dir into the real resolved version.
- *
- * Script-installed agents (droid, grok) have no npm package to read a version
- * from, so the installer resolves the version by probing `<cli> --version`
- * after the install script runs. When that probe failed (3s timeout, or the
- * freshly-dropped binary not yet resolvable on PATH) the installer fell back to
- * the literal string `latest`, creating a `versions/<agent>/latest/` dir. A
- * later install where the probe succeeded then created a SECOND dir at the real
- * semver, orphaning `latest` — and because these agents' getBinaryPath points
- * at a single global binary regardless of version dir, `latest` keeps showing
- * up in `agents view` next to the real version forever.
- *
- * Call this once the install path has resolved a real version: if a stale
- * `latest` dir exists, rename it onto the real version (preserving `home/`), or
- * if the real dir already exists, soft-delete the `latest` dir to trash. No-op
- * when nothing was resolved or no stale dir is present, so it is safe to call
- * on every script-based install. Returns the action taken (for tests/logging).
- */
-/**
- * Proactively fold a stale `latest` version-home into its concrete version,
- * WITHOUT needing a fresh install (RUSH-1320). `reconcileStaleLatestDir` only
- * fires at install time, so a `latest` dir left by an old probe-failed install
- * lingers in `agents view` indefinitely. This resolves the live CLI version and
- * reconciles — cheap no-op when there's no `latest` dir (the common case, so
- * `agents view` pays a `--version` shell-out only the once, until it's folded).
- * Skipped when the active config symlink still points at `latest`, since
- * renaming that dir would dangle the live symlink.
- */
+/** Fold a stale literal `latest` dir into the real version. Script installs probe `<cli>
+ * --version`; a failed probe made a latest/ dir that lingers beside the real one. Rename it
+ * (keeping home/) or trash it if the real dir exists. */
+/** RUSH-1320: fold a stale `latest` home into its concrete version without a fresh install,
+ * since reconcileStaleLatestDir only runs at install time. Skipped when the active config
+ * symlink still points at `latest`, to avoid dangling it. */
 export async function reconcileStaleLatestForAgent(agent: AgentId): Promise<void> {
   // Global-binary agents (droid) can accumulate MANY stale semver dirs — not
   // just a literal `latest` — because every `agents add` after an in-place
@@ -1588,24 +1469,13 @@ export async function reconcileStaleLatestForAgent(agent: AgentId): Promise<void
   }
 }
 
-/**
- * Fold every stale version-dir of a global-binary agent (droid) into the single
- * canonical survivor. All its dirs point at ONE binary, so the extras — left by
- * successive `agents add` + in-place self-updates, and by probe-failed installs
- * that created a literal `latest` dir — are phantom labels. Soft-delete each
- * non-survivor dir (its `home/` stays recoverable via `agents restore`) so disk
- * converges to a single install matching what `agents view` shows.
- *
- * Survivor selection matches listInstalledVersions' canonical choice
- * (config-symlink target → global default → live version → newest). The survivor
- * is NOT renamed: droid's ~/.factory symlink points inside its home, and the
- * live version label is surfaced by the view renderer via getLiveVersion.
- */
+/** Fold stale version dirs of a global-binary agent (droid) into one survivor, since all point
+ * at one binary. Extras are soft-deleted (home/ recoverable). Survivor follows
+ * listInstalledVersions' choice and is not renamed. */
 async function reconcileGlobalBinaryVersions(agent: AgentId): Promise<void> {
-  // Step 1 — preserve the original literal-`latest` reconcile: a probe-failed
-  // install leaves a `versions/<agent>/latest/` dir; fold it onto the concrete
-  // live version (rename if that dir is absent, else trash). Skipped while the
-  // config symlink still points at `latest` (renaming would dangle it).
+  // Preserve the literal-`latest` reconcile: fold a probe-failed `latest` dir onto the live version
+  // (rename, else trash). Skipped while the config symlink points at `latest`, to avoid dangling
+  // it.
   if (fs.existsSync(getVersionDir(agent, 'latest')) && getConfigSymlinkVersion(agent) !== 'latest') {
     const concrete = await getCliVersionFromPath(agent);
     if (concrete && concrete !== 'latest') {
@@ -1649,10 +1519,9 @@ async function reconcileGlobalBinaryVersions(agent: AgentId): Promise<void> {
 
   if (foldedAny) {
     invalidateInstalledVersionsCache(agent);
-    // Keep the recorded default pointing at a dir that still exists on disk —
-    // but never promote an isolated copy into the default slot (same rule as the
-    // post-removal promotion filter and `agents use`). Leaving it unset is right:
-    // an isolated-only agent has no default by design.
+    // Keep the recorded default pointing at an existing dir, but never promote an isolated copy
+    // into the default slot (same rule as removal promotion and `agents use`). An isolated-only
+    // agent has no default by design.
     const def = getGlobalDefault(agent);
     if ((!def || !fs.existsSync(getVersionDir(agent, def))) && !isVersionIsolated(agent, survivor)) {
       setGlobalDefault(agent, survivor);
@@ -1677,13 +1546,9 @@ export async function reconcileStaleLatestDir(
     return 'renamed';
   }
 
-  // Both dirs exist. Stripping install artifacts would not hide `latest` for
-  // global-binary agents (getBinaryPath ignores dir contents), so the whole
-  // dir must go. Soft-delete to trash so any `home/` data stays recoverable
-  // via `agents restore <agent>@latest`, then rewrite session file paths to
-  // point at the trashed location so history stays readable. The session-db
-  // module is imported lazily — it carries a top-level await that the CJS test
-  // harness can't statically transform, so it must stay out of the eager graph.
+  // Both dirs exist, and stripping artifacts would not hide `latest` for global-binary agents, so
+  // soft-delete the whole dir (home/ stays restorable) and rewrite session paths. The session-db
+  // import is lazy: its top-level await breaks the CJS test harness.
   const trashPath = softDeleteVersionDir(agent, 'latest');
   if (trashPath) {
     const { updateSessionFilePaths } = await import('../session/db.js');
@@ -1692,18 +1557,9 @@ export async function reconcileStaleLatestDir(
   return 'trashed';
 }
 
-/**
- * Soft-delete a version directory by moving it to ~/.agents/.system/trash/versions/.
- * Returns the trash path on success or null on failure / no source.
- *
- * Trash layout: ~/.agents/.system/trash/versions/<agent>/<version>/<timestamp>/
- * The timestamp suffix lets a user soft-delete the same version twice (after
- * re-install) without collision and gives a chronological audit trail.
- *
- * The whole versionDir moves — including `home/` (transcripts, sessions). The
- * user can recover everything via `agents restore <agent>@<version>`.
- * Nothing is ever hard-deleted.
- */
+/** Soft-delete a version dir by moving it, home/ included, to
+ * ~/.agents/.system/trash/versions/<agent>/<version>/<timestamp>/. Returns the trash path or
+ * null. Recoverable via `agents restore`; nothing is hard-deleted. */
 export function softDeleteVersionDir(agent: AgentId, version: string): string | null {
   const versionDir = getVersionDir(agent, version);
   if (!fs.existsSync(versionDir)) return null;
@@ -1730,13 +1586,8 @@ export function softDeleteVersionDir(agent: AgentId, version: string): string | 
   }
 }
 
-/**
- * Remove a specific version of an agent.
- *
- * Soft-delete only: moves the entire version directory (including `home/`)
- * to ~/.agents/.system/trash/versions/. Recoverable via `agents restore`.
- * Nothing is hard-deleted.
- */
+/** Remove a version by soft-delete only: the whole directory, home/ included, moves to trash and
+ * is recoverable via `agents restore`. */
 export function removeVersion(agent: AgentId, version: string): boolean {
   const versionDir = getVersionDir(agent, version);
 
@@ -1752,17 +1603,13 @@ export function removeVersion(agent: AgentId, version: string): boolean {
   // Remove versioned alias (e.g., claude@2.0.65)
   removeVersionedAlias(agent, version);
 
-  // If the removed version was the global default, keep launchers working:
-  // reassign the default to the newest remaining version, or clear it outright
-  // only when nothing is left. Leaving a dangling default pointer here is what
-  // broke every launcher after removing the pinned default.
+  // If the removed version was the global default, reassign it to the newest remaining version,
+  // clearing only when none is left. A dangling default pointer broke every launcher.
   if (getGlobalDefault(agent) === version) {
     const remaining = listInstalledVersions(agent);
-    // Never auto-promote an isolated install to the global default: it was
-    // installed to stay separate from the user's setup, and promoting it would
-    // silently make `<agent>` resolve to it (and let a later `use` adopt its
-    // home into `~/.<agent>`). Prefer the newest NON-isolated survivor; if every
-    // survivor is isolated, clear the default rather than adopt one.
+    // Never auto-promote an isolated install to the global default: it would silently make
+    // `<agent>` resolve to it. Prefer the newest non-isolated survivor; if all are isolated, clear
+    // the default.
     const promotable = remaining.filter((v) => !isVersionIsolated(agent, v));
     if (promotable.length > 0) {
       const newestRemaining = promotable[promotable.length - 1];
@@ -1793,11 +1640,9 @@ export function removeVersion(agent: AgentId, version: string): boolean {
     }
   }
 
-  // Clear dead per-version hook entries the removed version left behind in the
-  // remaining versions' settings. Their command paths point under the now-gone
-  // version home, so they error on every tool call until the next sync. Scoped
-  // to the Claude-family settings.json format (claude + droid) — the surface
-  // where per-version guard hooks accumulate; other agents self-heal on sync.
+  // Clear dead per-version hook entries the removed version left in remaining versions' settings;
+  // their command paths point at a gone home and error on every tool call. Limited to Claude-family
+  // settings.json (claude, droid).
   if (agent === 'claude' || agent === 'droid') {
     const configDir = agentConfigDirName(agent);
     for (const remaining of listInstalledVersions(agent)) {
@@ -1806,11 +1651,9 @@ export function removeVersion(agent: AgentId, version: string): boolean {
     }
   }
 
-  // The global hook shims embed one SOURCE path. When it pointed into this
-  // version home every shimmed guard would exit 127 (allow) until a self-heal
-  // pass ran, and that pass needs a live daemon. Re-point them now. Best
-  // effort: the removal itself already succeeded, and a repair failure on an
-  // unrelated harness's shim must not abort a bulk removal.
+  // Global hook shims embed one source path; if it pointed into this home, every guard would exit
+  // 127 (allow) until a daemon self-heal. Re-point now. Best effort: a repair failure must not
+  // abort a bulk removal.
   try {
     repairManagedHookRuntimeArtifacts();
   } catch (err) {
@@ -1821,10 +1664,8 @@ export function removeVersion(agent: AgentId, version: string): boolean {
   return true;
 }
 
-/**
- * Print the standard footer after one or more versions were soft-deleted to
- * trash. Reminds the user that sessions stay readable and how to restore.
- */
+/** Print the standard footer after versions are soft-deleted to trash, reminding the user that
+ * sessions stay readable and how to restore. */
 export function printTrashFooter(moved: Array<{ agent: AgentId; version: string }>): void {
   if (moved.length === 0) return;
   console.log();
@@ -1837,11 +1678,8 @@ export function printTrashFooter(moved: Array<{ agent: AgentId; version: string 
   }
 }
 
-/**
- * Remove all versions of an agent. Preserves each version's `home/` directory
- * so conversation history is never deleted; the per-version folders (now
- * containing only `home/`) remain under the agent dir.
- */
+/** Remove all versions of an agent while preserving each version's home/, so conversation
+ * history is never deleted. */
 export function removeAllVersions(agent: AgentId): number {
   const versions = listInstalledVersions(agent);
   let removed = 0;
@@ -1864,28 +1702,9 @@ export interface HealedVersionPointers {
   configSymlink?: { from: string; to: string };
 }
 
-/**
- * Repoint an agent's version pointers — the global/isolated default and the
- * `~/.<agent>` config symlink — off any version that is no longer installed, so
- * neither `agents sync`/`agents run` resolution nor the conventional-path home
- * can land on a dead version (RUSH-2471).
- *
- * How a pointer goes dangling: {@link removeVersion} reassigns the defaults and
- * clears the config symlink only when IT removes the pointed-at version. A
- * version-home whose launch binary disappears by any other route — grok
- * self-updated its per-version binary out from under the old dir, a manual
- * delete, a half-finished install that seeded the home but never landed the
- * binary — leaves the default and/or the symlink pointing at something
- * {@link isVersionInstalled} reports as gone.
- *
- * Called from the sync resolve path so the invariant self-heals. Mirrors
- * {@link removeVersion}'s reassignment: the global default prefers the newest
- * NON-isolated survivor else clears; the isolated default prefers the newest
- * remaining isolated copy else clears. The symlink is repointed at the now-healed
- * resolved default, else the newest installed non-isolated version. A symlink
- * already on an installed version, a real (non-symlink) config dir, and an
- * isolated-only agent are left untouched.
- */
+/** RUSH-2471: repoint the global/isolated defaults and the ~/.<agent> symlink off any version no
+ * longer installed (binary vanished by self-update, manual delete or half install). Mirrors
+ * removeVersion's reassignment; real config dirs and isolated-only agents are untouched. */
 export async function healDanglingVersionPointers(
   agent: AgentId,
   cwd: string,
@@ -1955,12 +1774,9 @@ export function resolveVersionAlias(agent: AgentId, raw: string | undefined | nu
   return raw;
 }
 
-/**
- * Loose variant of resolveVersionAlias for record-filter contexts (sessions,
- * team history). Same `default`/`pinned`/`latest`/`oldest` semantics, but explicit
- * versions pass through unchanged so historical records of uninstalled versions
- * remain queryable.
- */
+/** Loose variant of resolveVersionAlias for record filters (sessions, team history): same alias
+ * semantics, but explicit versions pass through so records of uninstalled versions stay
+ * queryable. */
 export function resolveVersionAliasLoose(agent: AgentId, raw: string | undefined | null): string | undefined {
   if (!raw || raw === 'default' || raw === 'pinned' || raw === 'any') return undefined;
   if (raw === 'latest' || raw === 'oldest') {
@@ -1994,53 +1810,19 @@ export async function getInstalledVersion(agent: AgentId, version: string): Prom
   }
 }
 
-/**
- * True when a probe's combined output/error looks like the runnable binary (or a
- * native sub-binary it execs) is MISSING — the "gutted install" signature. This
- * is the exact class of failure behind the ENOENT crash: an npm package whose JS
- * wrapper landed at node_modules/.bin/<cli> while its native platform binary
- * (shipped via an optional per-arch dependency, e.g. @openai/codex-<platform>)
- * did not — so the wrapper spawns and immediately dies with `spawn … ENOENT`.
- *
- * Deliberately narrow: only the missing-file signature counts. An agent that
- * merely dislikes `--version` (nonzero exit, ordinary error text) or ignores it
- * (times out) must NOT match, so a healthy install is never falsely condemned.
- *
- * The trailing phrases catch a gutted install that reports its own breakage
- * *politely* rather than with a raw ENOENT: @anthropic-ai/claude-code's stub
- * (run when its postinstall never copied the native binary in) prints "native
- * binary not installed / postinstall did not run / … optional dependency was not
- * downloaded" and exits nonzero — which the generic patterns above miss. Anchored
- * tightly so a healthy `--version` can never emit them.
- */
+/** True when probe output shows the runnable binary is missing (the gutted-install ENOENT
+ * signature). Deliberately narrow so a nonzero exit or timeout never condemns a healthy
+ * install; the trailing phrases catch claude-code's polite stub message. */
 export function isMissingBinarySignature(output: string): boolean {
   return /\bENOENT\b|no such file|cannot find|command not found|is not recognized|native binary not installed|postinstall did not run|optional dependency was not downloaded/i.test(output);
 }
 
-/**
- * Verify a freshly-installed agent can actually LAUNCH — not merely that its JS
- * wrapper exists. getBinaryPath()/isVersionInstalled() only check the wrapper, so
- * a gutted install (wrapper present, native binary missing) reads as healthy,
- * gets pinned as the default, and gets picked to run — then dies with ENOENT the
- * instant it spawns (which, wrapped in tmux, showed up as a silent `[detached]`).
- *
- * We probe `<binary> --version` under the version's isolated HOME so config
- * resolution matches a real launch. Because the ENOENT originates in the child
- * (the wrapper spawns fine, then fails to exec the absent native binary), we
- * inspect the child's OUTPUT, not just whether our spawn succeeded. Only the
- * missing-binary signature (see isMissingBinarySignature) fails the check; a
- * plain nonzero exit or a timeout is treated as healthy so we never false-fail.
- */
-/**
- * Compose the spawn spec for a `<binary> --version` launch probe. On Windows the
- * `.cmd` wrapper runs through cmd.exe, so the path is fully quoted into ONE
- * command line and the args array is emptied (composeWin32CommandLine) — the
- * DEP0190-safe pattern the real launch uses. Critically this keeps a spaced
- * Windows profile path (`C:\Users\John Doe\…\claude.cmd`) intact; passing the raw
- * path to a shell would split it at the space and false-fail a HEALTHY install.
- * On POSIX no shell is involved and the binary is exec'd directly. Pure/exported
- * so the quoting is unit-testable without spawning.
- */
+/** Verify a fresh install can actually launch, not just that its JS wrapper exists, since a
+ * gutted install reads healthy and then dies with ENOENT. Probe `--version` under the isolated
+ * HOME and fail only on the missing-binary signature. */
+/** Compose the spawn spec for a `--version` probe. On Windows the .cmd runs via cmd.exe with one
+ * fully quoted command line and empty args (DEP0190-safe), so a spaced profile path cannot
+ * split and false-fail a healthy install. Pure for unit tests. */
 export function probeSpawnSpec(binary: string, isWin: boolean): { command: string; args: string[]; shell: boolean } {
   if (isWin) return { command: composeWin32CommandLine(binary, ['--version']), args: [], shell: true };
   return { command: binary, args: ['--version'], shell: false };
@@ -2053,26 +1835,9 @@ export async function verifyInstalledBinaryLaunches(
   return verifyBinaryLaunches(getBinaryPath(agent, version), getVersionHomePath(agent, version));
 }
 
-/**
- * The launch probe itself, addressed by PATH rather than by installed version.
- *
- * `verifyInstalledBinaryLaunches` is this function applied to a version dir that
- * is already live. `agents update` needs the identical check applied to a release
- * that is still STAGED — probing it before the swap is what makes the update
- * transactional, since a staged release that cannot launch is discarded instead
- * of replacing a working one. Both callers must agree byte-for-byte on what
- * "launches" means, hence one implementation.
- *
- * `posixBinary` is the extensionless launch target. The real launch target
- * differs by platform, so we probe whatever `agents run` actually execs: on
- * Windows that is the npm `.cmd` wrapper beside it (exec.ts uses
- * `absPath + '.cmd'`), which chains to the native `.exe`; a gutted install
- * (renamed/missing `.exe`) makes that wrapper emit "is not recognized" — the
- * exact win-mini failure a vendor auto-update leaves behind. Probing the
- * extensionless `.bin/<cli>` instead would ENOENT even on a HEALTHY Windows
- * install, so we DON'T. On POSIX the `.bin/<cli>` binary is the launch target
- * and is probed directly.
- */
+/** The launch probe by path, shared by verifyInstalledBinaryLaunches and `agents update`, which
+ * probes a staged release before the swap. On Windows probe the .cmd wrapper `agents run`
+ * execs, since the extensionless bin would ENOENT even when healthy. */
 export async function verifyBinaryLaunches(
   posixBinary: string,
   home: string,
@@ -2086,11 +1851,9 @@ export async function verifyBinaryLaunches(
     return isWin ? { ok: true } : { ok: false, detail: `binary not found at ${binary}` };
   }
   try {
-    // On Windows the `.cmd` runs via cmd.exe (shell). Pass a single FULLY-QUOTED
-    // command line + EMPTY args (composeWin32CommandLine) — the same DEP0190-safe
-    // pattern the real launch uses (exec.ts) — so a space in the Windows profile
-    // path (`C:\Users\John Doe\…`) can't split the path and false-fail a healthy
-    // install into a destructive reinstall.
+    // On Windows the .cmd runs via cmd.exe: pass one fully quoted command line and empty args
+    // (DEP0190-safe, as exec.ts does) so a space in the profile path cannot split it and trigger a
+    // destructive reinstall.
     const spec = probeSpawnSpec(binary, isWin);
     await execFileAsync(spec.command, spec.args, {
       timeout: 15000,
@@ -2111,51 +1874,18 @@ export async function verifyBinaryLaunches(
   }
 }
 
-/**
- * Launch-path self-heal. Given the concrete version `agents run` is about to
- * spawn, make sure it will actually run — and if not, repair it instead of
- * letting the agent die with a raw `ENOENT` deep inside its own wrapper.
- *
- * Steps, cheapest first:
- *   1. Probe the version (verifyInstalledBinaryLaunches). Healthy → return it.
- *   2. Broken → **clean** reinstall in place (wipes the partial node_modules so
- *      npm actually re-fetches the platform binary). Re-probe; good → return it.
- *   3. Still broken → fall back to another INSTALLED version that launches,
- *      re-pinning it as the default so the shim path heals too. Return it.
- *   4. Nothing runnable installed → install `latest`, pin it, return it.
- *   5. Give up → return null (caller surfaces a clear error).
- *
- * Isolation boundary (both directions — steps 3/4 are the only mutating ones):
- *   - An ISOLATED target gets step 2 and nothing else. Falling back would let
- *     `agents run <agent>@<isolated>` silently repoint the user's NORMAL default,
- *     and installing `latest` would materialize a version they never asked for.
- *     A failed repair returns null so the caller says so plainly.
- *   - An isolated version is never a fallback CANDIDATE either, whatever the
- *     target is: promoting one to the global default is exactly what `agents use`
- *     refuses and what removeVersion's promotion filter excludes, so it must not
- *     happen here by the back door (the daemon's launch-health pass calls this
- *     unattended every ~6h).
- *
- * Gated to npm-package agents: their native binary ships as an optional per-arch
- * dependency whose tarball can extract partially (interrupted/raced install) —
- * the exact failure this repairs. Agents with a global/native binary (grok,
- * droid) have no such tarball and are returned unchanged.
- */
+/** Launch-path self-heal for `agents run`: probe, else clean-reinstall in place, else fall back
+ * to another installed version, else install latest, else null. Isolated targets only get the
+ * reinstall and are never fallbacks. */
 export async function ensureAgentRunnable(
   agent: AgentId,
   version: string,
   log?: (message: string) => void,
   opts?: { allowDefaultSwitch?: boolean },
 ): Promise<string | null> {
-  // Whether this heal may REPOINT the global default (adopt another version, or
-  // install `latest` and pin it). Interactive callers (`agents run`, `agents
-  // add`) allow it. The daemon's unattended 6-hourly launch-health pass sets
-  // this false: a background pass that silently switches the default installs a
-  // fresh version home → a fresh, empty Claude credential scope (macOS keychain
-  // keyed off CLAUDE_CONFIG_DIR; Linux per-version token file), i.e. an
-  // "unprovoked logout" at a time uncorrelated with anything the user did. In
-  // refuse-mode we still repair the CURRENT default in place (no scope change),
-  // but never repoint — we return null so the caller can alert instead.
+  // Whether the heal may repoint the global default. The unattended daemon pass sets this false:
+  // switching default makes a fresh empty Claude credential scope, an unprovoked logout. It still
+  // repairs the current default in place, else returns null.
   const allowDefaultSwitch = opts?.allowDefaultSwitch ?? true;
   const cfg = AGENTS[agent];
   if (!cfg?.npmPackage) return version;
@@ -2182,10 +1912,9 @@ export async function ensureAgentRunnable(
     return null;
   }
 
-  // In-place repair failed → normally adopt another installed version and repoint
-  // the default. When default-switching is disallowed (unattended daemon pass),
-  // refuse: repointing would swap the live credential scope out from under the
-  // user with no signal. Surface it so the caller can notify.
+  // In-place repair failed: normally adopt another installed version and repoint the default. When
+  // default-switching is disallowed (daemon pass), refuse, because repointing would swap the
+  // credential scope silently. Return so the caller can notify.
   if (!allowDefaultSwitch) {
     log?.(`${cfg.name}@${version} won't launch and could not be repaired in place — NOT repointing your default ${cfg.name} unattended. Run \`agents use ${agent} <version>\` or \`agents add ${agent}@latest\` to choose one.`);
     return null;
@@ -2205,14 +1934,9 @@ export async function ensureAgentRunnable(
     }
   }
 
-  // Nothing runnable installed → last resort: install latest and pin it.
-  //
-  // …unless `latest` is a version the user already holds as an ISOLATED copy. A
-  // normal and an isolated install of the same version share one on-disk dir
-  // (see the coexistence refusal in commands/versions.ts), so installing would
-  // commandeer that copy and pinning it would hand an isolated install the
-  // global default — the same breach the candidate filter above prevents.
-  // Resolved BEFORE installing so the isolated copy is not even rebuilt.
+  // Last resort: install latest and pin it, unless `latest` is already held as an isolated copy.
+  // Both share one on-disk dir, so installing would commandeer it and pin an isolated install as
+  // default. Resolved before installing.
   const latestVersion = await getLatestNpmVersion(agent);
   if (latestVersion && isVersionIsolated(agent, latestVersion)) {
     log?.(`no runnable ${cfg.name} version installed — ${cfg.name}@${latestVersion} is the latest, but you hold it as an isolated copy, so it can't become your default.`);
@@ -2236,20 +1960,9 @@ export async function ensureAgentRunnable(
   return null;
 }
 
-/**
- * Proactive launch-health pass for the daemon. Probe the DEFAULT version of
- * every npm-package agent and repair any that won't launch (via
- * ensureAgentRunnable), so a gutted install is healed BEFORE the user's next
- * `agents run` hits a raw ENOENT — the run-time heal (ensureAgentRunnable) only
- * fires once a run is already starting; this catches it in the background.
- *
- * Returns `{ repaired, unhealed }`: `repaired` is a label (`agent@broken→healed`)
- * for each version actually fixed; `unhealed` is `agent@version` for each broken
- * default that could not be fixed (including, under `allowDefaultSwitch:false`,
- * one that was deliberately not repointed), so the daemon can log/notify. A
- * version that already launches costs one cheap `--version` probe and is left
- * untouched.
- */
+/** Daemon launch-health pass: probe each npm-package agent's default and repair any that won't
+ * launch via ensureAgentRunnable, before the user's next run hits ENOENT. Returns `repaired`
+ * labels and `unhealed` agent@version entries. */
 const failedRepairAt = new Map<string, number>();
 const REPAIR_COOLDOWN_MS = 24 * 60 * 60_000;
 
@@ -2264,10 +1977,9 @@ export async function healBrokenDefaultLaunches(
     const version = getGlobalDefault(agent);
     if (!version) continue;
     if ((await verifyInstalledBinaryLaunches(agent, version)).ok) continue;
-    // Backoff: a version whose repair just failed (offline, npm 404, an arch the
-    // registry can't serve) must NOT re-trigger a full clean-reinstall +
-    // install-latest on every 6h pass. Skip it for a day; a daemon restart clears
-    // the memo, giving a fresh attempt.
+    // Backoff: a version whose repair just failed (offline, npm 404, unsupported arch) must not
+    // retrigger a full reinstall every 6h pass. Skip it for a day; a daemon restart clears the
+    // memo.
     const key = `${agent}@${version}`;
     const last = failedRepairAt.get(key);
     if (last !== undefined && Date.now() - last < REPAIR_COOLDOWN_MS) {
@@ -2299,34 +2011,21 @@ export interface SyncResult {
   subagents: string[];
   plugins: string[];
   workflows: string[];
-  /**
-   * Project files the sync left alone because the workspace already has them
-   * (repo-relative). Reported once, grouped, by the command that rendered the
-   * sync — never one line per file from down here.
-   */
+  /** Project files the sync left alone because the workspace already has them (repo-relative).
+   * Reported once, grouped, by the rendering command, never one line per file here. */
   projectSkipped: string[];
-  /**
-   * Resources removed from the version home because they were deleted from
-   * source since the last sync (RUSH-2438), per kind. Populated only on a
-   * repo-scope reconcile that ran the prune pass; empty otherwise.
-   */
+  /** Resources removed from the version home because they were deleted from source since the
+   * last sync (RUSH-2438), per kind. Populated only on a repo-scope reconcile that ran the
+   * prune pass. */
   pruned: Record<PrunableKind, string[]>;
-  /**
-   * Resources this sync refused to write, as user-facing sentences (RUSH-2677).
-   *
-   * An empty `mcp`/`subagents`/… list means "nothing to write"; it cannot also
-   * mean "declined and here is why", which is how a harness with no config
-   * writer reported a clean sync while writing nothing. The rendering command
-   * MUST surface these — a decline nobody prints is the silent no-op again.
-   */
+  /** RUSH-2677: resources this sync refused to write, as user-facing sentences. An empty list
+   * cannot also mean declined, which let a harness with no config writer report a clean sync.
+   * The rendering command must print these. */
   declined: string[];
 }
 
-/**
- * Enumerate the DotAgent repo names that resources can be scoped to:
- * the fixed `project` / `user` / `system` layers plus every enabled extra
- * repo alias. Used to validate `agents sync <agent> --repo <name>`.
- */
+/** Enumerate the DotAgent repo names resources can be scoped to: the fixed project/user/system
+ * layers plus every enabled extra repo alias. Validates `agents sync <agent> --repo <name>`. */
 export function listRepoNames(): string[] {
   return ['project', 'user', 'system', ...getEnabledExtraRepos().map(e => e.alias)];
 }
@@ -2335,18 +2034,9 @@ export function listRepoNames(): string[] {
  * driven by `source:name` patterns (memory is preset-driven, handled apart). */
 type SelectableKind = 'commands' | 'skills' | 'hooks' | 'subagents' | 'permissions' | 'mcp' | 'plugins' | 'workflows';
 
-/**
- * Build the name→source-layer map for one resource kind, the input
- * `expandPatterns` matches `source:*` patterns against. This is the single
- * source of truth for how each kind attributes its source layer:
- *   - commands/skills/hooks/subagents → real layer from `listResources`
- *   - permissions                     → real layer from permissions/groups
- *   - mcp                             → project vs user scope preserved
- *   - plugins                         → user repo
- *   - workflows                       → real layer from workflow directories
- * Both the persisted-pattern sync path and `buildRepoScopedSelection` use it
- * so the attribution can't drift between the two.
- */
+/** Build the name-to-source-layer map for one resource kind, matched against `source:*`
+ * patterns. The single source of truth for layer attribution, shared by the persisted-pattern
+ * sync and buildRepoScopedSelection so they cannot drift. */
 function resourceSourceMap(kind: SelectableKind, cwd: string, available: AvailableResources): Map<string, string> {
   switch (kind) {
     case 'commands':
@@ -2380,29 +2070,9 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
   }
 }
 
-/**
- * Build a ResourceSelection from source-pattern expansion and an optional
- * per-kind name filter. Both dimensions are optional and compose:
- *
- *   patterns only   → resources from those source layers (all matching names)
- *   kindFilter only → only those specific kinds / names, no source restriction
- *   both combined   → patterns scope the source layer; kindFilter further
- *                     limits which names within each kind are included
- *
- * Typical callers:
- *   `--repo system`   → buildSelection(['system:*'])
- *   `--plugin`        → buildSelection([], { plugins: 'all' })
- *   `--plugin fleet`  → buildSelection([], { plugins: ['fleet'] })
- *   no flags          → buildSelection([]) → full selection
- *
- * Memory (`kindFilter.memory`):
- *   - Always `'all'` when patterns are active (repo scope must recompile the
- *     composed file from all layers, RUSH-1354).
- *   - `'all'` when `kindFilter.memory` is set (--rule / --memory flag).
- *   - Absent (skipped) when kindFilter is given but does not include memory,
- *     so `--plugin fleet` does NOT trigger a memory recompile.
- *   - `'all'` when no kindFilter is given (full sync includes everything).
- */
+/** Build a ResourceSelection from source patterns and an optional per-kind name filter; both
+ * compose. Memory is 'all' under patterns or a memory filter (RUSH-1354), skipped when a filter
+ * omits it, and 'all' with no filter. */
 export function buildSelection(
   patterns: string[],
   kindFilter?: ResourceSelection,
@@ -2460,25 +2130,16 @@ export function buildSelection(
   return selection;
 }
 
-/**
- * Build a ResourceSelection scoped to a single DotAgent repo (`system`,
- * `user`, `project`, or an extra-repo alias). Delegates to `buildSelection`
- * so the source-map and pattern-expansion logic stays in one place.
- *
- * `memory` is always `'all'`: the composed rules-memory file spans all layers
- * and must be recompiled in the same pass (RUSH-1354).
- */
+/** Build a ResourceSelection for one DotAgent repo by delegating to buildSelection. `memory` is
+ * always 'all' because the composed rules file spans all layers and must be recompiled in the
+ * same pass (RUSH-1354). */
 export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
   return buildSelection([`${repo}:*`], undefined, cwd);
 }
 
-/**
- * Union several ResourceSelections into one, deduping names per kind. Pure — no
- * FS — so the merge logic is unit-tested without a DotAgents layout. `memory` is
- * a whole-file merge of the user+system layers, not a per-repo artifact: pass
- * `includeMemory` to request a full memory write (`'all'`), else the skip
- * sentinel (`[]`) is kept.
- */
+/** Union several ResourceSelections, deduping names per kind. Pure, so it is unit-tested without
+ * a DotAgents layout. Memory is a whole-file merge: `includeMemory` requests a full write
+ * ('all'), else the skip sentinel stays. */
 export function unionResourceSelections(
   selections: ResourceSelection[],
   includeMemory: boolean,
@@ -2497,45 +2158,19 @@ export function unionResourceSelections(
   return merged;
 }
 
-/**
- * Build one selection spanning several DotAgent repos — the source set an
- * interactive `agents sync` picker collects. Each repo is scoped via
- * `buildRepoScopedSelection`, then unioned. Memory is written whole when the
- * `user` or `system` layer is among the selected repos (that's where the memory
- * file's content comes from); a project-only / alias-only pick leaves it
- * untouched.
- */
+/** Build one selection across several repos, as an interactive `agents sync` picker collects.
+ * Memory is written whole only when the user or system layer is selected, since that is where
+ * its content comes from. */
 export function mergeRepoScopedSelections(repos: string[], cwd: string = process.cwd()): ResourceSelection {
   const includeMemory = repos.includes('user') || repos.includes('system');
   return unionResourceSelections(repos.map((r) => buildRepoScopedSelection(r, cwd)), includeMemory);
 }
 
-/**
- * Sync central resources (~/.agents/) into a specific version's config directory.
- * Copies selected resources from central storage into {versionHome}/.{agent}/.
- *
- * @param agent - The agent ID
- * @param version - The version string
- * @param selection - Optional resource selection. If not provided, syncs all resources.
- *
- * For Gemini: commands are converted from markdown to TOML.
- */
-/**
- * Resolve a caller's hook selection against the available hook set, matching a
- * selection entry by exact name OR by its extensionless basename, and returning
- * the AVAILABLE (extensioned) name in every case.
- *
- * `available.hooks` carries the source filename WITH its extension
- * (`git-guard.sh`) — the shape the hooks writer's source resolver requires — but
- * the doctor/heal resource diff identifies a hook by its extensionless basename
- * (`git-guard`). A heal pass feeds those diff names straight back as the
- * selection, so a plain exact-set filter matched NOTHING and `agents doctor
- * --fix` could never reconcile a flagged hook (PHNX-3187). Basename tolerance
- * closes that gap without changing the extensioned names the writer needs.
- *
- * Order-stable and de-duplicated; a selection entry that matches nothing is
- * dropped (mirrors resolveSelection).
- */
+/** Sync central resources (~/.agents/) into a version's config directory, optionally limited by
+ * `selection` (default: all). Gemini commands are converted from markdown to TOML. */
+/** Resolve a hook selection against the available set by exact name or extensionless basename,
+ * returning the available (extensioned) name. PHNX-3187: heal passes feed basenames back, which
+ * an exact filter matched against nothing, so `agents doctor --fix` never reconciled a hook. */
 export function resolveHookSelection(sel: string[] | 'all' | undefined, available: string[]): string[] {
   if (sel === 'all') return available;
   if (!Array.isArray(sel)) return [];
@@ -2567,10 +2202,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const versionHome = getVersionHomePath(agent, version);
   const agentDir = path.join(versionHome, agentConfigDirName(agent));
   fs.mkdirSync(agentDir, { recursive: true });
-  // Capture whether the caller passed a selection. The pattern-expansion
-  // path below reassigns `selection`, but for manifest write semantics we
-  // care about the ORIGINAL intent: a caller passing no selection means
-  // "full sync; persist the staleness manifest after."
+  // Record whether the caller passed a selection: the pattern path reassigns `selection`, but no
+  // selection means a full sync, after which the staleness manifest is persisted.
   const userPassedSelection = selection !== undefined;
 
   const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] }, declined: [] };
@@ -2587,10 +2220,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
   }
 
-  // Install the shared SessionStart state-writer hook for every hook-capable
-  // harness. This must run even when the rest of the sync is skipped by the
-  // staleness guard, because the hook is registered in the harness's native
-  // config (not in the version-home resource tree the manifest tracks).
+  // Install the shared SessionStart state-writer hook for every hook-capable harness even when the
+  // staleness guard skips the sync, because it is registered in the harness's native config, not
+  // the tracked resource tree.
   if (supports(agent, 'hooks', version).ok) {
     const trackerResult = installSessionTrackerHookSync(agent, version);
     if (!trackerResult.installed && trackerResult.error) {
@@ -2605,14 +2237,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Fast guard BEFORE getAvailableResources / pattern expansion /
-  // ensureVersionResourcePatterns. Guard needs only loadManifest + isStale
-  // (~6 ms); the work that used to sit ahead of it was ~12.5 ms of the 21.5 ms
-  // guard-hit path and is discarded when nothing changed (RUSH-2320 #4).
-  // Behavior note: a valid manifest implies a prior full sync already wrote
-  // version resource patterns, so skipping ensureVersionResourcePatterns on
-  // the hit path is safe in practice but is not byte-identical to the old
-  // order (that call always wrote missing pattern defaults).
+  // Fast guard before getAvailableResources and pattern expansion (RUSH-2320 #4): the work ahead of
+  // it was ~12.5 of the 21.5 ms hit path. A valid manifest implies patterns were written, so
+  // skipping that call is safe but not byte-identical.
   if (!userPassedSelection && !options.force) {
     const manifest = loadManifest(agent, version);
     if (manifest && !isStale(manifest, agent, version, cwd)) {
@@ -2641,11 +2268,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     });
   }
 
-  // If no explicit selection was passed, build one from the persisted resource
-  // patterns. This lets users customize agents.yaml to control which resources
-  // are synced (e.g. "skills: [system:brain-scan user:creative]").
-  // When patterns are the default (every layer wildcard), the expanded result
-  // equals the full available set — identical to the old behavior.
+  // With no explicit selection, build one from the persisted resource patterns so users can
+  // customize agents.yaml. Default patterns (every layer wildcard) expand to the full available
+  // set.
   if (!selection) {
     const vr = getVersionResources(agent, version);
     if (vr) {
@@ -2729,11 +2354,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
   const trustedCommandNames = (names: string[]): string[] => names.filter((name) => resolveCommandSource(name) !== null);
 
-  // Sync commands — dispatch through WRITERS.commands. The writer dispatches
-  // between native (file copy / TOML conversion), commands-as-skills, and the
-  // registry-driven dual-write path based on the command-skill predicates. The
-  // previous COMMANDS_CAPABLE_AGENTS gate excluded skills-only targets such as
-  // Kimi, silently dropping every converted command.
+  // Dispatch commands through WRITERS.commands, which picks native copy, commands-as-skills or
+  // dual-write. The old COMMANDS_CAPABLE_AGENTS gate excluded skills-only targets such as Kimi and
+  // silently dropped every converted command.
   const commandsWriter = getWriter('commands', agent);
   const commandsToSync = selection
     ? trustedCommandNames(resolveSelection(selection.commands, available.commands))
@@ -2748,12 +2371,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const writtenTargets: string[] = [];
 
   if (commandsToSync.length > 0 && commandsWriter) {
-    // Agents that replace native command files with skills (codex >= 0.117.0,
-    // kimi) must have their legacy command dir removed, or files written by an
-    // older version linger forever: the orphan sweep below is gated off for
-    // them, and `agents prune` only sees their skills. Gated on
-    // `commandsAsSkills`, never `commandsAlsoAsSkills` -- a dual-write agent's
-    // native dir is a live product surface (Cursor IDE) and must not be wiped.
+    // Agents that replace commands with skills (codex >= 0.117.0, kimi) need the legacy command
+    // dir removed, since the orphan sweep is off for them. Gate on `commandsAsSkills`, never
+    // `commandsAlsoAsSkills`: a dual-write native dir is live (Cursor IDE).
     if (commandsAsSkills && agentConfig.commandsSubdir) {
       removePath(path.join(agentDir, agentConfig.commandsSubdir));
     }
@@ -2764,14 +2384,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     result.commands = r.synced.length > 0;
   }
 
-  // Orphan-sweep stale top-level command files from previous syncs under a
-  // different cwd. Only runs in "full sync" mode — i.e. when the caller did
-  // not pass an explicit `selection`. Callers that pass explicit selections
-  // are using the incremental/additive API (sync exactly these; leave others
-  // alone), so the sweep would be a contract violation there. The
-  // cross-project leak comes from no-selection full syncs run under different
-  // cwds (`agents sync` / `agents refresh`; the shim's `agents sync --launch`
-  // skips version-home reconciliation and never reaches this path).
+  // Orphan-sweep stale command files left by syncs under a different cwd, in full-sync mode only.
+  // Explicit selections are additive, so sweeping there would violate that contract; the cross-
+  // project leak comes from no-selection full syncs.
   if (!userPassedSelection && commandsWriter && !shouldInstallCommandAsSkill(agent, version)) {
     const commandsTargetSweep = path.join(agentDir, agentConfig.commandsSubdir);
     if (fs.existsSync(commandsTargetSweep)) {
@@ -2833,18 +2448,14 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       result.skills = r.synced.length > 0;
     }
 
-    // Orphan-sweep stale skill directories from previous syncs under a
-    // different cwd. Only runs in "full sync" mode (no explicit selection) —
-    // see the matching guard on the commands sweep above for why. Skip
-    // dot-dirs to keep plugin-managed subtrees (.plugins/, .promptcuts) intact,
-    // and the harness's own directories (ownedSkillDirs), which it writes itself.
+    // Orphan-sweep stale skill dirs from syncs under a different cwd, full-sync only (see the
+    // commands sweep). Skip dot-dirs to keep plugin subtrees intact, and the harness's own
+    // ownedSkillDirs.
     const skillsTargetSweep = path.join(agentDir, 'skills');
     if (!userPassedSelection && fs.existsSync(skillsTargetSweep) && !fs.lstatSync(skillsTargetSweep).isSymbolicLink()) {
-      // Trust real skills AND command-skills: when commandsInstallAsSkills, the
-      // commands writer (above) materialized each command as a skill dir under
-      // skills/. Those names are not in skillsToSync, so without this they'd be
-      // swept as orphans — silently deleting every converted command (e.g.
-      // /recap on Kimi or newer Codex releases).
+      // Trust command-skills too: when commands install as skills, the writer made skill dirs that
+      // are not in skillsToSync and would be swept as orphans, silently deleting every converted
+      // command (e.g. /recap on Kimi).
       const trustedSkills = new Set([...skillsToSync, ...(agentConfig.ownedSkillDirs ?? [])]);
       if (commandsInstallAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
       for (const entry of fs.readdirSync(skillsTargetSweep, { withFileTypes: true })) {
@@ -2864,12 +2475,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (!hooksGate.ok) {
       console.warn(explainSkip(agent, 'hooks', hooksGate, version) + ' -- skipped');
     } else {
-      // Resolve requested hooks against the available set BY BASENAME as well as
-      // exact name. `available.hooks` carries the source filename WITH its
-      // extension (`git-guard.sh`), but the doctor/heal diff identifies a hook
-      // by its extensionless basename (`git-guard`) — so a heal pass that feeds
-      // the diff's names straight back through the plain resolveSelection
-      // matched NOTHING and could never reconcile a flagged hook (PHNX-3187).
+      // Resolve hooks by basename as well as exact name. PHNX-3187: available.hooks has extensions
+      // (git-guard.sh) but the heal diff uses basenames, so the plain resolveSelection matched
+      // nothing and could not reconcile a flagged hook.
       const hooksToSync = selection
         ? resolveHookSelection(selection.hooks, available.hooks)
         : available.hooks;
@@ -2877,10 +2485,8 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       let hookManifest: ReturnType<typeof parseHookManifest> = {};
       if (hooksToSync.length > 0) {
         const r = hooksWriter.write({ version, versionHome, selection: hooksToSync, cwd });
-        // Remove orphan files from version home. The trusted set is the
-        // manifest-declared hook list (`available.hooks`) — auxiliary files
-        // like README.md or promptcuts.yaml may exist alongside hooks at the
-        // source but are not hooks and must not linger in version homes from
+        // Remove orphan files from the version home. The trusted set is the manifest-declared hook
+        // list, so auxiliary source files like README.md or promptcuts.yaml do not linger from
         // older syncs.
         const hooksTarget = path.join(agentDir, 'hooks');
         const trustedHookNames = new Set(available.hooks);
@@ -2902,12 +2508,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Sync rules — dispatch through WRITERS.rules. The registry routes to the
-  // single-target writer for any agent that declares `rules: { file }` in
-  // its capability matrix (grok included; the previous gate used the wrong
-  // CAPABLE_AGENTS list and silently skipped it). Project rules are NOT
-  // synced into the version home — they are composed into the workspace at
-  // agents-run time (see compileRulesForProject).
+  // Dispatch rules through WRITERS.rules, which covers any agent declaring `rules: { file }` (grok
+  // included; the old gate used the wrong list and skipped it). Project rules are composed into the
+  // workspace at run time, not synced here.
   const skipMemory = selection && Array.isArray(selection.memory) && selection.memory.length === 0;
   const rulesWriter = getWriter('rules', agent);
   if (!skipMemory && rulesWriter) {
@@ -2929,15 +2532,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Apply permissions (if agent supports them).
-  // Groups live in ~/.agents/permissions/groups/. Optional recipes in
-  // ~/.agents/permissions/presets/<name>.yaml pick a subset via `includes:`.
-  // If AGENTS_PERMISSION_PRESET is set, we resolve that recipe and use its
-  // includes list as the group filter (intersected with groups on disk).
-  // Note: discoverPermissionGroups intentionally reads from user + system
-  // only — never from a project's .agents/permissions/. Permissions gate
-  // every other action, so a cloned public repo must not be able to widen
-  // its own sandbox by shipping a permissions group. Same defense as hooks.
+  // Apply permissions; AGENTS_PERMISSION_PRESET selects a recipe whose includes filter the groups.
+  // Groups are read from user and system only, never a project's .agents/permissions/, so a cloned
+  // repo cannot widen its own sandbox.
   const permissionGroups = discoverPermissionGroups();
   const allGroupNames = permissionGroups.map(g => g.name);
   const activePresetName = getActivePermissionPresetName();
@@ -2955,11 +2552,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   let permsToSync: string[];
   if (selection) {
     permsToSync = resolveSelection(selection.permissions, allGroupNames);
-    // If a preset recipe is active, the recipe's includes list always wins —
-    // even when the caller passed an explicit array via selection. Without
-    // this intersection, `agents add`'s buildAutomaticSelection would pass
-    // every group name discovered on disk (including 99-deny), bypassing
-    // the sandbox filter.
+    // An active preset recipe's includes list always wins, even over an explicit selection. Without
+    // the intersection, `agents add`'s automatic selection would pass every discovered group
+    // (including 99-deny) and bypass the sandbox filter.
     if (presetFilteredGroups) {
       const filterSet = new Set(presetFilteredGroups);
       permsToSync = permsToSync.filter(g => filterSet.has(g));
@@ -2974,18 +2569,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     // permissions patterns already written via ensureVersionResourcePatterns above.
   }
 
-  // Install MCP servers (if agent supports them)
-  // For Claude/Codex: uses CLI commands (claude mcp add, codex mcp add)
-  // For others: edits config files directly
-  //
-  // Mirror the hooks defense: an MCP server is an executable invoked under the
-  // agent's authority, so a cloned public repo's .agents/mcp/foo.yaml could
-  // install an arbitrary command (RUSH-1776). Project-scoped MCPs are UNTRUSTED
-  // by default — drop them before handing the list to installMcpServers unless
-  // the user has explicitly trusted this project (`agents mcp trust`). The
-  // register/spawn choke in lib/mcp.ts (getMcpServersByName) enforces the same
-  // trust gate and drops untrusted project entries before dedup, so a project
-  // entry can no longer shadow a same-named user entry either.
+  // Install MCP servers (CLI commands for Claude/Codex, config edits otherwise). RUSH-1776:
+  // project-scoped MCPs are untrusted by default, since a cloned repo could install an arbitrary
+  // command; drop them unless `agents mcp trust` was run. lib/mcp.ts enforces the same.
   const projectMcpTrusted = projectAgentsDir ? isProjectMcpTrusted(projectAgentsDir) : false;
   const untrustedProjectMcpNames = new Set(
     projectMcpTrusted
@@ -3099,23 +2685,16 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     syncMemoryToVersionHome(agent, versionHome, cwd);
   }
 
-  // Claude Code's own NATIVE per-project auto-memory (.claude/projects/<key>/memory/,
-  // PHNX-2817) is a separate, unmanaged directory Claude writes into itself — make it
-  // version-independent the same way project-level rules already are, via a shared
-  // symlink, so a note survives an agent version upgrade instead of vanishing into a
-  // fresh, empty version home.
+  // Claude's native per-project auto-memory (.claude/projects/<key>/memory/, PHNX-2817) is
+  // unmanaged. Make it version-independent via a shared symlink, as project rules are, so notes
+  // survive a version upgrade.
   if (agent === 'claude') {
     syncClaudeProjectMemoryDir(versionHome, cwd);
   }
 
-  // Prune resources deleted from source (RUSH-2438). Runs only on a repo-scope
-  // reconcile (`options.prune`) with a caller selection — a full sync
-  // (`!userPassedSelection`) already sweeps orphans above, and an additive
-  // interactive/`agents add` selection must not delete anything. The prune is
-  // manifest-bounded: only names the last full sync recorded are candidates,
-  // and only when they are gone from ALL source layers — so a user-authored
-  // file the sync never placed, or a same-named resource still provided by
-  // another layer, is never removed. No manifest → fail loud (delete nothing).
+  // RUSH-2438: prune resources deleted from source, only on a repo-scope reconcile with a caller
+  // selection (a full sync sweeps already; additive selections must delete nothing). Manifest-
+  // bounded and gone from all layers; no manifest means fail loud.
   if (options.prune && userPassedSelection) {
     const previousManifest = loadManifest(agent, version);
     const outcome = pruneRemovedResources({
@@ -3138,12 +2717,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Write manifest after a full sync (no user-passed selection) so the next
-  // launch can skip the slow path. Pattern-derived selections still count as
-  // "full" — the agents.yaml patterns describe the intended scope, not a
-  // one-off override, so the resulting state matches what the manifest
-  // records as the synced set. Carry forward still-fresh fingerprints from
-  // the previous manifest so we do not re-hash an unchanged tree (RUSH-2320 #3).
+  // Write the manifest after a full sync so the next launch skips the slow path. Pattern-derived
+  // selections count as full. Carry forward still-fresh fingerprints to avoid re-hashing an
+  // unchanged tree (RUSH-2320 #3).
   if (!userPassedSelection) {
     const previous = loadManifest(agent, version);
     const manifest = buildSyncManifest(agent, version, cwd, previous);
@@ -3315,11 +2891,9 @@ export function resolveInstalledAgentTargets(
     .map((item) => item.trim())
     .filter(Boolean);
 
-  // Expand literal `all` (with optional @all) into every available agent's all
-  // installed versions. Skip agents with no installed versions so `all` is
-  // lenient — only explicit `claude@all` errors when claude isn't installed.
-  // Mirrors resolveAgentVersionTargets so every --agents flag site supports
-  // the same selector syntax.
+  // Expand literal `all` (optionally @all) into every available agent's installed versions. Skip
+  // agents with none so `all` stays lenient; only explicit `claude@all` errors. Mirrors
+  // resolveAgentVersionTargets.
   const targets: string[] = [];
   for (const t of rawTargets) {
     if (t === 'all' || t === 'all@all') {

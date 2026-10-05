@@ -1,21 +1,6 @@
-/**
- * Union-on-read across every tracked device document (PHNX-3315).
- *
- * Phase 2 device-scopes three writers that used to rewrite one fleet-shared
- * block in the central `agents.yaml` (fleet discovery/dismissals, the host
- * registry, and device-scoped accounts). Each box now records only its OWN
- * decisions in `~/.agents/devices/<machine>/agents.yaml`, so pulls never
- * conflict — and the effective fleet view is recomputed here as a deterministic,
- * order-independent UNION across every device doc, exactly like the browser
- * profile registry (`lib/browser/registry.ts` `profileRegistry`).
- *
- * These readers walk the device docs ONLY. The central-legacy values (present
- * until the fold-then-delete migration drains them) are merged in by each
- * caller, so a value mid-migration is never lost. A doc that fails to parse is a
- * hard error — silently returning an empty union would let a later write wipe a
- * peer's decision, the same corruption contract `routine-activation.ts` and the
- * device registry keep.
- */
+/** Union-on-read across every tracked device document (PHNX-3315). Each box records only its own
+ * decisions, so pulls never conflict; the view is a deterministic union. A doc that fails to parse
+ * is a hard error, since an empty union would let a write wipe a peer's decision. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
@@ -33,11 +18,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Every device doc, sorted by device name so the union is order-independent. A
- * corrupt or non-map doc throws (loud), never silently skipped — a dropped doc
- * would let the next writer clobber that peer's slice.
- */
+/** Every device doc, sorted by name so the union is order-independent. A corrupt or non-map doc
+ * throws; a silently skipped doc would let the next writer clobber that peer's slice. */
 export function readAllDeviceDocs(): DeviceDoc[] {
   const devicesDir = path.join(getUserAgentsDir(), 'devices');
   if (!fs.existsSync(devicesDir)) return [];
@@ -65,12 +47,8 @@ export function readAllDeviceDocs(): DeviceDoc[] {
   return out;
 }
 
-/**
- * Union the per-box `fleet.discovery` maps. Precedence for a name declared by
- * more than one box is deterministic and order-independent: `ignored` beats
- * `approved` (a dismissal on any box wins), so every box computes the identical
- * effective policy regardless of walk order.
- */
+/** Union the per-box `fleet.discovery` maps. For a name declared by several boxes `ignored` beats
+ * `approved`, so every box computes the same policy regardless of walk order. */
 export function unionDeviceDiscovery(docs: DeviceDoc[] = readAllDeviceDocs()): Record<string, 'approved' | 'ignored'> {
   const out: Record<string, 'approved' | 'ignored'> = {};
   for (const { device, doc } of docs) {
@@ -92,12 +70,8 @@ export function unionDeviceDiscovery(docs: DeviceDoc[] = readAllDeviceDocs()): R
   return out;
 }
 
-/**
- * Union the per-box `fleet.ignored` dismissal lists by node name. When two boxes
- * dismissed the same node, the entry with the newest `ignoredAt` wins (ties
- * broken by `ignoredOn`), so the attribution is deterministic and
- * order-independent. Sorted by name to match the central writer's ordering.
- */
+/** Union the per-box `fleet.ignored` lists by node name. For the same node the newest `ignoredAt`
+ * wins (ties by `ignoredOn`); sorted by name to match the central writer. */
 export function unionDeviceIgnored(docs: DeviceDoc[] = readAllDeviceDocs()): IgnoredDeviceEntry[] {
   const byName = new Map<string, IgnoredDeviceEntry>();
   for (const { device, doc } of docs) {
@@ -128,11 +102,8 @@ export function addIgnoredEntry(byName: Map<string, IgnoredDeviceEntry>, entry: 
   }
 }
 
-/**
- * Union the per-box `hosts:` registries by host name. When two boxes registered
- * the same name, the newest `addedAt` wins (ties broken by device name), so the
- * merged directory is deterministic. Entries missing `addedAt` sort oldest.
- */
+/** Union the per-box `hosts:` registries by host name. The newest `addedAt` wins (ties by device
+ * name); entries without `addedAt` sort oldest. */
 export function unionDeviceHosts(docs: DeviceDoc[] = readAllDeviceDocs()): Record<string, HostEntry> {
   const out: Record<string, HostEntry> = {};
   const wonAt = new Map<string, number>();
@@ -153,7 +124,6 @@ export function unionDeviceHosts(docs: DeviceDoc[] = readAllDeviceDocs()): Recor
   return out;
 }
 
-// Native accounts and their bindings are machine-local (a native login lives in
-// the harness home on ONE box), so account-registry.ts reads THIS box's own
-// slice (meta.deviceAccounts) merged with the fleet-shared central store rather
-// than a cross-box union — there is deliberately no unionDeviceAccounts here.
+// Native accounts and bindings are machine-local (a native login lives in one box's harness home),
+// so account-registry.ts reads this box's own slice (meta.deviceAccounts) merged with the central
+// store; there is deliberately no unionDeviceAccounts.

@@ -1,15 +1,6 @@
-/**
- * Fold N per-account installations into 1 harness install + N credential slots
- * (PHNX-3940 T7).
- *
- * Homes are moved, never copied. Empty logged-out homes and duplicate identities
- * go to `agents trash` (restore reverses). Session transcript paths are re-indexed
- * in the same transaction as the moves. A running/leased home is deferred, never
- * moved. `--apply` is explicit; dry-run (and the upgrade hook) touch nothing.
- *
- * Native OAuth files stay inside the moved home on this device. Nothing here
- * reads or writes a reserved store, a setup-token, or a worker bundle.
- */
+/** Fold N per-account installations into 1 harness install + N credential slots (PHNX-3940 T7).
+ * Homes move, never copy; empty logged-out and duplicate homes go to `agents trash`; transcript
+ * paths re-index in the same transaction; running homes are deferred. `--apply` is explicit. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ALL_AGENT_IDS, credentialPresence, getAccountInfo, type AccountInfo } from '../agents.js';
@@ -274,13 +265,9 @@ function plannedTrashPath(agent: AgentId, label: string): string {
   return path.join(getHistoryDir(), 'trash', 'versions', agent, label, '<stamp>');
 }
 
-/**
- * Where a canonical install's stale `home/` goes when its account already holds
- * a slot: the binary and the (recreated, empty) home stay under `versions/`, so
- * the old home cannot use the versions trash — `agents trash restore` would put a
- * whole install back over a live one. Restoring is a plain move back; the
- * migration manifest records the path under `<agent>@<label>#home`.
- */
+/** Where a canonical install's stale `home/` goes when its account already has a slot. The versions
+ * trash would let `agents trash restore` put a whole install over a live one, so use this; the
+ * manifest records `<agent>@<label>#home`. */
 function homeTrashDir(agent: AgentId, label: string): string {
   return path.join(getHistoryDir(), 'trash', 'homes', agent, label);
 }
@@ -318,14 +305,9 @@ function assertSlotAbsent(agent: AgentId, accountId: string): string {
   return dest;
 }
 
-/**
- * True when this device already holds a populated slot directory for the
- * account. The daemon's auth-sync provisions durable worker slots on its own
- * (PHNX-3940), so by the time an operator runs `--apply` a worker commonly has
- * a slot for every account whose legacy per-version home is still on disk.
- * A regular file at the slot path is NOT a slot: the plan keeps routing such a
- * home to `slot` so the apply-time guard fails loud on the corruption.
- */
+/** True when this device holds a populated slot directory for the account. The daemon's auth-sync
+ * provisions worker slots itself (PHNX-3940). A regular file at the slot path is not a slot, so
+ * the plan routes such a home to `slot` and the apply-time check fails loud. */
 function provisionedSlotExists(agent: AgentId, accountId: string): boolean {
   const dest = slotDir(agent, accountId);
   try {
@@ -419,14 +401,9 @@ async function planHarness(
       continue;
     }
     if (item.hasCredential && item.accountId && provisionedSlotExists(agent, item.accountId)) {
-      // The account already owns a populated slot on this device, so this
-      // per-version home is a stale copy of a credential the slot now carries.
-      // Routing it to `slot` would only trip `assertSlotAbsent` and abort the
-      // whole apply with nothing done — the state every auth-synced worker was
-      // in. Trash it instead (`agents trash restore` reverses). The canonical
-      // install keeps its binary and ends up with an empty home, exactly as it
-      // does when its home is the one that moves into the slot: two on-disk
-      // copies of one credential is not an end state the migration leaves.
+      // The account already owns a populated slot, so this per-version home is a stale copy.
+      // Routing it to `slot` would trip `assertSlotAbsent` and abort the whole apply. Trash it
+      // (`agents trash restore` reverses); two copies of one credential is not an end state.
       if (canonical && item.label === canonical.label) {
         actions.push({
           kind: 'canonical',
@@ -787,11 +764,8 @@ export async function applyAccountMigration(
   return { plan, manifest, manifestPath, sessionsReindexed };
 }
 
-/**
- * Upgrade hook: print a dry-run report when leftover per-account installations
- * exist. Never applies. `--apply` stays an explicit `agents accounts migrate`
- * flag this release.
- */
+/** Upgrade hook: print a dry-run report when leftover per-account installations exist. Never
+ * applies; `--apply` stays an explicit `agents accounts migrate` flag this release. */
 export async function reportAccountSlotMigrationOnUpgrade(): Promise<void> {
   const plan = await planAccountMigration();
   const work = plan.totals.slots + plan.totals.trash + plan.totals.deferred;

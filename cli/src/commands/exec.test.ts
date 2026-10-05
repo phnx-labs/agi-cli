@@ -200,10 +200,9 @@ describe('degraded run governance mode', () => {
       { mode: 0o755 },
     );
     try {
-      // `node` cannot resolve the CLI's `.js` ESM specifiers to .ts sources on its
-      // own — spawn through the tsx loader, the same way every other CLI-spawning
-      // test does (commands/routines.test.ts:19-26,75). `--import` needs a module
-      // specifier, not a bare path, or Windows dies on ERR_UNSUPPORTED_ESM_URL_SCHEME.
+      // `node` cannot resolve the CLI's `.js` ESM specifiers to .ts sources, so spawn through the
+      // tsx loader like other CLI-spawning tests. `--import` needs a module specifier, not a bare
+      // path, or Windows dies on ERR_UNSUPPORTED_ESM_URL_SCHEME.
       const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
       // Vitest setup pins AGENTS_EVENTS_PATH to a fork-local sink; clear it so the
       // child writes under HOME (same pattern as tests/events-audit.test.ts).
@@ -397,9 +396,8 @@ describe('gitToplevel — always-fresh repo keying', () => {
       execFileSync('git', ['-C', dir, 'init', '-q']);
       const top = gitToplevel(dir);
       expect(top).not.toBeNull();
-      // macOS /tmp symlinks to /private/tmp, and on Windows os.tmpdir() hands
-      // back the 8.3 short form (C:\Users\RUNNER~1\...) while git reports the
-      // long one — realpathSync.native normalizes both, plain realpathSync
+      // macOS /tmp symlinks to /private/tmp, and on Windows os.tmpdir() returns the 8.3 short form
+      // while git reports the long one; realpathSync.native normalizes both, plain realpathSync
       // only the symlink.
       expect(fs.realpathSync.native(top!)).toBe(fs.realpathSync.native(dir));
       const nogit = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-notop-'));
@@ -450,10 +448,9 @@ describe('always-fresh repo set (F3 picker "remember for this repo")', () => {
 });
 
 describe('hostTargetGiven — the --device routing flag family (the --terminal reject guard)', () => {
-  // Regression: the --terminal handoff guard checked only `options.device`, so
-  // `agents run <agent> --terminal --device box` (or --on/--computer) silently
-  // opened a LOCAL tab and dropped the remote target instead of rejecting the
-  // combination. Every alias must count as a host target.
+  // Regression: the --terminal handoff guard checked only `options.device`, so `agents run <agent>
+  // --terminal --device box` (or --on/--computer) silently opened a local tab and dropped the
+  // remote target. Every alias must count as a host target.
   it('detects each --device alias, not just --device', () => {
     expect(hostTargetGiven({ host: 'box' })).toEqual(['box']);
     expect(hostTargetGiven({ device: 'box' })).toEqual(['box']);
@@ -494,10 +491,9 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
   });
 
   it('runAutoDefaultsToAffinity: an interactive dispatch of a NAMED harness is already placed too (PHNX-4083)', () => {
-    // A bare `agents run claude --device <box>` reaches the remote as a bare
-    // `agents run claude` (routing flags are not forwarded), so its
-    // AGENTS_REMOTE_INTERACTIVE=1 prelude marker is the only hop evidence —
-    // without this the remote would re-place the run and chain-hop.
+    // A bare `agents run claude --device <box>` reaches the remote as a bare `agents run claude`
+    // (routing flags are not forwarded), so its AGENTS_REMOTE_INTERACTIVE=1 prelude marker is the
+    // only hop evidence; without it the remote would re-place the run and chain-hop.
     expect(runAutoDefaultsToAffinity({}, { AGENTS_REMOTE_INTERACTIVE: '1' })).toBe(false);
     expect(runAutoDefaultsToAffinity({}, {
       AGENTS_RUN_AUTO_HOST_RESOLVED: '1',
@@ -515,10 +511,9 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
   it('agents run auto with zero installed harnesses exits nonzero with the no-healthy contract message', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-auto-empty-'));
     try {
-      // Fresh HOME → no installed harness versions → the harness layer finds
-      // zero candidates and must fail loud instead of launching anything. The
-      // .agents/.system fixture gets past the first-run setup gate (same shape
-      // as the governance-mode test above).
+      // A fresh HOME has no installed harness versions, so the harness layer finds zero candidates
+      // and must fail loud instead of launching anything. The .agents/.system fixture gets past
+      // the first-run setup gate.
       fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
       fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
       const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
@@ -630,11 +625,9 @@ describe('interactive host dispatch — run auto session correlation (RUSH-2132 
 
 describe('cost tier on a profile run is discarded, not resolved against the host harness', () => {
   it('warns loud and drops the tier so the host-harness catalog model never reaches the profile endpoint', () => {
-    // A profile's model comes from its endpoint (ANTHROPIC_MODEL), not the host
-    // harness catalog. `--model cheap` used to resolve against the HOST harness
-    // (claude -> claude-haiku-*) and forward that id to the profile's endpoint,
-    // which doesn't ship it. The guard must discard the tier with a standout
-    // warning BEFORE the host binary is spawned, leaving the profile's own model.
+    // A profile's model comes from its endpoint (ANTHROPIC_MODEL), not the host harness catalog.
+    // `--model cheap` used to resolve against the host harness and forward an id the endpoint
+    // doesn't ship. Discard the tier with a warning before spawning.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-profile-tier-'));
     const binDir = path.join(root, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
@@ -844,20 +837,9 @@ describe('opencode custom harness emits --model for its pinned model (PHNX-2577)
   });
 });
 
-/**
- * RUSH-2339 — `agents run <agent>` on a machine without that harness.
- *
- * Before the fix the launch fell through to the bare `cliCommand` and died as
- * `sh: 1: exec: cursor-agent: not found` (exit 127), after a `⚠ cursor looks
- * logged out` banner that was also wrong — it is not logged out, it is absent.
- *
- * These drive the REAL `agents run` command in a subprocess against a planted
- * HOME (`.agents/.system` git-inited so `ensureInitialized` passes) and a PATH
- * holding only what the test plants. No mocks: the second case genuinely
- * launches the harness stub, which is the whole point — a self-installed
- * harness with no version home MUST still run, so the guard cannot be a
- * "does agents-cli manage a version" check.
- */
+/** RUSH-2339: `agents run <agent>` without that harness fell through to the bare `cliCommand` and
+ * died `exec: cursor-agent: not found` (127) after a wrong "logged out" banner. Real subprocess,
+ * planted HOME/PATH. A self-installed harness with no version home must still run. */
 describe.skipIf(process.platform === 'win32')('agents run — harness not installed (RUSH-2339)', () => {
   // Resolved lazily: the describe factory body runs even when skipIf skips the
   // block, so an eager lookup would fail collection on a box without bun.
@@ -923,13 +905,9 @@ describe.skipIf(process.platform === 'win32')('agents run — harness not instal
   });
 });
 
-/**
- * RUSH-2527 — `--copy-creds` must refuse immediately with exit 1.
- *
- * The flag was a credential-copy feature; it is now a deprecated refusal. Any
- * invocation that passes --copy-creds must print a clear error and exit 1
- * without launching an agent or copying anything.
- */
+/** RUSH-2527: `--copy-creds` was a credential-copy feature and is now a deprecated refusal. Any
+ * invocation passing it must print a clear error and exit 1 without launching an agent or copying
+ * anything. */
 describe.skipIf(process.platform === 'win32')('--copy-creds refusal (RUSH-2527)', () => {
   const bunBin = () => execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
   const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');

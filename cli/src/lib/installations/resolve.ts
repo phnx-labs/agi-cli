@@ -4,18 +4,9 @@ import type { AgentId } from '../types.js';
 import { listInstallations } from './store.js';
 import type { Installation } from './types.js';
 
-/**
- * Addressing a frozen installation.
- *
- * A selector matches either the installation's stable {@link Installation.label}
- * or the vendor release it currently carries — the label because that is what
- * every persisted reference and every `agents add` invocation uses, the release
- * because after an update the two differ and a user reading `agents view` may
- * name either. Matching both is also precisely what makes duplicate same-release
- * installations addressable at all: two installs can share a release, so the
- * release alone is not an identifier and the ambiguity has to be reported rather
- * than silently resolved to whichever sorted first.
- */
+/** Addressing a frozen installation. A selector matches the stable label or the release it
+ * currently carries (they differ after an update). Matching both makes same-release duplicates
+ * addressable; ambiguity is reported, not resolved to whichever sorted first. */
 
 export class InstallationNotFoundError extends Error {
   constructor(
@@ -57,20 +48,14 @@ export function describeInstallation(installation: Installation): string {
 }
 
 export interface ResolveInstallationOptions {
-  /**
-   * An `agents accounts` label. Narrows to the installation currently signed
-   * into that account before the selector is applied.
-   */
+  /** An `agents accounts` label; narrows to the installation currently signed into that account
+   * before the selector is applied. */
   account?: string;
 }
 
-/**
- * Resolve `<agent>[@<selector>]` to exactly one installation.
- *
- * With no selector: the agent's default installation when one is pinned, else
- * the sole installation. Never a "newest wins" guess — picking for the user
- * across several installs is how an update lands on the wrong one.
- */
+/** Resolve `<agent>[@<selector>]` to exactly one installation: with no selector, the pinned
+ * default, else the sole installation. Never a "newest wins" guess, which is how an update
+ * lands on the wrong install. */
 export async function resolveInstallation(
   agent: AgentId,
   selector: string | undefined,

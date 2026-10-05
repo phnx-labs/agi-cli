@@ -1,12 +1,6 @@
-/**
- * Agent CLI binary names — the `cliCommand` field of each harness in AGENTS.
- *
- * Leaf module with zero imports. brand.ts uses this for reservedBrandNames so
- * the eager index.ts → brand.js graph never pulls agents.ts / versions.ts on
- * every invocation (RUSH-2331). agents.ts AGENTS[*].cliCommand values are
- * pinned equal by agent-cli-commands.test.ts — when a harness is added or
- * renamed, both this list and AGENTS must change together.
- */
+/** Agent CLI binary names, the `cliCommand` of each harness in AGENTS. A zero-import leaf so
+ * brand.ts's eager graph never pulls agents.ts/versions.ts (RUSH-2331). agent-cli-commands.test.ts
+ * pins it equal to AGENTS. */
 
 /** Every managed harness CLI binary name (no `agents` / `ag`). */
 export const AGENT_CLI_COMMANDS: readonly string[] = [

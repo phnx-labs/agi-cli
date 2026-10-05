@@ -1,11 +1,6 @@
-/**
- * Tests for layered hook manifest resolution: system + user merged, user wins.
- *
- * The registrar reads ~/.agents-system/hooks.yaml (npm-shipped defaults) and
- * the `hooks:` section of ~/.agents/agents.yaml (user). A user entry with
- * the same name as a system entry overrides it wholesale. A user entry with
- * `enabled: false` disables the system-shipped hook.
- */
+/** Layered hook manifest resolution: system + user merged, user wins. The registrar reads
+ * ~/.agents-system/hooks.yaml and the user's `hooks:` in ~/.agents/agents.yaml; a same-named user
+ * entry overrides the system one wholesale, and `enabled: false` disables it. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

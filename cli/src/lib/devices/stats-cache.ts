@@ -1,29 +1,6 @@
-/**
- * Disk cache for fleet {@link DeviceStats} so `agents devices list` and
- * `agents fleet status` render instantly from the last probe instead of
- * live-SSHing every registered box on every invocation.
- *
- * The old behaviour probed the whole fleet over ssh on every call
- * ({@link probeFleetStats}) — with a dozen devices, a few of them cold or
- * timing out, that turned a status glance into a multi-second hang. This module
- * makes the reads cache-first:
- *
- * - **Default:** serve remote devices from the cache (instant); always probe
- *   *this* machine locally (no ssh, sub-ms) so the "this machine" row is live;
- *   probe only the remote devices missing from the cache (first run / a
- *   newly-added box), then persist them.
- * - **`--refresh` / `--live`:** skip the cache and live-probe every device,
- *   rewriting the cache.
- *
- * Every cached row is bounded by {@link STATS_STALE_MS}: a row older than the
- * window is treated exactly like a missing one — re-probed live this call and
- * rewritten — so the default read is itself the cache's writer and a value can
- * never fossilize at the last manual `--refresh`. (The daemon used to warm this
- * cache every ~3 min; RUSH-2061 removed that N² fleet probe, which left the
- * unbounded read serving multi-day-old rows as current fleet state — the
- * scheduler, `--device auto`, and the session-start banner all read these
- * numbers. See #2666.)
- */
+/** Disk cache for fleet {@link DeviceStats} so `agents devices list` and `fleet status` render from
+ * the last probe instead of live-SSHing every box. Remote devices come from cache, this machine is
+ * probed locally, `--refresh` re-probes all; rows past STATS_STALE_MS re-probe (RUSH-2061). */
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,13 +10,9 @@ import type { DeviceProfile } from './registry.js';
 
 const CACHE_FILE = '.fleet-stats.json';
 
-/**
- * Freshness bound for a cached row. Matches the agent-count mirror's window
- * (`AGENT_STATUS_STALE_MS` in `commands/ssh.ts`) so both columns of
- * `devices list` / `fleet status` share one staleness model. A row older than
- * this is never served as current — it is re-probed live (and the probe result
- * rewrites the cache, unreachable boxes included).
- */
+/** Freshness bound for a cached row, matching the agent-count mirror's window
+ * (`AGENT_STATUS_STALE_MS` in `commands/ssh.ts`) so both columns share one staleness model. An
+ * older row is re-probed live and the result (unreachable included) rewrites the cache. */
 export const STATS_STALE_MS = 3 * 60_000;
 
 /** True when a cached row is still within {@link STATS_STALE_MS}. */
@@ -47,25 +20,9 @@ export function isFreshDeviceStats(stats: DeviceStats, now: number = Date.now())
   return now - stats.fetchedAt <= STATS_STALE_MS;
 }
 
-/**
- * Carry a device's last successfully-probed hardware facts onto a row whose
- * probe just came back unreachable (RUSH-3096).
- *
- * A failed probe knows nothing about the box — `probeDeviceStats` resolves
- * `{ host, reachable: false, fetchedAt }` — and that bare row then replaced the
- * cached one, so `agents devices list` rendered an offline device with an empty
- * `spec` cell and forgot its cores/RAM/disk until it came back up. Cores, total
- * RAM, and root-disk capacity do not change while a machine is down, so they
- * survive the failure; `loadPercent`, `memPercent`, and the free-byte counts are
- * current-state readings and stay absent rather than render a stale number as
- * live.
- *
- * `specsFetchedAt` keeps the moment the facts were actually observed while
- * `fetchedAt` advances to this attempt, so the row reads "this hardware, seen
- * then; unreachable, as of now" instead of backdating a reading that never
- * happened. A reachable probe is returned untouched — its own reading is the
- * truth, including a fact the box has stopped reporting.
- */
+/** Carry a device's last successfully-probed hardware facts onto a row whose probe came back
+ * unreachable (RUSH-3096). Cores/RAM/disk survive; `loadPercent`, `memPercent`, and free-byte
+ * counts are current readings and stay absent. `specsFetchedAt` keeps when facts were observed. */
 export function retainHardwareFacts(
   probed: DeviceStats,
   prior: DeviceStats | undefined,
@@ -110,11 +67,8 @@ export function readStatsCache(): Record<string, DeviceStats> {
   return {};
 }
 
-/**
- * Merge freshly-probed rows into the on-disk cache (best-effort write). Rows for
- * devices not in `entries` are preserved, so a partial probe (gap-fill, or a
- * single-device refresh) never drops the rest of the fleet's cached stats.
- */
+/** Merge freshly-probed rows into the on-disk cache (best-effort). Rows for devices not in
+ * `entries` are preserved, so a partial probe never drops the rest of the fleet's stats. */
 export function writeStatsCache(entries: Record<string, DeviceStats>): void {
   try {
     const dir = getCacheDir();
@@ -172,11 +126,8 @@ interface LoadFleetStatsOptions {
   now?: number;
 }
 
-/**
- * Load fleet stats cache-first. See the module doc for the default vs
- * `--refresh` behaviour. Never throws — an unreachable box degrades to a
- * `reachable: false` row exactly as the live probe does.
- */
+/** Load fleet stats cache-first (see the module doc for default vs `--refresh`). Never throws: an
+ * unreachable box degrades to a `reachable: false` row as the live probe does. */
 export async function loadFleetStats(
   devices: DeviceProfile[],
   opts: LoadFleetStatsOptions = {},

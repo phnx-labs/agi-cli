@@ -1,24 +1,7 @@
 #!/usr/bin/env tsx
-// Benchmark harness for the sessions indexing pipeline.
-//
-// Measures:
-//   A. Cold discover (index removed before the run)
-//   B. Warm discover (index present from a prior run)
-//   C. Picker keystroke (filterSessionsByQuery) — single call
-//   D. Picker keystroke — 10 successive queries (simulates typing)
-//   E. searchContentIndex alone (the per-keystroke bottleneck)
-//   F. one indexed tool-call clause
-//   G. two distinct indexed git calls in one session
-//   H. exact static program-occurrence count
-//
-// Corpus: the index is whatever $HOME holds, so CI's `HOME="$(mktemp -d)"` run
-// measures an EMPTY index — a floor for A/B, not a real-world number. Set
-// BENCH_CORPUS=real (with BENCH_MODE=warm) to copy this machine's live index
-// into a throwaway HOME and measure B/C/D/E against a populated one.
-//
-// Output: JSON on stdout, including p50/p95/p99 latency and DB/WAL sizes.
-// Set BENCH_BASELINE=<result.json> to compare p95 tool-query latency; add
-// BENCH_FAIL_REGRESSION=1 to fail when any p95 grows by more than 10%.
+// Benchmark harness for the sessions indexing pipeline: cold and warm discover, picker keystroke
+// (filterSessionsByQuery) single and 10 successive, searchContentIndex alone, an indexed tool-call
+// clause, two indexed git calls in one session, exact static program-occurrence count.
 
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';

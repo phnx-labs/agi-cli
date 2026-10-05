@@ -18,11 +18,9 @@ function makeTempDir(prefix: string): string {
 
 const makeTempHome = () => makeTempDir('agents-postinstall-home-');
 
-// Hermetic package tree: a copy of the real postinstall.js next to a stub
-// dist/. postinstall resolves its entrypoints relative to its own file
-// (import.meta.url), so running the copy keeps these tests independent of
-// whether THIS checkout currently has a built dist/bin/agents (it does on a
-// machine that ran scripts/sign-cli-binary.sh; it does not in CI).
+// Hermetic package tree: a copy of the real postinstall.js beside a stub dist/. It resolves
+// entrypoints relative to its own file (import.meta.url), so running the copy is independent of
+// whether this checkout has a built dist/bin/agents.
 function stagePackageTree(opts: { nativeBin?: string } = {}): string {
   const root = makeTempDir('agents-postinstall-pkg-');
   // Match the published package's module boundary; /tmp may contain an

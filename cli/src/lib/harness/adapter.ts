@@ -1,41 +1,13 @@
-/**
- * Harness adapter registry — the behavior axis of a supported harness.
- *
- * The declarative FLAG table lives in `AGENTS` (lib/agents.ts): what a harness
- * *is* (cliCommand, configDir, capabilities). A HarnessAdapter carries what a
- * harness *does* at the execution boundary — the per-harness quirks that four
- * call sites otherwise each re-express as a `if (agent === 'x') … else if …`
- * name-chain:
- *
- *   - config-dir env pins        → exec.ts buildExecEnv + shims.ts shim script
- *   - launch-arg quirks          → exec.ts buildExecCommand + runner.ts buildJobCommand
- *
- * One adapter per harness is the single source of truth for that harness's
- * behavior across every consuming site, mirroring the ChannelProvider
- * (lib/channels/registry.ts), HostProvider (lib/hosts/types.ts), and
- * AccountProviderAdapter (lib/account-provider-registry.ts) registries this repo
- * already proves.
- *
- * NOT here: transcript parsing and live team-event normalization. Those are
- * registry-dispatched too — a `Record` table in `session/parse.ts`
- * (`TRANSCRIPT_PARSERS`) and one in `teams/parsers.ts` (`TEAM_EVENT_NORMALIZERS`)
- * — but kept beside the parser functions they dispatch (which live in those
- * files) rather than on this `AgentId` registry, because their id domains differ:
- * the offline transcript reader keys on `SessionAgentId` (which includes `rush`,
- * not an `AgentId`), and the live team-event normalizer keys on the teams
- * `AgentType`. They stay separate functions — offline transcript vs live team
- * events — deliberately.
- */
+/** Harness adapter registry, the behavior axis of a harness: `AGENTS` (lib/agents.ts) holds what
+ * a harness is, while an adapter holds what it does at the execution boundary (config-dir env
+ * pins, launch-arg quirks) that call sites would otherwise express as `agent === 'x'` chains. */
 import type { AgentId, Mode } from '../types.js';
 import type { JobConfig } from '../scheduling/routines.js';
 import type { ConfiguredDeviceRole } from '../device-config.js';
 
-/**
- * Context for the exec-time config-env pin (mapping A, exec.ts side). The caller
- * resolves the interactive/version facts once; the adapter only expresses the
- * harness-specific env manipulation, operating on the accumulating `result` env
- * exactly as the old per-agent branch did.
- */
+/** Context for the exec-time config-env pin (exec.ts side). The caller resolves
+ * interactive/version facts once; the adapter only expresses the harness-specific env changes
+ * on the accumulating `result` env, as the old per-agent branch did. */
 export interface ExecConfigEnvCtx {
   agent: AgentId;
   /** The version to pin, pre-resolved by the caller (null = unresolved/not installed). */
@@ -44,40 +16,25 @@ export interface ExecConfigEnvCtx {
   versionHome: string | null;
   /** resolveInteractive(options) — computed once by the caller. */
   interactive: boolean;
-  /**
-   * The role marked on THIS machine (worker | personal | desktop | undefined),
-   * resolved once by the caller from selfConfiguredDeviceRole(). A headed device
-   * (`personal` or `desktop` — see isHeadedDeviceRole) holds a real per-version
-   * login and the credential decision MUST defer to it for EVERY run — interactive
-   * OR headless — never the worker-only setup-token (RUSH-2395). Injected as a
-   * plain value (not imported) to keep the adapter import-leaf. Absent/undefined
-   * is treated as non-headed (worker-equivalent).
-   */
+  /** The role marked on THIS machine (worker, personal, desktop), from selfConfiguredDeviceRole().
+   * On a headed device (personal/desktop) every run, interactive or headless, must use its native
+   * login, never the worker setup-token (RUSH-2395). Undefined means non-headed. */
   deviceRole?: ConfiguredDeviceRole;
-  /**
-   * claude-account-token's resolveClaudeSetupToken, injected. The adapters MUST
-   * stay import-leaf: claude-account-token pulls in the secrets stack, which
-   * transitively imports sqlite.ts (top-level await). Importing it inside an
-   * adapter drags that into shims.ts's module graph (shims imports the harness
-   * barrel), and subprocess-spawning tests that load shims via tsx then fail the
-   * cjs transform. Only claude uses it.
-   */
+  /** claude-account-token's resolveClaudeSetupToken, injected: adapters must stay import-leaf,
+   * since that module pulls in the secrets stack and sqlite.ts (top-level await), which breaks
+   * the cjs transform for subprocess tests loading shims.ts via tsx. Only claude uses it. */
   resolveClaudeSetupToken: (versionHome: string) => string | null;
 }
 
 /** Context for the shim-script config-env block (mapping A, shims.ts side). */
 export interface ShimConfigEnvCtx {
-  /**
-   * The config-dir path relative to `$HOME` (e.g. `.claude`, or the nested
-   * `.gemini/antigravity-cli`), derived by the caller from the AGENTS registry.
-   */
+  /** The config-dir path relative to `$HOME` (e.g. `.claude`, nested `.gemini/antigravity-cli`),
+   * derived by the caller from the AGENTS registry. */
   configDirName: string;
 }
 
-/**
- * Context for the exec-time launch-arg quirks (mapping B, exec.ts side). Mirrors
- * the locals buildExecCommand already computed at the emission point.
- */
+/** Context for the exec-time launch-arg quirks (exec.ts side); mirrors the locals
+ * buildExecCommand already computed. */
 export interface ExecLaunchArgsCtx {
   resolvedMode: Mode;
   interactive: boolean;
@@ -86,21 +43,15 @@ export interface ExecLaunchArgsCtx {
   addDirs: string[];
 }
 
-/**
- * Context for the routine (daemon-job) launch-arg quirks (mapping B, runner.ts
- * side). This idiom mutates a token array baked from AGENT_COMMANDS
- * (bakeRoutineArgv), distinct from buildExecCommand's declarative modeFlags —
- * so it is a separate method on the same adapter, one source of truth per
- * harness across both.
- */
+/** Context for routine (daemon-job) launch-arg quirks (runner.ts side). This idiom mutates a
+ * token array baked from AGENT_COMMANDS (bakeRoutineArgv), distinct from buildExecCommand's
+ * declarative modeFlags, so it is a separate adapter method. */
 export interface RoutineLaunchCtx {
   /** normalizeMode(config.mode) — the canonicalized mode. */
   mode: Mode;
   config: JobConfig;
-  /**
-   * exec.ts resolveHeadlessMode, injected to avoid an import cycle (exec.ts
-   * imports this registry). Kimi calls it for its plan→auto downgrade warning.
-   */
+  /** exec.ts resolveHeadlessMode, injected to avoid an import cycle (exec.ts imports this
+   * registry); Kimi uses it for its plan-to-auto downgrade warning. */
   resolveHeadlessMode: (agent: AgentId, mode: Mode, interactive: boolean) => void;
 }
 
@@ -109,70 +60,43 @@ export interface HarnessAdapter {
 
   // --- Mapping A: config-dir env, two call sites, one source of truth --------
 
-  /**
-   * Apply this harness's config-dir env pins to the live process env for an
-   * `agents run` invocation (exec.ts buildExecEnv). Mutates `result` in place,
-   * exactly as the old per-agent branch did. The caller has already stripped the
-   * shared config-dir keys (CONFIG_DIR_ENV_KEYS), so an adapter only sets its own
-   * vars (plus any harness-specific extra it must delete, e.g. Claude's inherited
-   * OAuth token). Omitted for a harness with no config-dir env (the old `else`).
-   */
+  /** Applies this harness's config-dir env pins to the process env for `agents run` (exec.ts
+   * buildExecEnv), mutating `result` in place. The caller already stripped CONFIG_DIR_ENV_KEYS,
+   * so an adapter sets only its own vars (plus extras to delete, e.g. Claude's inherited token). */
   applyExecConfigEnv?(result: NodeJS.ProcessEnv, ctx: ExecConfigEnvCtx): void;
 
-  /**
-   * The config-env bash block for this harness's generated shim (shims.ts). The
-   * returned string is spliced verbatim into the shim script. Omitted (⇒ '') for
-   * a harness with no managed config-dir env.
-   */
+  /** The config-env bash block for this harness's generated shim (shims.ts), spliced verbatim;
+   * omitted (empty) for a harness with no managed config-dir env. */
   shimConfigEnvBash?(ctx: ShimConfigEnvCtx): string;
 
   // --- Mapping B: launch-arg quirks, exec + shim + routine sites -------------
 
-  /**
-   * Launch args appended to this harness's shim `exec` line (shims.ts). Codex
-   * pins `check_for_update_on_startup=false` + its edit-profile policy args here.
-   * Returns '' for a harness with no shim launch args.
-   */
+  /** Launch args appended to the shim `exec` line (shims.ts); Codex pins
+   * `check_for_update_on_startup=false` and its edit-profile policy args. Empty when none. */
   shimLaunchArgs?(): string;
 
-  /**
-   * The shim's `exec` tail for this harness (shims.ts). Codex resolves the repo's
-   * `.agents` dir from `$PWD` at run time and appends `--add-dir`. Omitted ⇒ the
-   * default `exec "$BINARY"<launchArgs> "$@"`.
-   */
+  /** The shim's `exec` tail (shims.ts). Codex resolves the repo's `.agents` dir from `$PWD` at
+   * run time and appends `--add-dir`; the default is `exec "$BINARY"<launchArgs> "$@"`. */
   shimExecTail?(launchArgs: string): string;
 
-  /**
-   * Additive launch args emitted BEFORE mode-flag resolution in buildExecCommand
-   * (exec.ts). Cursor's `--trust` for a configured headless edit lives here.
-   * Returns undefined when this harness adds nothing.
-   */
+  /** Additive launch args emitted before mode-flag resolution in buildExecCommand (exec.ts),
+   * e.g. Cursor's `--trust` for a configured headless edit. Undefined when none. */
   execPreModeArgs?(ctx: ExecLaunchArgsCtx): string[] | undefined;
 
-  /**
-   * This harness's mode-flag emission for buildExecCommand (exec.ts), overriding
-   * the generic `template.modeFlags` / resume-subcommand path. Codex returns its
-   * policy args; Kimi returns [] for a headless run (and throws on an invariant
-   * violation). Returns undefined to defer to the generic path.
-   */
+  /** This harness's mode-flag emission for buildExecCommand, overriding the generic
+   * `template.modeFlags`/resume path. Codex returns policy args; Kimi returns [] for headless
+   * (throwing on an invariant violation). Undefined defers to the generic path. */
   execModeArgs?(ctx: ExecLaunchArgsCtx): string[] | undefined;
 
-  /**
-   * This harness's routine (daemon-job) launch-arg quirks for buildJobCommand
-   * (runner.ts). Mutates the bakeRoutineArgv token array in place, exactly as
-   * the old per-agent arm did; runner appends model/reasoning flags after.
-   * Omitted for a harness with no routine launch quirks.
-   */
+  /** This harness's routine (daemon-job) launch-arg quirks for buildJobCommand (runner.ts);
+   * mutates the bakeRoutineArgv token array in place and runner appends model/reasoning flags
+   * after. Omitted when none. */
   routineModeArgs?(cmd: string[], ctx: RoutineLaunchCtx): void;
 }
 
-/**
- * Config-dir env keys a harness pins to its slot / version home. Every
- * per-harness branch in buildExecEnv deletes the ones it does NOT set, so a
- * slot never inherits another account's dir (PHNX-3940 T5). GROK_HOME,
- * OPENCODE_CONFIG_DIR, and the XDG pair were previously omitted, which let a
- * parent agent's pin leak into a sibling slot.
- */
+/** Config-dir env keys a harness pins to its slot or version home. Each buildExecEnv branch
+ * deletes those it does not set so a slot never inherits another account's dir (PHNX-3940 T5).
+ * GROK_HOME, OPENCODE_CONFIG_DIR and the XDG pair were once omitted and leaked parent pins. */
 export const CONFIG_DIR_ENV_KEYS = [
   'CLAUDE_CONFIG_DIR',
   'CODEX_HOME',
@@ -184,35 +108,17 @@ export const CONFIG_DIR_ENV_KEYS = [
   'XDG_DATA_HOME',
 ] as const;
 
-/**
- * Strip every config-dir env key except the one(s) this harness sets. `keep=[]`
- * (the default / no-config-dir harness) deletes all of them — the old `else` arm.
- */
+/** Strips every config-dir env key except those this harness sets; `keep=[]` (no-config-dir
+ * harness) deletes all. */
 export function stripForeignConfigDir(result: NodeJS.ProcessEnv, keep: readonly string[] = []): void {
   for (const key of CONFIG_DIR_ENV_KEYS) {
     if (!keep.includes(key)) delete result[key];
   }
 }
 
-/**
- * Bash for a harness's config-dir pin that yields to an account-slot launch.
- *
- * A shim (bare or `<agent>@<version>` alias) pins the harness's config-dir env
- * at the version home. An account-slot launch (PHNX-3940 T5) has already chosen
- * the HOME-shaped slot: `agents run` pins the same env at the slot in
- * buildExecEnv and stamps the slot in AGENTS_EXEC_HOME. The shim used to
- * re-export the version home unconditionally, so a run picked as one account
- * read and wrote another account's home (claude on yosemite-m1, 2026-09-10;
- * the same override for every harness below). The pin now yields to the slot
- * — the way the cursor alias's HOME swap yields to a spawner-chosen HOME — and
- * consumes the marker so the launched harness never inherits it into a nested
- * launch; a bare `<agent>@<version>` from a terminal still gets the version home.
- *
- * `pins` are `{ env, rel }` with `rel` the HOME-relative config path (the slot
- * and the version home are both HOME-shaped); `versionHome` is the bash
- * expression for the version home (`$VERSION_DIR/home` in the shared block, the
- * absolute versions path in a direct alias).
- */
+/** Bash for a config-dir pin that yields to an account-slot launch (PHNX-3940 T5). The shim used
+ * to re-export the version home unconditionally, so a run picked as one account used another's
+ * home. It now yields to AGENTS_EXEC_HOME and consumes the marker so nested launches skip it. */
 export function slotAwareConfigEnvBash(
   pins: ReadonlyArray<{ env: string; rel: string }>,
   versionHome: string,
@@ -229,12 +135,8 @@ fi`;
 
 const REGISTRY = new Map<AgentId, HarnessAdapter>();
 
-/**
- * The no-behavior adapter — a harness with no managed config-dir env and no
- * launch-arg quirks. buildExecEnv strips all four config-dir keys for it (the old
- * `else` arm) by falling back to {@link stripForeignConfigDir} when an adapter
- * omits `applyExecConfigEnv`.
- */
+/** The no-behavior adapter: no managed config-dir env and no launch-arg quirks. buildExecEnv
+ * falls back to stripForeignConfigDir when an adapter omits `applyExecConfigEnv`. */
 function defaultAdapter(id: AgentId): HarnessAdapter {
   return { id };
 }
@@ -243,11 +145,8 @@ export function registerHarnessAdapter(adapter: HarnessAdapter): void {
   REGISTRY.set(adapter.id, adapter);
 }
 
-/**
- * The behavior adapter for a harness. Every `AgentId` resolves to an adapter —
- * one with real behavior when registered, else the id-only default (the old
- * `else` arm). Callers therefore never name-check a harness.
- */
+/** The behavior adapter for a harness: every `AgentId` resolves, to a registered adapter or the
+ * id-only default, so callers never name-check a harness. */
 export function resolveHarnessAdapter(id: AgentId): HarnessAdapter {
   return REGISTRY.get(id) ?? defaultAdapter(id);
 }

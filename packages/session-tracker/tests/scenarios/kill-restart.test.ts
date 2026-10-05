@@ -2,10 +2,9 @@ import { afterAll, expect, test } from 'vitest';
 import { spawnAndDetect, killAndCleanup } from '../harness.js';
 import { ScenarioRecorder, percentile, sleep } from '../lib/scenario-record.js';
 
-// The bug that motivated this whole package: a dead agent's stale state file
-// outliving it and shadowing the NEW agent that replaces it in the same cwd.
-// Each iteration spawns A, kills it, spawns B in the same directory, and
-// asserts the tracker now reports B's session — not A's ghost.
+// The bug that motivated this package: a dead agent's stale state file outliving it and shadowing
+// the new agent in the same cwd. Each iteration spawns A, kills it, spawns B in the same dir, and
+// asserts the tracker reports B, not A's ghost.
 const ITERATIONS = 20;
 const MATCH_RATE_THRESHOLD = 0.99;
 const P95_LATENCY_MS = 1000;

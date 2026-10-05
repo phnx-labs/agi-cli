@@ -1,28 +1,6 @@
-/**
- * Attention desktop banners as a supervised periodic service (PHNX-4004).
- *
- * Each tick reconciles this host's live sessions into attention items through
- * the CLI-owned reconciler (feed/attention.ts — never re-deriving detection) and
- * posts ONE actionable desktop banner per attention key not yet notified. The
- * banner carries the category, the attention key, the session id, and the
- * answerable choices, so the macOS companion can offer Approve / Approve for
- * session / Deny (permission), the options plus a typed reply (question),
- * Approve / Send back (plan review), or Open terminal (a stall/failure, or a
- * request the CLI could not verify is still pending), and route the answer back
- * through `agents feed answer <key> --choice <id>`. The kind — and so the button
- * set — is the reconciler's verdict from explicit harness evidence; an idle
- * reminder never reaches here as a permission (PHNX-3999).
- *
- * Idempotency is a filesystem ledger, not memory: one sidecar file per notified
- * key under `~/.agents/.history/feed/notified/`, so a daemon restart never
- * re-posts a banner already sent — the ledger is the truth. It is pruned with
- * the feed's 14-day retention rule.
- *
- * Reader-independent: unlike the session-state publisher this does NOT gate on a
- * live `sessions watch` reader — an attention banner must fire whether or not
- * anyone is watching the stream. `done` banners are deliberately NOT produced
- * here; they ride the run process's own exit (`run-notify.ts`).
- */
+/** Attention desktop banners as a supervised service (PHNX-4004): each tick reconciles live
+ * sessions via the CLI-owned reconciler (feed/attention.ts), one banner per un-notified key; kind
+ * comes from harness evidence (PHNX-3999). A file ledger stops re-posts; fires with no watcher. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -65,12 +43,9 @@ function shorten(text: string, max = BODY_MAX): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/**
- * The banner for one attention item, or `undefined` when its kind does not
- * notify (`done` comes from the run process; `declared`/`review` are surfaced in
- * the feed, not as a native banner). Pure — the service and its test both build
- * through here, so what ships is what is asserted.
- */
+/** The banner for one attention item, or `undefined` when its kind doesn't notify (`done` comes
+ * from the run process; `declared`/`review` go to the feed). Pure, shared by the service and its
+ * test. */
 export function buildAttentionNotification(item: AttentionItem, session: ActiveSession): DesktopNotification | undefined {
   const spec = BANNER_KINDS[item.kind];
   if (!spec) return undefined;

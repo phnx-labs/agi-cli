@@ -1,64 +1,6 @@
-/**
- * Benchmark for the brand ("white-label") bootstrap that runs on EVERY `agents`
- * invocation, including the unbranded fast path. Two distinct costs are measured
- * and kept separate, because they have opposite shapes:
- *
- *   A) The RUNTIME compute at index.ts:1244 (`const brandDisabled =
- *      disabledCommandsForActiveBrand()`), plus the two sibling calls at
- *      bootstrap.ts (`const BRAND = resolveBrandName()`) and the brand-disabled path
- *      (`disabledCommandsForActiveBrand()` inside the help re-brander). This is
- *      measured in-process below.
- *
- *   B) The eager MODULE-IMPORT cost of `import { resolveBrandName,
- *      disabledCommandsForActiveBrand } from './lib/brand.js'` at index.ts:514.
- *      After RUSH-2331 brand.ts no longer imports agents.js — reservedBrandNames
- *      reads the zero-dep AGENT_CLI_COMMANDS leaf (agent-cli-commands.ts) instead.
- *      brand.js's remaining static imports are state.js + the leaf list (types is
- *      type-only, erased). The agents.js/versions.js rows below stay as historical
- *      baselines so a regression that re-introduces the agents edge is visible.
- *      Measured with real cold `node -e "await import(...)"` subprocesses, since
- *      Node caches an ESM module for the life of a process, so an in-process
- *      second import cannot see cold cost (same method as index.bench.ts's
- *      startup-graph group on the sibling perf branches).
- *
- * Call path (each claim file:line-quoted):
- *   index.ts:1244  disabledCommandsForActiveBrand()      (brand.ts:102)
- *     -> getActiveBrandConfig()                          (brand.ts:84)
- *        -> activeBrandName()                            (brand.ts:41)
- *           -> resolveBrandName()  env AGENTS_BRAND read (brand.ts:34-38)
- *        -> [UNBRANDED] name === null -> return null BEFORE any readMeta
- *           (brand.ts:86: `if (!name) return null;`)
- *        -> [BRANDED]   getBrandConfig(name)             (brand.ts:75)
- *              -> listBrands()                           (brand.ts:70)
- *                 -> readMeta().brands                   (state.ts:1124)
- *
- * The UNBRANDED path (AGENTS_BRAND unset — every plain `agents`/`ag` call) never
- * reaches readMeta: activeBrandName() returns null at brand.ts:43 and
- * getActiveBrandConfig() short-circuits at brand.ts:86, so the whole compute is
- * one env read + one regex test (brand.ts:36) + `new Set(undefined ?? [])`
- * (brand.ts:104). The BRANDED path (AGENTS_BRAND set) instead reaches
- * readMeta() (state.ts:1124), which serves from a stamp-keyed cache on a warm
- * hit (state.ts:1130-1134, ~2 stat syscalls) and reads+parses both
- * ~/.agents/.system/agents.yaml and ~/.agents/agents.yaml on a cold miss
- * (state.ts:1176-1189, fs.readFileSync + yaml.parse of each). The branded bench
- * sets AGENTS_BRAND to a name absent from the real meta, so it exercises the
- * real readMeta lookup (state.ts:1124) and then finds no config (brand.ts:88) —
- * the readMeta hop is the branded add-on regardless of whether a brand is
- * actually configured, and this box has none (`grep brands: ~/.agents/agents.yaml`
- * is empty).
- *
- * No mocking. The runtime benches call the real exported functions; the branded
- * ones hit the real ~/.agents/{,.system}/agents.yaml on this machine. The cold
- * import benches spawn a real `node` that imports the REAL BUILT artifacts under
- * ../../dist/lib/ (produced by `bun run build`), never the TS source, so the
- * measured graph is exactly what an installed CLI loads.
- *
- * Lives at src/lib/brand.bench.ts (1:1 with brand.ts) so `typecheck:bench`
- * (package.json:58, globs `src/lib/*.bench.ts`) type-checks it, and so
- * `vitest bench` picks it up. It is NOT run by `vitest run` — vitest.config.ts
- * `include` matches only `*.test.ts`, so this file never runs in the PR test gate;
- * run it explicitly with `bun run bench` (`vitest bench --run`) inside cli.
- */
+/** Benchmark of the brand bootstrap run on every `agents` call: (A) runtime compute
+ * (`disabledCommandsForActiveBrand`, `resolveBrandName`), in process; (B) eager import cost of
+ * brand.js via cold `node` subprocesses (RUSH-2331). No mocks; `vitest run` skips it. */
 import { describe, bench } from 'vitest';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -116,13 +58,9 @@ describe('brand runtime compute — branded invocation (AGENTS_BRAND set): the r
   });
 });
 
-// --- Cold module-import cost (real subprocess per sample) ---------------------
-//
-// Node caches an ESM module for a process's life, so cold cost can only come
-// from a fresh process. Each sample spawns `node --input-type=module -e "await
-// import(<dist url>)"` importing the REAL built artifacts. `dist(p)` resolves
-// under ../../dist/lib relative to this file (src/lib -> cli), the same
-// place the installed CLI runs from.
+// Cold import cost needs a fresh process, since Node caches ESM modules. Each sample spawns `node
+// --input-type=module -e "await import(<dist url>)"` against the real built artifacts under
+// ../../dist/lib.
 const distUrl = (p: string): string =>
   pathToFileURL(path.resolve(__dirname, '../../dist/lib', p)).href;
 
@@ -138,11 +76,8 @@ function coldImport(specs: string[]): void {
   }
 }
 
-// index.ts's own static local-module imports (the eager startup graph), by
-// line: dev-build(16), sync-commands(36), self-update(86), command-registry(124),
-// help(208), whats-new(209), platform(211), cli-entry(212), events(213),
-// event-provenance(214), format(215), state(513), brand(514). types.js (210) is
-// type-only and erased at compile, so it is not a runtime edge.
+// index.ts's eager static local imports (the startup graph); types.js is type-only and erased, so
+// not a runtime edge.
 const EAGER_MINUS_BRAND = [
   'startup/dev-build.js',
   'secrets/sync-commands.js',

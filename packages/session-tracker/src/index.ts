@@ -32,11 +32,9 @@ export interface TrackSpawnOptions {
   pollIntervalMs?: number;
 }
 
-/**
- * Wait for the polyglot SessionStart hook (src/hook.sh) to drop a state file
- * at stateFilePath(input.agentPid). Resolves as soon as it appears.
- * Returns confidence='low' / sessionId=null on timeout.
- */
+/** Wait for the polyglot SessionStart hook (src/hook.sh) to drop a state file at
+ * stateFilePath(input.agentPid); resolves when it appears, or confidence='low' / sessionId=null on
+ * timeout. */
 export async function trackSpawn(
   input: TrackSpawnInput,
   opts: TrackSpawnOptions = {},

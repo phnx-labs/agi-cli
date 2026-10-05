@@ -1,24 +1,6 @@
-/**
- * The shared feed collector, exposed to other processes.
- *
- * {@link FeedHub} already collapses N readers in ONE process to one fleet
- * fan-out. The readers that matter are in DIFFERENT processes — the extension's
- * leader child, the menu-bar helper, an operator's `agents feed watch --json` —
- * so the hub has to be reachable across the process boundary or each of them
- * opens its own ssh-per-peer fan-out anyway.
- *
- * This is that boundary, and it is deliberately the thinnest possible one: a
- * UNIX socket (named pipe on Windows) that writes the SAME NDJSON envelopes
- * `agents feed watch --json` has always written, one per line. A client is a
- * line splitter over the socket; there is no request/response protocol, no framing
- * of its own, and no second schema to keep in sync.
- *
- * The daemon owns the server (`FeedStreamService`), which is what makes it one
- * scheduler and one executor: the hub dials peers, the clients only render. A
- * client MUST NOT fall back to running its own fan-out when the socket is
- * absent — that is the double-connection bug this module exists to remove — so
- * {@link streamFeedFromHub} fails loud and the caller starts the daemon.
- */
+/** The shared feed collector exposed to other processes over a UNIX socket (named pipe on
+ * Windows) writing the same NDJSON envelopes as `agents feed watch --json`. The daemon owns it;
+ * a client must never fall back to its own fan-out: streamFeedFromHub fails loud. */
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
@@ -30,71 +12,31 @@ import type { FeedWatchEnvelope } from './envelope.js';
 const IS_WINDOWS = process.platform === 'win32';
 const SOCKET_NAME = 'feed-stream.sock';
 
-/**
- * Live bytes a reader may leave queued, sustained past {@link HUB_BACKLOG_GRACE_MS},
- * before it is dropped.
- *
- * `socket.write()` never blocks: when a reader stops draining — a stopped
- * process, a suspended laptop, a debugger paused on a breakpoint — node buffers
- * the backlog in the DAEMON's heap, without limit. A busy fleet stream is a few
- * KB per second, so a reader wedged for an hour is tens of megabytes the daemon
- * can never reclaim, and the daemon is the process every other surface depends
- * on. A reader that cannot keep up is dropped loudly instead: it can reconnect
- * and be caught up from held state, which is cheaper than the backlog.
- *
- * The budget is a SUSTAINED condition on queued live events, never a verdict on
- * one envelope or one burst. A cold collector delivers every peer's reset as a
- * live event, thirteen of them inside one tick, and a healthy reader drains
- * that in milliseconds; judging the budget the instant an envelope was written
- * is how a 5 MB fleet reset was cut off after 8 KiB and delivered as one
- * unterminated line (the Menu activation failure this module's writer fixes).
- * The catch-up snapshot is never counted: it is bounded by the held state and is
- * exactly what a fresh reader is waiting for.
- */
+/** Live bytes a reader may leave queued, sustained past HUB_BACKLOG_GRACE_MS, before it is
+ * dropped: `socket.write()` never blocks, so a wedged reader grows the daemon's heap. Judged as a
+ * sustained condition, never per burst; the catch-up snapshot is not counted. */
 export const HUB_CLIENT_BACKLOG_LIMIT = 4 * 1024 * 1024;
 
-/**
- * How long a reader may stay past {@link HUB_CLIENT_BACKLOG_LIMIT} before it is
- * dropped. A healthy reader on a unix socket clears the whole budget in well
- * under this; one still over it after this long is not keeping up. The live
- * bytes queued for a reader are therefore bounded by the budget plus what the
- * stream produces in this window; the snapshot and the frame in flight sit
- * outside that figure.
- */
+/** How long a reader may stay past HUB_CLIENT_BACKLOG_LIMIT before it is dropped. Live queued
+ * bytes are bounded by the budget plus the stream's output in this window; the snapshot and the
+ * in-flight frame sit outside that figure. */
 export const HUB_BACKLOG_GRACE_MS = 2_000;
 
-/**
- * How long a reader may leave one chunk unaccepted before it is dropped.
- *
- * A write that returned `false` is a kernel buffer full of bytes the reader has
- * not read. A healthy reader — even one on a busy laptop — clears it in
- * milliseconds; one that has not in this long is not reading at all, and the
- * live-bytes budget alone would let a paused reader hold a large snapshot's
- * remainder in the daemon's heap forever.
- */
+/** How long a reader may leave one chunk unaccepted before it is dropped. A `false` write means
+ * the reader has not read the kernel buffer; without this a paused reader would hold a large
+ * snapshot's remainder in the daemon heap forever. */
 export const HUB_DRAIN_STALL_MS = 30_000;
 
-/**
- * Bytes handed to the socket per write. Small enough that a reader's own
- * backpressure (`write()` returning `false`, then `'drain'`) paces a multi-MB
- * snapshot instead of dumping it into the daemon's heap in one copy.
- */
+/** Bytes per socket write, small enough that the reader's backpressure paces a multi-MB snapshot
+ * instead of copying it into the heap at once. */
 export const HUB_WRITE_CHUNK_BYTES = 64 * 1024;
 
 /** Optional overrides for the transport bounds. Tests exercise both bounds fast. */
 export type FeedHubLimits = { backlogBytes?: number; backlogGraceMs?: number; drainStallMs?: number; chunkBytes?: number };
 
-/**
- * How long a reader gets to send its scope line before it is REJECTED.
- *
- * The handshake is required, not defaulted. Silently treating a missing or
- * unparseable scope as `fleet` meant a reader that sent nothing — or sent
- * garbage, or sent its line after the grace elapsed — was quietly subscribed to
- * the whole-fleet collector: it started ssh children to every peer on behalf of a
- * client that never asked for them, and delivered peer data to a client that may
- * have wanted only this box. A boundary that guesses is worse than one that
- * refuses, so an unusable handshake is reported and the connection ends.
- */
+/** How long a reader gets to send its scope line before it is rejected. The handshake is
+ * required: defaulting a missing or garbled scope to `fleet` subscribed silent readers to every
+ * peer (ssh children and peer data nobody asked for). */
 export const HUB_HANDSHAKE_GRACE_MS = 2_000;
 /** Bytes of handshake accepted before the reader is rejected outright. */
 const HUB_HANDSHAKE_MAX_BYTES = 1024;
@@ -114,22 +56,9 @@ export function feedHubEndpoint(socketPath = feedHubSocketPath()): string {
 /** Why a reader was dropped; each counts on its own server counter. */
 type DropReason = 'backlog' | 'stall';
 
-/**
- * One reader's ordered outbound queue.
- *
- * Every line to one socket goes through this — snapshot, live events, and the
- * error envelope that precedes a refusal — so nothing can land inside another
- * line. Lines are written in {@link HUB_WRITE_CHUNK_BYTES} chunks and the pump
- * waits for `'drain'` after every write the socket did not accept, so the socket
- * never holds more than one chunk past its high-water mark. The frame's own
- * Buffer stays allocated until its last chunk is written (`subarray` is a view),
- * so `pendingBytes` is a gauge of UNFLUSHED bytes, not of retained heap. Two
- * bounds drop the reader: a chunk left unaccepted for `drainStallMs`, and live
- * bytes queued past `backlogBytes` for longer than `backlogGraceMs`. The bound
- * on what a reader can make the daemon hold is therefore time- and
- * rate-dependent — the budget, plus the stream's ingress during the grace,
- * plus the snapshot and the frame in flight — not a hard allocation cap.
- */
+/** One reader's ordered outbound queue; every line (snapshot, live events, refusal error) goes
+ * through it so none lands inside another. Written in HUB_WRITE_CHUNK_BYTES chunks awaiting
+ * 'drain'; dropped on a chunk stalled `drainStallMs` or a backlog over budget past the grace. */
 class ReaderWriter {
   /** Lines not yet handed to the socket; `live` marks the ones the budget counts. */
   private readonly queue: Array<{ bytes: Buffer; live: boolean }> = [];
@@ -149,13 +78,9 @@ class ReaderWriter {
     private readonly drop: (reason: DropReason, message: string) => void,
   ) {}
 
-  /**
-   * Unflushed bytes for this reader: queued lines, the unwritten rest of the
-   * line being pumped, and the socket's own buffer. A gauge of what is still
-   * owed to the socket, not of retained heap. A 5 MiB frame to a paused reader
-   * leaves the queue on its first chunk, so a queue-only gauge read 0 while
-   * almost all of it was still unflushed.
-   */
+  /** Unflushed bytes for this reader: queued lines, the unwritten rest of the current line, and
+   * the socket buffer. A gauge of what is owed, not retained heap; a queue-only gauge read 0
+   * for a paused reader with a 5 MiB frame mostly unflushed. */
   get pendingBytes(): number {
     return this.queue.reduce((sum, line) => sum + line.bytes.length, 0) + this.activeRemaining + this.socket.writableLength;
   }
@@ -242,10 +167,8 @@ class ReaderWriter {
   }
 }
 
-/**
- * Serve one {@link FeedHub} to other processes. Each accepted connection is one
- * subscriber; closing it detaches, and the last detach stops the fan-out.
- */
+/** Serves one FeedHub to other processes. Each connection is one subscriber; the last detach
+ * stops the fan-out. */
 export class FeedHubServer {
   private server: net.Server | null = null;
   private readonly detachers = new Map<net.Socket, () => void>();
@@ -260,13 +183,8 @@ export class FeedHubServer {
   /** Readers refused for a missing, invalid, or late scope line. Observability. */
   rejectedHandshakes = 0;
 
-  /**
-   * @param hub      the FLEET collector (every reachable peer plus this box).
-   * @param localHub the LOCAL-only collector, served to a reader that asks for
-   *                 `scope: 'local'`. Optional: a server without one answers
-   *                 every reader from the fleet hub, which is what the fleet
-   *                 stream already contained.
-   */
+  /** `hub` is the fleet collector; `localHub` is the local-only collector served for `scope:
+   * 'local'`. Without one, every reader is answered from the fleet hub. */
   constructor(
     private readonly hub: FeedHub,
     private readonly socketPathOverride?: string,
@@ -401,11 +319,8 @@ export class FeedHubServer {
       const listener = this.server!;
       listener.once('error', reject);
       if (IS_WINDOWS) { listener.listen(endpoint, () => resolve()); return; }
-      // Restored on EVERY exit path. A listen error (the path is taken, the dir
-      // vanished) used to leave the process umask at 0o077 for good, so every
-      // later file this process created — a cache write, a journal — silently
-      // became owner-only. `once` guards the double-restore when both the
-      // success and error paths fire.
+      // Restored on every exit path: a listen error used to leave the umask at 0o077, making every
+      // later file this process created owner-only. `once` guards a double restore.
       const previousUmask = process.umask(0o077);
       let restored = false;
       const restoreUmask = () => { if (!restored) { restored = true; process.umask(previousUmask); } };
@@ -435,15 +350,9 @@ export class FeedHubServer {
   }
 }
 
-/**
- * Wait until the hub accepts a connection, or the deadline passes.
- *
- * `ensureDaemonStarted()` returns as soon as the daemon PROCESS is spawned, which
- * is well before that process has loaded its services and bound this socket.
- * Retrying immediately therefore raced the bind and failed on a daemon that was
- * about to be perfectly healthy — reported to the operator as "the shared feed
- * stream is unavailable". Resolves true once a connect succeeds.
- */
+/** Waits until the hub accepts a connection or the deadline passes. `ensureDaemonStarted()`
+ * returns when the process is spawned, before it binds this socket, so an immediate retry raced
+ * the bind and reported "shared feed stream is unavailable" on a healthy daemon. */
 export async function waitForHub(endpoint = feedHubEndpoint(), deadlineMs = 10_000, intervalMs = 100): Promise<boolean> {
   const deadline = Date.now() + deadlineMs;
   for (;;) {
@@ -459,21 +368,9 @@ export async function waitForHub(endpoint = feedHubEndpoint(), deadlineMs = 10_0
   }
 }
 
-/**
- * Read the shared stream from the hub until `signal` aborts.
- *
- * Rejects when the hub is not reachable. That is deliberate: a client that
- * quietly ran its own `watchFleetFeed` instead would restore the per-caller
- * ssh fan-out, so the caller starts the daemon and retries rather than
- * degrading into the thing this replaced.
- *
- * Also rejects on any close the caller did not ask for. The stream has no end
- * of its own — the hub serves it until the reader leaves — so a FIN that
- * arrives before `signal` aborts is the hub refusing, failing, or dropping this
- * reader, and a FIN inside a line is a frame the hub never finished. Resolving
- * there let `agents feed watch --json` exit 0 after 8 KiB of a 5 MB reset,
- * which is indistinguishable from an empty fleet.
- */
+/** Reads the shared stream from the hub until `signal` aborts. Rejects when the hub is
+ * unreachable (no own `watchFleetFeed` fan-out; start the daemon and retry), and on any close
+ * before abort: an early FIN once exited 0 after 8 KiB of a 5 MB reset. */
 export function streamFeedFromHub(options: {
   signal: AbortSignal;
   emit: (event: FeedWatchEnvelope) => void;

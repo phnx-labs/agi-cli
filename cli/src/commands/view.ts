@@ -150,11 +150,8 @@ export function compareAccountOrderedVersions(
   return compareVersions(b.version, a.version);
 }
 
-/**
- * Join fixed view columns with a consistent two-space gutter. Empty trailing
- * columns are dropped so a row without an auth chip does not grow a dangling
- * gutter, but interior empties stay padded so later columns stay aligned.
- */
+/** Join fixed view columns with a two-space gutter. Empty trailing columns are dropped (no dangling
+ * gutter), interior empties stay padded so later columns align. */
 export function joinViewColumns(cols: string[]): string {
   // Trim only pure-trailing empty strings so auth/status can be absent without
   // shifting earlier columns for rows that do carry them.
@@ -345,10 +342,7 @@ export function renderHarnessBlocks(
   }
 }
 
-/**
- * Show installed versions for one or all agents.
- * Called when: `agents view` or `agents view claude`
- */
+/** Show installed versions for one or all agents (`agents view` or `agents view claude`). */
 /** Color the source-layer tag for a host CLI, matching the rules-section convention. */
 function hostCliSourceTag(source: string): string {
   if (source === 'project') return chalk.blue('[project]');
@@ -595,10 +589,9 @@ async function showInstalledVersions(
   // that host has an install of some kind.
   const installedHosts = new Set<AgentId>([...versionManaged, ...globallyInstalled]);
 
-  // For self-updating global-binary agents (droid) the on-disk version-dir name
-  // is a stale label — the real version is whatever `<cli> --version` reports.
-  // Resolve it once so every row/width pass shows the live version, while the
-  // per-version home + account lookups keep using the real dir name.
+  // For self-updating global-binary agents (droid) the version-dir name is a stale label; the real
+  // version is what `<cli> --version` reports. Resolve once so rows show the live version, while
+  // per-version home and account lookups keep the dir name.
   const liveVersionByAgent = new Map<AgentId, string>();
   await Promise.all(
     versionManaged
@@ -1497,12 +1490,8 @@ export async function computeAgentRunReady(agentId: AgentId): Promise<ViewJsonRu
   return { ready: !!readyAccount, reason, accounts };
 }
 
-/**
- * Collect structured info for one or more agents without rendering to the
- * terminal. Used by `--json` output and any programmatic consumer (e.g. the
- * agents-cli extension's "resume current session in best available version"
- * command).
- */
+/** Collect structured info for one or more agents without rendering, for `--json` and programmatic
+ * consumers (e.g. the extension's "resume current session in best available version"). */
 export async function collectAgentsJson(
   filterAgentId?: AgentId,
   resourceSections?: Set<ResourceSection>,
@@ -1999,10 +1988,7 @@ export async function pruneDuplicates(
   }
 }
 
-/**
- * Main view action handler.
- * Exported for use by deprecated aliases.
- */
+/** Main view action handler; exported for deprecated aliases. */
 export async function viewAction(
   agentArg?: string,
   options?: {

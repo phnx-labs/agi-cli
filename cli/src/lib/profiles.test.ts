@@ -32,11 +32,9 @@ import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests
 let TEST_ROOT: string;
 let USER_DIR: string;
 
-// Profile tokens (`agents-cli.<provider>.token`) and account bundles are
-// keychain items, so on a headed macOS box the real standalone would reach
-// the operator's login keychain; the describes that read or seed one run
-// where keychain items are file-backed (headless Linux/Windows, CI). The
-// pure profile-file suites below need no gate.
+// Profile tokens and account bundles are keychain items, so on a headed macOS box the real
+// standalone would reach the operator's login keychain. Describes that read or seed one run only
+// where keychain items are file-backed (headless Linux/Windows, CI).
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 beforeEach(() => {
@@ -192,11 +190,9 @@ describe.skipIf(!fileBacked)('resolveProfileEnv reads the stored token through t
   });
 
   it('STILL throws for REQUIRED auth with a missing token (the load-bearing safety property)', () => {
-    // authOptional omitted (required). A missing keychain item must hard-fail —
-    // the authOptional skip must never leak into the required-auth path. The
-    // standalone reports the miss only as a NOT_FOUND code (its message is
-    // deliberately opaque, protocol-server.ts), so resolveProfileEnv names the
-    // harness, the item, and the repair itself.
+    // authOptional omitted (required): a missing keychain item must hard-fail and the authOptional
+    // skip must never leak into this path. The standalone reports the miss only as NOT_FOUND, so
+    // resolveProfileEnv names the harness, the item, and the repair.
     const p: Profile = {
       name: 'corp',
       host: { agent: 'claude' },
@@ -216,10 +212,9 @@ describe.skipIf(!fileBacked)('resolveProfileEnv names the harness on a dangling 
   useFreshSecretsHome();
 
   it('tells the user which harness points at the missing account and how to repoint it', () => {
-    // The fleet-sync trap (RUSH-2930): profiles travel via `agents repo push`
-    // but accounts are per-device, so a synced profile can reference an account
-    // this machine has never seen. The bare registry "Unknown account" gave the
-    // user nothing to act on.
+    // Fleet-sync trap (RUSH-2930): profiles travel via `agents repo push` but accounts are
+    // per-device, so a synced profile can reference an unknown account; the bare registry "Unknown
+    // account" gave the user nothing to act on.
     const p: Profile = {
       name: 'deepseek',
       host: { agent: 'claude' },
@@ -330,11 +325,8 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
       env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
     });
 
-    // No `models:` opt-in at all: this function leaves the tier token and env
-    // untouched. It does NOT write its own "no model configured" note --
-    // cli/src/commands/exec.ts's profile-tier discard guard (merged
-    // separately, "cost tiers don't apply to profile ...") is the canonical
-    // message for this case, covered by its own test in exec.test.ts.
+    // No `models:` opt-in: the tier token and env are left untouched, and the canonical message
+    // comes from exec.ts's profile-tier discard guard (covered in exec.test.ts).
     const resolved = resolveProfileForRun('kimi', 'best');
     expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
     expect(resolved.resolvedModel).toBeUndefined();
@@ -359,12 +351,9 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
   });
 
   it('regression: tier resolution is NOT affected by the HOST agent\'s own catalog (the collision this fix closes)', () => {
-    // The host is claude, but this profile pins its own deepseek models per
-    // tier. Before this fix, resolveProfileForRun ignored the requested
-    // model entirely and exec.ts's native tier block resolved "best" by
-    // calling resolveTier(options.agent, ...) with options.agent already
-    // overwritten to the HOST id ('claude') -- so a real claude-* id landing
-    // in ANTHROPIC_MODEL here would reproduce that exact collision.
+    // Host is claude but the profile pins deepseek models per tier. resolveProfileForRun used to
+    // ignore the requested model, and exec.ts resolved "best" with options.agent overwritten to the
+    // HOST id, landing a claude-* id in ANTHROPIC_MODEL.
     writeProfile({
       name: 'deepseek-flash',
       host: { agent: 'claude', version: '2.1.219' },

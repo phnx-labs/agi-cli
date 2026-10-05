@@ -1,11 +1,6 @@
-/**
- * Tests for the REST read core behind the `gh` overload.
- *
- * The gh runner returns the payloads real `gh api --jq` streams (NDJSON, one
- * object per line) for each endpoint — the same shape `rest.ts` parses. This
- * exercises the real union/dedupe/mapping and the head-SHA anchor, not a stub of
- * the result. A live end-to-end test against a real PR is gated on AGENTS_TEST_GH.
- */
+/** Tests for the REST read core behind the `gh` overload, with runner payloads shaped like real
+ * `gh api --jq` NDJSON. Exercises the real union/dedupe/mapping and head-SHA anchor; a live
+ * end-to-end test against a real PR is gated on AGENTS_TEST_GH. */
 
 import { describe, expect, it } from 'vitest';
 import { isCiGreen } from './pr-verdict.js';

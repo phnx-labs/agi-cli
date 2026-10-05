@@ -3,10 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before db.js loads so its module-level base dir picks up the
-// override. Plain top-level statements run before the dynamic `await import`
-// below, so vi.hoisted is not needed (and is also not supported by Bun's
-// native test runner).
+// Set HOME before db.js loads so its module-level base dir picks it up. Top-level statements run
+// before the dynamic `await import`, so vi.hoisted is not needed (and Bun's runner does not
+// support it).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-test-'));
 process.env.HOME = TEST_HOME;
 
@@ -28,10 +27,9 @@ const { costOfUsage } = await import('../../pricing/index.js');
 const { emit } = await import('../../feed/events.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
-// JSONL files live under TEST_HOME so they're isolated and torn down with it.
-// querySessions filters out rows whose file_path no longer exists on disk
-// (defense against phantom rows after a config-symlink swap, see #136), so
-// every seeded row needs a real backing file.
+// JSONL files live under TEST_HOME so they are isolated. querySessions drops rows whose file_path
+// no longer exists (phantom rows after a config-symlink swap, #136), so every seeded row needs a
+// real file.
 const SEED_FILES_DIR = path.join(TEST_HOME, 'seed-files');
 fs.mkdirSync(SEED_FILES_DIR, { recursive: true });
 
@@ -208,10 +206,9 @@ describe('usedBrowser/usedComputer — a scoped events-log read, not a transcrip
   });
 
   it('a computer-screenshot-only session sets usedComputer=true (agents computer screenshot / run, not just the explicit verbs)', () => {
-    // Mirrors what computer.ts's screenshot command and dispatch.ts's run-loop
-    // dispatcher now emit — previously neither path emitted computer.action at
-    // all, so a session that only ran `computer screenshot`/`run` read back
-    // usedComputer=false (reviewer-flagged regression on #1864).
+    // Mirrors what computer.ts's screenshot command and dispatch.ts's run-loop now emit; before,
+    // neither emitted computer.action, so a session that only ran `computer screenshot`/`run` read
+    // usedComputer=false (regression on #1864).
     emit('computer.action', { sessionId: 'tool-computer-screenshot', command: 'screenshot', targetPid: 200 });
     const filePath = emptyFile('tool-computer-screenshot');
     const meta: SessionMeta = { id: 'tool-computer-screenshot', shortId: 'tool-scr', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath };
@@ -425,10 +422,8 @@ describe('session_resource_usage — skill/slash-command usage joined against re
   });
 });
 
-// ---------------------------------------------------------------------------
-// Cost + duration (issue #323) — real SQLite, migration v6 columns, sort,
-// rollup grouping for a multi-model session.
-// ---------------------------------------------------------------------------
+// Cost + duration (issue #323): real SQLite, migration v6 columns, sort, rollup grouping for a
+// multi-model session.
 
 // Single teardown for the whole file (the per-describe teardown was removed so
 // later describe blocks still have a live DB and an intact TEST_HOME).
@@ -530,10 +525,8 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// last_activity (v8) — the listing sorts and labels by last-message time, not
-// creation time. A session created long ago but active recently must lead.
-// ---------------------------------------------------------------------------
+// last_activity (v8): the listing sorts and labels by last-message time, so a long-ago session
+// active recently must lead.
 const ACTIVITY_FILES_DIR = path.join(TEST_HOME, 'activity-files');
 fs.mkdirSync(ACTIVITY_FILES_DIR, { recursive: true });
 
@@ -709,10 +702,8 @@ describe('syncTopics', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// findSessionsById — exact-then-prefix id resolution over the index (the
-// DB-backed equivalent of resolveSessionById, used by `agents run --resume`).
-// ---------------------------------------------------------------------------
+// findSessionsById: exact-then-prefix id resolution over the index (DB-backed resolveSessionById,
+// used by `agents run --resume`).
 
 const ID_FILES_DIR = path.join(TEST_HOME, 'id-files');
 fs.mkdirSync(ID_FILES_DIR, { recursive: true });
@@ -823,22 +814,17 @@ describe('upsertSessionsBatch per-row guard', () => {
 });
 
 describe('closeDB drops the cached prepared statements', () => {
-  // Regression for the "statement has been finalized" bug: closeDB() finalizes
-  // every prepared statement the connection owns, but the module-level
-  // cachedStmts (upsert/FTS) used to survive the close. The next getDB() opened a
-  // fresh connection while stmts() handed back the stale, finalized statements —
-  // so the first upsertSession() after a closeDB() threw. In host-session
-  // registration (which swallows write errors) that silently dropped the row.
+  // Regression for "statement has been finalized": closeDB() finalizes prepared statements but the
+  // module-level cachedStmts survived, so the first upsertSession() after closeDB() threw.
+  // Host-session registration swallows write errors, so the row was silently dropped.
   it('lets upsertSession run again after closeDB without throwing a finalized statement', () => {
     const fileA = path.join(SEED_FILES_DIR, 'reopen-a.jsonl');
     const fileB = path.join(SEED_FILES_DIR, 'reopen-b.jsonl');
     fs.writeFileSync(fileA, '');
     fs.writeFileSync(fileB, '');
 
-    // A first upsert POPULATES cachedStmts with statements bound to this
-    // connection. Without that priming, stmts() would just rebuild fresh after
-    // the close and the bug wouldn't reproduce — the finalized statement only
-    // bites when the cache already holds statements from the closed connection.
+    // A first upsert populates cachedStmts bound to this connection. Without that priming, stmts()
+    // would rebuild fresh after the close and the bug would not reproduce.
     upsertSession(
       { id: 'reopen00-0000-4000-8000-00000000000a', shortId: 'reopen00',
         agent: 'claude', timestamp: '2026-07-05T00:00:00.000Z', cwd: '/x',

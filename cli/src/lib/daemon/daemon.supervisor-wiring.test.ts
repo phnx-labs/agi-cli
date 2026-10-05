@@ -1,13 +1,6 @@
-/**
- * runDaemon() migration wiring (RUSH-3193 P1/P3): the session-index warm
- * service (P1) and watchdog/device-probe/self-heal/state-dir-check (P3) are
- * all registered on `ServiceSupervisor` (each gated by its own `isEnabled()`
- * toggle) instead of a bare `setInterval`, and the supervisor is torn down on
- * shutdown. Drives the REAL compiled daemon as a subprocess, like the other
- * `daemon.*.test.ts` integration slices — the wiring lives inside
- * `runDaemon()`, which cannot be unit-tested in isolation (single-instance
- * guard, subsystem boot order, an infinite `await new Promise(() => {})`).
- */
+/** runDaemon() migration wiring (RUSH-3193 P1/P3): the session-index warm service and
+ * watchdog/device-probe/self-heal/state-dir-check are registered on `ServiceSupervisor` (each
+ * gated by `isEnabled()`) instead of bare `setInterval`, and torn down on shutdown. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -129,11 +122,9 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     'catchup',
   ] as const;
 
-  // PHNX-3373 / PHNX-3941: registration is a separate invariant from a clean
-  // first tick. Socket/lifecycle services can legitimately report a failure in
-  // a bare HOME (for example auth-sync with no configured account), but every
-  // enabled service must still publish a supervisor-owned health record on a
-  // real daemon boot.
+  // PHNX-3373 / PHNX-3941: registration is a separate invariant from a clean first tick. Services
+  // can legitimately fail in a bare HOME (e.g. auth-sync with no account), but every enabled
+  // service must still publish a supervisor-owned health record on a real boot.
   const ALL_SUPERVISED_SERVICE_IDS = [
     'session-state', 'monitors', 'account-state',
     'account-auth', 'catchup', 'session-index', 'watchdog',

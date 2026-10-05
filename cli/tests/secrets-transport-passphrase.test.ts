@@ -1,18 +1,6 @@
-/**
- * End-to-end: the portable `export --to-file` / `import --from-file` envelope
- * reads the TRANSPORT passphrase (`AGENTS_SYNC_PASSPHRASE`), not the file
- * store's master key (RUSH-1968).
- *
- * These two are the third consumer of the old overloaded variable. The unit
- * tests in src/lib/secrets/sync-passphrase.test.ts cover the resolver; this
- * suite proves the two command call sites are actually wired to it, by driving
- * the REAL CLI entry under a temp HOME and round-tripping a bundle through an
- * encrypted file. No mocking — the same path a real invocation takes.
- *
- * The store itself stays on its auto-provisioned machine-local key throughout,
- * which is the whole point: a box can seal a bundle for transport without ever
- * holding the master key to its own store.
- */
+/** End-to-end: `export --to-file` / `import --from-file` read the TRANSPORT passphrase
+ * (`AGENTS_SYNC_PASSPHRASE`), not the store's master key (RUSH-1968). Drives the real CLI under a
+ * temp HOME, round-tripping a bundle through an encrypted file. */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -61,15 +49,9 @@ function runCli(home: string, args: string[], extraEnv: Record<string, string> =
   });
 }
 
-/**
- * Seed a file-backed bundle with one key, headlessly.
- *
- * `storeEnv` keys the store: pass `{}` for the default machine-local key, or
- * `{ AGENTS_SECRETS_PASSPHRASE }` to model a pre-upgrade box that exports the
- * master key. That distinction matters — the legacy variable is the STORE key,
- * so reading a bundle back with it set only works if the store was written
- * under the same value. That coupling is exactly what this split removes.
- */
+/** Seed a file-backed bundle headlessly. `storeEnv` keys the store: `{}` for the default
+ * machine-local key, or `{ AGENTS_SECRETS_PASSPHRASE }` to model a pre-upgrade box; the legacy
+ * variable is the store key, a coupling this split removes. */
 function seedBundle(
   home: string, bundle: string, key: string, value: string,
   storeEnv: Record<string, string> = {},
@@ -113,14 +95,9 @@ describeSecrets('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRAS
     expect(imported.stderr + imported.stdout).toContain('Imported 1 key');
   });
 
-  // The exact env-var NAME surfaced in the "which passphrase" error and the
-  // legacy-deprecation warning is no longer agents-cli's to assert: PHNX-3989
-  // made `agents secrets export/import --to-file` a passthrough to the standalone
-  // (`secrets-passthrough.ts`), so the standalone owns the transport envelope and
-  // names its OWN passphrase variable (`SECRETS_PASSPHRASE`) in those messages —
-  // covered by the standalone's own suite. The round-trip cases above/below still
-  // prove the passthrough forwards `--to-file`/`--from-file` and seals the file
-  // (not plaintext), which is what agents-cli remains on the hook for.
+  // The passphrase env-var name in the errors is no longer agents-cli's to assert: PHNX-3989 made
+  // export/import `--to-file` a passthrough and the standalone names its own `SECRETS_PASSPHRASE`.
+  // The round-trip cases still prove the flags are forwarded and the file is sealed.
 
   it('a file sealed on a LEGACY box opens on an upgraded box using the NEW variable', () => {
     // Same secret, two spellings, two machines: the upgrade must not strand a

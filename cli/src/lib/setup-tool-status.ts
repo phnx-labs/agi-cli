@@ -125,10 +125,9 @@ async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
   // The standalone has no non-interactive health JSON. Do not list bundles or
   // unlock the broker merely to paint a settings row.
   if (row.tool === 'secrets') return { ...row, checkedAtMs: Date.now(), detail: 'Installed. Secret access is checked when used; this check does not unlock secrets.' };
-  // term is a headless PTY engine with no `status --json` health surface; it is
-  // spawned on demand by the setup-token mint (`agents accounts add`/`login`,
-  // via auth-mint.ts → term-driver.ts, the sole term-client consumers).
-  // Presence on PATH is the whole readiness signal — do not probe it.
+  // `term` is a headless PTY engine with no `status --json` health surface, spawned on demand by
+  // the setup-token mint (`agents accounts add`/`login`, via auth-mint.ts and term-driver.ts).
+  // Presence on PATH is the whole readiness signal; do not probe it.
   if (row.tool === 'term') return { ...row, readiness: 'ready', detail: 'Installed. Spawned on demand by `agents accounts add`/`login`.', checkedAtMs: Date.now() };
   try {
     const { command, prefix } = invocation(row.executable);

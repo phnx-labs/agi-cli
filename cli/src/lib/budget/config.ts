@@ -1,16 +1,6 @@
-/**
- * Budget config resolution (issue #346).
- *
- * The `budget:` block can live in the user/global agents.yaml (`readMeta().budget`)
- * and in any project-local agents.yaml walked from cwd upward. Precedence is
- * project > user, matching `run:` resolution (lib/run-config.ts). Caps merge
- * field-by-field — a project that sets only `per_run` inherits the user's
- * `per_day`/`per_project`/`per_agent` rather than wiping them.
- *
- * This is the single resolver the pre-flight gate, the live watcher, and the
- * `agents config budget` command all route through, so the effective cap set is
- * computed in exactly one place.
- */
+/** Budget config resolution (issue #346). The `budget:` block may be in the user agents.yaml and
+ * any project-local one up from cwd; project beats user, merged field by field. The single
+ * resolver for the pre-flight check, the live watcher and `agents config budget`. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -21,12 +11,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Coerce a raw parsed `budget:` block into a typed BudgetConfig, dropping any
- * field whose value is the wrong shape. Malformed entries are ignored, not
- * thrown — a typo in one cap must never crash a run (no-fallbacks applies to
- * the data path, not to user-typed config we choose to be lenient about).
- */
+/** Coerce a raw `budget:` block into a typed BudgetConfig, dropping wrong-shaped fields. Malformed
+ * entries are ignored, not thrown: a typo in one cap must not crash a run (lenient for user-typed
+ * config only). */
 function coerceBudget(raw: unknown): BudgetConfig {
   if (!isRecord(raw)) return {};
   const out: BudgetConfig = {};
@@ -89,11 +76,8 @@ function getProjectBudgets(startPath: string): BudgetConfig[] {
   return configs.reverse();
 }
 
-/**
- * Effective budget for `cwd`: user/global base, then each project-local block
- * from farthest ancestor to nearest, nearest winning. `on_exceed` defaults to
- * `block` when nothing sets it (fail-closed: the safe default is to enforce).
- */
+/** Effective budget for `cwd`: user base, then each project block from farthest ancestor to
+ * nearest, nearest winning. `on_exceed` defaults to `block` (fail-closed). */
 export function resolveBudgetConfig(cwd: string = process.cwd()): BudgetConfig {
   const userBudget = coerceBudget(readMeta().budget);
   let merged = userBudget;

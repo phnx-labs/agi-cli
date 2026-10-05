@@ -1,11 +1,6 @@
-/**
- * Permission-mode catalog for a harness.
- *
- * Source of truth is AGENTS[id].capabilities.modes plus the native CLI flags
- * in AGENT_COMMANDS.modeFlags. This is the modes analog of the model catalog
- * (`agents models`) — what a human or orchestrating agent reads before
- * `agents run <agent> --mode …` / `agents teams add … --mode …`.
- */
+/** Permission-mode catalog for a harness, from AGENTS[id].capabilities.modes plus the native flags
+ * in AGENT_COMMANDS.modeFlags. The modes analog of `agents models`, read before `agents run
+ * <agent> --mode ...`. */
 
 import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
@@ -21,14 +16,9 @@ export const MODE_DESCRIPTIONS: Record<Mode, string> = {
   skip: 'bypass every permission prompt (dangerously-skip-permissions)',
 };
 
-/**
- * What `auto` actually does, per harness. Two genuinely different mechanisms
- * wear the same mode name, and conflating them is a safety error in both
- * directions: telling a claude operator that auto never prompts invites an
- * unattended run that stalls on a risky-operation gate, and telling a codex
- * operator that auto prompts for risky work asserts a gate codex does not have.
- * Absent entry = no extra note; the row's own text suffices.
- */
+/** What `auto` does per harness. Two different mechanisms share the name: telling a claude operator
+ * that auto never prompts invites an unattended stall, and telling a codex operator it prompts
+ * asserts a prompt codex lacks. Absent entry means no extra note. */
 const AUTO_SEMANTICS: Partial<Record<AgentId, string>> = {
   // Classifier-style: still escalates. --permission-mode auto / --autopilot.
   claude: 'a smart classifier auto-approves safe operations and still prompts for risky ones.',
@@ -56,16 +46,12 @@ export interface AgentModesCatalog {
   modes: AgentModeEntry[];
   /** capabilities.modes[0] — safest native mode; run may still default elsewhere (e.g. CLI plan, teams edit). */
   defaultMode: Mode;
-  /**
-   * Configured run.defaults mode for this agent@version, when set.
-   * Null means no pin — CLI default (plan for most harnesses) or modes[0] applies.
-   */
+  /** Configured run.defaults mode for this agent@version, when set. Null means no pin: the CLI
+   * default (plan for most harnesses) or modes[0] applies. */
   configuredMode: Mode | null;
   configuredModeSource: string | null;
-  /**
-   * Whether plan works in a headless (`-p` / prompt) run. false means a headless
-   * --mode plan degrades (see resolveHeadlessMode). undefined = assumed true.
-   */
+  /** Whether plan works in a headless (`-p`) run; false means headless `--mode plan` degrades (see
+   * resolveHeadlessMode). Undefined is assumed true. */
   headlessPlan: boolean;
   /** Canonical modes this harness does NOT list in capabilities.modes. */
   unsupported: Mode[];
@@ -73,11 +59,8 @@ export interface AgentModesCatalog {
   notes: string[];
 }
 
-/**
- * Build the permission-mode catalog for one harness.
- * `version` only affects the configured run.defaults lookup (modes themselves
- * are per-agent today, not version-gated).
- */
+/** Build the permission-mode catalog for one harness. `version` only affects the run.defaults
+ * lookup; modes are per-agent today, not version-gated. */
 export function getAgentModesCatalog(
   agent: AgentId,
   version?: string | null,
@@ -106,11 +89,9 @@ export function getAgentModesCatalog(
   if (unsupported.includes('auto')) {
     notes.push(`--mode auto degrades to edit on ${agent} (no native auto classifier).`);
   }
-  // MODE_DESCRIPTIONS is one flat Record<Mode, string> rendered for every agent,
-  // so it cannot name any single harness's mechanism without lying about the
-  // others: claude/copilot auto STILL PROMPTS for risky operations, while codex
-  // auto never prompts at all. The row states only what is true everywhere; the
-  // mechanism rides here, per harness.
+  // MODE_DESCRIPTIONS is one flat record for every agent, so it can't name one harness's mechanism
+  // without lying about others (claude/copilot auto still prompts on risky operations; codex auto
+  // never does). The row states what is true everywhere; the mechanism rides here.
   const autoSemantics = AUTO_SEMANTICS[agent];
   if (autoSemantics && supported.includes('auto')) {
     notes.push(`${agent} --mode auto: ${autoSemantics}`);

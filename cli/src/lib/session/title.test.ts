@@ -1,7 +1,5 @@
-/**
- * Pure title logic (PHNX-3797): the prompt, the sanitizer, the source key that
- * makes generation once-per-session, and the shared headline ladder.
- */
+/** Pure title logic (PHNX-3797): the prompt, the sanitizer, the source key that makes generation
+ * once-per-session, and the shared headline ladder. */
 import { describe, expect, it } from 'vitest';
 import {
   SESSION_TITLE_MAX_CHARS,

@@ -15,10 +15,9 @@ describe('permissions add broad grant gate', () => {
     expect(shouldRefuseBroadPermissions(permissions, true)).toBe(false);
   });
 
-  // Without this case the gate is untested in the direction that matters. Both
-  // assertions above hold for `return !allowBroadPermissions` — a guard that
-  // ignored `permissions` entirely and refused EVERY install — so nothing
-  // proved the gate actually inspects the rules it is named for.
+  // Without this case the check is untested in the direction that matters: the assertions above
+  // also hold for `return !allowBroadPermissions`, a guard that ignored `permissions` and refused
+  // every install, so nothing proved it inspects the rules it is named for.
   it('lets a narrowly-scoped pack through even without --allow-broad-permissions', () => {
     // Scoped on both axes: a specific bash command, and a read confined to a
     // subtree. `Read(*)` would NOT do — containsBroadGrants counts a bare `*`

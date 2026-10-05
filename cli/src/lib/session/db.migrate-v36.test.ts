@@ -10,21 +10,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv36-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v35 -> v36: the tool index becomes incremental, and its FTS rows become
- * addressable.
- *
- * Two things have to be true afterwards. `tool_scan_ledger` must carry the
- * resume columns (NULL on existing rows, which reads as "re-read this one once
- * from byte 0"), and every `tool_call_text` row must sit at the rowid of the
- * `tool_calls` row it describes — the pre-v36 rows were inserted with
- * FTS5-assigned rowids and could only be reached through the UNINDEXED
- * `call_key`, i.e. a full index scan per delete.
- *
- * The rebuild must also stay non-destructive: `tool_calls` is the source of
- * truth and is untouched, the searchable text survives, and neither ledger is
- * wiped (the contract the other migration tests here assert).
- */
+/** v35 -> v36: the tool index becomes incremental and its FTS rows addressable. `tool_scan_ledger`
+ * gains resume columns (NULL means re-read from byte 0); each `tool_call_text` row sits at its
+ * `tool_calls` rowid. Non-destructive: `tool_calls` untouched, no ledger wiped. */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

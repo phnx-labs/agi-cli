@@ -1,11 +1,6 @@
-/**
- * PHNX-3949 — `agents open` is the OS callback for `agents://` deep links, not a
- * user command. It is hidden as the machine-only `_callback` verb, `open` stays a
- * hidden alias for handlers written by older CLIs, and the handler management
- * moves to the visible `agents setup url-scheme` group. These assertions pin the
- * command surface so a future edit cannot silently break a previously-registered
- * OS handler (which keeps calling `agents open <url>`).
- */
+/** PHNX-3949: `agents open` is the OS callback for `agents://` deep links, hidden as `_callback`,
+ * with `open` a hidden alias for handlers written by older CLIs; handler management moved to
+ * `agents setup url-scheme`. Pins the surface so an edit cannot break registered OS handlers. */
 import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
 import { registerOpenCommand, addUrlSchemeSubcommands } from './open.js';

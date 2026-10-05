@@ -1,14 +1,6 @@
-/**
- * Catch-up tests — a missed fire is recorded, and re-run unless opted out.
- *
- * These drive the real module against a real `~/.agents` tree in an isolated
- * mkdtemp HOME: real routine YAML on disk, real run records, real
- * `detectOverdueJobs`. The only seam is the injected clock. Nothing is mocked.
- *
- * The scenario is the one that cost real time: zion's daemon was down at
- * 2026-08-03T04:00Z when `weekly-fleet-retro` came due, croner rescheduled
- * forward on restart, and the fire was simply lost.
- */
+/** Catch-up tests: a missed fire is recorded and re-run unless opted out. They drive the real
+ * module on a real tree in an isolated HOME (real routine YAML, run records, `detectOverdueJobs`);
+ * only the clock is injected. Motivated by a daemon down at 2026-08-03T04:00Z. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -48,10 +40,9 @@ function readRuns(jobName: string): Record<string, unknown>[] {
 }
 
 beforeEach(() => {
-  // The state module resolves ~/.agents paths into consts at import time, so a
-  // cached module would still point at a previous test's HOME. Reset the module
-  // registry so each test imports against the temp HOME set below. Not a mock —
-  // the real path resolution runs, just against a fresh root.
+  // The state module resolves ~/.agents paths into consts at import, so a cached module would
+  // point at an old HOME. Reset the module registry so each test imports against the temp HOME.
+  // Not a mock.
   vi.resetModules();
   prevHome = process.env.HOME;
   prevUserProfile = process.env.USERPROFILE;
@@ -115,10 +106,9 @@ describe('claimMissedFire', () => {
 
 describe('runCatchup', () => {
   /** A routine due daily at 02:00 UTC whose last run was two days before "now". */
-  // timezone pinned so the cron occurrences line up with the UTC instants the
-  // fixtures use, whatever TZ the test machine runs in. createdAt predates the
-  // fixtures' runs so the routine is old enough for its slots to count as real
-  // misses (see "a routine is never judged against fires that predate it").
+  // Timezone is pinned so cron occurrences line up with the UTC fixtures on any machine.
+  // `createdAt` predates the fixtures' runs so slots count as real misses (see "a routine is never
+  // judged against fires that predate it").
   const nightly = {
     name: 'nightly', schedule: '0 2 * * *', timezone: 'UTC', agent: 'claude' as const,
     mode: 'auto' as const, effort: 'auto' as const, timeout: '10m', enabled: true, prompt: 'noop',
@@ -204,10 +194,9 @@ describe('runCatchup', () => {
   });
 });
 
-// The footgun this floor exists to prevent: `agents routines add` for any daily
-// or weekly schedule whose slot already passed today would otherwise be judged
-// overdue for a fire that predates the routine, and auto-catchup would run it
-// once, immediately, within five minutes of creating it.
+// The footgun this floor prevents: `agents routines add` for a daily/weekly schedule whose slot
+// already passed today would be judged overdue for a pre-creation fire, and auto-catchup would run
+// it within five minutes of creation.
 describe('a routine is never judged against fires that predate it', () => {
   const now = new Date('2026-08-03T09:00:00.000Z');
 

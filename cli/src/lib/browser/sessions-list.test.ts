@@ -83,14 +83,9 @@ describe('renderBrowserSessions', () => {
   });
 });
 
-// ─── Task-first grouping (RUSH-2407) ───────────────────────────────────────
-// groupIntoRows / matchesBrowserSessionRow / resolveLaunchSession are pure —
-// identities and the launch resolver are injected, so these run with no
-// filesystem or session-index dependency. loadTaskIdentities / buildBrowser-
-// SessionRows are the impure disk readers, covered further down against real
-// files under the machine's actual browser runtime dir (same pattern as
-// runtime-state.test.ts — CACHE_DIR resolves from HOME at module load, so a
-// per-test HOME override doesn't work; a random profile-name prefix does).
+// Task-first grouping (RUSH-2407): groupIntoRows, matchesBrowserSessionRow and
+// resolveLaunchSession are pure, with injected identities; the disk readers run against real
+// files. CACHE_DIR resolves from HOME at module load, so a random profile prefix is used.
 
 const taskArtifacts = (task: string, mtimes: number[]): BrowserArtifact[] =>
   mtimes.map((mtimeMs, i) => ({
@@ -217,11 +212,8 @@ describe('resolveLaunchSession', () => {
   });
 });
 
-// ─── Disk-backed readers ────────────────────────────────────────────────────
-// Real files under the machine's actual browser runtime dir, uniquely
-// prefixed and cleaned up afterward — CACHE_DIR resolves from HOME at module
-// load (see profiles.ts / runtime-state.test.ts), so it can't be redirected
-// per test.
+// Real files under the machine's actual browser runtime dir, uniquely prefixed and cleaned up.
+// CACHE_DIR resolves from HOME at module load, so it can't be redirected per test.
 
 describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
   let profile: string;
@@ -283,12 +275,9 @@ describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
   });
 
   it('surfaces tasks stored under the composite `<profile>@<device>` dir when queried by the bare profile name (PHNX-3317)', () => {
-    // The split-identity bug: a browser launched under the bare legacy dir, but
-    // the daemon persists its tasks to the composite `<profile>@<device>` dir.
-    // A `--profile <bare>` listing used to read the empty bare store and report
-    // "no captures" while the real tasks lived one dir over. The reader must
-    // resolve the bare name to its cache dirs (keyBelongsToProfile), like
-    // status()/findTask do.
+    // Split-identity bug: a browser launched under the bare dir while the daemon persists tasks to
+    // the composite `<profile>@<device>` dir. `--profile <bare>` read the empty store and reported
+    // "no captures"; the reader must resolve the bare name to its cache dirs.
     const compositeDir = getProfileRuntimeDir(`${profile}@zion`);
     extraDirs.push(compositeDir);
 

@@ -1,14 +1,6 @@
-/**
- * promote-home-base-probe.sh + release.sh's assert_promote_home_base (RUSH-3026).
- *
- * The home-base phase is promote-only, so the preflight must (a) verify exactly
- * what promoting needs — tools, gh auth, a headlessly readable npmjs.com token —
- * and (b) run BEFORE the release's first mutation, so an unready home base
- * aborts before merge+tag instead of after (the RUSH-2535 tagged-but-unpublished
- * shape; on origin/main the old signing preflight was defined but never
- * invoked). Exercised against the REAL scripts — no mocking; stub executables on
- * PATH stand in for the box's environment, the probe itself always runs.
- */
+/** promote-home-base-probe.sh + assert_promote_home_base (RUSH-3026): the preflight must verify
+ * tools, gh auth and a headless npm token, and run BEFORE the first mutation (avoids RUSH-2535's
+ * tagged-but-unpublished state). Real scripts; stub executables on PATH stand in for the box. */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -26,14 +18,9 @@ function stubBin(names: string[], overrides: Record<string, string> = {}): strin
     const body = overrides[name] ?? '#!/usr/bin/env bash\nexit 0\n';
     fs.writeFileSync(path.join(dir, name), body, { mode: 0o755 });
   }
-  // The probe judges the box by what is on PATH, so the child PATH is the stub
-  // dir ONLY — a real /usr/bin on it leaked the host's own jq into the
-  // "missing tool" case. bash/env come in as symlinks so the stubs' shebangs
-  // and the probe itself still resolve.
-  // Interpreter locations differ by OS — bash is /usr/bin/bash on Linux but
-  // /bin/bash on macOS (no /usr/bin/bash there). Resolve each name from its
-  // candidates or runProbe spawns a nonexistent <stub>/bash on darwin and
-  // every test reads status:null (the exact all-Mac failure this fixes).
+  // The probe judges the box by what is on PATH, so the child PATH is the stub dir only (a real
+  // /usr/bin leaked the host's jq into the "missing tool" case); bash/env come in as symlinks so
+  // shebangs resolve.
   for (const [name, candidates] of [
     ['bash', ['/usr/bin/bash', '/bin/bash']],
     ['env', ['/usr/bin/env', '/bin/env']],
@@ -109,17 +96,9 @@ describe('promote-home-base-probe.sh', () => {
   });
 });
 
-/**
- * Execute the REAL `assert_promote_home_base` function body under the same
- * `set -euo pipefail` release.sh runs with. The static ordering test below
- * proves the call is placed right; this proves the function itself fails LOUD.
- *
- * The bug this guards (found in review of the signing preflight's first cut):
- * `out="$(cmd)"; rc=$?` under errexit terminates the script AT the assignment
- * when the probe fails, before `rc=$?` runs -- so the diagnostic dump and the
- * `die` message were dead code and the release aborted with no stated reason.
- * The `&& rc=0 || rc=$?` form is what keeps the die branch reachable.
- */
+/** Execute the real `assert_promote_home_base` body under the same `set -euo pipefail` as
+ * release.sh; the static ordering test proves the call is placed right, this proves it fails loud.
+ * `&& rc=0 || rc=$?` keeps the die branch reachable. */
 function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: string } {
   // Extract the function definition (from its header to the first line that is a
   // bare `}` at column 0) rather than sourcing release.sh, which executes.
@@ -178,10 +157,9 @@ describe('release.sh: assert_promote_home_base fails loud under set -e', () => {
 
 describe('release.sh: the promote preflight gates the mutating phases (RUSH-3026)', () => {
   it('calls assert_promote_home_base BEFORE the first mutating phase', () => {
-    // The RUSH-2535 shape: an unready home base must abort before merge+tag,
-    // not after. On origin/main the old signing preflight was defined but never
-    // invoked; the promote preflight is wired in and must precede the release
-    // PR / merge / tag machinery.
+    // The RUSH-2535 shape: an unready home base must abort before merge+tag, not after. The old
+    // signing preflight was defined but never invoked; the promote preflight is wired in and must
+    // precede the release PR, merge and tag machinery.
     const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const call = lines.findIndex((l) => l.trim() === 'assert_promote_home_base');
     expect(call, 'assert_promote_home_base must be invoked').toBeGreaterThanOrEqual(0);

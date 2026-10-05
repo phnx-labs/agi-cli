@@ -3,13 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * The profile resolver: the config layers (per-device doc `config:` over
- * central `fleet.defaults.config`) overlay the registry's discovery record.
- * Exercises the REAL read path — temp HOME + registry fixtures, fresh modules
- * per test (state.ts captures HOME at import time), and the real
- * buildSshInvocation argv builder.
- */
+/** The profile resolver: config layers (per-device doc `config:` over central
+ * `fleet.defaults.config`) overlay the registry's discovery record. */
 let TMP = '';
 
 async function freshModules() {

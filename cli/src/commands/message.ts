@@ -1,26 +1,6 @@
-/**
- * `agents message <target> <text>` — send a message to a running or parked agent.
- *
- * Delivery is routed by agent state (RUSH-1474):
- *   - running, between tool calls → mailbox spool (PreToolUse inject)
- *   - parked on AskUserQuestion with a tmux/iterm rail → keystroke inject
- *   - parked headless (no rail) → `agents run --resume <id> -- <answer>`
- *   - cloud task → provider.message()
- *
- * Cross-host is handled one layer up: `--device <h>` routes the whole command over
- * ssh via `REMOTE_PASSTHROUGH` (see src/lib/hosts/passthrough.ts), so the box is
- * written on the host that actually owns the agent. A caller who doesn't already
- * know the host (a detached `agents run --device <h> --no-follow` dispatch) is
- * still resolved automatically: a `target` matching no local/cloud session falls
- * through to the `~/.agents/.cache/hosts/` records `agents devices ps` reads
- * (RUSH-2366 follow-up — see decideHostTaskRoute in lib/mailbox-target.ts), and
- * the message is rerouted there.
- *
- * For local agents, the message is tied to the agent's current open feed block
- * (if any). The first answer to a block wins: a second concurrent answer is
- * rejected with the surface that already answered. Delivery receipts
- * (queued → consumed → continued) are surfaced in the feed store.
- */
+/** `agents message <target> <text>` sends to a running or parked agent, routed by state
+ * (RUSH-1474): mailbox spool (running), keystroke inject (parked on AskUserQuestion), `run
+ * --resume` (parked headless), provider.message() (cloud). Unknown targets try host-task records. */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'child_process';
@@ -152,10 +132,9 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
     die(`Internal error: resume route incomplete for ${mailboxId}.`);
   }
   const argv = resumeArgv(route);
-  // Relaunch the same agents CLI (via getAgentsInvocation, which resolves the
-  // real binary — not a bun /$bunfs virtual path under the compiled build) so
-  // version pins and wrappers stay consistent. Detach so the resume can take
-  // over a TTY when interactive; for feed answers we pass it non-interactively.
+  // Relaunch the same agents CLI via getAgentsInvocation (which resolves the real binary, not a
+  // bun /$bunfs path) so version pins and wrappers stay consistent. Detach so the resume can take
+  // a TTY when interactive; feed answers run non-interactively.
   const inv = getAgentsInvocation(argv);
   const child = spawn(inv.command, inv.args, {
     stdio: 'inherit',
@@ -174,19 +153,9 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
   );
 }
 
-/**
- * Reroute a message to a detached `agents run --device <host> --no-follow`
- * dispatch (RUSH-2366 follow-up). `getActiveSessions()` never sees these: the
- * live process is on the dispatch's host, not this machine, so the local
- * session resolver in `resolveMessageTarget` reports "no running agent" even
- * while `agents devices ps` shows the same dispatch running with a live remote
- * pid — the only recovery was kill-and-redispatch, losing all context.
- *
- * Re-spawns `agents message <remoteRef> <text> --device <host>` through
- * `getAgentsInvocation`, so it re-enters via the SAME `--device` REMOTE_PASSTHROUGH
- * choke point (`lib/hosts/passthrough.ts`) any explicit `--device` caller uses,
- * and resolves against the remote box's own active sessions.
- */
+/** Reroute a message to a detached `run --device <host> --no-follow` dispatch (RUSH-2366).
+ * `getActiveSessions()` never sees its remote process, so the local resolver said 'no running
+ * agent' while `devices ps` showed it live. Re-spawn via the REMOTE_PASSTHROUGH choke point. */
 async function deliverViaHostReroute(
   route: Extract<HostTaskRoute, { kind: 'reroute' }>,
   text: string,
@@ -212,13 +181,9 @@ async function deliverViaHostReroute(
   }
 }
 
-/**
- * `message` is the agent-control plane (RUSH-2123): the answer/keystroke/
- * injected input a running agent consumes, never a notification a human reads.
- * Mirrors SHARED_NOTES in commands/send.ts so an agent reading either --help
- * sees the same three-plane map and doesn't reach for `message` when it means
- * `send`.
- */
+/** `message` is the agent-control plane (RUSH-2123): input a running agent consumes, never a human
+ * notification. Mirrors SHARED_NOTES in commands/send.ts so either --help shows the same three-
+ * plane map. */
 const CONTROL_PLANE_NOTES = `
   Planes (do not mix them up):
     message / sessions inject  - CONTROL a running agent (mailbox answer, terminal keystroke, or resume by runtime)
@@ -320,12 +285,9 @@ export function registerMessageCommand(program: Command): void {
           return;
         }
         case 'none': {
-          // RUSH-2384: a live local process can still advertise `--session-id
-          // <target>` in its argv when getActiveSessions lost the row (empty
-          // by-pid registry, teams status flap, fold into a parent). Mailbox
-          // delivery only needs the id — prove liveness from the process table
-          // before giving up, so a mid-run agent is never unreachable while
-          // its pid is alive.
+          // RUSH-2384: a live local process can still advertise `--session-id <target>` in argv
+          // after getActiveSessions loses the row (empty registry, teams flap). Mailbox delivery
+          // only needs the id, so prove liveness from the process table first.
           if (await isSessionIdLiveOnProcessTable(target)) {
             try {
               const block = findOpenBlockForMailbox(target);
@@ -351,15 +313,9 @@ export function registerMessageCommand(program: Command): void {
             }
             return;
           }
-          // Not a local/cloud session — check whether it's a detached
-          // `--device ... --no-follow` dispatch, which `getActiveSessions()`
-          // never sees (its live process is on another host). Same records
-          // `agents devices ps` reads, so the two commands never disagree.
-          // Heal first, exactly as `agents devices stop`/`agents devices ps` do: a detached
-          // dispatch record never self-updates, so a finished run is still
-          // stamped `status:'running'` on disk. Without this we'd route a dead
-          // task through an SSH reroute that can only fail, instead of
-          // reporting it finished here.
+          // Not a local/cloud session: check for a detached `--device ... --no-follow` dispatch,
+          // using the same records as `devices ps`. Heal first (as `devices stop`/`ps` do): those
+          // records never self-update, so a finished run still reads `running`.
           const onDisk = resolveTaskRef(target);
           const hostRoute = decideHostTaskRoute(
             onDisk ? reconcileRunningTasks([onDisk])[0] : null,

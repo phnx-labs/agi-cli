@@ -1,9 +1,5 @@
-/**
- * Migration ledger — real filesystem round-trip (no mocking) against an injected
- * temp ledger file. The ledger is an append-only lineage, so the bugs worth
- * catching are ordering (latest wins), per-session filtering, ignoring a failed
- * hop, and surviving a corrupt/partial line.
- */
+/** Migration ledger test: real filesystem round-trip on a temp ledger.
+ * Covers ordering (latest wins), per-session filtering, ignoring failed hops, and corrupt lines. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

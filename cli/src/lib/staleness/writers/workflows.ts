@@ -1,8 +1,5 @@
-/**
- * Workflows writer — materializes each selected workflow into the harness's
- * native layout via `syncWorkflowToVersion`, which is generic over
- * `WORKFLOW_TARGETS` (workflows-registry.ts).
- */
+/** Workflows writer: materializes each selected workflow into the harness's native layout via
+ * `syncWorkflowToVersion`, generic over `WORKFLOW_TARGETS` (workflows-registry.ts). */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import { listInstalledWorkflows } from '../../workflows.js';

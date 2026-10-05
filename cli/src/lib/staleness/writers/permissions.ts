@@ -1,13 +1,6 @@
-/**
- * Permissions writer — selection is a list of permission GROUP names. We
- * build the PermissionSet from the discovered groups, then dispatch into the
- * per-agent format writer in `lib/permissions.ts:applyPermissionsToVersion`.
- *
- * The per-agent format work lives in lib/permissions.ts because the format
- * conversions (Claude settings.json vs Codex TOML+rules vs Gemini tools vs
- * Antigravity permissions{} vs Grok [permission].rules) are tightly coupled
- * to the converters defined alongside them.
- */
+/** Permissions writer: selection is a list of permission GROUP names; builds the PermissionSet from
+ * discovered groups and dispatches to `applyPermissionsToVersion` in `lib/permissions.ts`, where
+ * the per-agent format conversions (Claude settings.json, Codex TOML+rules, Gemini tools. */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import {

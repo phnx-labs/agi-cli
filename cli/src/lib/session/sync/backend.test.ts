@@ -9,11 +9,9 @@ import { writeBundleWithItemsSync } from '../../secrets-client.js';
 import type { SecretsBundle } from '../../secrets-types.js';
 import { useFreshSecretsHome } from '../../../../tests/secrets-standalone.js';
 
-// resolveSessionsBackend routes managed-vs-BYO through the shared selection
-// policy (lib/storage/selection). MANAGED-FIRST: a signed-in user resolves to the
-// managed Phoenix store even with an r2.backups bundle present; only an explicit
-// --byo / env / write-token override flips to BYO. Real session file against the
-// real standalone `secrets` engine (PHNX-3989), no mocking of the decision.
+// resolveSessionsBackend uses the shared managed-vs-BYO policy, managed-first: a signed-in user
+// gets the managed Phoenix store even with an r2.backups bundle; only `--byo`, env or a write
+// token flips it. Real `secrets` engine.
 
 const ENV_PREV = process.env[SESSIONS_BACKEND_ENV];
 

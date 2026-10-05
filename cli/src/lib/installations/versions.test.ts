@@ -4,10 +4,8 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-// Pure — takes an explicit directory, no HOME-derived state — safe to call
-// directly in this process. getBinaryPath itself is exercised through
-// runVersionSync's isolated-HOME subprocess below, like every other
-// versions.ts function whose paths derive from HOME.
+// Pure and takes an explicit directory, so it is safe to call in-process. getBinaryPath is
+// exercised via runVersionSync's isolated-HOME subprocess below.
 import { resolveGrokFallbackBinary, resolveHookSelection } from './versions.js';
 import { resolveGrokCurrentBinary } from './store.js';
 
@@ -39,10 +37,8 @@ function runVersionSync(home: string, expression: string): unknown {
   // tsx (Node) — not bun. The CLI ships against Node, and `versions.ts`
   // transitively imports the SQLite layer that this test exercises.
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
-  // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
-  // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
-  // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
-  // .exe everywhere, so this is shell-free and cross-platform.
+  // Run tsx via node on cli.mjs, not the .bin shim: on Windows the shim is tsx.cmd, which spawnSync
+  // cannot run without a shell that would mangle the -e script.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
     import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection, getVersionHomePath, getBinaryPath } from ${JSON.stringify(moduleUrl)};
@@ -63,10 +59,8 @@ function runReconcile(home: string, agent: string, installedVersion: string): st
   // tsx (Node) subprocess with an isolated HOME — exercises the real fs +
   // session-db path that reconcileStaleLatestDir touches, no mocking.
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
-  // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
-  // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
-  // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
-  // .exe everywhere, so this is shell-free and cross-platform.
+  // Run tsx via node on cli.mjs, not the .bin shim: on Windows the shim is tsx.cmd, which spawnSync
+  // cannot run without a shell that would mangle the -e script.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
     import { reconcileStaleLatestDir } from ${JSON.stringify(moduleUrl)};
@@ -192,11 +186,8 @@ describe('reconcileStaleLatestForAgent (proactive)', () => {
   });
 });
 
-// RUSH-1321: a self-updating agent (droid) is ONE global binary. Its per-version
-// dirs all map to the same executable, so agents-cli must model it as a single
-// install — not a set of fictional version-homes. grok is self-updating too but
-// stores a real per-version binary copy under each version-home, so it must NOT
-// be collapsed.
+// RUSH-1321: a self-updating agent (droid) is one global binary, so model it as a single install,
+// not fictional version-homes. grok stores a real per-version copy and must not be collapsed.
 function droidBin(home: string): string {
   return path.join(home, '.local', 'bin', 'droid');
 }
@@ -849,18 +840,13 @@ describe('version resource sync path handling', () => {
   });
 });
 
-// `installVersion` derives an `npm install <pkg>@<version>` spec from `version`,
-// which originates from the `agents add pkg@<version>` CLI arg or a
-// `.agents-version` pin. The argv-form execFile call cannot be reached for a
-// tainted version because VERSION_RE rejects it at the source (versions.ts).
-// These tests assert the rejection happens before any npm exec, so a malicious
-// version can never escape into a shell.
+// `version` comes from the `agents add pkg@<version>` arg or a `.agents-version` pin. VERSION_RE
+// must reject a tainted one before any npm exec so it cannot reach a shell; these tests assert
+// that.
 function runInstallVersion(home: string, agent: string, version: string, extraPathDir?: string): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
-  // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
-  // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
-  // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
-  // .exe everywhere, so this is shell-free and cross-platform.
+  // Run tsx via node on cli.mjs, not the .bin shim: on Windows the shim is tsx.cmd, which spawnSync
+  // cannot run without a shell that would mangle the -e script.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
     import { installVersion } from ${JSON.stringify(moduleUrl)};
@@ -914,10 +900,9 @@ function runInstallVersionWithScript(
   version: string,
   installScript: string,
   extraPathDir?: string,
-  // Full PATH replacement (ignores extraPathDir and the inherited PATH) — for
-  // tests that must guarantee NO real agent binary on this machine's own
-  // PATH (e.g. this repo's own dev box has a real `grok` shim) can leak in
-  // and make a "the binary isn't resolvable yet" scenario silently pass.
+  // Full PATH replacement, ignoring extraPathDir and the inherited PATH, so no real agent binary
+  // on this machine (e.g. a dev box's grok shim) can leak in and make a not-resolvable scenario
+  // pass.
   fullPathOverride?: string
 ): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
@@ -1070,10 +1055,8 @@ describe('installVersion Grok binary relocation', () => {
     fs.mkdirSync(path.join(oldConfigDir, 'downloads'), { recursive: true });
     fs.symlinkSync(oldConfigDir, hostGrok, 'dir');
 
-    // No `grok` stub on PATH at all — `getCliVersionFromPath`'s
-    // `execFileAsync('grok', ['--version'])` fails every time (ENOENT),
-    // simulating the installer's binary not yet being resolvable in this exec
-    // context right after the curl installer exits.
+    // No `grok` stub on PATH, so getCliVersionFromPath's `grok --version` fails with ENOENT,
+    // simulating the binary not yet resolvable right after the curl installer exits.
     const script = [
       'mkdir -p ~/.grok/downloads',
       'printf \'#!/bin/sh\\nexit 0\\n\' > ~/.grok/downloads/grok-0.2.118-linux-x86_64',
@@ -1098,10 +1081,9 @@ describe('installVersion Grok binary relocation', () => {
 
   it.skipIf(process.platform === 'win32')('self-heals a binary stranded in an unrelated version home by an earlier probe-failed install', () => {
     const home = makeTempHome();
-    // The `latest`-labeled pseudo-version from a past probe-failed install
-    // (see the regression test above) — empty, but still the current
-    // `~/.grok` symlink target, exactly as `reconcileStaleLatestDir` would
-    // leave it before the real version name is known.
+    // The `latest` pseudo-version from a past probe-failed install: empty, but still the current
+    // ~/.grok symlink target, as reconcileStaleLatestDir leaves it before the real version is
+    // known.
     const staleLatestConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', 'latest', 'home', '.grok');
     const hostGrok = path.join(home, '.grok');
     fs.mkdirSync(path.join(staleLatestConfigDir, 'downloads'), { recursive: true });
@@ -1112,13 +1094,9 @@ describe('installVersion Grok binary relocation', () => {
     // version now being installed).
     const strandedConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.106', 'home', '.grok');
     fs.mkdirSync(path.join(strandedConfigDir, 'downloads'), { recursive: true });
-    // Filename ("0.2.118") deliberately does not match this version-home's
-    // name ("0.2.106") — the exact scenario RUSH-2459's fallback fix targets.
-    // The sweep below only visits this dir because listInstalledVersions
-    // still counts "0.2.106" as installed, which now requires a real-sized
-    // (>=1MB) grok-* candidate (resolveGrokFallbackBinary's size floor) — pad
-    // past that so this test keeps exercising the self-heal sweep itself,
-    // not the size floor.
+    // Filename (0.2.118) deliberately mismatches the version-home (0.2.106), the RUSH-2459
+    // scenario. Pad past the 1MB size floor of resolveGrokFallbackBinary so the sweep itself is
+    // exercised.
     fs.writeFileSync(
       path.join(strandedConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'),
       `#!/bin/sh\n${'# '.repeat(600_000)}\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n`,
@@ -1146,10 +1124,9 @@ describe('installVersion Grok binary relocation', () => {
   it.skipIf(process.platform === 'win32')('refuses to update a self-updating agent into a version dir already owned by a different account', () => {
     const home = makeTempHome();
 
-    // Two accounts already installed as two distinct versions — the state
-    // BOTH accounts self-updating to the SAME upstream release would collide
-    // into. accountA (0.2.118) is the collision target; accountB (0.2.32) is
-    // the currently-default account driving this update.
+    // Two accounts already on two distinct versions: the state both self-updating to the same
+    // upstream release would collide into. accountA (0.2.118) is the target; accountB (0.2.32)
+    // drives this update.
     const grokAuth = (email: string, userId: string) => JSON.stringify({
       'https://auth.x.ai::client-id': {
         email,
@@ -1199,14 +1176,9 @@ describe('installVersion Grok binary relocation', () => {
   }, 10000);
 });
 
-// RUSH-2459: grok self-updates its binary in place while running under the
-// shim, so a version-home's downloads dir can accumulate several `grok-*`
-// files whose names have drifted away from that version-home's pinned
-// version. Reproduced on yosemite-s0: version-home 0.2.82 held a real
-// self-updated `grok-1.0.0-linux-aarch64` PLUS a stale, unrelated 99-byte
-// `grok-0.2.118-linux-aarch64` wrapper script (`exec cursor-agent "$@"`) that
-// sorted alphabetically before it — the old "no exact match -> first file"
-// fallback silently launched the wrapper, so `agents run grok` ran Cursor.
+// RUSH-2459: grok self-updates in place, so downloads can hold grok-* files whose names drift from
+// the version. A stale 99-byte cursor-agent wrapper sorted first and was launched by the old first-
+// file fallback.
 describe('resolveGrokCurrentBinary', () => {
   // `grok update` writes bin/grok-<v> and repoints bin/grok without touching
   // downloads/; getBinaryPath resolves through this before any downloads/ scan.
@@ -1257,10 +1229,8 @@ describe('resolveGrokFallbackBinary (RUSH-2459)', () => {
 
   it('never picks a stray non-binary artifact under the size floor, even when it sorts first', () => {
     const dir = makeDownloadsDir();
-    // Sorts alphabetically FIRST ("0" < "1" < "l") and is exactly the shape of
-    // the real stray artifact found on yosemite-s0 (a 99-byte cursor-agent
-    // wrapper). Real grok binaries are ~127MB; 2MB here is enough to clear the
-    // 1MB floor without paying to write a full-size fixture in every test run.
+    // Sorts first alphabetically and mirrors the real stray artifact (a 99-byte cursor-agent
+    // wrapper). 2MB clears the 1MB floor without writing a full ~127MB fixture.
     writeGrokFile(dir, 'grok-0.2.118-linux-aarch64', 99, new Date('2026-08-01T19:35:00Z'));
     const real = writeGrokFile(dir, 'grok-1.0.0-linux-aarch64', 2_000_000, new Date('2026-08-09T18:38:00Z'));
     writeGrokFile(dir, 'grok-linux-aarch64', 2_000_000, new Date('2026-08-07T13:50:00Z'));
@@ -1303,16 +1273,12 @@ describe('resolveGrokFallbackBinary (RUSH-2459)', () => {
   });
 });
 
-// `resolveVersionAlias` is the shared @selector vocabulary (latest / oldest /
-// default / pinned / explicit) every `agents <cmd> agent@<token>` reads. droid
-// installs a single global binary (~/.local/bin/droid) shared across version
-// dirs, so a fixture is just N dirs + one binary — every dir reads as installed.
+// resolveVersionAlias is the shared @selector vocabulary (latest/oldest/default/pinned/explicit).
+// droid has one global binary shared across version dirs, so a fixture is N dirs plus one binary.
 function runResolveAlias(home: string, agent: string, raw: string | undefined): string | null {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
-  // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
-  // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
-  // routing the multi-line `-e` script through cmd.exe would mangle it. node is an
-  // .exe everywhere, so this is shell-free and cross-platform.
+  // Run tsx via node on cli.mjs, not the .bin shim: on Windows the shim is tsx.cmd, which spawnSync
+  // cannot run without a shell that would mangle the -e script.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
     import { resolveVersionAlias } from ${JSON.stringify(moduleUrl)};
@@ -1341,10 +1307,8 @@ function installDroidVersions(home: string, versions: string[]): void {
   fs.chmodSync(bin, 0o755);
 }
 
-// Numeric-vs-lexical ordering must be exercised on a genuinely MULTI-version
-// agent. droid is now single-binary (its dirs collapse to one — RUSH-1321), so
-// use antigravity (cliCommand `agy`): self-updating but per-version binary at
-// `node_modules/.bin/agy`, so its version dirs are NOT collapsed.
+// Numeric-vs-lexical ordering needs a genuinely multi-version agent. droid collapses to one binary
+// (RUSH-1321), so use antigravity (`agy`), which keeps a per-version node_modules/.bin/agy.
 function installAntigravityVersions(home: string, versions: string[]): void {
   for (const v of versions) {
     const binDir = path.join(home, '.agents', '.history', 'versions', 'antigravity', v, 'node_modules', '.bin');
@@ -1417,10 +1381,8 @@ describe('resolveVersionAliasLoose — @any', () => {
 });
 
 describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () => {
-  // Scaffold a user skill and a system skill in an isolated HOME, then confirm
-  // scoping to one repo returns only that layer's resources. Guards against
-  // layer-misattribution — the bug where `--repo system` would sweep in (or
-  // drop) the wrong repo's skills.
+  // Scaffold a user skill and a system skill in an isolated HOME and confirm scoping to one repo
+  // returns only that layer's resources. Guards against layer misattribution under `--repo system`.
   function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] | 'all' } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
@@ -1484,12 +1446,9 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
 
   it('recompiles a STALE memory file through a real repo-scoped sync (RUSH-1354)', () => {
     const home = makeTempHome();
-    // The composed rules-memory file is a merge of ALL layers, so a repo-scoped
-    // sync must still recompile it — otherwise a rules change followed by a
-    // repo-scoped `agents sync <agent> <repo>` silently strands the file at its
-    // old content. Same rules fixture the "writes missing grok AGENTS.md" test
-    // uses; here we PRE-SEED a stale AGENTS.md and prove the scoped sync
-    // overwrites it with the freshly composed content.
+    // The composed rules-memory file merges all layers, so a repo-scoped sync must still recompile
+    // it or a rules change leaves it stale. Pre-seed a stale AGENTS.md and prove the scoped sync
+    // overwrites it.
     const rulesDir = path.join(home, '.agents', '.system', 'rules');
     fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
     fs.writeFileSync(
@@ -1573,31 +1532,20 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
   });
 });
 
-// ── isVersionInstalled / listInstalledVersions probe the real launch binary ──
-//
-// Regression for the "gutted install" bug: a vendor auto-updater destroyed the
-// real per-version claude binary (node_modules/@anthropic-ai/claude-code/bin/
-// claude.exe) while leaving the version dir, its package.json, and the tiny
-// node_modules/.bin/claude(+.cmd) wrappers in place. The old check keyed
-// "installed" on the wrapper, so `agents add` skipped repair and the picker
-// counted the dead install healthy — `agents run` then died at spawn.
+// Regression for the gutted install: a vendor auto-updater deleted the real claude binary but left
+// the version dir, package.json and .bin wrappers. The old check keyed on the wrapper, so repair
+// was skipped and `agents run` died at spawn.
 
 function versionDir(home: string, agent: string, version: string): string {
   return path.join(home, '.agents', '.history', 'versions', agent, version);
 }
 
-// The name of the real launch binary the package's `bin` entry points at. We
-// don't use ".exe" so the fixture is platform-neutral — getPackageBinaryPath
-// reads whatever the installed package.json declares, which is exactly the
-// point of the fix.
+// The real launch binary the package's `bin` entry points at. Not ".exe", so the fixture is
+// platform-neutral; getPackageBinaryPath reads whatever package.json declares.
 const CLAUDE_BIN_REL = 'bin/claude-launcher';
 
-/**
- * Build a claude version dir. Always writes the version-dir marker package.json
- * and the node_modules/.bin/claude(+.cmd) wrappers npm leaves behind. When
- * `realBinary` is true, also writes the package's actual launch binary — omit
- * it to reproduce a gutted install.
- */
+/** Build a claude version dir with the marker package.json and the npm .bin wrappers. With
+ * `realBinary` true also write the real launch binary; omit it to reproduce a gutted install. */
 function makeClaudeVersion(home: string, version: string, opts: { realBinary: boolean }): void {
   const dir = versionDir(home, 'claude', version);
   const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
@@ -1656,10 +1604,8 @@ describe('isVersionInstalled — probes the real launch binary', () => {
 
 describe('the add fast-path gate flips a gutted install to the repair branch', () => {
   it('a gutted dir is NOT alreadyInstalled, so `agents add` proceeds to installVersion', () => {
-    // `agents add` computes `alreadyInstalled = isVersionInstalled(agent, version)`
-    // and only skips install when it is true (src/commands/versions.ts). A gutted
-    // dir must return false so add re-runs its install step to repair it rather
-    // than printing "already installed".
+    // `agents add` skips install only when isVersionInstalled is true (src/commands/versions.ts). A
+    // gutted dir must return false so add repairs it instead of printing "already installed".
     const home = makeTempHome();
     makeClaudeVersion(home, '2.1.196', { realBinary: false });
     const alreadyInstalled = runNamedExport(home, 'isVersionInstalled', "isVersionInstalled('claude', '2.1.196')");
@@ -1677,12 +1623,9 @@ describe('listInstalledVersions — excludes gutted installs from the picker', (
   });
 });
 
-// Regression (RUSH-1420): removing the version that is the current global
-// default must never leave a dangling default pointer — every launcher shim
-// resolves the default, so a stale pointer breaks `agents run` and the default
-// shim outright ("no installed default for claude"). The fix reassigns the
-// default to the newest remaining install, or clears it cleanly when the last
-// version goes.
+// RUSH-1420: removing the current global default must not leave a dangling default pointer,
+// since every launcher shim resolves it. Reassign to the newest remaining install, or clear
+// when the last goes.
 describe('removeVersion — default reassignment when removing the pinned default', () => {
   // Lay down a claude version on disk the way listInstalledVersions expects:
   // a real binary file at <versionDir>/node_modules/.bin/claude.
@@ -1762,12 +1705,9 @@ describe('system-scoped selection includes system-layer plugins (RUSH-3207)', ()
   });
 });
 
-// PHNX-3187: `available.hooks` carries the source filename WITH its extension
-// (`git-guard.sh`), but the doctor/heal resource diff names a hook by its
-// extensionless basename (`git-guard`). A heal pass feeds those diff names
-// straight back as the selection, so the old exact-set filter matched nothing
-// and `agents doctor --fix` could never reconcile a flagged hook. This is what
-// left win-mini's guards permanently "held" once its diff flagged them.
+// PHNX-3187: `available.hooks` carries filenames with extension (git-guard.sh) but the doctor/heal
+// diff uses extensionless names. The old exact-set filter matched nothing, so `agents doctor --fix`
+// could never reconcile a hook.
 describe('resolveHookSelection — basename-tolerant hook matching (PHNX-3187)', () => {
   const available = ['git-guard.sh', '10-feed-publish.py', 'json-field.sh', 'ask-user-question-guard.sh'];
 
@@ -1802,11 +1742,9 @@ describe('resolveHookSelection — basename-tolerant hook matching (PHNX-3187)',
   });
   it.skipIf(process.platform === 'win32')('keeps a pinned self-updating install as a stable label while recording the current release', () => {
     const home = makeTempHome();
-    // A valid version passes VERSION_RE. `hermes` is self-updating with no VERSION
-    // token (unmanagedBinary: 'path'). A `hermes` on PATH makes the single binary
-    // read as already-installed, so the pin is a network-free no-op — NOT the old
-    // `does not support version-pinned installs` hard error, and NOT a real install.
-    // (Repointed from a since-removed brew-installed harness.)
+    // A valid version passes VERSION_RE. `hermes` self-updates with no version token, so a `hermes`
+    // on PATH reads as installed and the pin is a network-free no-op, not a hard error or a real
+    // install.
     const binDir = path.join(home, 'fakebin');
     fs.mkdirSync(binDir, { recursive: true });
     const stub = path.join(binDir, 'hermes');

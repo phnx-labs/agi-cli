@@ -1,17 +1,5 @@
-/**
- * Unified configuration command barrel.
- *
- * `agents config` consolidates the fragmented config surface into one namespace:
- *   - run defaults (model, mode, effort)
- *   - tier overrides (folded into the run namespace)
- *   - interactive host
- *   - browser profile
- *   - local projects root
- *   - per-device config keys
- *
- * The underlying YAML schema is unchanged; this command translates the new key
- * grammar into reads/writes of the existing stores.
- */
+/** Unified configuration command barrel: `agents config` consolidates run defaults, tier overrides,
+ * interactive host, browser profile, local projects root and per-device keys into one namespace. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -75,10 +63,8 @@ function parseBool(value: string, key: string): boolean {
   throw new Error(`Config key '${key}' expects a boolean ('on' or 'off'), got '${value}'.`);
 }
 
-/**
- * A list value replaces the whole list: a JSON array of strings (what a program
- * writes, safe for any name) or comma-separated items (what a person types).
- */
+/** A list value replaces the whole list: a JSON array of strings (what a program writes, safe for
+ * any name) or comma-separated items (what a person types). */
 function parseStringList(raw: string, key: string): string[] {
   const text = raw.trim();
   if (!text.startsWith('[')) return text.split(',').map((item) => item.trim());
@@ -155,11 +141,9 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'computer.host':
           return raw.trim();
       }
-      // A device property with no arm above used to fall out of the switch and
-      // return `undefined`, so the write failed downstream with "expects a
-      // boolean, got undefined" instead of naming the real gap. The `never`
-      // binding makes adding a DeviceConfigProperty without a parse rule a
-      // compile error rather than a runtime mystery.
+      // A device property with no arm used to return `undefined`, failing the write downstream
+      // with "expects a boolean, got undefined". The `never` binding makes a missing parse rule a
+      // compile error.
       const unhandled: never = property;
       throw new Error(`Config key '${key}' has no parse rule for device property '${String(unhandled)}'.`);
     }
@@ -198,10 +182,9 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
         setConfigValue('browser.device', value as string);
         return;
       }
-      // Device-local default lives in the per-device doc's config: block
-      // (same store `agents devices config` / getConfigValue use). Bare
-      // browser.profile targets this machine; devices.<name>.browser.profile
-      // targets a peer.
+      // Device-local default lives in the per-device doc's config: block (same store as `agents
+      // devices config`). Bare browser.profile targets this machine;
+      // devices.<name>.browser.profile a peer.
       setConfigValue(
         parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         value as string,
@@ -275,11 +258,9 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
     }
     case 'project': {
       const had = getProjectRoot() !== undefined;
-      // `projectRoot` is a machine-local key that `writeMeta` persists to the
-      // device doc; it only clears that doc when the key is PRESENT-but-falsy
-      // (`writesProjectRoot` needs the own-property, state.ts). Dropping the key
-      // from the returned object left the device-doc value in place, so
-      // `config get` still returned it after unset. Set it undefined instead.
+      // `projectRoot` is machine-local and `writeMeta` clears the device doc only when the key is
+      // present-but-falsy. Dropping the key left the old value, so `config get` still returned it;
+      // set undefined.
       updateMeta((meta) => ({ ...meta, projectRoot: undefined }));
       return had;
     }
@@ -503,12 +484,9 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         key = `${prefix}computer.host`;
         break;
       default:
-        // A `default: continue` here silently drops any device property with no
-        // arm — which is how browser.viewer was invisible to `config list` after
-        // being added everywhere else. This is the fourth switch enumerating
-        // DeviceConfigProperty; unlike parseValue's it cannot use a `never`
-        // binding (it must keep skipping properties that are deliberately not
-        // listed), so the completeness test in config.test.ts is the guard.
+        // `default: continue` silently drops any device property with no arm (this hid
+        // browser.viewer from `config list`). It cannot use a `never` binding, so the completeness
+        // test in config.test.ts is the guard.
         continue;
     }
     yield { key, value: entry.value, hint: configKeyStorageHint(parseConfigKey(key)) };

@@ -1,32 +1,13 @@
-/**
- * Placement — one model for "where does the body run?"
- *
- * The CLI grew several doors that all mean execution target:
- *   run --device / --lease / --box / --cloud
- *   routines --placement / --run-on / hostStrategy
- *   monitors --run-on (body) vs --device (owner — NOT placement)
- *   teams --device (teammate pin)
- *   cloud run --provider host
- *
- * This module is the shared vocabulary. Old flags remain; --where is a
- * thin alias on `agents run` that expands into them. Docs and help teach
- * the matrix; stores stay separate (device registry, lease boxes, cloud).
- *
- * Owner (who may fire / evaluate) is NOT placement — see monitors.
- */
+/** Placement: one model for where the body runs. Shared vocabulary for execution-target flags (run
+ * --device/--lease/--box/--cloud, routines --placement, teams --device). `--where` on `agents run`
+ * is a thin alias expanding to them. Monitor owner is NOT placement. */
 
 /** Where a job body executes. */
 type PlacementKind = 'local' | 'device' | 'fleet' | 'cloud' | 'lease';
 
-/**
- * Canonical placement object.
- *
- *   kind: local  — this machine
- *   kind: device — named box or affinity pick (target: name | "auto")
- *   kind: fleet  — pick one online device at fire time (routines)
- *   kind: cloud  — vendor cloud dispatch
- *   kind: lease  — disposable crabbox (target: optional backend)
- */
+/** Canonical placement object. `kind`: local (this machine); device (named box or affinity pick,
+ * target name or "auto"); fleet (one online device at fire time, routines); cloud (vendor
+ * dispatch); lease (disposable crabbox, optional backend target). */
 export interface Placement {
   kind: PlacementKind;
   /** Device/host name, "auto", lease backend, or undefined. */
@@ -61,17 +42,8 @@ export class PlacementError extends Error {
 
 const KINDS: ReadonlySet<string> = new Set(['local', 'device', 'fleet', 'cloud', 'lease', 'host']);
 
-/**
- * Parse a `--where` / placement spec string.
- *
- * Accepted forms:
- *   local
- *   device[:name] | host[:name]   (bare name → device:<name>)
- *   device:auto | auto | host:auto
- *   fleet
- *   cloud
- *   lease[:backend]
- */
+/** Parses a `--where` / placement spec: `local`; `device[:name]` | `host[:name]` (bare name means
+ * device:<name>); `device:auto` | `auto` | `host:auto`; `fleet`; `cloud`; `lease[:backend]`. */
 export function parseWhereSpec(raw: string, source = '--where'): Placement {
   const spec = raw.trim();
   if (!spec) {
@@ -129,10 +101,8 @@ export function hostFamilyTarget(flags: RunPlacementFlags): string | undefined {
   return undefined;
 }
 
-/**
- * Resolve placement from run flags. `--where` wins only when no other
- * placement flag is set; mixing is a PlacementError.
- */
+/** Resolves placement from run flags. `--where` wins only when no other placement flag is set;
+ * mixing is a PlacementError. */
 export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
   const where = flags.where?.trim();
   const hostT = hostFamilyTarget(flags);
@@ -168,13 +138,9 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
   return { kind: 'local', source: 'default' };
 }
 
-/**
- * Expand a resolved placement into the concrete run option fields the
- * existing dispatch paths already understand. Pure — does not mutate input.
- *
- * `fleet` is not valid for a bare `agents run` (it is a routines placement);
- * it throws so callers fail loud.
- */
+/** Expands a resolved placement into the concrete run option fields the existing dispatch paths
+ * understand. Pure. `fleet` is a routines placement, invalid for a bare `agents run`, and throws
+ * so callers fail loud. */
 export function expandPlacementToRunFlags(
   placement: Placement,
 ): Pick<RunPlacementFlags, 'host' | 'device' | 'lease' | 'box' | 'cloud' | 'provider'> {

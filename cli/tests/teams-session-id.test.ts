@@ -18,11 +18,8 @@ import {
 
 const FIXTURES = path.resolve(__dirname, 'fixtures/teams');
 
-/**
- * Create an AgentProcess pointing at a temp base dir, seed its stdout.log with
- * the given fixture content, then call readNewEvents() so the in-memory
- * `remoteSessionId` gets populated from the first init-style event.
- */
+/** Create an AgentProcess on a temp base dir, seed its stdout.log with fixture content, then call
+ * readNewEvents() so `remoteSessionId` is set from the first init-style event. */
 async function runAgainstFixture(
   agentType: AgentType,
   fixtureName: string,
@@ -258,21 +255,14 @@ describe('AgentProcess: remoteSessionId extraction', () => {
       // Status is 'running' when claude is on PATH; 'failed' when the binary is absent
       // (e.g. CI). Either is fine — this test is about cycle detection, not launch.
       expect(['running', 'failed']).toContain(a.status);
-      // Note: in a real run we'd launch a process; test uses spawn without
-      // worrying about processes since we're about to assert on staging only.
-      // Mark a as pending with after=[b] so the cycle check has something to
-      // walk. We're simulating a prior `teams add a --after b`, so we need b
-      // to exist first. Start over with the correct order.
+      // No real process launch needed: only staging is asserted. Mark `a` pending with after=[b] so
+      // the cycle check has something to walk, simulating a prior `teams add a --after b`, with b
+      // existing first.
       const base2 = freshBase();
       const mgr2 = new AgentManager(50, base2);
-      // For a true cycle test we need: b depends on a, then try to make a depend on b.
-      // But a was added first without deps — and we can't re-add a. So we do:
-      //   add alice (no deps)
-      //   add bob --after alice
-      //   then try add carol --after bob,alice — that's fine
-      //   then try add alice2 --after bob — also fine (no cycle)
-      // A real cycle would be: add alice --after bob where bob --after alice. The only way to set that up is
-      // to monkey-patch an existing teammate's `after`. Cover that via the helper directly.
+      // A true cycle needs `alice --after bob` where bob is `--after alice`, which can only be set
+      // up by monkey-patching an existing teammate's `after`; cover that via the helper directly.
+      // The sequential adds (alice, bob, carol, alice2) are all acyclic.
       const { hasTransitiveDep } = await import('../src/lib/teams/agents.js' as any).catch(() => ({ hasTransitiveDep: null }));
       // hasTransitiveDep isn't exported, so we test via the spawn path indirectly below.
     });
@@ -323,12 +313,9 @@ describe('AgentProcess: remoteSessionId extraction', () => {
       await alice.saveMeta();
 
       const launched = await mgr.startReady('t');
-      // We may or may not find claude binary in test env; what we assert is
-      // that bob TRANSITIONED out of pending. If the launch itself fails due
-      // to missing binary, startReady still logged the attempt — bob stays
-      // pending in that case. So we accept either: bob was launched, OR bob
-      // is still pending because the spawn couldn't complete. Assert the
-      // happy path when launched is non-empty.
+      // The claude binary may be absent in the test env, so assert only that bob transitioned out
+      // of pending, or stays pending if the spawn could not complete; when launched, assert the
+      // happy path is non-empty.
       if (launched.length > 0) {
         expect(launched[0].name).toBe('bob');
         expect(launched[0].status).toBe('running');

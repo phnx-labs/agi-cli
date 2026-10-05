@@ -1,13 +1,5 @@
-/**
- * Harness adapter barrel — importing this registers every built-in adapter, the
- * same pattern as lib/channels/providers/index.ts. Consumers import
- * `resolveHarnessAdapter` from here (not from ./adapter.js directly) so the
- * registration side-effect has run before the first resolve.
- *
- * A harness with no config-env / launch quirks needs no adapter file: every
- * `AgentId` still resolves (to the id-only default), so call sites never
- * name-check a harness.
- */
+/** Harness adapter barrel: importing it registers every built-in adapter (like
+ * lib/channels/providers/index.ts), so consumers import `resolveHarnessAdapter` from here. */
 import { registerHarnessAdapter } from './adapter.js';
 import { claudeAdapter } from './adapters/claude.js';
 import { codexAdapter } from './adapters/codex.js';

@@ -1,12 +1,6 @@
-/**
- * `agents projects` — named, multi-repo projects and the progress
- * rollup. Definitions live in `~/.agents/projects/<name>.yaml` (see
- * `lib/projects.ts`); this registers the command tree over them.
- *
- * The headline is `status`: instead of the vague per-agent activity line, it
- * rolls every session up by project (matched on cwd) into one card — agents by
- * lifecycle state, plan completion, open PRs, and tickets in flight.
- */
+/** `agents projects`: named multi-repo projects (definitions in `~/.agents/projects/<name>.yaml`)
+ * and the progress rollup. `status` rolls sessions up by project (matched on cwd) into one card:
+ * agents by state, plan completion, open PRs, tickets in flight. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -113,12 +107,9 @@ const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
 /** Max peers named in the skipped note before the rest collapse to `+N`. */
 const SKIPPED_NAME_LIMIT = 4;
 
-/**
- * A path-shaped `agents projects view` argument — `.`, `..`, a `~`-prefixed
- * value, or anything containing a path separator — means "auto-detect the
- * project for this DIRECTORY", not "a project named literally this". A bare
- * token (no separators) stays a project name, exactly as before.
- */
+/** A path-shaped `projects view` argument (`.`, `..`, `~`-prefixed, or containing a separator)
+ * means 'detect the project for this directory', not a project named literally that. A bare token
+ * stays a project name. */
 export function looksLikePath(token: string): boolean {
   return token === '.' || token === '..' || token.startsWith('~') || token.includes('/');
 }
@@ -133,14 +124,9 @@ interface ViewDetection {
   root: string | null;
 }
 
-/**
- * Best-effort cwd->project detection for `agents projects view <path>`. Delegates
- * to the shared {@link projectNameForCwd} (def-root containment, longest wins),
- * then reads the matched definition's Linear binding and root so ONE call yields
- * the name AND the Linear projectId. Fail-open: an all-null shape when nothing
- * contains the path — never throws, so a scripted caller stays unscoped rather
- * than crashing. This subsumes the removed `agents projects for-cwd`.
- */
+/** Best-effort cwd->project detection for `projects view <path>` via projectNameForCwd (def-root
+ * containment, longest wins), plus the definition's Linear binding and root. Fail-open: all-null
+ * when nothing contains the path, never throws. Subsumes the removed `projects for-cwd`. */
 export function detectProjectForPath(cwd: string, defs: ProjectDef[]): ViewDetection {
   const name = projectNameForCwd(cwd, defs);
   const def = name ? defs.find((d) => d.name === name) : undefined;
@@ -154,13 +140,9 @@ export function detectProjectForPath(cwd: string, defs: ProjectDef[]): ViewDetec
   };
 }
 
-/**
- * One compact trailing note for peers that didn't answer the `--fleet`
- * fan-out — unreachable, running an agents-cli too old to carry `projects
- * probe`, or too slow to finish inside the 12s SSH budget. Mirrors
- * `formatUnreachableNote` (activity) with the probe-specific reasons; empty
- * string when everything answered.
- */
+/** One trailing note for peers that didn't answer the `--fleet` fan-out (unreachable, agents-cli
+ * too old for `projects probe`, or over the 12s SSH budget). Mirrors `formatUnreachableNote`;
+ * empty when everything answered. */
 export function formatFleetSkippedNote(skipped: string[]): string {
   if (skipped.length === 0) return '';
   const named = skipped.slice(0, SKIPPED_NAME_LIMIT);
@@ -170,14 +152,9 @@ export function formatFleetSkippedNote(skipped: string[]): string {
   return chalk.gray(`  · ${skipped.length} ${noun} didn't answer (unreachable, older agents-cli, or timed out): ${list}\n`);
 }
 
-/**
- * One compact trailing note for peers that DID answer a fan-out but whose
- * payload failed verification — a wrong machine id, a fingerprint that doesn't
- * match the targets we sent, or a malformed row. Deliberately separate from
- * {@link formatFleetSkippedNote}: silence means a peer never ran, while this
- * means it ran and we cannot trust what it reports, which is the worse state.
- * Empty string when every answer verified.
- */
+/** One trailing note for peers that answered but whose payload failed verification (wrong machine
+ * id, fingerprint mismatch, malformed row). Separate from the skipped note: silence means a peer
+ * never ran; this means it ran and can't be trusted, the worse state. */
 export function formatFleetUnverifiedNote(unverified: string[]): string {
   if (unverified.length === 0) return '';
   const named = unverified.slice(0, SKIPPED_NAME_LIMIT);
@@ -204,14 +181,9 @@ function parseGoalFlag(raw: string): ProjectGoal {
   return goal;
 }
 
-/**
- * Best-effort `owner/repo` from a repo's origin remote.
- *
- * `stderr: 'ignore'` is load-bearing, not tidiness. A checkout with no origin
- * makes git print `error: No such remote 'origin'` on ITS stderr, which is the
- * terminal's — the catch below never sees it. Absence of a remote is an
- * expected answer here (`undefined`), not something to report.
- */
+/** Best-effort `owner/repo` from a repo's origin remote. `stderr: 'ignore'` is load-bearing: git
+ * prints `No such remote 'origin'` on the terminal's stderr, which the catch never sees, and a
+ * missing remote is an expected answer (`undefined`). */
 export function originSlug(cwd: string): string | undefined {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
@@ -225,18 +197,9 @@ export function originSlug(cwd: string): string | undefined {
   }
 }
 
-/**
- * Turn a `--dir` / `--add-dir` value into a `repos[]` row.
- *
- * The slug comes from the DIRECTORY'S OWN origin remote, never from its path:
- * a checkout at `~/src/github.com/muqsitnawaz/agents-cli` whose origin is
- * `phnx-labs/agents-cli` must record the remote it actually pushes to. Pass
- * `slugOverride` for a directory with no origin (a vendored tree, a fresh
- * `git init`).
- *
- * The stored `path` is left for `writeProjectDef` to normalize home-relative,
- * so the same definition re-roots on every machine.
- */
+/** Turn a `--dir`/`--add-dir` value into a `repos[]` row. The slug comes from the directory's own
+ * origin remote, never its path; use `slugOverride` for a directory with no origin.
+ * `writeProjectDef` normalizes `path` home-relative so the definition re-roots on every machine. */
 export function projectRepoFromDir(
   dir: string,
   slugOverride?: string,
@@ -257,12 +220,9 @@ export function projectRepoFromDir(
   return { ok: true, repo: { slug, path: toHomeRelative(abs) } };
 }
 
-/**
- * List the workspace's Linear projects and plan their import, binding each to a
- * local checkout under the configured projects root when the names match
- * exactly. A missing / logged-out `linear` CLI is loud (this is an explicit user
- * command), and nothing is written before the whole plan is built.
- */
+/** List the workspace's Linear projects and plan their import, binding each to a local checkout
+ * under the projects root on an exact name match. A missing or logged-out `linear` CLI is loud
+ * (explicit user command), and nothing is written before the whole plan is built. */
 function runLinearImport(existing: Map<string, ProjectDef>, opts: ImportOptions): ImportPlan {
   let list: LinearProjectLite[];
   try {
@@ -302,12 +262,9 @@ export interface ProjectListRow {
 /** Longest path a `list` row shows before it truncates. */
 const LIST_PATH_MAX = 48;
 
-/**
- * Column widths for `projects list`, sized to the rows actually being printed.
- * Fixed padding was the bug: home-relative roots run past 50 characters, so a
- * hardcoded 32 pushed the repo column off its gridline on every long path.
- * Paths longer than {@link LIST_PATH_MAX} truncate rather than widen the table.
- */
+/** Column widths for `projects list`, sized to the printed rows: fixed padding was the bug (home-
+ * relative roots exceed 50 chars and pushed the repo column off its gridline). Paths over
+ * LIST_PATH_MAX truncate rather than widen. */
 export function computeProjectListWidths(rows: ProjectListRow[]): { name: number; path: number; repo: number } {
   const widest = (pick: (r: ProjectListRow) => string, cap: number) =>
     Math.min(cap, rows.reduce((w, r) => Math.max(w, pick(r).length), 0));
@@ -318,13 +275,9 @@ export function computeProjectListWidths(rows: ProjectListRow[]): { name: number
   };
 }
 
-/**
- * A milestone's target date as a person would say it — "due tomorrow",
- * "overdue by 3 days", "due Aug 21" — never a raw `2026-08-21` or a duration in
- * hours. Linear stores a calendar date with no timezone, so both sides are
- * compared at LOCAL midnight; parsing `YYYY-MM-DD` with `new Date(str)` would
- * read it as UTC and shift the answer by a day for anyone west of Greenwich.
- */
+/** A milestone's target date as a person says it ('due tomorrow', 'overdue by 3 days'). Linear
+ * stores a timezone-less calendar date, so compare at local midnight: `new Date('YYYY-MM-DD')`
+ * reads UTC and shifts the answer a day west of Greenwich. */
 export function formatMilestoneDue(targetDate: string, nowMs: number): string | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(targetDate.trim());
   if (!m) return undefined;
@@ -347,14 +300,9 @@ export function formatMilestoneDue(targetDate: string, nowMs: number): string | 
   return `due ${label}`;
 }
 
-/**
- * The milestone block. `status` prints one line — the next checkpoint — because
- * a roll-up across projects has to stay scannable. `view` prints every declared
- * milestone, because "how many are there and when are they due" is the shape of
- * the plan and the reason to open one project.
- *
- * Pure (chalk only) so the layout is testable without a Linear account.
- */
+/** The milestone block: `status` prints one line (the next checkpoint) to stay scannable; `view`
+ * prints every declared milestone, since count and due dates are the shape of the plan. Pure
+ * (chalk only) so layout is testable without a Linear account. */
 export function formatMilestoneLines(
   milestones: LinearMilestone[],
   next: LinearMilestone | undefined,
@@ -366,11 +314,9 @@ export function formatMilestoneLines(
     // list existed; render what we have rather than dropping the row.
     return next ? [`  ${chalk.dim('next')}     ${formatNextMilestone(next, nowMs)}`] : [];
   }
-  // The next milestone leads, always. Linear can flag a LATER-dated milestone
-  // as next, and `milestones` is date-ordered — so slicing the front would show
-  // an earlier one and hide the actual next behind "+N more", which is the one
-  // thing this row exists to say. Identity is name+targetDate: two milestones
-  // can share a name, and matching on name alone labelled the wrong row.
+  // The next milestone always leads: Linear can flag a later-dated milestone as next while
+  // `milestones` is date-ordered, so slicing the front would hide it behind '+N more'. Identity is
+  // name+targetDate, since two milestones can share a name.
   const key = (m: LinearMilestone) => `${m.name}${m.targetDate ?? ''}`;
   const lead = next ? milestones.filter((m) => key(m) === key(next)).slice(0, 1) : [];
   const others = next ? milestones.filter((m) => key(m) !== key(next)) : milestones;
@@ -409,10 +355,9 @@ function statusBar(r: ProjectSessionRollup): string {
   push(r.byStatus.queued, 'queued', chalk.gray);
   const shown =
     (r.byStatus.running ?? 0) + (r.byStatus.idle ?? 0) + (r.byStatus.input_required ?? 0) + (r.byStatus.queued ?? 0);
-  // The remainder is the LIVE sessions in a state without its own chip
-  // (orphaned, unknown). Dead ones are on their own row now, so counting them
-  // here made the line disagree with the headline — `19 live` beside
-  // `+24 other`, which invites the reader to trust neither.
+  // The remainder is live sessions in a state without its own chip (orphaned, unknown). Dead ones
+  // have their own row, so counting them here made the line disagree with the headline (`19 live`
+  // beside `+24 other`).
   const live = liveDeadSplit(r.byStatus).live;
   if (live > shown) parts.push(chalk.gray(`+${live - shown} other`));
   return parts.join(' · ') || chalk.gray('no live agents');
@@ -426,17 +371,9 @@ interface ProjectRenderData {
   focus: Map<string, FocusArea[]>;
 }
 
-/**
- * Gather the live/remote/Linear/focus signals for the projects about to be
- * rendered. `status` and `view` share this deliberately: `view` used to build
- * its own thinner picture, so the command you open to learn everything about
- * ONE project showed strictly less than the roll-up across all of them — no
- * agents, no ships, no focus, no schedule verdict. One gatherer means a signal
- * added for either surface appears on both.
- *
- * Only the shown projects are enriched. `skipRemote` still reads the local
- * artifact log and git focus, and skips just the network calls (`gh`, Linear).
- */
+/** Gather live/remote/Linear/focus signals for the projects about to render, shared by `status` and
+ * `view` (view used to show strictly less than the roll-up), so a signal added for either appears
+ * on both. Only shown projects are enriched; `skipRemote` skips just the network calls. */
 async function enrichProjectsForRender(
   defs: ProjectDef[],
   all: ProjectDef[],
@@ -447,10 +384,9 @@ async function enrichProjectsForRender(
     extraSessions?: Awaited<ReturnType<typeof getActiveSessions>>;
   },
 ): Promise<ProjectRenderData> {
-  // Local getActiveSessions() leaves `machine` unset (the sessions renderer
-  // falls back to this box). Host-grouped agents need an explicit stamp so
-  // under `--fleet` this box does not render as `@local` next to peers that
-  // carry real device ids.
+  // Local getActiveSessions() leaves `machine` unset (the renderer falls back to this box); stamp
+  // it explicitly so under `--fleet` this box doesn't render as `@local` beside peers with real
+  // device ids.
   const local = withDefaultMachine(await getActiveSessions(), machineId());
   const roll = rollupSessionsByProject(all, [...local, ...(opts.extraSessions ?? [])]);
   const remote = new Map<string, ProjectRemoteSignals>();
@@ -486,16 +422,13 @@ function renderCard(
   focus: FocusArea[] = [],
   /** `view` mode: the caller prints the stored definition in full afterwards. */
   detail: boolean = false,
-  /**
-   * Workspace probe rows used only for the warnings footer. May be the full
-   * `--fleet` set or a local-only probe so drift is never silent by default.
-   */
+  /** Workspace probe rows used only for the warnings footer: the full `--fleet` set or a local-only
+   * probe, so drift is never silent by default. */
   warnWorkspaces: HostWorkspaceStatus[] = [],
 ): void {
-  // The headline counts LIVE agents. It used to be every matched session, which
-  // read `39 agents` on a project where 19 had crashed. `planPct` used to sit
-  // here too and is gone: it summed each session's latest checklist snapshot,
-  // so one agent opening a fresh 40-item plan rendered the whole project `0%`.
+  // The headline counts live agents (it counted every matched session: `39 agents` with 19
+  // crashed). `planPct` is gone: it summed each session's latest checklist, so one agent opening a
+  // fresh 40-item plan rendered the project `0%`.
   const split = r ? liveDeadSplit(r.byStatus) : { live: 0, dead: 0, deadByStatus: [] };
   console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${split.live} live`)}`);
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
@@ -610,10 +543,8 @@ type ProjectCardOpts = {
   deviceFilter?: string[];
 };
 
-/**
- * Merge `--device a b` (variadic) and `--devices a,b,c` (comma list) into one
- * deduped device filter; undefined when neither was given (= whole fleet).
- */
+/** Merge `--device a b` (variadic) and `--devices a,b,c` (comma list) into one deduped filter;
+ * undefined when neither was given (whole fleet). */
 function resolveDeviceFilter(device?: string[], devices?: string): string[] | undefined {
   const merged = [
     ...(device ?? []),
@@ -870,11 +801,9 @@ async function runProjectCard(
     const windowDays = Math.max(1, Number.parseInt(opts.window ?? '7', 10) || 7);
     const nowMs = Date.now();
 
-    // Fleet is the default: probe each shown def's workspace paths (root +
-    // repos[].path) locally AND on every peer in one parallel SSH round, and
-    // widen the live-session rollup to the fleet via the sessions fan-out.
-    // `--device`/`--devices` scopes the remote fan-out to a subset; with no
-    // filter every registered device is dialled.
+    // Fleet is the default: probe each shown def's workspace paths (root + repos[].path) locally
+    // and on every peer in one parallel SSH round, and widen the live-session rollup via the
+    // sessions fan-out. `--device`/`--devices` narrows the remote fan-out.
     const fleetTargets = [...new Set(defs.flatMap(workspaceTargetsForDef))];
     let fleetWs: HostWorkspaceStatus[] = [];
     let fleetSkipped: string[] = [];
@@ -995,12 +924,9 @@ async function runProjectCard(
     .option('--device <name...>', 'Scope fleet status to one or more devices (repeatable)')
     .option('--devices <names>', 'Scope fleet status to a comma-separated list of devices')
     .action(async (name: string | undefined, rawOpts: ProjectCardOpts & { path?: string | boolean; device?: string[]; devices?: string }) => {
-      // Path mode: an explicit --path, or a path-shaped positional (., .., a
-      // ~-prefixed value, or a /-containing value) means "auto-detect the
-      // project for this DIRECTORY" rather than "a project named literally
-      // this". projectNameForCwd resolves the dir (expandLocalHome +
-      // path.resolve), so `.`, `~/…`, and relative paths all normalize. This
-      // subsumes the removed `agents projects for-cwd`.
+      // Path mode: an explicit --path or a path-shaped positional (`.`, `..`, `~`-prefixed, or
+      // containing `/`) means 'detect the project for this directory'. projectNameForCwd
+      // normalizes the dir. Subsumes the removed `projects for-cwd`.
       let detectDir: string | undefined;
       if (typeof rawOpts.path === 'string') detectDir = rawOpts.path;
       else if (rawOpts.path === true) detectDir = process.cwd();
@@ -1018,10 +944,9 @@ async function runProjectCard(
         // Non-JSON: fall through and render the full card for the detected project.
         name = detection.name;
       }
-      // Named invocation = `view` depth (all milestones + definition). Unnamed
-      // stays the scannable multi-project rollup. `view` is a commander alias
-      // of this same command, so there is only one implementation.
-      // Fleet is dialled by default; --device/--devices narrows it to a subset.
+      // Named invocation is `view` depth (all milestones + definition); unnamed stays the
+      // scannable rollup. `view` is a commander alias of this command, so there is one
+      // implementation. Fleet is dialled by default; --device/--devices narrows it.
       const opts: ProjectCardOpts = {
         json: rawOpts.json,
         window: rawOpts.window,
@@ -1076,11 +1001,9 @@ async function runProjectCard(
         process.exit(1);
       }
       if (opts.json) {
-        // A machine caller reads the envelope from stdout regardless of exit
-        // code: `partial` + per-repo `error` ARE the failure signal, and the
-        // successful repositories ride alongside them. So --json always exits 0
-        // (the envelope is authoritative); a native consumer must not discard
-        // stdout on a non-zero exit. Only the human path below exits non-zero.
+        // A machine caller reads the envelope from stdout regardless of exit code: `partial` +
+        // per-repo `error` are the failure signal and successes ride alongside, so --json always
+        // exits 0 and a native consumer must not discard stdout on non-zero.
         console.log(JSON.stringify(envelope, null, 2));
         return;
       } else {
@@ -1412,13 +1335,9 @@ async function runProjectCard(
     .description('Fast-forward workspace repos (default-branch only) and print JSON. Answers for this machine only.')
     .requiredOption('--targets <json>', 'JSON array of {path, expectedSlug} targets, from the orchestrating `pull`')
     .action(async (opts: { targets: string }) => {
-      // Never fans out — this is the peer half of the fleet fan-out.
-      //
-      // Targets arrive as {path, expectedSlug} PAIRS, not bare paths: the slug
-      // is what lets this machine refuse to fast-forward a directory hosting a
-      // different repo, and it is hashed into the fingerprint the caller
-      // verifies. Decoding failures exit non-zero so the caller records this
-      // peer as skipped instead of reading a missing answer as "nothing to do".
+      // Never fans out: this is the peer half of the fleet fan-out. Targets arrive as {path,
+      // expectedSlug} pairs so this machine can refuse to fast-forward a directory hosting a
+      // different repo; the slug is hashed into the fingerprint the caller verifies.
       let targets: ProjectRepoTarget[];
       try {
         targets = decodePullTargets(opts.targets);
@@ -1457,11 +1376,9 @@ async function runProjectCard(
       const self = machineId();
       const localResults = await pullProjectTargets(targets, self);
 
-      // Fan out to fleet peers. Send the full {path, expectedSlug} targets —
-      // bare paths would disable slug verification on every peer AND make the
-      // peer's fingerprint (which hashes the slug) unmatchable, so its whole
-      // answer would be discarded. Compute the fingerprint once so every peer
-      // envelope can be verified against the exact target set we sent.
+      // Fan out to peers with full {path, expectedSlug} targets: bare paths would disable slug
+      // verification and make the peer's fingerprint (which hashes the slug) unmatchable,
+      // discarding its answer. Compute the fingerprint once for the exact target set sent.
       const expectedFingerprint = fingerprintTargets(targets);
       const remoteRes = await gatherRemoteAgentsJson({
         args: pullLocalArgs(targets),
@@ -1476,10 +1393,9 @@ async function runProjectCard(
       const allResults = [...localResults, ...remoteRes.items];
 
       if (rawOpts.json) {
-        // Mirror `status --json`: peers that didn't answer, or answered
-        // unverifiably, go to stderr so a machine caller can still tell them
-        // apart from a device with nothing to report (the JSON array itself
-        // stays a clean result list).
+        // Mirror `status --json`: peers that didn't answer, or answered unverifiably, go to stderr
+        // so a machine caller can tell them from a device with nothing to report; the JSON array
+        // stays a clean result list.
         if (remoteRes.skipped.length > 0) process.stderr.write(formatFleetSkippedNote(remoteRes.skipped));
         if (remoteRes.parseFailed.length > 0) process.stderr.write(formatFleetUnverifiedNote(remoteRes.parseFailed));
         console.log(JSON.stringify(allResults, null, 2));
@@ -1579,11 +1495,9 @@ async function runProjectCard(
       if (opts.description !== undefined) def.description = opts.description;
       if (opts.goal?.length) def.goals = opts.goal.map(parseGoalFlag);
       if (opts.path !== undefined) {
-        // `--path` is a subdir OF the root, so without one there is nothing to
-        // hang it off. A def imported with `--from-linear` that found no local
-        // checkout carries name + linear and no root — joining against '' there
-        // would silently write `/apps/cli`, an absolute path at the filesystem
-        // root, and the def would resolve somewhere that does not exist.
+        // `--path` is a subdir of the root, so without one there is nothing to hang it off. A def
+        // from `--from-linear` with no local checkout has name + linear and no root; joining
+        // against '' would silently write `/apps/cli`, an absolute path at the filesystem root.
         const base = (opts.root ?? def.root ?? '').replace(/\/$/, '');
         if (!base) {
           console.error(chalk.red(`"${def.name}" has no root, so --path has nothing to resolve against.`));

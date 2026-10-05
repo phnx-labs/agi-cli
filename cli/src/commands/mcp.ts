@@ -1,11 +1,5 @@
-/**
- * MCP (Model Context Protocol) server management commands.
- *
- * Implements `agents mcp` -- list, add, remove, view, and register MCP
- * servers that give agents runtime access to databases, APIs, and external
- * services. Servers are declared in ~/.agents/mcp/ YAML files or the
- * agents.yaml manifest, then registered into each agent version's config.
- */
+/** `agents mcp`: list, add, remove, view and register MCP servers (declared in `~/.agents/mcp/`
+ * YAML or the agents.yaml manifest), then registered into each agent version's config. */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -68,20 +62,9 @@ import {
   type SyncTarget,
 } from './resource-view.js';
 
-/**
- * Parse a comma-separated --agents string into validated agent IDs and
- * optional version targets in the manifest shape.
- *
- * Supports the same selector syntax as resolveAgentVersionTargets:
- *   - bare `agent`        → manifest agents:[agent] (no version pin)
- *   - `agent@default`     → manifest agents:[agent] (no version pin)
- *   - `agent@x.y.z`       → manifest agentVersions[agent] = ['x.y.z']
- *   - `agent@all`         → manifest agentVersions[agent] = every installed version
- *   - literal `all`       → expand to all MCP-capable agents (each as `@all`)
- *
- * Throws VersionNotInstalledError for unknown specific versions so callers
- * can prompt-and-install before retrying.
- */
+/** Parse a comma-separated --agents string into agent IDs and version targets
+ * (resolveAgentVersionTargets syntax): bare/`@default` = no pin, `@x.y.z` = that version, `@all` =
+ * every installed version, `all` = every MCP-capable agent. Unknown versions throw. */
 function parseMcpAgentTargets(value: string): {
   agents: AgentId[];
   agentVersions?: Partial<Record<AgentId, string[]>>;
@@ -336,10 +319,9 @@ Examples:
         return;
       }
 
-      // Registry resolution: if the user just typed `agents mcp add <name>`,
-      // try looking up `<name>` in any configured MCP registry (by default the
-      // official MCP Registry at registry.modelcontextprotocol.io) and derive
-      // the install spec automatically.
+      // Registry resolution: for a bare `agents mcp add <name>`, look `<name>` up in any
+      // configured MCP registry (default registry.modelcontextprotocol.io) and derive the install
+      // spec.
       if (commandOrUrl.length === 0) {
         const { getMcpServerInfo, mcpEntryToInstallSpec } = await import('../lib/registry.js');
         const spinner = ora(`Looking up '${name}' in MCP registries…`).start();
@@ -784,16 +766,9 @@ function iterMcpCapableVersions(filter?: { agent?: AgentId; version?: string }):
 
 type McpSource = 'central' | 'manifest' | 'unmanaged';
 
-/**
- * Build the row data for `agents mcp list`. Rows come from three sources,
- * in priority order:
- *   1. central  — ~/.agents/mcp/*.yaml (primary source of truth)
- *   2. manifest — agents.yaml#mcp (legacy/alternate declaration)
- *   3. unmanaged — found only in an agent's own config file
- *
- * Sync targets reflect the physical state: whether the server is actually
- * registered in each (agent, version) config.
- */
+/** Build the rows for `agents mcp list` from three sources in priority order: central
+ * `~/.agents/mcp/*.yaml`, manifest `agents.yaml#mcp` (legacy), and unmanaged entries found only in
+ * an agent's own config. Sync targets reflect registration per (agent, version). */
 function buildMcpRows(opts: {
   filterAgent?: AgentId;
   filterVersion?: string;

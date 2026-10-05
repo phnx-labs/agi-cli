@@ -24,10 +24,9 @@ function providerOf(state: {
 const CLAUDE = 'claude' as AgentId;
 
 describe('isolated default', () => {
-  // An isolated-only agent never has a global default — that is what --isolated
-  // guarantees — so the chain has to keep going or `--agents codex` throws at a user
-  // who has explicitly run `agents use`. resolveVersion already did this; the two
-  // resolvers had drifted, and only this one still threw.
+  // An isolated-only agent never has a global default (that is what --isolated guarantees), so the
+  // chain must continue or `--agents codex` throws after an explicit `agents use`. resolveVersion
+  // did this; the two resolvers had drifted.
   it('bare resolves to the isolated default when there is no global one', () => {
     const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, isolated: { claude: '2.1.0' } });
     expect(resolveSingleAgentTarget('claude', p)).toEqual({ agent: CLAUDE, version: '2.1.0', source: 'isolated-default' });

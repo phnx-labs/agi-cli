@@ -3,16 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * The v2 store convergence: the central `fleet.devices.<name>.config` block
- * (#2458) and legacy `.history/devices/auto-launch.json` fold into each
- * per-device doc's `config:`; doc-level `defaultBrowserProfile:` folds into
- * `config:`; and agent pins leave the tracked docs — SELF's pins move to the
- * untracked `.history/devices/pins-<host>.json`, peers' pins are dropped.
- *
- * Real files, fresh modules per test (state.ts captures HOME at import time,
- * same pattern as lib/device-config.test.ts). No mocks.
- */
+/** The v2 store convergence: central `fleet.devices.<name>.config` (#2458), legacy
+ * `auto-launch.json` and `defaultBrowserProfile:` fold into each device doc's `config:`; agent
+ * pins leave tracked docs. Real files, fresh modules per test, no mocks. */
 let TMP = '';
 
 async function freshModules() {
@@ -293,10 +286,9 @@ describe('migrateDeviceConfigStores', () => {
   });
 
   it('folds central dismissals into the device doc without losing them as the #2458 strip empties the fleet block', async () => {
-    // A box carrying BOTH legacy central per-device config AND dismissals: the
-    // config strip AND the dismissal fold both drain central. The dismissal must
-    // survive the move to this box's device doc — losing it would silently
-    // un-ignore the node fleet-wide.
+    // A box carrying both legacy central per-device config and dismissals drains central twice.
+    // The dismissal must survive the move to this box's device doc, or the node would be silently
+    // un-ignored fleet-wide.
     writeCentral(
       'fleet:\n  devices:\n    mac-mini:\n      config:\n        maxAgents: 8\n  ignored:\n    - name: ipad165\n      ignoredAt: "2026-08-20T09:15:00.000Z"\n      ignoredOn: zion\n',
     );

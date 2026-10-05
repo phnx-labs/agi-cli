@@ -65,16 +65,9 @@ function run(args: string[], home: string): { stdout: string; stderr: string; st
 // Helpers shared across per-kind flag tests
 // ---------------------------------------------------------------------------
 
-/**
- * Build a disposable commander probe with the real kind-selector options
- * (including their kindCollector argParser). Parsing flags against this probe
- * never fires the sync action — it only exercises flag registration and
- * option collection.
- *
- * Uses addSelectorOptions directly so kindCollector is wired up identically
- * to the real sync command, ensuring array-accumulation and comma-split
- * assertions match production behaviour.
- */
+/** Build a disposable commander probe with the real kind-selector options via addSelectorOptions
+ * (including kindCollector), so array accumulation and comma-split assertions match production.
+ * Parsing never fires the sync action. */
 function buildSyncProbe(): Command {
   const probe = new Command('sync').exitOverride();
   addSelectorOptions(probe);
@@ -425,12 +418,9 @@ describe('sync --json reports a refused write (RUSH-2700)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// PHNX-3301: `agents sync user` adopt-in-place self-heal — the real command
-// against a real bare origin and a non-git ~/.agents (no mocks). Exercises the
-// entry point (not just the library fn), so the runRepoGitSync wiring — remote
-// recording, the --json path, the adopt→sync handoff — is covered end to end.
-// ---------------------------------------------------------------------------
+// PHNX-3301: `agents sync user` adopt-in-place self-heal, run for real against a bare origin and a
+// non-git ~/.agents (no mocks). Exercises the entry point so the runRepoGitSync wiring (remote
+// recording, --json path, adopt-to-sync handoff) is covered end to end.
 
 describe('agents sync user — adopt-in-place self-heal (PHNX-3301)', () => {
   const FULL_YAML = [

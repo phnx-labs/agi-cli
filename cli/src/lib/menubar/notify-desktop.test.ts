@@ -145,11 +145,9 @@ describe('notifyDesktop — missing notifier must not crash the daemon', () => {
     process.env.PATH = origPath;
   });
 
-  // Regression parity with overdue.test.ts: on a headless box the notifier
-  // (notify-send / osascript) is absent. spawn() reports that as an ASYNC
-  // 'error' event, not a synchronous throw — the module attaches an 'error'
-  // listener so Node does not re-throw ENOENT as an uncaught exception and take
-  // the daemon down. Emptying PATH forces ENOENT on the PATH-resolved notifier.
+  // Parity with overdue.test.ts: on a headless box the notifier is absent and spawn() reports
+  // ENOENT as an ASYNC 'error' event; the module's listener keeps Node from crashing the daemon.
+  // Emptying PATH forces ENOENT.
   it('swallows the notifier ENOENT and survives', async () => {
     process.env.PATH = '';
     expect(() =>
@@ -162,10 +160,9 @@ describe('notifyDesktop — missing notifier must not crash the daemon', () => {
 });
 
 describe('spawnDetachedQuiet — bounded lifetime', () => {
-  // The pile-up this fixes: a one-shot notifier that stalls (locked screen,
-  // WindowServer hiccup) must not linger forever. A real long-running child
-  // (`sleep 30`) that never self-exits must be hard-killed after the timeout.
-  // Real process, real signal — no mocking.
+  // A stalled one-shot notifier (locked screen, WindowServer hiccup) must not linger: a real
+  // `sleep 30` child that never exits must be SIGKILLed after the timeout. Real process, real
+  // signal.
   it('SIGKILLs a child that outlives the timeout', async () => {
     const child = spawnDetachedQuiet('sleep', ['30'], 120);
     const result = await new Promise<{ code: number | null; signal: string | null }>(

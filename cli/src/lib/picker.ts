@@ -1,18 +1,9 @@
-/**
- * Interactive fuzzy-filter picker built on @inquirer/core.
- *
- * Provides a searchable, paginated list UI with optional preview pane
- * for selecting items in the terminal. Used by session picker, command
- * picker, and other interactive selection flows.
- */
+/** Interactive fuzzy-filter picker built on @inquirer/core: a searchable, paginated list with an
+ * optional preview pane, used by the session and command pickers and other terminal selection
+ * flows. */
 
-/**
- * Custom inquirer prompt for searchable, scrollable selection lists.
- *
- * Extends @inquirer/core to support type-ahead filtering, column-aligned
- * display, and keyboard navigation. Used by sessions, teams, and other
- * interactive pickers throughout the CLI.
- */
+/** Custom inquirer prompt for searchable, scrollable selection lists: type-ahead filtering,
+ * column-aligned display and keyboard navigation. Used by sessions, teams and other pickers. */
 
 import {
   createPrompt,
@@ -39,38 +30,27 @@ interface PickerConfig<T> {
   message: string;
   /** Optional dim hint line rendered directly under the header (above the rows). */
   subtitle?: string;
-  /**
-   * The row pool. A {@link Separator} entry renders as a non-selectable divider
-   * (used for group headers) — navigation skips it and it is never returned.
-   */
+  /** The row pool. A {@link Separator} entry renders as a non-selectable divider (group header);
+   * navigation skips it and it is never returned. */
   items: Array<T | Separator>;
   filter: (query: string) => Array<T | Separator>;
   labelFor: (item: T, query: string) => string;
   buildPreview?: (item: T) => string;
-  /**
-   * Called once with a repaint trigger for the open prompt. An async preview
-   * source (e.g. a remote row's digest arriving over SSH) invokes the trigger
-   * when data `buildPreview` reported as pending is now ready, so the pane
-   * refreshes without a keypress. The trigger is inert after the prompt closes.
-   */
+  /** Called once with a repaint trigger for the open prompt. An async preview source (e.g. a remote
+   * digest over SSH) invokes it when pending data is ready, so the pane refreshes without a
+   * keypress. Inert after the prompt closes. */
   registerPreviewRepaint?: (repaint: () => void) => void;
   shortIdFor?: (item: T) => string;
-  /**
-   * Prefix each selectable row with its 1-based position in the current
-   * filtered list (`  1.`, ` 12.`), right-aligned so the labels stay columnar
-   * and a user scanning a long list can tell where they are. Separators are
-   * never numbered.
-   */
+  /** Prefix each selectable row with its 1-based position in the current filtered list (`  1.`, `
+   * 12.`), right-aligned so labels stay columnar. Separators are never numbered. */
   numbered?: boolean;
   pageSize?: number;
   initialSearch?: string;
   emptyMessage?: string;
   enterHint?: string;
-  /**
-   * Lines the caller already printed above the Inquirer prompt (e.g. the
-   * hidden-session footer). Subtracted from the row budget so the list page is
-   * capped to keep the preview — and those notices — on screen together.
-   */
+  /** Lines the caller already printed above the Inquirer prompt (e.g. the hidden-session footer),
+   * subtracted from the row budget so the list page leaves room for the preview and those notices
+   * together. */
   linesAbovePrompt?: number;
 }
 
@@ -104,13 +84,9 @@ interface Choice<T> {
 const DEFAULT_TERMINAL_ROWS = 24;
 const DEFAULT_TERMINAL_WIDTH = 80;
 
-/**
- * Rows the detail preview is guaranteed when it is open and a row is selected.
- * The list page is capped so this floor always fits the viewport — without it a
- * long list (PICKER_RECENT_COUNT = 15) consumes the whole default 24-row
- * terminal, `availablePreviewRows` goes <= 0, and the preview silently collapses
- * to empty (RUSH-2198).
- */
+/** Rows the detail preview is guaranteed when open with a row selected. The list page is capped so
+ * this floor fits the viewport; without it a long list (PICKER_RECENT_COUNT = 15) fills a 24-row
+ * terminal and the preview collapses to empty (RUSH-2198). */
 export const PREVIEW_MIN_ROWS = 6;
 
 /** Floor for the visible list page, so a short terminal still shows a few rows. */
@@ -124,22 +100,9 @@ function terminalRows(): number {
   return Math.max(1, process.stdout.rows || DEFAULT_TERMINAL_ROWS);
 }
 
-/**
- * Cap the visible list page so an open preview keeps a guaranteed floor of rows.
- *
- * The picker renders header + list page + separator + preview + help. When the
- * requested page size (e.g. 15) is large enough to fill the terminal on its own,
- * the preview has no room left and collapses. This reserves
- * {@link PREVIEW_MIN_ROWS} (plus its separator) for the preview and hands the
- * list whatever remains, never below {@link PICKER_MIN_LIST_ROWS}.
- *
- * `chromeRows` counts the fixed non-list, non-preview lines (header, subtitle,
- * help, any flash). `linesAbovePrompt` counts lines the caller printed above the
- * Inquirer prompt that have scrolled the viewport but the picker cannot measure —
- * today the session picker passes the hidden-session footer; subtracting it keeps
- * that notice on screen alongside the preview. (The fleet browser folds its
- * unreachable-peer warning into the header instead, so it needs no reserve here.)
- */
+/** Cap the visible list page so an open preview keeps a floor of rows: reserves PREVIEW_MIN_ROWS
+ * plus separator, never below PICKER_MIN_LIST_ROWS. `chromeRows` = fixed non-list lines;
+ * `linesAbovePrompt` = lines printed above the prompt that the picker cannot measure. */
 export function pickerPageSize(opts: {
   requestedPageSize: number;
   terminalRows: number;
@@ -243,10 +206,9 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
     const [status, setStatus] = useState<'idle' | 'done'>('idle');
     const [searchTerm, setSearchTerm] = useState(cfg.initialSearch ?? '');
     const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
-    // An async preview source repaints the pane by bumping this nonce; the
-    // counter lives in a ref because the trigger closure would otherwise hold a
-    // stale value and the second repaint would silently no-op (the same
-    // stale-closure trap dynamicPicker's reloadNonce documents).
+    // An async preview source repaints the pane by bumping this nonce; the counter lives in a ref
+    // because the trigger closure would hold a stale value and the second repaint would silently
+    // no-op (the same stale-closure trap as dynamicPicker's reloadNonce).
     const [, setPreviewNonce] = useState(0);
     const previewNonce = useRef(0);
     useEffect(() => {
@@ -412,15 +374,9 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
   return prompt(config);
 }
 
-/**
- * Multi-select variant of {@link itemPicker}. Same searchable, paginated list
- * and preview pane, but `space` toggles a checkbox on the active row instead of
- * the preview (preview moves to `tab`), and `enter` confirms every checked row.
- *
- * Returns the selected items (in the config's `items` order) or `null` on
- * cancel. Pressing `enter` with nothing checked confirms just the highlighted
- * row, so a quick single-pick still works.
- */
+/** Multi-select variant of {@link itemPicker}: `space` toggles a checkbox (preview moves to `tab`)
+ * and `enter` confirms every checked row. Returns items in `items` order, or `null` on cancel.
+ * `enter` with nothing checked confirms the highlighted row. */
 export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | null> {
   const prompt = createPrompt<T[] | null, MultiPickerConfig<T>>((cfg, done) => {
     const theme = makeTheme({});
@@ -585,20 +541,14 @@ interface DynamicPickerConfig<T, F, A = never> {
   headerFor?: (filter: F) => string;
   /** The hotkey-legend help line; receives the mode so it can adapt. */
   helpFor?: (filter: F, mode: 'nav' | 'search') => string;
-  /**
-   * Single-key bindings (by key name) that transform the filter. Returning the
-   * SAME reference is a no-op; a new object triggers a reload.
-   */
+  /** Single-key bindings (by key name) that transform the filter. Returning the SAME reference is a
+   * no-op; a new object triggers a reload. */
   keyBindings?: Record<string, (filter: F) => F>;
   /** Keys that submit the highlighted row with an alternate typed action. */
   submitKeys?: Record<string, A>;
-  /**
-   * Side-effecting keys that don't change the filter (e.g. `y` copies a command).
-   * Receives the live search `query` so the effect can be search-aware. Return a
-   * short string to flash under the list, or `{ flash, reload }` when the effect
-   * changed something the rows RENDER (a star, a mark) and the list has to be
-   * rebuilt — the row labels are memoized, so a flash alone leaves them stale.
-   */
+  /** Side-effecting keys that don't change the filter (e.g. `y` copies a command); gets the live
+   * `query`. Return a flash string, or `{ flash, reload }` when the effect changed what rows
+   * RENDER (row labels are memoized, so a flash alone leaves them stale). */
   onKey?: (
     name: string,
     filter: F,
@@ -617,20 +567,9 @@ interface DynamicPickerConfig<T, F, A = never> {
   linesAbovePrompt?: number;
 }
 
-/**
- * The lookup token for a hotkey: the literal character the key produced, else
- * readline's key name (`tab`, `escape`, arrows).
- *
- * readline reports both `f` and `F` as name `f` — only `sequence` tells them
- * apart — and gives a punctuation key like `*` no name at all. Keying on the
- * character makes shifted letters and punctuation bindable, and is a no-op for
- * every existing binding: for a plain lowercase letter, sequence === name.
- *
- * Callers receiving this in `onKey` see the literal character, so a handler that
- * wants to accept both cases of a letter must say so (`'y'` and `'Y'`); the
- * keyBindings lookup falls back to the key NAME, which keeps the shifted form of
- * an existing single-letter binding working without each caller restating it.
- */
+/** Lookup token for a hotkey: the literal character produced, else readline's key name. readline
+ * reports `f` and `F` both as `f` and gives `*` no name. onKey handlers see the literal character;
+ * the keyBindings lookup falls back to the key name so existing bindings still work. */
 export function hotkeyToken(key: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean }): string {
   const seq = key.sequence;
   // Printable single characters only — a control code's sequence (`\t`, `\r`,
@@ -646,16 +585,9 @@ interface DynamicPicked<T, F, A = never> {
   action?: A;
 }
 
-/**
- * Async-refetch variant of {@link itemPicker}. Holds a `filter` object in state and
- * re-runs `load(filter)` whenever a keybinding mutates it (with a loading placeholder
- * while the fetch — e.g. an SSH fleet fan-out — is in flight). A separate `S` search
- * mode filters the loaded pool client-side. `enter` returns the active row + the live
- * filter; `esc` cancels (from search mode, `esc` first exits search).
- *
- * Same render/pagination/preview machinery as the static pickers — only the data
- * source and keymap are dynamic.
- */
+/** Async-refetch variant of itemPicker: keeps a `filter` in state and re-runs `load(filter)` when a
+ * keybinding changes it. `S` searches the loaded pool client-side. `enter` returns the row and
+ * live filter; `esc` cancels (first exits search). */
 export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F, A>): Promise<DynamicPicked<T, F, A> | null> {
   const prompt = createPrompt<DynamicPicked<T, F, A> | null, DynamicPickerConfig<T, F, A>>((cfg, done) => {
     const theme = makeTheme({});
@@ -674,16 +606,13 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
     // Bumped by an `onKey` that asks for a reload; a dep of the load effect, so a
     // side effect that changed the rows can rebuild them without a filter change.
     const [reloadNonce, setReloadNonce] = useState(0);
-    // The counter lives in a ref, not in the state read back from the keypress
-    // closure: that closure can hold a STALE `reloadNonce`, so a second reload
-    // would recompute the same value, the state would not change, and the
-    // repaint would silently never happen (the first star appeared, the second
-    // did not). A ref is always current.
+    // The counter lives in a ref, not state read from the keypress closure: that closure can hold
+    // a STALE `reloadNonce`, so a second reload would recompute the same value, state wouldn't
+    // change and the repaint would silently never happen (the second star never appeared).
     const reloadCount = useRef(0);
-    // Bumped when a load RESOLVES. `load` is async, so the render that follows
-    // `setReloadNonce` still sees the pre-load data — memoizing the row labels on
-    // the nonce alone rendered each press's result one press late. Keying them on
-    // load COMPLETION is what actually makes them current.
+    // Bumped when a load RESOLVES. `load` is async, so the render after `setReloadNonce` still
+    // sees pre-load data; memoizing labels on the nonce alone rendered each press one press late.
+    // Keying on load COMPLETION makes them current.
     const [loadedSeq, setLoadedSeq] = useState(0);
     const loadedCount = useRef(0);
     const prefix = usePrefix({ status, theme });
@@ -728,11 +657,9 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
         value: item,
         label: cfg.labelFor(item, q),
       }));
-      // `loadedSeq` is a dep because a reload can legitimately return the SAME
-      // array — `load` hands back its cached pool unchanged when no filter is
-      // active — while what a row RENDERS has changed underneath it. Without this
-      // the labels stay memoized on the old state and the side effect looks like
-      // it silently did nothing (starring a row left the star invisible).
+      // `loadedSeq` is a dep because a reload can return the SAME array (`load` hands back its
+      // cached pool when no filter is active) while what a row RENDERS has changed. Without it
+      // labels stay memoized on old state (starring a row left the star invisible).
     }, [items, query, loadedSeq]);
 
     useEffect(() => {
@@ -818,11 +745,9 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
         return;
       }
       const token = hotkeyToken(key);
-      // Exact character first (so `*` and a shifted `F` are addressable), then
-      // the readline name. The fallback is what preserves the shifted form of an
-      // existing single-letter hotkey: `R`/`C`/`A` used to reach their bindings
-      // via `key.name`, and keying on the character alone would silently retire
-      // them for anyone with caps lock on.
+      // Exact character first (so `*` and a shifted `F` are addressable), then the readline name.
+      // The fallback preserves shifted forms of existing hotkeys: `R`/`C`/`A` reached bindings via
+      // `key.name`, and keying on the character alone would retire them under caps lock.
       const submitAction = cfg.submitKeys?.[token] ?? cfg.submitKeys?.[key.name ?? ''];
       if (submitAction !== undefined) {
         finish(submitAction);
@@ -861,10 +786,9 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
     }
     const header = headerBits.filter(Boolean).join(' ');
 
-    // Cap the list page so an open preview keeps a guaranteed floor of rows.
-    // chrome = header + help + optional flash line; the preview separator is
-    // reserved inside pickerPageSize. Only the loaded list steals viewport, so
-    // skip the cap while the loading placeholder is showing.
+    // Cap the list page so an open preview keeps a guaranteed floor of rows. chrome = header +
+    // help + optional flash; the preview separator is reserved in pickerPageSize. Only the loaded
+    // list steals viewport, so skip the cap while the loading placeholder shows.
     const chromeRows = 2 + (flash ? renderedRows(flash, terminalWidth()) : 0);
     const effectivePageSize = pickerPageSize({
       requestedPageSize: cfg.pageSize ?? 12,

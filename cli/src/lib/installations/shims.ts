@@ -199,94 +199,11 @@ async function promptConflictStrategy(
 }
 
 /** Generate the shim script content for an agent. Resolves project/default version, auto-installs if missing, and execs the binary. */
-/**
- * Current shim schema version. Bump whenever `generateShimScript` changes
- * in a way that requires existing on-disk shims to be regenerated (new
- * flags, fixed argument parsing, new hooks, etc.). `isShimCurrent` reads
- * this marker out of existing shims to decide whether to regenerate.
- *
- * History:
- *   v1 — initial shim (implicit, no marker).
- *   v2 — `--version=...` form in sync/refresh-rules calls; refresh-rules
- *        shim hook for non-@-capable agents.
- *   v3 — sync/refresh-rules flag renamed `--version` → `--agent-version`
- *        so it no longer collides with commander's top-level `--version`.
- *   v4 — project version marker changed from `.agents-version` to a
- *        root-level `agents.yaml`; shim now skips ~/.agents/agents.yaml
- *        when walking up for a project marker.
- *   v5 — emit CODEX_HOME for codex shims so the versioned config (permissions,
- *        sandbox_mode, rules/agents-deny.rules) is actually read by the codex
- *        binary instead of $HOME/.codex.
- *   v6 — hard-disable Codex startup update checks in the generated shims.
- *   v7 — rename `agents refresh-memory` invocation to `agents refresh-rules`
- *        and capability flag `memoryImports` → `rulesImports`.
- *   v8 — versions moved from ~/.agents-system/versions to ~/.agents/versions
- *        (two-repo split: system = shipped defaults, user = operational state).
- *   v9 — claude shim exports CLAUDE_CODE_OAUTH_TOKEN from per-version
- *        .oauth_token file on Linux (keychain-less sandbox fallback).
- *   v11 — when no default is set or the configured version is not installed,
- *         interactively propose the latest already-installed version.
- *   v12 — helper calls inside generated shims use the absolute agents-cli
- *         entrypoint instead of PATH-resolved `agents`.
- *   v13 — validate agents.yaml version strings before constructing binary paths.
- *   v14 — derive `configDirName` from `agentConfig.configDir` relative to $HOME
- *         instead of hardcoding `.${agent}`. Backwards-compatible for every
- *         existing agent (their configDir is `~/.{agent}`); enables nested
- *         layouts like Antigravity's `~/.gemini/antigravity-cli/`.
- *   v15 — remove foreground resource sync / rules refresh from launch shims.
- *         Version homes are reconciled by agents-cli management commands; the
- *         shim hot path only resolves a version and execs the agent binary.
- *   v16 — re-introduce project-scoped compile to the shim hot path via
- *         `agents sync --launch`. This stays fast (filesystem-only): compiles
- *         project rules, mirrors workspace resources, and synthesizes the
- *         scoped plugin marketplaces (agents-cli/agents-system/extras-<alias>/
- *         agents-project). Version-home reconciliation stays out of the hot
- *         path — management commands still own that.
- *   v17 — bash-side skip-fast sentinel under ~/.agents/.cache/launch-sync/.
- *         When the sentinel mtime is newer than every source dir, exec the
- *         agent binary directly without spawning node. Cuts steady-state
- *         hot-path latency from ~680ms (node startup + module init) to ~11ms
- *         (a few stat calls). Node writes the sentinel after each successful
- *         sync. Documented limitation: POSIX dir mtime only updates on
- *         top-level entry add/remove — deep edits to plugin contents won't
- *         trigger auto-resync, run `agents sync` for that.
- */
-// v20 — stop treating kimi like grok/droid: it npm-installs into
-//        node_modules/.bin/kimi, so resolve it via the generic branch. The old
-//        ~/.kimi-code/bin special-case never existed for npm installs and
-//        re-exec-looped through `command -v kimi` (the dispatcher itself).
-// v21 — guard grok's `command -v grok` fallback against resolving to our own
-//        shims dir (same infinite re-exec loop), mirroring droid.
-// v22 — export DISABLE_AUTOUPDATER=1 for claude shims so a pinned per-version
-//        install can't self-mutate: Claude Code's background auto-updater would
-//        otherwise rewrite the pinned binary in place. Explicit user value wins.
-// v25 — dispatcher self-recovery: if the baked AGENTS_BIN is gone (a removed/moved
-//        dev build that generated the shim), resolve `agents` on PATH instead of
-//        exiting 127, so a stale/vanished dev build can't brick every launch.
-// v26 — grok resolves its binary from the versioned home's .grok/downloads first
-//        ($VERSION_DIR/home/.grok/downloads, where the binary lands when the
-//        installer runs with GROK_HOME set or grok self-updates under the shim),
-//        then falls back to the global ~/.grok/downloads for pre-fix installs.
-//        The old dispatcher checked only the global dir, so a pinned grok that
-//        installed into the versioned home fell through to the "not installed"
-//        error.
-// v30 — RUSH-2459: two compounding grok binary-resolution bugs fixed. (1) The
-//        "exact version match" grep ran against `ls`'s FULL PATH output, and
-//        the versioned home's own path always contains the version string
-//        (.../versions/grok/<version>/...), so it matched every candidate
-//        unconditionally and silently degraded to "whatever ls sorts first" —
-//        now matched against each candidate's basename instead. (2) When no
-//        filename genuinely carries the version, the fallback no longer
-//        trusts whatever sorts first: it rejects any grok-* candidate under
-//        1MB (real grok binaries are ~100MB+; a stray wrapper/alias script is
-//        a few hundred bytes) and prefers the most recently modified
-//        survivor. On yosemite-s0 both bugs fired together: a stale, unrelated
-//        grok-0.2.118-* file — a 99-byte wrapper that exec'd cursor-agent —
-//        sorted alphabetically before the real self-updated grok binary and
-//        was silently launched instead.
-// v32 — every config-dir pin (claude, grok, opencode, kimi, muse, copilot) yields to
-//        an account-slot launch (AGENTS_EXEC_HOME from `agents run`), so a slot run
-//        reads and writes its own slot home instead of the shared version home.
+/** Current shim schema version. Bump whenever `generateShimScript` changes so existing on-disk
+ * shims must be regenerated; `isShimCurrent` reads this marker. */
+// Shim schema history v20-v32: kimi resolves via the generic node_modules/.bin branch; grok
+// checks the versioned home first and rejects candidates under 1MB (RUSH-2459); claude shims
+// export DISABLE_AUTOUPDATER=1 (user value wins); config-dir pins yield to account-slot launches.
 export const SHIM_SCHEMA_VERSION = 33;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
@@ -296,35 +213,9 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Bash function embedded in every generated grok binary-resolution block
- * (the dispatcher shim's `generateShimScript` and the direct alias's
- * `generateVersionedAliasScript`). Prints the path to use, or nothing.
- *
- * Prefers a `grok-*` FILENAME that carries the pinned version string —
- * checked against `basename`, never the full path: `dir` is always
- * `.../versions/grok/<version>/home/.grok/downloads`, so the version string
- * is already a substring of every path in that directory regardless of the
- * actual filename. The original `ls "$dir"/grok-* | grep -i "$version"`
- * matched on the full line and so matched every candidate unconditionally,
- * silently degrading to "whatever sorts first" — the versioned-home half of
- * RUSH-2459, distinct from (and compounding) the missing-match fallback bug
- * below.
- *
- * Grok self-updates its binary in place while running under the shim, so a
- * version-home's downloads dir can accumulate several `grok-*` files whose
- * names have drifted away from the version-home's pinned version — when no
- * filename carries it, never trust whatever the directory listing returns
- * first (RUSH-2459: a stale, unrelated 99-byte wrapper script matching the
- * `grok-*` naming pattern sorted before the real ~127MB self-updated binary
- * and was silently exec'd). Instead, reject anything under
- * MIN_GROK_BINARY_BYTES — comfortably above any wrapper/alias artifact,
- * comfortably below a real compiled binary — and among the survivors, pick
- * the most recently modified: the file grok's self-updater actually wrote
- * last. Mirrors the TS implementation, `resolveGrokFallbackBinary` in
- * versions.ts (which reads bare filenames via `fs.readdirSync` and so never
- * had the full-path-match bug).
- */
+/** Bash function in every generated grok binary-resolution block; prints the path to use.
+ * Prefers a `grok-*` file whose basename (never full path) carries the pinned version; else
+ * drops files under MIN_GROK_BINARY_BYTES, takes the newest (RUSH-2459). Mirrors versions.ts. */
 const GROK_RESOLVE_BINARY_FN = `_resolve_grok_current() {
   local target
   target=$(readlink -f "$1/bin/grok" 2>/dev/null) || return 0
@@ -362,17 +253,13 @@ function getAgentsBinForGeneratedShim(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'index.js');
 }
 
-/**
- * Generate the full bash shim script for the given agent. The returned string
- * is written to ~/.agents/shims/{cliCommand} and made executable.
- */
+/** Generate the full bash shim script for the agent; it is written to
+ * ~/.agents/shims/{cliCommand} and made executable. */
 export function generateShimScript(agent: AgentId): string {
   const agentConfig = AGENTS[agent];
   const cliCommand = agentConfig.cliCommand;
-  // Derive the relative config-dir path from the registry. For most agents
-  // this is just `.${agent}` (e.g., `.claude`, `.codex`); for nested layouts
-  // like Antigravity (`~/.gemini/antigravity-cli`) it carries the full
-  // subpath so per-version HOME symlinks reach the right place.
+  // Derive the relative config-dir path from the registry: `.${agent}` for most agents, but nested
+  // layouts like Antigravity (`~/.gemini/antigravity-cli`) carry the full subpath.
   const configDirName = path.relative(os.homedir(), agentConfig.configDir);
   const agentsBin = shellQuote(getAgentsBinForGeneratedShim());
   const managedEnv = resolveHarnessAdapter(agent).shimConfigEnvBash?.({ configDirName }) ?? '';
@@ -822,14 +709,9 @@ ${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${la
 `;
 }
 
-/**
- * Which shim files to materialize for a platform. Pure — testable on any host.
- *
- * POSIX writes the extensionless `#!/bin/bash` shim — the file PATH resolution
- * execs. Windows writes only the `.cmd` companion: PATHEXT makes it the runnable
- * form, and the bash file (mode 0o755 is a no-op there) is never executed — so
- * emitting it is dead weight that only ever confuses `where agents`.
- */
+/** Which shim files to materialize for a platform (pure). POSIX writes the extensionless
+ * `#!/bin/bash` shim; Windows writes only the `.cmd` companion, since PATHEXT makes it the
+ * runnable form and the bash file would be dead weight that confuses `where agents`. */
 export function shimTargetsFor(platform: NodeJS.Platform): { bash: boolean; cmd: boolean } {
   if (platform === 'win32') return { bash: false, cmd: true };
   return { bash: true, cmd: false };
@@ -849,10 +731,8 @@ export function createShim(agent: AgentId): string {
   if (targets.bash) {
     fs.writeFileSync(shimPath, generateShimScript(agent), { mode: 0o755 });
   }
-  // Windows can't execute the bash shim directly. Drop a `.cmd` companion — which
-  // delegates to the node-side transparent resolver (`agents __shim`) so version
-  // resolution stays single-sourced instead of reimplemented in batch — and skip
-  // the vestigial bash file entirely.
+  // Windows can't execute the bash shim: drop a `.cmd` companion that delegates to the node-side
+  // resolver (`agents __shim`), keeping version resolution single-sourced, and skip the bash file.
   if (targets.cmd) {
     writeWindowsCmdShim(shimPath + '.cmd', agentConfig.cliCommand);
   }
@@ -860,12 +740,9 @@ export function createShim(agent: AgentId): string {
   return shimPath;
 }
 
-// ─── White-label brand shims ──────────────────────────────────────────────────
-// A brand shim is a PURE pass-through: unlike an agent shim (which resolves a
-// version and execs the agent binary) or an alias shim (which injects a fixed
-// subcommand), it forwards argv verbatim to the agents-cli entrypoint with
-// `AGENTS_BRAND` set, so `<brand> <any-verb>` behaves exactly like
-// `agents <any-verb>` but presents under the brand's name. See lib/brand.ts.
+// White-label brand shims are a pure pass-through: unlike agent or alias shims they forward argv
+// verbatim to the agents-cli entrypoint with `AGENTS_BRAND` set, so `<brand> <verb>` behaves like
+// `agents <verb>` under the brand's name (see lib/brand.ts).
 
 const BRAND_SHIM_MARKER = '# Brand shim:';
 
@@ -936,20 +813,15 @@ export function removeBrandShim(name: string): boolean {
   return removed;
 }
 
-// ── gh overload shim ────────────────────────────────────────────────────────
-// A transparent interceptor for the ONE thing that keeps rate-limiting the fleet:
-// agents' trained `gh pr checks`. It routes that (and only that) to REST via
-// `agents __gh`, and execs the real gh for everything else. Agents keep their
-// habit; we decide what it runs. See cli/src/lib/github/gh-overload.ts + PHNX-3501.
+// gh overload shim: a transparent interceptor for the one thing that keeps rate-limiting the fleet,
+// `gh pr checks`. It routes only that to REST via `agents __gh` and execs the real gh otherwise
+// (see cli/src/lib/github/gh-overload.ts, PHNX-3501).
 
 const GH_OVERLOAD_MARKER = '# gh overload shim:';
 
-/**
- * The POSIX gh overload shim. Self-healing by construction: it resolves the real
- * gh (first `gh` on PATH that is not this shims dir) and execs it directly whenever
- * agents-cli is gone, the sentinel is already set (recursion), or the verb is
- * anything but `pr checks` — so a leftover/orphaned shim can never break `gh`.
- */
+/** The POSIX gh overload shim. Self-healing: it resolves the real gh (first on PATH not in this
+ * shims dir) and execs it directly when agents-cli is gone, the recursion sentinel is set, or
+ * the verb is not `pr checks`, so an orphaned shim can never break `gh`. */
 export function generateGhOverloadShim(): string {
   const agentsBin = shellQuote(getAgentsBinForGeneratedShim());
   const shimsDir = shellQuote(getShimsDir());
@@ -1011,16 +883,9 @@ function hasRealGhOnPath(): boolean {
   return false;
 }
 
-/**
- * Create/refresh the gh overload shim so a user's `gh pr checks` transparently
- * escapes the GraphQL rate limit. POSIX only in v1 (Windows keeps native gh —
- * resolving the real gh without recursion needs a separate `.cmd` design).
- *
- * Skips (returns null) when there is no real `gh` to overload — shadowing a
- * non-existent binary would only turn a clean "command not found" into shim
- * output. Never clobbers a non-shim `gh` a user placed in the shims dir. If a real
- * gh later disappears, the shim itself fails loud with 127 rather than looping.
- */
+/** Create/refresh the gh overload shim so `gh pr checks` escapes the GraphQL rate limit. POSIX
+ * only in v1. Returns null when there is no real `gh` to overload, never clobbers a non-shim
+ * `gh`, and fails loud with 127 if gh later disappears. */
 export function ensureGhOverloadShim(): string | null {
   if (!shimTargetsFor(process.platform).bash) return null;
   if (!hasRealGhOnPath()) return null;
@@ -1041,18 +906,9 @@ export function removeGhOverloadShim(): boolean {
   return false;
 }
 
-/**
- * Generate a Windows `.cmd` launcher that delegates to `agents __shim <spec>`.
- * `spec` is the agent's cliCommand for the default-version shim, or
- * `cliCommand@version` for a versioned alias. node + the dist entrypoint are
- * resolved at generation time so the launcher does not depend on `agents`
- * already being on PATH.
- *
- * `extraMarkerLines` lets callers stamp additional schema markers into the
- * header — versioned aliases embed their own alias-schema marker so
- * readVersionedAliasSchemaVersion can stat the `.cmd` (the only Windows
- * artifact) the same way it reads the bash script on POSIX.
- */
+/** Generate a Windows `.cmd` launcher delegating to `agents __shim <spec>`, with node and the
+ * dist entrypoint resolved at generation time. `extraMarkerLines` stamps schema markers so
+ * readVersionedAliasSchemaVersion can stat the `.cmd`, the only Windows artifact. */
 function writeWindowsCmdShim(cmdPath: string, spec: string, extraMarkerLines: string[] = []): void {
   const indexJs = getAgentsBinForGeneratedShim();
   const content =
@@ -1070,10 +926,8 @@ export function removeShim(agent: AgentId): boolean {
   const agentConfig = AGENTS[agent];
   const shimPath = path.join(shimsDir, agentConfig.cliCommand);
 
-  // Remove whichever companions exist: the extensionless script (POSIX, or a
-  // legacy Windows install that wrote it) AND the `.cmd` (Windows). Keying only
-  // off the extensionless path would orphan the `.cmd` on Windows, where
-  // createShim now writes only the `.cmd`.
+  // Remove whichever companions exist: the extensionless script (POSIX or a legacy Windows install)
+  // and the `.cmd`; keying only off the extensionless path would orphan the `.cmd`.
   let removed = false;
   for (const p of [shimPath, shimPath + '.cmd']) {
     if (fs.existsSync(p)) {
@@ -1084,89 +938,20 @@ export function removeShim(agent: AgentId): boolean {
   return removed;
 }
 
-/**
- * Current versioned-alias schema. Bump whenever `generateVersionedAliasScript`
- * changes in a way that requires existing on-disk aliases to be regenerated.
- *
- * History:
- *   v1 — implicit (no marker); no CLAUDE_CONFIG_DIR export, so direct
- *        `claude@X` invocations leaked into ~/.claude (the default version's
- *        symlinked home) and `agents view` never saw the login.
- *   v2 — emit CLAUDE_CONFIG_DIR for claude aliases so each version has its
- *        own isolated config/OAuth slot; stamp a version marker so stale
- *        aliases can be detected and regenerated.
- *   v3 — emit CODEX_HOME for codex aliases so direct `codex@X` invocations
- *        read the versioned permissions/rules instead of $HOME/.codex.
- *   v4 — direct aliases read binaries and config homes from ~/.agents-system.
- *   v5 — hard-disable Codex startup update checks in versioned aliases.
- *   v6 — versions moved from ~/.agents-system/versions to ~/.agents/versions
- *        (two-repo split: system = shipped defaults, user = operational state).
- *   v7 — runtime state split into ~/.agents/.history and ~/.agents/.cache.
- *   v8 — resolve grok/kimi/droid binaries from their real install locations
- *        (~/.grok/downloads, ~/.kimi-code/bin, ~/.local/bin) instead of the
- *        hardcoded node_modules/.bin, which never exists for these three and
- *        made every versioned alias (the path `agents teams` pins to) fail
- *        with "<agent>@<version> not installed". Also emit GROK_HOME.
- *   v9 — kimi was wrong in v8: it npm-installs @moonshot-ai/kimi-code into
- *        node_modules/.bin/kimi (grok/droid ship native binaries elsewhere,
- *        kimi does not). The ~/.kimi-code/bin path never existed for an npm
- *        install and the `command -v kimi` fallback resolved to this alias's
- *        sibling dispatcher shim, re-exec-looping forever. Resolve kimi via the
- *        generic node_modules/.bin branch.
- *  v10 — guard grok's `command -v grok` fallback against resolving to our own
- *        shims dir (same infinite re-exec loop), mirroring droid.
- *  v11 — export DISABLE_AUTOUPDATER=1 for claude aliases so a pinned per-version
- *        install can't self-mutate via Claude Code's background auto-updater.
- *        Explicit user value wins.
- *  v12 — Windows: stop writing the extensionless bash alias next to the `.cmd`
- *        (and delete a lingering one). The version suffix contains dots, so
- *        cmd.exe and PowerShell treat `claude@2.1.201` as a complete filename
- *        with extension `.201`, exact-match the bash script AHEAD of PATHEXT
- *        probing, and ShellExecute it to the `.sh` editor association — the
- *        editor opens the script and the agent never launches. The `.cmd` is
- *        now the only Windows artifact and carries this alias marker so
- *        staleness checks read it directly.
- *  v13 — grok aliases resolve the binary from the versioned home's
- *        .grok/downloads first, then fall back to the global ~/.grok/downloads.
- *        The old template checked only the global dir, so a `grok@<version>`
- *        alias failed with "not installed" whenever the binary was staged into
- *        the versioned home (installer run with GROK_HOME set, or grok
- *        self-update under the shim).
- *  v16 — RUSH-2459: two compounding grok binary-resolution bugs fixed. (1) The
- *        "exact version match" grep ran against `ls`'s FULL PATH output, and
- *        the versioned home's own path always contains the version string
- *        (.../versions/grok/<version>/...), so it matched every candidate
- *        unconditionally and silently degraded to "whatever ls sorts first" —
- *        now matched against each candidate's basename instead. (2) When no
- *        filename genuinely carries the version, the fallback no longer
- *        trusts whatever sorts first: it rejects any grok-* candidate under
- *        1MB (real grok binaries are ~100MB+; a stray wrapper/alias script is
- *        a few hundred bytes) and prefers the most recently modified
- *        survivor. On yosemite-s0 both bugs fired together: a stale, unrelated
- *        grok-0.2.118-* file — a 99-byte wrapper that exec'd cursor-agent —
- *        sorted alphabetically before the real self-updated grok binary and
- *        was silently launched instead.
- */
-// v17 — the claude alias env now reuses the adapter's shimConfigEnvBash (adds the
-//       Linux .oauth_token setup-token fallback the hand-copied subset had dropped),
-//       so existing alias shims must regenerate to pick it up.
-// v18 — Cursor aliases select the file credential store and swap HOME to the
-//       version home because current Cursor writes auth.json under ~/.cursor
-//       and ignores XDG_CONFIG_HOME for credential storage.
-// v21 — every alias config-dir pin (claude, grok, opencode, kimi, muse, copilot)
-//       yields to an account-slot launch (AGENTS_EXEC_HOME from `agents run`). Before,
-//       the alias re-pinned every slot launch onto the shared version home, so a worker
-//       run picked as one account onboarded from scratch and kept its history in
-//       another account's home.
+/** Current versioned-alias schema; bump whenever `generateVersionedAliasScript` changes so on-
+ * disk aliases regenerate. v1-v16 covered per-version config isolation, kimi/grok/droid binary
+ * resolution, Windows `.cmd`-only aliases and the RUSH-2459 grok fixes. */
+// Alias schema history v17-v21: the claude alias env reuses the adapter's shimConfigEnvBash;
+// Cursor aliases swap HOME and use the file credential store; every config-dir pin yields to an
+// account-slot launch (AGENTS_EXEC_HOME), which the alias once re-pinned onto the shared home.
 export const VERSIONED_ALIAS_SCHEMA_VERSION = 21;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
 
-// The version string is interpolated into a generated bash script and into
-// a filename. parseAgentSpec / parseVersion already validates this upstream,
-// but generators are also called from internal code paths (e.g., re-emit on
-// schema bump), so re-check here. Mirrors VERSION_RE in versions.ts.
+// The version string is interpolated into a generated bash script and a filename. parseAgentSpec
+// already validates it, but generators are also called from internal paths (e.g. re-emit on schema
+// bump), so re-check here; mirrors VERSION_RE in versions.ts.
 const ALIAS_VERSION_RE = /^[A-Za-z0-9._+-]{1,64}$/;
 
 function assertSafeVersion(version: string): void {
@@ -1175,45 +960,28 @@ function assertSafeVersion(version: string): void {
   }
 }
 
-/**
- * Agents whose config directory can be relocated by an environment variable
- * (the per-agent `managedEnv` block in `generateVersionedAliasScript` below).
- *
- * Only these can be installed with `agents add --isolated`: the versioned alias
- * points that env var at the copy's private home, so the copy never reads or
- * writes the user's real `~/.<agent>`. Every other agent isolates ONLY by
- * adopting `~/.<agent>` via a symlink — which an isolated install deliberately
- * skips — so an isolated copy would silently fall back to (and mutate) the real
- * config dir. For those agents `--isolated` is refused up front.
- *
- * KEEP IN SYNC with the `managedEnv` switch in `generateVersionedAliasScript`.
- * The colocated test `shims.isolation-capability.test.ts` enforces this.
- */
+/** Agents whose config dir an env var can relocate (the `managedEnv` block in
+ * `generateVersionedAliasScript`); only these support `agents add --isolated`. Others isolate only
+ * via the symlink an isolated install skips, so it is refused. KEEP IN SYNC; a test enforces it. */
 export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'cursor', 'grok', 'kimi', 'opencode', 'muse'];
 
-/**
- * Whether an agent supports a clean `--isolated` install — i.e. its config
- * location can be redirected by an env var so the isolated copy stays fully
- * separate from the user's real `~/.<agent>`. See {@link CONFIG_ENV_ISOLATED_AGENTS}.
- */
+/** Whether an agent supports a clean `--isolated` install: its config location can be redirected
+ * by an env var so the copy stays separate from the real `~/.<agent>` (see
+ * CONFIG_ENV_ISOLATED_AGENTS). */
 export function supportsIsolatedInstall(agent: AgentId): boolean {
   return CONFIG_ENV_ISOLATED_AGENTS.includes(agent);
 }
 
-/**
- * Harnesses that isolate by symlink-adopting `~/.<config>` rather than a
- * config-dir env (PHNX-3940 T5). One active slot per device; `accounts default`
- * repoints the adopted symlink under the auth-op lock.
- */
+/** Harnesses that isolate by symlink-adopting `~/.<config>` rather than a config-dir env
+ * (PHNX-3940 T5): one active slot per device, and `accounts default` repoints the symlink under
+ * the auth-op lock. */
 export function isSymlinkAdoptedHarness(agent: AgentId): boolean {
   return !CONFIG_ENV_ISOLATED_AGENTS.includes(agent);
 }
 
-/**
- * Repoint this harness's adopted `~/.<config>` symlink at `home`'s config dir.
- * No-op for env-isolated harnesses. Fails loud when the adopted path is a real
- * directory rather than a symlink — adopting that is `agents use`, not default.
- */
+/** Repoint this harness's adopted `~/.<config>` symlink at `home`'s config dir; no-op for env-
+ * isolated harnesses. Fails loud when the adopted path is a real directory, since adopting that
+ * is `agents use`, not default. */
 export function repointAdoptedConfigToHome(agent: AgentId, home: string): { success: boolean; error?: string } {
   if (!isSymlinkAdoptedHarness(agent)) return { success: true };
   const lock = acquireAuthOperationLock(agent);
@@ -1257,10 +1025,8 @@ export function repointAdoptedConfigToHome(agent: AgentId, home: string): { succ
   }
 }
 
-/**
- * Generate a versioned alias script that directly execs a specific version.
- * e.g., claude@2.0.65 -> directly runs that version's binary
- */
+/** Generate a versioned alias script that directly execs a specific version (e.g. claude@2.0.65
+ * runs that version's binary). */
 export function generateVersionedAliasScript(agent: AgentId, version: string): string {
   assertSafeVersion(version);
   const agentConfig = AGENTS[agent];
@@ -1335,19 +1101,9 @@ export AGENT_CLI_CREDENTIAL_STORE="file"
                 : '';
   const launchArgs = resolveHarnessAdapter(agent).shimLaunchArgs?.() ?? '';
 
-  // Resolve the binary the same way the main shim does (see generateShimScript).
-  // Grok and Droid do NOT ship into node_modules/.bin — Grok downloads a native
-  // binary to ~/.grok/downloads and Droid (Factory AI) installs a standalone
-  // binary to ~/.local/bin. Hardcoding the node_modules path made every
-  // versioned alias for those two fail with "<agent>@<version> not installed",
-  // which is exactly the path `agents teams` takes once it pins a teammate's
-  // version. Kimi is NOT one of them: `agents add kimi` npm-installs
-  // @moonshot-ai/kimi-code so its binary is at node_modules/.bin/kimi (the
-  // generic branch below). The old ~/.kimi-code/bin path never exists for an
-  // npm install and fell back to `command -v kimi`, which resolves to this
-  // alias's sibling dispatcher shim and re-execs forever.
-  // This template is unix-only — on Windows the .cmd companion delegates to
-  // "agents __shim" which resolves via getBinaryPath() instead.
+  // Resolve the binary like the main shim. Grok (~/.grok/downloads) and Droid (~/.local/bin)
+  // aren't in node_modules/.bin, and hardcoding it broke their aliases ("not installed"). Kimi
+  // npm-installs into .bin; its old ~/.kimi-code path re-execed the dispatcher forever. Unix-only.
   const versionDir = `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}`;
   const binaryResolution =
     agent === 'grok'
@@ -1448,10 +1204,8 @@ ${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${la
 `;
 }
 
-/**
- * Read the schema version of an on-disk versioned alias. Returns null if the
- * alias doesn't exist or is a pre-v2 alias (no marker — treated as stale).
- */
+/** Read the schema version of an on-disk versioned alias; null if it doesn't exist or is pre-v2
+ * (no marker, treated as stale). */
 export function readVersionedAliasSchemaVersion(agent: AgentId, version: string): number | null {
   const aliasPath = versionedAliasOnDiskPath(agent, version);
   if (!fs.existsSync(aliasPath)) return null;
@@ -1473,21 +1227,16 @@ export function isVersionedAliasCurrent(agent: AgentId, version: string): boolea
   return readVersionedAliasSchemaVersion(agent, version) === VERSIONED_ALIAS_SCHEMA_VERSION;
 }
 
-/**
- * Regenerate a versioned alias if missing or stale. Mirrors ensureShimCurrent
- * for the main shim — callers can surface a one-line notice when something
- * was upgraded.
- */
+/** Regenerate a versioned alias if missing or stale, mirroring ensureShimCurrent; callers can
+ * surface a one-line notice on upgrade. */
 export function ensureVersionedAliasCurrent(agent: AgentId, version: string): 'created' | 'updated' | 'current' {
   if (!fs.existsSync(versionedAliasOnDiskPath(agent, version))) {
     createVersionedAlias(agent, version);
     return 'created';
   }
-  // A lingering extensionless bash alias on Windows shadows the `.cmd` in both
-  // cmd.exe and PowerShell (the dotted version reads as a file extension, and
-  // an exact filename match beats PATHEXT probing), ShellExecuting the bash
-  // script to the `.sh` editor association instead of launching the agent.
-  // Regenerate regardless of the `.cmd`'s stamp so the shadow gets deleted.
+  // A lingering extensionless bash alias on Windows shadows the `.cmd` (the dotted version reads as
+  // an extension and beats PATHEXT), opening the `.sh` editor instead of launching. Regenerate
+  // regardless of the `.cmd`'s stamp so the shadow is deleted.
   if (shimTargetsFor(process.platform).cmd && fs.existsSync(getVersionedAliasPath(agent, version))) {
     createVersionedAlias(agent, version);
     return 'updated';
@@ -1502,20 +1251,15 @@ export function ensureVersionedAliasCurrent(agent: AgentId, version: string): 'c
   return 'current';
 }
 
-/**
- * Get the filesystem path for a versioned alias script — the logical
- * (extensionless) launch name. On Windows this is not a real file (see
- * versionedAliasOnDiskFile); stat/read checks must use the on-disk path.
- */
+/** The filesystem path for a versioned alias: the logical, extensionless launch name. On Windows
+ * it is not a real file (see versionedAliasOnDiskFile), so stat/read checks must use the on-
+ * disk path. */
 export function getVersionedAliasPath(agent: AgentId, version: string): string {
   return path.join(getShimsDir(), `${AGENTS[agent].cliCommand}@${version}`);
 }
 
-/**
- * The file createVersionedAlias actually materializes for a platform:
- * `<cmd>@<version>.cmd` on Windows, the bare bash script on POSIX. Pure —
- * testable on any host. Mirrors onDiskShimFile for the main shim.
- */
+/** The file createVersionedAlias actually writes: `<cmd>@<version>.cmd` on Windows, the bare
+ * bash script on POSIX. Pure; mirrors onDiskShimFile. */
 export function versionedAliasOnDiskFile(cliCommand: string, version: string, platform: NodeJS.Platform): string {
   const name = `${cliCommand}@${version}`;
   return shimTargetsFor(platform).cmd ? `${name}.cmd` : name;
@@ -1526,19 +1270,9 @@ function versionedAliasOnDiskPath(agent: AgentId, version: string): string {
   return path.join(getShimsDir(), versionedAliasOnDiskFile(AGENTS[agent].cliCommand, version, process.platform));
 }
 
-/**
- * Create a versioned alias for a specific agent version.
- * e.g., claude@2.0.65
- *
- * Same platform split as createShim (shimTargetsFor): POSIX writes the
- * extensionless bash script; Windows writes ONLY the `.cmd`. Unlike the main
- * shim — where the bash file was merely dead weight — a bash alias next to the
- * versioned `.cmd` is actively harmful: the dotted version suffix makes
- * cmd.exe/PowerShell treat `claude@2.1.201` as a complete filename (extension
- * `.201`), so the exact match wins over PATHEXT probing and the shell
- * ShellExecutes the bash script to the `.sh` editor association — the editor
- * opens, the agent never launches. Any legacy bash alias is deleted here.
- */
+/** Create a versioned alias (e.g. claude@2.0.65): POSIX writes the bash script, Windows only the
+ * `.cmd`. A bash alias beside the `.cmd` is harmful: the dotted version reads as an extension,
+ * so the shell opens it in the `.sh` editor. Any legacy bash alias is deleted. */
 export function createVersionedAlias(agent: AgentId, version: string): string {
   assertSafeVersion(version);
   ensureAgentsDir();
@@ -1563,11 +1297,8 @@ export function createVersionedAlias(agent: AgentId, version: string): string {
   return aliasPath;
 }
 
-/**
- * Remove a versioned alias for a specific agent version. Removes whichever
- * companions exist — the extensionless script (POSIX, or a legacy Windows
- * install that wrote it) AND the `.cmd` (Windows) — mirroring removeShim.
- */
+/** Remove a versioned alias, whichever companions exist (the extensionless script, or a legacy
+ * Windows copy, and the `.cmd`), mirroring removeShim. */
 export function removeVersionedAlias(agent: AgentId, version: string): boolean {
   const aliasPath = getVersionedAliasPath(agent, version);
 
@@ -1595,22 +1326,9 @@ export function getAgentConfigPath(agent: AgentId): string {
   return agentConfig.configDir.replace(os.homedir(), home);
 }
 
-/**
- * Read the user's configured Codex model from their active `~/.codex/config.toml`.
- *
- * Codex runs under a per-version `CODEX_HOME` (see `buildExecEnv`). A dispatch
- * pinned to a version whose home config lacks a top-level `model` key silently
- * falls back to Codex's built-in default (currently `gpt-5.3-codex`), which a
- * ChatGPT-tier account is not entitled to use — the run dies with HTTP 400
- * before doing any work. The user's model preference lives in whichever
- * version-home was active when they set it (`~/.codex` symlinks to it), so it is
- * NOT visible to a run pinned to a different version. Forwarding it via `--model`
- * keeps the user's "default model setup" regardless of the active version-home,
- * and is concurrency-safe (no file writes) when fanning out many parallel runs.
- *
- * Returns the top-level `model` only (ignores `[profile.*]` tables). Best-effort:
- * a missing/unreadable/unset config yields `undefined` (caller keeps prior behaviour).
- */
+/** Read the user's configured Codex model from `~/.codex/config.toml`. A dispatch pinned to a
+ * version whose home lacks a top-level `model` falls back to Codex's built-in default, which
+ * ChatGPT-tier accounts can't use (HTTP 400). Forwarding it via `--model` avoids that. */
 export function readCodexConfiguredModel(): string | undefined {
   try {
     const cfg = path.join(getAgentConfigPath('codex'), 'config.toml');
@@ -1686,15 +1404,9 @@ export function carryForwardAuthFiles(agent: AgentId, toConfigDir: string): void
     return; // no installed versions to source from
   }
 
-  // Account identity currently installed at the destination home (null when the
-  // dest is empty or its credential can't be decoded). When it IS known, only a
-  // source home whose credential decodes to the SAME account is eligible to
-  // overwrite it — so a newer login for a DIFFERENT account sitting in another
-  // version-home can't silently replace the account the user is signed into
-  // (RUSH-1764). An empty destination still seeds from the freshest source (the
-  // version-switch case). Identity is a per-DIR/account property, not per-file:
-  // for droid it comes from decrypting auth.v2.file with auth.v2.key, so it must
-  // gate BOTH files as a unit (never carry account B's key over account A's).
+  // Account identity currently installed at the destination (null if empty or undecodable). When
+  // known, only a source with the same account may overwrite it, so another account's newer login
+  // can't replace the signed-in one (RUSH-1764). Droid identity gates both auth files as a unit.
   const toResolved = path.resolve(toConfigDir);
   const destIdentity = readAuthFileIdentity(agent, toConfigDir);
   const identityCache = new Map<string, string | null>();
@@ -1756,11 +1468,9 @@ export async function switchConfigSymlink(
     fs.mkdirSync(versionConfigPath, { recursive: true });
   }
 
-  // Carry the account credential into the version we're switching to. Droid /
-  // antigravity / kimi store login as files INSIDE the per-version config home;
-  // switching versions repoints the symlink to a home that was never logged in,
-  // silently logging the CLI out. Sign-in is account-global, so seed the target
-  // home with the freshest existing credential before we flip the symlink.
+  // Carry the account credential into the version being switched to: droid/antigravity/kimi store
+  // login inside the per-version home, so repointing the symlink would silently log the CLI out.
+  // Seed the target with the freshest credential first.
   carryForwardAuthFiles(agent, versionConfigPath);
 
   try {
@@ -1775,14 +1485,9 @@ export async function switchConfigSymlink(
         // Already pointing to correct target, no-op
         return { success: true };
       }
-      // openclaw mixes user data (openclaw.json, openclaw.db, per-agent
-      // workspaces under ~/.openclaw/{agentId}/, memory/) with the version
-      // home — silently swapping the symlink to a fresh version home strips
-      // every running agent's config + workspace + memory. Carry the user
-      // data forward into the new version home before flipping the symlink
-      // (keep-dest preserves anything the new version already shipped).
-      // Other agents (Claude, Codex, etc.) keep user data outside the
-      // version-home dir, so this is openclaw-only by design.
+      // openclaw mixes user data (config, db, per-agent workspaces, memory/) with the version home,
+      // so swapping the symlink strips every agent's data. Carry it into the new home first (keep-
+      // dest). Other agents keep user data outside the version home.
       if (agent === 'openclaw') {
         try {
           if (fs.existsSync(resolvedCurrent) && fs.statSync(resolvedCurrent).isDirectory()) {
@@ -1812,15 +1517,9 @@ export async function switchConfigSymlink(
       fs.mkdirSync(agentBackupDir, { recursive: true });
       fs.renameSync(configPath, finalBackupPath);
 
-      // Session JSONLs that lived under the old configPath have just moved to
-      // finalBackupPath on disk. Rewrite any DB rows pointing at the old prefix
-      // so querySessions stops returning phantom rows (issue #136). The
-      // discoverer at src/lib/session/discover.ts already scans backup dirs, so
-      // future indexer runs will find the new files — this just keeps the
-      // existing rows valid in the meantime.
-      //
-      // Dynamic import so loading shims.ts doesn't transitively open the
-      // sessions DB — many tests partially mock state.js and would break.
+      // Session JSONLs under the old configPath just moved to the backup path, so rewrite DB rows
+      // with the old prefix to stop phantom rows (issue #136). Dynamic import so loading shims.ts
+      // doesn't open the sessions DB (tests partially mock state.js).
       try {
         const { updateSessionFilePaths } = await import('../session/db.js');
         updateSessionFilePaths(configPath, finalBackupPath);
@@ -1851,14 +1550,9 @@ export async function switchConfigSymlink(
   }
 }
 
-/**
- * Switch home-level files (outside the config dir) to per-version symlinks.
- * e.g., ~/.claude.json -> ~/.agents/versions/claude/2.0.65/home/.claude.json
- *
- * Uses atomic rename to avoid data loss if another session is running.
- * On first migration (real file -> symlink), merges global auth into
- * ALL installed versions so they inherit the current account.
- */
+/** Switch home-level files (outside the config dir) to per-version symlinks, e.g. ~/.claude.json
+ * to the version home's copy. Atomic rename avoids data loss with a running session; first
+ * migration merges global auth into all installed versions. */
 export function switchHomeFileSymlinks(
   agent: AgentId,
   version: string
@@ -1874,10 +1568,9 @@ export function switchHomeFileSymlinks(
   const switched: string[] = [];
   const errors: string[] = [];
 
-  // For Claude, Claude's binary reads CLAUDE_CONFIG_DIR/.claude.json (INSIDE
-  // the per-version .claude dir) — not the home-level file this function
-  // manages. Reconcile all installed Claude versions so INSIDE is a symlink
-  // to OUTSIDE, making OUTSIDE the single source of truth.
+  // Claude reads CLAUDE_CONFIG_DIR/.claude.json (inside the per-version .claude dir), not the home-
+  // level file this function manages; reconcile every installed Claude version so INSIDE is a
+  // symlink to OUTSIDE, the single source of truth.
   if (agent === 'claude') {
     const reconcile = ensureAllClaudeInsideSymlinks();
     for (const e of reconcile.errors) errors.push(e);
@@ -1979,25 +1672,9 @@ export function switchHomeFileSymlinks(
   return { switched, errors };
 }
 
-/**
- * Claude reads `.claude.json` at `$CLAUDE_CONFIG_DIR/.claude.json`. Our shim
- * points CLAUDE_CONFIG_DIR at `<ver>/home/.claude`, so Claude's real config
- * file lives at `<ver>/home/.claude/.claude.json` (INSIDE), while
- * `switchHomeFileSymlinks` manages `<ver>/home/.claude.json` (OUTSIDE).
- *
- * To keep both views consistent we make INSIDE a symlink to OUTSIDE. Claude's
- * atomic write (`Uf6`) resolves symlinks before the tmp+rename cycle, so the
- * symlink survives across writes and OUTSIDE remains the single source of
- * truth that agents-cli's home-file machinery already manages.
- *
- * This function idempotently reconciles one version:
- *   - INSIDE missing: create symlink -> `../.claude.json` (create OUTSIDE if needed).
- *   - INSIDE already symlink to OUTSIDE: no-op.
- *   - INSIDE is a real file: it's the authoritative auth state (Claude was
- *     writing to it). Move its content to OUTSIDE (merging with OUTSIDE,
- *     INSIDE wins for `oauthAccount`), then replace INSIDE with the symlink.
- *   - Symlink points elsewhere: replace it.
- */
+/** Claude reads `$CLAUDE_CONFIG_DIR/.claude.json` (INSIDE the version's .claude dir) while
+ * `switchHomeFileSymlinks` manages `<ver>/home/.claude.json` (OUTSIDE). Make INSIDE a symlink
+ * to OUTSIDE; a real INSIDE file merges into OUTSIDE first (INSIDE wins for `oauthAccount`). */
 export function ensureClaudeInsideSymlink(version: string): void {
   const versionsDir = getVersionsDir();
   const versionHome = path.join(versionsDir, 'claude', version, 'home');
@@ -2059,10 +1736,8 @@ export function ensureClaudeInsideSymlink(version: string): void {
   fs.symlinkSync(linkTarget, insidePath);
 }
 
-/**
- * Apply `ensureClaudeInsideSymlink` to every installed Claude version.
- * Safe to call repeatedly; per-version calls are idempotent.
- */
+/** Apply `ensureClaudeInsideSymlink` to every installed Claude version; safe to repeat, since
+ * each call is idempotent. */
 function ensureAllClaudeInsideSymlinks(): { migrated: string[]; errors: string[] } {
   const versionsDir = getVersionsDir();
   const claudeVersionsDir = path.join(versionsDir, 'claude');
@@ -2117,15 +1792,9 @@ interface CopyContext {
   version: string;
 }
 
-/**
- * Copy directory contents with configurable conflict strategy.
- * Skips when dest is a symlink (managed resources that shouldn't be overwritten).
- *
- * @param src - Source directory
- * @param dest - Destination directory
- * @param strategy - How to handle conflicts: 'keep-dest', 'overwrite', or 'ask-per-file'
- * @param context - Agent/version context for prompts (only used when strategy is 'ask-per-file')
- */
+/** Copy directory contents with a configurable conflict strategy ('keep-dest', 'overwrite' or
+ * 'ask-per-file'; `context` is used only for prompts). Skips when dest is a symlink (managed
+ * resources that must not be overwritten). */
 async function copyDirContents(
   src: string,
   dest: string,
@@ -2256,15 +1925,9 @@ function readAgentsBinFromShim(shimPath: string): string | null {
   }
 }
 
-/**
- * True when the agent shim's baked `AGENTS_BIN` is fine to keep: it either already
- * points at the install we'd generate now, OR points at some OTHER install that
- * still exists on disk (leave it — regenerating could ping-pong two live installs
- * sharing the shims dir). Returns FALSE only when the shim points at a DIFFERENT,
- * now-removed install — the exact drift a deleted dev build (`~/.local/agents-cli-dev`),
- * an old npm-global (`/opt/homebrew`), or a rotated version dir leaves behind. A shim
- * can pass the schema check (`isShimCurrent`) yet still carry that stale path.
- */
+/** True when the shim's baked `AGENTS_BIN` is fine to keep: it points at the install we'd
+ * generate, or at another install that still exists (regenerating could ping-pong live
+ * installs). False only for a removed install (deleted dev build, rotated version dir). */
 export function shimPointsAtLiveInstall(agent: AgentId): boolean {
   if (!shimExists(agent)) return true; // missing shim is handled by ensureShimCurrent
   const baked = readAgentsBinFromShim(onDiskShimPath(agent));
@@ -2285,31 +1948,14 @@ export function listShimFileNames(): string[] {
   }
 }
 
-/**
- * Legacy command shims that are wrong even when their baked install is alive.
- * `secrets` (PHNX-3989), `sessions` (PHNX-4012), `computer` (PHNX-4075) and
- * `browser` (PHNX-4101): the shim `exec`s `agents <name>`, which is a passthrough
- * to the STANDALONE binary — so the shim re-enters itself (the 1.22.85 fork
- * bomb) and, sitting first on PATH, shadows the real `@phnx-labs/<name>-cli`
- * binary a user types directly. Pruned unconditionally.
- *
- * `computer` and `browser` are the sharpest, because agents-cli USED to publish
- * (`computer`) or shim (`browser`) a bin of its own: a machine that installed an
- * older CLI has a real shim on PATH under the name the standalone engine now owns.
- */
+/** Legacy command shims wrong even when their baked install is alive (`secrets`, `sessions`,
+ * `computer`, `browser`; PHNX-3989/4012/4075/4101): they `exec agents <name>`, a passthrough to
+ * the standalone binary, so they re-enter themselves (fork bomb). Pruned. */
 const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets', 'sessions', 'computer', 'pty', 'browser']);
 
-/**
- * Prune a stale, orphaned shim: one that is NOT a managed agent shim and NOT a user
- * alias, whose baked `AGENTS_BIN` points at an install that no longer exists. These
- * are `exec "$AGENTS_BIN" <cmd>` command shims (browser/teams) that
- * `scripts/postinstall.js` writes for the LIVE install; one baked at a removed
- * install either dies with `exit 127` or shadows the real package bin on PATH.
- * Only removed when the baked target is gone, so a working shim is never touched —
- * except the `LEGACY_SHIMS_ALWAYS_PRUNED` set, which cannot work at all (and which
- * postinstall no longer writes).
- * Returns true if removed.
- */
+/** Prune a stale orphaned command shim (not an agent shim or user alias) whose baked
+ * `AGENTS_BIN` points at a removed install; it would exit 127 or shadow the real package bin.
+ * Removed only when the target is gone, except LEGACY_SHIMS_ALWAYS_PRUNED. */
 export function pruneOrphanedCommandShim(fileName: string): boolean {
   // Never touch a shim that corresponds to a real agent — agents-cli manages those.
   const isAgentCommand = Object.values(AGENTS).some((a) => a.cliCommand === fileName);
@@ -2389,10 +2035,9 @@ export function getPathShadowingExecutable(
       continue;
     }
     if (candidate === shimPath) return null;
-    // Adopted launcher: a symlink we repointed at our shim. Its path differs
-    // from shimPath but it resolves to the same file, so it is NOT a shadow —
-    // otherwise every adopted default would be re-flagged forever, resurfacing
-    // the false "runs a native binary" note this whole feature set out to kill.
+    // Adopted launcher: a symlink we repointed at our shim resolves to the same file, so it is not
+    // a shadow; otherwise every adopted default would be re-flagged forever, resurfacing the false
+    // "runs a native binary" note.
     if (shimReal && canonicalOrNull(candidate) === shimReal) return null;
     if (candidate === legacyUserShim && managedShimExists) {
       // Legacy file from the pre-split layout. Don't treat as shadow — the
@@ -2406,14 +2051,9 @@ export function getPathShadowingExecutable(
   return null;
 }
 
-/**
- * Delete the legacy ~/.agents/shims/<cli> file if it exists, returning whether
- * anything was removed. Pre-split installs put shims under ~/.agents/shims/;
- * the new layout uses ~/.agents-system/shims/. The leftover file causes the
- * repair-prompt loop reported in PROJ-789 — `getPathShadowingExecutable` flags
- * it as a shadow but `addShimsToPath` only edits rc files, never the file
- * itself. Removing it ends the loop.
- */
+/** Delete the legacy ~/.agents/shims/<cli> file if present. Pre-split installs used that path,
+ * and the leftover caused the repair-prompt loop (PROJ-789): `getPathShadowingExecutable` flags
+ * it but `addShimsToPath` only edits rc files. */
 export function removeLegacyUserShim(agent: AgentId, overrides?: { homeDir?: string }): boolean {
   const cliCommand = AGENTS[agent].cliCommand;
   const homeDir = overrides?.homeDir || os.homedir();
@@ -2437,25 +2077,16 @@ export function removeLegacyUserShim(agent: AgentId, overrides?: { homeDir?: str
   }
 }
 
-/**
- * Where an adopted launcher's provenance is recorded. Lives under durable
- * `.history` (NOT the regenerable `.cache`) so the reverse pointer to the native
- * binary survives a cache wipe — the shim reads it to fall through to the native
- * binary by absolute path when no managed version resolves. Two lines:
- * line 1 = original binary, line 2 = launcher path (for `--release`).
- */
+/** Where an adopted launcher's provenance is recorded: durable `.history` (not the regenerable
+ * `.cache`) so the pointer to the native binary survives a cache wipe. Line 1 = original
+ * binary, line 2 = launcher path (for `--release`). */
 export function getAdoptedRecordPath(agent: AgentId, historyDir: string = getHistoryDir()): string {
   return path.join(historyDir, 'adopted-launchers', AGENTS[agent].cliCommand);
 }
 
-/**
- * The launcher a harness's own installer drops in an early-PATH dir. Detection
- * for adoption keys on the launcher *existing as a symlink resolving outside our
- * shims dir* — NOT on current PATH order. That's deliberate: the shim only loses
- * PATH races in non-interactive / GUI-launched shells, which an interactive
- * `agents` run can't observe via its own PATH. Keying on the durable symlink lets
- * auto-adoption fire for those users too. Returns the launcher path or null.
- */
+/** The launcher a harness's own installer drops in an early-PATH dir. Detection keys on a
+ * symlink resolving outside our shims dir, not PATH order, since the shim loses PATH races only
+ * in non-interactive shells an `agents` run can't observe. */
 export function findAdoptableLauncher(
   agent: AgentId,
   overrides?: { homeDir?: string; shimsDir?: string },
@@ -2507,26 +2138,9 @@ export type AdoptResult =
   | { adopted: true; launcher: string; original: string }
   | { adopted: false; reason: 'no-shadow' | 'already-adopted' | 'not-a-symlink' | 'unsafe-target' | 'error'; launcher?: string };
 
-/**
- * Adopt the harness's own launcher that shadows our shim on PATH.
- *
- * PATH-ordering fixes (editing rc files) can never reliably win: `~/.local/bin`
- * (where grok/droid/etc. self-install) is prepended in `.zshenv`/`.zprofile`
- * for *every* shell, while our shims prepend only lands in `.zshrc`
- * (interactive). No single rc file guarantees "last prepend wins" across zsh's
- * whole sourcing chain, so the shim loses in non-interactive / GUI-launched
- * contexts. Instead of fighting PATH order, we *become* the launcher: replace
- * the shadowing symlink with one pointing at our shim, and record the real
- * original so the shim falls through to it when no managed version is selected.
- *
- * Regression bounds:
- * - Only ever touches a **symlink** (never renames/deletes a real binary).
- * - Records the resolved original + launcher path for lossless restore
- *   (`releaseAdoptedLauncher`), in durable `.history` so a cache wipe can't
- *   orphan the reverse pointer.
- * - Idempotent: a no-op once the launcher already points at our shim.
- * - Never records our own shim as the "original" (would loop).
- */
+/** Adopt the harness's own launcher that shadows our shim. PATH-ordering fixes can't reliably
+ * win across zsh's sourcing chain, so replace the shadowing symlink with one at our shim and
+ * record the original in durable `.history`. Symlinks only; idempotent; never records our shim. */
 export function adoptShadowingLauncher(
   agent: AgentId,
   overrides?: { shadowedBy?: string; shimsDir?: string; historyDir?: string },
@@ -2571,10 +2185,8 @@ export function adoptShadowingLauncher(
   try {
     const recordPath = getAdoptedRecordPath(agent, overrides?.historyDir);
     fs.mkdirSync(path.dirname(recordPath), { recursive: true });
-    // Line 1: original binary (shim fall-through target). Line 2: launcher path
-    // (release restores this exact symlink, independent of PATH order at release
-    // time — the M3 fix). Absolute launcher path so release never has to
-    // re-derive it from a PATH scan that may miss.
+    // Line 1: original binary (shim fall-through target). Line 2: absolute launcher path, so
+    // release restores that exact symlink without a PATH scan that may miss (the M3 fix).
     fs.writeFileSync(recordPath, `${resolved}\n${path.resolve(launcher)}\n`, 'utf-8');
     // Repoint the launcher at our shim. rm + symlink (not atomic rename) is fine
     // here: the record is already written, so a crash between the two leaves a
@@ -2587,12 +2199,9 @@ export function adoptShadowingLauncher(
   }
 }
 
-/**
- * Undo `adoptShadowingLauncher`: repoint the launcher back at the recorded
- * original and drop the record. Reversible escape hatch for users who want the
- * native launcher to win. Returns the restored original path, or null if there
- * was nothing to release.
- */
+/** Undo `adoptShadowingLauncher`: repoint the launcher at the recorded original and drop the
+ * record, an escape hatch for users who want the native launcher to win. Returns the restored
+ * original path, or null if there was nothing to release. */
 export function releaseAdoptedLauncher(
   agent: AgentId,
   overrides?: { shimsDir?: string; historyDir?: string },
@@ -2607,10 +2216,9 @@ export function releaseAdoptedLauncher(
   }
   const original = lines[0] ?? '';
   if (!original) return null;
-  // Line 2 is the exact launcher we rewrote at adopt time. Restoring it directly
-  // (rather than re-deriving from PATH) means release works regardless of the
-  // current shell's PATH order — the M3 fix. Fall back to a PATH scan only for
-  // records written before this format existed.
+  // Line 2 is the exact launcher rewritten at adopt time; restoring it directly makes release
+  // independent of the current PATH order (the M3 fix). Fall back to a PATH scan only for records
+  // written before this format.
   const launcher = lines[1] || getPathShadowingExecutable(agent) || original;
 
   const shimReal = canonical(path.join(shimsDir, AGENTS[agent].cliCommand));
@@ -2645,19 +2253,9 @@ export function releaseAdoptedLauncher(
   }
 }
 
-/**
- * Check if the agent's CLI command is shadowed by a shell alias.
- *
- * Shell aliases live in the user's session and aren't visible from a Node.js
- * child process. We do a best-effort scan of common RC files for `alias
- * <command>=` patterns. Returns false when detection is inconclusive.
- *
- * Tracks the LAST `alias` / `unalias` action for this command per rc file —
- * a trailing `unalias codex` cancels an earlier `alias codex=...`, and
- * `unalias` can name multiple commands on one line. Without this, an
- * `alias` line elsewhere in the file would surface as a false positive
- * (e.g. seen in zshrc setups that conditionally clear an alias later).
- */
+/** Check whether the agent's CLI command is shadowed by a shell alias: a best-effort scan of RC
+ * files for `alias <command>=` (aliases are invisible to a child process). It tracks the last
+ * `alias`/`unalias` per file, so a trailing `unalias` avoids false positives. */
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -2838,10 +2436,8 @@ interface ShimPathResult {
   error?: string;
 }
 
-/**
- * Add the shims directory to PATH: edits the shell rc file on POSIX, or registers
- * it on the Windows User PATH (registry + WM_SETTINGCHANGE). Idempotent.
- */
+/** Add the shims directory to PATH: edit the shell rc file on POSIX, or register it on the
+ * Windows User PATH (registry plus WM_SETTINGCHANGE). Idempotent. */
 export function addShimsToPath(
   overrides?: { homeDir?: string; shell?: string; shimsDir?: string },
 ): ShimPathResult {
@@ -2900,15 +2496,9 @@ export function addShimsToPath(
   }
 }
 
-/**
- * Register the shims dir on the Windows User PATH via the .NET environment API,
- * which writes the registry AND broadcasts WM_SETTINGCHANGE — the correct analog
- * of editing a shell rc file (no `setx` truncation, no manual step). Idempotent:
- * a no-op when the shims dir is already first in the User PATH. Moves it to the
- * front when it exists but is in the wrong position (e.g. appended by an old
- * install) so it overrides any npm/global installs that appear later. The shims
- * dir is passed via an env var so it is never interpolated into the script text.
- */
+/** Register the shims dir on the Windows User PATH via the .NET environment API (writes the
+ * registry and broadcasts WM_SETTINGCHANGE, no `setx` truncation). Idempotent; moves it to the
+ * front if misplaced. The dir is passed via env var, never interpolated into the script. */
 function addShimsToWindowsUserPath(shimsDir: string): ShimPathResult {
   const r = prependToWindowsUserPath(shimsDir);
   if (!r.success) {
@@ -2939,12 +2529,9 @@ function isInstalledVersionIsolated(agent: AgentId, version: string): boolean {
   return fs.existsSync(path.join(getVersionsDir(), agent, version, '.isolated'));
 }
 
-/**
- * Thrown when an operation would carry an isolated-only agent across the isolation
- * boundary. Callers that can explain the situation catch it and print guidance; the
- * throw is what makes the boundary a property of the code rather than a convention
- * every future call site has to remember.
- */
+/** Thrown when an operation would carry an isolated-only agent across the isolation boundary.
+ * Callers catch it to print guidance; the throw makes the boundary a property of the code
+ * rather than a convention every call site must remember. */
 export class IsolationBoundaryError extends Error {
   constructor(readonly agent: AgentId, readonly operation: string) {
     super(
@@ -2954,18 +2541,9 @@ export class IsolationBoundaryError extends Error {
   }
 }
 
-/**
- * True when EVERY installed version of `agent` is isolated (and at least one is).
- *
- * This is the switch: installing with `--isolated` is itself the act of opting in,
- * so there is no mode to set and none to forget. It is per-agent, so an isolated
- * codex constrains nothing about claude. And the escape hatch is inherent — remove
- * the isolated copies and the agent is ordinary again, which means the state that
- * grants protection is the same state you delete to drop it.
- *
- * An agent with any NORMAL version is not protected: that install already owns the
- * launcher and the real `~/.<agent>`, so there is no boundary left to defend.
- */
+/** True when every installed version of `agent` is isolated (and at least one is). `--isolated`
+ * is itself the opt-in, per agent; removing the isolated copies drops protection. An agent with
+ * any normal version isn't protected: it already owns the launcher and real `~/.<agent>`. */
 export function isIsolationProtected(agent: AgentId): boolean {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
   let dirs: string[];
@@ -2976,12 +2554,9 @@ export function isIsolationProtected(agent: AgentId): boolean {
   } catch {
     return false;
   }
-  // Count only directories that are actually an install. A bare version dir is
-  // scaffolding, not a non-isolated version — and treating it as one would disable
-  // protection at exactly the wrong moment: an adopting path that does
-  // `mkdirSync(<version>/home)` before adopting would flip this to false with its own
-  // first line and then walk straight through the gates. Ignoring scaffolding biases
-  // the predicate toward protecting, which is the safe direction to fail in.
+  // Count only directories that are actually an install: a bare version dir is scaffolding, and
+  // counting it as non-isolated would disable protection when an adopting path does
+  // `mkdirSync(<version>/home)` first. Ignoring scaffolding fails toward protecting.
   const installed = dirs.filter((v) => {
     const dir = path.join(agentVersionsDir, v);
     return fs.existsSync(path.join(dir, 'node_modules')) || fs.existsSync(path.join(dir, 'package.json'));
@@ -3036,10 +2611,8 @@ function ensureAllShims(): void {
   }
 }
 
-/**
- * Resource diff between two versions. Each field lists resources present in
- * the current version but missing from the target.
- */
+/** Resource diff between two versions: each field lists resources present in the current version
+ * but missing from the target. */
 export interface ResourceDiff {
   commands: string[];  // names in current but not in target
   skills: string[];
@@ -3048,10 +2621,7 @@ export interface ResourceDiff {
   mcp: string[];  // server names in current but not in target
 }
 
-/**
- * Compare resources between two versions.
- * Returns resources that exist in currentVersion but not in targetVersion.
- */
+/** Compare resources between two versions: those in currentVersion but not targetVersion. */
 function compareVersionResources(
   agent: AgentId,
   currentVersion: string,
@@ -3149,10 +2719,8 @@ export function hasResourceDiff(diff: ResourceDiff): boolean {
   );
 }
 
-/**
- * Copy resources from one version to another.
- * Only copies resources listed in the diff (i.e., ones missing in target).
- */
+/** Copy resources from one version to another, only those listed in the diff (missing in
+ * target). */
 function copyResourcesToVersion(
   agent: AgentId,
   fromVersion: string,

@@ -1,29 +1,6 @@
-/**
- * Per-project Linear issue counts for the `agents projects status` card.
- *
- * When a project definition carries `linear.projectId` (set via
- * `agents projects link <name> --linear`), the card shows one outcome line —
- * `12/30 done · 5 in progress` — counted from the Linear GraphQL API by state
- * TYPE (triage / backlog / unstarted / started / completed / canceled), never
- * hardcoded state names.
- *
- * The same fetch also yields the **next milestone** — the earliest-dated
- * milestone with unfinished issues — because each issue node carries its
- * `projectMilestone`. A percentage tells you how far along a project is; the
- * milestone tells you what it is due to hit next, which is the thing a person
- * actually plans around. Deriving it here costs no extra request.
- *
- * This is a best-effort card enrichment, not an explicit command: every failure
- * (no credential, offline, API error, timeout) degrades to `undefined` and the
- * card simply omits the line — never a hang, never a throw. `--no-remote`
- * skips it (it's network). The API key resolves through the same chain the rest
- * of the stack uses: $LINEAR_API_KEY → macOS Keychain (`resolveLinearApiKey`)
- * → the linear-cli config (`~/.linear-cli/config.json` `apiKey`).
- *
- * Paging is capped (10 × 250 issues) so a pathological project can't burn the
- * budget; a capped fetch reports `truncated: true` and the card renders the
- * total as a lower bound (`2500+ done`), never as the complete count.
- */
+/** Per-project Linear issue counts and next milestone for `agents projects status`, counted by
+ * state TYPE, not name. Best-effort: any failure returns undefined and the card omits the line.
+ * Paging is capped (10 x 250); a capped fetch sets `truncated` and the total is a lower bound. */
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -38,24 +15,15 @@ const PAGE_SIZE = 250;
 /** Hard page cap so a pathological project can't page forever within the budget. */
 const MAX_PAGES = 10;
 
-/**
- * The next checkpoint the project is working toward: the earliest-dated
- * milestone that still has unfinished issues. A percentage says how far along
- * the project is; this says what it is due to hit next.
- */
+/** The milestone the project is working toward: earliest-dated one with unfinished issues. */
 export interface LinearMilestone {
   name: string;
   /** `YYYY-MM-DD` as Linear stores it. Absent when the milestone has no date. */
   targetDate?: string;
   /** Issues in this milestone in a `completed`-type state. */
   done: number;
-  /**
-   * Issues assigned to this milestone. Legitimately `0` — a milestone can be
-   * declared with a date long before any issue is filed under it (that is the
-   * state of every milestone in this repo's own Linear project), and such a
-   * milestone is still the next checkpoint. The card omits the fraction rather
-   * than printing a meaningless `0/0`.
-   */
+  /** Issues assigned to this milestone. Legitimately 0 (milestones can be declared before any issue
+   * is filed); the card then omits the fraction rather than printing `0/0`. */
   total: number;
   /** True when Linear itself flags this as the project's next milestone. */
   isNext?: boolean;
@@ -66,12 +34,8 @@ export interface LinearMilestoneNode {
   id?: string;
   name?: string;
   targetDate?: string | null;
-  /**
-   * Linear's own marker. Observed values: `"next"` (it flags exactly one) and
-   * `"unstarted"`. Treated as an opaque string and only compared to `"next"` —
-   * the enum is not documented as closed, so switching exhaustively on it would
-   * break the day Linear adds a value.
-   */
+  /** Linear's own marker (`"next"` flags one, else `"unstarted"`). Opaque string compared only to
+   * `"next"`; the enum is not documented as closed. */
   status?: string | null;
 }
 
@@ -83,29 +47,16 @@ export interface LinearProjectCounts {
   total: number;
   /** Issues in a `started`-type state. */
   inProgress: number;
-  /**
-   * True when the page cap cut the fetch short — `total` is then a LOWER
-   * bound (rendered `2500+`), never presented as the complete count.
-   */
+  /** True when the page cap cut the fetch short; `total` is then a lower bound (rendered `2500+`). */
   truncated?: boolean;
-  /**
-   * True when this answer came from the cache after a failed or skipped fetch.
-   * The card labels it rather than dropping the line — a populated Linear row
-   * that silently vanishes on one timeout is the defect this replaces.
-   */
+  /** True when the answer came from cache after a failed or skipped fetch; the card labels it
+   * instead of dropping the line. */
   stale?: boolean;
-  /**
-   * Every milestone the project declares, in the order the card shows them:
-   * unfinished first by target date, then the finished ones. A project with
-   * three checkpoints has three; showing only the next one hides the shape of
-   * the plan, which is what `projects view` exists to show.
-   */
+  /** Every declared milestone in card order: unfinished by target date, then finished. `projects
+   * view` shows them all, since showing only the next hides the shape of the plan. */
   milestones?: LinearMilestone[];
-  /**
-   * The one the project is working toward — `milestones[0]` when there is an
-   * unfinished one. Kept as its own field because the compact card shows only
-   * this, while `view` shows the whole list.
-   */
+  /** The milestone being worked toward (`milestones[0]` when one is unfinished); the compact card
+   * shows only this, `view` shows the full list. */
   nextMilestone?: LinearMilestone;
 }
 
@@ -125,11 +76,8 @@ export interface LinearIssuesResponse {
   project?: { projectMilestones?: { nodes?: LinearMilestoneNode[] } } | null;
 }
 
-/**
- * Pure mapping: a Linear issues response → card counts, grouping by state
- * type. Defensive at the boundary — a missing `issues`/`nodes` yields zeros,
- * an issue with no state still counts toward `total`.
- */
+/** Pure mapping from a Linear issues response to card counts grouped by state type. A missing
+ * `issues`/`nodes` yields zeros; an issue with no state still counts toward `total`. */
 export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProjectCounts {
   const nodes = data.issues?.nodes ?? [];
   let done = 0;
@@ -148,20 +96,9 @@ export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProj
   return counts;
 }
 
-/**
- * Pick the milestone the project is working toward next.
- *
- * The **declared** list is authoritative for which milestones exist, their
- * names, and their dates; issues only supply progress. Deriving the list from
- * issues instead looks tempting (it costs no extra request) and is wrong: a
- * milestone with nothing filed under it yet would be invisible, and that is the
- * common case — every milestone in this repo's own Linear project has zero
- * issues assigned, so an issue-derived list showed nothing at all.
- *
- * Next = the earliest-dated milestone that is not finished. A milestone with no
- * issues counts as unfinished (it is upcoming work, not completed work). Undated
- * milestones sort last, ties break by declaration order, so the answer is stable.
- */
+/** Orders milestones. The declared list is authoritative for existence, names and dates; issues
+ * only give progress, else milestones with nothing filed would vanish. Next = earliest-dated
+ * unfinished (no issues counts as unfinished); undated sort last, ties by declaration order. */
 export function orderedMilestones(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
@@ -200,14 +137,8 @@ export function orderedMilestones(
   return all.map(({ order: _order, ...m }) => m);
 }
 
-/**
- * The milestone the project is working toward next.
- *
- * Linear flags one itself (`status: "next"`), and that is the answer the user
- * sees in Linear's own UI, so it wins when present. Only when nothing is
- * flagged does this fall back to "earliest-dated unfinished", which is a
- * reasonable guess but still a guess.
- */
+/** The milestone to work toward next. Linear's own `status: "next"` flag wins when present;
+ * otherwise falls back to the earliest-dated unfinished one, which is only a guess. */
 export function nextMilestone(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
@@ -231,13 +162,9 @@ function resolveApiKey(): string | null {
   }
 }
 
-/**
- * Fetch issue counts for one Linear project, paging `issues` filtered by
- * project id. One shared AbortController bounds the WHOLE paged fetch at ~8s;
- * any failure (no key, network, API error, abort) returns undefined so the
- * card just omits the line. `fetchPage` is injectable for tests — the
- * accumulator (cursor hand-off, cap) is the risky logic, not the HTTP.
- */
+/** Fetches issue counts for one Linear project, paging issues by project id. One AbortController
+ * bounds the whole fetch at ~8s; any failure returns undefined. `fetchPage` is injectable because
+ * the accumulator is the risky logic. */
 export async function fetchLinearProjectCounts(
   projectId: string,
   fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
@@ -261,10 +188,8 @@ export async function fetchLinearProjectCounts(
     let truncated = false;
     for (let page = 0; ; page++) {
       const data = await fetchPage(projectId, after, ctrl.signal);
-      // A failed fetch keeps the last good answer on screen, marked stale,
-      // instead of the line vanishing. One 8s timeout must not blank a chip
-      // that was populated a minute ago — the rule `mergeAuthHealthEntries`
-      // already encodes for account health.
+      // A failed fetch keeps the last good answer, marked stale, so one 8s timeout doesn't blank a
+      // populated chip (same rule as `mergeAuthHealthEntries`).
       if (!data) return cached ? { ...cached.value, stale: true } : undefined;
       if (page === 0) declared = data.project?.projectMilestones?.nodes ?? [];
       all.push(...(data.issues?.nodes ?? []));
@@ -301,11 +226,9 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey();
   if (!apiKey) return undefined;
-  // Proactive shared budget (PHNX-2310): every agent on this key spends from one
-  // hourly pool, so N concurrent drains can't collectively blow Linear's 2500/hr
-  // limit. When the pool is spent, skip the request — the accumulator serves the
-  // last good (stale) snapshot instead, exactly as it does on any other failure.
-  // This is the proactive complement to the reactive 429 backoff below.
+  // Shared proactive budget (PHNX-2310): all agents on this key spend one hourly pool so
+  // concurrent drains can't blow Linear's 2500/hr limit. When spent, skip and serve the stale
+  // snapshot.
   if (!reserveLinearRequest(apiKey)) return undefined;
   // The declared-milestone list rides along on the FIRST page only — it does
   // not paginate, and re-requesting it per page would spend up to MAX_PAGES

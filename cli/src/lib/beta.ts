@@ -1,12 +1,6 @@
-/**
- * User-opt-in beta feature flags.
- *
- * Preview features live in the git-trackable user repo (~/.agents/agents.yaml)
- * when present, and otherwise fall back to the local system state file
- * (~/.agents/.system/agents.yaml). This keeps opt-ins portable for users with a
- * personal agents repo without mixing them into unrelated version capability
- * checks.
- */
+/** User-opt-in beta feature flags. They live in the git-trackable user repo (~/.agents/agents.yaml)
+ * when present, else the local system state file (~/.agents/.system/agents.yaml), keeping opt-ins
+ * portable without mixing into version capability checks. */
 
 import * as path from 'path';
 import type { BetaFeatureName, Manifest, Meta } from './types.js';

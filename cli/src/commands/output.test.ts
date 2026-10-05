@@ -84,10 +84,9 @@ const BASE = ['--since', '2020-01-01', '--no-prs'];
 
 describe('agents insights output', () => {
   beforeAll(() => {
-    // token_count is deliberately >> outputTokens to model cache-read inflation.
-    // The split (input/cache-read/cache-write) and cost_usd_nocache are seeded so
-    // the rollup + --pricing no-cache scenario have real numbers (RUSH-2287).
-    // Per session: costUsdNoCache > costUsd (caching is a discount).
+    // token_count is deliberately much larger than outputTokens to model cache-read inflation; the
+    // input/cache-read/cache-write split and cost_usd_nocache are seeded so the rollup and
+    // `--pricing` no-cache case have real numbers (RUSH-2287).
     seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', 30, 1_000_000, 50_000_000, 'rush',
       { inputTokens: 2_000_000, cacheReadTokens: 46_000_000, cacheWriteTokens: 1_000_000, costUsdNoCache: 90 });
     seed('mid0002', 'claude', '2026-05-21T10:00:00.000Z', 10, 400_000, 12_000_000, 'agents-cli',
@@ -141,11 +140,9 @@ describe('agents insights output', () => {
   });
 
   it('honors flags that collide by name with the insights parent (--json/--since/--by)', async () => {
-    // --json, --since and --by all exist on the `insights` PARENT too, so
-    // commander binds them there at parse time; the leaf must read them via
-    // optsWithGlobals() or every one is silently dropped. Before the fix,
-    // `insights output --json` printed the human table (invalid JSON) and
-    // `--by project` fell back to the default agent grouping.
+    // --json, --since and --by also exist on the `insights` parent, so commander binds them there;
+    // the leaf must read them via optsWithGlobals() or they are dropped. Before the fix, `insights
+    // output --json` printed the human table and `--by project` fell back to agent grouping.
     const jsonOut = await runOutput(['--since', '2020-01-01', '--no-prs', '--json']);
     expect(() => JSON.parse(jsonOut)).not.toThrow();
     const byProject = JSON.parse(await runOutput(['--since', '2020-01-01', '--no-prs', '--by', 'project', '--json']));

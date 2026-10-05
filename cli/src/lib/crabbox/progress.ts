@@ -1,31 +1,19 @@
-/**
- * Progress routing for `agents run --lease`.
- *
- * The box-side bootstrap emits `LEASE_AGENT_MARKER` on its own line right before
- * `agents run`. Everything the crabbox run streams BEFORE that marker is setup
- * noise (sync bytes, node/agents install, `agents setup`) — shown as spinner
- * text and captured for a failure dump. Everything AFTER is the agent's own
- * output — printed through verbatim. The marker line itself is swallowed.
- */
+/** Progress routing for `agents run --lease`. Output before `LEASE_AGENT_MARKER` is setup noise
+ * (shown as spinner text, captured for a failure dump); output after is the agent's, printed
+ * verbatim. The marker line is swallowed. */
 
 /** Sentinel echoed on the box right before `agents run`. Distinctive + collision-proof. */
 export const LEASE_AGENT_MARKER = '___AGENTS_LEASE_AGENT_OUTPUT_b1f4c2___';
 
-/**
- * A structured setup step, parsed from a `___PHASE_<name>___` sentinel line the
- * bootstrap script echoes before each block (sync/install/runtime/creds/…). The
- * command layer renders these to drive a step-by-step progress UI; the lib never
- * prints (see `renderStepLine`).
- */
+/** A structured setup step parsed from a `___PHASE_<name>___` sentinel the bootstrap echoes before
+ * each block. The command layer renders these; the lib never prints (see `renderStepLine`). */
 export type LeaseStep = { name: string; detail?: string; elapsedMs?: number };
 
 const PHASE_PREFIX = '___PHASE_';
 const PHASE_SUFFIX = '___';
 
-/**
- * The sentinel line the bootstrap script echoes to announce phase `name`.
- * Kept distinct from `LEASE_AGENT_MARKER` (which does NOT start with `___PHASE_`).
- */
+/** The sentinel line announcing phase `name`. Distinct from `LEASE_AGENT_MARKER`, which does not
+ * start with `___PHASE_`. */
 export function leasePhaseSentinel(name: string): string {
   return `${PHASE_PREFIX}${name}${PHASE_SUFFIX}`;
 }
@@ -60,10 +48,8 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
-/**
- * Render one lease step as a single human line the command layer can print
- * (e.g. behind a spinner). Self-contained: the lib never writes to a stream.
- */
+/** Render one lease step as a single human line for the command layer to print. Self-contained: the
+ * lib never writes to a stream. */
 export function renderStepLine(step: LeaseStep): string {
   const label = STEP_LABELS[step.name] ?? step.name;
   const detail = step.detail ? ` — ${step.detail}` : '';
@@ -86,17 +72,9 @@ export interface Spinner {
   readonly active: boolean;
 }
 
-/**
- * A deliberately minimal, self-throttled spinner. Unlike `ora`, it does NOT hook
- * the stream's `write` to re-render on external output — it writes exactly one
- * short line per fixed tick and nowhere else, so it is structurally incapable of
- * a re-render feedback loop (the failure mode that made `ora` blow up when a
- * lease streamed output past a live spinner). On a non-TTY it prints each phase
- * label once and stays silent on `update`, so piped/CI output never floods.
- *
- * Only ever run ONE phase at a time, and never stream other output to the same
- * stream while a phase is active — stop it first.
- */
+/** A minimal self-throttled spinner. Unlike `ora` it does not hook the stream's `write`, writing
+ * one short line per fixed tick, so it cannot re-render-loop when a lease streams output past it.
+ * Non-TTY prints each label once. One phase at a time; stop it before writing other output. */
 export function createSpinner(opts: {
   stream?: { write(s: string): unknown; isTTY?: boolean };
   enabled?: boolean;
@@ -165,17 +143,9 @@ interface LeaseOutputRouter {
   steps(): LeaseStep[];
 }
 
-/**
- * Split the crabbox run stream at `LEASE_AGENT_MARKER`. `onSetupLine` fires for
- * each complete non-empty line before the marker; `onAgentChunk` fires with raw
- * text after it (streamed promptly, not line-buffered, so agent output is live).
- *
- * Setup lines matching a `___PHASE_<name>___` sentinel are swallowed (never shown
- * as setup noise) and surfaced through `onStep` instead — a structured step
- * stream the command layer can render via `renderStepLine`. When `now` is
- * provided, each step carries `elapsedMs` since the previous step (or router
- * start for the first); omit `now` for deterministic, timing-free output.
- */
+/** Split the crabbox run stream at `LEASE_AGENT_MARKER`: `onSetupLine` per complete line before it,
+ * `onAgentChunk` raw text after (not line-buffered, so agent output is live). `___PHASE_<name>___`
+ * lines are swallowed and surfaced via `onStep`. */
 export function createLeaseOutputRouter(cb: {
   onSetupLine: (line: string) => void;
   onAgentChunk: (chunk: string) => void;

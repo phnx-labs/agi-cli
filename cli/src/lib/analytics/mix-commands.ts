@@ -1,17 +1,6 @@
-/**
- * Counter / warehouse mix recipes under `agents insights`.
- *
- * These used to live as the top-level `agents trends` tree. That name was a
- * peer of `agents insights` with overlapping "analytics" meaning, so agents and
- * humans kept picking the wrong verb. The cheap counter path (sessions index +
- * usage.db) still exists — it is now `agents insights mix`. Latency stays on
- * `agents insights perf`; quota on `agents view`.
- *
- * One surface, not five: the board is `agents insights mix`, one section is
- * `agents insights mix <recipe>`, and `--list` names the recipe ids. The former
- * per-recipe shortcut commands (`harness-mix`, `model-mix`, …), the `recipes`
- * lister, and the `trends` alias were removed — `mix` already did all three.
- */
+/** Counter/warehouse mix recipes under `agents insights`. They were the top-level `agents trends`,
+ * whose name overlapped `insights` and got picked wrongly; the counter path is now `agents
+ * insights mix`. One surface: the board, `mix <recipe>`, and `--list`. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -79,15 +68,8 @@ function renderMixDashboard(days: number, asJson: boolean, bannerLabel = 'agents
   for (const section of dash.sections) printMixSection(section);
 }
 
-/**
- * Attach counter-mix subcommands to a parent (typically `insights`).
- *
- * Layout:
- *   <parent> mix                 multi-recipe board
- *   <parent> mix <recipe>        one baked recipe (harness-mix, model-mix, …)
- *   <parent> mix --list          list recipe ids
- *   <parent> query               raw usage.db rows
- */
+/** Attach counter-mix subcommands to a parent (typically `insights`): `mix` (board), `mix
+ * <recipe>`, `mix --list` (recipe ids), and `query` (raw usage.db rows). */
 export function registerMixCommands(parent: Command): void {
   const banner = 'agents insights mix';
 

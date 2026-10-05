@@ -1,18 +1,6 @@
-/**
- * Per-device harness inventory: for every installed (agent, version) on a host,
- * resolve its account identity, sign-in state, usage quota, and a single "ready"
- * verdict — the data behind `agents devices harnesses` and `agents devices
- * accounts`.
- *
- * The collector ({@link collectLocalHarnessInventory}) runs on ONE host (the
- * `--local` worker); the command fans it out over SSH exactly like
- * `agents devices ping`. Everything else here is pure so the table/grouping/ready
- * logic is unit-tested without a shell or a network.
- *
- * Quota is read cache-only by default (the daemon warms the usage cache every few
- * minutes), so a glance never blocks on a per-account network fetch; `--refresh`
- * opts into a live read.
- */
+/** Per-device harness inventory: for every installed (agent, version) on a host, resolve account
+ * identity, sign-in, usage quota, and one "ready" verdict. {@link collectLocalHarnessInventory}
+ * runs on one host; the command fans out over SSH. Quota is cache-only unless `--refresh`. */
 import chalk from 'chalk';
 
 import {
@@ -42,10 +30,8 @@ import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 
 /** An account's usage headroom rolled into one glanceable summary. */
 export interface QuotaSummary {
-  /**
-   * `available` / `rate_limited` from the live usage windows, or `null` when
-   * there is no snapshot at all (no data yet, or the agent has no usage source).
-   */
+  /** `available` / `rate_limited` from the live usage windows, or `null` when there is no snapshot
+   * at all (no data yet, or no usage source). */
   status: 'available' | 'rate_limited' | 'out_of_credits' | null;
   /** Canonical launch verdict. Kept separate from utilization for JSON clients. */
   verdict: 'available' | 'rate_limited' | 'out_of_credits' | 'unavailable';
@@ -107,24 +93,18 @@ interface AccountGroup {
   reason?: string;
 }
 
-/**
- * Roll one usage snapshot into a {@link QuotaSummary}. Mirrors the blocking-window
- * selection of {@link deriveUsageStatusFromSnapshot} (the model-specific
- * `sonnet_week` sub-limit is excluded so hitting it doesn't read as a throttled
- * account) and takes the highest utilization across those windows. Pure.
- */
+/** Roll one usage snapshot into a {@link QuotaSummary}, mirroring the blocking-window selection of
+ * {@link deriveUsageStatusFromSnapshot} (the model-specific `sonnet_week` sub-limit is excluded)
+ * and taking the highest utilization across those windows. Pure. */
 export function summarizeQuota(
   snapshot: UsageSnapshot | null | undefined,
   unavailableReason: string | null = null,
   accountStatus: AccountInfo['usageStatus'] = null,
 ): QuotaSummary {
   if (!snapshot || snapshot.windows.length === 0) {
-    // An active refusal marker (persisted out_of_credits, or an unexpired
-    // session_limit) blocks even when there are no live utilization windows —
-    // which is the normal state hours/days after a run, once cached windows
-    // expire. Check it BEFORE trusting the coarse account status, which is
-    // hardcoded 'available' for a signed-in Claude; otherwise a tokens-exhausted
-    // account reads ready:true here (RUSH-3018 finding, `agents devices harnesses`).
+    // An active refusal marker (persisted out_of_credits, or an unexpired session_limit) blocks
+    // even with no live windows. Check it before the coarse account status, which is hardcoded
+    // 'available' for a signed-in Claude, or an exhausted account reads ready:true (RUSH-3018).
     const marker = snapshot?.unavailable;
     let status = accountStatus;
     let reason = unavailableReason;
@@ -148,11 +128,9 @@ export function summarizeQuota(
       unavailableReason: status ? null : (reason ?? 'usage unavailable'),
     };
   }
-  // Percentage and status MUST read from the SAME live windows, or a window past
-  // its reset (usedPercent from the PREVIOUS period) makes the status `available`
-  // while the displayed percentage still shows a stale ~100% (#3705). Select the
-  // live set first, then narrow to blocking exactly as
-  // `deriveUsageStatusFromSnapshot` does.
+  // Percentage and status must read from the same live windows, or a window past its reset makes
+  // status `available` while a stale ~100% shows (#3705). Select the live set first, then narrow
+  // to blocking as `deriveUsageStatusFromSnapshot` does.
   const live = liveUsageWindows(snapshot);
   const blocking = live.filter((w) => w.key !== 'sonnet_week');
   const windows = blocking.length > 0 ? blocking : live;
@@ -162,10 +140,9 @@ export function summarizeQuota(
   let usedPercent = windows.length > 0
     ? Math.round(Math.max(...windows.map((w) => w.usedPercent)))
     : 0;
-  // Never show 100% for an account that isn't actually capped: a genuinely-100
-  // blocking window makes the status `rate_limited` (rendered "limited"), so a
-  // rounded 100 on an `available` account (e.g. 99.6% → 100) would read as maxed
-  // next to a "ready" verdict. Cap the display at 99 to keep the two consistent.
+  // Never show 100% for an account that is not capped: a genuinely-100 blocking window makes
+  // status `rate_limited`, so a rounded 100 (e.g. 99.6%) on an `available` account would read
+  // maxed beside "ready". Cap the display at 99.
   if (status !== 'rate_limited' && usedPercent >= 100) usedPercent = 99;
   return {
     status,
@@ -181,11 +158,8 @@ export function summarizeQuota(
   };
 }
 
-/**
- * Scope/permission failures on a worker mean the usage endpoint cannot be read.
- * They are not evidence of exhausted credits, even when stale account metadata
- * previously carried that coarse status.
- */
+/** Scope/permission failures on a worker mean the usage endpoint cannot be read; they are not
+ * evidence of exhausted credits, even if stale account metadata carried that status. */
 export function summarizeObservedQuota(
   snapshot: UsageSnapshot | null | undefined,
   error: string | null | undefined,
@@ -202,12 +176,9 @@ export function summarizeObservedQuota(
   };
 }
 
-/**
- * A scope/permission failure on the usage endpoint is not a credit claim.
- * Strip utilization and, only when auth still looks healthy, surface
- * `unverified` instead of `live`/`rate_limited`. A real auth failure
- * (expired/revoked/missing) stays the auth failure.
- */
+/** A scope/permission failure on the usage endpoint is not a credit claim. Strip utilization and,
+ * only when auth still looks healthy, surface `unverified` instead of `live`/`rate_limited`. A
+ * real auth failure (expired/revoked/missing) stays the auth failure. */
 export function applyUsageHonesty(
   verdict: AccountVerdict,
   usage: QuotaSummary | null,
@@ -236,11 +207,8 @@ export function applyUsageHonesty(
   return { verdict, usage };
 }
 
-/**
- * "Ready" = signed in AND not rate-limited. A missing quota snapshot does NOT
- * block readiness: the account is signed in and usable, we just have no live
- * utilization to show. Pure.
- */
+/** "Ready" = signed in and not rate-limited. A missing quota snapshot does not block readiness: the
+ * account is usable, we just have no utilization to show. Pure. */
 export function computeReady(
   signedIn: boolean,
   quota: QuotaSummary,
@@ -251,12 +219,9 @@ export function computeReady(
   return { ready: true };
 }
 
-/**
- * Enumerate every installed (agent, version) on THIS host, resolve account +
- * sign-in + quota + ready, and return the rows. Signed-out installs are kept
- * (they are the actionable ones), unlike the auth-health probe which drops
- * `unconfigured`. Quota is cache-only unless `refresh` is set.
- */
+/** Enumerate every installed (agent, version) on this host and resolve account, sign-in, quota, and
+ * ready. Signed-out installs are kept (they are actionable), unlike the auth-health probe, which
+ * drops `unconfigured`. Quota is cache-only unless `refresh` is set. */
 export async function collectLocalHarnessInventory(opts?: {
   agents?: readonly AgentId[];
   refresh?: boolean;
@@ -330,13 +295,9 @@ export async function collectLocalHarnessInventory(opts?: {
   });
 }
 
-/**
- * Collapse a host's rows into one {@link AccountGroup} per distinct account (the
- * signed-out installs fall into the `null` bucket). Because an account label maps
- * to a single provider identity, every install sharing it shares one quota, so
- * the group's quota is taken from the first row carrying real data (preferring a
- * `rate_limited` row so a throttle is never hidden). Pure.
- */
+/** Collapse a host's rows into one {@link AccountGroup} per distinct account (signed-out installs
+ * go in the `null` bucket). Installs sharing an account share one quota, taken from the first row
+ * with real data, preferring a `rate_limited` row so a throttle is never hidden. Pure. */
 export function groupByAccount(rows: HarnessRow[]): AccountGroup[] {
   const order: string[] = [];
   const groups = new Map<string, HarnessRow[]>();
@@ -385,11 +346,8 @@ export function formatQuota(quota: QuotaSummary): string {
   return `${quota.usedPercent}%${quota.stale ? '*' : ''}`;
 }
 
-// ---------------------------------------------------------------------------
-// Rendering. Each cell is padded as PLAIN text to a computed width, then colored
-// — coloring first would let chalk's escape codes throw off the alignment.
-// chalk auto-disables color off a TTY, so the strings tests assert on are plain.
-// ---------------------------------------------------------------------------
+// Rendering: pad each cell as plain text to a computed width before coloring, so chalk's escape
+// codes do not skew alignment; chalk disables color off a TTY, keeping test strings plain.
 
 /** Pad plain `text` to `width`, then apply `paint`. Alignment survives coloring. */
 function cell(text: string, width: number, paint: (s: string) => string): string {
@@ -430,10 +388,8 @@ function colWidth(values: string[], min: number): number {
 
 const QUOTA_W = 7;
 
-/**
- * Render the device × harness table: one block per device, one row per installed
- * (agent, version) with account / signed-in / quota / ready. Pure.
- */
+/** Render the device x harness table: one block per device, one row per installed (agent, version)
+ * with account, signed-in, quota, ready. Pure. */
 export function renderHarnessMatrix(results: HostHarnessResult[]): string[] {
   const lines: string[] = [chalk.bold('Fleet harnesses')];
   const allRows = results.flatMap((r) => r.rows);
@@ -455,10 +411,8 @@ export function renderHarnessMatrix(results: HostHarnessResult[]): string[] {
   return lines;
 }
 
-/**
- * Render the device × account table: one block per device, one row per distinct
- * account (installs sharing it collapsed), showing which harnesses use it. Pure.
- */
+/** Render the device x account table: one block per device, one row per distinct account (installs
+ * sharing it collapsed), showing which harnesses use it. Pure. */
 export function renderAccountsMatrix(results: HostHarnessResult[]): string[] {
   const lines: string[] = [chalk.bold('Fleet accounts')];
   const grouped = results.map((r) => ({ ...r, groups: groupByAccount(r.rows) }));
@@ -494,11 +448,8 @@ function fleetVerdictLabel(verdict: AccountVerdict): string {
   return verdict.toUpperCase();
 }
 
-/**
- * Account × device matrix used by `agents accounts list --fleet`.
- * Rows are logical accounts, not installations. Columns come from the
- * daemon-state observations already joined onto each account row.
- */
+/** Account x device matrix for `agents accounts list --fleet`. Rows are logical accounts, not
+ * installs; columns come from the daemon-state observations already joined onto each account row. */
 export function renderAccountFleetMatrix(
   rows: AccountFleetMatrixRow[],
   opts: { uncoveredDevices?: string[] } = {},

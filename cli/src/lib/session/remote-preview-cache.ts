@@ -30,17 +30,12 @@ function nextAttemptBackoffMs(consecutiveFailures: number): number {
   return Math.min(30_000 * 2 ** (capped - 1), 30 * 60_000);
 }
 
-/**
- * Overall interactive budget for a call that must actually dial the peer:
- * lease-wait + SSH attempt. A caller that provides its own `timeoutMs` still
- * has this outer ceiling applied, since the lease-wait time is additive to it.
- */
+/** Overall interactive budget for a call that must dial the peer (lease-wait plus SSH attempt).
+ * Applied even when the caller passes its own `timeoutMs`, since lease-wait is additive. */
 const REMOTE_PREVIEW_TOTAL_DEADLINE_MS = 10_000;
 const CACHE_BUSY_TIMEOUT_MS = 250;
-/** Default SSH attempt bound for this fast path specifically — tighter than
- * the general-purpose picker's `PEER_PREVIEW_TIMEOUT_MS` (15s), which is
- * tuned for an interactive "peek" the user is already waiting on, not a
- * budget-conscious automated caller. */
+/** Default SSH attempt bound for this path, tighter than the picker's `PEER_PREVIEW_TIMEOUT_MS`
+ * (15s), which is tuned for an interactive peek the user is waiting on. */
 const REMOTE_PREVIEW_SSH_TIMEOUT_MS = 8_000;
 
 export type RemotePreviewCacheState =
@@ -69,11 +64,9 @@ function cacheKey(device: string, sessionId: string): string {
 
 /** A changed caller cursor invalidates a good copy; failed attempts preserve both its content and cursor. */
 export interface RemotePreviewDeps {
-  /** Defaults to the real bounded SSH transport ({@link fetchPeerPreviewEnvelope}).
-   * Overridable so the cache/backoff/revision/lease STATE MACHINE can be tested
-   * against a real SQLite DB without a live peer — this repo has no fleet in
-   * CI, and the actual bounded-transport behavior (timeout, byte cap) is
-   * already covered where `fetchPeerPreviewEnvelope`/`sshCapture` are defined. */
+  /** Defaults to the real bounded SSH transport. Overridable so the
+   * cache/backoff/revision/lease state machine can be tested against real SQLite without a
+   * peer (CI has no fleet). */
   fetchEnvelope: typeof fetchPeerPreviewEnvelope;
 }
 
@@ -136,11 +129,9 @@ async function fetchOrServe(
     const revisionConfirmedUnchanged = revision !== undefined
       && cached.lastCallerRevision !== undefined
       && revision === cached.lastCallerRevision;
-    // A revision was supplied and there is no prior recorded caller revision,
-    // or it DIFFERS: skip the TTL bypass below (activity-driven invalidation)
-    // and fall through to a real attempt, still subject to backoff. No
-    // revision supplied at all: fall back to the plain TTL freshness window,
-    // unchanged from before `--revision` existed.
+    // A revision was supplied and either no prior caller revision is recorded or it differs: skip
+    // the TTL bypass (activity-driven invalidation) and attempt for real, still subject to
+    // backoff. With no revision supplied, plain TTL freshness applies.
     const age = now - cached.fetchedAt;
     const withinFreshWindow = revision === undefined && age >= 0 && age < REMOTE_PREVIEW_FRESH_MS;
     if (revisionConfirmedUnchanged || withinFreshWindow) {
@@ -154,11 +145,9 @@ async function fetchOrServe(
     return cached.ok ? staleFromCache(cached, device, reason) : noCacheOutcome(device, reason);
   }
 
-  // From here on we are actually about to dial the peer. This is the
-  // realistic duplication case (one CLI process per user action, e.g. the
-  // Menu worker shelling out a fresh `agents sessions preview` per click), so
-  // this takes a bounded, OS-visible lease keyed on (device, sessionId) —
-  // never an in-process-only guard, which cannot help two separate processes.
+  // About to dial the peer. One CLI process per user action (e.g. the Menu worker running a fresh
+  // `agents sessions preview` per click) means duplicates are cross-process, so take a bounded
+  // OS-visible lease keyed on (device, sessionId), not an in-process guard.
   const beforeFetchedAt = cached?.fetchedAt ?? 0;
   const timeoutMs = opts.timeoutMs ?? REMOTE_PREVIEW_SSH_TIMEOUT_MS;
 
@@ -167,10 +156,8 @@ async function fetchOrServe(
   const attempt = async (remainingMs: number): Promise<RemotePreviewOutcome> => {
     const afterLease = readCache();
     if (afterLease?.ok && afterLease.consecutiveFailures === 0 && afterLease.fetchedAt > beforeFetchedAt) {
-      // Another process completed a SUCCESSFUL fetch for this exact
-      // (device, id) while we waited for the lease — reuse it. True under
-      // --refresh too: refresh means "current data now", and data fetched a
-      // moment ago while we queued already IS current.
+      // Another process completed a successful fetch for this (device, id) while we waited for the
+      // lease: reuse it, also under --refresh, since data fetched a moment ago already is current.
       return freshFromCache(afterLease, device);
     }
     if (!opts.refresh && afterLease && now < afterLease.nextAttemptAt) {
@@ -182,11 +169,9 @@ async function fetchOrServe(
     }
     if (opts.refresh && afterLease
       && afterLease.consecutiveFailures > priorConsecutiveFailures) {
-      // Even under --refresh (which otherwise ignores backoff): another
-      // process's OWN refresh attempt just failed while we waited for the
-      // lease. Reuse that failure rather than immediately trying a third
-      // time — "explicit retry" still means at most one attempt per genuinely
-      // concurrent request, not one per caller.
+      // Even under --refresh (which ignores backoff): if another process's own refresh failed
+      // while we waited for the lease, reuse that failure rather than a third attempt. At most one
+      // attempt per concurrent request.
       const reason = afterLease.failureReason ?? 'peer unreachable';
       return afterLease.ok ? staleFromCache(afterLease, device, reason) : noCacheOutcome(device, reason);
     }
@@ -205,10 +190,9 @@ async function fetchOrServe(
 
     const validation = validateEnvelope(result.envelope, sessionId, device);
     if (!validation.ok) {
-      // A peer answered, but the payload doesn't check out (wrong session id,
-      // wrong schema version, malformed shape — a version-skewed or
-      // misbehaving peer). Never cache it under this id/device key, and never
-      // pass it through as if it were a genuine success.
+      // A peer answered but the payload is invalid (wrong session id, schema version or shape;
+      // version-skewed or misbehaving). Never cache it under this key or pass it through as
+      // success.
       recordFailure(validation.reason);
       if (cached?.ok) return staleFromCache(cached, device, validation.reason);
       return noCacheOutcome(device, validation.reason);
@@ -216,11 +200,9 @@ async function fetchOrServe(
 
     const envelopeBytes = Buffer.byteLength(JSON.stringify(result.envelope), 'utf8');
     if (envelopeBytes > REMOTE_PREVIEW_ENVELOPE_MAX_BYTES) {
-      // The live fetch genuinely succeeded, but the payload is too large to
-      // persist AND too large to hand back unbounded. Never silently pass an
-      // oversized blob through as "fresh" — degrade to the last-good stale
-      // copy (explicitly labeled) when one exists, else an explicit bounded
-      // error, and do not cache the oversized response either way.
+      // The live fetch succeeded but the payload is too large to persist or return unbounded.
+      // Never pass it through as fresh: degrade to the labeled last-good stale copy, else a
+      // bounded error, and never cache it.
       const reason = `peer response was ${envelopeBytes} bytes, over the ${REMOTE_PREVIEW_ENVELOPE_MAX_BYTES}-byte bounded-cache limit`;
       recordFailure(reason);
       if (cached?.ok) return staleFromCache(cached, device, reason);
@@ -239,10 +221,9 @@ async function fetchOrServe(
 
   try {
     return await withBoundedRemoteLease(device, sessionId, timeoutMs, deadlineAt, attempt, () => {
-    // Could not acquire the lease within the interactive budget (another
-    // process is holding it, presumably mid-fetch, longer than our deadline).
-    // Degrade to whatever the cache holds rather than piling on a second SSH
-    // attempt — bounded wait, no serial redial, no unbounded queueing.
+    // Lease not acquired within the interactive budget (another process is mid-fetch). Degrade to
+    // the cache instead of a second SSH attempt: bounded wait, no serial redial, no unbounded
+    // queueing.
     const current = cached;
     if (current?.ok) return staleFromCache(current, device, 'another request for this session was already in flight');
     return noCacheOutcome(device, 'another request for this session was already in flight and did not finish in time');
@@ -253,16 +234,9 @@ async function fetchOrServe(
   }
 }
 
-/**
- * Validate a peer's response before it is trusted at all: schema-version 1,
- * a `session` object present, its `id` an EXACT non-empty string match for
- * the id we asked for (never missing/null/numeric/mismatched), and — when the
- * peer names its own machine — that name must agree with the device we
- * actually dialed. Without these checks a version-skewed, misbehaving, or
- * misconfigured peer's response could be cached under the WRONG key (this
- * caller's requested sessionId) or attributed to the wrong owning device,
- * poisoning a later read for a completely different session/device pair.
- */
+/** Validate a peer's response before trusting it: schema-version 1, a `session` whose `id` exactly
+ * matches the request, and any named machine matching the device dialed. Else a skewed peer could
+ * poison another session/device key. */
 function validateEnvelope(envelope: unknown, sessionId: string, device: string): { ok: true } | { ok: false; reason: string } {
   const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
   const text = (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0;
@@ -378,10 +352,8 @@ async function withBoundedRemoteLease<T>(
   }
 }
 
-/** Best-effort removal of the lease marker file after release, so the
- * lock directory doesn't grow one file per (device, sessionId) pair this box
- * has ever previewed. Self-healing either way: `withBoundedRemoteLease`
- * recreates it on demand (`{ flag: 'wx' }` — a no-op if it's still there). */
+/** Best-effort removal of the lease marker file so the lock dir does not grow one file per
+ * (device, sessionId). Self-healing: `withBoundedRemoteLease` recreates it on demand. */
 async function cleanupLeaseFile(target: string): Promise<void> {
   try {
     await fs.unlink(target);

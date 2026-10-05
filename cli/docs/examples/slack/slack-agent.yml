@@ -1,12 +1,6 @@
-# Example Slack webhook handler.
-#
-# Copy to ~/.agents/webhooks/slack-agent.yml. A slash command (/agents AGI: …) or
-# an @mention of your Slack app reaches POST /hooks/slack, and this handler runs an
-# agent scoped to the project named in the message, on this machine. The agent then
-# replies to the same Slack conversation.
-#
-# See `agents webhooks --help` and docs/automation.md for the
-# one-time setup (secrets bundle, Funnel, the Slack app manifest in this directory).
+# Example Slack webhook handler: copy to ~/.agents/webhooks/slack-agent.yml. A slash command
+# (/agents AGI: ...) or @mention reaches POST /hooks/slack and this handler runs an agent scoped
+# to the project named in the message, on this machine, which replies in the same conversation.
 
 name: slack-agent
 source: slack

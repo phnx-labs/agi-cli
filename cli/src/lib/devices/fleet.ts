@@ -1,12 +1,6 @@
-/**
- * Fleet-wide device operations — pick online targets and run a command on each.
- *
- * Used by `agents fleet update` / `agents fleet run` (aliases of the same
- * subcommands under `agents devices`). Offline devices are skipped with a
- * reason so a single dead node never blocks the rest of the rollout. Per-device
- * throws (misconfigured auth, etc.) become `failed` rows — they never abort
- * the remaining devices.
- */
+/** Fleet-wide device operations: pick online targets and run a command on each, for `agents fleet
+ * update` / `agents fleet run`. Offline devices are skipped with a reason; per-device throws
+ * become `failed` rows and never abort the rest. */
 
 import { spawnSync } from 'child_process';
 import type { DeviceProfile, DeviceRegistry } from './registry.js';
@@ -47,14 +41,9 @@ export interface FanOutDeviceResult<T> {
   reason?: FleetSkipReason | string;
 }
 
-/**
- * Classify each registered device for a fleet operation.
- *
- * - Tailscale-offline → skip `offline`
- * - No address → skip `no-address`
- * - Everything else is a target (including this machine, reached over ssh when
- *   it has a registry address — same path as any other box).
- */
+/** Classify each registered device for a fleet operation: Tailscale-offline is skipped `offline`,
+ * no address is skipped `no-address`, everything else is a target, including this machine (reached
+ * over ssh via its registry address). */
 export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
   const names = Object.keys(reg).sort();
   return names.map((name) => {
@@ -71,39 +60,19 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
   });
 }
 
-/**
- * Remote fan-out targets for the fleet health/drift gates (`fleet status`,
- * `doctor --check --devices`): every planned device except this machine.
- * Offline / no-address devices are kept — those are genuine faults a gate should
- * surface — so their `skip` reason still flows through as an `unreachable` row.
- */
+/** Remote fan-out targets for the fleet health/drift checks (`fleet status`, `doctor --check
+ * --devices`): every planned device except this machine. Offline and no-address devices are kept
+ * as genuine faults; their `skip` reason flows through as an `unreachable` row. */
 export function remoteFleetTargets(planned: FleetTarget[], self: string): FleetTarget[] {
-  // Exclude self by name AND by full identity (tailscale dnsName, loopback): a
-  // device referenced by its dnsName slipped past the bare name check and got a
-  // remote version+doctor dial back to THIS box, which orphaned on timeout and
-  // piled up (RUSH-2114). `isSelfHost` matches every alias the box answers to.
+  // Exclude self by name and by full identity (dnsName, loopback): a device referenced by dnsName
+  // slipped past the name check and dialed back to this box, orphaning on timeout and piling up
+  // (RUSH-2114). `isSelfHost` matches every alias the box answers to.
   return planned.filter((t) => t.device.name !== self && !isSelfHost(t.device.name));
 }
 
-/**
- * Decide whether a fleet-health target should skip the expensive version+doctor
- * dials (`agents fleet status`). The cheap stats probe (~2.5s, same registry
- * address) has already tried this box one step earlier. If it came back
- * unreachable, dialing `agents --version` (15s) + `agents doctor --json` (30s)
- * would almost certainly fail the same way — just 45s slower — so one
- * genuinely-offline box would stall the whole matrix (the ~60s hang, RUSH-1964).
- *
- * We trust the stats verdict on the DEFAULT path, not only under
- * `--refresh`/`--live`: `probeDeviceStats` and the version/doctor dials share
- * one ssh path (`fleetDialTarget`), so reachability is not per-probe. The
- * verdict is either freshly probed this run or daemon-warmed (~3min) with the
- * live write-back from RUSH-1965, so a box that came online in the last few
- * minutes is the only false-negative window — it renders `unreachable` until the
- * next stats warm, which beats letting it hang the status glance for 45s.
- *
- * An existing skip (offline/no-address from {@link planFleetTargets})
- * always wins — those are classified before any probe.
- */
+/** Decide whether a fleet-health target skips the expensive version+doctor dials. The cheap stats
+ * probe (~2.5s) already tried this box; if unreachable, the 15s + 30s dials would fail the same
+ * way and stall the matrix (RUSH-1964). Trusted on the default path: one ssh path (RUSH-1965). */
 export function fleetHealthSkip(
   currentSkip: FleetSkipReason | string | undefined,
   stats: DeviceStats | undefined,
@@ -123,12 +92,9 @@ export function skipLabel(reason: FleetSkipReason): string {
   }
 }
 
-/**
- * Run `cmd` on one device via the same ssh path as `agents ssh <name> …`.
- * Captures stdout/stderr (not inherited) so the fleet table can summarize.
- * Throws from buildSshInvocation are returned as a non-zero result so a single
- * misconfigured device cannot abort the fleet loop.
- */
+/** Run `cmd` on one device via the same ssh path as `agents ssh <name>`, capturing stdout/stderr
+ * for the fleet table. Throws from buildSshInvocation return a non-zero result so one
+ * misconfigured device cannot abort the loop. */
 export function runOnDevice(
   device: DeviceProfile,
   cmd: string[],
@@ -156,18 +122,9 @@ export function runOnDevice(
   }
 }
 
-/**
- * Run `cmd` on THIS machine directly — no ssh. Used by {@link runFleet} for the
- * self target: a box frequently can't ssh to itself (no self-authorized key, as
- * `agents fleet update` hit trying to reach zion from zion) and doesn't need to —
- * `agents upgrade` etc. runs identically as a local process. Mirrors
- * {@link runOnDevice}'s return shape and never throws. The argv is space-joined
- * and evaluated by a shell — matching the POSIX-shell ssh path (so PATH-resolved
- * `agents`, quoting, and `;`/`&&` behave the same). It does NOT replicate the
- * powershell-device encoding runOnDevice uses (`connect.ts` base64 path): a
- * Windows self runs under the default OS shell (cmd.exe), which still resolves
- * `agents` on PATH for the only self commands that matter (`agents upgrade …`).
- */
+/** Run `cmd` on this machine directly, no ssh, for {@link runFleet}'s self target: a box often
+ * cannot ssh to itself (no self-authorized key). Same return shape as {@link runOnDevice}; never
+ * throws. Argv is space-joined and shell-evaluated like the POSIX ssh path. */
 export function runLocalCommand(
   cmd: string[],
   opts: { timeoutMs?: number } = {},
@@ -192,11 +149,8 @@ export function runLocalCommand(
   }
 }
 
-/**
- * Build `agents upgrade --yes` argv, optionally pinned to a version/dist-tag.
- * Rejects anything that is not a plain npm version/tag token so a version pin
- * cannot inject shell metacharacters into the remote command line.
- */
+/** Build `agents upgrade --yes` argv, optionally pinned to a version/dist-tag. Rejects anything but
+ * a plain npm version/tag token so a pin cannot inject shell metacharacters. */
 export function upgradeCommand(version?: string): string[] {
   if (version !== undefined && version !== '') {
     if (!FLEET_VERSION_RE.test(version)) {
@@ -210,11 +164,8 @@ export function upgradeCommand(version?: string): string[] {
 }
 
 interface RunFleetOptions {
-  /**
-   * Name of THIS machine. Its target runs the command **locally** (no ssh) — a
-   * box can't reliably ssh to itself and doesn't need to. Omit to ssh every
-   * target (the old behaviour). Callers pass `machineId()`.
-   */
+  /** Name of this machine. Its target runs the command locally (no ssh), since a box cannot
+   * reliably ssh to itself. Omit to ssh every target. Callers pass `machineId()`. */
   self?: string;
   /** Injectable ssh runner (tests). */
   runner?: typeof runOnDevice;
@@ -222,13 +173,9 @@ interface RunFleetOptions {
   localRunner?: typeof runLocalCommand;
 }
 
-/**
- * Execute a command across planned targets. Pure orchestration over
- * {@link runOnDevice} / {@link runLocalCommand}; testable by injecting either.
- * The `self` target runs locally so `agents fleet update` upgrades this machine
- * too instead of failing to ssh to itself. Per-device throws from a runner are
- * recorded as `failed` so one bad device never aborts the rest.
- */
+/** Execute a command across planned targets; pure orchestration over {@link runOnDevice} / {@link
+ * runLocalCommand}, injectable for tests. The `self` target runs locally so `agents fleet update`
+ * upgrades this machine too. A runner throw is recorded as `failed` and never aborts the rest. */
 export function runFleet(
   targets: FleetTarget[],
   cmd: string[],
@@ -271,18 +218,9 @@ export function runFleet(
 }
 
 interface FanOutDeviceOptions {
-  /**
-   * Per-device deadline in milliseconds. When set, any probe that does not
-   * settle within this window is abandoned via `Promise.race` against a
-   * rejection timer and recorded as a `failed` result with the message
-   * `'timed out'`. There is no AbortController — the underlying probe
-   * continues running in the background; cancellation of the in-flight work
-   * is the caller's responsibility. In practice `probeRemoteAuth` relies on
-   * `sshExecAsync`'s own 15 s timer to kill the ssh child independently.
-   * The per-device ssh timeout passed directly to {@link sshExecAsync} is
-   * the first line of defence; this acts as a hard backstop so one slow
-   * device can never stall the entire fan-out past its budget.
-   */
+  /** Per-device deadline in ms: a probe not settled in time is abandoned via `Promise.race` and
+   * recorded `failed` with `'timed out'`. No AbortController: the probe keeps running and
+   * cancelling it is the caller's job. A backstop so one slow device cannot stall the fan-out. */
   perDeviceTimeoutMs?: number;
 }
 

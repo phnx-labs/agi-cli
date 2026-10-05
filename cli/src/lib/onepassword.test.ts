@@ -1,11 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { itemToSecret, type OpItem } from './onepassword.js';
 
-/**
- * Real `op item get --format=json` payload shape for an API_CREDENTIAL item:
- * a CONCEALED credential field alongside a NOTES-purpose `notesPlain` field.
- * Verified against the live `npm-phnx-labs` item (RUSH-2348).
- */
+/** Real `op item get --format=json` payload shape for an API_CREDENTIAL item: a CONCEALED
+ * credential field plus a NOTES-purpose `notesPlain` field. Verified against the live
+ * `npm-phnx-labs` item (RUSH-2348). */
 function apiCredentialItem(overrides: Partial<OpItem> = {}): OpItem {
   return {
     id: 'abc123',

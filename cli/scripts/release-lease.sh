@@ -84,42 +84,25 @@ local_host() {
   fi
 }
 
-# The process whose death means this release is dead. release.sh exports its own
-# pid, so a lease survives the short-lived `renew` invocations that rotate it --
-# each of those is a fresh shell whose $$ is dead a second later, and recording
-# THAT would make every renewed lease look abandoned. Unset (a hand-run claim)
-# means no pid is recorded at all and liveness stays `unknown`: a missing export
-# must degrade to today's TTL behaviour, never to "instantly reclaimable".
-#
-# This pid decides LIVENESS ONLY, never ownership. Ownership stays the lease
-# token below, because a release spans several invocations (claim, then a resumed
-# run that finishes a merged PR) and a process-scoped owner would make a lease
-# undroppable by its own owner on the second invocation.
+# The process whose death means this release is dead; release.sh exports its pid so a lease
+# survives short-lived `renew` shells. Unset means liveness stays `unknown`, never instantly
+# reclaimable. The pid decides liveness only; ownership stays the lease token.
 holder_pid() { printf '%s' "${RELEASE_LEASE_HOLDER_PID:-}"; }
 
-# Describe the holder for a human reading a stuck lease: a real box and, when the
-# releaser is an agent, a real session. DIAGNOSTIC text only -- never matched to
-# decide anything. The pid segment appears only when a release process was
-# declared, so the string never points at a shell that was already gone when it
-# was written.
+# Describes the holder for a human reading a stuck lease. Diagnostic text only, never matched to
+# decide anything.
 holder_desc() {
   printf '%s%s%s' "$(local_host)" \
     "${RELEASE_LEASE_HOLDER_PID:+/pid-$RELEASE_LEASE_HOLDER_PID}" \
     "${AGENTS_SESSION_ID:+/session-$AGENTS_SESSION_ID}"
 }
 
-# Ownership token: the sha of the lease commit WE pushed. Whoever can name the
-# exact commit the remote ref points at is its owner -- that is what makes
-# `release` safe to run from a different process than `claim`, and what stops a
-# third agent from dropping a lease it never held.
+# Ownership token: the sha of the lease commit we pushed. Whoever can name the commit the remote
+# ref points at owns it, so `release` is safe from a different process than `claim`.
 token_path()   { printf '%s/release-lease.token' "$(git rev-parse --git-common-dir)"; }
-# Every sha this run has ever pushed for the CURRENT lease. `renew` rotates the
-# lease commit, and the rotation is not atomic with updating the token file: the
-# renewer pushes sha2, and only then writes it. A concurrent `release` reading
-# just the current token would see sha1, find sha2 on origin, conclude the lease
-# was reclaimed, and leave it alone -- orphaning our own lease until its TTL.
-# Checking membership in the history closes that window: any sha in here is one
-# WE authored, so it is ours to drop.
+# Every sha this run has pushed for the current lease. `renew` rotates the commit non-atomically
+# with the token file, so a concurrent `release` could orphan our own lease. Checking membership
+# in this history closes that window.
 history_path() { printf '%s/release-lease.history' "$(git rev-parse --git-common-dir)"; }
 read_token()   { cat "$(token_path)" 2>/dev/null || true; }
 write_token()  { printf '%s\n' "$1" >> "$(history_path)"; printf '%s\n' "$1" > "$(token_path)"; }
@@ -154,16 +137,9 @@ lease_age_min() { # $1 = sha
   echo $(( (now - when) / 60 ))
 }
 
-# ── Holder liveness ─────────────────────────────────────────────────────────
-# `ps -p` rather than `kill -0`: kill(2) also fails with EPERM for a live process
-# owned by another user, and reading that as "dead" would steal a lease from a
-# running release. `ps -p <pid> -o pid=` answers existence regardless of owner.
-#
-# Presence in the table is not life, though: a SIGKILLed release whose parent has
-# not reaped it stays listed as a zombie, and that is precisely the case this
-# whole feature is about. A zombie has already exited -- only its exit status is
-# parked -- so it counts as dead. An unreadable state degrades to alive, keeping
-# every uncertainty on the never-steal side.
+# Holder liveness uses `ps -p` rather than `kill -0`, which fails with EPERM for a live process
+# owned by another user. A zombie (SIGKILLed, unreaped) counts as dead; an unreadable state
+# degrades to alive, keeping uncertainty on the never-steal side.
 pid_alive() { # $1 = pid
   ps -p "$1" -o pid= >/dev/null 2>&1 || return 1
   local state
@@ -227,10 +203,8 @@ describe_lease() { # $1 = sha
 make_lease_commit() { # $1 = version
   local tree msg pid claim_id
   tree="$(git hash-object -t tree /dev/null)"
-  # Make competing claims distinct even when the fleet exports one shared Git
-  # identity and two hand-run claims land in the same second. If both commits
-  # are byte-identical, Git reports the loser's push as "up to date" before the
-  # expected-absent lease can reject it, so both callers believe they acquired.
+  # Make competing claims distinct even when the fleet shares one Git identity: byte-identical
+  # commits make the loser's push report "up to date", so both callers believe they acquired.
   claim_id="$(local_host)-$$-$RANDOM"
   msg="release lease
 
@@ -238,10 +212,9 @@ version: $1
 claim-id: $claim_id
 holder: $(holder_desc)
 host: $(local_host)"
-  # `pid` + `started` are what make a dead holder detectable. They are written
-  # only when the caller declared the release process, and `started` only when
-  # ps can read it -- a half-recorded holder must degrade to `unknown`, not to a
-  # guess. `renew` rebuilds this message, so both stay current across rotations.
+  # `pid` and `started` make a dead holder detectable and are written only when the release
+  # process was declared; a half-recorded holder degrades to `unknown`. `renew` rebuilds this
+  # message, so both stay current.
   pid="$(holder_pid)"
   if [[ -n "$pid" ]]; then
     msg="$msg
@@ -354,10 +327,8 @@ cmd_renew() {
   return 1
 }
 
-# Fail CLOSED: any error -- no token, no ref, an unreachable origin -- is "we do
-# not demonstrably hold it", never "probably fine". A verify that fails open is
-# worse than no verify, because the caller would proceed into merge/tag/publish
-# believing it had been checked.
+# Fail closed: any error (no token, no ref, unreachable origin) means we do not demonstrably hold
+# the lease. A verify that fails open is worse than none.
 cmd_verify() {
   local mine held
   mine="$(read_token)"
@@ -408,12 +379,9 @@ cmd_release() {
   gray "release lease dropped"
 }
 
-# Drop a lease nobody is holding, WITHOUT starting a release. This is the answer
-# to the shape that wedged the pipeline: an external kill (SIGKILL, a severed
-# ssh, a rebooted box) leaves the lease on origin, `status` reads `held`, and
-# there is no process left to finish the release or run the drop. `release`
-# cannot help -- it only drops a lease THIS checkout claimed. Same predicate as
-# `claim`, so this can never take a lease off a live holder either.
+# Drop a lease nobody holds without starting a release: an external kill leaves it on origin and
+# `release` only drops a lease this checkout claimed. Same predicate as `claim`, so it can never
+# take a lease from a live holder.
 cmd_clear() {
   local ttl="$DEFAULT_TTL_MIN"
   while [[ $# -gt 0 ]]; do

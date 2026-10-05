@@ -1,11 +1,6 @@
-/**
- * Scheduled job (routine) configuration and run history management.
- *
- * Routines are YAML files in ~/.agents/routines/ that define recurring or
- * one-shot agent tasks. This module handles CRUD operations on job configs,
- * run metadata persistence, prompt variable expansion, and one-shot "at" time
- * scheduling.
- */
+/** Scheduled job (routine) configuration and run history: routines are YAML files in
+ * ~/.agents/routines/ defining recurring or one-shot agent tasks. CRUD on configs, run metadata
+ * persistence, prompt variable expansion, and one-shot "at" scheduling. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -179,24 +174,8 @@ interface RoutineStatusRow {
   inFlight: { runId: string; pid: number | null; startedAt: string; triggerKind: RunMeta['triggerKind'] | null } | null;
 }
 
-/**
- * The per-routine rows behind `agents routines status --json`. Distinct from
- * {@link buildRoutineListJson}: this is the scheduler-truth surface the daemon
- * owns — per routine it names the single owner device, the last fire's outcome
- * and error, and any in-flight spawn — the fields an operator (or the menu bar /
- * ext) needs to answer "did this routine fire, and is one running right now?"
- * that the definition-shaped `list --json` does not carry (PHNX-3215).
- *
- * `monitorRunningJobs()` runs first to reap runs whose process has exited, then
- * `inFlight` is gated on {@link isRunGenuinelyInFlight} — NOT on `status ===
- * 'running'` alone, because a provisional pre-spawn claim is `running` with a
- * null pid that the reaper does not touch (RUSH-2640).
- *
- * The routine set is the schedulable one ({@link listJobs}, the same
- * `getDaemonStatus`/`routines status` counts), not the display set
- * {@link buildRoutineListJson} uses — a scheduler-status surface names what the
- * daemon can actually fire, not discoverable-but-unmaterialised project routines.
- */
+/** Rows behind `agents routines status --json`: the scheduler-truth surface (owner device, last
+ * fire outcome and error, in-flight spawn), unlike definition-shaped `list --json` (PHNX-3215). */
 export function buildRoutineStatusRows(): RoutineStatusRow[] {
   try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
   const jobs = listJobs();
@@ -250,19 +229,14 @@ export interface JobAllowConfig {
   dirs?: string[];
 }
 
-/**
- * Where a routine's job body executes when the daemon fires it.
- * Distinct from `devices` (which daemon may *fire*) and from the CLI `--device`
- * remote-management passthrough (manage routines *on* another machine).
- */
+/** Where a routine's job body executes when the daemon fires it. Distinct from `devices` (which
+ * daemon may fire) and the CLI `--device` passthrough (manage routines on another machine). */
 export type HostStrategy = 'local' | 'host' | 'fleet' | 'cloud';
 
 export const HOST_STRATEGIES: readonly HostStrategy[] = ['local', 'host', 'fleet', 'cloud'] as const;
 
-/**
- * Provenance for a routine that was materialised from a project
- * (`.agents/routines/*.yml` synced into the user layer after opt-in).
- */
+/** Provenance for a routine materialised from a project (`.agents/routines/*.yml` synced into the
+ * user layer after opt-in). */
 export interface JobSource {
   /** Always `project` today; reserved for future layers. */
   kind: 'project';
@@ -299,11 +273,8 @@ const LINEAR_TRIGGER_EVENTS: readonly LinearTriggerEvent[] = [
   'Cycle',
 ];
 
-/**
- * Map a user-facing `--on` alias to a canonical GitHub trigger event.
- * Accepts the canonical names plus friendly shortcuts (e.g. `pr`, `pr_opened`
- * → `pull_request`, `comment` → `issue_comment`). Returns null when unknown.
- */
+/** Map a user-facing `--on` alias to a canonical GitHub trigger event (canonical names plus
+ * shortcuts like `pr`, `comment`); null when unknown. */
 export function normalizeTriggerEvent(input: string): GithubTriggerEvent | null {
   const key = input.trim().toLowerCase();
   const aliases: Record<string, GithubTriggerEvent> = {
@@ -320,12 +291,9 @@ export function normalizeTriggerEvent(input: string): GithubTriggerEvent | null 
   return aliases[key] ?? null;
 }
 
-/**
- * Event-based fire condition for a routine — an alternative (or complement) to
- * `schedule`. Incoming webhooks whose source-specific filters match fire the job
- * through the same dispatch path a cron fire uses. See
- * `src/lib/triggers/webhook.ts`.
- */
+/** Event-based fire condition for a routine, an alternative or complement to `schedule`: webhooks
+ * whose filters match fire the job through the same dispatch path as a cron fire. See
+ * `src/lib/triggers/webhook.ts`. */
 export interface GithubJobTrigger {
   type: 'github_event';
   event: GithubTriggerEvent;
@@ -358,34 +326,22 @@ export interface LinearJobTrigger {
 
 export type JobTrigger = GithubJobTrigger | LinearJobTrigger;
 
-/**
- * Full configuration for a routine (persisted as YAML).
- *
- * A job fires on a `schedule` (cron), on a `trigger` (event/webhook), or both.
- * `schedule` remains a first-class field; trigger-only jobs omit it and are
- * skipped by the cron scheduler (they fire only via the webhook receiver).
- */
+/** Full routine configuration (persisted as YAML). A job fires on a `schedule` (cron), a `trigger`
+ * (event/webhook), or both; trigger-only jobs omit `schedule` and the cron scheduler skips them. */
 export interface JobConfig {
   name: string;
   /** Cron expression. Optional when `trigger` is set (event-only routine). */
   schedule?: string;
   /** Event/webhook fire condition. Optional when `schedule` is set. */
   trigger?: JobTrigger;
-  /**
-   * Which agent runs the routine — a native harness id, or the name of a
-   * custom harness (`agents harness list`), which the runner delegates to
-   * `agents run <name>` the same way workflow jobs are. Optional — omitted
-   * for `workflow`/`command` routines. Exactly one of agent/workflow/command
-   * must be set.
-   */
+  /** Which agent runs the routine: a native harness id or a custom harness name (delegated to
+   * `agents run <name>` like workflows). Omitted for `workflow`/`command` routines; exactly one of
+   * agent/workflow/command must be set. */
   agent?: AgentId | (string & {});
   workflow?: string;
-  /**
-   * A plain shell command run directly instead of an agent/workflow — no LLM,
-   * no auth, no rotation, no tokens, no sandbox overlay. For deterministic
-   * housekeeping routines (version-check, `npm i -g`, `git pull`, notify).
-   * Mutually exclusive with `agent` and `workflow`.
-   */
+  /** A plain shell command run directly instead of an agent/workflow: no LLM, auth, rotation, tokens
+   * or sandbox overlay. For deterministic housekeeping (version-check, `git pull`, notify).
+   * Exclusive with `agent` and `workflow`. */
   command?: string;
   // 'full' is accepted as a permanent silent alias for 'skip' (see normalizeMode).
   mode: 'plan' | 'edit' | 'auto' | 'skip' | 'full';
@@ -395,215 +351,90 @@ export interface JobConfig {
   prompt: string;
   timezone?: string;
   repo?: string;
-  /**
-   * Singular execution anchor: the named project (`agents projects`) whose base
-   * directory the routine's run lands in. Optional. Metadata-only `projects[]`
-   * (below) is NEVER used for execution — this field is. Resolution happens on
-   * the execution TARGET (`resolveRoutineExecutionContext`, routine-context.ts),
-   * never from the daemon's own cwd: a project with a usable `defaultPath`/`root`
-   * gives the base directory; a rootless Linear-imported project gives no base,
-   * so a bare relative `cwd` then anchors at the target user's `$HOME`.
-   *
-   * CLI flag is `--project-anchor` (not `--project`, which is the repeatable
-   * grouping-metadata flag that writes `projects[]`). The YAML key is the shorter
-   * singular `project` because it is unambiguous there.
-   */
+  /** Singular execution anchor: the named project whose base dir the run lands in, resolved on the
+   * execution TARGET (routine-context.ts), never the daemon's cwd. Metadata-only `projects[]` is
+   * never used for execution. CLI flag `--project-anchor` (`--project` writes `projects[]`). */
   project?: string;
-  /**
-   * Portable execution directory for the routine's run. Optional. A relative
-   * value resolves under the `project` base when that base is usable, otherwise
-   * under the execution target's `$HOME` (so a Linear-imported rootless project
-   * can still name `cwd: src/github.com/acme/app`). A `~/`-anchored value is the
-   * target's home-relative path; an absolute path under the target home is
-   * normalized to the portable `~/…` form on save. An absolute path outside the
-   * home is only allowed for local-pinned routines — host/fleet/cloud placement
-   * pauses it as non-portable. Supersedes the legacy `remoteCwd`, which the
-   * one-shot migration folds into this field.
-   */
+  /** Portable execution dir. A relative value resolves under the `project` base if usable, else the
+   * target's `$HOME`; `~/` is target-home-relative; an absolute path under home is normalized to
+   * `~/...` on save. Absolute outside home is local-pinned only (else paused non-portable). */
   cwd?: string;
-  /**
-   * Fleet allowlist — restrict this routine to specific devices. When omitted
-   * or empty, the routine is unrestricted and fires on every device running the
-   * scheduler. When set, only devices whose `machineId()` matches any entry
-   * (via `normalizeHost`) schedule, fire, catch up, or count this job as
-   * overdue; everywhere else it is inert and `run` refuses with a pointer.
-   */
+  /** Fleet allowlist restricting this routine to specific devices. Omitted or empty: fires on every
+   * scheduling device. Set: only devices whose `machineId()` matches (via `normalizeHost`)
+   * schedule, fire, catch up or count it overdue; elsewhere it is inert and `run` refuses. */
   devices?: string[];
-  /**
-   * Whether a fire this device missed (daemon down, laptop asleep, wedged event
-   * loop) is run late. Defaults to true: croner only schedules forward from
-   * "now", so without catch-up a missed fire is simply lost and the routine
-   * silently does not run.
-   *
-   * Set `catchup: false` for a routine whose value is tied to its clock — a
-   * 9am standup brief is worthless at 3pm. An opted-out routine still records
-   * the miss (a `missed` run), it just is not re-run.
-   */
+  /** Whether a fire this device missed (daemon down, asleep) runs late. Default true: croner
+   * schedules only forward, so a miss would silently vanish. `catchup: false` suits clock-bound
+   * routines (a 9am brief is worthless at 3pm); the miss is still recorded as a `missed` run. */
   catchup?: boolean;
-  /**
-   * When this routine came into existence, ISO 8601. Stamped once by
-   * {@link writeJob}, like `actor`.
-   *
-   * Overdue detection needs it: `detectOverdueJobs` walks back a week for the
-   * most recent expected fire, so without a floor a brand-new routine is
-   * "overdue" for occurrences that happened before it was written. Harmless
-   * when catch-up was a manual command; with auto-catchup it would run every
-   * newly created routine once, immediately.
-   */
+  /** ISO 8601 creation time, stamped once by {@link writeJob}. Overdue detection needs it as a
+   * floor: `detectOverdueJobs` walks back a week, so a new routine would be "overdue" for fires
+   * before it existed, and auto-catchup would run it immediately. */
   createdAt?: string;
-  /**
-   * Environment variables injected into the spawned run, on top of the sandbox
-   * overlay's own. Merged by `buildSpawnEnv`, so it applies to both the
-   * foreground and detached execution paths.
-   */
+  /** Environment variables injected into the spawned run on top of the sandbox overlay's own; merged
+   * by `buildSpawnEnv`, so it covers both foreground and detached execution. */
   env?: Record<string, string>;
-  /**
-   * Execution placement — run the job body on this machine over SSH (a
-   * registered host, device, capability tag, or user@host) instead of locally.
-   * Distinct from `devices`: `devices` says which daemon may FIRE the job,
-   * `host` says where the dispatched run EXECUTES. CLI flag: `--run-on`
-   * (`--device` on routines commands already means "manage routines on that
-   * machine" via the remote passthrough).
-   *
-   * When `hostStrategy` is set, it owns placement semantics; `host` is then
-   * only required for `hostStrategy: host` (or when strategy is inferred from
-   * a bare `host:` field for back-compat).
-   */
+  /** Execution placement: run the job body over SSH on this machine (registered host, device,
+   * capability tag or user@host). Distinct from `devices` (which daemon FIRES). CLI flag `--run-on`
+   * (`--device` means managing routines on that machine). Required only for `hostStrategy. */
   host?: string;
-  /**
-   * Where the job body should run when the daemon fires it.
-   * - `local`  — on the firing machine (default / current behavior)
-   * - `host`   — on the named `host` over SSH (maps to `--run-on`)
-   * - `fleet`  — pick one online registered device per run (no cross-device
-   *              double-fire; the firing pin stays on `devices`)
-   * - `cloud`  — dispatch via the agent's native cloud provider
-   *
-   * CLI flag: `--placement` (not `--device`, which is the remote-management
-   * passthrough). Omitted strategy falls back to `host` when `host:` is set,
-   * otherwise `local`.
-   */
+  /** Where the job body runs: `local` (firing machine, default), `host` (named host over SSH),
+   * `fleet` (one online device per run; firing pin stays on `devices`), `cloud` (the agent's native
+   * cloud provider). CLI flag `--placement`. Omitted: `host` if `host:` is set, else `local`. */
   hostStrategy?: HostStrategy;
   /** Working directory on the host for `host:`-placed runs. */
   remoteCwd?: string;
-  /**
-   * Provenance for routines materialised from a project
-   * (`<project>/.agents/routines/*.yml` → user-layer copy after opt-in).
-   * Absent for hand-authored user/system routines.
-   */
+  /** Provenance for routines materialised from a project (user-layer copy after opt-in); absent for
+   * hand-authored user/system routines. */
   source?: JobSource;
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
   config?: Record<string, unknown>;
   version?: string;
-  /**
-   * Explicit per-routine version/account selection strategy — the same
-   * vocabulary as `agents run --strategy` (RUN_STRATEGIES). Overrides
-   * `run.<agent>.strategy` from the FIRING device's own agents.yaml
-   * (getConfiguredRunStrategy) so a routine's selection policy travels with the
-   * definition instead of depending on whichever box happens to fire it.
-   * Conflicts with `version:` (an exact pin leaves nothing to select) —
-   * validateJob rejects the pair.
-   */
+  /** Per-routine version/account selection strategy, same vocabulary as `agents run --strategy`.
+   * Overrides the firing device's `run.<agent>.strategy` so the policy travels with the definition.
+   * Conflicts with `version:` (a pin leaves nothing to select); validateJob rejects both. */
   strategy?: RunStrategy;
-  /**
-   * Pin this routine to a signed-in account by identity (its login email, or its
-   * account key) instead of rotating. At launch it resolves to whichever
-   * installed version currently holds that account and runs pinned — no
-   * `balanced` rotation, no usage-read refresh, no failover onto other accounts.
-   *
-   * This is the durable way to keep concurrent unattended routines off a *shared*
-   * Claude OAuth credential: the refresh token is single-use and rotates
-   * server-side on every refresh, so two routines running the same account
-   * concurrently (on one box or across the fleet) mutually revoke each other —
-   * the `401 OAuth access token has been revoked` storm (RUSH-1957). Give each
-   * routine (or each device's routines) a distinct account and no run rotates a
-   * credential out from under another.
-   *
-   * Prefer this over `version:`, which pins a version *number* that is GC'd on
-   * the next agent upgrade — when the pinned version disappears the routine
-   * silently falls back to `balanced` and the stampede returns.
-   */
+  /** Pin this routine to a signed-in account by identity (email or key) instead of rotating; at
+   * launch it resolves to the version holding that account. Distinct accounts keep concurrent
+   * routines off a shared single-use OAuth refresh token (RUSH-1957). Prefer over `version:`. */
   account?: string;
   runOnce?: boolean;
   // RFC3339 timestamp; routine auto-disables at the next fire on/after this time.
   endAt?: string;
-  /**
-   * When set, the job resumes this existing agent session id at fire time
-   * (`agents run <agent> --resume <id>`) instead of starting a fresh conversation,
-   * so the actual session reopens with full context and `prompt` becomes its next
-   * turn. Powers self-scheduled wake-ups (e.g. /hibernate). claude/codex only.
-   */
+  /** When set, the job resumes this agent session id (`agents run <agent> --resume <id>`) instead of
+   * a fresh conversation, with `prompt` as the next turn. Powers self-scheduled wake-ups (e.g.
+   * /hibernate). claude/codex only. */
   resume?: string;
   /** When set, executeJob runs this job through the loop driver instead of once. */
   loop?: LoopConfig;
-  /**
-   * Actor id of whoever CREATED this routine (`resolveActor().id`, stamped by
-   * `writeJob` at creation and preserved across edits). Propagated into each
-   * fired run's env and RunMeta so an unattended cron traces back to the person
-   * who scheduled it, not the `UNRESOLVED@<host>` a live resolve would give.
-   * RUSH-2020.
-   */
+  /** Actor id of whoever CREATED this routine (`resolveActor().id`, stamped by `writeJob`, kept
+   * across edits), propagated into each run's env and RunMeta so an unattended cron traces to its
+   * scheduler, not `UNRESOLVED@<host>` (RUSH-2020). */
   actor?: string;
-  /**
-   * Named projects this routine belongs to. Metadata-only: organises the
-   * routine under a project group in `agents routines list` and the menu bar;
-   * has no effect on scheduling or execution.
-   *
-   * Special values:
-   * - `["*"]` — routine applies to all defined projects (the "All projects" group).
-   * - A single name — routine belongs to that specific project.
-   * - Multiple names — routine spans several projects ("Cross-project" group).
-   * - Absent/empty — routine belongs to no project ("Operations" group).
-   */
+  /** Named projects this routine belongs to; metadata only (grouping in `agents routines list` and
+   * the menu bar), no effect on scheduling. `["*"]` is all projects; one name is that project;
+   * several is "Cross-project"; absent is "Operations". */
   projects?: string[];
-  /**
-   * Set only by `lib/monitors/dispatch.ts` on the one-off job it synthesizes for
-   * a monitor's `run` action. Such a job is NOT a routine: it has no definition
-   * file, `agents routines` never lists it, and its name can therefore never
-   * appear in this device's routine activation manifest
-   * (`~/.agents/devices/<machine>/agents.yaml` → `routines:`). Gating it on that
-   * manifest refused every monitor action fleet-wide with `wrong_owner` and an
-   * empty allowlist (RUSH-2681), so {@link jobRunsOnThisDevice} skips the
-   * manifest for it. Exactly-once ownership is already resolved BEFORE dispatch
-   * by the monitor's own `device:` pin (`monitorRunsOnThisDevice`,
-   * `lib/monitors/config.ts`) — re-gating here was double-gating on the wrong
-   * key.
-   *
-   * Deliberately narrow: a monitor's or webhook handler's `routine` action fires a
-   * REAL routine, which keeps its activation gate, so a routine defined but not
-   * activated on this device is still refused.
-   *
-   * Runtime-only, enforced at both ends of the schema boundary: `writeJob`
-   * strips it, and `readJobFileResult` refuses a definition that carries it
-   * (a hand-authored one would otherwise fire on every box regardless of
-   * activation, since the daemon's load path never calls `validateJob`).
-   */
+  /** Set only by `lib/monitors/dispatch.ts` on the one-off job synthesized for a monitor `run`;
+   * it is never in the activation manifest, so gating on that refused every monitor action
+   * (RUSH-2681). Runtime-only: writeJob strips it; readJobFileResult refuses a file with it. */
   dispatchedBy?: 'monitor' | 'webhook';
 }
 
-/**
- * Canonical form of a routine's `projects` field: drop non-string and empty
- * entries and deduplicate while preserving first-seen order. This is the single
- * source of truth for project-name normalization, applied at the schema
- * boundary (`writeJob` before persistence) and at grouping (`computeProjectGroupKind`)
- * so a hand-authored YAML with duplicates (`projects: [myapp, myapp]`) is
- * treated identically to the canonical single-entry form everywhere.
- *
- * Returns `undefined` when nothing survives, so callers can omit the field.
- */
+/** Canonical form of `projects`: drop non-string and empty entries, dedupe in first-seen order. The
+ * single source of truth for normalization, applied at `writeJob` and grouping so duplicates in
+ * hand-written YAML behave like the single entry. Undefined when nothing survives. */
 export function normalizeProjects(projects: string[] | undefined): string[] | undefined {
   if (!Array.isArray(projects) || projects.length === 0) return undefined;
   const out = [...new Set(projects.filter((p): p is string => typeof p === 'string' && p !== ''))];
   return out.length === 0 ? undefined : out;
 }
 
-/**
- * A routine's project bucket, discriminated by `kind` so buckets are never keyed
- * on their human display label. A named project called literally "Operations" or
- * "Cross-project" is `{ kind: 'named', name }` and can never collide with the
- * `operations` / `cross` special buckets that happen to share those titles.
- */
+/** A routine's project bucket, discriminated by `kind` so buckets never key on display labels: a
+ * project literally named "Operations" or "Cross-project" is `{ kind: 'named' }` and can't collide
+ * with the special buckets. */
 type ProjectGroup =
   | { kind: 'named'; name: string }
   | { kind: 'all' }
@@ -611,14 +442,9 @@ type ProjectGroup =
   | { kind: 'operations' }
   | { kind: 'unknown' };
 
-/**
- * Classify a routine's `projects` field into a discriminated {@link ProjectGroup}.
- * Duplicates are collapsed first ({@link normalizeProjects}), so `[myapp, myapp]`
- * is a single named project, not a "Cross-project" span.
- *
- * @param projects - The routine's projects array (may be undefined).
- * @param knownProjectNames - The set of currently defined project names (from `listProjectDefs`).
- */
+/** Classify a routine's `projects` into a discriminated {@link ProjectGroup}. Duplicates collapse
+ * first ({@link normalizeProjects}), so `[myapp, myapp]` is one named project. `knownProjectNames`
+ * is the set from `listProjectDefs`. */
 export function computeProjectGroupKind(
   projects: string[] | undefined,
   knownProjectNames: Set<string>,
@@ -643,12 +469,9 @@ export function projectGroupTitle(group: ProjectGroup): string {
   }
 }
 
-/**
- * Stable bucket key for a {@link ProjectGroup}. Named projects key on their name
- * under a `named:` prefix; specials key on their `kind` under a `special:` prefix.
- * The two namespaces can never collide, so a project named "Operations" gets its
- * own bucket separate from the no-project "Operations" special.
- */
+/** Stable bucket key for a {@link ProjectGroup}: `named:` prefix for projects, `special:` for
+ * specials. The namespaces can't collide, so a project named "Operations" differs from the
+ * no-project special. */
 export function projectGroupKey(group: ProjectGroup): string {
   return group.kind === 'named' ? `named:${group.name}` : `special:${group.kind}`;
 }
@@ -664,24 +487,9 @@ export function projectGroupOrder(group: ProjectGroup): number {
   }
 }
 
-/**
- * Compute the display group label for a routine's `projects` field.
- *
- * Kept as the label-returning form for the JSON `projectGroup` field and any
- * text consumer; grouping and ordering use the discriminated
- * {@link computeProjectGroupKind}/{@link projectGroupKey} instead so buckets are
- * never keyed on the label.
- *
- * @param projects - The routine's projects array (may be undefined).
- * @param knownProjectNames - The set of currently defined project names (from `listProjectDefs`).
- *
- * Returns one of:
- * - A specific project name — when `projects` has exactly one known name.
- * - `"All projects"` — when `projects` is `["*"]`.
- * - `"Cross-project"` — when `projects` has multiple distinct known entries.
- * - `"Operations"` — when `projects` is absent or empty.
- * - `"Unknown projects"` — when any entry is no longer a defined project (stale).
- */
+/** Display group label for `projects`, for JSON `projectGroup` and text consumers (grouping uses
+ * {@link computeProjectGroupKind}). One known name: that name; `["*"]`: "All projects"; several:
+ * "Cross-project"; none: "Operations"; any stale entry: "Unknown projects". */
 export function computeProjectGroup(
   projects: string[] | undefined,
   knownProjectNames: Set<string>,
@@ -705,14 +513,9 @@ function jobRoutineKind(config: Pick<JobConfig, 'agent' | 'workflow' | 'command'
   return 'agent';
 }
 
-/**
- * Resolve a routine's execution context (working directory + structural/fs
- * readiness) by bridging its `project`/`cwd` fields into the pure
- * {@link resolveRoutineExecutionContext} resolver. Local placement resolves
- * against this machine's `$HOME` with a real filesystem probe; a caller may
- * inject a different target home / probe (e.g. `null` to defer existence for a
- * remote target).
- */
+/** Resolve a routine's execution context by bridging `project`/`cwd` into {@link
+ * resolveRoutineExecutionContext}. Local placement uses this machine's `$HOME` and a real
+ * filesystem probe. */
 export function resolveJobExecutionContext(
   config: Pick<JobConfig, 'name' | 'project' | 'cwd' | 'agent' | 'workflow' | 'command'>,
   opts: { targetHome?: string; mode?: PlacementMode; probe?: ContextFsProbe | null; projectResolution?: ProjectResolution } = {},
@@ -746,15 +549,9 @@ export interface RunMeta {
   jobName: string;
   runId: string;
   agent?: AgentId | (string & {});  // undefined at runtime for workflow and command jobs; a custom-harness job records the harness name (host/cloud placement) or its resolved host agent (local placement)
-  /**
-   * Resolved agent version this run launched under. Re-pointed to each failover
-   * attempt's version as the single-shot chain advances (runner.ts), so it names
-   * the version that actually ran and wrote the transcript. Recorded so
-   * `archiveRoutineTranscripts` can find the transcript in the per-version home a
-   * config-dir-relocating agent (claude/codex) writes to, and so account
-   * attribution can name the home that ran (RUSH-2271). Unset for
-   * command/self-updating runs.
-   */
+  /** Resolved agent version the run launched under, re-pointed at each failover attempt (runner.ts)
+   * so it names the version that ran and wrote the transcript. Lets `archiveRoutineTranscripts`
+   * find it in the per-version home and attribute the account (RUSH-2271). */
   version?: string;
   workflow?: string;
   /** The shell command that ran, for command-mode routines (no agent). */
@@ -764,33 +561,16 @@ export interface RunMeta {
   spawnedAt?: number;
   /** Configured execution deadline persisted for daemon-restart recovery. */
   timeoutMs?: number;
-  /**
-   * `missed` is not an execution outcome — it is the record that a scheduled
-   * fire never happened (the daemon was down, asleep, or wedged when it came
-   * due). Without it a miss leaves no trace at all and the listing keeps
-   * showing the previous run's status as if it were current. Written by
-   * `claimMissedFire` (catchup.ts), never by the runner.
-   *
-   * `blocked` and `skipped` are pre-execution terminals that leave a visible
-   * record even though no agent process ran (the plan's history contract):
-   * - `blocked` — a fire-time readiness rejection (bad context, dead auth,
-   *   untrusted workspace). No agent process was spawned. Distinct from `failed`,
-   *   which means a process started and failed.
-   * - `skipped` — the attempt lost a claim (`skipReason`): a duplicate schedule
-   *   slot, an already-active run it would overlap, or a wrong device owner.
-   */
+  /** `missed` is not an execution outcome: it records that a scheduled fire never happened (daemon
+   * down/asleep), written by `claimMissedFire` (catchup.ts), else a miss leaves no trace. `blocked`
+   * is a fire-time readiness rejection with no process spawned. */
   status: 'running' | 'completed' | 'failed' | 'timeout' | 'missed' | 'blocked' | 'skipped';
-  /**
-   * How this attempt was triggered. Answers "why did this run exist" for a
-   * record that may have no transcript (a blocked/skipped attempt).
-   */
+  /** How this attempt was triggered, answering "why did this run exist" for records with no
+   * transcript (blocked/skipped attempts). */
   triggerKind?: 'schedule' | 'catchup' | 'manual' | 'webhook' | 'event';
-  /**
-   * The scheduler's intended UTC fire time (ISO), for a `schedule`/`catchup`
-   * attempt. The atomic single-fire claim keys on (routine, scheduledFor): a
-   * duplicate cron delivery for the same slot resolves to this same run rather
-   * than launching a second time.
-   */
+  /** The scheduler's intended UTC fire time (ISO) for a schedule/catchup attempt. The atomic
+   * single-fire claim keys on (routine, scheduledFor), so a duplicate cron delivery for the same
+   * slot resolves to the same run. */
   scheduledFor?: string;
   /** Resolved execution context (routine-context.ts), recorded before preflight. */
   project?: string;
@@ -817,25 +597,17 @@ export interface RunMeta {
   cloudTaskId?: string;
   /** Cloud provider id when the run was cloud-dispatched. */
   cloudProvider?: string;
-  /**
-   * Actor id of the routine's CREATOR (stamped at creation, carried from the job
-   * config). Answers "whose scheduled run is this" for an unattended cron fire,
-   * where resolving the actor live would only yield `UNRESOLVED@<host>`. RUSH-2020.
-   */
+  /** Actor id of the routine's CREATOR (stamped at creation), answering "whose scheduled run is
+   * this" for an unattended fire, where a live resolve would give `UNRESOLVED@<host>` (RUSH-2020). */
   actor?: string;
-  /**
-   * Actor id that TRIGGERED this particular run (`resolveActor().id` at fire
-   * time): a person for a manual `agents routines run`, `UNRESOLVED@<host>` for
-   * an unattended scheduled fire. Distinct from {@link actor} (the creator).
-   */
+  /** Actor id that TRIGGERED this run: a person for a manual `agents routines run`,
+   * `UNRESOLVED@<host>` for an unattended fire. Distinct from {@link actor} (the creator). */
   triggeredBy?: string;
 }
 
-/**
- * Finalize a run record with a terminal status, computing `duration` from
- * `startedAt` and the completion timestamp. Keeps failure-reason population
- * centralized so every completion path writes the same machine-readable fields.
- */
+/** Finalize a run record with a terminal status, computing `duration` from `startedAt`; keeps
+ * failure-reason population centralized so every completion path writes the same machine-readable
+ * fields. */
 export function finalizeRunMeta(
   meta: RunMeta,
   status: RunMeta['status'],
@@ -857,21 +629,9 @@ export function finalizeRunMeta(
   }
 }
 
-/**
- * True when the job may execute on this machine: no `devices` allowlist (or
- * empty), or the allowlist includes this device. Both sides go through
- * `normalizeHost` so `Yosemite-S0`, `yosemite-s0.tailnet.ts.net`, and
- * `yosemite-s0` all agree. Every fire path (cron scheduler, webhook,
- * catchup/overdue, manual run) gates on this.
- *
- * A monitor- or webhook-dispatched job ({@link JobConfig.dispatchedBy} set) skips
- * the routine activation manifest: it is not a routine, so its name can never be
- * a member and the lookup could only ever answer "not activated here"
- * (RUSH-2681 for monitors; the same hole broke every `run.agent`/`run.workflow`
- * webhook handler, which the receiver logged as `fired` while the run record read
- * `skipped` with an empty allowlist). Ownership was already decided upstream — by
- * the monitor's `device:` pin, or by the one box the webhook was delivered to.
- */
+/** True when the job may run here: no `devices` allowlist, or it includes this device (both via
+ * `normalizeHost`). Every fire path gates on this. A monitor/webhook-dispatched job
+ * (`dispatchedBy`) skips the activation manifest, since it isn't a routine (RUSH-2681). */
 export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>): boolean {
   if (config.dispatchedBy === undefined) {
     const activated = routineEnabledOnThisDevice(config.name);
@@ -883,25 +643,9 @@ export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices' |
   return owner === machineId();
 }
 
-/**
- * The ONE device that owns a routine — the single daemon allowed to fire it.
- *
- * `devices` is an allowlist, and every listed device used to fire
- * independently, so a routine pinned to two boxes ran **twice** per schedule:
- * two full agent sessions doing identical work, burning double the quota. On
- * this fleet seven routines were in that state, e.g. `security-sweep` running
- * at 15:30:02 on one box and 15:30:03 on the other, both completing.
- *
- * Ownership is a pure function of the config — the first entry in normalized
- * sort order — so every daemon independently reaches the same answer with no
- * lease, no cross-device coordination, and no split brain when the fleet
- * partitions. A multi-entry pin is a misconfiguration
- * ({@link hasAmbiguousDevicePin}); this keeps such a routine running exactly
- * once instead of silently dropping it, while `validateJob` refuses to create
- * a new one and `agents doctor` surfaces the existing ones.
- *
- * Returns null when the routine is unrestricted (empty or omitted `devices`).
- */
+/** The ONE device that owns a routine: the single daemon allowed to fire it. `devices` used to fire
+ * on every listed device (seven routines ran twice, e.g. `security-sweep`). Ownership is the first
+ * entry in normalized sort order, so every daemon agrees with no lease or split brain. */
 export function routineOwnerDevice(config: Pick<JobConfig, 'devices'>): string | null {
   // A non-array `devices` is a separate validation error; don't throw here and
   // don't double-report it.
@@ -911,12 +655,9 @@ export function routineOwnerDevice(config: Pick<JobConfig, 'devices'>): string |
   return [...devices].sort()[0];
 }
 
-/**
- * Does this routine name more than one distinct device? Such a pin used to mean
- * "fire on each of them"; it now means "fire only on the first", which is
- * almost certainly not what the author intended either way — so it is reported
- * as a misconfiguration rather than silently reinterpreted.
- */
+/** Does this routine name more than one distinct device? Such a pin once meant "fire on each" and
+ * now means "only the first", likely not what the author meant either way, so it is reported as a
+ * misconfiguration rather than silently reinterpreted. */
 export function hasAmbiguousDevicePin(config: Pick<JobConfig, 'devices'>): boolean {
   if (!Array.isArray(config.devices)) return false;
   const devices = new Set(config.devices.map((d) => normalizeHost(String(d))).filter(Boolean));
@@ -931,12 +672,9 @@ interface AmbiguousDevicePin {
   owner: string;
 }
 
-/**
- * Every routine carrying a multi-device pin. Surfaced by `agents doctor` and
- * `agents routines list` so an existing misconfiguration is visible rather than
- * silently reinterpreted: before ownership became singular each of these fired
- * once per listed device, doubling the work and the agent spend.
- */
+/** Every routine with a multi-device pin, surfaced by `agents doctor` and `agents routines list` so
+ * the misconfiguration is visible; before ownership became singular each fired once per listed
+ * device, doubling work and spend. */
 export function findAmbiguousDevicePins(cwd?: string): AmbiguousDevicePin[] {
   return listJobs(cwd)
     .filter((job) => job.enabled && hasAmbiguousDevicePin(job))
@@ -947,11 +685,8 @@ export function findAmbiguousDevicePins(cwd?: string): AmbiguousDevicePin[] {
     }));
 }
 
-/**
- * Resolve the effective host strategy for a job.
- * Bare `host:` without an explicit strategy implies `host` (back-compat with
- * pre-hostStrategy YAML). Otherwise default to `local`.
- */
+/** Effective host strategy for a job: a bare `host:` without a strategy implies `host` (back-compat
+ * with pre-hostStrategy YAML), otherwise `local`. */
 export function resolveHostStrategy(
   config: Pick<JobConfig, 'hostStrategy' | 'host'>,
 ): HostStrategy {
@@ -960,10 +695,8 @@ export function resolveHostStrategy(
   return 'local';
 }
 
-/**
- * Parse a CLI `--placement` value into a HostStrategy, or null when empty.
- * Throws a human-readable Error for unknown values.
- */
+/** Parse a CLI `--placement` value into a HostStrategy, or null when empty; throws a readable Error
+ * for unknown values. */
 export function parseHostStrategy(raw: string | undefined | null): HostStrategy | null {
   if (raw === undefined || raw === null || raw === '') return null;
   const v = raw.trim().toLowerCase();
@@ -971,12 +704,9 @@ export function parseHostStrategy(raw: string | undefined | null): HostStrategy 
   throw new Error(`Invalid placement '${raw}'. Use one of: ${HOST_STRATEGIES.join(', ')}`);
 }
 
-/**
- * Strategies that dispatch the job body off the firing machine. Without a
- * `devices` pin every daemon in the fleet would fire and each would dispatch
- * once — N× duplicate runs. Callers pin to this machine when the user did not
- * set an explicit allowlist.
- */
+/** Strategies that dispatch the body off the firing machine. Without a `devices` pin every fleet
+ * daemon would fire and dispatch once (N duplicate runs), so callers pin to this machine when the
+ * user set no allowlist. */
 export function placementRequiresFiringPin(strategy: HostStrategy): boolean {
   return strategy === 'host' || strategy === 'fleet' || strategy === 'cloud';
 }
@@ -993,12 +723,9 @@ interface JobEligibilityResult {
   firstHost: string;
 }
 
-/**
- * Return null when the job may run here; otherwise return a structured,
- * human-friendly eligibility failure. Centralizes the message/suggestion
- * construction so manual run, executeJob, and executeJobDetached stay in
- * sync. Scheduler/webhook/overdue paths continue to use jobRunsOnThisDevice.
- */
+/** Null when the job may run here, else a structured, readable eligibility failure. Centralizes
+ * message construction so manual run, executeJob and executeJobDetached stay in sync;
+ * scheduler/webhook/overdue paths use jobRunsOnThisDevice. */
 export function checkJobDeviceEligibility(
   config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>,
 ): JobEligibilityResult | null {
@@ -1034,18 +761,9 @@ function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): J
   return merged;
 }
 
-/**
- * List all job configs, scanning project > user > system routine dirs.
- * Higher layers shadow lower ones of the same name (first-seen wins): a project
- * routine shadows a user routine, and a user routine shadows a system routine
- * (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
- * When a same-name project routine wins for inspection, the user-layer
- * `devices` allowlist is overlaid only if the project routine does not declare
- * its own allowlist, so CWD project discovery cannot hide an operational fleet
- * pin or erase a project-authored one.
- * Project discovery is opt-in via `cwd`; the daemon (which calls `listJobs()`
- * with no argument) sees user + system routines.
- */
+/** List all job configs across project > user > system routine dirs; higher layers shadow same-named
+ * lower ones (system ships via gh:phnx-labs/.agents-system). A winning project routine inherits the
+ * user-layer `devices` allowlist unless it declares its own. Project discovery is opt-in via `cwd`. */
 export function listJobs(cwd?: string): JobConfig[] {
   ensureAgentsDir();
   const seen = new Set<string>();
@@ -1078,14 +796,9 @@ export function listJobs(cwd?: string): JobConfig[] {
   return jobs.map(applyDeviceActivation);
 }
 
-/**
- * Read a single job config by name, checking project > user > system.
- * Same-name project routines keep the user-layer `devices` allowlist only when
- * the project routine does not declare its own allowlist, for the same reason
- * as listJobs().
- * Project discovery is opt-in via `cwd`; daemon callers pass no argument and
- * resolve user + system routines.
- */
+/** Read one job config by name, project > user > system. A same-name project routine keeps the
+ * user-layer `devices` allowlist only if it declares none (as in listJobs). Project discovery is
+ * opt-in via `cwd`. */
 export function readJob(name: string, cwd?: string): JobConfig | null {
   ensureAgentsDir();
   const userDir = getRoutinesDir();
@@ -1122,22 +835,15 @@ function readJobFromDir(dir: string, name: string): JobConfig | null {
   return null;
 }
 
-/**
- * The outcome of reading one routine file: a config, or the reason it is inert.
- * Every `problem` here means the daemon will not run the routine.
- */
+/** The outcome of reading one routine file: a config, or the reason it is inert. Every `problem`
+ * means the daemon won't run the routine. */
 type RoutineReadResult =
   | { config: JobConfig; problem: null }
   | { config: null; problem: string };
 
-/**
- * Read one routine file, preserving WHY it failed.
- *
- * `readJobFile` collapses all four fail-closed paths to `null`, which is right
- * for the loaders (an inert routine must not run) but leaves a broken routine
- * invisible in every view — the one routine an operator most needs to see. Same
- * reading, reason kept, for diagnostic surfaces like `agents inspect --routines`.
- */
+/** Read one routine file, keeping WHY it failed. `readJobFile` collapses the fail-closed paths to
+ * `null`, right for loaders but it hides a broken routine in every view; this keeps the reason for
+ * diagnostics like `agents inspect --routines`. */
 export function readJobFileResult(filePath: string): RoutineReadResult {
   let content: string;
   try {
@@ -1163,11 +869,9 @@ export function readJobFileResult(filePath: string): RoutineReadResult {
     return { config: null, problem: 'legacy `device:` key — inert until migrated to `devices:`' };
   }
 
-  // Fail closed on a malformed `devices` too. Ownership treats a non-array as
-  // "no pin", and the daemon's load path never calls validateJob — so a YAML
-  // typo (`devices: yosemite-s0` instead of a list) would silently promote the
-  // routine to fleet-wide and fire it on EVERY box. Inert-and-loud beats
-  // unrestricted-and-silent.
+  // Fail closed on a malformed `devices` too: ownership treats a non-array as "no pin" and the load
+  // path never calls validateJob, so a typo (`devices: yosemite-s0`) would silently make the
+  // routine fleet-wide. Inert-and-loud beats unrestricted-and-silent.
   if (Object.prototype.hasOwnProperty.call(parsed, 'devices')
       && parsed.devices !== undefined
       && parsed.devices !== null
@@ -1175,15 +879,9 @@ export function readJobFileResult(filePath: string): RoutineReadResult {
     return { config: null, problem: '`devices:` must be a list — routine is inert' };
   }
 
-  // Fail closed on `dispatchedBy`. It is a runtime-only marker set by
-  // lib/monitors/dispatch.ts on a job that has no definition file, and it makes
-  // `jobRunsOnThisDevice` SKIP this device's routine activation manifest. A
-  // routine YAML carrying it would therefore fire on every box regardless of
-  // activation, on every path (scheduler, overdue, webhook) — the same
-  // unrestricted-and-silent outcome the `devices:` guard above exists to
-  // prevent, and the daemon's load path never calls validateJob. It is never
-  // written back (writeJob deletes it), so its presence here means hand-authored
-  // state, not drift.
+  // Fail closed on `dispatchedBy`: a runtime-only marker for jobs with no definition file that
+  // makes `jobRunsOnThisDevice` skip the activation manifest. A routine YAML carrying it would
+  // fire on every box regardless of activation.
   if (Object.prototype.hasOwnProperty.call(parsed, 'dispatchedBy')) {
     return { config: null, problem: '`dispatchedBy:` is a runtime-only monitor/webhook marker, not a routine field — routine is inert' };
   }
@@ -1206,22 +904,17 @@ function readJobFile(filePath: string): JobConfig | null {
   return readJobFileResult(filePath).config;
 }
 
-/** Write a job config to disk, omitting fields that match defaults.
- *
- * Updates the one existing supported extension (.yml or .yaml) atomically.
- * New routines are written as .yml. If both extensions exist for the same
- * name, the write fails explicitly so we never choose or drop a sibling.
- */
+/** Write a job config, omitting default-valued fields. Updates the one existing extension (.yml or
+ * .yaml) atomically; new routines are .yml. If both extensions exist for a name, the write fails
+ * rather than choose or drop a sibling. */
 export function writeJob(config: JobConfig): void {
   ensureAgentsDir();
   // Stamp the creator once (RUSH-2020). An edit re-writes a config loaded from
   // disk, which already carries `actor`, so this preserves the original creator;
   // only a brand-new routine (no actor yet) gets the current resolver.
   if (!config.actor) config.actor = resolveActor().id;
-  // Stamped once, on first write, and preserved by every later edit (an edit
-  // re-writes a config loaded from disk, which already carries it). This is the
-  // floor overdue detection uses so a routine is never judged against fires
-  // that predate it.
+  // Stamped once on first write and preserved by edits: the floor overdue detection uses so a
+  // routine is never judged against fires that predate it.
   if (!config.createdAt) config.createdAt = new Date().toISOString();
   const jobsDir = getRoutinesDir();
   const ymlPath = safeJoin(jobsDir, config.name + '.yml');
@@ -1249,10 +942,8 @@ export function writeJob(config: JobConfig): void {
   // the read-side guard in readJobFileResult), so strip it at the one schema
   // boundary rather than trusting every caller.
   delete output.dispatchedBy;
-  // Persist projects in canonical form: deduplicated, first-seen order, field
-  // omitted when nothing survives. This is the schema boundary, so a routine
-  // written from any path (add, edit, enable/disable re-write) lands canonical
-  // regardless of how the caller assembled the array.
+  // Persist `projects` canonically (deduped, first-seen order, omitted if empty). This is the
+  // schema boundary, so routines written from any path (add, edit, enable/disable) land canonical.
   const normProjects = normalizeProjects(output.projects as string[] | undefined);
   if (normProjects) output.projects = normProjects;
   else delete output.projects;
@@ -1268,21 +959,9 @@ export function writeJob(config: JobConfig): void {
   atomicWriteFileSync(filePath, serializeJob(output, existingText));
 }
 
-/**
- * Serialize a job config, preserving the on-disk formatting of an existing file.
- *
- * A full `yaml.stringify(config)` re-emits the whole document — restyling every
- * scalar (unquoting `schedule`, re-wrapping the folded `prompt` block, reordering
- * keys). When a routine is only being toggled (pause/resume) or re-pinned
- * (`devices --set`), that rewrites the entire file, leaving the git-backed
- * `~/.agents` tree perpetually dirty so `agents repo pull` refuses to sync across
- * the fleet. To keep the diff to the field that actually changed, we edit the
- * existing document in place and only re-render touched nodes; untouched nodes
- * (notably the large `prompt` block) keep their byte-for-byte formatting.
- *
- * `existingText` is the current file contents, or null for a new file. New,
- * unparseable, and non-mapping documents fall back to canonical `yaml.stringify`.
- */
+/** Serialize a job config preserving an existing file's formatting. A full `yaml.stringify` restyles
+ * every scalar and the folded `prompt`, so a pause/resume or `devices --set` would leave the git-
+ * backed `~/.agents` tree dirty and block `agents repo pull` fleet-wide. */
 export function serializeJob(output: Record<string, unknown>, existingText: string | null): string {
   if (existingText == null) return yaml.stringify(output);
 
@@ -1302,11 +981,9 @@ export function serializeJob(output: Record<string, unknown>, existingText: stri
     if (!(key in output)) doc.delete(key);
   }
 
-  // `flowCollectionPadding: false` keeps a re-serialized flow sequence in the
-  // committed no-padding form (`[a, b]`, not `[ a, b ]`). Routine YAML lives in
-  // the same git-backed `~/.agents` repo as agents.yaml, so the same emitter
-  // padding would leave the tracked file dirty and block `agents repo pull`
-  // fleet-wide (RUSH-2505). Node styles are otherwise preserved.
+  // `flowCollectionPadding: false` keeps re-serialized flow sequences in the committed no-padding
+  // form (`[a, b]`). Routine YAML lives in the git-backed `~/.agents` repo, so padding would dirty
+  // the file and block `agents repo pull` (RUSH-2505).
   return doc.toString({ flowCollectionPadding: false });
 }
 
@@ -1405,13 +1082,9 @@ export function validateJob(config: Partial<JobConfig>): string[] {
     // jobs take, so no ROUTINE_AGENT_COMMANDS template is needed.
     !isCustomHarnessName(config.agent)
   ) {
-    // The local daemon only knows how to build a command for the agents in
-    // ROUTINE_AGENT_IDS (baked from AGENT_COMMANDS in runner.ts) — anything else is a
-    // real, installable agent (it passed the ALL_AGENT_IDS check above) but one
-    // the daemon can't fire itself, so reject it now instead of accepting the
-    // routine and failing at fire time (runner.ts buildJobCommand: "Unsupported
-    // agent for daemon jobs"). host/fleet/cloud placement dispatches through
-    // `agents run`/a cloud provider instead of this table, so they're exempt.
+    // The local daemon can build commands only for agents in ROUTINE_AGENT_IDS (baked from
+    // AGENT_COMMANDS in runner.ts); others pass ALL_AGENT_IDS but fail at fire time ("Unsupported
+    // agent for daemon jobs"), so reject now.
     errors.push(
       `agent '${config.agent}' is not supported by the local routine daemon; use one of: ` +
       `${ROUTINE_AGENT_IDS.join(', ')} (or set hostStrategy: host/fleet/cloud to run it elsewhere)`,
@@ -1785,10 +1458,8 @@ export function shouldPurgeCompletedOneShotRoutine(
   return hasCompletedOneShotRun(config, now);
 }
 
-/**
- * Context passed to `resolveJobPrompt` when a job is fired by a webhook. Lets
- * prompts use `{{issue.identifier}}`, `{{updatedFrom.state.name}}`, etc.
- */
+/** Context passed to `resolveJobPrompt` when a webhook fires a job, so prompts can use
+ * `{{issue.identifier}}`, `{{updatedFrom.state.name}}`, etc. */
 export interface WebhookContext {
   source: string;
   event: string;
@@ -1809,10 +1480,8 @@ function getPath(obj: unknown, path: string): unknown {
   return current;
 }
 
-/**
- * Substitute `{{dotted.path}}` placeholders in a string using a webhook context.
- * Missing values are replaced with an empty string.
- */
+/** Substitute `{{dotted.path}}` placeholders using a webhook context; missing values become an empty
+ * string. */
 export function substituteWebhookPrompt(prompt: string, context: WebhookContext): string {
   return prompt.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
     const value = getPath(context, rawPath.trim());
@@ -1821,24 +1490,9 @@ export function substituteWebhookPrompt(prompt: string, context: WebhookContext)
   });
 }
 
-/**
- * Substitute `{{dotted.path}}` placeholders in a string destined for a SHELL,
- * quoting every substituted value so payload content cannot break out of it.
- *
- * `run.command` is executed through a shell, and its context is built from an
- * external webhook payload — `issue.title`, `issue.description`, and the GitHub
- * `pull_request` fields are free text any outside contributor can set. Pasting
- * those in raw (as {@link substituteWebhookPrompt} does, correctly, for prompts)
- * turns an operator's `echo {{issue.title}}` into a command-injection sink.
- *
- * The template itself is operator-authored and stays unquoted, so pipes,
- * redirects, and `&&` in the configured command keep working. Only the
- * interpolated values are quoted.
- *
- * POSIX `sh` quoting: wrap in single quotes and close/escape/reopen for any
- * embedded single quote. `exec` uses `cmd.exe` on Windows, which does not
- * honour these rules — see `assertShellSubstitutionSupported`.
- */
+/** Substitute `{{dotted.path}}` placeholders in a string destined for a SHELL, quoting every value.
+ * `run.command` runs through a shell with a context from an external webhook, whose `issue.title`
+ * and PR fields are free text; raw pasting would be a command-injection sink. */
 export function substituteWebhookCommand(command: string, context: WebhookContext): string {
   return command.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
     const value = getPath(context, rawPath.trim());
@@ -1847,14 +1501,9 @@ export function substituteWebhookCommand(command: string, context: WebhookContex
   });
 }
 
-/**
- * Refuse a `run.command` carrying placeholders on a platform whose shell we
- * cannot safely quote for. `child_process.exec` runs through `cmd.exe` on
- * Windows, where POSIX single-quoting is not a quoting mechanism at all, so
- * {@link substituteWebhookCommand} would not contain a hostile value.
- *
- * Fail loud rather than execute something we cannot prove is safe.
- */
+/** Refuse a `run.command` with placeholders on platforms whose shell we can't safely quote: `exec`
+ * uses `cmd.exe` on Windows, where POSIX single-quoting doesn't contain a hostile value. Fail loud
+ * rather than run something unprovably safe. */
 export function assertShellSubstitutionSupported(
   command: string,
   platform: NodeJS.Platform = process.platform,
@@ -1901,10 +1550,9 @@ export function resolveJobPrompt(config: JobConfig, context?: WebhookContext): s
     prompt = substituteWebhookPrompt(prompt, context);
   }
 
-  // Last report (special handling). Only a COMPLETED run's report is injected —
-  // a failed run's report.md is the agent's error text (e.g. a login prompt on
-  // an auth failure), and feeding that into the next prompt poisons every
-  // subsequent run until a human intervenes.
+  // Last report: only a COMPLETED run's report is injected. A failed run's report.md is the agent's
+  // error text (e.g. a login prompt), and feeding it into the next prompt would poison every later
+  // run until a human intervenes.
   const latestRun = getLatestCompletedRun(config.name);
   if (latestRun) {
     const reportPath = path.join(getJobRunsDir(config.name), latestRun.runId, 'report.md');
@@ -1921,10 +1569,8 @@ export function resolveJobPrompt(config: JobConfig, context?: WebhookContext): s
   return prompt;
 }
 
-/** Parse a human-readable timeout string (e.g. "10m", "2h", "1h30m", "3d", "1w") into milliseconds.
- *  Accepts combinations of w (weeks), d (days), h (hours), m (minutes).
- *  Returns null if the string is empty, matches nothing, totals zero, or exceeds 1 week.
- */
+/** Parse a timeout string ("10m", "2h", "1h30m", "3d", "1w") into milliseconds, accepting w/d/h/m
+ * combinations; null if empty, matching nothing, totaling zero, or exceeding 1 week. */
 export function parseTimeout(timeout: string): number | null {
   const match = timeout.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/);
   if (!match) return null;
@@ -1967,12 +1613,8 @@ export function getLatestRun(jobName: string): RunMeta | null {
   return runs.length > 0 ? runs[runs.length - 1] : null;
 }
 
-/**
- * Get the most recent COMPLETED run for a job, or null if none has completed.
- * Used to resolve `{last_report}` so a failed run's error text (e.g. an auth
- * login prompt written into report.md) can never be injected into the next
- * run's prompt.
- */
+/** Most recent COMPLETED run for a job, or null. Used for `{last_report}` so a failed run's error
+ * text (e.g. an auth login prompt in report.md) can never reach the next run's prompt. */
 export function getLatestCompletedRun(jobName: string): RunMeta | null {
   const runs = listRuns(jobName);
   for (let i = runs.length - 1; i >= 0; i--) {
@@ -1992,11 +1634,8 @@ interface RoutineStats {
   p95: number;
 }
 
-/**
- * Fold a job's run history (`listRuns`) into a duration + outcome summary.
- * `missed` fires (no process ever ran) carry no `duration` and are excluded
- * from the latency percentiles but still counted in `count`/`missed`.
- */
+/** Fold a job's run history into a duration + outcome summary. `missed` fires (no process ran) carry
+ * no `duration` and are excluded from latency percentiles but still counted in `count`/`missed`. */
 export function routineStats(jobName: string): RoutineStats {
   const runs = listRuns(jobName);
   const failed = runs.filter((r) => r.status === 'failed' || r.status === 'timeout').length;
@@ -2037,14 +1676,9 @@ export function readRunMeta(jobName: string, runId: string): RunMeta | null {
   }
 }
 
-/**
- * Runs directory for a single job, with the (untrusted) job name contained to a
- * single segment beneath the runs dir — same guard as `getJobHomePath`. The name
- * comes from routine YAML and can arrive via a synced config repo; every runs-dir
- * sink (run dir, meta read/write, last-report read) routes through here so a
- * crafted `name` like `../../../../tmp/x` can't `mkdirSync`/write `stdout.log`,
- * `meta.json`, or `report.md` outside `~/.agents/.history/runs`.
- */
+/** Runs directory for one job, with the untrusted job name (from possibly synced routine YAML)
+ * contained to one segment under the runs dir, like `getJobHomePath`. Every runs-dir sink routes
+ * here so a crafted `name` can't write outside `~/.agents/.history/runs`. */
 export function getJobRunsDir(jobName: string): string {
   return safeJoin(getRunsDir(), jobName);
 }
@@ -2054,64 +1688,30 @@ export function getRunDir(jobName: string, runId: string): string {
   return path.join(getJobRunsDir(jobName), runId);
 }
 
-/**
- * The run id a scheduled fire is recorded under — derived from its intended UTC
- * fire time so the SAME slot always maps to the SAME run directory. This is what
- * makes the single-fire claim meaningful: a duplicate cron delivery for one slot
- * computes the same id and loses the atomic `mkdir` claim. Shares the derivation
- * with `missedRunId` (catchup.ts) so a missed-then-caught-up fire and a live fire
- * for the same UTC slot are one record.
- */
+/** The run id a scheduled fire is recorded under, derived from its intended UTC fire time so the
+ * SAME slot maps to the SAME run dir: a duplicate cron delivery computes the same id and loses the
+ * atomic `mkdir` claim. Shares derivation with `missedRunId` (catchup.ts). */
 export function slotRunId(scheduledFor: Date | string): string {
   const iso = typeof scheduledFor === 'string' ? scheduledFor : scheduledFor.toISOString();
   return iso.replace(/[:.]/g, '-');
 }
 
-/**
- * Lookback windows for {@link alignedSlotForFire}, narrowest first. A wider
- * window is tried ONLY when the narrower one found no fire, so:
- *  - a dense schedule (every-minute) resolves in the 1-hour window — ~60 steps,
- *    not ~10080 — which matters because the forward-timer path now runs this on
- *    every fire (a live fire is milliseconds past its boundary, so the narrowest
- *    window always contains it);
- *  - a sparse schedule (`0 9 1,13,25 * *` has 12-day gaps; monthly/quarterly/
- *    annual) still resolves, because a fixed short window silently blinded
- *    overdue detection to any cron whose gap exceeded it.
- * A narrower window can only ever find the true most-recent fire ≤ `at` or
- * nothing (never a wrong boundary), so prepending the cheap windows is
- * behavior-preserving for the sparse-schedule overdue path.
- */
+/** Lookback windows for {@link alignedSlotForFire}, narrowest first; a wider one only if the
+ * narrower finds no fire. Dense schedules resolve in 1 hour (~60 steps), as this runs every fire;
+ * sparse ones (12-day gaps, monthly) still resolve, so overdue detection sees them. */
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const SLOT_LOOKBACK_WINDOWS_MS = [HOUR_MS, DAY_MS, 7 * DAY_MS, 32 * DAY_MS, 93 * DAY_MS, 400 * DAY_MS];
 
-/**
- * The aligned schedule boundary a fire belongs to: the most recent occurrence of
- * `cron` at or before `at`.
- *
- * This is the occurrence IDENTITY that {@link slotRunId} (forward dispatch) and
- * `missedRunId` (catchup.ts) must both key on. croner's `currentRun()` inside a
- * fire callback is the JITTERED wall-clock trigger instant (it carries
- * milliseconds — verified), not the aligned boundary, so keying `slotRunId`
- * directly on it produced a distinct id per delivery: two callbacks for one
- * occurrence each claimed a different run dir and both launched, and a live fire
- * never collided with its catch-up twin (which keys on the aligned
- * `previousExpectedFire`). Flooring both to this boundary is what makes the
- * single-fire claim a structural claim on `(routine, scheduledFor)` (SING-15).
- *
- * croner's `previousRun()` takes no argument and returns null on a freshly
- * constructed instance, so we walk `nextRun(cursor)` forward from a lookback
- * window and keep the last fire still ≤ `at` — the same derivation catchup's
- * overdue detection has always used.
- */
+/** The aligned schedule boundary a fire belongs to: the latest occurrence of `cron` at or before
+ * `at`, the identity both {@link slotRunId} and `missedRunId` must key on. croner's `currentRun()`
+ * is the jittered instant, so keying on it made two deliveries claim different run dirs (SING-15). */
 export function alignedSlotForFire(cron: Cron, at: Date): Date | null {
   for (const window of SLOT_LOOKBACK_WINDOWS_MS) {
     let cursor: Date = new Date(at.getTime() - window);
     let last: Date | null = null;
-    // Cap iterations: an every-minute schedule yields ≤ 10080 steps over a week;
-    // 20k is a paranoia bound against pathological patterns. Only a schedule that
-    // found nothing in the narrower window reaches a wider one, and such a
-    // schedule is sparse, so the cap is never the binding constraint.
+    // Cap iterations: an every-minute schedule yields at most 10080 steps a week; 20k is a paranoia
+    // bound. Only sparse schedules reach wider windows, so the cap never binds.
     for (let i = 0; i < 20000; i++) {
       const next = cron.nextRun(cursor);
       if (!next || next.getTime() > at.getTime()) break;
@@ -2123,14 +1723,9 @@ export function alignedSlotForFire(cron: Cron, at: Date): Date | null {
   return null;
 }
 
-/**
- * Atomically CLAIM a run directory. Returns true on a successful claim, false
- * when the directory already exists (another caller — even in a separate process
- * — owns this (routine, slot) pair). The non-recursive `mkdir` is a single
- * filesystem test-and-set on every POSIX filesystem, the same primitive
- * `claimMissedFire` relies on; it holds across processes where an in-process flag
- * or a released lock cannot.
- */
+/** Atomically CLAIM a run directory: true on success, false if it exists (another caller, even
+ * another process, owns this (routine, slot)). A non-recursive `mkdir` is one filesystem test-and-
+ * set on POSIX, as `claimMissedFire` relies on. */
 export function claimRunSlot(jobName: string, runId: string): boolean {
   const runDir = getRunDir(jobName, runId);
   fs.mkdirSync(path.dirname(runDir), { recursive: true });
@@ -2161,22 +1756,9 @@ export function jobExists(name: string): boolean {
   return readJob(name) !== null;
 }
 
-/**
- * True when `sourcePath` already IS the canonical user-layer file for `name`.
- *
- * `agents routines add <file>` copies a definition into the routines dir, but
- * users routinely point it at the file that already lives there — the release
- * train's own `~/.agents/routines/release-train.yml`. `writeJob` would then
- * re-serialize that file in place and, per {@link serializeJob}, delete every
- * key absent from the canonical output — silently dropping the legacy
- * `devices:` pin from config tracked in the git-backed `~/.agents` repo
- * (RUSH-2517). Callers use this to skip the write when there is nothing to
- * copy.
- *
- * Compares real paths so a symlinked `~/.agents` (the normal layout) still
- * matches, and falls back to a resolved-path compare when either side cannot be
- * realpath'd.
- */
+/** True when `sourcePath` already IS the canonical user-layer file for `name`. `agents routines add
+ * <file>` on `~/.agents/routines/release-train.yml` would re-serialize in place and drop the legacy
+ * `devices:` pin from git-tracked config (RUSH-2517); callers skip the write. */
 export function isCanonicalRoutineSource(sourcePath: string, name: string): boolean {
   const jobsDir = getRoutinesDir();
   const real = (p: string): string => {
@@ -2202,17 +1784,9 @@ export function getJobPath(name: string): string | null {
   return null;
 }
 
-/**
- * Resolve a routine's YAML across EVERY layer `listJobs`/`readJob` read — user
- * then system — not just the user dir.
- *
- * `getJobPath` is user-layer only because its callers write there. Read paths
- * that ask "when did this routine come to exist" need the system layer too:
- * a built-in shipped in the system repo has no user-layer file and no
- * `createdAt`, so a user-layer-only lookup returns null, the overdue floor is
- * skipped, and the routine reads as instantly overdue on first daemon start —
- * exactly the case the floor exists to prevent.
- */
+/** Resolve a routine's YAML across EVERY layer `listJobs`/`readJob` read (user then system), not
+ * just the user dir. A built-in in the system repo has no user-layer file or `createdAt`, so a
+ * user-only lookup skips the overdue floor and the routine reads as instantly overdue. */
 export function resolveJobFilePath(name: string): string | null {
   const userPath = getJobPath(name);
   if (userPath) return userPath;
@@ -2223,14 +1797,8 @@ export function resolveJobFilePath(name: string): string | null {
   return null;
 }
 
-/**
- * Parse an "at" time string into a one-shot cron expression.
- * Supports formats like:
- * - "9:00" or "09:00" - today at 9:00 AM (or tomorrow if past)
- * - "14:30" - today at 2:30 PM
- * - "2026-02-24 09:00" - specific date and time
- * Returns null if invalid format.
- */
+/** Parse an "at" time into a one-shot cron expression: "9:00" (today, or tomorrow if past), "14:30",
+ * or "2026-02-24 09:00". Null if invalid. */
 export function parseAtTime(atTime: string): { schedule: string; runOnce: boolean } | null {
   // Try parsing as "HH:MM" format
   const timeMatch = atTime.match(/^(\d{1,2}):(\d{2})$/);

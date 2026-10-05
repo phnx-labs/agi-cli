@@ -38,22 +38,18 @@ describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
   });
 
   it('parseReadyProbe never sets timedOut — that path is readyProbe-only', () => {
-    // timedOut is set only by readyProbe() when sshExec signals a timeout kill.
-    // parseReadyProbe() is a pure stdout parser and must never set it, regardless
-    // of what stdout looks like. The sshExec timedOut detection is exercised by
-    // the ssh-exec.test.ts PATH-stub tests.
+    // timedOut is set only by readyProbe() when sshExec signals a timeout kill; parseReadyProbe()
+    // is a pure parser and must never set it. The sshExec detection is covered by the ssh-
+    // exec.test.ts PATH-stub tests.
     for (const stdout of ['', `2.1.170\n${MARK}\n`, `\n${MARK}\n`, 'garbage\nno-marker']) {
       expect(parseReadyProbe(stdout).timedOut).toBeUndefined();
     }
   });
 });
 
-// PHNX-4116: ONE readiness gate. The box that RUNS computes `runReady`
-// (`collectRunCandidates` → `readinessFromCandidate` over its native slots AND
-// version homes); the dispatcher READS that answer off `agents view --json` and
-// never re-derives freshness. These lock the placement seam
-// (`viewAgentAccountEligibility` reads `runReady`, the probe maps it into the
-// signal `resolveDeviceAuto` gates on).
+// PHNX-4116: one readiness gate. The box that runs computes `runReady`; the dispatcher reads it
+// from `agents view --json` and never re-derives freshness. These lock the seam from
+// viewAgentAccountEligibility to what `resolveDeviceAuto` gates on.
 describe('viewAgentAccountEligibility / viewAgentSignedIn — one readiness gate (PHNX-4116)', () => {
   const runReadyRow = (runReady: unknown, agent = 'claude') =>
     JSON.stringify([{ agent, runReady }]);
@@ -113,10 +109,9 @@ describe('viewAgentAccountEligibility / viewAgentSignedIn — one readiness gate
     });
   });
 
-  // The stale-usage / dead-auth re-derivation is GONE: the box that runs already
-  // decided, so a synced-only worker whose usage lags is never refused here — the
-  // fleet-wide usage-sync lag that read as "no ready device" while `--device
-  // <name>` launched fine (PHNX-4116). runReady.ready carries the verdict as-is.
+  // The stale-usage/dead-auth re-derivation is gone: the running box already decided, so a synced-
+  // only worker with lagging usage is not refused (that lag read as "no ready device" while
+  // `--device <name>` launched fine, PHNX-4116).
   it('trusts a ready verdict even with no per-version usage evidence (the synced-worker case)', () => {
     const view = runReadyRow({ ready: true, reason: 'ready (work)', accounts: [{ name: 'work', ready: true, reason: 'ready' }] });
     expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: true, pickerEligible: true });
@@ -155,10 +150,9 @@ describe('viewAgentAccountEligibility — older-CLI fallback without runReady (P
     expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: undefined, pickerEligible: undefined });
   });
 
-  // #3705: the fallback must keep the pre-PHNX-4116 throttle exclusion, or a
-  // throttled-but-launchable old-CLI worker reads signedIn: true and slips into
-  // `--device auto`'s pick during a rolling upgrade. A FRESH rate_limit
-  // disqualifies; a STALE one is unverified, not disqualifying.
+  // #3705: the fallback must keep the pre-PHNX-4116 throttle exclusion, or a throttled old-CLI
+  // worker slips into `--device auto` during a rolling upgrade. A fresh rate_limit disqualifies; a
+  // stale one is unverified.
   it('a FRESH rate_limited launchable version is not signed in (throttle exclusion restored)', () => {
     const now = Date.now();
     const view = JSON.stringify([{ agent: 'claude', versions: [{

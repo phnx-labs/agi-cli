@@ -22,12 +22,9 @@ import {
   CLI_ENTRYPOINT,
 } from './routines.test-fixture.js';
 
-// `routines run`/`edit`/`cleanup` execution slice of the routines.*.test.ts
-// suite (RUSH-2819), plus the pure-function unit tests for `buildRunsJson`
-// and `groupRoutineJobsByProject` and the bare-command-routing and
-// launch-target-parity coverage — split off the original 2,249-line
-// routines.test.ts (measured ~194s of test time) so vitest can parallelize
-// the file across worker forks. Shared fixtures: routines.test-fixture.ts.
+// `routines run`/`edit`/`cleanup` execution slice (RUSH-2819), plus unit tests for
+// `buildRunsJson`, `groupRoutineJobsByProject`, bare-command routing and launch-target parity,
+// split from routines.test.ts for vitest parallelism. Fixtures: routines.test-fixture.ts.
 
 const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome } = createDaemonHarness('run');
 registerLeakDetector();
@@ -160,13 +157,9 @@ function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Read a run's status from meta.json, tolerating a torn read of a file another
- * process is mid-write on (writeRunMeta is not atomic — same defensive parse
- * `readRunMeta` in lib/routines.ts already applies to production readers).
- * Returns null when the file is absent, empty, or not yet valid JSON — the
- * caller polls again rather than treating a transient read race as a failure.
- */
+/** Read a run's status from meta.json, tolerating a torn read of a file another process is mid-
+ * write on (writeRunMeta is not atomic). Returns null for absent, empty or not-yet-valid JSON so
+ * the caller polls again. */
 function readRunStatus(runsDir: string, runId: string): string | null {
   const metaPath = path.join(runsDir, runId, 'meta.json');
   try {
@@ -223,13 +216,9 @@ describeRoutines('routines run --json', () => {
   });
 
   it('two independent CLI processes do not serialize overlapping foreground runs', async () => {
-    // The overlap window must stay open until this test is done probing it —
-    // a fixed `sleep N` raced real wall-clock time against source-mode CLI
-    // startup (10-15s+ on a loaded CI shard) and went flaky under contention.
-    // Instead, the job blocks on an observable state transition this test
-    // controls directly: a stop-file it does not create until AFTER it has
-    // asserted the second process was skipped. The `i -lt 1200` bound (60s)
-    // is a safety net for a wedged test, not the synchronization mechanism.
+    // The overlap window must stay open until the test is done probing it: a fixed `sleep N` raced
+    // source-mode CLI startup (10-15s+ on loaded CI) and flaked. The job blocks on a stop-file the
+    // test creates only after asserting the second process was skipped.
     const stopFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-overlap-')), 'stop');
     const home = makeHome({
       jobs: [{
@@ -271,11 +260,9 @@ describeRoutines('routines run --json', () => {
       first.stdout.on('data', (chunk) => { firstStdout += chunk; });
       first.stderr.on('data', (chunk) => { firstStderr += chunk; });
 
-      // Wait until the first process writes meta.json with status 'running' —
-      // the readiness signal that the claim is held. Because the job now
-      // blocks on stopFile rather than a fixed sleep, this claim cannot
-      // expire out from under the second process no matter how long its own
-      // startup takes.
+      // Wait until the first process writes meta.json with status 'running', the signal that the
+      // claim is held. Because the job blocks on stopFile, the claim cannot expire under the
+      // second process however slow its startup is.
       const runsDir = path.join(home, '.agents', '.history', 'runs', 'overlap-job');
       const deadline = Date.now() + 30_000;
       let observedRunning = false;
@@ -433,10 +420,9 @@ describeRoutines('groupRoutineJobsByProject — named projects never collide wit
   });
 });
 
-// The bare `agents routines` command (RUSH-2503): on a TTY it opens the interactive
-// browser, but with --json or in a non-interactive shell it MUST reproduce the
-// static `routines list` output byte-for-byte. spawnSync gives the child no TTY, so
-// these exercise the static fall-through path.
+// Bare `agents routines` (RUSH-2503): on a TTY it opens the interactive browser, but with --json
+// or a non-interactive shell it must reproduce `routines list` byte-for-byte. spawnSync gives the
+// child no TTY, so these exercise the static path.
 describeRoutines('bare routines command routing', () => {
   it('bare `routines --json` matches `routines list --json` byte-for-byte', () => {
     const home = makeHome({ jobs: [baseJob, { ...baseJob, name: 'other-job', projects: ['*'] }] });
@@ -481,11 +467,9 @@ describeRoutines('bare routines command routing', () => {
   });
 });
 
-// RUSH-2517: an agent with no TTY must be able to repair a paused routine and
-// activate it. Before this, the readiness gate printed
-// `agents routines edit <name> --project-anchor <name>  # or --cwd <path>`
-// (routine-context.ts:215,334) while `edit` accepted neither flag and its only
-// surface opened $EDITOR — so the hint named a command that could not be run.
+// RUSH-2517: an agent with no TTY must be able to repair a paused routine and activate it. The
+// readiness gate printed `agents routines edit <name> --project-anchor <name>` while `edit`
+// accepted no such flag and only opened $EDITOR: an unrunnable hint.
 describeRoutines('routines edit — headless context repair', () => {
   const noContext = {
     name: 'needs-cwd',
@@ -537,11 +521,9 @@ describeRoutines('routines edit — headless context repair', () => {
   });
 });
 
-// RUSH-2545 regression: the daemon spawned by startIsolatedDaemon must carry an
-// AGENTS_HISTORY_DIR confined to the test's tmpHome. Without this override the daemon
-// inherited the parent vitest process's real production AGENTS_HISTORY_DIR
-// (~/.agents/.history), and its SIGTERM sweep killed live tmux-wrapped Claude and
-// cgraph-mcp processes on every five-minute tick while the test suite ran.
+// RUSH-2545 regression: the daemon from startIsolatedDaemon must carry an AGENTS_HISTORY_DIR
+// confined to the test's tmpHome. Otherwise it inherited the real `~/.agents/.history`, and its
+// SIGTERM sweep killed live tmux-wrapped Claude and cgraph-mcp processes every five minutes.
 describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
   it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
     const home = makeDaemonHome();

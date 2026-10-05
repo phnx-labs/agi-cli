@@ -19,14 +19,9 @@ import {
   replayRemoteCache,
 } from './remote.js';
 
-/**
- * Decode the argv the *remote* would actually receive. `buildRemoteCommand` emits
- * `bash -lc '<...>'`; ssh hands that to the remote login shell, which runs it. We
- * reproduce that exactly: an outer bash defines+exports an `agents` shim (exported
- * functions survive the nested `bash -lc` via the environment), then runs the
- * command. The shim prints each arg on its own line, so stdout == the remote argv.
- * This is the true end-to-end check of the two-layer quoting (injection-safety).
- */
+/** Decode the argv the remote would receive: `buildRemoteCommand` emits `bash -lc '<...>'`, so an
+ * outer bash exports an `agents` shim that prints each arg per line. This is the end-to-end check
+ * of the two-layer quoting (injection safety). */
 function decodeRemoteArgv(forwarded: string[]): string[] {
   const shim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; `;
   const res = spawnSync('bash', ['-c', shim + buildRemoteCommand(forwarded)], { encoding: 'utf-8' });

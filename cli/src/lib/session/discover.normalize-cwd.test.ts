@@ -1,13 +1,6 @@
-/**
- * `normalizeCwd` sits on both sides of the cwd filter in `db.ts` — the stored
- * value written at index time and the `--cwd`/`--cwd-prefix` query — so the two
- * must normalize identically or the LIKE subdir match silently returns nothing.
- *
- * It also has to survive a FOREIGN path. A cwd read out of a transcript can name
- * a directory on another machine, and `path.resolve()` used to rebase such a path
- * onto the current drive on Windows (`/Users/me` -> `D:\Users\me`), inventing a
- * location that never existed and corrupting every remote session in the index.
- */
+/** `normalizeCwd` runs on both sides of the cwd filter in `db.ts`; the two must normalize
+ * identically or the LIKE subdir match returns nothing. It must also survive a FOREIGN path:
+ * Windows `path.resolve()` rebased `/Users/me` onto `D:\`. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -67,12 +60,9 @@ describe('normalizeCwd', () => {
   });
 
   it('never rebases a foreign Windows-rooted path onto this process cwd (RUSH-2358)', () => {
-    // The mirror regression: on POSIX, path.isAbsolute() doesn't recognize a
-    // drive letter, so a Windows-recorded cwd used to fall through to
-    // path.resolve() and come back prefixed with THIS process's own cwd —
-    // silently grafting an unrelated local directory onto a synced session
-    // (and, via WORKTREE_RE, capable of misattributing its worktree slug to
-    // whatever worktree this process happens to be running in).
+    // Mirror regression: on POSIX a Windows-recorded cwd fell through to path.resolve() and gained
+    // THIS process's cwd as prefix, grafting an unrelated directory (and possibly a wrong worktree
+    // slug via WORKTREE_RE) onto a synced session.
     const foreign = 'C:\\Users\\dev\\repo\\.agents\\worktrees\\my-feature';
     const out = normalizeCwd(foreign);
     expect(out).not.toContain(process.cwd());

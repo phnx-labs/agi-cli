@@ -1,21 +1,6 @@
-/**
- * Managed known_hosts pinning for the device fleet (RUSH-1767).
- *
- * The shared SSH baseline uses `StrictHostKeyChecking=accept-new`
- * (trust-on-first-use): it silently accepts whatever key answers on the FIRST
- * connect, so a machine-in-the-middle present in that window is trusted forever
- * and never re-checked. This module gives the CLI its own known_hosts store,
- * kept apart from the user's `~/.ssh/known_hosts`, so a device's host key can be
- * *pinned*: once a key is recorded here, connections verify against it with
- * `StrictHostKeyChecking=yes`, so a later key swap is refused instead of
- * silently re-accepted.
- *
- * The learn-then-pin flow: the first `agents ssh`/fleet connection to a host is
- * still `accept-new`, but it writes the learned key into THIS store, which pins
- * it for every subsequent connect. Credential copies (`run --device --copy-creds`)
- * refuse to run against a host that isn't pinned here — see
- * `commands/exec.ts` — so tokens never ride an unverified first connect.
- */
+/** Managed known_hosts pinning (RUSH-1767). The baseline `accept-new` (TOFU) trusts a
+ * machine-in-the-middle on first connect forever. This CLI-owned store lets a key be pinned, so
+ * later connections use `StrictHostKeyChecking=yes` and a key swap is refused. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
@@ -44,11 +29,8 @@ function readManagedKnownHosts(file = managedKnownHostsPath()): string {
   }
 }
 
-/**
- * True if `host` has at least one pinned key line in `content`. Pure (content
- * in) so the match logic is unit-testable without touching disk. Matching is
- * case-insensitive on the hostname, as OpenSSH does.
- */
+/** True if `host` has at least one pinned key line in `content`. Pure so matching is testable
+ * without disk; hostname match is case-insensitive, as in OpenSSH. */
 export function isHostPinnedIn(content: string, host: string): boolean {
   const needle = host.trim().toLowerCase();
   if (!needle) return false;
@@ -60,19 +42,9 @@ export function isHostPinned(host: string, file = managedKnownHostsPath()): bool
   return isHostPinnedIn(readManagedKnownHosts(file), host);
 }
 
-/**
- * True if a DEVICE's host key is pinned — checked against the SAME host string
- * the ssh connection dials (`hostNameFor(device)`: the Tailscale dnsName/IP that
- * `sshTargetFor` resolves), falling back to the bare device name.
- *
- * A device discovered over the tailnet is pinned under its FQDN
- * (`yosemite-m6.tail….ts.net`), so a caller that checks the bare `device.name`
- * misses the pin and wrongly treats a reachable, pinned peer as unpinned —
- * silently excluding it from usage/auth fan-out while ssh to it would have
- * succeeded (PHNX-3505). Accepting the bare name too keeps a device pinned only
- * under its short name working. `isPinned` is injectable for tests; it defaults
- * to the managed on-disk store.
- */
+/** True if a device's host key is pinned, checked against the host string ssh dials
+ * (`hostNameFor(device)`), falling back to the bare name. A tailnet device is pinned under its
+ * FQDN, so checking only `device.name` would wrongly drop a pinned peer (PHNX-3505). */
 export function isDevicePinned(
   device: DeviceProfile,
   isPinned: (host: string) => boolean = (host) => isHostPinned(host),
@@ -81,15 +53,9 @@ export function isDevicePinned(
   return (host != null && isPinned(host)) || isPinned(device.name);
 }
 
-/**
- * The host-key-checking ssh options for a connection.
- *
- * Always points `UserKnownHostsFile` at the managed store so learned and pinned
- * keys live in exactly one CLI-owned file. `StrictHostKeyChecking` is `yes` once
- * the host is pinned (a key swap is refused) and `accept-new` before that
- * (genuine first enrollment learns the key into the managed store, which pins it
- * for every subsequent connect). Pure given `pinned`, so the policy is testable.
- */
+/** The host-key-checking ssh options: always point `UserKnownHostsFile` at the managed store so
+ * learned and pinned keys live in one CLI-owned file; `StrictHostKeyChecking` is `yes` once pinned
+ * (a swap is refused), `accept-new` before (first enrollment learns the key). Pure given `pinned`. */
 export function hostKeyCheckingOpts(pinned: boolean, file = managedKnownHostsPath()): string[] {
   return [
     '-o', `UserKnownHostsFile=${file}`,
@@ -97,12 +63,8 @@ export function hostKeyCheckingOpts(pinned: boolean, file = managedKnownHostsPat
   ];
 }
 
-/**
- * The key lines in `scanned` (ssh-keyscan output) not already present in
- * `existing`. Comments and blank lines are dropped; whitespace is normalized so
- * a re-scan of an already-pinned key is a no-op. Pure, so the idempotent-append
- * contract is unit-testable without spawning ssh-keyscan.
- */
+/** The key lines in `scanned` (ssh-keyscan output) not already in `existing`. Comments and blanks
+ * are dropped and whitespace normalized, so re-scanning a pinned key is a no-op. Pure. */
 export function newKnownHostsLines(existing: string, scanned: string): string[] {
   const have = new Set(existing.split('\n').map((l) => l.trim()).filter(Boolean));
   const seen = new Set<string>();
@@ -123,13 +85,9 @@ interface PinResult {
   added: number;
 }
 
-/**
- * Merge `ssh-keyscan` output for `host` into the managed store at `file`,
- * idempotently, and report whether `host` is pinned afterward. Split out from
- * {@link pinHostKey} so the store-write half — the part that decides a scanned
- * key now counts as pinned — is unit-testable with real keyscan text and no
- * network (the spawn stays in `pinHostKey`).
- */
+/** Merge `ssh-keyscan` output for `host` into the managed store at `file`, idempotently, and report
+ * whether `host` is pinned. Split from {@link pinHostKey} so the store-write half is unit-testable
+ * with real keyscan text and no network. */
 export function recordScannedKeys(host: string, scanned: string, file = managedKnownHostsPath()): PinResult {
   ensureManagedKnownHostsDir(file);
   const existing = readManagedKnownHosts(file);
@@ -141,18 +99,9 @@ export function recordScannedKeys(host: string, scanned: string, file = managedK
   return { pinned: isHostPinned(host, file), added: fresh.length };
 }
 
-/**
- * `ssh-keyscan` a host at a trusted moment and append any new key lines to the
- * managed store, idempotently. This is the explicit pin path; the implicit one
- * is a normal `accept-new` connection whose learned key lands in the same store.
- * Returns whether the host is pinned afterward.
- *
- * Host-name-agnostic: it scans whatever address it is handed, so it also pins a
- * host `agents ssh` can't reach — notably a bare `~/.ssh/config` `Host` alias,
- * which is not a registered device. The `--copy-creds` gate (commands/exec.ts)
- * calls this for exactly that case so the credential copy is usable for
- * ssh-config-alias hosts (RUSH-1767).
- */
+/** `ssh-keyscan` a host at a trusted moment and append new key lines to the managed store,
+ * idempotently; returns whether the host is pinned. The explicit pin path; the implicit one is an
+ * `accept-new` connection. Also pins a bare `~/.ssh/config` alias for `--copy-creds` (RUSH-1767). */
 function pinHostKey(
   host: string,
   opts: { file?: string; timeoutMs?: number; port?: number } = {},

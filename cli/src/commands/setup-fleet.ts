@@ -1,10 +1,6 @@
-/**
- * `agents setup fleet` — guided Tailscale device onboarding.
- *
- * This wizard is a front door over the existing fleet/device commands: sync
- * Tailscale into the registry, choose auth, render SSH config, test devices, and
- * optionally run the fleet updater without reimplementing those subcommands.
- */
+/** `agents setup fleet`: guided Tailscale onboarding as a front door over existing fleet/device
+ * commands (sync, auth, SSH config, device tests, optional fleet updater), reimplementing none of
+ * them. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

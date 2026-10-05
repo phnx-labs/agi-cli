@@ -1,19 +1,6 @@
-/**
- * RUSH-2438: `agents sync` was additive-only — a resource deleted from source
- * lingered in every version home forever, because the repo-scoped reconcile
- * path (`agents sync <agent>@all system`, `agents sync <agent> system --force`)
- * passes a selection, which turned off the full-sync orphan sweeps.
- *
- * These tests drive the REAL sync path (no mocking) inside an isolated `$HOME`
- * via `bun --eval`, exactly like `__tests__/extras-sync.test.ts`. They lock the
- * four safety properties the prune MUST hold, plus the writer-`remove()` parity
- * the manifest-bounded prune depends on:
- *
- *   (a) a source-removed resource IS pruned from the version home;
- *   (b) a user-authored file the sync never placed is NOT touched;
- *   (c) a same-named resource in another layer is NOT cross-pruned;
- *   (d) with no manifest, prune FAILS LOUD (deletes nothing).
- */
+/** RUSH-2438: `agents sync` was additive-only (repo-scoped reconciles turned off orphan sweeps).
+ * Real sync path in an isolated `$HOME`. Source-removed resources ARE pruned; user files and
+ * same-named resources in other layers are NOT; with no manifest, prune fails loud (no deletes). */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -233,12 +220,9 @@ describe('agents sync prune (RUSH-2438)', () => {
   });
 
   it('(guard) a skill prune must NOT destroy a same-named command-skill', () => {
-    // The guard at writers/skills.ts remove() skips a dir that is currently a
-    // command-skill (agents_command marker). Construct the collision: a name that
-    // WAS a real skill (so the manifest records it under skills) but is now a
-    // command-installed-as-skill in the home. A skill prune considers it (gone
-    // from skill source, still materialized) and MUST leave it alone — deleting it
-    // would destroy a live command. If the guard were removed, this test fails.
+    // The guard at writers/skills.ts remove() skips a directory that is a command-skill
+    // (agents_command marker). A name that was a skill but is now a command installed as a skill
+    // must survive a skill prune, or a live command is destroyed.
     const result = runInTempHome(`
       writeSystemSkill('foo', 'foo skill');
       writeSystemSkill('keep', 'keep skill');

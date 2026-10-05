@@ -59,13 +59,9 @@ describe('profiles-presets', () => {
     expect(preset?.env.OPENAI_MODEL).toBe('deepseek-ai/DeepSeek-V3');
   });
 
-  // Dropped three data mirrors that pinned preset field values as literals:
-  // `authOptional` on bedrock/proxy, the grok model ids, and the positive spark
-  // id. Each restated a line of profiles-presets.ts a few lines away, so no
-  // wrong implementation could fail them — while a legitimate model bump broke
-  // all of them at once. The negative guard below is the one that catches a real
-  // bug (a specific id that was never served must never come back), and it keeps
-  // working across every future rename.
+  // Literal mirrors of preset fields were dropped: they restated profiles-presets.ts, so no wrong
+  // implementation could fail them while a model bump broke them all. The negative guard below
+  // catches a real bug (a never-served id must not return).
 
   it('no preset references the never-served meta/claude-spark-1.1 id', () => {
     const stale = PRESETS.filter((p) =>

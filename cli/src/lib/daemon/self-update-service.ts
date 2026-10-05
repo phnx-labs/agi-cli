@@ -1,38 +1,6 @@
-/**
- * Daemon self-update service (PHNX-3695, "Fix 2").
- *
- * The daemon (`agents __daemon-run`) is a long-running background process that
- * historically opted OUT of the CLI's interactive auto-update: `bootstrap.ts`
- * force-sets `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` for `__daemon-run`, so a
- * running daemon never picked up new agents-cli code until a human ran
- * `agents daemon restart`. R5 in the root CLAUDE.md ("An installed CLI and its
- * installed helpers auto-update from the public channel") is binding for the
- * interactive CLI path (`self-update.ts` / `agents upgrade`) but was silently
- * NOT held for the one process that runs unattended for days. This service
- * closes that gap for the daemon specifically, reusing the exact same
- * verified-install primitives `agents upgrade` already uses — it does not
- * fork or reimplement them.
- *
- * Model: verify-then-exit, not swap-in-place. A daemon cannot safely hot-swap
- * its own loaded JS mid-process (in-flight ticks, open sockets, a live
- * ServiceSupervisor). Instead this tick installs + BYTE-VERIFIES the new
- * package on disk, and only once that succeeds does it `process.exit(0)` —
- * the OS supervisor (launchd `KeepAlive` / systemd `Restart=always`, see
- * `daemon/AGENTS.md`'s crash-recovery model) relaunches the daemon, which
- * then boots the new code. Clients do not need to be told anything: a socket
- * client re-probes and reconnects when the daemon relaunches, and the
- * scheduler's atomic `(routine, scheduledFor)` claim (see
- * `docs/specifications.md` §Scheduling & execution singularity) means a routine
- * mid-fire at the moment of exit is deduped safely across the restart rather
- * than double-fired.
- *
- * Fail-closed is the whole point: every step below that can fail — the
- * registry check, the install, the post-install verify — leaves the OLD
- * daemon running untouched and logs a WARN/ERROR for the next tick to retry.
- * The daemon must never exit into code it has not proven is the real,
- * verified, requested version; an unverified exit would let the OS supervisor
- * relaunch-loop on a broken install.
- */
+/** Daemon self-update (PHNX-3695): the daemon opted out of auto-update, so R5 wasn't held for it.
+ * Verify-then-exit: install and byte-verify, then `process.exit(0)` for the OS supervisor. Fail
+ * closed: any failed step leaves the old daemon running; never exit into unverified code. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -65,27 +33,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Runs roughly every 75 minutes — self-update is not urgent (unlike self-heal's 6h drift repair, it changes running code, so it stays well under a day but still infrequent). */
 const SELF_UPDATE_TICK_MS = 75 * 60_000;
-/**
- * Hard cap per tick: a real download + npm/bun install + verify can
- * legitimately take minutes on a slow link. 15 minutes matches the task's
- * stated budget and is short relative to the ~75min cadence. Exported so an
- * on-demand self-update trigger ({@link triggerSelfUpdateInBackground}) can bound
- * its own `AbortController` on the SAME budget the periodic tick runs under —
- * one deadline, not two independently-tuned numbers that could drift apart.
- * (Its former transport, the `request-self-update` verb on the daemon's browser
- * IPC socket, left with the standalone `browser` CLI in PHNX-4101; the mechanism
- * stays for a future on-demand caller.)
- */
+/** Hard cap per tick: download + install + verify can take minutes on a slow link; 15 minutes is
+ * short relative to the ~75min cadence. Exported so triggerSelfUpdateInBackground bounds its
+ * `AbortController` on the same budget. */
 const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
-/**
- * First tick fires 5 minutes after daemon boot — deliberately longer than
- * self-heal's 30s stagger (`self-heal-service.ts`): self-heal repairs local
- * drift and is cheap/safe to run immediately, while self-update can replace
- * the running package and exit the process, which should never be the very
- * first thing a freshly-started daemon does (give the box a moment to finish
- * settling — shims, PATH, other services' startup ticks — before considering
- * a restart). Every later tick still fires on the normal cadence.
- */
+/** First tick fires 5 minutes after boot, longer than self-heal's 30s: self-update can replace the
+ * package and exit, so it must not be the first thing a fresh daemon does while shims, PATH and
+ * other services settle. Later ticks use the normal cadence. */
 const SELF_UPDATE_STARTUP_DELAY_MS = 5 * 60_000;
 
 interface SelfUpdateOutcome {
@@ -99,13 +53,9 @@ interface NpmLatestMetadata {
   tarball: string;
 }
 
-/**
- * Dependency seam so `self-update-service.test.ts` can drive a REAL install
- * against a fixture npm prefix/tarball without touching the real npm
- * registry or the real running install. Production code always uses
- * {@link defaultSelfUpdateDeps} (the default parameter below) — no test-only
- * branch exists in the exported logic itself.
- */
+/** Dependency seam so `self-update-service.test.ts` can drive a real install against a fixture
+ * prefix/tarball. Production always uses defaultSelfUpdateDeps; the exported logic has no
+ * test-only branch. */
 export interface SelfUpdateDeps {
   /** The version this process BOOTED with (memoized at startup). */
   currentVersion(): string;
@@ -141,30 +91,9 @@ async function fetchLatestNpmMetadata(signal: AbortSignal): Promise<NpmLatestMet
   return { version: data.version, integrity: data.dist.integrity, tarball: data.dist.tarball };
 }
 
-/**
- * Install + byte-verify `metadata` into `packageRoot`'s install, exactly the
- * sequence `bootstrap.ts`'s `installResolvedPackage` runs for `agents
- * upgrade` (download+integrity-verify -> sweep stale staging -> package-
- * manager install -> verify installed version -> refresh alias shims).
- * `bootstrap.ts` cannot be imported here — it runs side-effecting top-level
- * code (argv parsing, command registration) on import, which the daemon must
- * never trigger — so this is the same primitives from `self-update.ts`
- * composed directly, not a fork of the upgrade logic.
- *
- * `signal` is threaded into EVERY step's own `signal` option
- * (`downloadVerifiedTarball` / `installPackageIntoPrefix` /
- * `installPackageWithBun`, all in `self-update.ts`) rather than raced against
- * from the outside: those primitives kill the underlying fetch/child process
- * on abort and their promise rejects only once that real cancellation has
- * happened. A wrapper that merely stopped AWAITING an unkillable operation
- * (the prior approach here) left an orphaned `npm install -g`/`bun add -g`
- * writing into the shared global prefix — which the very next tick's fresh
- * install (started as soon as the supervisor's backoff fires, seconds later)
- * would then race into the same directory. Real cancellation is what makes
- * `attemptSelfUpdateAndExit`'s `inFlightAttempt` dedupe (below) an actual
- * guarantee instead of a guard whose lifetime is shorter than the operation
- * it's guarding (found in review, PHNX-3695).
- */
+/** Install and byte-verify `metadata` into `packageRoot`, the same sequence as `bootstrap.ts`'s
+ * `installResolvedPackage` (bootstrap cannot be imported: side-effecting top level). `signal` goes
+ * into each step so abort kills the fetch/child; an orphan races the next install (PHNX-3695). */
 export async function installAndVerifyDefault(
   metadata: NpmLatestMetadata,
   packageRoot: string,
@@ -188,14 +117,9 @@ export async function installAndVerifyDefault(
   await verifyInstalledVersion(packageRoot, metadata.version);
   await refreshAliasShims(packageRoot, signal);
 
-  // PHNX-2768: mirror `bootstrap.ts`'s `installResolvedPackage` — an
-  // `--ignore-scripts` install (both package-manager paths above) can leave
-  // the package.json at the new version but the global bin links
-  // (agents/ag/browser/computer) GONE. Without this, a self-update tick could
-  // exit `updated: true` while every operator-typed `agents` command on that
-  // box now reads "command not found," with no signal anywhere pointing at
-  // why. Same fail-loud contract as the interactive path: a link that cannot
-  // be made to resolve fails the whole attempt rather than reporting success.
+  // PHNX-2768: mirror `installResolvedPackage`. An `--ignore-scripts` install can leave
+  // package.json at the new version with the global bin links gone. A link that cannot be made to
+  // resolve fails the attempt instead of reporting `updated: true`.
   if (detectPackageManager(packageRoot) !== 'bun' && process.platform !== 'win32') {
     const prefix = deriveGlobalPrefix(packageRoot);
     const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
@@ -247,29 +171,14 @@ function defaultSelfUpdateDeps(): SelfUpdateDeps {
   };
 }
 
-/**
- * Dedupes concurrent callers onto ONE in-flight attempt. The periodic tick
- * and an on-demand `request-self-update` IPC call (possibly several, if more
- * than one version-skewed client reconnects at once) can overlap in the same
- * process — without this, two concurrent `installAndVerify` calls race on the
- * same package-manager install directory. Keyed process-wide (not per-deps)
- * since production always shares one `defaultSelfUpdateDeps()` install target;
- * tests inject distinct `deps` per case and don't run concurrently with each
- * other, so this never cross-contaminates test outcomes.
- */
+/** Dedupes concurrent callers (periodic tick, on-demand request, several skewed clients) onto one
+ * in-flight attempt; two concurrent installs would race on the same install directory.
+ * Process-wide since production shares one `defaultSelfUpdateDeps()` target. */
 let inFlightAttempt: Promise<SelfUpdateOutcome> | null = null;
 
-/**
- * Core self-update decision + action, shared by the periodic tick
- * ({@link SelfUpdateService.onTick}) and the on-demand trigger
- * ({@link triggerSelfUpdateInBackground}) — one implementation, so a
- * version-skew "update now" caller runs exactly the same fail-closed logic as the
- * scheduled sweep. Returns rather than throws so callers decide their own exit
- * timing (the periodic service exits immediately; an on-demand caller that must
- * respond to a client BEFORE exiting delays via {@link scheduleSelfUpdateExit}).
- * Concurrent callers share one in-flight attempt rather than racing separate
- * installs.
- */
+/** Core self-update decision and action, shared by the periodic tick and
+ * triggerSelfUpdateInBackground, so both run the same fail-closed logic. Returns rather than
+ * throws so callers pick their exit timing (see scheduleSelfUpdateExit). */
 export async function attemptSelfUpdateAndExit(
   ctx: DaemonContext,
   signal: AbortSignal,
@@ -290,22 +199,15 @@ async function runSelfUpdateAttempt(
   signal: AbortSignal,
   deps: SelfUpdateDeps,
 ): Promise<SelfUpdateOutcome> {
-  // One decline source for the periodic tick and the on-demand IPC path
-  // (`selfUpdateSyncDeclineReason`): dev build; shadowed install — except when
-  // the install on disk is already newer than the running code, because a
-  // relaunch installs nothing and a second `agents` on the box is irrelevant to
-  // it (otherwise a shadowed worker never leaves the release it booted on).
+  // One decline source for the periodic tick and the on-demand path
+  // (`selfUpdateSyncDeclineReason`): dev build, or shadowed install unless the disk install is
+  // already newer than the running code, since a relaunch installs nothing.
   const syncDecline = selfUpdateSyncDeclineReason(deps);
   if (syncDecline) return { updated: false, reason: syncDecline };
 
-  // Another agents process (an operator's `agents` command auto-updating, an
-  // `agents upgrade`, the installer) may already have replaced the install
-  // under this daemon. The code on disk is then newer than the code in memory
-  // and there is nothing to download — that path verified its install before
-  // it returned. Exit for the OS-supervisor relaunch, once the install has
-  // settled: npm's reify is atomic but bun's is not, so a version bump alone
-  // could be bun mid-extraction (`installLooksSettled`). Waiting one tick is
-  // cheap; relaunching into a half-written tree is a supervisor crash-loop.
+  // Another process (operator `agents`, `agents upgrade`, installer) may have already replaced the
+  // install, so disk is newer than memory and there is nothing to download. Exit for the
+  // supervisor relaunch once the install has settled (npm's reify is atomic, bun's is not).
   const current = deps.currentVersion();
   const installed = deps.installedVersion();
   if (installedIsNewerThanRunning(installed, current)) {
@@ -343,11 +245,9 @@ async function runSelfUpdateAttempt(
     return { updated: false, reason: 'install or verify failed' };
   }
 
-  // Best-effort from here: the CLI package itself is already installed and
-  // byte-verified, so a failure pulling the companion .system repo or
-  // reconciling resources must not undo a good CLI upgrade or block the exit
-  // that lets the OS supervisor relaunch onto it — it is logged and left for
-  // the NEXT tick (which runs on the new code) to retry.
+  // Best-effort from here: the CLI is already installed and verified, so a failure pulling the
+  // .system repo or reconciling resources must not undo the upgrade or block the exit. It is
+  // logged and retried on the next tick, which runs on the new code.
   try {
     await deps.syncSystemRepo();
   } catch (err) {
@@ -370,50 +270,18 @@ const SELF_UPDATE_EXIT_DELAY_MS = 250;
 
 let exitScheduled = false;
 
-/**
- * Schedule the process exit for a verified self-update, exactly once, no
- * matter how many callers observe `outcome.updated` on the shared
- * `inFlightAttempt` promise. The periodic tick and an on-demand caller can both
- * be awaiting that SAME promise — if the tick's continuation ran an immediate
- * `process.exit(0)` while an on-demand caller's continuation had not yet flushed
- * its response to a client, the tick's exit could win the race and the client
- * would see a closed socket before any response (found in review, PHNX-3695).
- * Routing every caller through this one guarded, always-delayed scheduling point
- * means the delay protects EVERY caller's in-flight response.
- */
+/** Schedule the exit for a verified self-update exactly once, however many callers await the shared
+ * `inFlightAttempt`. An immediate tick exit could win the race against an on-demand caller still
+ * flushing its client response (PHNX-3695), so all go through this one delayed point. */
 export function scheduleSelfUpdateExit(): void {
   if (exitScheduled) return;
   exitScheduled = true;
   setTimeout(() => process.exit(0), SELF_UPDATE_EXIT_DELAY_MS);
 }
 
-/**
- * Fire an on-demand self-update in the BACKGROUND and return its (bounded)
- * promise WITHOUT the caller having to await it — the reusable primitive for a
- * "update now" trigger that must respond to a client before the daemon exits.
- * Awaiting the full check→download→install→verify inline would park the caller
- * for tens of seconds (worst case ~15 min), the client-stall PHNX-3605 was
- * written to prevent; instead a trigger responds "triggered" immediately and
- * lets this run in the background — the daemon does install→verify→exit(0) on its
- * own, the OS supervisor relaunches it, and the client reconnects.
- *
- * (Its one former production caller was the `request-self-update` verb on the
- * daemon's browser IPC socket, removed with the standalone `browser` CLI in
- * PHNX-4101. The primitive stays — tested and reusable — for a future on-demand
- * trigger; the periodic tick does not use it, exiting inline instead.)
- *
- * The work still shares the module-level {@link attemptSelfUpdateAndExit}
- * `inFlightAttempt` guard, so a concurrent trigger (or the periodic tick) can't
- * race a second install into the same prefix. It is bounded by
- * {@link SELF_UPDATE_DEADLINE_MS} via an `AbortController` nobody awaits (the
- * timer is `unref`'d so it never keeps the daemon alive on its own and never
- * dangles in a test). Fail-closed is preserved end to end:
- * `runSelfUpdateAttempt` already turns an install/verify failure into a
- * not-updated outcome that leaves the running daemon untouched. The caller
- * schedules the one decoupled {@link scheduleSelfUpdateExit} off the returned
- * promise once `updated` is true, so the exit still fires after the caller's
- * response has flushed.
- */
+/** Fire an on-demand self-update in the background and return its bounded promise without awaiting,
+ * so a trigger can respond to a client before the daemon exits. Awaiting inline would stall the
+ * caller up to ~15 min (PHNX-3605). Shares the inFlightAttempt guard; stays fail-closed. */
 export function triggerSelfUpdateInBackground(
   ctx: DaemonContext,
   deps: SelfUpdateDeps = defaultSelfUpdateDeps(),
@@ -424,19 +292,9 @@ export function triggerSelfUpdateInBackground(
   return attemptSelfUpdateAndExit(ctx, controller.signal, deps).finally(() => clearTimeout(timeout));
 }
 
-/**
- * The subset of self-update decline checks that are INSTANT and network-free —
- * a dev build, or a shadowed install. The on-demand IPC handler
- * (`request-self-update`) runs these SYNCHRONOUSLY so a version-skewed browser
- * client gets the PHNX-3605 "nothing changed, not evicting" advisory
- * immediately, instead of a "triggered" it would never act on. The remaining
- * checks (registry probe, already-current, install/verify) stay inside the
- * backgrounded {@link attemptSelfUpdateAndExit} so the handler never blocks on
- * the network or the install. This is the single source of the two instant
- * decline reasons — {@link runSelfUpdateAttempt} calls it too, so the on-demand
- * decline text can never drift from the periodic tick's. Returns the decline
- * reason, or `null` to proceed to the (backgrounded) install path.
- */
+/** The instant, network-free decline checks: dev build, or shadowed install. The on-demand handler
+ * runs these synchronously so a skewed client gets the PHNX-3605 "nothing changed" advisory
+ * immediately; runSelfUpdateAttempt calls it too. Returns the reason, or null. */
 export function selfUpdateSyncDeclineReason(deps: SelfUpdateDeps = defaultSelfUpdateDeps()): string | null {
   if (deps.isDevBuild()) return DEV_BUILD_DECLINE;
   // A stale install is never declined by a shadow: the relaunch installs nothing.

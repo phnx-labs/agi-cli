@@ -7,11 +7,9 @@ const { TEST_REAL_HOME } = vi.hoisted(() => {
   const { tmpdir } = require('node:os');
   const { join } = require('node:path');
   const { realpathSync } = require('node:fs');
-  // Canonicalize the tmp base so the mocked homedir() matches what
-  // realpathSync() returns inside symlinkAllowedDirs. On Windows tmpdir() is an
-  // 8.3 short name (RUNNER~1 vs runneradmin); on macOS /var symlinks to
-  // /private/var. Without this the source's HOME-containment guard sees the two
-  // forms as different and skips the link.
+  // Canonicalize the tmp base so the mocked homedir() matches realpathSync() inside
+  // symlinkAllowedDirs: Windows tmpdir() is an 8.3 short name and macOS /var symlinks to
+  // /private/var, which would make the HOME-containment guard skip the link.
   return { TEST_REAL_HOME: join(realpathSync(tmpdir()), 'agents-cli-sandbox-real-home') };
 });
 

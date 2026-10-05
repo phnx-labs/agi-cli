@@ -1,8 +1,5 @@
-/**
- * Mix tree registration — real commander, no mocks.
- * Covers the insights-owned mix path: the board, `mix <recipe>`, and `mix --list`
- * (the former standalone recipe shortcuts, `recipes`, and `trends` are gone).
- */
+/** Mix tree registration, real commander, no mocks: the board, `mix <recipe>` and `mix --list`. The
+ * former standalone shortcuts, `recipes` and `trends` are gone. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

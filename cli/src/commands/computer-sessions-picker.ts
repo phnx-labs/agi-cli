@@ -1,21 +1,6 @@
-/**
- * Interactive, task-first `agents computer sessions` / `agents sessions
- * --computer` view (RUSH-2432) — the computer counterpart of
- * `browser-sessions-picker.ts` (RUSH-2407). Backs the TTY path only —
- * non-TTY, `--json`, and `--no-interactive` all fall straight through to the
- * flat printer in `lib/computer/sessions-list.ts` (unchanged, so `--json`
- * stays a stable surface).
- *
- * Reuses the same `itemPicker` + `buildPreview` primitives as the ordinary
- * session picker (`sessions-picker.ts`) and the browser task picker — same
- * search/filter/quit help, and the preview pane for a linked run IS the
- * canonical session digest, not a second renderer. Unlike a browser task, a
- * computer run has no on-disk artifact of its own to open (see
- * `lib/computer/sessions-list.ts`'s module docblock), so `enter` prints the
- * run's full action list rather than opening a file, and the picker keeps
- * browsing afterward instead of exiting. Interactive routing and the browse
- * loop live in `sessions-picker-factory.ts` (shared with the browser twin).
- */
+/** Interactive, task-first `agents computer sessions` / `agents sessions --computer` view
+ * (RUSH-2432), the counterpart of browser-sessions-picker.ts. TTY path only; non-TTY, `--json` and
+ * `--no-interactive` fall through to the flat printer in `lib/computer/sessions-list.ts`. */
 import chalk from 'chalk';
 import { buildPreview } from './sessions-picker.js';
 import { createSessionsPickerCommand } from './sessions-picker-factory.js';
@@ -136,11 +121,8 @@ export function shouldOpenInteractiveComputerSessions(opts: ComputerSessionsComm
   return computerSessionsPicker.shouldOpen(opts, isTTY);
 }
 
-/**
- * Shared entry point for `agents computer sessions` and `agents sessions
- * --computer`. Mirrors `runBrowserSessionsCommand`'s interactive-routing
- * split so both call sites stay in lockstep.
- */
+/** Shared entry point for `agents computer sessions` and `agents sessions --computer`, mirroring
+ * `runBrowserSessionsCommand`'s interactive-routing split so both stay in lockstep. */
 export async function runComputerSessionsCommand(opts: ComputerSessionsCommandOpts): Promise<void> {
   await computerSessionsPicker.run(opts);
 }

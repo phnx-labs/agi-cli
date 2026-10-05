@@ -1,9 +1,6 @@
-/**
- * RUSH-2007 Layer C — composed integration: runWatchdogTick reconciles + persists
- * per-session presence across ticks, using the tick's own session view (no mocks;
- * a real tmp state dir). Tick 1 sees a session -> connected; tick 2 no longer sees
- * it -> disconnected + the connect->disconnect transition with its action.
- */
+/** RUSH-2007 Layer C, composed integration (real tmp state dir, no mocks): runWatchdogTick persists
+ * presence across ticks; tick 1 sees a session (connected), tick 2 does not (disconnected
+ * transition). */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

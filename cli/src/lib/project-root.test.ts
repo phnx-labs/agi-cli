@@ -153,10 +153,9 @@ describe('resolveProjectDirs', () => {
   });
 
   it('a @worktree ref keeps the worktree as cwd and grants the main checkout too', async () => {
-    // The worktree is the cwd, so the project's own checkout stops being the
-    // primary and becomes a grant like any other bound directory. That is the
-    // wanted behavior: a teammate isolated in a worktree still needs to read
-    // the checkout it branched from, and the siblings.
+    // The worktree is the cwd, so the project's own checkout becomes a grant like any other bound
+    // directory. Wanted: a teammate in a worktree still needs to read the checkout it branched
+    // from, and the siblings.
     const wt = path.join(mainDir, '.agents', 'worktrees', 'fix');
     fs.mkdirSync(wt, { recursive: true });
     const { cwd, extraDirs } = await resolveProjectDirs('multi@fix', { forRemote: false });
@@ -173,12 +172,9 @@ describe('inferProjectRoot', () => {
     toHomeRelative(process.platform === 'win32' ? tmp : fs.realpathSync(tmp));
 
   beforeAll(() => {
-    // Canonicalize the temp dir so it matches the long real path git — and thus
-    // inferProjectRoot — resolves to. realpathSync.native resolves BOTH the macOS
-    // /var → /private/var symlink AND Windows 8.3 short names (CI runners hand back
-    // os.tmpdir() as C:\Users\RUNNER~1\..., which would never fold under the
-    // long-form home dir). Without this the home-relative comparison mismatches on
-    // Windows (short vs long) even though inferProjectRoot is correct.
+    // Canonicalize the temp dir to the real long path git resolves: realpathSync.native handles
+    // macOS /var -> /private/var and Windows 8.3 short names (RUNNER~1), else the home-relative
+    // comparison mismatches on Windows.
     tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'proot-')));
     repo = path.join(tmp, 'my-repo');
     fs.mkdirSync(path.join(repo, 'sub', 'deep'), { recursive: true });

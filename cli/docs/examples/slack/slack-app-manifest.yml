@@ -1,12 +1,6 @@
-# Slack app manifest for the agents bridge.
-#
-# Create the app at https://api.slack.com/apps → "Create New App" → "From a manifest",
-# paste this, then install it to your workspace. Replace <box>.<tailnet>.ts.net with
-# your Tailscale Funnel host (from `agents daemon webhooks add --funnel-port 443`).
-#
-# After install:
-#   agents secrets add slack SLACK_SIGNING_SECRET <Basic Information → Signing Secret>
-#   agents secrets add slack SLACK_BOT_TOKEN      <OAuth & Permissions → Bot User OAuth Token, xoxb-…>
+# Slack app manifest for the agents bridge: create the app at https://api.slack.com/apps ("From a
+# manifest"), paste this, install it, and replace <box>.<tailnet>.ts.net with your Funnel host.
+# Then store the signing secret via `agents secrets add slack SLACK_SIGNING_SECRET`.
 
 display_information:
   name: agents

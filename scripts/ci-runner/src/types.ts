@@ -12,10 +12,8 @@ export const RESOURCE_WEIGHT: Record<ResourceClass, number> = {
   large: 4,
 };
 
-/**
- * Fields a caller must never send. The executor derives the worktree and
- * never acquires a box. Presence of any of these is a hard reject.
- */
+/** Fields a caller must never send: the executor derives the worktree and never acquires a box. Any
+ * of them is a hard reject. */
 export const FORBIDDEN_REQUEST_FIELDS = [
   'lease',
   'leaseId',

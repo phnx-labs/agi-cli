@@ -93,11 +93,9 @@ describe('detectProjectForPath', () => {
   });
 });
 
-// The pure helpers above are unit-tested in isolation; this drives the real
-// `projects status`/`view` command through commander to prove the path-vs-name
-// disambiguation and the JSON short-circuit are wired correctly end to end.
-// AGENTS_PROJECTS_DIR points listProjectDefs at a temp defs dir, and the project
-// `root` is a temp dir so containment matching is real, not mocked.
+// The pure helpers above are unit-tested alone; this drives the real `projects status`/`view`
+// through commander to prove path-vs-name disambiguation and the JSON short-circuit.
+// AGENTS_PROJECTS_DIR and the project `root` are temp dirs, so containment matching is real.
 describe('projects view <path> — CLI dispatch disambiguation', () => {
   let projectsDir: string;
   let projectRoot: string;
@@ -434,25 +432,9 @@ describe('formatFleetUnverifiedNote', () => {
 // `projects pull` → `projects pull-local` CLI-arg round trip (RUSH-2536)
 // ---------------------------------------------------------------------------
 
-/**
- * The seam the fleet fan-out actually crosses: `pull` serializes its targets
- * into an argv, ssh hands that argv to a peer, and the peer's `pull-local`
- * rebuilds targets from it. Both halves are exercised for real here — the real
- * `pullLocalArgs` builder, the real commander command parsing that argv, real
- * git checkouts underneath — because the two things that broke were only
- * visible ACROSS this boundary:
- *
- *   1. `expectedSlug` never crossed it, so slug verification silently became a
- *      no-op on every remote peer;
- *   2. the peer's fingerprint (which hashes the slug) could then never match
- *      the caller's, so `parseProjectPullEnvelope` discarded the peer's ENTIRE
- *      result set — with no skipped/parseFailed marker, because a bare `[]`
- *      reads as "valid, zero items".
- *
- * Neither shows up in a unit test of either half alone: `pullProjectTargets`
- * verifies slugs correctly when handed slugs, and the envelope round-trips
- * correctly when both sides hash the same targets.
- */
+/** The seam the fleet fan-out crosses: `pull` serializes targets into argv, ssh hands it to a peer,
+ * whose `pull-local` rebuilds them. Both halves run for real: `expectedSlug` never crossed (slug
+ * check a no-op), then fingerprints never matched and results were dropped silently. */
 describe('projects pull-local — CLI-arg round trip from pull', () => {
   let root: string;
   let remote: string;
@@ -549,10 +531,9 @@ describe('projects pull-local — CLI-arg round trip from pull', () => {
   });
 });
 
-// `prs` is a group whose default subcommand is `list`, so `prs <name>` keeps the
-// shape AGI Menu calls and `prs merge` owns its own --repo/--number/--json. With
-// both options on one parent, commander handed `merge`'s flags to the parent
-// and every documented merge invocation failed to parse.
+// `prs` is a group whose default subcommand is `list`, so `prs <name>` keeps AGI Menu's shape
+// while `prs merge` owns its own --repo/--number/--json. With both on one parent, commander gave
+// merge's flags to the parent and every documented merge invocation failed to parse.
 describe('projects prs — list is the default, merge owns its flags', () => {
   let projectsDir: string;
   let priorEnv: string | undefined;

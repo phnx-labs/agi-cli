@@ -1,15 +1,6 @@
-/**
- * MonitorEngine lifecycle as a `DaemonService` (RUSH-3193 P2).
- *
- * Wraps the `MonitorEngine` (event-triggered watchers) under the
- * `ServiceSupervisor` contract. The engine can own a timer when embedded by a
- * foreground caller, but the daemon starts it in external-scheduler mode so
- * every evaluation cycle receives the supervisor's deadline, health, and
- * circuit-breaker semantics.
- *
- * `getEngine()` exposes the underlying `MonitorEngine` so `daemon.ts`'s
- * SIGHUP handler can call `engine.reload()` when needed.
- */
+/** MonitorEngine lifecycle as a `DaemonService` (RUSH-3193 P2): wraps the event-triggered engine
+ * under the `ServiceSupervisor`, started in external-scheduler mode so every cycle gets the
+ * supervisor's deadline, health and breaker; `getEngine()` lets SIGHUP call `engine.reload()`. */
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';

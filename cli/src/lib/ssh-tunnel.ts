@@ -1,22 +1,6 @@
-/**
- * ssh-tunnel.ts — the generic `ssh -L localPort:127.0.0.1:remotePort -N`
- * port-forward, plus the fleet-device resolution that names its far end.
- *
- * WHY IT LIVES HERE. These primitives used to sit in `lib/computer/ssh-tunnel.ts`
- * alongside the Windows computer-helper provisioning, because `agents computer
- * --device` was their second caller after the browser CDP driver. The computer
- * engine has since moved to the standalone `computer` CLI (PHNX-4075), so a
- * generic tunnel parked in a deleted subsystem's directory would have gone with
- * it and taken `agents browser`'s remote path down. It is fleet plumbing — the
- * devices registry, the hardened ssh baseline, a local loopback port — and
- * belongs in the fleet layer, not under a feature.
- *
- * Its callers are thin: `browser/drivers/ssh.ts` holds a tunnel for one CDP
- * session, and `lib/computer/context.ts` uses `resolveRemoteDevice` alone —
- * `agents computer --device` resolves the fleet name here and forwards the
- * answer to the standalone engine, which opens and owns its own tunnel (it
- * holds the helper token that tunnel's transport needs).
- */
+/** The generic `ssh -L` port-forward plus the fleet-device resolution naming its far end. It left
+ * `lib/computer/ssh-tunnel.ts` when the computer engine became the standalone CLI (PHNX-4075), so
+ * the browser's remote path would not go with it. */
 
 import { spawn, type ChildProcess } from 'child_process';
 import { SSH_OPTS, assertValidSshTarget } from './ssh-exec.js';
@@ -28,11 +12,9 @@ interface StartTunnelOptions {
   extraSshArgs?: string[];
 }
 
-/** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure.
- *
- * Composes the shared hardened baseline (`SSH_OPTS`) rather than re-listing it,
- * so the tunnel inherits the same options — crucially the keepalive, which lets
- * a dropped `-N` tunnel exit instead of lingering as a zombie on the laptop. */
+/** Build the ssh argv for an `-L` tunnel. Pure. Composes the shared `SSH_OPTS` baseline so the
+ * tunnel inherits keepalive, which lets a dropped `-N` tunnel exit instead of lingering as a
+ * zombie. */
 export function buildTunnelArgs(
   user: string,
   host: string,
@@ -50,13 +32,9 @@ export function buildTunnelArgs(
   ];
 }
 
-/**
- * Spawn `ssh -L localPort:127.0.0.1:remotePort -N user@host`.
- *
- * stderr is captured so a tunnel that dies inside 500ms rejects with the ssh
- * error — the browser driver's original contract. The tunnel is held by this
- * process for the lifetime of the session that opened it.
- */
+/** Spawn `ssh -L localPort:127.0.0.1:remotePort -N user@host`. stderr is captured so a tunnel dying
+ * within 500ms rejects with the ssh error (the browser driver's original contract). The tunnel is
+ * held by this process for the session. */
 export function startSSHTunnel(
   user: string,
   host: string,
@@ -65,11 +43,9 @@ export function startSSHTunnel(
   opts: StartTunnelOptions = {},
 ): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
-    // `user`/`host` can originate from a browser ssh:// profile or a device
-    // record. buildTunnelArgs places `${user}@${host}` before `-N`/SSH_OPTS, so
-    // a `-`-leading user would be parsed as an ssh option flag (option
-    // injection). Validate at the spawn sink so every caller is covered; reject
-    // (rather than throw synchronously) to keep the Promise contract.
+    // `user`/`host` can come from a browser ssh:// profile or device record, and buildTunnelArgs
+    // places `${user}@${host}` before `-N`/SSH_OPTS, so a `-`-leading user would parse as an ssh
+    // flag (option injection). Validate at the spawn sink; reject, not throw.
     try {
       assertValidSshTarget(`${user}@${host}`);
     } catch (err) {
@@ -110,16 +86,9 @@ interface ResolvedRemoteDevice {
   identityArgs: string[];
 }
 
-/**
- * Resolve a registered device to its ssh pieces, or throw a clear error.
- *
- * `expectPlatform` is how a caller keeps a platform requirement it used to
- * hard-code: `agents computer --device` drives the Windows helper daemon, so it
- * passes `'windows'` and gets the same refusal as before. Callers with no
- * platform requirement (the browser driver) omit it. The gate is a parameter
- * rather than a baked-in check so this module stays fleet-generic — a
- * hard-coded `windows` here would be a feature rule in shared plumbing.
- */
+/** Resolve a registered device to its ssh pieces, or throw a clear error. `expectPlatform` lets a
+ * caller keep a platform requirement (`agents computer --device` passes `'windows'`); a parameter,
+ * not a hard-coded check, so this stays fleet-generic. */
 export async function resolveRemoteDevice(
   name: string,
   opts: { expectPlatform?: DeviceProfile['platform']; forWhat?: string } = {},

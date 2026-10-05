@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
-/**
- * Time the impact planner on a representative leaf change (RUSH-2666).
- * Does not run the full CLI suite. Quote the printed JSON as evidence.
- */
+/** Time the impact planner on a representative leaf change (RUSH-2666); does not run the full CLI
+ * suite. Quote the printed JSON as evidence. */
 import { selectImpact, commandsForPlan, IMPACT_BUDGET_SEC, repoRootFrom } from './ci-scope';
 
 const repoRoot = repoRootFrom();

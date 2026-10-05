@@ -1,9 +1,5 @@
-/**
- * Built-in profile presets for popular model providers.
- *
- * Each preset bundles a host CLI, API base URL, default model, and provider
- * name so users can `agents harness add kimi` without manual configuration.
- */
+/** Built-in profile presets for popular providers: host CLI, API base URL, default model and
+ * provider name, so `agents harness add kimi` needs no manual config. */
 
 import type { AgentId } from './types.js';
 
@@ -37,23 +33,9 @@ export interface Preset {
   docPath?: string;
 }
 
-// Model IDs verified against openrouter.ai/api/v1/models on 2026-07-31
-// (spark presets corrected from the never-served meta/claude-spark-1.1 to the
-// live meta/muse-spark-1.1, confirmed on both OpenRouter and OpenCode id:meta).
-// Presets target the top-ranked open-source model per provider based on
-// SWE-bench Verified, LiveCodeBench, HumanEval, and Chatbot Arena rankings.
-//
-// Important limitation of Claude Code + non-Anthropic models via OpenRouter:
-// Claude Code sends `thinking:{type:"enabled"}` in its Anthropic payload by
-// default, and its headless output consolidation returns empty text when a
-// response contains thinking/redacted_thinking blocks — even when the model
-// *also* emits a text block. This means reasoning models work fine in
-// interactive `claude` mode (same env vars) but headless invocations
-// (`agents run <profile> "<prompt>"`) see empty stdout.
-//
-// Presets flagged "headless-safe" use non-reasoning variants that ignore
-// thinking:enabled. Presets flagged "reasoning" are the leaderboard leaders
-// but are best invoked interactively.
+// Model IDs verified against openrouter.ai on 2026-07-31. Claude Code's headless output returns
+// empty text when a response has thinking blocks, so reasoning presets work interactively but give
+// empty stdout headless; "headless-safe" presets use non-reasoning variants.
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api';
 const OPENROUTER_AUTH: Pick<Preset, 'provider' | 'host' | 'authEnvVar' | 'signupUrl'> = {

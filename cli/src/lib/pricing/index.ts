@@ -1,9 +1,5 @@
-/**
- * Canonical, reusable pricing module.
- *
- * Public surface re-exported here is the contract issue #346 (budget
- * enforcement) imports against — keep it stable.
- */
+/** Canonical pricing module; the public surface re-exported here is the contract issue #346 (budget
+ * enforcement) imports, so keep it stable. */
 export {
   type ModelPricing,
   PRICING_VERSION,

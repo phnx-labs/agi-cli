@@ -1,22 +1,6 @@
-/**
- * "Viewing in <app> tab N" for tmux-hosted agent sessions.
- *
- * A tmux-wrapped agent (see src/lib/exec.ts `runInTmux`) runs detached on the
- * shared socket; a terminal only *displays* it while a client is attached. This
- * resolver answers "which app + tab is looking at this session right now" by
- * matching the session to its attached tmux client(s) and reusing the app/tab
- * resolvers we already have:
- *
- *   - app  — the client's terminal PID walked up the process ancestry via the
- *            shared HOST_MATCHERS logic (`hostFromPid`).
- *   - tab  — per app: Ghostty via `assignGhosttyTabs` (cwd + title match), iTerm
- *            via the `t<n>` field of the client's `$ITERM_SESSION_ID`, and
- *            VS Code / Cursor / Codium via the extension-published `tabIndex` in
- *            live-terminals.json (keyed by session id).
- *
- * No client attached => `undefined` (the session is running detached). Every
- * lookup is best-effort; a miss degrades to `{ app }` with no tab, never throws.
- */
+/** 'Viewing in <app> tab N' for tmux-hosted sessions: match the session to its attached tmux
+ * clients, resolve the app via HOST_MATCHERS (`hostFromPid`) and the tab via Ghostty
+ * `assignGhosttyTabs`, iTerm `$ITERM_SESSION_ID`, or VS Code `tabIndex` in live-terminals.json. */
 
 import * as path from 'path';
 import * as fs from 'fs';
@@ -39,27 +23,9 @@ interface ViewingIn {
   tab?: number;
 }
 
-/**
- * The one display form of "where is this session being watched" — `'codium tab 3'`
- * when a client is attached, the bare app name when the tab can't be resolved, and
- * `'detached'` when the pane is live but nobody is looking at it (the terminal that
- * displayed it was closed or crashed).
- *
- * `undefined` means **we do not know**, and it covers two different situations that
- * must not be confused with `'detached'`: a session that isn't tmux-hosted (no pane
- * to attach to, so it isn't on this axis at all), and a tmux session whose pane the
- * locator could not resolve (`mapPanesToTargets` returned nothing for this socket,
- * or the row was never enriched). {@link resolveViewingIn} answers `undefined` for
- * BOTH "no client attached" and "could not locate the pane", so the pane's resolved
- * `tmuxTarget` is what separates them: without it there is no evidence of absence,
- * only absence of evidence. Claiming `'detached'` there would invent an orphaned
- * session — and a consumer acts on that claim (the ext's picker pre-ticks every
- * detached row for rescue), so the wrong answer resumes a session nobody asked for.
- *
- * Shared by the `--active` row renderer and the `--json` serializer so a machine
- * consumer reads exactly the string a human sees, instead of re-deriving "detached"
- * from an absent field.
- */
+/** The one display form of where a session is watched: `'codium tab 3'`, the bare app name, or
+ * `'detached'` (live pane, nobody looking). `undefined` means unknown; never claim `'detached'`
+ * without a resolved `tmuxTarget`: the ext pre-ticks detached rows to resume them. */
 export function viewingInLabel(
   s: Pick<ActiveSession, 'provenance' | 'viewingIn' | 'tmuxTarget'>,
 ): string | undefined {
@@ -68,14 +34,9 @@ export function viewingInLabel(
   return s.viewingIn.tab != null ? `${s.viewingIn.app} tab ${s.viewingIn.tab}` : s.viewingIn.app;
 }
 
-/**
- * Wire form -> internal form for a row arriving from another machine's
- * `--active --json`. The fan-out reaches peers whose CLI may predate
- * {@link viewingInLabel} and still emit the `{app, tab}` object, so this boundary
- * normalizes both shapes into one — the ONLY place either shape is accepted.
- * `'detached'` maps to undefined, which is what "no attached client" means
- * internally; {@link viewingInLabel} regenerates the word from the pane.
- */
+/** Wire form to internal form for a row from another machine's `--active --json`. Older peers still
+ * emit the `{app, tab}` object, so this is the only place either shape is accepted. `'detached'`
+ * maps to undefined and is regenerated from the pane by viewingInLabel. */
 export function parseViewingIn(raw: unknown): ViewingIn | undefined {
   if (raw && typeof raw === 'object') {
     const app = (raw as ViewingIn).app;
@@ -113,11 +74,8 @@ function sessionNameFor(session: ActiveSession, paneToTarget?: Map<string, strin
   return name || undefined;
 }
 
-/**
- * Resolve where a single tmux-hosted session is being viewed. Returns undefined
- * when the session isn't tmux-hosted, can't be located, or has no client
- * attached (detached). Pure aside from the injected (defaulted) probes.
- */
+/** Resolve where one tmux-hosted session is viewed. Undefined when it is not tmux-hosted, cannot be
+ * located, or has no client attached. Pure aside from the injected probes. */
 export async function resolveViewingIn(
   session: ActiveSession,
   clients: TmuxClient[],
@@ -156,11 +114,9 @@ async function ghosttyTab(session: ActiveSession, surfaces?: GhosttySurface[]): 
   return assignGhosttyTabs([probe], s).get(probe);
 }
 
-/**
- * iTerm tab from the attaching client's `$ITERM_SESSION_ID` (`w<n>t<n>p<n>:UUID`).
- * The `t<n>` field is iTerm2's 0-based tab index; we present it 1-based to match
- * Ghostty's `index of tab`. Exported for the parser test.
- */
+/** iTerm tab from the attaching client's `$ITERM_SESSION_ID` (`w<n>t<n>p<n>:UUID`). `t<n>` is
+ * iTerm2's 0-based index; we present it 1-based to match Ghostty's `index of tab`. Exported for
+ * the parser test. */
 export function itermTabFromSessionId(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const m = value.match(/t(\d+)/);
@@ -208,11 +164,8 @@ async function readClientEnv(pid: number): Promise<Record<string, string> | unde
   return undefined;
 }
 
-/**
- * VS Code editor-tab index for a session, from the extension's live-terminals.json
- * (`tabIndex` per entry — the DATA CONTRACT with the extension teammate). Read
- * directly (not via active.ts's readLiveTerminals, which strips tabIndex).
- */
+/** VS Code editor-tab index from the extension's live-terminals.json (`tabIndex`, the data contract
+ * with the extension). Read directly because active.ts's readLiveTerminals strips tabIndex. */
 function tabIndexFromLiveTerminals(sessionId: string | undefined): number | undefined {
   if (!sessionId) return undefined;
   let parsed: any;

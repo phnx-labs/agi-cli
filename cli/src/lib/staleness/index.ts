@@ -1,17 +1,6 @@
-/**
- * Staleness library entrypoint. Aggregates per-resource checkers into the
- * two operations the rest of the codebase needs:
- *
- *   - `buildManifest(agent, version, cwd)` — snapshot current state.
- *   - `isStale(manifest, agent, version, cwd)` — true when any tracked
- *     resource has drifted from its stored fingerprint, or when an artifact
- *     the last full sync wrote (`writtenTargets`) has been deleted from the
- *     version home (#2398).
- *
- * `loadManifest` / `saveManifest` round-trip the on-disk JSON. The format
- * version stays at 1; new optional fields (workflows, plugins) on old files
- * read as empty maps which forces a single re-sync.
- */
+/** Staleness library entrypoint: `buildManifest` snapshots current state; `isStale` is true when a
+ * tracked resource drifted or an artifact the last full sync wrote (`writtenTargets`) was deleted
+ * from the version home (#2398). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,10 +31,8 @@ import { nameSetDiffers } from './fingerprint.js';
 export type { SyncManifest } from './types.js';
 export { MANIFEST_VERSION } from './types.js';
 
-/**
- * Standard checkers — uniform contract. Rules and permissions have extra
- * context (agent/version, preset env) so they're wired explicitly below.
- */
+/** Standard checkers with a uniform contract. Rules and permissions need extra context
+ * (agent/version, preset env), so they are wired explicitly below. */
 const STANDARD_CHECKERS: ReadonlyArray<{
   checker: ResourceChecker;
   field: keyof Pick<SyncManifest, 'commands' | 'skills' | 'hooks' | 'mcp' | 'subagents' | 'workflows' | 'plugins'>;
@@ -88,15 +75,8 @@ export function saveManifest(agent: AgentId, version: string, manifest: SyncMani
   }
 }
 
-/**
- * Snapshot current resource fingerprints for `agent@version`.
- *
- * When `previous` is supplied (the still-loaded post-guard manifest), any
- * entry whose stored path/mtime/size still match via the checker's `isFresh`
- * is carried forward without re-hashing. Measured: full rebuild ~716 ms →
- * carry-forward near the 5.67 ms `isStale` cost on an unchanged tree
- * (RUSH-2320 #3).
- */
+/** Snapshot current resource fingerprints for `agent@version`. Entries still `isFresh` against
+ * `previous` are carried forward without re-hashing (RUSH-2320 #3: ~716 ms down to near 5.67 ms). */
 export function buildManifest(
   agent: AgentId,
   version: string,
@@ -115,11 +95,9 @@ export function buildManifest(
     subagents: {},
     workflows: {},
     plugins:   {},
-    // Empty baseline ("nothing recorded to verify"). The full-sync
-    // orchestrator (versions.ts) replaces this with the writer-reported
-    // artifact paths right before saving; a manifest built outside that path
-    // simply verifies nothing. Only an ABSENT field (a pre-upgrade manifest
-    // on disk) forces the one-time migration re-sync in isStale.
+    // Empty baseline ('nothing recorded to verify'): the full-sync orchestrator (versions.ts)
+    // replaces it with the writer-reported artifact paths before saving. Only an absent field (a
+    // pre-upgrade manifest) forces the one-time migration re-sync in isStale.
     writtenTargets: [],
   };
 
@@ -150,11 +128,8 @@ export function buildManifest(
   return manifest;
 }
 
-/**
- * True when any tracked resource has drifted from the stored manifest.
- * Walks every resource type in turn and returns true at the first miss —
- * sync detection should be cheap when nothing changed.
- */
+/** True when any tracked resource drifted from the stored manifest. Walks every resource type and
+ * returns at the first miss, so detection stays cheap when nothing changed. */
 export function isStale(
   manifest: SyncManifest,
   agent: AgentId,
@@ -173,12 +148,9 @@ export function isStale(
   }
   if (isPermissionsStale(manifest.permissions)) return true;
   if (isRulesStale(manifest.rules, agent, version, cwd)) return true;
-  // Home-side deletion check (#2398): every artifact the last full sync wrote
-  // must still exist, or the version home has rotted and needs a re-sync —
-  // regardless of source fingerprints. One existsSync per path, no content
-  // reads, so the fast-guard budget holds (RUSH-2320). A manifest that
-  // predates the field reads as stale once so the next full sync records the
-  // baseline (same precedent as the optional workflows/plugins maps).
+  // Home-side deletion check (#2398): every artifact the last full sync wrote must still exist,
+  // else the version home rotted and needs a re-sync. One existsSync per path, no content reads
+  // (RUSH-2320 budget).
   if (manifest.writtenTargets === undefined) return true;
   for (const target of manifest.writtenTargets) {
     if (!fs.existsSync(target)) return true;

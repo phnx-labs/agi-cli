@@ -1,22 +1,6 @@
-/**
- * Resource inventory — the single chokepoint for "what does this agent@version
- * have" (RUSH-2238, parent RUSH-2236). Contract: cli/docs/specifications.md.
- *
- * One API answers four orthogonal questions per (agent, version, kind):
- *
- *   capable   — the agent+version feature flags allow the kind at all
- *   declared  — resources the DotAgents layers (project/user/system/extra)
- *               declare for sync
- *   onDisk    — resources actually installed in the version home filesystem
- *               (the installed-resource truth — NOT agents.yaml tracking data)
- *   wired     — resources the harness native config references so they fire
- *   unmanaged — onDisk − declared (orphans no layer declares anymore)
- *
- * Callers (inspect, doctor, view, sync) MUST come here rather than
- * re-implementing path joins or config parsing per command. Wiring parsing
- * currently covers the settings.json family (claude, droid,
- * muse), Grok hooks.json, and Kimi config.toml via checkVersionHookWiring.
- */
+/** Resource inventory, the single chokepoint for "what does this agent@version have" (RUSH-2238;
+ * contract in cli/docs/specifications.md). Per kind: capable, declared (DotAgents layers), onDisk
+ * (installed), wired (in harness config), unmanaged (onDisk - declared). Callers must use it. */
 
 import type { AgentId } from './types.js';
 import { AGENTS } from './agents.js';
@@ -73,11 +57,9 @@ export interface ResourceInventory {
 
 const IMPLEMENTED_KINDS: readonly InventoryKind[] = ['hooks'];
 
-/**
- * The single inventory API. Harness-scoped (claude/codex/grok/kimi/droid) —
- * never a model or profile. Throws for kinds without an implementation rather
- * than returning a half-empty report that looks like truth.
- */
+/** The single inventory API, harness-scoped (claude/codex/grok/kimi/droid), never a model or
+ * profile. Throws for kinds without an implementation rather than return a half-empty report that
+ * looks like truth. */
 export function getResourceInventory(
   agent: AgentId,
   version: string,
@@ -95,13 +77,9 @@ export function getResourceInventory(
   return hooksInventory(agent, version, opts.cwd);
 }
 
-/**
- * On-disk hook listing for an explicit home (version home or effective home)
- * plus the project overlay — the one listing `getAgentResources` routes
- * through, so inspect/doctor/view share a single hooks source. Paths resolve
- * through the absolute-hooksDir-safe join (RUSH-2237), so grok/kimi version
- * homes list their real hooks.
- */
+/** On-disk hook listing for an explicit home plus the project overlay, the one listing
+ * `getAgentResources` routes through so inspect/doctor/view share a hooks source; paths use the
+ * absolute-hooksDir-safe join (RUSH-2237) so grok/kimi homes list real hooks. */
 export function listOnDiskHooks(
   agent: AgentId,
   opts: { home?: string; cwd?: string } = {}

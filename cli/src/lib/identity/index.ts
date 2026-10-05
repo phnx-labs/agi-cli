@@ -1,7 +1,5 @@
-/**
- * Phoenix ID — the typed surface commands use. Every route the account backend
- * exposes is a function here; no command builds a URL or reads a token itself.
- */
+/** Phoenix ID: the typed surface commands use. Every route the account backend exposes is a
+ * function here; no command builds a URL or reads a token itself. */
 
 import { phoenixRequest, PhoenixApiError, readSession, writeSession, type PhoenixSession } from './client.js';
 
@@ -36,11 +34,8 @@ export interface WhoAmI {
   name?: string;
 }
 
-/**
- * RFC 8628 poll outcomes. `pending` and `slow_down` are normal states of a
- * login in progress, not failures — the server signals them through the error
- * body, and this is where that wire detail stops.
- */
+/** RFC 8628 poll outcomes: `pending` and `slow_down` are normal states of a login in progress,
+ * signalled through the error body; this is where that wire detail stops. */
 export type DevicePoll =
   | {
       status: 'authorized';
@@ -96,28 +91,18 @@ export function fetchWhoAmI(token?: string): Promise<WhoAmI> {
   return phoenixRequest<WhoAmI>('GET', '/api/v1/auth/me', { token });
 }
 
-/**
- * Keep the session's profile current (PHNX-3547): merge the `avatar_url` and
- * `name` Phoenix ID reports on `/api/v1/auth/me` into the persisted session, so
- * the actor env, share attribution and the menu-bar snapshot can show the
- * person without a network call of their own. Pass `known` when the caller
- * already fetched `/auth/me` (whoami) — then a changed picture or name is
- * written too. Without it, a session that already carries a picture is left
- * alone rather than spending a network round trip to re-check it (the share
- * publish path). A no-op when signed out or when the server exposes neither;
- * network/server failures are swallowed (the Gravatar fallback covers
- * attribution either way).
- */
+/** Keep the session's profile current (PHNX-3547): merge `avatar_url` and `name` from
+ * `/api/v1/auth/me` into the session so actor env, share attribution and the menu bar need no
+ * network call. Pass `known` if whoami already fetched it; failures are swallowed. */
 export async function refreshSessionProfile(known?: WhoAmI): Promise<void> {
   const session = readSession();
   if (!session) return;
   if (!known && session.avatarUrl) return;
   try {
     const me = known ?? (await fetchWhoAmI());
-    // The fetch is a network round trip: a logout or re-login may have replaced
-    // the file meanwhile. Merge into what is on disk now, and only when it is
-    // still the session `me` describes, so a stale profile never lands on (or
-    // resurrects) a different sign-in.
+    // The fetch is a network round trip, so a logout or re-login may have replaced the file
+    // meanwhile: merge into what is on disk now, and only if it is still the session `me`
+    // describes, so a stale profile never lands on or resurrects a different sign-in.
     const current = readSession();
     if (!current || current.access_token !== session.access_token || current.userId !== session.userId) return;
     const hosted = me.avatar_url?.trim();

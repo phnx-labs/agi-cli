@@ -151,10 +151,8 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
 
   it('falls through for an UNKNOWN command so commander reports it (RUSH-2022)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // `session` is a typo for the very much device-routable `sessions`. The router
-    // runs before commander parses, so claiming "does not support --device" here
-    // both invents a command and states the opposite of the truth for the one
-    // the user meant. It must decline and let `unknown command 'session'` win.
+    // `session` is a typo for the device-routable `sessions`; the router must decline so `unknown
+    // command 'session'` wins, not claim "does not support --device".
     expect(await maybeRunOnHost('session', ['session', 'resume', '--device', 'mac'])).toBe(false);
     expect(process.exitCode).toBe(0);
     expect(await maybeRunOnHost('zzzznotacommand', ['zzzznotacommand', '--device', 'mac'])).toBe(false);
@@ -200,19 +198,15 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
   });
 
   it('resolves `auto` to a local pick and runs locally, not a self-SSH (RUSH-2185)', async () => {
-    // AGENTS_DEVICES_DIR is fork-private and empty (tests/setup.ts) and this
-    // machine id has no session history, so resolveDeviceAffinity's only
-    // eligible candidate is this machine — a deterministic "picked local"
-    // outcome without needing to inject the resolver.
+    // AGENTS_DEVICES_DIR is empty (tests/setup.ts) and this machine id has no history, so the only
+    // eligible candidate is this machine: a deterministic "picked local" outcome without injecting
+    // the resolver.
     process.env.AGENTS_SYNC_MACHINE_ID = 'auto-passthrough-test-box';
     process.argv = ['node', 'agents', 'view', '--device', 'auto'];
     expect(await maybeRunOnHost('view', ['view', '--device', 'auto'])).toBe(false);
-    // Routing flags stripped exactly like the explicit self-device short-circuit —
-    // proves the command runs locally rather than resolving to a real device and
-    // SSHing to itself (the bug this test guards: `auto` used to reach
-    // resolveTargetHost('auto', ...) unresolved, either self-SSHing when this
-    // box happened to be a registered device, or dialing a literal device named
-    // "auto" when it wasn't).
+    // Routing flags are stripped like the self-device short-circuit, so the command runs locally.
+    // Guards the bug where `auto` reached resolveTargetHost unresolved, self-SSHing or dialing a
+    // literal device named "auto".
     expect(process.argv).toEqual(['node', 'agents', 'view']);
   });
 
@@ -503,12 +497,8 @@ describe('runFleetPassthrough — direct unit tests', () => {
   });
 
   it('uses the sync summarizer for sync command', async () => {
-    // RUSH-2700: this is the WIRING test. An earlier revision called
-    // summarizeSyncResult directly, so deleting the `command === 'sync'` line in
-    // summarizeResult restored the exact bug (every box rendering a flat `ok`)
-    // with no test failing. This drives the real fan-out instead, so the roster
-    // must actually dispatch to the summarizer; the describe block below was
-    // rewritten the same way for the same reason.
+    // RUSH-2700 wiring test: drives the real fan-out, because calling summarizeSyncResult directly
+    // let deleting the `command === 'sync'` line restore the flat-`ok` bug with no test failing.
     console.log = (...args: unknown[]) => logs.push(args.join(' '));
     const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
     const runner = (_device: DeviceProfile, cmd: string[]) => {
@@ -620,18 +610,12 @@ describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-
   });
 });
 
-/**
- * RUSH-2700: `agents sync --device all` injects `--json` per peer and gets back
- * the corrected `ok` / `declined`, but the roster rendered a flat `ok`
- * regardless — so every box showed green even where a harness's config was
- * never written. That is the fleet-wide silent success the ticket exists to
- * remove, one layer above where the payload was fixed.
- */
+/** RUSH-2700: `agents sync --device all` returned the corrected `ok`/`declined` per peer, but
+ * the roster rendered a flat `ok`, so every box showed green even where a harness's config was
+ * never written. */
 describe('sync fan-out roster surfaces a refused write', () => {
-  // Driven through the real fan-out, never by calling the summarizer directly:
-  // a direct call cannot tell whether `summarizeResult` actually dispatches to
-  // it, which is how the first version of these tests stayed green with the
-  // wiring deleted.
+  // Driven through the real fan-out, never by calling the summarizer directly, which cannot show
+  // that `summarizeResult` dispatches to it.
   async function syncRoster(payload: unknown): Promise<string> {
     const captured: string[] = [];
     console.log = (...args: unknown[]) => captured.push(args.join(' '));
@@ -687,10 +671,8 @@ describe('sync fan-out roster surfaces a refused write', () => {
   });
 });
 
-// PHNX-4090: computer/browser/secrets each resolve --device to the standalone
-// engine's own --host address grammar (no fleet registry on that side) — a
-// regression here would route --device through the generic SSH passthrough
-// instead, which knows nothing about vnc://, tcp://, or the engine's argv shape.
+// PHNX-4090: computer/browser/secrets resolve --device to the standalone engine's own --host
+// grammar (vnc://, tcp://); routing them through generic SSH passthrough would break that.
 describe('OWN_HOST_COMMANDS keeps computer/browser/secrets local', () => {
   it('lists computer, browser and secrets so their own --device handling runs', () => {
     expect(OWN_HOST_COMMANDS.has('computer')).toBe(true);

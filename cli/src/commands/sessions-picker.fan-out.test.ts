@@ -2,14 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { formatFanOut } from './sessions-picker.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
-/**
- * RUSH-3091/3095 regression. A REMOTE or unindexed row renders through
- * `formatMetaOnlyBody`, which has no parsed events — so before this change the
- * sub-agent count silently vanished there and background shells were never shown
- * at all. The counts are persisted columns precisely so this path can render
- * them; these tests pin that, and the zero/undefined distinction that keeps the
- * line from ever asserting "nothing is running".
- */
+/** RUSH-3091/3095 regression: a remote or unindexed row renders through `formatMetaOnlyBody` with
+ * no parsed events, so the sub-agent count vanished and background shells never showed. The counts
+ * are persisted columns; these pin that and the zero/undefined distinction. */
 function meta(over: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: 'a'.repeat(36),

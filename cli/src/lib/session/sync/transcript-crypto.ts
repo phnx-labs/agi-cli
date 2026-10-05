@@ -1,28 +1,6 @@
-/**
- * Client-side (zero-knowledge) encryption for session transcripts before they
- * leave this machine for R2.
- *
- * R2 encrypts objects at rest server-side (AES-256, Cloudflare default), but
- * that key is Cloudflare's — anyone with bucket-read access (or Cloudflare
- * itself) can read the plaintext. Transcripts carry secrets, tokens, and
- * absolute file paths, so "encrypted at rest by the provider" is not enough. We
- * seal each transcript BODY client-side with AES-256-GCM under a key that never
- * leaves the machines that share the sync bundle; Cloudflare only ever stores
- * ciphertext.
- *
- * The key is a 32-byte secret (`R2_SYNC_ENC_KEY`) held in the same
- * keychain-backed `r2.backups` bundle as the R2 credentials. Every machine in
- * the sync fabric shares that bundle, so every machine derives the identical key
- * and can decrypt its peers' objects. The key is deliberately SEPARATE from the
- * R2 access key so that rotating the R2 token (RUSH-1464) never orphans
- * transcripts already encrypted under the old one.
- *
- * Identity for CRDT merge stays over PLAINTEXT: the manifest hash is computed on
- * the cleartext transcript (sync.ts), and pull decrypts before the G-Set union
- * (crdt.ts) ever sees the bytes. Ciphertext is non-deterministic (a fresh random
- * IV per seal), so it is never usable as an identity — which is exactly why the
- * manifest, not the object body, carries the hash.
- */
+/** Client-side encryption before transcripts leave for R2 (provider keys are Cloudflare's;
+ * transcripts hold secrets): AES-256-GCM under `R2_SYNC_ENC_KEY`, separate from the R2 key
+ * (RUSH-1464). Manifest hashes use plaintext: random-IV ciphertext is never an identity. */
 
 import * as crypto from 'crypto';
 import type { R2Config } from './config.js';
@@ -45,15 +23,9 @@ interface TranscriptEnvelope {
   tag: string;
 }
 
-/**
- * Decode the configured `R2_SYNC_ENC_KEY` into a 32-byte key, or null when the
- * bundle does not carry one (encryption off — see pushOwn's warning path).
- *
- * Accepts hex (64 chars) or base64; both must decode to exactly 32 bytes. A key
- * that is present but the wrong length THROWS rather than silently truncating —
- * a malformed key is a configuration bug, not a reason to fall back to a weaker
- * or wrong key.
- */
+/** Decode `R2_SYNC_ENC_KEY` into a 32-byte key, or null when the bundle has none (encryption off).
+ * Accepts hex (64 chars) or base64. A present key of the wrong length throws rather than being
+ * truncated: that is a config bug. */
 export function resolveSyncEncKey(cfg: Pick<R2Config, 'syncEncKey'>): Buffer | null {
   const raw = cfg.syncEncKey?.trim();
   if (!raw) return null;
@@ -95,16 +67,9 @@ export function encryptTranscript(plaintext: string, key: Buffer): string {
   return JSON.stringify(envelope);
 }
 
-/**
- * Parse a stored object body into an envelope, or null when it is not one.
- *
- * A plaintext transcript is NDJSON — many JSON objects, one per line — so it
- * never parses as a single object carrying our `v`/`alg`/`ct`/`tag` fields. That
- * makes envelope-vs-plaintext detection unambiguous and lets a puller read BOTH
- * encrypted objects and any legacy plaintext already in the bucket (the beta
- * uploaded plaintext before this landed). This is format-version handling for a
- * real migration, not a "just in case" fallback.
- */
+/** Parse a stored object body into an envelope, or null. Plaintext transcripts are NDJSON and
+ * never parse as one object with `v`/`alg`/`ct`/`tag`, so detection is unambiguous and pullers
+ * can read legacy plaintext uploaded by the beta (a real migration, not a fallback). */
 export function parseEnvelope(body: string): TranscriptEnvelope | null {
   const trimmed = body.trimStart();
   if (!trimmed.startsWith('{')) return null; // NDJSON first line is an object too, but…
@@ -149,15 +114,9 @@ export function decryptEnvelope(envelope: TranscriptEnvelope, key: Buffer): stri
   }
 }
 
-/**
- * Return the plaintext transcript for a fetched object body, transparently
- * decrypting when it is an envelope.
- *
- *  - Envelope + key  → decrypted plaintext.
- *  - Envelope + no key → throws (the object is encrypted but this machine has no
- *    key to read it — surfacing that beats silently mis-merging ciphertext).
- *  - Plaintext body  → returned verbatim (legacy/unencrypted object).
- */
+/** Return the plaintext transcript for a fetched body, decrypting when it is an envelope.
+ * Envelope with no key throws rather than mis-merging ciphertext; a plaintext body is returned
+ * verbatim (legacy). */
 export function decryptTranscriptBody(body: string, key: Buffer | null): string {
   const envelope = parseEnvelope(body);
   if (!envelope) return body; // legacy plaintext object

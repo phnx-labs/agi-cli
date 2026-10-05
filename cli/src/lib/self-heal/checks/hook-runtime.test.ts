@@ -1,8 +1,5 @@
-/**
- * 1:1 tests for the hook-runtime HealCheck — wires repairManagedHookRuntimeArtifacts
- * into the unified self-heal runner. Behavior of inspect/repair is covered in
- * hooks.test.ts; this pins the check id, cadence, and dryRun hand-off.
- */
+/** 1:1 tests for the hook-runtime HealCheck: pins the check id, cadence, and dryRun hand-off.
+ * inspect/repair behavior is covered in hooks.test.ts. */
 import { describe, expect, it } from 'vitest';
 import { hookRuntimeCheck } from './hook-runtime.js';
 import { HEAL_CHECKS } from '../registry.js';

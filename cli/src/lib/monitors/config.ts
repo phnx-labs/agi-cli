@@ -1,14 +1,6 @@
-/**
- * Monitor (event-triggered watcher) configuration, validation, and CRUD.
- *
- * A monitor is a routine whose trigger is a *watched source* instead of a
- * *clock*. It watches a SOURCE, detects a CONDITION change, and fires an ACTION —
- * reusing the routines daemon, dispatch engine, device model, and notify path.
- *
- * Monitors are YAML files in ~/.agents/monitors/. This module owns the on-disk
- * shape (mirroring lib/routines.ts read/write helpers), hand-rolled validation
- * (mirroring validateJob — no zod), and the device-owner eligibility gate.
- */
+/** Monitor (event-triggered watcher) config, validation and CRUD. A monitor is a routine triggered
+ * by a watched SOURCE: it detects a CONDITION change and fires an ACTION, reusing the routines
+ * daemon, dispatch and notify path. YAML in ~/.agents/monitors/. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -43,11 +35,9 @@ export interface MonitorWebhookSource {
   label?: string;
 }
 
-/**
- * What a monitor watches. Exactly one source-payload field is populated, keyed by
- * `type`: `command`/`interval` for command/poll, `url`/`interval` for poll-http,
- * `wsUrl` for ws, `path` for file, `device` for device, `webhook` for webhook.
- */
+/** What a monitor watches. Exactly one source-payload field is populated, keyed by `type`:
+ * `command`/`interval` (command/poll), `url`/`interval` (poll-http), `wsUrl` (ws), `path` (file),
+ * `device` (device), `webhook` (webhook). */
 export interface MonitorSource {
   type: MonitorSourceType;
   /** Shell command whose stdout is the observation (command, poll). */
@@ -73,24 +63,18 @@ export interface MonitorCondition {
   mode: MonitorConditionMode;
   /** Regex (required for `match` mode) — fire when the observation matches. */
   match?: string;
-  /**
-   * What counts as "the same event" for de-duplication. When set, the dedupe
-   * signature is the first regex match of this expression against the
-   * observation (so re-observing the same token is silent); when omitted, the
-   * full observation is the signature.
-   */
+  /** What counts as "the same event" for de-duplication. When set, the signature is the first regex
+   * match against the observation (re-observing the same token is silent); otherwise the full
+   * observation. */
   dedupeKey?: string;
 }
 
 /** Action types a monitor can fire. */
 export type MonitorActionType = 'run' | 'routine' | 'notify' | 'webhook-out';
 
-/**
- * What a monitor does on a fire. Shares the run-shaped fields (agent, prompt,
- * mode, effort, timeout) conceptually with JobConfig (lib/routines.ts) so
- * dispatch reuses the routines path (executeJobDetached). The fired event is
- * injected into the prompt as `{event}`.
- */
+/** What a monitor does on a fire. Shares the run-shaped fields (agent, prompt, mode, effort,
+ * timeout) with JobConfig (lib/routines.ts) so dispatch reuses executeJobDetached. The fired event
+ * is injected into the prompt as `{event}`. */
 export interface ActionConfig {
   type: MonitorActionType;
   /** run: which agent to spawn — a native harness id or a custom harness name (agents harness list). */
@@ -109,16 +93,9 @@ export interface ActionConfig {
   notifyChannel?: string;
   /** webhook-out: URL to POST the event to. */
   url?: string;
-  /**
-   * Shell command that must exit 0 after a `run`/`routine` action settles.
-   * Asserts the stated effect actually happened (PHNX-2842) — e.g.
-   * `gh pr view 1682 --json state --jq .state | grep -qx MERGED`. `{event}` is
-   * replaced with the fired event summary, same as the prompt. Evaluated once
-   * the dispatched run is no longer `running`; a failed check makes the fire
-   * `ok: false` with effect `none` (`postcondition not met`), not a healthy
-   * `completed`. Notify/webhook-out already have a synchronous ok and refuse
-   * this field.
-   */
+  /** Shell command that must exit 0 after a `run`/`routine` action settles, asserting the effect
+   * happened (PHNX-2842), e.g. `gh pr view 1682 --json state --jq .state | grep -qx MERGED`. A
+   * failed check makes the fire `ok: false`, not `completed`. Notify/webhook-out refuse it. */
   postcondition?: string;
 }
 
@@ -129,54 +106,21 @@ export interface MonitorConfig {
   source: MonitorSource;
   condition: MonitorCondition;
   action: ActionConfig;
-  /**
-   * Pin-to-one OWNER device — the single machine whose daemon evaluates the
-   * source and fires. Exactly-once for v1 (no distributed lock). When set, only
-   * that machine is eligible; everywhere else the monitor is inert.
-   */
+  /** Pin-to-one OWNER device: the single machine whose daemon evaluates the source and fires
+   * (exactly-once for v1, no distributed lock). Everywhere else the monitor is inert. */
   device?: string;
-  /**
-   * Fleet allowlist (advanced) — each listed device evaluates and fires
-   * independently, like routines' `devices`. Mutually exclusive with `device`.
-   */
+  /** Fleet allowlist (advanced): each listed device evaluates and fires independently, like
+   * routines' `devices`. Mutually exclusive with `device`. */
   devices?: string[];
-  /**
-   * Does this monitor's SOURCE poll a fleet-shared queue (a PR list, a ticket
-   * tracker, the feed, a sync bucket) rather than the firing box's own state
-   * (its repos, sessions, caches)?
-   *
-   * This is the SING-9 placement switch for an UNPINNED monitor (no `device` /
-   * `devices`). A shared-input source has no per-box input, so every daemon
-   * firing it independently is a multi-executor race on shared state — the exact
-   * double-fire bug class. So an unpinned shared-input monitor fires only on the
-   * single owner (`interactive.host`, else the sole box on a one-device fleet),
-   * never on every daemon.
-   *
-   * Defaults differ by layer so the SAFE side is the default for each:
-   * - a **system built-in** (`scope: 'system'`) is treated as shared-input
-   *   unless it sets `sharedInput: false`, so a built-in shipped with no pin
-   *   can never fan out across the fleet — a device-local built-in opts back
-   *   into fleet-wide firing with `sharedInput: false`;
-   * - a **user monitor** keeps its historical fleet-wide default and only
-   *   becomes owner-restricted when it explicitly sets `sharedInput: true`.
-   *
-   * An explicit `device` / `devices` pin always wins and makes this moot — the
-   * author has already chosen the executor(s).
-   */
+  /** Does this monitor's SOURCE poll a fleet-shared queue (PR list, tracker) rather than the firing
+   * box's own state? SING-9 switch for an UNPINNED monitor: shared-input fires only on the single
+   * owner. System built-ins default to it; user monitors stay fleet-wide. */
   sharedInput?: boolean;
   /** Execute the ACTION on this machine over SSH (placement), distinct from the owner that fires it. */
   runOn?: string;
-  /**
-   * Working directory for a `run` action, in the routines-portable form
-   * (`~/…`, or relative to the execution target's home). Optional: a monitor
-   * watches a source rather than owning a project, so `dispatchAction` defaults
-   * it to the target's home (`~`) when unset.
-   *
-   * Without this, every `run` action was blocked at readiness with
-   * `execution_context_missing` — `resolveJobExecutionContext` refuses an
-   * agent job carrying neither `project` nor `cwd` (`lib/routine-context.ts`),
-   * and a monitor had no field with which to supply one (RUSH-2681).
-   */
+  /** Working directory for a `run` action, routines-portable (`~/...` or relative to the target's
+   * home); defaults to `~`. Without it `run` actions were blocked with `execution_context_missing`
+   * since a monitor has no project to supply one (RUSH-2681). */
   cwd?: string;
   /** Firehose guard: auto-pause the monitor if it fires more than `max` times per `per`. */
   rateLimit?: { max: number; per: string };
@@ -184,21 +128,14 @@ export interface MonitorConfig {
   variables?: Record<string, string>;
   /** Pin the agent version for `run` actions (omit to use the run strategy). */
   version?: string;
-  /**
-   * Which layer this monitor was read from — `user` (~/.agents/monitors/) or
-   * `system` (the npm-shipped built-in mirror ~/.agents/.system/monitors/).
-   * A DERIVED, runtime-only annotation stamped by `readMonitorFile`, never a
-   * persisted YAML field: it tags a built-in in `list`/`view` (mirroring
-   * routines' `(built-in)` label) and `writeMonitor` strips it before writing,
-   * so materializing a user copy of a built-in always lands as `user`.
-   */
+  /** Which layer this monitor came from: `user` or `system` (built-in mirror). Derived and
+   * runtime-only, stamped by `readMonitorFile` and stripped by `writeMonitor`; it tags built-ins
+   * in `list`/`view`. */
   scope?: 'user' | 'system';
 }
 
-/**
- * A fired event. `summary` is injected into the action prompt as `{event}`;
- * `payload` carries the structured observation for `webhook-out` and inspection.
- */
+/** A fired event. `summary` is injected into the action prompt as `{event}`; `payload` carries the
+ * structured observation for `webhook-out` and inspection. */
 export interface MonitorEvent {
   monitorName: string;
   firedAt: string;
@@ -224,11 +161,9 @@ const SOURCE_TYPES: readonly MonitorSourceType[] = [
 const CONDITION_MODES: readonly MonitorConditionMode[] = ['on-change', 'match', 'every'];
 const ACTION_TYPES: readonly MonitorActionType[] = ['run', 'routine', 'notify', 'webhook-out'];
 
-/**
- * Parse a human interval string (e.g. `30s`, `15m`, `8h`, `1d`, `1h30m`) into
- * milliseconds. Unlike routines' parseTimeout, seconds are supported (polls tick
- * in seconds). Returns null on empty/unparseable/zero input.
- */
+/** Parses a human interval (`30s`, `15m`, `8h`, `1d`, `1h30m`) into ms. Unlike routines'
+ * parseTimeout, seconds are supported (polls tick in seconds). Null on empty, unparseable or zero
+ * input. */
 export function parseInterval(interval: string): number | null {
   const match = interval.trim().match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
   if (!match) return null;
@@ -241,16 +176,9 @@ export function parseInterval(interval: string): number | null {
   return ms > 0 ? ms : null;
 }
 
-/**
- * True when an UNPINNED monitor must be placed on a single owner rather than
- * fired by every daemon — the SING-9 guard against a shared-queue double-fire.
- *
- * A `device` / `devices` pin is an explicit executor choice, so it is never
- * owner-overridden (returns false here). For an unpinned monitor the default is
- * layer-specific, SAFE side first: a **system built-in** is treated as
- * shared-input unless it opts out with `sharedInput: false`; a **user monitor**
- * keeps its fleet-wide default and only opts IN with `sharedInput: true`.
- */
+/** True when an UNPINNED monitor must run on a single owner rather than every daemon (SING-9
+ * shared-queue double-fire guard). A `device`/`devices` pin is an explicit choice (false). Else a
+ * system built-in is shared-input unless `sharedInput: false`; a user monitor only opts IN. */
 export function requiresSingleOwner(
   config: Pick<MonitorConfig, 'device' | 'devices' | 'scope' | 'sharedInput'>,
 ): boolean {
@@ -259,19 +187,9 @@ export function requiresSingleOwner(
   return config.sharedInput === true;
 }
 
-/**
- * The single fleet box that owns unpinned shared-input monitors — PURE, so the
- * placement rule is unit-testable without a live tailnet. Priority:
- *
- * 1. the configured `interactive.host` (the box the operator sits at);
- * 2. else, on a fleet with no OTHER registered device, this box — a single-box
- *    install has no peer to race, so the built-in still fires here;
- * 3. else `undefined` — a multi-box fleet with no interactive host has no safe
- *    single owner, so an unpinned shared-input monitor fires NOWHERE (fail safe:
- *    a silent no-op beats a fleet-wide double-fire) until one is pinned.
- *
- * `deviceNames` is the registered fleet (registry keys); `self` is `machineId()`.
- */
+/** The single fleet box owning unpinned shared-input monitors; PURE for tests. Priority: configured
+ * `interactive.host`; else this box when no OTHER device is registered; else `undefined`: a
+ * multi-box fleet with no interactive host fires NOWHERE until pinned. */
 export function resolveSharedInputOwner(
   interactiveHost: string | undefined,
   deviceNames: string[],
@@ -302,20 +220,9 @@ export function monitorSharedInputOwner(): string | undefined {
   );
 }
 
-/**
- * True when the monitor may evaluate + fire on this machine. Owner semantics:
- * `device` (single owner, exactly-once) → only that machine; else `devices`
- * (allowlist) → any listed machine; else placement depends on shared-input: an
- * unpinned SHARED-INPUT monitor (a system built-in by default, or a user monitor
- * that set `sharedInput: true`) fires only on the resolved owner
- * ({@link monitorSharedInputOwner}), so a built-in that polls a fleet-shared
- * queue can never fan out across every daemon (SING-9); anything else is
- * unrestricted. Both sides normalize so `Yosemite-S0` and
- * `yosemite-s0.tailnet.ts.net` agree with `yosemite-s0`.
- *
- * `ownerHost` overrides the resolved owner for tests/callers that already know
- * it; omit it in production to resolve from config + the device registry.
- */
+/** True when the monitor may evaluate and fire here: `device` pins one machine; else `devices`
+ * allowlist; else an unpinned SHARED-INPUT monitor fires only on the resolved owner (SING-9); else
+ * unrestricted. Names are normalized. `ownerHost` overrides the owner for tests. */
 export function monitorRunsOnThisDevice(
   config: Pick<MonitorConfig, 'device' | 'devices' | 'scope' | 'sharedInput'>,
   ownerHost?: string,
@@ -367,12 +274,9 @@ function populatedActionFields(action: ActionConfig): string[] {
   return fields.filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k]) => k);
 }
 
-/**
- * Validate a partial monitor config, returning a list of human-readable errors.
- * Hand-rolled like validateJob (lib/routines.ts) — no zod. Rejects: no source,
- * two sources, no action, two actions, match-mode without `match`, plus the
- * per-type field/shape checks.
- */
+/** Validates a partial monitor config into human-readable errors; hand-rolled like validateJob, no
+ * zod. Rejects: no source, two sources, no action, two actions, match-mode without `match`, plus
+ * per-type field checks. */
 export function validateMonitor(config: Partial<MonitorConfig>): string[] {
   const errors: string[] = [];
 
@@ -560,26 +464,9 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
   return errors;
 }
 
-/**
- * Read and normalize a monitor file. A built-in defaults to enabled exactly like
- * every other system-layer resource (rules, hooks, commands, skills): a monitor
- * shipped in the system mirror is on for every install unless the user shadows it
- * with an explicit `enabled: false` (via `agents monitors pause`, which writes a
- * user copy — the system mirror is pull-only). There is deliberately no
- * system-scope special-case: monitors used to be the lone outlier that shipped
- * disabled+invisible (PHNX-2506). `scope` no longer changes the enabled default;
- * it is retained on the config so `list`/`view` can tag a built-in.
- *
- * Enabled-by-default is NOT, on its own, permission to fire on every daemon. A
- * shared-input built-in (one whose source polls a fleet-shared queue such as `gh
- * pr list --author @me`) is placed on a single owner by `monitorRunsOnThisDevice`
- * / `requiresSingleOwner` even when the shipped YAML carries no `device:` pin: a
- * system built-in is treated as shared-input unless it sets `sharedInput: false`,
- * so it can never fan out across the fleet and double-fire on a shared queue
- * (SING-9). A device-local built-in opts back into fleet-wide firing with
- * `sharedInput: false`; a genuinely-shared one should still ship a `device:` pin
- * (or `sharedInput: true`) to document the intent.
- */
+/** Reads and normalizes a monitor file. A built-in is enabled by default like every system-layer
+ * resource unless shadowed by a user `enabled: false` copy (PHNX-2506). Enabled is not firing
+ * everywhere: a shared-input built-in is placed on one owner (SING-9). */
 function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): MonitorConfig | null {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
@@ -590,10 +477,8 @@ function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): M
       ...MONITOR_DEFAULTS,
       ...parsed,
       name: parsed.name || path.basename(filePath).replace(/\.ya?ml$/, ''),
-      // Enabled unless the user explicitly disables it — same default for user
-      // and system layers, so a built-in is visible and on like any other
-      // system resource. `scope` is stamped below for the (built-in) tag, not
-      // used to gate enablement.
+      // Enabled unless the user explicitly disables it, the same default for user and system
+      // layers. `scope` is stamped below for the (built-in) tag, not to gate enablement.
       enabled: hasEnabled ? parsed.enabled !== false : (MONITOR_DEFAULTS.enabled ?? true),
       scope,
     } as MonitorConfig;
@@ -610,11 +495,8 @@ function monitorLayers(): Array<{ scope: 'user' | 'system'; path: string }> {
   ];
 }
 
-/**
- * List all monitor configs, unioning the user dir (~/.agents/monitors/) over the
- * built-in system dir (~/.agents/.system/monitors/). Higher layer wins by name
- * (first-seen), so a user monitor shadows a system built-in of the same name.
- */
+/** Lists all monitor configs, unioning the user dir (~/.agents/monitors/) over the built-in system
+ * dir. The higher layer wins by name, so a user monitor shadows a same-named built-in. */
 export function listMonitors(): MonitorConfig[] {
   ensureAgentsDir();
   const monitors: MonitorConfig[] = [];
@@ -631,11 +513,8 @@ export function listMonitors(): MonitorConfig[] {
   return monitors;
 }
 
-/**
- * Read a single monitor config by name, checking the user dir then the system
- * dir (a user monitor shadows a system built-in). Returns null if not found or
- * corrupt.
- */
+/** Reads one monitor by name from the user dir, then the system dir (a user monitor shadows a
+ * built-in). Null if not found or corrupt. */
 export function readMonitor(name: string): MonitorConfig | null {
   ensureAgentsDir();
   for (const { scope, path: dir } of monitorLayers()) {
@@ -647,13 +526,9 @@ export function readMonitor(name: string): MonitorConfig | null {
   return null;
 }
 
-/**
- * Get the filesystem path of a monitor's YAML config in the USER dir, or null.
- * User-layer only by design — like routines' getJobPath (lib/routines.ts), its
- * caller (`agents monitors edit`) writes to the returned path, and the system
- * mirror is pull-only. To edit a system built-in, `edit` materializes a user
- * copy (prefilled via readMonitor()) rather than opening the mirror.
- */
+/** Path of a monitor's YAML in the USER dir, or null. User-layer only by design (like getJobPath):
+ * `agents monitors edit` writes to it and the system mirror is pull-only, so editing a built-in
+ * materializes a user copy via readMonitor(). */
 export function getMonitorPath(name: string): string | null {
   const dir = getMonitorsDir();
   for (const ext of ['.yml', '.yaml']) {

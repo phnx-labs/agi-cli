@@ -1,20 +1,6 @@
-/**
- * PHNX-3072: the vitest suite must be structurally unable to launch the
- * developer's desktop opener. tests/setup.ts prepends stub `open` /
- * `xdg-open` / `gnome-open` binaries to PATH before any test file's imports
- * run (see opener-sandbox.ts).
- *
- * These assertions FAIL on the pre-fix setup.ts (which sandboxed HOME but
- * left PATH pointing at the real `/usr/bin/open`) and PASS once the opener
- * sandbox is installed. The historical bug: `src/lib/open-url.test.ts` drove
- * the non-injected viewer path, so `bun run test` on a Mac opened
- * example.com in the developer's browser; Linux CI had no xdg-open and
- * stayed green.
- *
- * This file declares AGENTS_TEST_ALLOW_OPENER because it *intentionally*
- * spawns the stubbed openers to prove they intercept. Other test files must
- * not set that flag — an accidental spawn fails the file.
- */
+/** PHNX-3072: the suite must be unable to launch the developer's desktop opener; setup.ts prepends
+ * stub `open`/`xdg-open`/`gnome-open` to PATH. Bug: open-url.test.ts opened example.com on every
+ * Mac run. This file sets AGENTS_TEST_ALLOW_OPENER since it spawns the stubs on purpose. */
 process.env.AGENTS_TEST_ALLOW_OPENER = '1';
 
 import { describe, it, expect } from 'vitest';
@@ -70,11 +56,9 @@ describe('vitest opener sandbox (PHNX-3072)', () => {
   });
 
   it('spawning the platform opener against a real URL hits the stub (exit 1), not a browser', () => {
-    // Historical reproduction: showUrl('https://example.com') with no injected
-    // spawnOpen called spawn('open' | 'xdg-open', [url]). Before the sandbox
-    // that opened the developer's browser on macOS and ENOENT'd on Linux CI.
-    // After, both platforms spawn the stub and the URL never reaches a real
-    // handler.
+    // Historical reproduction: showUrl('https://example.com') with no injected spawnOpen spawned
+    // `open`/`xdg-open`, opening the developer's browser on macOS and ENOENT on Linux CI. Now both
+    // spawn the stub and the URL never reaches a real handler.
     const result = spawnSync(platformOpener, ['https://example.com'], { encoding: 'utf-8' });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);

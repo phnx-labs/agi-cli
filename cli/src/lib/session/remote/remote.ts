@@ -1,27 +1,6 @@
-/**
- * `agents sessions --device <target>` — run the session query on a remote machine
- * over SSH and stream its output back. Session transcripts and the index DB live
- * on the machine that produced them (see `discover.ts`, all `os.homedir()`-rooted),
- * so instead of syncing the bytes here we invoke the *remote's own* `agents
- * sessions` against its already-built index and forward stdout verbatim.
- *
- * This is the live counterpart to `agents sessions sync` (R2/CRDT, eventual): no
- * upfront copy, always current, but the peer must be reachable. SSH access is the
- * only auth — if you can `ssh <host>`, you own the box (no identity layer by design).
- *
- * Cache-first (RUSH-2062) + offline degradation: every *successful* fetch is
- * cached to `~/.agents/.cache/remote-sessions/`, keyed by host + the exact query.
- * A later call with a *fresh* cache serves it without SSH (same daemon-warmed
- * shared-cache shape as `stats-cache.ts`) so a reachable host is not re-probed
- * on every menubar/CLI/watchdog tick. When the host is unreachable, any cache
- * (even stale) is replayed with a clearly labelled "showing cached results"
- * banner. The cache is a byproduct of fetches you already made — freely
- * deletable — so the fetch-don't-replicate model holds.
- *
- * Mirrors the transport already used by `agents secrets export --device`
- * (`src/commands/secrets.ts`): `ssh -o BatchMode=yes <host> bash -lc '<cmd>'`,
- * with `bash -lc` so the remote login PATH resolves `agents`.
- */
+/** `agents sessions --device <target>`: run the query on the remote's own index over SSH, stdout
+ * verbatim. Cache-first (RUSH-2062) in `~/.agents/.cache/remote-sessions/`: fresh hits skip SSH;
+ * an unreachable host replays any cache with a 'showing cached results' banner. */
 import { spawnSync } from 'child_process';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
@@ -35,37 +14,25 @@ import { NO_FANOUT_ENV } from '../remote-active.js';
 import { formatRelativeTime } from '../../text/relative-time.js';
 import { terminalWidth } from '../../text/width.js';
 
-/**
- * POSIX single-quote a string for safe interpolation into a remote shell command.
- * Always wraps (unlike the bare-passthrough variant in `ssh-exec.ts`) — the
- * forwarded `agents` argv is embedded verbatim inside `bash -lc '<cmd>'`, so
- * every token is quoted to keep the command boundary unambiguous.
- */
+/** POSIX single-quote a string for the remote shell. Always wraps (unlike the bare-passthrough
+ * variant in `ssh-exec.ts`) so each token inside `bash -lc '<cmd>'` has an unambiguous
+ * boundary. */
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Strip the `--device`/`-D` flag (and its value) from a raw `agents sessions` argv,
- * leaving the args to forward to the remote unchanged. The remote runs the same
- * binary, so every other flag (`--since`, `--last`, `--json`, query, …) carries
- * over for free. Handles every form commander accepts: `--device h`, `--device=h`,
- * `-D h`, `-D=h`, and the glued short form `-Dh`.
- *
- * @param argv full process argv; the sessions args begin at index 2
- *             (`[runtime, script, 'sessions', ...]`).
- */
+/** Strip `--device`/`-D` and its value from a raw `agents sessions` argv, forwarding everything
+ * else unchanged. Handles `--device h`, `--device=h`, `-D h`, `-D=h` and `-Dh`. `argv` is the full
+ * process argv; the sessions args begin at index 2. */
 export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set()): string[] {
   const args = argv.slice(2);
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--device' || a === '--devices') {
-      // Commander's `<target...>` variadic accepts both `--device a --device b`
-      // and `--device a b` — consume every consecutive token that is a known host
-      // so the variadic form doesn't leak the extra hosts into the remote argv.
-      // Fall back to consuming the single next token when we have no host set
-      // (e.g. malformed input) so the flag value never leaks either way.
+      // Commander's variadic `<target...>` accepts `--device a --device b` and `--device a b`, so
+      // consume every consecutive known host to avoid leaking extra hosts into the remote argv.
+      // With no host set, consume just the next token so the value never leaks.
       if (hosts.size > 0) {
         while (i + 1 < args.length && hosts.has(args[i + 1])) i++;
       } else {
@@ -79,39 +46,20 @@ export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set(
   return out;
 }
 
-/**
- * Force a forwarded `agents sessions` listing to span the peer's WHOLE index.
- *
- * A remote listing runs in the peer's SSH-login cwd — its home dir — and the
- * default listing is silently cwd-scoped, so `sessions --device box` reads as
- * empty even when the box's index is full (`No sessions found for /home/<user>`).
- * Across SSH a peer's cwd is meaningless, so `--device` defaults to `--all`
- * (whole-index) scope. This only drops the *cwd* narrowing — an explicit path
- * query, `--project`, `--since`, or `--agent` filter still narrows on top, and
- * a query that looks like a path takes precedence over `--all` on the remote.
- * Idempotent: never adds a second `--all`.
- */
+/** Force a forwarded listing to span the peer's whole index: the default is cwd-scoped and the
+ * peer's SSH cwd is its home, so `--device box` looked empty. Only drops cwd narrowing; explicit
+ * filters still apply. Idempotent. */
 export function ensureWholeIndex(forwardedArgs: string[]): string[] {
   return forwardedArgs.includes('--all') ? forwardedArgs : [...forwardedArgs, '--all'];
 }
 
-/**
- * Build the single remote command string for `ssh <host> <cmd>`. Forwarded args
- * are quoted for the inner login shell, then the whole `agents …` invocation is
- * quoted again so it survives `bash -lc <...>`.
- *
- * `os` selects the remote shell: a Windows host gets a PowerShell invocation
- * (ssh lands in cmd.exe/PowerShell there, where `bash -lc` does not exist);
- * anything else — including unknown/absent — keeps the POSIX form unchanged.
- * The forwarded terminal width rides across as an env var either way so the
- * remote renders its table to the local screen.
- */
+/** Build the remote command string for `ssh <host> <cmd>`: args quoted for the inner login shell,
+ * then the whole invocation quoted again for `bash -lc`. `os` selects PowerShell for Windows.
+ * Terminal width rides as an env var. */
 export function buildRemoteCommand(forwardedArgs: string[], columns?: number, os?: string): string {
-  // `--device <box>` means "that box's own sessions" — so the peer must answer for
-  // ITSELF and not re-sweep its fleet. Without this the remote `agents sessions`
-  // fans back out to every device IT knows (including us), printing a spurious
-  // `<this-machine>: unreachable`. AGENTS_SESSIONS_LOCAL=1 pins the peer local,
-  // matching the JSON fan-out path (`remote-list.ts`).
+  // `--device <box>` means that box's own sessions, so the peer must answer for itself; otherwise
+  // it re-sweeps its fleet (including us) and prints a spurious `<this-machine>: unreachable`.
+  // AGENTS_SESSIONS_LOCAL=1 pins it local, matching the JSON fan-out in `remote-list.ts`.
   if (remoteShellFor(os) === 'powershell') {
     const env: Record<string, string> = { [NO_FANOUT_ENV]: '1' };
     if (columns && columns > 0) env.COLUMNS = String(columns);
@@ -129,13 +77,9 @@ export function buildRemoteCommand(forwardedArgs: string[], columns?: number, os
 /** The four outcomes of one `ssh <host> agents sessions …` invocation. */
 type SshOutcome = 'ok' | 'unreachable' | 'query-failed' | 'spawn-error';
 
-/**
- * Classify an ssh `spawnSync` result. ssh(1) reserves exit 255 for its own
- * connection-layer failures (host down, timeout, refused, auth, changed host
- * key) — distinct from any other non-zero, which is the remote `agents sessions`
- * exit code forwarded back (the query ran but failed). The two must be handled
- * differently: 255 may fall back to cache, a forwarded failure must surface.
- */
+/** Classify an ssh `spawnSync` result. Exit 255 is ssh's own connection-layer failure (host down,
+ * timeout, refused, auth, changed host key); any other non-zero is the forwarded remote exit code.
+ * 255 may fall back to cache; a forwarded failure must surface. */
 export function classifySshFailure(res: { error?: Error | null; status: number | null }): SshOutcome {
   if (res.error) return 'spawn-error';
   if (res.status === 0) return 'ok';
@@ -146,28 +90,20 @@ export function classifySshFailure(res: { error?: Error | null; status: number |
 /** Root of the offline-replay cache (`~/.agents/.cache/remote-sessions/`). */
 const REMOTE_CACHE_DIR = join(getCacheDir(), 'remote-sessions');
 
-/**
- * How long a successful remote fetch may be served without re-SSHing.
- * Short on purpose: session listings must stay near-live (RUSH-2062). Match the
- * active-session snapshot window so surfaces share one freshness model.
- */
+/** How long a successful remote fetch may be served without re-SSHing. Short on purpose so
+ * listings stay near-live (RUSH-2062); matches the active-session snapshot window. */
 export const REMOTE_CACHE_MAX_AGE_MS = 15_000;
 
-/**
- * Deterministic cache path for a (host, forwarded-args) pair. The forwarded args
- * are hashed so distinct queries cache independently; the host stays readable in
- * the filename (sanitised so `user@host` and aliases are filesystem-safe).
- */
+/** Deterministic cache path for a (host, forwarded-args) pair. Args are hashed so distinct
+ * queries cache independently; the host stays readable, sanitised for the filesystem. */
 export function remoteCachePath(host: string, forwardedArgs: string[]): string {
   const hash = createHash('sha256').update(forwardedArgs.join('\u0000')).digest('hex').slice(0, 16);
   const safeHost = host.replace(/[^a-zA-Z0-9._@-]/g, '_');
   return join(REMOTE_CACHE_DIR, `${safeHost}__${hash}.txt`);
 }
 
-/**
- * Pure freshness check for a remote-sessions cache entry. A reachable host
- * skips SSH only while this returns true; unreachable fallback ignores age.
- */
+/** Pure freshness check for a remote-sessions cache entry. A reachable host skips SSH only
+ * while true; the unreachable fallback ignores age. */
 export function isRemoteCacheFresh(
   mtimeMs: number,
   nowMs: number,
@@ -182,11 +118,8 @@ interface RemoteCacheHit {
   mtimeMs: number;
 }
 
-/**
- * Read a cached remote fetch. When `maxAgeMs` is set, returns null if the
- * entry is older than the window (cache-first path for reachable hosts).
- * Omit `maxAgeMs` to accept any age (unreachable fallback).
- */
+/** Read a cached remote fetch. With `maxAgeMs`, returns null for an older entry (reachable-host
+ * path); omit it to accept any age (unreachable fallback). */
 export function readRemoteCache(
   host: string,
   forwardedArgs: string[],
@@ -230,12 +163,9 @@ export function writeRemoteCache(host: string, forwardedArgs: string[], output: 
   }
 }
 
-/**
- * Serve a *fresh* cache entry for a reachable-host skip (no banner — the data
- * is still within the freshness window). Returns false when missing/stale so
- * the caller SSHes. RUSH-2062: without this, a reachable host never skipped SSH
- * even when the cache was just written.
- */
+/** Serve a fresh cache entry for a reachable host (no banner); returns false when missing or stale
+ * so the caller SSHes. RUSH-2062: previously a reachable host never skipped SSH even with a
+ * just-written cache. */
 export function serveWarmRemoteCache(
   host: string,
   forwardedArgs: string[],
@@ -270,22 +200,9 @@ interface RunRemoteSessionsOptions {
   nowMs?: number;
 }
 
-/**
- * Run the current `agents sessions` invocation on one or more remote machines over
- * SSH, writing each remote's output to the terminal.
- *
- * Cache policy (RUSH-2062):
- * - **Default:** serve a fresh cache hit without SSH; SSH only on miss/stale.
- * - **`forceRefresh`:** always SSH, then rewrite the cache.
- * - **Unreachable:** fall back to any cached output (with a stale banner).
- *
- * Sets `process.exitCode = 1` if any host could not be answered (live or cached).
- * Reads the invocation from `process.argv` (override via `argv` for testing).
- *
- * Output is captured rather than `stdio: 'inherit'`-streamed so it can be cached.
- * Session output is small and the remote returns quickly, so buffering is
- * imperceptible; `maxBuffer` is generous for the rare large `--markdown <id>` dump.
- */
+/** Run the current `agents sessions` invocation on remote machines over SSH (RUSH-2062 cache):
+ * serve a fresh hit without SSH; `forceRefresh` always SSHes; unreachable falls back to any cache
+ * with a stale banner. Sets `process.exitCode = 1` if any host went unanswered. */
 export function runRemoteSessions(
   hosts: string[],
   argv: string[] = process.argv,

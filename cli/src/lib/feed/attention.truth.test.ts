@@ -1,17 +1,6 @@
-/**
- * Attention truth, end to end on real transcript shapes (PHNX-3999).
- *
- * Reproduces the live 2026-09-10 finding — nine fleet attention records classified
- * `permission`, eight of them from Claude's `idle_prompt` hook event, one of them a
- * session whose whole transcript was "reply with exactly: pong" → "pong" — and pins
- * the corrected pipeline from the transcript bytes to every consumer: the real
- * Claude tail parser (`computeLiveSignals`), the real feed store (`readBlock`), the
- * reconciler, the daemon banner service with its on-disk ledger, and the
- * `feed watch --json` projection the menu-bar helper and AGI EXT render.
- *
- * No mocks: the fixtures under ./testdata are transcripts in the exact line shape
- * Claude Code writes and blocks in the exact shape the feed-publish hook writes.
- */
+/** Attention truth end to end on real transcript shapes (PHNX-3999). Reproduces the 2026-09-10
+ * finding of nine fleet records classified `permission`, eight from Claude's `idle_prompt`
+ * hook, and pins the corrected pipeline from transcript bytes to every consumer. No mocks. */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -55,10 +44,8 @@ function installBlock(fixture: string, sessionId: string): void {
   fs.copyFileSync(path.join(TESTDATA, fixture), path.join(getFeedDir(), `${blockIdForSession(sessionId)}.json`));
 }
 
-/**
- * The live row `getActiveSessions` builds for a Claude terminal session — the
- * state-engine fields exactly as `applyState` folds them on, from the real parser.
- */
+/** The live row `getActiveSessions` builds for a Claude terminal session, with state-engine
+ * fields as `applyState` folds them on. */
 function liveRow(sessionId: string, file: string, nowMs: number): ActiveSession {
   const { state } = computeLiveSignals('claude', file, path.dirname(file), true, nowMs);
   if (!state) throw new Error(`fixture ${file} parsed to no state`);

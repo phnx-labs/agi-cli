@@ -1,18 +1,6 @@
-/**
- * A remote teams teammate is attributed to the box it EXECUTES on, not to the
- * orchestrator that spawned it (SES-GAP-10, RUSH-2486).
- *
- * `teams add --device <peer>` runs the teammate on <peer> over SSH, but it gets
- * no host-dispatch index row, so `foldExecutionMachine` can't reach it and the
- * orchestrator's self-stamp (`commands/sessions.ts`) claimed it — listing a
- * peer's teammate under `agents sessions --active --device <orchestrator>`.
- * `listTeamsActive` now folds `AgentProcess.hostName` into `machine` /
- * `offloadedFrom`, the same shape `run --device` gets.
- *
- * Real path: seed teammate `meta.json` records on disk and drive the actual
- * `AgentManager.listRunning()` through `listTeamsActive`, no mocking. `localOnly`
- * keeps it off SSH (a remote teammate reports its last-persisted RUNNING state).
- */
+/** A remote teams teammate is attributed to the box it executes on, not the orchestrator
+ * (SES-GAP-10, RUSH-2486). `teams add --device <peer>` has no host-dispatch index row;
+ * `listTeamsActive` now folds `AgentProcess.hostName` into `machine`/`offloadedFrom`. No mocks. */
 
 import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';

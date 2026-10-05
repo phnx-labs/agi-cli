@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { withAlias, withoutAlias } from '../state.js';
 
-// These guard the selector-amend logic behind `applyExtraAliasToVersions`, which
-// backfills an extra-repo alias into already-installed versions' selectors when a
-// repo is registered (and strips it on remove). The position and idempotency are
-// the load-bearing parts — a wrong position changes resolution precedence, and a
-// non-idempotent add corrupts the list on repeated `repo add`/launch.
+// Guards the selector-amend logic behind `applyExtraAliasToVersions`, which backfills an extra-repo
+// alias into installed versions' selectors on repo register (and strips it on remove). Position
+// matters (it changes resolution precedence) and so does idempotency (repeated `repo add`/launch).
 
 describe('withAlias', () => {
   it('inserts <alias>:* immediately before project:* (after system/user)', () => {

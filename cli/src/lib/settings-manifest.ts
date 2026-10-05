@@ -1,21 +1,6 @@
-/**
- * Settings carry-forward between version homes.
- *
- * Every installed version gets an isolated `home/`, so user-authored
- * preferences (settings.json, config.toml, keybindings, auth) written while
- * running one version do not exist in a freshly installed one. Resources
- * managed in ~/.agents/ (commands, skills, hooks, rules, MCP YAML, plugins,
- * subagents) are synced into every version home by syncResourcesToVersion and
- * are deliberately NOT listed here — copying them would fight that sync.
- *
- * The manifest below classifies the remaining per-agent files, and
- * carryForwardSettings() fills gaps in a target version home from a source
- * version home. It never overwrites a value the target already has: scalars
- * keep the target's value, objects merge recursively, arrays union. That makes
- * the operation idempotent and safe to run on every `agents add` / `agents use`.
- * (One scoped exception: the 'claude-trust' strategy promotes a stamped-default
- * `hasTrustDialogAccepted: false` to `true` — see the note on that entry.)
- */
+/** Settings carry-forward between version homes: fills gaps in a target home from a source, never
+ * overwriting a target value, so it is idempotent on every `agents add`/`use`. Synced ~/.agents
+ * resources are excluded (would fight sync). One exception: 'claude-trust' promotes false->true. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,11 +16,8 @@ interface ManifestEntry {
   /** Path relative to the version home (e.g. ".claude/settings.json"). */
   rel: string;
   strategy: MergeStrategy;
-  /**
-   * Top-level keys that are machine/onboarding state rather than user
-   * preference — stripped from the source before merging so stale state
-   * never propagates into a new version.
-   */
+  /** Top-level keys that are machine/onboarding state, not user preference; stripped from the
+   * source before merging so stale state never reaches a new version. */
   stateKeys?: string[];
   /** chmod the copied file to 0600 (credentials). */
   restrictMode?: boolean;
@@ -46,12 +28,9 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
     { rel: '.claude/settings.json', strategy: 'json-merge' },
     { rel: '.claude/settings.local.json', strategy: 'copy-if-absent' },
     { rel: '.claude/keybindings.json', strategy: 'copy-if-absent' },
-    // `.claude.json` holds the login (oauthAccount) and per-session stats, so it
-    // must never merge wholesale — but it is also where Claude records workspace
-    // trust (`projects[<path>].hasTrustDialogAccepted`). Without carrying that,
-    // every newly pinned version re-shows the trust dialog once per project
-    // (issue #2776). The 'claude-trust' strategy projects ONLY the trust flags
-    // out of the source file; credentials and stats stay per-version.
+    // `.claude.json` holds the login and stats, so it never merges wholesale, but it also holds
+    // workspace trust (`projects[<path>].hasTrustDialogAccepted`); without carrying it each new
+    // version re-asks per project (#2776). 'claude-trust' projects only the trust flags.
     { rel: '.claude.json', strategy: 'claude-trust' },
   ],
   codex: [
@@ -60,14 +39,8 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
       strategy: 'toml-merge',
       stateKeys: ['notice', 'windows_wsl_setup_acknowledged'],
     },
-    // `.codex/auth.json` is deliberately NOT carried forward. Copying it seeded
-    // every new Codex version with the current default's ChatGPT token, so two
-    // installed versions always reported the same account and could never sign
-    // into separate accounts. Claude never merges `.claude.json` for the same
-    // reason (its 'claude-trust' entry extracts only the trust flags) — a
-    // version home holds its own login, keeping accounts per-version. A fresh
-    // Codex version installs signed-out; run `codex login`
-    // (or `agents run codex --version <v>`) inside it to authenticate.
+    // `.codex/auth.json` is deliberately not carried forward: copying seeded every new Codex
+    // version with the default's ChatGPT token, so versions could never hold separate accounts.
     { rel: '.codex/instructions.md', strategy: 'copy-if-absent' },
     { rel: '.codex/hooks.json', strategy: 'copy-if-absent' },
     { rel: '.codex/prompts', strategy: 'dir-entries' },
@@ -86,15 +59,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Fill gaps in `target` from `source` without overwriting target values:
- * missing keys are copied, plain objects recurse, and everything else —
- * scalars AND arrays — keeps the target's value. Arrays deliberately do not
- * union: other writers (factory sync, hooks registration) mutate array entries
- * in place, so a union would keep re-appending stale pre-mutation copies from
- * the source on every carry (e.g. a user hook duplicated after the system
- * hooks were merged into it). Returns a new object.
- */
+/** Fill gaps in `target` from `source` without overwriting: missing keys copy, plain objects
+ * recurse, scalars and arrays keep the target's value. Arrays never union: other writers mutate
+ * entries in place, so a union would re-append stale copies on every carry. */
 export function fillGaps(
   target: Record<string, unknown>,
   source: Record<string, unknown>
@@ -114,15 +81,9 @@ export function fillGaps(
   return out;
 }
 
-/**
- * Project paths the source `.claude.json` records an accepted trust dialog for.
- * Only an explicit `true` counts: Claude Code never persists a decline (the
- * dialog exits without writing), so `false` is only ever the stamped default —
- * not a user decision worth propagating. Verified against Claude Code
- * 2.1.219/2.1.220 (decline paths exit via code 1 / code 0 without a config
- * write); if a future Claude Code starts persisting declines, this premise —
- * and the false→true promotion in the 'claude-trust' case — must be revisited.
- */
+/** Project paths for which the source `.claude.json` records an accepted trust dialog. Only an
+ * explicit `true` counts: Claude Code never persists a decline, so `false` is just the stamped
+ * default (verified on 2.1.219/2.1.220); revisit false->true if declines start persisting. */
 function trustedClaudeProjects(source: Record<string, unknown>): string[] {
   const projects = isPlainObject(source.projects) ? source.projects : {};
   return Object.entries(projects)
@@ -147,11 +108,9 @@ function backupFile(backupRoot: string, home: string, rel: string): void {
   fs.copyFileSync(src, dest);
 }
 
-/**
- * Carry user settings forward from one version home into another. Both paths
- * are version-home roots (the directory containing `.claude/` / `.codex/`).
- * Only fills gaps — never overwrites target values — so it is idempotent.
- */
+/** Carry user settings from one version home into another (both are version-home roots containing
+ * `.claude/` or `.codex/`). Only fills gaps and never overwrites target values, so it is
+ * idempotent. */
 export function carryForwardSettings(
   agent: AgentId,
   fromHome: string,
@@ -197,13 +156,8 @@ export function carryForwardSettings(
           break;
         }
         case 'claude-trust': {
-          // Projection, not a merge: pull ONLY `projects[<path>].hasTrustDialogAccepted`
-          // out of the source `.claude.json`. Everything else in that file
-          // (oauthAccount, onboarding state, per-session stats) stays per-version.
-          // Trust granted anywhere wins over the target's stamped-default `false`
-          // (headless runs create project entries with the flag unset-as-false
-          // without ever showing the dialog), but a target entry's other keys
-          // are preserved untouched.
+          // Projection, not a merge: pull only `projects[<path>].hasTrustDialogAccepted` from the
+          // source `.claude.json`; the rest (oauthAccount, onboarding, stats) stays per-version.
           const source = JSON.parse(fs.readFileSync(sourcePath, 'utf-8')) as Record<string, unknown>;
           const trusted = trustedClaudeProjects(source);
           if (trusted.length === 0) break;
@@ -235,11 +189,9 @@ export function carryForwardSettings(
           } else {
             fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           }
-          // Atomic (tmp + rename): a running Claude session rewrites this exact
-          // file (it holds the login and session stats), so a plain write risks
-          // a reader seeing a partial file. The OUTSIDE `.claude.json` is the
-          // real file (the INSIDE `.claude/.claude.json` symlink resolves to it
-          // and survives the rename).
+          // Atomic (tmp + rename): a running Claude session rewrites this file (login and stats),
+          // so a plain write risks a partial read. The outer `.claude.json` is the real file; the
+          // `.claude/.claude.json` symlink survives the rename.
           atomicWriteFileSync(
             targetPath,
             JSON.stringify({ ...targetObj, projects: targetProjects }, null, 2) + '\n'

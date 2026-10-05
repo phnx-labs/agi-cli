@@ -20,10 +20,8 @@ function writeFile(p: string, content: string): void {
   fs.writeFileSync(p, content, 'utf-8');
 }
 
-/**
- * Build a tmp HOME with a single Claude version installed at 9.9.9, a default
- * pin in agents.yaml, and a few user-scoped resources visible to inspect.
- */
+/** Build a tmp HOME with one Claude version at 9.9.9, a default pin in agents.yaml, and a few
+ * user-scoped resources visible to inspect. */
 function makeFixture(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-test-' + crypto.randomBytes(4).toString('hex') + '-'));
 
@@ -34,10 +32,9 @@ function makeFixture(): string {
   // Suppress the update-check network call.
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as { version: string };
   mkdir(path.join(home, '.agents', '.cache'));
-  // A normal (non-isolated) install owns the bare shim. The fixture omitted it, so
-  // it described a state that cannot occur — and `inspect` now reports the shim only
-  // when it is really there, since printing a phantom path told isolated users their
-  // copy sat on PATH when it did not.
+  // A normal (non-isolated) install owns the bare shim; the fixture omitted it and described an
+  // impossible state. `inspect` now reports the shim only when it exists, since a phantom path
+  // told isolated users their copy was on PATH.
   mkdir(path.join(home, '.agents', '.cache', 'shims'));
   writeFile(path.join(home, '.agents', '.cache', 'shims', 'claude'), '#!/bin/sh\nexit 0\n');
   fs.chmodSync(path.join(home, '.agents', '.cache', 'shims', 'claude'), 0o755);
@@ -96,12 +93,9 @@ function run(home: string, args: string[], cwd: string = home) {
   });
 }
 
-/**
- * Build a project dir (separate from HOME's ~/.agents) whose resources live
- * under `.agents/`, plus decoy top-level `agents.yaml` + `skills/` that must NOT
- * be mistaken for the DotAgents tree. The `.agents/` holds a skill, a command,
- * and a plugin bundling its own skill.
- */
+/** Build a project dir (separate from HOME's ~/.agents) with resources under `.agents/`, plus decoy
+ * top-level `agents.yaml` and `skills/` that must not be mistaken for the DotAgents tree. It holds
+ * a skill, a command, and a plugin bundling its own skill. */
 function makeProjectRepo(): string {
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-proj-' + crypto.randomBytes(4).toString('hex') + '-'));
 
@@ -250,11 +244,9 @@ describe('agents inspect', () => {
   });
 
   it('shows a hook what fires it, never a line of its own shell', () => {
-    // The AGENT path specifically. The repo path already hardcodes an empty
-    // description ("hooks are shell scripts with no human description"), so a
-    // repo fixture cannot reproduce this — the two paths disagreed, which is
-    // the whole bug: every one of the 53 hooks under an agent home rendered
-    // "!/usr/bin/env bash" as its description.
+    // The agent path specifically: the repo path hardcodes an empty hook description, so a repo
+    // fixture cannot reproduce the bug where all 53 hooks under an agent home rendered
+    // "!/usr/bin/env bash" as their description.
     const hooksDir = path.join(fixtureHome, '.agents', '.history', 'versions', 'claude', '9.9.9', 'home', '.claude', 'hooks');
     writeFile(path.join(hooksDir, 'guard.sh'), '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n');
     writeFile(path.join(hooksDir, 'guard_test.sh'), '#!/usr/bin/env bash\nset -euo pipefail\n');
@@ -283,12 +275,8 @@ describe('agents inspect', () => {
     writeFile(path.join(many, '.claude-plugin', 'plugin.json'),
       JSON.stringify({ name: 'many', description: 'Many commands.', version: '1.0.0' }));
     for (const n of names) writeFile(path.join(many, 'commands', `${n}.md`), `---\ndescription: ${n}.\n---\n\nb\n`);
-    // Types that contradict the declared PluginManifest — loadPluginManifest
-    // validates only name/version, so these reach the renderer as-is.
-    // Every field the view reads, each with a type the interface forbids. The
-    // first cut of this test only had version/dependencies and only exercised
-    // `--plugins`, which is exactly how a non-string `description` (crashing
-    // BOTH list and detail mode) survived a review.
+    // Types that contradict the declared PluginManifest: loadPluginManifest validates only
+    // name/version, so these reach the renderer as-is.
     const bad = path.join(proj, '.agents', 'plugins', 'wrongtypes');
     writeFile(path.join(bad, '.claude-plugin', 'plugin.json'),
       JSON.stringify({ name: 'wrongtypes', description: 42, version: 2, dependencies: 'some-plugin', author: ['a'] }));

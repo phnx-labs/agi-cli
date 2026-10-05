@@ -3,14 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// state.ts FREEZES HOME (-> getUserAgentsDir()) at first import. Under a
-// shared-process runner (e.g. `bun test`) another test file may import state.ts
-// before this one, freezing HOME at a DIFFERENT temp dir. So we (1) set HOME at
-// module TOP-LEVEL — before ANY import of ./config.js (which pulls in
-// state.ts), mirroring budget.test.ts — and (2) derive the user agents.yaml
-// path from the SAME getUserAgentsDir() the code actually reads, after import,
-// so the test writes where the resolver reads regardless of which file froze
-// HOME first. This makes the test robust under both vitest and `bun test`.
+// state.ts freezes HOME at first import, and under a shared-process runner (`bun test`) another
+// file may freeze a different temp dir. So set HOME at module top-level before any ./config.js
+// import (as budget.test.ts) and derive the agents.yaml path from getUserAgentsDir() after import.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-home-'));
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
@@ -21,12 +16,9 @@ const userAgentsDir = getUserAgentsDir();
 fs.mkdirSync(userAgentsDir, { recursive: true });
 const userYaml = path.join(userAgentsDir, 'agents.yaml');
 
-// state.readMeta() memoizes the parsed user agents.yaml against its mtime
-// (ms-resolution). Successive writes within the same millisecond — common under
-// a fast shared-process runner like `bun test` — leave the mtime unchanged, so
-// the resolver returns a STALE cached budget. Bump the mtime forward
-// monotonically on every write so the cache stamp always changes and the
-// resolver re-reads. Robust under both vitest and `bun test`.
+// state.readMeta() memoizes agents.yaml against its ms-resolution mtime, so writes in the same
+// millisecond leave a stale cached budget. Bump the mtime monotonically on every write so the
+// cache stamp changes.
 let mtimeTick = 0;
 function writeUserYaml(body: string): void {
   fs.writeFileSync(userYaml, body);

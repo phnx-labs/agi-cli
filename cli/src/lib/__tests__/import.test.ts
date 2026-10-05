@@ -1,13 +1,6 @@
-/**
- * Tests for the lib/import helpers backing the `agents import` command.
- *
- * - resolvePackageDirFromBinary is pure (filesystem reads only, no state).
- * - importAgentBinary is exercised with the optional versionDirOverride
- *   parameter pointing at a temp dir, so we never touch the real
- *   ~/.agents/.history/versions/. This avoids needing vi.mock on
- *   state.ts / versions.ts — bun's vi.mock isn't file-scoped and would
- *   leak failures into hooks/versions tests.
- */
+/** Tests for the lib/import helpers behind `agents import`: resolvePackageDirFromBinary is pure;
+ * importAgentBinary uses the `versionDirOverride` parameter with a temp dir, so no vi.mock of
+ * state.ts/versions.ts (bun's vi.mock is not file-scoped and leaks into hooks/versions tests). */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

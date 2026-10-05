@@ -1,7 +1,5 @@
-/**
- * Convert slash-command markdown files into Codex skills for Codex releases
- * that no longer load the legacy prompts/ directory.
- */
+/** Convert slash-command markdown files into Codex skills for Codex releases that no longer load
+ * the legacy prompts/ directory. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -59,12 +57,9 @@ export function shouldInstallCommandAsSkill(agent: AgentId, version: string): bo
   return !supports(agent, 'commands', version).ok && supports(agent, 'skills', version).ok;
 }
 
-/**
- * Agents whose native command files serve a separate surface while their CLI
- * consumes the generated skill form. Keep this registry distinct from
- * `shouldInstallCommandAsSkill`: these targets need both writes, not a format
- * replacement.
- */
+/** Agents whose native command files serve another surface while their CLI consumes the generated
+ * skill form. Distinct from `shouldInstallCommandAsSkill`: these need both writes, not a format
+ * replacement. */
 export const COMMAND_SKILL_DUAL_WRITE_TARGETS = {
   cursor: true,
 } satisfies Partial<Record<AgentId, true>>;

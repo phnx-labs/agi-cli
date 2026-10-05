@@ -1,21 +1,6 @@
-/**
- * Project pull — fast-forward every fleet checkout of a named project.
- *
- * Safety contract (binding for all paths in this module):
- *   - Dirty trees are blocked immediately (no fetch attempted).
- *   - Only checkouts on the remote's default branch are fast-forwarded.
- *   - Local commits ahead of upstream block the pull.
- *   - Fast-forward ONLY — no rebase, no reset, no history rewrite.
- *   - Missing checkouts are reported, never cloned.
- *   - Malformed or partial peer envelopes fail CLOSED and LOUD (the parse
- *     returns `valid: false`, so the peer lands in `parseFailed` and drives a
- *     non-zero exit — never an empty result set that reads as "nothing to do").
- *   - Git hook symlinks are NEVER installed during a pull.
- *
- * The fan-out extends the `projects status` seam: the same
- * `projectRepoTargetsForDef` expansion drives both commands, so they
- * always operate on exactly the same set of directories.
- */
+/** Fast-forward every fleet checkout of a project. Dirty trees block before any fetch; only the
+ * default branch fast-forwards; local commits ahead block; no rebase/reset; missing checkouts are
+ * never cloned. Malformed peer envelopes fail CLOSED and LOUD. */
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -67,12 +52,8 @@ interface ProjectPullEnvelope {
 // Target fingerprint
 // ---------------------------------------------------------------------------
 
-/**
- * Deterministic hash of a target list so the orchestrator can verify the peer
- * pulled the same set of directories it intended to request. Computed from the
- * canonical `path\0expectedSlug` representation, sorted so insertion order does
- * not matter.
- */
+/** Deterministic hash of a target list, so the orchestrator can verify the peer pulled the intended
+ * set; computed from sorted `path\0expectedSlug` pairs. */
 export function fingerprintTargets(targets: ProjectRepoTarget[]): string {
   const lines = targets
     .map((t) => `${t.path}\0${t.expectedSlug ?? ''}`)
@@ -84,42 +65,24 @@ export function fingerprintTargets(targets: ProjectRepoTarget[]): string {
 // Target wire encoding (the `pull` → `pull-local` CLI-arg boundary)
 // ---------------------------------------------------------------------------
 
-/**
- * Encode a target list as the single `--targets` argument the orchestrating
- * `pull` hands to a peer's hidden `pull-local`.
- *
- * A target is a `{ path, expectedSlug }` PAIR, and both halves must survive the
- * hop: `expectedSlug` is what makes the peer refuse to fast-forward a directory
- * whose `origin` is a different repo, and it is also hashed into
- * {@link fingerprintTargets}. Sending bare paths therefore broke the fan-out
- * twice over — slug verification silently became a no-op on every peer, and the
- * peer's slug-less fingerprint could never match the caller's, so
- * {@link parseProjectPullEnvelope} discarded the peer's whole result set. JSON
- * keeps the pair intact; both transports quote it as one argument
- * (`shellQuote` on bash, `powershellQuote` inside a base64 `-EncodedCommand`
- * on Windows), so no escaping is owed here.
- */
+/** Encode targets as the single `--targets` argument for a peer's `pull-local`. Each `{ path,
+ * expectedSlug }` PAIR must survive the hop: expectedSlug makes the peer refuse a different repo
+ * and is hashed into the fingerprint. JSON keeps the pair intact. */
 export function encodePullTargets(targets: ProjectRepoTarget[]): string {
   return JSON.stringify(
     targets.map((t) => (t.expectedSlug === undefined ? { path: t.path } : { path: t.path, expectedSlug: t.expectedSlug })),
   );
 }
 
-/**
- * The exact `agents …` argv the fleet fan-out runs on each peer. Owned here,
- * beside the decoder, so the two halves of the hop cannot drift apart and a
- * test can exercise the real caller-side arguments rather than a retyped copy.
- */
+/** The exact `agents ...` argv the fan-out runs on each peer, owned beside the decoder so the two
+ * halves can't drift and a test exercises the real caller-side arguments. */
 export function pullLocalArgs(targets: ProjectRepoTarget[]): string[] {
   return ['projects', 'pull-local', '--targets', encodePullTargets(targets)];
 }
 
-/**
- * Decode the `--targets` argument back into targets on the peer. THROWS on any
- * malformed input rather than returning a partial list: a peer that cannot tell
- * exactly which directories it was asked to pull must fail loudly, not
- * fast-forward a guessed subset.
- */
+/** Decode `--targets` on the peer. THROWS on any malformed input rather than returning a partial
+ * list: a peer that can't tell which directories it was asked to pull must fail loudly, not
+ * fast-forward a guessed subset. */
 export function decodePullTargets(raw: string): ProjectRepoTarget[] {
   let parsed: unknown;
   try {
@@ -145,14 +108,9 @@ export function decodePullTargets(raw: string): ProjectRepoTarget[] {
 // Local pull
 // ---------------------------------------------------------------------------
 
-/**
- * Pull each target on THIS machine, sequentially (concurrent worktree writes
- * can corrupt the git index). Returns one result per target.
- *
- * Missing checkouts (no directory or no `.git`) are reported as `missing` and
- * skipped — never cloned. A slug mismatch (the directory's `origin` remote does
- * not match the expected slug) is reported as `blocked`.
- */
+/** Pull each target on THIS machine sequentially (concurrent worktree writes can corrupt the git
+ * index). Missing checkouts (no directory or `.git`) are `missing` and never cloned; a slug
+ * mismatch (origin doesn't match the expected slug) is `blocked`. */
 export async function pullProjectTargets(
   targets: ProjectRepoTarget[],
   host: string = machineId(),
@@ -174,11 +132,9 @@ export async function pullProjectTargets(
       continue;
     }
 
-    // Slug verification: if the project def declares a slug, the directory's
-    // origin must match it. A mismatch means the path hosts a different repo
-    // and we must not fast-forward it under a wrong project's command.
-    // An unreadable remote URL or an unrecognised remote shape is also blocked —
-    // we cannot confirm the checkout is the right repo, so we fail closed.
+    // Slug verification: a declared slug must match the directory's origin, else the path hosts a
+    // different repo and must not be fast-forwarded. An unreadable or unrecognised remote is also
+    // blocked: we can't confirm the right repo, so fail closed.
     if (target.expectedSlug) {
       const remoteUrl = await getRemoteUrl(absPath);
       if (remoteUrl === null) {
@@ -286,21 +242,9 @@ export function buildPullEnvelope(
 // Envelope parser (fail-closed — every validation failure returns [])
 // ---------------------------------------------------------------------------
 
-/**
- * Parse a peer's `projects pull-local` stdout. Fails CLOSED **and
- * LOUD**: any structural anomaly (wrong schema version, wrong kind, machine
- * mismatch, fingerprint mismatch, non-array results, malformed rows) returns
- * `{ items: [], valid: false }` rather than silently accepting a partial or
- * spoofed payload.
- *
- * `valid: false` is what makes the failure visible. A bare `[]` normalizes to
- * `{ items: [], valid: true }` in `normalizeRemoteAgentsJsonParse`, so the peer
- * would be recorded as having answered with nothing to report — indistinguishable
- * from a device that genuinely had no work, even though it had already run
- * `git fetch` + `merge --ff-only` or hit a real `blocked`/`failed`. Returning
- * the result shape instead lands the peer in `parseFailed`, which the caller
- * both prints and treats as a non-zero exit.
- */
+/** Parse a peer's `pull-local` stdout. Fails CLOSED and LOUD: any anomaly returns `{ items: [],
+ * valid: false }`, since a bare `[]` would read as a peer with no work. `valid: false` lands it in
+ * `parseFailed`, printed and a non-zero exit. */
 export function parseProjectPullEnvelope(
   stdout: string,
   machine: string,
@@ -355,11 +299,8 @@ export function parseProjectPullEnvelope(
 // Exit-code predicate
 // ---------------------------------------------------------------------------
 
-/**
- * Returns `true` when every pull completed successfully (`updated` or
- * `current`). `missing` paths are skipped by design — their absence does not
- * count as a failure. `blocked` and `failed` paths drive a non-zero exit.
- */
+/** True when every pull completed (`updated` or `current`). `missing` is skipped by design;
+ * `blocked` and `failed` drive a non-zero exit. */
 export function projectPullComplete(results: ProjectPullResult[]): boolean {
   return results.every((r) => r.status !== 'blocked' && r.status !== 'failed');
 }
@@ -398,15 +339,9 @@ function statusLabel(r: ProjectPullResult): string {
   }
 }
 
-/**
- * Print a human-readable per-host / per-path pull summary to stdout, followed
- * by a one-line counts footer. Does not exit — the caller controls the exit code.
- *
- * `unavailableDevices` never answered (offline, no CLI, timed out).
- * `unverifiedDevices` DID answer but their envelope failed verification, so
- * their real outcome is unknown — a strictly worse state than silence, and the
- * one the caller turns into a non-zero exit.
- */
+/** Print a per-host / per-path pull summary plus counts; does not exit. `unavailableDevices` never
+ * answered; `unverifiedDevices` answered but failed envelope verification, a worse state than
+ * silence and a non-zero exit. */
 export function printProjectPullSummary(
   projectName: string,
   results: ProjectPullResult[],

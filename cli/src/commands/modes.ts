@@ -1,12 +1,6 @@
-/**
- * `agents modes` — list the permission modes a harness accepts for
- * `agents run` / `agents teams add`.
- *
- * Mirror of `agents models`: humans and orchestrating agents read this before
- * picking `--mode plan|edit|auto|skip`. Modes are per-agent today (not version-
- * gated); `agent@version` is accepted so the configured run.defaults mode for
- * that version can be shown beside the catalog.
- */
+/** `agents modes` lists the permission modes a harness accepts for `agents run` / `teams add`,
+ * mirroring `agents models`. Modes are per-agent, not version-gated; `agent@version` also shows
+ * the configured run.defaults mode. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

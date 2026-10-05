@@ -61,11 +61,9 @@ export async function spawnAndDetect(opts: SpawnOpts): Promise<SpawnRun> {
     throw new Error(`spawn agents ${opts.agent} failed: no pid`);
   }
 
-  // Tracker polls for the state file at <agentPid>.json.
-  // The hook writes to $PPID which IS the agent process pid; in our spawn
-  // chain agents-cli -> agent CLI so we need to walk descendants.
-  // Use shellPid path (findStateInTree) via the index re-export — but
-  // trackSpawn polls a SPECIFIC pid. For early validation, walk the tree.
+  // The tracker polls for <agentPid>.json, but the hook writes to $PPID, the agent's own pid; in
+  // the spawn chain agents-cli -> agent CLI, so early validation walks the descendant tree
+  // (findStateInTree) rather than a specific pid.
   const trackerTimeoutMs = opts.trackerTimeoutMs ?? 6000;
   const truthTimeoutMs = opts.truthTimeoutMs ?? 6000;
 
@@ -152,11 +150,9 @@ export async function killAndCleanup(run: SpawnRun): Promise<void> {
     /* ignore */
   }
 
-  // A tmux-wrapped `agents run --interactive` on a worker (tmux.enabled)
-  // used to leave the pane alive after this SIGTERM — the wrapper died,
-  // the detached session did not (PHNX-3293, 100+ week-old Claudes on s0
-  // sitting on "trust this folder" in /tmp/session-tracker-test-*). Kill
-  // any pane whose cwd is this run's directory.
+  // A tmux-wrapped `agents run --interactive` on a worker left the pane alive after this SIGTERM
+  // (PHNX-3293: 100+ week-old Claudes sitting on "trust this folder"). Kill any pane whose cwd is
+  // this run's directory.
   killTmuxSessionsForCwd(run.cwd);
 
   // Remove the temp cwd we created (if we created one).

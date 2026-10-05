@@ -1,13 +1,6 @@
-/**
- * The merged, first-wins DotAgents resource surface — every resource kind, one
- * table, showing the winning layer per row.
- *
- * Ported verbatim from the former `agents resources` command, now surfaced as
- * `agents view --merged`. `agents view agent@version` shows per-version
- * resources; this shows the cross-layer merge across project → user → extras →
- * system. Kept as a shared lib (not inlined into `view.ts`) so `inspect` can
- * reuse it later.
- */
+/** The merged, first-wins DotAgents resource surface: every kind in one table with the winning
+ * layer per row, shown by `agents view --merged` (ported from `agents resources`). Shows the
+ * project > user > extras > system merge; a shared lib so `inspect` can reuse it. */
 
 import * as path from 'path';
 import chalk from 'chalk';

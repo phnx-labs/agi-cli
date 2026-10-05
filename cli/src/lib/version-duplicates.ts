@@ -22,11 +22,8 @@ function duplicateIdentity(info: AccountInfo | undefined): string | null {
   return info.email ? `email:${info.email.toLowerCase()}` : null;
 }
 
-/**
- * Return installed versions newer than selectedVersion that share the same
- * account identity. This is intentionally pure so command output can share one
- * duplicate rule with tests.
- */
+/** Installed versions newer than selectedVersion with the same account identity; pure so output and
+ * tests share one duplicate rule. */
 export function findNewerDuplicateVersions(
   entries: VersionAccountEntry[],
   selectedVersion: string,

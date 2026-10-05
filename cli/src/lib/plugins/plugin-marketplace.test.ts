@@ -1,13 +1,5 @@
-/**
- * Tests for per-DotAgents-repo plugin marketplaces: naming policy, source-side
- * discovery, per-version catalog synthesis (symlink-aware), registration, and
- * top-level orchestration.
- *
- * Real filesystem under os.tmpdir(). The only thing redirected is state.js's
- * path getters (getPluginsDir / getEnabledExtraRepos / getProjectPluginsDir) so
- * discovery points at tmp repos instead of the real ~/.agents — the same
- * vi.doMock('../state.js') pattern used in plugins.test.ts.
- */
+/** Tests for per-DotAgents-repo marketplaces: naming, discovery, catalog synthesis, registration.
+ * Real tmp filesystem; only state.js path getters are redirected (as in plugins.test.ts). */
 
 import * as fs from 'fs';
 import * as path from 'path';

@@ -1,17 +1,6 @@
-/**
- * Live budget kill-switch for `agents cloud` dispatch (issue #399).
- *
- * Follow-up to #346, which shipped a pre-flight budget gate for cloud runs but
- * no live mid-run enforcement — a runaway cloud task would keep spending until
- * the user hit Ctrl-C. This wires the same `makeLiveSpendWatcher` the local
- * headless run uses (src/lib/exec.ts) into the cloud SSE stream: each `usage`
- * event from the provider feeds the watcher, and on breach we call
- * `provider.cancel(taskId)` to terminate server-side.
- *
- * Wrapper shape mirrors `renderStream`'s input — it takes an
- * `AsyncIterable<CloudEvent>` and yields the same events downstream. Dormant
- * (returns the source stream unchanged) when no caps are configured.
- */
+/** Live budget kill-switch for `agents cloud` dispatch (issue #399). #346 shipped only a pre-flight
+ * check, so a runaway cloud task kept spending. Each provider `usage` event feeds the same
+ * `makeLiveSpendWatcher` as local runs; `provider.cancel(taskId)` fires on breach. */
 import type { CloudProvider, CloudEvent } from '../cloud/types.js';
 import {
   capsFromConfig,
@@ -28,13 +17,9 @@ interface CloudBudgetGate {
   breach(): BreachInfo | null;
 }
 
-/**
- * Wrap a cloud event stream with a live budget watcher. On a `usage` event we
- * feed the shared watcher; on the first breach we call `provider.cancel(taskId)`
- * and forward a synthetic `status:'cancelled'` + `error` frame so the renderer
- * shows why the task stopped. Returns null when no caps are configured; callers
- * fall through to the raw stream in that case.
- */
+/** Wrap a cloud event stream with a live budget watcher: `usage` events feed the shared watcher,
+ * and on first breach call `provider.cancel(taskId)` and forward a synthetic `status:'cancelled'`
+ * + `error` so the renderer shows why. Returns null with no caps; callers use the raw stream. */
 export function wrapStreamWithBudgetGate(args: {
   provider: CloudProvider;
   taskId: string;

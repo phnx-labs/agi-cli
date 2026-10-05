@@ -19,11 +19,9 @@ TASK_ID="${TASK_ID:-$(date +%s)-$$}"
 # Crabbox config
 BOX_CLASS="${CRABBOX_CLASS:-cpx62}"
 
-# Read profile from .crabbox.yaml so we only pick boxes warmed for THIS repo.
-# Falls back to "default" if the file is missing or unparseable.
-# `|| true` is required: under `set -e`, awk exiting non-zero on a missing
-# .crabbox.yaml would abort the whole script inside this assignment before the
-# `:-default` fallback below could run.
+# Read the profile from .crabbox.yaml so we pick only boxes warmed for this repo, falling back to
+# "default". `|| true` is required: under `set -e`, awk exiting non-zero on a missing file would
+# abort before the fallback runs.
 PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.crabbox.yaml" 2>/dev/null || true)}"
 PROFILE="${PROFILE:-default}"
 export PROFILE
@@ -34,12 +32,9 @@ die() { echo "error: $*" >&2; exit 1; }
 # local Keychain — CI passes them in via env, so we don't require it there.
 command -v crabbox >/dev/null || die "crabbox not installed"
 
-# Load credentials. Prefer already-set env vars (CI workflow path); otherwise
-# re-enter this script under chained `agents secrets exec` so the bundle values
-# ride the child process env and never touch stdout (RUSH-2774 — the old
-# eval-a-plaintext-dump pattern put whole bundles into agent transcripts).
-# Each bundle is probed with a real resolve first, so a locked/absent bundle is
-# skipped exactly like the old per-bundle `|| true`.
+# Load credentials: prefer already-set env vars (CI path), else re-enter under chained `agents
+# secrets exec` so bundle values ride the child env and never touch stdout (RUSH-2774). Each
+# bundle is probed with a real resolve first, so a locked or absent bundle is skipped.
 if [[ -z "${SANDBOX_SECRETS_EXEC:-}" ]] && command -v agents >/dev/null; then
   # Each bundle loads independently, gated on its own target var being unset —
   # a caller with HCLOUD_TOKEN pre-set but no GitHub App creds still gets the
@@ -59,10 +54,8 @@ fi
 [[ -n "${HCLOUD_TOKEN:-}" ]] || die "HCLOUD_TOKEN is empty after secret resolution"
 export HCLOUD_TOKEN
 
-# Generate GitHub App token for private repo access.
-# Resolves the installation ID dynamically from a target repo so the script
-# works regardless of whether the App is installed on a user or an org.
-# TOKEN_REPO env var (required) picks which installation.
+# Generate a GitHub App token for private repo access, resolving the installation ID from a target
+# repo so it works for a user or an org install. TOKEN_REPO (required) picks the installation.
 generate_github_token() {
   # APP_ID / APP_PRIVATE_KEY arrive via the github.com link of the secrets-exec
   # chain at the top of this script (or CI env) — never printed to stdout.
@@ -135,10 +128,8 @@ fi
 # anthropic.com link of the secrets-exec chain at the top. Optional either way.
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
-# List the slugs of running boxes matching $PROFILE, one per line (oldest
-# first). Box slugs are ephemeral -- a box gets reaped and its replacement comes
-# up under a new slug -- so we always resolve by the stable `profile` label at
-# run time, never by a cached/hardcoded name.
+# List the slugs of running boxes matching $PROFILE, oldest first. Box slugs are ephemeral, so
+# always resolve by the stable `profile` label at run time, never a cached name.
 running_slugs_for_profile() {
   crabbox list --json 2>/dev/null | /usr/bin/python3 -c "
 import sys, json, os
@@ -156,10 +147,9 @@ for b in boxes:
 " 2>/dev/null || true
 }
 
-# Return 0 if $1 is SSH-ready (crabbox reports `ready=true`), else 1. A box whose
-# cloud-init bootstrap failed still reports status=running but never becomes
-# ready; selecting it burns the full ~2min crabbox SSH-wait before hard-failing.
-# `crabbox status` flips to ready=true only once sshd is reachable, so gate on it.
+# Return 0 if $1 is SSH-ready (`ready=true`). A box whose cloud-init failed still reports
+# status=running but never becomes ready, and selecting it burns the ~2min SSH-wait before
+# failing.
 box_ready() {
   local slug="$1"
   [[ -n "$slug" ]] || return 1
@@ -177,10 +167,9 @@ pick_ready_box() {
   done < <(running_slugs_for_profile)
 }
 
-# Acquire an SSH-ready box for $PROFILE. Reuse a ready one if it exists; else
-# warm a fresh box and poll until it is actually ready. Never selects or destroys
-# a not-ready box -- a dud lease is left for crabbox's idle timeout to reap, which
-# keeps concurrent runs and mid-boot boxes safe.
+# Acquire an SSH-ready box for $PROFILE: reuse a ready one, else warm a fresh box and poll until
+# ready. Never select or destroy a not-ready box; leave a dud lease to crabbox's idle timeout so
+# concurrent runs and mid-boot boxes stay safe.
 get_or_create_box() {
   local box_id waited
   box_id="$(pick_ready_box)"
@@ -312,16 +301,9 @@ main() {
 
   echo "Using crabbox: $box_id (task: $TASK_ID)"
 
-  # Verb vocabulary, matching every sibling project (rush/cli, rush/app,
-  # prix/api and harness all dispatch `sandbox.sh test`). Baking the canonical
-  # command in IS the point: when each caller has to compose the command string
-  # itself, offloading becomes opt-in per call site and every call site opts out
-  # -- which is how build.sh and the attestation producer both ended up running
+  # Verb vocabulary matching every sibling project. Baking in the canonical command stops each
+  # caller composing its own, which is how build.sh and the attestation producer ended up running
   # the suite locally (RUSH-3178).
-  #
-  # The old bare default ran `bun install && bun run test` at the REPO ROOT,
-  # which has no test script: this is a monorepo and the suite lives in cli.
-  # That is the same trap 6abd4a2ea had to fix for the test:remote alias.
   local test_cmd='cd cli && bun install && bun run build && bun run test'
   case "${1:-}" in
     ''|test)
@@ -329,11 +311,9 @@ main() {
       cmd="$test_cmd"
       if [[ $# -gt 0 ]]; then shift; fi
       if [[ $# -gt 0 ]]; then
-        # Quote each arg with %q rather than splicing "$*". The command string is
-        # re-parsed by a shell on the remote box, so an unquoted arg containing a
-        # space (`--testNamePattern="a b"`) would arrive there split into two
-        # words. Neither caller passes one today; test.sh documents `-- <anything>`
-        # as a general escape hatch, so it must not be a trap.
+        # Quote each arg with %q rather than splicing "$*": the command string is re-parsed on the
+        # remote box, so an arg with a space would be split. test.sh documents `-- <anything>` as
+        # a general escape hatch.
         cmd="$cmd --"
         local a
         for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done

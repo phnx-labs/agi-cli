@@ -1,11 +1,6 @@
-/**
- * Self-heal runs in a child process and is not re-run by a daemon restart.
- *
- * The regression: `runSelfHeal` held the daemon's event loop for over a minute
- * on a real box, every other service breached its deadline, the supervisor
- * exited, and the restarted daemon ran self-heal again 30 s later. These tests
- * drive real child processes; only the choice of child is injected.
- */
+/** Self-heal runs in a child process and is not re-run by a daemon restart. Regression: inline
+ * `runSelfHeal` held the event loop over a minute, the supervisor exited, and the restarted daemon
+ * re-ran it 30 s later. Tests drive real child processes. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

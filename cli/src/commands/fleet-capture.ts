@@ -1,14 +1,6 @@
-/**
- * `agents fleet capture` (alias surface of `agents devices capture`) — snapshot
- * the live environment into the `fleet:` block of `agents.yaml` so a fresh
- * machine can reconstruct it with `agents fleet apply`.
- *
- * Local-read + local-write, zero SSH. Records device NAMES only (never IPs or
- * usernames — those are re-resolved live from Tailscale at apply-time), plus the
- * source's own agents as defaults, browser profiles, secrets-bundle names, and
- * routine names. The heavy lifting is the pure `captureFleet` builder; this
- * command just gathers inputs and persists via `updateMeta`.
- */
+/** `agents fleet capture` snapshots the live environment into the `fleet:` block of `agents.yaml`
+ * so `agents fleet apply` can rebuild it. Local read/write, zero SSH; records device names only
+ * (IPs and usernames are re-resolved from Tailscale at apply time). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,11 +21,9 @@ interface CaptureOptions {
   device?: string;
 }
 
-/** Read THIS machine's pins file into `name -> [id@latest]`. Only used with
- * `--from-pins`; keeps capture zero-SSH by reading local state. Pins are
- * machine-local runtime state (`.history/devices/pins-<host>.json`, untracked)
- * — peer pins never sync, so only this machine contributes; peers inherit the
- * captured fleet defaults. */
+/** Read THIS machine's pins file into `name -> [id@latest]`; used only with `--from-pins`. Pins are
+ * machine-local (`.history/devices/pins-<host>.json`), so peers inherit the captured fleet
+ * defaults. */
 function agentsFromPins(names: string[]): Record<string, string[]> {
   const self = machineId();
   if (!names.includes(self)) return {};
@@ -47,13 +37,8 @@ function agentsFromPins(names: string[]): Record<string, string[]> {
   return ids.length > 0 ? { [self]: ids.map((id) => `${id}@latest`) } : {};
 }
 
-/**
- * The names to snapshot into `fleet.secretsBundles` — best-effort. Capture's
- * primary job (device/agent/routine snapshot) is unrelated to secrets, so a
- * missing standalone `secrets` install (DIST-1: no fallback engine) degrades
- * this ONE optional field to empty with a warning rather than failing the
- * whole capture. A real store error still surfaces.
- */
+/** Names for `fleet.secretsBundles`, best-effort: a missing standalone `secrets` install (DIST-1)
+ * yields empty plus a warning, not a failed capture. A real store error still surfaces. */
 async function captureSecretsBundleNames(): Promise<string[]> {
   try {
     return (await listBundles()).map((b) => b.name);
@@ -105,13 +90,9 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     routines: listJobs().map((j) => j.name),
   };
 
-  // Discovery decisions and dismissals are device-scoped now (PHNX-3315): they
-  // live in each box's device doc and sync via the repo, so `capture` must NOT
-  // hoist the cross-box union back into the shared `agents.yaml` `fleet:` block
-  // (that would recreate the N-boxes-rewrite-one-map conflict Task A removed and
-  // re-arm the fold-then-delete migration on every capture). `meta.fleet` carries
-  // only the roster/defaults; any lingering central-legacy discovery/ignored is
-  // carried forward verbatim and drained by the migration.
+  // Discovery decisions and dismissals are device-scoped (PHNX-3315), so `capture` must not hoist
+  // them back into the shared `fleet:` block; that would recreate the N-boxes-rewrite-one-map
+  // conflict. Legacy entries are carried forward for the migration to drain.
   const next = captureFleet(meta.fleet, inputs);
 
   if (opts.dryRun) {

@@ -1,12 +1,6 @@
-/**
- * Real-repo tests for adoptRepoInPlace — the `agents repo sync user` self-heal
- * (PHNX-3301). A directory that carries runtime state but lost (or never had)
- * its `.git` is git-backed IN PLACE against a real local bare remote: no mocks of
- * the unit, no re-clone. Asserts it restores tracking, materializes only the
- * MISSING tracked files, preserves gitignored runtime state, reconciles a
- * stale-stub agents.yaml, surfaces (never clobbers) real local edits, pushes no
- * stray commit, and is idempotent.
- */
+/** Real-repo tests for adoptRepoInPlace, the `agents repo sync user` self-heal (PHNX-3301): a
+ * directory with runtime state but no `.git` is git-backed in place against a local bare
+ * remote. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import simpleGit from 'simple-git';
 import * as fs from 'fs';

@@ -1,11 +1,5 @@
-/**
- * Hook management commands for automating workflows on agent events.
- *
- * Implements `agents hooks` -- list, add, remove, sync, prune, and view
- * shell scripts that fire on agent lifecycle events (session start, file
- * edit, task completion). Central storage lives in ~/.agents/hooks/ and
- * scripts are synced to individual version homes.
- */
+/** `agents hooks`: list, add, remove, sync, prune and view shell scripts fired on agent lifecycle
+ * events. Central storage is `~/.agents/hooks/`, synced into each version home. */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';

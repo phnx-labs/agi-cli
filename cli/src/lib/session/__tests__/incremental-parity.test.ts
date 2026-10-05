@@ -10,14 +10,9 @@ import {
   type ClaudeParserState,
 } from '../discover.js';
 
-// Differential parity harness (B-1). Proves that resuming a Claude parse from a
-// persisted continuation and folding in appended lines is BYTE-FOR-BYTE
-// identical to a full parse of the whole file, for EVERY field of
-// ClaudeSessionScan. Real temp files, real fs, real sqlite-free path — no mocks.
-//
-// The invariant: full(all lines) === hydrate(state@k) + apply(k+1..n), because
-// applyClaudeLine is the single shared fold. Equality holds iff serialize /
-// hydrate round-trips the accumulator faithfully.
+// Differential parity harness (B-1): resuming a Claude parse from a persisted continuation plus
+// appended lines is byte-identical to a full parse for every ClaudeSessionScan field. Real temp
+// files. Invariant: full(all) === hydrate(state@k) + apply(k+1..n).
 
 let dir: string;
 
@@ -33,16 +28,9 @@ function jsonl(lines: object[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n');
 }
 
-/**
- * Write the first chunk, full-scan it to establish an offset + continuation,
- * then for each subsequent chunk APPEND it to the same file and resume with
- * scanClaudeSessionIncremental from the persisted offset. Return both the final
- * incremental scan and the ground-truth full scan of the final file, so callers
- * can assert deep equality (and per-field equality).
- *
- * `chunks[i]` is a complete-lines string (its own trailing '\n' is added here);
- * the raw-partial test appends bytes directly and does not use this helper.
- */
+/** Write the first chunk, full-scan it for an offset + continuation, append each later chunk and
+ * resume with scanClaudeSessionIncremental. Returns the incremental scan and the ground truth.
+ * `chunks[i]` is complete lines ('\n' added here); the raw-partial test appends bytes directly. */
 async function replay(
   chunks: string[],
 ): Promise<{ inc: Awaited<ReturnType<typeof scanClaudeSession>>; full: Awaited<ReturnType<typeof scanClaudeSession>>; offsets: number[] }> {
@@ -323,12 +311,9 @@ describe('incremental parity — partial trailing line', () => {
   });
 
   it('a COMPLETE record missing only its trailing newline is deferred, then counted EXACTLY once', async () => {
-    // The non-atomic-append case prix-cloud caught: a writer appends a full,
-    // valid record and only later appends its '\n'. readline emits that
-    // unterminated line at EOF, so a naive pass applies it while the offset
-    // stops before it → the next pass re-reads and re-applies the SAME record.
-    // User events have no dedup (no seenAssistantIds), so the double-apply shows
-    // up as messageCount 2→3 and contentText carrying the second message twice.
+    // Non-atomic append caught by prix-cloud: a writer appends a full record and its '\n' later.
+    // readline emits the unterminated line, so a naive pass applies it and then re-applies it.
+    // User events have no dedup, so messageCount goes 2 to 3 and the message is duplicated.
     const fp = path.join(dir, 'complete-unterminated.jsonl');
     const l1 = JSON.stringify({ type: 'user', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/x', message: { role: 'user', content: 'first message' } });
     fs.writeFileSync(fp, l1 + '\n');

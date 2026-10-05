@@ -185,11 +185,9 @@ describe('agentKindFromComm', () => {
     expect(agentKindFromComm('/Applications/Claude.app/Contents/MacOS/Claude')).toBeUndefined();
   });
 
-  // Harness-parity regression guard (RUSH-2205): every SESSION_AGENTS member must
-  // resolve from at least one process comm name, so a bare-headless run of any
-  // discoverable harness (grok/kimi/antigravity/openclaw/hermes/rush) is never
-  // silently dropped by the ps-scan. Asserted off the registry-derived source so
-  // adding a SESSION_AGENT without a comm fails here instead of at runtime.
+  // Harness-parity guard (RUSH-2205): every SESSION_AGENTS member must resolve from at least one
+  // process comm name, so a bare headless run is never dropped by the ps-scan. Derived from the
+  // registry so a missing comm fails here.
   it('resolves every SESSION_AGENTS member to its id via at least one comm', () => {
     for (const id of SESSION_AGENTS) {
       const comms = sessionAgentComms(id);

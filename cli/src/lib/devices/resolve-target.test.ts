@@ -1,14 +1,6 @@
-/**
- * resolveDeviceTarget — the `agents ssh` adapter over the shared host resolver.
- *
- * Covers the `auto` affinity sentinel (RUSH-2185): `agents ssh auto` used to
- * reject with "Unknown device 'auto'" because only `agents run --device auto`
- * pre-processed the sentinel before reaching the resolver. matchHost now
- * resolves it directly (../hosts/registry.ts), so this file locks in that
- * resolveDeviceTarget — the ssh-specific adapter on top of matchHost — carries
- * the pick through to a full DeviceProfile the same way an explicit device
- * name does.
- */
+/** resolveDeviceTarget, the `agents ssh` adapter over the shared host resolver, covers the `auto`
+ * sentinel (RUSH-2185): `agents ssh auto` used to fail "Unknown device"; matchHost now resolves
+ * it, and this pins that the pick yields a full DeviceProfile like an explicit name. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

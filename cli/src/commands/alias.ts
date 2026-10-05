@@ -1,14 +1,5 @@
-/**
- * `agents setup alias` -- create top-level shim binaries that expand to
- * `agents <subcommand>`. Nested under setup because the user is configuring
- * this machine's PATH shortcuts, not operating a separate noun (RUSH-2965).
- *
- * Generates executable scripts in ~/.agents/.cache/shims/ (already on PATH from
- * the standard agents-cli install). Running `teams` becomes equivalent to
- * `agents teams`. Aliases are tracked in ~/.agents/aliases.json so we can
- * list, regenerate, or remove them without scanning the shims directory
- * (which also holds agent CLI shims like claude/codex/gemini).
- */
+/** `agents setup alias` creates top-level shim binaries that expand to `agents <subcommand>`,
+ * nested under setup because it configures this machine's PATH shortcuts (RUSH-2965). */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
@@ -25,11 +16,9 @@ function aliasesFile(): string {
   return path.join(getUserAgentsDir(), 'aliases.json');
 }
 
-/**
- * Names that would clobber an agent CLI shim, the `agents` binary itself, or the
- * standalone `secrets` CLI (PHNX-3989): the shims dir sits first on PATH, so an
- * alias named `secrets` would shadow `@phnx-labs/secrets-cli` for every caller.
- */
+/** Names that would clobber an agent CLI shim, the `agents` binary, or the standalone `secrets` CLI
+ * (PHNX-3989): the shims dir is first on PATH, so an alias named `secrets` would shadow
+ * `@phnx-labs/secrets-cli` for every caller. */
 function reservedNames(): Set<string> {
   const reserved = new Set<string>(['agents', 'secrets']);
   for (const id of ALL_AGENT_IDS) reserved.add(AGENTS[id].cliCommand);

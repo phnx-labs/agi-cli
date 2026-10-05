@@ -1,12 +1,6 @@
-/**
- * `agents fleet apply` / `agents devices apply` — reconcile the whole fleet
- * to a declared profile: install agents-cli + agents and sync config. Native
- * harness logins remain device-local; portable provider credentials move only
- * through explicit `agents accounts sync`.
- *
- * The manifest is the `fleet:` block of any `-f` file (default `agents.yaml`).
- * Top-level `agents apply` is retired (RUSH-2981).
- */
+/** `agents fleet apply` / `agents devices apply` reconcile the fleet to a declared profile: install
+ * agents-cli and agents, and sync config. Native harness logins stay device-local; portable
+ * provider credentials move only through explicit `agents accounts sync`. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -134,18 +128,16 @@ function renderPlan(plan: FleetPlan): void {
   console.log();
   console.log(chalk.gray(`  ${plan.actions.length} action(s) across ${rows.filter((r) => r.probe.reachable).length} reachable device(s)`));
 
-  // The capability is opt-in, so when it is OFF and the manifest declares
-  // bundles, say that it exists. Otherwise an operator reads "manual recreate"
-  // and concludes there is no supported path — which is exactly the conclusion
-  // that led to a master key being hand-exported across the fleet (RUSH-1968).
+  // The capability is opt-in, so when it is off and the manifest declares bundles, say it exists.
+  // Otherwise "manual recreate" reads as no supported path, which led to a master key being
+  // hand-exported across the fleet (RUSH-1968).
   if (anySecrets && !rows.some((r) => r.actions.some((a) => a.kind === 'push-secret'))) {
     console.log(chalk.gray('  secrets: not pushed. `--provision-secrets` pushes declared bundles to devices whose host key is pinned.'));
   }
 
-  // `apply` no longer propagates ANY login (SING-1b: a native OAuth / session
-  // login is never copied between devices). Every login:sync agent that has a
-  // login to establish is surfaced here with the one honest reason + the portable
-  // alternative — never a silent skip.
+  // `apply` no longer propagates any login (SING-1b: a native OAuth/session login is never copied
+  // between devices). Every login:sync agent with a login to establish is surfaced with the one
+  // honest reason and the portable alternative, never silently skipped.
   const needsLogin = [...new Set(rows.flatMap((r) => r.loginBlocked.map((a) => `${a}@${r.device}`)))];
   if (needsLogin.length > 0) {
     console.log(
@@ -182,12 +174,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   const manifest = readFleetFile(path.resolve(file));
   const source = machineId();
 
-  // Fresh-machine bootstrap: an explicit `devices:` map may name boxes this
-  // machine has never registered (e.g. a freshly-cloned agents.yaml). Resolve
-  // those names live from Tailscale and register them BEFORE resolveDesired
-  // validates the roster — so replication needs only the repo, never committed
-  // IPs/usernames. `devices: all` needs no bootstrap (it targets what's already
-  // registered + online).
+  // Fresh-machine bootstrap: an explicit `devices:` map may name boxes this machine never
+  // registered. Resolve them live from Tailscale and register them before resolveDesired validates
+  // the roster, so replication needs only the repo, never committed IPs.
   let unresolved: string[] = [];
   if (manifest.devices !== 'all') {
     const wanted = Object.keys(manifest.devices).filter((n) => n !== source);
@@ -213,10 +202,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     desired = desired.filter((d) => d.device === opts.device);
     if (desired.length === 0) throw new Error(`Device '${opts.device}' is not a target in this manifest.`);
   }
-  // --agent overrides the roster for the targeted device(s): install exactly these
-  // specs instead of the manifest's. `claude@all` expands to every claude version
-  // installed on THIS machine, so a fresh box inherits the same version set. Pair
-  // with --device to seed one box; without it, every targeted device gets the set.
+  // --agent overrides the roster for the targeted devices: install exactly these specs.
+  // `claude@all` expands to every claude version installed on this machine so a fresh box inherits
+  // the same set. Pair with --device to seed one box.
   if (opts.agent && opts.agent.length > 0) {
     const specs = expandAllSpecs(opts.agent, (id) => listInstalledVersions(id as AgentId));
     desired = desired.map((d) => ({ ...d, agents: specs }));
@@ -269,11 +257,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     secretsBundles,
     provisionSecrets: opts.provisionSecrets === true,
     forceSecrets: opts.force === true,
-    // Portable secret values only ever go to a host whose key is already pinned.
-    // Resolve the device to its profile so the pin is checked against the FQDN the
-    // ssh connection dials (isDevicePinned), not the bare name — a tailnet worker
-    // pinned only under its FQDN would otherwise be refused as "not pinned"
-    // (PHNX-3505). A name with no profile falls back to the raw host-string check.
+    // Portable secret values go only to a host whose key is already pinned. Resolve the device to
+    // its profile so the pin is checked against the FQDN ssh dials, not the bare name, or a
+    // tailnet worker pinned under its FQDN is refused (PHNX-3505).
     isHostPinned: (device) => {
       const p = nameToProfile.get(device);
       return p ? isDevicePinned(p) : isHostPinned(device, managedKnownHostsPath());
@@ -296,10 +282,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
 
   const isDry = opts.plan || opts.dryRun;
   if (isDry) return;
-  // `needs-login`/`needs-secret` are surfaced manual reminders, not executable
-  // mutations — exclude them so an otherwise-converged fleet still says "nothing
-  // to do" instead of looping forever on un-actionable surfacing. `push-secret`
-  // IS executable and deliberately stays counted.
+  // `needs-login`/`needs-secret` are surfaced manual reminders, not executable mutations, so
+  // exclude them: an otherwise-converged fleet must say "nothing to do" instead of looping on
+  // un-actionable surfacing. `push-secret` is executable and stays counted.
   if (plan.actions.filter((a) => a.kind !== 'needs-login' && a.kind !== 'needs-secret').length === 0) {
     console.log(chalk.green('\nNothing to do — fleet already matches the profile.'));
     return;
@@ -371,11 +356,8 @@ function configureApplyCommand(cmd: Command): Command {
     });
 }
 
-/**
- * Canonical surface: `agents fleet apply` / `agents devices apply`.
- * Top-level `agents apply` is retired (RUSH-2981) — not a noun, already nested
- * here. Same reconcile engine, kept in lockstep via {@link configureApplyCommand}.
- */
+/** Canonical surface: `agents fleet apply` / `agents devices apply`. Top-level `agents apply` is
+ * retired (RUSH-2981); same reconcile engine, kept in lockstep via {@link configureApplyCommand}. */
 export function registerFleetApplyAlias(devicesCmd: Command): void {
   const sub = configureApplyCommand(devicesCmd.command('apply'));
   setHelpSections(sub, {

@@ -1,28 +1,6 @@
-/**
- * Resource heal engine — close the gap between what DotAgents repos DEFINE and
- * what is actually present/valid in each installed agent home.
- *
- * Powers two callers:
- *   - `agents sync` — the one fixer, via the post-reconcile repair pass
- *     (`lib/reconcile-and-repair.ts`, run at the tail of every sync). Mode
- *     'full': fills missing, overwrites drifted content, and refreshes stale
- *     plugins even when the baseline is unknown (the user asked to sync).
- *   - the routines daemon's periodic safety check — Mode 'safe': fixes only the
- *     unambiguous gaps (missing resources, Claude-invalid plugin manifests, and
- *     provably-unmodified stale plugins). Drift and risky refreshes are reported,
- *     never clobbered.
- *
- * Built on the LIVE-home diff (`diffVersionResources`) — NOT the staleness
- * manifest. `isStale()` only compares the last-synced manifest against the
- * sources, so home-side rot (a deleted, corrupted, or Claude-rejected file in a
- * version home whose source never changed) is invisible to it and to the sync
- * fast-guard. The diff reads the actual home, so heal catches exactly that class
- * of drift — the kind that silently broke the `code` plugin on a non-default
- * Claude version.
- *
- * Heal FILLS and FIXES; it never deletes. Orphan/extra removal stays the job of
- * `agents prune cleanup`, so a heal pass can never lose work.
- */
+/** Resource heal engine: closes the gap between what DotAgents repos define and what is valid in
+ * each installed agent home, from the live-home diff (not the staleness manifest). `agents sync`
+ * uses mode 'full'; the daemon uses 'safe' (drift reported, not clobbered). Never deletes. */
 
 import { ALL_AGENT_IDS } from './agents.js';
 import type { AgentId } from './types.js';
@@ -64,10 +42,9 @@ export interface HealedResource {
 export interface SkippedResource {
   kind: DoctorKind;
   name: string;
-  /** 'drift': hand-edited content left untouched in 'safe' mode.
-   *  'unreconcilable': heal wrote it but the diff still flags it — a source/home
-   *  asymmetry the writer can't satisfy (e.g. a hook sidecar the installer omits),
-   *  surfaced honestly instead of "fixed" on every pass. */
+  /** 'drift': hand-edited content left untouched in 'safe' mode. 'unreconcilable': heal wrote it
+   * but the diff still flags it (a source/home asymmetry, e.g. a hook sidecar the installer
+   * omits), surfaced honestly instead of "fixed" every pass. */
   reason: 'drift' | 'unreconcilable';
 }
 
@@ -151,11 +128,9 @@ export function healChangedAnything(r: HealResult): boolean {
 
 // ─── central plugin layer (version-independent, runs once per heal) ──────────
 
-/**
- * Strip Claude-invalid bare-name `skills`/`commands` fields from every central
- * plugin's SOURCE plugin.json. Unambiguously safe (Claude auto-discovers both
- * from their directories) and the precondition for those plugins loading at all.
- */
+/** Strips Claude-invalid bare-name `skills`/`commands` fields from every central plugin's source
+ * plugin.json. Safe since Claude auto-discovers both from directories, and a precondition for
+ * loading. */
 function repairCentralPluginManifests(dryRun = false): ManifestRepairResult[] {
   const out: ManifestRepairResult[] = [];
   for (const p of discoverPlugins()) {
@@ -166,12 +141,9 @@ function repairCentralPluginManifests(dryRun = false): ManifestRepairResult[] {
   return out;
 }
 
-/**
- * Fast-forward central plugins whose local `.source` upstream now ships a newer
- * version. `allowModified` (full mode) re-pulls regardless of baseline; safe
- * mode refreshes only when the central copy is provably an untouched mirror of
- * its last pull (baseline version === current version) and reports the rest.
- */
+/** Fast-forwards central plugins whose `.source` upstream ships a newer version. `allowModified`
+ * (full mode) re-pulls regardless; safe mode refreshes only a provably untouched mirror
+ * (baseline version equals current) and reports the rest. */
 async function refreshStaleCentralPlugins(opts: {
   dryRun?: boolean;
   allowModified: boolean;
@@ -245,12 +217,9 @@ function healVersion(
         result.skipped.push({ kind: row.kind, name: row.name, reason: 'drift' });
         continue;
       }
-      // Rules (the composed instruction file) and knowledge memory (~/.agents/
-      // memory/ facts) are both repaired by a sync of this version: rules via the
-      // preset re-composition `selection.memory` drives, knowledge facts via the
-      // unconditional `syncMemoryToVersionHome` fan-out every sync runs. Setting
-      // the rules selection guarantees a sync executes, so a memory-fact drift is
-      // reconciled the same pass (PHNX-3504).
+      // Rules and knowledge memory are both repaired by a sync of this version: rules via the
+      // preset re-composition `selection.memory` drives, memory facts via the unconditional
+      // `syncMemoryToVersionHome` fan-out, so memory drift is fixed the same pass (PHNX-3504).
       if (row.kind === 'rules' || row.kind === 'memory') {
         selection.memory = 'all';
         attempted.push({ kind: row.kind, name: row.name, was: row.status });
@@ -263,11 +232,8 @@ function healVersion(
     }
   }
 
-  // Plugins are presence-only in the diff, so a stale/invalid-but-present plugin
-  // mirror never shows as 'diff' — yet its central source just changed (repaired
-  // or refreshed). Re-push those into this version's marketplace mirror, but only
-  // where the plugin is already installed (don't force-install into a version
-  // that opted out). These are verified by the central change, not the re-diff.
+  // Plugins are presence-only in the diff, so a stale-but-present mirror never shows as 'diff', yet
+  // its central source just changed.
   const pluginHealed: HealedResource[] = [];
   if (opts.changedPlugins.size > 0) {
     const synced = new Set(getActuallySyncedResources(agent, version, diffOpts).plugins);
@@ -316,11 +282,9 @@ function healVersion(
 
 // ─── public entrypoint ────────────────────────────────────────────────────────
 
-/**
- * Run a heal pass. Repairs the central plugin layer once (manifest + stale
- * refresh), then reconciles every targeted (agent, version) home against its
- * live diff. Returns a full account of what changed (or would, under dryRun).
- */
+/** Runs a heal pass: repairs the central plugin layer once (manifest plus stale refresh), then
+ * reconciles every targeted (agent, version) home against its live diff. Returns a full account
+ * of what changed, or would under dryRun. */
 export async function heal(opts: HealOptions): Promise<HealResult> {
   const cwd = opts.cwd ?? os.homedir();
   const full = opts.mode === 'full';
@@ -335,13 +299,9 @@ export async function heal(opts: HealOptions): Promise<HealResult> {
     ...refreshed.map((r) => r.plugin),
   ]);
 
-  // Isolated copies are excluded from every SWEEP. `agents add --isolated`
-  // promises "no settings carry-over, no resource sync", and this engine runs
-  // unattended from the daemon (~30s after start, then every ~6h) — a sweep that
-  // walked into an isolated home would quietly refill it with shared commands,
-  // skills, hooks, MCP config and permissions. Explicitly NAMED versions
-  // (`agents sync <agent>@<version>`) are honoured as-is: naming the
-  // version is the operator's consent.
+  // Isolated copies are excluded from every sweep: `agents add --isolated` promises no settings
+  // carry-over or resource sync, and this engine runs unattended (~30s after daemon start, then
+  // every ~6h).
   const sweep = (a: AgentId) => listInstalledVersions(a).filter((v) => !isVersionIsolated(a, v));
   const targets: Array<{ agent: AgentId; versions: string[] }> = opts.agent
     ? [{ agent: opts.agent, versions: opts.versions ?? sweep(opts.agent) }]

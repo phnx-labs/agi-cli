@@ -1,46 +1,7 @@
 #!/usr/bin/env bash
-# Build, sign, and notarize the standalone macOS `agents` binary (issue #315).
-#
-# The npm-installed `agents` entrypoint is a node-shebang JS file in a
-# user-writable path - unsignable, and CrowdStrike Falcon's behavioral engine
-# flags it as post-exploitation tooling when an Editor/Electron child spawns
-# it. The fix is to ship a Developer-ID-signed + notarized Mach-O built with
-# `bun build --compile` (scripts/build-bin.sh) and have scripts/postinstall.js
-# point the resolved `agents` at it on macOS.
-#
-# Shape decisions (defended in phnx-labs/agents-cli#315):
-#   - Bare Mach-O, not a .app wrapper. A wrapper would bury the executable at
-#     Contents/MacOS/... behind a symlink on PATH just to gain stapling, and
-#     stapling is irrelevant for the npm install path: npm-extracted files
-#     carry no com.apple.quarantine attribute, and Gatekeeper/EDR resolve the
-#     notarization ticket online from the signature's cdhash. Notarized bare
-#     Mach-Os are the standard CLI distribution shape.
-#   - arm64-only, not universal. lipo cannot even inspect bun's darwin-x64
-#     standalone output (`lipo -archs`/`lipo -create` die with SIGKILL on it,
-#     bun 1.3.14), so a fat binary cannot be assembled from bun-compiled
-#     slices; a universal build would also double the ~66MB payload the npm
-#     tarball now carries. Intel Macs keep the JS entrypoint - postinstall's
-#     run-probe falls back to it automatically.
-#   - Hardened runtime + the JIT entitlement only (bun-jit-entitlements.plist).
-#     NO keychain entitlements: keychain access is brokered through the
-#     separately signed "bin/Agents CLI.app" helper, never by the CLI binary.
-#
-# Requires: APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID in env
-# (inject via: agents secrets exec apple.com -- scripts/sign-cli-binary.sh),
-# the "Developer ID Application" identity in an unlocked keychain, bun + node.
-#
-# Output: dist/bin/agents               signed + notarized Mach-O
-#         bin/agents-macos              staging copy `bun run build` packages
-#                                       into dist/ (bin/ is gitignored)
-#         scripts/agents-cli-bin.sha256 pin the prepack gate
-#                                       (scripts/verify-cli-binary.sh) checks;
-#                                       a build artifact paired to this run's
-#                                       binary, gitignored - unlike the
-#                                       keychain helper's committed pin, this
-#                                       binary is rebuilt every release, so a
-#                                       committed pin would go stale against a
-#                                       re-signed binary on every publish
-#                                       re-run.
+# Build, sign, and notarize the standalone macOS `agents` binary (issue #315). The npm
+# node-shebang entrypoint is unsignable and gets flagged by CrowdStrike Falcon, so we ship a
+# Developer-ID-signed, notarized Mach-O built with `bun build --compile`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

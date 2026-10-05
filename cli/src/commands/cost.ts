@@ -1,13 +1,6 @@
-/**
- * Cost command — roll up $ spend and wall-clock duration across the local,
- * cross-agent session index.
- *
- * This is the read side of issue #323. Cost and duration are computed and
- * persisted at scan time (see src/lib/session/discover.ts + db.ts); this
- * command only queries and renders them — a pure SQLite/CLI win, no server,
- * no telemetry. Distinct from `agents view`, which reports live rate-limit /
- * quota status per agent and is left untouched.
- */
+/** Cost command: roll up $ spend and duration across the local session index (issue #323). Both are
+ * persisted at scan time (discover.ts, db.ts); this only queries and renders. | Distinct from
+ * `agents view`, which reports live quota status. */
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
@@ -47,12 +40,9 @@ Examples:
 
 Cost is computed offline from a versioned per-model price table (${PRICING_VERSION}).
 `)
-    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide by name
-    // with the `insights` parent's own options, so commander binds them to the
-    // parent at parse time and the leaf's plain opts() never sees them. Merging
-    // ancestor opts is what the sibling `insights mix` recipes already do
-    // (mix-commands.ts) — without it every flag on this command is silently
-    // dropped (e.g. `agents insights cost --json` printed the human table).
+    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide with the `insights`
+    // parent's options, so commander binds them to the parent and the leaf never sees them
+    // (`insights cost --json` printed the table).
     .action(async (_options: CostOptions, command: Command) => {
       await costAction(command.optsWithGlobals() as CostOptions);
     });

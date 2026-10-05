@@ -1,15 +1,6 @@
-/**
- * Rules writer — composes one instruction file per supported agent.
- *
- * Single-target per agent (RulesCapability is `{ file: string } | false`).
- * The composer in `lib/rules/compose.ts` handles all four layers
- * (project > user > extras > system). We never write the project layer into
- * the version home — it's resolved at agents-run time into the workspace
- * AGENTS.md by `compileRulesForProject`.
- *
- * Selection shape: `{ preset: string }`. Use `getActiveRulesPreset(agent,
- * version)` to derive the preset when the caller has no override.
- */
+/** Rules writer: composes one instruction file per supported agent (single target; RulesCapability
+ * is `{ file } | false`) via `lib/rules/compose.ts`. The project layer is never written into the
+ * version home; `compileRulesForProject` resolves it at run time. */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';

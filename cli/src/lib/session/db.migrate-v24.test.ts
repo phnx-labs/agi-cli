@@ -9,13 +9,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv23-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Build a v23-shaped DB (tool_call_count + used_browser/used_computer
-// present, no session_resource_usage table), then let db.js's getDB()
-// upgrade it to v24 (#12) on first open. No ledger wipe: session_resource_usage
-// is populated by writeResourceUsage() at upsert time, independent of
-// scan_ledger/dir_ledger. Seeded at v23 (not v21/v22) so this test exercises
-// ONLY the migration under test, not also the earlier v21->v22 (tool_call_count)
-// step, which DOES wipe the ledger.
+// Build a v23-shaped DB (no session_resource_usage table), then let getDB() upgrade it to v24. No
+// ledger wipe: usage is written by writeResourceUsage() at upsert time. Seeded at v23 so the
+// earlier ledger-wiping v21->v22 step is not exercised.
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

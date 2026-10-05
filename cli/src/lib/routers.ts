@@ -1,13 +1,6 @@
-/**
- * Router management -- named, task-typed allowlists of (harness, model/tier,
- * account) that constrain an Agent Router decision. A router is a
- * generalization of a profile (a profile ≡ a router pinned to one harness and
- * one account). Stored as YAML files under ~/.agents/routers/.
- *
- * Routers resolve as a layered resource (project > user > system, like other
- * resources -- see resources.ts) but are always CREATED in the user layer,
- * mirroring profiles.ts.
- */
+/** Router management: named, task-typed allowlists of (harness, model/tier, account) constraining an
+ * Agent Router decision; a generalization of a profile. YAML under ~/.agents/routers/, resolved as
+ * a layered resource but always CREATED in the user layer, mirroring profiles.ts. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -65,14 +58,9 @@ export function routerExists(name: string, cwd?: string): boolean {
   return resolveResource('routers', name, cwd) !== null;
 }
 
-/**
- * The layer a router currently resolves from ('project' | 'user' | 'system' |
- * an extra-repo alias), or null if it doesn't resolve. `writeRouter` and
- * `deleteRouter` only ever touch the user layer, so a caller that edits or
- * removes a router MUST check this first -- editing a router that resolves
- * from a non-user layer would silently write to a user-layer file that stays
- * permanently shadowed (the edit "succeeds" but is never read back).
- */
+/** The layer a router resolves from, or null. `writeRouter`/`deleteRouter` touch only the user
+ * layer, so callers editing or removing MUST check this first: editing a router from another layer
+ * would write a user file that stays permanently shadowed. */
 export function routerSource(name: string, cwd?: string): string | null {
   validateRouterName(name);
   return resolveResource('routers', name, cwd)?.source ?? null;
@@ -120,16 +108,9 @@ export function deleteRouter(name: string): boolean {
   return true;
 }
 
-/**
- * Rename a router on disk, re-keying the user-layer file and preserving every
- * field (harness allowlists, weights, linked accounts, hijack flag).
- *
- * Throws if `oldName` does not resolve, if it resolves from a non-user layer
- * (renaming would write a shadowed user-layer copy -- see {@link routerSource}),
- * or if `newName` already resolves in any layer. There is no `--force` /
- * overwrite path -- a collision is a hard error directing the user to remove
- * the target first.
- */
+/** Rename a router on disk, re-keying the user-layer file and preserving every field. Throws if
+ * `oldName` doesn't resolve or resolves from a non-user layer (see {@link routerSource}), or if
+ * `newName` already resolves; there is no overwrite path. */
 export function renameRouter(oldName: string, newName: string): void {
   validateRouterName(newName);
   const source = routerSource(oldName);
@@ -152,26 +133,9 @@ export function renameRouter(oldName: string, newName: string): void {
   deleteRouter(oldName);
 }
 
-/**
- * Fail-loud token validation (E1 of the Agent Router spec): a router MUST NOT
- * persist a harness id or model/tier token this machine cannot vouch for.
- * Throws naming the first invalid token found; the caller (route.ts) never
- * calls {@link writeRouter} when this throws, so an invalid `create`/`allow`
- * writes nothing.
- *
- * A harness id must be a real, registered agent (`AGENTS` in agents.ts) --
- * checked regardless of whether that harness is installed on this machine,
- * since a router is fleet-wide config and the harness may only run
- * elsewhere. A model/tier token is valid when it is one of the four
- * cross-harness tier tokens (cheap|default|best|ultra, always installable-
- * agnostic), OR a concrete model id this machine can actually verify: either
- * one of the harness's resolved tier rungs (`resolveTierMap` -- covers
- * curated/no-catalog harnesses like Droid with zero install required) or a
- * member of its extracted catalog (`getModelCatalog`, when a version of that
- * harness is installed here). A concrete id for a harness with neither --
- * not installed here, no curated ladder -- cannot be verified and is
- * rejected rather than accepted unverified.
- */
+/** Fail-loud validation (Agent Router spec E1): never persist a harness id or model/tier token
+ * this machine can't vouch for; throws on the first invalid one. Harness ids need only be
+ * registered; a model must be a tier token, a resolved tier rung, or in the extracted catalog. */
 export function validateRouter(router: Router): void {
   for (const [harness, allowlist] of Object.entries(router.harnesses)) {
     if (!(ALL_AGENT_IDS as string[]).includes(harness)) {
@@ -202,11 +166,9 @@ export function validateRouter(router: Router): void {
   }
 }
 
-/**
- * List every router resolved project > user > system (deduplicated union,
- * project wins on a name collision -- same precedence as {@link resolveResource}).
- * Malformed files are silently skipped, surfaced via `agents route view <name>`.
- */
+/** List every router resolved project > user > system (deduplicated union, project wins, same as
+ * {@link resolveResource}); malformed files are silently skipped and surfaced by `agents route view
+ * <name>`. */
 export function listRouters(cwd?: string): Router[] {
   const routers: Router[] = [];
   for (const resolved of listResources('routers', cwd)) {

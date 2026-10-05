@@ -1,11 +1,6 @@
-/**
- * Session discovery across Claude, Codex, Gemini, OpenCode, and OpenClaw.
- *
- * Performs incremental scans: each agent's session files are stat'd and compared
- * to a scan-stamp ledger in SQLite. Only files whose mtime or size changed since
- * the last run are re-parsed. All metadata is upserted into the sessions DB so
- * subsequent queries are served entirely from the cache.
- */
+/** Session discovery across Claude, Codex, Gemini, OpenCode and OpenClaw, scanning incrementally:
+ * only files whose mtime or size changed since the scan-stamp ledger are re-parsed, and results
+ * are upserted so queries are served from the cache. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -77,12 +72,9 @@ import {
 import { purgeMissingToolCallsInDirectory } from './tool-store.js';
 
 const HOME = os.homedir();
-// Versions can live under either repo: the user repo (current canonical
-// location, ~/.agents/.history/versions/) or the system repo (legacy / npm-shipped,
-// ~/.agents-system/versions/). Both must be scanned — sessions written by
-// any installed version end up in that version's projects/ dir, and the user
-// can be running one repo's version while another repo holds older versions
-// whose JSONLs the user still wants to search.
+// Versions can live under either repo: the user repo (~/.agents/.history/versions/) or the legacy
+// system repo (~/.agents-system/versions/). Both must be scanned, since the user may run one
+// repo's version while the other holds older versions whose JSONLs they still search.
 const VERSIONS_ROOTS = [getHistoryDir(), getAgentsDir()];
 const RUSH_SESSIONS_DIR = path.join(HOME, '.rush', 'sessions');
 const HERMES_SESSIONS_DIR = path.join(HOME, '.hermes', 'sessions');
@@ -95,12 +87,9 @@ const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
 /** One JSONL record may not force an unbounded string allocation. */
 const SESSION_JSONL_LINE_MAX_BYTES = 1024 * 1024;
 
-/**
- * Stream one appended JSONL range, applying only newline-terminated records.
- * Memory is bounded to one record. An ordinary unterminated tail remains for the
- * next scan. Once a record exceeds the cap, its consumed offset and a one-bit
- * dropping state advance together so later scans never reread the growing tail.
- */
+/** Stream one appended JSONL range, applying only newline-terminated records, with memory bounded
+ * to one record. An unterminated tail waits for the next scan. Past the cap, the offset and a
+ * dropping bit advance together so later scans never reread the tail. */
 async function applyJsonlAppend(
   filePath: string,
   fromOffset: number,
@@ -162,15 +151,9 @@ async function applyJsonlAppend(
   return { consumedBytes, droppingOversizedLine, skippedOversizedLine };
 }
 
-/**
- * How recently a file must have been scanned to be treated as "hot" — a
- * candidate for an in-place append even when its parent dir's mtime hasn't
- * moved. A dir-ledger match lets us skip the per-file stat of everything in a
- * leaf dir EXCEPT its hot set; a file is hot if it lives under the agent's live
- * `~/.<agent>` root (the only tree an agent appends to live) or was scanned
- * within this window. 10 minutes comfortably covers a session that paused
- * between `agents sessions` calls but is still being written to.
- */
+/** How recently a file must have been scanned to count as "hot": a candidate for in-place append
+ * when its dir mtime has not moved. A dir-ledger match skips per-file stats except the hot set.
+ * Hot means under the live `~/.<agent>` root or scanned within this 10-minute window. */
 const HOT_FILE_WINDOW_MS = 600_000;
 
 /** Emergency kill-switch for the directory-ledger optimization. */
@@ -184,11 +167,9 @@ let cachedOpenClawWorkspaces: Map<string, string> | null = null;
 /** Options controlling which sessions to discover and how to report progress. */
 export interface DiscoverOptions {
   agent?: SessionAgentId;
-  /**
-   * Include sessions from the user's own (unmanaged) `~/.<agent>` alongside managed
-   * version homes. Defaults to true only when the agent has no managed versions, so
-   * a user who has never run `agents add` sees exactly what they see today.
-   */
+  /** Include sessions from the user's own (unmanaged) `~/.<agent>` alongside managed version homes.
+   * Defaults to true only when the agent has no managed versions, so a user who never ran `agents
+   * add` sees what they see today. */
   includeUnmanaged?: boolean;
   /** Called with how many rows the managed-only default hid, so callers can say so. */
   onHiddenUnmanaged?: (count: number) => void;
@@ -272,10 +253,8 @@ interface ClaudeSessionScan {
   /** ISO time of the last timestamped event — the session's last activity. */
   lastActivity?: string;
   toolCallCount?: number;
-  /**
-   * Value of the JSONL `entrypoint` field on the first event that carries it.
-   * 'cli' for real interactive sessions, 'sdk-cli' for team-spawned ones.
-   */
+  /** Value of the JSONL `entrypoint` field on the first event that carries it: 'cli' for
+   * interactive sessions, 'sdk-cli' for team-spawned ones. */
   entrypoint?: string;
   /** Concatenated user message text, ready to hand to FTS5. */
   contentText?: string;
@@ -349,12 +328,9 @@ interface ScanEntry {
   scan: ScanStamp;
   /** Normalized events already produced while scanning; avoids reopening the transcript in the DB sink. */
   events?: SessionEvent[];
-  /**
-   * Serialized {@link ClaudeParserState} continuation to persist in
-   * scan_ledger.parser_state (Claude only). Carries the offset + accumulator so
-   * the NEXT scan of this file resumes from where this parse stopped. Absent for
-   * non-Claude scanners, which leave the column NULL.
-   */
+  /** Serialized {@link ClaudeParserState} continuation for scan_ledger.parser_state (Claude only),
+   * so the next scan resumes where this parse stopped. Absent for non-Claude scanners, which leave
+   * the column NULL. */
   parserState?: string;
   /** Accumulated user doc to persist in scan_ledger.content_text for the next hydrate (Claude only). */
   contentText?: string;
@@ -362,16 +338,9 @@ interface ScanEntry {
   toolIndexMode?: 'replace' | 'append';
 }
 
-/**
- * Discover sessions. Scans only files whose (mtime, size) have changed since
- * the last run; everything else is served from the SQLite cache.
- *
- * Only one process runs the incremental scan at a time. When many agents boot
- * simultaneously (e.g. after a restart), the first to claim the scan slot does
- * the work; the rest skip parsing entirely and serve from the DB. The claim is
- * stored in the `meta` table — crash-safe via dead-PID detection and a 2-min
- * TTL, no external lock files needed.
- */
+/** Discover sessions. Scans only files whose (mtime, size) changed since the last run; the rest
+ * comes from the SQLite cache. One process scans at a time; others serve from the DB. The
+ * `meta`-table claim is crash-safe via dead-PID detection and a 2-min TTL. */
 export async function discoverSessions(options?: DiscoverOptions): Promise<SessionMeta[]> {
   const { claimed } = await scanSessionsIncremental({
     agent: options?.agent,
@@ -379,10 +348,9 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   });
 
   if (!claimed && options?.waitForScan) {
-    // Lost the single-flight claim to another live process (a foreground
-    // `agents sessions*` or the daemon's index warm). Rather than return the
-    // pre-scan snapshot that just missed, wait (bounded) for that scan to finish
-    // so the read below reflects what it wrote (RUSH-2682 cold-miss repair).
+    // Lost the single-flight claim to another live process. Rather than return the stale pre-scan
+    // snapshot, wait (bounded) for that scan so the read below sees its writes (RUSH-2682
+    // cold-miss repair).
     await waitForScanToSettle();
   }
 
@@ -479,16 +447,14 @@ export async function scanSessionsIncremental(options?: {
   };
 
   try {
-    // Bounded + staggered instead of a single Promise.all: scanning every
-    // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
-    // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
-    // file-enumeration sweep. Same dirs, same results — just not all at once.
+    // Bounded and staggered instead of one Promise.all: scanning every agent's dotfile dir at once
+    // looks to behavioral EDR (CrowdStrike Falcon) like a ransomware-style bulk file sweep. Same
+    // dirs, same results.
     await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, track('dotfiles')));
     await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, track('routines')));
-    // Seed labels from `agents run --name` handles onto the freshly-scanned
-    // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
-    // titles via syncLabels), so a real title always wins and the seed only
-    // backfills sessions that would otherwise be unnamed.
+    // Seed labels from `agents run --name` handles onto the freshly-scanned rows by id. This runs
+    // AFTER the per-agent scans, so a real title always wins and the seed only backfills unnamed
+    // sessions.
     seedLabelsFromNames(buildRunNameMap());
   } finally {
     releaseScan(process.pid);
@@ -526,24 +492,16 @@ export async function queryIndexedSessions(
   ));
   if (indexedOptions.resolveLinear !== false) await resolveLinearProjects(sessions);
   for (const s of sessions) {
-    // A non-empty transcript path is authoritative for origin (a live-home file
-    // is this box; `backups/<agent>/<machine>/…` names that peer), so derive
-    // there. An EMPTY file_path carries no such signal — `machineForSessionFile`
-    // falls back to THIS box — so keep the machine the row was recorded with
-    // instead: a host dispatch stamps the EXECUTION host on its empty-file index
-    // row (`registerHostSession`), and re-deriving re-attributed the dispatcher's
-    // own pool row to itself, splitting it from the executing peer's fan-out row
-    // and making resume-by-id read as "ambiguous (2 sessions)" (RUSH-2486 /
-    // RUSH-2479 criterion 2). A recorded-less empty-file row still falls back.
+    // A non-empty transcript path is authoritative for origin. An EMPTY file_path carries no
+    // signal (it falls back to THIS box), so keep the recorded machine. Re-deriving made
+    // resume-by-id ambiguous (RUSH-2486 / RUSH-2479).
     if (s.filePath || !s.machine?.trim()) s.machine = machineForSessionFile(s.filePath, s.agent);
   }
   return scopeToManaged(sessions, agents, options);
 }
 
-/**
- * Resolve locally without scanning or fleet I/O, keeping concurrent crash recovery lock-light.
- * The existence check preserves archived content while rejecting transcriptless phantoms.
- */
+/** Resolve locally without scanning or fleet I/O, keeping concurrent crash recovery lock-light. The
+ * existence check preserves archived content while rejecting transcriptless phantoms. */
 export async function resolveIndexedSessionById(idQuery: string): Promise<SessionMeta[]> {
   const q = idQuery.trim();
   if (!q) return [];
@@ -593,16 +551,9 @@ async function resolveLinearProjects(sessions: SessionMeta[]): Promise<void> {
   }));
 }
 
-/**
- * Drop unmanaged rows for agents that HAVE managed versions.
- *
- * Scoping happens here, at query time, rather than by narrowing the scan: the index
- * stays complete, so `--unmanaged` needs no re-scan and every other consumer of the
- * DB (watchdog, the Factory watcher, `--roots`) is unaffected.
- *
- * An agent with no managed versions is left alone entirely — someone who has never
- * run `agents add` sees exactly what they saw before.
- */
+/** Drop unmanaged rows for agents that HAVE managed versions. Scoping happens at query time, not by
+ * narrowing the scan, so the index stays complete and `--unmanaged`, the watchdog and `--roots`
+ * are unaffected. An agent with no managed versions is left alone. */
 export function scopeToManaged(
   sessions: SessionMeta[],
   agents: readonly SessionAgentId[],
@@ -617,12 +568,8 @@ export function scopeToManaged(
   return kept;
 }
 
-/**
- * True once agents-cli manages ANY agent version. Until then it manages nothing, so
- * scoping to "managed only" would leave the listing empty for a user who has never
- * run `agents add` — the browser is most of the tool's value before you install
- * anything through it.
- */
+/** True once agents-cli manages ANY agent version. Until then, scoping to managed-only would leave
+ * the listing empty for a user who never ran `agents add`. */
 function anyManagedVersions(): boolean {
   for (const root of VERSIONS_ROOTS) {
     const base = path.join(root, 'versions');
@@ -640,11 +587,9 @@ function anyManagedVersions(): boolean {
   return false;
 }
 
-/**
- * How many agents' dotfile dirs we scan at once, and the minimum spacing between
- * successive scan starts. A small bound + stagger turns a simultaneous bulk
- * multi-dotfile sweep (a behavioral-EDR file-enumeration trigger) into a trickle.
- */
+/** How many agents' dotfile dirs we scan at once, and the minimum spacing between scan starts. The
+ * small bound and stagger turn a simultaneous bulk sweep (a behavioral-EDR trigger) into a
+ * trickle. */
 export const DOTFILE_SCAN_CONCURRENCY = 2;
 const DOTFILE_SCAN_STAGGER_MS = 15;
 
@@ -682,62 +627,41 @@ function dispatchAgentScan(
 }
 
 
-/**
- * The machine a discovered session originated on. Cross-machine sync mirrors a
- * remote transcript to backups/<agent>/<machine>/<subdir>/… (see mirrorPath in
- * sync/agents.ts); every other transcript is a live-home file on this box. So:
- * when the path sits under the agent's backups root, the first segment below it
- * is the origin machine id; otherwise it's the local machine.
- */
-/**
- * True when this transcript belongs to a version agents-cli manages — i.e. it lives
- * under a version home (or a backup mirror of one) rather than in the user's own
- * `~/.<agent>`.
- *
- * `agents sessions` scans both, which is right for indexing: the DB stays a complete
- * picture and `--unmanaged` can surface everything without a re-scan. But listing
- * *by default* is a different question. Once you have managed versions, an unmanaged
- * install's history is not really agents-cli's to show — most visibly after
- * `agents add --isolated`, where the whole point was to keep the two apart.
- */
+/** The machine a discovered session originated on. Sync mirrors a remote transcript to
+ * backups/<agent>/<machine>/<subdir>/… (mirrorPath in sync/agents.ts), so under the backups root
+ * the first segment below it is the origin machine; every other transcript is local. */
+/** True when this transcript belongs to a version agents-cli manages (a version home or its backup
+ * mirror), not the user's own `~/.<agent>`. The DB indexes both, but default listing hides
+ * unmanaged history once versions exist (notably after `agents add --isolated`). */
 export function isManagedSessionFile(filePath: string): boolean {
   // Synthetic rows (OpenClaw workspace sessions, cloud/remote entries) have no local
   // transcript to classify. They are produced BY agents-cli rather than read out of
   // someone's dotfile dir, so scoping must not silently swallow them.
   if (!filePath || !path.isAbsolute(filePath)) return true;
 
-  // A composite file_path (`<container>#<id>`) names a row inside a single shared
-  // DB the scanner reads from one fixed location (OpenCode's `opencode.db`) — that
-  // store is never a per-install dotfile under a version home, so the managed-vs-
-  // unmanaged split does not apply: there is exactly one store, not a "your own"
-  // copy to hide. Classifying it as unmanaged hid every OpenCode row from default
-  // listings once any agent was managed (RUSH-2357). Keyed off the composite FORM,
-  // so any future single-DB harness inherits this.
+  // A composite file_path (`<container>#<id>`) names a row in one shared DB at a fixed location
+  // (OpenCode's `opencode.db`), so the managed split does not apply. Treating it as unmanaged hid
+  // all OpenCode rows (RUSH-2357). Keyed off the FORM so future single-DB harnesses inherit it.
   if (splitSessionFilePath(filePath).fragment !== undefined) return true;
 
   const roots = [
     ...VERSIONS_ROOTS.map((root) => path.join(root, 'versions')),
     path.join(getHistoryDir(), 'backups'),
-    // Codex's managed home is not always under versions/. On macOS the versioned path
-    // overflows SUN_LEN for codex's control socket, so the shim relocates it to
-    // `<agentsUserDir>/.codex-homes/<key>/` (lib/codex-home.ts) — keyed by version OR
-    // by account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`).
+    // Codex's managed home is not always under versions/. On macOS the versioned path overflows
+    // SUN_LEN, so the shim relocates it to `<agentsUserDir>/.codex-homes/<key>/`
+    // (lib/codex-home.ts), keyed by version or account.
     path.join(getUserAgentsDir(), '.codex-homes'),
-    // Account slots (PHNX-3940): a named account's HOME-shaped dir under
-    // `<historyDir>/accounts/<agent>/<accountId>/` (lib/accounts/slots.ts
-    // `slotDir`), sharing the one managed install rather than owning a version
-    // home of its own. Without this root, every account-slot transcript read as
-    // unmanaged the moment any version was managed, hiding a fully registered,
-    // runnable account's entire history from the default listing.
+    // Account slots (PHNX-3940): a named account's HOME-shaped dir
+    // `<historyDir>/accounts/<agent>/<accountId>/` (lib/accounts/slots.ts). Without this root its
+    // transcripts read as unmanaged once any version was managed, hiding that account's history.
     path.join(getHistoryDir(), 'accounts'),
     // Routine archives are agents-cli's OWN run output — managed by definition.
     getRunsDir(),
   ];
 
-  // Compare realpaths as well as the literal roots. A transcript's stored path is
-  // resolved, so on macOS (`/var` -> `/private/var`) a temp-dir HOME yields
-  // `/private/var/...` for the file and `/var/...` for the root, and a plain prefix
-  // test silently classifies every managed session as the user's own.
+  // Compare realpaths as well as literal roots. A stored transcript path is resolved, so on macOS
+  // (`/var` -> `/private/var`) a temp-dir HOME makes file and root differ and a plain prefix test
+  // misclassifies every managed session as the user's own.
   const real = safeRealpathSync(filePath) || filePath;
   return roots.some((root) => {
     if (filePath.startsWith(root + path.sep)) return true;
@@ -748,11 +672,8 @@ export function isManagedSessionFile(filePath: string): boolean {
 
 
 
-/**
- * Count sessions in scope without running an incremental scan. Assumes the DB
- * is already fresh (typically true because `discoverSessions` ran first this
- * turn). Uses the exact same filter shape as the discover query.
- */
+/** Count sessions in scope without an incremental scan. Assumes the DB is already fresh
+ * (`discoverSessions` ran first this turn) and uses the same filter shape as the discover query. */
 export function countSessionsInScope(options: DiscoverOptions): number {
   const agents = options.agent ? [options.agent] : SESSION_AGENTS;
   return countSessions(buildQueryOptions(options, agents, { includeLimit: false }));
@@ -800,48 +721,24 @@ function buildQueryOptions(
   };
 }
 
-/**
- * Canonicalize a working directory path (follows symlinks when it is local).
- *
- * Most callers pass a cwd RECORDED in a transcript, which may name a directory
- * on another machine — a POSIX path read on a Windows host, say. `path.resolve()`
- * rebases such a path onto the current drive (`/Users/me` -> `D:\Users\me`),
- * inventing a location that never existed. So an absolute path is normalized but
- * never rebased; only a genuinely relative one resolves against the process cwd.
- *
- * `path.normalize()` still runs on every branch: it collapses `.`, `..`, and
- * duplicate separators, and folds separators on Windows. Both sides of the cwd
- * filter in `db.ts` (`cwd = ?` and `cwd LIKE ? || path.sep || '%'`) come through
- * here, so dropping that would leave a trailing slash or a `..` segment in one
- * side and match nothing.
- *
- * Realpath is attempted only for a path that is absolute in THIS platform's
- * terms. A POSIX-rooted path on Windows is drive-relative to `fs.realpathSync`,
- * which would resolve `/Users/me` against the current drive and reintroduce the
- * graft for any path that happens to exist locally.
- */
+/** Canonicalize a working directory (follows symlinks when local). A cwd recorded in a transcript
+ * may be another machine's path, so absolute paths are normalized, never rebased onto the current
+ * Windows drive. Both cwd-filter sides in `db.ts` must match. */
 export function _normalizeCwdForTest(cwd?: string): string {
   return normalizeCwd(cwd);
 }
 
 function normalizeCwd(cwd?: string): string {
   if (!cwd) return '';
-  // A POSIX-rooted path on Windows belongs to another machine. Normalize it with
-  // POSIX rules so its separators survive — path.win32.normalize would fold them
-  // to backslashes, mangling the very path we are trying to preserve — and never
-  // realpath it, since fs.realpathSync would resolve it against the current drive.
+  // A POSIX-rooted path on Windows belongs to another machine. Normalize with POSIX rules so
+  // separators survive (win32 would fold them to backslashes) and never realpath it, since that
+  // would resolve against the current drive.
   if (process.platform === 'win32' && /^\//.test(cwd) && !/^[a-zA-Z]:/.test(cwd)) {
     return stripTrailingSep(path.posix.normalize(cwd));
   }
-  // The mirror case (RUSH-2358): a Windows-rooted path (`C:\...`, `C:/...`, or a
-  // UNC `\\server\share\...`) read on POSIX belongs to another machine too, but
-  // `path.isAbsolute()` here uses POSIX rules and doesn't recognize a drive
-  // letter — without this branch such a cwd falls into the `path.resolve()` arm
-  // below and gets silently prefixed with THIS process's own cwd, corrupting the
-  // path (and, via WORKTREE_RE, can misattribute the worktree slug to whatever
-  // worktree the reading process happens to be running in). Normalize with
-  // win32 rules so separators survive; never realpath it, for the same
-  // cross-drive reason as the mirror branch above.
+  // Mirror case (RUSH-2358): a Windows-rooted path (`C:\...` or UNC) on POSIX is another
+  // machine's, but `path.isAbsolute()` misses it and `path.resolve()` would prefix THIS process's
+  // cwd (and misattribute the worktree slug). Normalize with win32 rules; never realpath.
   if (process.platform !== 'win32' && /^([a-zA-Z]:[\\/]|\\\\)/.test(cwd)) {
     return stripTrailingSep(path.win32.normalize(cwd));
   }
@@ -863,51 +760,24 @@ const SESSION_UUID_PREFIX = /^session_/;
 /** opencode mints `ses_` + a 26-char ULID — NOT a UUID, so it needs its own shape. */
 const SES_ULID = /^ses_[0-9a-z]{26}$/;
 
-/**
- * Whether a query is a session id in full, rather than an id prefix or a search
- * phrase.
- *
- * Callers use this to decide that an id lookup is the ONLY admissible
- * interpretation: a complete id is unique, so when it misses there is nothing
- * left to widen to. Without the check, `sessions <uuid>` fell through to the
- * FTS content search, which tokenizes the UUID and matches every transcript that
- * merely mentions it — surfacing unrelated sessions as if they were id matches.
- *
- * The accepted shapes are the ones the index actually holds, measured over a
- * 12,507-row index: a bare UUID (11,116 rows), `session_` + UUID (1,360 — kimi
- * and rush), and `ses_` + ULID (15 — opencode). Deliberately NOT covered, so a
- * miss keeps today's search behavior rather than gaining a wrong error: routine
- * run ids (ISO timestamps, matched via `routineRunId` below) and cloud execution
- * ids, whose charset is too permissive to distinguish from a search phrase.
- */
+/** Whether a query is a full session id, not a prefix or phrase. A complete id is unique, so a miss
+ * has nothing to widen to; otherwise `sessions <uuid>` fell through to FTS and surfaced mere
+ * mentions. Shapes: bare UUID, `session_` + UUID (kimi, rush), `ses_` + ULID (opencode). */
 export function isCompleteSessionId(query: string): boolean {
   const q = query.trim().toLowerCase();
   return UUID_36.test(q.replace(SESSION_UUID_PREFIX, '')) || SES_ULID.test(q);
 }
 
-/**
- * Whether a query should be treated as a session id rather than a search phrase
- * — the one canonical id-shaped test, shared by every session-id resolver.
- *
- * True for a complete id (`isCompleteSessionId`) AND for a bare hex short-id or
- * prefix (`d3470b57`), which the complete-id check rejects. Any id-shaped query
- * resolves by id ONLY (exact -> prefix -> `findSessionsById` index) and must
- * never fall back to fuzzy content search: a short id like `d3470b57` otherwise
- * surfaces every transcript that merely MENTIONS the string (a resume prompt
- * echoes the parent id into the body of many later sessions). The hex test
- * catches the bare short-id/prefix; `isCompleteSessionId` additionally catches
- * the prefixed whole ids (`session_…`, `ses_…`) that the hex test rejects.
- */
+/** Whether a query is a session id rather than a search phrase: the one canonical test every id
+ * resolver shares. True for a complete id AND a bare hex short-id or prefix (`d3470b57`).
+ * Id-shaped queries resolve by id ONLY, never by fuzzy content search. */
 export function looksLikeSessionId(query: string): boolean {
   const trimmed = query.trim();
   return /^[0-9a-f-]{6,}$/i.test(trimmed) || isCompleteSessionId(trimmed);
 }
 
-/**
- * Resolve a session by full or short ID. Accepts a pre-loaded session list
- * (fast path from discoverSessions) and falls back to a DB lookup for the
- * "I only know the id" case.
- */
+/** Resolve a session by full or short ID. Accepts a pre-loaded session list (fast path from
+ * discoverSessions) and falls back to a DB lookup for the "I only know the id" case. */
 export function resolveSessionById(sessions: SessionMeta[], idQuery: string): SessionMeta[] {
   const query = idQuery.toLowerCase();
   const exact = sessions.filter(s =>
@@ -927,17 +797,9 @@ export function resolveSessionById(sessions: SessionMeta[], idQuery: string): Se
 // Content-index search (FTS5-backed)
 // ---------------------------------------------------------------------------
 
-/**
- * Run an FTS5 search over the DB and union hits with the given session list.
- *
- * The listing pool is a minority of the index — cwd-scoped, default-capped at
- * 50, and skipping whole classes of indexed transcript — so intersecting FTS
- * hits with it dropped grep-visible sessions that the index already found
- * (PHNX-2767: `agents sessions "tmux pane"` returned 0 while the project
- * transcripts matched). Hits already in the pool keep the caller's SessionMeta;
- * hits the pool missed are hydrated from the index so a content query returns
- * the transcript FTS matched.
- */
+/** Run an FTS5 search over the DB and union hits with the given session list. The listing pool is a
+ * minority of the index (cwd-scoped, capped), so intersecting dropped sessions the index found
+ * (PHNX-2767). Pool hits keep the caller's SessionMeta; missed hits are hydrated from the index. */
 export function searchContentIndex(
   sessions: SessionMeta[],
   query: string,
@@ -965,15 +827,9 @@ export function searchContentIndex(
 // Incremental scan orchestration
 // ---------------------------------------------------------------------------
 
-/**
- * For a list of files, stat each, compare to the DB ledger, and return only
- * the ones that need rescanning. One bulk DB query for the whole list.
- *
- * Actively running agents append to their JSONL every few seconds. Without a
- * small debounce, repeated `agents sessions` invocations stream-parse the same
- * growing transcript over and over. The cached row is good enough for a few
- * seconds; once writes settle or the debounce expires, the file is parsed once.
- */
+/** Stat each file, compare to the DB ledger, and return only those needing a rescan, with one bulk
+ * DB query. Running agents append to their JSONL every few seconds, so a small debounce stops
+ * repeat `agents sessions` calls re-parsing the same growing transcript. */
 export function filterChangedFiles(
   filePaths: string[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
@@ -993,19 +849,9 @@ interface PreStatEntry {
   fileSize: number;
 }
 
-/**
- * Ledger-compare pre-stat'd entries (from the walk's own stat) without a second
- * stat. Same debounce and change-detection as filterChangedFiles; the raw
- * mtime is floored here so warm files match the ledger exactly as the stat path
- * does (Math.floor(stat.mtimeMs)).
- *
- * A file is also treated as "changed" — independent of (mtime, size) — when
- * its ledger row's `extractor_version` is behind {@link CONTENT_INDEX_VERSION}.
- * This is the lever that backfills a content-extractor improvement (e.g.
- * indexing assistant answers, not just user prompts) into every already-scanned
- * session on its next pass, without a `DELETE FROM scan_ledger` that would also
- * discard the Claude/Codex resumable parser_state.
- */
+/** Ledger-compare pre-stat'd entries without a second stat; same debounce and change detection as
+ * filterChangedFiles, with raw mtime floored to match. A file is also changed when its ledger
+ * `extractor_version` is behind {@link CONTENT_INDEX_VERSION}, backfilling extractor improvements. */
 export function filterChangedEntries(
   entries: PreStatEntry[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
@@ -1050,11 +896,8 @@ export function shouldDeferRecentAppend(
 interface LeafDir {
   /** Absolute path to the directory that directly holds transcript files. */
   dirPath: string;
-  /**
-   * True if this dir is under the agent's LIVE `~/.<agent>` root — the only tree
-   * an agent process appends to live. Every file in such a dir is treated as
-   * hot (always re-stat'd), so an in-place append is never missed there.
-   */
+  /** True if this dir is under the agent's LIVE `~/.<agent>` root, the only tree an agent appends
+   * to live. Every file there is hot (always re-stat'd), so an in-place append is never missed. */
   isLiveRoot: boolean;
 }
 
@@ -1062,36 +905,15 @@ interface LeafDir {
 interface LeafDirScan {
   /** Files whose (mtime, size) changed vs the ledger — the parse set. */
   changed: Array<{ filePath: string; scan: ScanStamp }>;
-  /**
-   * Every transcript file seen across all leaf dirs (changed or not), in
-   * live-root-first order, each tagged with whether its dir is a live root.
-   * Lets a caller restore cross-root, session-id precedence (prefer the live
-   * copy of a session over a frozen backup copy) independent of which copy
-   * happened to be flagged "changed" this run.
-   */
+  /** Every transcript file seen across all leaf dirs (changed or not), live-root-first, each tagged
+   * with whether its dir is a live root. Lets a caller restore session-id precedence (live copy
+   * over frozen backup) regardless of which copy changed. */
   allFiles: Array<{ filePath: string; isLiveRoot: boolean }>;
 }
 
-/**
- * Walk a set of leaf transcript directories and return the files that changed,
- * skipping the per-file `stat` of directories whose (mtime, entry_count) matches
- * the dir_ledger.
- *
- * Per leaf dir:
- *   - `stat` the dir once and `readdir` it (one cheap syscall) to get the entry
- *     count and the file list.
- *   - If the dir matches the dir_ledger (floored mtime AND entry_count), no file
- *     was created / deleted / renamed since we last walked it. We then stat ONLY
- *     the hot files (live-root files, or files scanned within HOT_FILE_WINDOW_MS)
- *     and run just those through the ledger compare — so an in-place append to a
- *     still-live session is still caught, while immutable backup/version dirs
- *     collapse to a single dir stat and zero per-file stats.
- *   - Else (changed dir, or no ledger row) we stat every file (today's full
- *     walk) and record the fresh dir stamp so the next run can short-circuit.
- *
- * The kill-switch (`AGENTS_SESSIONS_NO_DIR_LEDGER=1`) forces the full-walk branch
- * for every dir and never consults or records the dir_ledger.
- */
+/** Walk leaf transcript dirs and return changed files. If a dir's (mtime, entry_count) match the
+ * dir_ledger, stat only hot files (live-root or scanned within HOT_FILE_WINDOW_MS); otherwise stat
+ * all and record a fresh stamp. `AGENTS_SESSIONS_NO_DIR_LEDGER=1` forces the full walk. */
 function collectChangedFilesInLeafDirs(
   leafDirs: LeafDir[],
   ext: string,
@@ -1125,16 +947,9 @@ function collectChangedFilesInLeafDirs(
       !disabled && prevDir !== undefined && prevDir.dirMtimeMs === dirMtimeMs && prevDir.entryCount === entryCount;
 
     if (dirUnchanged) {
-      // Contents did not change (no create/delete/rename). Stat only the hot
-      // files; the rest are served from the DB with no stat. An immutable backup
-      // dir (not a live root, nothing recently scanned) does zero per-file stats.
-      //
-      // A live-root dir treats every file as hot — that is the tree an agent
-      // appends to live, and an append does NOT bump the parent-dir mtime, so
-      // without this a growing session would be silently skipped. A non-live
-      // file is hot only if it was scanned within HOT_FILE_WINDOW_MS (bulk ledger
-      // lookup), covering a session under a version/backup path that is somehow
-      // still being written.
+      // Contents unchanged (no create/delete/rename), so stat only hot files; the rest is served
+      // from the DB. An immutable backup dir does zero per-file stats. A live-root file is always
+      // hot (appends do not bump dir mtime).
       const stamps = isLiveRoot ? null : getScanStampsForPaths(files);
       for (const filePath of files) {
         let hot = isLiveRoot;
@@ -1170,10 +985,8 @@ function collectChangedFilesInLeafDirs(
 // Multi-version directory scanning
 // ---------------------------------------------------------------------------
 
-/**
- * Collect all directories to scan for an agent's sessions. Deduplicates by
- * realpath to avoid double-counting symlinked version homes.
- */
+/** Collect all directories to scan for an agent's sessions, deduplicated by realpath to avoid
+ * double-counting symlinked version homes. */
 export function getAgentSessionDirs(agent: string, subdir: string): string[] {
   const resolved = new Set<string>();
   const dirs: string[] = [];
@@ -1204,17 +1017,9 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
     } catch { /* dir unreadable */ }
   }
 
-  // Codex's managed home is not always where the version layout says. On macOS
-  // the versioned path overflows SUN_LEN (104 bytes) for codex's control socket,
-  // so the shim relocates the home to `<agentsUserDir>/.codex-homes/<key>/.codex`
-  // (lib/codex-home.ts) — `<key>` is the version for a version home, or
-  // `a-<accountId prefix>` (`codexShortKey`) for an account slot under
-  // `<historyDir>/accounts/codex/`. Walking `.codex-homes/` directly — rather
-  // than deriving keys from the installed-version list — is what catches BOTH:
-  // an account short key is not a vendor version and never appears in
-  // `versions/codex/`, so iterating only installed versions silently dropped
-  // every transcript a codex account slot wrote. addDir skips what does not
-  // exist, so this is inert on Linux and for homes that never needed relocating.
+  // Codex's managed home may not follow the version layout: on macOS the versioned path overflows
+  // SUN_LEN, so the shim relocates it to `<agentsUserDir>/.codex-homes/<key>/.codex`
+  // (lib/codex-home.ts). `<key>` may be an account short key, so walk `.codex-homes/` directly.
   if (agent === 'codex') {
     const codexHomesBase = path.join(getUserAgentsDir(), '.codex-homes');
     try {
@@ -1224,16 +1029,9 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
     } catch { /* dir absent or unreadable */ }
   }
 
-  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir
-  // under `<historyDir>/accounts/<agent>/<accountId>/`, sharing the one managed
-  // binary install rather than owning a version home of its own
-  // (lib/accounts/slots.ts `slotDir`). A slot-launched transcript lives ONLY
-  // there — never under `versions/` — so without this root it is fully
-  // discoverable by the account machinery (the account is registered and
-  // runnable) yet invisible to `agents sessions`, reading as if the history had
-  // vanished. `addDir` follows the realpath, so a codex slot whose `.codex` is a
-  // symlink onto its `.codex-homes/<key>` short home (SUN_LEN relocation, above)
-  // is deduplicated against that same target rather than double-counted.
+  // Account slots (PHNX-3940): a named account's HOME-shaped dir
+  // `<historyDir>/accounts/<agent>/<accountId>/` (lib/accounts/slots.ts). Transcripts live only
+  // there, never under `versions/`. `addDir` follows realpath, so codex slot symlinks dedupe.
   const accountsBase = path.join(getHistoryDir(), 'accounts', agent);
   try {
     for (const accountId of fs.readdirSync(accountsBase)) {
@@ -1253,14 +1051,9 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
   return dirs;
 }
 
-/**
- * The (agent, subdir) pairs `discoverSessions` walks for JSONL transcripts —
- * the single source of truth for which directories hold live session files.
- * `getSessionRoots` expands each pair to its concrete directories so a consumer
- * (AGI EXT's fs.watch, see issue #741) can configure its watcher
- * from the CLI instead of hardcoding `~/.claude|.codex|.gemini`. Adding a new
- * on-disk agent here makes every consumer watch it automatically.
- */
+/** The (agent, subdir) pairs `discoverSessions` walks for JSONL transcripts: the single source of
+ * truth for live session dirs. `getSessionRoots` expands them so consumers (AGI EXT fs.watch,
+ * issue #741) take their watch paths from the CLI. */
 const SESSION_ROOT_SPECS: ReadonlyArray<{ agent: SessionAgentId; subdir: string }> = [
   { agent: 'claude', subdir: 'projects' },
   { agent: 'codex', subdir: 'sessions' },
@@ -1282,12 +1075,9 @@ interface SessionRoots {
   dirs: string[];
 }
 
-/**
- * The directories `agents sessions` scans for each on-disk session agent,
- * resolved to what exists on this machine. Emitted by `agents sessions --roots
- * --json` so external watchers stay in lockstep with the CLI's discovery paths.
- * Agents with no directories present are omitted.
- */
+/** The directories `agents sessions` scans for each on-disk session agent, resolved to what exists
+ * on this machine. Emitted by `agents sessions --roots --json` so external watchers match the
+ * CLI's discovery paths. Agents with none present are omitted. */
 export function getSessionRoots(): SessionRoots[] {
   const out: SessionRoots[] = [];
   for (const { agent, subdir } of SESSION_ROOT_SPECS) {
@@ -1446,15 +1236,9 @@ async function scanRoutineArchivesIncremental(
 
 let cachedClaudeAccountIndex: ClaudeAccountIndex | undefined;
 
-/**
- * The account-attribution index, built at most once per scan pass.
- *
- * Rebuilt when `refresh` is set — `scanClaudeIncremental` does that at the start of
- * each pass so a long-lived process (the daemon) picks up an `agents use` switch or a
- * fresh login instead of attributing later sessions to a stale set of homes. Per-file
- * resolution then reads the cached index, because rebuilding it per transcript would
- * re-read every home's `.claude.json` thousands of times.
- */
+/** The account-attribution index, built at most once per scan pass; rebuilt when `refresh` is set
+ * (`scanClaudeIncremental` does each pass) so the daemon sees an `agents use` switch or fresh
+ * login. Per-file resolution reads the cache, not every home's `.claude.json`. */
 function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
   if (refresh || !cachedClaudeAccountIndex) cachedClaudeAccountIndex = buildClaudeAccountIndex();
   return cachedClaudeAccountIndex;
@@ -1464,13 +1248,9 @@ function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
 // Claude
 // ---------------------------------------------------------------------------
 
-/**
- * Build a map of Claude sessionId -> user-given label from ~/.claude/sessions/*.json.
- * Each JSON has shape { pid, sessionId, cwd, startedAt, name?, ... }. The
- * `name` field only exists if the user ran /rename in that session.
- * For sessionId collisions (re-resume of the same session), prefer the most
- * recent startedAt.
- */
+/** Build a map of Claude sessionId -> user-given label from ~/.claude/sessions/*.json (shape { pid,
+ * sessionId, cwd, startedAt, name?, ... }). `name` exists only if the user ran /rename. On
+ * sessionId collisions (re-resume), prefer the most recent startedAt. */
 export function buildClaudeLabelMap(): Map<string, string | null> {
   const map = new Map<string, { label: string | null; startedAt: number }>();
   const dir = path.join(HOME, '.claude', 'sessions');
@@ -1507,11 +1287,9 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   claudeAccountIndex(true);
   const labelMap = buildClaudeLabelMap();
 
-  // Enumerate every leaf project dir across all Claude roots. The FIRST root
-  // returned by getAgentSessionDirs is the agent's live `~/.claude/projects` —
-  // the only tree Claude appends to in place, so its project dirs are live roots
-  // (every file hot). Version-home + backup roots are immutable: their dirs
-  // short-circuit to a single dir stat when unchanged.
+  // Enumerate every leaf project dir across all Claude roots. The FIRST root is the live
+  // `~/.claude/projects`, the only tree Claude appends to, so its dirs are live roots (every file
+  // hot). Version-home and backup roots are immutable and short-circuit to one dir stat.
   const roots = getAgentSessionDirs('claude', 'projects');
   const leafDirs: LeafDir[] = [];
   const seenLeaf = new Set<string>();
@@ -1533,37 +1311,26 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   });
 
   const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
-  // Restore the pre-A-2 cross-root precedence: a session id present in multiple
-  // roots is ALWAYS served from its live path, never a frozen backup/version
-  // copy. Pre-A-2, dedup happened at enumeration time via a live-first `seen`
-  // set, so a non-live copy was never even stat'd when a live copy existed. This
-  // PR must not regress that to "whichever copy changed this run wins" — a cold
-  // (unchanged) live copy paired with a freshly-written backup snapshot would
-  // otherwise flip the row's file_path to the backup path.
-  //
-  // allFiles is every transcript file across all roots in live-first order, so
-  // the FIRST occurrence of each session id is its live (or highest-precedence)
-  // path — the durable winner, independent of which copy was flagged changed.
+  // Restore the pre-A-2 cross-root precedence: a session id in several roots is ALWAYS served from
+  // its live path, or a cold live copy plus a fresh backup would flip file_path to the backup.
+  // allFiles is live-first, so each id's first occurrence wins.
   const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
   const winnerBySession = new Map<string, string>();
   for (const { filePath } of allFiles) {
     const id = sessionIdOf(filePath);
     if (!winnerBySession.has(id)) winnerBySession.set(id, filePath);
   }
-  // Keep a changed entry only if it is its session's winner. A changed non-live
-  // copy is dropped whenever a live copy exists anywhere; the winning path is
-  // parsed only when it itself changed (a cold winner needs no re-parse — its DB
-  // row already points at the live path).
+  // Keep a changed entry only if it is its session's winner. A changed non-live copy is dropped
+  // whenever a live copy exists; the winner is parsed only when it changed itself (a cold winner's
+  // DB row already points at the live path).
   const changed = changedAll.filter(e => winnerBySession.get(sessionIdOf(e.filePath)) === e.filePath);
 
   if (changed.length > 0) {
     onProgress?.({ agent: 'claude', parsed: 0, total: changed.length });
 
-    // Bulk-fetch each changed file's prior resumable continuation. A file with a
-    // usable prior state + growth goes incremental (re-parse only the appended
-    // bytes); everything else does a FULL from-offset-0 parse. The decision + the
-    // parse both live in scanClaudeSessionResumable so full and incremental share
-    // one reducer and produce identical rows.
+    // Bulk-fetch each changed file's prior resumable continuation. A usable prior state plus
+    // growth goes incremental (re-parse only appended bytes); everything else gets a FULL parse
+    // from offset 0. Both live in scanClaudeSessionResumable, sharing one reducer.
     const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
 
     const entries: ScanEntry[] = [];
@@ -1605,13 +1372,9 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   if (labelMap.size > 0) syncLabels(labelMap);
 }
 
-/**
- * Stream-parse a single Claude JSONL file to extract session metadata, resuming
- * from the persisted continuation when the file merely grew (see
- * {@link scanClaudeSessionResumable}). Returns the row's meta + FTS content plus
- * the serialized continuation (parser_state + content_text) to persist for the
- * next scan.
- */
+/** Stream-parse one Claude JSONL file for session metadata, resuming from the persisted
+ * continuation when the file merely grew (see {@link scanClaudeSessionResumable}). Returns meta
+ * and FTS content plus the continuation (parser_state + content_text) to persist. */
 async function readClaudeMeta(
   filePath: string,
   sessionId: string,
@@ -1627,11 +1390,9 @@ async function readClaudeMeta(
   toolCalls?: IndexedToolCall[];
   toolIndexMode: 'replace' | 'append';
 } | null> {
-  // A prior continuation extracted at an older CONTENT_INDEX_VERSION is missing
-  // whatever the current extractor adds (e.g. assistant-answer text) — resuming
-  // from it would fold only the NEWLY appended lines into that gap, never
-  // backfilling the file's earlier assistant text. Treat it as absent so the
-  // file gets one full from-offset-0 reparse instead.
+  // A prior continuation from an older CONTENT_INDEX_VERSION lacks whatever the current extractor
+  // adds (e.g. assistant text); resuming would fold only new lines into that gap, never
+  // backfilling earlier text. Treat it as absent so the file gets one full from-offset-0 reparse.
   const prior = priorRow?.extractorVersion === CONTENT_INDEX_VERSION ? parsePriorClaudeState(priorRow) : null;
   const { scan, newState, toolCalls, mode } = await scanClaudeSessionResumable(
     filePath,
@@ -1764,11 +1525,9 @@ let cachedCodexAccount: string | undefined;
 /** Number of times the auth.json JWT was actually base64-decoded. Test seam for the lazy-decode contract. */
 let codexAccountResolveCount = 0;
 
-/**
- * Base64url-decode a JWT and return its `email` claim, if present. Split out so
- * the decode is a single, testable step — and so it only runs when someone
- * actually reads the Codex account (see the lazy resolution below).
- */
+/** Base64url-decode a JWT and return its `email` claim, if present. Split out so the decode is one
+ * testable step and runs only when someone reads the Codex account (see the lazy resolution
+ * below). */
 export function decodeJwtEmail(idToken: string): string | undefined {
   const parts = idToken.split('.');
   if (parts.length < 2) return undefined;
@@ -1780,14 +1539,9 @@ export function decodeJwtEmail(idToken: string): string | undefined {
   }
 }
 
-/**
- * Extract the Codex account email from the JWT id_token in auth.json.
- *
- * Memoized and resolved LAZILY: the credential-harvesting-shaped JWT decode
- * (base64-decoding ~/.codex/auth.json) only runs when the account is actually
- * needed to build a session's metadata — never eagerly during the bulk scan.
- * A scan with no changed Codex files never touches the auth file.
- */
+/** Extract the Codex account email from the JWT id_token in auth.json. Memoized and LAZY: the
+ * credential-harvesting-shaped decode of ~/.codex/auth.json runs only when a session's metadata
+ * needs the account, never in the bulk scan. A scan with no changed Codex files never touches it. */
 function getCodexAccount(): string | undefined {
   if (cachedCodexAccount !== undefined) return cachedCodexAccount || undefined;
   codexAccountResolveCount++;
@@ -1856,11 +1610,9 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   const changed = filterChangedEntries(prestat);
 
-  // Codex keeps human-readable titles (`thread_name`) in `session_index.jsonl`,
-  // which updates independently of the rollout files. Stat each index against the
-  // ledger *without reading it*; only read + re-apply titles when the index (or a
-  // rollout) actually changed. On a fully unchanged scan this collapses to a
-  // couple of stat() calls instead of a full read + a `syncTopics` DB pass.
+  // Codex keeps titles (`thread_name`) in `session_index.jsonl`, which updates independently of
+  // rollouts. Stat each index against the ledger WITHOUT reading it; re-apply titles only when the
+  // index or a rollout changed. An unchanged scan costs a few stat() calls.
   const titleIndex = diffCodexTitleIndexes();
 
   if (changed.length === 0 && !titleIndex.changed) return;
@@ -1876,11 +1628,9 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   onProgress?.({ agent: 'codex', parsed: 0, total: changed.length });
 
-  // Bulk-fetch each changed rollout's prior resumable continuation. A file with
-  // a usable prior state + growth goes incremental (re-parse only the appended
-  // bytes); everything else does a FULL from-offset-0 parse. The decision + the
-  // parse both live in scanCodexSessionResumable so full and incremental share
-  // one reducer and produce identical rows.
+  // Bulk-fetch each changed rollout's prior resumable continuation. A usable prior state plus
+  // growth goes incremental (re-parse only appended bytes); everything else does a FULL parse from
+  // offset 0. Both live in scanCodexSessionResumable, sharing one reducer so rows are identical.
   const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
 
   const entries: ScanEntry[] = [];
@@ -1942,15 +1692,9 @@ export function parseCodexThreadNameIndex(raw: string): Map<string, string> {
   return titles;
 }
 
-/**
- * Stat every Codex `session_index.jsonl` and diff it against the scan ledger
- * *without reading it*. Returns the fresh stamps (persisted only after a
- * successful title sync) and whether any index changed since the last scan — the
- * signal that lets a no-op scan skip the file read + `syncTopics` entirely.
- *
- * The index path is a sibling of `sessions/` (never inside it), so it is never
- * walked as a rollout and its ledger row can't collide with a transcript's.
- */
+/** Stat every Codex `session_index.jsonl` and diff it against the scan ledger WITHOUT reading it.
+ * Returns fresh stamps (persisted after a successful title sync) and whether any index changed, so
+ * a no-op scan skips the read. The index sits beside `sessions/`, never walked as a rollout. */
 function diffCodexTitleIndexes(): {
   stamps: Array<{ filePath: string; scan: ScanStamp }>;
   changed: boolean;
@@ -1971,10 +1715,8 @@ function diffCodexTitleIndexes(): {
   return { stamps, changed };
 }
 
-/**
- * Read Codex session titles across every Codex home (live + versioned). The
- * `session_index.jsonl` file sits beside each `sessions/` rollout tree.
- */
+/** Read Codex session titles across every Codex home (live and versioned). The
+ * `session_index.jsonl` file sits beside each `sessions/` rollout tree. */
 function readCodexThreadNames(): Map<string, string> {
   const titles = new Map<string, string>();
   for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
@@ -1990,13 +1732,9 @@ function readCodexThreadNames(): Map<string, string> {
   return titles;
 }
 
-/**
- * Stream-parse a single Codex JSONL file to extract session metadata.
- *
- * `resolveAccount` is a lazy thunk (not a resolved string): the JWT decode it
- * performs is deferred until we know this file is a real session worth building
- * metadata for, and only then — never during the file walk / stat phase.
- */
+/** Stream-parse a single Codex JSONL file for session metadata. `resolveAccount` is a lazy thunk:
+ * the JWT decode is deferred until the file is known to be a real session, never during the walk
+ * or stat phase. */
 export async function readCodexMeta(
   filePath: string,
   resolveAccount?: () => string | undefined,
@@ -2012,11 +1750,9 @@ export async function readCodexMeta(
   toolCalls?: IndexedToolCall[];
   toolIndexMode: 'replace' | 'append';
 } | null> {
-  // Resume from the persisted continuation when the file merely grew; otherwise
-  // full-parse from byte 0. Both branches share one reducer, so an append yields
-  // a row identical to a from-scratch reparse. When no stamp is supplied (a
-  // caller outside the live scan path), fall back to a plain full parse with no
-  // continuation to persist.
+  // Resume from the persisted continuation when the file merely grew; otherwise full-parse from
+  // byte 0. Both share one reducer, so an append yields the same row as a fresh reparse. With no
+  // stamp supplied (outside the live scan path), do a plain full parse.
   let scan: CodexSessionScan;
   let newState: CodexParserState | undefined;
   let newOffset = 0;
@@ -2098,12 +1834,9 @@ export async function readCodexMeta(
   };
 }
 
-/**
- * Codex writes `session_meta` (with the start timestamp) on the first line of a
- * rollout and never updates it. For long-running sessions that's stale by
- * hours — `--since 2h` would drop a session still being actively written.
- * Compare against the file's mtime and use whichever is newer.
- */
+/** Codex writes `session_meta` (with the start timestamp) on a rollout's first line and never
+ * updates it, so for long sessions it is stale by hours and `--since 2h` would drop an active
+ * session. Compare against the file's mtime and use whichever is newer. */
 function pickLatestCodexTimestamp(metaTimestamp: string | undefined, filePath: string): string {
   const fallback = new Date().toISOString();
   let mtimeIso: string | null = null;
@@ -2119,16 +1852,9 @@ function pickLatestCodexTimestamp(metaTimestamp: string | undefined, filePath: s
   return candidates.reduce((best, cur) => (cur > best ? cur : best));
 }
 
-// ---------------------------------------------------------------------------
-// Antigravity
-//
 // Antigravity stores one SQLite DB per conversation at
-// ~/.gemini/antigravity-cli/conversations/<trajectory-uuid>.db. The filename
-// (minus .db) is the canonical session id. Each DB is stat'd against the ledger;
-// only changed DBs are re-parsed (via parseAntigravity, which shells out to
-// sqlite3). Tool count doubles as the message count; the toolSummary of the
-// first tool call becomes the topic, and any run_command's Cwd fills in cwd.
-// ---------------------------------------------------------------------------
+// ~/.gemini/antigravity-cli/conversations/<trajectory-uuid>.db; the name minus .db is the session
+// id. Only DBs changed vs the ledger are re-parsed (parseAntigravity).
 
 /** Incrementally re-scan changed Antigravity conversation DBs and upsert into the DB. */
 async function scanAntigravityIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
@@ -2226,64 +1952,18 @@ const OPENCODE_DB = path.join(HOME, '.local', 'share', 'opencode', 'opencode.db'
 
 let cachedOpenCodeAccount: string | undefined;
 
-/**
- * The active OpenCode account: the provider ids with a valid credential in
- * `auth.json`, joined (e.g. `"anthropic+muse-spark"`) — see
- * `resolveOpenCodeAccountId` in `../agents.js`, the single source of truth
- * `agents view`/`agents doctor` also read.
- *
- * OpenCode's `opencode.db` also carries `account`/`account_state`/
- * `control_account` tables that look like the obvious source, but on a real,
- * actively-used install (yosemite-s1, 1.16.0, 35 applied migrations) all
- * three are permanently empty — no migration populates them and no session
- * has ever written a row. Querying them (the pre-fix behavior here) always
- * returned undefined, credential or not; `auth.json` is what OpenCode
- * actually reads at runtime.
- */
+/** The active OpenCode account: provider ids with a valid credential in `auth.json`, joined (e.g.
+ * `"anthropic+muse-spark"`); see `resolveOpenCodeAccountId` in `../agents.js`. The `account*`
+ * tables in `opencode.db` are always empty on real installs. */
 function getOpenCodeAccount(): string | undefined {
   if (cachedOpenCodeAccount !== undefined) return cachedOpenCodeAccount || undefined;
   cachedOpenCodeAccount = resolveOpenCodeAccountId(HOME) ?? '';
   return cachedOpenCodeAccount || undefined;
 }
 
-/**
- * The per-session ledger stamp for an OpenCode row: the newest write time across
- * the session's own row, its messages, and its parts, paired with the total byte
- * length of that session's message + part payloads.
- *
- * OpenCode keeps every session in ONE shared SQLite file, so that file's
- * mtime/size changes whenever *any* session is written. Stamping each session
- * with the whole-DB stat therefore invalidated every indexed session on every
- * scan: up to `LIMIT 1000` sessions were re-emitted into `upsertSessionsBatch`,
- * and its enrichment step re-opened `opencode.db` once per re-emitted entry via
- * `parseSession` (RUSH-2210).
- *
- * `s.time_updated` alone is NOT that session's change signal, which is the trap
- * this shape exists to avoid. On a real database, parts land long after the
- * session row was last touched — e.g. `ses_3955202dfffe…` carried
- * `time_updated = 1771316403087` with its newest part at `1771331512162`, over
- * four hours later. So the stamp maxes `time_updated` with the newest message
- * and part times, and pairs it with a byte total that also moves when an
- * existing part's `data` is rewritten in place (a streaming turn) without any
- * new row or timestamp.
- *
- * The byte total is a REAL size, not a repurposed counter, because
- * `sessions.file_size` is read back as bytes elsewhere: `ensureToolIndex` uses
- * it as the tool-backfill byte budget and `toolCallsForBackfill` as the 16 MiB
- * in-memory parser cap (`tool-index.ts`). A message/part byte total is the
- * honest cost of parsing that session — strictly better than the whole-DB size
- * this column used to hold for every OpenCode row.
- *
- * The size is `LENGTH(CAST(data AS BLOB))`, not `LENGTH(data)`: SQLite's
- * `LENGTH()` on a TEXT column counts CHARACTERS, so a CJK/emoji-heavy transcript
- * would under-report its real size by up to 4x — and this number is a byte
- * budget downstream.
- *
- * A degenerate row — nothing but zeros/NaN for every time AND no payload at all
- * — falls back to the whole-DB stat, keeping the pre-RUSH-2210 always-rescan
- * behavior for exactly those rows rather than pinning them to a stamp that never
- * changes.
- */
+/** Per-session ledger stamp for an OpenCode row: newest write time over the session, its messages
+ * and parts (not `time_updated` alone) plus payload bytes; a whole-DB stat rescanned all
+ * (RUSH-2210). Bytes via `LENGTH(CAST(data AS BLOB))`: `LENGTH()` counts characters. */
 function openCodeSessionStamp(
   times: { timeUpdated: number; timeCreated: number; lastMessageAt: number; lastPartAt: number },
   bytes: { messageBytes: number; partBytes: number },
@@ -2343,12 +2023,9 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     );
     const costExpr = sessionCols.has('cost') ? 's.cost' : 'NULL';
     const modelExpr = sessionCols.has('model') ? 's.model' : 'NULL';
-    // Every `json_extract` / `json_type` below is guarded by `json_valid`.
-    // SQLite raises "malformed JSON" on a non-JSON value, and that aborts the
-    // WHOLE query — so a single unparseable `part`/`message` row anywhere in the
-    // shared DB would drop EVERY OpenCode session from the index, silently in a
-    // non-TTY run (the handler below only prints when stderr is a TTY). A
-    // poisoned row must cost that row, not the harness.
+    // Every `json_extract` / `json_type` below is guarded by `json_valid`: SQLite aborts the WHOLE
+    // query on a non-JSON value, so one bad `part`/`message` row would drop every OpenCode
+    // session, silently in a non-TTY run.
     const query = `
       SELECT
         s.id AS id,
@@ -2431,10 +2108,9 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
       has_token_data: unknown;
     }>;
 
-    // Two passes. First derive each row's identity + per-session stamp, then
-    // bulk-load the prior stamps in ONE query and keep only the rows that
-    // actually changed. Skipped rows never reach upsertSessionsBatch, so they
-    // never pay its per-entry `parseSession` re-open of this same DB.
+    // Two passes: derive each row's identity and per-session stamp, then bulk-load prior stamps in
+    // ONE query and keep only changed rows. Skipped rows never reach upsertSessionsBatch, so they
+    // never pay its per-entry `parseSession` re-open of this DB.
     const asInt = (v: unknown): number =>
       typeof v === 'number' ? v : parseInt(String(v), 10);
     const candidates = rows.flatMap(row => {
@@ -2563,11 +2239,9 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     }
 
     upsertSessionsBatch(entries);
-    // Report what this scan indexed. OpenCode is one SQLite DB rather than N
-    // transcript files, so the whole batch lands as a single progress emit —
-    // enough for the daemon's warm tick to count it (RUSH-2691); without it a
-    // tick whose only changed sessions were OpenCode's reported 0 and logged
-    // nothing, the same silent-success class this tick exists to remove.
+    // Report what this scan indexed. OpenCode is one SQLite DB, so the batch lands as a single
+    // progress emit, enough for the daemon's warm tick to count it (RUSH-2691). Without it, a tick
+    // whose only changes were OpenCode's reported 0 and logged nothing.
     onProgress?.({ agent: 'opencode', parsed: entries.length, total: entries.length });
     // Stamp the OpenCode DB itself so we can short-circuit on the next run.
     recordScans([{ filePath: OPENCODE_DB, scan: currentScan }]);
@@ -2586,10 +2260,9 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
 
 /** Scan active OpenClaw channels and cron jobs via the openclaw CLI. */
 async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  // Check if openclaw is installed — silently skip if not. `which` is POSIX-only
-  // (Windows resolves PATH with `where`), so a bare `which` throws ENOENT on every
-  // Windows run and silently disabled the entire OpenClaw scan there — its sessions
-  // never reached the index (RUSH-2286). hasCommand() probes cross-platform.
+  // Skip silently if openclaw is not installed. `which` is POSIX-only, so a bare `which` threw
+  // ENOENT on every Windows run and disabled the whole OpenClaw scan (RUSH-2286); hasCommand()
+  // probes cross-platform.
   if (!hasCommand('openclaw')) return;
 
   // TTL cache: skip subprocess calls if we scanned recently. Stored in the
@@ -2682,26 +2355,15 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
   }
 
   upsertSessionsBatch(entries);
-  // Deliberately NO onProgress emit, unlike every other scanner (RUSH-2691).
-  // This one cannot report a delta: its gate is a 60s TTL (not a store stamp),
-  // `scan` above stamps a fresh `now` on every entry every run, and `entries` is
-  // the CURRENT INVENTORY — running channels plus cron jobs — rebuilt from
-  // scratch each pass. Emitting entries.length would report "how many openclaw
-  // things exist", re-counted every 60s forever, which is a worse lie than
-  // silence: the warm tick's number means "transcripts parsed this scan". Giving
-  // OpenClaw a real per-entry stamp is tracked separately; until then it
-  // contributes 0 and the docblock on IncrementalScanResult says so.
+  // Deliberately NO onProgress emit, unlike other scanners (RUSH-2691): this scan cannot report a
+  // delta. Its gate is a 60s TTL and `entries` is the current inventory, re-stamped every run.
+  // Emitting entries.length would re-count what exists. It contributes 0.
   db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('openclaw_last_scan_ms', ?)`).run(String(Date.now()));
 }
 
-// ---------------------------------------------------------------------------
-// Rush
-//
-// Rush sessions live at ~/.rush/sessions/<session-id>/messages.jsonl.
-// Each line is { id, session_id, agent_id, role, type, content, created_at, ... }.
-// The directory name is the canonical session id. Rush sessions are cloud-bound
-// (not tied to a local cwd), so cwd is left unset.
-// ---------------------------------------------------------------------------
+// Rush sessions live at ~/.rush/sessions/<session-id>/messages.jsonl, each line { id, session_id,
+// agent_id, role, type, content, created_at, ... }. The directory name is the session id. Sessions
+// are cloud-bound, so cwd is left unset.
 
 interface RushSessionScan {
   timestamp?: string;
@@ -2857,16 +2519,9 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Hermes
-//
-// Hermes sessions live at ~/.hermes/sessions/session_<id>.json (one JSON
-// file per session). Shape:
-//   { session_id, model, platform, session_start, last_updated,
-//     system_prompt, message_count, messages: [{role, content}, ...] }
-// request_dump_*.json files in the same dir are per-turn debug dumps — skip.
-// Hermes is a gateway/API agent, so cwd is left unset.
-// ---------------------------------------------------------------------------
+// Hermes sessions live at ~/.hermes/sessions/session_<id>.json, one JSON file per session {
+// session_id, model, platform, session_start, last_updated, system_prompt, message_count, messages
+// }. Skip request_dump_*.json (per-turn debug dumps). cwd is left unset.
 
 /** Incrementally re-scan changed Hermes session files and upsert into the DB. */
 async function scanHermesIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
@@ -2973,14 +2628,9 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
   return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
 }
 
-/**
- * Muse Code stores one session per directory under
- * ~/.local/share/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl (event-sourced
- * JSONL). Walk the tree for session.jsonl files and index each one.
- *
- * Also scan version homes (`versions/muse/<v>/home/.local/share/muse/sessions`)
- * so managed/isolated runs that rewrite HOME still show up in `agents sessions`.
- */
+/** Muse Code stores one event-sourced session per directory at
+ * ~/.local/share/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl; index each. Also scan version
+ * homes (`versions/muse/<v>/home/.local/share/muse/sessions`) for managed runs that rewrite HOME. */
 function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const roots: string[] = [];
   if (fs.existsSync(MUSE_SESSIONS_DIR)) roots.push(MUSE_SESSIONS_DIR);
@@ -3175,12 +2825,9 @@ interface DroidSessionScan {
   assistantText?: string;
 }
 
-/**
- * Incrementally re-scan changed Droid (Factory) session files and upsert into
- * the DB. Droid writes one `<uuid>.jsonl` transcript plus a sibling
- * `<uuid>.settings.json` (model + token usage) under
- * `~/.factory/sessions/<encoded-cwd>/`.
- */
+/** Incrementally re-scan changed Droid (Factory) session files and upsert into the DB. Droid writes
+ * one `<uuid>.jsonl` transcript plus a sibling `<uuid>.settings.json` (model and token usage)
+ * under `~/.factory/sessions/<encoded-cwd>/`. */
 async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('droid');
 
@@ -3416,13 +3063,9 @@ function extractDroidMessageText(content: any): string {
     .trim();
 }
 
-/**
- * Mutable accumulator for the Claude transcript reducer. One field per local
- * that {@link scanClaudeSession} previously declared inline — the reducer
- * mutates `state.*` instead of closure locals so the exact same logic can drive
- * both a full parse and a resumable incremental parse (see
- * {@link scanClaudeSessionIncremental}).
- */
+/** Mutable accumulator for the Claude transcript reducer, one field per local {@link
+ * scanClaudeSession} once declared inline. The reducer mutates `state.*` so the same logic drives
+ * both a full and a resumable parse (see {@link scanClaudeSessionIncremental}). */
 interface ClaudeParseState {
   timestamp?: string;
   cwd?: string;
@@ -3481,12 +3124,9 @@ interface ClaudeParseState {
   /** Slash-command events (user-typed <command-name> wrapper OR a SlashCommand
    *  tool_use), held for extractSlashCommands() at finalize (#12). */
   slashCommandEvents: SessionEvent[];
-  /**
-   * Fan-out tallies (RUSH-3091/3095). Counted as we stream rather than held as
-   * events — unlike skills we need only the count, and a busy session can spawn
-   * hundreds. `backgroundShells` stays undefined for a harness with no
-   * background-shell concept, which must render as absence, never as 0.
-   */
+  /** Fan-out tallies (RUSH-3091/3095), counted as we stream rather than held as events since a busy
+   * session can spawn hundreds. `backgroundShells` stays undefined for a harness with no such
+   * concept, which must render as absence, never 0. */
   subAgents: number;
   backgroundShells: number | undefined;
 }
@@ -3579,12 +3219,9 @@ function foldDerivedToolState(
   if (state.recentDirectoriesTouched.length > 10) state.recentDirectoriesTouched.splice(0, state.recentDirectoriesTouched.length - 10);
 }
 
-/**
- * Fold one parsed transcript line into the accumulator. This is the exact loop
- * body {@link scanClaudeSession} used to run inline — extracted verbatim,
- * mutating `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
- * malformed-line skip happens in the caller, as before).
- */
+/** Fold one parsed transcript line into the accumulator: the exact loop body {@link
+ * scanClaudeSession} used to run inline, extracted verbatim and mutating `state.*`. `parsed` is
+ * the already-parsed line; the caller skips malformed ones. */
 export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   collectClaudeToolCalls(state.toolCollector, parsed);
   // entrypoint ships on the first envelope event (attachment/user/assistant)
@@ -3593,10 +3230,9 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     state.entrypoint = parsed.entrypoint;
   }
 
-  // Produced-artifact signals, structurally (independent of the PR gate below):
-  //   - a Bash `agents teams create/add` command → the team it spawned
-  //   - a Linear create_issue / `gh issue create` tool_use → its result carries
-  //     the new ticket ref, read from the matching tool_result.
+  // Produced-artifact signals, independent of the PR check below: a Bash `agents teams create/add`
+  // command yields the team it spawned; a Linear create_issue or `gh issue create` tool_use yields
+  // the new ticket ref from its tool_result.
   if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
     for (const b of parsed.message.content) {
       if (b?.type !== 'tool_use') continue;
@@ -3754,22 +3390,17 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   }
 }
 
-/**
- * Build the {@link ClaudeSessionScan} return object from an accumulator. This is
- * the exact return-building {@link scanClaudeSession} used to run inline.
- */
+/** Build the {@link ClaudeSessionScan} return object from an accumulator: the exact return-building
+ * {@link scanClaudeSession} used to run inline. */
 export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
   const durationMs =
     state.firstTsMs !== undefined && state.lastTsMs !== undefined && state.lastTsMs > state.firstTsMs
       ? state.lastTsMs - state.firstTsMs
       : undefined;
 
-  // A topic is the first meaningful prompt. Harness-owned names travel in the
-  // separate label field so consumers can replace an early topic once Claude's
-  // generated title (or a later `/rename`) arrives.
-  // Generated titles (Claude `ai-title`, Cursor `chatMeta.title`) go through
-  // one shared cleaner so a skill-preamble echo collapses to `/<skill>`. A
-  // `/rename` (`custom-title`) is the user's own words and is never rewritten.
+  // A topic is the first meaningful prompt. Harness-owned names go in the separate label field so
+  // consumers can replace an early topic when a generated title or `/rename` arrives. Generated
+  // titles share one cleaner; a `/rename` is the user's own words, never rewritten.
   const label = state.customTitle || cleanGeneratedSessionLabel(state.aiTitle);
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
@@ -3841,34 +3472,17 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
   return finalizeClaudeScan(state);
 }
 
-/**
- * SERIALIZED continuation blob persisted in `scan_ledger.parser_state`. Carries
- * everything {@link hydrateClaudeParseState} needs to resume a parse from
- * `offset` such that resuming + applying the appended lines is byte-for-byte
- * identical to a full parse of the whole file.
- *
- * `seenAssistantIds` is persisted as a size counter plus a bounded FIFO window
- * of the most-recent ids: the fallback logical id `${ts}:${seenAssistantIds.size}`
- * (see {@link applyClaudeLine}) depends on the set's *size*, so the size must be
- * exact even when the recent window is smaller than the true count.
- */
+/** SERIALIZED continuation blob in `scan_ledger.parser_state`: what {@link hydrateClaudeParseState}
+ * needs to resume from `offset` equal to a full parse. `seenAssistantIds` is a size counter plus a
+ * bounded FIFO of recent ids; the fallback id `${ts}:${size}` needs the exact size. */
 export interface ClaudeParserState {
-  // v3 (RUSH-2287): added the burn-split accumulators + no-cache cost. A stale v2
-  // blob is rejected by the `!== 3` guard and the session is re-parsed from byte 0,
-  // which populates the new split correctly rather than resuming without it.
-  // v5: added `assistantContentText` (assistant-answer accumulator, alongside
-  // `contentText`). A stale v4 blob is rejected the same way, forcing one full
-  // reparse that backfills the new assistant text — belt-and-suspenders with
-  // scan_ledger.extractor_version, which gates resuming from it in the first
-  // place (see readClaudeMeta).
+  // v3 (RUSH-2287): added the burn-split accumulators and no-cache cost; a stale v2 blob fails the
+  // `!== 3` check and is re-parsed from byte 0. v5: added `assistantContentText`; a stale v4 blob
+  // is rejected likewise, backing scan_ledger.extractor_version (see readClaudeMeta).
   v: 6;
-  /**
-   * Fan-out tallies carried across a RESUMED parse (RUSH-3091/3095). They must
-   * live in the durable blob: the resumable parser reads only new bytes, so
-   * re-initialising them on hydrate would report a session's tail, not its
-   * total. Adding them is why `v` moved 3 -> 4 — an older blob is rejected and
-   * the session re-parses from byte 0 with correct totals.
-   */
+  /** Fan-out tallies carried across a RESUMED parse (RUSH-3091/3095). They must live in the durable
+   * blob: the parser reads only new bytes, so re-initialising on hydrate would report only the
+   * tail. Adding them moved `v` 3 -> 4; an older blob is rejected and re-parsed from byte 0. */
   subAgents: number;
   backgroundShells: number | undefined;
   offset: number;
@@ -3919,11 +3533,8 @@ export interface ClaudeParserState {
 /** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
 const SEEN_IDS_RECENT_CAP = 256;
 
-/**
- * Snapshot a live {@link ClaudeParseState} into its serializable form at
- * `offset` bytes consumed. Round-trips through {@link hydrateClaudeParseState}
- * so incremental replay equals a full parse.
- */
+/** Snapshot a live {@link ClaudeParseState} into its serializable form at `offset` bytes consumed.
+ * Round-trips through {@link hydrateClaudeParseState} so incremental replay equals a full parse. */
 export function serializeClaudeParserState(
   state: ClaudeParseState,
   offset: number,
@@ -3972,10 +3583,9 @@ export function serializeClaudeParserState(
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
     spawnedTeam: state.spawnedTeam,
-    // ticketId is derived at finalize time; persist it (and content_text) so a
-    // consumer (B-2) can rebuild the row + FTS doc on append without re-reading
-    // the whole file. worktreeSlug is re-derived from cwd/gitBranch, so it need
-    // not be persisted.
+    // ticketId is derived at finalize time; persist it (and content_text) so a consumer (B-2) can
+    // rebuild the row and FTS doc on append without re-reading the file. worktreeSlug is
+    // re-derived from cwd/gitBranch, so it is not persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
     assistantContentText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
@@ -3987,22 +3597,9 @@ export function serializeClaudeParserState(
   };
 }
 
-/**
- * Rebuild a live {@link ClaudeParseState} from a persisted continuation so that
- * applying the appended lines yields the same accumulator a full parse would.
- *
- * `seenAssistantIds` is rehydrated from the recent-id FIFO window, then padded
- * with unique sentinel entries so its `.size` matches the true prior count
- * (`seenIdsSize`) — the fallback id `${ts}:${size}` must line up with the full
- * parse even when the window dropped older ids. Padding sentinels can never
- * collide with a real logical id (real ids are message ids/uuids or
- * `${ts}:${n}`; the sentinel prefix is not JSON-line-derived).
- *
- * `userTexts` is rehydrated as a single joined blob from `contentText`: only
- * `userTexts.join('\n')` (detectTicket + contentText) and `userTexts.length > 0`
- * are ever read downstream, and both are preserved by a one-element array
- * holding the joined content.
- */
+/** Rebuild a live {@link ClaudeParseState} from a persisted continuation. `seenAssistantIds` is
+ * rehydrated from the FIFO window, padded with sentinels so `.size` matches `seenIdsSize` (the
+ * fallback id uses it). `userTexts` is one joined blob. */
 export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseState {
   const seen = new Set<string>(prior.seenIdsRecent);
   // Pad to the true prior size so `seenAssistantIds.size` (which feeds the
@@ -4057,17 +3654,9 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
   };
 }
 
-/**
- * Resume a Claude parse from `fromOffset` bytes into the file, folding only the
- * newly-appended lines into `prior`. Returns the finalized scan, the next
- * serialized continuation, and the byte offset to resume from next time —
- * `newOffset` stops at the last `'\n'` seen so a half-written trailing record is
- * re-read (not lost) on the next append.
- *
- * NOT wired into the live scan path yet (that is B-2); {@link scanClaudeSession}
- * remains the only caller-facing entry point. This exists so the parity harness
- * can prove full === hydrate(state@k) + apply(k+1..n).
- */
+/** Resume a Claude parse from `fromOffset`, folding only new lines into `prior`. Returns the scan,
+ * next continuation and offset; `newOffset` stops at the last `'\n'` so a half-written record is
+ * re-read. Not wired into the live scan yet (B-2). */
 export async function scanClaudeSessionIncremental(
   filePath: string,
   fromOffset: number,
@@ -4075,17 +3664,9 @@ export async function scanClaudeSessionIncremental(
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[] }> {
   const state = hydrateClaudeParseState(prior);
 
-  // Read the appended byte range and apply ONLY newline-terminated lines. The
-  // applied lines and `newOffset` MUST stay consistent: readline (like the full
-  // parse) would emit a trailing UNTERMINATED final line at EOF, but `newOffset`
-  // stops before it — so the next pass, after that record's '\n' is flushed,
-  // would re-read and re-apply the same line and double-count it (user events
-  // have no dedup, unlike assistant `seenAssistantIds`). A record written
-  // non-atomically — bytes first, then '\n' in a second write — is exactly this
-  // case. So we slice at the last '\n' ourselves: everything up to and including
-  // it is a run of complete lines we apply and commit. An ordinary tail after
-  // it is deferred until its '\n' lands; after a tail exceeds 1 MiB, its offset
-  // advances with a persisted discard-until-newline bit.
+  // Apply ONLY newline-terminated lines, consistent with `newOffset`: an unterminated final line
+  // would be re-applied once its '\n' lands and double-counted (user events have no dedup). So
+  // slice at the last '\n'; an oversized tail advances with a discard bit.
   const append = await applyJsonlAppend(
     filePath,
     fromOffset,
@@ -4110,22 +3691,9 @@ function freshClaudeParserState(): ClaudeParserState {
   return serializeClaudeParserState(initClaudeParseState(), 0);
 }
 
-/**
- * Decide full-vs-incremental for one Claude file and parse it uniformly, always
- * returning a finalized scan plus the continuation to persist. Both branches run
- * through the SAME reducer (via {@link scanClaudeSessionIncremental}), so the row
- * an append produces is identical to a from-scratch full reparse by construction
- * (the B-1 parity harness proves this at the function level).
- *
- * INCREMENTAL when a prior continuation exists AND the file grew past the
- * persisted offset AND its mtime did not go backwards — an in-place append.
- * FULL (from byte 0, fresh state) otherwise: cold start (no prior), truncation /
- * rewrite (size shrank to at or below the offset), or a clock rewind / restore
- * (mtime older than the last parse). A FULL parse still produces a continuation,
- * so the file's very next append can go incremental.
- *
- * `mode` is returned so the caller (and tests) can confirm which branch ran.
- */
+/** Decide full-vs-incremental for one Claude file; both branches share the SAME reducer, so an
+ * append yields a row identical to a full reparse. INCREMENTAL if a prior continuation exists, the
+ * file grew and mtime did not go backwards; FULL otherwise. */
 export async function scanClaudeSessionResumable(
   filePath: string,
   prior: ClaudeParserState | null,
@@ -4133,18 +3701,9 @@ export async function scanClaudeSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
-  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
-  // restore that dropped DIFFERENT, larger content at the same path: both grow
-  // the file and move mtime forward. Resuming from the stored offset across that
-  // boundary would fold the new file's bytes into an accumulator hydrated from
-  // the OLD session, so the persisted row silently diverges from a full reparse.
-  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
-  // offset we re-read the transcript's first user/assistant timestamp and require
-  // it to still match the prior continuation's. An append keeps that identity
-  // byte-for-byte; a rewrite/restore of a different session changes it. A
-  // mismatch — or an identity we cannot derive — falls back to a FULL parse,
-  // which is always correct. (A shrink is already handled: currentFileSize is not
-  // > prior.offset, so it takes the FULL branch.)
+  // Size and mtime cannot tell an APPEND from a rewrite or restore of different content at the
+  // same path; resuming would fold new bytes into the OLD accumulator. So require the first
+  // user/assistant timestamp to still match the prior one; otherwise take the FULL parse.
   let canIncrement = false;
   if (
     prior !== null &&
@@ -4164,14 +3723,9 @@ export async function scanClaudeSessionResumable(
   return { ...result, mode: 'full' };
 }
 
-/**
- * Cheaply derive a Claude transcript's session identity — the first
- * user/assistant event `timestamp` — by streaming only the START of the file
- * (at most `maxBytes`) and stopping at the first such event. Used by
- * {@link scanClaudeSessionResumable} to confirm a grown file is still the SAME
- * session before resuming from a stored parse offset. Returns undefined when no
- * user/assistant event appears within the budget, which forces a FULL parse.
- */
+/** Cheaply derive a Claude session identity (the first user/assistant event `timestamp`) by
+ * streaming only the first `maxBytes`. {@link scanClaudeSessionResumable} uses it to confirm a
+ * grown file is the SAME session. Undefined if none appears, forcing a FULL parse. */
 async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
   const state = initClaudeParseState();
   const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
@@ -4195,12 +3749,9 @@ async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): 
   return state.timestamp;
 }
 
-/**
- * Parse the prior continuation blob for a changed file into a usable
- * {@link ClaudeParserState}, or null when there is none / it is unusable. A blob
- * from a different serialization version is treated as absent so the file falls
- * back to a clean FULL parse rather than resuming against a stale shape.
- */
+/** Parse the prior continuation blob into a usable {@link ClaudeParserState}, or null if absent or
+ * unusable. A blob from a different serialization version counts as absent so the file gets a
+ * clean FULL parse. */
 function parsePriorClaudeState(row: { parserState: string | null } | undefined): ClaudeParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -4228,12 +3779,9 @@ export function __resetClaudeScanBranchCountsForTest(): void {
   claudeFullScanCount = 0;
 }
 
-/**
- * Live (in-memory) accumulator for a Codex parse — the mutable state
- * {@link scanCodexSession} used to hold in local `let`s, extracted so the same
- * fold ({@link applyCodexLine}) runs for both a full parse and an incremental
- * resume. Mirrors {@link ClaudeParseState}.
- */
+/** Live in-memory accumulator for a Codex parse, extracted from {@link scanCodexSession}'s locals
+ * so the same fold ({@link applyCodexLine}) serves a full parse and an incremental resume. Mirrors
+ * {@link ClaudeParseState}. */
 interface CodexParseState {
   // First-wins session_meta fields.
   sessionId?: string;
@@ -4268,10 +3816,8 @@ interface CodexParseState {
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
   toolCollector: ToolCallCollector;
-  /** #12: see ClaudeParseState.skillEvents. Empty in practice today — no
-   *  verified Codex skill-invocation tool name — but wired for parity so a
-   *  future confirmed tool name (or a literal 'SlashCommand' function_call)
-   *  is picked up with no further plumbing. */
+  /** #12: see ClaudeParseState.skillEvents. Empty in practice (no verified Codex skill-invocation
+   * tool name) but wired for parity so a future confirmed name needs no more plumbing. */
   skillEvents: SessionEvent[];
   slashCommandEvents: SessionEvent[];
 }
@@ -4308,12 +3854,8 @@ export function initCodexParseState(): CodexParseState {
   };
 }
 
-/**
- * Fold one parsed Codex line into the accumulator — the exact loop body
- * {@link scanCodexSession} used to run inline, extracted verbatim and mutating
- * `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
- * malformed-line skip happens in the caller, as before).
- */
+/** Fold one parsed Codex line into the accumulator: the exact loop body {@link scanCodexSession}
+ * used to run inline, extracted verbatim and mutating `state.*`. The caller skips malformed lines. */
 function applyCodexLine(state: CodexParseState, parsed: any): void {
   collectCodexToolCalls(state.toolCollector, parsed);
   // PR signal, structurally: a Codex `function_call` whose command is
@@ -4376,10 +3918,8 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
     return;
   }
 
-  // Codex rollouts put per-turn metadata (including the model) on
-  // `turn_context` events. Use them as a fallback when session_meta itself
-  // does not carry the field, otherwise `agents sessions` shows blank model
-  // info for Codex.
+  // Codex rollouts put per-turn metadata, including the model, on `turn_context` events. Use them
+  // as a fallback when session_meta lacks the field, or `agents sessions` shows a blank model.
   if (parsed.type === 'turn_context') {
     const payload = parsed.payload || {};
     if (!state.model && typeof payload.model === 'string') state.model = payload.model;
@@ -4423,10 +3963,8 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
   }
 }
 
-/**
- * Build the {@link CodexSessionScan} return object from an accumulator — the
- * exact return-building {@link scanCodexSession} used to run inline.
- */
+/** Build the {@link CodexSessionScan} return object from an accumulator: the exact return-building
+ * {@link scanCodexSession} used to run inline. */
 function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
   // Codex reports one cumulative snapshot: uncached input, cached (cache-read)
   // input, and output+reasoning. It has no cache-write bucket. Derive the burn
@@ -4526,17 +4064,9 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
   return finalizeCodexScan(state);
 }
 
-/**
- * SERIALIZED continuation blob persisted in `scan_ledger.parser_state` for a
- * Codex rollout. Carries everything {@link hydrateCodexParseState} needs to
- * resume a parse from `offset` such that resuming + applying the appended lines
- * is byte-for-byte identical to a full parse of the whole file.
- *
- * Unlike Claude, Codex has NO per-message dedup set, so `messageCount` is a
- * plain additive base with no recent-id window to persist. The `lastTotalTokenUsage`
- * object is round-tripped whole so the last-wins cost/output-token pricing at
- * finalize is identical after a resume.
- */
+/** SERIALIZED continuation blob in `scan_ledger.parser_state` for a Codex rollout: what {@link
+ * hydrateCodexParseState} needs to resume from `offset`. Codex has NO per-message dedup set, so
+ * `messageCount` is a plain additive base; `lastTotalTokenUsage` round-trips whole. */
 export interface CodexParserState {
   // v3: added `assistantContentText` (assistant-answer accumulator). A stale v2
   // blob is rejected, forcing one full reparse — see ClaudeParserState's v5 note.
@@ -4570,11 +4100,8 @@ export interface CodexParserState {
   toolCalls: ToolCallCollectorSnapshot;
 }
 
-/**
- * Snapshot a live {@link CodexParseState} into its serializable form at `offset`
- * bytes consumed. Round-trips through {@link hydrateCodexParseState} so
- * incremental replay equals a full parse.
- */
+/** Snapshot a live {@link CodexParseState} into its serializable form at `offset` bytes consumed.
+ * Round-trips through {@link hydrateCodexParseState} so incremental replay equals a full parse. */
 export function serializeCodexParserState(
   state: CodexParseState,
   offset: number,
@@ -4604,10 +4131,9 @@ export function serializeCodexParserState(
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
     spawnedTeam: state.spawnedTeam,
-    // ticketId is derived at finalize time; persist it (and content_text) so a
-    // consumer can rebuild the row + FTS doc on append without re-reading the
-    // whole file. worktreeSlug is re-derived from cwd/gitBranch, so it need not
-    // be persisted.
+    // ticketId is derived at finalize time; persist it (and content_text) so a consumer can
+    // rebuild the row and FTS doc on append without re-reading the file. worktreeSlug is
+    // re-derived from cwd/gitBranch.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
     assistantContentText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
@@ -4617,16 +4143,9 @@ export function serializeCodexParserState(
   };
 }
 
-/**
- * Rebuild a live {@link CodexParseState} from a persisted continuation so that
- * applying the appended lines yields the same accumulator a full parse would.
- *
- * `userTexts` is rehydrated as a single joined blob from `contentText`: only
- * `userTexts.join('\n')` (detectTicket + contentText) and `userTexts.length > 0`
- * are ever read downstream, and both are preserved by a one-element array
- * holding the joined content. Topic is first-wins and already persisted, so a
- * collapsed userTexts never changes it.
- */
+/** Rebuild a live {@link CodexParseState} from a persisted continuation. `userTexts` becomes one
+ * joined blob; only its join and `.length > 0` are read downstream. Topic is first-wins and
+ * already persisted, so collapsing never changes it. */
 function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
   return {
     sessionId: prior.sessionId,
@@ -4663,19 +4182,9 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
   };
 }
 
-/**
- * Resume a Codex parse from `fromOffset` bytes into the file, folding only the
- * newly-appended lines into `prior`. Returns the finalized scan, the next
- * serialized continuation, and the byte offset to resume from next time.
- *
- * Same trailing-line discipline as {@link scanClaudeSessionIncremental}: apply
- * ONLY the run of newline-terminated lines (slice at the last `'\n'`), and set
- * `newOffset = fromOffset + consumedBytes`. An ordinary tail after the last
- * `'\n'` is deferred; an oversized one advances under a persisted discard bit.
- * Codex `messageCount` is additive with
- * NO dedup, so re-reading a still-unterminated complete line would double-count
- * it; deferring prevents that (the bug class prix-cloud caught for Claude).
- */
+/** Resume a Codex parse from `fromOffset`, folding only new lines into `prior`. Same trailing-line
+ * rule as {@link scanClaudeSessionIncremental}: apply only newline-terminated lines.
+ * `messageCount` has NO dedup, so an unterminated line re-read would double-count. */
 export async function scanCodexSessionIncremental(
   filePath: string,
   fromOffset: number,
@@ -4707,16 +4216,9 @@ function freshCodexParserState(): CodexParserState {
   return serializeCodexParserState(initCodexParseState(), 0);
 }
 
-/**
- * Cheaply derive a Codex rollout's session identity — the `session_meta` id — by
- * streaming only the START of the file (at most `maxBytes`) and stopping once the
- * id is known. Mirrors {@link claudeSessionIdentityAt}: used by
- * {@link scanCodexSessionResumable} to confirm a grown file is still the SAME
- * session before resuming from a stored parse offset. Codex writes `session_meta`
- * (carrying the durable session UUID) on the first line of every rollout, so the
- * id is reached almost immediately. Returns undefined when no id appears within
- * the budget, which forces a FULL parse.
- */
+/** Cheaply derive a Codex rollout's session identity (the `session_meta` id on its first line) by
+ * streaming only the first `maxBytes`. Mirrors {@link claudeSessionIdentityAt}; used by {@link
+ * scanCodexSessionResumable}. Undefined if no id appears, forcing a FULL parse. */
 async function codexSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
   const state = initCodexParseState();
   const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
@@ -4740,15 +4242,9 @@ async function codexSessionIdentityAt(filePath: string, maxBytes = 1_048_576): P
   return state.sessionId;
 }
 
-/**
- * Decide full-vs-incremental for one Codex rollout and parse it uniformly,
- * always returning a finalized scan plus the continuation to persist. Both
- * branches run through the SAME reducer (via {@link scanCodexSessionIncremental}),
- * so an append produces a row identical to a from-scratch full reparse by
- * construction. INCREMENTAL when a prior continuation exists AND the file grew
- * past the persisted offset AND its mtime did not go backwards; FULL (from byte
- * 0, fresh state) otherwise (cold start, truncation/rewrite, clock rewind).
- */
+/** Decide full-vs-incremental for one Codex rollout; both branches share the SAME reducer, so an
+ * append yields a row identical to a full reparse. INCREMENTAL if a prior continuation exists, the
+ * file grew past the offset and mtime did not go backwards; FULL otherwise. */
 export async function scanCodexSessionResumable(
   filePath: string,
   prior: CodexParserState | null,
@@ -4756,17 +4252,9 @@ export async function scanCodexSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
-  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
-  // restore that dropped a DIFFERENT, larger rollout at the same path: both grow
-  // the file and move mtime forward. Resuming from the stored offset across that
-  // boundary would fold the new session's bytes into an accumulator hydrated from
-  // the OLD session, so the persisted row silently diverges from a full reparse.
-  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
-  // offset we re-read the rollout's `session_meta` id and require it to still
-  // match the prior continuation's. An append keeps that id; a rewrite/restore of
-  // a different session changes it. A mismatch — or an id we cannot derive —
-  // falls back to a FULL parse, which is always correct. (A shrink is already
-  // handled: currentFileSize is not > prior.offset, so it takes the FULL branch.)
+  // Size and mtime cannot tell an APPEND from a rewrite or restore of a different rollout at the
+  // same path; resuming would fold its bytes into the OLD accumulator. So require the
+  // `session_meta` id to still match; otherwise take the FULL parse.
   let canIncrement = false;
   if (
     prior !== null &&
@@ -4786,12 +4274,9 @@ export async function scanCodexSessionResumable(
   return { ...result, mode: 'full' };
 }
 
-/**
- * Parse the prior continuation blob for a changed Codex file into a usable
- * {@link CodexParserState}, or null when there is none / it is unusable. A blob
- * from a different serialization version is treated as absent so the file falls
- * back to a clean FULL parse rather than resuming against a stale shape.
- */
+/** Parse the prior continuation blob for a Codex file into a usable {@link CodexParserState}, or
+ * null if absent or unusable. A blob from a different serialization version counts as absent so
+ * the file gets a clean FULL parse. */
 function parsePriorCodexState(row: { parserState: string | null } | undefined): CodexParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -4909,14 +4394,9 @@ function isLocalCommandMessage(text: string): boolean {
   return /<local-command-caveat>|<bash-(input|stdout|stderr)>/i.test(text);
 }
 
-/**
- * Extract the assistant's own answer text from a Claude JSONL assistant event —
- * the reply text blocks, skipping tool_use/tool_result blocks and an
- * interrupted turn, mirroring {@link extractClaudeUserText}'s filters. Unlike
- * the user side (which keeps only the first text block), a single assistant
- * turn can legitimately carry multiple text blocks around tool calls, so every
- * one is joined.
- */
+/** Extract the assistant's answer text from a Claude JSONL assistant event: reply text blocks only,
+ * skipping tool_use/tool_result and interrupted turns, like {@link extractClaudeUserText}. An
+ * assistant turn may carry several text blocks around tool calls, so all are joined. */
 function extractClaudeAssistantText(parsed: any): string | undefined {
   const content = parsed.message?.content;
   if (typeof content === 'string') {
@@ -4972,11 +4452,9 @@ export function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?
 
   const candidates = [sourcePath, safeRealpathSync(sourcePath) || ''];
   const markers = [`/.agents/versions/${agent}/`, `/.agents-system/versions/${agent}/`];
-  // Codex is relocated by CODEX_HOME to `~/.agents/.codex-homes/<version>/`
-  // (shims.ts `codexHomeShimBash`), NOT the `versions/<agent>/<version>/home/…`
-  // layout every other isolated agent uses — so its rollout transcripts live
-  // under `.codex-homes/<version>/sessions/…` and the markers above never match,
-  // leaving `version` NULL and native resume degraded to `/continue` (PHNX-3626).
+  // Codex is relocated by CODEX_HOME to `~/.agents/.codex-homes/<version>/` (shims.ts
+  // `codexHomeShimBash`), not the `versions/<agent>/<version>/home/` layout, so the markers above
+  // never match, leaving `version` NULL and native resume degraded to `/continue` (PHNX-3626).
   if (agent === 'codex') markers.push('/.agents/.codex-homes/');
 
   for (const candidate of candidates) {
@@ -5049,16 +4527,9 @@ function sumKnownNumbers(values: unknown[]): number | null {
 // Time range parsing
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Cursor
-// ---------------------------------------------------------------------------
-// Cursor writes the conversation to
-// projects/<encoded-cwd>/agent-transcripts/<uuid>/<uuid>.jsonl and metadata to
-// chats/<workspace-hash>/<uuid>/meta.json. Discovery deliberately starts from
-// transcripts, then joins metadata by UUID: chat directories with no transcript
-// are empty or abandoned sessions and must not become broken zero-event rows.
-// Routine archives may contain only the transcript; those remain browsable with
-// file timestamps and without guessed cwd/title metadata.
+// Cursor writes the conversation to projects/<encoded-cwd>/agent-transcripts/<uuid>/<uuid>.jsonl
+// and metadata to chats/<workspace-hash>/<uuid>/meta.json. Discovery starts from transcripts and
+// joins metadata by UUID, so chat dirs without a transcript never become zero-event rows.
 
 /** Incrementally re-scan changed Cursor transcript files and upsert into the DB. */
 async function scanCursorIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
@@ -5190,12 +4661,9 @@ export function readCursorMeta(
   return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n'), events };
 }
 
-// ---------------------------------------------------------------------------
-// Kimi
-// ---------------------------------------------------------------------------
-// Kimi stores sessions under ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/.
-// Each session has state.json (metadata) and agents/main/wire.jsonl (conversation).
-// A session_index.jsonl at ~/.kimi-code/ maps session IDs to directories.
+// Kimi stores sessions under ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/, each with
+// state.json (metadata) and agents/main/wire.jsonl (conversation). A session_index.jsonl at
+// ~/.kimi-code/ maps session IDs to directories.
 
 /** Incrementally re-scan changed Kimi session state.json files and upsert into the DB. */
 async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
@@ -5283,11 +4751,9 @@ export function readKimiMeta(
 
   const createdAt = typeof state.createdAt === 'string' ? state.createdAt : undefined;
   const updatedAt = typeof state.updatedAt === 'string' ? state.updatedAt : undefined;
-  // Coerce to never-null, the same way every other parser does (Rush/Hermes/Droid/…):
-  // a real createdAt/updatedAt still wins; otherwise fall back to the state.json mtime.
-  // Kimi was the lone parser that could yield `undefined`, which binds NULL into
-  // `timestamp TEXT NOT NULL` and aborts the whole batch index. mtime also matches how
-  // the listing already ranks Kimi (last_activity resolves to the file mtime).
+  // Coerce to never-null like every other parser: a real createdAt/updatedAt wins, else the
+  // state.json mtime. Kimi alone could yield `undefined`, binding NULL into `timestamp TEXT NOT
+  // NULL` and aborting the whole batch index. mtime also matches how the listing ranks Kimi.
   const stat = safeStatSync(filePath);
   const timestamp = updatedAt || createdAt
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
@@ -5328,12 +4794,9 @@ export function readKimiMeta(
   return { meta, content: lastPrompt || '', parserState: JSON.stringify(newState) };
 }
 
-/**
- * Kimi wire metrics are pure additive counters (messageCount, tokenCount,
- * outputTokens) with NO straddle/dedup state, so the continuation is just those
- * three bases plus the byte `offset` already consumed from wire.jsonl. Resuming
- * from `offset` + adding the appended tail's deltas equals a full parse.
- */
+/** Kimi wire metrics are pure additive counters (messageCount, tokenCount, outputTokens) with NO
+ * straddle or dedup state, so the continuation is those three bases plus the byte `offset`
+ * consumed from wire.jsonl. */
 export interface KimiParserState {
   v: 2;
   offset: number;
@@ -5370,21 +4833,9 @@ function applyKimiWireEvent(
   }
 }
 
-/**
- * Incrementally parse Kimi's wire.jsonl for message-count and token counters,
- * resuming from a persisted continuation instead of re-reading from byte 0 every
- * scan. Returns the finalized counters and the next {@link KimiParserState} to
- * persist (offset + the three counter bases).
- *
- * Same trailing-line discipline as {@link scanClaudeSessionIncremental}: read
- * only the appended byte range from `prior.offset`, apply ONLY the run of
- * newline-terminated lines (slice at the last `'\n'`), and advance the offset to
- * `prior.offset + consumedBytes`. A complete-but-not-yet-terminated last record
- * is DEFERRED to the next pass; because these counters are additive with no
- * dedup, re-reading such a line would double-count it. FULL parse from byte 0
- * (fresh counters) when there is no prior OR the file shrank below the stored
- * offset (truncation/rewrite).
- */
+/** Incrementally parse Kimi's wire.jsonl counters, resuming from a persisted {@link
+ * KimiParserState}. Same trailing-line rule as {@link scanClaudeSessionIncremental}: counters are
+ * additive, so only newline-terminated lines apply. FULL parse if no prior or the file shrank. */
 export function parseKimiWireMetricsIncremental(
   sessionDir: string,
   prior: KimiParserState | null,
@@ -5398,20 +4849,9 @@ export function parseKimiWireMetricsIncremental(
     return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 2, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
   }
 
-  // INCREMENTAL only when a usable prior exists AND the file grew past its
-  // offset; otherwise FULL from byte 0 with fresh counters (cold start OR the
-  // file shrank to/below the offset — a truncation/rewrite).
-  //
-  // No session-identity re-check is needed here (unlike Claude's
-  // claudeSessionIdentityAt / Codex's codexSessionIdentityAt, which guard against
-  // an in-place rewrite dropping a DIFFERENT session at the same path). A Kimi
-  // wire.jsonl is uniquely keyed by its session dir — `.../session_<uuid>/agents/
-  // main/wire.jsonl` (see readKimiMeta: sessionId is `session_<uuid>` and must
-  // start with `session_`) — and Kimi only ever APPENDS to that per-session log.
-  // The path therefore cannot host a different session's transcript, so a
-  // size-grew wire.jsonl is always the same session's append. (A truncation/
-  // rewrite — the only way its bytes could diverge — already shrinks it to/below
-  // the offset and takes the FULL branch above.)
+  // INCREMENTAL only with a usable prior and a file grown past its offset; otherwise FULL from
+  // byte 0. No identity re-check, unlike Claude/Codex: wire.jsonl is keyed by its `session_<uuid>`
+  // dir and Kimi only APPENDS, so growth is the same session.
   const canIncrement = prior !== null && stat.size > prior.offset;
   const fromOffset = canIncrement ? prior!.offset : 0;
   const acc = canIncrement
@@ -5421,12 +4861,9 @@ export function parseKimiWireMetricsIncremental(
   let consumedBytes = 0;
   let fd: number | undefined;
   try {
-    // Read ONLY the appended byte range [fromOffset, stat.size) — not the whole
-    // file. readSync from an explicit position keeps this function synchronous
-    // (its callers are sync) while making the disk read + allocation scale with
-    // the appended delta, not total file size, matching scanCodexSessionIncremental
-    // / scanClaudeSessionIncremental. Bytes past the stat'd size are a concurrent
-    // append and are deferred to the next scan.
+    // Read ONLY the appended range [fromOffset, stat.size). readSync from a position keeps this
+    // synchronous while the read scales with the delta; bytes past the stat'd size are a
+    // concurrent append, deferred to the next scan.
     const bytesToRead = Math.max(0, stat.size - fromOffset);
     const appended = Buffer.allocUnsafe(bytesToRead);
     if (bytesToRead > 0) {
@@ -5469,12 +4906,9 @@ export function parseKimiWireMetricsIncremental(
   };
 }
 
-/**
- * Parse the prior continuation blob for a changed Kimi session into a usable
- * {@link KimiParserState}, or null when there is none / it is unusable. A blob
- * from a different serialization version is treated as absent so the wire parse
- * falls back to a clean FULL parse rather than resuming against a stale shape.
- */
+/** Parse the prior continuation blob for a Kimi session into a usable {@link KimiParserState}, or
+ * null if absent or unusable. A blob from a different serialization version counts as absent so
+ * the wire parse does a clean FULL parse. */
 function parsePriorKimiState(row: { parserState: string | null } | undefined): KimiParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -5486,14 +4920,9 @@ function parsePriorKimiState(row: { parserState: string | null } | undefined): K
   }
 }
 
-/**
- * Scan Grok sessions. Grok stores one directory per session under
- * ~/.grok/sessions/<url-encoded-cwd>/<uuid>/, each holding a summary.json with
- * structured metadata (id, cwd, title, timestamps, message count). Same
- * dir-per-session (L3) shape as Kimi, so it walks two levels and gates the
- * summary.json read through the scan ledger. Before this, Grok had a type slot
- * and a placeholder parser but no scanner, so `agents sessions` never indexed it.
- */
+/** Scan Grok sessions: one directory per session under ~/.grok/sessions/<url-encoded-cwd>/<uuid>/,
+ * each with a summary.json (id, cwd, title, timestamps, message count). Same dir-per-session (L3)
+ * shape as Kimi: walk two levels and gate the summary.json read through the scan ledger. */
 async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('grok');
 
@@ -5553,18 +4982,9 @@ async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Prom
   recordScans(touched);
 }
 
-/**
- * Bounded read of a Grok `chat_history.jsonl` for the genuine full first user
- * turn (PHNX-3621 leftover from #3359). Grok's cheap scan reads only
- * `summary.json` (a LARGE-transcript harness whose full message log is
- * deliberately not parsed on the hot tick), but the first turn is at the START
- * of the log, so a bounded prefix read recovers it without paying the full-file
- * cost. Production logs lead with a `type:system` record, then a huge
- * `<user_info>` user dump (no `synthetic_reason`), then a `synthetic_reason`
- * reminder, then the originating turn at `prompt_index: 0` wrapped in
- * `<user_query>`. Skip that scaffolding and prefer `prompt_index` when present.
- * Returns undefined when no genuine user turn appears within the budget.
- */
+/** Bounded prefix read of a Grok `chat_history.jsonl` for the genuine first user turn (PHNX-3621);
+ * the cheap scan reads only `summary.json`. Skip scaffolding (`type:system`, `<user_info>`,
+ * `synthetic_reason`) and prefer `prompt_index` 0. Undefined if none appears. */
 function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): string | undefined {
   const historyPath = path.join(sessionDir, 'chat_history.jsonl');
   let fd: number | undefined;
@@ -5654,11 +5074,9 @@ export function readGrokMeta(
         ? summary.num_messages
         : undefined;
 
-  // Grok records its managed home in summary.grok_home
-  // (…/versions/grok/<version>/home/.grok) — recover the version from it. The
-  // value is written by the Grok CLI in the writing host's native separators, so
-  // a Windows-authored summary is backslash-separated; normalize to `/` before
-  // matching or the version never resolves on Windows (RUSH-2286).
+  // Grok records its managed home in summary.grok_home (…/versions/grok/<version>/home/.grok);
+  // recover the version from it. It uses the writing host's native separators, so normalize
+  // backslashes to `/` first or the version never resolves on Windows (RUSH-2286).
   let embeddedVersion: string | undefined;
   if (typeof summary?.grok_home === 'string') {
     embeddedVersion = summary.grok_home.replace(/\\/g, '/').match(/versions\/grok\/([^/]+)\//)?.[1];
@@ -5682,9 +5100,7 @@ export function readGrokMeta(
   return { meta, content: topic || '' };
 }
 
-// parseTimeFilter moved to ./relative-time.js — a leaf module — so a caller that
-// only needs the duration parser does not pull this file's `../sqlite.js` import
-// (and Node's SQLite ExperimentalWarning on stderr) into its module graph.
-// Re-exported so every existing importer keeps working unchanged. Imported too,
-// because a bare re-export does not bind the name for this file's own callers.
+// parseTimeFilter moved to the leaf module ./relative-time.js so a caller needing only it avoids
+// this file's `../sqlite.js` import (and Node's SQLite warning). Re-exported for existing
+// importers, and imported since a bare re-export binds no local name.
 export { parseTimeFilter } from './relative-time.js';

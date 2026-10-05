@@ -1,17 +1,6 @@
-/**
- * PHNX-3337 — the cross-harness `agents-cli` discovery skill + the repo-root
- * Claude plugin marketplace are a distribution contract: an outside agent runs
- * `claude plugin marketplace add phnx-labs/agents-cli` (reads
- * `.claude-plugin/marketplace.json`) or `npx skills add phnx-labs/agents-cli`
- * (reads `skills/**\/SKILL.md`). Both break silently if the committed files drift
- * from the schema Claude Code / skills.sh parse, or if the SKILL.md description
- * loses a trigger intent — the string the runtime matches an operator's question
- * against.
- *
- * This exercises the REAL committed files at the repo root (no fixtures, no
- * mocks) and the REAL manifest validator the CLI uses everywhere else
- * (`validateClaudePluginManifest`), so a regression to either surface fails here.
- */
+/** PHNX-3337: the agents-cli skill and repo-root Claude marketplace are a distribution contract
+ * that breaks silently on schema drift or a lost SKILL.md trigger. Exercises the REAL committed
+ * files and the real validateClaudePluginManifest, no fixtures or mocks. */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';

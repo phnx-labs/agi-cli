@@ -1,31 +1,6 @@
-/**
- * Singleflight + short-TTL disk cache for the `agents doctor --json` OVERVIEW
- * payload (the bare, no-target form the menu-bar helper and other pollers read).
- *
- * Why this exists (RUSH-2153): the bare `doctor --json` overview is expensive —
- * it probes every host CLI, spawns every installed agent CLI for its sign-in,
- * and diffs every agent×version against its source. On an idle box that is a few
- * seconds; on a loaded one it is minutes. The menu-bar helper polls it on a 60s
- * timer with a per-*process* in-flight guard, so nothing coalesces ACROSS
- * processes: a helper relaunch (or any second poller) each launches its own
- * live compute, and a helper killed mid-run orphans its `doctor --json` child,
- * which keeps spinning. In steady state this stacked to dozens of concurrent
- * `doctor --json` processes pinning ~14 cores and driving load to ~300.
- *
- * The fix mirrors the {@link readStatsCache}/`writeStatsCache` mirror-file
- * convention: reads are cache-first, and when a live compute IS needed exactly
- * ONE runs at a time. The singleflight is the shared `proper-lockfile` lock (via
- * `ensureLockTarget` + `lockfile.lock`) — the SAME battle-tested lock the rest of
- * the CLI uses (fs-atomic.ts) — which owns two things a hand-rolled lock got
- * wrong: (1) it auto-refreshes the lock's mtime on a timer while held, so a live
- * computer whose compute runs for minutes is never mistaken for a crashed one
- * and stolen; (2) `release()` only ever releases the lock THIS caller acquired,
- * so a slow computer can't delete a successor's lock. Waiters block on the lock
- * up to a bounded budget, then serve the last snapshot rather than pile on.
- *
- * The cache write is tmp+rename so a concurrent reader never sees a partial file.
- * All IO is best-effort: a failure degrades to a live compute, never a throw.
- */
+/** Singleflight + short-TTL disk cache for the `agents doctor --json` overview polled by the
+ * menu-bar helper (RUSH-2153). It is expensive, and relaunches stacked dozens of processes (load
+ * ~300). One live compute at a time via a lockfile; waiters serve the last snapshot. */
 import * as fs from 'fs';
 import * as path from 'path';
 import lockfile from 'proper-lockfile';
@@ -38,19 +13,12 @@ const LOCK_TARGET_FILE = '.doctor-overview.lock-target';
 
 /** Serve a cached snapshot without recomputing while it is younger than this. */
 export const DOCTOR_OVERVIEW_FRESH_MS = 90_000;
-/**
- * A held lock older than this is treated as a crashed computer and broken. The
- * lock's mtime is auto-refreshed by proper-lockfile every `stale/2` while a live
- * computer holds it (the event loop turns during the compute's `await`ed
- * subprocess spawns), so this only ever breaks a genuinely dead holder.
- */
+/** A held lock older than this is a crashed computer and is broken. proper-lockfile refreshes mtime
+ * every `stale/2` while a live computer holds it, so only a dead holder is broken. */
 const LOCK_STALE_MS = 60_000;
-/**
- * How long a waiter blocks on the lock before giving up and serving the last
- * snapshot. Sized to comfortably exceed a slow (multi-second-to-minutes) compute
- * so a waiter normally gets the winner's fresh write; capped so a truly wedged
- * holder never hangs the CLI (it serves stale instead).
- */
+/** How long a waiter blocks on the lock before serving the last snapshot. Sized above a slow
+ * compute so a waiter usually gets the winner's write; capped so a wedged holder never hangs the
+ * CLI. */
 const LOCK_RETRIES = { retries: 240, factor: 1, minTimeout: 500, maxTimeout: 500 } as const;
 
 interface CacheFile {
@@ -102,12 +70,9 @@ export function writeDoctorOverviewCache(payload: unknown, deps: DoctorOverviewC
   }
 }
 
-/**
- * Drop the cached overview after a doctor repair attempt changes (or fails to
- * change) live health. Best-effort and deliberately narrow: it never touches
- * the singleflight lock, so an in-progress overview compute remains owned by
- * its holder and no repair can create a retry loop.
- */
+/** Drop the cached overview after a doctor repair changes (or fails to change) health. Best-effort
+ * and narrow: it never touches the singleflight lock, so an in-progress compute stays owned by its
+ * holder and no repair can create a retry loop. */
 export function invalidateDoctorOverviewCache(deps: DoctorOverviewCacheDeps = {}): void {
   const dir = deps.dir ?? getCacheDir();
   try {
@@ -117,32 +82,17 @@ export function invalidateDoctorOverviewCache(deps: DoctorOverviewCacheDeps = {}
   }
 }
 
-/**
- * Result of {@link enterDoctorOverviewGate}.
- *  - `cached` non-null → the caller MUST print this string and return; no compute.
- *  - `cached` null     → the caller holds the singleflight lock: compute the
- *    overview, call {@link writeDoctorOverviewCache}, and invoke `release()` on
- *    the way out. Call `release()` in a `finally` so a compute that throws still
- *    frees the lock promptly (idempotent).
- */
+/** Result of {@link enterDoctorOverviewGate}: non-null `cached` means print it and return; null
+ * `cached` means the caller holds the lock, computes, calls {@link writeDoctorOverviewCache}, and
+ * calls `release()` in a `finally` (idempotent) so a throwing compute still frees the lock. */
 interface OverviewGate {
   cached: string | null;
   release?: () => void;
 }
 
-/**
- * Enter the doctor-overview singleflight gate. Returns a cached string to print,
- * or a lock token telling the caller to compute (and then write + release).
- *
- * Contract:
- *  - Fresh snapshot present (and not `forceRefresh`) → `{ cached }`, no lock.
- *  - Otherwise exactly one caller holds the lock and gets `{ cached: null,
- *    release }`; everyone else blocks on the lock, then (on acquiring it)
- *    double-checks and serves the winner's fresh write — or, if the winner runs
- *    past the wait budget, serves the last snapshot — rather than recomputing.
- *  - Never throws: any IO/lock failure degrades to a compute token or a served
- *    snapshot.
- */
+/** Enter the doctor-overview singleflight: returns a cached string to print, or a lock token to
+ * compute, write, and release. A fresh snapshot (without `forceRefresh`) returns `{ cached }`;
+ * otherwise one caller holds the lock. Never throws; failure degrades to a compute token. */
 export async function enterDoctorOverviewGate(
   opts: { forceRefresh?: boolean; freshMs?: number } = {},
   deps: DoctorOverviewCacheDeps = {},
@@ -196,11 +146,8 @@ export async function enterDoctorOverviewGate(
   //    serve it and release, instead of recomputing.
   const afterWait = serveFresh();
   if (afterWait !== null) {
-    // AWAIT, don't fire-and-forget: returning while the lockfile is still on
-    // disk makes the next caller retry against a lock that is logically free —
-    // the same pile-up this gate exists to prevent, just narrowed to the window
-    // between return and unlink. We are already in an async function, so the
-    // wait costs one unlink.
+    // Await, don't fire-and-forget: returning while the lockfile is on disk makes the next caller
+    // retry against a logically free lock, the pile-up this gate prevents. It costs one unlink.
     await release().catch(() => {});
     return { cached: afterWait };
   }

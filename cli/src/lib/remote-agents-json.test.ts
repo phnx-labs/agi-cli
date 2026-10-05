@@ -14,11 +14,8 @@ import { REMOTE_STDOUT_MAX_BYTES } from './ssh-exec.js';
 import { parseRemoteListPayload } from './session/remote-list.js';
 import { decodeRenderedPowershell } from './hosts/remote-cmd.test-fixture.js';
 
-/**
- * A fake `ssh` child: an EventEmitter for the process-level `error`/`close`
- * events with a nested emitter standing in for `stdout`, recording every kill so
- * a test can assert the capture aborted a runaway peer.
- */
+/** A fake `ssh` child: an EventEmitter for process-level `error`/`close` with a nested emitter
+ * standing in for `stdout`, recording every kill so a test can assert a runaway peer was aborted. */
 class FakeChild extends EventEmitter implements CapturableChild {
   readonly stdout = new EventEmitter();
   readonly kills: Array<NodeJS.Signals | undefined> = [];
@@ -174,10 +171,9 @@ describe('gatherRemoteAgentsJson early-exit + cancellation', () => {
   });
 
   it('with NO earlyExit, two peers holding distinct same-label rows are BOTH collected (conflict stays visible)', async () => {
-    // The regression the reviewer caught: if labels early-exited, the first peer
-    // would abort the second and hide the collision. Labels do NOT pass earlyExit
-    // (they are not globally unique), so both rows come back and the caller can
-    // surface the conflict. Modelled as two distinct ids sharing a label.
+    // Regression caught in review: if labels early-exited, the first peer would abort the second
+    // and hide the collision. Labels are not globally unique and do NOT pass earlyExit, so both
+    // rows come back and the caller can surface the conflict (two distinct ids sharing a label).
     const capture: SshCaptureFn = (target) => new Promise((resolve) => {
       if (target === FAST) resolve({ code: 0, stdout: JSON.stringify([{ id: 'peer-a', label: 'dup' }]) });
       else setTimeout(() => resolve({ code: 0, stdout: JSON.stringify([{ id: 'peer-b', label: 'dup' }]) }), 25);
@@ -195,15 +191,9 @@ describe('gatherRemoteAgentsJson early-exit + cancellation', () => {
     expect(result.items.map(r => r.id).sort()).toEqual(['peer-a', 'peer-b']);
   });
 
-  // PHNX-3292 widened isDefinitiveMatch/selectorAllowsEarlyExit past full UUID
-  // to a live tmux alias and an exact 8-hex short id — both name at most one
-  // session PER ANSWERING peer, so the trade above (label rows stay all-settle)
-  // does not apply to them the same way. These two tests pin the accepted risk
-  // documented on isDefinitiveMatch: a peer that has genuinely not answered YET
-  // when the abort fires is invisible to the uniqueness check (same stance
-  // SES-9a already takes for an unreachable peer post-sweep) — but a peer that
-  // HAS answered, even a beat before the abort takes effect, still contributes
-  // its row, so a real collision between two ANSWERED peers is never hidden.
+  // PHNX-3292 widened early-exit to a live tmux alias and an exact 8-hex short id. These pin the
+  // accepted risk on isDefinitiveMatch: a peer that hasn't answered when the abort fires is
+  // invisible to the uniqueness check, but one that HAS answered still contributes its row.
   it('PHNX-3292: a genuinely slower peer sharing the short id is cancelled, not surfaced as a collision (accepted risk)', async () => {
     const capture: SshCaptureFn = (target, _cmd, { signal }) => new Promise((resolve) => {
       if (target === FAST) { resolve({ code: 0, stdout: JSON.stringify([{ id: 'session-a', shortId: '0145ab8f' }]) }); return; }

@@ -1,8 +1,6 @@
-/**
- * The gh overload shim's generated script must be a faithful, self-healing
- * passthrough: recursion-guarded, only intercepting `pr checks`, and degrading to
- * real gh when agents-cli is gone — so a leftover shim can never break `gh`.
- */
+/** The gh overload shim's script must be a faithful, self-healing passthrough: recursion-
+ * guarded, intercepting only `pr checks`, and degrading to real gh when agents-cli is gone, so
+ * a leftover shim can never break `gh`. */
 
 import { describe, expect, it } from 'vitest';
 import { generateGhOverloadShim, isGhOverloadShim } from './shims.js';

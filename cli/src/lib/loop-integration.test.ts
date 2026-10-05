@@ -1,13 +1,6 @@
-/**
- * Integration test for the loop driver (issue #332).
- *
- * Unlike loop.test.ts (which injects a fake run-fn), this exercises the REAL
- * defaultRunIteration — actual child_process.spawn, actual stdout stream-json
- * parsing, actual token accumulation — against a fake `claude` binary on PATH
- * that emits real Claude-shaped stream-json and writes loop-signal.json. This
- * proves the spawn + parse + signal + checkpoint + resume wiring end-to-end
- * without paying for a real model.
- */
+/** Integration test for the loop driver (issue #332): exercises the REAL defaultRunIteration
+ * (spawn, stream-json parsing, token accumulation) against a fake `claude` on PATH, proving spawn,
+ * signal, checkpoint and resume wiring without a real model. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -155,10 +148,9 @@ describe('loop driver — checkpoint write + resume continuity', () => {
     const finalCp = readCheckpoint(cpFile)!;
     expect(finalCp.iteration).toBe(4);
     expect(finalCp.cumulativeTokens).toBe(640);
-    // Each iteration pins a DISTINCT session id (`--session-id` CREATES a
-    // session; re-passing one errors "already in use"). Continuity is threaded
-    // via /continue, not a shared id — so the final checkpoint records the LAST
-    // iteration's fresh id, which differs from the resumed-from id.
+    // Each iteration pins a DISTINCT session id (`--session-id` creates a session; re-passing one
+    // errors). Continuity comes via /continue, so the final checkpoint records the last
+    // iteration's fresh id, not the resumed-from one.
     expect(typeof finalCp.sessionId).toBe('string');
     expect(finalCp.sessionId).not.toBe(cp!.sessionId);
   });

@@ -9,13 +9,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-mirror-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Pin this box's device id so the suite is independent of the host it runs on
-// (PHNX-3850). Otherwise machineId() resolves to the real hostname: on a box
-// literally named `yosemite-m6` it collides with the peer this file uses as a
-// remote publisher, and consumeSessionMirrorFromSharedStore skips that peer's
-// digest as "self" — the fold never runs and the placeholder-label overwrite is
-// never exercised. A fixed id that matches no peer keeps self and every peer
-// distinct on every machine.
+// Pin this box's device id (PHNX-3850) so the suite is host-independent. On a host named
+// `yosemite-m6`, machineId() collides with the remote peer used here and its digest is skipped as
+// self.
 process.env.AGENTS_SYNC_MACHINE_ID = 'mirror-test-self';
 
 const { getSessionsDir, getUserAgentsDir } = await import('../state.js');
@@ -431,12 +427,9 @@ describe('session mirror (real DB + real shared-state files)', () => {
   });
 
   it('keeps every session_text row at its session\'s rowid across local upsert, re-upsert, mirror fold and prune (PHNX-4154)', () => {
-    // Every writer above ran in this suite: seedLocalSession (twice for one id
-    // — a rescan must replace, not duplicate), the peer fold, the placeholder
-    // overwrite, and the prune. The text row of each survivor must sit at its
-    // session's rowid, and a pruned session must leave no text row behind —
-    // a stray row is unreachable by rowid and would only ever be found by
-    // the full scan this fix removed.
+    // Each survivor's text row must sit at its session's rowid and a pruned session must leave
+    // none. A stray row is unreachable by rowid and would only be found by the full scan this fix
+    // removed.
     seedLocalSession({ id: 'ffffffff-0000-0000-0000-000000000006', topic: 'keep me local, rescanned' });
     const d = new Database(path.join(getSessionsDir(), 'sessions.db'));
     try {
@@ -478,10 +471,9 @@ describe('a mirror row reclaimed by a real local transcript (PHNX-3792 blocker f
     expect(asLocal.mirror_source).toBeNull();
     expect(asLocal.file_path).toBeTruthy();
 
-    // 3. (a) Prune with a cutoff PAST the original stale stamp — the reclaimed row
-    // survives because its stamp is now NULL, not because it is fresh. (The prune
-    // count is not asserted: this file shares one DB, so other tests' mirror rows
-    // also fall in the cutoff — what matters is that THIS real local row is spared.)
+    // Prune with a cutoff past the stale stamp: the reclaimed row survives because its stamp is
+    // NULL, not because it is fresh. The prune count is not asserted since this file shares one
+    // DB.
     db.pruneMirrorSessions(Date.now());
     expect(rawRow(ID)).toBeTruthy();
 

@@ -17,11 +17,9 @@ vi.mock('@inquirer/prompts', async (importOriginal) => {
   return { ...actual, password: vi.fn(actual.password) };
 });
 
-// Provider accounts (`agents accounts add`, addAccount) are bundles with no
-// explicit backend, so on a headed macOS box the real standalone would write
-// them to the operator's login keychain; those tests run where keychain items
-// are file-backed (headless Linux/Windows, CI). The reserved `auth` bundle is
-// explicitly file-backed and runs everywhere.
+// Provider accounts are bundles with no explicit backend, so on a headed macOS box the real
+// standalone would write them to the operator's login keychain. Those tests run where items are
+// file-backed; the reserved `auth` bundle is explicitly file-backed and runs everywhere.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 function cancelledPromptError(): Error {
@@ -42,11 +40,9 @@ describe('accounts credential import', () => {
   });
 });
 
-/**
- * PHNX-2578: add --from-secrets and inspect used to throw a raw Error that
- * bootstrap rethrows as an uncaught Node stack dump. They must fail as a
- * commander CLI error (code accounts.error) with a one-line message.
- */
+/** PHNX-2578: add --from-secrets and inspect threw a raw Error that bootstrap rethrows as an
+ * uncaught Node stack dump. They must fail as a commander CLI error (code accounts.error) with a
+ * one-line message. */
 describe('accounts add/inspect CLI errors', () => {
   useFreshSecretsHome();
 

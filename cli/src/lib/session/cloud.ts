@@ -1,14 +1,6 @@
-/**
- * Rush Cloud session source.
- *
- * Fetches cloud-captured sessions from the cloud proxy (api.prix.dev) and caches
- * them locally so the existing filesystem-based parse pipeline works unchanged.
- *
- * Endpoints consumed by the cloud proxy:
- *   GET /api/v1/cloud-runs                  → list executions
- *   GET /api/v1/cloud-runs/:id              → get one (used for meta)
- *   GET /api/v1/cloud-runs/:id/session.jsonl → raw captured jsonl
- */
+/** Rush Cloud session source: fetches cloud-captured sessions from the cloud proxy (api.prix.dev)
+ * and caches them locally so the filesystem-based parse pipeline works unchanged. Consumes `GET
+ * /api/v1/cloud-runs`, `/cloud-runs/:id` (meta) and `/cloud-runs/:id/session.jsonl` (raw capture). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -101,11 +93,8 @@ function cachePathForExecution(executionId: string, agent: SessionAgentId): stri
   return assertContained(path.join(id, `session.${agent}.jsonl`), CLOUD_CACHE_DIR);
 }
 
-/**
- * List cloud executions the user has captured sessions for. Includes
- * completed + needs_review + failed; an empty session_path means capture
- * never ran, so those are silently dropped.
- */
+/** List cloud executions with captured sessions (completed, needs_review, failed). An empty
+ * session_path means capture never ran, so those are silently dropped. */
 export async function discoverCloudSessions(options?: {
   limit?: number;
 }): Promise<SessionMeta[]> {
@@ -147,11 +136,8 @@ export async function discoverCloudSessions(options?: {
   return out;
 }
 
-/**
- * Fetch the jsonl for one cloud execution and stash it in the local cache.
- * Returns the local file path. Re-fetches on every call (cheap — executions
- * are immutable once complete). Callers may pass an already-known filePath.
- */
+/** Fetch the jsonl for one cloud execution into the local cache and return its path. Re-fetches
+ * every call (cheap; completed executions are immutable). Callers may pass a known filePath. */
 export async function ensureCloudSessionCached(
   executionId: string,
   destPath?: string,

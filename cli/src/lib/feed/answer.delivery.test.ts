@@ -1,12 +1,6 @@
-/**
- * Reliable answer delivery (PHNX-3999) — no mocks anywhere.
- *
- * Every rail is exercised for real: the remote hop spawns a real `ssh` and a
- * real `agents` (child scripts on PATH, so the tokens asserted are the ones a
- * login shell actually reconstructed), the PR enrichment is gated by a real `gh`
- * on PATH, the keystroke rail drives a real tmux pane, and every claim/receipt
- * assertion reads a real temporary feed store.
- */
+/** Reliable answer delivery (PHNX-3999), no mocks: real ssh and agents child scripts on PATH, a
+ * real `gh`, a real tmux pane, and a real temporary feed store for claim and receipt
+ * assertions. */
 import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -99,11 +93,8 @@ describe('attention key', () => {
 // --- the remote hop ---------------------------------------------------------
 
 describe('forwardFeedAnswer over a real ssh child', () => {
-  /**
-   * A faithful `ssh`: real ssh hands its LAST argument to the remote login
-   * shell, so the fake does exactly that. Anything that survives to the recorder
-   * survived a real `sh -c` parse.
-   */
+  /** A faithful `ssh`: real ssh hands its last argument to the remote login shell, so the fake
+   * does too and survives a real `sh -c` parse. */
   function fakeSsh(bin: string): void {
     script(bin, 'ssh', 'for last; do :; done\nexec sh -c "$last"');
   }
@@ -537,20 +528,9 @@ const bunPath = (() => {
 })();
 
 describe('claim release under REAL concurrency', () => {
-  /**
-   * Real OS processes, because `Promise.all` cannot contend: the claim/release
-   * path is synchronous file I/O, so two promises in one event loop never
-   * interleave inside it.
-   *
-   * HONEST SCOPE: this is an end-to-end contention smoke, not proof of the
-   * release token. Measured — it passes with the token removed too, because
-   * `recordAnswer`'s own `O_EXCL` already yields a single winner for THIS
-   * interleaving. The token guards a narrower one (a caller that passed the
-   * compare, then unlinks the marker a faster peer has already re-taken), whose
-   * window is microseconds and is not reproducible on demand. What IS proven
-   * deterministically is the token's contract: a live owner blocks the release,
-   * and a dead owner's token is reclaimed — the two tests below.
-   */
+  /** Real OS processes, since `Promise.all` cannot contend on synchronous claim/release file
+   * I/O. Honest scope: an end-to-end contention smoke that passes even without the release
+   * token, because `recordAnswer`'s O_EXCL already yields one winner here. */
   it.skipIf(!bunPath)('lets exactly one of six real processes adopt a stranded claim', async () => {
     const feedRoot = dir('feed');
     const outFile = path.join(tmp, 'adopters.txt');

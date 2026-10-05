@@ -1,8 +1,5 @@
-/**
- * The switches that gate the automatic-update pass (PHNX-3940). Real
- * filesystem — HOME redirected to a temp dir so `state.ts`/`device-config.ts`
- * resolve `agents.yaml` there.
- */
+/** The switches that gate the automatic-update pass (PHNX-3940), on a real filesystem with HOME
+ * redirected so `state.ts`/`device-config.ts` resolve `agents.yaml` there. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

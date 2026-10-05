@@ -45,10 +45,9 @@ describe('stripClixml', () => {
   });
 
   it('does NOT delete a legitimate JSON value that merely quotes CLIXML text', () => {
-    // A real CLIXML banner is present (so the guard fires), and the payload's own
-    // string fields contain the literal substrings `<Objs` and `</Objs>`. A naive
-    // global `<Objs>…</Objs>` strip would silently delete the JSON between them;
-    // the banner-anchored strip must leave the payload intact.
+    // A real CLIXML banner is present and the payload's own strings contain `<Objs` and `</Objs>`;
+    // a naive global strip would delete the JSON between them, so the banner-anchored strip must
+    // leave the payload intact.
     const payload = '{"topic":"debug <Objs> parsing","label":"</Objs> handler","outputTokens":5}';
     const cleaned = stripClixml(CLIXML_BANNER + '\n' + payload);
     const parsed = JSON.parse(cleaned);
@@ -65,13 +64,9 @@ const decodeWindows = decodeRenderedPowershell;
 
 const SPECS: StripSpec[] = [...HOST_ROUTING_SPECS, { long: 'no-tty', takesValue: false }];
 
-/**
- * Decode the argv the *remote* would actually receive. `buildRemoteAgentsInvocation`
- * emits `bash -lc '<...>'`; ssh hands that to the remote login shell, which runs it.
- * We reproduce that exactly with an `agents` shim that prints each arg on its own
- * line, so stdout == the remote argv — the true end-to-end check of the two-layer
- * quoting (injection-safety).
- */
+/** Decode the argv the remote would receive: `buildRemoteAgentsInvocation` emits `bash -lc
+ * '<...>'` and an `agents` shim prints each arg per line, so stdout is the remote argv, an end-
+ * to-end check of the two-layer quoting (injection safety). */
 function decodeRemoteArgv(forwarded: string[], remoteCwd?: string): string[] {
   const shim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; cd /; `;
   const res = spawnSync('bash', ['-c', shim + buildRemoteAgentsInvocation(forwarded, remoteCwd)], {
@@ -168,11 +163,9 @@ describe('buildRemoteAgentsInvocation (two-layer quoting is injection-safe)', ()
 });
 
 describe('secrets export --device push command (cross-platform)', () => {
-  // The keychain export push drives `agents secrets import --from -` on the
-  // remote (`--from -` reads the .env off ssh stdin — the cross-platform
-  // replacement for the POSIX-only `/dev/stdin`; `import` auto-creates the
-  // bundle so there is no `create … || true`, the POSIXism that broke on
-  // PowerShell with `'true' is not recognized`).
+  // The keychain export push runs `agents secrets import --from -` remotely (`--from -` reads the
+  // .env from ssh stdin, replacing POSIX-only `/dev/stdin`); `import` auto-creates the bundle, so
+  // there is no `create … || true`, which broke on PowerShell.
   const importArgs = ['secrets', 'import', 'mybundle', '--from', '-'];
 
   it('POSIX target: bash -lc agents secrets import --from - (no /dev/stdin, no || true)', () => {
@@ -251,14 +244,9 @@ describe('buildRemoteAgentsInvocation — POSIX targets stay byte-identical', ()
   });
 });
 
-/**
- * The Win32-escaped argument string the emitted launcher hands to .NET.
- *
- * Asserted instead of the whole script text: the launcher resolves the peer's
- * package entry at runtime, so the script is necessarily multi-statement, and
- * pinning it verbatim would test the prose rather than the argv the Agents parser
- * actually receives.
- */
+/** The Win32-escaped argument string the launcher hands to .NET. Asserted instead of the whole
+ * script, which is multi-statement because the launcher resolves the peer's package entry at
+ * runtime; pinning it verbatim would test prose, not the argv the parser receives. */
 function launcherArgs(script: string): string {
   // Match the single-quoted literal, allowing PowerShell's doubled `''` escape.
   const m = /\$zi\.Arguments\s*=\s*\$zr\s*\+\s*'((?:[^']|'')*)'/.exec(script);
@@ -407,11 +395,9 @@ describe('buildWindowsStdinImportCommand', () => {
 });
 
 describe('posixEnvExports — actor values are shell-literal, PATH still expands', () => {
-  // Actor provenance carries attacker-influenceable strings (a tailnet peer's
-  // whois display name, or an unvalidated AGENTS_ACTOR_* env). They ride the same
-  // export prefix that sends PATH to the remote, so a `$(...)`/backtick in a value
-  // must NOT execute. These run the exact `bash -lc "<exports>; …"` shape the
-  // dispatch builders send over SSH, against the real shell — no mocks.
+  // Actor provenance carries attacker-influenceable strings (a tailnet peer's whois name,
+  // unvalidated AGENTS_ACTOR_* env) on the same export prefix as PATH, so a `$(...)`/backtick must
+  // not execute. These run the exact `bash -lc` shape dispatch sends, in a real shell.
   const runExports = (env: Record<string, string>, tail: string) =>
     spawnSync('bash', ['-lc', `${posixEnvExports(env)}; ${tail}`], { encoding: 'utf-8' });
 

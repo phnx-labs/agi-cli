@@ -37,12 +37,9 @@ function persist(broker: Broker, record: RunRecord): void {
   writeFileSync(file, JSON.stringify(record, null, 2));
 }
 
-/**
- * Controller-side execution. The worker sees only the worktree and a
- * read-only cache, via Firecracker. The controller observes exit status,
- * hashes reports, and signs the attestation with a key that is never
- * mounted into the worker.
- */
+/** Controller-side execution: the worker sees only the worktree and a read-only cache, via
+ * Firecracker. The controller observes exit status, hashes reports, and signs the attestation with
+ * a key never mounted into the worker. */
 export function runAdmittedJob(opts: ExecuteOptions): ExecuteResult {
   const now = opts.now ?? Date.now;
   const { broker } = opts;

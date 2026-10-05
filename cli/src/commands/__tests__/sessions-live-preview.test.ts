@@ -1,10 +1,6 @@
-/**
- * Tests for the pure helpers that enrich the default `agents sessions` listing
- * with live state (Feature 2). Correlating a historical row to the session
- * that is still running hinges on the full-UUID key, and the glyph must reflect
- * the coarse status — both are easy to get subtly wrong, so they're exercised
- * directly rather than through the chalk+console renderer.
- */
+/** Tests the pure helpers that enrich the default `agents sessions` listing with live state.
+ * Correlating a historical row to a running session hinges on the full-UUID key, and the glyph
+ * must reflect the coarse status; both are subtle, so they are tested directly. */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { indexActiveBySessionId, liveGlyphAndPreview, formatActiveRowDescription } from '../sessions.js';

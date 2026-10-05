@@ -46,10 +46,9 @@ function commit(p: string, msg: string): void {
 /** A repo with an upstream set to a local bare remote, pushed and even. */
 function repoWithUpstream(name: string): { repo: string; remote: string } {
   const remote = path.join(dir, `${name}.git`);
-  // `-b main` on the bare init too: its HEAD symref decides what a clone checks
-  // out, and CI's init.defaultBranch is master — a bare HEAD→master leaves the
-  // sibling clone branchless and its push fails with "src refspec main does not
-  // match any".
+  // `-b main` on the bare init too: its HEAD symref decides what a clone checks out, and CI's
+  // init.defaultBranch is master, so a bare HEAD->master leaves the sibling clone branchless and
+  // its push fails ("src refspec main does not match any").
   git(dir, ['init', '--bare', '-b', 'main', remote]);
   const repo = path.join(dir, name);
   initRepo(repo);
@@ -173,10 +172,9 @@ describe('workspaceTargetsForDef', () => {
   });
 
   it('anchors on root, NOT defaultPath — a monorepo subproject probes its checkout', () => {
-    // The probe asks "is this checkout clean / behind?", which is a
-    // whole-repository question. Anchoring on defaultPath would probe
-    // ~/src/rush/apps/web — not a git root — and report every monorepo
-    // subproject on the fleet as missing or errored.
+    // The probe asks a whole-repository question (clean / behind?). Anchoring on defaultPath would
+    // probe ~/src/rush/apps/web, not a git root, and report every monorepo subproject as missing or
+    // errored.
     expect(workspaceTargetsForDef({
       name: 'rush-web',
       root: '~/src/rush',

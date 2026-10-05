@@ -1,10 +1,5 @@
-/**
- * Headless ACP runner.
- *
- * Glue between the `agents run <agent> "prompt" --acp` command and the ACP
- * client. Emits either a human-readable stream of agent messages or newline-
- * delimited JSON events, depending on `--json`.
- */
+/** Headless ACP runner: glue between `agents run <agent> "prompt" --acp` and the ACP client,
+ * emitting a human-readable message stream or newline-delimited JSON events with `--json`. */
 
 import type { SessionNotification } from '@zed-industries/agent-client-protocol';
 import { runAcp } from './client.js';

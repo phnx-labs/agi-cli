@@ -1,30 +1,6 @@
-/**
- * Per-host fleet-status rows: this machine's resource stats PLUS its live agent
- * workload (running-agent count + per-context / per-agent breakdown), published
- * to a shared local mirror.
- *
- * ## Why this exists (RUSH-2061)
- *
- * The daemon's fleet-cache warm used to `loadFleetStats({ forceRefresh: true })`
- * every 3 minutes — an SSH resource probe of EVERY device. With N daemons each
- * probing N devices that is N² SSH round trips across the fleet every 3 minutes,
- * each a remote `uptime;vm_stat;nproc` compute with a timeout that (pre-RUSH-2114)
- * could orphan the remote child. This module replaces that with a
- * **publish-own / read-union** model:
- *
- *  - Each daemon probes ONLY ITSELF (`probeLocalFleetStatus`, no SSH) and writes
- *    its own row into the mirror. Zero cross-host SSH from the daemon → the N²
- *    probe is gone.
- *  - A READER (the `agents fleet status` command) unions the fleet's rows on
- *    demand — a bounded, kill-on-timeout SSH read of each peer's already-computed
- *    `--local` row (a cheap `cat`-equivalent, not a fresh remote probe) — and
- *    writes them into the same mirror. `readFleetStatus` then serves the union
- *    synchronously with no network at all.
- *
- * The mirror file matches the `stats-cache` / `auth-health` convention exactly:
- * `{ version: 1, entries: Record<host, FleetStatusRow> }` under `getCacheDir()`,
- * keyed by `machineId()`, best-effort read/write that never throws.
- */
+/** Per-host fleet-status rows (stats plus live agent workload) in a shared local mirror. The
+ * daemon SSH-probed every device every 3 minutes, N-squared (RUSH-2061); now each publishes only
+ * its own row and `agents fleet status` unions peers' `--local` rows (bounded SSH, RUSH-2114). */
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -58,11 +34,8 @@ export interface FleetStatusRow {
 /** Minimal shape needed to count workload — a subset of ActiveSession. */
 type CountableSession = { status?: string; context?: string; kind?: string; pidAlive?: boolean };
 
-/**
- * Tally running-agent workload from a host's live sessions. "running" is the
- * actively-working set (`status === 'running'`); `live` is every session the
- * host is tracking. Pure so the tally is unit-tested without a live scan.
- */
+/** Tallies running-agent workload from a host's live sessions: `running` is `status ===
+ * 'running'`, `live` is every tracked session. Pure. */
 export function computeAgentCounts(sessions: ReadonlyArray<CountableSession>): FleetAgentCounts {
   const byContext: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
@@ -80,12 +53,9 @@ export function computeAgentCounts(sessions: ReadonlyArray<CountableSession>): F
   return { running, live, byContext, byAgent };
 }
 
-/**
- * Probe THIS host's status — resource stats locally (no SSH) and agent workload
- * from the local live-session set (`getActiveSessions({ localOnly: true })`,
- * which never dials a remote host). Never throws: a failed sub-probe degrades to
- * null stats / zero counts.
- */
+/** Probes this host: resource stats locally and workload from `getActiveSessions({ localOnly:
+ * true })`, which never dials a remote host. Never throws; a failed sub-probe degrades to null
+ * stats or zero counts. */
 export async function probeLocalFleetStatus(host: string, now: number = Date.now()): Promise<FleetStatusRow> {
   const [stats, sessions] = await Promise.all([
     probeLocalStats(host).catch(() => null),
@@ -143,11 +113,8 @@ export function writeFleetStatusRows(entries: Record<string, FleetStatusRow>): v
   }
 }
 
-/**
- * Publish THIS host's row into the mirror (probe self, no SSH). The daemon calls
- * this on its warm tick; it is the whole of the daemon's fleet-status duty now
- * that cross-host probing is gone.
- */
+/** Publishes this host's row into the mirror (probe self, no SSH); the whole of the daemon's
+ * fleet-status duty on its warm tick. */
 export async function publishLocalFleetStatus(host: string): Promise<FleetStatusRow> {
   const row = await probeLocalFleetStatus(host);
   writeFleetStatusRows({ [host]: row });

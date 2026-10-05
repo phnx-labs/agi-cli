@@ -5,11 +5,9 @@ import * as path from 'path';
 
 import { filterAutoPool, isAutoPoolMember, listWorkerDevices, describeAutoPool, autoLaunchPreferredSet } from './pool.js';
 
-// The pure rule (roles + mode injected) is exercised directly; the stored-config
-// path re-imports against a throwaway HOME so it reads a REAL agents.yaml, the
-// same pattern device-config.test.ts uses. No mocks either way. The pure calls
-// inject `autoLaunch: {}` alongside `roles` so neither role nor auto-launch rule
-// touches disk.
+// The pure rule (roles + mode injected) is tested directly; the stored-config path re-imports
+// against a throwaway HOME to read a real agents.yaml (as device-config.test.ts does). No mocks.
+// Pure calls inject `autoLaunch: {}` alongside `roles` so neither rule touches disk.
 
 const FLEET = ['zion', 'yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone'];
 
@@ -168,10 +166,8 @@ describe('roles read from the per-device docs', () => {
     mod.setConfigValue('role', 'personal', { fleet: true });
     // The bare, doc-scan-only read still sees only the device with a doc.
     expect(mod.listConfiguredDeviceRoles()).toEqual({ 'yosemite-s0': 'personal' });
-    // filterAutoPool passes its own candidate pool as the roster, so the
-    // fleet default reaches every device in FLEET — including 'zion',
-    // 'yosemite-s1', 'mac-mini', 'iphone', none of which have a doc — and
-    // the whole fleet is excluded as personal.
+    // filterAutoPool passes its own candidate pool as the roster, so the fleet default reaches
+    // every device in FLEET (none has a doc) and the whole fleet is excluded as personal.
     expect(mod.filterAutoPool(FLEET)).toEqual([]);
   });
 

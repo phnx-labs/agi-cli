@@ -9,12 +9,9 @@ import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 import { getVersionHomePath } from '../installations/versions.js';
 import { setConfiguredDeviceRole } from '../device-config.js';
 
-// A routine authenticates through a per-account, non-rotating `claude setup-token`
-// (the mint-auth cure for the single-use-refresh-token revocation storm). The daemon
-// path builds its spawn env via buildRoutineSpawnEnv, which historically DELETED
-// CLAUDE_CODE_OAUTH_TOKEN unconditionally — throwing away a legitimately-provisioned
-// setup-token and forcing the routine back onto the rotating login. These tests pin
-// the two-flavour rule: KEEP a per-account setup-token, STRIP an inherited ambient one.
+// A routine authenticates via a per-account non-rotating `claude setup-token` (the cure for the
+// refresh-token revocation storm), but buildRoutineSpawnEnv deleted CLAUDE_CODE_OAUTH_TOKEN
+// unconditionally. These pin the rule: KEEP a per-account token, STRIP an ambient one.
 let versionDirs: string[] = [];
 let prevClaudeToken: string | undefined;
 let prevMachineId: string | undefined;
@@ -23,10 +20,9 @@ beforeEach(() => {
   versionDirs = [];
   prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
-  // These cases assert the WORKER routine credential rule (keep the setup-token,
-  // strip an inherited ambient one). Pin the self device id to a role-less name so
-  // selfConfiguredDeviceRole() resolves undefined; on a machine marked personal
-  // (e.g. zion) a routine defers to the login instead (RUSH-2395), flipping them.
+  // These cases assert the worker routine credential rule. Pin the self device id to a role-less
+  // name so selfConfiguredDeviceRole() is undefined; on a personal machine (e.g. zion) a routine
+  // defers to the login (RUSH-2395), flipping them.
   process.env.AGENTS_SYNC_MACHINE_ID = 'runner-setup-token-worker-fixture';
 });
 
@@ -50,11 +46,9 @@ function makeVersionHome(version: string, email: string): void {
   );
 }
 
-/**
- * Seed the reserved file-backed `auth` bundle through the standalone `secrets`
- * CLI — the same shape `seedReservedAuthToken` writes (file backend, never
- * policy, one keychain ref + raw item per account key).
- */
+/** Seed the reserved file-backed `auth` bundle through the standalone `secrets` CLI, in the shape
+ * `seedReservedAuthToken` writes (file backend, never policy, one keychain ref + raw item per
+ * account key). */
 function writeAuthBundle(values: Record<string, string>): void {
   const keys = Object.keys(values);
   writeBundleWithItemsSync(
@@ -100,9 +94,8 @@ describe('buildRoutineSpawnEnv — CLAUDE_CODE_OAUTH_TOKEN handling', () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  // On a PERSONAL device (the user's own interactive box), routines defer to the
-  // per-version login exactly like an interactive run — the setup-token is a
-  // worker-only credential (RUSH-2395). This mirrors the adapter matrix in
+  // On a personal device routines defer to the per-version login like an interactive run; the
+  // setup-token is worker-only (RUSH-2395). Mirrors the adapter matrix in
   // harness/adapters/claude.test.ts on the routines path.
   describe('on a personal device', () => {
     it('does NOT inject a provisioned setup-token — defers to the per-version login', () => {

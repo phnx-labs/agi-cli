@@ -1,13 +1,6 @@
-/**
- * `agents daemon status` process-uptime probe (PHNX-3289).
- *
- * Regression: `uptimeSeconds` shelled `ps -o etimes=` — a GNU/procps keyword
- * that macOS/BSD `ps` rejects with `ps: etimes: keyword not found` and a
- * non-zero exit, so `execFileSync` threw and `agents daemon status` errored out
- * on macOS. This exercises the real `ps` invocation against a live pid (no
- * mocking) and asserts a plausible elapsed time comes back on every POSIX
- * platform — which the old `etimes=` keyword could not deliver on macOS.
- */
+/** `agents daemon status` process-uptime probe (PHNX-3289). Regression: `uptimeSeconds` shelled `ps
+ * -o etimes=`, a GNU keyword macOS/BSD `ps` rejects, so status errored on macOS. Runs the real
+ * `ps` on a live pid and asserts a plausible elapsed time on every POSIX platform. */
 import { describe, it, expect } from 'vitest';
 import { uptimeSeconds } from './daemon.js';
 

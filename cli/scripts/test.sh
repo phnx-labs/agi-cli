@@ -45,16 +45,13 @@ gray()  { printf '\033[2m%s\033[0m\n'  "$*"; }
 bold()  { printf '\033[1m%s\033[0m\n'  "$*"; }
 die()   { red "error: $*"; exit 1; }
 
-# `auto` is the default (RUSH-3211). Every call site that does not name a box
-# gets a real worker without the operator having to know which boxes are free --
-# which is the whole point of test.sh existing. crabbox is still available, but
-# it is now an explicit choice: it needs the crabbox binary + provider creds,
-# so defaulting to it made the default path fail on any box without them.
+# `auto` is the default (RUSH-3211): call sites that name no box get a real worker without knowing
+# which are free. crabbox stays available as an explicit choice; defaulting to it failed on any
+# box without the binary and provider creds.
 MODE="auto"
-# Which flag chose MODE. Empty means "still the default", so the first
-# target-selecting flag always wins and a SECOND, different one is a conflict
-# rather than a silent overwrite: `--shard 6 --device box` used to drop one of
-# the two purely on argument order, with no warning.
+# Which flag chose MODE; empty means still the default. The first target-selecting flag wins and a
+# second, different one is a conflict, not a silent overwrite (`--shard 6 --device box` once
+# dropped one by argument order).
 MODE_FLAG=""
 DEVICE=""
 SHARDS=0
@@ -62,12 +59,9 @@ SHARD_LIST=""
 REPO_ROOT=""
 VITEST_ARGS=()
 
-# Every flag that picks WHERE the suite runs goes through this, so two of them
-# can never quietly disagree. Same-mode repeats are fine (--shard with
-# --devices, or --device twice); a different mode dies naming both flags.
-# A shard count below 2 is never what the caller wants: 0 ran nothing at all and
-# still printed "All 0 shards passed." with exit 0 -- a false green -- and 1 is
-# `--device auto` reached through the whole fan-out apparatus.
+# Every flag that picks where the suite runs goes through this, so two can never quietly disagree:
+# a different mode dies naming both flags. A shard count below 2 is never wanted: 0 ran nothing
+# yet printed "All 0 shards passed." with exit 0, and 1 is `--device auto`.
 shard_count_ok() {
   local n="$1" flag="${2:---shard}"
   [[ "$n" =~ ^[0-9]+$ ]] || die "--shard needs a worker count, e.g. --shard 6"
@@ -91,10 +85,8 @@ while [[ $# -gt 0 ]]; do
     # target: the suite is throughput-bound (3079s CPU / 11.5x on one box), so
     # dividing the CPU across machines is what shortens it.
     --shard) shard_count_ok "${2:-}"; SHARDS="$2"; set_mode shard --shard; shift 2 ;;
-    # Name the workers explicitly instead of auto-picking them. Two reasons this
-    # exists rather than being auto-only: it lets an operator pin the fan-out to
-    # known-idle boxes, and it removes the `devices pick --json` (>= 1.22.49)
-    # dependency, so sharding works on a machine whose installed CLI predates it.
+    # Name the workers explicitly instead of auto-picking: it lets an operator pin the fan-out to
+    # known-idle boxes and removes the `devices pick --json` (>= 1.22.49) dependency.
     --devices) [[ -n "${2:-}" ]] || die "--devices needs a comma-separated list, e.g. --devices m1,m2,m3"; SHARD_LIST="$2"; set_mode shard --devices; shift 2 ;;
     --devices=*) SHARD_LIST="${1#*=}"; set_mode shard --devices; shift ;;
     --shard=*) SHARDS="${1#*=}"; shard_count_ok "$SHARDS"; set_mode shard --shard; shift ;;
@@ -111,20 +103,17 @@ done
 # here rather than dialing a literal, nonexistent host named "auto".
 if [[ "$MODE" == "device" && "$DEVICE" == "auto" ]]; then MODE="auto"; DEVICE=""; fi
 
-# Resolve an explicit --devices list here, BEFORE any prerequisite check, so a
-# bad invocation fails on its own merits. Validating it down in the dispatch
-# branch meant `--devices onebox` on a box without rsync died reporting the
-# missing rsync, hiding the real problem.
+# Resolve an explicit --devices list before any prerequisite check so a bad invocation fails on
+# its own merits; validating later made `--devices onebox` without rsync report the missing rsync
+# instead.
 SHARD_DEVICES=()
 if [[ "$MODE" == "shard" && -n "$SHARD_LIST" ]]; then
   _IFS_SAVE="$IFS"; IFS=','
   for _d in $SHARD_LIST; do [[ -n "$_d" ]] && SHARD_DEVICES+=("$_d"); done
   IFS="$_IFS_SAVE"
   (( ${#SHARD_DEVICES[@]} )) || die "--devices parsed to nothing: '$SHARD_LIST'"
-  # An explicit list sets the count when --shard did not. Route it through the
-  # SAME floor: `--devices onebox` otherwise slipped past the >= 2 rule --shard
-  # enforces and ran a one-shard fan-out, which is `--device auto` through a
-  # great deal more machinery.
+  # An explicit list sets the count when --shard did not, through the same >= 2 floor; otherwise
+  # `--devices onebox` slipped past it and ran a one-shard fan-out.
   (( SHARDS )) || { SHARDS=${#SHARD_DEVICES[@]}; shard_count_ok "$SHARDS" --devices; }
 fi
 
@@ -136,11 +125,9 @@ if [[ -n "$REPO_ROOT" ]]; then
 fi
 TREE_ROOT="$(cd "$CLI_DIR/.." && pwd)"
 
-# Render the vitest args for a command string that a SHELL will re-parse.
-# Per-arg `%q`, never "$*": splicing joins on a space, so `--testNamePattern="a b"`
-# arrives as two words and silently selects a different set of tests -- observed
-# as 10,620 tests running where a filter should have matched a handful. Same bug
-# sandbox.sh had; this is the sweep of the remaining call sites.
+# Render vitest args for a command string a shell will re-parse, with per-arg `%q`, never "$*":
+# splicing turned `--testNamePattern="a b"` into two words and ran 10,620 tests instead of a
+# handful. Same bug as sandbox.sh.
 vitest_suffix() {
   ((${#VITEST_ARGS[@]})) || return 0
   local a
@@ -148,17 +135,9 @@ vitest_suffix() {
   for a in "${VITEST_ARGS[@]}"; do printf ' %s' "$(printf '%q' "$a")"; done
 }
 
-# Resolve a device NAME to an address ssh/rsync can actually reach.
-#
-# Raw `ssh <name>` resolves against whatever the local resolver knows, which for
-# the yosemite worker pool is a 192.168.1.x LAN entry -- unroutable from off-LAN,
-# so it hangs until ConnectTimeout. The device registry carries the tailscale
-# dnsName, which works from anywhere on the tailnet. Read it rather than trusting
-# the bare hostname: the registry is the CLI's own source of truth for how to
-# reach a box (`agents devices list --json`).
-#
-# Also refuses the interactive host by name -- the machine someone is sitting at
-# is never a test target, and `--here` is the explicit way to say otherwise.
+# Resolve a device name to an address ssh/rsync can reach. Raw `ssh <name>` resolves to an
+# unroutable LAN entry for the yosemite pool and hangs until ConnectTimeout, so read the
+# registry's tailscale dnsName. Also refuses the interactive host by name.
 device_addr() {
   command -v agents >/dev/null 2>&1 \
     || die "the 'agents' CLI is not on PATH, so device '$1' cannot be resolved"
@@ -180,14 +159,9 @@ sys.exit(1)
 ' "$1"
 }
 
-# Resolve MODE=auto to a concrete worker, then fall through to the device path.
-#
-# The eligibility rule is NOT reimplemented here. `agents devices pick` is the
-# CLI's own worker picker (lib/devices/worker-pick.ts): same auto pool as
-# `agents run --device auto`, so `role=worker` / `role=personal` marks move this
-# surface too; same live reachability+load probe; same least-loaded ranking. It
-# fails loud when no worker is eligible, and this script surfaces that verbatim
-# rather than inventing a fallback.
+# Resolve MODE=auto to a concrete worker, then fall through to the device path. Eligibility is not
+# reimplemented: `agents devices pick` is the CLI's own picker, with the same pool, probe and
+# ranking as `agents run --device auto`. It fails loud when no worker is eligible.
 if [[ "$MODE" == "auto" ]]; then
   command -v agents >/dev/null 2>&1 \
     || die "the 'agents' CLI is not on PATH, so a worker cannot be auto-picked.
@@ -196,10 +170,9 @@ if [[ "$MODE" == "auto" ]]; then
   # stdout is the name alone; the candidate/load detail goes to stderr, so let it
   # through to the operator instead of swallowing it.
   if ! DEVICE="$(agents devices pick)"; then
-    # Distinguish "the fleet has nothing free" from "your CLI is too old to ask".
-    # Both exit non-zero here, and conflating them sends the operator hunting a
-    # capacity problem that does not exist. This is a diagnostic, not a fallback:
-    # either way the run aborts.
+    # Distinguish "the fleet has nothing free" from "your CLI is too old to ask": both exit
+    # non-zero, and conflating them sends the operator hunting a capacity problem. This is a
+    # diagnostic, not a fallback; the run aborts either way.
     if ! agents devices --help 2>/dev/null | grep -qE '^[[:space:]]*pick([[:space:]]|$)'; then
       die "the installed 'agents' CLI has no 'devices pick' -- it predates the auto-picker.
   Upgrade it, or name a box until you do:  scripts/test.sh --device yosemite-m1"
@@ -209,11 +182,9 @@ if [[ "$MODE" == "auto" ]]; then
   Or pin THIS machine:  scripts/test.sh --here"
   fi
   [[ -n "$DEVICE" ]] || die "'agents devices pick' returned no device"
-  # A worker that picked ITSELF runs in place. Shipping the tree over ssh to
-  # localhost would be pure overhead, and the loud --here warning is wrong here:
-  # a box marked `worker` running the suite is the intended outcome, not a
-  # surprise. (On the interactive host this branch is unreachable -- `personal`
-  # keeps it out of the pool.)
+  # A worker that picked itself runs in place: shipping the tree over ssh to localhost is
+  # overhead, and the --here warning is wrong for a box marked `worker`. On the interactive host
+  # this is unreachable since `personal` keeps it out of the pool.
   if [[ "$(hostname -s 2>/dev/null || hostname)" == "$DEVICE" ]]; then
     gray "Auto-picked THIS machine ($DEVICE) -- it is a pool worker, so running in place."
     MODE="here-worker"
@@ -222,11 +193,9 @@ if [[ "$MODE" == "auto" ]]; then
   fi
 fi
 
-# Ship this tree to $1 and run the suite there. $2.. are extra vitest args
-# (sharding appends `--shard=i/N`). Factored out of the `device` branch so the
-# shard fan-out can reuse it N times instead of duplicating the rsync/bind/run
-# sequence -- one place to fix, and the shard path cannot drift from the single
-# -device path it is built on.
+# Ship this tree to $1 and run the suite there; $2.. are extra vitest args (sharding appends
+# `--shard=i/N`). Factored out so the shard fan-out reuses it N times and cannot drift from the
+# single-device path.
 ship_and_run() (
   local device="$1"; shift
   local addr remote_dir extra
@@ -262,10 +231,9 @@ ship_and_run() (
 
 case "$MODE" in
   here|here-worker)
-    # `here` is deliberately loud: running the full suite on the machine someone
-    # is using is a real cost, so it never happens implicitly. `here-worker` is
-    # the auto-pick landing on a pool worker, which is the intended outcome --
-    # no warning, because nothing surprising happened.
+    # `here` is deliberately loud: running the full suite on the machine someone is using is a
+    # real cost, so it never happens implicitly. `here-worker` is the auto-pick landing on a pool
+    # worker, the intended outcome, so no warning.
     if [[ "$MODE" == "here" ]]; then
       red "WARNING: running the full suite on THIS machine ($(hostname -s))."
       red "         ~13k tests, several minutes of pinned CPU. Ctrl-C now to offload instead."
@@ -290,18 +258,9 @@ case "$MODE" in
 
 
   shard)
-    # Fan the suite across N workers with vitest's own `--shard=i/N`.
-    #
-    # This is the change that actually moves the number, and the reason is
-    # arithmetic rather than intuition: measured on a real full run, the suite is
-    # 3079s of CPU at 11.5x parallelism on one box -- so wall == CPU/workers
-    # (269s), and it is THROUGHPUT-bound, not bound by any single slow file.
-    # Splitting the slowest file moved the total only 296s -> 269s (~9%). Adding
-    # boxes divides the CPU: 3 boxes ~93s, 6 ~47s, 9 ~31s.
-    #
-    # A file still must not exceed the per-shard budget, or it becomes the new
-    # floor -- but that is a narrow constraint on a couple of files, not a
-    # prerequisite for sharding.
+    # Fan the suite across N workers with vitest's `--shard=i/N`. The suite is throughput-bound,
+    # so wall == CPU/workers: 3 boxes ~93s, 6 ~47s, 9 ~31s against 269s on one. A file must still
+    # not exceed the per-shard budget or it becomes the floor.
     command -v rsync >/dev/null || die "rsync not found"
     command -v ssh   >/dev/null || die "ssh not found"
     # SHARD_DEVICES is already populated when --devices was passed (resolved and
@@ -309,20 +268,18 @@ case "$MODE" in
     # work left to do here.
     if (( ${#SHARD_DEVICES[@]} )); then :; else
     command -v agents >/dev/null 2>&1 || die "the 'agents' CLI is not on PATH, so workers cannot be picked"
-    # `devices pick --json` is how the fan-out gets its candidate list WITH loads,
-    # from the same auto pool a single run uses. It landed in 1.22.49; an older
-    # installed CLI gives a confusing "unknown option" from commander rather than
-    # anything actionable, so name the requirement and the fix.
+    # `devices pick --json` supplies the fan-out's candidate list with loads, from the same auto
+    # pool a single run uses. It landed in 1.22.49; an older CLI gives a confusing commander
+    # "unknown option", so name the requirement and the fix.
     if ! agents devices pick --json >/dev/null 2>&1; then
       die "the installed 'agents' ($(agents --version 2>/dev/null || echo unknown)) has no 'devices pick --json'.
   Sharding needs >= 1.22.49. Upgrade it, then re-run:  scripts/test.sh --shard $SHARDS
   Until then:                                          scripts/test.sh --device <box>"
     fi
 
-    # Take the N least-loaded eligible workers from the SAME auto pool a single
-    # --device auto run draws from, so role marks govern the fan-out too.
-    # NOT `mapfile`: macOS ships bash 3.2, where it does not exist (bash 4+ only).
-    # This script must run on the interactive Mac that dispatches the fan-out.
+    # Take the N least-loaded eligible workers from the same auto pool a single --device auto run
+    # uses, so role marks govern the fan-out. Not `mapfile`: macOS ships bash 3.2, and this must
+    # run on the interactive Mac that dispatches the fan-out.
     SHARD_DEVICES=()
     while IFS= read -r _dev; do
       [[ -n "$_dev" ]] && SHARD_DEVICES+=("$_dev")
@@ -376,12 +333,9 @@ for c in cands: print(c["device"])
   Drop the flag to auto-pick a fleet worker: scripts/test.sh
   Or name one:                              scripts/test.sh --device yosemite-m1"
     fi
-    # Fail loud, never silently local. Name the explicit alternatives without
-    # guessing whether a credential, provider, network, or crabbox operation failed.
-    # VITEST_ARGS must ride through here too. The producer passes
-    # `-- --retry=2 --maxWorkers=2` and offload is its DEFAULT mode, so dropping
-    # them silently removes the mitigation that keeps a good tree from
-    # false-failing (see release-attestation-produce.sh's RUSH-3015 note).
+    # Fail loud, never silently local, naming the explicit alternatives. VITEST_ARGS must ride
+    # through: the producer passes `-- --retry=2 --maxWorkers=2` and offload is its default, so
+    # dropping them removes the mitigation against false failures (RUSH-3015).
     if ! scripts/sandbox.sh test ${VITEST_ARGS[@]+"${VITEST_ARGS[@]}"}; then
       die "the crabbox run failed; the command output above is the source of truth.
   To auto-pick a fleet worker instead: scripts/test.sh

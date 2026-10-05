@@ -1,16 +1,6 @@
-/**
- * Canonical agent memory resource — accumulated facts/preferences/knowledge
- * distinct from `rules` (instructions / AGENTS.md persona).
- *
- * Layout (project > user > system layering):
- *   ~/.agents/memory/MEMORY.md          always-read index
- *   ~/.agents/memory/<slug>.md          individual facts
- *   ~/.agents/.system/memory/           system layer
- *   <project>/.agents/memory/           project layer
- *
- * Sync fans out into each capable agent's version home under an agent-specific
- * target dir (see memoryTargetDir).
- */
+/** Canonical agent memory: accumulated facts/preferences, distinct from `rules`. Layers project >
+ * user > system: `memory/MEMORY.md` (always-read index) plus `<slug>.md` facts. Sync fans out into
+ * each capable agent's version home under an agent-specific dir (memoryTargetDir). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -218,10 +208,8 @@ function rebuildMemoryIndex(dir: string): void {
   fs.writeFileSync(path.join(dir, 'MEMORY.md'), lines.join('\n'), 'utf-8');
 }
 
-/**
- * Per-agent target directory (relative to version home) for synced memory.
- * Claude/Codex/OpenClaw/Grok get native-ish paths; others get a generic memory/.
- */
+/** Per-agent target dir (relative to version home) for synced memory: Claude/Codex/OpenClaw/Grok
+ * get native-ish paths, others a generic memory/. */
 export function memoryTargetDir(agent: AgentId): string {
   switch (agent) {
     case 'claude':
@@ -307,35 +295,17 @@ export function syncMemoryToVersionHome(
   return written;
 }
 
-/**
- * Canonical shared dir for Claude Code's NATIVE per-project auto-memory —
- * `<versionHome>/.claude/projects/<project-key>/memory/*.md`, the freeform
- * notes Claude writes for itself during a session. Distinct from the layered
- * `memory` resource above (~/.agents/memory/ facts synced into
- * `.claude/memory/`): this dir is keyed by project (via
- * {@link claudeProjectDirName}), not by agent version, and Claude Code itself
- * decides what goes in it — agents-cli only makes the directory
- * version-independent, never writes into it.
- */
+/** Canonical shared dir for Claude Code's NATIVE per-project auto-memory
+ * (`.claude/projects/<project-key>/memory/`), keyed by project, not agent version. Claude owns its
+ * contents; agents-cli only makes the dir version-independent. */
 export function getClaudeProjectMemoryDir(cwd: string): string {
   const projectKey = claudeProjectDirName(path.resolve(cwd));
   return path.join(getRuntimeStateDir(), 'claude-project-memory', projectKey);
 }
 
-/**
- * Make Claude Code's native per-project memory dir version-independent by
- * symlinking `<versionHome>/.claude/projects/<project-key>/memory/` into the
- * one canonical dir every installed Claude version's home shares for this
- * project (PHNX-2817). Without this, `getVersionHomePath` gives every
- * installed version its own isolated HOME, so a note written under one
- * version is invisible under another — the directory is just empty there.
- *
- * Idempotent and safe to call on every sync: a dir already linked to the
- * canonical target is left alone; a PRE-EXISTING real directory with content
- * (the common case today, since this bug has always left one behind) has its
- * files migrated into the canonical dir first — never discarded — before
- * being replaced by the symlink.
- */
+/** Makes Claude's per-project memory dir version-independent by symlinking each version home's copy
+ * to one canonical dir (PHNX-2817), else each version's HOME hides the others' notes. Idempotent;
+ * a pre-existing real dir has its files migrated into the canonical dir first, never discarded. */
 export function syncClaudeProjectMemoryDir(versionHome: string, cwd: string = process.cwd()): void {
   const projectKey = claudeProjectDirName(path.resolve(cwd));
   const canonicalDir = path.join(getRuntimeStateDir(), 'claude-project-memory', projectKey);
@@ -367,10 +337,8 @@ export function syncClaudeProjectMemoryDir(versionHome: string, cwd: string = pr
   try {
     fs.symlinkSync(canonicalDir, nativeMemoryDir, process.platform === 'win32' ? 'junction' : undefined);
   } catch (err) {
-    // A concurrent sync (e.g. two `agents run claude` launches racing on a
-    // first-ever project) can win this exact link between our lstat above
-    // and this call. If it landed the same canonical target, that's the
-    // outcome we wanted — treat it as success rather than throwing.
+    // A concurrent sync can win this link between our lstat and this call; if it landed the same
+    // canonical target, treat it as success.
     if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') throw err;
     let racedTarget: string | undefined;
     try { racedTarget = fs.readlinkSync(nativeMemoryDir); } catch { /* not even a symlink — fall through to rethrow */ }

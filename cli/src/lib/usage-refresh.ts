@@ -1,52 +1,6 @@
-/**
- * Daemon-owned usage refresher — one poller per account, on a headed box.
- *
- * The routing hot path (`agents run` → collectRunCandidates) reads usage
- * CACHE-ONLY (`getUsageInfoForIdentity`, RUSH-2061) and never blocks
- * on a provider fetch. A headed box (`isHeadedDeviceRole`) polls only the
- * accounts it holds native logins for; a setup-token-only box never polls.
- * A stray `.credentials.json` for an account another headed box already
- * publishes defers to that poller. Auth-health draws from the same
- * per-account call budget so the two stay under the ~100/hr ceiling.
- *
- * Design:
- *
- *  - **Per-host writer.** Each host lists its own credential-backed accounts
- *    and calls providers directly; there is no cross-host broadcast.
- *  - **Fixed 5-minute cadence** (`REFRESH_INTERVAL_MS`). Enough to keep
- *    balanced/`agents view` off multi-hour stale data without thrashing
- *    provider APIs when the user runs agents frequently. The delay helpers
- *    still accept a burn projection for tests/future tuning, but the default
- *    floor and ceiling are both 5 minutes.
- *  - **Hard hourly cap** (`HOURLY_CALL_CAP`) so a stuck "due" loop cannot
- *    hammer an endpoint past ~12 calls/account/hour.
- *  - **429 backoff.** An account (or provider-wide scope) under
- *    `usageRateLimitedUntil` is skipped — no live fetch or re-armed penalty.
- *  - **File-only credentials on the daemon path.** Refresh never opens the
- *    ACL-bound macOS keychain item (Touch ID storm). It uses the no-ACL
- *    access-token cache / setup-token / `.credentials.json` only
- *    (`fileOnly: true` on `getUsageInfo`).
- *  - **Concurrency-safe cache writes.** Usage + headroom files are updated
- *    under `withFileLock` + atomic rename so a concurrent `agents view`
- *    background refresh cannot tear or drop another account's row.
- *
- * Scenarios (what this path must survive):
- *
- *  1. **Daemon tick overlaps a slow tick** — overlap guard in daemon.ts;
- *     second tick is a no-op.
- *  2. **`agents view` writes cache while daemon refreshes** — file lock
- *     serializes read-modify-write; no lost updates.
- *  3. **macOS keychain ACL / Touch ID** — fileOnly refresh never calls
- *     `security find-generic-password` on Claude's ACL item.
- *  4. **Account 429** — that account is skipped until Retry-After while its
- *     siblings continue; a provider-wide penalty still skips all accounts.
- *  5. **Expired access token (no refresh)** — usage path never rotates
- *     single-use refresh tokens; counts as `failed`, reschedules 5m later.
- *  6. **No file credential on this host** — account skipped / failed; no
- *     keychain fallback from the daemon refresher.
- *  7. **Grok/Codex (network:false)** — not listed by `buildLocalUsageAccounts`;
- *     their "cache" is local logs, not this HTTP refresher.
- */
+/** Daemon-owned usage refresher, one poller per account on a headed box; routing reads the cache
+ * only (RUSH-2061). Fixed 5-minute cadence, `HOURLY_CALL_CAP`, skip 429-backed-off accounts,
+ * file-only credentials (no Touch ID storm), cache writes under `withFileLock`. */
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -71,12 +25,8 @@ import { machineId, normalizeHost } from './session/sync/config.js';
 import { readFleetSharedDeviceStates } from './fleet-shared-state.js';
 import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 
-/**
- * Default schedule between successful (or attempted) live usage fetches for one
- * account. Floor and ceiling of the delay helper are pinned to this so the
- * daemon does not poll faster than 5 minutes even under high burn, and does not
- * let an idle account rot longer than 5 minutes between attempts.
- */
+/** Default schedule between live usage fetches for one account; the delay helper's floor and ceiling
+ * are both this, so polling is exactly every 5 minutes. */
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 /** Burn-rate divisor retained for the pure delay helper / tests; with min=max
  * the divisor does not change the scheduled interval. */
@@ -86,55 +36,18 @@ export const HOURLY_CALL_CAP = 12;
 /** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
 export const USAGE_REFRESH_TICK_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-/**
- * Minimum wall-clock spacing between two live usage fetches to ONE network
- * provider, across all of its accounts. This is the pacing primitive: refreshes
- * are issued round-robin (stalest account first) no faster than one per spacing,
- * so aggregate endpoint load is a smooth, fixed rate — never the synchronized
- * burst-then-stall a plain rolling-hour cap produces when every account falls
- * due on the same tick. Set to two daemon ticks so the floor-based pacing lands
- * on exact tick boundaries (no drift): one refresh every other tick ⇒ 30/hr.
- */
+/** Minimum spacing between live fetches to one network provider across accounts: round-robin,
+ * stalest first, a smooth rate instead of a burst. Two daemon ticks, so 30/hr. */
 export const PROVIDER_MIN_REFRESH_SPACING_MS = 2 * USAGE_REFRESH_TICK_MS;
-/**
- * Aggregate live fetches this daemon may spend on ONE network provider's usage
- * endpoint per rolling hour, across ALL of that provider's local accounts —
- * derived from {@link PROVIDER_MIN_REFRESH_SPACING_MS} so the two are always
- * consistent (HOUR / 120s = 30).
- *
- * The per-account {@link HOURLY_CALL_CAP} alone scales linearly with account
- * count — 8 Claude accounts × 12/hr = ~96 usage calls/hr from one box — and
- * Anthropic's `/api/oauth/usage` rate-limits around ~100/hr (see the
- * `usage-backoff.ts` header). That tripped the endpoint into per-account 429s
- * with Retry-After penalties up to an hour: measured live on `zion`, 7 of 8
- * Claude accounts sat parked, never refreshed inside their 5h window, so
- * `agents view` showed `S: unavailable` and balanced routing read stale/absent
- * usage. It got WORSE with every account added.
- *
- * 30/hr is a fixed rate that does NOT grow with account count, and leaves ample
- * headroom under the ~100/hr ceiling for the auth probe (same endpoint, ~3/hr
- * per account, RUSH-2998) and foreground `agents view` bursts. Because refreshes
- * are paced round-robin (stalest first), each account's worst-case proactive
- * cadence is bounded at N × spacing (8 accounts ⇒ 16 min; 16 ⇒ 32 min) — kept
- * deliberately under the {@link USAGE_STALE_REFUSAL_MAX_AGE_MS} routing window so
- * a budget-paced account never reads as "genuinely stale". A slightly
- * older-but-present reading beats a 45-minute 429 park. Network providers only;
- * grok/codex read local logs and have no rate-limited endpoint.
- */
+/** Aggregate live fetches per rolling hour per network provider, derived from the spacing (30).
+ * Per-account caps alone scaled with accounts (~96/hr from 8) and tripped Anthropic's ~100/hr
+ * limit. 30/hr leaves room for the auth probe (RUSH-2998) and stays under the stale window. */
 export const PROVIDER_HOURLY_BUDGET = HOUR_MS / PROVIDER_MIN_REFRESH_SPACING_MS;
-/**
- * Most refreshes a single tick may catch up after the daemon has been idle/down
- * (elapsed ≫ spacing). Without this clamp a long gap would grant many tokens at
- * once and re-synchronize every account into the very burst the spacing exists
- * to prevent. A small catch-up keeps the load smooth even after a restart.
- */
+/** Most refreshes one tick may catch up after the daemon was idle or down, so a long gap cannot
+ * re-synchronize every account into a burst. */
 export const PROVIDER_CATCHUP_MAX = 2;
-/**
- * A usage row this recently captured (by the free statusline ingest of a live
- * `agents run`, or any writer) is already fresh — do not spend an API call to
- * re-refresh it. Actively-used accounts stay current at zero endpoint cost, so
- * the proactive budget is reserved for genuinely idle accounts.
- */
+/** A row captured this recently (e.g. by the free statusline ingest of a live run) is fresh: skip
+ * the API call and keep the budget for idle accounts. */
 /** Consecutive failed live reads before one broken account is quarantined. */
 export const FAILURE_QUARANTINE_THRESHOLD = 3;
 /** A chronic offender waits this long while healthy siblings keep their cadence. */
@@ -142,11 +55,8 @@ export const FAILURE_QUARANTINE_MS = 30 * 60 * 1000;
 const SKIP_JITTER_MIN_MS = 2_000;
 const SKIP_JITTER_RANGE_MS = 3_001;
 
-/**
- * One account's refresh state + published headroom. `sessionUsedPercent` /
- * `capturedAt` are the prior sample the NEXT tick projects the burn rate from;
- * `minutesToLimit` / `status` are what the routing hot path reads.
- */
+/** One account's refresh state and headroom: `sessionUsedPercent`/`capturedAt` are the prior sample
+ * for burn projection; `minutesToLimit`/`status` are what routing reads. */
 export interface HeadroomEntry {
   status: UsageHeadroom['status'];
   minutesToLimit: number | null;
@@ -214,12 +124,8 @@ export function writeHeadroomEntries(entries: Record<string, HeadroomEntry>): vo
   }
 }
 
-/**
- * Interval until the next refresh attempt, clamped to [minMs, maxMs].
- * Defaults pin both ends to {@link REFRESH_INTERVAL_MS} (5 minutes) so the
- * live daemon path is a fixed schedule. Tests may pass a wider range to
- * exercise burn-aware scheduling without changing production cadence.
- */
+/** Interval to the next refresh attempt, clamped to [minMs, maxMs]; defaults pin both to
+ * `REFRESH_INTERVAL_MS`. Tests may widen the range. */
 export function computeNextRefreshDelayMs(
   minutesToLimit: number | null,
   opts: { minMs?: number; maxMs?: number; divisor?: number } = {},
@@ -238,11 +144,8 @@ export function pruneCallTimestamps(timestamps: number[], now: number, windowMs 
   return timestamps.filter((ts) => ts > floor);
 }
 
-/**
- * Whether an account may be live-refreshed right now: it is due (past its
- * scheduled `nextRefreshAt`) AND under the rolling-hour call cap. Pure so the
- * cadence + cap arithmetic is unit-tested without a daemon or a network call.
- */
+/** Whether an account may be live-refreshed now: past `nextRefreshAt` and under the hourly cap.
+ * Pure, so testable without a daemon. */
 export function shouldRefreshAccount(
   entry: HeadroomEntry | null | undefined,
   now: number,
@@ -256,11 +159,8 @@ export function shouldRefreshAccount(
   return recent.length < cap;
 }
 
-/**
- * Build the next headroom entry after a live refresh: project headroom from the
- * new snapshot against the prior sample, schedule the next refresh from the
- * projection, and record this call for the hourly cap.
- */
+/** Build the next headroom entry after a live refresh: project headroom, schedule the next refresh,
+ * record the call for the hourly cap. */
 export function nextHeadroomEntry(
   prev: HeadroomEntry | null | undefined,
   snapshot: UsageSnapshot | null,
@@ -311,16 +211,9 @@ function skippedHeadroomEntry(
   };
 }
 
-/**
- * Reschedule an account we skipped because a free statusline ingest already
- * captured it inside {@link REFRESH_INTERVAL_MS}. The statusline row IS a real,
- * live sample, so RE-DERIVE headroom (status / minutesToLimit) from it against
- * the prior sample — otherwise `status`/`minutesToLimit` would freeze at their
- * last API-refresh value forever for exactly the actively-used accounts that
- * stay statusline-fresh, and `capacityWeight` reads `minutesToLimit`. No call
- * timestamp is recorded (this cost zero API budget); the next proactive attempt
- * is pushed to one interval past the free capture.
- */
+/** Reschedule an account skipped because a free statusline ingest captured it: re-derive
+ * status/minutesToLimit from that sample (else they freeze and `capacityWeight` goes stale). No
+ * call is recorded. */
 function freshHeadroomEntry(
   prev: HeadroomEntry | null,
   snapshot: UsageSnapshot,
@@ -347,12 +240,8 @@ function freshHeadroomEntry(
   };
 }
 
-/**
- * Most-recent live-fetch time per network provider (the max call timestamp
- * across its accounts, 0 when none), which the smooth per-provider pacing spaces
- * the next refresh from. Non-network providers are omitted — they have no
- * rate-limited endpoint to pace.
- */
+/** Most-recent live-fetch time per network provider (0 when none), from which pacing spaces the next
+ * refresh. Non-network providers have no rate-limited endpoint and are omitted. */
 export function providerLastCall(
   accounts: LocalUsageAccount[],
   cache: Record<string, HeadroomEntry>,
@@ -368,16 +257,9 @@ export function providerLastCall(
   return last;
 }
 
-/**
- * How many live fetches the smooth pacing permits a provider THIS tick: one per
- * elapsed {@link PROVIDER_MIN_REFRESH_SPACING_MS} since its last fetch, clamped
- * to {@link PROVIDER_CATCHUP_MAX} so a long idle gap (or a cold provider with no
- * prior fetch) cannot re-burst the whole due set at once. At the daemon's 60 s
- * tick this yields at most one fetch every other tick in steady state (⇒ the
- * hourly budget), while a small fleet whose total demand fits under budget is
- * never throttled — the {@link PROVIDER_HOURLY_BUDGET} rolling cap is the only
- * gate that binds it.
- */
+/** Fetches pacing permits a provider this tick: one per elapsed spacing since its last fetch,
+ * clamped to `PROVIDER_CATCHUP_MAX` so an idle gap cannot re-burst. `PROVIDER_HOURLY_BUDGET` is
+ * the only cap on a small fleet. */
 export function providerSpacingTokens(lastCallMs: number, now: number): number {
   // A cold provider (never fetched) is treated as maximally idle: grant the
   // catch-up ceiling so a couple of accounts warm immediately without bursting.
@@ -412,12 +294,9 @@ export function mayIssueUsageEndpointProbe(opts: {
   return isHeadedDeviceRole(opts.role);
 }
 
-/**
- * Sticky one-poller election: lex-least among this box (if it holds a native
- * login) and peer devices that published a `freshnessSource=poll` row. Statusline
- * ingest does not claim. Two headed boxes therefore converge on one poller
- * instead of each deferring to the other.
- */
+/** Sticky one-poller election: lex-least among this box (if it has a native login) and peers
+ * publishing a `freshnessSource=poll` row, so two headed boxes converge instead of deferring to
+ * each other. */
 export function electUsagePoller(opts: {
   selfDevice: string;
   selfHoldsNativeLogin: boolean;
@@ -482,12 +361,9 @@ export function pollerClaimsFromSharedStore(
   return claims;
 }
 
-/**
- * Spend one live usage-endpoint call from the shared per-account / per-provider
- * budget. Auth-health and the usage poller both go through here so they cannot
- * together exceed {@link PROVIDER_HOURLY_BUDGET} (~30/hr, well under ~100/hr).
- * Returns false when the call must not fire.
- */
+/** Spend one live call from the shared per-account/per-provider budget; auth-health and the poller
+ * both use it so together they stay under `PROVIDER_HOURLY_BUDGET` (~30/hr). False means do not
+ * fire. */
 export function trySpendUsageApiCall(usageKey: string, agentId: AgentId, now: number): boolean {
   if (!agentUsesNetworkUsage(agentId)) return true;
   const cache = readHeadroomCache();
@@ -520,26 +396,13 @@ export function trySpendUsageApiCall(usageKey: string, agentId: AgentId, now: nu
 interface LocalUsageAccount {
   usageKey: string;
   agentId: AgentId;
-  /**
-   * Live-fetch this account's usage; the daemon passes the real network fetch.
-   * `signal` (the daemon tick's deadline AbortSignal) bounds the provider fetch
-   * so a hung refresh is aborted at deadlineMs, not just its own 5s timeout.
-   */
+  /** Live-fetch this account's usage; `signal` (the tick's deadline AbortSignal) aborts a hung
+   * refresh at deadlineMs, not just its own 5s timeout. */
   fetch: (signal?: AbortSignal) => Promise<UsageInfo>;
 }
 
-/**
- * Order a pass STALEST-FIRST so a scarce per-provider budget
- * ({@link PROVIDER_HOURLY_BUDGET}) is always spent on the accounts most in need
- * of a fresh reading, and no account is starved indefinitely.
- *
- *  - **Cold accounts** (never refreshed → no cache entry) are maximally stale
- *    and lead the pass. They rotate by `tick` so, when the budget can't cover
- *    them all in one tick, a different cold account leads each tick.
- *  - **Cached accounts** follow, oldest `capturedAt` first (a null capture time
- *    counts as maximally stale). As accounts refresh their `capturedAt` advances,
- *    so the next pass naturally rotates to whoever is now most out of date.
- */
+/** Order a pass stalest-first so the scarce per-provider budget serves the neediest and none
+ * starves: cold accounts lead (rotating by `tick`), then cached ones by oldest `capturedAt`. */
 export function orderUsageAccounts(
   accounts: LocalUsageAccount[],
   cache: Record<string, HeadroomEntry>,
@@ -557,13 +420,8 @@ export function orderUsageAccounts(
   return [...rotate(cold), ...byStalest];
 }
 
-/**
- * Aggregate live calls a network provider has already spent in the trailing hour,
- * summed across the accounts in this pass. Seeds the per-provider budget counter
- * so {@link PROVIDER_HOURLY_BUDGET} bounds the rolling-hour total, not just this
- * one tick. Non-network providers (grok/codex, local logs) are excluded — they
- * have no rate-limited endpoint to budget.
- */
+/** Live calls a network provider already spent in the trailing hour, summed over this pass, so
+ * `PROVIDER_HOURLY_BUDGET` bounds the rolling hour. Local-log providers (grok/codex) are excluded. */
 export function providerRecentCalls(
   accounts: LocalUsageAccount[],
   cache: Record<string, HeadroomEntry>,
@@ -586,11 +444,8 @@ export interface BuildLocalUsageAccountsOpts {
   claimedBy?: Record<string, string[]>;
 }
 
-/**
- * Enumerate the usage accounts THIS headed box should poll — native logins it
- * holds, minus accounts another headed poller already claims. A worker or
- * setup-token-only box returns [].
- */
+/** Usage accounts this headed box should poll: its native logins minus those another headed poller
+ * claims. A worker or setup-token-only box returns []. */
 export async function buildLocalUsageAccounts(
   opts: BuildLocalUsageAccountsOpts = {},
 ): Promise<LocalUsageAccount[]> {
@@ -649,21 +504,11 @@ interface UsageRefreshDeps {
   listAccounts: () => Promise<LocalUsageAccount[]>;
   /** Persist a fresh snapshot to the usage cache (writeClaudeUsageCache). */
   writeUsageCache: (usageKey: string, snapshot: UsageSnapshot) => void;
-  /**
-   * Epoch ms this provider — or, when `usageKey` is given, this specific
-   * account — is backed off until; null when free (usageRateLimitedUntil).
-   * Per-account scope (RUSH-3036): one throttled account must not park its
-   * siblings, which previously starved every account after the first 429 in
-   * this loop's fixed iteration order.
-   */
+  /** Epoch ms this provider (or, with `usageKey`, this account) is backed off until; null if free.
+   * Per-account (RUSH-3036) so one throttled account cannot park its siblings. */
   backoffUntil: (agentId: AgentId, usageKey?: string) => number | null;
-  /**
-   * The account's current usage row from the shared cache (the row the routing
-   * hot path reads), or null when absent. Lets the refresher see the FREE
-   * statusline ingest of a live `agents run` and, when that row is recent, skip a
-   * redundant API refresh while still re-deriving headroom from it — instead of
-   * spending scarce provider budget re-fetching an already-current account.
-   */
+  /** The account's usage row from the shared cache (what routing reads), or null; lets the refresher
+   * skip a redundant refresh when a free statusline ingest is recent. */
   readCachedSnapshot?: (usageKey: string) => UsageSnapshot | null;
   /** Daemon tick deadline signal, forwarded to each account's provider fetch (PHNX-3608). */
   signal?: AbortSignal;
@@ -685,12 +530,8 @@ interface UsageRefreshResult {
   failed: number;
 }
 
-/**
- * One refresher tick: for each local account that is due, under its hourly cap,
- * and not backed off, live-fetch its usage, update the cache, and
- * reschedule from the new burn projection. Never throws — a single account's
- * failed fetch leaves its cache untouched and counts as `failed`.
- */
+/** One refresher tick: live-fetch each due, under-cap, not-backed-off account, update the cache,
+ * reschedule. Never throws; a failed fetch leaves the cache untouched and counts as `failed`. */
 export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefreshResult> {
   const now = deps.now ?? Date.now();
   const result: UsageRefreshResult = {
@@ -709,15 +550,9 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     cache,
     Math.floor(now / USAGE_REFRESH_TICK_MS),
   );
-  // Per-provider pacing. Two gates keep aggregate endpoint load smooth and bounded:
-  //  - a rolling-hour ceiling (PROVIDER_HOURLY_BUDGET) — the hard cap, seeded
-  //    with calls already spent in the trailing hour;
-  //  - a min-spacing token count (PROVIDER_MIN_REFRESH_SPACING_MS) — the smoother,
-  //    which issues refreshes round-robin at a fixed rate instead of the
-  //    synchronized burst-then-stall a plain rolling cap produces when every
-  //    account falls due on the same tick.
-  // Both are per-provider and network-only; accounts are ordered stalest-first, so
-  // the scarce budget always serves the account most in need and none is starved.
+  // Per-provider pacing: a rolling-hour ceiling (PROVIDER_HOURLY_BUDGET, seeded with calls already
+  // spent) plus min-spacing tokens that issue refreshes round-robin instead of a burst.
+  // Network-only; stalest first.
   const budgetSpent = providerRecentCalls(accounts, cache, now);
   const lastCall = providerLastCall(accounts, cache);
   const spacingTokens = new Map<AgentId, number>();
@@ -743,10 +578,9 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
       continue;
     }
 
-    // A live `agents run` already refreshed this account's usage row for free via
-    // the statusline ingest — re-derive headroom from that row and skip the API
-    // call. Network providers only: a local-log provider's cache is always its
-    // own last write, so this must not suppress its refresh (grok/codex).
+    // A live `agents run` already refreshed this row via the statusline ingest: re-derive headroom
+    // and skip the API call. Network providers only; a local-log provider's cache is its own write
+    // (grok/codex).
     if (network) {
       const cached = deps.readCachedSnapshot?.(account.usageKey) ?? null;
       const capturedAtMs = cached?.capturedAt?.getTime() ?? null;

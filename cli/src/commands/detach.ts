@@ -1,15 +1,6 @@
-/**
- * `agents sessions detach <id>` — send a live agent session to the background:
- * stop its interactive process and continue it headless, unattended, so it drives
- * its task to completion without holding a terminal. Bring it back with
- * `agents sessions resume`. A sibling of `sessions focus` on the session
- * lifecycle axis.
- *
- * Agent-agnostic and version-pinned by construction: it re-invokes
- * `agents run <agent> "<nudge>" --resume <id> --headless`, which resolves the
- * session's originating version and uses the agent's native resume (claude/codex)
- * or a `/continue` replay (others) — the same path `attach` reverses.
- */
+/** `agents sessions detach <id>` backgrounds a live session: stop its interactive process and
+ * continue headless; `agents sessions resume` brings it back. Agent-agnostic, version-pinned: re-
+ * invokes `agents run <agent> --resume <id> --headless` with a nudge, which `attach` reverses. */
 import { spawn } from 'node:child_process';
 import { openSync, closeSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -37,17 +28,9 @@ export function registerDetachCommand(program: Command): void {
     });
 }
 
-/**
- * Stop a live agent's interactive process and tear down its mux. tmux-hosted
- * sessions are killed by session (closes the pane, ends the agent, reaps its
- * helper processes); a plain process is SIGTERM'd (then SIGKILLed) by pid. Either
- * way we wait for the process to actually exit before returning.
- *
- * Shared by two callers: `detach` (stop the terminal so the headless resume it
- * spawns next doesn't fight the old process over the same transcript) and `stop`
- * (end the session outright — no resume). `socket` defaults to the shared agents
- * socket; it is a parameter only so a test can drive an isolated tmux server.
- */
+/** Stop a live agent's interactive process and tear down its mux: tmux sessions are killed by
+ * session, a plain process gets SIGTERM then SIGKILL; wait for exit. Shared by `detach` (so the
+ * headless resume doesn't fight the old process over the transcript) and `stop`. */
 export async function stopInteractive(s: ActiveSession, socket: string = getDefaultSocketPath()): Promise<void> {
   if (s.tmuxTarget) {
     const name = s.tmuxTarget.split(':')[0];
@@ -62,11 +45,9 @@ export async function stopInteractive(s: ActiveSession, socket: string = getDefa
   if (s.pid && s.pid > 0) await waitForExit(s.pid);
 }
 
-/**
- * Poll until `pid` is gone (SIGTERM already sent), escalating to SIGKILL past the
- * deadline so a stuck process can't wedge the detach. Bounded so `detach` never
- * hangs waiting on a process that ignores signals.
- */
+/** Poll until `pid` is gone (SIGTERM already sent), escalating to SIGKILL past the deadline so a
+ * stuck process can't wedge the detach. Bounded so `detach` never hangs on a process that ignores
+ * signals. */
 async function waitForExit(pid: number, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -87,20 +68,15 @@ async function waitForExit(pid: number, timeoutMs = 5000): Promise<void> {
   }
 }
 
-/**
- * Where a backgrounded continuation's stdout/stderr lands, by convention, so a
- * crash after detach is debuggable — there is no terminal watching it, and
- * presence only tells you the pid is gone, not whether the run finished or died.
- */
+/** Where a backgrounded continuation's stdout/stderr lands, by convention, so a crash after detach
+ * is debuggable: no terminal watches it, and presence only shows the pid is gone, not whether the
+ * run finished or died. */
 function backgroundLogPath(sessionId: string): string {
   return path.join(getLogsDir(), `detach-${sessionId.slice(0, 8)}.log`);
 }
 
-/**
- * Spawn the headless continuation detached, resolving to its pid for tracking.
- * Its output is redirected to `logFile` rather than discarded, so a fast-failing
- * background run leaves a trail.
- */
+/** Spawn the headless continuation detached, resolving to its pid. Output goes to `logFile` rather
+ * than being discarded, so a fast-failing background run leaves a trail. */
 function spawnHeadless(command: string, args: string[], logFile: string): Promise<number> {
   return new Promise((resolve, reject) => {
     mkdirSync(path.dirname(logFile), { recursive: true });

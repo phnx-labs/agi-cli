@@ -1,35 +1,6 @@
-/**
- * Device/user config keys — typed read/write over the three-layer store.
- *
- * One registry (`CONFIG_KEYS`) maps each CLI dotted name to where it lives:
- *   - user scope   → central `~/.agents/agents.yaml` under `config:` (syncs
- *                    fleet-wide via `agents repo push/pull`)
- *   - device scope → the per-device TRACKED doc
- *                    `~/.agents/devices/<name>/agents.yaml` under `config:` —
- *                    conflict-free by construction (each machine writes only
- *                    its own folder, and the churny auto-written pins no longer
- *                    share the file)
- *   - fleet layer  → central `~/.agents/agents.yaml` under
- *                    `fleet.defaults.config` — fleet-wide defaults written by
- *                    `agents devices config --fleet <key> <value>`
- *
- * Read order for a device-scope key: built-in default < fleet.defaults.config
- * < per-device config:. Names and non-secret values only (a secrets-bundle
- * NAME is fine; a credential never is).
- *
- * The device registry (`~/.agents/.history/devices/registry.json`) stays the
- * DISCOVERY cache (address, tailscale snapshot, reachability); the profile
- * fields config can override (ssh.*, platform, user) are overlaid onto it at
- * read time by `lib/devices/resolve-profile.ts`.
- *
- * Legacy stores (central `fleet.devices.<name>.config`, legacy auto-launch.json,
- * doc-level defaultBrowserProfile, pins in tracked docs) are folded into this
- * layout once by `lib/devices/config-migration.ts`, invoked on the first
- * read/write in a process — after migration there is ONE read path per layer,
- * no fallback branches.
- *
- * Unset always means today's behavior (the documented default).
- */
+/** Device/user config keys over a three-layer store; `CONFIG_KEYS` maps each name to user scope
+ * (central `agents.yaml`), device scope (tracked per-device doc) or fleet defaults. Device read
+ * order: default < fleet < device. Names and non-secret values only, never a credential. */
 
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
@@ -47,16 +18,9 @@ import { isAgentId } from './types.js';
 /** Which tier of the agents.yaml store a key lives in. */
 export type ConfigScope = 'user' | 'device';
 
-/**
- * For a device-scope key: WHO READS IT. Storage is still the three-layer
- * store (per-device doc / fleet.defaults.config); visibility only gates
- * whether a PEER may read or write the key.
- *
- * - `shared`  — a peer reads it (ssh.*, platform, role, caps), so any box
- *   may set it for any device. Lands in that device's tracked doc.
- * - `machine` — only the owning box ever reads it (scheduler, daemon, tmux,
- *   browser consent). Refused for a peer — run it on that box instead.
- */
+/** For a device-scope key, who reads it (storage is the same three-layer store): `shared` is read
+ * by peers (ssh.*, platform, role, caps), so any box may set it for any device; `machine` is read
+ * only by the owning box and is refused for a peer. */
 export type ConfigVisibility = 'shared' | 'machine';
 
 /** Value type of a config key — drives validation and `--json` rendering. */
@@ -77,10 +41,8 @@ interface ConfigKeySpecBase {
   validate?: (value: unknown) => string | null;
 }
 
-/**
- * One known config key. A device-scope key MUST declare its `visibility`; a
- * user-scope key has none (it is fleet-wide by definition).
- */
+/** One known config key. A device-scope key must declare its `visibility`; a user-scope key has
+ * none (it is fleet-wide). */
 export type ConfigKeySpec =
   | (ConfigKeySpecBase & { scope: 'user'; visibility?: never })
   | (ConfigKeySpecBase & { scope: 'device'; visibility: ConfigVisibility });
@@ -110,17 +72,12 @@ const SSH_AUTH_METHODS = ['key', 'password'] as const;
 const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 /** Which devices automatic placement may pick — see the `auto.pool` key below. */
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
-/**
- * A device's physical form factor (`formFactor` key) — a factual hardware fact
- * the menu bar shows as an icon. Set explicitly per device (no inference from
- * platform, no hardcoded device names). `unknown` is the effective default.
- */
+/** A device's physical form factor (`formFactor` key), a hardware fact the menu bar shows as an
+ * icon. Set explicitly per device, never inferred; `unknown` is the default. */
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-/**
- * The AGI Menu tabs `menubar.menu.tabOrder` orders and `menubar.menu.hiddenTabs`
- * hides, in the menu's built-in order. Settings is always shown, so it is not one.
- */
+/** The AGI Menu tabs `menubar.menu.tabOrder` orders and `menubar.menu.hiddenTabs` hides, in
+ * built-in order. Settings is always shown, so it is not listed. */
 export const MENUBAR_TABS = ['home', 'sessions', 'inbox', 'projects'] as const;
 
 /** A validate() that accepts only one of `allowed` — the enum-string keys reuse it. */
@@ -249,12 +206,9 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
   {
     name: 'browser.device',
     yamlKey: 'defaultBrowserDevice',
-    // user scope, so a SINGLE value in the central agents.yaml syncs to every box:
-    // the fleet's browser hub. A worker with this set forwards its browser drives
-    // to the hub (as if `--device <hub>` was passed) with no per-command flag, so
-    // every agent shares the hub's one logged-in browser. The hub names itself, so
-    // there it resolves to a self-host and runs locally — which is why one synced
-    // value is safe. Unset = drive this box's own browser (today's behavior).
+    // User scope, so one synced value names the fleet's browser hub: a worker with it set forwards
+    // browser drives to the hub as if `--device <hub>` were passed. The hub resolves itself to a
+    // self-host and runs locally. Unset drives this box's own browser.
     scope: 'user',
     type: 'string',
     description:
@@ -481,12 +435,9 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     validate: oneOf('formFactor', DEVICE_FORM_FACTORS),
   },
 
-  // ─── AGI Menu preferences (PHNX-3999) ──────────────────────────────────────
-  // User-scope so one value syncs fleet-wide via `agents repo push/pull` and the
-  // native menu reads it from `agents config list --json`. Names mirror the Swift
-  // MenuPreferences local-cache keys. `config list` OMITS an unset key, so the
-  // native app falls back to its own known defaults — the defaults documented
-  // here match those, they are not substituted on read.
+  // AGI Menu preferences (PHNX-3999): user scope so one value syncs fleet-wide and the native menu
+  // reads it from `agents config list --json`. Names mirror the Swift MenuPreferences cache keys.
+  // `config list` omits unset keys so the app uses its own defaults.
   {
     name: 'menubar.menu.defaultProject',
     yamlKey: 'menubarMenuDefaultProject',
@@ -747,12 +698,9 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
 ];
 
 /** Look up a key spec by CLI dotted name, or throw listing the known keys. */
-/**
- * Per-harness override of `updates.auto` (PHNX-3940) — `updates.<agent>.auto`,
- * one boolean key per registered agent id. Use the lightweight canonical ID
- * catalog: importing the installation/runtime registry here creates a cycle
- * through the harness adapters and makes ordinary config readers load it all.
- */
+/** Per-harness override of `updates.auto` (PHNX-3940): `updates.<agent>.auto`, one boolean per
+ * registered agent id. Use the lightweight canonical ID catalog; importing the
+ * installation/runtime registry creates a cycle through the harness adapters. */
 function dynamicAgentAutoUpdateSpec(name: string): ConfigKeySpec | null {
   const match = name.match(/^updates\.(.+)\.auto$/);
   if (!match) return null;
@@ -812,13 +760,9 @@ export function assertValidValue(spec: ConfigKeySpec, value: unknown): void {
 
 let migrationDone = false;
 
-/**
- * Fold the legacy config/pins stores into the current layout, once per
- * process. A failure is loud but non-fatal — config reads must keep working,
- * and the next process retries the fold. Honors AGENTS_SKIP_MIGRATION=1, the
- * same gate bootstrap's runMigration uses (tests pin it so a fork never folds
- * the developer's real ~/.agents as a side effect).
- */
+/** Fold the legacy config/pins stores into the current layout once per process. A failure is loud
+ * but non-fatal and retried by the next process. Honors AGENTS_SKIP_MIGRATION=1 (as bootstrap's
+ * runMigration does) so tests never fold the developer's real ~/.agents. */
 function ensureDeviceConfigMigrated(): void {
   if (migrationDone || process.env.AGENTS_SKIP_MIGRATION === '1') return;
   try {
@@ -836,11 +780,8 @@ function deviceDocPath(device: string): string {
   return path.join(getUserAgentsDir(), 'devices', device, 'agents.yaml');
 }
 
-/**
- * Read a device's doc. Returns null when the file does not exist. A malformed
- * file is a hard error — silently returning null would let the next write wipe
- * the device's routines/config (same contract as routine-activation's reader).
- */
+/** Read a device's doc; null when the file does not exist. A malformed file is a hard error, since
+ * returning null would let the next write wipe the device's routines/config. */
 /** Parse + validate a device doc's raw YAML. Shared by the sync and async readers. */
 function parseDeviceDoc(raw: string, p: string): Record<string, unknown> {
   const corrupted = (detail: string) =>
@@ -914,13 +855,9 @@ function readDeviceDocConfig(device: string): Record<string, unknown> {
   return (readDeviceDoc(device)?.config as Record<string, unknown> | undefined) ?? {};
 }
 
-/**
- * The effective device-scope config block for `device`: fleet.defaults.config
- * overlaid with the per-device doc's config:. This is the single read path
- * post-migration — the profile resolver (`lib/devices/resolve-profile.ts`)
- * goes through here. Deliberately does NOT auto-trigger the migration: it
- * serves the hot dial/render paths. Sync and cheap (small local files).
- */
+/** The effective device-scope config for `device`: fleet.defaults.config overlaid with the
+ * per-device doc's config:. The single read path post-migration (used by resolve-profile.ts).
+ * Deliberately does not trigger the migration, as it serves hot dial/render paths. */
 export function readDeviceConfigValues(device: string): Record<string, unknown> {
   return { ...readFleetConfigDefaults(), ...readDeviceDocConfig(device) };
 }
@@ -930,11 +867,8 @@ function targetDevice(opts?: ConfigTarget): string {
   return opts?.device ?? machineId();
 }
 
-/**
- * A machine-visibility key is only ever readable for THIS box. Asking for a
- * peer's value is a mistake with a concrete fix, so say so rather than
- * silently returning this machine's answer for another machine.
- */
+/** A machine-visibility key is only readable for this box. Asking for a peer's value is an error
+ * with a concrete fix, not a silent answer for the wrong machine. */
 function assertLocalTarget(spec: ConfigKeySpec, device: string): void {
   if (spec.scope !== 'device' || spec.visibility !== 'machine') return;
   if (device === machineId()) return;
@@ -948,13 +882,9 @@ function assertLocalTarget(spec: ConfigKeySpec, device: string): void {
 export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
-    // A user-scope key reads purely from central `agents.yaml` (readMeta) and
-    // is untouched by the device-config fold, which only relocates DEVICE-scope
-    // legacy stores (config-migration.ts) — none of them a user key. So a
-    // user-scope read stays a PURE read and MUST NOT trigger the migration
-    // write: a read-only `agents update --check` reads the `updates.auto` /
-    // `updates.<agent>.auto` policy through here, and migrating disk on that
-    // read is exactly the unsolicited startup write --check must not do.
+    // A user-scope key reads purely from central `agents.yaml` and is untouched by the
+    // device-config fold, so the read must not trigger the migration write: a read-only `agents
+    // update --check` reads `updates.auto` through here and must not write to disk.
     const value = readMeta({ migrate: false }).config?.[spec.yamlKey];
     return { spec, value, source: value !== undefined ? 'user' : 'default' };
   }
@@ -972,15 +902,9 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
   return { spec, value: undefined, source: 'default' };
 }
 
-/**
- * Async, non-blocking twin of {@link getConfigValue} for the daemon's tick paths
- * (PHNX-3695) — e.g. the watchdog tick reading `watchdog.enabled` every ~3min.
- * Same layer precedence (device doc → fleet defaults → default), but the
- * per-device doc READ is async. The user/fleet layers go through `readMeta`,
- * which serves from an mtime-stamped in-memory cache (≈ 2 stat syscalls on the
- * hot path, no file read), and `ensureDeviceConfigMigrated` is a one-shot no-op
- * after the first process-wide fold — neither blocks the loop meaningfully.
- */
+/** Async, non-blocking twin of getConfigValue for daemon tick paths (PHNX-3695), e.g. the watchdog
+ * reading `watchdog.enabled`. Same layer precedence, with an async device-doc read. User/fleet
+ * layers use `readMeta`'s cache; the migration is a one-shot no-op after the first fold. */
 export async function getConfigValueAsync(name: string, opts?: ConfigTarget): Promise<ConfigEntry> {
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
@@ -1003,13 +927,8 @@ export async function getConfigValueAsync(name: string, opts?: ConfigTarget): Pr
   return { spec, value: undefined, source: 'default' };
 }
 
-/**
- * List every known key with its effective value and the layer that set it.
- *
- * Listing a PEER omits its machine-local keys rather than throwing — those
- * values live on that box and are unknowable from here, but a bulk listing
- * must not hard-fail. Asking for such a key by name still errors.
- */
+/** List every known key with its effective value and the layer that set it. Listing a peer omits
+ * its machine-local keys rather than throwing; asking for such a key by name still errors. */
 export function listConfig(opts?: ConfigTarget): ConfigEntry[] {
   const isPeer = !opts?.fleet && targetDevice(opts) !== machineId();
   const visible = isPeer
@@ -1086,11 +1005,8 @@ function unsetInDeviceDoc(device: string, spec: ConfigKeySpec): void {
   });
 }
 
-/**
- * Set a config key (validated). Device-scope keys target this machine unless
- * `opts.device` names a peer; `opts.fleet` writes the fleet-wide defaults layer
- * instead. User-scope keys reject `fleet` (they are already fleet-wide).
- */
+/** Set a validated config key. Device-scope keys target this machine unless `opts.device` names a
+ * peer; `opts.fleet` writes the fleet defaults layer. User-scope keys reject `fleet`. */
 export function setConfigValue(name: string, value: unknown, opts?: ConfigTarget): void {
   ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
@@ -1145,43 +1061,24 @@ export type ConfiguredDeviceRole = (typeof DEVICE_ROLES)[number];
 /** Which devices automatic placement may pick (`auto.pool`). */
 export type AutoPoolMode = (typeof AUTO_POOL_MODES)[number];
 
-/**
- * The role marked on one device, or undefined when the operator never marked it.
- *
- * Undefined is meaningful and is NOT the same as `worker`: an unmarked device is
- * eligible for automatic placement only while no device anywhere carries an
- * explicit `worker` mark (see {@link listConfiguredDeviceRoles}).
- */
+/** The role marked on one device, or undefined when never marked. Undefined is not `worker`: an
+ * unmarked device is eligible for automatic placement only while no device carries an explicit
+ * `worker` mark (see listConfiguredDeviceRoles). */
 export function configuredDeviceRole(name: string): ConfiguredDeviceRole | undefined {
   assertValidDeviceName(name);
   return getConfigValue('role', { device: name }).value as ConfiguredDeviceRole | undefined;
 }
 
-/**
- * The role marked on THIS machine — the one running the CLI — or undefined when
- * it was never marked. Keyed off {@link machineId} (overridable via
- * AGENTS_SYNC_MACHINE_ID), so it matches the device's own config-folder key.
- *
- * The auth strategy reads this: a headed device (`personal` or `desktop`, see
- * {@link isHeadedDeviceRole}) holds a real per-version login and MUST
- * authenticate from it for EVERY run, interactive or headless; only a `worker`
- * uses the file-based setup-token (RUSH-2395). `undefined` is treated as
- * non-headed (worker-equivalent) by that gate — an unmarked box has no login to
- * defer to.
- */
+/** The role marked on this machine (via machineId, overridable by AGENTS_SYNC_MACHINE_ID), or
+ * undefined. A headed device (`personal`/`desktop`) must authenticate from its per-version login
+ * for every run; only a `worker` uses the setup-token (RUSH-2395). */
 export function selfConfiguredDeviceRole(): ConfiguredDeviceRole | undefined {
   return configuredDeviceRole(machineId());
 }
 
-/**
- * A "headed" device — one with an interactive desktop login, so it authenticates
- * from its own per-version Claude login (which carries the `user:profile` scope
- * the usage endpoint needs) rather than the headless file setup-token. Both
- * `personal` (the box you sit at) and `desktop` (a headed always-on box like a
- * Mac mini) qualify; a `worker` and an unmarked box do NOT. This is the single
- * predicate the auth-bucket sites read, so `personal` and `desktop` never drift
- * apart (claude adapter, routine spawn env, `agents view` usage login).
- */
+/** A headed device has an interactive desktop login, so it authenticates from its own per-version
+ * Claude login (with the `user:profile` scope), not the setup-token. `personal` and `desktop`
+ * qualify; `worker` and unmarked do not. Single predicate, so sites cannot drift. */
 export function isHeadedDeviceRole(role: ConfiguredDeviceRole | undefined): boolean {
   return role === 'personal' || role === 'desktop';
 }
@@ -1193,22 +1090,15 @@ export function setConfiguredDeviceRole(name: string, role: ConfiguredDeviceRole
   else setConfigValue('role', role, { device: name });
 }
 
-/**
- * Devices whose OWN config pins one of the browser profile keys to `profile`.
- *
- * Used by `profiles rename` to warn rather than silently leave a peer pointing at
- * a name that no longer exists. Deliberately read-only: rewriting another
- * machine's device doc from here would be a cross-machine mutation nobody asked
- * for, and the pin may well be correct there (a local profile of the same name).
- */
+/** Devices whose own config pins a browser profile key to `profile`, used by `profiles rename` to
+ * warn about stale pins. Read-only on purpose: rewriting another machine's device doc is an
+ * unrequested cross-machine mutation, and a same-named local profile may exist there. */
 export function devicesPinningBrowserProfile(
   profile: string,
 ): Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }> {
   ensureDeviceConfigMigrated();
-  // Reports WHICH key each device used, not just that it matched. A caller
-  // telling the user to fix `browser.profile` on a device that actually pinned
-  // `browser.viewer` leaves the real pin broken and sets a second key nobody
-  // asked for.
+  // Report which key each device used, not just that it matched; telling the user to fix
+  // `browser.profile` when the pin was `browser.viewer` leaves the real pin broken.
   const hits: Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }> = [];
   const devicesRoot = path.join(getUserAgentsDir(), 'devices');
   let names: string[] = [];
@@ -1229,15 +1119,9 @@ export function devicesPinningBrowserProfile(
   return hits;
 }
 
-/**
- * Every device with an effective role, keyed by device name. Layers like every
- * other device-scope key: the fleet default (central fleet.defaults.config)
- * applies fleet-wide and the per-device doc wins on conflict. `roster` (the
- * registered device names) lets a fleet default reach devices that have no doc
- * of their own; without it only devices with docs are considered — so a
- * fleet-wide `role` default would silently miss a doc-less device and drop it
- * from the worker allowlist. Mirrors {@link loadAutoLaunchPreferences}.
- */
+/** Every device with an effective role, keyed by name; the per-device doc wins over the fleet
+ * default. `roster` lets the fleet default reach doc-less devices; without it they silently drop
+ * out of the worker allowlist. Mirrors {@link loadAutoLaunchPreferences}. */
 export function listConfiguredDeviceRoles(roster?: string[]): Record<string, ConfiguredDeviceRole> {
   ensureDeviceConfigMigrated();
   const out: Record<string, ConfiguredDeviceRole> = {};
@@ -1268,11 +1152,9 @@ export function autoPoolMode(): AutoPoolMode {
 
 // ─── Auto-launch preferences (Factory auto-host selection) ────────────────────
 
-/**
- * A device's auto-launch flags, read by the automatic-placement pool
- * (`filterAutoPool` drops `enabled: false`; `pickBestDevice` boosts
- * `preferred: true` — see `lib/devices/pool.ts`) and by the menu-bar snapshot.
- */
+/** A device's auto-launch flags, read by the placement pool (`filterAutoPool` drops `enabled:
+ * false`; `pickBestDevice` boosts `preferred: true`, see `lib/devices/pool.ts`) and the menu-bar
+ * snapshot. */
 export interface AutoLaunchPreference {
   enabled?: boolean;
   preferred?: boolean;
@@ -1306,14 +1188,9 @@ export function setAutoLaunchPreferred(name: string, preferred: boolean): void {
   else unsetConfigValue('auto-launch.preferred', { device: name });
 }
 
-/**
- * Every device's effective auto-launch flags, keyed by device name — the shape
- * the menu-bar snapshot consumes. Layers like every other device-scope key: the
- * fleet default (central fleet.defaults.config) applies fleet-wide and the
- * per-device doc wins on conflict. `roster` (the registered device names) lets
- * a fleet default reach devices that have no doc of their own; without it only
- * devices with docs are listed.
- */
+/** Every device's effective auto-launch flags by name, as the menu-bar snapshot consumes them. The
+ * fleet default applies fleet-wide and the per-device doc wins; `roster` lets a fleet default
+ * reach devices without a doc, otherwise only devices with docs are listed. */
 export function loadAutoLaunchPreferences(roster?: string[]): Record<string, AutoLaunchPreference> {
   ensureDeviceConfigMigrated();
   const fleet = readFleetConfigDefaults();
@@ -1346,12 +1223,8 @@ export function isSchedulerEnabled(): boolean {
   return getConfigValue('scheduler.enabled').value !== false;
 }
 
-/**
- * Throw when the routines scheduler is disabled on this machine, naming the
- * setting and the fix. The single message every scheduler-start surface
- * (auto-start on `routines add`, manual `routines start`, the daemon's own
- * scheduler init) refuses with.
- */
+/** Throw when the routines scheduler is disabled on this machine, naming the setting and fix. The
+ * single refusal for every scheduler-start surface. */
 export function assertSchedulerEnabled(): void {
   if (isSchedulerEnabled()) return;
   throw new Error(
@@ -1370,13 +1243,9 @@ export function isDaemonEnabled(): boolean {
   return getConfigValue('daemon.enabled').value !== false;
 }
 
-/**
- * Throw when the daemon is disabled on this machine, naming the setting and
- * the fix. Every AUTO-start surface (routines add/start/catchup/webhook,
- * monitors add, `ensureDaemonStarted`) refuses with this before calling
- * `startDaemon()`. `agents daemon start` is the deliberate override and does
- * NOT call this — disable only blocks auto-start, mirroring `systemctl disable`.
- */
+/** Throw when the daemon is disabled on this machine, naming the setting and fix. Every auto-start
+ * surface refuses with it before `startDaemon()`; `agents daemon start` is the deliberate override
+ * and does not call it, mirroring `systemctl disable`. */
 export function assertDaemonEnabled(): void {
   if (isDaemonEnabled()) return;
   throw new Error(
@@ -1385,25 +1254,18 @@ export function assertDaemonEnabled(): void {
   );
 }
 
-/**
- * Idle window (ms) the browser-task reaper (`browser/hygiene.ts`) uses on THIS
- * machine, or `null` when idle reaping is off (`browser.task-idle-minutes=0`)
- * — session-dead reaping is unaffected either way. Unset means the default 30
- * minutes. Read by the daemon's periodic tick and, as the fallback when a
- * caller omits `--idle-minutes`, by the `gc` IPC action.
- */
+/** Idle window (ms) the browser-task reaper uses on this machine, or `null` when idle reaping is
+ * off (`browser.task-idle-minutes=0`); session-dead reaping is unaffected. Unset means 30 minutes.
+ * Read by the daemon tick and as the `gc` IPC fallback. */
 /** Async so the daemon's browser-task-reap tick reads the config off the shared event loop (PHNX-3695). */
 export async function resolveBrowserTaskIdleMs(): Promise<number | null> {
   const minutes = ((await getConfigValueAsync('browser.task-idle-minutes')).value as number | undefined) ?? 30;
   return minutes === 0 ? null : minutes * 60_000;
 }
 
-/**
- * Read the effective `agents.max-concurrent` cap for each named device (fleet
- * defaults layered under the per-device doc; no SSH). Devices without a cap
- * are omitted — uncapped is the default. Used as an input to host ranking
- * (teams placement, AGI EXT auto-launch), never as a remote probe.
- */
+/** Read the effective `agents.max-concurrent` cap per named device (fleet defaults under the
+ * per-device doc; no SSH). Devices without a cap are omitted (uncapped). An input to host ranking
+ * (teams placement, AGI EXT auto-launch), never a remote probe. */
 export function readMaxConcurrentCaps(devices: string[]): Record<string, number> {
   const caps: Record<string, number> = {};
   for (const device of devices) {

@@ -188,12 +188,9 @@ describe('monitorRunsOnThisDevice — owner semantics', () => {
     expect(monitorRunsOnThisDevice({ devices: ['other-a', 'other-b'] })).toBe(false);
   });
 
-  // ─── SING-9: an unpinned shared-input built-in must NOT fire on every box ──────
-  // The exact double-fire bug class the repo AGENTS.md names as blocking (the
-  // 2026-08-03 incident): a system built-in that polls a fleet-shared queue (a PR
-  // list, a tracker) ships enabled with no device pin, so without this guard every
-  // daemon fires it and races on the shared queue. `ownerHost` is passed
-  // explicitly so the placement rule is asserted without a live tailnet.
+  // SING-9: an unpinned shared-input built-in must NOT fire on every box (the 2026-08-03
+  // double-fire class: every daemon races on a fleet-shared queue). `ownerHost` is passed
+  // explicitly so placement is asserted without a live tailnet.
   const OTHER_BOX = 'some-other-box-xyz';
 
   it('an unpinned SYSTEM built-in does NOT fire on a non-owner box', () => {
@@ -296,10 +293,8 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
   const prevUser = process.env.AGENTS_MONITORS_DIR;
   const prevSys = process.env.AGENTS_SYSTEM_MONITORS_DIR;
 
-  /**
-   * A full valid monitor YAML: a poll source + on-change condition + a notify
-   * action on the given channel. `header` prepends name/enabled lines per test.
-   */
+  /** A full valid monitor YAML: a poll source, on-change condition and a notify action on the given
+   * channel. `header` prepends name/enabled lines per test. */
   function monitorYaml(header: string, notifyChannel = 'telegram'): string {
     return (
       header +

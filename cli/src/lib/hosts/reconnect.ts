@@ -1,16 +1,6 @@
-/**
- * Auto-reconnect for an interactive `agents run --device` session whose SSH link
- * dropped. ssh exit 255 triggers bounded-backoff re-attaches via the peer's own
- * `agents sessions focus <id> --local`, which joins a surviving tmux pane or
- * resumes the session in place. The retry window bounds unproductive streaks,
- * resetting when an attach reaches the host and holds the pane.
- *
- * A remote interactive session MUST be tmux-wrapped: with the wrap on, the agent
- * runs in a DETACHED tmux pane on the peer, so a blink kills only the ssh client
- * and the reattach rejoins the live pane; with it off, the agent is a child of
- * the sshd session and a blink SIGHUPs it, losing the in-flight turn (the
- * reattach then resumes the harness from disk). See lib/exec.ts `runInTmux`.
- */
+/** Auto-reconnect for an interactive `agents run --device` session whose SSH link dropped: exit
+ * 255 triggers bounded-backoff re-attaches via the peer's `agents sessions focus <id> --local`.
+ * The remote session must be tmux-wrapped, or a blink SIGHUPs it (lib/exec.ts `runInTmux`). */
 import { sshExec, sshStream, shellQuote, SSH_CONN_FAILURE_CODE } from '../ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
 import { RUN_AUTO_KEYWORD } from '../types.js';
@@ -18,30 +8,22 @@ import { RUN_AUTO_KEYWORD } from '../types.js';
 /** ssh's connection-layer failure code — re-exported from ssh-exec.ts. */
 export const SSH_CONN_FAILURE = SSH_CONN_FAILURE_CODE;
 
-/**
- * ssh returns 255 for BOTH "couldn't connect" and "connected then dropped", so a
- * remote-origin 255 (the focus command's own exit) is remapped to 254 before the
- * reconnect loop sees it — inside the loop, 255 therefore always means a network
- * drop, never a code the remote command chose.
- */
+/** ssh returns 255 for both "couldn't connect" and "connected then dropped", so a remote-origin
+ * 255 is remapped to 254 before the reconnect loop; inside the loop 255 always means a network
+ * drop. */
 export const REMOTE_EXIT_255_REMAPPED = 254;
 
-/**
- * Wall-clock window bounding unproductive reconnect streaks, not the total
- * session. A reattach that reaches the host and holds resets the budget.
- */
+/** Wall-clock window bounding unproductive reconnect streaks, not the whole session; a reattach
+ * that reaches the host and holds resets it. */
 export const RECONNECT_WINDOW_MS = 15 * 60_000;
 
 /** Backoff curve: 2s, 4s, 8s, 16s, 30s, then 30s until the window closes. */
 const BASE_BACKOFF_MS = 2_000;
 const MAX_BACKOFF_MS = 30_000;
 
-/**
- * A genuine reconnection must hold the remote pane this long before refilling
- * the retry budget. It is the minimum time to clear TTY negotiation and confirm
- * a working session, distinguishing that from an attach that reconnects and
- * immediately re-drops; otherwise a flapping link would retry forever.
- */
+/** A genuine reconnection must hold the remote pane this long before refilling the retry budget
+ * (time to clear TTY negotiation), so an attach that re-drops immediately on a flapping link
+ * cannot retry forever. */
 export const MIN_HOLD_MS = 10_000;
 
 export interface ReconnectState {
@@ -78,10 +60,8 @@ export function refillsBudget(outcome: ReconnectOutcome): boolean {
   return outcome.connected && outcome.heldMs >= MIN_HOLD_MS;
 }
 
-/**
- * Decide the next action from a run/re-attach outcome. Non-255 exits stop and
- * surface that code; 255 retries until the unproductive window is spent.
- */
+/** Decide the next action from a run/re-attach outcome: non-255 exits stop and surface that
+ * code; 255 retries until the unproductive window is spent. */
 export function reconnectStep(state: ReconnectState, outcome: ReconnectOutcome): ReconnectDecision {
   if (outcome.code !== SSH_CONN_FAILURE) return { action: 'stop', code: outcome.code };
   const productive = refillsBudget(outcome);
@@ -137,19 +117,15 @@ export function interruptedNotice(target: ReconnectTarget, host: string): string
   return `\nStopped reconnecting to ${targetLabel(target)} on ${host}. Recover it when the link is stable:\n${recoveryHint(target, host)}`;
 }
 
-/**
- * Wrap `cmd` in `bash -lc` with an exit-code remap: 255 becomes
- * {@link REMOTE_EXIT_255_REMAPPED} so a remote-origin 255 cannot pass as ssh drop.
- */
+/** Wrap `cmd` in `bash -lc` with an exit-code remap: 255 becomes REMOTE_EXIT_255_REMAPPED so a
+ * remote-origin 255 cannot pass as an ssh drop. */
 export function wrapRemoteExitCode(cmd: string): string {
   const guarded = `${cmd}; rc=$?; [ "$rc" = "${SSH_CONN_FAILURE}" ] && rc=${REMOTE_EXIT_255_REMAPPED}; exit "$rc"`;
   return `bash -lc ${shellQuote(guarded)}`;
 }
 
-/**
- * How a dropped run is named when we go back for it.
- * `launch` ids are minted locally before the connection exists, so they survive a drop.
- */
+/** How a dropped run is named when we go back for it; `launch` ids are minted locally before the
+ * connection exists, so they survive a drop. */
 export type ReconnectTarget =
   | { kind: 'session'; id: string }
   | { kind: 'launch'; id: string };
@@ -159,10 +135,8 @@ function targetLabel(target: ReconnectTarget): string {
   return target.id.slice(0, 8);
 }
 
-/**
- * The command a user can run to re-enter a session after reconnect gives up.
- * The full id is printed on its own line so it remains copyable after a drop.
- */
+/** The command a user can run to re-enter a session after reconnect gives up; the full id prints
+ * on its own line so it stays copyable. */
 export function recoveryHint(target: ReconnectTarget, host: string): string {
   if (target.kind === 'session') {
     return `  Session ${target.id}\n  Resume:  agents sessions resume ${target.id}\n`;
@@ -171,10 +145,8 @@ export function recoveryHint(target: ReconnectTarget, host: string): string {
     + `  or pick it:  agents sessions --active\n`;
 }
 
-/**
- * Notice shown when an interactive remote connection ends and no auto-reconnect
- * follows. Prints the session id/handle so the user can get back in.
- */
+/** Notice shown when an interactive remote connection ends with no auto-reconnect, printing the
+ * session id/handle so the user can get back in. */
 export function connectionEndedNotice(
   target: ReconnectTarget,
   host: string,
@@ -184,19 +156,15 @@ export function connectionEndedNotice(
   return `\nConnection to ${host} ${verb}.\n${recoveryHint(target, host)}`;
 }
 
-/**
- * Banner printed as an interactive `--device` run takes the TTY, so the id is
- * visible in scrollback while the connection exists.
- */
+/** Banner printed as an interactive `--device` run takes the TTY, so the id is visible in
+ * scrollback while the connection exists. */
 export function connectionStartedNotice(target: ReconnectTarget, host: string): string | undefined {
   if (target.kind !== 'session') return undefined;
   return `Session ${target.id} on ${host}\n  Resume later:  agents sessions resume ${target.id}\n`;
 }
 
-/**
- * The id to print as an interactive `--device` stream starts. `run auto` is
- * excluded because its forwarded id is only real when the remote picks Claude.
- */
+/** The id to print as an interactive `--device` stream starts; `run auto` is excluded because
+ * its forwarded id is real only when the remote picks Claude. */
 export function startConnectionTarget(opts: {
   agent: string;
   hostSessionId?: string;
@@ -207,10 +175,8 @@ export function startConnectionTarget(opts: {
   return id ? { kind: 'session', id } : undefined;
 }
 
-/**
- * Decide what happens after an interactive `--device` stream returns. Auto-
- * reconnect fires on 255 unless `--raw` opted out; otherwise print recovery info.
- */
+/** Decide what happens after an interactive `--device` stream returns: auto-reconnect on 255
+ * unless `--raw` opted out, else print recovery info. */
 export function afterInteractiveRemoteExit(opts: {
   target?: ReconnectTarget;
   host: string;
@@ -237,10 +203,8 @@ interface ReconnectTargetInputs {
   launchId?: string;
 }
 
-/**
- * Choose how to name the dropped run. `launchId` is last because it is minted
- * locally before the connection exists, so it survives the drop.
- */
+/** Choose how to name the dropped run; `launchId` goes last because it is minted locally before
+ * the connection exists, so it survives the drop. */
 export function pickReconnectTarget(inputs: ReconnectTargetInputs): ReconnectTarget | undefined {
   const { agent, sessionId, resolvedId, resumeId, launchId } = inputs;
   const preferred = agent === RUN_AUTO_KEYWORD
@@ -251,10 +215,8 @@ export function pickReconnectTarget(inputs: ReconnectTargetInputs): ReconnectTar
   return launchId ? { kind: 'launch', id: launchId } : undefined;
 }
 
-/**
- * The peer's recovery verb wrapped so a remote-origin 255 cannot masquerade as
- * a network drop. No `--attach-only`: focus resumes in place when no pane survived.
- */
+/** The peer's recovery verb, wrapped so a remote-origin 255 cannot masquerade as a network drop.
+ * No `--attach-only`: focus resumes in place when no pane survived. */
 export function reattachRemoteCommand(target: ReconnectTarget): string {
   const selector = target.kind === 'launch'
     ? ['--launch-id', target.id]
@@ -265,11 +227,9 @@ export function reattachRemoteCommand(target: ReconnectTarget): string {
   return wrapRemoteExitCode(inner);
 }
 
-/**
- * Re-attach the live remote pane by driving the peer's `agents sessions focus`.
- * A fast preflight probe decides reachability; only then do we run the
- * interactive attach/resume. Returns the exit code, connected bit, and hold time.
- */
+/** Re-attach the live remote pane via the peer's `agents sessions focus`: a fast preflight probe
+ * decides reachability, then the interactive attach/resume runs. Returns the exit code,
+ * connected bit and hold time. */
 function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
   const sshTarget = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
@@ -283,12 +243,9 @@ function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOu
   return { code, connected: true, heldMs: Date.now() - startedAt };
 }
 
-/**
- * Wait `ms`, but return early if the user interrupts.
- *
- * Installs a SIGINT handler only for the wait so Ctrl-C gives a graceful
- * "agent still running" message instead of killing the local process silently.
- */
+/** Wait `ms`, returning early on interrupt. The SIGINT handler is installed only for the wait so
+ * Ctrl-C gives a graceful "agent still running" message instead of silently killing the local
+ * process. */
 async function waitOrInterrupt(ms: number): Promise<'elapsed' | 'interrupted'> {
   return new Promise((resolve) => {
     let done = false;

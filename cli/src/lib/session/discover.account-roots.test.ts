@@ -1,15 +1,6 @@
-/**
- * Account-root session discovery (PHNX-3940).
- *
- * A named account gets its own HOME-shaped dir under
- * `<historyDir>/accounts/<harness>/<accountId>/` (lib/accounts/slots.ts), sharing the
- * one managed install rather than owning a version home of its own. Before this
- * fix, `getAgentSessionDirs` only ever walked `versions/<agent>/<version>/home/…`
- * (plus codex's per-VERSION short-home relocation), so a transcript an account slot
- * wrote was never scanned at all — a fully registered, runnable account's history
- * read as gone. Every fixture here is a real directory tree on disk; no mocking,
- * per the repo rule.
- */
+/** Account-root session discovery (PHNX-3940). An account's HOME-shaped dir is
+ * `<historyDir>/accounts/<harness>/<accountId>/`. `getAgentSessionDirs` once walked only
+ * `versions/`, so account transcripts were never scanned. Real dir trees, no mocking. */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -55,10 +46,8 @@ describe('getAgentSessionDirs — account-slot roots (PHNX-3940)', () => {
   });
 
   it('scans a claude account-slot dir even with no version home ever installed', () => {
-    // Cold account-root discovery: nothing under versions/claude/ exists at all, yet
-    // the slot's own `projects` dir must still be a scan root (getAgentSessionDirs
-    // returns the `projects` dir itself; a per-project subdir like `-p/` is walked
-    // from there, exactly like a version home's `projects` dir is).
+    // Cold account-root discovery: nothing exists under versions/claude/, yet the slot's
+    // `projects` dir must still be a scan root (walked like a version home's).
     const dirs = getAgentSessionDirs('claude', 'projects');
     const expected = path.join(historyDir(), 'accounts', 'claude', claudeAccountId, '.claude', 'projects');
     expect(dirs).toContain(expected);
@@ -73,11 +62,9 @@ describe('getAgentSessionDirs — account-slot roots (PHNX-3940)', () => {
 });
 
 describe('getAgentSessionDirs — codex short account-home keys (PHNX-3940)', () => {
-  // An account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`)
-  // is never a vendor version and never appears under versions/codex/. Iterating
-  // only installed versions to derive `.codex-homes/<key>` therefore misses it
-  // entirely — this is the exact bug: "Account short keys a-... are not vendor
-  // versions."
+  // An account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`) is never a
+  // vendor version, so iterating installed versions to derive `.codex-homes/<key>` misses it. That
+  // is the bug.
   const shortKey = 'a-deadbeef0123';
   const codexShortTranscript = path.join(
     agentsUserDir(), '.codex-homes', shortKey, '.codex', 'sessions', 'b.jsonl',
@@ -100,10 +87,9 @@ describe('getAgentSessionDirs — codex short account-home keys (PHNX-3940)', ()
 });
 
 describe('getAgentSessionDirs — symlinked account-slot dedup (PHNX-3940)', () => {
-  // resolveCodexHome (lib/codex-home.ts) relocates an overflowing origin home to
-  // `.codex-homes/<key>/.codex` and leaves the origin as a symlink onto it. A slot's
-  // `accounts/codex/<accountId>/.codex` can be exactly such an origin — both paths
-  // must resolve to the SAME scan root, not be walked (and later parsed) twice.
+  // resolveCodexHome relocates an overflowing origin home to `.codex-homes/<key>/.codex` and
+  // leaves a symlink. A slot's `accounts/codex/<accountId>/.codex` can be such an origin; both
+  // paths must resolve to the same scan root, not be parsed twice.
   const accountId = 'acct-codex-dup-0002';
   const shortKey = 'a-cafef00dfeed';
   const realShortHome = path.join(agentsUserDir(), '.codex-homes', shortKey, '.codex');

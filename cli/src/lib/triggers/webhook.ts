@@ -1,16 +1,6 @@
-/**
- * Public webhook trigger receiver for routines.
- *
- * A routine may declare a `trigger` block instead of (or alongside) a cron
- * `schedule` (see `JobConfig.trigger` in `../routines.ts`). This module turns
- * incoming GitHub or Linear webhooks into the set of routines they should fire,
- * and dispatches those routines through the exact same path a cron fire uses
- * (`executeJobDetached`).
- *
- * The matching logic is pure, so it can be unit-tested without a daemon or HTTP
- * server. The listener adds the public-ingress requirements: raw-body HMAC
- * verification, idempotency, source allow-listing, and rate limiting.
- */
+/** Public webhook receiver for routines: maps GitHub/Linear webhooks to routines and fires them via
+ * `executeJobDetached`. Matching is pure; the listener adds HMAC, idempotency, allow-list, rate
+ * limits. */
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -60,15 +50,8 @@ function shortRef(ref: string): string {
   return ref.replace(/^refs\/(heads|tags)\//, '');
 }
 
-/**
- * Extract every candidate branch a webhook payload references, per event type.
- * A trigger's `branch` matches if it equals any of these. Different events
- * carry the branch in different places:
- *   - push:          `ref` (refs/heads/<b>)
- *   - pull_request:  base + head refs of the PR
- *   - workflow_run:  `workflow_run.head_branch`
- *   - issue_comment: no branch (comments aren't branch-scoped)
- */
+/** Every candidate branch a payload references, per event type; a trigger's `branch` matches any.
+ * issue_comment events carry no branch. */
 export function webhookBranches(event: string, payload: Record<string, unknown>): string[] {
   const branches = new Set<string>();
   const add = (v: unknown) => {
@@ -112,10 +95,8 @@ export function linearTeamKey(payload: Record<string, unknown>): string | null {
 }
 
 export function linearLabels(payload: Record<string, unknown>): string[] {
-  // Linear webhook bodies flatten list relations: an Issue event carries
-  // `data.labels` as a flat array of label objects (`[{ id, name, color }]`),
-  // NOT the `{ nodes: [...] }` connection shape returned by the GraphQL API.
-  // Reading `.nodes` here made every `--label` filter match nothing.
+  // Linear webhook labels are a flat array, not `{ nodes: [...] }`; reading `.nodes` made every
+  // `--label` filter match nothing.
   const data = payload.data as Record<string, unknown> | undefined;
   const labels = Array.isArray(data?.labels) ? (data?.labels as unknown[]) : [];
   return labels
@@ -187,13 +168,9 @@ function linearTriggerMatches(trigger: LinearJobTrigger, webhook: IncomingWebhoo
     const data = webhook.payload.data as Record<string, unknown> | undefined;
     const current = (data?.state as Record<string, unknown> | undefined)?.name;
     if (current !== trigger.stateTo) return false;
-    // RUSH-2539: `stateTo` is a TRANSITION predicate, not a current-state one.
-    // Linear carries the prior value of each changed field in `updatedFrom`, so a
-    // real state change has `updatedFrom.state` (this codebase's shape) or
-    // `updatedFrom.stateId` (Linear's scalar). With neither, this Issue/update
-    // touched something else while the issue merely still sits in `stateTo` —
-    // matching there re-fires on every later edit (RUSH-1459 got 11 duplicate
-    // plan comments).
+    // RUSH-2539: `stateTo` is a transition predicate; without `updatedFrom.state`/`stateId` the
+    // issue merely sits there, and matching re-fired on every edit (RUSH-1459: 11 duplicate
+    // comments).
     const updatedTo = webhook.payload.updatedFrom as Record<string, unknown> | undefined;
     if (!updatedTo || (updatedTo.state === undefined && updatedTo.stateId === undefined)) return false;
   }
@@ -214,11 +191,7 @@ export function jobMatchesWebhook(job: JobConfig, webhook: IncomingWebhook): boo
   return false;
 }
 
-/**
- * Pure matcher: given a set of jobs and an incoming webhook, return the jobs
- * whose `trigger` matches. Jobs without a trigger (schedule-only routines) are
- * never selected — proving time-based jobs are unaffected by webhook delivery.
- */
+/** Pure matcher: jobs whose `trigger` matches the webhook; schedule-only jobs are never selected. */
 export function matchJobsToWebhook(jobs: JobConfig[], webhook: IncomingWebhook): JobConfig[] {
   return jobs.filter((job) => job.enabled !== false && jobRunsOnThisDevice(job) && jobMatchesWebhook(job, webhook));
 }
@@ -227,11 +200,8 @@ export function matchJobsToWebhook(jobs: JobConfig[], webhook: IncomingWebhook):
 export interface FireWebhookOptions {
   /** Job source. Defaults to all persisted routines (`listJobs()`). */
   jobs?: JobConfig[];
-  /**
-   * How to dispatch a matched job. Defaults to `executeJobDetached` — the SAME
-   * path a cron fire uses (see `daemon.ts`). Injectable so tests can assert
-   * matching without spawning real agent processes.
-   */
+  /** How to dispatch a matched job; defaults to `executeJobDetached`, the cron path. Injectable for
+   * tests. */
   dispatch?: (config: JobConfig) => Promise<RunMeta>;
   /** Matched job names that already completed for this delivery. */
   skipJobNames?: ReadonlySet<string>;
@@ -258,10 +228,7 @@ class WebhookDispatchError extends Error {
   }
 }
 
-/**
- * Match an incoming webhook against the persisted routines and fire each match
- * through the cron dispatch path. Returns one entry per fired job.
- */
+/** Match a webhook against persisted routines and fire each match via the cron path. */
 export async function fireWebhookJobs(
   webhook: IncomingWebhook,
   options: FireWebhookOptions = {},
@@ -330,15 +297,8 @@ function verifyLinearTimestamp(payload: Record<string, unknown>, now = Date.now(
   return typeof ts === 'number' && Math.abs(now - ts) <= toleranceMs;
 }
 
-/**
- * Verify a Slack request signature (the `v0` scheme). Slack signs the base
- * string `v0:${timestamp}:${rawBody}` with the app's signing secret and sends
- * the hex digest as `X-Slack-Signature: v0=<hex>`, alongside the unix
- * `X-Slack-Request-Timestamp`. The timestamp is BOTH part of the signed base
- * string AND checked for freshness here — a request older than `toleranceSec`
- * (default 5 min) is rejected, so a captured, correctly-signed body cannot be
- * replayed later. Fails closed on any missing/malformed header.
- */
+/** Verify a Slack `v0` signature over `v0:${timestamp}:${rawBody}`. The timestamp is also checked
+ * for freshness (default 5 min) so a captured body cannot be replayed. Fails closed on bad headers. */
 export function verifySlackSignature(
   headers: IncomingHttpHeaders,
   rawBody: Buffer,
@@ -358,12 +318,8 @@ export function verifySlackSignature(
   return timingSafeHexEqual(signature, expected);
 }
 
-/**
- * Normalized fields extracted from a Slack slash-command or Events API delivery.
- * This is the `payload` of a Slack {@link IncomingWebhook}: transport-level
- * parsing lives here, message *semantics* (splitting the mention text into an
- * agent / project / prompt) live in `handlers.ts` `buildWebhookContext`.
- */
+/** Normalized fields of a Slack slash-command or Events API delivery; message semantics live in
+ * `handlers.ts` `buildWebhookContext`. */
 export interface SlackPayload extends Record<string, unknown> {
   /** `url_verification` | `event_callback` | `slash_command`. */
   type: string;
@@ -389,12 +345,8 @@ export interface SlackPayload extends Record<string, unknown> {
   team?: string;
 }
 
-/**
- * Parse a Slack delivery body into a normalized {@link SlackPayload}. Slack
- * sends slash commands as `application/x-www-form-urlencoded` and Events API
- * deliveries (including the `url_verification` handshake) as
- * `application/json` — this is the one place that content-type branch lives.
- */
+/** Parse a Slack body: form-encoded slash commands vs JSON Events API (incl. `url_verification`).
+ * The one place that content-type branch lives. */
 export function parseSlackBody(contentType: string | undefined, rawBody: Buffer): SlackPayload {
   if ((contentType ?? '').includes('application/x-www-form-urlencoded')) {
     const form = new URLSearchParams(rawBody.toString('utf-8'));
@@ -493,17 +445,8 @@ interface PersistedDelivery {
   updatedAt: number;
 }
 
-/**
- * A durable, disk-backed delivery store. Unlike `createMemoryDeliveryStore`,
- * seen delivery ids survive a process restart and are bounded by AGE, not by a
- * fixed entry count — so a captured valid delivery cannot re-fire after a
- * restart or after count-based LRU eviction would have dropped it.
- *
- * `retentionMs` doubles as the replay-acceptance window: a delivery whose id is
- * still on record (younger than the window) is rejected as a duplicate; entries
- * older than the window are pruned (keeping the file bounded) since a webhook
- * source will not legitimately retry a delivery that old.
- */
+/** Durable disk-backed delivery store: seen ids survive restarts and are bounded by age, not count,
+ * so a captured delivery cannot re-fire; entries older than `retentionMs` are pruned. */
 export function createFileDeliveryStore(
   filePath: string,
   retentionMs = 14 * 24 * 60 * 60 * 1000,
@@ -623,14 +566,8 @@ async function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise
   return Buffer.concat(chunks);
 }
 
-/**
- * Resolve once a receiver is actually accepting connections, REJECT if the bind
- * failed. `server.listen()` reports a bind failure (EADDRINUSE, EACCES) as an
- * asynchronous `'error'` event, never a throw — so a `try/catch` around
- * `startWebhookServer` cannot see it, and without this the event reaches Node's
- * default handler and takes the whole process down. Every caller that hosts a
- * receiver MUST await this rather than assuming the return means "bound".
- */
+/** Resolves once accepting connections, rejects on bind failure: `listen()` reports EADDRINUSE as
+ * an async 'error' event a try/catch cannot see, which would crash the process. Always await this. */
 export function waitForListening(server: http.Server): Promise<void> {
   if (server.listening) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -653,32 +590,13 @@ interface WebhookServerOptions {
   secrets: WebhookSecrets;
   /** Override the fire options (mainly for tests). */
   fire?: FireWebhookOptions;
-  /**
-   * Called the moment a delivery's matches are known — BEFORE any routine or
-   * handler is dispatched. Matching is a pure, synchronous lookup (no I/O), so
-   * this fires immediately after the ack, regardless of how long the matched
-   * work then takes to run. This is the right hook for a "webhook X fired Y"
-   * log line: a `run.command` handler that shells out a long agent session
-   * (`exec()`, which only resolves on process exit) used to hold that log back
-   * for as long as the session ran — `ps` would show the agent already running
-   * while the log still implied nothing had matched (RUSH-2722). Names only
-   * (no runId/exitCode yet — those aren't known until dispatch settles).
-   */
+  /** Called when matches are known, before any dispatch (RUSH-2722): the right hook for a "fired"
+   * log, since a long `run.command` no longer holds it back. Names only; no runId/exitCode yet. */
   onMatch?: (webhook: IncomingWebhook, matchedJobNames: string[], matchedHandlerNames: string[]) => void;
-  /**
-   * Called after a delivery has fully settled — every matched routine and
-   * handler dispatched (and, for `run.command` handlers, exited). Because the
-   * receiver acks the HTTP response BEFORE dispatch (see `startWebhookServer`),
-   * this fires strictly after the response has been written, and is the only
-   * way a caller observes the dispatch outcome (runId/exitCode/output). It is
-   * NOT the right hook for "did this webhook match" logging — use `onMatch`.
-   */
+  /** Called after a delivery fully settles, after the response is written; the only way to see the
+   * outcome (runId/exitCode/output). Not for "did it match" logging: use `onMatch`. */
   onDelivery?: (webhook: IncomingWebhook, fired: FiredJob[], handlers: FiredHandler[]) => void;
-  /**
-   * Called when settling an already-acked delivery threw. The HTTP status can
-   * no longer carry the failure, so this is the loud path — the daemon host and
-   * `agents webhooks serve` both log it. Never swallowed silently.
-   */
+  /** Called when settling an already-acked delivery threw; the loud path, never swallowed silently. */
   onDeliveryError?: (webhook: IncomingWebhook, error: Error) => void;
   deliveryStore?: DeliveryStore;
   rateLimiter?: RateLimiter;
@@ -692,33 +610,9 @@ interface WebhookServerOptions {
   maxConnections?: number;
 }
 
-/**
- * Start a localhost-bound receiver. It accepts only:
- *   POST /hooks/github  with X-Hub-Signature-256
- *   POST /hooks/linear  with Linear-Signature + fresh webhookTimestamp
- *   POST /hooks/slack   with X-Slack-Signature + fresh X-Slack-Request-Timestamp
- *
- * **The ack is asynchronous (RUSH-2548).** Once a delivery has passed signature
- * verification, freshness, dedup, and rate limiting, the receiver writes
- * `202 {ok:true, accepted:true}` IMMEDIATELY and dispatches the matched routines
- * and handlers afterwards. Dispatch starts an agent run and takes 15-20s, which
- * exceeds Linear's delivery timeout — holding the socket open across it made
- * every real delivery log a timeout + retry on Linear's side. Nothing about the
- * dedup ledger changes: the `<source>:<delivery-id>` key is still what makes a
- * retry a no-op, per-job `markJob` still lets a retry finish only the matches
- * that failed, and the delivery is marked complete only after it settles.
- *
- * A retry that lands WHILE the first is still settling is answered as a
- * duplicate from an in-flight set, since `deliveryStore.seen` only reports
- * completed deliveries and would otherwise let a mid-flight retry double-fire.
- *
- * `onMatch` fires as soon as matching is known, before any dispatch; `onDelivery`
- * fires only once every matched routine/handler has settled — see their docs on
- * `WebhookServerOptions`. A caller that wants a prompt "this fired" log uses
- * `onMatch`, not `onDelivery` (RUSH-2722).
- *
- * Returns the underlying server so callers can `close()` it.
- */
+/** Localhost receiver for POST /hooks/{github,linear,slack}. Acks 202 right after verification,
+ * dedup and rate limiting, then dispatches (RUSH-2548): dispatch takes 15-20s, past Linear's
+ * timeout. In-flight retries are duplicates. Log 'fired' via `onMatch` (RUSH-2722). */
 export function startWebhookServer(options: WebhookServerOptions): http.Server {
   const deliveryStore = options.deliveryStore ?? createMemoryDeliveryStore();
   /** Delivery ids acked but not yet settled — dedup across the async window. */
@@ -727,24 +621,16 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
   const ipRateLimiter = options.ipRateLimiter ?? createMemoryRateLimiter(options.ipRateLimitPerMinute ?? 120, 60_000);
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
 
-  /**
-   * Dispatch an already-acked delivery: matched routines first, then matched
-   * handlers, then mark the delivery complete. A failure leaves the delivery
-   * UNMARKED (its per-job `markJob` entries survive), so a later retry of the
-   * same delivery id re-runs only what did not complete — the same partial-retry
-   * ledger the synchronous receiver had, minus the 4xx that used to request it.
-   */
+  /** Dispatch an acked delivery: routines, then handlers, then mark complete. A failure leaves it
+   * unmarked so a retry re-runs only what did not complete. */
   async function settleDelivery(webhook: IncomingWebhook, id: string): Promise<void> {
     const { source, event: webhookEvent } = webhook;
     try {
       const context = buildWebhookContext(webhook);
       const fireOptions = options.fire ?? {};
 
-      // Match FIRST, before any dispatch — matching is a pure in-memory lookup,
-      // so this is the earliest point the receiver knows what fired, and the
-      // right time to log it (RUSH-2722). Dispatching a `run.command` handler
-      // can then block on the shelled-out process for minutes; that must never
-      // hold the "fired" log back with it.
+      // Match first, before dispatch: it is a pure lookup and the right time to log (RUSH-2722),
+      // so a long `run.command` never holds the "fired" log back.
       const matchedJobs = matchJobsToWebhook(fireOptions.jobs ?? listJobs(), webhook);
       const matchedHandlers = listHandlers().filter((handler) => handlerMatchesWebhook(handler, webhook));
       options.onMatch?.(webhook, matchedJobs.map((job) => job.name), matchedHandlers.map((handler) => handler.name));
@@ -812,11 +698,8 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         return;
       }
 
-      // Per-IP throttle + declared-size cap BEFORE the (expensive) body read +
-      // HMAC. A bad-signature flood of 1 MiB POSTs must be rejected without
-      // forcing a full body read and an HMAC per request — the signed-delivery
-      // rate limit further down runs only after a signature passes, so it can't
-      // shed this load on its own.
+      // Per-IP throttle and size cap before the expensive body read and HMAC, so a bad-signature
+      // flood is shed cheaply; the signed-delivery limit below runs only after a signature passes.
       const ip = req.socket.remoteAddress ?? 'unknown';
       if (!ipRateLimiter.take(ip)) {
         emit('webhook.rejected', { source, reason: 'ip rate limit exceeded' });

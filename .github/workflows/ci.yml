@@ -1,22 +1,8 @@
 name: CI
 
-# The cross-platform build matrix is EXPENSIVE (macOS is billed 10x, Windows 2x
-# on GitHub-hosted runners) and largely redundant per-PR: every PR to main
-# already runs the real suite cheaply on Linux via `test` (tests.yml) plus
-# `gitleaks` (secret-scan.yml).
-#
-# It runs on a NIGHTLY schedule plus manual dispatch — deliberately OFF the
-# release path. It used to fire on release/** branch pushes/PRs, but that was
-# 16-53 min of macOS/Windows-billed work on every release while gating NOTHING:
-# the matrix is not a required check (main requires only `test` + `gitleaks`),
-# and scripts/release.sh never waited on it (it gates the merge on the required
-# checks and the publish on an exact-tree attestation). Worse, a macOS-only
-# failure had it red on every recent release, so it added cost and a false
-# "release is failing" signal without ever protecting a release. Per repo
-# doctrine (root AGENTS.md — "rare-platform suites run after merge or nightly;
-# they do not block the required PR result"), cross-platform coverage lives
-# here on the nightly lane. A risky release can still run it on demand via
-# workflow_dispatch before shipping.
+# The cross-platform matrix is expensive (macOS billed 10x, Windows 2x) and redundant per PR,
+# since every PR to main already runs the real suite on Linux via `test` plus `gitleaks`. Per
+# AGENTS.md, rare-platform suites run after merge or nightly; workflow_dispatch can still run it.
 on:
   schedule:
     - cron: '0 8 * * *'   # 08:00 UTC nightly cross-platform sweep
@@ -53,18 +39,9 @@ jobs:
       - name: Install dependencies
         run: bun install --ignore-scripts
 
-      # picker.test.ts and sync.test.ts spawn a REAL pty via node-pty
-      # (@homebridge/node-pty-prebuilt-multiarch, a devDependency now that the
-      # engine itself lives in the standalone term-cli, PHNX-4091). That
-      # package ships prebuilt binaries only for Linux; macOS/Windows fetch
-      # (or compile) pty.node via its own install script. bun does not run
-      # that script here (not even without --ignore-scripts, as of bun
-      # 1.3.x), so build this one native dep explicitly — otherwise those
-      # tests crash on macOS/Windows (Linux uses the shipped prebuild and
-      # stayed green, masking the break; this matrix runs only nightly, so a
-      # break shows the next morning, not on the PR). The package's install
-      # script prefers a prebuilt download and falls back to a node-gyp
-      # compile, so it self-heals on runners with no matching prebuilt.
+      # picker.test.ts and sync.test.ts spawn a real pty via node-pty
+      # (@homebridge/node-pty-prebuilt-multiarch, a devDependency since the engine moved to the
+      # standalone term-cli, PHNX-4091). The script prefers a prebuilt and falls back to node-gyp.
       - name: Build node-pty native binary
         shell: bash
         run: cd node_modules/@homebridge/node-pty-prebuilt-multiarch && npm run install
@@ -91,11 +68,6 @@ jobs:
             bun run test
           fi
 
-  # No CI publish job — publishing runs through `scripts/release.sh <version>
-  # --apply`, which gates the merge on the required `test` + `gitleaks` checks and
-  # the publish on an exact-tree attestation (release-attestation.sh). This
-  # cross-platform matrix is NOT part of that gate: it runs nightly for coverage,
-  # never on the release PR, so it neither blocks nor speeds a release. Native
-  # helpers no longer ship in the tarball (RUSH-3100) — they resolve from their
-  # own signed release tags — so an ordinary release is promote-only and runs on
-  # any OS (RUSH-3026).
+  # No CI publish job: it runs through `scripts/release.sh <version> --apply`, which gates the
+  # merge on `test` + `gitleaks` and the publish on an exact-tree attestation. Native helpers no
+  # longer ship in the tarball (RUSH-3100), so a release is promote-only on any OS (RUSH-3026).

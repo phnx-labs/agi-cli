@@ -178,13 +178,9 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(db.readSessionTimelineAny('kimi-1')!.timeline.steps).toHaveLength(2);
   });
 
-  /**
-   * Write a grok session dir carrying a REAL grok `chat_history.jsonl` of at
-   * least `atLeastBytes`, in the record shapes the live 5.9 MiB / 4.2 MiB
-   * transcripts on this fleet use. The row points at `summary.json`, exactly as
-   * the daemon's gather produces it — `toolEvidenceSourcePath` is what maps that
-   * to the sibling the parser reads.
-   */
+  /** Write a grok session dir with a real `chat_history.jsonl` of at least `atLeastBytes`, in the
+   * shapes live 4-6 MiB transcripts use. The row points at `summary.json` as the daemon gather
+   * does; `toolEvidenceSourcePath` maps the sibling. */
   function writeGrokSession(id: string, atLeastBytes: number): ActiveSession {
     const dir = fs.mkdtempSync(path.join(tmpHome, `grok-${id}-`));
     const history = path.join(dir, 'chat_history.jsonl');
@@ -208,11 +204,9 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
   }
 
   it('folds a 4-16 MiB non-resumable transcript instead of leaving it with no row at all', () => {
-    // The dead band: whole-file eligibility used to be gated on the per-SESSION
-    // allowance, capped at 4 MiB however idle the tick was, while `unavailable`
-    // only fired above 16 MiB. Everything in between on a non-resumable harness
-    // got no row — not `ready`, not `partial`, not `unavailable` — and was
-    // counted `reused`, so the daemon log read healthy forever.
+    // The dead band: whole-file eligibility was gated on the per-session allowance (capped at 4
+    // MiB) while `unavailable` fired only above 16 MiB, so files between got no row and counted
+    // `reused`, and the daemon log read healthy forever.
     const grok = writeGrokSession('grok-band', 5 * 1024 * 1024);
     const size = fs.statSync(path.join(path.dirname(grok.sessionFile!), 'chat_history.jsonl')).size;
     expect(size).toBeGreaterThan(pass.TIMELINE_PASS_MAX_BYTES_PER_SESSION);

@@ -1,10 +1,6 @@
-/**
- * The cross-box union readers (PHNX-3315). Each box writes only its OWN
- * `devices/<host>/agents.yaml`; the effective fleet view is the deterministic,
- * order-independent union of every device doc. These tests prove two boxes'
- * decisions combine correctly and that the precedence rules hold regardless of
- * walk order.
- */
+/** The cross-box union readers (PHNX-3315). Each box writes only its own
+ * `devices/<host>/agents.yaml`; the fleet view is the deterministic, order-independent union of
+ * every doc. Tests prove two boxes' decisions combine regardless of walk order. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';

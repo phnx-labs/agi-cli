@@ -1,24 +1,15 @@
 import chalk from 'chalk';
 import { compareVersions } from './agent-spec/primitives.js';
 
-/**
- * Render a compact "What's new" summary from a CHANGELOG.md body: one bullet
- * per feature/fix heading for each version in the range the user actually
- * moved through, `(fromVersion, toVersion]`. Headings are recognized in both
- * changelog formats — the current `- **Title.** prose…` single-line bullets
- * and the older standalone `**Heading**` lines. The verbose prose/sub-bullets
- * are intentionally dropped — the full notes live in the changelog.
- *
- * Returns colored lines ready to print, empty when nothing is in range.
- */
+/** Render a compact "What's new" from a CHANGELOG.md body: one bullet per feature/fix heading for
+ * each version in `(fromVersion, toVersion]`, in both the current `- **Title.** prose` and older
+ * `**Heading**` formats. Prose is dropped; returns colored lines, empty if none. */
 export function renderWhatsNew(changelog: string, fromVersion: string, toVersion: string): string[] {
   const out: string[] = [];
   let inRelevantSection = false;
-  // Whether the CURRENT version section uses the old standalone-heading format.
-  // Old sections nest `-` sub-bullets under each `**Heading**` line, and some
-  // sub-bullets are themselves bold-led (`- **Claim.** detail…`) — once a
-  // standalone heading is seen, `- **` lines in that section are sub-bullets,
-  // not entries, and must not render.
+  // Whether the current version section uses the old standalone-heading format: there, `-`
+  // sub-bullets (some bold-led) nest under each `**Heading**`, so `- **` lines are sub-bullets, not
+  // entries, and must not render.
   let sectionUsesStandaloneHeadings = false;
 
   for (const line of changelog.split('\n')) {
@@ -38,10 +29,8 @@ export function renderWhatsNew(changelog: string, fromVersion: string, toVersion
       continue;
     }
 
-    // Only the entry headings — one bullet per feature/fix. Two formats exist
-    // across the changelog's history: the current single-line bullets
-    // (`- **Title.** verbose prose…`, heading kept, prose dropped) and the
-    // older standalone `**Heading**` lines with `-` sub-bullets beneath.
+    // Only the entry headings, one bullet per feature/fix, across two changelog formats: current `-
+    // **Title.** prose` (prose dropped) and older standalone `**Heading**` lines with sub-bullets.
     if (!inRelevantSection) continue;
     if (line.startsWith('**') && line.endsWith('**')) {
       sectionUsesStandaloneHeadings = true;

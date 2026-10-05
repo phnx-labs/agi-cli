@@ -1,12 +1,6 @@
-/**
- * Monitors — durable event-triggered watchers.
- *
- * Registers the `agents monitors` command tree: create, list, view, dry-run test,
- * edit, logs, fire history, pause/resume, (re)pin the owner device, and remove.
- * Mirrors `agents routines` (commands/routines.ts) and shares the same daemon +
- * dispatch engine underneath — a monitor is a routine whose trigger is a watched
- * source instead of a clock.
- */
+/** `agents monitors`: durable event-triggered watchers (create, list, view, dry-run test, edit,
+ * logs, fires, pause/resume, repin owner, remove). Mirrors `agents routines` and shares its daemon
+ * and dispatch engine: a monitor is a routine triggered by a watched source, not a clock. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -144,12 +138,9 @@ function builtinTag(monitor: Pick<MonitorConfig, 'scope'>): string {
   return monitor.scope === 'system' ? chalk.gray(' (built-in)') : '';
 }
 
-/**
- * A one-line liveness note for a monitor living on a PEER, reconstructed from the
- * `--json` fields that box reported (it computes the colorized local label, which
- * doesn't cross the wire). Deliberately terse — the owning box's `monitors view`
- * has the full detail.
- */
+/** One-line liveness note for a monitor on a peer, rebuilt from the box's `--json` fields (the
+ * colorized label doesn't cross the wire). Terse on purpose; the owning box's `monitors view` has
+ * the detail. */
 function remoteLivenessNote(d?: RemoteMonitorDisplay): string {
   if (!d) return chalk.gray('—');
   if (d.enabled === false) return chalk.gray('paused');
@@ -161,10 +152,8 @@ function remoteLivenessNote(d?: RemoteMonitorDisplay): string {
   return chalk.yellow('never polled');
 }
 
-/**
- * Print a stderr note when the fleet fan-out couldn't consult every box, so a
- * partial listing never silently reads as "these are all the monitors there are".
- */
+/** Print a stderr note when the fleet fan-out couldn't consult every box, so a partial listing
+ * never reads as complete. */
 function fleetReachNote(fleet: { discoveryFailed: boolean; skipped: string[] }): void {
   if (fleet.discoveryFailed) {
     stderrLine(chalk.yellow('  Note: could not reach the device registry — the fleet was not checked, only this device is shown.'));
@@ -205,11 +194,9 @@ function monitorIntervalMs(monitor: MonitorConfig): number {
   return 60_000;
 }
 
-/**
- * True when an enabled, locally-owned monitor's last poll is far enough past its
- * interval that the engine has plainly stopped checking it (dead engine, swallowed
- * start failure, never picked up). Tolerates a few missed ticks before flagging.
- */
+/** True when an enabled, locally-owned monitor's last poll is far past its interval, so the engine
+ * has plainly stopped checking it (dead engine, swallowed start failure). Tolerates a few missed
+ * ticks. */
 function isStalled(monitor: MonitorConfig, liveness: MonitorLiveness | null): boolean {
   if (!monitor.enabled || !monitorRunsOnThisDevice(monitor)) return false;
   if (!liveness) return false; // "never polled" is its own state, handled separately
@@ -217,12 +204,8 @@ function isStalled(monitor: MonitorConfig, liveness: MonitorLiveness | null): bo
   return Date.now() - new Date(liveness.lastCheckedAt).getTime() > staleAfter;
 }
 
-/**
- * The human liveness line for a monitor. This is the RUSH-2485 fix: it makes
- * "the engine has never touched this" (`never polled`) visibly distinct from
- * "polling steadily, condition just isn't matching" (`checked Nx`), from a real
- * fire, and from a stalled engine.
- */
+/** The human liveness line (RUSH-2485 fix): `never polled` (engine never touched it) is distinct
+ * from `checked Nx` (polling, condition not matching), a real fire, and a stalled engine. */
 function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readState>, liveness: MonitorLiveness | null): string {
   const here = monitorRunsOnThisDevice(monitor);
   if (!monitor.enabled) return chalk.gray('paused');
@@ -252,13 +235,9 @@ function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readStat
   return chalk.gray(`checked ${liveness.checkCount}x · last ${checkedAgo} · no match yet`);
 }
 
-/**
- * Start or reload the background daemon so a newly-added monitor is watched.
- * Returns false when auto-start was refused (`daemon.enabled=false`); the add
- * itself already succeeded — the monitor is config and stays valid fleet-wide.
- * The refusal names the setting and the fix. Mirrors `ensureSchedulerRunning`
- * in commands/routines.ts (PHNX-2637).
- */
+/** Start or reload the daemon so a new monitor is watched. Returns false when auto-start was
+ * refused (`daemon.enabled=false`); the add still succeeded since the monitor is fleet-wide
+ * config. The refusal names the setting and the fix; mirrors `ensureSchedulerRunning` (PHNX-2637). */
 function ensureDaemonRunning(): boolean {
   try {
     assertDaemonEnabled();
@@ -294,15 +273,9 @@ function ensureDaemonRunning(): boolean {
   return true;
 }
 
-/**
- * Assert the postcondition of `add`: the engine actually picked the monitor up.
- * Config acceptance is not enough — RUSH-2485 was a monitor that added cleanly,
- * listed as `on`, and never polled. A poll-model monitor owned by and enabled on
- * this box should show a liveness heartbeat within a couple of engine ticks; wait
- * for it and report the real outcome instead of reporting success on write. A
- * miss is a warning, not a hard failure — a freshly-started daemon may still be
- * booting — but it is surfaced so a dead engine can never masquerade as healthy.
- */
+/** Assert `add`'s postcondition: the engine picked the monitor up. RUSH-2485 was a monitor that
+ * added cleanly, listed `on`, and never polled. A poll-model monitor owned and enabled here should
+ * heartbeat within a couple of ticks; a miss warns so a dead engine never looks healthy. */
 async function assertEnginePickup(monitor: MonitorConfig): Promise<void> {
   const pollSource = POLL_SOURCE_TYPES.has(monitor.source.type);
   if (!monitor.enabled || !monitorRunsOnThisDevice(monitor) || !pollSource) return; // nothing to assert here
@@ -407,12 +380,9 @@ function buildSource(options: Record<string, any>, name: string): MonitorSource 
   return chosen[0].source;
 }
 
-/**
- * Parse the condition flags into a MonitorCondition (default on-change).
- * `--watch-pid` with no explicit mode defaults to firing on exit rather than
- * on-change, since "running"/"exited" is a two-value observation where
- * on-change would fire the instant the daemon takes its first poll.
- */
+/** Parse condition flags into a MonitorCondition (default on-change). `--watch-pid` without a mode
+ * defaults to firing on exit, since running/exited is two-valued and on-change would fire on the
+ * first poll. */
 function buildCondition(options: Record<string, any>): MonitorCondition {
   const modes: Array<MonitorCondition['mode']> = [];
   if (options.onChange) modes.push('on-change');
@@ -501,15 +471,9 @@ async function pickMonitor(message: string, alternatives: string[] = []): Promis
 }
 
 /** Register the `agents monitors` command tree. */
-/**
- * Refuse a monitor that duplicates one already in play — same NAME (which
- * `writeMonitor` would silently overwrite) or same BEHAVIOR under any name, on
- * this box or any other. Exits the process on a refusal.
- *
- * Shared by BOTH `add` paths. The file path (`add ./watcher.yml`) returns early
- * and used to skip the guard entirely, so a duplicate could be walked straight
- * in through a YAML file — the one input an agent is most likely to generate.
- */
+/** Refuse a monitor that duplicates one in play: same name (which `writeMonitor` would overwrite)
+ * or same behavior under any name, on any box. Exits on refusal. Shared by both `add` paths; the
+ * file path used to skip it, letting agent-generated YAML bypass the check. */
 async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolean): Promise<void> {
   if (force) return;
   const existing = listMonitors();
@@ -529,10 +493,9 @@ async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolea
     process.exit(1);
   }
 
-  // The case a local check cannot see: another agent, on another box, already
-  // watching this same work item with these same arguments. One work item, two
-  // triggers. Identity is the arguments, so the claim has to be fleet-wide —
-  // different arguments (another PR) are not a clash and still pass.
+  // What a local check cannot see: another agent on another box already watching the same work
+  // item with the same arguments. Identity is the arguments, so the claim is fleet-wide; different
+  // arguments (another PR) are not a clash.
   if (process.env[NO_MONITOR_FANOUT_ENV]) return;
   const mine = monitorFingerprint(config);
   const fleet = await gatherFleetMonitors({ againstFingerprint: mine });
@@ -777,10 +740,9 @@ export function registerMonitorsCommands(program: Command): void {
     .action(async (options: { json?: boolean; local?: boolean }) => {
       const self = machineId();
       const monitors = listMonitors();
-      // A peer answering the fan-out (NO_MONITOR_FANOUT_ENV set) reports its own
-      // box only, so the parent's gather is a flat union and never recurses. The
-      // duplicate guard reads exactly this bare local array, so its shape must not
-      // change when the env is set. `--local` is the same opt-out for a human.
+      // A peer answering the fan-out (NO_MONITOR_FANOUT_ENV set) reports its own box only, so the
+      // parent's gather is a flat union and never recurses. The duplicate guard reads this bare
+      // local array, so its shape must not change; `--local` is the human opt-out.
       const peerMode = !!process.env[NO_MONITOR_FANOUT_ENV];
       const localOnly = peerMode || options.local === true;
 
@@ -808,10 +770,9 @@ export function registerMonitorsCommands(program: Command): void {
             enabled: m.enabled,
             source: m.source,
             condition: m.condition,
-            // Full action, not just `type`: the cross-machine duplicate guard
-            // fingerprints source+condition+action, so a type-only action made
-            // every `--run` monitor unmatchable and the fleet check inert for
-            // exactly the case it exists for. `source` already ships whole.
+            // Ship the full action, not just `type`: the cross-machine duplicate guard
+            // fingerprints source+condition+action, so a type-only action made every `--run`
+            // monitor unmatchable and the fleet check inert.
             action: m.action,
             owner: ownerLabel(m),
             // `scope`/`builtin` (PHNX-2506 item 2): where the monitor came from,
@@ -1013,11 +974,9 @@ export function registerMonitorsCommands(program: Command): void {
         monitorPath = safeJoin(dir, `${name}.yml`);
         const builtIn = readMonitor(name);
         if (builtIn) {
-          // Route through writeMonitor, NOT a raw yaml.stringify: readMonitor
-          // stamps the derived `scope` (and a built-in's `enabled: true`), and
-          // only writeMonitor strips those from the on-disk schema. A raw dump
-          // would persist `scope: system` into the user copy — dead, contradictory
-          // state that violates the "scope never persists" contract.
+          // Route through writeMonitor, not a raw yaml.stringify: readMonitor stamps the derived
+          // `scope` (and a built-in's `enabled: true`) and only writeMonitor strips them, so a raw
+          // dump would persist `scope: system` into the user copy.
           writeMonitor(builtIn);
           console.log(chalk.gray(`Editing a copy of built-in monitor '${name}' in your user dir: ${monitorPath}`));
         } else {
@@ -1110,11 +1069,9 @@ export function registerMonitorsCommands(program: Command): void {
       }
       console.log(chalk.bold(`Fire history: ${name}\n`));
       for (const f of fires.slice(-20)) {
-        // Reconcile against the run's REAL, current status (RUSH-2690) and a
-        // declared postcondition (PHNX-2842) rather than trusting the frozen
-        // `ok` written at fire time — `dispatchAction` only sees a synchronous
-        // 'running' snapshot before the run has actually settled, and a
-        // `completed` agent that did nothing used to read `ok` here forever.
+        // Reconcile against the run's real, current status (RUSH-2690) and any declared
+        // postcondition (PHNX-2842), not the frozen `ok` written at fire time: `dispatchAction`
+        // sees only a synchronous 'running' snapshot, so a completed no-op agent read `ok`.
         const { label, note } = fireOutcomeDisplay(name, f);
         const runRef = f.runId ? chalk.gray(`  run ${f.runId}`) : '';
         console.log(`  ${f.firedAt}  ${(f.action ?? '?').padEnd(12)} ${label}${runRef}`);

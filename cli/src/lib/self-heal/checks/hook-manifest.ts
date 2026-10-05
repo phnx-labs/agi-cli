@@ -1,21 +1,6 @@
-// hook-manifest check — detects manifest hooks whose `script:` resolves to
-// nothing, so they are registered in config but silently never installed.
-//
-// Why this exists. resolveHookScriptPath only resolves a manifest script under
-// <root>/hooks/, and resolveContainedHookPath rejects any candidate escaping
-// that root. A manifest entry pointing anywhere else returns null and the hook
-// is dropped — no error, no warning, no trace in `agents doctor`.
-//
-// That is not hypothetical. main-branch-guard was declared in agents.yaml as
-//   script: rules/subrules/truly-agentic-git-workflow/main-branch-guard.sh
-// which resolves to hooks/rules/subrules/... — a path that does not exist. The
-// guard was authored, tested with a 100+ case suite, and registered, yet
-// reached zero of 25 settings files across three machines. Nothing surfaced it;
-// it was found only after four agent sessions had written into a primary
-// checkout that this exact hook exists to prevent.
-//
-// A guard that silently does not run is worse than a missing one, because the
-// config says it is there. This check turns that silence into a finding.
+// hook-manifest check: finds manifest hooks whose `script:` resolves outside <root>/hooks/, which
+// are dropped silently. main-branch-guard reached 0 of 25 settings files this way; a guard that
+// silently never runs is worse than none.
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';

@@ -1,24 +1,6 @@
-/**
- * Cross-platform cooperative cancellation for the harness auto-update pass
- * (PHNX-3940).
- *
- * The mutating pass must be stoppable from outside WITHOUT force-killing a
- * process that is mid-swap. These tests exercise the REAL mechanism — a real
- * child process, a real Node IPC channel, real signals, and real filesystem
- * "transactions" — not a mocked child or a faked FS success:
- *
- *   1. The in-process wiring (`withGuardedUpdateCancellation`): the guard is held
- *      for the pass duration and released after; an IPC cancel message and a
- *      channel disconnect each flip `cancelled()`.
- *   2. A real subprocess whose loop MIRRORS `runAutoUpdatePassUntilCancelled`
- *      (check `cancelled()` at the top, then a real stage→commit on disk): an IPC
- *      cancel after the first commit lets that commit's record finish and starts
- *      NO second transaction. A control run with no cancel commits every item, so
- *      the stop is caused by the cancel, not the harness.
- *   3. A real subprocess proving the `index.ts` SIGINT guard: while the guard is
- *      held a SIGINT does NOT tear the process down (it defers and cancels
- *      cooperatively); once released, a SIGINT exits 130 as normal.
- */
+/** Cooperative cancellation for the auto-update pass (PHNX-3940), tested with real children, IPC
+ * and signals: in-process wiring; a subprocess that finishes its current commit and starts none
+ * after cancel (with a control); and the SIGINT guard (defers while held, exits 130 after). */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -108,14 +90,9 @@ describe('withGuardedUpdateCancellation (in-process wiring)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Real subprocess: a loop that MIRRORS runAutoUpdatePassUntilCancelled, driven
-// over a real IPC channel. Each iteration is a real two-step transaction on
-// disk (stage -> atomic rename = "record"), and it awaits the parent between
-// iterations so the "did the loop stop after cancel?" assertion has no sleep
-// race: the parent replies with an ack to continue, or with the cancel envelope
-// to stop.
-// ---------------------------------------------------------------------------
+// Real subprocess mirroring runAutoUpdatePassUntilCancelled over a real IPC channel; each iteration
+// is a real stage-then-atomic-rename transaction and awaits the parent's ack or cancel envelope, so
+// the "stopped after cancel?" assertion has no sleep race.
 const LOOP_FIXTURE = `
 import * as fs from 'fs';
 import * as path from 'path';
@@ -215,12 +192,9 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
   }, 30_000);
 });
 
-// ---------------------------------------------------------------------------
-// Real subprocess: the index.ts SIGINT guard. A fixture mirrors index.ts's
-// top-level SIGINT handler (reading the SAME registry symbol via the leaf
-// predicate) and holds a real guarded pass; a SIGINT while guarded must NOT
-// tear it down, and once the guard releases a SIGINT exits 130.
-// ---------------------------------------------------------------------------
+// Real subprocess for the index.ts SIGINT guard: the fixture mirrors its top-level handler (same
+// registry symbol via the leaf predicate) and holds a real guarded pass; a SIGINT while guarded
+// must not tear it down, and once released it exits 130.
 const SIGINT_FIXTURE = `
 import { withGuardedUpdateCancellation, isGuardedAutoUpdateActive } from ${JSON.stringify(LEAF_PATH)};
 

@@ -30,12 +30,9 @@ type AgentSpecErrorCode =
   | 'none-installed'
   | 'multi-not-allowed';
 
-/**
- * Thrown on any bad spec — never `process.exit`, so the engine is safe on the
- * hot path and in library contexts. `code` + `installed` let callers render a
- * consistent message (e.g. the "No default … Specify one:" version list) without
- * string-matching.
- */
+/** Thrown on any bad spec, never `process.exit`, so the engine is safe on the hot path and in
+ * libraries. `code` and `installed` let callers render consistent messages without
+ * string-matching. */
 export class AgentSpecError extends Error {
   constructor(
     message: string,
@@ -48,11 +45,9 @@ export class AgentSpecError extends Error {
   }
 }
 
-/**
- * The filesystem/meta seam. The pure resolver takes this instead of importing
- * versions.ts, so it is fully unit-testable with in-memory fixtures — no $HOME,
- * no subprocess. `provider.ts` supplies the production adapter.
- */
+/** The filesystem/meta seam: the pure resolver takes this instead of importing versions.ts, so it
+ * is unit-testable with in-memory fixtures (no $HOME, no subprocess). `provider.ts` is the
+ * production adapter. */
 export interface VersionProvider {
   /** Installed versions, sorted ascending by `compareVersions`. */
   listInstalled(agent: AgentId): string[];
@@ -60,13 +55,9 @@ export interface VersionProvider {
   getProjectVersion(agent: AgentId, cwd: string): string | null;
   /** The configured global default version, or null. */
   getGlobalDefault(agent: AgentId): string | null;
-  /**
-   * The preferred isolated copy. Kept separate from getGlobalDefault on purpose: a
-   * global default owns the launcher, the bare shim and the real ~/.<agent> config
-   * symlink, and an isolated version must never acquire any of those. Folding the
-   * two together here would hand an isolated version back to every caller that
-   * reasonably assumes a global default means "the one that owns the launcher".
-   */
+  /** The preferred isolated copy, separate from getGlobalDefault on purpose: a global default owns
+   * the launcher, bare shim and ~/.<agent> config symlink, which an isolated version must never
+   * acquire. Merging them would hand an isolated version to callers assuming it owns the launcher. */
   getIsolatedDefault(agent: AgentId): string | null;
   /** Whether an exact version is installed. */
   isInstalled(agent: AgentId, version: string): boolean;
@@ -77,13 +68,9 @@ export interface ResolveOptions {
   cwd?: string;
   /** Restrict which agents a spec may name (e.g. only mcp-capable). Defaults to all. */
   availableAgents?: readonly AgentId[];
-  /**
-   * Bare spec, >1 installed, no pin/default:
-   *   'error'  (default) → throw AgentSpecError{code:'no-default'} — safe for
-   *                        state-mutating commands (sync/use).
-   *   'newest'          → pick the newest installed (source:'newest-installed');
-   *                        callers should note it. For execution verbs (run/exec).
-   */
+  /** Bare spec, >1 installed, no pin/default: `'error'` (default) throws AgentSpecError
+   * `no-default`, safe for state-mutating commands (sync/use); `'newest'` picks the newest
+   * installed (source `newest-installed`) for execution verbs (run/exec); callers should note it. */
   onAmbiguous?: 'error' | 'newest';
 }
 

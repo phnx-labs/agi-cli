@@ -1,7 +1,5 @@
-/**
- * Verifies parseKimi normalizes Kimi's internal wire.jsonl session log into the
- * shared SessionEvent shape, and detectAgent routes Kimi session paths correctly.
- */
+/** Verifies parseKimi normalizes Kimi's wire.jsonl session log into SessionEvent and detectAgent
+ * routes Kimi session paths. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -43,10 +41,9 @@ function makeKimiSession(wireContent: string): string {
     title: 'Test session',
     createdAt: '2026-06-24T00:00:00.000Z',
   }));
-  // Real Kimi wire.jsonl is newline-terminated (see testdata/kimi-tool-args.jsonl,
-  // which ends in 0x0a). Terminate the fixture too so the incremental parse's
-  // trailing-line discipline (a complete-but-unterminated tail is DEFERRED, not
-  // applied — the double-count guard) sees the final record as committed.
+  // Real Kimi wire.jsonl is newline-terminated (testdata/kimi-tool-args.jsonl). Terminate the
+  // fixture so the incremental parse's trailing-line rule (unterminated tail is deferred) sees the
+  // last record as committed.
   const terminated = wireContent.endsWith('\n') || wireContent === '' ? wireContent : wireContent + '\n';
   fs.writeFileSync(path.join(agentsDir, 'wire.jsonl'), terminated);
   return path.join(sessionDir, 'state.json');
@@ -452,13 +449,9 @@ describe('parseKimi', () => {
   });
 });
 
-/**
- * Kimi's checklist tool is `TodoList`, not Claude's `TodoWrite`, and its items
- * are `{title, status}` where finished is `"done"` — not `{content, status:
- * "completed"}`. Both spellings were unhandled, so a Kimi session with a live
- * checklist showed no todos in `agents sessions` at all. The wire records below
- * are verbatim shapes from a real ~/.kimi-code wire.jsonl.
- */
+/** Kimi's checklist tool is `TodoList` with `{title, status: "done"}`, not Claude's `TodoWrite`
+ * shape. Both were unhandled, so live Kimi checklists showed no todos in `agents sessions`. Wire
+ * records are verbatim shapes from a real ~/.kimi-code wire.jsonl. */
 describe('kimi TodoList checklist', () => {
   function todoListCall(todos: Array<{ title: string; status: string }>) {
     return JSON.stringify({
@@ -522,10 +515,8 @@ describe('kimi TodoList checklist', () => {
   });
 });
 
-/**
- * Kimi names the file argument `path` where Claude names it `file_path`, so
- * Read/Write/Edit summaries rendered as a bare "Read " with no file at all.
- */
+/** Kimi names the file argument `path` where Claude uses `file_path`, so Read/Write/Edit summaries
+ * rendered as a bare "Read " with no file. */
 describe('kimi tool-call summaries carry the file path', () => {
   test('Read/Write/Edit read the `path` arg', () => {
     expect(summarizeToolUse('Read', { path: '/tmp/secrets.ts' })).toBe('Read /tmp/secrets.ts');

@@ -52,11 +52,9 @@ process.on('SIGINT', () => {
 // (e.g. `agents sessions | head`, or when stdout is captured by another process).
 process.on('SIGPIPE', () => {});
 
-// Launch-lease delegate: every generated native shim/alias calls
-// `agents __launch-lease <agent> <label> <pid>` right before its final `exec`
-// (PHNX-3940) — on the hot launch path of every managed agent, so it must skip
-// the same update-check/bootstrap machinery `__shim` skips below. See
-// `lib/installations/launch-gate.ts` for what this call actually does.
+// Launch-lease delegate: every generated native shim calls `agents __launch-lease <agent>
+// <label> <pid>` before its final `exec` (PHNX-3940), on every managed agent's hot launch path,
+// so it skips update-check/bootstrap like `__shim`. See lib/installations/launch-gate.ts.
 if (process.argv[2] === '__launch-lease') {
   const { runLaunchLeaseCli } = await import('./lib/installations/launch-gate.js');
   process.exit(await runLaunchLeaseCli(process.argv.slice(3)));
@@ -77,11 +75,9 @@ if (process.argv[2] === '__shim') {
   process.exit(code);
 }
 
-// gh overload delegate: the `gh` PATH shim routes `gh pr checks` here as
-// `agents __gh --real-gh <path> -- pr checks …`, so the rate-limit-prone read
-// runs over REST instead of GraphQL (PHNX-3501). Above bootstrap for the same
-// reason as __shim: no update check, no command-tree load — this is on the hot
-// path of an agent's CI watch, and the gh argv must pass through untouched.
+// gh overload delegate: the `gh` PATH shim routes `gh pr checks` here so the rate-limit-prone read
+// uses REST, not GraphQL (PHNX-3501). Above bootstrap like __shim: no update check or command-tree
+// load on an agent's CI-watch hot path; gh argv passes untouched.
 if (process.argv[2] === '__gh') {
   const { runGhOverload } = await import('./lib/github/gh-overload.js');
   process.exit(await runGhOverload(process.argv.slice(3)));

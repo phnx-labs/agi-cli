@@ -1,27 +1,6 @@
-/**
- * Setup-copy for `agents run --lease` (RUSH-1920), transport = PUSH-FROM-LOCAL.
- *
- * A fresh crabbox box has agents-cli installed but none of the caller's own
- * `~/.agents` config (skills, hooks, commands, MCP, profiles). This module
- * replicates the *git-tracked* subset of the LOCAL `~/.agents` onto the box:
- *
- *   1. `git -C <userAgentsDir> ls-files` — tracked files only. Tracked-only is
- *      the safety boundary: it excludes `.history/`, `.cache/`, `.system/` and
- *      any keychain-backed secrets by construction (those are gitignored), so no
- *      credential material is ever pushed.
- *   2. `rsync` that exact file set to `~/.agents` on the box over crabbox's OWN
- *      ssh invocation (`crabboxSshArgv`) — crabbox provisions a per-lease identity
- *      key, so a raw `ssh crabbox@ip` fails publickey; only crabbox's key works.
- *   3. `agents sync --local` on the box so the copied config takes effect.
- *
- * NEVER copies `~/.claude` / `~/.claude.json` — they live in `$HOME`, not
- * `~/.agents`, and are rebuilt on the box by `agents add` + refresh; an explicit
- * filter belts-and-braces the tracked-only guarantee.
- *
- * This is a self-contained local function the command layer calls; it does NOT
- * ride the box-side bootstrap script (that only echoes the `copy-setup` progress
- * sentinel — see `buildBootstrapScript`).
- */
+/** Setup-copy for `agents run --lease` (RUSH-1920), push-from-local: replicate the git-tracked
+ * subset of local `~/.agents` onto a fresh box. Tracked-only (`git ls-files`) is the safety
+ * boundary: no `.history/`, `.cache/`, `.system/` or keychain secrets; never copies `~/.claude`. */
 
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -43,20 +22,14 @@ interface CopySetupOptions {
   secretsBundle?: string;
   /** Override the local `~/.agents` dir (defaults to `getUserAgentsDir()`). */
   userAgentsDir?: string;
-  /**
-   * Destination relative to the box user's home. Lease runs set this to their
-   * isolated home; other callers retain the historical `~/.agents/` target.
-   */
+  /** Destination relative to the box user's home. Lease runs set their isolated home; other callers
+   * keep the historical `~/.agents/` target. */
   remoteDir?: string;
   /** Receives combined stdout/stderr of the rsync + refresh, if set. */
   onData?: (chunk: string) => void;
-  /**
-   * Run `agents sync --local` on the box after the push (default `true`). Set
-   * `false` when the caller runs the refresh itself in the box bootstrap — the
-   * lease path does this so the refresh runs AFTER the box installs agents-cli
-   * (this host-side push happens before the box boots agents-cli, so a host-side
-   * refresh here could not find the CLI).
-   */
+  /** Run `agents sync --local` on the box after the push (default true). The lease path sets false
+   * and refreshes in the bootstrap, since the host-side push happens before the box has
+   * agents-cli. */
   refresh?: boolean;
 }
 
@@ -69,11 +42,8 @@ export interface CopySetupResult {
   refreshExitCode: number | null;
 }
 
-/**
- * git-tracked files under `dir` (paths relative to `dir`), minus the never-copy
- * set. Returns `[]` when `dir` is not a git repo — a caller with no tracked
- * `~/.agents` simply copies nothing.
- */
+/** git-tracked files under `dir` (relative paths) minus the never-copy set; `[]` when `dir` is not
+ * a git repo. */
 export function enumerateTrackedFiles(dir: string): string[] {
   const r = spawnSync('git', ['-C', dir, 'ls-files', '-z'], { encoding: 'utf-8' });
   if (r.status !== 0 || !r.stdout) return [];
@@ -86,22 +56,17 @@ export function enumerateTrackedFiles(dir: string): string[] {
     });
 }
 
-/**
- * Split crabbox's ssh argv (`['ssh', …opts, 'crabbox@host']`) into the `-e`
- * transport string (`ssh …opts`) and the `crabbox@host` endpoint. This is what
- * carries the per-lease identity key + known_hosts a raw ssh lacks.
- */
+/** Split crabbox's ssh argv into the `-e` transport string and the `crabbox@host` endpoint,
+ * carrying the per-lease identity key and known_hosts a raw ssh lacks. */
 export function sshTransportFromArgv(sshArgv: string[]): { rsh: string; host: string } {
   const host = sshArgv[sshArgv.length - 1];
   const rsh = sshArgv.slice(0, -1).join(' '); // 'ssh -i <key> -o … -p 2222'
   return { rsh, host };
 }
 
-/**
- * rsync argv to push the tracked file set to `~/.agents` on the box. Reads the
- * NUL-separated list at `filesFrom` (`--from0`, matching `ls-files -z`) so paths
- * with spaces survive, and tunnels over crabbox's own ssh (`rsh`).
- */
+/** rsync argv to push the tracked file set to `~/.agents` on the box. Reads the NUL-separated list
+ * at `filesFrom` (`--from0`, matching `ls-files -z`) so paths with spaces survive; tunnels over
+ * crabbox's ssh. */
 export function buildSetupRsyncArgs(opts: {
   rsh: string;
   host: string;
@@ -134,13 +99,9 @@ function runStreaming(
   });
 }
 
-/**
- * Replicate the git-tracked subset of the local `~/.agents` onto the crabbox box
- * and refresh it. Enumerates tracked files, rsyncs them over ssh, then runs
- * `agents sync --local` on the box. Refresh is skipped when the push fails or the
- * file set is empty (nothing to refresh). Never throws — surfaces failure through
- * the returned exit codes.
- */
+/** Replicate the git-tracked subset of local `~/.agents` onto the box and refresh it. Refresh is
+ * skipped when the push fails or the file set is empty. Never throws; failure surfaces via exit
+ * codes. */
 export async function copySetupToBox(opts: CopySetupOptions): Promise<CopySetupResult> {
   const dir = opts.userAgentsDir ?? getUserAgentsDir();
   const files = enumerateTrackedFiles(dir);

@@ -1,10 +1,5 @@
-// path check — ensures the shims dir is on PATH. On POSIX it appends to the shell
-// rc file; on Windows it registers on the user PATH (registry). addShimsToPath is a
-// no-op when already present, so this is idempotent. Formerly an interactive prompt
-// in index.ts fired on every new shell; here the daemon does it once, silently.
-//
-// Caveat: an already-open shell won't pick up the new rc/PATH entry until it reloads
-// — but new shells will, so the recurring prompt stops.
+// path check: ensures the shims dir is on PATH (rc file on POSIX, user PATH registry on Windows).
+// Idempotent via addShimsToPath. An already-open shell picks up the change only after reload.
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';

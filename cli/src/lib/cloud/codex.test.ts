@@ -1,11 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { extractTaskId } from './codex.js';
 
-// The dispatch path keys everything (status, list, session reconcile) on the id
-// extractTaskId returns. The old fallback minted a synthetic `codex-<ts>` when
-// this returned undefined — an id that could never match the real execution — so
-// these pin the parser AND the fact that a genuine miss yields undefined (which
-// dispatch now turns into a loud error, never a fabricated id).
+// Dispatch keys status, list and reconcile on the id extractTaskId returns. The old synthetic
+// `codex-<ts>` fallback never matched; a genuine miss yields undefined, which dispatch makes loud.
 describe('extractTaskId', () => {
   it('reads the id from JSON output', () => {
     expect(extractTaskId('{"id":"task_abc123","status":"queued"}')).toBe('task_abc123');

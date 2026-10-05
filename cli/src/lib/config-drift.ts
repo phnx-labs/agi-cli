@@ -1,33 +1,14 @@
-/**
- * Config drift: has THIS box drained its device-scoped state into its own
- * `devices/<host>/agents.yaml`, or is it still carrying per-box state in the
- * shared top-level `agents.yaml`?
- *
- * PHNX-3315 P1 heals a frozen top-level header and drains the central `browser:`
- * tombstone; P2 folds `fleet.discovery` / `fleet.ignored`, the `hosts:` registry,
- * and device-scoped native `accounts:` out of central and into the device doc.
- * Each fold-and-delete migration is idempotent and runs on config access / daemon
- * boot / install — so a converged box shows NO drift. A box that has NOT run the
- * fold yet (stale checkout, never re-synced) still holds those blocks centrally,
- * and until now that was INVISIBLE: `agents sync status` only reported per-agent
- * "N missing", so an un-drained box was discovered the hard way — as a mystery
- * `agents repo pull` conflict when two boxes rewrote the same shared map.
- *
- * This detector is READ-ONLY and must NOT trigger the migration (that would drain
- * the very leak it is trying to surface): it reads the raw top-level user file
- * directly, never `readMeta()` (system-merged) and never the migration hook.
- */
+/** Config drift: has this box drained its device-scoped state into `devices/<host>/agents.yaml`, or
+ * still carries it in the shared `agents.yaml` (PHNX-3315)? Read-only: it must not run the
+ * migration (that would drain the leak it reports), so it reads the raw user file. */
 
 import { hasStaleMetaHeader, readTopLevelUserMeta } from './state.js';
 
 export interface ConfigDrift {
   /** Top-level `agents.yaml` header != the current META_HEADER (the P1 case). */
   staleHeader: boolean;
-  /**
-   * Labels of central blocks that should have folded into this box's device doc
-   * but still linger — the P1 `browser` tombstone and the P2 `fleet` / `hosts` /
-   * `accounts` device-scoped writers. Empty on a drained box.
-   */
+  /** Labels of central blocks that should have folded into this box's device doc but linger: the P1
+   * `browser` tombstone and P2 `fleet` / `hosts` / `accounts`. Empty on a drained box. */
   centralLeaks: string[];
 }
 
@@ -35,11 +16,9 @@ function isMap(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/**
- * Inspect this box's on-disk state for config drift. Pure read — no migration, no
- * writes. Mirrors the gather step of {@link migrateDeviceConfigStores} (plus the
- * browser tombstone) so a leak here is exactly what a fold would drain.
- */
+/** Inspect on-disk state for config drift. Pure read; mirrors the gather step of
+ * migrateDeviceConfigStores plus the browser tombstone, so a leak is exactly what a fold would
+ * drain. */
 export function detectConfigDrift(): ConfigDrift {
   const staleHeader = hasStaleMetaHeader();
   const raw = readTopLevelUserMeta();

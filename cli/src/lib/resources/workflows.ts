@@ -1,10 +1,6 @@
-/**
- * Workflows resource handler.
- *
- * Workflows are directory bundles with a WORKFLOW.md containing YAML frontmatter.
- * They optionally contain subagents/, skills/, and plugins/ subdirectories.
- * Resolution order (docs/07-entrypoints): project > user > plugin > extra > system.
- */
+/** Workflows resource handler. Workflows are directory bundles with a WORKFLOW.md (YAML frontmatter)
+ * and optional subagents/, skills/, plugins/ subdirs. Resolution order (docs/07-entrypoints):
+ * project > user > plugin > extra > system. */
 
 import * as fs from 'fs';
 import * as path from 'path';

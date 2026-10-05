@@ -1,15 +1,6 @@
-/**
- * `agents config budget` — view and set spend caps (issue #346).
- *
- *   agents config budget                show effective caps + spend-to-cap (today + project)
- *   agents config budget --json         machine-readable snapshot
- *   agents config budget set <cap> <n>  write a cap to the user agents.yaml budget: block
- *
- * Caps resolve project > user (see lib/budget/config.ts); `agents config budget`
- * reports the EFFECTIVE merged config for the current directory, and `set`
- * writes the user-global layer (the project layer is hand-edited in the repo's
- * agents.yaml, like every other project override).
- */
+/** `agents config budget` views and sets spend caps (issue #346): bare shows effective caps and
+ * spend-to-cap, `--json` a machine snapshot, `set <cap> <n>` writes the user agents.yaml budget:
+ * block. Caps resolve project > user; the project layer is hand-edited in the repo's agents.yaml. */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 

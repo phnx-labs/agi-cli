@@ -1,17 +1,6 @@
-/**
- * The daemon harness-update tick (PHNX-3940).
- *
- * Two layers are tested:
- *   1. `runHarnessUpdateTick` — the shared decision/logging logic — through the
- *      `deps` injection seam (like `self-update-service.test.ts`), so only the
- *      boundary that shells out is swapped; logging and outcome shape are real.
- *   2. `driveCooperativeChild` — the real spawn+IPC boundary — against REAL child
- *      processes: it must request a cooperative stop over IPC (never a kill) when
- *      the tick's `AbortSignal` fires, wait for the child's TRUE exit, and reject
- *      only when a wedged child has to be force-reaped. The real hidden
- *      `__harness-update-run` verb is also driven end-to-end over the real CLI
- *      entry. No mocked process, no faked FS success.
- */
+/** The daemon harness-update tick (PHNX-3940), two layers: `runHarnessUpdateTick`
+ * (decision/logging) via the `deps` seam, and `driveCooperativeChild` (spawn+IPC) against REAL
+ * children. A tick abort requests a cooperative stop over IPC, never a kill. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'child_process';
 import * as fs from 'fs';

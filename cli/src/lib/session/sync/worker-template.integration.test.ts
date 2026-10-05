@@ -5,10 +5,9 @@ import { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderSessionsWorkerScript } from './worker-template.js';
 
-// The exact emitted module runs inside workerd against Miniflare's real R2
-// implementation and calls a real local HTTP identity service. This covers the
-// production route, bearer, ETag/CAS, cursor, and quota semantics without a Map
-// bucket or a replaced authorization hook.
+// The emitted module runs in workerd against Miniflare's real R2 and a real local HTTP identity
+// service, covering route, bearer, ETag/CAS, cursor and quota semantics with no Map bucket or
+// replaced authorization hook.
 
 const USER_A = 'user-a';
 const USER_B = 'user-b';
@@ -64,11 +63,9 @@ describe('managed sessions Worker in real workerd', () => {
 
   const url = (path: string) => `https://sessions.test/${path}`;
   const auth = (token = 'token-a') => ({ authorization: `Bearer ${token}` });
-  // A well-formed ENCRYPTED bundle wire — NDJSON: a header line claiming
-  // encryption + one record whose body is an AES-256-GCM transcript envelope
-  // ({ v, alg, iv, ct, tag }). This is the exact shape the CLI uploads on the
-  // managed path; the Worker requires it and rejects a plaintext PUT 422 so
-  // readable transcript content can never land in the bucket (SES-51).
+  // A well-formed encrypted bundle wire (NDJSON: header claiming encryption, one AES-256-GCM
+  // envelope record). The Worker rejects a plaintext PUT with 422 so readable transcripts never
+  // land in the bucket (SES-51).
   const encBody = (marker: string) => {
     const env = JSON.stringify({ v: 1, alg: 'aes-256-gcm', iv: 'AAAAAAAAAAAAAAAA', ct: Buffer.from(marker).toString('base64'), tag: 'AAAAAAAAAAAAAAAAAAAAAA==' });
     const header = JSON.stringify({
@@ -386,10 +383,9 @@ describe('managed sessions Worker in real workerd', () => {
     const successorBody = await successor.text();
     if (successor.status !== 200) throw new Error(`successor ${successor.status}: ${successorBody}`);
 
-    // This is the predecessor's stale ledger CAS from the review interleaving:
-    // it read before takeover and tries to append its refund afterwards. The
-    // successor wrote settled[pathId] in that same ledger, so the stale etag is
-    // fenced and the late delta cannot land.
+    // The predecessor's stale ledger CAS from the review interleaving: it read before takeover and
+    // appends its refund after. The successor wrote settled[pathId] in that ledger, so the stale
+    // etag is fenced and the delta cannot land.
     const late = await bucket.put(`__usage/${USER_A}`, JSON.stringify({
       bytes: 0,
       count: 0,

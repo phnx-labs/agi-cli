@@ -1,11 +1,6 @@
-/**
- * Worker process for the concurrent-writes benchmark.
- * Called by bench-concurrent-writes.ts with BENCH_HOME set via env.
- *
- * Generates a fixed batch of synthetic session entries (same across all workers
- * so every worker is racing to write the exact same rows) and calls
- * upsertSessionsBatch. Reports JSON result to stdout.
- */
+/** Worker for the concurrent-writes benchmark (BENCH_HOME via env): builds the same synthetic
+ * session batch in every worker so all race on the same rows, calls upsertSessionsBatch, and
+ * reports JSON on stdout. */
 
 const benchHome = process.env.BENCH_HOME;
 if (!benchHome) {

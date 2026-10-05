@@ -110,12 +110,9 @@ describe('readRepoBehindMarkers', () => {
   });
 });
 
-/**
- * RUSH-2324: parent-side recency gate for spawnDetachedSync. The spawn itself
- * costs ~7ms mean; the worker is almost always a no-op when a cycle finished
- * in the last five minutes. These tests exercise the real fs paths against a
- * temp fetch dir — no mocks.
- */
+/** RUSH-2324: parent-side recency check for spawnDetachedSync. The ~7ms spawn is wasted when a
+ * cycle finished in the last five minutes. Exercises real fs paths against a temp fetch dir, no
+ * mocks. */
 describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => {
   const NOW = 1_700_000_000_000;
 

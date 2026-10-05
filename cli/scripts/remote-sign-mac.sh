@@ -1,41 +1,7 @@
 #!/usr/bin/env bash
-#
-# Offload the macOS signing work to the release home base so the signed macOS
-# artifacts can be produced FROM ANOTHER MAC (or a Linux box).
-#
-# NOTE: the normal release flow no longer calls this. release.sh routes the whole
-# privileged phase to the home base directly (run_home_base_phase /
-# --home-base-phase). This script remains for the narrow case of producing +
-# pulling back JUST the macOS artifacts from another Mac, without publishing.
-#
-# Two artifacts come back into THIS worktree's cli/bin/:
-#   bin/MenubarHelper.app  the menu-bar helper. NOT built here: its source lives
-#                          in phnx-labs/agi-menu (PHNX-4036) and this repo only
-#                          consumes the published, signed + notarized release on
-#                          menubar/v<floor>. The home base runs
-#                          scripts/stage-menubar-helper.sh, which downloads that
-#                          asset, verifies sha256 + codesign + Gatekeeper, and
-#                          stages it -- on a Mac so the verification is real.
-#   bin/agents-macos       the standalone CLI binary, built + Developer-ID signed
-#                          + notarized there (scripts/sign-cli-binary.sh).
-# (A third artifact, the keychain broker, used to build here too; it moved out
-# of this repo entirely with the standalone `secrets` engine, PHNX-3989.)
-#
-# This script rsyncs the exact INPUTS from THIS worktree to the home base, runs
-# the Mac steps there under its headless signing creds, then pulls the results
-# back into THIS worktree's cli/bin/.
-#
-# NO ENV VARS: the sign host defaults to mac-mini (matching release.sh) and is
-# overridable only with `--device <name>` (alias `--host`) -- a flag, never
-# ambient config. No secret-host override, no force-remote knob, no fleet
-# discovery, no auto-failover.
-#
-# The home base must have: a Developer ID identity in rush-signing.keychain-db,
-# the kcpass + secrets.pass files under ~/Library/Application Support/rush/, and
-# the `apple.com` secrets bundle (APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
-# APPLE_TEAM_ID).
-#
-# Usage: scripts/remote-sign-mac.sh [--device <name>]
+# Offload the macOS signing work to the release home base. The normal release flow no longer calls
+# this; it remains to produce and pull back just bin/MenubarHelper.app (staged from the published
+# menubar/v<floor>, PHNX-4036) and bin/agents-macos.
 set -euo pipefail
 
 # The Mac that builds + signs, matching release.sh: mac-mini by default,
@@ -77,19 +43,15 @@ HOST_CLI="$(ssh "$HOME_BASE" 'echo $HOME/src/github.com/muqsitnawaz/agents-cli/c
 [[ -n "$HOST_CLI" ]] || die "resolved an empty remote cli path on $HOME_BASE"
 log "remote cli:  $HOME_BASE:$HOST_CLI"
 
-# ----- 1. Ship the build inputs from this worktree to the sign host -----
-# We stage into the sign host's cli subtree so the Mac scripts see the layout
-# they expect (scripts/.., src/.., bin/..). This is a build workspace, not a git
-# checkout — the sign host's own branch/version is irrelevant.
+# Ship the build inputs from this worktree to the sign host's cli subtree so the Mac scripts see
+# the layout they expect. It is a build workspace, not a git checkout, so the host's branch and
+# version are irrelevant.
 log "staging build inputs on $HOME_BASE ..."
 ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/scripts' '$HOST_CLI/bin'"
 
-# Full src tree + package manifest: the standalone CLI binary is compiled from
-# src/ with `bun build --compile` (scripts/build-bin.sh), which resolves its
-# npm imports from node_modules — the remote script runs `bun install` first.
-# src/lib/helper-versions.ts rides along in src/: it is what
-# stage-menubar-helper.sh reads the menubar floor from, so THIS worktree's pin
-# decides which published helper is staged.
+# Full src tree plus package manifest: the CLI binary is compiled from src/ with `bun build
+# --compile`, so the remote script runs `bun install` first. helper-versions.ts rides along
+# because stage-menubar-helper.sh reads the menubar floor from it.
 rsync -az --delete --exclude '__tests__/' --exclude '*.test.ts' \
           "$LOCAL_CLI/src/" "$HOME_BASE:$HOST_CLI/src/"
 rsync -az "$LOCAL_CLI/package.json" "$LOCAL_CLI/bun.lock" "$HOME_BASE:$HOST_CLI/"
@@ -107,13 +69,9 @@ ok "inputs staged"
 # headless, and injects the Apple notarization creds via the `apple.com` bundle.
 log "staging + signing on $HOME_BASE (published menu-bar helper, then the standalone CLI binary) ..."
 
-# Generate the remote build script LOCALLY and ship it as a file, then run it on
-# the host. A file dodges the multi-layer quoting hell of embedding a multi-line
-# script (with its own single-quoted `bash -c '...'`) inside an ssh command that
-# the host's login shell re-parses. `$HOME` / `$(cat …)` stay literal so the
-# REMOTE bash expands them; only the resolved workspace path is baked in via %q.
-# Trailing X's (PHNX-3631): BSD/macOS mktemp only substitutes X's at the END of
-# a template, so `...XXXXXX.sh` is a literal filename that collides on reuse.
+# Generate the remote build script locally and ship it as a file, avoiding the multi-layer quoting
+# of embedding it in an ssh command. `$HOME` and `$(cat ...)` stay literal for the remote bash;
+# only the workspace path is baked in via %q. Trailing X's (PHNX-3631).
 BUILD_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/remote-sign-build.sh.XXXXXX")"
 trap 'rm -f "$BUILD_SCRIPT"' EXIT
 {

@@ -100,10 +100,9 @@ describe('scanClaudeCatalogIds (#1892 / #2233 — word-boundary + sibling drop)'
   const ids = scanClaudeCatalogIds(text);
 
   it('does not scrape a bare major out of a sibling-less dotted-typo string (the anchor)', () => {
-    // `claude-opus-9.0` has no dashed `claude-opus-9-*` in-scan sibling for the
-    // sibling-drop to catch, so without the trailing `(?!\.\d)` anchor the scan
-    // would scrape and *keep* `claude-opus-9` — a 404-able id. The anchor stops
-    // the scrape at the source.
+    // `claude-opus-9.0` has no dashed in-scan sibling for the sibling-drop to catch, so without
+    // the trailing `(?!\.\d)` anchor the scan would keep `claude-opus-9`, a 404-able id. The
+    // anchor stops the scrape at the source.
     expect(ids).not.toContain('claude-opus-9');
   });
 
@@ -125,10 +124,9 @@ describe('scanClaudeCatalogIds (#1892 / #2233 — word-boundary + sibling drop)'
   });
 
   it('does not backtrack-emit a bare major from a suffix-glued multi-segment token', () => {
-    // `claude-opus-9-1x` — two packed strings glued with no separator, as the
-    // binary-string extractor can produce. The greedy `-\d+` run must match
-    // atomically: it must NOT fail the trailing anchor on the full token, drop
-    // the `-1` segment, and re-emit the bare `claude-opus-9` (a 404-able id).
+    // `claude-opus-9-1x` is two packed strings glued with no separator, as the extractor can
+    // produce. The greedy `-\d+` run must match atomically, not fail the anchor, drop `-1` and
+    // re-emit the bare 404-able `claude-opus-9`.
     const glued = scanClaudeCatalogIds('cfg={id:"claude-opus-9-1x"};');
     expect(glued).not.toContain('claude-opus-9');
     expect(glued).toHaveLength(0);

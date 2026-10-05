@@ -4,14 +4,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { sshStreamWithArgs, SSH_STREAM_MAX_STDERR } from './ssh-exec.js';
 
-/**
- * A fake `ssh` that runs its last argument as a shell script.
- *
- * The hardening under test is process lifecycle — SIGTERM/SIGKILL escalation,
- * bounded stderr, a consumer that throws — none of which needs a real peer. A
- * stub binary exercises the REAL spawn/kill/stream code with a controllable
- * child, which is what these guarantees are about.
- */
+/** A fake `ssh` that runs its last argument as a shell script. The hardening under test is process
+ * lifecycle (SIGTERM/SIGKILL escalation, bounded stderr, a throwing consumer), so a stub exercises
+ * the real spawn/kill/stream code with a controllable child. */
 const fixtureDirs: string[] = [];
 function fixtureDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-ssh-'));
@@ -24,19 +19,9 @@ function fakeSsh(body: string): string {
   return bin;
 }
 
-/**
- * A fake `ssh` that is a NODE process with an explicit SIGTERM disposition,
- * installed BEFORE it announces readiness.
- *
- * Bash was the wrong fixture for the escalation cases. Its default disposition
- * while blocked in `sleep` is not "die promptly on SIGTERM" — it can defer until
- * the child finishes — so the polite-exit case escalated and reported
- * `killed: true` after the full grace, and the ignoring case depended on a `trap`
- * being installed before the signal arrived. Neither outcome measured the code:
- * both measured shell signal semantics and startup latency. Node lets the
- * disposition be stated exactly, and the readiness marker is written only after
- * the handler is in place, so the ordering is guaranteed rather than raced.
- */
+/** A fake `ssh` that is a Node process with an explicit SIGTERM disposition, set before it
+ * announces readiness. Bash was the wrong fixture: its signal handling while in `sleep` measured
+ * shell semantics and startup latency, not the code. */
 function nodeSsh(mode: 'ignore' | 'exit'): string {
   const bin = path.join(fixtureDir(), 'ssh.js');
   const body = mode === 'ignore'

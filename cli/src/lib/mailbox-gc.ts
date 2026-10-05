@@ -1,11 +1,6 @@
-/**
- * Mailbox liveness sweep and GC.
- *
- * A box whose owning agent is no longer alive is a ghost: pending messages will
- * never be drained, and any feed block tied to that box is stale. This module
- * archives dead-box messages and prunes old consumed entries so the spool stays
- * bounded under fleet load.
- */
+/** Mailbox liveness sweep and GC. A box whose owning agent is dead is a ghost: its pending messages
+ * are never drained and its feed block is stale. This archives dead-box messages and prunes old
+ * consumed entries to keep the spool bounded. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { getFeedDir, getMailboxRootDir } from './state.js';
@@ -119,11 +114,9 @@ function pruneConsumed(boxDir: string, maxAgeMinutes: number, now: Date): number
   return n;
 }
 
-/**
- * Sweep all mailboxes. For dead boxes (not in `activeBoxIds`), archive every
- * pending message as `dropped: dead` and remove any feed block tied to that
- * mailbox. For live boxes, drop expired messages and prune old consumed files.
- */
+/** Sweeps all mailboxes. Dead boxes (not in `activeBoxIds`): archive every pending message as
+ * `dropped: dead` and remove the tied feed block. Live boxes: drop expired messages and prune old
+ * consumed files. */
 export function gcMailbox(
   activeBoxIds: Set<string>,
   options: GcOptions = {},

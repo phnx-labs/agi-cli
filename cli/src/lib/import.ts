@@ -1,21 +1,6 @@
-/**
- * Import existing unmanaged agent installations into agents-cli.
- *
- * Two flavors:
- *
- *  1. Config-only import — moves an agent's config dir (e.g. ~/.openclaw)
- *     into the version structure and symlinks it back. Used by `agents setup`
- *     on first-run when an agent was previously installed via npm/homebrew.
- *
- *  2. Full import — also registers an existing binary install (e.g. a global
- *     `npm i -g openclaw`) under the managed version path so the shim
- *     resolver can find it. This is what `agents import <agent>` does.
- *
- * The binary side never moves files. It creates a thin symlink farm under
- * `~/.agents/.history/versions/<agent>/<version>/` pointing at the original
- * global install, plus a package.json marker so `isVersionInstalled` returns
- * true.
- */
+/** Import unmanaged agent installs: config-only import moves an agent's config dir into the
+ * version structure and symlinks it back (`agents setup`); full import (`agents import`) also
+ * registers the binary via a symlink farm. Binaries never move. */
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -45,14 +30,9 @@ export function isValidImportVersion(version: string): boolean {
   return IMPORT_VERSION_RE.test(version);
 }
 
-/**
- * Move an agent's config dir into the managed version structure and symlink it
- * back to its original location. Sets the imported version as the global
- * default and refreshes the shim so the user's PATH lookup hits the managed
- * version.
- *
- * No-op (returns skipped=true) if the version's config dir is already created.
- */
+/** Move an agent's config dir into the managed version structure and symlink it back, set the
+ * imported version as global default and refresh the shim. No-op (skipped=true) if the
+ * version's config dir already exists. */
 export async function importAgentConfig(
   agentId: AgentId,
   version: string
@@ -61,21 +41,17 @@ export async function importAgentConfig(
     return { success: false, error: `Invalid version: ${JSON.stringify(version)}` };
   }
 
-  // Adoption, done inline rather than via switchConfigSymlink — so it needs the gate
-  // directly. commands/import.ts checks at its entry point too (it must: it registers
-  // a normal version first, which would un-protect the agent before this runs), but
-  // an exported function that moves the user's real config must not depend on every
-  // future caller remembering.
+  // Adoption is done inline rather than via switchConfigSymlink, so it needs the isolation check
+  // itself. commands/import.ts checks at its entry too, but an exported function that moves the
+  // user's real config must not depend on every future caller remembering.
   assertIsolationBoundary(agentId, 'adopt your existing install');
   const agent = AGENTS[agentId];
   const configDir = agent.configDir;
   const versionsDir = getVersionsDir();
   const versionHome = path.join(versionsDir, agentId, version, 'home');
-  // Match the shim's derivation in generateShimScript: the per-version config
-  // path mirrors the original configDir's path relative to $HOME. Hardcoding
-  // `.${agentId}` broke for nested configDirs like Antigravity
-  // (`~/.gemini/antigravity-cli`) — the destination would be `.antigravity`,
-  // mismatching the shim's expectation of `.gemini/antigravity-cli`.
+  // Match the shim's derivation in generateShimScript: the per-version config path mirrors the
+  // configDir's path relative to $HOME. Hardcoding `.${agentId}` broke nested configDirs like
+  // Antigravity (`~/.gemini/antigravity-cli`), whose destination would be `.antigravity`.
   const versionConfigDir = path.join(versionHome, path.relative(os.homedir(), configDir));
 
   if (fs.existsSync(versionConfigDir)) {
@@ -95,21 +71,9 @@ export async function importAgentConfig(
   }
 }
 
-/**
- * Wire an imported version into the rest of the system so it behaves the same
- * as a freshly installed version:
- *
- *   - registered as the global default in agents.yaml (so `agents view`
- *     reports it correctly and resolvers find it),
- *   - main shim refreshed (`~/.agents/.cache/shims/<cli>`),
- *   - versioned alias created (`~/.agents/.cache/shims/<cli>@<version>`),
- *   - home-file symlinks (CLAUDE.md / AGENTS.md / etc.) repointed at this
- *     version's home dir.
- *
- * Without this, the binary-only import path would leave the version stranded:
- * isVersionInstalled returns true, but the resolver never picks it. Safe to
- * call multiple times — each underlying function is idempotent.
- */
+/** Wire an imported version in like a fresh install: register it as global default, refresh the
+ * main shim and versioned alias, repoint home-file symlinks at its home. Without it the version
+ * is stranded (installed, never picked). Idempotent. */
 export function finalizeImport(agentId: AgentId, version: string): void {
   setGlobalDefault(agentId, version);
   createShim(agentId);
@@ -118,12 +82,8 @@ export function finalizeImport(agentId: AgentId, version: string): void {
   ensureShimCurrent(agentId);
 }
 
-/**
- * Agent metadata needed by importAgentBinary. Taking these as explicit
- * inputs (rather than looking up AGENTS internally) decouples the symlink
- * farm from the AGENTS registry, which keeps the function pure and avoids
- * fragile coupling in test setups that stub `lib/agents.ts`.
- */
+/** Agent metadata needed by importAgentBinary, taken as explicit inputs rather than looking up
+ * AGENTS, which keeps the function pure and avoids coupling in tests that stub `lib/agents.ts`. */
 interface AgentBinarySpec {
   /** Agent id used in the marker package.json (`agents-{agentId}-{version}`). */
   agentId: string;
@@ -133,18 +93,9 @@ interface AgentBinarySpec {
   cliCommand: string;
 }
 
-/**
- * Register an existing global npm package install under the managed version
- * path so the shim resolver finds it.
- *
- * Layout produced (everything is a symlink, nothing is copied):
- *
- *   {versionDir}/
- *     package.json                          # marker so isVersionInstalled() is true
- *     home/                                 # empty isolated $HOME for this version
- *     node_modules/{npmPackage}    -> {globalPath}
- *     node_modules/.bin/{cliCommand} -> {binaryEntry}
- */
+/** Register an existing global npm package install under the managed version path so the shim
+ * resolver finds it. Everything is a symlink: `package.json` marker, empty isolated `home/`,
+ * `node_modules/{npmPackage}` to the global path, and `.bin/{cliCommand}` to the entry. */
 export function importAgentBinary(
   spec: AgentBinarySpec,
   version: string,
@@ -223,26 +174,9 @@ export function importAgentBinary(
   }
 }
 
-/**
- * Register an existing installScript-based binary (Grok, Antigravity, Cursor,
- * etc. — anything with `npmPackage: ''` and a curl/brew installer) under the
- * managed version path. Unlike `importAgentBinary` this skips the npm
- * package.json walk and just symlinks the resolved PATH binary directly into
- * `{versionDir}/node_modules/.bin/{cliCommand}`. The symlink is what makes
- * `listInstalledVersions` consider the version Managed.
- *
- * Layout produced:
- *
- *   {versionDir}/
- *     package.json                              # marker (private, imported, from)
- *     home/                                     # empty isolated $HOME
- *     node_modules/.bin/{cliCommand} -> {binaryPath}
- *
- * For agents whose binary lookup is special-cased elsewhere (e.g. Grok's
- * `~/.grok/downloads/`), the symlink is still created — `getBinaryPath` won't
- * read it for those agents, but it documents provenance and lets a future
- * refactor consolidate the binary-resolution registry.
- */
+/** Register an existing installScript-based binary (Grok, Antigravity, Cursor) by symlinking the
+ * resolved PATH binary into `{versionDir}/node_modules/.bin/{cliCommand}`, which makes
+ * `listInstalledVersions` count it Managed; special-cased lookups still get it as provenance. */
 export function importInstallScriptBinary(
   spec: AgentBinarySpec,
   version: string,
@@ -288,14 +222,9 @@ export function importInstallScriptBinary(
   }
 }
 
-/**
- * Resolve the on-disk npm package directory for an agent's CLI binary by
- * walking up from the binary, following any symlinks. Returns null if the
- * package can't be identified.
- *
- * Handles the homebrew/global-npm pattern where:
- *   /opt/homebrew/bin/{cli}  ->  ../lib/node_modules/{pkg}/dist/index.js
- */
+/** Resolve the on-disk npm package directory for an agent's CLI by walking up from the binary
+ * and following symlinks; null if unidentified. Handles the homebrew/global-npm pattern
+ * `/opt/homebrew/bin/{cli} -> ../lib/node_modules/{pkg}/dist/index.js`. */
 export function resolvePackageDirFromBinary(binaryPath: string): string | null {
   try {
     let real = fs.realpathSync(binaryPath);
@@ -317,20 +246,9 @@ export function resolvePackageDirFromBinary(binaryPath: string): string | null {
   }
 }
 
-/**
- * Seed an ISOLATED version's home from the user's real `~/.<agent>` — the mirror of
- * {@link importAgentConfig}, which adopts.
- *
- * The difference is the whole point: this COPIES and leaves the original in place,
- * never symlinks it, never sets a default, never creates a shim. So an isolated copy
- * can start from the setup the user already has instead of from nothing, which was
- * the only way to get a working sandbox before.
- *
- * Credentials are skipped by default and reported, not silently included. An isolated
- * copy is a separate principal — `agents add --isolated` already tells the user to
- * sign in on first run — and copying tokens into it should be a choice, not a side
- * effect of wanting your settings. `--with-auth` opts in.
- */
+/** Seed an isolated version's home from the user's real `~/.<agent>`, the mirror of
+ * importAgentConfig: it copies, leaving the original, with no symlink, default or shim.
+ * Credentials are skipped and reported (separate principal); `--with-auth` opts in. */
 export function seedIsolatedConfigFromLocal(
   agentId: AgentId,
   version: string,
@@ -342,11 +260,9 @@ export function seedIsolatedConfigFromLocal(
   // Mirror importAgentConfig's derivation so nested config dirs (e.g. Antigravity's
   // ~/.gemini/antigravity-cli) land where the shim expects them.
   let dest = path.join(versionHome, path.relative(os.homedir(), configDir));
-  // Codex uses a SUN_LEN-safe CODEX_HOME: `home/.codex` is a SYMLINK to
-  // `~/.agents/.codex-homes/<version>/.codex`, because the real path is too long for a
-  // unix socket. cpSync cannot overwrite a symlink with a directory (it fails with
-  // "Cannot overwrite non-directory"), and writing beside it would put settings
-  // somewhere the agent never reads. Follow the link and seed the actual home.
+  // Codex uses a SUN_LEN-safe CODEX_HOME: `home/.codex` is a symlink to `~/.agents/.codex-
+  // homes/<version>/.codex`. cpSync cannot overwrite a symlink with a directory, and writing beside
+  // it would put settings where the agent never reads, so follow the link and seed the actual home.
   try {
     if (fs.lstatSync(dest).isSymbolicLink()) dest = fs.realpathSync(dest);
   } catch {
@@ -356,14 +272,9 @@ export function seedIsolatedConfigFromLocal(
 
   if (!fs.existsSync(configDir)) return result;
 
-  // Known credential paths, relative to the config dir. `authFiles` covers the agents
-  // that declare them for cross-version carry; the rest are verified filenames for
-  // agents that do not declare any (codex `auth.json`, claude `.credentials.json`).
-  // Runtime state, not settings. Seeding a sandbox with the user's session history,
-  // logs and caches duplicated 757MB on a real machine — 349MB of `sessions` alone —
-  // for a copy that wants config. These are regenerated by the agent as it runs, and
-  // an isolated copy keeps its own; carrying them over also drags conversation history
-  // into a sandbox the user may have created precisely to keep separate.
+  // Known credential paths relative to the config dir: `authFiles` where declared, plus verified
+  // names (codex `auth.json`, claude `.credentials.json`). Runtime state (sessions, logs, caches)
+  // isn't settings: seeding it duplicated 757MB and dragged history into a sandbox.
   const RUNTIME_PREFIXES = ['sessions', 'log', 'logs', 'cache', '.tmp', 'tmp', 'generated_images'];
   const RUNTIME_FILES = ['history.jsonl', 'session_index.jsonl'];
   const isRuntime = (rel: string): boolean =>

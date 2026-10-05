@@ -1,9 +1,5 @@
-/**
- * Rush Cloud provider -- dispatches tasks to the Factory Floor via api.prix.dev.
- *
- * Auth: reads the session token from ~/.rush/user.yaml (written by `rush login`).
- * Requires the Rush GitHub App installed on the target repo.
- */
+/** Rush Cloud provider: dispatches to the Factory Floor via api.prix.dev. Auth is the session token
+ * in ~/.rush/user.yaml (from `rush login`); needs the Rush GitHub App on the repo. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,13 +45,9 @@ interface Installation {
   repository_selection?: string;
 }
 
-/**
- * Returns true when ~/.rush/user.yaml exists, carries an access_token, and
- * the token has not passed its expires_at timestamp (Unix milliseconds). A missing
- * expires_at, or `expires_at: 0` (a non-expiring Phoenix `pid_` bearer), is
- * treated as non-expired (see isRushSessionExpired, PHNX-3645). Pass yamlPath
- * to override the default path in tests.
- */
+/** True when ~/.rush/user.yaml has an access_token not past its expires_at (Unix ms). Missing or
+ * `expires_at: 0` (non-expiring Phoenix `pid_` bearer) is non-expired (PHNX-3645). `yamlPath`
+ * overrides for tests. */
 export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   try {
     if (!fs.existsSync(yamlPath)) return false;
@@ -69,12 +61,8 @@ export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   }
 }
 
-/**
- * Read the Rush session access token from ~/.rush/user.yaml. Exported (with an
- * overridable yamlPath, like isRushSessionValid) so the freshness behavior —
- * including the `expires_at: 0` non-expiring case (PHNX-3645) — is directly
- * testable; the class methods call it with the default path.
- */
+/** Read the Rush session access token from ~/.rush/user.yaml. Exported with an overridable yamlPath
+ * so freshness, including `expires_at: 0` (PHNX-3645), is testable. */
 export function readToken(yamlPath: string = USER_YAML): string {
   if (!fs.existsSync(yamlPath)) {
     throw new Error('Not logged in to Rush. Run `rush login` first.');
@@ -146,17 +134,9 @@ interface AccountManifestEntry {
   email: string;
 }
 
-/**
- * Manifest of the user's local Claude accounts (version + account email only).
- * Sent on a non-balanced dispatch so the server knows which accounts exist and
- * can route to one. It carries **no credential material** and does NOT read the
- * native OAuth login (RUSH-2527 / SING-1b): agents-cli never reads a harness's
- * interactive login to build this. When the server asks for the underlying token
- * (a new account, or a rotation it can't otherwise resolve), the client does NOT
- * upload it — there is no consented path to copy a native OAuth login to the
- * cloud. Dispatch fails loud and steers to a portable provider account instead
- * (see the 401 handler in `dispatch()`).
- */
+/** Manifest of local Claude accounts (version + email only), sent on a non-balanced dispatch so the
+ * server can route. No credential material; never reads the native OAuth login (RUSH-2527 /
+ * SING-1b). If the server wants the token, dispatch fails loud (see the 401 handler). */
 interface AccountManifest {
   fp: string;
   versions: AccountManifestEntry[];
@@ -167,11 +147,8 @@ function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-/**
- * Strip tokens/credentials from a server error body before surfacing it.
- * If the body is JSON with a `message` or `error` field, prefer that.
- * Otherwise truncate and redact anything that looks like a bearer token or JWT.
- */
+/** Strip tokens from a server error body before surfacing: prefer a JSON `message`/`error` field,
+ * else truncate and redact bearer tokens and JWTs. */
 function sanitizeErrorBody(body: string): string {
   const MAX_LEN = 300;
   try {
@@ -187,11 +164,8 @@ function sanitizeErrorBody(body: string): string {
   return safe;
 }
 
-/**
- * Pull `prompt_code` out of a JSON-encoded error body. Returns null when the
- * body isn't JSON or doesn't carry one — caller falls through to the generic
- * dispatch-failed path.
- */
+/** Pull `prompt_code` from a JSON error body; null if not JSON or absent, so the caller takes the
+ * generic failure path. */
 function parsePromptCode(body: string): string | null {
   try {
     const parsed = JSON.parse(body) as { prompt_code?: unknown };
@@ -201,14 +175,8 @@ function parsePromptCode(body: string): string | null {
   }
 }
 
-/**
- * Build a manifest of the user's local Claude installations to send on every
- * cloud dispatch. The manifest is the contract the server uses to detect when
- * the user has added a new account or rotated a token.
- *
- * Returns null when no Claude versions are signed in (the dispatch falls back
- * to the platform-wide key, current behavior).
- */
+/** Build the manifest of local Claude installations sent on every cloud dispatch, so the server can
+ * detect new accounts or rotated tokens. Null when no Claude is signed in. */
 async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
   let candidateVersions: Array<{ version: string; email: string }>;
 
@@ -234,11 +202,9 @@ async function buildAccountManifest(strategy?: string): Promise<AccountManifest 
     candidateVersions = rows.filter((r): r is { version: string; email: string } => r !== null);
   }
 
-  // RUSH-2527 / SING-1b: do NOT read the native OAuth login to fingerprint it.
-  // The manifest carries version + account email only — enough for the server to
-  // route to an account. If the server needs the token itself, the client does NOT
-  // upload it (there is no consented path to copy a native OAuth login to the
-  // cloud); dispatch fails loud and steers to a portable provider account.
+  // RUSH-2527 / SING-1b: do not read the native OAuth login to fingerprint it. The manifest is
+  // version + email only; the client never uploads the token and fails loud to a portable provider
+  // account.
   const entries: AccountManifestEntry[] = candidateVersions
     .map(({ version, email }) => ({ version, email }))
     .sort((a, b) => a.version.localeCompare(b.version));
@@ -248,18 +214,12 @@ async function buildAccountManifest(strategy?: string): Promise<AccountManifest 
   return { fp, versions: entries };
 }
 
-// buildAccountTokensPayload / accountTokensFingerprint (which read every installed
-// Claude version's native OAuth token to upload it to the cloud) were REMOVED —
-// SING-1b forbids reading or transferring a native OAuth / session login, even
-// with consent. Cloud dispatch under a native login now fails loud and steers to a
-// portable provider account (see the 401 handler in dispatch()).
+// buildAccountTokensPayload / accountTokensFingerprint were removed: SING-1b forbids reading or
+// transferring a native OAuth login even with consent. Dispatch under one fails loud (see the 401
+// handler).
 
-/**
- * Build the POST body for /api/v1/cloud-runs. Exported so tests can verify
- * the back-compat shape (singular fields + repos[]) without needing real
- * GitHub installations or a live Rush session. `findInstallation` is the
- * only other I/O and it's tested by the cloud proxy integration suite.
- */
+/** Build the POST body for /api/v1/cloud-runs. Exported so tests can verify the back-compat shape
+ * (singular fields + repos[]) without GitHub installations or a live session. */
 export function buildDispatchBody(input: {
   agent?: string;
   prompt: string;
@@ -267,16 +227,11 @@ export function buildDispatchBody(input: {
   strategy?: string;
   resolvedRepos: Array<{ installation_id: number; repo_owner: string; repo_name: string }>;
   accountManifest?: AccountManifest | null;
-  /**
-   * Skill ride-alongs so the cloud pod isn't context-blind. Forwarded verbatim
-   * as `skills` so the Factory Floor can mount them by id/version before the
-   * agent runs. Omitted when empty.
-   */
+  /** Skill ride-alongs forwarded verbatim as `skills` so the Factory Floor can mount them by
+   * id/version before the agent runs. Omitted when empty. */
   skills?: SkillRef[] | null;
-  /**
-   * Base64 image attachments for vision dispatch. Sliced to
-   * MAX_IMAGES_PER_DISPATCH — extras are dropped, never sent. Omitted when empty.
-   */
+  /** Base64 image attachments for vision dispatch, sliced to MAX_IMAGES_PER_DISPATCH (extras
+   * dropped). Omitted when empty. */
   images?: ImageAttachment[] | null;
   /** Runtime env vars mounted into the cloud agent process. */
   env?: Record<string, string> | null;
@@ -337,11 +292,9 @@ export class RushCloudProvider implements CloudProvider {
       throw new Error('Rush Cloud requires --repo <owner/repo> (or --repo repeated for multi-repo).');
     }
 
-    // Budget pre-flight gate (issue #346). Cloud dispatches inherit the local
-    // project's caps; we refuse to POST a run that would breach an on_exceed:block
-    // cap. The repo slug is the project attribution key. Server-side spend is
-    // authoritative for live enforcement; this pre-flight is the deterministic
-    // "don't even start it" guard. Dormant when no caps are configured.
+    // Budget pre-flight (issue #346): cloud dispatches inherit the project's caps and refuse to
+    // POST a run that would breach an on_exceed:block cap. Server-side spend stays authoritative;
+    // dormant without caps.
     {
       const { runPreflightGate } = await import('../budget/preflight.js');
       const projectKey = repos[0] ?? process.cwd();
@@ -396,12 +349,9 @@ export class RushCloudProvider implements CloudProvider {
 
     let res = await api('POST', '/api/v1/cloud-runs', token, body);
 
-    // The server asks the client to upload the underlying Claude OAuth token when
-    // it detects a new account or a rotation (401 + prompt_code). agents-cli NEVER
-    // reads or transfers a native OAuth / session login off this machine — not
-    // even with consent (SING-1b): a rotating token copied to the cloud is
-    // invalidated on its next refresh and logs the fleet out. Fail loud and steer
-    // to a portable provider account instead of exfiltrating the login.
+    // On 401 + prompt_code the server wants the Claude OAuth token. agents-cli never reads or
+    // transfers a native OAuth login, even with consent (SING-1b): a copied rotating token is
+    // invalidated and logs the fleet out. Fail loud; steer to a portable provider account.
     if (res.status === 401 && accountManifest) {
       const errBody = await res.clone().text();
       const promptCode = parsePromptCode(errBody);
@@ -504,10 +454,9 @@ export class RushCloudProvider implements CloudProvider {
 
   async cancel(taskId: string): Promise<void> {
     const token = readToken();
-    // The cancel ACTION endpoint (POST .../cancel) is what the backend implements;
-    // it works on paused runs too (queued / needs_review / input_required). A bare
-    // DELETE on the run 404s, so `agents cloud cancel` silently failed on anything
-    // that wasn't actively running.
+    // Use the cancel ACTION endpoint (POST .../cancel); it works on paused runs too (queued /
+    // needs_review / input_required). A bare DELETE 404s, so cancel silently failed on anything
+    // not actively running.
     const res = await api('POST', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}/cancel`, token);
     if (!res.ok) {
       throw new Error(`Failed to cancel task (${res.status}).`);

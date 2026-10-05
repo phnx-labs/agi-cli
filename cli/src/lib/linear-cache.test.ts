@@ -12,10 +12,8 @@ import {
   writeCached,
 } from './linear-cache.js';
 
-// getCacheDir() resolves HOME once at module load, so swapping process.env.HOME
-// here would read and WRITE the developer's real cache. Point the dedicated
-// AGENTS_LINEAR_CACHE_PATH seam at a temp file instead. Real fs, real JSON, no
-// mocking.
+// getCacheDir() resolves HOME once at load, so swapping HOME would touch the developer's real
+// cache; point AGENTS_LINEAR_CACHE_PATH at a temp dir instead. Real fs, no mocking.
 let home: string;
 let cacheFile: string;
 const T0 = new Date(2026, 7, 3, 12, 0, 0).getTime();

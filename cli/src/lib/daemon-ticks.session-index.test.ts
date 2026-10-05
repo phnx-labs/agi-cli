@@ -4,24 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ActiveSession } from './session/active.js';
 
-// RUSH-2691: the tick's only test injected a `deps.discover` seam — a mock with
-// no production caller — so the real branch never evaluated and it asserted
-// `3 === 3`. It passed green while the tick indexed nothing on every real box.
-//
-// This drives the REAL path: a real transcript on disk, the real incremental
-// scanner, the real SQLite index, run from the daemon's own cwd. That last part
-// is the regression: `discoverSessions()` with no options ends in a listing
-// query whose cwd filter defaults to `process.cwd()` (the daemon's, `$HOME`) and
-// caps at 50, so the count described "sessions whose cwd is exactly $HOME" — 0
-// on a normal box, forever, no matter what the scan wrote.
-//
-// HOME is redirected BEFORE the session modules load because discover.ts binds
-// `const HOME = os.homedir()` at import time (discover.ts:76); that is why this
-// lives in its own file instead of a suite in daemon-ticks.test.ts.
-//
-// The `process.chdir` calls below are legal only under `pool: 'forks'`
-// (vitest.config.ts) — `process.chdir()` throws in worker threads. If the pool
-// ever changes, this file needs a different way to run from the daemon's cwd.
+// RUSH-2691: the tick's only test injected a `deps.discover` mock with no production caller, so it
+// asserted `3 === 3` while the tick indexed nothing on real boxes. This drives the real path:
+// `discoverSessions()` filters by `process.cwd()`, so it returned 0.
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
@@ -87,11 +72,9 @@ describe('runSessionIndexWarmTick (RUSH-2682, RUSH-2691)', () => {
   });
 
   it('is incremental — an unchanged transcript is not re-parsed on the next tick', async () => {
-    // Self-contained on purpose: write a transcript, prove the tick parses it,
-    // THEN prove the next tick reports 0. Asserting only the 0 would pass with
-    // nothing on disk at all — indistinguishable from "the scanner skipped an
-    // unchanged file", and unfailable in the same way as the mock seam this
-    // suite replaced.
+    // Self-contained on purpose: write a transcript, prove the tick parses it, then prove the next
+    // tick reports 0. Asserting only 0 would pass with nothing on disk, indistinguishable from the
+    // scanner skipping an unchanged file.
     const id = '44444444-3333-4222-8111-000000000000';
     writeTranscript(id, path.join(testHome, 'work', 'incremental'));
 

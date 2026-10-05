@@ -1,12 +1,6 @@
-/**
- * Package registry and installation commands.
- *
- * Registers `agents registry`, `agents search`, `agents install`, and
- * `agents packages materialize` for discovering and installing MCP servers,
- * skills, commands, and hooks from configured registries or GitHub sources,
- * and for materializing a schema-v3 agent.yaml package into an ephemeral
- * harness home (PHNX-3838).
- */
+/** Registers `agents registry`, `search`, `install` and `packages materialize`: discover and
+ * install MCP servers, skills, commands and hooks from registries or GitHub, and materialize a
+ * schema-v3 agent.yaml package into an ephemeral harness home (PHNX-3838). */
 
 import * as fs from 'fs';
 import type { Command } from 'commander';
@@ -95,11 +89,8 @@ export function buildMcpPackageCommand(pkg: McpPackage): McpCommandSpec {
   throw new Error(`Unsupported MCP runtime: ${pkg.runtime}. Supported: node, python.`);
 }
 
-/**
- * Picker fallback for `registry enable/config [name]`.
- * Returns the picked name, or null if the user cancels. In non-TTY shells,
- * hard-fails with a clear reminder of the positional form.
- */
+/** Picker fallback for `registry enable/config [name]`: returns the picked name, or null on cancel;
+ * non-TTY shells hard-fail with a reminder of the positional form. */
 async function pickRegistryName(
   type: RegistryType,
   verb: string,
@@ -658,9 +649,8 @@ delegate to the same underlying installers.
 
           const { localPath } = await cloneRepo(resolved.source);
 
-          // Integrity: a published skill entry carries the sha256 of its
-          // SKILL.md. Verify the freshly cloned file against it BEFORE
-          // installing anything — a mismatch aborts rather than trusting a
+          // Integrity: a published skill entry carries the sha256 of its SKILL.md; verify the
+          // cloned file before installing anything, and abort on mismatch rather than trust a
           // tampered artifact.
           if (resolved.type === 'skill' && resolved.skillEntry) {
             const check = verifySkillIntegrity(localPath, resolved.skillEntry);

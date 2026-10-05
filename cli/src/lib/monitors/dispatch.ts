@@ -1,15 +1,6 @@
-/**
- * Monitor action dispatch.
- *
- * On a fire, the monitor feeds the event to an action. Every `run`/`routine`
- * action goes through the *same* detached spawn cron and webhook fires use
- * (executeJobDetached, lib/daemon/runner.ts) — a monitor never duplicates spawn logic,
- * it synthesizes a JobConfig and hands it to the one dispatch seam. `notify`
- * routes the owner through the one channel seam (sendToOwner → lookupTransport,
- * lib/notify.ts) — recipient from notify.owner, no hardcoded chat id, and an
- * unresolvable channel comes back as `ok: false` instead of exiting the daemon;
- * `webhook-out` POSTs the event.
- */
+/** Monitor action dispatch. `run`/`routine` use the same detached spawn as cron and webhook fires
+ * (executeJobDetached), never duplicating spawn logic. `notify` goes through one owner-channel
+ * seam (sendToOwner); an unresolvable channel returns `ok: false`. `webhook-out` POSTs. */
 
 import { executeJobDetached } from '../daemon/runner.js';
 import { readJob, type JobConfig } from '../scheduling/routines.js';
@@ -31,13 +22,9 @@ export function injectEvent(prompt: string, event: MonitorEvent): string {
   return prompt.replace(/\{event\}/g, event.summary);
 }
 
-/**
- * Dispatch a monitor's action for a fired event. `run` synthesizes a JobConfig
- * (event injected into the prompt, action fields mapped onto the routines shape,
- * runOn → host placement) and calls executeJobDetached — the exact path routines
- * use. `routine` fires an existing routine with the event injected. `notify` and
- * `webhook-out` are terminal side-effects.
- */
+/** Dispatches a monitor's action for a fired event. `run` synthesizes a JobConfig (event in the
+ * prompt, runOn mapped to host placement) and calls executeJobDetached; `routine` fires an
+ * existing routine with the event; `notify` and `webhook-out` are terminal side-effects. */
 export async function dispatchAction(
   monitor: MonitorConfig,
   event: MonitorEvent,
@@ -48,13 +35,9 @@ export async function dispatchAction(
   if (action.type === 'run') {
     const job: JobConfig = {
       name: monitor.name,
-      // This job is not a routine — no definition, no yaml, never listed by
-      // `agents routines` — so it can never be a member of this device's routine
-      // activation manifest and MUST NOT be gated on it. Before this marker the
-      // gate refused every monitor `run` action with `wrong_owner` and an empty
-      // allowlist ("Job '<name>' can only run on: "), so no monitor action ever
-      // executed (RUSH-2681). The monitor's own `device:` pin already resolved
-      // exactly-once ownership before this dispatch.
+      // This job is not a routine, so it is never in the device's routine activation manifest and
+      // MUST NOT be gated on it: that refused every monitor `run` with `wrong_owner` (RUSH-2681).
+      // The monitor's own `device:` pin already resolved exactly-once ownership.
       dispatchedBy: 'monitor',
       agent: action.agent as AgentId,
       mode: action.mode ?? 'auto',
@@ -62,12 +45,9 @@ export async function dispatchAction(
       timeout: action.timeout ?? '10m',
       enabled: true,
       prompt: injectEvent(action.prompt ?? '', event),
-      // A monitor watches a source; it owns no project, and until `cwd` existed
-      // it had no field able to supply one — so `resolveJobExecutionContext`
-      // blocked every `run` action with `execution_context_missing`
-      // (lib/routine-context.ts) once the eligibility gate above stopped
-      // swallowing them first. `~` is the execution TARGET's home, so it stays
-      // portable across a `runOn:` SSH hop.
+      // A monitor owns no project and had no field to supply a cwd, so
+      // `resolveJobExecutionContext` blocked `run` with `execution_context_missing`. `~` is the
+      // execution TARGET's home, portable across a `runOn:` SSH hop.
       cwd: monitor.cwd ?? '~',
       ...(monitor.variables ? { variables: monitor.variables } : {}),
       ...(monitor.version ? { version: monitor.version } : {}),

@@ -5,15 +5,9 @@ import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { pathToFileURL } from 'url';
 
-// RUSH-2471: a version pointer (global/isolated default, or the `~/.<agent>`
-// config symlink) left aimed at a version whose binary is gone. `agents use
-// grok@1.0.0` sets BOTH the global default and the symlink; once 1.0.0's binary
-// vanishes (grok self-updated it out from under the old dir) both dangle, so
-// `agents sync grok` resolves the dead default and fails `not installed` even
-// after the symlink is repointed. healDanglingVersionPointers heals every
-// pointer off the dead version. Real fs, no mocking (repo convention): each case
-// builds a real version-home layout under an isolated HOME and runs in a
-// subprocess so state.ts derives ~/.agents inside the temp dir.
+// RUSH-2471: a version pointer (default or ~/.<agent> symlink) left aimed at a version whose binary
+// is gone makes sync fail `not installed`. healDanglingVersionPointers repoints them. Real fs, run
+// in a subprocess under an isolated HOME.
 
 const tempDirs: string[] = [];
 
@@ -39,16 +33,9 @@ function nodeExecPath(): string {
   return binary;
 }
 
-/**
- * Run `body` under an isolated HOME. grok is an install-script agent:
- * isVersionInstalled probes getBinaryPath, which for grok resolves
- * `<versionHome>/.grok/downloads/grok-<version>` — so a version is "installed"
- * iff that file exists, and a "home-only leftover" is a version dir with the
- * config home but no downloads binary.
- *
- * Pin BOTH HOME (state.ts captures it at import) and AGENTS_REAL_HOME
- * (getAgentConfigPath honors that for the `~/.<agent>` symlink).
- */
+/** Run `body` under an isolated HOME. grok is installed iff
+ * <versionHome>/.grok/downloads/grok-<version> exists. Pin both HOME (state.ts reads it at
+ * import) and AGENTS_REAL_HOME (the ~/.<agent> symlink). */
 function runInHome(home: string, body: string): Record<string, unknown> {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');

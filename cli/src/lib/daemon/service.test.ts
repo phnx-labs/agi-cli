@@ -1,8 +1,5 @@
-/**
- * BasePeriodicService (RUSH-3193 P1): the convenience base every concrete
- * periodic service (e.g. SessionIndexService) extends for its health
- * bookkeeping — exercised directly here, independent of ServiceSupervisor.
- */
+/** BasePeriodicService (RUSH-3193 P1): the base every periodic service extends for health
+ * bookkeeping, tested directly without ServiceSupervisor. */
 import { describe, it, expect } from 'vitest';
 import { BasePeriodicService, isPeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';

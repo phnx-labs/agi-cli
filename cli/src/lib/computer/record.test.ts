@@ -1,11 +1,6 @@
-/**
- * The consumer's recording half: an engine action event on fd 4 must land in
- * agents-cli's REAL event ledger with the same shape `agents computer sessions`
- * has always read (RUSH-2432). Written against the actual event log, not a stub.
- *
- * The engine's wire shape is what is fed in here — `command`, `invocationId`,
- * `host` — because a translation layer is exactly what would drift.
- */
+/** The consumer's recording half: an engine action event on fd 4 must land in the REAL event ledger
+ * in the shape `agents computer sessions` reads (RUSH-2432). Fed the engine's wire shape, since a
+ * translation layer would drift. */
 import { describe, expect, it, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

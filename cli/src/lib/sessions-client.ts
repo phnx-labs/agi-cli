@@ -1,18 +1,6 @@
-/**
- * sessions-client.ts — agents-cli's process client for the standalone
- * `sessions` CLI (PHNX-4012). This client never falls back itself: a missing
- * binary throws `SESSIONS_BIN_MISSING` (loud, DIST-1). The caller decides what
- * that means — the read fast-path in `index.ts` falls through to the in-repo
- * `lib/session` engine when no standalone can be resolved, and takes the fast
- * path when one can.
- *
- * Resolution order: a non-empty `$SESSIONS_BIN`, else the `sessions` bin of the
- * installed `@phnx-labs/sessions-cli` dependency, else `findInPath`. An empty
- * `$SESSIONS_BIN` skips the dependency and uses PATH only. `findInPath` skips
- * `~/.agents/.cache/shims`. That skip is load-bearing: the leftover `sessions`
- * alias shim execs `agents sessions`, and resolving it would recurse (the
- * 1.22.85 secrets fork bomb with the names swapped — agi-cli#3532).
- */
+/** agents-cli's client for the standalone `sessions` CLI (PHNX-4012). Never falls back: a missing
+ * binary throws `SESSIONS_BIN_MISSING` (DIST-1). Order: `$SESSIONS_BIN`, the dependency, PATH.
+ * `findInPath` must skip `~/.agents/.cache/shims`: the `sessions` shim recurses (agi-cli#3532). */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -23,24 +11,14 @@ import { stripRoutingFlags } from './hosts/remote-cmd.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/sessions-cli';
 
-/**
- * First `sessions` release that implements the metadata filters and sort
- * (`-p/--project`, `--since`, `--until`, `--sort`, the `@version` agent suffix,
- * and the harness shorthands). An older binary would treat these as FTS tokens,
- * so a box with `sessions` < this floor keeps them on the in-repo engine (which
- * implements the same filters) rather than mis-routing to a binary that can't.
- */
+/** First `sessions` release with the metadata filters and sort (`-p`, `--since`, `--until`,
+ * `--sort`, `@version`, harness shorthands). An older binary would treat them as FTS tokens, so
+ * such a box keeps them on the in-repo engine. */
 const SESSIONS_FILTERS_MIN_VERSION = '0.2.0';
 
-/**
- * First `sessions` release that implements the point-to-one remote read flag
- * `--host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back).
- * An older binary would treat `--host` as an FTS token, so a box with `sessions`
- * below this floor keeps a `--host` query on the in-repo engine (which resolves
- * `--device` against the fleet) rather than mis-routing it. Kept separate from the
- * filter floor above even though 0.2.1 ≥ 0.2.0 — a 0.2.0 binary supports the
- * filters but NOT `--host`, so the two gates are checked independently.
- */
+/** First `sessions` release with the point-to-one remote read `--host <target>`. Older binaries
+ * treat it as an FTS token, so `--host` queries stay on the in-repo engine. Separate from the
+ * filter floor: 0.2.0 has filters but not `--host`. */
 const SESSIONS_HOST_MIN_VERSION = '0.2.1';
 
 export class SessionsClientError extends Error {
@@ -54,12 +32,9 @@ export class SessionsClientError extends Error {
 
 let cachedBin: string | undefined;
 
-/**
- * The `sessions` executable shipped in the `@phnx-labs/sessions-cli` dependency.
- * That package's `exports` map publishes only `./reader`, so `require.resolve` of
- * the package name, its bin, or `package.json` throws `ERR_PACKAGE_PATH_NOT_EXPORTED`.
- * Walk Node's own lookup paths and read the bin field off disk.
- */
+/** The `sessions` executable in the `@phnx-labs/sessions-cli` dependency. Its `exports` map
+ * publishes only `./reader`, so `require.resolve` of the package, bin or package.json throws; walk
+ * Node's lookup paths and read the bin field. */
 function dependencySessionsBin(): string | null {
   const dirs = createRequire(import.meta.url).resolve.paths('@phnx-labs/sessions-cli');
   if (!dirs) return null;
@@ -115,22 +90,17 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-/**
- * Allowlist of what sessions-cli v1 actually implements. Anything else —
- * picker (no args), `--since`, `-D`, `--waiting`, `render`, `stats`,
- * lifecycle verbs — stays on the in-repo engine. A denylist leaked those
- * through `allowUnknownOption()` as FTS tokens (PR review on #3554).
- */
+/** Allowlist of what sessions-cli v1 implements. Everything else (picker, `--since`, `-D`,
+ * `--waiting`, `render`, `stats`, lifecycle verbs) stays on the in-repo engine. A denylist leaked
+ * those through `allowUnknownOption()` (PR review, #3554). */
 const READ_FLAGS = new Set([
   '--json',
   '--local',
   '--no-interactive',
 ]);
 
-/**
- * Boolean harness-shorthand flags added in 0.2.0 (`--claude` = `--agent claude`).
- * Recognized as read flags only when the resolved binary supports filters.
- */
+/** Boolean harness-shorthand flags added in 0.2.0 (`--claude` = `--agent claude`); read flags only
+ * when the binary supports filters. */
 const FILTER_BOOL_FLAGS = new Set([
   '--claude',
   '--codex',
@@ -140,11 +110,8 @@ const FILTER_BOOL_FLAGS = new Set([
   '--opencode',
 ]);
 
-/**
- * Value-taking filter flags added in 0.2.0 (each consumes the next argv token,
- * or is written `--flag=value`). `--agent`/`--limit` are NOT here — they are the
- * 0.1.x base set handled unconditionally below.
- */
+/** Value-taking filter flags added in 0.2.0 (next argv token or `--flag=value`).
+ * `--agent`/`--limit` are the 0.1.x base set, handled unconditionally. */
 const FILTER_VALUE_FLAGS = new Set([
   '--project',
   '--since',
@@ -164,22 +131,17 @@ export function usesFilterFlags(args: string[]): boolean {
   });
 }
 
-/**
- * True if the 0.2.1 point-to-one remote read flag `--host <value>` (or `--host=value`)
- * is present — the other case that needs the version probe, gated on its own floor.
- */
+/** True if the 0.2.1 remote read flag `--host <value>` (or `--host=value`) is present: the other
+ * case needing the version probe, gated on its own floor. */
 export function usesHostFlag(args: string[]): boolean {
   return args.some((arg) => arg === '--host' || arg.startsWith('--host='));
 }
 
 let cachedProbedVersion: string | null | undefined;
 
-/**
- * Probe `sessions --version` ONCE per process (cached), returning the parsed
- * version string, or `null` when the probe fails or the output is unparseable.
- * The single cache is what keeps the filter and host gates to one spawn between
- * them, however many `sessionsBinSupports*` calls a query makes.
- */
+/** Probe `sessions --version` once per process (cached); null on failure or unparseable output. The
+ * single cache keeps the filter and host gates to one spawn however many `sessionsBinSupports*`
+ * calls a query makes. */
 function probeSessionsVersion(bin: string): string | null {
   if (cachedProbedVersion !== undefined) return cachedProbedVersion;
   const { command, prefix } = invocation(bin);
@@ -189,11 +151,9 @@ function probeSessionsVersion(bin: string): string | null {
   return cachedProbedVersion;
 }
 
-/**
- * Whether the resolved `sessions` binary is at or above `minVersion`. A probe
- * failure or an unparseable version reads as unsupported — the safe direction
- * (in-repo engine handles it), never a mis-route to an old binary.
- */
+/** Whether the resolved `sessions` binary is at or above `minVersion`. A probe failure or
+ * unparseable version reads as unsupported, the safe direction (in-repo engine), never a mis-route
+ * to an old binary. */
 export function sessionsBinSupports(bin: string, minVersion: string): boolean {
   const version = probeSessionsVersion(bin);
   return version !== null && compareVersions(version, minVersion) >= 0;
@@ -275,14 +235,9 @@ export function isReadQuery(args: string[], opts: { filters?: boolean; host?: bo
   return true;
 }
 
-/**
- * Scan an argv for the `sessions` `--device`/`-D` flag, which commander defines
- * as VARIADIC (`-D, --device <target...>`) — so it can appear more than once and
- * a space-form value greedily consumes following bare tokens as extra devices.
- * Returns how many times it occurs, the FIRST value, and the index of the last
- * argv token that value occupies (the flag token itself for the `=`/glued forms,
- * the following value token for the space form). Pure; no imports.
- */
+/** Scan argv for `--device`/`-D`, which commander defines as variadic, so it can repeat and a
+ * space-form value consumes following bare tokens. Returns the count, the first value, and the
+ * index of the last token it occupies. Pure. */
 function scanDeviceFlag(args: string[]): { count: number; value?: string; valueEndIndex?: number } {
   let count = 0;
   let value: string | undefined;
@@ -317,39 +272,9 @@ function scanDeviceFlag(args: string[]): { count: number; value?: string; valueE
   return { count, value, valueEndIndex };
 }
 
-/**
- * Plan the rewrite of a `sessions` READ query that names EXACTLY ONE device via
- * `--device <name>` (and no explicit `--host`) into the standalone's
- * point-to-one remote read: the caller resolves the device to an ssh target and
- * appends `--host ssh://<target>` to `readArgs`, forwarding it to the LOCAL
- * standalone (which owns the ssh hop). This is the local-orchestration collapse
- * (secrets-cli model): `sessions` owns the remote read, replacing the in-repo
- * `--device` peer fan-out — WHEN it is safe (the caller gates on the LOCAL
- * standalone supporting `--host`, >=0.2.1, and falls through to the in-repo
- * fan-out if the PEER lacks the standalone).
- *
- * `sessions --host` is point-to-one, so ONLY a single unambiguous device may
- * collapse; a multi-device query MUST stay on the in-repo fan-out, which parses
- * commander's variadic `--device` correctly. Returns null (→ in-repo path,
- * unchanged) when the query is not a single-device read:
- *   - no `--device`/`-D`, or a missing/flag-shaped value;
- *   - `--device`/`-D` appears more than once (`--device box --device mac-mini`);
- *   - the value is a fan-out sentinel `all`/`fleet` (case-insensitive);
- *   - a bare token immediately follows the value (`--device box mac-mini`) —
- *     commander's variadic would take it as a second device, so this is
- *     multi-device too;
- *   - an explicit `--host` is already on the argv — it wins, matching `secrets`'
- *     `rewriteDeviceToHost`, so we never add a second `--host`;
- *   - the remaining query (with `--device` stripped) is not a read — a lifecycle
- *     `--device` (resume/watch/inject/focus/…) keeps its in-repo/`runOnPeer`
- *     behavior exactly.
- *
- * Pure and argv-only: fleet resolution (device → ssh target, via
- * `resolveRemoteDevice`) and the version gate live in the caller so this is unit
- * testable with real inputs. `filters` mirrors the caller's version gate for the
- * 0.2.0 filter flags (the `--device` token is not a filter flag, so it is
- * computed identically on the original argv and on `readArgs`).
- */
+/** Plan the rewrite of a `sessions` read naming exactly one device into the standalone's
+ * point-to-one `--host ssh://<target>` (the caller resolves the target and gates on the local
+ * binary supporting `--host`, >=0.2.1). Multi-device queries stay on the in-repo fan-out. */
 export function planDeviceHostRead(
   args: string[],
   opts: { filters?: boolean } = {},

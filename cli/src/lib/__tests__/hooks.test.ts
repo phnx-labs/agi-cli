@@ -517,10 +517,9 @@ describe('registerHooksToSettings - Codex', () => {
     );
   });
 
-  // Ground-truth fixtures: these hashes were written into a real config.toml by
-  // the Codex 0.134.0 binary's own trust flow for these exact hook definitions.
-  // If canonicalization (key ordering, field omission, always-present
-  // `async:false`, TOML null-drop of an absent matcher) regresses, they break.
+  // Ground-truth fixtures: these hashes were written into a real config.toml by the Codex 0.134.0
+  // binary's own trust flow. They break if canonicalization regresses (key order, field omission,
+  // always-present `async:false`, TOML null-drop of an absent matcher).
   describe('computeCodexHookTrustHash — Codex 0.134.0 ground truth', () => {
     const HOOK_DIR = '~/.agents/.history/versions/codex/0.134.0/home/.codex/hooks';
 
@@ -1995,13 +1994,9 @@ describe('registerHooksToSettings - Muse Code', () => {
   });
 });
 
-// Regression for the Windows hook-path bug: hook commands stored as absolute
-// Windows paths with backslashes ("C:\\Users\\...\\06-attention-sentinel.sh")
-// break at exec time because Claude runs hooks via bash, which strips the
-// backslashes -> "No such file or directory". The registrar must store the
-// portable "~/..." form. `sep` is injected so the Windows case is exercised on
-// a POSIX CI host (where path.sep is '/'), which is the only way the required
-// Linux `test` gate can catch a Windows-only path regression.
+// Regression for the Windows hook-path bug: absolute backslash paths in hook commands break because
+// Claude runs hooks via bash, which strips the backslashes. The registrar must store the portable
+// "~/..." form. `sep` is injected so Linux CI can catch Windows-only path regressions.
 describe('toPortableCommand — portable hook commands (Windows path regression)', () => {
   const WIN_SEP = '\\';
   const winHome = 'C:\\Users\\me';

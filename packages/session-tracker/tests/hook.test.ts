@@ -9,11 +9,9 @@ const pkgRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hookPath = path.join(pkgRoot, 'src', 'hook.sh');
 const dirs: string[] = [];
 
-// hook.sh shells the compiled `dist/prune-state.js` for state-dir hygiene, so the
-// state-dir tests need the package built. CI runs these tests via impact analysis
-// without a prior `bun run build` (the CLI build doesn't cover this package), so
-// build the dist here when it is missing — otherwise the prune step silently
-// no-ops and the hygiene assertions fail (PHNX-3626).
+// hook.sh shells the compiled `dist/prune-state.js` for state-dir hygiene, so the tests need the
+// package built. CI runs them via impact analysis without `bun run build`, so build dist here when
+// missing, else the prune step silently no-ops and assertions fail (PHNX-3626).
 beforeAll(() => {
   if (!fs.existsSync(path.join(pkgRoot, 'dist', 'prune-state.js'))) {
     execSync('bun run build', { cwd: pkgRoot, stdio: 'inherit' });

@@ -1,20 +1,6 @@
-/**
- * Writer + detector registry for resource sync.
- *
- * Two parallel maps keyed by (ResourceKind, AgentId). At module import time
- * (which fires once when the CLI boots) we verify that EVERY supported
- * (agent, kind) pair has both a writer and a detector. Missing entries
- * throw immediately — silent-skip bugs become startup errors.
- *
- *   - Adding a new agent? Either declare every supported kind with a writer
- *     here OR mark the kind `false` in `AgentConfig.capabilities`.
- *   - Adding a new kind? Declare it on every agent's capabilities and add a
- *     writer module.
- *
- * The capability matrix in `lib/agents.ts:AGENTS` is the single source of
- * truth for "is this (agent, kind) supported?". The assertion below maps the
- * matrix to required registry entries.
- */
+/** Writer + detector registry for resource sync: parallel maps keyed by (ResourceKind, AgentId),
+ * checked once at boot so a supported pair missing either entry throws (silent-skip bugs become
+ * startup errors). */
 import { AGENTS } from '../agents.js';
 import { supports } from '../capabilities.js';
 import type { AgentId } from '../types.js';
@@ -84,13 +70,9 @@ export const DETECTORS: Record<ResourceKind, Partial<Record<AgentId, ResourceDet
   workflows:   workflowsDetectors,
 };
 
-/**
- * Kinds excluded from the assertion. Skills + native-skills-dir agents are
- * the only legitimate gap — Gemini reads `~/.agents/skills/` natively, so
- * it deliberately has no per-version writer/detector. The orchestrator
- * handles that case by clearing the version-home skills dir before launch.
- * Anywhere else, a missing entry is a real bug.
- */
+/** Kinds excluded from the assertion. The only legitimate gap is skills on native-skills-dir
+ * agents: Gemini reads `~/.agents/skills/` natively, so it has no per-version writer or detector
+ * and the orchestrator clears its version-home skills dir before launch. */
 function isExempt(agent: AgentId, kind: ResourceKind): boolean {
   if (kind === 'skills' && AGENTS[agent].nativeAgentsSkillsDir) return true;
   return false;
@@ -98,13 +80,9 @@ function isExempt(agent: AgentId, kind: ResourceKind): boolean {
 
 let assertionFired = false;
 
-/**
- * Verify every supported (agent, kind) pair has both a writer and a
- * detector. Deferred from module-import time to the first `getWriter` /
- * `getDetector` call to dodge the agents.ts ↔ versions.ts ↔ registry.ts
- * import cycle (the same one the lazy writer/detector maps work around).
- * Idempotent — runs at most once per process.
- */
+/** Verify every supported (agent, kind) pair has a writer and detector. Deferred to the first
+ * `getWriter`/`getDetector` call to dodge the agents.ts / versions.ts / registry.ts import cycle.
+ * Idempotent: runs at most once per process. */
 export function assertRegistryComplete(): void {
   if (assertionFired) return;
   assertionFired = true;

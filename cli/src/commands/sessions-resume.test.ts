@@ -53,10 +53,9 @@ describe('buildSessionLifecycleArgs', () => {
     ]);
   });
 
-  // `resume` is the one entry point for "put me back in that session", so the
-  // attach-only vs attach-or-recover distinction has to be reachable FROM it —
-  // otherwise collapsing the verbs would quietly drop a behaviour focus.test.ts
-  // pins (selectFallback: --attach-only picks refuseFallback, never forks).
+  // `resume` is the one entry point for 'put me back in that session', so the attach-only vs
+  // attach-or-recover distinction must be reachable from it, or collapsing the verbs would drop a
+  // behaviour focus.test.ts pins (`--attach-only` picks refuseFallback, never forks).
   it('forwards --attach-only so the no-fork behaviour survives the collapse', () => {
     expect(buildSessionLifecycleArgs('019fd114', [], true)).toEqual([
       'sessions', 'focus', '019fd114', '--attach-only',
@@ -156,10 +155,9 @@ describe('resume picker filter (in-memory, no DB)', () => {
 });
 
 describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux socket, no mocking)', () => {
-  // Random suffix so this can never collide with a genuinely live pane on the
-  // machine running the suite. attachLocalLiveSelector reads the REAL default
-  // tmux socket (list-sessions / has-session — read-only), so this alias must
-  // be one no live session will ever hold.
+  // Random suffix so the alias can't collide with a live pane on the machine running the suite:
+  // attachLocalLiveSelector reads the real default tmux socket (read-only), so the alias must be
+  // one no live session will hold.
   const randomAlias = (): string => `ag-claude-${randomBytes(4).toString('hex')}`;
 
   it('a bare alias resume with no live local pane falls through to strict resume instead of hanging', async () => {
@@ -167,10 +165,9 @@ describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux so
     const priorExitCode = process.exitCode;
     process.exitCode = undefined;
     try {
-      // No live pane for this alias -> attachLocalLiveSelector returns false ->
-      // falls through to runStrictResume -> resolveSessionMetadataValue finds
-      // nothing locally or on the (empty, sandboxed-HOME) fleet -> reports
-      // "No session matching", never a silent hang or a thrown error.
+      // No live pane for this alias, so attachLocalLiveSelector returns false and runStrictResume
+      // finds nothing locally or on the empty sandboxed fleet, reporting 'No session matching',
+      // never a silent hang or throw.
       await sessionsResumeAction(randomAlias(), undefined, {});
       expect(errSpy.mock.calls.flat().join('\n')).toContain('No session matching');
       expect(process.exitCode).toBe(1);
@@ -185,10 +182,9 @@ describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux so
     const priorExitCode = process.exitCode;
     process.exitCode = undefined;
     try {
-      // shouldAttachLocalTmuxAliasBeforeFleet is false whenever hosts.length > 0
-      // (rule 4: --device skips the local gate entirely) — attachLocalLiveSelector
-      // never touches the local tmux socket here, and the selector still resolves
-      // (as not-found) rather than hanging.
+      // shouldAttachLocalTmuxAliasBeforeFleet is false whenever hosts.length > 0 (rule 4: --device
+      // skips the local gate), so attachLocalLiveSelector never touches the local tmux socket and
+      // the selector resolves (as not-found) rather than hanging.
       await sessionsResumeAction(randomAlias(), undefined, { device: 'nonexistent-device-xyz' });
       expect(errSpy.mock.calls.flat().join('\n')).toMatch(/No session matching|unreachable/);
       expect(process.exitCode).toBe(1);

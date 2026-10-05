@@ -5,11 +5,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getUserPermissionsDir, getPermissionsDir } from '../state.js';
 
-// Walk all permission group YAMLs (user dir wins on name collision) and
-// collect Computer(<bundle-id>) patterns from each group's `allow:` list.
-// Returns distinct bundle ids. Line-by-line regex extraction matches
-// buildPermissionsFromGroups: YAML parsers stumble on the nested quotes in
-// some rule values, but the strict pattern below catches our shape cleanly.
+// Walk all permission group YAMLs (user dir wins) and collect `Computer(<bundle-id>)` patterns
+// from `allow:`; returns distinct ids. Line-by-line regex like buildPermissionsFromGroups, as YAML
+// parsers stumble on nested quotes.
 export function loadComputerAllowList(): string[] {
   const seenFiles = new Set<string>();
   const allowed = new Set<string>();
@@ -66,24 +64,9 @@ export function loadComputerAllowList(): string[] {
   return [...allowed].sort();
 }
 
-/**
- * Default peer set: the standalone `computer` executable, this `agents` CLI's
- * own runtime, plus Rush.app if it's installed. realpath() the symlink chain so
- * we record the on-disk path the helper will see via proc_pidpath, not the shim
- * path.
- *
- * The standalone's path is the one that changed with PHNX-4075: the daemon's
- * caller is now the engine process, not this CLI. `agents`' own execPath stays
- * on the list because the engine may be a `.js` bin run through this same
- * runtime (`invocation()` in computer-client.ts), in which case proc_pidpath
- * still reports the runtime.
- *
- * Why path-based instead of codesign-team-id? The agents CLI is unsigned
- * today (npm distribution), and even if we sign Rush.app the team-id
- * check would need a separate roundtrip. Path is concrete and fast; the
- * daemon already runs as the user so anyone who can swap a binary at
- * these paths can do worse via other means.
- */
+/** Default peer set: the standalone `computer` executable, this CLI's runtime, and Rush.app if
+ * installed, realpath()ed to the path the helper sees via proc_pidpath. Path-based, not
+ * codesign-team-id, because the CLI is unsigned (npm). */
 export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] {
   const out = new Set<string>();
   const add = (p: string) => {
@@ -115,14 +98,9 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
   return [...out].sort();
 }
 
-/**
- * Parse a `host:port` VNC endpoint, defaulting the port to 5901. Pure.
- *
- * Kept on the consumer side because the `--vnc` FLAG is parsed here — the
- * platform gate has to know whether a remote desktop was named before the
- * engine is ever spawned (see `shouldBlockOffPlatform`). The RFB protocol
- * implementation itself went to the engine.
- */
+/** Parse a `host:port` VNC endpoint, port defaulting to 5901. Pure. The `--vnc` flag is parsed here
+ * because the platform gate must know a remote desktop was named before spawning the engine
+ * (`shouldBlockOffPlatform`). */
 function parseVncEndpoint(raw: string | undefined): { host: string; port: number } | null {
   if (!raw || raw.length === 0) return null;
   const idx = raw.lastIndexOf(':');
@@ -133,11 +111,9 @@ function parseVncEndpoint(raw: string | undefined): { host: string; port: number
   return { host: host || '127.0.0.1', port };
 }
 
-// Resolve the TCP endpoint for a remote daemon (the Windows helper), if
-// configured. That helper binds loopback TCP and is reached over an `ssh -L`
-// tunnel, so the endpoint is a local forwarded port. COMPUTER_HELPER_TCP is
-// "host:port" (host defaults to 127.0.0.1); COMPUTER_HELPER_TOKEN is the shared
-// secret sent in the first `auth` frame.
+// Resolve the TCP endpoint for a remote daemon (the Windows helper), reached over an `ssh -L`
+// tunnel. COMPUTER_HELPER_TCP is `host:port` (host defaults to 127.0.0.1); COMPUTER_HELPER_TOKEN
+// is the secret sent in the first `auth` frame.
 export function resolveTcpEndpoint(): { host: string; port: number; token: string | null } | null {
   const raw = process.env.COMPUTER_HELPER_TCP;
   if (!raw || raw.length === 0) return null;
@@ -148,11 +124,9 @@ export function resolveTcpEndpoint(): { host: string; port: number; token: strin
   return { host: hostPart || '127.0.0.1', port, token: token && token.length > 0 ? token : null };
 }
 
-// Resolve the VNC/RFB endpoint for driving a remote GUI desktop over the RFB
-// protocol (an x11vnc/Xvnc server — e.g. a headless Linux desktop or an LXD
-// container exposing x11vnc on the host's Tailscale IP). COMPUTER_HELPER_VNC is
-// "host:port" (port defaults to 5901); COMPUTER_HELPER_VNC_PASSWORD is the VNC
-// password.
+// Resolve the VNC/RFB endpoint for driving a remote GUI desktop (x11vnc/Xvnc, e.g. headless
+// Linux). COMPUTER_HELPER_VNC is `host:port` (port defaults to 5901); COMPUTER_HELPER_VNC_PASSWORD
+// is the password.
 export function resolveVncEndpoint(): { host: string; port: number; password: string } | null {
   const parsed = parseVncEndpoint(process.env.COMPUTER_HELPER_VNC);
   if (!parsed) return null;

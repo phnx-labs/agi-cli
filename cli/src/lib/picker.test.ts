@@ -43,12 +43,9 @@ describe('limitPreviewHeight', () => {
   });
 });
 
-/**
- * The row-budget math behind RUSH-2198: PICKER_RECENT_COUNT = 15 list rows on a
- * default 24-row terminal left `availablePreviewRows <= 0`, so `limitPreviewHeight`
- * returned '' and the preview collapsed to nothing. pickerPageSize caps the list so
- * the preview always keeps its PREVIEW_MIN_ROWS floor.
- */
+/** The row-budget math behind RUSH-2198: PICKER_RECENT_COUNT = 15 list rows on a default 24-row
+ * terminal left `availablePreviewRows <= 0`, collapsing the preview. pickerPageSize caps the list
+ * so the preview keeps its PREVIEW_MIN_ROWS floor. */
 describe('pickerPageSize', () => {
   // Mirror of the itemPicker fixedRows math: header + subtitle + page + separator + help.
   const availablePreview = (page: number, termRows: number, linesAbove = 0): number =>
@@ -399,13 +396,9 @@ describe('dynamicPicker submit keys', () => {
   });
 });
 
-/**
- * The hotkey lookup token. readline collapses `f` and `F` onto the same `name`
- * and gives punctuation no name at all, so keying bindings on the name alone
- * makes `*` unbindable and a shifted letter indistinguishable from its lowercase
- * twin. Every existing binding is a plain lowercase letter, where the token is
- * unchanged — that no-op property is what makes this safe to swap in.
- */
+/** The hotkey lookup token. readline collapses `f` and `F` onto one `name` and gives punctuation
+ * none, so keying on the name makes `*` unbindable and shifted letters indistinguishable. Plain
+ * lowercase letters keep the same token, which makes the swap safe. */
 describe('hotkeyToken', () => {
   it('is a no-op for a plain lowercase letter (every existing binding)', () => {
     for (const c of ['r', 'c', 'a', 'b', 'd', 't', 'p', 'w', 'y', 's', 'f']) {
@@ -440,11 +433,9 @@ describe('hotkeyToken', () => {
     expect(hotkeyToken({})).toBe('');
   });
 
-  // The shifted form of an existing single-letter hotkey reached its binding
-  // through `key.name` before this token existed. Keying on the character alone
-  // would have retired `R`/`C`/`A` for anyone with caps lock on, so the lookup
-  // falls back to the name — which only works if the token and the name differ
-  // in exactly the way asserted here.
+  // A shifted single-letter hotkey reached its binding through `key.name` before this token
+  // existed. Keying on the character alone would retire `R`/`C`/`A` under caps lock, so the lookup
+  // falls back to the name.
   it('leaves the readline name available as the fallback for a shifted letter', () => {
     const shifted = { name: 'r', sequence: 'R' };
     expect(hotkeyToken(shifted)).toBe('R');
@@ -452,12 +443,9 @@ describe('hotkeyToken', () => {
   });
 });
 
-/**
- * Group dividers: an itemPicker fed Separator rows renders them as non-selectable
- * headers. The cursor never rests on one — it starts below a leading divider, and
- * up/down navigation jumps over one — so enter always resolves a real row. This is
- * what lets the routines browser show project/device group headers inline (RUSH-2503).
- */
+/** Group dividers: an itemPicker fed Separator rows renders them as non-selectable headers. The
+ * cursor starts below a leading divider and navigation skips them, so enter always resolves a real
+ * row (lets the routines browser show group headers, RUSH-2503). */
 describe('itemPicker group separators', () => {
   const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
 

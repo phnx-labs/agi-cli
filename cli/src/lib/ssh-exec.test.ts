@@ -113,11 +113,9 @@ describe('controlOpts (connection multiplexing)', () => {
   });
 
   it('keeps a multi-minute burst of same-host touches warm — well above the old 60s (PHNX-2582)', () => {
-    // The master only survives while idle < ControlPersist, so the window has to
-    // span the gap between repeated ad-hoc --device / fan-out touches of one box,
-    // which arrive in bursts over minutes. At the old 60s any two more than a
-    // minute apart were both cold. Guard that the window stays several minutes so
-    // a future edit can't silently drop it back toward that cold-every-touch 60s.
+    // The master survives only while idle under ControlPersist, so the window must span the gap
+    // between ad-hoc --device and fan-out touches, which come in bursts over minutes; at 60s any
+    // two more than a minute apart were cold. Guard that it stays several minutes.
     const OLD_COLD_WINDOW_SECONDS = 60;
     expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThanOrEqual(5 * 60);
     expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThan(OLD_COLD_WINDOW_SECONDS);
@@ -161,16 +159,13 @@ describe.skipIf(process.platform === 'win32')('sshExec timedOut detection (PATH 
   });
 });
 
-// POSIX-only: the stub is a `#!/bin/sh` script, which Windows cannot exec (the
-// spawn produces no output — `expected '' to contain 'OUT_OK'`). The product code
-// (sshExecAsync) is cross-platform; only this shell-stub harness is not, so the
-// whole suite is skipped on Windows. The full Windows matrix runs only on release
-// PRs, so this surfaced there rather than on a normal PR to main.
+// POSIX-only: the stub is a `#!/bin/sh` script Windows cannot exec. The product code
+// (sshExecAsync) is cross-platform; only this harness is not. The Windows matrix runs on release
+// PRs, which is where this surfaced.
 describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PATH ssh stub — no mocks)', () => {
-  // Put a genuine executable named `ssh` first on PATH so sshExecAsync's spawn('ssh')
-  // runs it: a real subprocess round-trip that exercises stdout/stderr capture,
-  // exit-code propagation, and the timeout -> SIGTERM path — the primitive the fleet
-  // fan-out is built on — without needing a reachable host.
+  // Put a real executable named `ssh` first on PATH so sshExecAsync's spawn('ssh') runs it: a real
+  // subprocess round-trip for stdout/stderr capture, exit codes and the timeout -> SIGTERM path,
+  // without a reachable host.
   function withStubSsh<T>(script: string, fn: () => Promise<T>): Promise<T> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
     fs.writeFileSync(path.join(dir, 'ssh'), script, { mode: 0o755 });
@@ -271,10 +266,9 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
 
 
 describe('local terminal restore after an interactive stream (RUSH-3125)', () => {
-  // A remote agent TUI killed by a dropped link never sends its own exit
-  // sequences, so these modes stay armed on the LOCAL terminal and it starts
-  // answering back at a shell that is not expecting it — the
-  // `^[[?997;1n ^[[I ^[[O` litter in the reported capture.
+  // A remote TUI killed by a dropped link never sends its exit sequences, so its DEC modes stay
+  // armed on the local terminal and it answers back at the shell (the `^[[?997;1n ^[[I ^[[O`
+  // litter in the reported capture) (RUSH-3125).
   it('disables every DEC mode a full-screen TUI arms, and re-shows the cursor', () => {
     for (const mode of ['1004', '996', '997', '2004', '1049', '1000', '1002', '1003', '1006']) {
       expect(TERMINAL_MODE_RESET).toContain(`\x1b[?${mode}l`);
@@ -301,12 +295,9 @@ describe('local terminal restore after an interactive stream (RUSH-3125)', () =>
     expect(() => restoreLocalTerminal('garbage-not-a-stty-string', { drainStdin: true })).not.toThrow();
   });
 
-  // Review finding on PR #3006. Resetting termios/DEC modes is idempotent, so
-  // doing it on a clean exit costs nothing. Draining stdin is DESTRUCTIVE: on a
-  // successful interactive session those queued bytes are the user's legitimate
-  // type-ahead, and eating them would be a new bug in every sshStream(tty) caller
-  // rather than a fix. Only an abnormal exit produces the answerback storm the
-  // drain exists to clear.
+  // Review finding on PR #3006: resetting termios/DEC modes is idempotent, but draining stdin is
+  // destructive (it eats legitimate type-ahead after a clean session), so it is opt-in and only
+  // for abnormal exits that cause the answerback storm.
   it('only drains stdin when asked — the destructive step is opt-in', () => {
     const reads: unknown[] = [];
     const stdin = process.stdin as unknown as { isTTY?: boolean; read?: () => unknown };

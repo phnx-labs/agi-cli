@@ -1,17 +1,6 @@
-/**
- * `agents sessions fork <session>` — branch an existing conversation into a new,
- * independent same-harness sibling, seeded with a recap so it picks up where the
- * original left off. The original is untouched. Also exposed as the hidden
- * top-level alias `agents fork` (back-compat).
- *
- * The source is resolved CROSS-FLEET (the same path `agents sessions preview`
- * uses), so a session that lives on another device forks fine — the sibling is
- * handed a plain-text recap as its opening input and never has to reach the
- * source transcript. Because the seed is text, any REPL harness can be forked,
- * not just Claude.
- *
- * Thin command layer; the pure recap text lives in `lib/session/fork.ts`.
- */
+/** `agents sessions fork <session>` branches a conversation into an independent same-harness
+ * sibling seeded with a recap; the original is untouched. The source resolves cross-fleet like
+ * `preview`. Pure recap text lives in `lib/session/fork.ts`. */
 import { spawnSync } from 'child_process';
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -27,11 +16,8 @@ interface ForkOptions {
   terminal?: string | boolean;
 }
 
-/**
- * The two process boundaries fork crosses — a preview subprocess (cross-fleet
- * resolve + digest) and the sibling launch. Injectable so the resolve→recap→run
- * argv logic is unit-tested without spawning real CLIs.
- */
+/** The two process boundaries fork crosses (preview subprocess and sibling launch), injectable so
+ * the argv logic is tested without real CLIs. */
 export interface ForkDeps {
   /** Run `agents sessions preview <sub…>` and capture stdout + exit status. */
   runPreview: (sub: string[]) => { status: number | null; stdout: string };
@@ -81,23 +67,16 @@ const FORK_HELP = {
   `,
 };
 
-/**
- * Resolve the source cross-fleet, build a recap from its preview digest, and
- * launch a same-harness sibling seeded with that recap. Shared by
- * `agents sessions fork` and the `agents fork` alias.
- */
+/** Resolve the source cross-fleet, build a recap from its preview digest, and launch a same-harness
+ * sibling seeded with it. Shared by `agents sessions fork` and the `agents fork` alias. */
 export async function runFork(
   sessionArg: string,
   options: ForkOptions,
   deps: ForkDeps = defaultDeps(),
 ): Promise<void> {
-  // Resolve + digest in one cross-fleet hop by shelling the existing preview
-  // verb: it resolves the id across the fleet (SSH fan-out + peer hop), computes
-  // the digest on the OWNING device, and prints it as JSON — so a remote source
-  // resolves fine and we never re-implement resolution or digesting here.
-  // --terminal opens a tab on THIS machine; --device dispatches over SSH. `agents
-  // run` refuses the combination, so reject it here with a fork-specific message
-  // before resolving anything, rather than after an overpromising progress line.
+  // Shell the existing preview verb to resolve and digest on the owning device in one hop; never
+  // re-implement resolution here. `--terminal` opens a tab here and `--device` dispatches over
+  // SSH; `agents run` refuses both, so reject early.
   if (options.device && options.terminal !== undefined) {
     console.error(chalk.red('Pick one placement: --terminal opens a tab here; --device places the sibling on another box. They cannot combine.'));
     process.exitCode = 1;
@@ -128,11 +107,9 @@ export async function runFork(
   }
   const digest = data?.preview ?? undefined;
 
-  // Most sessions have no explicit --name label; fall back to the shared headline
-  // ladder the rest of the CLI shows, not the raw short id. Pass `source` whole
-  // rather than re-listing fields: an object literal that omits `generatedTitle`
-  // still type-checks (the key is optional) and would silently drop the
-  // daemon-generated title rung — the PHNX-3797 bug shape.
+  // Unnamed sessions fall back to the shared headline ladder, not the raw short id. Pass `source`
+  // whole: re-listing fields would still type-check without optional `generatedTitle` and silently
+  // drop it (the PHNX-3797 bug shape).
   const label = forkLabelFor(source);
   const recap = buildForkRecap({
     agent: source.agent,
@@ -163,10 +140,8 @@ export async function runFork(
   process.exitCode = child.status ?? 0;
 }
 
-/**
- * Register `agents sessions fork <session>` — the canonical surface (fork is a
- * session operation, so it lives under the `sessions` group).
- */
+/** Register `agents sessions fork <session>`, the canonical surface since fork is a session
+ * operation. */
 export function registerSessionsForkCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('fork <session>')
@@ -179,10 +154,8 @@ export function registerSessionsForkCommand(sessionsCmd: Command): void {
   cmd.action((session: string, options: ForkOptions) => runFork(session, options));
 }
 
-/**
- * Register the hidden top-level `agents fork` alias. Kept working for back-compat
- * and muscle memory; the canonical, discoverable surface is `agents sessions fork`.
- */
+/** Register the hidden top-level `agents fork` alias, kept for back-compat; the canonical surface
+ * is `agents sessions fork`. */
 export function registerForkCommand(program: Command): void {
   const cmd = program
     .command('fork <session>', { hidden: true })

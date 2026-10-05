@@ -1,17 +1,6 @@
-/**
- * Runtime detection + picker + credential-script builder for `agents run --lease`.
- *
- * The picker asks which coding-agent runtime(s) to provision on a leased box.
- * The default selection is whatever the user is currently signed into locally
- * (via `getAccountInfo`, the same source `agents view` uses). The chosen runtimes
- * drive both what gets installed on the box and which auth token file is copied
- * over — the token contents ride the uploaded `--script-stdin` body, never argv.
- *
- * SECURITY: copying a runtime's auth token to an ephemeral cloud box is a
- * credential transfer. It is strictly opt-in (a confirm prompt in the command
- * layer), the token never appears in argv/`ps`, and `--lease` one-shot runs tear
- * the box down afterward so the credential's lifetime is bounded by the run.
- */
+/** Runtime detection, picker and credential-script builder for `agents run --lease`. SECURITY:
+ * copying a token to a cloud box is a credential transfer: opt-in via confirm prompt, contents
+ * ride the `--script-stdin` body never argv/`ps`, and one-shot runs tear the box down. */
 
 import * as os from 'os';
 import * as path from 'path';
@@ -22,12 +11,9 @@ import { getKeychainTokenSync } from '../secrets-client.js';
 import { getClaudeKeychainService } from '../accounting/usage.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 
-/**
- * Credential file locations per runtime. `localCandidates` are read in order
- * (first existing wins); `remote` is where the box's CLI reads it by default
- * (home-level — no per-version shim). Source of truth for these paths is
- * `getAccountInfo` in src/lib/agents.ts; keep them in sync.
- */
+/** Credential file locations per runtime: `localCandidates` read in order (first existing wins);
+ * `remote` is where the box's CLI reads it. Source of truth is `getAccountInfo` in
+ * src/lib/agents.ts; keep in sync. */
 interface RuntimeCred {
   id: AgentId;
   label: string;
@@ -41,18 +27,9 @@ export const LEASE_RUNTIMES: RuntimeCred[] = [
   { id: 'grok', label: 'Grok CLI', localCandidates: ['.grok/auth.json'], remote: '.grok/auth.json' },
 ];
 
-/**
- * Every runtime whose login this module can serialize (`LEASE_RUNTIMES`) is a
- * native, rotating OAuth / session credential (Claude OAuth token, codex/grok
- * `auth.json`). The fleet-auth contract forbids
- * copying any of them between devices — including to an ephemeral leased box —
- * because a shared refresh token rotates server-side on the next refresh and
- * invalidates every other copy (`docs/specifications.md` SING-1b,
- * `docs/secrets.md`). The set is derived from
- * `LEASE_RUNTIMES` so a newly-added runtime can never be silently exempted. This
- * is the single canonical predicate; `--copy-creds` (`hosts/credentials.ts`) and
- * `--lease` (this module's `buildCredentialScript`) both refuse against it.
- */
+/** Every runtime `LEASE_RUNTIMES` can serialize is a native rotating OAuth credential; SING-1b
+ * forbids copying any between devices, even to an ephemeral box (a shared refresh token kills
+ * other copies). Derived from LEASE_RUNTIMES; `--copy-creds` and `--lease` both refuse on it. */
 const NATIVE_OAUTH_RUNTIMES = new Set<AgentId>(LEASE_RUNTIMES.map((c) => c.id));
 
 /** True when `id` is a native OAuth / session login that MUST NOT be copied between devices (SING-1b). */
@@ -118,11 +95,8 @@ export async function detectSignedInRuntimes(): Promise<DetectedRuntime[]> {
   return out;
 }
 
-/**
- * Interactive checkbox: which runtimes to provision on the box. Defaults to the
- * signed-in ones. Runtimes with no local credential are shown disabled.
- * `prompt` is injected so tests don't require a TTY.
- */
+/** Interactive checkbox of runtimes to provision, defaulting to signed-in ones; those with no local
+ * credential are disabled. `prompt` is injected so tests need no TTY. */
 export async function pickRuntimes(
   detected: DetectedRuntime[],
   prompt?: (choices: { name: string; value: AgentId; checked: boolean; disabled: boolean | string }[]) => Promise<AgentId[]>,
@@ -138,24 +112,14 @@ export async function pickRuntimes(
   return checkbox({ message: 'Provision which runtime(s) on the leased box?', choices });
 }
 
-/**
- * The lease runtime to provision for a headless run of `agentName`.
- *
- * When the agent is itself a lease-capable runtime (claude/codex/gemini/grok)
- * that IS the runtime to install. Otherwise fall back to the single signed-in
- * lease runtime (preferring claude), or null when none is signed in. This is the
- * non-interactive replacement for the runtime checkbox picker: `--lease` requires
- * a prompt, so it is headless by contract and must never block on a TTY.
- *
- * Profile-dispatch agents (kimi/deepseek) and custom workflow agents that run
- * under a non-obvious runtime are resolved separately — see RUSH-1725.
- */
+/** The lease runtime for a headless run of `agentName`: the agent itself if lease-capable
+ * (claude/codex/gemini/grok), else the single signed-in runtime (preferring claude), else null.
+ * Never blocks on a TTY (`--lease` needs a prompt). Profile agents resolve separately (RUSH-1725). */
 export function inferLeaseRuntime(agentName: string, detected: DetectedRuntime[]): AgentId | null {
   const signedIn = detected.filter((d) => d.signedIn && d.credPath);
-  // The agent names a lease runtime directly: require that runtime to be signed
-  // in — never silently substitute a different one for an explicit `run <runtime>`
-  // (that would lease a billable box only to boot it "Not logged in"). Not signed
-  // in → null, so the caller exits with "sign into it locally first".
+  // The agent names a lease runtime directly: require it to be signed in and never substitute
+  // another (that would lease a billable box only to boot it "Not logged in"). Not signed in
+  // returns null.
   if (LEASE_RUNTIMES.some((c) => c.id === agentName)) {
     return signedIn.find((d) => d.id === agentName)?.id ?? null;
   }
@@ -201,11 +165,8 @@ export function buildHomeFileWriteScript(remote: string, contents: string): stri
   );
 }
 
-/**
- * Where Claude Code reads its OAuth token on the box. `.claude.json` (the file
- * LEASE_RUNTIMES copies) is config/account-metadata ONLY — the actual token
- * lives here, so without it the box boots "Not logged in".
- */
+/** Where Claude Code reads its OAuth token on the box. `.claude.json` is config/account metadata
+ * only; without this file the box boots "Not logged in". */
 export const CLAUDE_TOKEN_REMOTE = '.claude/.credentials.json';
 
 /** True when `s` parses to a Claude keychain payload with an OAuth access token. */
@@ -218,27 +179,9 @@ function isClaudeCredentialsBlob(s: string): boolean {
   }
 }
 
-/**
- * The RAW wrapped Claude credential payload (`{"claudeAiOauth":{…}}`) to write to
- * the box's `~/.claude/.credentials.json`, or null if no signed-in token is found.
- *
- * On macOS the token is in the login Keychain, read SILENTLY via the standalone
- * `secrets` client's `getKeychainTokenSync` (the `/usr/bin/security … -w` path —
- * Claude's item trusts it, no Touch ID). A default native install uses the bare `Claude Code-credentials`
- * service; an agents-cli managed install (where `~/.claude` symlinks into a
- * versioned home) uses a hash-suffixed service, so we try the bare service first,
- * then enumerate installed version homes (preferring the account whose email
- * matches `preferEmail`, so the token matches the `.claude.json` config we copy).
- * Off macOS the local Claude CLI stores the wrapped rotating blob in
- * `.credentials.json` already. Read that file here with a shape check
- * (`claudeAiOauth.accessToken`). Do not reintroduce a shared helper that
- * also serves Rush Cloud dispatch — dispatch is email-only (SING-1b) and
- * the old `readClaudeCredentialsBlob` path was the #1767 TTY-banner leak
- * (RUSH-2359).
- *
- * The reader/service/version helpers are injected so unit tests never touch the
- * real Keychain.
- */
+/** Raw wrapped Claude credential (`{"claudeAiOauth":{...}}`) for the box's `.credentials.json`, or
+ * null: macOS reads the Keychain silently (`getKeychainTokenSync`), else the local file. Never
+ * share with Rush Cloud dispatch (email-only, SING-1b); the old blob reader leaked (RUSH-2359). */
 export async function resolveClaudeCredentialsBlob(opts?: {
   preferEmail?: string | null;
   readItem?: (service: string) => string;
@@ -312,24 +255,11 @@ export async function resolveClaudeCredentialsBlob(opts?: {
   return null;
 }
 
-/**
- * The credential-provisioning snippet for a `--lease` box.
- *
- * Every runtime this could serialize is a native OAuth / session login
- * (`LEASE_RUNTIMES`), and SING-1b forbids copying one to another device —
- * including an ephemeral leased box, whose refresh of a shared rotating token
- * invalidates every other holder. So this no longer writes a login: it REFUSES
- * (throws, steering to the portable `agents accounts` path) whenever a picked
- * runtime actually has a native credential to copy — signed in locally
- * (`credPath`), or a Claude OAuth blob supplied. A picked runtime with nothing to
- * copy is simply skipped, so `buildCredentialScript` returns `''` (a no-op box
- * bootstrap) rather than throwing on a not-signed-in runtime.
- */
-/**
- * The native OAuth runtimes among `picked` that actually have a credential to copy
- * — signed in locally (`credPath`) or a Claude OAuth blob supplied — i.e. the ones
- * a transfer would leak. A picked runtime with nothing to copy is not refused.
- */
+/** The credential snippet for a `--lease` box. Every serializable runtime is a native OAuth login
+ * and SING-1b forbids copying one, so this REFUSES (throws, steering to the portable `agents
+ * accounts` path) when a picked runtime has a native credential to copy; otherwise `''`. */
+/** The native OAuth runtimes among `picked` that actually have a credential to copy (signed in
+ * locally or a Claude blob supplied), i.e. what a transfer would leak. */
 export function refusedNativeOAuthRuntimes(
   picked: AgentId[],
   detected: DetectedRuntime[],
@@ -344,13 +274,9 @@ export function refusedNativeOAuthRuntimes(
   });
 }
 
-/**
- * Throw the SING-1b refusal if any picked runtime would transfer a native OAuth
- * login. Callers should invoke this at a FAIL-FAST point — before any expensive or
- * costly side effect (e.g. before `crabboxWarmup` leases a paid box) — so a refused
- * `--lease` never leaks infra, mirroring how `--copy-creds` refuses before it opens
- * an SSH connection.
- */
+/** Throw the SING-1b refusal if any picked runtime would transfer a native OAuth login. Call at a
+ * fail-fast point, before any costly side effect like `crabboxWarmup`, as `--copy-creds` does
+ * before SSH. */
 export function assertNoNativeOAuthTransfer(
   picked: AgentId[],
   detected: DetectedRuntime[],

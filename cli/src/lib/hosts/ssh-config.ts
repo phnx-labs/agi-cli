@@ -1,10 +1,6 @@
-/**
- * Read the user's SSH config as a host directory — we never copy or rewrite it.
- *
- * `~/.ssh/config` is the source of truth for connection details; we only parse
- * `Host` stanzas to list candidate names and `ssh -G <name>` to resolve them for
- * display. `known_hosts` is a secondary candidate source for enrollment.
- */
+/** Read the user's SSH config as a host directory, never copying or rewriting it:
+ * `~/.ssh/config` is the source of truth; we parse `Host` stanzas for names, `ssh -G <name>`
+ * for display, and `known_hosts` as a secondary candidate source for enrollment. */
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -15,11 +11,8 @@ import { assertValidSshTarget } from '../ssh-exec.js';
 const SSH_DIR = path.join(os.homedir(), '.ssh');
 const SSH_CONFIG = path.join(SSH_DIR, 'config');
 
-/**
- * Parse `Host` stanza names from ssh config text. Wildcard/negated patterns
- * (`*`, `?`, `!`) are skipped — they're match rules, not concrete hosts.
- * Pure (text in, names out) so it's unit-testable.
- */
+/** Parse `Host` stanza names from ssh config text, skipping wildcard/negated patterns (`*`, `?`,
+ * `!`), which are match rules. Pure. */
 export function parseSshConfigHosts(content: string): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
@@ -38,11 +31,8 @@ export function parseSshConfigHosts(content: string): string[] {
   return names;
 }
 
-/**
- * Parse hostnames from known_hosts text. Hashed entries (`|1|…`) carry no
- * recoverable hostname and are skipped; `[host]:port` and comma lists are split.
- * Pure for testability.
- */
+/** Parse hostnames from known_hosts text; hashed entries (`|1|…`) have no recoverable name and
+ * are skipped, `[host]:port` and comma lists are split. Pure. */
 export function parseKnownHosts(content: string): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
@@ -114,12 +104,9 @@ interface SshGResult {
   port?: string;
 }
 
-/**
- * Authoritative resolution of a host's effective ssh config via `ssh -G <name>`
- * (honors Match/Include). Returns undefined if `ssh` is unavailable. Note:
- * `ssh -G` returns defaults even for unknown names — pair with `isSshConfigHost`
- * to decide whether a name is actually configured.
- */
+/** Authoritative resolution of a host's effective ssh config via `ssh -G <name>` (honors
+ * Match/Include); undefined if `ssh` is unavailable. It returns defaults even for unknown
+ * names, so pair with `isSshConfigHost` to tell whether a name is configured. */
 export function sshResolve(name: string): SshGResult | undefined {
   // Same target-injection guard as sshExec: a name starting with `-` (or
   // carrying shell metacharacters) must never reach `ssh` as a bare argv where

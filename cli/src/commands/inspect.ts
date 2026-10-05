@@ -1,16 +1,6 @@
-/**
- * `agents inspect <target>` — detail view for one agent+version or one DotAgents repo.
- *
- * Agent targets (`claude`, `claude@2.1.170`) show the per-version header (paths,
- * shim, capabilities, resource counts, sessions). Repo targets (`user`, `system`,
- * `project`, a registered extra-repo alias, or a filesystem path to a repo with a
- * `.agents/` dir or to a DotAgents root itself) show the repo root, git state, and
- * per-kind resource counts. Drill-down flags (`--skills`, `--hooks`, `--mcp`, ...)
- * list one resource kind for either target form; passing a positional query to the
- * same flag fuzzy-searches for a single resource and prints its detail. Resource
- * names render as OSC-8 hyperlinks to the marker file (SKILL.md / WORKFLOW.md /
- * AGENT.md / the file itself) so users can click straight to the source.
- */
+/** `agents inspect <target>`: detail for one agent+version (paths, shim, capabilities, resource
+ * counts, sessions) or one DotAgents repo (root, git state, per-kind counts). Drill-down flags
+ * (`--skills`, `--hooks`, ...) list a kind; a positional query fuzzy-searches one resource. */
 
 import { execFileSync } from 'child_process';
 import { addHostOption } from '../lib/hosts/option.js';
@@ -89,20 +79,14 @@ const DRILLABLE_KINDS = [
 ] as const;
 type DrillableKind = typeof DRILLABLE_KINDS[number];
 
-/**
- * Summary-view partition. SIMPLE kinds render as a one-line count + name preview;
- * RICH kinds (hooks/plugins/mcp/routines) get their own expanded section showing
- * each item's key detail (events/predicates, bundle contents, transport/url,
- * schedule + where a routine actually fires). Together they cover every
- * DrillableKind — the type below makes that claim load-bearing.
- */
+/** Summary-view partition: SIMPLE kinds show a count plus name preview; RICH kinds
+ * (hooks/plugins/mcp/routines) get expanded sections. Together they cover every DrillableKind,
+ * which the type below enforces. */
 const SIMPLE_KINDS = ['commands', 'skills', 'rules', 'subagents', 'workflows'] as const;
 const RICH_KINDS = ['hooks', 'plugins', 'mcp', 'routines'] as const;
 
-/**
- * A kind added to DRILLABLE_KINDS but to neither list would silently vanish from
- * both summary views rather than failing the build. This makes it a type error.
- */
+/** A kind in DRILLABLE_KINDS but in neither list would silently vanish from both summaries; this
+ * makes it a type error. */
 type _KindsPartitioned =
   Exclude<DrillableKind, typeof SIMPLE_KINDS[number] | typeof RICH_KINDS[number]> extends never
     ? true
@@ -110,12 +94,8 @@ type _KindsPartitioned =
 const _kindsPartitioned: _KindsPartitioned = true;
 void _kindsPartitioned;
 
-/**
- * Singular aliases for the plural drill-down flags. `--plugin code` reads as
- * "show the one plugin named code" — a required-value flag that always lands in
- * detail mode, the natural counterpart to `--plugins` (list). `mcp` has no
- * distinct singular, so it is intentionally absent.
- */
+/** Singular aliases for the plural drill flags: `--plugin code` always lands in detail mode, the
+ * counterpart to `--plugins` (list). `mcp` has no singular. */
 const SINGULAR_DRILL_ALIASES: Record<string, DrillableKind> = {
   command: 'commands',
   skill: 'skills',
@@ -182,10 +162,8 @@ interface ResourceItem {
   extra?: Array<[string, string]>;
   /** For plugins: the resource categories (skills, commands, …) the bundle packages. */
   groups?: PluginResourceGroup[];
-  /**
-   * Machine-shaped fields for `--json`, when the display strings in `extra` would
-   * lose information a script needs (a routine's raw cron, its device arrays).
-   */
+  /** Machine-shaped fields for `--json`, for when display strings in `extra` would lose information
+   * a script needs (a routine's raw cron, device arrays). */
   json?: Record<string, unknown>;
 }
 
@@ -328,12 +306,9 @@ export interface RepoTarget {
 /** Files at a DotAgents root that mark it as one, beyond the per-kind dirs. */
 const REPO_MARKER_FILES = ['agents.yaml', 'hooks.yaml'];
 
-/**
- * Resolve a non-agent target as a DotAgents repo: the built-in layer names,
- * a registered extra-repo alias, or a filesystem path. Paths accept either a
- * DotAgents root itself or a repo whose `.agents/` dir should be inspected.
- * Returns null when the target is none of these.
- */
+/** Resolve a non-agent target as a DotAgents repo: a built-in layer name, a registered extra-repo
+ * alias, or a path (a DotAgents root or a repo with a `.agents/` dir). Returns null when it is
+ * none of these. */
 export function resolveRepoTarget(target: string, cwd?: string): RepoTarget | null {
   if (target === 'user') return { label: 'user', root: getUserAgentsDir() };
   if (target === 'system') return { label: 'system', root: getSystemAgentsDir() };
@@ -359,10 +334,9 @@ export function resolveRepoTarget(target: string, cwd?: string): RepoTarget | nu
   if (path.basename(abs) === '.agents') {
     return { label: path.basename(path.dirname(abs)), root: abs };
   }
-  // A nested `.agents/` that is a populated DotAgents root wins over `abs` — the
-  // project case (`agents inspect .` from a repo root whose resources live under
-  // `.agents/`, while the repo's own top-level `skills/`, `agents.yaml` pin, etc.
-  // are unrelated source, not a DotAgents tree).
+  // A nested `.agents/` that is a populated DotAgents root wins over `abs` (`agents inspect .` in
+  // a repo whose resources live under `.agents/`), since the repo's own top-level `skills/`,
+  // `agents.yaml`, etc. are unrelated source.
   const nested = path.join(abs, '.agents');
   if (isDotAgentsRoot(nested)) {
     return { label: path.basename(abs), root: nested };
@@ -381,11 +355,9 @@ function isDotAgentsRoot(dir: string): boolean {
     if (fs.existsSync(path.join(dir, marker))) return true;
   }
   for (const kind of DRILLABLE_KINDS) {
-    // `routines/` alone is NOT a marker. Shipping example routine YAML for
-    // `agents routines add` is a documented pattern (this repo's own
-    // cli/routines/), and that directory is the ONLY kind dir there — so
-    // counting it would make `agents inspect cli` resolve a source tree as
-    // a DotAgents repo. Same reasoning as the nested-`.agents/` case above.
+    // `routines/` alone is not a marker: shipping example routine YAML is a documented pattern
+    // (this repo's cli/routines/) and is the only kind dir there, so counting it would resolve a
+    // source tree as a DotAgents repo.
     if (kind === 'routines') continue;
     if (safeStat(path.join(dir, kind))?.isDirectory()) return true;
   }
@@ -440,32 +412,22 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // Hooks live nested under event directories (`hooks/pre-tool-use/…`), and a
-  // script pairs with its data sidecar. repoHookItems already reads them that
-  // way for the summary view; a flat readdir here returned the event dirs
-  // themselves plus README/test scaffolding, so `--hooks` and the summary
-  // reported different counts for the same repo.
+  // Hooks nest under event directories and pair with a data sidecar; reuse repoHookItems as the
+  // summary does. A flat readdir returned event dirs and README/test scaffolding, so `--hooks` and
+  // the summary disagreed on counts.
   if (kind === 'hooks') return repoHookItems(repo);
 
-  // A repo's `rules/` holds the COMPOSED output (AGENTS.md plus its CLAUDE.md /
-  // GEMINI.md symlinks) alongside a `subrules/` dir of the individually named
-  // fragments. The fragments are what `--rule <name>` resolves and what a reader
-  // means by "a rule"; the composed file is a build artifact. Without this,
-  // `subrules` listed as a single opaque leaf and every real rule was unreachable.
-  // Deliberately exclusive: once `subrules/` exists it is the sole home for
-  // rules (composeRules only ever resolves names under it — lib/rules/compose.ts),
-  // so loose top-level `.md` files are not listed. A repo mid-migration to the
-  // subrules convention would see those legacy files disappear from `--rules`;
-  // that is the correct signal, since composeRules would not load them either.
+  // A repo's `rules/` holds composed output (AGENTS.md and symlinks) plus `subrules/` fragments;
+  // the fragments are what `--rule <name>` resolves, so list those. Exclusive once `subrules/`
+  // exists: composeRules loads only names there, so legacy loose `.md` files rightly disappear.
   if (kind === 'rules') {
     const subrulesDir = path.join(repo.root, kind, 'subrules');
     if (fs.existsSync(subrulesDir)) return readResourceDir(subrulesDir, kind, repo.label);
   }
 
-  // Routines are YAML job definitions whose real state (does it fire, where, how
-  // did it last run) lives outside the file. Their directory also holds
-  // `<name>/home/` sandbox overlays, which a flat readdir would count as
-  // routines — on this author's box that turned 24 routines into 49.
+  // Routines are YAML job definitions whose real state lives outside the file, and their directory
+  // also holds `<name>/home/` sandbox overlays that a flat readdir would count as routines (24
+  // became 49 on the author's box).
   if (kind === 'routines') return collectRepoRoutines(repo);
 
   return readResourceDir(path.join(repo.root, kind), kind, repo.label);
@@ -481,16 +443,9 @@ export interface RoutineLiveState {
   materialized: boolean;
   /** This machine's name, for reporting whether the routine is enabled here. */
   thisDevice: string;
-  /**
-   * THIS machine's activation answer, from `routineEnabledOnThisDevice` — the
-   * same call `applyDeviceActivation` makes. `null` means this device has not
-   * materialized its own allowlist, so the file's `enabled:` still governs.
-   *
-   * Deliberately separate from `materialized`, which is fleet-wide: a box whose
-   * own device doc has no `routines:` key while a synced peer's does is the
-   * normal state of a freshly-joined machine, and conflating the two reported
-   * `enabled: no` for routines the daemon was actively firing.
-   */
+  /** THIS machine's activation answer (`routineEnabledOnThisDevice`); `null` means no allowlist, so
+   * the file's `enabled:` governs. Separate from fleet-wide `materialized`: conflating them
+   * reported `enabled: no` on a fresh box. */
   enabledHere: boolean | null;
   /** Last run's status, or null if it has never run on a device we can see. */
   lastStatus: RunMeta['status'] | null;
@@ -502,26 +457,16 @@ const NO_LIVE_STATE: RoutineLiveState = {
   devices: [], materialized: false, thisDevice: '', enabledHere: null, lastStatus: null, lastAt: null,
 };
 
-/**
- * Whether the routine actually runs on this machine.
- *
- * Exactly `applyDeviceActivation` (`lib/routines.ts`): this device's own
- * allowlist answer wins when it exists, and the file's `enabled:` governs only
- * while that answer is `null`. Measured at the same scope as the daemon's, so
- * `agents inspect --routines` and `agents routines list` cannot disagree.
- */
+/** Whether the routine runs on this machine: exactly `applyDeviceActivation` (`lib/routines.ts`),
+ * where this device's allowlist answer wins and the file's `enabled:` applies only while it is
+ * null. Same scope as the daemon, so `inspect --routines` and `routines list` cannot disagree. */
 function routineEnabledHere(config: JobConfig, live: RoutineLiveState): boolean {
   return live.enabledHere === null ? config.enabled : live.enabledHere;
 }
 
-/**
- * The last run we can read, without paying for the whole history.
- *
- * `getLatestRun` goes through `listRuns`, which parses EVERY meta.json under the
- * routine — one firing every 3 minutes accumulates hundreds. Run ids are ISO-ish
- * and sort lexicographically, so walking from the newest and stopping at the
- * first readable record gives the same answer for a bounded number of reads.
- */
+/** The last readable run without parsing the whole history: `getLatestRun` goes through `listRuns`,
+ * which parses every meta.json (hundreds at one firing per 3 min). Run ids sort lexicographically,
+ * so walk from the newest and stop at the first readable record within a bounded number of reads. */
 function latestRunOf(name: string, maxProbes = 20): RunMeta | null {
   let runIds: string[];
   try {
@@ -539,14 +484,9 @@ function latestRunOf(name: string, maxProbes = 20): RunMeta | null {
   return null;
 }
 
-/**
- * Default live provider: one fleet index per collect, one bounded run read per
- * routine, and this device's own activation answer per routine.
- *
- * Returns the collected `errors` alongside so the caller can surface an
- * unreadable device document instead of letting the affected device silently
- * vanish from every `devices` cell.
- */
+/** Default live provider: one fleet index per collect, one bounded run read and one activation
+ * answer per routine. Returns collected `errors` so an unreadable device document surfaces instead
+ * of vanishing from every `devices` cell. */
 function defaultRoutineLive(): { live: (name: string) => RoutineLiveState; errors: string[] } {
   let index: RoutineDeviceIndex;
   try {
@@ -557,10 +497,9 @@ function defaultRoutineLive(): { live: (name: string) => RoutineLiveState; error
   const thisDevice = (() => { try { return currentRoutineDevice(); } catch { return ''; } })();
   const errors = [...index.errors];
 
-  // This device's own doc is read through readMeta, which THROWS on a corrupt
-  // one. Falling back to the file's `enabled:` silently would be the same
-  // silent-failure class the index's error collection just removed, so record it
-  // once — the answer is identical for every routine on this machine.
+  // This device's doc is read via readMeta, which throws on a corrupt one. Falling back to the
+  // file's `enabled:` would be the silent-failure class the index's error collection just removed,
+  // so record it once; the answer is the same for every routine here.
   let ownDocError: string | null = null;
   const enabledOnThisDevice = (name: string): boolean | null => {
     try {
@@ -631,14 +570,9 @@ export function routineTargetLabel(job: JobConfig): string {
   return 'nothing configured';
 }
 
-/**
- * A routine's one-line intent.
- *
- * Routine YAML has no `description:` key, so the generic first-prose-line reader
- * returns `name: growth-metrics` for one file and a real sentence for the next.
- * Prefer the prompt's first sentence, then the file's leading comment block, then
- * the first meaningful line of a shell command.
- */
+/** A routine's one-line intent. Routine YAML has no `description:` key, so the generic reader
+ * returns `name: ...` for some files. Prefer the prompt's first sentence, then the file's leading
+ * comment, then the first meaningful shell-command line. */
 export function routineDescription(job: JobConfig | null, raw: string): string {
   const prompt = job ? manifestText(job.prompt).trim() : '';
   if (prompt) return summaryLine(truncate(prompt.replace(/\s+/g, ' '), 400));
@@ -662,15 +596,9 @@ export function routineDescription(job: JobConfig | null, raw: string): string {
   return '';
 }
 
-/**
- * Read every routine one DotAgents repo declares.
- *
- * Reads exactly `<root>/routines/`, never the layered `listJobs` — `collectRepoKind`
- * is a single-root view, and returning `~/.agents` routines while inspecting a
- * project repo would be a lie. `live` is injectable because `getUserAgentsDir()`
- * and `getRunsDir()` have no env override, so tests cannot otherwise keep this
- * off the developer's real fleet state.
- */
+/** Read every routine one DotAgents repo declares, from exactly `<root>/routines/` (not the layered
+ * `listJobs`, which would show `~/.agents` routines for a project repo). `live` is injectable
+ * because `getUserAgentsDir()` and `getRunsDir()` have no env override. */
 export function collectRepoRoutines(
   repo: RepoTarget,
   live: (name: string) => RoutineLiveState = defaultRoutineLive().live,
@@ -685,12 +613,9 @@ export function collectRepoRoutines(
   const items: ResourceItem[] = [];
   const seen = new Map<string, ResourceItem>();
 
-  // Files only: `routines/<name>/home/` is a sandbox overlay HOME, not a routine.
-  //
-  // `.yml` before `.yaml` for the same basename, because that is the order
-  // `readJobFromDir` tries — so when both exist we describe the file the daemon
-  // actually loads. A plain alphabetical sort put `.yaml` first and reported the
-  // wrong schedule and command for a routine that fires from its sibling.
+  // Files only: `routines/<name>/home/` is a sandbox overlay HOME, not a routine. `.yml` sorts
+  // before `.yaml` for the same basename, matching `readJobFromDir`, so we describe the file the
+  // daemon loads (alphabetical order reported the wrong schedule).
   const files = entries
     .filter(e => e.isFile() && /\.ya?ml$/.test(e.name) && !e.name.startsWith('.'))
     .map(e => e.name)
@@ -795,11 +720,8 @@ function extraOf(item: ResourceItem, key: string): string {
   return item.extra?.find(([k]) => k === key)?.[1] ?? '';
 }
 
-/**
- * Enumerate one directory of resources of `kind`, skipping dotfiles, build caches,
- * and directory docs. Shared so the rules `subrules/` branch and the default
- * `<repo>/<kind>/` branch cannot drift apart.
- */
+/** Enumerate one directory of resources of `kind`, skipping dotfiles, build caches, and directory
+ * docs. Shared so the rules `subrules/` branch and the default branch cannot drift. */
 function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins' | 'routines'>, source: string): ResourceItem[] {
   let entries: fs.Dirent[];
   try {
@@ -853,10 +775,8 @@ export function pathSize(p: string): { bytes: number; files: number } {
   return { bytes, files };
 }
 
-/**
- * Weigh only the entries actually listed, for a kind whose directory holds more
- * than its resources (routines share theirs with sandbox overlay HOMEs).
- */
+/** Weigh only the entries actually listed, for a kind whose directory holds more than its resources
+ * (routines share theirs with sandbox overlay HOMEs). */
 function itemsSize(items: ResourceItem[]): { bytes: number; files: number } {
   let bytes = 0, files = 0;
   for (const item of items) {
@@ -1114,10 +1034,9 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
   const configSymlink = path.join(os.homedir(), `.${agent}`);
   const configTarget = readSymlinkSafe(configSymlink);
 
-  // Report the bare shim only when it is actually there. An isolated install
-  // deliberately has none — that is the promise — so printing the path
-  // unconditionally told the user this copy sits on their PATH when it does not.
-  // Same failure mode as `agents view` claiming an isolated copy was `(global)`.
+  // Report the bare shim only when present: an isolated install deliberately has none, so printing
+  // the path unconditionally claimed it sits on PATH. Same failure mode as `agents view` calling
+  // an isolated copy `(global)`.
   const shimPathIfPresent = fs.existsSync(path.join(getShimsDir(), AGENTS[agent].cliCommand))
     ? path.join(getShimsDir(), AGENTS[agent].cliCommand)
     : null;
@@ -1260,23 +1179,16 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
     return;
   }
 
-  // Route through the shared resource view: an interactive picker with a live
-  // preview in a TTY, a plain aligned table when piped. This is the same
-  // renderer `agents skills list`, `agents commands` and four others already
-  // use — inspect was the last drill-down printing its own two-line-per-entry
-  // dump with a `[source]` tag repeated on every row.
-  //
-  // Sync targets are deliberately off: for a repo the resources ARE the source,
-  // so the column would read "no installed versions" for every row.
+  // Route through the shared resource view (TTY picker with preview, aligned table when piped), as
+  // `skills list`, `commands` and others do. Sync targets are off: for a repo the resources are
+  // the source, so the column would read 'no installed versions' on every row.
   const sources = new Set(items.map(i => i.source));
   // A hook has no prose description — it is a script. Leaving the column blank
   // is honest but useless, so it carries what the Hooks view is actually for:
   // the events that fire it. Same string the overview prints.
   const hookEvents = kind !== 'hooks' ? null : (hookManifest ?? hookManifestByScript(loadCentralHookManifest()));
-  // A routine's byte size says nothing; whether it last ran, and where it is
-  // allowed to run, is the whole question. Devices needs the room, so it only
-  // takes a column on a wide terminal — below that it folds into the description
-  // rather than being dropped.
+  // A routine's byte size says nothing; whether it last ran and where it may run is the question.
+  // Devices takes a column only on a wide terminal, otherwise it folds into the description.
   const isRoutines = kind === 'routines';
   const routineDevicesColumn = isRoutines && terminalWidth() >= 100;
   await showResourceList({
@@ -1287,14 +1199,9 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
     // `[.system]` on every row is 13 columns spent on one bit of information.
     extra2Label: routineDevicesColumn ? 'Devices' : (isRoutines ? undefined : (sources.size > 1 ? 'Source' : undefined)),
     showSync: false,
-    // inspect's names run long — hook scripts (`00-agent-verify-work-complete`
-    // and its `_test` sibling) and namespaced plugin entries (`/swarm:orchestrate`)
-    // both blow past the 22-char default and truncate to the same string.
-    //
-    // Gate on terminal width, NOT on "do any rows have a description": that
-    // proxy depended on which path built the items — the repo path hardcodes an
-    // empty description so it widened, while the agent path filled one from the
-    // script's shebang so it never did. Same command, two behaviours.
+    // inspect's names run long (hook scripts and their `_test` siblings, namespaced plugin
+    // entries) and truncate to the same string at the 22-char default. Gate on terminal width, not
+    // on whether rows have descriptions: that proxy differed by path.
     nameCap: terminalWidth() >= 120 ? 40 : undefined,
     // Keep names clickable — the pre-picker list wrapped every name in an OSC-8
     // link to its file, and losing that would be a silent capability regression.
@@ -1330,10 +1237,8 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
     })),
   });
 
-  // On a TTY the picker's preview pane carries each plugin's bundled skills and
-  // commands. Piped, there is no pane — and the pre-picker output printed those
-  // lines under every row, so a table alone would silently drop what a plugin
-  // actually ships from `agents inspect . --plugins | grep`.
+  // On a TTY the picker preview carries each plugin's bundled skills and commands; piped there is
+  // no pane, so a table alone would drop what a plugin ships from `inspect . --plugins | grep`.
   if (!isInteractiveTerminal() && items.some(i => i.groups?.length)) {
     for (const item of items) {
       if (!item.groups?.length) continue;
@@ -1350,13 +1255,9 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
   }
 }
 
-/**
- * The scannable half of a description: everything before the trigger clause, and
- * only the first sentence of that. 15 of 20 skills in .system lead with their
- * purpose and then append "Triggers on: …" — in a one-line row that boilerplate
- * is what survives truncation, so the row says nothing. The full text still
- * renders in the preview pane.
- */
+/** The scannable half of a description: everything before the trigger clause, first sentence only.
+ * 15 of 20 .system skills append `Triggers on: ...`, which survives truncation in a one-line row
+ * and says nothing. The preview pane still shows the full text. */
 export function summaryLine(description: string): string {
   if (!description) return '';
   const cutAtTrigger = description.split(/\s*(?:Triggers on|Use this skill when|Invoke when)\b/i)[0];
@@ -1431,14 +1332,9 @@ function renderItemDetail(header: string, jsonHead: Record<string, unknown>, kin
     }
   }
   for (const [k, v] of buildDetailRows(best.item, kind)) {
-    // Wrap, never truncate. These values are `, `-joined lists (commands,
-    // skills, triggers, tools) and cutting them hides real entries — a 9-command
-    // plugin would show 4. Before the detail view wrapped at all, the terminal
-    // soft-wrapped these in full, so truncating here would lose information the
-    // old output had.
-    // String(v) is belt-and-braces: pluginToItem now coerces every manifest field
-    // through manifestText, so nothing non-string should reach here. Kept because
-    // this is the choke point every future row kind flows through.
+    // Wrap, never truncate: these are `, `-joined lists (commands, skills, triggers, tools) and
+    // cutting them hides real entries (a 9-command plugin showed 4). `String(v)` is a safety net:
+    // pluginToItem already coerces via manifestText.
     printWrappedJoined(`     ${chalk.gray(k.padEnd(10))} `, String(v).split(', '), ', ');
   }
 
@@ -1481,11 +1377,9 @@ function printSimpleResourceRow(kind: string, items: ResourceItem[]): void {
   console.log(`  ${kind.padEnd(10)} ${count}   ${breakdown}  ${preview}`.trimEnd());
 }
 
-/**
- * Build the `resources` JSON: every kind keeps `total` + `bySource` (back-compat),
- * simple kinds add `names`, and the rich kinds add structured `items` (hook
- * events/predicates, mcp transport/url/command, plugin version + group counts).
- */
+/** Build the `resources` JSON: every kind keeps `total` + `bySource` (back-compat), simple kinds
+ * add `names`, rich kinds add structured `items` (hook events/predicates, mcp
+ * transport/url/command, plugin version + group counts). */
 function summaryResourcesJson(
   itemsByKind: Record<DrillableKind, ResourceItem[]>,
   hookByScript: Map<string, ManifestHook>,
@@ -1565,14 +1459,9 @@ function collectKind(agent: AgentId, versionHome: string, kind: DrillableKind): 
   }
 }
 
-/**
- * The routines that dispatch this agent.
- *
- * Version-invariant, like the `rules`/`subagents` cases above which also ignore
- * `versionHome`: a routine names an agent, never an agent@version. `listJobs()`
- * with no cwd is deliberate — it is the daemon's own view (user + system), so an
- * unsynced project routine that can never fire is not listed as if it could.
- */
+/** The routines that dispatch this agent. Version-invariant like `rules`/`subagents` (a routine
+ * names an agent, never agent@version). `listJobs()` with no cwd is deliberate: it is the daemon's
+ * view, so an unsynced project routine that can never fire is not listed. */
 function agentRoutineItems(agent: AgentId): ResourceItem[] {
   const { live } = defaultRoutineLive();
   const now = new Date();
@@ -1610,19 +1499,9 @@ function pluginItems(): ResourceItem[] {
   return discoverPlugins().map(p => pluginToItem(p, 'user'));
 }
 
-/**
- * Map a discovered plugin to a resource item, surfacing the manifest description
- * and the bundle's nested resources (skills, commands, hooks, ...) as detail rows.
- *
- * EVERY field read here comes from an uncontrolled `plugin.json`:
- * `loadPluginManifest` casts parsed JSON straight to `PluginManifest` and
- * validates only name/version (`lib/plugins.ts`), so the declared types are a
- * hope, not a guarantee. A non-string reaching a renderer throws on `.split` /
- * `.replace`, and `pluginToItem` runs while BUILDING THE LIST — so one malformed
- * manifest anywhere takes down `inspect .`, `--plugins`, `--json`, and even a
- * query for a different, valid plugin. Coerce every field through `manifestText`;
- * never trust the annotation.
- */
+/** Map a discovered plugin to a resource item with the manifest description and nested resources as
+ * detail rows. Every field comes from an uncontrolled `plugin.json`, so coerce via `manifestText`:
+ * one bad manifest would take down `inspect .`. */
 function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   const extra: Array<[string, string]> = [];
   const version = manifestText(plugin.manifest.version);
@@ -1653,23 +1532,16 @@ function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   };
 }
 
-/**
- * Render one uncontrolled manifest value as display text. Objects and arrays
- * carry no sensible one-line form, so they become '' (the row is then dropped)
- * rather than `[object Object]`; everything else stringifies.
- */
+/** Render one uncontrolled manifest value as display text; objects and arrays become '' (row
+ * dropped) rather than `[object Object]`. */
 function manifestText(v: unknown): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'object') return '';
   return String(v);
 }
 
-/**
- * Render one uncontrolled value as a list of display strings. A scalar becomes a
- * one-element list — the case `?? []` and `Array.isArray` both miss, and the one
- * that threw on `.join`. Object entries drop out rather than becoming
- * `[object Object]`.
- */
+/** Render one uncontrolled value as a list of display strings. A scalar becomes a one-element list,
+ * the case `?? []` and `Array.isArray` miss and that threw on `.join`; object entries drop out. */
 function manifestList(v: unknown): string[] {
   if (v === null || v === undefined) return [];
   if (Array.isArray(v)) return v.map(manifestText).filter(Boolean);
@@ -1685,12 +1557,9 @@ function entriesFromAgentResources(agent: AgentId, versionHome: string, kind: 'c
     source: e.scope,
     path: e.path,
     linkTarget: linkTarget(e.path),
-    // A hook is a shell/Python script with no human description, so the prose
-    // fallback returned code: all 53 under an agent home read "!/usr/bin/env
-    // bash" (the `#` strip eating the shebang), and skipping that line only
-    // promoted `set -euo pipefail`. repoHookItems already hardcodes '' for the
-    // repo path; this makes the agent path agree instead of guessing. The
-    // Hooks view shows firing events in that column.
+    // A hook script has no human description: the prose fallback returned code (all 53 read
+    // `!/usr/bin/env bash`, and skipping it yielded `set -euo pipefail`). repoHookItems already
+    // uses ''; agree on the agent path. The Hooks view shows firing events instead.
     description: kind === 'hooks' ? '' : readDescription(e.path),
   }));
 }
@@ -1731,15 +1600,9 @@ function buildDetail(item: ResourceItem, kind: DrillableKind): Record<string, un
   return out;
 }
 
-/**
- * The preview pane for one row, refreshed as the selection moves.
- *
- * Adaptive on purpose — the sessions picker sets the precedent: a Cursor
- * session shows Dirs/Repos/Artifacts, a Codex one shows a different set, and
- * empty fields simply do not render. A hook's useful metadata (what fires it,
- * whether it is wired) has nothing in common with a skill's (what invokes it,
- * where it is synced), so each kind contributes its own rows and blanks drop out.
- */
+/** The preview pane for one row, refreshed as selection moves. Adaptive like the sessions picker:
+ * each kind contributes its own rows (a hook's trigger and wiring differ from a skill's invocation
+ * and sync) and blank fields drop out. */
 export function previewFor(kind: DrillableKind, item: ResourceItem, hookManifest: Map<string, ManifestHook>): string {
   const out: string[] = [];
   const label = (k: string, v: string) => `  ${chalk.gray(k.padEnd(11))}${v}`;
@@ -1758,13 +1621,9 @@ export function previewFor(kind: DrillableKind, item: ResourceItem, hookManifest
   // A hook's identity is when it fires — the summary view has always shown this
   // while the drill-down showed only a size.
   if (kind === 'hooks') {
-    // Use the manifest the caller already resolved. Re-resolving the CENTRAL
-    // one here made the preview contradict its own row: a repo hook wired by
-    // that repo's agents.yaml showed `PreToolUse(Bash)` in the table and
-    // "not registered" in the pane below it, and the mirror case credited a
-    // central registration to the repo. No `?? loadCentralHookManifest()`
-    // fallback: it would be dead in production and would silently reinstate
-    // exactly that bug the next time a caller forgot the argument.
+    // Use the manifest the caller already resolved. Re-resolving the central one made the preview
+    // contradict its row (a repo hook showed `PreToolUse(Bash)` in the table and 'not registered'
+    // below). No `?? loadCentralHookManifest()` fallback: it would reinstate that bug.
     const hook = hookManifest.get(item.name);
     if (hook) {
       rows.push(['fires', chalk.yellow(summarizeHook(hook))]);
@@ -1859,10 +1718,9 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
   if (kind === 'plugins') {
     if (item.groups) for (const g of item.groups) rows.push([g.label, g.items.join(', ')]);
   }
-  // Every kind's scalar rows. previewFor already renders `extra` unconditionally,
-  // so gating it on plugins here made the detail view and its own preview pane
-  // disagree about the same item — and dropped a routine's schedule/status from
-  // `--routine <name> --json` entirely.
+  // Every kind's scalar rows. previewFor renders `extra` unconditionally, so gating it on plugins
+  // made the detail view disagree with its preview and dropped a routine's schedule/status from
+  // `--routine <name> --json`.
   if (item.extra) rows.push(...item.extra);
   return rows;
 }
@@ -1882,16 +1740,12 @@ function abbrevSource(s: string): string {
   return s === 'system' ? 'sys' : s;
 }
 
-/**
- * Compact one-liner for a hook from its manifest entry: the firing events (with
- * the matcher/tool-name in parens), then a `·`-separated predicate summary, then
- * an optional cache tail. Plain text — the caller applies color.
- */
+/** Compact one-liner for a hook: firing events (matcher in parens), a `·`-separated predicate
+ * summary, then an optional cache tail. Plain text; the caller colors. */
 export function summarizeHook(hook: ManifestHook): string {
-  // `hook` is an unvalidated YAML cast from agents.yaml, so `??` is not enough:
-  // a scalar `events: PreToolUse` is neither null nor an array, and `.join` threw
-  // — taking down bare `agents inspect <repo>`, and via the central manifest
-  // `agents inspect <agent>` on every box. Same shape as the plugin.json bug.
+  // `hook` is an unvalidated YAML cast, so `??` is not enough: a scalar `events: PreToolUse` is
+  // neither null nor an array and `.join` threw, taking down `inspect <repo>` and, via the central
+  // manifest, `inspect <agent>` on every box. Same shape as the plugin.json bug.
   const events = manifestList(hook.events).join('/') || '(no event)';
   let matcher = manifestText(hook.matcher);
   if (!matcher && hook.matches?.tool_name) {
@@ -1978,12 +1832,9 @@ function scopeBreakdownPlain(bySource: Record<string, number>): string {
   return Object.entries(bySource).map(([k, v]) => `${k}:${v}`).join(' ');
 }
 
-/**
- * Index a hook manifest by script basename (no extension). Installed hooks are
- * named after their script file (`04-capture-…`), while the manifest is keyed by
- * logical name (`capture-…`) with the filename in `script:` — so we join on the
- * script basename, not the manifest key.
- */
+/** Index a hook manifest by script basename (no extension): installed hooks are named after the
+ * script (`04-capture-...`), but the manifest is keyed by logical name (`capture-...`) with the
+ * filename in `script:`. */
 export function hookManifestByScript(manifest: Record<string, ManifestHook>): Map<string, ManifestHook> {
   const out = new Map<string, ManifestHook>();
   for (const hook of Object.values(manifest)) {
@@ -1996,10 +1847,9 @@ export function hookManifestByScript(manifest: Record<string, ManifestHook>): Ma
 
 /** Build hook rows by enriching the installed hook items with manifest events/predicates. */
 function hookRows(items: ResourceItem[], byScript: Map<string, ManifestHook>): RichRow[] {
-  // The section shows only the first handful before a `…(+N)` tail, so order
-  // matters: wired hooks first. Alphabetically `00-…_test` sorts next to the
-  // hook it tests, so half the visible rows were test scaffolding with a blank
-  // event column while real registered hooks hid behind the tail.
+  // The section shows only the first handful before a `…(+N)` tail, so wired hooks go first:
+  // alphabetically `00-...` sorts next to its `_test`, so half the visible rows were test
+  // scaffolding with a blank event column while real hooks hid behind the tail.
   const ordered = [...items].sort((a, b) => {
     const aw = byScript.has(a.name) ? 0 : 1;
     const bw = byScript.has(b.name) ? 0 : 1;
@@ -2031,14 +1881,9 @@ function pluginRows(items: ResourceItem[]): RichRow[] {
 /** Statuses that mean the last run did not do its job. */
 const UNHEALTHY_RUN = new Set(['failed', 'timeout', 'missed', 'blocked']);
 
-/**
- * Health tier for the section ordering. Lower sorts first.
- *
- * `printExpandedSection` shows only the first handful before a `…(+N)` tail, so
- * for a repo with 24 routines the sort IS the section. Same reasoning as
- * `hookRows` putting wired hooks first: a routine that fires nowhere is exactly
- * what the reader opened this for, and must never hide behind the tail.
- */
+/** Health tier for section ordering, lower first. `printExpandedSection` shows only the first
+ * handful, so with 24 routines the sort is the section; as with `hookRows`, a routine that fires
+ * nowhere is what the reader came for and must not hide behind the tail. */
 export function routineHealthTier(item: ResourceItem): number {
   if (extraOf(item, 'problem')) return 0;
   const fires = extraOf(item, 'fires');
@@ -2075,11 +1920,9 @@ function routineRows(items: ResourceItem[]): RichRow[] {
     }
     const devices = compactDeviceCell(extraOf(item, 'devices'));
     const last = extraOf(item, 'last');
-    // Pad the PLAIN strings, then colour. Padding a chalk-wrapped string counts
-    // the escape codes as width and silently steals columns from the next cell.
-    // The trailing problem gets what the three sized cells leave, or it would
-    // blow the row past the terminal and break the alignment this budget exists
-    // to hold — a 147-column row at COLUMNS=100 in testing.
+    // Pad the plain strings, then color: padding a chalk-wrapped string counts escape codes as
+    // width and steals columns. The trailing problem cell gets the remainder, or the row overflows
+    // the terminal (147 columns at COLUMNS=100 in testing).
     const problemW = Math.max(12, budget - firesW - devicesW - stringWidth(last) - 8);
     const detail = [
       chalk.gray(truncateToWidth(fires, firesW).padEnd(firesW)),
@@ -2096,10 +1939,8 @@ function routineRows(items: ResourceItem[]): RichRow[] {
   });
 }
 
-/**
- * Routine rows for an agent target: `daily at 9:00 AM   completed · 2h ago`.
- * No devices column — an agent view is inherently about this machine.
- */
+/** Routine rows for an agent target: `daily at 9:00 AM   completed · 2h ago`. No devices column,
+ * since an agent view is about this machine. */
 function agentRoutineRows(items: ResourceItem[]): RichRow[] {
   const ordered = [...items].sort((a, b) => {
     const at = routineHealthTier(a), bt = routineHealthTier(b);
@@ -2112,13 +1953,9 @@ function agentRoutineRows(items: ResourceItem[]): RichRow[] {
   }));
 }
 
-/**
- * `ok 2h` / `fail 3d` / `never` — the Last column, clamped to the 10-wide cell.
- *
- * The picker path pads without truncating, so an 11-char `blocked 3d` would push
- * the next column; the abbreviations cover only the two commonest statuses, so
- * the clamp is what actually holds the invariant.
- */
+/** `ok 2h` / `fail 3d` / `never` for the Last column, clamped to 10 wide: the picker pads without
+ * truncating, and the abbreviations cover only the two commonest statuses, so the clamp holds the
+ * invariant. */
 function routineLastCell(item: ResourceItem, width = 10): string {
   const last = extraOf(item, 'last');
   if (!last || last === 'never run') return 'never';
@@ -2127,12 +1964,8 @@ function routineLastCell(item: ResourceItem, width = 10): string {
   return truncateToWidth(age ? `${word} ${age}` : word, width);
 }
 
-/**
- * Trim the long-form `devices` phrasing down to a cell.
- *
- * The extra row is written for the detail pane ("no device — will not fire");
- * a 16-column cell needs the same fact in two words.
- */
+/** Trim the long-form `devices` phrasing to a cell: the detail pane says 'no device — will not
+ * fire'; a 16-column cell needs the same fact in two words. */
 function compactDeviceCell(devices: string): string {
   if (devices.startsWith('no device —')) return 'none ⚠';
   if (devices.startsWith('no device allowlist yet')) return 'unset';
@@ -2148,12 +1981,9 @@ function colorLast(last: string): string {
   return chalk.gray(last);
 }
 
-/**
- * The one-line warning under the Routines section, or null when it would mislead.
- *
- * Silent until some device has materialized a `routines:` list — before that,
- * every routine is legitimately unpinned and "will not fire" would be noise.
- */
+/** The one-line warning under the Routines section, or null when it would mislead: silent until
+ * some device has materialized a `routines:` list, since before that every routine is legitimately
+ * unpinned and 'will not fire' would be noise. */
 export function routineDarkWarning(items: ResourceItem[]): string | null {
   const materialized = items.some(i => {
     const d = extraOf(i, 'devices');
@@ -2186,12 +2016,9 @@ export function hookManifestFromFile(agentsYamlPath: string): Record<string, Man
   } catch { return {}; }
 }
 
-/**
- * Merge the system + user `agents.yaml` hook manifests (user wins on key
- * collision). Built directly from the two layer files rather than via
- * `parseHookManifest()` so inspecting never emits the shadow/override warnings
- * that the registrar path prints.
- */
+/** Merge the system + user `agents.yaml` hook manifests (user wins on collision), built directly
+ * from the layer files so inspecting never emits the shadow/override warnings the registrar path
+ * prints. */
 function loadCentralHookManifest(): Record<string, ManifestHook> {
   return {
     ...hookManifestFromFile(path.join(getSystemAgentsDir(), 'agents.yaml')),
@@ -2199,17 +2026,9 @@ function loadCentralHookManifest(): Record<string, ManifestHook> {
   };
 }
 
-/**
- * Hook items for a repo's Hooks section. Uses the grouped hook reader (script +
- * data file collapsed into one entry, non-hook files like promptcuts.yaml or
- * README.md filtered out) rather than a naive readdir, so names are clean and
- * join cleanly against the manifest by script basename.
- *
- * `description` is intentionally blank: a hook is a script, and the only text a
- * readdir-based reader could scrape from one is its shebang (the old flat path
- * surfaced `!/usr/bin/env bash` as a description). The Hooks section shows firing
- * events via summarizeHook instead, which is the useful signal.
- */
+/** Hook items for a repo's Hooks section via the grouped hook reader (script + data file collapsed,
+ * non-hook files filtered), so names join to the manifest. `description` is blank on purpose: a
+ * readdir reader could only scrape the shebang; the section shows firing events. */
 function repoHookItems(repo: RepoTarget): ResourceItem[] {
   return listHookEntriesFromDir(path.join(repo.root, 'hooks')).map(h => ({
     name: h.name,

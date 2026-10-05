@@ -37,14 +37,9 @@ import {
   shouldMigrateMenubarTcc,
 } from './install-menubar.js';
 
-// Regression guard for the STOLEN-HOTKEY blind spot. Status used
-// `pgrep -f MenubarHelper` (the executable's pre-RUSH-3101 name), which matches
-// ANY process with that name — so a stray dev build launched over ssh reported
-// `running: yes` while it, not the installed bundle, held the global
-// Cmd-Shift-V chord (RegisterEventHotKey is first-come). The paste was dead and
-// status said everything was fine. The fixtures below are the real
-// `ps -axo pid=,command=` lines from that incident, renamed to the current
-// executable ("AGI Menu") — the bundle folder itself is still MenubarHelper.app.
+// Regression guard for the STOLEN-HOTKEY blind spot: status used `pgrep -f MenubarHelper`,
+// matching any process of that name, so a stray dev build held Cmd-Shift-V while status said
+// `running: yes`. Fixtures are real `ps` lines from that incident.
 describe('classifyMenubarProcesses', () => {
   // Note the space in "Application Support" (and in "AGI Menu" itself) — the
   // reason pid/field parsing takes the rest of the line rather than splitting
@@ -74,10 +69,8 @@ describe('classifyMenubarProcesses', () => {
     expect(r.foreign.map((p) => p.pid)).toEqual([58619]);
   });
 
-  // The DUPLICATE-ICON blind spot: launchd's KeepAlive copy and a
-  // LaunchServices/`open` launch of the SAME .app both run the installed
-  // executable, so a boolean `running` reported this as healthy while the user
-  // looked at two agents marks in the menu bar. Both pids must be visible.
+  // The DUPLICATE-ICON blind spot: launchd's KeepAlive copy and a `open` launch of the same .app
+  // both run, which a boolean `running` hid. Both pids must be visible.
   it('reports BOTH copies when the installed bundle is running twice', () => {
     const comm = `43244 ${INSTALLED}\n93684 ${INSTALLED}`;
     const r = classifyMenubarProcesses(comm, comm, INSTALLED);
@@ -124,10 +117,9 @@ describe('classifyMenubarProcesses', () => {
   });
 });
 
-// `agents menubar setup` ends every live helper and lets launchd restart one,
-// so the survivor is always the login-managed copy. Selecting a survivor from
-// a `ps` listing instead would risk keeping the UNMANAGED copy alive — the
-// duplicate would then come straight back at next login.
+// `agents menubar setup` ends every live helper and lets launchd restart one, so the survivor is
+// the login-managed copy; picking from a `ps` listing could keep the unmanaged copy and the
+// duplicate would return at next login.
 describe('processesToEnd', () => {
   const A = { pid: 43244, executable: '/Applications/…/AGI Menu' };
   const B = { pid: 93684, executable: '/Applications/…/AGI Menu' };
@@ -150,10 +142,9 @@ describe('processesToEnd', () => {
   });
 });
 
-// Regression guard for the upgrade self-heal: before this, the helper was only
-// (re)installed when no service existed, so `npm update` left the menu bar
-// running the previous release's binary. isMenubarStale is the decision that
-// must flag an upgraded/missing install for reinstall.
+// Regression guard for the upgrade self-heal: the helper used to be reinstalled only when no
+// service existed, so `npm update` left the old binary. isMenubarStale must flag an upgraded or
+// missing install.
 describe('isMenubarStale', () => {
   const REL = (v: string) => ({ source: 'release' as const, helperVersion: v });
   const LOC = (stamp: string) => ({ source: 'local' as const, sourceStamp: stamp });
@@ -202,13 +193,9 @@ describe('isMenubarStale', () => {
   });
 
   it('stamps from the SAME resolved source the installer uses', () => {
-    // The blocker this replaces: startMenubarServiceFromSource stamped
-    // `stampFor(opts.sourceAppPath)` — the UNRESOLVED parameter — while
-    // ensureMenubarAppInstalled resolved `opts.sourceAppPath ?? sourceAppPath()`
-    // itself. On the self-heal path (which passes nothing) that installed a
-    // LOCAL build while stamping a RELEASE version; the next invocation saw a
-    // kind mismatch and reinstalled, forever. Asserted on the source because the
-    // composition, not either function alone, is what was wrong.
+    // Replaces a blocker: the stamp used the UNRESOLVED `opts.sourceAppPath` while the installer
+    // resolved its own, so the self-heal installed a LOCAL build stamped RELEASE and reinstalled
+    // forever. Asserted on source (the composition was wrong).
     const src = fs.readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
       'utf-8',
@@ -255,24 +242,9 @@ describe('isMenubarStale', () => {
   });
 
   it('converges: what an install stamps is not stale on the next invocation', () => {
-    // THE property a reinstall storm violates, stated directly. #2109 was not
-    // "the wrong version was compared" — it was that the value written at
-    // install time and the value computed at check time disagreed, so the check
-    // never settled. Whatever the source, stamping it and then asking about the
-    // same source must say "not stale", or the self-heal reinstalls forever.
-    //
-    // Scope, stated honestly: this does NOT catch the original blocker. That bug
-    // lived in the CALLER's composition — install stamped one input while the
-    // check derived from another — and is caught by the source assertion in
-    // `stamps from the SAME resolved source the installer uses`. Verified by
-    // mutation: making stampFor return a constant leaves THIS test green,
-    // because both sides then agree on the same wrong value.
-    //
-    // What it does pin is that stampFor is deterministic for a given input —
-    // the other half of convergence. A stampFor that varied run to run (a
-    // timestamp, a random temp path) would storm even with the caller correct.
-    // Driving installMenubarLaunchAgentOnUpgrade end to end would need
-    // codesign/spctl/launchctl stubbed, which this repo forbids.
+    // The property a reinstall storm violates (#2109): stamping a source then checking it must say
+    // "not stale". Pins that stampFor is deterministic; the caller-composition bug is caught by
+    // the source assertion. A full drive needs forbidden stubs.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-converge-'));
     const local = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(local);
@@ -296,10 +268,9 @@ describe('isMenubarStale', () => {
   });
 
   it('does not let a local build win or lose a version contest', () => {
-    // Reviewer-found: excluding LOCAL_BUILD_LABEL from the compareVersions arm
-    // had zero coverage — mutating it away killed nothing. `local` is a KIND
-    // marker; ordering it against real semver would let a dev build seize a
-    // release helper, or be refused by one, on a meaningless comparison.
+    // Reviewer-found: excluding LOCAL_BUILD_LABEL from the compareVersions arm had no coverage.
+    // `local` is a KIND marker; ordering it against semver would let a dev build seize a release
+    // helper or be refused by one.
     const base = {
       ownerEntryExists: true,
       sourceIsDeveloperId: true,
@@ -315,10 +286,9 @@ describe('isMenubarStale', () => {
   });
 
   it('a local rebuild is a real change, not two equal `local` labels', () => {
-    // Reviewer-found, third instance of one bug class: stampVersionLabel
-    // collapses EVERY local build to the literal 'local', discarding the mtime.
-    // Any comparison done through the label therefore reports "unchanged" across
-    // a genuine dev rebuild. The stamps themselves distinguish them.
+    // Reviewer-found (third of one bug class): stampVersionLabel collapses every local build to
+    // the literal 'local', dropping the mtime, so a label comparison reports "unchanged" across a
+    // real dev rebuild. The stamps distinguish them.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-rebuild-'));
     const app = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(app);
@@ -338,11 +308,9 @@ describe('isMenubarStale', () => {
   });
 
   it("the setup bundle step compares stamps, not the lossy label", () => {
-    // Mutation-driven: the behavioural test above stays green even when the step
-    // label is computed through `stampVersionLabel`, because it exercises
-    // stampFor/isMenubarStale rather than the step itself. That step lives inside
-    // runMenubarSetup, which needs a signed bundle to reach — so the comparison
-    // is asserted at source, the same way the install/stamp composition is.
+    // Mutation-driven: the behavioural test stays green if the step label goes through
+    // `stampVersionLabel`, since it exercises stampFor/isMenubarStale. That step is in
+    // runMenubarSetup (needs a signed bundle), so it is asserted at source.
     const src = fs.readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
       'utf-8',
@@ -380,11 +348,9 @@ describe('isMenubarStale', () => {
   });
 });
 
-// Regression guard for the DUAL-INSTALL skew: the plist was baked by one install
-// (e.g. nvm) but the user's `agents` now resolves to another (e.g. bun), so the
-// helper kept shelling a stale copy for menu data + the quick-issue dispatch. A
-// version bump can't catch this (the copies can even be the same version), so
-// the re-point keys off the plist's baked interpreter/entry vs the active one.
+// Regression guard for DUAL-INSTALL skew: the plist baked one install (nvm) while `agents`
+// resolves another (bun), so the helper kept shelling a stale copy. A version bump can't catch it,
+// so the re-point compares the plist's baked interpreter/entry with the active one.
 describe('menubarPlistNeedsRepoint', () => {
   const nvm = '/Users/me/.nvm/versions/node/v24/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
   const bun = '/Users/me/.bun/install/global/node_modules/@phnx-labs/agents-cli/dist/index.js';
@@ -426,20 +392,9 @@ describe('menubarPlistNeedsRepoint', () => {
   });
 });
 
-// Regression guard for #2109: several agents-cli installs on one box reinstalled
-// the helper over each other on EVERY invocation, because both the version stamp
-// and the plist's baked entry name whichever copy acted last. Recopying the bundle
-// replaces the executable under the live helper and kills it; KeepAlive restarts
-// it; the next install repeats it. Observed: a new pid every 5-15s, 578 launches
-// in the helper's log, and a status item that never stayed visible while
-// `agents menubar status` still said `running: yes`.
-//
-// Ownership — not content — decides, because content cannot. The helper is
-// rebuilt/re-signed/re-notarized every release, so consecutive releases ship
-// byte-different bundles from identical source: 1.22.20/21/22 all carry the same
-// 2876288-byte executable with three different sha256s and three different
-// CDHashes. A digest gate would report "changed" for exactly the skew it was
-// meant to exempt, which is why this predicate never looks at bytes.
+// Regression guard for #2109: several agents-cli installs reinstalled the helper over each other
+// on EVERY invocation (a new pid every 5-15s). Ownership decides, not content: each release is
+// re-notarized, so digests differ for identical source.
 describe('mayInstallMenubarHelper', () => {
   const brew = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
   const nvm = '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
@@ -511,10 +466,9 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('lets a foreign install take over after the cooldown in unversioned legacy state', () => {
-    // The stuck state a pure ownership rule creates: a stale-but-present install
-    // (an old nvm node dir nobody runs) owns the plist while the user's daily
-    // driver upgrades. Refusing forever would freeze the menu bar at whatever the
-    // dead owner last installed. The cooldown bounds the churn without stranding.
+    // The stuck state a pure ownership rule creates: a stale-but-present install (an old nvm dir)
+    // owns the plist while the daily driver upgrades. The cooldown bounds churn without freezing
+    // the menu bar.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       msSinceLastHeal: HOUR + 1,
@@ -548,10 +502,9 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('never lets an ad-hoc/dev build seize a healthy helper on the timer', () => {
-    // scripts/install.sh puts a dev build beside the npm global, and its bundle
-    // cannot be notarized. Recopying it over a good Developer-ID bundle makes
-    // Gatekeeper reject the result as "damaged" and AppKit crash at launch
-    // (RUSH-2134) — a broken menu bar, not just a cosmetic restart.
+    // scripts/install.sh puts a dev build beside the npm global; it can't be notarized, and
+    // recopying it over a Developer-ID bundle makes Gatekeeper call it "damaged" and AppKit crash
+    // at launch (RUSH-2134).
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       msSinceLastHeal: HOUR + 1, sourceIsDeveloperId: false,
@@ -559,12 +512,9 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('refuses an ad-hoc build seizing a HEALTHY helper whose owner-entry is gone', () => {
-    // The owner-gone branch is deadlock avoidance, but recopying an ad-hoc bundle
-    // over a healthy Developer-ID install poisons its Accessibility grant — the
-    // ad-hoc signature fails the grant's stored code requirement, so macOS revokes
-    // it and re-prompts on the next paste — and Gatekeeper rejects the result as
-    // "damaged" (RUSH-2134). This does NOT deadlock: a genuinely broken helper
-    // still heals from any source via escape (1), asserted next.
+    // The owner-gone branch avoids deadlock, but recopying an ad-hoc bundle over a healthy
+    // Developer-ID install fails the Accessibility grant's code requirement (macOS revokes it) and
+    // Gatekeeper calls it "damaged" (RUSH-2134). A broken helper still heals via escape (1).
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
       sourceIsDeveloperId: false,
@@ -622,10 +572,9 @@ describe('restartMenubarLaunchAgent', () => {
 
       restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
 
-      // The service target is `serviceLabel()`, not the bare literal: under a
-      // redirected HOME (every test fork, and any sandboxed run) the identifier is
-      // namespaced so this bootout cannot tear down the operator's live helper —
-      // launchctl routes by identifier alone, never by the plist path (RUSH-2639).
+      // Use `serviceLabel()`, not the bare literal: under a redirected HOME the identifier is
+      // namespaced so this bootout can't tear down the operator's live helper (launchctl routes by
+      // identifier alone; RUSH-2639).
       const target = `gui/501/${serviceLabel()}`;
       expect(calls).toHaveLength(3);
       expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', target] });
@@ -674,14 +623,9 @@ describe('restartMenubarLaunchAgent', () => {
   });
 });
 
-// Regression guard for the "damaged app" bug (RUSH-2134): the shipped helper is
-// Developer-ID signed AND notarized (menubar/scripts/build.sh + the
-// verify-menubar-helper.sh prepack gate). A signature alone is NOT enough —
-// Gatekeeper rejects an un-notarized bundle as "damaged" on macOS 26+ — so the
-// launch guards require BOTH `codesign --verify` (codesignVerifies) and
-// Gatekeeper acceptance (gatekeeperAssesses). This pins the reason both are
-// checked: an ad-hoc / un-notarized bundle passes codesign but fails Gatekeeper,
-// and must be refused, never re-signed. Real codesign/spctl (no mocking) → macOS.
+// Regression guard for the "damaged app" bug (RUSH-2134): the helper is Developer-ID signed AND
+// notarized; signature alone fails Gatekeeper on macOS 26+, so guards need `codesign --verify` and
+// Gatekeeper acceptance. Ad-hoc is refused, never re-signed. macOS only.
 const darwinOnly = process.platform === 'darwin' ? describe : describe.skip;
 darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', () => {
   function makeAdHocBundle(): string {
@@ -692,12 +636,9 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
     // Read the basename from the shipped constant, never a literal: RUSH-3101
     // renamed it and this fixture's hardcoded copy silently went stale.
     fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', MENUBAR_HELPER_EXECUTABLE_NAME));
-    // The real bundle declares CFBundleExecutable (menubar/scripts/build.sh:122).
-    // Without an Info.plist codesign INFERS the main executable from the bundle
-    // name -- MenubarHelper.app -> Contents/MacOS/MenubarHelper -- which stopped
-    // existing at the rename, so codesign rejected the whole bundle with
-    // "bundle format unrecognized, invalid, or unsuitable" and this fixture
-    // handed the assertions an UNSIGNED bundle. Declare it like the real build.
+    // The real bundle declares CFBundleExecutable (menubar/scripts/build.sh:122). Without an
+    // Info.plist codesign infers `Contents/MacOS/MenubarHelper`, which no longer exists after the
+    // rename, so the fixture was an UNSIGNED bundle. Declare it like the real build.
     fs.writeFileSync(
       path.join(app, 'Contents', 'Info.plist'),
       [
@@ -777,14 +718,9 @@ darwinOnly('service-manager registration gating (RUSH-2968)', () => {
   });
 });
 
-// Regression guard for the ORPHAN-STORM incident. The helper can crash at
-// startup on a loaded machine — `NSApplication.shared` segfaults inside
-// `SLSNewConnection` when WindowServer is too starved to hand out a connection.
-// With `KeepAlive` and no `ThrottleInterval`, launchd relaunched on its ~10s
-// default and every attempt spawned another `agents doctor --json` before dying,
-// so a starved box got hit harder the worse it got: 38 orphaned doctors, ~13 of
-// 18 cores, load average 490. The throttle paces the respawn; ChildProcess.swift
-// bounds and reaps the children.
+// Regression guard for the ORPHAN-STORM: the helper can crash at startup on a loaded machine; with
+// KeepAlive and no `ThrottleInterval`, each relaunch spawned another `agents doctor --json` (38
+// orphans, load 490). The throttle paces respawn; ChildProcess.swift reaps children.
 describe('generateServicePlist — launchd crash-loop throttle', () => {
   const plist = generateServicePlist('/Users/x/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/AGI Menu');
 
@@ -820,12 +756,9 @@ describe('generateServicePlist — launchd crash-loop throttle', () => {
   });
 });
 
-// Regression guard for the STALE-PROCESS bug (RUSH-3019): the upgrade self-heal
-// swapped the on-disk bundle but never restarted the running helper, so it kept
-// requesting Accessibility under the OLD code identity and the grant never
-// stuck. `menubarHealReplacedBundle` is the pure gate that decides when a heal
-// changed content a live process could be stale against, as opposed to a
-// plist-only repoint (RUSH-3005's churn, not this bug's).
+// Regression guard for the STALE-PROCESS bug (RUSH-3019): the self-heal swapped the bundle but
+// never restarted the running helper, so it kept the OLD identity. `menubarHealReplacedBundle`
+// flags content swaps, not plist-only repoints (RUSH-3005).
 describe('menubarHealReplacedBundle', () => {
   it('is true on a version-bump stale heal', () => {
     expect(menubarHealReplacedBundle({ stale: true, needsDevIdHeal: false })).toBe(true);
@@ -870,10 +803,9 @@ describe('restartMenubarHelperAfterSwap', () => {
     }
   });
 
-  // The exact failure verified live: `launchctl kickstart -k` against the GUI
-  // domain throws from a shell with no Aqua session ("Could not find service
-  // ... in domain for user gui"). The fallback must end the confirmed-own pids
-  // so launchd's KeepAlive relaunches from the swapped binary.
+  // Verified live: `launchctl kickstart -k` throws from a shell with no Aqua session ("Could not
+  // find service ... in domain for user gui"). The fallback must end the confirmed-own pids so
+  // KeepAlive relaunches from the swapped binary.
   it('falls back to ending the own pid(s) when kickstart -k fails', () => {
     const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
     process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
@@ -914,11 +846,9 @@ describe('restartMenubarHelperAfterSwap', () => {
   });
 });
 
-// Regression guard for the 11-stale-TCC-rows finding (RUSH-3019): a machine that
-// moved from an ad-hoc signature to Developer ID (6fa36f73a) keeps a dead TCC
-// grant recorded against the old identity forever unless something resets it.
-// The reset must run exactly once per machine, never on a machine that was
-// always Developer ID (nothing stale to clear there).
+// Regression guard for 11 stale TCC rows (RUSH-3019): a machine that moved from ad-hoc to
+// Developer ID (6fa36f73a) keeps a dead grant for the old identity unless reset. The reset runs
+// once per machine, never on an always-Developer-ID one.
 describe('shouldMigrateMenubarTcc', () => {
   it('migrates on a real ad-hoc -> Developer ID transition not yet migrated', () => {
     expect(shouldMigrateMenubarTcc({ needsDevIdHeal: true, alreadyMigrated: false })).toBe(true);
@@ -934,10 +864,8 @@ describe('shouldMigrateMenubarTcc', () => {
 });
 
 describe('resetMenubarAccessibilityTcc', () => {
-  // tests/setup.ts redirects HOME to a fork-private sandbox for the whole
-  // suite, so installDir() already resolves under it — no extra sandboxing
-  // needed, and the injected exec means the real `tccutil` binary is never
-  // invoked here.
+  // tests/setup.ts redirects HOME to a fork-private sandbox, so installDir() already resolves
+  // under it; the injected exec means the real `tccutil` is never invoked.
   it('resets Accessibility under the bundle identifier and stamps the marker', () => {
     const calls: Array<{ cmd: string; args: string[] }> = [];
     const exec = (cmd: string, args: readonly string[]) => {
@@ -976,11 +904,9 @@ describe('isMenubarProcessStaleAgainstBundle', () => {
     expect(isMenubarProcessStaleAgainstBundle(1_000, 1_000)).toBe(false);
   });
 
-  // The false positive that made `doctor` demand a re-grant after every healthy
-  // upgrade. `ps -o lstart` reports whole seconds, the bundle mtime does not, and
-  // the post-swap restart lands inside the swap's own second — so the two
-  // timestamps below are the SAME second, 700ms apart. Real values read off zion
-  // at 1.22.46, where the helper had already restarted onto the new binary.
+  // The false positive that made `doctor` demand a re-grant after every healthy upgrade: `ps -o
+  // lstart` has whole seconds, the bundle mtime doesn't, and the post-swap restart lands in the
+  // swap's own second. Values are real, from zion at 1.22.46.
   it('is not stale when the pid started in the same second the bundle was written', () => {
     expect(isMenubarProcessStaleAgainstBundle(1_787_441_353_000, 1_787_441_353_700)).toBe(false);
   });
@@ -990,30 +916,9 @@ describe('isMenubarProcessStaleAgainstBundle', () => {
   });
 });
 
-/**
- * Drives `installMenubarLaunchAgentOnUpgrade` for real — the function the
- * #2109 storm lived in, and which had no test that executed it at all.
- *
- * Honest scope. Two things make a full convergence drive unreachable rather
- * than merely awkward, and both are properties of the code, not the harness:
- *  - `sourceAppPath()` resolves candidates relative to the MODULE's own
- *    location, so a fake source cannot be planted via HOME; planting one would
- *    mean writing into the source tree.
- *  - the install path refuses any bundle that fails `codesign` + `spctl`, so a
- *    synthetic bundle can never reach `installAndStartService`, and a real
- *    Developer-ID-signed one is not available in CI.
- *
- * What this ACTUALLY verifies, stated narrowly because the first version of
- * this comment claimed more than the assertions did: on a checkout where
- * `sourceAppPath()` finds no bundle the function returns at its first guard, so
- * what is pinned is that it completes without throwing, twice, and registers
- * nothing with the real service manager under a sandbox HOME. The stamp-marker
- * path is asserted below rather than merely claimed here.
- *
- * It does NOT exercise install, verification, or the stamp-on-heal rule — those
- * need a signed bundle. The regression class itself is closed structurally (one
- * resolved `src`, used for both install and stamp) rather than by this test.
- */
+/** Drives `installMenubarLaunchAgentOnUpgrade` for real (the #2109 storm lived here). A full
+ * convergence drive is unreachable: `sourceAppPath()` is module-relative and installs refuse
+ * unsigned bundles. Verifies it returns at the first guard, twice, under a sandbox HOME. */
 describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
   const savedHome = process.env.HOME;
   const savedRealHome = process.env.AGENTS_REAL_HOME;
@@ -1042,11 +947,9 @@ describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
       const launchAgents = path.join(home, 'Library', 'LaunchAgents');
       const plists = fs.existsSync(launchAgents) ? fs.readdirSync(launchAgents) : [];
       expect(plists.filter((f) => f.includes('menubar'))).toEqual([]);
-      // And no stamp. Reviewer-found: this checked `<HOME>/.agents/`, which is
-      // not where the stamp goes at all — `installedVersionMarkerPath()` writes
-      // `<HOME>/Library/Application Support/agents-cli/.menubar-version`. The
-      // assertion passed because nothing is stamped here either way, i.e. for
-      // the wrong reason. Point it at the real path.
+      // And no stamp. Reviewer-found: this checked `<HOME>/.agents/`, but
+      // `installedVersionMarkerPath()` writes `<HOME>/Library/Application
+      // Support/agents-cli/.menubar-version`, so it passed for the wrong reason.
       const marker = path.join(home, 'Library', 'Application Support', 'agents-cli', '.menubar-version');
       expect(fs.existsSync(marker)).toBe(false);
     } finally {
@@ -1055,12 +958,9 @@ describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
   });
 });
 
-// The npm tarball ships no helper bundle (PHNX-4036), so on an `npm i -g` Mac the
-// floor release's download cache is the ONLY source the network-free startup
-// self-heal can install from. These pin the two halves of that path: the cached
-// bundle must classify as the floor RELEASE (never `local`, which would flip the
-// stamp kind and reinstall forever — #2109), and the background worker must fetch
-// exactly when a fetch changes something.
+// The npm tarball ships no helper bundle (PHNX-4036), so the floor release's cache is the only
+// source for the network-free self-heal. Pins: the cached bundle classifies as the floor RELEASE
+// (never `local`, #2109); the worker fetches only when it helps.
 describe('release-path self-heal source (cached floor bundle)', () => {
   it('the cached floor bundle stamps as the floor release, not a local build', () => {
     const cached = cachedFloorBundlePath();

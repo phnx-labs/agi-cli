@@ -17,11 +17,8 @@ import { validateBrandName, getBrandConfig } from '../lib/brand.js';
 import { isShimsInPath } from '../lib/installations/shims.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
-/**
- * Optional/heavier top-level commands a brand commonly turns off. Kept short so
- * the checkbox is scannable — anything can still be toggled later with
- * `agents setup mine toggle <name> --disable <cmd>`.
- */
+/** Optional or heavier top-level commands a brand commonly disables, kept short so the checkbox is
+ * scannable; others can be toggled later with `agents setup mine toggle <name> --disable <cmd>`. */
 const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'teams', hint: 'coordinate multiple agents on shared work' },
   { name: 'cloud', hint: 'dispatch agent tasks to the cloud' },
@@ -32,11 +29,8 @@ const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'monitors', hint: 'event-triggered watchers' },
 ];
 
-/**
- * Interactive white-label setup. Returns true when a brand exists afterward,
- * false if the user backed out. Never throws on cancel — the `agents setup` hub
- * relies on that.
- */
+/** Interactive white-label setup; true when a brand exists afterward, false if the user backed out.
+ * Never throws on cancel; the `agents setup` hub relies on that. */
 async function runMineWizard(): Promise<boolean> {
   if (!isInteractiveTerminal()) {
     console.log(
@@ -105,10 +99,8 @@ function printNextSteps(name: string, pathWarning: boolean): void {
   }
 }
 
-/**
- * Register `agents setup mine` under the parent `setup` command.
- * Bare invocation runs the wizard; init/list/toggle/remove manage brands.
- */
+/** Register `agents setup mine`: bare invocation runs the wizard; init/list/toggle/remove manage
+ * brands. */
 export function registerSetupMineCommand(setupCmd: Command): void {
   const mineCmd = setupCmd
     .command('mine')

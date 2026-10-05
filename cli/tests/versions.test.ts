@@ -4,10 +4,9 @@ import * as path from 'path';
 import * as os from 'os';
 import { IS_WINDOWS, toPosix } from '../src/lib/platform/index.js';
 
-// Mock state.ts to redirect all paths to temp directory. Stash mutable
-// override state on globalThis instead of a top-level const — vitest 4
-// hoists vi.mock above local declarations (TDZ error) and Bun's native
-// runner doesn't expose vi.hoisted. globalThis is always initialized.
+// Mock state.ts to redirect paths to a temp dir. Mutable override state lives on globalThis, not a
+// top-level const: vitest 4 hoists vi.mock above local declarations (TDZ) and Bun's runner lacks
+// vi.hoisted.
 interface VersionsHoistedState {
   TEST_ROOT: string;
   AGENTS_DIR: string;
@@ -29,11 +28,9 @@ let PROJECT_AGENTS_DIR: string | null = null;
 let META: { agents?: Record<string, string> } = {};
 
 vi.mock('../src/lib/state.js', () => {
-  // Pull from globalThis at call time so vitest's hoisting of vi.mock above
-  // the local `hoistedState` binding (TDZ) doesn't break references. Seed
-  // the bucket here too — if vitest invokes the factory before the
-  // module-body const initializer runs, the consumer's first read still
-  // sees a real object instead of undefined.
+  // Pull from globalThis at call time so vitest's hoisting of vi.mock above `hoistedState` (TDZ)
+  // cannot break references; seed the bucket here too in case the factory runs before the const
+  // initializer.
   const nodeFs = require('node:fs') as typeof import('fs');
   const nodePath = require('node:path') as typeof import('path');
   const gt = globalThis as Record<string, unknown>;
@@ -113,10 +110,8 @@ vi.mock('../src/lib/plugins/plugins.js', () => ({
   cleanOrphanedPluginSkills: () => [],
 }));
 
-// The subagent registry (imported transitively via the staleness writer) reads
-// every transform binding when it builds its target table at import time, so the
-// mock must define them all even though these tests never invoke them
-// (listInstalledSubagents returns [] — nothing syncs).
+// The subagent registry (imported transitively via the staleness writer) reads every transform
+// binding at import time, so the mock must define them all although these tests never invoke them.
 vi.mock('../src/lib/subagents.js', () => ({
   listInstalledSubagents: () => [],
   parseSubagentFrontmatter: () => null,
@@ -543,11 +538,9 @@ describe('getNewResources', () => {
   });
 
   it('excludes project-only entries for kinds that sync intentionally skips', () => {
-    // Regression for the "infinite New resources prompt" bug. The available
-    // set unions project + user + system layers, but syncResourcesToVersion
-    // intentionally excludes the project layer for security on commands,
-    // skills, hooks, subagents, plugins, and workflows — so those project-only
-    // names would otherwise re-appear as "new" on every run.
+    // Regression for the "infinite New resources prompt": the available set unions project, user
+    // and system layers, but syncResourcesToVersion excludes the project layer for security, so
+    // project-only names reappeared as "new" every run.
     const available: AvailableResources = {
       commands: ['debug', 'project-only-cmd'],
       skills: ['mq', 'project-only-skill'],
@@ -916,13 +909,9 @@ describe('syncResourcesToVersion', () => {
     });
 
     it('ignores project commands and uses the user/system layer (security defense)', () => {
-      // The project `.agents/commands/` layer is intentionally excluded from
-      // sync — a cloned public repo could ship a malicious command body that
-      // fires when the user invokes the slash command. See commit 1cc35b14.
-      // The resolveResource API still surfaces project commands (so `agents
-      // commands list` and friends can show them) but the sync pipeline used
-      // by the shim only materializes user/system content. This test pins
-      // that contract.
+      // The project `.agents/commands/` layer is excluded from sync (commit 1cc35b14): a cloned
+      // public repo could ship a malicious command body. resolveResource still lists project
+      // commands, but the shim's sync only materializes user/system content. This pins that.
       setupCentralResources();
       const projectAgents = path.join(TEST_ROOT, 'project', '.agents');
       fs.mkdirSync(path.join(projectAgents, 'commands'), { recursive: true });
@@ -937,10 +926,9 @@ describe('syncResourcesToVersion', () => {
 
       syncResourcesToVersion('claude', '2.0.65', undefined, { projectDir: projectAgents, cwd: path.dirname(projectAgents) });
 
-      // debug.md lands because setupCentralResources() planted it in the user
-      // layer (line 701, body 'Debug things' / 'Debug prompt with $ARGUMENTS').
-      // The synced body must be the user-layer one, not the project marker —
-      // that proves the project layer was skipped.
+      // debug.md lands because setupCentralResources() planted it in the user layer; the synced
+      // body must be the user-layer one, not the project marker, proving the project layer was
+      // skipped.
       const commandsDir = path.join(getVersionHomePath('claude', '2.0.65'), '.claude', 'commands');
       const content = fs.readFileSync(path.join(commandsDir, 'debug.md'), 'utf-8');
       expect(content).toContain('Debug things');
@@ -1082,10 +1070,9 @@ describe('syncResourcesToVersion', () => {
     });
 
     it('writes openclaw rules to workspace/AGENTS.md (rules cap drives sync, not commands cap)', () => {
-      // Previously gated on COMMANDS_CAPABLE_AGENTS, which silently skipped
-      // openclaw even though it ships its own memory file. The registry now
-      // dispatches off the `rules` capability — openclaw's `{ file:
-      // 'workspace/AGENTS.md' }` writes correctly.
+      // Previously gated on COMMANDS_CAPABLE_AGENTS, which silently skipped openclaw although it
+      // ships its own memory file. The registry now dispatches on the `rules` capability, so
+      // openclaw's `{ file: 'workspace/AGENTS.md' }` writes correctly.
       setupCentralResources();
       const versionHome = path.join(AGENTS_DIR, 'versions', 'openclaw', '1.0.0', 'home');
       fs.mkdirSync(versionHome, { recursive: true });
@@ -1216,13 +1203,9 @@ describe('installVersion', () => {
   });
 
   it.skipIf(IS_WINDOWS)('keeps a concrete self-updating install label while recording the current release', async () => {
-    // A self-updating agent (no VERSION token in the installer) can't pin. A
-    // network-free `true` installer stands in for the real curl/brew script.
-    // A stub `agy` (antigravity's actual cliCommand — NOT the agent id) on
-    // PATH lets the post-install version probe resolve for real (RUSH-1321's
-    // own follow-up fix: installVersion no longer tolerates an unresolvable
-    // probe by silently falling back to the literal string 'latest' — see
-    // relocateGrokBinaryToVersionHome).
+    // A self-updating agent (no VERSION token) cannot pin. A network-free `true` installer stands
+    // in, and a stub `agy` on PATH lets the post-install probe resolve: installVersion no longer
+    // falls back to the string 'latest' on a failed probe (RUSH-1321).
     const original = AGENTS.antigravity.installScript;
     AGENTS.antigravity.installScript = 'true';
 

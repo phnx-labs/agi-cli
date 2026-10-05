@@ -1,8 +1,5 @@
-/**
- * Verifies parseDroid normalizes Droid's (Factory) message-envelope JSONL to
- * the shared SessionEvent shape, drops injected <system-reminder> context, and
- * detectAgent routes ~/.factory/ paths to the droid parser.
- */
+/** Verifies parseDroid normalizes Droid's (Factory) message-envelope JSONL to SessionEvent, drops
+ * injected <system-reminder> context, and detectAgent routes ~/.factory/ paths here. */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';

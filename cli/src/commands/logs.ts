@@ -1,25 +1,6 @@
-/**
- * `agents logs` — unified, discoverable run-log viewer + audit trail.
- *
- * Resolves a run across two substrates and shows (or `-f` follows) its log:
- *  - host-dispatch tasks (`agents run --device`) → combined-stdout log, offset-tailed
- *  - sessions (the local index) → transcript, tailed via the sessions tailer
- *
- * Subcommands:
- *  - `agents logs audit` — read the structured audit/event log
- *  - `agents logs stats` — show aggregate audit statistics
- *
- * Concise by default: a bare `agents logs <id>` prints the same summary digest as
- * `agents sessions <id>` — cheap for an agent to glance at. The token-heavy full
- * transcript / raw stdout is opt-in behind `--full` (alias `-m/--markdown`).
- *
- * `[id]`/`--session` load directly (host task tried first, then session). With no
- * id, `--device`/`--agent`/`--version` filter a merged candidate list; one match is
- * shown, several open the fuzzy picker (or, non-TTY, print the list).
- *
- * Additive: `agents devices ps`/`stop` and `agents sessions tail` are unchanged and
- * share the same underlying helpers (showHostTaskLog / streamSessionTail).
- */
+/** `agents logs`: unified run-log viewer and audit trail over host-dispatch tasks (`run --device`,
+ * offset-tailed) and sessions (transcript tail); `-f` follows. A bare `logs <id>` prints the cheap
+ * digest of `sessions <id>`; the full transcript is opt-in via `--full`. */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

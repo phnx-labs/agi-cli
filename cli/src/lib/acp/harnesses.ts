@@ -1,12 +1,6 @@
-/**
- * Per-harness spawn configuration for Agent Client Protocol (ACP) mode.
- *
- * Each entry describes how to launch a coding agent CLI as an ACP server
- * (stdio JSON-RPC). Unsupported harnesses (amp, goose-stdio) are omitted;
- * callers should fall back to the legacy direct-exec path for those.
- *
- * Sources: https://agentclientprotocol.com/get-started/agents + vendor docs.
- */
+/** Per-harness spawn configuration for ACP mode: how to launch each coding agent CLI as a stdio
+ * JSON-RPC server. Unsupported harnesses (amp, goose-stdio) are omitted and use the legacy
+ * direct-exec path. Sources: https://agentclientprotocol.com/get-started/agents and vendor docs. */
 
 import type { AgentId } from '../types.js';
 
@@ -65,11 +59,8 @@ const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
     confidence: 'documented',
     source: 'https://docs.x.ai/build/cli/headless-scripting',
   },
-  // antigravity: no documented ACP support (May 2026).
-  // goose: ACP over HTTP via `goosed`, not a clean stdio subcommand.
-  // copilot: excluded for now (not installed in the reference environment,
-  //                no local verification possible).
-  // amp: not on the ACP agents list.
+  // antigravity: no documented ACP support (May 2026). goose: ACP over HTTP via `goosed`, no stdio
+  // subcommand. copilot: excluded, not verifiable locally. amp: not on the ACP agents list.
 };
 
 /** Returns the ACP spawn spec for an agent, or undefined if the harness does not speak ACP. */

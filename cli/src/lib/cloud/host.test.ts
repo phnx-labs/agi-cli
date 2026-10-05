@@ -1,19 +1,6 @@
-/**
- * Host cloud provider — your machines behind the CloudProvider contract.
- *
- * The real bugs this guards against:
- *   1. Dispatch without a host must throw MissingTargetError('host') so the
- *      cloud CLI's standard target-picker flow engages — not a raw error.
- *   2. --repo/--branch must be refused loud: the host provider clones nothing,
- *      and silently accepting them would look like a repo-scoped run.
- *   3. A host task's sidecar statuses must map onto the canonical cloud enum
- *      with the reconcile rule intact: `unknown` is NOT a failure.
- *   4. message() on a run without a sessionId (non-Claude) must refuse with
- *      the follow-up-run suggestion instead of dispatching a resume that the
- *      remote CLI would reject.
- *   5. listTargets() must expose the unified pool minus non-dispatchable
- *      (password-auth) devices — the same filter cap routing applies.
- */
+/** Host cloud provider tests guard: dispatch without a host throws MissingTargetError('host');
+ * --repo/--branch refused loud; `unknown` sidecar status is not a failure; message() with no
+ * sessionId suggests a follow-up run; listTargets() drops password-auth devices. */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

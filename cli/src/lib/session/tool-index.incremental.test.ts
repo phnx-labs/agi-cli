@@ -1,13 +1,6 @@
-/**
- * The tool index reads a growing transcript incrementally (RUSH-2208).
- *
- * A live session's transcript only ever gets longer, but every scan used to
- * re-read it from byte 0 and delete + reinsert the whole session's evidence, so
- * indexing a session that was scanned N times cost N full parses of an
- * ever-larger file. These tests pin the resume path: which bytes are actually
- * read, that the calls already stored survive, and the cases that must still
- * fall back to a full re-read.
- */
+/** The tool index reads a growing transcript incrementally (RUSH-2208): scans used to re-read from
+ * byte 0 and reinsert a session's evidence each time. These tests pin the resume path: which bytes
+ * are read, that stored calls survive, and the cases that must still fall back to a full re-read. */
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -67,13 +60,9 @@ function storedCalls(sessionId: string) {
   `).all(sessionId) as Array<{ ordinal: number; source_call_id: string; input: string; rowid: number }>;
 }
 
-/**
- * Overwrite text in the already-parsed prefix, in place and at the same byte
- * length so later offsets still line up. Nothing writes a transcript this way —
- * it is a probe. A scan that re-read the prefix picks the new text up; a scan
- * that resumed past it cannot, which is what makes "only the tail was read" an
- * observable fact rather than an inference from row counts.
- */
+/** Overwrite text in the already-parsed prefix in place at the same byte length. Nothing writes
+ * transcripts this way; it is a probe: a scan that re-read the prefix sees the change, one that
+ * resumed past it cannot. */
 function mutatePrefix(session: SessionMeta, from: string, to: string): void {
   expect(Buffer.byteLength(to)).toBe(Buffer.byteLength(from));
   const body = fs.readFileSync(session.filePath, 'utf8');
@@ -112,12 +101,9 @@ describe('incremental tool index', () => {
   });
 
   it('accounts for every byte of a transcript larger than one read chunk', async () => {
-    // The stream reads in 64 KiB chunks, so records straddle chunk boundaries.
-    // Counting only the bytes a record contributed to the chunk that ENDED it
-    // silently loses the part carried in from the previous chunk: measured, a
-    // 4.8 MB transcript came up 22,888 bytes short, and the resume point then
-    // re-read (and re-derived) the tail of every split record on the next scan.
-    // A single-chunk fixture cannot catch this — hence the size here.
+    // The stream reads 64 KiB chunks, so records straddle boundaries. Counting only the bytes a
+    // record added to the chunk that ended it lost the carried part (a 4.8 MB transcript came up
+    // 22,888 bytes short), re-reading split-record tails.
     const body = Array.from({ length: 400 }, (_, i) =>
       callRecords(`bulk-${i}`, `git log --oneline -${i} # ${'x'.repeat(400)}`, `ok ${'y'.repeat(400)}`)).join('');
     const session = claudeSession('multi-chunk', body);

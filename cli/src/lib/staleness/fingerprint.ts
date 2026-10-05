@@ -1,8 +1,5 @@
-/**
- * File and directory fingerprinting primitives shared by every resource
- * checker. Two-tier comparison: stat (mtime+size) first for the hot path,
- * sha256 only on miss.
- */
+/** File and directory fingerprinting shared by every resource checker. Two tiers: stat
+ * (mtime+size) on the hot path, sha256 only on miss. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,17 +28,9 @@ export function fingerprintFile(filePath: string): Fingerprint | null {
   }
 }
 
-/**
- * Names we never fingerprint: OS metadata, VCS bookkeeping, dep caches,
- * build outputs. Matches the SKILL_COPY_IGNORE set used by the sync writer
- * in `src/lib/installations/versions.ts`.
- *
- * Important: this is an allowlist of noise, NOT a blanket "skip every
- * dot-prefixed entry". Plugins keep their manifest at
- * `.claude-plugin/plugin.json` — a dot-prefix skip would make plugin
- * manifests invisible to the fingerprint and silently break staleness
- * detection for plugins.
- */
+/** Names never fingerprinted: OS metadata, VCS bookkeeping, dep caches, build outputs (matches the
+ * writer's SKILL_COPY_IGNORE in `versions.ts`). Not a blanket dot-prefix skip: that would hide
+ * `.claude-plugin/plugin.json` and silently break plugin staleness. */
 const FINGERPRINT_SKIP = new Set([
   '.DS_Store',
   '.git',
@@ -51,11 +40,8 @@ const FINGERPRINT_SKIP = new Set([
   'node_modules',
 ]);
 
-/**
- * Fingerprint all files in a directory recursively. Returned sorted by
- * absolute path so ordering is deterministic regardless of readdir order.
- * Noise entries (see `FINGERPRINT_SKIP`) are excluded.
- */
+/** Fingerprint all files in a directory recursively, sorted by absolute path for deterministic
+ * order. Noise entries (`FINGERPRINT_SKIP`) are excluded. */
 export function fingerprintDir(dirPath: string): Fingerprint[] {
   const results: Fingerprint[] = [];
   function walk(dir: string): void {
@@ -89,11 +75,8 @@ export function isFileStale(stored: Fingerprint, currentPath: string): boolean {
   }
 }
 
-/**
- * Hot-path directory staleness. Compares sorted paths first (catches add /
- * remove / rename), then stat each file (skips reads when mtime+size match),
- * sha256 only on stat mismatch.
- */
+/** Hot-path directory staleness: compare sorted paths first (add/remove/rename), then stat each
+ * file, and sha256 only on stat mismatch. */
 export function isDirStale(storedDirPath: string, storedFiles: Fingerprint[], currentDirPath: string): boolean {
   if (storedDirPath !== currentDirPath) return true;
   const currentPaths = walkDirPaths(currentDirPath);
@@ -113,12 +96,9 @@ export function isDirStale(storedDirPath: string, storedFiles: Fingerprint[], cu
   return false;
 }
 
-/**
- * Walk a directory and return sorted absolute paths of every regular file.
- * No content reads. Uses the same FINGERPRINT_SKIP allowlist as
- * `fingerprintDir` so both produce the same path set (required for the
- * dir-stale path comparison to work).
- */
+/** Walk a directory and return sorted absolute paths of every regular file, no content reads. Uses
+ * the same FINGERPRINT_SKIP as `fingerprintDir` so both produce the same path set, which the
+ * dir-stale comparison requires. */
 function walkDirPaths(dirPath: string): string[] {
   const results: string[] = [];
   function walk(dir: string): void {

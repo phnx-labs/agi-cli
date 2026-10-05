@@ -99,12 +99,9 @@ fi
 
 [[ -f dist/index.js ]] || die "dist/index.js missing -- run scripts/build.sh first"
 
-# Stage a copy of the package with the dev version. We don't mutate the
-# working-tree package.json because that would dirty the tree mid-iteration
-# and confuse later builds. The package's own `bin` names (`agents`, `ag`,
-# `browser`) are kept as-is INSIDE $PREFIX so the dev install behaves
-# identically to the registry release; only the links published into $LINK_DIR
-# are renamed, so nothing on PATH collides with the registry install.
+# Stage a copy of the package with the dev version rather than mutating the working-tree
+# package.json. The package's own `bin` names stay inside $PREFIX; only the links published into
+# $LINK_DIR are renamed, so nothing on PATH collides with the registry install.
 STAGE_DIR=$(mktemp -d)
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
@@ -157,18 +154,9 @@ mkdir -p "$LINK_DIR"
 # symlinks, so the cleanup below cannot recognize them by their link target.
 DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
 
-# Remove a $LINK_DIR entry that a PRIOR run of THIS script created under a
-# production name. Two shapes qualify, one per platform:
-#
-#   POSIX   a symlink whose target points into the dev prefix.
-#   Windows a regular wrapper file that execs into the dev prefix. Older
-#           revisions wrote these with NO marker (they hardcoded the
-#           `agents-cli-dev` path), so recognizing them by content is the only
-#           thing that works -- a marker-only check silently repaired nothing on
-#           the one platform where the shadow is a file rather than a link.
-#
-# A real binary, or a link/wrapper pointing anywhere else (the registry install,
-# Homebrew, the user's own alias), is left exactly as it is.
+# Remove a $LINK_DIR entry that a prior run of this script created under a production name: on
+# POSIX a symlink into the dev prefix; on Windows a wrapper file that execs into it (older
+# revisions wrote those with no marker, so recognize by content).
 cleanup_legacy_shadow() {
   local path="$1" raw
   if [[ -L "$path" ]]; then
@@ -198,20 +186,9 @@ for bin in "${PRODUCTION_BINS[@]}"; do
   done
 done
 
-# A long-running service may have been pinned to a link we just removed. An
-# earlier revision of this script bounced the shared routines daemon onto the dev
-# build and recorded THAT path in the service manifest, so the daemon keeps
-# running from memory but dies on its next restart -- silently taking the
-# scheduler and browser IPC with it. Name it and hand over the
-# one command that repoints the manifest; do not restart a shared service the
-# caller did not ask us to touch.
-#
-# Match the EXACT path we removed, terminated. A bare substring test for
-# "$LINK_DIR/agents" also matches "$LINK_DIR/agents-dev", so a box that ran
-# --bounce-daemon (healthy manifest, pointing at agents-dev) plus any one stale
-# link would be told to restart a working daemon. Both manifest formats delimit
-# the path -- systemd quotes it, launchd wraps it in <string> -- so two fixed
-# string tests are enough and need no regex escaping of $LINK_DIR.
+# A service may be pinned to a link we just removed (an earlier revision bounced the shared daemon
+# onto the dev build), so it dies on next restart. Name it and print the repoint command; do not
+# restart it. Match the EXACT removed path: a substring of $LINK_DIR/agents also hits agents-dev.
 for manifest in \
   "$HOME/.config/systemd/user/agents-daemon.service" \
   "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"
@@ -264,30 +241,9 @@ LINKED_PATH="$LINK_DIR/agents$DEV_SUFFIX"
 [[ -e "$LINKED_PATH" ]] || die "agents$DEV_SUFFIX not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 
-# Bounce a running routines daemon onto this build (RUSH-2442).
-#
-# The npm postinstall hook is the registry-install path that restarts the
-# daemon so every subsystem it hosts (browser IPC, the scheduler, and more)
-# reloads the just-installed code. We strip that hook above so the PATH-nudge
-# and alias-shim flow don't fire for a side-by-side dev prefix — which also
-# skipped the restart, leaving those subsystems built from the PREVIOUS
-# install still running. (The secrets broker is a separate process owned by
-# the standalone `secrets` CLI now, PHNX-3989 — this daemon restart never
-# touches it.)
-#
-# Match postinstall.js healLongRunningProcesses: only when a daemon is
-# already running (never start one the user didn't want), best-effort and
-# non-fatal, skipped in CI and when AGENTS_NO_HEAL=1.
-#
-# OPT-IN (--bounce-daemon), because the daemon is SHARED. It hosts browser IPC and
-# the routines scheduler for the whole machine (NOT the secrets broker — that is a
-# separate process the standalone `secrets` CLI owns, PHNX-3989), and the
-# restart pins it to whichever binary is passed. Doing that automatically would
-# leave every `agents browser` and scheduled routine served by
-# a working-tree build while `agents` itself still looks untouched -- an invisible
-# takeover, and the same class of problem the dev bin rename fixes. Earlier
-# revisions justified the automatic restart on the premise that the dev build IS
-# what `agents` resolves to; that premise no longer holds.
+# Bounce a running routines daemon onto this build (RUSH-2442). The npm postinstall hook normally
+# restarts the daemon so browser IPC and the scheduler reload; we strip that hook for the
+# side-by-side dev prefix. Only bounce a daemon already running, never start one.
 if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" && "$BOUNCE_DAEMON" == true ]]; then
   INSTALLED_PKG="$PREFIX/lib/node_modules/$PKG_NAME"
   if [[ -f "$INSTALLED_PKG/dist/lib/daemon/daemon.js" ]]; then
@@ -323,12 +279,9 @@ fi
 green "  Ready"
 dim   "  $LINKED_PATH ($LINKED_VER)"
 
-# The cleanup above may have removed the only thing answering to `agents` on this
-# box. postinstall.js short-circuits its own ~/.local/bin link when `agents`
-# already resolves on the login PATH (`scripts/postinstall.js:311`), so on a box
-# where npm's global bin dir is not on that PATH, the dev shadow was what
-# satisfied that probe and npm never wrote a link of its own. Removing the shadow
-# is still right -- but say so instead of claiming `agents` is untouched.
+# The cleanup above may have removed the only thing answering to `agents`: postinstall.js skips
+# its own ~/.local/bin link when `agents` already resolves on the login PATH, so with npm's bin
+# dir off that PATH the dev shadow satisfied it. Say so; do not claim `agents` is untouched.
 if command -v agents >/dev/null 2>&1; then
   dim "  Run 'agents$DEV_SUFFIX <args>'. Your installed 'agents' is untouched."
 else

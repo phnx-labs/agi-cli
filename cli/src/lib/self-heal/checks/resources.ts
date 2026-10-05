@@ -1,7 +1,5 @@
-// resources check — reconciles each installed version's home against the DotAgents
-// definitions (commands, skills, hooks, rules, mcp, plugins). This is a thin adapter
-// over the existing, battle-tested heal() engine (lib/heal.ts) — no behavior change;
-// it just re-expresses heal()'s result in the unified CheckResult shape.
+// resources check: reconciles each installed version's home against the DotAgents definitions. A
+// thin adapter over heal() (lib/heal.ts) that re-expresses its result as a CheckResult.
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';

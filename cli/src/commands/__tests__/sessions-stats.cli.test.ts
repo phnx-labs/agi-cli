@@ -31,12 +31,9 @@ afterAll(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-/**
- * Drives the REAL CLI: the parent `sessions` command declares --json/--agent/
- * --plugin/--since AND a positional [query], so commander keeps binding those to
- * the PARENT past the subcommand name. `sessions stats` reads them via
- * optsWithGlobals — a direct action call can't see that binding, only a spawn.
- */
+/** Drives the real CLI: the parent `sessions` declares --json/--agent/--plugin/--since and a
+ * positional [query], so commander binds them to the parent past the subcommand name. `sessions
+ * stats` reads them via optsWithGlobals, which only a spawn can see. */
 describe('agents sessions stats (real CLI parse)', () => {
   it('emits the versioned stats envelope on --json even though the parent owns --json', () => {
     const res = run(['sessions', 'stats', '--json']);

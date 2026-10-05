@@ -1,11 +1,6 @@
-/**
- * The fd-3 context is the engine's input contract, so its SHAPE is the thing
- * under test: the engine accepts `version`/`permissions`/`peers`/`target`/
- * `session` and nothing else. A field the engine does not read is not a
- * harmless extra — it is a second, drifting copy of an answer the engine
- * already resolves for itself (the transport it hydrates from its own tunnel
- * state, for one).
- */
+/** The fd-3 context is the engine's input contract, so its shape is under test: only
+ * `version`/`permissions`/`peers`/`target`/`session`. An extra field is a drifting copy of an
+ * answer the engine already resolves. */
 import { describe, expect, it, afterEach } from 'vitest';
 import { buildComputerContext } from './context.js';
 

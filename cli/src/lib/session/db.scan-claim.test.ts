@@ -1,9 +1,6 @@
-/**
- * RUSH-2682: `scanInProgressByLivePid` is the read-only probe that lets a
- * cold-miss repair wait for a concurrent scan instead of returning the pre-scan
- * snapshot. It must report a scan in progress ONLY when a LIVE process holds the
- * claim within its TTL — a dead-PID or expired claim is not a running scan.
- */
+/** RUSH-2682: `scanInProgressByLivePid` lets a cold-miss repair wait for a concurrent scan instead
+ * of returning the pre-scan snapshot. It reports a scan only when a LIVE process holds the claim
+ * within its TTL; a dead-PID or expired claim is not a scan. */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

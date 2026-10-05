@@ -121,15 +121,9 @@ policy_version_of() {
     "$root/scripts/ci-scope.ts"
   do
     [[ -f "$f" ]] || continue
-    # Label with the path RELATIVE to $root, not $f itself: release.sh re-execs
-    # into a freshly-named throwaway worktree on every invocation
-    # (.agents/worktrees/release-v<version>-<pid>), and any producer runs in
-    # its own separate worktree too, so no two callers ever share one literal
-    # $root. Hashing the absolute path made this digest un-reproducible
-    # across every real caller pair -- identical file content at two
-    # different checkouts of the exact same commit hashed to different
-    # policyVersion values, so no attestation any producer wrote could ever
-    # satisfy release.sh's own require() call.
+    # Label with the path relative to $root, not $f: release.sh and each producer run in separate,
+    # freshly-named worktrees, so hashing the absolute path gave one commit different
+    # policyVersion values and no attestation satisfied require().
     rel="${f#"$root"/}"
     concat+="$(file_sha256 "$f")  $rel"$'\n'
   done
@@ -245,10 +239,9 @@ missing_key_msg() {
     "${TREE:-?}" "${LOCK_DIGEST:-?}" "${POLICY:-?}" "${BUN_VER:-?}" "${NODE_VER:-?}" "${PLATFORM:-?}" "${SUITE:-selected}"
 }
 
-# Lookup binds the *tree under test* (and lock/policy hashed from that tree).
-# Toolchain/platform stay on the record as the tester's identity; they are NOT
-# re-keyed from the releaser's PATH, or Linux orchestration and a Darwin home
-# base could never share one attestation.
+# Lookup binds the tree under test (and lock/policy hashed from it). Toolchain/platform stay on
+# the record as the tester's identity and are not re-keyed from the releaser's PATH, or Linux
+# orchestration and a Darwin home base could never share an attestation.
 bind_tree_lock_policy() {
   if [[ -z "$LOCK_DIGEST" || -z "$POLICY" ]]; then
     local root
@@ -327,12 +320,9 @@ promote_tarball() {
   printf '%s\n' "$TGZ"
 }
 
-# A release commit may change ONLY these paths, relative to the CLI dir (`cli/`
-# pre/post flatten `apps/cli/`). This mirrors exactly what release.sh stages:
-# `git add -A package.json CHANGELOG.md .changelog docs/command-index.{md,json}`
-# run from the CLI dir. Any other changed path means the release tree carries
-# code (or config the suite depends on) the base attestation never tested, so
-# derive MUST refuse and the caller MUST run the real suite.
+# A release commit may change only these paths, relative to the CLI dir, mirroring what release.sh
+# stages. Any other changed path means untested code, so derive must refuse and the caller must
+# run the real suite.
 release_diff_is_metadata_only() {
   local root="$1" base_tree="$2" rel_tree="$3" line rel
   local changed
@@ -374,10 +364,8 @@ derive_release_tree() {
   name="$(basename "$TGZ")"
   digest="sha256:$(file_sha256 "$TGZ")"
 
-  # Inherit lock/policy/toolchain/suite from the base. The allowlist above proves
-  # bun.lock and the policy inputs are byte-identical between the two trees, so an
-  # inherited value equals what release.sh's require() recomputes from the release
-  # tree -- the record still keys exactly to the tree it is for.
+  # Inherit lock/policy/toolchain/suite from the base. The allowlist above proves bun.lock and the
+  # policy inputs are byte-identical, so the inherited value equals what require() recomputes.
   jq -nc \
     --arg commit "$rel_commit" \
     --arg tree "$rel_tree" \

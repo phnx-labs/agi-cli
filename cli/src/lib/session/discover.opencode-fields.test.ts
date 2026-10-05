@@ -30,12 +30,9 @@ const SESSION_ID = 'ses_fields0000000000000000';
 const T0 = Date.UTC(2026, 7, 1, 0, 0, 0);
 const T1 = T0 + 5000; // duration 5000ms
 
-// Session transcripts sync across the fleet, so a cwd recorded on ONE platform is
-// parsed on every other (RUSH-2358). These two rows hardcode literal separators
-// instead of going through `path.join` (which would only ever produce this host's
-// native separator), so the assertions below hold no matter which OS runs the
-// suite — a forward-slash cwd recorded on Linux/macOS, and a backslash cwd
-// recorded on Windows, both read correctly everywhere.
+// Transcripts sync across the fleet, so a cwd from one platform is parsed on every other
+// (RUSH-2358). These rows hardcode literal separators instead of `path.join`, so assertions hold
+// on any OS: a forward-slash cwd from Linux/macOS and a backslash cwd from Windows.
 const SESSION_ID_POSIX = 'ses_fieldsposix000000000000';
 const POSIX_SLUG = 'posix-feature';
 const POSIX_CWD = '/home/dev/repo/.agents/worktrees/posix-feature';
@@ -109,10 +106,9 @@ beforeAll(async () => {
         JSON.stringify({ id: 'claude-x', providerID: 'anthropic' }), T0, T1);
   oc.close();
 
-  // account resolves from auth.json (resolveOpenCodeAccountId), NOT the
-  // control_account table above — that table exists in real installs but is
-  // permanently empty there, so a lookup against it always yields undefined
-  // (RUSH-2358). One valid provider credential proves the real path.
+  // The account resolves from auth.json (resolveOpenCodeAccountId), NOT the `control_account`
+  // table, which exists in real installs but is permanently empty (RUSH-2358). One valid provider
+  // credential proves the real path.
   const authPath = path.join(tmpHome, '.local', 'share', 'opencode', 'auth.json');
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
   fs.writeFileSync(authPath, JSON.stringify({ anthropic: { type: 'api', key: 'sk-test-key' } }));
@@ -166,12 +162,9 @@ describe('OpenCode field parity (RUSH-2358)', () => {
     const win = db.getSessionById(SESSION_ID_WIN);
     expect(win!.worktreeSlug).toBe(WIN_SLUG);
 
-    // The slug assertions above do NOT discriminate a fixed normalizeCwd from a
-    // broken one: WORKTREE_RE matches `[\\/]` anywhere in the string, and the
-    // pre-fix `path.resolve()` only PREFIXES the reading process's cwd, leaving
-    // the `\.agents\worktrees\win-feature` substring intact for the regex to
-    // find by coincidence. The stored cwd is what actually regresses, so assert
-    // that directly — this is the assertion that fails without the fix.
+    // The slug assertions above do not discriminate a fixed normalizeCwd from a broken one:
+    // WORKTREE_RE matches `[\\/]` anywhere and the old `path.resolve()` only prefixed the cwd,
+    // leaving the substring. The stored cwd is what regresses, so assert it directly.
     expect(win!.cwd).toBe(WIN_CWD);
     expect(win!.cwd).not.toContain(process.cwd());
     expect(posix!.cwd).toBe(POSIX_CWD);

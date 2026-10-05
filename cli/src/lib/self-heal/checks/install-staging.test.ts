@@ -1,7 +1,5 @@
-// Tests for the install-staging self-heal check (PHNX-3393): fleet-wide
-// removal of an orphaned npm reify staging dir on a box that is not actively
-// mid-upgrade, with a 10-minute age guard so a concurrent live reify is never
-// touched.
+// Tests for the install-staging self-heal check (PHNX-3393): removes an orphaned npm reify staging
+// dir, with a 10-minute age guard so a live reify is never touched.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';

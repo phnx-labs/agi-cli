@@ -1,20 +1,6 @@
-/**
- * Canonical agent-package resolver (PHNX-3838).
- *
- * `resolveAgentPackage` is the ONE place that decides what a package's logical
- * resources are: it validates the manifest, resolves every declared resource
- * path against the package directory (failing closed on anything missing,
- * malformed, or escaping the package root), hashes each resource
- * deterministically, and applies the package's conflict-resolution rule —
- * within one scope (portable, or one harness's overlay) a duplicate
- * `(kind, name)` is a hard validation error; across scopes, an overlay
- * resource deterministically replaces the portable resource of the same
- * `(kind, name)` when a harness materializes it (`effectiveResources`).
- *
- * This module never writes to disk and never knows about any specific
- * harness's native format — `materialize.ts` is the only consumer of
- * `effectiveResources`, and it owns projection, not resolution.
- */
+/** Canonical agent-package resolver (PHNX-3838): the one place deciding a package's logical
+ * resources. It validates the manifest, resolves paths failing closed on missing, malformed or
+ * escaping ones, hashes them, and errors on a duplicate `(kind, name)` in one scope. */
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -33,15 +19,9 @@ import type {
   ResourceProvenance,
 } from './package-types.js';
 
-/**
- * Reject a package source that is a symlink, or that resolves (through a
- * symlinked ancestor) outside the package's real root. `assertWithin` above is a
- * TEXTUAL check — `path.resolve` normalizes `..` but never follows links — so a
- * `skills/evil -> /home/user/.ssh` symlink, or an `instructions.md ->
- * /etc/passwd` symlink, passes it while the actual bytes read/copied come from
- * OUTSIDE the package. This is the containment check that makes the copy safe.
- * A missing source is left for the `requireFile`/`requireDir` caller to report.
- */
+/** Reject a package source that is a symlink or resolves through a symlinked ancestor outside the
+ * package root. `assertWithin` is textual (`path.resolve` never follows links), so `skills/evil ->
+ * ~/.ssh` passes it while the bytes come from outside. A missing source is left to the caller. */
 function assertRealSourceWithin(abs: string, packageReal: string, label: string): void {
   let lst: fs.Stats;
   try {
@@ -315,13 +295,9 @@ export function resolveAgentPackage(packageDir: string): ResolvedAgentPackage {
   };
 }
 
-/**
- * The resource set a specific harness actually materializes: portable
- * resources, with any harness-overlay resource of the same `(kind, name)`
- * deterministically replacing its portable counterpart, plus overlay-only
- * additions. This is the ONE merge rule every harness adapter shares —
- * `materialize.ts` calls this instead of re-deriving precedence per harness.
- */
+/** The resource set a harness materializes: portable resources, with a same-`(kind, name)` overlay
+ * replacing its portable counterpart, plus overlay-only additions. The one merge rule every
+ * harness adapter shares. */
 export function effectiveResources(resolved: ResolvedAgentPackage, harness: AgentId): ResolvedResource[] {
   const overlay = resolved.overlays[harness] ?? [];
   const overlayKeys = new Set(overlay.map((r) => `${r.kind}:${r.name}`));

@@ -27,13 +27,9 @@ function homeWithOneServer(): string {
   return home;
 }
 
-/**
- * Run the built writer against `home` and return its WriteResult.
- *
- * Resolved through `getWriter` — the same accessor `syncResourcesToVersion`
- * uses. Importing `writers/mcp.js` directly as an entry point trips the
- * pre-existing module-init cycle `lazy-map.ts` documents.
- */
+/** Run the built writer against `home` and return its WriteResult, through `getWriter` like
+ * `syncResourcesToVersion`. Importing `writers/mcp.js` directly as an entry point trips the
+ * module-init cycle `lazy-map.ts` documents. */
 function write(home: string, agent: string): { synced: string[]; errors?: string[] } {
   const moduleUrl = pathToFileURL(path.resolve('dist/lib/staleness/registry.js')).href;
   const versionHome = path.join(home, '.agents', '.history', 'versions', agent, '1.0.0', 'home');
@@ -58,10 +54,9 @@ afterEach(() => {
 });
 
 describe('mcp writer surfaces a refusal instead of swallowing it', () => {
-  // RUSH-2677: `installMcpServers` reported the refusal, and this writer threw
-  // its `errors` away (`return { synced: r.applied }`), so a harness with no
-  // config writer produced `synced: []` — indistinguishable from "nothing to
-  // sync" — and `agents sync` printed nothing at all.
+  // RUSH-2677: `installMcpServers` reported the refusal but this writer discarded its `errors`, so
+  // a harness with no config writer produced `synced: []`, indistinguishable from 'nothing to
+  // sync', and `agents sync` printed nothing.
   it.skipIf(IS_WINDOWS)('forwards the reason a harness could not be written', () => {
     const result = write(homeWithOneServer(), 'copilot');
     expect(result.synced).toEqual([]);

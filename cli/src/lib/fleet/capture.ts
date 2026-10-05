@@ -1,18 +1,6 @@
-/**
- * Serialize the live environment into a `fleet:` manifest.
- *
- * `captureFleet` is PURE — it takes the previous manifest plus already-gathered
- * inputs (device names, per-device agent specs, browser profiles, secret-bundle
- * names, routine names) and returns the new manifest. All I/O (registry read,
- * `agents secrets`/`routines` enumeration, YAML write) happens in the command
- * (`commands/fleet-capture.ts`); keeping this pure makes the privacy contract —
- * NAMES ONLY, never IPs/usernames — trivially unit-testable.
- *
- * Additive by design: it merges OVER an existing manifest and never clobbers a
- * hand-authored per-device override (`agents:` you set by hand wins over a
- * captured one). The captured roster reflects live state, so it becomes the
- * source of truth for WHICH devices exist.
- */
+/** Serializes the live environment into a `fleet:` manifest. `captureFleet` is pure (previous
+ * manifest plus gathered inputs); all I/O lives in `commands/fleet-capture.ts`, so the
+ * names-only privacy contract (never IPs or usernames) is testable. */
 
 import type {
   FleetManifest,
@@ -33,27 +21,17 @@ export interface CaptureInputs {
   routines?: string[];
 }
 
-/**
- * Build the new `fleet:` manifest from the previous one and captured inputs.
- * Pure — no SSH, no filesystem, no registry. The returned object carries device
- * names + desired state only; a caller that serializes it to YAML can assert no
- * address/username ever appears.
- */
+/** Builds the new `fleet:` manifest from the previous one and captured inputs. Pure; the result
+ * carries device names and desired state only, so serializing it can assert no address or
+ * username appears. */
 export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInputs): FleetManifest {
   const prevDevices = prev && prev.devices !== 'all' && typeof prev.devices === 'object'
     ? prev.devices
     : {};
 
-  // Roster: explicit map of the captured names. A hand-authored override for a
-  // device that still exists is preserved; a captured agent list only fills in
-  // when the manifest didn't already pin one for that device.
-  //
-  // A device absent from `inputs.devices` drops OUT of the roster — that is the
-  // intended "live state is the source of truth for WHICH devices exist". A
-  // leftover `config:` on an override is the LEGACY #2458 store (folded into
-  // per-device docs by migrateDeviceConfigStores). Carry it forward so a
-  // capture from a box that has not seen a peer cannot re-strip a not-yet-
-  // migrated peer's settings. Config only, never its roster fields.
+  // Roster: a hand-authored override for a still-existing device is preserved; a captured agent
+  // list fills in only when none is pinned. A device absent from `inputs.devices` drops out.
+  // A legacy `config:` (#2458) is carried forward so capture cannot re-strip an unmigrated peer.
   const devices: Record<string, FleetDeviceOverride> = {};
   for (const [name, prevOverride] of Object.entries(prevDevices)) {
     if (inputs.devices.includes(name)) continue; // handled by the roster loop below

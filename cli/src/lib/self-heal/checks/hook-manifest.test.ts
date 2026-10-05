@@ -1,7 +1,5 @@
-// Tests for the hook-manifest check. The scenario under test is the real
-// main-branch-guard failure: a manifest entry pointing outside <root>/hooks/
-// resolves to null, the hook is dropped without a word, and the config still
-// claims it is installed.
+// Tests for the hook-manifest check, using the real main-branch-guard failure: a manifest entry
+// outside <root>/hooks/ resolves to null and is silently dropped.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 

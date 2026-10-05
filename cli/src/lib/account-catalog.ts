@@ -151,14 +151,9 @@ export interface NativeAccountCatalogRow {
   checkedAt: string | null;
   devices: AccountDeviceVerdict[];
   usage: QuotaSummary | null;
-  /**
-   * The live usage snapshot backing `usage`, or null when none was collected.
-   * Carried alongside the collapsed `QuotaSummary` so the per-window bars
-   * (S: session 5h, W: week 7d, etc.) can render via the canonical
-   * `formatUsageSummary` / `pickCompactUsageWindows` path instead of the
-   * single max-percent bar. Added non-breaking: JSON clients keep `usage`
-   * and may read this when present.
-   */
+  /** The live usage snapshot backing `usage`, or null if none was collected. Lets per-window bars
+   * (session 5h, week 7d) render via `formatUsageSummary`/`pickCompactUsageWindows` instead of the
+   * single max-percent bar. Non-breaking for JSON clients. */
   usageSnapshot?: UsageSnapshot | null;
   /** Raw usage fetch error, for headless/unverified labeling alongside the bars. */
   usageError?: string | null;
@@ -355,10 +350,9 @@ export function buildNativeCatalog(
     groups.set(key, group);
   }
 
-  // A registered account whose identity has no discovered home still belongs in
-  // the catalog — it just has nothing live to connect through yet. Its
-  // `identityKey` is the same value a home row groups on (a raw accountKey, or
-  // an already-lowercased email), so an exact-key check finds the existing group.
+  // A registered account with no discovered home still belongs in the catalog, with nothing live to
+  // connect through yet. Its `identityKey` matches a home row's group value (raw accountKey or
+  // lowercased email), so an exact-key check finds the existing group.
   for (const account of registered) {
     const key = keyOf(account.agent, account.identityKey);
     if (!groups.has(key)) {
@@ -450,12 +444,9 @@ function tokenFileDate(mtimeMs: number): string {
   return `${TOKEN_FACT_MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
-/**
- * The non-secret scheme prefix of a Claude token — `sk-ant-oat01` for a
- * setup-token, `sk-ant` for another Claude scheme, `token` otherwise. NEVER the
- * secret body: only a fixed, publicly-documented prefix is returned so the fact
- * can be printed and fleet-synced safely (root AGENTS.md §Security).
- */
+/** The non-secret scheme prefix of a Claude token (`sk-ant-oat01` setup-token, `sk-ant` other, else
+ * `token`). NEVER the secret body: only a fixed, publicly documented prefix, so the fact can be
+ * printed and fleet-synced safely (root AGENTS.md Security). */
 function safeTokenPrefix(raw: string): string {
   const value = raw.trim();
   if (value.startsWith('sk-ant-oat01')) return 'sk-ant-oat01';
@@ -463,13 +454,9 @@ function safeTokenPrefix(raw: string): string {
   return 'token';
 }
 
-/**
- * The token FACT for a Claude account ON THIS BOX (PHNX-4116): the slot/home
- * `.claude/.oauth_token` scheme prefix + its file date, else a present native
- * credential, else `no token`. For non-Claude native rows it reports credential
- * presence generically. `dir` is the slot dir when the account has one, else the
- * local version home. A fact, never a verdict.
- */
+/** The token FACT for a Claude account ON THIS BOX (PHNX-4116): the `.claude/.oauth_token` scheme
+ * prefix plus file date, else a present native credential, else `no token`; generic presence for
+ * non-Claude rows. `dir` is the slot dir, else the local version home. A fact, never a verdict. */
 export function readTokenFact(agent: AgentId, dir: string | null): string {
   if (!dir) return 'no token';
   if (agent === 'claude') {
@@ -513,11 +500,9 @@ export function toProviderRow(account: CredentialAccount, meta: Pick<Meta, 'acco
   };
 }
 
-/**
- * Wire the real collectors to the pure builder. This is the canonical
- * account-first read model `view.ts` renders: native identities (account +
- * connection first, release/home secondary) plus durable provider credentials.
- */
+/** Wire the real collectors to the pure builder: the canonical account-first read model `view.ts`
+ * renders (native identities with connection first, release/home second, plus durable provider
+ * credentials). */
 export async function loadAccountCatalog(): Promise<AccountCatalog> {
   const meta = readMeta();
   const native = buildNativeCatalog(await collectNativeHomeRows(), meta);
@@ -634,12 +619,9 @@ function providerListEntry(
   };
 }
 
-/**
- * Unfiltered JSON emits one entry per harness the credential authenticates
- * (same `id`, `kind: 'provider'`, each with its own `harness`), plus one
- * `harness: null` entry for an orphan. A harness filter emits only that
- * harness's entry. The v2 field set is otherwise unchanged.
- */
+/** Unfiltered JSON emits one entry per harness the credential authenticates (same `id`, `kind:
+ * 'provider'`, own `harness`) plus one `harness: null` entry for an orphan; a harness filter emits
+ * only that harness's entry. Other v2 fields unchanged. */
 function providerJsonEntries(
   row: ProviderAccountCatalogRow,
   harness?: AgentId,
@@ -770,11 +752,8 @@ interface ListingLine {
   isDefault: boolean;
 }
 
-/**
- * Colour the auth FACT by what it states (PHNX-4116): a recent success is green,
- * a server rejection red, a throttle yellow, and "not used on this box yet" the
- * neutral gray of a fact that carries no alarm.
- */
+/** Colour the auth FACT by what it states (PHNX-4116): recent success green, server rejection red,
+ * throttle yellow, and "not used on this box yet" neutral gray. */
 export function authFactNote(lastAuth: string): string {
   if (lastAuth.startsWith('last used ok')) return chalk.green(lastAuth);
   if (lastAuth.startsWith('last auth failure')) return chalk.red(lastAuth);

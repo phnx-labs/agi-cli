@@ -1,22 +1,6 @@
-/**
- * Activity log -- an append-only, per-session stream of agent-semantic events
- * (plan created, PR opened, worktree created, sub-agent spawned, file edited).
- *
- * This is the counterpart to the feed block store: the block store is
- * last-writer-wins STATE ("this agent is waiting on you"), while the activity
- * log is an append-only EVENT stream ("this agent did X at T"). Together they
- * let `agents feed` show both open decisions and a running activity lane
- * without ever re-parsing session transcripts -- events are emitted at hook
- * time by `11-activity-log.py` and read back by tailing the log.
- *
- * Layout: <activityDir>/<sessionId>.jsonl  (one append-only file per session)
- *   Each line is one {@link ActivityEvent}. Files are keyed by session so a
- *   plain O_APPEND write is race-free (a session has a single writer process).
- *
- * Event tiers:
- *   - `milestone` -- recognizable deliverables, always surfaced individually.
- *   - `activity`  -- routine work (file edits), collapsed to counts by readers.
- */
+/** Activity log: an append-only per-session event stream (`<activityDir>/<sessionId>.jsonl`, one
+ * single-writer file so O_APPEND is race-free). The counterpart to the feed block store, which
+ * is last-writer-wins state; events are written by `11-activity-log.py` and read by tailing. */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -56,23 +40,13 @@ type MilestoneEvent =
   | 'metadata.edited'
   /** Deliberate agent-authored progress post (`agents feed post`). */
   | 'status.posted'
-  /**
-   * An agent terminal spawned from AGI EXT, the VS Code extension. A milestone
-   * because it is the BIRTH of a session — it carries the sessionId and the
-   * terminalId that every later event on that session joins through, the same
-   * way `subagent.spawned` roots a sub-agent. Written out of process by
-   * `agents events emit`; the other factory.* kinds are operational-only.
-   */
+  /** An agent terminal spawned from AGI EXT. A milestone because it is the birth of a session,
+   * carrying the sessionId and terminalId later events join through. Written out of process by
+   * `agents events emit`; other factory.* kinds are operational-only. */
   | 'factory.launch'
-  /**
-   * The same post, but the agent is STUCK (`agents feed post --blocked`).
-   *
-   * A distinct event rather than a flag on `status.posted` because it is a
-   * different kind of thing in the stream: a benign update is history the
-   * moment it lands, while a blocked post stays open until someone answers it.
-   * Readers that show "what needs a human" select on this; readers that show
-   * "what happened" get both.
-   */
+  /** Same post but the agent is STUCK (`agents feed post --blocked`). A distinct event, not a
+   * flag, because a blocked post stays open until answered; "what needs a human" readers select
+   * on it, "what happened" readers get both. */
   | 'status.blocked';
 
 /** Routine activity events, collapsed to counts by readers. */
@@ -85,12 +59,8 @@ export type ActivityTier = 'milestone' | 'activity';
 /** Well-known attachment kinds; the field is an open string, not an enum. */
 export type AttachmentKind = 'link' | 'file' | 'image' | 'audio' | 'video';
 
-/**
- * A generic artifact carried by a progress update — a rendered plan, an audio
- * take, a preview URL. Deliberately domain-agnostic: `kind` is an open string,
- * and `meta` is an open bag (duration, width, …) so any producer can attach
- * anything without a schema change.
- */
+/** A generic artifact on a progress update (plan, audio, preview URL). Domain-agnostic: `kind`
+ * is an open string and `meta` an open bag. */
 export interface Attachment {
   /** Coarse kind for glyph/rendering; open string, not a closed enum. */
   kind: AttachmentKind | string;
@@ -124,11 +94,8 @@ export const MILESTONE_EVENTS: readonly MilestoneEvent[] = [
   'image.upscaled',
   'metadata.edited',
   'status.posted',
-  // NOTE: intentionally absent from the Python hook's own MILESTONE_EVENTS copy
-  // (see ACTIVITY_LOG_HOOK_SCRIPT below) — that set only classifies events the
-  // hook itself writes from PreToolUse/PostToolUse, and the hook never writes
-  // this one. activity.test.ts pins the difference so the divergence stays
-  // deliberate rather than becoming drift.
+  // Intentionally absent from the Python hook's MILESTONE_EVENTS copy: that set only classifies
+  // events the hook writes itself. activity.test.ts pins the difference so it stays deliberate.
   'factory.launch',
   'status.blocked',
 ];
@@ -158,12 +125,8 @@ export interface ActivityEvent {
   runtime: string;
   /** Working directory at event time -- the join key to a project/git repo. */
   cwd?: string;
-  /**
-   * Project/repo name stamped by the writer (basename of cwd, worktree-aware),
-   * so a progress post carries its project even without a live-session join.
-   * Read-time enrichment ({@link enrichActivityEvents}) still fills it for
-   * hook-written events that lack it.
-   */
+  /** Project/repo name stamped by the writer (worktree-aware); read-time enrichment still fills
+   * it for hook-written events. */
   project?: string;
   /** Agent that produced the event (claude, codex, ...). */
   agent?: string;
@@ -175,11 +138,8 @@ export interface ActivityEvent {
   tool?: string;
   /** One-line human summary (plan title, PR command, sub-agent role, status text). */
   detail?: string;
-  /**
-   * Short subject for deliberate status posts (`feed post --title`). Phone
-   * broadcasts put this on the first line; `detail` is the body. Optional on
-   * older events that only carried `detail`.
-   */
+  /** Short subject for deliberate status posts (`feed post --title`); `detail` is the body.
+   * Absent on older events. */
   title?: string;
   /** Extracted URL when the event has one (e.g. the opened PR). */
   url?: string;
@@ -201,11 +161,8 @@ export interface ActivityEvent {
   attachments?: Attachment[];
 }
 
-/**
- * Coerce an unknown value into a clean {@link Attachment}[] — a fail-open reader
- * over user/agent-written JSON. Drops entries without a usable `href`, clamps
- * `kind` to a string, and keeps only primitive `meta` values.
- */
+/** Coerces unknown input into a clean Attachment[]: fail-open, drops entries without a usable
+ * `href`, clamps `kind` to a string, and keeps only primitive `meta` values. */
 export function sanitizeAttachments(value: unknown): Attachment[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const out: Attachment[] = [];
@@ -239,11 +196,8 @@ function activityPath(root: string, sessionId: string): string {
   return path.join(root, `${safe}.jsonl`);
 }
 
-/**
- * Append one event to a session's activity log. Primarily the Python hook
- * writes these at runtime; this TS writer exists for tests and any in-process
- * emitter. Uses O_APPEND so concurrent appends never interleave a line.
- */
+/** Appends one event to a session's log. The Python hook is the runtime writer; this exists for
+ * tests and in-process emitters. Uses O_APPEND so concurrent appends never interleave. */
 export function appendActivityEvent(
   event: Omit<ActivityEvent, 'v' | 'tier'> & { v?: number; tier?: ActivityTier },
   root?: string,
@@ -259,10 +213,7 @@ export function appendActivityEvent(
   fs.appendFileSync(activityPath(dir, event.sessionId), `${JSON.stringify(record)}\n`, { mode: 0o644 });
 }
 
-/**
- * Parse one activity log line. Tolerant by design: a blank, corrupt, or
- * half-written line is skipped rather than failing the whole read.
- */
+/** Parses one activity log line. Tolerant: a blank, corrupt or half-written line is skipped. */
 export function parseActivityLine(line: string): ActivityEvent | undefined {
   const trimmed = line.trim();
   if (!trimmed) return undefined;
@@ -487,20 +438,15 @@ interface RecentActivityOptions {
   root?: string;
   /** Per-session tail budget in bytes. */
   maxBytesPerSession?: number;
-  /**
-   * Only include these event names. Applied BEFORE `limit`, so asking for a
-   * rare event (a deliberate `status.posted`) returns that many of it instead
-   * of however many survive a slice dominated by routine `file.edited` churn.
-   */
+  /** Only include these event names, applied before `limit` so a rare event is not crowded out
+   * by routine `file.edited` churn. */
   events?: string[];
   /** Only include events in these tiers. Applied BEFORE `limit`, as `events` is. */
   tier?: ActivityTier;
 }
 
-/**
- * Merge recent events across every session's log, newest first. Reads only the
- * tail of each file, so cost scales with active sessions, not transcript size.
- */
+/** Merges recent events across every session log, newest first. Reads only each file's tail, so
+ * cost scales with active sessions. */
 export function readRecentActivity(opts: RecentActivityOptions = {}): ActivityEvent[] {
   const dir = opts.root ?? getActivityDir();
   const sinceMs = opts.sinceMs ?? 0;
@@ -529,11 +475,8 @@ interface CollapsedActivity {
   subagentCount: number;
 }
 
-/**
- * Split a chronological event list into individual milestones plus a
- * count map for the routine (tier-2) events, so a reader shows recognizable
- * deliverables in full and collapses the noise.
- */
+/** Splits a chronological event list into individual milestones plus a count map of routine
+ * events. */
 export function collapseActivity(events: ActivityEvent[]): CollapsedActivity {
   const milestones: ActivityEvent[] = [];
   const counts: Record<string, number> = {};
@@ -553,11 +496,8 @@ export function collapseActivity(events: ActivityEvent[]): CollapsedActivity {
 // Bridge into the unified event stream (lib/event-stream.ts)
 // ---------------------------------------------------------------------------
 
-/**
- * Normalize one activity event into the shared {@link EventRecord} shape so the
- * agent-semantic stream reads through the same reader as operational events.
- * `module` is stamped `activity` so `--module` filters partition the two cleanly.
- */
+/** Normalizes an activity event into the shared EventRecord shape; `module` is stamped
+ * `activity` so `--module` filters partition cleanly. */
 function activityEventToRecord(ev: ActivityEvent): EventRecord {
   return {
     ts: ev.ts,
@@ -640,12 +580,8 @@ export function formatActivityLine(ev: ActivityEvent, opts: { showHost?: boolean
   return `  ${when}  ${host}${label}${detail}${agent}${url}`;
 }
 
-// ---------------------------------------------------------------------------
-// Rich progress render (RUSH-2014): `status.posted` posts are the deliberate,
-// operator-facing announcements — a single truncated line under-serves them.
-// `formatProgressUpdate` renders each as a multi-line row with full identity
-// chips (agent · session · host · project) and any attached artifacts.
-// ---------------------------------------------------------------------------
+// Rich progress render (RUSH-2014): `status.posted` posts render as multi-line rows with identity
+// chips and attachments.
 
 /** Glyph per attachment kind, so an artifact row reads at a glance. */
 const ATTACHMENT_GLYPH: Record<string, string> = {
@@ -669,10 +605,8 @@ export function attachmentName(att: Attachment): string {
   return base || href;
 }
 
-/**
- * Short session id for a chip: strip a known prefix (`session_`, `ses_`) then
- * take the first 8 chars — enough to disambiguate, matching `ag sessions`.
- */
+/** Short session id for a chip: strips a known prefix (`session_`, `ses_`) and takes the first 8
+ * chars, matching `ag sessions`. */
 export function shortSessionId(sessionId: string): string {
   const stripped = sessionId.replace(/^(session_|ses_)/, '');
   return stripped.slice(0, 8) || sessionId.slice(0, 8);
@@ -685,21 +619,9 @@ interface ProgressJoin {
   label?: string;
 }
 
-/**
- * Render a deliberate progress update (`status.posted`) as an operator-facing,
- * multi-line row with full identity — not a 60-char one-liner. Shape:
- *
- * ```
- *   ▸ update · 3m ago
- *     grok · 0108441e · yosemite-s1 · agents
- *     "CHANGELOG pushed; watching CI"
- *     ♪ draft.wav   🖼 cover.png
- *     ↳ ag focus 0108441e · ag sessions 0108441e
- * ```
- *
- * Chips (agent, short session id, host, project, optional joined ticket/label)
- * are shown only when known. Non-progress milestones keep {@link formatActivityLine}.
- */
+/** Renders a `status.posted` update as a multi-line operator-facing row: age, identity chips
+ * (agent, session, host, project, ticket), quoted text, attachments and focus hints. Chips show
+ * only when known; other milestones use formatActivityLine. */
 export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: ProgressJoin } = {}): string {
   const shortId = shortSessionId(ev.sessionId);
   const lines: string[] = [];
@@ -729,16 +651,9 @@ export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: Progres
   return lines.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Fleet fan-out, session enrichment, grouping (the "activity bar")
-//
-// The activity stream is a mergeable per-host payload, so a feed-style fan-out
-// (`gatherRemoteAgentsJson`) collects every peer's own stream and merges them
-// host-tagged. Each item is then enriched by JOINING to live
-// sessions (project / ticket / execution host) — NOT by re-parsing transcripts
-// — and can be grouped by project, device, or agent so progress reads at a
-// glance across the whole fleet.
-// ---------------------------------------------------------------------------
+// Fleet fan-out, enrichment and grouping: peers' streams merge host-tagged, then each item is
+// joined to live sessions (project, ticket, execution host) rather than re-parsing transcripts, and
+// can be grouped by project, device or agent.
 
 /** An activity event with the session-derived facts joined on at read time. */
 export interface EnrichedActivityEvent extends ActivityEvent {
@@ -750,10 +665,8 @@ export interface EnrichedActivityEvent extends ActivityEvent {
   executionHost?: string;
 }
 
-/**
- * Facts pulled off a live session to enrich its activity events. Keyed by
- * `sessionId`; every field optional so callers pass whatever they resolved.
- */
+/** Facts pulled off a live session to enrich its activity events, keyed by sessionId; every
+ * field optional. */
 interface ActivitySessionHint {
   sessionId?: string | null;
   /** Tracker ticket id (from `ActiveSession.ticket`). */
@@ -764,32 +677,15 @@ interface ActivitySessionHint {
   project?: string | null;
 }
 
-/**
- * Resolve a stable project/repo name from a working directory — the same fold
- * the `agents sessions` overview groups by ({@link projectKeyFromCwd}), so a
- * project reads identically in both views.
- */
+/** Resolves a project/repo name from a working directory using the same fold as the `agents
+ * sessions` overview. */
 export function projectFromCwd(cwd?: string | null): string | undefined {
   return projectKeyFromCwd(cwd);
 }
 
-/**
- * Join session facts (ticket / project / execution host) onto each event by
- * `sessionId`. A hint wins; otherwise a CANONICAL def match (`canonicalProject`)
- * upgrades whatever the event carries; otherwise pre-baked enriched fields (from
- * a remote peer that already enriched its own stream) are preserved, and
- * project/host fall back to what the event itself carries (`cwd`, `host`).
- *
- * The def match ranks above the pre-baked stamp because the stamp may be stale
- * (posted before the def existed) or skewed (a peer whose defs haven't synced);
- * the match is pure prefix compare against local defs, so a different-home
- * peer's path simply doesn't match and its stamp is honored as before.
- *
- * `resolveProject` is how a caller reading its OWN machine's logs upgrades the
- * cwd fold to real repository detection ({@link resolveProjectKey}); it defaults
- * to the pure {@link projectFromCwd}, which is all a path from another machine
- * can be resolved with. Pure given pure resolvers.
- */
+/** Joins session facts (ticket, project, execution host) onto events by sessionId. Precedence: a
+ * hint, then a canonical def match, then pre-baked peer fields, then the event's own
+ * `cwd`/`host`. The def match outranks a peer's stamp, which may be stale or skewed. */
 export function enrichActivityEvents(
   events: EnrichedActivityEvent[],
   hints: ActivitySessionHint[],
@@ -813,13 +709,9 @@ export function enrichActivityEvents(
   });
 }
 
-/**
- * Validate + host-tag one peer's `activity --json` payload for the fan-out
- * merge. Mirrors {@link parseLine}: skip anything missing `event`/`sessionId`/
- * `ts`, drop corrupt items. The event's own `host` is the execution host and is
- * authoritative; only fall back to the dialed peer's `machine` when it's absent.
- * Enriched fields the peer stamped (project/ticket/executionHost) ride through.
- */
+/** Validates and host-tags one peer's `activity --json` payload: skips items missing
+ * `event`/`sessionId`/`ts` and drops corrupt ones. The event's own `host` is authoritative; the
+ * dialed peer's `machine` is only a fallback. */
 export function parseActivityPayload(stdout: string, machine: string): EnrichedActivityEvent[] {
   let parsed: unknown;
   try {
@@ -839,12 +731,8 @@ export function parseActivityPayload(stdout: string, machine: string): EnrichedA
   return out;
 }
 
-/**
- * Merge local + remote event lists, keeping the first copy of a given
- * host/session/ts/event and sorting newest first. Cross-machine activity dirs
- * can sync in a peer's own events, so the identity key dedupes those (mirrors
- * `mergeFeedBlocks`).
- */
+/** Merges local and remote events, keeping the first copy per host/session/ts/event, newest
+ * first. Synced peer dirs can duplicate events. */
 export function mergeActivityEvents(...groups: EnrichedActivityEvent[][]): EnrichedActivityEvent[] {
   const byKey = new Map<string, EnrichedActivityEvent>();
   for (const ev of groups.flat()) {
@@ -854,19 +742,9 @@ export function mergeActivityEvents(...groups: EnrichedActivityEvent[][]): Enric
   return [...byKey.values()].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
 }
 
-/**
- * Apply `--limit` to the events a reader will actually SHOW.
- *
- * The default view collapses routine work (`file.edited`) to a count and shows
- * milestones individually, so a plain `slice(limit)` spends the whole budget on
- * churn: one busy machine editing 40 files hid every other device's PRs behind
- * a single `file edited ×40` line. Milestones therefore carry the cap, and the
- * routine events that ride along are the ones newer than the last milestone
- * kept — so the collapsed counts describe exactly the window on screen.
- *
- * With `all` (routine shown inline) every event is displayed, so the cap is the
- * plain slice again. Input must be newest-first; output preserves that order.
- */
+/** Applies `--limit` to the events a reader will show. Milestones carry the cap so routine churn
+ * (one box editing 40 files) cannot hide other devices' PRs; routine events kept are those
+ * newer than the last milestone. With `all`, a plain slice. */
 export function capActivityEvents(
   events: EnrichedActivityEvent[],
   limit: number,
@@ -917,11 +795,8 @@ export function activityGroupKey(ev: EnrichedActivityEvent, by: ActivityGroupBy)
   return a ? { key: a, label: a } : { key: '', label: 'unknown agent' };
 }
 
-/**
- * Bucket events by project, device, or agent. Groups are ordered by event count
- * (desc) then label; the "unknown" bucket always sorts last. Input order is
- * preserved within a group, so newest-first survives when the input is sorted.
- */
+/** Buckets events by project, device or agent, ordered by count then label with "unknown" last;
+ * input order is preserved within a group. */
 export function groupActivity(events: EnrichedActivityEvent[], by: ActivityGroupBy): ActivityGroup[] {
   const byKey = new Map<string, ActivityGroup>();
   for (const ev of events) {
@@ -938,11 +813,8 @@ export function groupActivity(events: EnrichedActivityEvent[], by: ActivityGroup
   });
 }
 
-/**
- * Narrow events to those whose project, device/host, agent, event kind, or
- * ticket contains `filter` (case-insensitive substring). An empty filter is a
- * no-op. Pure.
- */
+/** Narrows events to those whose project, host, agent, event kind or ticket contains `filter`
+ * (case-insensitive); empty is a no-op. */
 export function filterActivityEvents(events: EnrichedActivityEvent[], filter: string): EnrichedActivityEvent[] {
   const needle = filter.trim().toLowerCase();
   if (!needle) return events;
@@ -952,12 +824,8 @@ export function filterActivityEvents(events: EnrichedActivityEvent[], filter: st
   });
 }
 
-/**
- * Narrow events to one resolved project, exact match on the enriched label
- * (unlike {@link filterActivityEvents}'s cross-field substring). This is the
- * `--project` flag: the label is canonical (a defined project's name) once the
- * reader's resolver has run, so a multi-repo project matches as one bucket. Pure.
- */
+/** Narrows events to one resolved project by exact label match (the `--project` flag), so a
+ * multi-repo project is one bucket. */
 export function filterActivityByProject(events: EnrichedActivityEvent[], project: string): EnrichedActivityEvent[] {
   const name = project.trim();
   if (!name) return events;
@@ -980,12 +848,8 @@ export function formatEnrichedActivityLine(
 /** Max device names named in a group header before the rest collapse to `+N`. */
 const GROUP_HEADER_DEVICE_LIMIT = 3;
 
-/**
- * The distinct machines a group's events ran on, most-active first then
- * alphabetical — so a project header can say WHERE the work happened without
- * sub-grouping the timeline. Prefers the session-joined `executionHost` (where
- * the process really lives) over the raw emitting `host`. Pure.
- */
+/** Distinct machines a group's events ran on, most-active first then alphabetical, preferring
+ * the session-joined `executionHost` over `host`. */
 export function activityGroupDevices(events: EnrichedActivityEvent[]): string[] {
   const counts = new Map<string, number>();
   for (const ev of events) {
@@ -998,14 +862,9 @@ export function activityGroupDevices(events: EnrichedActivityEvent[]): string[] 
     .map(([host]) => host);
 }
 
-/**
- * The trailing facts for one grouped bucket: `N events · M milestones`, plus
- * the machines the work ran on when `showDevices` is set (redundant when the
- * grouping dimension IS the device, so the caller decides). The device list is
- * capped at {@link GROUP_HEADER_DEVICE_LIMIT} with a `+N` tail, so a project
- * touched by a dozen boxes stays one scannable line. Separate from the label so
- * a renderer can color the two differently without re-splitting a string.
- */
+/** Trailing facts for a grouped bucket: `N events · M milestones`, plus machines when
+ * `showDevices` is set. The device list is capped at GROUP_HEADER_DEVICE_LIMIT with a `+N`
+ * tail; kept separate from the label so a renderer can color them differently. */
 export function formatActivityGroupMeta(
   group: ActivityGroup,
   opts: { showDevices?: boolean } = {},
@@ -1030,16 +889,9 @@ export function formatActivityGroupMeta(
 // Hook installation
 // ---------------------------------------------------------------------------
 
-/**
- * The activity-log hook (Python), sibling to 10-feed-publish.py. Classifies
- * PreToolUse/PostToolUse payloads into activity events and appends one JSONL
- * line per event to ~/.agents/.history/activity/<sessionId>.jsonl.
- *
- * Matcher-gated to mutating/milestone tools (Bash|Task|ExitPlanMode|Write|
- * Edit|MultiEdit|TodoWrite|update_plan|TaskUpdate|todo_write|TaskCreate) so
- * read-only tools never pay the hook cost. Fail-open: any error is swallowed so
- * a logging hiccup never blocks a tool call.
- */
+/** The activity-log hook (Python) beside 10-feed-publish.py: classifies PreToolUse/PostToolUse
+ * payloads into events and appends JSONL to ~/.agents/.history/activity/<sessionId>.jsonl.
+ * Matcher-gated to mutating tools so read-only tools pay nothing; fail-open. */
 export const ACTIVITY_LOG_HOOK_SCRIPT = String.raw`#!/usr/bin/env python3
 """Append agent-activity events for 'agents feed'.
 
@@ -1902,11 +1754,8 @@ const ACTIVITY_HOOK_DEFINITIONS: Record<string, Record<string, unknown>> = {
   },
 };
 
-/**
- * Install the activity-log hook script into the user hooks dir and add its
- * manifest entries to the user agents.yaml. Mirrors {@link ensureFeedPublishHook}
- * in feed.ts -- idempotent, and never writes the read-only system repo.
- */
+/** Installs the activity-log hook script and its manifest entries into the user agents.yaml;
+ * idempotent, never writes the system repo. */
 export function ensureActivityLogHook(userAgentsDir: string = getUserAgentsDir()): { installed: boolean; error?: string } {
   try {
     const hooksDir = path.join(userAgentsDir, 'hooks');
@@ -1936,12 +1785,9 @@ export function ensureActivityLogHook(userAgentsDir: string = getUserAgentsDir()
     }
     if (installed) {
       const tmpYaml = `${agentsYamlPath}.${process.pid}.tmp`;
-      // `flowCollectionPadding: false` matches the committed formatting — see the
-      // twin `ensureFeedPublishHook` in feed.ts. Without it, re-emitting a
-      // committed flow node (`[a, b]` -> `[ a, b ]`) leaves the git-backed
-      // `~/.agents` tree permanently dirty and blocks `agents repo pull`
-      // fleet-wide (RUSH-2505). This writer runs back-to-back with the feed one
-      // on the `agents feed` path, so both must round-trip cleanly.
+      // `flowCollectionPadding: false` matches committed formatting (see ensureFeedPublishHook in
+      // feed.ts); otherwise re-emitting a flow node leaves the git-backed ~/.agents tree dirty and
+      // blocks `agents repo pull` fleet-wide (RUSH-2505).
       fs.writeFileSync(tmpYaml, stringifyDoc(yamlDoc));
       fs.renameSync(tmpYaml, agentsYamlPath);
     }

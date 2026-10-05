@@ -62,26 +62,12 @@ describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
 });
 
 describeRelease('release.sh: an ordinary release is CLI-only', () => {
-  /**
-   * The default path must do NO helper work. Two couplings made that false and
-   * each is asserted separately, because they fail differently:
-   *
-   *  - staging `ComputerHelper.app.zip` onto `v$TARGET` publishes an asset no
-   *    client requests (helpers resolve from their own tags), and
-   *  - `release-manifest.sh require` re-derives every helper's input digest and
-   *    ABORTS when one moved without a rebuild — so editing Swift the CLI does
-   *    not ship could fail a perfectly good CLI release.
-   */
-  /**
-   * Run `upload_release_proof` for real, with its five external dependencies
-   * stubbed as recording shims, and return what it invoked.
-   *
-   * This replaces a text-scanning `isGated` helper that was defeated THREE times
-   * — nearest-match, then an indentation assumption, then a one-line `if ...; fi`
-   * hiding its own `fi`. Every failure came from reasoning about the script's
-   * text instead of its behaviour, so this runs the function and observes the
-   * calls. Same extract-and-run shape `home_base_wt_snippet` already uses below.
-   */
+  /** The default path must do no helper work. Two couplings broke that: staging
+   * `ComputerHelper.app.zip` onto `v$TARGET` publishes an asset no client requests, and
+   * `release-manifest.sh require` aborts when a helper input moved without a rebuild. */
+  /** Run `upload_release_proof` for real with its five external dependencies stubbed as recording
+   * shims, and return what it invoked. This replaces a text-scanning `isGated` helper that was
+   * defeated three times by reasoning about script text instead of behaviour. */
   function runUpload(
     withHelpers: boolean,
     fail: { attestationFails?: boolean; tarballMissing?: boolean } = {},
@@ -100,10 +86,9 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
       `#!/usr/bin/env bash\necho "gh $*" >> ${log}\nexit 0\n`);
     fs.writeFileSync(path.join(bin, 'jq'),
       `#!/usr/bin/env bash\necho "jq $*" >> ${log}\ncat >/dev/null\necho "${dir}/pkg.tgz"\n`);
-    // release-attestation.sh's output is CAPTURED (`attest="$(...)"`), so a stub
-    // that only logs leaves $attest empty and `cp "$attest"` fails — which the
-    // harness swallowed until the review caught it. Log to the file, echo a real
-    // path to stdout.
+    // release-attestation.sh's output is captured (`attest="$(...)"`), so a stub that only logs
+    // leaves $attest empty and `cp "$attest"` fails. Log to the file and echo a real path to
+    // stdout.
     fs.writeFileSync(path.join(dir, 'attestation.json'), '{}');
     fs.writeFileSync(path.join(scripts, 'release-attestation.sh'),
       `#!/usr/bin/env bash\necho "release-attestation.sh $*" >> ${log}\n`
@@ -156,12 +141,9 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
   });
 
   it('aborts when the attestation lookup fails, rather than uploading unproven bytes', () => {
-    // Asserts the INVARIANT — never upload unproven bytes — not the presence of
-    // the `|| die`. Verified by mutation: deleting that guard does NOT fail this
-    // test, and should not, because under production's `set -euo pipefail` the
-    // assignment `attest="$(...)"` aborts on a non-zero command regardless. The
-    // `die` supplies a message, not the abort. A test demanding the guard's text
-    // would be back to asserting source, which is what failed three times here.
+    // Asserts the invariant (never upload unproven bytes), not the presence of `|| die`. Deleting
+    // that guard does not fail this test, correctly: under `set -euo pipefail` the assignment
+    // aborts regardless and `die` only supplies a message.
     const { calls, status } = runUpload(false, { attestationFails: true });
     expect(status).not.toBe(0);
     expect(calls.some((c) => c.startsWith('gh release')), 'must not upload without proof').toBe(false);
@@ -176,10 +158,9 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
   });
 
   it('DOES stage the helper manifest with --with-helpers', () => {
-    // Before PHNX-4075 this also asserted a `release-manifest.sh copy-asset
-    // --helper computer-mac` call. That helper left the repo with the standalone
-    // `computer` engine, which resolves its own releases, so the manifest JSON is
-    // now the only helper artifact a --with-helpers release stages.
+    // Before PHNX-4075 this also asserted a `release-manifest.sh copy-asset --helper computer-mac`
+    // call; that helper left the repo, so the manifest JSON is the only helper artifact a
+    // --with-helpers release stages.
     const { calls, out } = runUpload(true);
     const upload = calls.find((c) => c.startsWith('gh release upload')) ?? '';
     expect(upload, out).toContain('release-manifest.json');
@@ -200,11 +181,9 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
   });
 
   it('lists EVERY flag its parser accepts in --help (executed, not grepped)', () => {
-    // Runs the real script. The content-assertion version of this test passed
-    // while --help silently omitted --with-helpers, because it only checked that
-    // one known string appeared. This derives the flag set from the parser and
-    // compares it against actual --help OUTPUT, so the next flag someone adds is
-    // covered without anyone remembering to extend the test.
+    // Runs the real script. The content-assertion version passed while --help silently omitted
+    // --with-helpers; this derives the flag set from the parser and compares it with actual --help
+    // output.
     const help = spawnSync('bash', [RELEASE_SH_PATH, '--help'], { encoding: 'utf-8' });
     expect(help.status, help.stderr).toBe(0);
 
@@ -231,12 +210,9 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
   });
 
   it('warns that a new flag is inert until merged, because the script re-execs from origin', () => {
-    // release.sh:190 execs release-worktree.sh, which checks out
-    // `origin/$DEFAULT_BRANCH` and re-runs THIS script from there. The second
-    // parse is the MERGED copy, so an unmerged flag dies as `unknown flag` even
-    // though the local parser handles it. No content assertion can catch that —
-    // they read the working tree, the failure is in another copy — so the trap is
-    // pinned as prose instead, next to the parser it bites.
+    // release.sh:190 execs release-worktree.sh, which re-runs this script from
+    // `origin/$DEFAULT_BRANCH`, so an unmerged flag dies as `unknown flag` even though the local
+    // parser accepts it.
     expect(RELEASE_SH).toContain('A NEW FLAG DOES NOT WORK UNTIL IT IS ON origin/<default>');
     expect(RELEASE_SH).toContain('--orchestration-phase');
   });
@@ -278,10 +254,9 @@ describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audi
   });
 
   it('keys the tag/publish to the STABLE branch head, not a re-synthesized commit (retry-safe)', () => {
-    // git commit-tree stamps wall-clock time, so RELEASE_COMMIT gets a fresh SHA
-    // every run for identical content. The primary path must publish the stable,
-    // already-pushed RELEASE_CI_HEAD so a retry after a transient home-base failure
-    // does not die at the tag-mismatch check (review of #2966).
+    // git commit-tree stamps wall-clock time, so RELEASE_COMMIT gets a fresh SHA each run. The
+    // primary path must publish the stable RELEASE_CI_HEAD so a retry after a transient home-base
+    // failure does not die at the tag-mismatch check (review of #2966).
     expect(RELEASE_SH).toContain('CI_COMMIT="$RELEASE_CI_HEAD"');
     expect(RELEASE_SH).not.toContain('CI_COMMIT="$RELEASE_COMMIT"');
     // The already-published re-run lands a still-open deferred bump PR so the
@@ -454,10 +429,9 @@ describeRelease('release.sh --device flag', () => {
 
 describeRelease('release.sh: non-interactive --apply guard (PHNX-3176)', () => {
   it('fails loud on --apply from a non-TTY without --yes, instead of exiting 0', () => {
-    // runRelease uses spawnSync, whose default stdio is a pipe -- stdin is not a
-    // TTY, exactly the backgrounded-release repro. Before this guard, the [y/N]
-    // confirmation EOF-declined and the script exited 0 having published nothing,
-    // so a caller that checked $? believed a release shipped when none did.
+    // runRelease uses spawnSync, so stdin is a pipe, not a TTY, which is the backgrounded-release
+    // repro. Before this guard the [y/N] confirmation EOF-declined and exited 0 having published
+    // nothing.
     const { status, out } = runRelease('9.9.9', '--apply');
     expect(status).not.toBe(0);
     expect(out).toMatch(/--yes/);
@@ -466,10 +440,9 @@ describeRelease('release.sh: non-interactive --apply guard (PHNX-3176)', () => {
   });
 
   it('does not trip the guard in dry-run (no --apply)', () => {
-    // A non-interactive dry-run is legitimate (CI preview); the guard is scoped to
-    // --apply, which is the only mode that reaches the confirmation. Use the
-    // internal phase marker so this parser/guard test does not clone origin and
-    // turn a sub-second assertion into a live-network timeout.
+    // A non-interactive dry-run is legitimate (CI preview); the guard is scoped to --apply. Use
+    // the internal phase marker so this test does not clone origin and turn a sub-second assertion
+    // into a live-network timeout.
     const { out } = runRelease('1.2.3', '--home-base-phase');
     expect(out).not.toMatch(/needs an interactive terminal/);
   });
@@ -504,11 +477,9 @@ describeDeviceResolution('release.sh --device resolution', () => {
   });
 });
 
-// RUSH-3189 flatten: pkg_version_at_ref must read the recorded version from a
-// POST-flatten ref (cli/package.json) and from a PRE-flatten tag
-// (apps/cli/package.json) — the fallback that keeps the catch-up-publish and
-// stuck-tag guards working against tags cut before the rename. Fixtures build
-// both layouts synthetically; nothing here depends on this repo's own history.
+// RUSH-3189 flatten: pkg_version_at_ref must read the version from a post-flatten ref
+// (cli/package.json) and a pre-flatten tag (apps/cli/package.json), which keeps the
+// catch-up-publish and stuck-tag guards working.
 describe('release.sh: pkg_version_at_ref resolves both layouts (RUSH-3189)', () => {
   const fnSource = (): string => {
     const sh = fs.readFileSync(path.join(__dirname, 'release.sh'), 'utf8');
@@ -564,17 +535,9 @@ describe('release.sh: pkg_version_at_ref resolves both layouts (RUSH-3189)', () 
 });
 
 describeRelease('release.sh fetch_main_attestation (RUSH-2666, plan line 336)', () => {
-  /**
-   * Run the real `fetch_main_attestation` extracted from release.sh, with `gh`
-   * and `release-attestation.sh` stubbed as recording shims, and observe what it
-   * did. Same extract-and-run shape the upload_release_proof tests above use — we
-   * assert BEHAVIOR (store populated / no download / never dies), not source text.
-   *
-   * The invariant under test is the hard fail-safe constraint: the fast path can
-   * only make a release faster. Every miss/error falls back to today's poll path
-   * WITHOUT a non-zero exit that would abort the caller (which runs under
-   * `set -euo pipefail` and calls it as `fetch_main_attestation ... || true`).
-   */
+  /** Run the real `fetch_main_attestation` extracted from release.sh, with `gh` and
+   * `release-attestation.sh` stubbed as recording shims, and assert behavior rather than source
+   * text. The invariant: the fast path only makes a release faster; a miss never exits non-zero. */
   function runFetch(opts: {
     ghOnPath?: boolean; // default true
     ghDownloadSucceeds?: boolean; // gh release download exit
@@ -631,10 +594,8 @@ exit 0
       fs.chmodSync(path.join(bin, 'gh'), 0o755);
     }
 
-    // Under production's set -euo pipefail, calling with `|| true` mirrors the
-    // real call site. If the function ever `die`d (exit without the guard) the
-    // harness would still exit 0 here, so we ALSO assert it returns cleanly by
-    // capturing its own return code separately below.
+    // Calling with `|| true` mirrors the real call site, so a `die` would still exit 0 here; we
+    // also capture the function's own return code separately.
     const harness = [
       'set -euo pipefail',
       'die() { echo "die: $*" >&2; exit 42; }',
@@ -642,12 +603,9 @@ exit 0
       `REPO_ROOT=${JSON.stringify(dir)}`,
       'ATTEST_MAIN_TAG="main-attestations"',
       src!,
-      // Mirror the REAL call site: `fetch_main_attestation ... || true`. A `die`
-      // inside would exit 42 (caught before the echo below), proving the fail-safe
-      // — only a die aborts the release; a plain non-zero return is what `|| true`
-      // absorbs so the caller polls the local store as today. `set +e` around the
-      // call captures the function's OWN verdict (0 = hit, non-zero = fell back)
-      // without the shell aborting first, matching the guarded call site.
+      // Mirror the real call site. A `die` would exit 42 before the echo, proving the fail-safe; a
+      // plain non-zero return is what `|| true` absorbs. `set +e` captures the function's own
+      // verdict (0 = hit, non-zero = fell back).
       `set +e; fetch_main_attestation ${JSON.stringify(tree)} ${JSON.stringify(store)}; rc=$?; set -e; echo "rc=$rc" >> ${JSON.stringify(log)}; true`,
     ].join('\n');
 
@@ -676,12 +634,9 @@ exit 0
     expect(dl, out).toBeDefined();
     expect(dl).toContain('main-attestations');
     expect(dl).toContain(`--pattern attest-${'a'.repeat(40)}.json`);
-    // Downloads ONLY the tree-keyed json — never a `*.tgz` glob. The rolling
-    // release accumulates one tarball per attested tree, so a `*.tgz` pattern
-    // into a store that already holds any tarball would make `gh release
-    // download` exit non-zero on the pre-existing file (no --clobber) and
-    // silently drop every previously-primed box to the slow poll. The consumer
-    // (require) needs only the json; the promoted tarball comes from v$TARGET.
+    // Download only the tree-keyed json, never a `*.tgz` glob: the rolling release holds one
+    // tarball per tree, so a glob into a primed store makes `gh release download` exit non-zero
+    // and drops every primed box to the slow poll.
     expect(dl, 'must not glob *.tgz — it collides on a primed store').not.toContain('*.tgz');
     // The asset landed in the store and the function returned success (rc=0).
     expect(storeFiles).toContain(`attest-${'a'.repeat(40)}.json`);
@@ -689,10 +644,9 @@ exit 0
   });
 
   it('fetch-HIT on a store already holding a stray .tgz: still succeeds (no *.tgz collision)', () => {
-    // Regression guard for the collision the review caught: a box that prefetched
-    // before has a tarball sitting in the store. Because we download only the
-    // tree-keyed json (never a `*.tgz` glob), that pre-existing tarball cannot
-    // make `gh release download` exit non-zero, so the fast path still lands.
+    // Regression guard for the review-caught collision: a box that prefetched before has a tarball
+    // in the store. Since only the json is downloaded, it cannot make `gh release download` fail
+    // and the fast path still lands.
     const { calls, status, out, storeFiles } = runFetch({
       ghOnPath: true,
       ghDownloadSucceeds: true,
@@ -783,23 +737,9 @@ exit 0
   });
 });
 
-/**
- * PHNX-3696 — the release-tree attestation gate must be satisfiable WITHOUT a human.
- *
- * RUSH-2666 (bfa1b4eed) made this record mandatory and shipped no producer, so every
- * `release.sh --apply` since 2026-08-15 stopped at "missing exact attestation key".
- * It survived review because the tests in this file assert against `RELEASE_SH` as a
- * STRING — they proved the gate was WIRED, never that it could be SATISFIED.
- *
- * So these tests EXECUTE the real `derive_release_attestation` body extracted from
- * release.sh, against a real git repo and a real on-disk store. Nothing is mocked:
- * the produce script the function shells out to is a real script in the fixture's
- * own `scripts/` dir, invoked over a real process boundary, because the function
- * resolves it by relative path. (The shipped producer runs a full `bun install` +
- * build + `npm pack`; it carries its own real-path coverage in
- * release-attestation-produce.test.ts. What is under test HERE is the decision the
- * release makes: derive, skip, or fall through.)
- */
+/** PHNX-3696: the release-tree attestation gate must be satisfiable without a human. RUSH-2666 made
+ * it mandatory with no producer and passed review because tests asserted `RELEASE_SH` as a string.
+ * These EXECUTE the real derive_release_attestation against a real git repo and store, unmocked. */
 describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)', () => {
   const RELEASE_ATTESTATION_SH = path.resolve(__dirname, 'release-attestation.sh');
 
@@ -888,11 +828,9 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
   });
 
   it('inherits from $BASE_SHA, not the remote tip, when the two diverge (PHNX-3705)', () => {
-    // The review found the pre-existing derive test could not catch blocker 2:
-    // its fixture happens to set origin/main == BASE_SHA, so reading either one
-    // behaves identically. Here the tip is deliberately AHEAD of the base, and
-    // only the BASE's tree is attested — so a derive that reads the tip finds no
-    // base record and never reaches the producer.
+    // The review found the earlier derive test could not catch blocker 2: its fixture sets
+    // origin/main == BASE_SHA. Here the tip is ahead of the base and only the base's tree is
+    // attested, so a derive reading the tip never reaches the producer.
     const { dir, store, log } = harness();
     const baseCommit = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
     const baseTree = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf-8' }).stdout.trim();
@@ -914,10 +852,9 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
       tarball: { filename: 'x.tgz', digest: 'sha256:' + '0'.repeat(64) },
     }));
 
-    // The release commit: an UNATTESTED tree (reuse the tip's) hung off the BASE
-    // as parent — exactly the shape release.sh builds with
-    // `git commit-tree "$BRANCH_TREE" -p "$BASE_SHA"`. Its own tree must not be
-    // attested, or derive short-circuits before it ever looks up a base.
+    // The release commit: an unattested tree (the tip's) hung off the BASE as parent, the shape
+    // release.sh builds with `git commit-tree "$BRANCH_TREE" -p "$BASE_SHA"`. Its own tree must
+    // not be attested, or derive short-circuits.
     const tipTree = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf-8' }).stdout.trim();
     const releaseCommit = spawnSync(
       'git', ['-C', dir, 'commit-tree', tipTree, '-p', baseCommit, '-m', 'chore(release): x'],
@@ -941,15 +878,9 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
   });
 
   it('the REAL call site survives a derive failure instead of killing the release', () => {
-    // The bug this exists to catch: release.sh runs under `set -euo pipefail`, and
-    // a BARE call to a function that returns non-zero aborts the whole script — so
-    // an unguarded call would die before wait_for_attestation's poll, the documented
-    // fallback, ever runs. That is strictly worse than the pre-fix behavior.
-    //
-    // So: take the real function body AND the real call-site line out of release.sh,
-    // run them together under the real production flags, and require that execution
-    // continues past the call. No text matching — a sentinel that only prints if the
-    // shell is still alive.
+    // Pins the bug: under `set -euo pipefail` a bare call to a non-zero-returning function aborts
+    // release.sh before wait_for_attestation's poll runs, which is worse than the pre-fix
+    // behavior.
     const { dir, store } = harness();
     const head = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).stdout.trim();
     const body = RELEASE_SH.match(/^derive_release_attestation\(\) \{[\s\S]*?^\}/m)?.[0];
@@ -975,16 +906,8 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
   });
 });
 
-/**
- * PHNX-3705 — the release base may be an attested ANCESTOR of the remote tip.
- *
- * Two halves, and the review that caught this is why both are here: relaxing the
- * base guard without repointing the gates was a no-op change that still died at
- * [2/6]. The guard is exercised by executing the real block; the two gate
- * references are asserted textually and labelled as such — they are single
- * `$BASE_SHA^{tree}` argument sites with no seam to drive, and the behavior they
- * produce is covered end-to-end in release-worktree.test.ts.
- */
+/** PHNX-3705: the release base may be an attested ancestor of the remote tip. Relaxing the base
+ * guard without repointing the gates was a no-op that still died at [2/6]. */
 describeRelease('release.sh releases from an attested ancestor (PHNX-3705)', () => {
   /** Run the REAL base-freshness block, lifted out of release.sh. */
   function runBaseCheck(dir: string, baseRef: string) {
@@ -1048,11 +971,8 @@ describeRelease('release.sh releases from an attested ancestor (PHNX-3705)', () 
   });
 
   it('gates phase 2 and the derive base on $BASE_SHA, never the live remote tip', () => {
-    // TEXTUAL, deliberately: both are single argument sites with no seam to
-    // drive. They are the exact lines whose absence made the first version of
-    // PHNX-3705 a no-op that still died at [2/6], so they are worth pinning even
-    // in this weaker form; the behavior itself is covered in
-    // release-worktree.test.ts by asserting the HEAD the release actually runs at.
+    // Textual on purpose: both are single argument sites with no seam. Their absence made the
+    // first PHNX-3705 a no-op that died at [2/6]; behavior is covered in release-worktree.test.ts.
     expect(RELEASE_SH).toContain('wait_for_attestation "$(git rev-parse "$BASE_SHA^{tree}")"');
     expect(RELEASE_SH).toContain('base_tree="$(git rev-parse "$BASE_SHA^{tree}" 2>/dev/null)"');
     expect(RELEASE_SH).not.toContain('wait_for_attestation "$(git rev-parse "origin/$DEFAULT_BRANCH^{tree}")"');

@@ -1,12 +1,6 @@
-/**
- * Device-affinity coverage for the scheduler and overdue detector.
- *
- * No mocks, no spies, no fake service seams: every test spawns the real CLI
- * (`node --import tsx src/index.ts routines ...`) against an isolated mkdtemp
- * HOME. Scheduling is observed through `routines list --json` (nextRun is
- * present only when this machine's scheduler loads the job); overdue detection
- * is observed through the same JSON (`overdue` flag).
- */
+/** Device-affinity coverage for the scheduler and overdue detector. No mocks or spies: every test
+ * spawns the real CLI against an isolated mkdtemp HOME and observes via `routines list --json`
+ * (nextRun only when this machine's scheduler loads the job; `overdue` flag). */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';

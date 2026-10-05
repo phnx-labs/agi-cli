@@ -16,13 +16,9 @@ import {
   type FleetStateExchangePayload,
 } from './usage-sync.js';
 
-// Real end-to-end of the `agents __usage-ingest` verb (PHNX-3392, PHNX-4116):
-// spawn the actual CLI with an isolated HOME, pipe an envelope, and assert the
-// rows landed in that HOME's real claude-usage.json, the peer's file was stored,
-// and `--reply` prints this box's own envelope. Exercises the index.ts
-// pre-bootstrap interception + stdin read + newest-wins merge, no mocks. The
-// exchange test injects ONLY the ssh boundary: a dial that runs the local binary
-// as the peer, exactly as `ssh <peer> agents __usage-ingest --reply` would.
+// Real end-to-end of `agents __usage-ingest` (PHNX-3392, PHNX-4116): spawn the CLI with an isolated
+// HOME, pipe an envelope, assert the rows land in claude-usage.json and `--reply` prints this box's
+// envelope. Only the ssh boundary is injected, as a dial that runs the local binary as the peer.
 
 function run(home: string, input: string, args: string[] = [], machineId = 'ingest-e2e-self') {
   return spawnSync('bun', ['src/index.ts', '__usage-ingest', ...args], {

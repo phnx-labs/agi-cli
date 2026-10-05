@@ -9,11 +9,9 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv14-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Build a v13-shaped DB on disk (sessions + scan_ledger populated, no
-// dir_ledger), then let db.js's getDB() upgrade it to v14 on first open. Locks
-// the load-bearing invariants: dir_ledger is created, scan_ledger is cleared so
-// the first post-upgrade scan does a clean full walk, and existing session rows
-// survive the migration.
+// Build a v13-shaped DB (no dir_ledger), then let getDB() upgrade it to v14. Locks: dir_ledger is
+// created, scan_ledger is cleared so the first scan does a clean full walk, and session rows
+// survive.
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

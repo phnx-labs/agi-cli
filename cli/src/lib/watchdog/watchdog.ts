@@ -1,9 +1,6 @@
-// Watchdog: pure logic for detecting stalled agent terminals and rendering the
-// prompt that the watchdog AGENT reads to decide idle-vs-unfinished and craft a
-// nudge. There is deliberately no heuristic decider here (no regex over the tail
-// guessing "done" vs "stuck") — that judgment is the agent's job. This module
-// only classifies idleness by timestamp and renders/parses the agent's I/O, so
-// it reads no files and touches no host APIs and can be unit-tested in isolation.
+// Pure watchdog logic: detect stalled terminals and render the prompt the watchdog agent reads.
+// Deliberately no heuristic decider (no regex guessing "done" vs "stuck"); this module only
+// classifies idleness by timestamp and renders/parses agent I/O, reading no files.
 
 export interface WatchdogCandidate {
   terminalId: string;
@@ -21,11 +18,8 @@ export interface Decision {
   action: 'nudge' | 'skip';
   text: string;
   reason: string;
-  /**
-   * Set by the agent on a SKIP to distinguish "genuinely needs the human"
-   * (true → surface it) from "the task is actually done" (false/absent → leave
-   * it alone, do not poke). `done` is a distinct terminal state from `idle`.
-   */
+  /** Set by the agent on a SKIP: true = genuinely needs the human (surface it); false/absent = task
+   * done, do not poke. `done` is distinct from `idle`. */
   needsHuman?: boolean;
 }
 

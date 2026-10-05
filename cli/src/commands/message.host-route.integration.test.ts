@@ -1,20 +1,6 @@
-/**
- * `agents message <name>` resolving a detached `agents run --device <host>
- * --no-follow` dispatch (RUSH-2366 follow-up), end to end through the real
- * command.
- *
- * `decideHostTaskRoute` is unit-tested in `lib/mailbox-target.test.ts`, but the
- * WIRING in `commands/message.ts` was not covered — and the wiring is where the
- * bug lived twice over: first the command never consulted the host-task records
- * at all, then it consulted them WITHOUT the `reconcileRunningTasks` heal that
- * `agents devices stop`/`agents devices ps` both run first.
- *
- * Real CLI, real on-disk records under a throwaway HOME, no mocking. The cases
- * here are deliberately the ones that need no reachable host: a record that is
- * already terminal must be reported as finished from local state, and an
- * unknown name must fall through to the generic "no target" error. The live-SSH
- * heal itself is covered by `lib/hosts/reconcile`'s own tests.
- */
+/** `agents message <name>` resolving a detached `run --device <host> --no-follow` dispatch
+ * (RUSH-2366), end to end through the real command. message.ts was the bug twice: it ignored host-
+ * task records, then read them without the `reconcileRunningTasks` heal. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';

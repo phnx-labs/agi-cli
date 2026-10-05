@@ -1,11 +1,6 @@
-/**
- * Rules file compilation -- resolving @-imports into a single flat file.
- *
- * Agents that do not natively resolve `@path/to/file` imports (Codex, Cursor)
- * need a pre-compiled rules file with all imports inlined. This module
- * handles that expansion for both user-scope (writes into version home) and
- * project-scope (writes into the workspace).
- */
+/** Rules file compilation: resolve @-imports into one flat file. Agents that don't natively resolve
+ * `@path/to/file` (Codex, Cursor) need a pre-compiled file, for user scope (written into the
+ * version home) and project scope (written into the workspace). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,12 +16,9 @@ import { composeRules, composeRulesFromState, type RulesLayer } from './compose.
 // whitespace (if any) is captured so we can preserve it in the output.
 const IMPORT_RE = /(^|\s)@(\S+)/g;
 const MAX_DEPTH = 5;
-/**
- * Header the non-@-import compile path (`agents refresh-rules` → compileRulesForAgent)
- * prepends to a compiled instruction file. Exported so `doctor-diff` can strip it
- * before content-comparing a home rules file against the raw preset composition —
- * a header-compiled home must still reconcile (the header is not source content).
- */
+/** Header that the non-@-import compile path (`agents refresh-rules` -> compileRulesForAgent)
+ * prepends. Exported so `doctor-diff` can strip it before comparing a home rules file to the raw
+ * preset composition; the header isn't source content. */
 export const COMPILED_HEADER =
   '<!-- Auto-compiled by agents-cli from ~/.agents/rules/AGENTS.md + imports.\n' +
   '     Edit the source files under ~/.agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
@@ -51,11 +43,8 @@ function sha256(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
 
-/**
- * Replace fenced code blocks (```...```) and inline code spans (`...`) with
- * placeholders. Claude Code's @-import parser ignores these regions, so we
- * must too.
- */
+/** Replace fenced code blocks and inline code spans with placeholders, since Claude Code's @-import
+ * parser ignores those regions and so must we. */
 function protectCodeRegions(content: string): { protectedText: string; fences: string[]; inlines: string[] } {
   const fences: string[] = [];
   let withFences = content.replace(/```[\s\S]*?```/g, (match) => {
@@ -84,15 +73,9 @@ interface ResolveResult {
   sources: string[];
 }
 
-/**
- * Expand all `@path/to/file` imports in `content`, recursively up to
- * MAX_DEPTH. Imports inside fenced code blocks and inline code spans are
- * left alone, matching Claude Code's parser. Missing files are left as-is
- * (silent skip), matching the documented behavior.
- *
- * Relative paths resolve against `baseDir`; absolute and tilde-prefixed
- * paths resolve against the filesystem root / home directory.
- */
+/** Expand `@path/to/file` imports recursively up to MAX_DEPTH, leaving fenced code and inline code
+ * alone (as Claude Code does) and silently skipping missing files. Relative paths resolve against
+ * `baseDir`; absolute and tilde paths from root/home. */
 export function resolveImports(content: string, baseDir: string): ResolveResult {
   const sources: string[] = [];
   const seen = new Set<string>();
@@ -139,15 +122,9 @@ function getManifestPath(compiledPath: string): string {
   return compiledPath + '.manifest.json';
 }
 
-/**
- * Fast staleness check. Returns true when:
- *  - the compiled file or its manifest is missing
- *  - any recorded source file is missing
- *  - any recorded source's sha256 no longer matches
- *
- * For agents that support @-imports natively, always returns false — there's
- * nothing to compile.
- */
+/** Fast staleness check: true when the compiled file or manifest is missing, a recorded source is
+ * missing, or a source's sha256 no longer matches. Always false for agents that resolve @-imports
+ * natively (nothing to compile). */
 export function isRulesStale(agentId: AgentId, version: string): boolean {
   if (supportsRulesImports(agentId)) return false;
 
@@ -173,14 +150,9 @@ export function isRulesStale(agentId: AgentId, version: string): boolean {
   }
 }
 
-/**
- * Resolve the source `rules/AGENTS.md` (with all @-imports expanded) and
- * write the result into the version home, alongside a sidecar manifest that
- * records source file hashes for staleness detection.
- *
- * Agents that natively resolve @-imports are skipped (no-op) — their sync
- * uses the standard copyFileSync path in `syncResourcesToVersion`.
- */
+/** Resolve the source `rules/AGENTS.md` with all @-imports expanded and write it into the version
+ * home beside a sidecar manifest of source hashes for staleness detection. Agents resolving
+ * @-imports natively are skipped (their sync uses copyFileSync in `syncResourcesToVersion`). */
 function compileRulesForAgent(
   agentId: AgentId,
   version: string
@@ -189,14 +161,9 @@ function compileRulesForAgent(
     return { compiled: false, compiledPath: '', sources: 0 };
   }
 
-  // Route through the layered composer (project > user > extras > system).
-  // The previous implementation read only `<systemRules>/AGENTS.md` and
-  // inlined its @-imports — that dropped user/extras/project subrules
-  // entirely for @-import-incapable agents (Cursor, older Codex), so
-  // updates to ~/.agents/rules/subrules/ never reached the version home.
-  // composeRulesFromState already returns the concatenated content with
-  // every fragment resolved across layers; we just need to record the
-  // composed source list for staleness detection.
+  // Route through the layered composer (project > user > extras > system). The old code read only
+  // the system AGENTS.md, dropping user/extras/project subrules for @-import-incapable agents
+  // (Cursor, older Codex), so edits to ~/.agents/rules/subrules/ never arrived.
   let composed: ReturnType<typeof composeRulesFromState>;
   try {
     composed = composeRulesFromState({ preset: undefined });
@@ -234,11 +201,8 @@ function compileRulesForAgent(
   return { compiled: true, compiledPath, sources: allSources.length };
 }
 
-/**
- * Recompile rules if stale. Safe to call on every agent invocation — the
- * staleness check is fast (sha256 of 8-10 small files, ~10-20ms). Returns
- * true if a recompile happened, false otherwise.
- */
+/** Recompile rules if stale; safe on every agent invocation since the check is fast (sha256 of 8-10
+ * small files, ~10-20ms). Returns true if a recompile happened. */
 export function ensureRulesFresh(agentId: AgentId, version: string): boolean {
   if (supportsRulesImports(agentId)) return false;
   if (!isRulesStale(agentId, version)) return false;
@@ -259,26 +223,9 @@ interface ProjectCompileResult {
   skippedClobber: string[];
 }
 
-/**
- * Compile project-scope rules into a workspace's root memory files so each
- * agent's native loader picks them up.
- *
- * Composes rules from all available layers (project > user > extras > system)
- * with project highest priority — so a project's `subrules/` and `rules.yaml`
- * shadow user/system fragments and presets. Writes `cwd/AGENTS.md` with
- * COMPILED_HEADER_PROJECT and creates symlinks (CLAUDE.md, GEMINI.md,
- * .cursorrules, etc.) → AGENTS.md so every agent finds its expected file at
- * cwd. The agent's own loader merges this project-level file with its
- * user-level rules (in version home) at runtime.
- *
- * Don't-clobber guard: if `cwd/AGENTS.md` exists without our header, the user
- * authored it — leave it alone and report via `skippedClobber`. Same for any
- * pre-existing per-agent file or symlink that doesn't already point at
- * AGENTS.md.
- *
- * No-op when `cwd/.agents/rules/` does not exist. Idempotent on repeated
- * calls — content equality short-circuits the write.
- */
+/** Compile project-scope rules into a workspace's root memory files: compose all layers (project
+ * highest), write `cwd/AGENTS.md` with COMPILED_HEADER_PROJECT, symlink CLAUDE.md etc. to it. A
+ * file lacking our header is user-authored and left alone. No-op without `cwd/.agents/rules/`. */
 export function compileRulesForProject(
   cwd: string,
   opts: { preset?: string; layers?: RulesLayer[] } = {}
@@ -291,12 +238,9 @@ export function compileRulesForProject(
 
   if (!fs.existsSync(projectRulesDir)) return empty;
 
-  // The user layer's own home satisfies the rules-dir test — ~/.agents/rules
-  // exists on every configured machine — which compiled $HOME as a "project",
-  // wrote ~/AGENTS.md (+ per-agent symlinks), and injected the whole ruleset
-  // into every session twice: once as global memory, once as "project" memory
-  // (RUSH-2725). Reserved roots (user layer, system layer, or a checkout of
-  // either canonical DotAgents repo) never compile as a project.
+  // The user layer's home satisfies the rules-dir test (~/.agents/rules exists everywhere), which
+  // compiled $HOME as a "project" and injected the ruleset twice (RUSH-2725). Reserved roots (user,
+  // system, canonical DotAgents checkouts) never compile as a project.
   if (isReservedAgentsDir(path.join(cwd, '.agents'))) return empty;
 
   let composed: { content: string; subrules: { sourcePath: string }[] };
@@ -352,10 +296,9 @@ export function compileRulesForProject(
     for (const agent of Object.values(AGENTS)) {
       const fname = agent.instructionsFile;
       if (seen.has(fname)) continue;
-      // Hard-deprecated agents (e.g. Gemini, retired by Google) never get an
-      // instruction-file symlink — the harness is gone, so GEMINI.md would only
-      // litter the tree. Mirrors the deprecated?.hard skip used everywhere else
-      // (capabilities.ts, MANAGED_AGENT_IDS, modes.ts).
+      // Hard-deprecated agents (e.g. Gemini, retired by Google) never get an instruction-file
+      // symlink; GEMINI.md would only litter the tree. Mirrors the `deprecated?.hard` skip in
+      // capabilities.ts, MANAGED_AGENT_IDS and modes.ts.
       if (agent.deprecated?.hard) continue;
       // Skip agents whose instructions live at a nested path (e.g. OpenClaw's
       // workspace/AGENTS.md) — those are managed by their own setup paths.

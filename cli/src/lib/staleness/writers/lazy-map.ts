@@ -1,14 +1,6 @@
-/**
- * Lazy-built per-agent map.
- *
- * The writer/detector modules form a circular dependency with agents.ts:
- * agents.ts → versions.ts → staleness/registry.ts → writers/<kind>.ts →
- * (capableAgents/AGENTS via capabilities or agents directly). If a writer
- * module iterates AGENTS at module top-level it fires before the AGENTS
- * const is initialized through the cycle. Wrapping the per-agent map in a
- * lazily-evaluated Proxy defers every read until call time, by which point
- * the cycle has resolved.
- */
+/** Lazy-built per-agent map. The writer/detector modules form an import cycle with agents.ts
+ * (agents.ts, versions.ts, staleness/registry.ts, writers/<kind>.ts); iterating AGENTS at module
+ * top level fires before it is initialized. */
 import type { AgentId } from '../../types.js';
 
 export function lazyAgentMap<T>(

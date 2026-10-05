@@ -1,17 +1,6 @@
-/**
- * `agents events --limit` truncation tests. Drive the REAL CLI entry (via tsx)
- * against a temp HOME seeded with a real events.jsonl, then assert on the
- * records it returns.
- *
- * The bug these cover: `--limit` defaulted to 50 and was applied silently, with
- * `--limit 0` collapsing to 50 (`0 || 50`), so there was no way to read the
- * whole stream. Any aggregation over `--json` therefore ranked the newest 50
- * records and reported a confidently wrong answer — measured on a real 7-day
- * friction corpus (2135 events, 9 classes): 8 of 9 ranks wrong, counts off by
- * ~100x, no warning.
- *
- * No mocking — the same code path a real invocation takes.
- */
+/** `agents events --limit` tests driving the real CLI against a temp HOME. The bug: `--limit`
+ * silently defaulted to 50 and `--limit 0` collapsed to 50, so `--json` aggregations ranked only
+ * the newest 50 (on a 2135-event corpus 8 of 9 ranks were wrong, no warning). No mocking. */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -38,11 +27,8 @@ function makeTempHome(): string {
   return home;
 }
 
-/**
- * Seed `alpha` (older, more numerous) and `beta` (newest) so the two answers
- * disagree: over the full set alpha wins 55-45; over the newest 50 beta wins
- * 45-5. That inversion is exactly what a silent cap produces.
- */
+/** Seed `alpha` (older, more numerous) and `beta` (newest) so the answers disagree: over the full
+ * set alpha wins 55-45, over the newest 50 beta wins 45-5, exactly what a silent cap produces. */
 const ALPHA = 55;
 const BETA = 45;
 
@@ -158,10 +144,9 @@ describe('agents events --limit', () => {
     expect(res.stderr).toContain('Invalid --limit');
   });
 
-  // `Number('')` and `Number('   ')` are both 0, which the cap resolver reads as
-  // "no cap". An unset shell variable — `agents events --limit "$LIMIT"` — would
-  // therefore return the entire unbounded stream with exit 0 and no notice: the
-  // same silent-wrong-answer this ticket exists to remove, in the other direction.
+  // `Number('')` and `Number('   ')` are 0, which the cap resolver reads as "no cap", so an unset
+  // `--limit "$LIMIT"` would return the entire stream silently, the same silent-wrong-answer in the
+  // other direction.
   it.each([['empty', ''], ['whitespace', '   ']])(
     'rejects an %s --limit instead of reading the whole stream unannounced',
     (_label, value) => {

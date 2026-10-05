@@ -1,7 +1,5 @@
-// Watchdog tail summarization: pull the most recent user / assistant message
-// out of the session JSONL window the watchdog read this tick. Pure functions —
-// the watchdog runtime hands us tailLines + agentType and we read no files.
-// Ported from Swarmify (extension/src/core/watchdogTail.ts) — behavior verbatim.
+// Watchdog tail summarization: pull the latest user/assistant message from the JSONL window read
+// this tick. Pure; ported verbatim from Swarmify (extension/src/core/watchdogTail.ts).
 
 interface TailSummary {
   lastUserMessage?: string;

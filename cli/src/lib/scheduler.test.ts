@@ -8,10 +8,8 @@ import { missedRunId } from './catchup.js';
 import * as activation from './routine-activation.js';
 import { getUserAgentsDir } from './state.js';
 
-/**
- * reloadAll() must re-read device activation after a manifest change so the
- * daemon does not keep firing a routine that was disabled on this host.
- */
+/** reloadAll() must re-read device activation after a manifest change so the daemon doesn't keep
+ * firing a routine disabled on this host. */
 describe('JobScheduler.reloadAll — device activation refresh', () => {
   const name = 'rush1980-scheduler-test';
   const SELF = 'rush1980-self';
@@ -29,14 +27,9 @@ describe('JobScheduler.reloadAll — device activation refresh', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     try { deleteJob(name); } catch { /* best effort */ }
-    // deleteJob drops the routine but not the device dir that writing it
-    // created, and this suite runs against the developer's REAL ~/.agents (no
-    // HOME redirect), so `devices/rush1980-self/` was left behind on every box
-    // that ever ran the suite. Harmless while `devices/` was gitignored;
-    // once it is tracked, every such box stages the SAME path — which is
-    // exactly the two-writers-one-path wedge that tracking it is meant to
-    // avoid. Remove our own artifact while the id is still in scope. (Same
-    // class as RUSH-2639: tests writing into the real user dir.)
+    // deleteJob drops the routine but not the device dir writing it created, and this suite uses
+    // the REAL ~/.agents, leaving `devices/rush1980-self/` on every box. Now that `devices/` is
+    // tracked, remove our artifact (cf. RUSH-2639).
     try {
       fs.rmSync(path.join(getUserAgentsDir(), 'devices', SELF), { recursive: true, force: true });
     } catch { /* best effort */ }

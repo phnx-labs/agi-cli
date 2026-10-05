@@ -4,11 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// The guarantee: once an agent is installed only as isolated copies, nothing the
-// framework does can adopt it. Previously `--isolated` was defined by a list of
-// things it doesn't do, which had to be re-checked at every new call site — and
-// leaked three times that way. Protection is now derived from the `.isolated`
-// markers on disk and enforced inside the primitives themselves.
+// Once an agent is installed only as isolated copies, nothing the framework does can adopt it.
+// Protection is derived from the `.isolated` markers on disk and enforced inside the primitives.
 describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
   let home: string;
   const V = '9.9.4';

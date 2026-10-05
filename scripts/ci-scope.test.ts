@@ -75,15 +75,9 @@ describe('classifyCiScope', () => {
   });
 
   test('a .changelog edit brings the CLI job with it, for gen-changelog.test.ts', () => {
-    // `cli` is true because the changelog-sources group selects
-    // cli/scripts/gen-changelog.test.ts, and scopeFromPlan's
-    // testUnder('cli/') reports "a test under cli/ was selected" --
-    // the same generic derivation every other group gets. It costs nothing
-    // extra: tests.yml has ONE job, driven by plan.tests/plan.checks, and
-    // nothing in .github/ reads steps.plan.outputs.cli. Before this group
-    // existed the value read `cli: false` -- and a hand-edited CHANGELOG.md that
-    // no source reproduces reached main three times in one day, each caught only
-    // by the full suite at release time.
+    // `cli` is true because the changelog-sources group selects gen-changelog.test.ts, so
+    // scopeFromPlan sees a selected test under cli/. It costs nothing (tests.yml has one job).
+    // Before it, hand-edited CHANGELOG.md reached main three times in a day.
     expect(classifyCiScope([
       'cli/docs/architecture.md',
       'cli/.changelog/next/ci.md',
@@ -239,11 +233,9 @@ describe('selectImpact policy', () => {
   });
 
   test('a sessions change carries the group budget, not the 85s default', () => {
-    // Registering a subcommand must touch sessions.ts, which selects the whole
-    // sessions* suite. Extracting width/short-id/relative-time (PR #2796, run
-    // 32392267349) still touches session/* re-export shims, so the sessions
-    // group is selected; impact was 198s and failed the previous 180s ceiling.
-    // Under the flat 85s default no new `agents sessions <verb>` could merge.
+    // Registering a subcommand touches sessions.ts, which selects the whole sessions* suite. PR
+    // #2796 (run 32392267349) took 198s and failed the previous 180s ceiling; under the flat 85s
+    // default no new `agents sessions <verb>` could merge.
     const plan = selectImpact({
       files: ['cli/src/commands/sessions.ts'],
       repoRoot: REPO,
@@ -293,10 +285,9 @@ describe('selectImpact policy', () => {
   });
 
   test('a group with no budget keeps the default, so the ceiling only rises where declared', () => {
-    // Uses a genuinely unbudgeted group. This previously pointed at
-    // cli/src/commands/** (command-surface), which acquired a budget in
-    // RUSH-3062 — the invariant held, only the example went stale. Pick a group
-    // whose entry in test-ownership.yaml has no budget_sec today.
+    // Uses a genuinely unbudgeted group. This pointed at cli/src/commands/** (command-surface)
+    // until RUSH-3062 gave it a budget, so the example went stale; pick a group whose
+    // test-ownership.yaml entry has no budget_sec.
     const plan = selectImpact({
       files: ['packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
@@ -375,10 +366,9 @@ describe('selectImpact policy', () => {
   });
 
   test('a deleted tree selects no tests and does not fail the plan', () => {
-    // The PR shape that removes a whole mapped tree (apps/ext/** moved to
-    // phnx-labs/agi-ext, RUSH-3189): deleted test files must not be queued as
-    // work, and a deleted source is not the missing-coverage signal
-    // zero_selection exists to catch. None of these paths exist at head.
+    // The PR shape that removes a whole mapped tree (apps/ext/** moved to phnx-labs/agi-ext,
+    // RUSH-3189): deleted tests must not be queued as work, and a deleted source is not the
+    // missing-coverage signal zero_selection exists to catch.
     const plan = selectImpact({
       files: [
         'apps/ext/app/floorData.test.ts', // testless-exempted tree, deleted
@@ -697,13 +687,9 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
   });
 
   test('a CHANGELOG-only diff selects its generator test, never cli-full', () => {
-    // CHANGELOG.md is GENERATED from .changelog/<version>.md, and
-    // gen-changelog.test.ts is what asserts the committed file still matches
-    // those sources. Selecting nothing here is what let three separate
-    // hand-edits reach main on 2026-08-20, each surfacing only when the full
-    // suite ran at release time and refused to attest a red tree. The point of
-    // the assertion is still that this stays `selected` -- one fast test, not
-    // cli-full.
+    // CHANGELOG.md is generated from .changelog/<version>.md and gen-changelog.test.ts asserts they
+    // match. Selecting nothing here let three hand-edits reach main on 2026-08-20, caught only when
+    // the full suite refused to attest. This must stay `selected`: one fast test, not cli-full.
     const plan = selectImpact({
       files: ['CHANGELOG.md', 'cli/CHANGELOG.md'],
       repoRoot: REPO,
@@ -839,12 +825,9 @@ describe('commandsForPlan', () => {
     expect(cmds[0].cmd.join(' ')).not.toContain('--shard');
   });
 
-  // RUSH-2666 (wave 6): vitest's CLI treats every arg after a literal `--`
-  // as opaque pass-through, not a file filter. `vitest run -- state.test.ts`
-  // silently falls back to the full `include` glob. Measured on PR #2770:
-  // the plan selected 3 files, the `--` invocation ran all 864 (883.72s)
-  // instead of the selected files (~13s single-file). Guard the exact
-  // token shape so this regression can't sneak back in.
+  // RUSH-2666 (wave 6): vitest treats every arg after a literal `--` as pass-through, not a file
+  // filter, so `vitest run -- state.test.ts` falls back to the full include glob. On PR #2770 the
+  // plan selected 3 files but the `--` invocation ran all 864 (883.72s). Guard the token shape.
   test('vitest invocations never carry a bare `--` before the file list', () => {
     const single = commandForTestFile('cli/src/lib/state.test.ts', REPO);
     expect(single.cmd).not.toContain('--');
@@ -1000,11 +983,9 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
 });
 
 test('changedFilesBetween treats a pure cross-component move as moved-not-changed (PHNX-3200)', () => {
-  // Was: `--no-renames` reported this as a delete of the old path PLUS an add of
-  // the new one, so a pure move read as two changed files (and the #3033 flatten
-  // of ~2100 files read as ~2100 changes → suite=cli-full). Rename-aware, a
-  // 100%-similarity move selects nothing: the content is unchanged, and any
-  // importer whose path broke shows up as its own content change.
+  // Was: `--no-renames` reported a move as delete plus add, so a pure move read as two changes (the
+  // #3033 flatten of ~2100 files gave suite=cli-full). Rename-aware, a 100%-similarity move selects
+  // nothing: content is unchanged, and broken importers show up as their own changes.
   const repo = mkdtempSync(join(tmpdir(), 'agents-ci-rename-'));
   try {
     git(repo, 'init', '-b', 'main');

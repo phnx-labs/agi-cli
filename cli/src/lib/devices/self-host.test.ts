@@ -1,12 +1,6 @@
-/**
- * isSelfHost — the self-identity check that gates `--device` dispatch and the
- * fleet fan-out (RUSH-2114). The old check compared only machineId() (short
- * hostname), so a target referenced by its tailscale dnsName self-SSH'd to the
- * local box and orphaned. These tests pin the fix through the REAL device
- * registry IO (no mocking): the box is matched by every alias it answers to, and
- * — the safety-critical half — a genuine PEER is never matched (else `--device
- * <peer>` would wrongly run locally).
- */
+/** isSelfHost, the self-identity check gating `--device` dispatch and the fleet fan-out
+ * (RUSH-2114). The old check compared only the short hostname, so a target named by tailscale
+ * dnsName self-SSH'd and orphaned. Matches every alias, but never a genuine peer. */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

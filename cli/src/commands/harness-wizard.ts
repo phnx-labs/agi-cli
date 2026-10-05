@@ -1,31 +1,6 @@
-/**
- * Shared interactive step engine for `agents harness` create + edit.
- *
- * A single engine drives BOTH the create wizard (`agents harness add`/`fork`,
- * previously `runHarnessWizard`) and the new edit wizard (`agents harness edit`,
- * which was flag-only before). A "step" is a self-contained unit — decide whether
- * it runs for the current draft, then prompt/validate/apply — so the two modes
- * differ only in their step list, not in the runner.
- *
- * Design goals (RUSH-2219, parent RUSH-2218):
- *   - One runner, two modes. `create` builds a new harness from a source; `edit`
- *     loads an existing profile and re-asks each field pre-filled with its value.
- *   - Every step is skippable. A flag that already supplied the value pre-fills
- *     the draft and its step is not re-asked — so non-interactive scripting via
- *     flags is unchanged and the wizard only asks for what is missing.
- *   - Pure and injectable. The engine talks to the user through {@link WizardIO},
- *     an injected seam. Tests drive a scripted fake IO and assert which steps ran,
- *     with no TTY. {@link defaultWizardIO} is the production driver over
- *     `@inquirer/prompts`.
- *   - Typed extension points, not stubs. The three sibling subtasks plug in via
- *     {@link WizardHooks} without editing the engine: RUSH-2220 (model catalog +
- *     secrets surface) via `pickModel`, RUSH-2221 (connection test) via
- *     `connectionTest`, RUSH-2222 (edit matrix) via `editable`. Each hook is a
- *     real no-op extension point — absent, the scaffold falls back to today's
- *     behavior (free-text model, no test, resolver-sourced editability). None of
- *     them fakes a result. RUSH-2223 (cross-host portability, `fork --to-host`)
- *     extends the create source step; the seam is `HarnessDraft.toHost`.
- */
+/** Shared interactive step engine for `agents harness` create and edit (RUSH-2219): one runner, two
+ * modes, differing only in step list. Each step is skippable (flags prefill the draft) and talks
+ * to the user through the injected WizardIO; extension points are WizardHooks. */
 
 import chalk from 'chalk';
 import type { AgentId } from '../lib/types.js';
@@ -55,12 +30,8 @@ export interface WizardChoice<T> {
   disabled?: boolean | string;
 }
 
-/**
- * The prompt seam the engine drives. Injected so the engine is testable with no
- * TTY: the production implementation ({@link defaultWizardIO}) wraps
- * `@inquirer/prompts`; a test passes a scripted fake that records calls and
- * returns canned answers.
- */
+/** The prompt seam the engine drives, injected so tests need no TTY: production wraps
+ * `@inquirer/prompts`, tests pass a scripted fake. */
 export interface WizardIO {
   select<T>(opts: { message: string; choices: WizardChoice<T>[]; default?: T }): Promise<T>;
   input(opts: { message: string; default?: string; validate?: (v: string) => true | string }): Promise<string>;
@@ -70,13 +41,9 @@ export interface WizardIO {
   note(message: string): void;
 }
 
-/**
- * The mutable draft threaded through every step. It is a superset of both modes'
- * fields; a step reads what it needs and records its answer here. `create` maps
- * the finished draft into `{ source, name, opts }` for `runForkFlow`; `edit` maps
- * it into the `EditOptions` shape the flag-driven edit path already persists — so
- * a wizard-built and a hand-written harness are byte-identical after save.
- */
+/** The mutable draft threaded through every step, a superset of both modes' fields. `create` maps
+ * it to `runForkFlow` input, `edit` to `EditOptions`, so wizard-built and hand-written harnesses
+ * are byte-identical. */
 export interface HarnessDraft {
   readonly mode: WizardMode;
   /** create: the fork source (a native agent id or an existing harness name). */
@@ -95,12 +62,8 @@ export interface HarnessDraft {
   fallbackModel?: string;
   /** edit: the profile being edited, providing current values. Read-only. */
   readonly original?: Profile;
-  /**
-   * RUSH-2223 seam (cross-host portability): the target host to re-key a cloned
-   * harness onto (`fork --to-host <host>`). The scaffold never sets it; the
-   * portability subtask reads it in an extended source step. Left here so the
-   * draft shape is stable when that lands.
-   */
+  /** RUSH-2223 seam: target host to re-key a cloned harness onto (`fork --to-host`).
+   * Not set by the scaffold; kept so the draft shape stays stable. */
   toHost?: AgentId;
 
   // --- transient wizard state (never persisted) ---
@@ -114,14 +77,8 @@ export interface HarnessDraft {
   providerAsked?: boolean;
 }
 
-/**
- * What the engine does with a step for a given draft:
- *   - `'run'`             prompt the user, validate, and apply into the draft.
- *   - `'skip'`            value already supplied (by a flag) or step N/A — silent.
- *   - `{ disabled: … }`   the step does not apply to this host; surface the reason
- *                         (the field reads as greyed/disabled) but do not prompt.
- *                         This is the seam the edit matrix (RUSH-2222) drives.
- */
+/** What the engine does with a step: `'run'` prompts, `'skip'` is silent (flag supplied or N/A),
+ * and `{ disabled }` shows the reason without prompting (the edit matrix, RUSH-2222). */
 export type StepDecision = 'run' | 'skip' | { disabled: string };
 
 /** One wizard step: decide, then (only when decided `'run'`) prompt + apply. */
@@ -156,19 +113,9 @@ interface HarnessEditability {
   fallback: EditableField;
 }
 
-/**
- * The per-harness editability matrix (RUSH-2222). Which of a harness's params
- * this host's API format actually lets you change, each disabled field carrying
- * the reason the wizard greys it with.
- *
- * Sourced ENTIRELY from the same maps the run-time resolver reads —
- * `baseUrlEnvKeyForHost` (endpoint slot), `authEnvKeyForHost` (auth env), and
- * `isSelfUpdatingAgent` (pinnable version) — never a table hardcoded alongside
- * them, so the wizard's enable/disable can never drift from what a run actually
- * honors (repo rule: the capability table stays truthful, in lockstep with the
- * code). A disabled param is never a silent no-op — the wizard shows its reason
- * and the flag path fails loud (`forkProfile`'s base-URL throw is the precedent).
- */
+/** Per-harness editability matrix (RUSH-2222): which params the host's API format lets you change,
+ * with the reason for each disabled one. Derived from the run-time resolver's maps so it cannot
+ * drift from what a run honors. A disabled param never no-ops silently: the flag path fails loud. */
 export function harnessEditable(host: AgentId): HarnessEditability {
   const hasEndpoint = baseUrlEnvKeyForHost(host) !== null;
   const hasAuth = authEnvKeyForHost(host) !== null;
@@ -188,11 +135,8 @@ export function harnessEditable(host: AgentId): HarnessEditability {
   };
 }
 
-/**
- * The boolean projection of {@link harnessEditable} — the scaffold default behind
- * the RUSH-2222 {@link WizardHooks.editable} seam. Derived from the reason-carrying
- * matrix so the two can never disagree.
- */
+/** Boolean projection of `harnessEditable`, the default behind the `WizardHooks.editable` seam;
+ * derived so the two cannot disagree. */
 export function defaultEditable(host: AgentId): HarnessEditable {
   const e = harnessEditable(host);
   return {
@@ -204,27 +148,18 @@ export function defaultEditable(host: AgentId): HarnessEditable {
   };
 }
 
-/**
- * Extension points the sibling subtasks fill without touching the engine. Each is
- * a real no-op-by-default seam: absent, the scaffold uses today's behavior; none
- * fabricates a result.
- */
+/** Extension points filled without touching the engine. Each is a no-op by default and none
+ * fabricates a result. */
 export interface WizardHooks {
-  /**
-   * RUSH-2220 — model catalog pick. Given the resolved host (+ version and the
-   * current value in edit), return a chosen model id, or `null` to fall through
-   * to the free-text prompt. Absent → always free-text (today's behavior).
-   */
+  /** RUSH-2220 model catalog pick: return a model id, or `null` to fall through to free text.
+   * Absent means always free text. */
   pickModel?: (
     io: WizardIO,
     host: AgentId | undefined,
     version: string | undefined,
     current: string | undefined,
   ) => Promise<string | null>;
-  /**
-   * RUSH-2221 — connection test after configure, before save. Absent → no test
-   * (the wizard saves without one, exactly as today).
-   */
+  /** RUSH-2221 connection test after configure, before save. Absent means no test. */
   connectionTest?: (draft: HarnessDraft) => Promise<ConnectionTestResult>;
   /**
    * RUSH-2222 — per-host editability matrix. Absent → {@link defaultEditable}.
@@ -242,11 +177,8 @@ export function hostForSource(source: string | undefined): AgentId | undefined {
   return custom?.host.agent;
 }
 
-/**
- * The engine. Walk the steps in order; for each, ask `decide` what to do, then
- * prompt only when it says `'run'`. A `{ disabled }` decision surfaces the reason
- * and moves on; `'skip'` is silent. Returns the finished draft.
- */
+/** The engine: walk the steps in order, asking `decide` what to do; prompt on `'run'`, show the
+ * reason on `{ disabled }`, stay silent on `'skip'`. */
 export async function runWizardSteps(
   steps: WizardStep[],
   draft: HarnessDraft,
@@ -282,12 +214,9 @@ function knownProviders(): string[] {
   return [...new Set(listPresets().map((p) => p.provider))];
 }
 
-/**
- * Prompt for a key source when a provider needs one: type it now, or copy it from
- * an existing agents secrets bundle. Sets `draft.fromSecrets` for the bundle path;
- * the type-now path is handled downstream (ensureProviderToken), unchanged. This
- * is today's behavior, lifted verbatim; RUSH-2220 enriches the bundle browse.
- */
+/** Prompt for a key source when a provider needs one: type it now (handled downstream by
+ * ensureProviderToken) or copy from an agents secrets bundle, setting `draft.fromSecrets`. Lifted
+ * verbatim from prior behavior; RUSH-2220 enriches the bundle browse. */
 async function askKeySource(io: WizardIO, draft: HarnessDraft, provider: string): Promise<void> {
   const bundles = await listBundles();
   const source =
@@ -328,13 +257,9 @@ async function askModel(io: WizardIO, draft: HarnessDraft, hooks: WizardHooks, c
 
 // --- create steps -----------------------------------------------------------
 
-/**
- * The create step list — the shape of `agents harness add`/`fork`. Faithful to
- * the previous `runHarnessWizard` sequence (source → preset|custom → model →
- * provider → base URL → name → key source), re-expressed as engine steps so the
- * sibling subtasks can gate/replace individual steps. Produces the same
- * `{ source, name, opts }` draft the fork flow already persists.
- */
+/** The create step list for `agents harness add`/`fork`, the same sequence as the old
+ * `runHarnessWizard` expressed as engine steps. Produces the same `{ source, name, opts }` draft
+ * the fork flow persists. */
 export function createSteps(): WizardStep[] {
   return [
     {
@@ -406,10 +331,9 @@ export function createSteps(): WizardStep[] {
       id: 'baseUrl',
       decide: (d) => {
         if (!d.custom || d.baseUrl !== undefined) return 'skip';
-        // Endpoint slot is a function of the host's API format (§3.4): only the
-        // Anthropic/OpenAI-compatible hosts carry one. Skipping the prompt for the
-        // rest replaces the old silent-drop (`profileFromHostModel` discards a
-        // base URL the host can't honor) with an explicit reason.
+        // Endpoint slot depends on the host's API format (§3.4): only Anthropic/OpenAI-compatible
+        // hosts carry one. Skipping replaces the old silent drop in `profileFromHostModel` with an
+        // explicit reason.
         const host = d.host ?? hostForSource(d.source);
         if (host) {
           const cap = harnessEditable(host).baseUrl;
@@ -471,13 +395,9 @@ function currentBaseUrl(p: Profile): string | undefined {
   return key ? p.env[key] : undefined;
 }
 
-/**
- * The edit step list — `agents harness edit <name>` with no flags on a TTY. Each
- * step is pre-filled with the profile's current value and gated by the host's
- * editability matrix (RUSH-2222 seam): an unsupported param reads as disabled with
- * a reason instead of being silently accepted. Records into the same draft, which
- * `runEditWizard` maps to the `EditOptions` shape the flag path already persists.
- */
+/** The edit step list for `agents harness edit <name>` on a TTY: each step is prefilled and gated
+ * by the editability matrix (RUSH-2222), so an unsupported param reads as disabled with a reason,
+ * not silently accepted. */
 export function editSteps(original: Profile): WizardStep[] {
   const host = original.host.agent;
   const editableFor = (hooks: WizardHooks) => (hooks.editable ?? defaultEditable)(host);
@@ -549,13 +469,8 @@ export function editSteps(original: Profile): WizardStep[] {
   ];
 }
 
-/**
- * The connection-test step (RUSH-2221 seam). Kept in both step lists so the id is
- * a stable member of the sequence, but the actual test needs the assembled profile
- * (which the caller builds after the wizard), so the run is performed separately by
- * {@link runConnectionTest}. The step itself decides `'skip'` — a real no-op
- * extension point that fakes nothing.
- */
+/** Connection-test step (RUSH-2221): kept in both lists so the id is stable, but the test needs the
+ * assembled profile, so it runs separately via `runConnectionTest`; the step itself always skips. */
 function connectionTestStep(): WizardStep {
   return {
     id: 'connectionTest',
@@ -566,12 +481,8 @@ function connectionTestStep(): WizardStep {
   };
 }
 
-/**
- * Run the connection-test hook against a finished draft, if one is wired
- * (RUSH-2221). Returns `null` when no hook is present (no test performed) so the
- * caller can distinguish "not tested" from "tested and passed". Separated from the
- * step list because the test needs the assembled profile, which the caller builds.
- */
+/** Run the connection-test hook against a finished draft (RUSH-2221). Returns `null` when no hook
+ * is wired, so callers can tell 'not tested' from 'passed'. */
 export async function runConnectionTest(
   draft: HarnessDraft,
   hooks: WizardHooks,
@@ -580,11 +491,8 @@ export async function runConnectionTest(
   return hooks.connectionTest(draft);
 }
 
-/**
- * Production {@link WizardIO} over `@inquirer/prompts`, lazy-imported so the
- * dependency loads only when a wizard actually runs. `note` prints to stderr so it
- * never contaminates a `--json`/piped stdout.
- */
+/** Production WizardIO over `@inquirer/prompts`, lazy-imported. `note` writes to stderr so it never
+ * pollutes `--json` or piped stdout. */
 export async function defaultWizardIO(): Promise<WizardIO> {
   const { select, input, password, confirm } = await import('@inquirer/prompts');
   return {

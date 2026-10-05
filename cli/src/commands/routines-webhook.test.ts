@@ -1,19 +1,6 @@
-/**
- * End-to-end tests for `agents routines webhook`.
- *
- * The webhook receiver logic (`matchJobsToWebhook` / `fireWebhookJobs` in
- * `../lib/triggers/webhook.ts`) is unit-tested in isolation, but until this
- * command existed nothing CALLED it — a `--on-registered` (trigger) routine had
- * no reachable local entrypoint. These tests drive the REAL CLI as a subprocess
- * against an isolated HOME, so they exercise the full path a user hits:
- *
- *   payload (--file) -> listJobs() (real disk read) -> matchJobsToWebhook
- *     -> executeJobDetached (the same dispatch cron uses)
- *
- * Nothing here is mocked: the matcher, the job loader, and the dispatch path all
- * run for real. Before the `webhook` subcommand is registered these fail with
- * commander's "unknown command" (non-zero exit, no run dirs created).
- */
+/** End-to-end tests for `agents routines webhook`. The receiver logic
+ * (`matchJobsToWebhook`/`fireWebhookJobs`) was unit-tested but nothing called it, so a `--on-
+ * registered` routine had no local entrypoint. Real CLI, isolated HOME, no mocks. */
 import { describe, it, expect } from 'vitest';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -151,10 +138,9 @@ describe('agents routines webhook', () => {
       const payloadPath = path.join(home, 'pr.json');
       fs.writeFileSync(payloadPath, JSON.stringify(pullRequestPayload('octo/repo')));
 
-      // No --dry-run: fireWebhookJobs -> executeJobDetached actually runs.
-      // executeJobDetached writes the run's meta.json synchronously, then spawns
-      // the (absent-in-test) agent binary detached — so exit code is irrelevant;
-      // the run directory is the observable proof the routine was dispatched.
+      // No --dry-run: fireWebhookJobs -> executeJobDetached runs for real. It writes the run's
+      // meta.json synchronously, then spawns the (absent) agent binary detached, so the exit code
+      // is irrelevant and the run directory is the proof of dispatch.
       runWebhook(home, ['--event', 'pull_request', '--file', payloadPath]);
 
       const runsDir = path.join(home, '.agents', '.history', 'runs');

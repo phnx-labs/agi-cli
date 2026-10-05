@@ -1,21 +1,8 @@
 name: Bench
 
-# Post-merge performance benchmark harnesses (bench/ + tests/bench-*).
-# Deliberately Linux-only and informational:
-#
-#   * No per-OS bench legs. The correctness matrix (ubuntu/macOS/Windows x
-#     node 22/24) lives in ci.yml — cross-platform bench numbers add noise
-#     without signal right now, so there is no Windows/macOS/Linux bench fan-out.
-#   * Most bench steps are `continue-on-error` — a regression or a nonzero exit
-#     never fails the job or blocks a merge. Numbers are informational; read
-#     them in the step log. Infra failures (checkout/install) still surface red.
-#   * The distributed session-query threshold remains a PR gate inside the
-#     `cli-preflight` job in tests.yml. It also runs here to keep the post-merge
-#     benchmark record complete.
-#
-# Each harness runs against a fresh HOME (mktemp -d) so results depend on the
-# harness, not on leftover runner state. resolve-perf no-ops when no agent
-# versions are installed (the CI case) — it smoke-tests the harness itself.
+# Post-merge benchmark harnesses, Linux-only and informational: most steps continue-on-error,
+# so a regression never blocks a merge (infra failures still go red); the session-query threshold
+# stays a PR check in tests.yml. Each harness runs on a fresh HOME; resolve-perf no-ops in CI.
 
 on:
   push:

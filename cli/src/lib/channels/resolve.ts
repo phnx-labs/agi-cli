@@ -1,17 +1,6 @@
-/**
- * Transport resolution: map a user-facing channel name to the provider that
- * actually delivers it, using `notify.transports` from agents.yaml.
- *
- * Default is name-identity (`--channel slack` -> `slack` provider) — NOT a
- * fallback to a different transport. Only telegram is dual-homed (rush vs
- * openclaw-telegram); config picks.
- *
- * Two entry points, deliberately: `lookupTransport` *returns* the failure, for
- * long-lived callers (the monitor daemon, the feed-dispatch loop) that must
- * survive a bad channel name; `resolveTransport` `die()`s on it, for the
- * interactive `agents send` command path where exiting with a
- * loud message is the right answer. Never give a daemon the dying one.
- */
+/** Map a channel name to its provider via `notify.transports`; default is name-identity, not a
+ * fallback. Only telegram is dual-homed. `lookupTransport` returns the failure (for daemons);
+ * `resolveTransport` die()s (for interactive `agents send`). Never give a daemon the dying one. */
 import type { Meta } from '../types.js';
 import { die } from '../format.js';
 import { resolveChannelProvider, listChannelProviders, type ChannelProvider } from './registry.js';

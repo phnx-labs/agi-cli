@@ -52,13 +52,9 @@ function shellQuote(value) {
 // Shorthands that delegate to the installed agents-cli entrypoint.
 const ALIASES = ['teams'];
 
-// Aliases this script USED to write and must now remove on every install.
-// `secrets` (PHNX-3989), `sessions` (PHNX-4012), `pty` (PHNX-4091), and
-// `browser` (PHNX-4101): those names belong to standalone CLIs now (`pty` ->
-// `@phnx-labs/term-cli`'s `term`; `browser` -> `@phnx-labs/browser-cli`). An
-// alias shim that `exec`s `agents <name>` re-enters the passthrough and shadows
-// the real binary because the shims dir sits first on PATH — the 1.22.85 fork
-// bomb. Postinstall is the upgrade path that actually runs, so it prunes here.
+// Aliases this script used to write and must now remove on every install: `secrets` (PHNX-3989),
+// `sessions` (PHNX-4012), `pty` (PHNX-4091), `browser` (PHNX-4101), which belong to standalone
+// CLIs now. Postinstall is the upgrade path that runs, so it prunes here.
 const RETIRED_ALIASES = ['secrets', 'sessions', 'pty', 'browser'];
 
 function removeRetiredAliasShims() {
@@ -70,10 +66,9 @@ function removeRetiredAliasShims() {
       } catch {
         continue;
       }
-      // Only ever remove OUR alias — the POSIX shim ends in `<name> "$@"`, the
-      // Windows companion in `<name> %*` — never an unrelated file someone placed
-      // under that name, and never a user's own `agents setup alias` shim, which
-      // is marked `# Alias shim:` (the same guard pruneOrphanedCommandShim keeps).
+      // Remove only our own alias: the POSIX shim ends in `<name> "$@"`, the Windows companion in
+      // `<name> %*`. Never an unrelated file under that name, nor a user's own `agents setup
+      // alias` shim (marked `# Alias shim:`, as pruneOrphanedCommandShim also keeps).
       if (content.includes('# Alias shim:')) continue;
       if (!content.includes(`${name} "$@"`) && !content.includes(`${name} %*`)) continue;
       fs.rmSync(file, { force: true });
@@ -98,10 +93,9 @@ function writeAliasShims() {
   return written;
 }
 
-// Self-updater entry: the upgrade installs with --ignore-scripts (skipping
-// this script as an npm lifecycle hook), then re-invokes it with this env var
-// so the alias shims are refreshed from the newly installed copy. Shims only —
-// no prompts, no rc-file edits, no output.
+// Self-updater entry: the upgrade installs with --ignore-scripts, then re-invokes this script with
+// this env var so alias shims refresh from the newly installed copy. Shims only: no prompts,
+// rc-file edits or output.
 if (process.env.AGENTS_POSTINSTALL_SHIMS_ONLY === '1') {
   fs.mkdirSync(SHIMS_DIR, { recursive: true });
   writeAliasShims();
@@ -120,17 +114,9 @@ To complete setup, run: npx agents setup
   process.exit(0);
 }
 
-// Create directories. The full migration (legacy ~/.agents-system/ fold,
-// runtime-state bucket moves, etc.) runs from src/lib/migrate.ts on the first
-// CLI invocation — we don't duplicate it here.
-//
-// SYSTEM_DIR is intentionally NOT pre-created: if a legacy ~/.agents-system/
-// exists, the migrator's fast-path rename needs SYSTEM_DIR to be absent so it
-// can move the legacy tree in one shot (including .git). Pre-creating an empty
-// skeleton forces the slower merge path AND can leave the new dir without
-// `.git`, which makes ensureInitialized() exit "not set up" before the
-// migrator runs. The migrator + first `agents setup` create SYSTEM_DIR as
-// needed.
+// Create directories only; the full migration (legacy ~/.agents-system/ fold, state bucket moves)
+// runs from src/lib/migrate.ts on first CLI invocation. SYSTEM_DIR is intentionally NOT created:
+// the migrator's fast-path rename of a legacy ~/.agents-system/ (with .git) needs it absent.
 fs.mkdirSync(USER_DIR, { recursive: true, mode: 0o700 });
 fs.mkdirSync(SHIMS_DIR, { recursive: true });
 
@@ -196,12 +182,9 @@ function isAlreadyConfigured(rcFile) {
 }
 
 async function main() {
-  // Windows has no shell rc files to edit. Write the `.cmd` shorthands here, then
-  // make sure npm's global-bin dir is on the User PATH so the `agents` command
-  // itself resolves: Node's installer normally adds it, but winget / portable /
-  // nvm-windows setups often don't — and then `npm i -g` succeeds yet `agents`
-  // is "not recognized". The shims dir (claude/codex/...) is still left to
-  // `agents setup`, which the user can now run because `agents` is discoverable.
+  // Windows has no rc files to edit: write the `.cmd` shorthands, then ensure npm's global-bin dir
+  // is on the User PATH so `agents` resolves (winget/portable/nvm-windows setups often lack it, so
+  // `npm i -g` succeeds yet `agents` is "not recognized").
   if (process.platform === 'win32') {
     console.log(`\nagents-cli installed.`);
     const written = writeAliasShims();
@@ -298,24 +281,9 @@ To enable version-aware shims, add this to your shell config:
   }
 }
 
-/**
- * Make the `agents` command resolvable in a *login* shell on POSIX.
- *
- * `agents`/`ag` reach PATH only through npm's bin symlink in the npm global-bin
- * dir. Under nvm (and other per-user node prefixes) that dir is missing from a
- * non-interactive login shell's PATH, so `bash -lc 'agents …'` fails with
- * command-not-found — which breaks `agents secrets export --host` (it runs
- * `bash -lc 'agents secrets import …'` on the remote) and the routines daemon
- * (src/lib/daemon/daemon.ts falls back to bare `agents`). This is the POSIX symmetric
- * counterpart of the Windows branch in main() that registers npm's global-bin
- * dir on the user PATH.
- *
- * Self-heal, not a prompt: it fires ONLY when `agents` is otherwise
- * unresolvable — the genuinely-broken state — so it acts decisively, exactly
- * like the Windows PATH registration. The symlink never clobbers a dev build
- * (scripts/install.sh) or any real file. Skipped in CI (ephemeral homes) and
- * when AGENTS_NO_HEAL=1.
- */
+/** Make `agents` resolvable in a login shell on POSIX. It reaches PATH only through npm's
+ * global-bin symlink, which under nvm is missing from a non-interactive login PATH, so `bash -lc
+ * 'agents ...'` fails (breaking `agents secrets export --host` and the routines daemon). */
 async function ensureAgentsResolvablePosix() {
   if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
   retargetManagedLinksToNativeBin();
@@ -335,10 +303,9 @@ async function ensureAgentsResolvablePosix() {
       return;
     }
 
-    // ~/.local/bin isn't on the *bash* login PATH yet. The consumers run
-    // `bash -lc`, so add it to the file a bash login shell reads (~/.bash_profile
-    // when present, else ~/.profile) — not the interactive $SHELL rc, which for a
-    // zsh user (.zshrc) bash would never source.
+    // ~/.local/bin is not on the bash login PATH yet. Consumers run `bash -lc`, so add it to the
+    // file a bash login shell reads (~/.bash_profile if present, else ~/.profile), not the
+    // interactive $SHELL rc (a zsh user's .zshrc, which bash never sources).
     const bashRc = fs.existsSync(path.join(HOME, '.bash_profile'))
       ? path.join(HOME, '.bash_profile')
       : path.join(HOME, '.profile');
@@ -357,15 +324,9 @@ async function ensureAgentsResolvablePosix() {
   }
 }
 
-/**
- * Upgrade path for #315: an earlier install symlinked ~/.local/bin/agents at
- * the JS entrypoint. ensureLocalBinSymlink never repoints an existing link,
- * and the loginShellResolves() early-return means ensureAgentsResolvablePosix
- * would not even try - so without this, a machine healed before the signed
- * binary existed keeps the unsigned JS shim forever. Repoint ONLY symlinks
- * that resolve exactly to OUR dist/index.js; a dev build or foreign link is
- * never touched.
- */
+/** Upgrade path for #315: an earlier install symlinked ~/.local/bin/agents at the JS entrypoint,
+ * ensureLocalBinSymlink never repoints an existing link, and the loginShellResolves() early-return
+ * stops ensureAgentsResolvablePosix, so a machine healed earlier keeps the unsigned JS shim. */
 function retargetManagedLinksToNativeBin() {
   if (AGENTS_BIN === AGENTS_JS_ENTRYPOINT) return;
   const binDir = path.join(HOME, '.local', 'bin');
@@ -389,27 +350,16 @@ function retargetManagedLinksToNativeBin() {
   }
 }
 
-/**
- * Self-heal long-running processes onto the just-installed code (darwin + linux).
- *
- * The root cause behind stale-behavior bugs is a daemon that keeps
- * running pre-upgrade code for days. An in-place `npm i -g` swaps the files but
- * not the running processes — so we bounce them here, the one moment we know the
- * code just changed. (The secrets broker is not one of them — the standalone
- * `secrets` CLI owns its own broker lifecycle, PHNX-3989.) Always start (or
- * restart) the supervised daemon so a fresh
- * install gets launchd/systemd KeepAlive without waiting for routines add.
- * Best-effort and non-fatal: a failure must never break the install. Skipped in
- * CI and when AGENTS_NO_HEAL=1. Windows is out of scope (detached-only, no KeepAlive).
- */
+/** Self-heal long-running processes onto the just-installed code (darwin + linux): `npm i -g` swaps
+ * files but not a daemon running old code, so bounce it here (not the secrets broker, PHNX-3989).
+ * Best-effort: it must never break the install; skipped in CI and when AGENTS_NO_HEAL=1. */
 async function healLongRunningProcesses() {
   if (process.platform !== 'darwin' && process.platform !== 'linux') return;
   if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
 
-  // Always (re)start so first install writes the LaunchAgent/systemd unit and
-  // upgrades bounce onto the new binary — but honor daemon.enabled for cold
-  // starts (SING-4a). If it was already running under a disable, stop and leave
-  // it down so upgrade does not resurrect a killed switch.
+  // Always (re)start so first install writes the LaunchAgent/systemd unit and upgrades bounce onto
+  // the new binary, but honor daemon.enabled for cold starts (SING-4a): if it was running under a
+  // disable, stop it so an upgrade does not resurrect a killed switch.
   try {
     const d = await import('../dist/lib/daemon/daemon.js');
     const { isDaemonEnabled } = await import('../dist/lib/device-config.js');

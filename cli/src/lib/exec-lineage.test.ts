@@ -2,12 +2,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
 import { buildExecEnv } from './exec.js';
 
-// A sub-agent's events can only carry a walkable "spawned by" edge if
-// buildExecEnv stamps the SPAWNER's session as AGENTS_PARENT_SESSION_ID on the
-// child's env — which the event floor (events.ts::resolveProvenance) then reads
-// onto every event the child emits. options.sessionId is the CHILD's id, so the
-// parent must come from the live env of the spawning process. This exercises the
-// real env build + cross-process delivery, not a mock.
+// A sub-agent's events carry a walkable "spawned by" edge only if buildExecEnv stamps the
+// spawner's session as AGENTS_PARENT_SESSION_ID. options.sessionId is the child's id, so the
+// parent comes from the spawning process's live env. Exercises the real env build and delivery.
 describe('AGENTS_PARENT_SESSION_ID lineage', () => {
   const savedParent = process.env.AGENTS_SESSION_ID;
   const savedAgentParent = process.env.AGENT_SESSION_ID;

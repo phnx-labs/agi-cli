@@ -1,10 +1,5 @@
-/**
- * Scheduled routines management.
- *
- * Registers the `agents routines` command tree for creating, editing,
- * running, pausing, and removing cron-scheduled agent invocations.
- * Also exposes scheduler lifecycle controls (start/stop/status/logs).
- */
+/** `agents routines`: create, edit, run, pause and remove cron-scheduled agent invocations, plus
+ * scheduler lifecycle controls (start/stop/status/logs). */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -108,11 +103,8 @@ import { devicesWithRoutineEnabled } from '../lib/routine-activation.js';
 import { spawnSync } from 'node:child_process';
 import { getCliLaunch } from '../lib/cli-entry.js';
 
-/**
- * Human-friendly wall-clock a run took (e.g. "  · 3 min", "  · 45 sec"), or ""
- * when it hasn't completed or timestamps are unparseable. Leading separator lets
- * callers drop it straight into a status line.
- */
+/** Human-friendly wall-clock a run took ("  · 3 min"), or "" if incomplete or timestamps are
+ * unparseable; the leading separator lets callers append it to a status line. */
 export function formatRunDuration(startedAt: string, completedAt: string | null): string {
   if (!completedAt) return '';
   const ms = Date.parse(completedAt) - Date.parse(startedAt);
@@ -126,10 +118,8 @@ export function formatRunDuration(startedAt: string, completedAt: string | null)
   return rem ? `  · ${hr} hr ${rem} min` : `  · ${hr} hr`;
 }
 
-/**
- * Human label for what fires a job: its cron schedule, or its event trigger
- * for schedule-less (trigger-only) routines.
- */
+/** Human label for what fires a job: its cron schedule, or its event trigger for schedule-less
+ * routines. */
 function scheduleLabel(job: JobConfig): string {
   let label = fireConditionLabel(job);
   if (isOneShotRoutine(job)) label = `${label} (one-shot)`;
@@ -178,28 +168,17 @@ function deviceLabel(job: JobConfig, width?: number): { raw: string; display: st
   return { raw, display, dim: full.length === 0 || !jobRunsOnThisDevice(job) };
 }
 
-/**
- * The last run THIS device can speak for.
- *
- * A run record is written by whichever daemon fired the routine, into that
- * machine's own runs dir — records carry no device attribution, so a record
- * found here only ever describes this device's history. When a routine is
- * pinned away from this machine (`devices:` excludes it) any local record is a
- * leftover from before the pin, and reporting it as the routine's status paints
- * another device's healthy routine red. Report nothing instead; the local
- * history stays readable via `agents routines runs <name>`, and the owning
- * device's status via `agents routines list --device <name>`.
- */
+/** The last run this device can speak for. Run records carry no device attribution and live in the
+ * firing machine's runs dir, so for a routine pinned away a local record is a pre-pin leftover
+ * that would paint another device's healthy routine red. Report nothing. */
 
 interface RoutineListGroup {
   key: string;
   title: string;
   jobs: JobConfig[];
-  /**
-   * Whether this device's run records describe the group. False for a
-   * `Device: <peer>` group — the rows are the same routine seen from a machine
-   * that does not fire it there, so Last Status is not ours to report.
-   */
+  /** Whether this device's run records describe the group. False for a `Device: <peer>` group: the
+   * rows are the same routine seen from a machine that doesn't fire it there, so Last Status is
+   * not ours to report. */
   local: boolean;
 }
 
@@ -263,11 +242,8 @@ function groupRoutineJobsByDevice(
   return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
 }
 
-/**
- * Group routines by their `projects` metadata field.
- * Named projects come first (alphabetically), followed by All projects, Cross-project,
- * Operations (no project), and Unknown projects (stale names).
- */
+/** Group routines by their `projects` metadata: named projects first (alphabetical), then All
+ * projects, Cross-project, Operations (no project), and Unknown projects (stale names). */
 export function groupRoutineJobsByProject(
   jobs: JobConfig[],
   knownProjectNames: Set<string>,
@@ -290,11 +266,9 @@ export function groupRoutineJobsByProject(
     add(key, projectGroupTitle(group), job);
   }
 
-  // Order by the discriminated group rank (named first, then All projects,
-  // Cross-project, Operations, Unknown projects), then alphabetically by title
-  // within a rank. Buckets are keyed on the discriminant, never the label, so a
-  // project named "Operations" sorts among the named projects — not with the
-  // no-project special that shares its title.
+  // Order by the discriminated group rank, then alphabetically by title. Buckets key on the
+  // discriminant, never the label, so a project named "Operations" sorts among named projects, not
+  // with the no-project special sharing its title.
   const order = (group: RoutineListGroup): number => orderByKey.get(group.key) ?? 0;
   return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
 }
@@ -310,11 +284,9 @@ interface RenderRowsOptions {
   overdueSet: Set<string>;
   link: (label: string, url: string | null) => string;
   now: Date;
-  /**
-   * Whether this device's run records describe these rows. False for a
-   * `Device: <peer>` group, whose Last Status column stays blank rather than
-   * showing this machine's leftover records for the same routine name.
-   */
+  /** Whether this device's run records describe these rows. False for a `Device: <peer>` group,
+   * whose Last Status stays blank rather than showing this machine's leftover records for the same
+   * routine name. */
   local?: boolean;
 }
 
@@ -408,14 +380,9 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
   throw new Error('--on source must be github or linear');
 }
 
-/**
- * Start or reload the background scheduler so newly-added jobs fire on time.
- * `quiet` suppresses human status lines for JSON callers.
- *
- * When this device has `scheduler.enabled=false` the auto-start is skipped with
- * the stated reason (the add itself already succeeded — the job is config and
- * stays valid fleet-wide); the refusal message names the setting and the fix.
- */
+/** Start or reload the scheduler so new jobs fire on time; `quiet` suppresses status lines for JSON
+ * callers. With `scheduler.enabled=false` auto-start is skipped with a stated reason (the add
+ * succeeded; the job is fleet-wide config), naming the setting and fix. */
 function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}): void {
   const log = opts.stderr ? console.error : console.log;
   try {
@@ -443,10 +410,9 @@ function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}
   try {
     result = startDaemon();
   } catch (err) {
-    // The redirected-HOME refusal (W4) is an auto-start policy, not a failure
-    // of the routine just added — state it and leave the foreground command
-    // green, the same tier split as the auto-start circuit breaker. Anything
-    // else (a genuinely unspawnable binary) still fails loud.
+    // The redirected-HOME refusal (W4) is an auto-start policy, not a failure of the routine just
+    // added: state it and keep the command green, like the auto-start circuit breaker. Anything
+    // else (an unspawnable binary) still fails loud.
     if (err instanceof RedirectedHomeDaemonError) {
       if (!opts.quiet) log(chalk.yellow((err as Error).message));
       return;
@@ -511,13 +477,9 @@ export function buildRunsJson(runs: RunMeta[]): Record<string, unknown>[] {
 
 /** Build the exact structured routine rows shared by `routines list --json`
  * and the one-process AGI Menu snapshot. */
-/**
- * Materialised routines plus project routines discoverable from registered
- * projects, deduped by name. The discovered ones are always disabled (available
- * to enable) — this is a DISPLAY-only merge, so `list` shows the full single
- * enabled/disabled picture. Execution paths (`run`/`catchup`/`webhook`) keep
- * using `listAllJobs` so an un-materialised project routine can never fire.
- */
+/** Materialised routines plus project routines from registered projects, deduped by name.
+ * Discovered ones are always disabled; display-only. Execution paths (`run`/`catchup`/`webhook`)
+ * keep `listAllJobs`, so an un-materialised project routine never fires. */
 
 /** Detect Ctrl+C or premature stream close during an interactive prompt. */
 function isPromptCancelled(err: unknown): boolean {
@@ -529,17 +491,9 @@ function isPromptCancelled(err: unknown): boolean {
   );
 }
 
-/**
- * Interactive job picker. Returns the selected job name or null on cancel/empty.
- *
- * `cwd` is opt-in: pass `process.cwd()` only for inspect-class commands
- * (`view`) whose backing operation tolerates project-layer entries. Mutation
- * (`remove`/`edit`/`pause`/`resume`) and execution (`run`) callers omit it,
- * which limits the picker — and therefore the user — to user-layer routines
- * only. Without that guard, a cloned public repo's `.agents/routines/<name>.yml`
- * would surface in `agents routines run`'s picker and execute with an
- * attacker-supplied prompt under the user's Claude session.
- */
+/** Interactive job picker; returns the job name or null on cancel/empty. `cwd` is opt-in for
+ * inspect-class commands (`view`) only; mutation and `run` omit it, else a cloned repo's
+ * `.agents/routines/<name>.yml` would run an attacker-supplied prompt under the user's session. */
 async function pickJob(
   message: string,
   filter?: (job: JobConfig) => boolean,
@@ -578,13 +532,9 @@ async function pickJob(
   }
 }
 
-/**
- * Enable a routine on this device. If the name is not yet a user/system routine
- * but names a project routine (in the current project or a registered one), it
- * is materialised into the user layer first — one step, no separate opt-in. The
- * device flag (`meta.deviceRoutines`) is the only thing that turns firing on, so
- * a project YAML can never enable itself.
- */
+/** Enable a routine on this device, first materialising a project routine (current or registered
+ * project) into the user layer in one step. Only the device flag (`meta.deviceRoutines`) turns
+ * firing on, so a project YAML can never enable itself. */
 async function enableRoutineAction(name: string | undefined): Promise<void> {
   if (!name) {
     name = await pickJob('Select routine to enable', (job) => !job.enabled, ['agents routines enable <name>']) ?? undefined;
@@ -674,11 +624,8 @@ async function disableRoutineAction(name: string | undefined): Promise<void> {
   }
 }
 
-/**
- * Parse a comma-separated devices string, normalize, deduplicate, and validate
- * each entry against the registered fleet. Exits nonzero on empty/whitespace
- * input or unknown devices.
- */
+/** Parse a comma-separated devices string, normalize, dedupe, and validate each against the
+ * registered fleet; exits nonzero on empty input or unknown devices. */
 async function parseAndValidateDevices(raw: string): Promise<string[]> {
   const names = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean).map((s) => normalizeHost(s)))];
   if (names.length === 0) {
@@ -703,11 +650,8 @@ interface RoutinesListOptions {
   flat?: boolean;
 }
 
-/**
- * The static routines table. Shared verbatim by `agents routines list` and the
- * non-interactive fall-through of the bare `agents routines` command, so both emit
- * byte-identical `--json` and text output.
- */
+/** The static routines table, shared by `routines list` and the non-interactive fall-through of
+ * bare `routines`, so both emit byte-identical `--json` and text. */
 function runRoutinesList(options: RoutinesListOptions): void {
   if (options.groupBy && options.groupBy !== 'device' && options.groupBy !== 'project') {
     console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: project (default) or device`));
@@ -791,23 +735,16 @@ function routineMatchesQuery(job: JobConfig, q: string): boolean {
     .includes(q);
 }
 
-/**
- * Friendly one-liners for the claim a `skipped` run lost — the reasons whose
- * message is static. `active_run` is dynamic (it names the live run that owns
- * the slot and when it started), built in {@link runFailureReason}: since
- * PHNX-4116 there is no "wedged" daemon state, so an overlapping routine reads
- * as `blocked` on the live run, not "wedged".
- */
+/** Friendly one-liners for the claim a `skipped` run lost, for static reasons only. `active_run` is
+ * dynamic (names the live run and its start), built in `runFailureReason`: since PHNX-4116 there
+ * is no 'wedged' state, so an overlap reads as `blocked` on the live run. */
 const SKIP_REASON_LABEL: Record<Exclude<NonNullable<RunMeta['skipReason']>, 'active_run'>, string> = {
   duplicate_slot: 'duplicate slot (already fired)',
   wrong_owner: 'pinned to another device',
 };
 
-/**
- * A run id is an ISO timestamp with `:`/`.` replaced by `-` (`slotRunId` /
- * `generateRunId`), so it reverses losslessly to the run's start time. Returns
- * the ISO string, or null when the id is not that shape (a hand-set id).
- */
+/** A run id is an ISO timestamp with `:`/`.` replaced by `-` (`slotRunId`/`generateRunId`), so it
+ * reverses losslessly to the start time; null when the id isn't that shape (hand-set). */
 function runIdToStartIso(runId: string): string | null {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(runId);
   if (!m) return null;
@@ -815,23 +752,18 @@ function runIdToStartIso(runId: string): string | null {
   return Number.isFinite(Date.parse(iso)) ? iso : null;
 }
 
-/**
- * The short, human reason a run did not simply complete — for inline display in
- * the list/detail so "why did it fail" needs no dig into the run dir. Prefers the
- * concrete `errorMessage` (which carries `auth_failed: …`, OAuth-revoked, timeouts),
- * then the readiness block for a `blocked` run, then the mapped skip reason. Returns
- * null for a healthy (`completed`/`running`) run, which needs no annotation.
- */
+/** The short human reason a run did not simply complete, for inline display. Prefers the concrete
+ * `errorMessage` (`auth_failed: ...`, OAuth-revoked, timeouts), then the readiness block for a
+ * `blocked` run, then the mapped skip reason; null for healthy runs. */
 export function runFailureReason(run: RunMeta): string | null {
   if (run.status === 'completed' || run.status === 'running') return null;
   const compact = (s: string): string => {
     const one = s.replace(/\s+/g, ' ').trim();
     return one.length > 80 ? one.slice(0, 79) + '…' : one;
   };
-  // An overlap skip names the live run it lost to (PHNX-4116): `blocked: run
-  // <id> active since <t>`, not the removed "wedged" wording. The structured
-  // `activeRunId` is preferred; a legacy record without it falls back to the
-  // errorMessage (which embeds the same id) so nothing regresses to vaguer text.
+  // An overlap skip names the live run it lost to (PHNX-4116): `blocked: run <id> active since
+  // <t>`. Prefer the structured `activeRunId`; a legacy record without it falls back to
+  // errorMessage (which embeds the same id).
   if (run.skipReason === 'active_run') {
     if (run.activeRunId) {
       const since = runIdToStartIso(run.activeRunId);
@@ -881,10 +813,8 @@ function routineBrowserRow(
   return `${chalk.bold(name)} ${chalk.cyan(kind.padEnd(12))} ${enabled.padEnd(6)} ${chalk.gray(scheduleLabel(job)).padEnd(24)} next ${next} · last ${last}`;
 }
 
-/**
- * The four-block routine detail — Definition, Next fire, Recent runs, Stats — shown
- * both live in the picker's preview pane and, in full, when a routine is selected.
- */
+/** The four-block routine detail (Definition, Next fire, Recent runs, Stats), shown live in the
+ * picker's preview pane and in full when a routine is selected. */
 function buildRoutineDetail(job: JobConfig, scheduler: JobScheduler, now: Date): string {
   const lines: string[] = [];
 
@@ -949,11 +879,9 @@ function buildRoutineDetail(job: JobConfig, scheduler: JobScheduler, now: Date):
   return lines.join('\n');
 }
 
-/**
- * Interactive routines browser behind the bare `agents routines` command on a TTY.
- * Reuses {@link itemPicker}, keeping the project/device group headers as inline
- * dividers, with a live four-block detail pane and a full drill-in on select.
- */
+/** Interactive routines browser behind bare `agents routines` on a TTY: reuses `itemPicker` with
+ * project/device group headers as dividers, a live four-block detail pane, and a full drill-in on
+ * select. */
 async function runRoutinesBrowser(options: RoutinesListOptions): Promise<void> {
   // Same --group-by validation as the static list, so a bad value fails the same
   // way on a TTY as it does under --json / a pipe (rather than silently defaulting).
@@ -1115,12 +1043,9 @@ export function registerRoutinesCommands(program: Command): void {
     `,
   });
 
-  // Bare `agents routines`: a HIDDEN default subcommand carries the bare-command's
-  // own --json/--group-by/--flat. It must be a subcommand rather than options on the
-  // parent `routines`, because commander binds a same-named PARENT option first and
-  // would shadow the identical --json on every sibling (`add`/`run`/`runs`/`list`/…).
-  // On a TTY it opens the interactive browser; with --json, --flat, or in a
-  // non-interactive shell it prints the exact static `routines list` output.
+  // Bare `agents routines` is a hidden default subcommand carrying its own --json/--group-
+  // by/--flat: as parent options, commander would bind them first and shadow the identical --json
+  // on `add`/`run`/`runs`/`list`. On a TTY it opens the browser; otherwise the static list.
   routinesCmd
     .command('browse', { isDefault: true, hidden: true })
     .description('Interactive routines browser (the default for a bare `agents routines`)')
@@ -1237,17 +1162,14 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
-        // Normalize `--agent <agent[@version]>` into separate bare agent +
-        // version fields, the same split `agents run` performs. Storing the raw
-        // compound string is the RUSH-2719 bug: validateJob compared
-        // 'claude@2.1.207' against bare AgentIds, and the deprecation gate below
-        // silently missed a hard-deprecated harness pinned with @version.
+        // Normalize `--agent <agent[@version]>` into bare agent + version fields as `agents run`
+        // does. Storing the compound string was RUSH-2719: validateJob compared 'claude@2.1.207'
+        // to bare AgentIds and the deprecation check silently missed a pinned deprecated harness.
         let parsedAgent: { agent: AgentId | (string & {}); version?: string } | undefined;
         if (options.agent) {
-          // A custom harness (agents harness list) is a valid routine agent:
-          // the runner delegates it to `agents run <name>`. It pins its own
-          // host version, so no @version suffix applies (a suffixed name falls
-          // through to the parse error below).
+          // A custom harness (`agents harness list`) is a valid routine agent: the runner
+          // delegates it to `agents run <name>`. It pins its own host version, so no @version
+          // suffix applies (a suffixed name hits the parse error below).
           if (isCustomHarnessName(options.agent)) {
             parsedAgent = { agent: options.agent };
           } else {
@@ -1266,10 +1188,9 @@ export function registerRoutinesCommands(program: Command): void {
           }
         }
 
-        // --strategy / --balanced: per-routine selection policy, same vocabulary
-        // as agents run. Rejected (not warned) against an @version pin: a warning
-        // printed once at add time is easy to miss and the routine then silently
-        // runs pinned forever.
+        // --strategy / --balanced: per-routine selection policy, same vocabulary as `agents run`.
+        // Rejected, not warned, against an @version pin: a warning at add time is easy to miss and
+        // the routine then runs pinned forever.
         let strategy: RunStrategy | undefined;
         if (options.strategy !== undefined || options.balanced) {
           if (options.strategy !== undefined && options.balanced) {
@@ -1355,11 +1276,9 @@ export function registerRoutinesCommands(program: Command): void {
           console.error(chalk.red('--placement host requires --run-on <name>'));
           process.exit(1);
         }
-        // No devices auto-pin is needed for off-box placement: under the
-        // per-device activation model (§8), a new routine is activated only on
-        // the creating machine's device manifest (setJobEnabled below), so
-        // exactly one daemon fires it unless it is deliberately enabled
-        // elsewhere — the double-fire guard is structural now.
+        // No devices auto-pin is needed for off-box placement: under per-device activation (§8) a
+        // new routine is activated only on the creating machine's manifest, so exactly one daemon
+        // fires it unless deliberately enabled elsewhere; the double-fire guard is structural.
 
         const config: JobConfig = {
           name: nameOrPath,
@@ -1399,10 +1318,9 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         writeJob(config);
-        // Readiness gate: a routine only activates when its execution context
-        // resolves and the harness is available. A proven blocker saves the
-        // definition PAUSED with a stable code + repair, so a broken routine can
-        // never fire (and storm) — the plan's save-paused contract.
+        // Readiness check: a routine activates only when its execution context resolves and the
+        // harness is available. A proven blocker saves the definition paused with a stable code
+        // and repair, so a broken routine can never fire or storm.
         const deviceMatch = !devices || devices.map(normalizeHost).includes(normalizeHost(machineId()));
         const readiness = await evaluateActivationReadinessLive(config);
         const activate = config.enabled && deviceMatch && readiness.ready;
@@ -1493,23 +1411,17 @@ export function registerRoutinesCommands(program: Command): void {
           ));
         }
 
-        // `add <file>` must never rewrite the file the user pointed at. When the
-        // source already IS the canonical routine file — the normal case for a
-        // definition tracked in the git-backed `~/.agents` repo — writeJob would
-        // re-serialize it in place and drop every key the canonical form omits,
-        // including the legacy `devices:` pin, silently corrupting committed
-        // config (RUSH-2517). The definition is already where it belongs; only
-        // activation is left to do. A source from anywhere else is still copied
-        // in, which is the whole point of passing a path.
+        // `add <file>` must never rewrite the file the user pointed at. When the source is already
+        // the canonical routine file (git-tracked `~/.agents`), writeJob would re-serialize it and
+        // drop keys, including the legacy `devices:` pin (RUSH-2517). Only activation remains.
         if (!isCanonicalRoutineSource(resolved, config.name)) writeJob(config);
         const deviceMatch = !config.devices || config.devices.map(normalizeHost).includes(normalizeHost(machineId()));
         const readiness = await evaluateActivationReadinessLive(config);
         const activate = config.enabled && deviceMatch && readiness.ready;
         setJobEnabled(config.name, activate);
-        // A `devices:` pin in a hand-authored definition is legacy input: since
-        // RUSH-2392's split (723182bb5) activation lives in each device's
-        // `agents.yaml`, and `add` only ever applies it to THIS box. Say so
-        // rather than let the routine read `Devices: all` on every peer.
+        // A `devices:` pin in a hand-authored definition is legacy input: since RUSH-2392's split
+        // activation lives in each device's `agents.yaml` and `add` applies it only to THIS box.
+        // Say so rather than let the routine read `Devices: all` on every peer.
         if (config.devices && config.devices.length > 0 && !options.json) {
           console.log(chalk.yellow(`'devices:' pins activation on this box only — it is not propagated to peers.`));
           console.log(chalk.gray(`  pin the fleet with: agents routines devices ${config.name} --set ${config.devices.join(',')}`));
@@ -1645,12 +1557,9 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       const existing = readJob(name);
-      // Headless context repair. Both readiness blockers print
-      // `agents routines edit <name> --project-anchor <name>  # or --cwd <path>`
-      // as their repair (routine-context.ts:215,334), but neither flag existed
-      // and the only edit surface opened $EDITOR — so an agent could never
-      // follow its own repair hint (RUSH-2517). Applying and saving directly is
-      // what makes that hint true.
+      // Headless context repair: both readiness blockers print `agents routines edit <name>
+      // --project-anchor <name>  # or --cwd <path>`, but neither flag existed and `edit` only
+      // opened $EDITOR (RUSH-2517). Applying and saving directly makes the hint true.
       if (options.cwd !== undefined || options.projectAnchor !== undefined || options.agent !== undefined || options.strategy !== undefined) {
         if (!existing) {
           console.error(chalk.red(`Routine '${name}' not found. Create it first: agents routines add ${name} --schedule "..." --agent claude --prompt "..."`));
@@ -1859,12 +1768,9 @@ export function registerRoutinesCommands(program: Command): void {
         if (!name) return;
       }
 
-      // Execution is intentionally user-only: a routine spawns a full agent
-      // session with a YAML-supplied prompt, so a cloned public repo's
-      // `.agents/routines/<name>.yml` would be a prompt-injection vector if
-      // `run` honored the project layer. `list` / `view` stay project-aware
-      // for inspection; `run`, `remove`, `edit`, `pause`, `resume` stay on
-      // the trusted user layer.
+      // Execution is user-layer only: a routine spawns a full agent session with a YAML prompt, so
+      // honoring a cloned repo's `.agents/routines/<name>.yml` would be a prompt-injection vector.
+      // `list`/`view` stay project-aware; `run`, `edit`, `pause`, `resume` use the user layer.
       const job = readJob(name);
       if (!job) {
         if (options.json) {
@@ -1904,11 +1810,9 @@ export function registerRoutinesCommands(program: Command): void {
             logPath,
             reportPath: result.reportPath ?? null,
           });
-          // A failed run must exit non-zero so cron wrappers, `&&` chains, and
-          // `--json` consumers actually see the failure (a logged-out agent used
-          // to exit 0 with ok:true, hiding the whole auth-failure epidemic). Set
-          // exitCode rather than process.exit() so the JSON payload is fully
-          // flushed to a pipe before the process ends.
+          // A failed run must exit non-zero so cron wrappers, `&&` chains and `--json` consumers
+          // see it (a logged-out agent used to exit 0 with ok:true, hiding auth failures). Set
+          // exitCode rather than process.exit() so the JSON is flushed to a pipe first.
           if (!succeeded) process.exitCode = 1;
           return;
         }
@@ -2038,10 +1942,9 @@ export function registerRoutinesCommands(program: Command): void {
 
       const webhook: IncomingWebhook = { source, event: options.event, payload };
 
-      // Matching is intentionally user-layer only (fireWebhookJobs defaults to
-      // listJobs() with no cwd), mirroring `run`/`catchup`: a webhook must never
-      // fire a cloned project repo's `.agents/routines/*.yml` and run an
-      // attacker-supplied prompt under the user's agent session.
+      // Matching is user-layer only (fireWebhookJobs defaults to listJobs() with no cwd), like
+      // `run`/`catchup`: a webhook must never fire a cloned repo's `.agents/routines/*.yml` with
+      // an attacker-supplied prompt under the user's agent session.
       if (options.dryRun) {
         const matched = matchJobsToWebhook(listAllJobs(), webhook);
         if (matched.length === 0) {
@@ -2056,10 +1959,9 @@ export function registerRoutinesCommands(program: Command): void {
         return;
       }
 
-      // Fired jobs run detached via executeJobDetached (the same path cron
-      // uses). Keep the daemon alive so each run's meta.json is finalized —
-      // unless daemon.enabled is off, in which case this auto-start is
-      // skipped with a stated reason.
+      // Fired jobs run detached via executeJobDetached (as cron does); keep the daemon alive so
+      // each run's meta.json is finalized, unless daemon.enabled is off, in which case auto-start
+      // is skipped with a stated reason.
       if (!isDaemonRunning()) {
         if (!isDaemonEnabled()) {
           console.log(chalk.yellow(`Daemon is disabled (daemon.enabled=false) — run(s) below fire but are not monitored. Re-enable with: agents daemon enable`));
@@ -2128,11 +2030,9 @@ export function registerRoutinesCommands(program: Command): void {
         return;
       }
 
-      // Concise by default: a status header + the extracted report (final
-      // assistant message). Routine runs are sandboxed (transcript in an overlay
-      // HOME, not the session index), so the captured report — not renderSummary —
-      // is the concise view. Falls back to a bounded stdout tail when no report
-      // was extracted (e.g. the run failed before finishing).
+      // Concise by default: a status header plus the extracted report (final assistant message).
+      // Routine runs are sandboxed (transcript in an overlay HOME, not the session index), so fall
+      // back to a bounded stdout tail when no report was extracted.
       const statusColor = run.status === 'completed' ? chalk.green
         : run.status === 'missed' ? chalk.magenta
         : run.status === 'failed' || run.status === 'timeout' ? chalk.red
@@ -2310,12 +2210,9 @@ export function registerRoutinesCommands(program: Command): void {
         const selectedSet = new Set(selected.map(normalizeHost));
         const unknown = [...selectedSet].filter((device) => !all.includes(device));
         if (unknown.length > 0) throw new Error(`Unknown device${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
-        // --set/--clear fan out to every registered device so peers outside the
-        // new set get paused. An asleep/offline peer must not abort the whole
-        // pin: the target may already be applied, and an unreachable box cannot
-        // be running the routine (it picks up the enabled set on next sync).
-        // Exit non-zero only when a *selected* device could not be enabled
-        // (github.com/phnx-labs/agents-cli#2118).
+        // --set/--clear fan out to every registered device so peers outside the new set get
+        // paused. An offline peer must not abort the pin: it can't be running the routine and
+        // picks up the enabled set on next sync. Exit non-zero only if a selected device failed.
         const skipped: Array<{ device: string; action: 'resume' | 'pause' }> = [];
         const failedTargets: string[] = [];
         for (const device of all) {
@@ -2409,10 +2306,9 @@ export function registerRoutinesCommands(program: Command): void {
     .description('Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.')
     .action(() => {
       try {
-        // A manual start on a disabled device refuses with the same message the
-        // auto-start surfaces give — `agents routines start` is a convenience
-        // wrapper around the daemon, not the deliberate override. Use
-        // `agents daemon start` to bypass daemon.enabled explicitly.
+        // A manual start on a disabled device refuses with the same message as the auto-start
+        // surfaces: `routines start` is a convenience wrapper, not the override. Use `agents
+        // daemon start` to bypass daemon.enabled explicitly.
         assertDaemonEnabled();
         assertSchedulerEnabled();
       } catch (err) {
@@ -2473,10 +2369,9 @@ export function registerRoutinesCommands(program: Command): void {
       const schedulerDeviceEnabled = isSchedulerEnabled();
       const schedulerState = schedulerServiceEnabled && schedulerDeviceEnabled ? status.state : 'stopped';
 
-      // The daemon-owned status surface (PHNX-3215): scheduler truth plus, per
-      // routine, its single owner device, last fire outcome + error, and any
-      // in-flight spawn — the fields `list --json` (definition-shaped) does not
-      // carry. Emitted from THIS device, so per-device fields read as this box's.
+      // The daemon-owned status surface (PHNX-3215): scheduler truth plus per routine its single
+      // owner device, last fire outcome and error, and any in-flight spawn, which definition-
+      // shaped `list --json` lacks. Emitted from this device, so per-device fields are this box's.
       if (options.json) {
         const rows = buildRoutineStatusRows();
         writeJson({

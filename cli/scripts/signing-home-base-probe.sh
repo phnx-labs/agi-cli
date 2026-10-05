@@ -1,39 +1,7 @@
 #!/usr/bin/env bash
-#
-# signing-home-base-probe.sh -- is THIS box a fully provisioned signing home base?
-#
-# The release's privileged phase (build + sign + notarize + npm publish +
-# computer-helper, run_home_base_phase in release.sh) can ONLY run on a macOS box
-# that carries ALL of:
-#   - a `Developer ID Application` codesigning identity reachable in a
-#     headless-unlockable keychain (rush-signing.keychain-db + signing.kcpass);
-#   - the `apple.com` secrets bundle (notarytool creds) and the `npmjs.com`
-#     bundle (the publish token), resolvable in the headless secrets context.
-#
-# These are what a provisioned home base (mac-mini) has and an unprovisioned
-# `--device` fallback (e.g. zion) does not -- they are the checks that
-# actually catch the RUSH-2535 case. (A third requirement, the Apple
-# provisioning profile the keychain helper's signed build embedded, is gone —
-# that helper moved out of this repo entirely with the standalone `secrets`
-# engine, PHNX-3989.)
-#
-# release.sh runs this ON the resolved home base BEFORE any mutation. If the box
-# is not provisioned it aborts there -- before the crabbox/PR/merge/tag phases --
-# so a `--device <box>` fallback that lacks signing (e.g. the documented
-# "mac-mini is down, use --device zion" path on a box that was never provisioned)
-# can no longer merge the PR and push the tag and THEN die at the sign step,
-# leaving a tagged-but-UNPUBLISHED release (RUSH-2535).
-#
-# The readiness logic lives here rather than inline in release.sh so it can be
-# tested directly (scripts/signing-home-base-probe.test.ts) -- same split as
-# stuck-release.sh / validate-bump.sh. It is READ-ONLY: it never runs git tag,
-# push, commit, merge, worktree, checkout, switch, or reset, nor a gh/npm
-# mutation, so invoking it can never advance the release.
-#
-# Usage:  scripts/signing-home-base-probe.sh
-#
-# Prints `OK` and exits 0 when every requirement is present. Otherwise prints one
-# `MISSING: <reason>` line per gap to stderr and exits 1. Exit 2 is a usage error.
+# Is this box a fully provisioned signing home base? Probe for a Developer ID identity in a
+# headless-unlockable keychain plus the `apple.com` and `npmjs.com` secrets bundles, catching
+# RUSH-2535 on an unprovisioned `--device` fallback. Read-only.
 
 set -uo pipefail
 
@@ -48,10 +16,9 @@ else
   command -v security >/dev/null 2>&1 || missing+=("security (keychain) not found")
 fi
 
-# 2) A Developer ID codesigning identity in a headless-unlockable keychain. Unlock
-#    it from signing.kcpass first (the same preamble headless-sign-context.sh uses)
-#    so the check reflects what a headless release would actually see -- an
-#    identity that only appears after an interactive unlock does NOT qualify.
+# A Developer ID codesigning identity in a headless-unlockable keychain. Unlock it from
+# signing.kcpass first (as headless-sign-context.sh does), since an identity that appears only
+# after an interactive unlock does not qualify.
 if [[ "$(uname -s)" == "Darwin" ]] && command -v security >/dev/null 2>&1; then
   SUPPORT="$HOME/Library/Application Support/rush"
   if [[ -f "$SUPPORT/signing.kcpass" ]]; then

@@ -1,8 +1,5 @@
-/**
- * RUSH-2984 — top-level `agents inbox` is gone. It was a pure alias of
- * `agents feed` (needs-you is already the feed default). Pins that the name
- * is unregistered and cannot auto-correct.
- */
+/** RUSH-2984: top-level `agents inbox` is gone (a pure alias of `agents feed`). Pins that the name
+ * is unregistered and cannot auto-correct. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';

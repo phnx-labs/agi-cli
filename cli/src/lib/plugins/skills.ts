@@ -1,11 +1,5 @@
-/**
- * Skill management -- discovery, installation, and syncing of SKILL.md bundles.
- *
- * Skills are knowledge packs stored in ~/.agents/skills/. Each skill directory
- * contains a SKILL.md (with frontmatter metadata) and optional supporting files
- * (rules/, examples/, etc.). This module handles parsing skill metadata,
- * installing skills into agent version homes, and tracking installation state.
- */
+/** Skill discovery, installation, and syncing of SKILL.md bundles stored in ~/.agents/skills/
+ * (SKILL.md plus optional supporting files). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -165,11 +159,8 @@ export function countSkillRules(skillDir: string): number {
   }
 }
 
-/**
- * Count bundled resource files in a skill directory: every regular file
- * beyond SKILL.md itself (reference docs, scripts, assets, etc). Hidden
- * files and hidden directories are skipped.
- */
+/** Count bundled resource files in a skill dir: every regular file beyond SKILL.md, skipping hidden
+ * files and dirs. */
 export function countSkillFiles(skillDir: string): number {
   if (!fs.existsSync(skillDir)) return 0;
   let count = 0;
@@ -202,11 +193,8 @@ export interface DiscoveredSkill {
   ruleCount: number;
   validation: ValidationResult;
   parseError?: string;
-  /**
-   * Which repo the skill was discovered in. `undefined` means the primary
-   * ~/.agents/ repo; otherwise the alias of an extra repo registered via
-   * `agents repo add`. Primary wins on name collisions.
-   */
+  /** Repo the skill was found in: `undefined` is the primary ~/.agents/, otherwise the alias of an
+   * extra repo; primary wins on collisions. */
   source?: string;
 }
 
@@ -366,10 +354,7 @@ function directoriesMatch(dir1: string, dir2: string): boolean {
   }
 }
 
-/**
- * Check if installed skill content matches source content.
- * Compares SKILL.md and all rules/*.md files.
- */
+/** Whether installed skill content matches source (SKILL.md and all rules/*.md). */
 export function skillContentMatches(
   agentId: AgentId,
   skillName: string,
@@ -405,10 +390,7 @@ export function skillContentMatches(
   }
 }
 
-/**
- * List skill names from user (~/.agents/skills/) and system (~/.agents/.system/skills/) dirs.
- * User dir takes priority; deduplication preserves first occurrence.
- */
+/** Skill names from user and system dirs; the user dir wins and dedup keeps the first occurrence. */
 export function listCentralSkills(): string[] {
   const seen = new Set<string>();
   for (const dir of [getUserSkillsDir(), getSystemSkillsDir()]) {
@@ -422,17 +404,9 @@ export function listCentralSkills(): string[] {
   return Array.from(seen).sort();
 }
 
-/**
- * Resolve a skill name to its source directory. Searches user dir first,
- * then system dir, then extra repos, then plugin-bundled skills
- * (`plugins/<plugin>/skills/<name>` under any trusted base). Returns null if no
- * source has a SKILL.md.
- *
- * Crediting plugins here is load-bearing (PHNX-3185): a skill materialized from
- * `plugins/design/skills/design` has a real source, so it must resolve — else
- * `versionSkillMatches` finds no source and the skill reads as drifted, and
- * {@link diffVersionSkills} classes it an orphan `prune cleanup` would delete.
- */
+/** Resolve a skill name to its source dir: user, system, extra repos, then plugin-bundled skills;
+ * null if none has a SKILL.md. Crediting plugins is load-bearing (PHNX-3185): without it a
+ * plugin-materialized skill reads as drifted and as an orphan `prune cleanup` would delete. */
 export function resolveSkillSourcePath(skillName: string): string | null {
   for (const dir of [getUserSkillsDir(), getSystemSkillsDir()]) {
     const candidate = path.join(dir, skillName);
@@ -449,10 +423,7 @@ export function resolveSkillSourcePath(skillName: string): string | null {
   return null;
 }
 
-/**
- * Union of skill names available across the primary and all enabled extras.
- * Primary wins on name collision.
- */
+/** Union of skill names across the primary and enabled extras; primary wins on collision. */
 export function listAllSkills(): string[] {
   const seen = new Set<string>(listCentralSkills());
   for (const extra of getEnabledExtraRepos()) {
@@ -475,16 +446,9 @@ export function getVersionSkillsDir(agent: AgentId, version: string): string {
   return path.join(home, agentConfigDirName(agent), 'skills');
 }
 
-/**
- * List real skill names installed in a specific version home.
- *
- * Command-as-skill WRAPPERS (a `skills/<name>/SKILL.md` carrying the
- * `agents_command` marker — how command-runtime agents like Codex/Kimi install
- * commands) are excluded: they are commands, reconciled by the commands diff
- * against the command source, not skills. Counting them here made the skill
- * orphan/extra detectors flag every command wrapper (tickets, prune, swarm-plan,
- * …) as an unmanaged skill — a false positive that `prune cleanup` would delete.
- */
+/** Real skill names installed in a version home. Command-as-skill wrappers (`agents_command` marker,
+ * used by Codex/Kimi) are excluded: they are commands, and counting them made orphan detectors flag
+ * them as unmanaged skills that `prune cleanup` would delete. */
 export function listSkillsInVersionHome(agent: AgentId, version: string): string[] {
   const dir = getVersionSkillsDir(agent, version);
   if (!fs.existsSync(dir)) return [];
@@ -579,10 +543,8 @@ export function diffVersionSkills(agent: AgentId, version: string): VersionSkill
   return { agent, version, toAdd: toAdd.sort(), toUpdate: toUpdate.sort(), matched, orphans: orphans.sort() };
 }
 
-/**
- * Walk a directory and return every file's path relative to base.
- * Follows no symlinks. Returns empty set if the dir doesn't exist.
- */
+/** Walk a directory and return file paths relative to base, following no symlinks; empty set if it
+ * doesn't exist. */
 function walkRelativeFiles(base: string): Set<string> {
   const out = new Set<string>();
   if (!fs.existsSync(base)) return out;
@@ -608,14 +570,9 @@ function walkRelativeFiles(base: string): Set<string> {
   return out;
 }
 
-/**
- * Install a single skill from central into a specific version home.
- *
- * Copy mode preserves any files that exist in the version home but NOT in
- * central — e.g. user-populated `.env` alongside the git-tracked `.env.example`.
- * Without this, re-running `sync` whenever central content changes would wipe
- * local secrets.
- */
+/** Install one skill from central into a version home. Copy mode preserves version-home-only files
+ * (e.g. a user `.env` beside `.env.example`), otherwise re-syncing on central changes would wipe
+ * local secrets. */
 export function installSkillToVersion(
   agent: AgentId,
   version: string,
@@ -634,10 +591,8 @@ export function installSkillToVersion(
 
   const target = path.join(skillsDir, skillName);
 
-  // Snapshot files unique to the version home so we can restore them after
-  // the fresh copy (copy mode only; symlink shares the source so there's
-  // nothing local to preserve — and writing a .env into a symlinked skill
-  // would pollute the git-tracked source dir anyway).
+  // Snapshot files unique to the version home to restore after the fresh copy (copy mode only; a
+  // symlink shares the source, and writing a .env through it would pollute the tracked source dir).
   const preserved: Array<{ rel: string; buf: Buffer; mode: number }> = [];
   if (method === 'copy' && fs.existsSync(target) && !fs.lstatSync(target).isSymbolicLink()) {
     const sourceFiles = walkRelativeFiles(sourcePath);
@@ -715,10 +670,8 @@ export function removeSkillFromVersion(
   return { success: true };
 }
 
-/**
- * Iterate all (agent, version) pairs that support skills and are installed,
- * optionally scoped to a single agent/version.
- */
+/** Iterate all installed (agent, version) pairs that support skills, optionally scoped to one
+ * agent/version. */
 export function iterSkillsCapableVersions(filter?: { agent?: AgentId; version?: string }): Array<{ agent: AgentId; version: string }> {
   const pairs: Array<{ agent: AgentId; version: string }> = [];
   const agents = filter?.agent ? [filter.agent] : capableAgents('skills');
@@ -958,10 +911,7 @@ export function getSkillRules(skillName: string): string[] {
   }
 }
 
-/**
- * Install a skill to central ~/.agents/skills/ directory only.
- * Does not create per-agent symlinks (shims handle that for synced agents).
- */
+/** Install a skill to central ~/.agents/skills/ only; per-agent symlinks are made by shims. */
 export function installSkillCentrally(
   sourcePath: string,
   skillName: string

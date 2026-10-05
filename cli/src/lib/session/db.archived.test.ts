@@ -4,11 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
-// RUSH-2436: the local DB is authoritative for content. A session whose
-// transcript file is gone must still LIST and RENDER its user turns (served from
-// session_text), flagged `archived`, instead of silently vanishing — and merely
-// listing it must NOT purge its redacted tool-call evidence. A contentless
-// phantom (a stale/moved file_path) stays suppressed.
+// RUSH-2436: the local DB is authoritative for content. A session whose transcript file is gone
+// must still list and render its user turns (from session_text), flagged `archived`, without
+// purging its tool-call evidence. A contentless phantom stays suppressed.
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;

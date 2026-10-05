@@ -72,11 +72,9 @@ describe('backgroundSpawnOptions', () => {
   });
 
   it('an fd-redirected background child survives its launcher console closing (#556 regression)', async () => {
-    // Reproduces the daemon-start death: a launcher owning its own console
-    // (hidden via CREATE_NO_WINDOW) spawns a log-fd-redirected child and exits.
-    // If the child shared the launcher's console (the broken non-detached
-    // variant — windowsHide is inert under fd stdio), the console-close event
-    // kills it. With fdStdio options it must still be alive afterwards.
+    // Reproduces the daemon-start death: a launcher with a hidden console spawns a log-fd child
+    // then exits. A non-detached child shares that console and dies on close (windowsHide is inert
+    // with fd stdio); with fdStdio options it must survive.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bg-spawn-'));
     const logPath = path.join(dir, 'child.log');
     const pidPath = path.join(dir, 'child.pid');

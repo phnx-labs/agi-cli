@@ -1,15 +1,6 @@
-/**
- * End-to-end verification of the `matches:` gate baked into the generated shim
- * (issue #744 / RUSH-1506). No mocking — writes a real script, generates the
- * shim that wraps it, invokes the shim with `bash` + a JSON event payload on
- * stdin, and asserts the underlying script runs (fires) or not (skipped) via a
- * counter file. This is the actual bash codepath every Claude/Codex hook fire
- * goes through.
- *
- * A conformance suite additionally cross-checks the shim's fire/skip decision
- * against `shouldFire()` (the TS reference in match.ts) over the same fixtures,
- * so the two implementations can't drift.
- */
+/** End-to-end verification of the `matches:` gate in the generated shim (issue #744 /
+ * RUSH-1506), no mocking: a real script and shim invoked with `bash` and a JSON event on stdin,
+ * asserting via a counter file whether the script fired. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -191,11 +182,8 @@ echo "call=$count"
       { name: 'project-has-missing', matches: { project_has: 'no-such-file.xyz' }, input: { cwd: os.tmpdir() } },
     ];
 
-    // The conformance fixtures above only protect the keys someone remembered to
-    // add. `permission_mode_not` shipped in match.ts with no fixture, so the
-    // suite stayed green while the shim's gate ignored the key entirely. This
-    // pins the fixture list to the HookMatches surface itself: a new predicate
-    // fails here until it is exercised against both implementations.
+    // The conformance fixtures only protect keys someone remembered: `permission_mode_not` shipped
+    // in match.ts with no fixture while the shim's gate ignored it.
     it('every HookMatches predicate has at least one conformance fixture', () => {
       const typesSrc = fs.readFileSync(new URL('../types.ts', import.meta.url), 'utf-8');
       const block = typesSrc.match(/export interface HookMatches \{([\s\S]*?)\n\}/);
