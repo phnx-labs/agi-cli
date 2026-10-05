@@ -31,8 +31,6 @@ describe('buildOpenClawNotifyArgs', () => {
   });
 
   it('has no numeric-literal recipient default baked into the source', () => {
-    // The recipient is always resolved by the caller; regression guard against
-    // re-introducing a `?? '<some chat id>'` default for any target/owner.
     const src = fs.readFileSync(new URL('./notify.ts', import.meta.url), 'utf-8');
     expect(src).not.toMatch(/\?\?\s*['"]\d{5,}['"]/);
   });
@@ -57,24 +55,12 @@ describe('formatUrgentBlockMessage', () => {
   });
 });
 
-/**
- * Real-path tests for the consolidated owner-send seam. No mocking: a real
- * `openclaw` executable (a shell script that records its argv) is placed on PATH,
- * so the assertions run through lookupTransport → openclaw-telegram provider →
- * exec, the actual delivery path.
- *
- * POSIX-only (RUSH-2215): the openclaw-telegram provider resolves the binary
- * with `which openclaw` and execs it, and the fake is a `#!/bin/sh` recorder —
- * neither works on Windows (no `which`; an extensionless shell script is not
- * executable), so these assertions can only run on a POSIX host.
- */
 describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + provider routing)', () => {
   let tmp: string;
   let record: string;
   const savedPath = process.env.PATH;
   const savedRecord = process.env.OPENCLAW_RECORD;
 
-  /** A Meta that routes telegram -> openclaw-telegram and names an owner. */
   function metaWithOwner(to: string): Meta {
     return {
       notify: {
@@ -84,7 +70,6 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
     } as Meta;
   }
 
-  /** Install a fake `openclaw` on PATH that appends its argv to `record`. */
   function installFakeOpenclaw(): void {
     const bin = path.join(tmp, 'openclaw');
     fs.writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$OPENCLAW_RECORD"\nexit 0\n`);
@@ -92,7 +77,6 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
     process.env.PATH = `${tmp}${path.delimiter}/usr/bin${path.delimiter}/bin`;
   }
 
-  /** A PATH with `which`/`sh` available but no `openclaw` anywhere on it. */
   function pathWithoutOpenclaw(): void {
     process.env.PATH = `${tmp}${path.delimiter}/usr/bin${path.delimiter}/bin`;
   }
@@ -169,7 +153,7 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
     const result = await sendToOwner('ping', { meta: metaWithOwner('owner-chat-2'), dryRun: true });
     expect(result.ok).toBe(true);
     expect(result.id).toBe('owner-chat-2');
-    expect(fs.existsSync(record)).toBe(false); // nothing exec'd
+    expect(fs.existsSync(record)).toBe(false);
   });
 
   it('fails loud (not ENOENT) when the provider binary is missing', async () => {
@@ -187,13 +171,8 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
   });
 
   it('returns ok:false on an unresolvable channel — never process.exit()', async () => {
-    // sendToOwner is called from the monitor daemon and the feed-dispatch loop,
-    // so it must resolve via lookupTransport, not the die()-capable
-    // resolveTransport: an exit here bypasses both callers' try/catch.
     let exited: number | undefined;
     const realExit = process.exit;
-    // Tripwire, not a mock of the code under test: if the seam still exits, the
-    // call would abort the run — record the attempt and let the assertion fail.
     process.exit = ((code?: number) => {
       exited = code ?? 0;
       throw new Error(`process.exit(${exited})`);
@@ -213,16 +192,6 @@ describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + p
   });
 });
 
-/**
- * PHNX-3698: the owner policy fans one alert out to iMessage AND Slack, and only
- * Slack can render a labeled link. sendToOwner must therefore compose the body
- * PER destination — Slack gets `<url|label>`, iMessage the plain sentence — not
- * one shared plain string to both (the bug this fixes). Real path, no mocking:
- * the actual rush `slack`/`imessage` providers, dry-run so no `rush` binary is
- * needed, with `composeForFormat` the real owner composer. Each destination's
- * echoed `body` is the observable proof (the same field `--dry-run --json`
- * surfaces). Not POSIX-gated — the dry-run provider path spawns nothing.
- */
 describe('sendToOwner composes per destination (PHNX-3698)', () => {
   const savedHumans = process.env.AGENTS_HUMANS_FILE;
   const savedWorkspace = process.env.LINEAR_WORKSPACE;
@@ -231,8 +200,6 @@ describe('sendToOwner composes per destination (PHNX-3698)', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'notify-perchan-'));
     process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
-    // Owner policy fans out to iMessage then Slack — both rush-backed, exactly
-    // the shape of the zion owner box in the bug report.
     fs.writeFileSync(
       process.env.AGENTS_HUMANS_FILE,
       `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
@@ -251,8 +218,6 @@ describe('sendToOwner composes per destination (PHNX-3698)', () => {
   it('gives the Slack destination mrkdwn labeled links and iMessage the plain sentence', async () => {
     const raw = 'Deploy never ran. PHNX-3689 is the root cause of the drift.';
     const compose = ownerMessageComposer(raw);
-    // No transports remap: `slack` resolves to the slack provider (mrkdwn) and
-    // `imessage` to the imessage provider (plain).
     const result = await sendToOwner(compose('plain'), {
       meta: {} as Meta,
       dryRun: true,
@@ -262,27 +227,20 @@ describe('sendToOwner composes per destination (PHNX-3698)', () => {
     expect(result.deliveries).toHaveLength(2);
     const body = Object.fromEntries(result.deliveries!.map((d) => [d.channel, d.body ?? '']));
 
-    // Slack: the ticket key is a labeled link in place.
     expect(body.slack).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>');
-    // iMessage: the same key as bare text, no angle-bracket markup, no URL dump.
     expect(body.imessage).toContain('PHNX-3689');
     expect(body.imessage).not.toContain('<https://');
     expect(body.imessage).not.toContain('http');
-    // The whole point: two destinations, two different bodies.
     expect(body.slack).not.toEqual(body.imessage);
   });
 
   it('without a composer, delivers the one verbatim body to every destination', async () => {
-    // The back-compat path (monitor summaries, urgent blocks): no per-format
-    // shaping, so both channels get the identical string handed in.
     const result = await sendToOwner('plain summary, no links', { meta: {} as Meta, dryRun: true });
     expect(result.deliveries).toHaveLength(2);
     for (const d of result.deliveries!) expect(d.body).toBe('plain summary, no links');
   });
 });
 
-// POSIX-only (RUSH-2215): same openclaw `which` + `#!/bin/sh` recorder path as
-// sendToOwner above — untestable on Windows.
 describe.skipIf(process.platform === 'win32')('notifyUrgentBlock (feed urgent-block dispatch resolves the owner)', () => {
   let tmp: string;
   let record: string;
@@ -342,20 +300,6 @@ describe.skipIf(process.platform === 'win32')('notifyUrgentBlock (feed urgent-bl
   });
 });
 
-/**
- * PHNX-3303 integration: sendToOwner must actually INVOKE the SSH forward when
- * local owner delivery fails on a box with no working provider — proving the
- * wiring, not just the isolated owner-forward.ts functions.
- *
- * Real path, no mocking of the logic: the owner channel is the macOS-only
- * `imessage` transport, so on this Linux box the local send genuinely fails on
- * platform, a real device registry names a macOS peer, and a fake `ssh` on PATH
- * stands in for the transport (the same on-PATH-fake pattern the openclaw tests
- * above use) returning the peer's `agents send --json` result.
- */
-// Linux-only: the scenario is a headless worker whose local iMessage provider
-// fails on platform (rush.ts sends via osascript now, no `rush` preflight), so
-// on macOS the "local failure" would be a real Messages.app send attempt.
 describe.skipIf(process.platform !== 'linux')('sendToOwner forwards over SSH on local failure (PHNX-3303)', () => {
   let tmp: string;
   let sshRecord: string;
@@ -386,15 +330,14 @@ describe.skipIf(process.platform !== 'linux')('sendToOwner forwards over SSH on 
         auth: { method: 'key' }, createdAt: now, updatedAt: now,
       },
     });
-    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self'; // not the mac peer
-    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml'); // absent -> meta.notify.owner wins
+    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self';
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
 
     sshRecord = path.join(tmp, 'ssh.log');
     process.env.SSH_RECORD = sshRecord;
     const bin = path.join(tmp, 'bin');
     fs.mkdirSync(bin, { recursive: true });
     const ssh = path.join(bin, 'ssh');
-    // The LOCAL imessage send fails on platform (not macOS) before any I/O.
     fs.writeFileSync(ssh, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$SSH_RECORD"\nprintf '%s\\n' '{"ok":true,"channel":"imessage","id":"+18055551234"}'\nexit 0\n`);
     fs.chmodSync(ssh, 0o755);
     process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
@@ -414,10 +357,10 @@ describe.skipIf(process.platform !== 'linux')('sendToOwner forwards over SSH on 
 
   it('hands off to the macOS peer when this box cannot send iMessage', async () => {
     const result = await sendToOwner('ship it', { meta: ownerMeta });
-    expect(result.ok).toBe(true); // forwarded delivery, not the local rush failure
+    expect(result.ok).toBe(true);
     const log = fs.readFileSync(sshRecord, 'utf-8');
     expect(log).toContain('mac-test.example');
-    expect(log).toContain('AGENTS_OWNER_NO_FORWARD'); // loop guard rides the forward
+    expect(log).toContain('AGENTS_OWNER_NO_FORWARD');
     expect(log).toContain('send');
     expect(log).toContain('--channel');
     expect(log).toContain('imessage');
@@ -464,6 +407,6 @@ describe.skipIf(process.platform !== 'linux')('sendToOwner forwards over SSH on 
     const result = await sendToOwner('ship it', { meta });
     expect(result.ok).toBe(false);
     expect(result.error).toBe('openclaw CLI not found on PATH');
-    expect(fs.existsSync(sshRecord)).toBe(false); // non-rush failure stays local
+    expect(fs.existsSync(sshRecord)).toBe(false);
   });
 });

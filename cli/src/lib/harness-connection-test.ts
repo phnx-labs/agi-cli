@@ -19,32 +19,16 @@
 import { spawnSync } from 'node:child_process';
 import { getCliLaunch } from './cli-entry.js';
 
-/** Why a connection test failed, when it did. `undefined` reason ⇒ it passed. */
 export type ConnectionTestReason = 'auth' | 'endpoint' | 'model' | 'unknown';
 
-/** Outcome of a harness connection test. */
 export interface ConnectionTestResult {
   ok: boolean;
-  /** Machine-readable failure class; absent on success. */
   reason?: ConnectionTestReason;
-  /** One-line human summary (the classified cause, or a success note). */
   message?: string;
 }
 
-/** The prompt the smoke test sends — cheap, deterministic, one token of output. */
 export const CONNECTION_TEST_PROMPT = 'say alive in one word';
 
-/**
- * Classify a finished `agents run` smoke test from its exit code and combined
- * stdout+stderr. Pure — no spawn — so the mapping (pass / auth / endpoint /
- * model / unknown) is unit-tested against real provider error strings.
- *
- * Exit 0 is a pass. Otherwise the output is matched against provider-error
- * shapes in priority order: an auth rejection (401 / invalid key) is the most
- * specific, then a model-not-served error, then a transport/DNS failure; a
- * failure that matches none is `unknown` (the run failed but not in a way we can
- * name — surfaced verbatim, never swallowed).
- */
 export function classifyConnectionOutput(exitCode: number | null, output: string): ConnectionTestResult {
   if (exitCode === 0) return { ok: true, message: 'Connection test passed.' };
 
@@ -64,22 +48,11 @@ export function classifyConnectionOutput(exitCode: number | null, output: string
   return { ok: false, reason: 'unknown', message: `Run failed (exit ${exitCode ?? 'null'}).${detail}` };
 }
 
-/** Options for {@link runHarnessConnectionTest}. */
 interface ConnectionTestOptions {
-  /** Agent-side timeout passed to `agents run --timeout`. Default `60s`. */
   timeout?: string;
-  /** Hard wall-clock cap (ms) on the child, above the agent timeout. Default 90s. */
   killAfterMs?: number;
 }
 
-/**
- * Run the real connection test against an already-saved harness. Spawns the CLI
- * itself (`getCliLaunch`, the one self-invocation primitive) with the same argv a
- * user would type, and classifies the result. Never throws on a failed run — a
- * failure is returned as a classified {@link ConnectionTestResult}; only a spawn
- * that never produced an exit (killed by the wall-clock cap) reads as `endpoint`
- * (the request hung).
- */
 export async function runHarnessConnectionTest(name: string, opts: ConnectionTestOptions = {}): Promise<ConnectionTestResult> {
   const { command, args } = getCliLaunch([
     'run',

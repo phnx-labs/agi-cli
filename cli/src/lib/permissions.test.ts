@@ -213,10 +213,6 @@ describe('permission path handling', () => {
     }
   });
 
-  // PHNX-3187: git checks group yaml out with CRLF on Windows (core.autocrlf).
-  // The rule extractor anchors on the closing quote (`"$`); a trailing '\r'
-  // meant it matched ZERO rules, so `agents doctor --fix` on win-mini wrote an
-  // empty permission set and could never reconcile permissions.
   it('extracts rules from a CRLF-checked-out permission group (PHNX-3187)', async () => {
     const home = makeTempHome();
     const groupsDir = path.join(home, '.agents', 'permissions', 'groups');
@@ -228,7 +224,7 @@ describe('permission path handling', () => {
       'deny:',
       '  - "Write(secrets/**)"',
       '',
-    ].join('\r\n')); // CRLF, as git would check it out on Windows
+    ].join('\r\n'));
 
     const previousHome = process.env.HOME;
     process.env.HOME = home;
@@ -379,7 +375,6 @@ describe('codex writable roots (build/test/install caches)', () => {
     const versionHome = makeTempHome();
     const codexDir = path.join(versionHome, '.codex');
     fs.mkdirSync(codexDir, { recursive: true });
-    // Pre-existing user config with a custom writable root.
     fs.writeFileSync(
       path.join(codexDir, 'config.toml'),
       TOML.stringify({ sandbox_workspace_write: { writable_roots: ['/opt/custom'] } } as any),
@@ -389,18 +384,14 @@ describe('codex writable roots (build/test/install caches)', () => {
     expect(res.success).toBe(true);
     const written = TOML.parse(fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf-8')) as any;
     const roots: string[] = written.sandbox_workspace_write.writable_roots;
-    expect(roots).toContain('/opt/custom'); // user's root preserved
-    expect(roots).toContain(path.join(os.homedir(), '.cargo')); // baseline added
-    expect(new Set(roots).size).toBe(roots.length); // deduped
+    expect(roots).toContain('/opt/custom');
+    expect(roots).toContain(path.join(os.homedir(), '.cargo'));
+    expect(new Set(roots).size).toBe(roots.length);
   });
 });
 
 describe('convertToKimiFormat', () => {
   it('translates Claude `:*` bash patterns into Kimi globs, with a slash-crossing variant', () => {
-    // The core bug: copying `Bash(git status:*)` verbatim never matches in
-    // Kimi's engine (it globs the raw command string), so every call prompts.
-    // The second `*​/**` form is required because Kimi's `*` does not cross `/`,
-    // so a bare `cmd*` misses any path argument (`git push origin feat/x`).
     const { permission } = convertToKimiFormat({
       name: 'core',
       allow: ['Bash(git push:*)', 'Bash(mq:*)', 'Bash(env)'],
@@ -412,7 +403,6 @@ describe('convertToKimiFormat', () => {
       { decision: 'allow', pattern: 'Bash(git push*/**)' },
       { decision: 'allow', pattern: 'Bash(mq*)' },
       { decision: 'allow', pattern: 'Bash(mq*/**)' },
-      // Exact command (no `:*`) takes no path args — single rule, no slash variant.
       { decision: 'allow', pattern: 'Bash(env)' },
     ]);
   });
@@ -462,15 +452,10 @@ describe('convertToKimiFormat', () => {
       { decision: 'deny', pattern: 'Bash(rm -rf*)' },
       { decision: 'deny', pattern: 'Bash(rm -rf*/**)' },
     ]);
-    // The pre-fix bug would have left the un-matchable Claude `:*` form on disk.
     expect(raw).not.toContain(':*');
   });
 });
 
-// ---------------------------------------------------------------------------
-// Permission-set storage: groups/ contract
-// Regression for the bug where writes go to groups/ but reads scanned root.
-// ---------------------------------------------------------------------------
 describe('permission-set storage (groups/ contract)', () => {
   let userPermsDir: string;
   let sysPermsDir: string;
@@ -487,7 +472,6 @@ describe('permission-set storage (groups/ contract)', () => {
     process.env.AGENTS_USER_PERMISSIONS_DIR = userPermsDir;
     process.env.AGENTS_SYSTEM_PERMISSIONS_DIR = sysPermsDir;
 
-    // A valid permission-set YAML to install
     sourceFile = path.join(base, 'my-set.yml');
     fs.writeFileSync(sourceFile, yaml.stringify({
       name: 'my-set',
@@ -506,7 +490,6 @@ describe('permission-set storage (groups/ contract)', () => {
     const result = installPermissionSet(sourceFile, 'my-set');
     expect(result.success).toBe(true);
 
-    // Confirm file landed in groups/, not root
     expect(fs.existsSync(path.join(userPermsDir, 'groups', 'my-set.yml'))).toBe(true);
     expect(fs.existsSync(path.join(userPermsDir, 'my-set.yml'))).toBe(false);
 
@@ -515,7 +498,6 @@ describe('permission-set storage (groups/ contract)', () => {
   });
 
   it('listInstalledPermissions ignores root YAML and only reads from groups/', () => {
-    // Plant a YAML at root (the old, wrong location) — must NOT be surfaced
     fs.writeFileSync(path.join(userPermsDir, 'root-only.yml'), yaml.stringify({
       name: 'root-only',
       description: 'should be invisible',
@@ -536,7 +518,6 @@ describe('permission-set storage (groups/ contract)', () => {
     });
     expect(saved.success).toBe(true);
 
-    // Confirm file is in groups/
     expect(fs.existsSync(path.join(userPermsDir, 'groups', 'default.yml'))).toBe(true);
 
     const retrieved = getDefaultPermissionSet();
@@ -545,7 +526,6 @@ describe('permission-set storage (groups/ contract)', () => {
   });
 
   it('getDefaultPermissionSet ignores root YAML and reads from groups/', () => {
-    // Plant a root default.yml with different content — must NOT be used
     fs.writeFileSync(path.join(userPermsDir, 'default.yml'), yaml.stringify({
       name: 'default',
       description: 'wrong location',
@@ -553,14 +533,12 @@ describe('permission-set storage (groups/ contract)', () => {
       deny: [],
     }));
 
-    // No groups/default.yml → should return the empty shell, not the root file
     const result = getDefaultPermissionSet();
     expect(result.allow).toHaveLength(0);
     expect(result.description).toBe('Default permission set');
   });
 
   it('user groups/ takes precedence over system groups/', () => {
-    // Write to system groups/
     fs.writeFileSync(path.join(sysPermsDir, 'groups', 'shared.yml'), yaml.stringify({
       name: 'shared',
       description: 'system version',
@@ -568,7 +546,6 @@ describe('permission-set storage (groups/ contract)', () => {
       deny: [],
     }));
 
-    // Write to user groups/ with different content
     fs.writeFileSync(path.join(userPermsDir, 'groups', 'shared.yml'), yaml.stringify({
       name: 'shared',
       description: 'user version',
@@ -580,7 +557,6 @@ describe('permission-set storage (groups/ contract)', () => {
     const shared = sets.find((s) => s.name === 'shared');
     expect(shared).toBeDefined();
     expect(shared!.set.description).toBe('user version');
-    // Only one entry (deduped)
     expect(sets.filter((s) => s.name === 'shared')).toHaveLength(1);
   });
 
@@ -595,24 +571,7 @@ describe('permission-set storage (groups/ contract)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// PHNX-3294: safe cross-machine ops must resolve to ALLOW on every harness.
-//
-// Fleet agents were punting on `ssh` / `scp` / `agents ssh` / compound
-// `scp … && open …` / `git -C <config-repo>` because the blanket `Bash` grant
-// (user 30-paths.yaml) translated to a form some harnesses do not honour as
-// allow-all — most sharply Grok, whose `pattern:'*'` is only a SINGLE-level
-// wildcard, so it never auto-approved a multi-token `ssh host cmd`.
-//
-// These tests hit the REAL translation path (no mocking): the canonical set is
-// converted to each harness's native config on disk via applyPermissionsToVersion,
-// then read back with the registry's reverse projection, and a reference
-// (Claude-semantics) matcher checks each safe command resolves to allow.
-// ---------------------------------------------------------------------------
 describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
-  // The prefix a canonical Bash rule grants, or '*' for a blanket grant, or
-  // null when the rule is not a Bash allow. Mirrors Claude's token-prefix match:
-  // `Bash(ssh:*)` grants a command that is `ssh` or starts with `ssh `.
   function bashPrefix(rule: string): string | '*' | null {
     if (rule === 'Bash' || rule === 'Bash(*)' || rule === 'Bash(**)') return '*';
     const m = rule.match(/^Bash\((.+)\)$/);
@@ -620,8 +579,6 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
     return m[1].replace(/:\*$/, '');
   }
 
-  // A single shell atom is granted when some allow rule is blanket, matches it
-  // exactly, or is a token-prefix of it.
   function atomGranted(allow: string[], atom: string): boolean {
     const cmd = atom.trim();
     for (const rule of allow) {
@@ -633,8 +590,6 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
     return false;
   }
 
-  // A compound command is only as strong as its weakest atom, so every atom
-  // between shell operators must be independently granted.
   function grants(allow: string[], command: string): boolean {
     const atoms = command.split(/\s*(?:&&|\|\||;)\s*/).filter((a) => a.trim().length > 0);
     return atoms.every((atom) => atomGranted(allow, atom));
@@ -648,9 +603,6 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
     'git -C ~/.agents status',
   ];
 
-  // The fleet-realistic allow set after the fix: blanket Bash (30-paths) plus the
-  // explicit system allowlists that back each safe shape (10-security ssh/scp,
-  // 02-dotdirs agents/open, cross-repo git -C, 09-git git status).
   const FLEET_ALLOW = [
     'Bash',
     'Bash(ssh:*)',
@@ -662,9 +614,6 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
     'Bash(git status:*)',
   ];
 
-  // Every allowlist-capable harness whose native config we can round-trip through
-  // a version home. (openclaw/copilot/cursor/antigravity are covered by the
-  // dedicated per-format suites above; these five are the ones the ticket names.)
   const HARNESSES: AgentId[] = ['claude', 'grok', 'codex', 'kimi', 'droid'];
 
   it.each(HARNESSES)(
@@ -687,18 +636,13 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
   );
 
   it('THE FIX: blanket Bash becomes a pattern-LESS grok rule, not a single-level wildcard', () => {
-    // Grok's `*` is single-level, so the pre-fix `pattern:'*'` never auto-approved
-    // `ssh host cmd`; a rule with NO pattern is grok's "bare prefix matches all
-    // invocations" allow-all-shell idiom. Assert every blanket form emits it.
     for (const blanket of ['Bash', 'Bash(*)', 'Bash(**)']) {
       const { permission } = convertToGrokFormat({ name: 'b', allow: [blanket], deny: [] });
       expect(permission.rules).toEqual([{ action: 'allow', tool: 'bash' }]);
       expect(permission.rules[0]).not.toHaveProperty('pattern');
     }
-    // A blanket DENY is symmetric — it must deny ALL bash, not one level.
     const denySet = convertToGrokFormat({ name: 'b', allow: [], deny: ['Bash'] });
     expect(denySet.permission.rules).toEqual([{ action: 'deny', tool: 'bash' }]);
-    // An explicit per-command grant still carries its prefix pattern.
     const sshSet = convertToGrokFormat({ name: 's', allow: ['Bash(ssh:*)'], deny: [] });
     expect(sshSet.permission.rules).toEqual([{ action: 'allow', tool: 'bash', pattern: 'ssh *' }]);
   });
@@ -709,19 +653,12 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
     const written = TOML.parse(fs.readFileSync(path.join(home, '.grok', 'config.toml'), 'utf-8')) as {
       permission: { rules: Array<Record<string, unknown>> };
     };
-    // The on-disk rule is pattern-less — the shape grok honours as allow-all.
     expect(written.permission.rules).toEqual([{ action: 'allow', tool: 'bash' }]);
 
     const readBack = readCanonicalPermissions('grok', 'user', undefined, home);
     expect(readBack!.allow).toContain('Bash(*)');
   });
 
-  // The explicit allowlist (no blanket Bash) must still grant the safe shapes on
-  // the harnesses that keep per-command rules. Grok is excluded here on purpose:
-  // its config `pattern` glob is single-level, so an explicit `Bash(ssh:*)` alone
-  // is NOT a reliable multi-token match — the pattern-less blanket grant above is
-  // grok's reliable fleet mechanism. Codex has no per-command allowlist, so any
-  // allow widens its sandbox to workspace-write and reads back as Bash(*).
   const EXPLICIT_ONLY = FLEET_ALLOW.filter((r) => r !== 'Bash');
   it.each(['claude', 'kimi', 'droid', 'codex'] as AgentId[])(
     'explicit ssh/scp/git-C allowlist (no blanket) still allows the safe commands on %s',
@@ -742,12 +679,8 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
   );
 
   it('the matcher rejects an unsafe atom in a compound (weakest-atom rule holds)', () => {
-    // Sanity guard on the matcher itself: with only ssh allowed, a compound that
-    // also runs an un-granted command is NOT allowed — so a green result above is
-    // real coverage, not a matcher that says yes to everything.
     expect(grants(['Bash(ssh:*)'], "ssh host 'ls'")).toBe(true);
     expect(grants(['Bash(ssh:*)'], "ssh host 'ls' && rm -rf /")).toBe(false);
-    // git -C <config-repo> is NOT covered by a token-anchored Bash(git status:*).
     expect(grants(['Bash(git status:*)'], 'git -C ~/.agents status')).toBe(false);
     expect(grants(['Bash(git -C ~/.agents:*)'], 'git -C ~/.agents status')).toBe(true);
   });

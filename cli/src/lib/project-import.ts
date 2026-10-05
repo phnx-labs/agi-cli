@@ -1,57 +1,32 @@
-/**
- * Pure builders behind `agents projects import`.
- *
- * Currently supports one source: **Linear** (projects someone deliberately
- * created on the board). Results funnel through `writeProjectDef`.
- *
- * Everything here is a pure function of its arguments — no fs, no shell, no
- * process env. The command layer shells out to `linear` and hands the rows in;
- * that's what makes these testable against plain fixtures with no mocking.
- * The one exception is `toHomeRelative`, a string rewrite against `$HOME`.
- */
 
 import { isSafeProjectName, type ProjectDef } from './projects.js';
 import { matchLocalCheckoutExact, type LinearProjectLite } from './linear-projects.js';
 
-/** A row the import declined to write, with the reason to print. */
 export interface ImportSkip {
   name: string;
   reason: string;
 }
 
-/** What an import would write, and what it declined. */
 export interface ImportPlan {
   defs: ProjectDef[];
   skipped: ImportSkip[];
 }
 
-/** The validated shape of the `import` flags. */
 export interface ImportOptions {
   source: 'linear';
   force: boolean;
 }
 
-/** The raw commander flags, before validation. */
 export interface RawImportFlags {
   fromLinear?: boolean;
   force?: boolean;
 }
 
-/**
- * Validate the flag combination, throwing a user-facing message on the first
- * problem.
- */
 export function validateImportOpts(flags: RawImportFlags): ImportOptions {
   if (!flags.fromLinear) throw new Error('Pick an import source: --from-linear.');
   return { source: 'linear', force: flags.force === true };
 }
 
-/**
- * Turn a Linear project name into a definition slug: lowercase, every run of
- * unusable characters collapsed to one `-`, trimmed of leading/trailing
- * punctuation, capped at the 64 chars `isSafeProjectName` allows. Returns `''`
- * when nothing usable survives — the caller skips those loudly.
- */
 export function slugifyProjectName(name: string): string {
   const slug = name
     .toLowerCase()
@@ -63,28 +38,12 @@ export function slugifyProjectName(name: string): string {
   return isSafeProjectName(slug) ? slug : '';
 }
 
-/** The local-checkout lookups the Linear builder needs, injected so it stays pure. */
 export interface LinearImportDeps {
-  /** Directory names directly under the configured projects root. */
   localDirs: string[];
-  /** Home-relative root path for one of `localDirs`. */
   resolveRoot: (dir: string) => string | undefined;
-  /** `owner/repo` from that checkout's origin remote, when it has one. */
   resolveOrigin: (dir: string) => string | undefined;
 }
 
-/**
- * Plan the Linear import. Every project becomes a def carrying its `linear`
- * link; the local checkout is bound **only on an exact normalized-name match**
- * (`matchLocalCheckoutExact`). The containment fallback that powers the `link`
- * suggestion is deliberately not used here — "Agents CLI" containing
- * "agents-cli-web" is a fine hint for a human to confirm, and a silently wrong
- * `root` on a write path.
- *
- * An existing def is preserved field-for-field; only `name` and `linear` are
- * overwritten, so a hand-set `description`/`contexts`/`integrations` survives a
- * re-import.
- */
 export function buildLinearImportCandidates(
   projects: LinearProjectLite[],
   existing: Map<string, ProjectDef>,
@@ -110,9 +69,6 @@ export function buildLinearImportCandidates(
       continue;
     }
     seen.add(name);
-    // The Linear display name is recorded verbatim (`p.name`), not the
-    // slugified def name: `agi` is the local id, "AGI" is what the board calls
-    // it, and agents read the latter when they name the project.
     const def: ProjectDef = { ...prior, name, linear: { projectId: p.id, name: p.name } };
     if (p.url) def.linear!.url = p.url;
     const dir = matchLocalCheckoutExact(p.name, deps.localDirs);

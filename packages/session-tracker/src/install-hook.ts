@@ -1,9 +1,3 @@
-// Installs the polyglot src/hook.sh as a SessionStart hook in each agent's
-// native config file. Idempotent — running twice does not double-register.
-//
-// CLI usage:
-//   tsx src/install-hook.ts claude
-//   tsx src/install-hook.ts claude codex cursor
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -27,9 +21,6 @@ export interface InstallResult {
 export interface InstallOptions {
   dryRun?: boolean;
   hookPathOverride?: string;
-  /** Home directory whose harness-native config should be written. Defaults to
-   *  `os.homedir()` so the live config (usually a symlink into the active
-   *  version home) is updated. */
   home?: string;
 }
 
@@ -38,7 +29,6 @@ function hookCommand(agent: AgentId, opts: InstallOptions): string {
   return `${hook} ${agent}`;
 }
 
-/** Recognize current registrations and the retired builtin sidecar writer. */
 function isOwnHookCommand(command: string): boolean {
   const first = command.trim().split(/\s+/)[0];
   return (first.endsWith('hook.sh') && first.includes('session-tracker'))
@@ -62,7 +52,7 @@ async function writeJsonAtomic(p: string, data: any): Promise<void> {
     await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
     await fs.promises.rename(tmp, p);
   } catch (err) {
-    try { await fs.promises.unlink(tmp); } catch { /* best-effort */ }
+    try { await fs.promises.unlink(tmp); } catch {  }
     throw err;
   }
 }
@@ -76,14 +66,12 @@ async function installClaude(opts: InstallOptions): Promise<InstallResult> {
   const cfg = await readJson(configPath);
   cfg.hooks = cfg.hooks ?? {};
   cfg.hooks.SessionStart = cfg.hooks.SessionStart ?? [];
-  // Remove any prior registration of THIS hook path (idempotency).
   for (const entry of cfg.hooks.SessionStart) {
     if (!entry || !Array.isArray(entry.hooks)) continue;
     entry.hooks = entry.hooks.filter(
       (h: any) => !(h && h.command && isOwnHookCommand(h.command)),
     );
   }
-  // Find or create the empty-matcher group and add our hook.
   let group = cfg.hooks.SessionStart.find((e: any) => e && e.matcher === '');
   if (!group) {
     group = { matcher: '', hooks: [] };
@@ -193,9 +181,6 @@ async function installHermes(opts: InstallOptions): Promise<InstallResult> {
   const configPath = path.join(opts.home ?? os.homedir(), '.hermes', 'config.yaml');
   const command = hookCommand('hermes', opts);
   if (opts.dryRun) return { agent: 'hermes', installed: false, configPath };
-  // Read-modify-write the YAML, preserving every sibling key (mcp_servers, …) —
-  // mirrors the CLI's registerHooksForHermes. Hermes maps SessionStart to the
-  // `on_session_start` event (HERMES_EVENT_MAP in cli/src/lib/hooks/install.ts).
   let cfg: Record<string, unknown> = {};
   try {
     const parsed = YAML.parse(await fs.promises.readFile(configPath, 'utf8'));
@@ -220,26 +205,6 @@ async function installHermes(opts: InstallOptions): Promise<InstallResult> {
   return { agent: 'hermes', installed: true, configPath };
 }
 
-/**
- * Per-agent support for the SessionStart state-writer hook — the single source of
- * truth, replacing a hardcoded switch whose `default` lumped "not wired up yet"
- * together with "genuinely can't host it" under one opaque "not yet implemented"
- * (RUSH-2205). Keyed by {@link AgentId}, so TypeScript forces an entry for every
- * agent and the completeness test can assert each is either installable or carries
- * a specific reason. The writer needs BOTH a native SessionStart hook the tracker
- * can write AND a `hook.sh` branch that parses the harness's payload:
- *
- *   - gemini      — hard-deprecated; kept only for parsing old sessions/config.
- *   - antigravity — its native config has no SessionStart event (only
- *                   before_tool_call / after_model_call / on_loop_stop / on_error).
- *   - opencode    — SessionStart is delivered by a generated TS plugin
- *                   (session.created), not a shell-command hook this tracker emits.
- *
- * openclaw and rush are absent from this package's {@link AgentId} entirely — the
- * former has no native SessionStart hook host, the latter is the Rush app, not a
- * hook-bearing harness — so the writer cannot reach them at all. Their headless
- * rows still surface via the discovery comm-map (cli/src/lib/session/active.ts).
- */
 type HookSupport =
   | { install: (opts: InstallOptions) => Promise<InstallResult> }
   | { unsupported: string };
@@ -257,8 +222,6 @@ const HOOK_SUPPORT: Record<AgentId, HookSupport> = {
   opencode: { unsupported: 'opencode SessionStart is a generated plugin, not a shell-command hook' },
 };
 
-/** Every agent id the hook installer knows — the keys of the compile-time-complete
- *  {@link HOOK_SUPPORT} table (Record<AgentId, …>), so this can never drift from AgentId. */
 export const HOOK_AGENTS = Object.keys(HOOK_SUPPORT) as AgentId[];
 
 export async function installHookFor(

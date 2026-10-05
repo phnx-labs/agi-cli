@@ -1,13 +1,3 @@
-/**
- * Tests for the project-pull library (RUSH-2536).
- *
- * Coverage:
- *   - fingerprintTargets — deterministic, order-independent
- *   - parseProjectPullEnvelope — fail-closed validation (schema, kind, machine, fingerprint)
- *   - projectPullComplete — exit-code predicate
- *   - pullProjectTargets — real git repos; missing / slug-mismatch / dirty / ahead blocks
- *   - buildPullEnvelope — round-trip with parseProjectPullEnvelope
- */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -26,9 +16,6 @@ import {
 } from './project-pull.js';
 import type { ProjectRepoTarget } from './projects.js';
 
-// ---------------------------------------------------------------------------
-// fingerprintTargets
-// ---------------------------------------------------------------------------
 
 describe('fingerprintTargets', () => {
   it('produces a 16-char hex string', () => {
@@ -57,9 +44,6 @@ describe('fingerprintTargets', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// parseProjectPullEnvelope (fail-closed)
-// ---------------------------------------------------------------------------
 
 describe('parseProjectPullEnvelope', () => {
   const machine = 'test-machine';
@@ -84,10 +68,6 @@ describe('parseProjectPullEnvelope', () => {
     expect(items[0].path).toBe('~/src/a');
   });
 
-  // Every rejection below must report `valid: false`, NOT a bare empty list. An
-  // empty-but-valid answer is indistinguishable from a peer with nothing to do,
-  // which is how a peer's real mutation/block/failure used to vanish from the
-  // output while the command still exited 0.
   it('rejects non-JSON input loudly', () => {
     expect(parseProjectPullEnvelope('not json', machine)).toEqual({ items: [], valid: false });
   });
@@ -118,12 +98,10 @@ describe('parseProjectPullEnvelope', () => {
   });
 
   it('rejects the whole envelope when ANY result row is malformed', () => {
-    // Dropping the bad row would hide one directory's real outcome inside an
-    // otherwise healthy-looking answer, so a bad row fails the envelope.
     for (const bad of [
-      { host: machine, status: 'updated' },                       // no path
-      { host: machine, path: '~/src/b' },                         // no status
-      { host: machine, path: '~/src/c', status: 'bad-status' },   // invalid status
+      { host: machine, status: 'updated' },
+      { host: machine, path: '~/src/b' },
+      { host: machine, path: '~/src/c', status: 'bad-status' },
     ]) {
       const env = validEnvelope({ results: [{ host: machine, path: '~/src/a', status: 'current' }, bad] });
       expect(parseProjectPullEnvelope(env, machine)).toEqual({ items: [], valid: false });
@@ -152,9 +130,6 @@ describe('parseProjectPullEnvelope', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// encodePullTargets / decodePullTargets — the CLI-arg wire format
-// ---------------------------------------------------------------------------
 
 describe('encodePullTargets / decodePullTargets', () => {
   it('round-trips a target list WITH its expectedSlug', () => {
@@ -180,9 +155,6 @@ describe('encodePullTargets / decodePullTargets', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// projectPullComplete
-// ---------------------------------------------------------------------------
 
 describe('projectPullComplete', () => {
   const base = { host: 'h', path: '~/p' } as const;
@@ -217,9 +189,6 @@ describe('projectPullComplete', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// pullProjectTargets — real git repos
-// ---------------------------------------------------------------------------
 
 describe('pullProjectTargets', () => {
   let root: string;
@@ -251,13 +220,6 @@ describe('pullProjectTargets', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
     await simpleGit().clone(remote, author);
     await configIdentity(author);
-    // Commit `* -text` before anything clones this repo. On Windows CI the
-    // *checkout* during `git clone` runs with the machine-default autocrlf
-    // (true) before configIdentity() can set autocrlf=false on the fresh clone,
-    // so the local working tree comes out as CRLF while the index holds LF and
-    // status.isClean() sees a phantom modification — making pullProjectTargets'
-    // strict pullRepo refuse a clean tree as dirty. A committed .gitattributes
-    // wins over autocrlf at checkout time and prevents that.
     fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
@@ -329,7 +291,6 @@ describe('pullProjectTargets', () => {
     expect(results[0].status).toBe('blocked');
   });
 
-  // Slug verification runs BEFORE any fetch or merge, so these need no network.
   it('blocks a checkout whose origin is a different repo than the declared slug', async () => {
     await simpleGit(local).raw(['remote', 'set-url', 'origin', 'https://github.com/org/other.git']);
     const targets: ProjectRepoTarget[] = [{ path: local, expectedSlug: 'org/a' }];
@@ -340,8 +301,6 @@ describe('pullProjectTargets', () => {
   });
 
   it('blocks when the origin remote cannot be resolved to a slug at all', async () => {
-    // origin here is the bare local test remote — not a github URL, so the
-    // checkout cannot be confirmed as the right repo. Fail closed.
     const targets: ProjectRepoTarget[] = [{ path: local, expectedSlug: 'org/a' }];
     const results = await pullProjectTargets(targets, 'host');
     expect(results[0].status).toBe('blocked');
@@ -349,10 +308,6 @@ describe('pullProjectTargets', () => {
   });
 
   it('fast-forwards when the origin slug matches the declared slug', async () => {
-    // A real, fetchable local remote whose PATH is itself slug-shaped, so the
-    // same origin both serves the fetch and parses as `org/a`. (Rewriting the
-    // URL with `insteadOf` cannot work here: `git remote` reports the rewritten
-    // URL, which is what the slug check reads.)
     const slugRemote = path.join(root, 'github.com', 'org', 'a.git');
     const slugAuthor = path.join(root, 'slug-author');
     const slugLocal = path.join(root, 'slug-local');
@@ -360,9 +315,6 @@ describe('pullProjectTargets', () => {
     await simpleGit().raw(['init', '--bare', '-b', 'main', slugRemote]);
     await simpleGit().clone(slugRemote, slugAuthor);
     await configIdentity(slugAuthor);
-    // Same `* -text` guard as the beforeAll fixture (f065a0b43): without it the
-    // slugLocal clone below checks out CRLF under Windows autocrlf=true, reads
-    // phantom-dirty, and strict pullRepo blocks the fast-forward.
     fs.writeFileSync(path.join(slugAuthor, '.gitattributes'), '* -text\n');
     await commitFile(slugAuthor, 'README.md', 'v1\n', 'init');
     await simpleGit(slugAuthor).push('origin', 'main');
@@ -396,9 +348,6 @@ describe('pullProjectTargets', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildPullEnvelope + round-trip through parseProjectPullEnvelope
-// ---------------------------------------------------------------------------
 
 describe('buildPullEnvelope round-trip', () => {
   it('produces an envelope that parses back to the same results', () => {

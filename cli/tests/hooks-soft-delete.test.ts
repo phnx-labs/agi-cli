@@ -1,17 +1,3 @@
-/**
- * Tests for the hooks soft-delete prune logic.
- *
- * removeHookFromVersion() moves hook files to trash instead of hard-deleting.
- * diffVersionHooks() classifies version-home hooks as toAdd / toUpdate / matched / orphans.
- *
- * Both functions rely on path constants from state.ts that are not injectable.
- * We redirect them by spying on the two exported state getters they call through:
- *   - getVersionsDir()       → controls getVersionHomePath() → getVersionHooksDir()
- *   - getTrashHooksDir()     → controls the trash destination
- *   - getUserHooksDir()      → controls getCentralHooksDir() (used by diffVersionHooks)
- *
- * Spies must be set up BEFORE importing hooks.ts so ESM live bindings pick them up.
- */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync, chmodSync, readdirSync, statSync } from 'fs';
@@ -19,19 +5,16 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import * as state from '../src/lib/state.js';
 
-// ── Temp roots ────────────────────────────────────────────────────────────────
 
 const TEST_ROOT = join(tmpdir(), 'agents-cli-hooks-soft-delete-test');
 const TEST_VERSIONS_DIR = join(TEST_ROOT, 'versions');
 const TEST_TRASH_HOOKS_DIR = join(TEST_ROOT, '.trash', 'hooks');
 const TEST_CENTRAL_HOOKS_DIR = join(TEST_ROOT, 'central-hooks');
 
-// Redirect state getters before any module under test is loaded.
 vi.spyOn(state, 'getVersionsDir').mockReturnValue(TEST_VERSIONS_DIR);
 vi.spyOn(state, 'getTrashHooksDir').mockReturnValue(TEST_TRASH_HOOKS_DIR);
 vi.spyOn(state, 'getUserHooksDir').mockReturnValue(TEST_CENTRAL_HOOKS_DIR);
 
-// Import AFTER spies are installed.
 import {
   removeHookFromVersion,
   diffVersionHooks,
@@ -39,10 +22,8 @@ import {
   listHooksInVersionHome,
 } from '../src/lib/hooks/install.js';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeVersionHooksDir(agent: string, version: string): string {
-  // Mirrors getVersionHooksDir: <versionsDir>/<agent>/<version>/home/.<agent>/hooks
   const dir = join(TEST_VERSIONS_DIR, agent, version, 'home', `.${agent}`, 'hooks');
   mkdirSync(dir, { recursive: true });
   return dir;
@@ -64,7 +45,6 @@ function writeData(dir: string, filename: string, content = 'data: true'): strin
 function listTrashEntries(agent: string, version: string, hookName: string): string[] {
   const stampParent = join(TEST_TRASH_HOOKS_DIR, agent, version, hookName);
   if (!existsSync(stampParent)) return [];
-  // Returns the timestamp directories.
   return readdirSync(stampParent);
 }
 
@@ -75,7 +55,6 @@ function listTrashFiles(agent: string, version: string, hookName: string): strin
   return readdirSync(stampDir).sort();
 }
 
-// ── Setup / teardown ──────────────────────────────────────────────────────────
 
 beforeEach(() => {
   mkdirSync(TEST_ROOT, { recursive: true });
@@ -87,7 +66,6 @@ afterEach(() => {
   rmSync(TEST_ROOT, { recursive: true, force: true });
 });
 
-// ── removeHookFromVersion ─────────────────────────────────────────────────────
 
 describe('removeHookFromVersion – soft-delete', () => {
   it('moves the script file to the trash instead of deleting it', () => {
@@ -97,9 +75,7 @@ describe('removeHookFromVersion – soft-delete', () => {
     const result = removeHookFromVersion('claude', '2.1.0', 'my-hook');
 
     expect(result.success).toBe(true);
-    // File must be gone from the version home.
     expect(existsSync(join(hooksDir, 'my-hook.sh'))).toBe(false);
-    // File must appear in trash.
     const trashed = listTrashFiles('claude', '2.1.0', 'my-hook');
     expect(trashed).toContain('my-hook.sh');
   });
@@ -126,10 +102,8 @@ describe('removeHookFromVersion – soft-delete', () => {
 
     removeHookFromVersion('codex', '0.120.0', 'on-tool');
 
-    // Stamp dirs: exactly one entry under the hookName directory.
     const stamps = listTrashEntries('codex', '0.120.0', 'on-tool');
     expect(stamps).toHaveLength(1);
-    // Timestamp format: ISO with colons and dots replaced by dashes.
     expect(stamps[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/);
   });
 
@@ -140,18 +114,14 @@ describe('removeHookFromVersion – soft-delete', () => {
 
     removeHookFromVersion('claude', '2.1.0', 'target-hook');
 
-    // Other hook must remain.
     expect(existsSync(join(hooksDir, 'other-hook.sh'))).toBe(true);
-    // Target hook must be gone.
     expect(existsSync(join(hooksDir, 'target-hook.sh'))).toBe(false);
   });
 
   it('returns success when the hooks directory does not exist (nothing to remove)', () => {
-    // Do NOT create the hooksDir — it should not exist.
     const result = removeHookFromVersion('claude', '9.9.9', 'nonexistent-hook');
 
     expect(result.success).toBe(true);
-    // Trash should be empty because there was nothing to move.
     expect(listTrashEntries('claude', '9.9.9', 'nonexistent-hook')).toHaveLength(0);
   });
 
@@ -162,15 +132,10 @@ describe('removeHookFromVersion – soft-delete', () => {
     const result = removeHookFromVersion('claude', '2.1.0', 'missing-hook');
 
     expect(result.success).toBe(true);
-    // Nothing trashed — hook name did not match any file.
     expect(listTrashEntries('claude', '2.1.0', 'missing-hook')).toHaveLength(0);
-    // Existing hook must be untouched.
     expect(existsSync(join(hooksDir, 'other-hook.sh'))).toBe(true);
   });
 
-  // NTFS does not honor POSIX permission bits, so mkdirSync's mode 0o700 is a
-  // no-op on Windows (stat reports 0o666-derived bits). The intent — a
-  // private-by-default trash dir — only holds on POSIX.
   it.skipIf(process.platform === 'win32')('creates the trash dir with mode 0o700', () => {
     const hooksDir = makeVersionHooksDir('claude', '2.1.0');
     writeScript(hooksDir, 'secure-hook.sh');
@@ -181,16 +146,13 @@ describe('removeHookFromVersion – soft-delete', () => {
     expect(stamps).toHaveLength(1);
     const stampDir = join(TEST_TRASH_HOOKS_DIR, 'claude', '2.1.0', 'secure-hook', stamps[0]);
     const stat = statSync(stampDir);
-    // mode & 0o777 isolates the permission bits.
     expect(stat.mode & 0o777).toBe(0o700);
   });
 });
 
-// ── diffVersionHooks ──────────────────────────────────────────────────────────
 
 describe('diffVersionHooks – orphan detection', () => {
   it('classifies a hook in the version home but absent from central as an orphan', () => {
-    // Central is empty (no hooks written to TEST_CENTRAL_HOOKS_DIR).
     const hooksDir = makeVersionHooksDir('claude', '2.1.0');
     writeScript(hooksDir, 'stale-hook.sh');
 
@@ -204,7 +166,6 @@ describe('diffVersionHooks – orphan detection', () => {
 
   it('classifies a hook in central but absent from version home as toAdd', () => {
     writeScript(TEST_CENTRAL_HOOKS_DIR, 'new-hook.sh');
-    // Version home is empty.
     makeVersionHooksDir('claude', '2.1.0');
 
     const diff = diffVersionHooks('claude', '2.1.0');
@@ -243,18 +204,14 @@ describe('diffVersionHooks – orphan detection', () => {
     const centralContent = '#!/bin/sh\necho central';
     const staleContent = '#!/bin/sh\necho stale';
 
-    // Hook A: in central, not in version → toAdd
     writeScript(TEST_CENTRAL_HOOKS_DIR, 'hook-a.sh', centralContent);
-    // Hook B: in both, same content → matched
     writeScript(TEST_CENTRAL_HOOKS_DIR, 'hook-b.sh', centralContent);
-    // Hook C: in both, different content → toUpdate
     writeScript(TEST_CENTRAL_HOOKS_DIR, 'hook-c.sh', centralContent);
 
     const hooksDir = makeVersionHooksDir('claude', '2.1.0');
-    // hook-a absent from version home
-    writeScript(hooksDir, 'hook-b.sh', centralContent);           // matched
-    writeScript(hooksDir, 'hook-c.sh', staleContent);             // toUpdate
-    writeScript(hooksDir, 'hook-orphan.sh', staleContent);        // orphan
+    writeScript(hooksDir, 'hook-b.sh', centralContent);
+    writeScript(hooksDir, 'hook-c.sh', staleContent);
+    writeScript(hooksDir, 'hook-orphan.sh', staleContent);
 
     const diff = diffVersionHooks('claude', '2.1.0');
 

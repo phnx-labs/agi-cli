@@ -1,13 +1,3 @@
-/**
- * Tests for the declarative subagent-target registry. These lock the two
- * things the registry exists to guarantee:
- *   1. Every subagents-capable agent has a shape (no silently-half-wired agent).
- *   2. The generic engine round-trips install -> list -> remove for each layout,
- *      including agents (droid, copilot) that were previously missing arms in
- *      the hand-written per-agent chains.
- *
- * No mocking -- real temp directories on the actual filesystem.
- */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -47,9 +37,6 @@ afterEach(() => {
 
 describe('subagent registry completeness', () => {
   it('has a shape for exactly every subagents-capable agent', () => {
-    // The capability flag (agents.ts) is the version gate; the registry is the
-    // shape. They MUST agree, or a capable agent gets silently half-wired -- the
-    // exact drift this registry exists to prevent.
     const capable = capableAgents('subagents').sort();
     const shaped = Object.keys(SUBAGENT_TARGETS).sort();
     expect(shaped).toEqual(capable);
@@ -61,17 +48,14 @@ describe('generic engine round-trips (droid: previously unwired in subagents.ts)
     const home = mkTemp();
     const src = makeSubagentDir('reviewer');
 
-    // Install through the public API (was `does not support subagents` before).
     const res = installSubagentToAgent(src, 'reviewer', 'droid', home);
     expect(res.success).toBe(true);
     expect(fs.existsSync(path.join(home, '.factory', 'droids', 'reviewer.md'))).toBe(true);
 
-    // Listable (droid had no arm in listSubagentsForAgent before).
     const listed = listSubagentsForAgent('droid', home);
     expect(listed.map((s) => s.name)).toEqual(['reviewer']);
     expect(listed[0].frontmatter.description).toBe('Test reviewer');
 
-    // Removable (droid had no arm in removeSubagentFromAgent before).
     const rm = removeSubagentFromAgent('reviewer', 'droid', home);
     expect(rm.success).toBe(true);
     expect(fs.existsSync(path.join(home, '.factory', 'droids', 'reviewer.md'))).toBe(false);
@@ -93,14 +77,6 @@ describe('generic engine round-trips (copilot: previously unwired for install/re
 });
 
 describe('Codex TOML listing (readMeta must not use markdown frontmatter)', () => {
-  /**
-   * Codex custom agents are flat `.toml` files with `name` / `description` /
-   * `developer_instructions` — no YAML `---` block. The default
-   * `metaFrontmatterSkip` reader returns null on TOML, so
-   * `listInstalledSubagentsRich` dropped every codex target and
-   * `agents subagents list` reported them as `missing` while the files sat
-   * on disk and Codex loaded them fine (#2399).
-   */
   it('installs, lists rich metadata, and removes a codex subagent', () => {
     const home = mkTemp();
     const src = makeSubagentDir('code-reviewer');
@@ -113,16 +89,13 @@ describe('Codex TOML listing (readMeta must not use markdown frontmatter)', () =
     expect(body).toContain('name = "code-reviewer"');
     expect(body).toContain('description = "Test code-reviewer"');
 
-    // names() never used frontmatter — it already enumerated .toml files.
     expect(listInstalledSubagentNames('codex', home)).toEqual(['code-reviewer']);
 
-    // The bug: rich listing used metaFrontmatterSkip and returned [].
     const rich = listInstalledSubagentsRich('codex', home);
     expect(rich.map((s) => s.name)).toEqual(['code-reviewer']);
     expect(rich[0].frontmatter.description).toBe('Test code-reviewer');
     expect(rich[0].frontmatter.model).toBe('gpt-4o');
 
-    // Public list path used by `agents subagents list`.
     const listed = listSubagentsForAgent('codex', home);
     expect(listed.map((s) => s.name)).toEqual(['code-reviewer']);
     expect(listed[0].frontmatter.description).toBe('Test code-reviewer');
@@ -133,7 +106,6 @@ describe('Codex TOML listing (readMeta must not use markdown frontmatter)', () =
   });
 
   it('lists a hand-written TOML that has no model field', () => {
-    // Real Codex agents often omit model; the reader must not require it.
     const home = mkTemp();
     const dir = path.join(home, '.codex', 'agents');
     fs.mkdirSync(dir, { recursive: true });
@@ -170,7 +142,6 @@ describe('trashSubagentFromHome (soft-delete semantics per layout)', () => {
     const r = trashSubagentFromHome('openclaw', home, 'c', trashDir, 'STAMP');
     expect(r.success).toBe(true);
     expect(fs.existsSync(path.join(home, '.openclaw', 'c'))).toBe(false);
-    // AGENT.md was renamed to AGENTS.md on install and moved with the dir.
     expect(fs.existsSync(path.join(trashDir, 'STAMP', 'AGENTS.md'))).toBe(true);
   });
 
@@ -186,14 +157,6 @@ describe('trashSubagentFromHome (soft-delete semantics per layout)', () => {
 });
 
 describe('Kimi subagents are Claude-shaped agent markdown', () => {
-  /**
-   * kimi-code >= 0.29.0 discovers agent FILES from its brand home's `agents/`
-   * dir and parses them as markdown with YAML frontmatter (`name` +
-   * `description`, kebab-case name). It has no loader for the `version: 1` /
-   * `agent:` YAML agentspec — that schema belongs to the older, separate
-   * `kimi-cli` product — so a `.yaml` written here is never read by any
-   * kimi-code session. Pin the format so the two cannot drift apart again.
-   */
   it('writes <name>.md with frontmatter, not a yaml + system.md pair', () => {
     const home = mkTemp();
     writeSubagentToHome('kimi', home, { name: 'code-reviewer', path: makeSubagentDir('code-reviewer') });
@@ -202,7 +165,6 @@ describe('Kimi subagents are Claude-shaped agent markdown', () => {
     expect(fs.existsSync(path.join(dir, 'code-reviewer.md'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'code-reviewer.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(dir, 'code-reviewer.system.md'))).toBe(false);
-    // No managed parent index: kimi-code enumerates the dir itself.
     expect(fs.existsSync(path.join(dir, '_agents-cli.yaml'))).toBe(false);
 
     const body = fs.readFileSync(path.join(dir, 'code-reviewer.md'), 'utf-8');
@@ -213,24 +175,12 @@ describe('Kimi subagents are Claude-shaped agent markdown', () => {
     expect(listInstalledSubagentsRich('kimi', home).map((s) => s.name)).toEqual(['code-reviewer']);
   });
 
-  /**
-   * The target must describe ONLY the current shape. Folding the pre-markdown
-   * layout is `migrateKimiSubagentsToMarkdown`'s job (lib/migrate.ts), so a
-   * write here must not reach for files it did not create -- doing so made the
-   * project-sync collision check veto its own write, and made an orphaned
-   * `<name>.system.md` unreachable by `agents prune cleanup`.
-   */
   it('claims only the file it writes', () => {
-    // Widening `occupied` to the legacy pair made project sync's collision
-    // check veto its own write over a stray `<name>.yaml`.
     const dir = path.join(mkTemp(), '.kimi-code', 'agents');
     expect(SUBAGENT_TARGETS.kimi!.occupied(dir, 'x').map((e) => path.basename(e.path))).toEqual(['x.md']);
   });
 
   it('enumerates a stale <name>.system.md so the orphan diff can still reach it', () => {
-    // Filtering `.system` out of `names` hid an abandoned legacy prompt file
-    // from `agents prune cleanup` -- the migrator sweeps it, but until that
-    // runs it must stay visible rather than silently linger.
     const home = mkTemp();
     const dir = path.join(home, '.kimi-code', 'agents');
     fs.mkdirSync(dir, { recursive: true });

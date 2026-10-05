@@ -43,38 +43,25 @@ describe('limitPreviewHeight', () => {
   });
 });
 
-/**
- * The row-budget math behind RUSH-2198: PICKER_RECENT_COUNT = 15 list rows on a
- * default 24-row terminal left `availablePreviewRows <= 0`, so `limitPreviewHeight`
- * returned '' and the preview collapsed to nothing. pickerPageSize caps the list so
- * the preview always keeps its PREVIEW_MIN_ROWS floor.
- */
 describe('pickerPageSize', () => {
-  // Mirror of the itemPicker fixedRows math: header + subtitle + page + separator + help.
   const availablePreview = (page: number, termRows: number, linesAbove = 0): number =>
-    termRows - linesAbove - (1 /*header*/ + 1 /*subtitle*/ + page + 1 /*separator*/ + 1 /*help*/);
+    termRows - linesAbove - (1  + 1  + page + 1  + 1 );
 
   it('caps a 15-row list so the preview keeps its floor at the default 24-row height', () => {
     const page = pickerPageSize({
       requestedPageSize: 15,
       terminalRows: 24,
-      chromeRows: 3, // header + subtitle + help
+      chromeRows: 3,
       previewOpen: true,
     });
     expect(page).toBeLessThan(15);
     expect(page).toBeGreaterThanOrEqual(PICKER_MIN_LIST_ROWS);
-    // The whole point: with the capped page, the preview slot is >= its floor.
     expect(availablePreview(page, 24)).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
   });
 
   it('reproduces the collapse without the cap and fixes it with it', () => {
-    // Uncapped on a common 20-row pane, the raw 15-row page leaves the preview a
-    // 1-row budget — limitPreviewHeight then returns only the truncation marker (or
-    // '' outright at <= 0), which is the empty pane users reported.
     expect(availablePreview(15, 20)).toBeLessThanOrEqual(1);
-    // And it goes fully non-positive (preview === '') once the terminal is a hair shorter.
     expect(availablePreview(15, 19)).toBeLessThanOrEqual(0);
-    // Capped: positive, at least the floor, at the same 20-row height.
     const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 20, chromeRows: 3, previewOpen: true });
     expect(availablePreview(page, 20)).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
   });
@@ -94,7 +81,6 @@ describe('pickerPageSize', () => {
       previewOpen: true,
     });
     expect(withFooter).toBeLessThan(withoutFooter);
-    // Even with the footer eating rows, the preview keeps its floor.
     expect(availablePreview(withFooter, 24, 3)).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
   });
 
@@ -117,8 +103,6 @@ describe('pickerPageSize', () => {
 describe('itemPicker preview at default height (RUSH-2198 regression)', () => {
   it('renders the detailed preview for a 15-row list request on a default-height terminal', async () => {
     const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
-    // 20 rows, pageSize 15 (PICKER_RECENT_COUNT), preview open by default, plus
-    // lines printed above the prompt — the exact shape that used to collapse.
     const program = `
       import { itemPicker } from ${JSON.stringify(pickerUrl)};
       const items = Array.from({ length: 20 }, (_, i) => ({ id: 's' + i }));
@@ -157,7 +141,6 @@ describe('itemPicker preview at default height (RUSH-2198 regression)', () => {
 
     const clean = stripVTControlCharacters(output);
     expect(clean).toContain('PREVIEW_VISIBLE');
-    // The list still shows and the separator still divides it from the preview.
     expect(clean).toContain('session row s0');
     expect(clean).toContain('─');
   });
@@ -242,7 +225,6 @@ describe('itemPicker numbered rows', () => {
     });
 
     const clean = stripVTControlCharacters(output);
-    // Right-aligned to the widest index: " 1." for single digits, "12." plain.
     expect(clean).toContain(' 1. cmd-a');
     expect(clean).toContain(' 9. cmd-i');
     expect(clean).toContain('10. cmd-j');
@@ -399,13 +381,6 @@ describe('dynamicPicker submit keys', () => {
   });
 });
 
-/**
- * The hotkey lookup token. readline collapses `f` and `F` onto the same `name`
- * and gives punctuation no name at all, so keying bindings on the name alone
- * makes `*` unbindable and a shifted letter indistinguishable from its lowercase
- * twin. Every existing binding is a plain lowercase letter, where the token is
- * unchanged — that no-op property is what makes this safe to swap in.
- */
 describe('hotkeyToken', () => {
   it('is a no-op for a plain lowercase letter (every existing binding)', () => {
     for (const c of ['r', 'c', 'a', 'b', 'd', 't', 'p', 'w', 'y', 's', 'f']) {
@@ -440,11 +415,6 @@ describe('hotkeyToken', () => {
     expect(hotkeyToken({})).toBe('');
   });
 
-  // The shifted form of an existing single-letter hotkey reached its binding
-  // through `key.name` before this token existed. Keying on the character alone
-  // would have retired `R`/`C`/`A` for anyone with caps lock on, so the lookup
-  // falls back to the name — which only works if the token and the name differ
-  // in exactly the way asserted here.
   it('leaves the readline name available as the fallback for a shifted letter', () => {
     const shifted = { name: 'r', sequence: 'R' };
     expect(hotkeyToken(shifted)).toBe('R');
@@ -452,16 +422,9 @@ describe('hotkeyToken', () => {
   });
 });
 
-/**
- * Group dividers: an itemPicker fed Separator rows renders them as non-selectable
- * headers. The cursor never rests on one — it starts below a leading divider, and
- * up/down navigation jumps over one — so enter always resolves a real row. This is
- * what lets the routines browser show project/device group headers inline (RUSH-2503).
- */
 describe('itemPicker group separators', () => {
   const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
 
-  /** Spawn a tiny itemPicker program, send keys once its first frame lands, and read `PICKED:<id>`. */
   async function drivePicker(programBody: string, keysAfterFirstFrame: string): Promise<string> {
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', programBody], {
       cols: 80,
@@ -478,7 +441,6 @@ describe('itemPicker group separators', () => {
       }, 10_000);
       child.onData((data) => {
         captured += data;
-        // First frame renders the group header; only then are the rows on screen.
         if (!sentKeys && captured.includes('Group A')) {
           sentKeys = true;
           child.write(keysAfterFirstFrame);
@@ -522,7 +484,6 @@ describe('itemPicker group separators', () => {
       });
       console.log('PICKED:' + (r ? r.item.id : 'null'));
     `;
-    // Header text differs, so wait on the always-present 'row a' frame instead.
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', program], {
       cols: 80,
       rows: 24,
@@ -540,7 +501,7 @@ describe('itemPicker group separators', () => {
         captured += data;
         if (!sent && captured.includes('row a')) {
           sent = true;
-          child.write('\x1b[B\r'); // down (skips the divider), then enter
+          child.write('\x1b[B\r');
         }
         if (!captured.includes('PICKED:')) return;
         clearTimeout(timeout);
