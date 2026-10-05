@@ -4,7 +4,6 @@
 
 # Repo-maintenance scripts (contain personal/internal data)
 scripts/scrub-history.sh
-scripts/scrub-orphan-branches.sh
 scripts/rebuild-sqlite.sh
 
 # Build/test/dev artifacts

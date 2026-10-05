@@ -6,7 +6,7 @@
 # do not invent a second notes channel at tag time.
 #
 # Extracted from release.sh so the tag+notes contract is unit-testable without
-# npm/gh/CI — the same reason select-publish-commit.sh and validate-bump.sh exist.
+# npm/gh/CI — the same reason validate-bump.sh exists.
 #
 # Usage: create-annotated-release-tag.sh <version> <commit> [--force]
 # --force rewrites a local tag (already-published recovery / lightweight upgrade).

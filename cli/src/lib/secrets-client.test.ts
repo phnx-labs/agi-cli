@@ -6,9 +6,8 @@
  * messages over the fd 3 / fd 4 pipes. It is gated on AGENTS_TEST_SECRETS_BIN
  * pointing at a built standalone entrypoint (e.g. `dist/index.js` from a
  * `secrets-cli` checkout after `bash scripts/build.sh`); with the var unset it
- * skips cleanly, so CI — which has no standalone checkout — stays green. This is
- * the same env-gated real-dependency pattern as the Windows `--device` e2e
- * suites (AGENTS_TEST_WIN_HOST). Point it at the binary to exercise it:
+ * skips cleanly, so CI — which has no standalone checkout — stays green. Point
+ * it at the binary to exercise it:
  *
  *   AGENTS_TEST_SECRETS_BIN=/path/to/secrets-cli/dist/index.js \
  *     bun run test src/lib/secrets-client.test.ts

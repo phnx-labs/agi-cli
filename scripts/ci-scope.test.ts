@@ -494,7 +494,6 @@ describe('selectImpact policy', () => {
     const byFile = new Map(plan.tests.map((t) => [t.file, t.reason]));
     expect(byFile.get('cli/scripts/release.test.ts')).toBe('companion');
     expect(byFile.get('cli/scripts/promote-home-base-probe.test.ts')).toBe('runtime-read');
-    expect(byFile.get('cli/scripts/signing-home-base-probe.test.ts')).toBe('runtime-read');
     expect(byFile.get('cli/scripts/stuck-release.test.ts')).toBe('runtime-read');
     expect(plan.unmapped).toEqual([]);
   });
@@ -802,14 +801,21 @@ describe('commandsForPlan', () => {
   });
 
   test('a changed root script test is executed, not dropped', () => {
-    const plan = selectImpact({
-      files: ['scripts/bottle.test.sh'],
-      repoRoot: REPO,
-      related: false,
-    });
-    expect(plan.tests.some((t) => t.file === 'scripts/bottle.test.sh')).toBe(true);
-    const cmds = commandsForPlan(plan, REPO);
-    expect(cmds.some((c) => c.cmd[0] === 'bash' && c.cmd[1] === 'bottle.test.sh')).toBe(true);
+    const root = mkdtempSync(join(tmpdir(), 'root-sh-test-'));
+    try {
+      mkdirSync(join(root, 'scripts'));
+      writeFileSync(join(root, 'scripts/thing.test.sh'), 'true\n');
+      const plan = selectImpact({
+        files: ['scripts/thing.test.sh'],
+        repoRoot: root,
+        related: false,
+      });
+      expect(plan.tests.some((t) => t.file === 'scripts/thing.test.sh')).toBe(true);
+      const cmds = commandsForPlan(plan, root);
+      expect(cmds.some((c) => c.cmd[0] === 'bash' && c.cmd[1] === 'thing.test.sh')).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('a session library change selects the session bench', () => {
