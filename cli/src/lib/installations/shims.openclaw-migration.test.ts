@@ -65,13 +65,11 @@ describe('switchConfigSymlink — openclaw cross-version data migration (#23)', 
 
   it('carries openclaw.json, db, agent workspaces, and memory across a version switch', async () => {
     seedOpenclawData(v1Home);
-    // Start with ~/.openclaw -> v1 home (steady-state symlink — the bug case).
     fs.symlinkSync(path.join(v1Home, '.openclaw'), configLink);
 
     const result = await switchConfigSymlink('openclaw', '1.0.1');
     expect(result.success).toBe(true);
 
-    // Symlink now points at v2 home, and v2 has the user's data.
     const newTarget = fs.readlinkSync(configLink);
     expect(path.resolve(path.dirname(configLink), newTarget)).toBe(path.join(v2Home, '.openclaw'));
 
@@ -81,15 +79,11 @@ describe('switchConfigSymlink — openclaw cross-version data migration (#23)', 
     expect(fs.readFileSync(path.join(v2Dir, 'jeff', 'AGENTS.md'), 'utf8')).toContain('Chief of Staff');
     expect(fs.readFileSync(path.join(v2Dir, 'memory', '2026-05-30.md'), 'utf8')).toBe('tasked with X');
 
-    // v1 data is intact — we copy, we don't move. The user can roll back to v1.
     expect(fs.existsSync(path.join(v1Home, '.openclaw', 'openclaw.json'))).toBe(true);
   });
 
   it('does NOT clobber files the new version already shipped (keep-dest)', async () => {
     seedOpenclawData(v1Home);
-    // v2 ships its own defaults for openclaw.json — the user's runtime config
-    // should win in steady-state, but for this safety check we exercise
-    // keep-dest: anything pre-existing in v2 home stays put.
     fs.mkdirSync(path.join(v2Home, '.openclaw'), { recursive: true });
     fs.writeFileSync(path.join(v2Home, '.openclaw', 'openclaw.json'), '{"v2-default":true}');
 
@@ -97,9 +91,7 @@ describe('switchConfigSymlink — openclaw cross-version data migration (#23)', 
     const result = await switchConfigSymlink('openclaw', '1.0.1');
     expect(result.success).toBe(true);
 
-    // Pre-existing v2 file untouched.
     expect(fs.readFileSync(path.join(v2Home, '.openclaw', 'openclaw.json'), 'utf8')).toBe('{"v2-default":true}');
-    // But files v2 did NOT ship were carried over from v1.
     expect(fs.readFileSync(path.join(v2Home, '.openclaw', 'openclaw.db'), 'utf8')).toBe('SQLITE');
     expect(fs.readFileSync(path.join(v2Home, '.openclaw', 'jeff', 'AGENTS.md'), 'utf8')).toContain('Chief of Staff');
   });
@@ -118,8 +110,6 @@ describe('switchConfigSymlink — openclaw cross-version data migration (#23)', 
     const result = await switchConfigSymlink('claude', '2.1.0');
     expect(result.success).toBe(true);
 
-    // Claude data must NOT be auto-copied — Claude's user data lives outside
-    // the version home, so cross-version migration would actively corrupt state.
     expect(fs.existsSync(path.join(claudeV2, '.claude', 'should-not-migrate.txt'))).toBe(false);
   });
 });

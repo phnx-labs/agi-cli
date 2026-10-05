@@ -17,9 +17,6 @@ function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-adopt-test-'));
 }
 
-// Realistic layout: shims dir + a durable history dir (records live there now),
-// plus a harness that installed a real binary symlinked into ~/.local/bin —
-// exactly the grok/claude/kimi shape that shadows our shim.
 function fixture(cli: string) {
   const root = tmp();
   const shimsDir = path.join(root, '.agents', '.cache', 'shims');
@@ -50,17 +47,13 @@ describe('adoptShadowingLauncher', () => {
     const result = adoptShadowingLauncher('grok', { shadowedBy: link, shimsDir, historyDir });
     expect(result.adopted).toBe(true);
 
-    // Launcher now points at our shim.
     expect(fs.realpathSync(link)).toBe(fs.realpathSync(shimPath));
 
-    // Durable record: line 1 = original binary, line 2 = launcher path.
     const record = fs.readFileSync(getAdoptedRecordPath('grok', historyDir), 'utf-8').split('\n');
     expect(record[0]).toBe(fs.realpathSync(realBin));
     expect(record[1]).toBe(path.resolve(link));
-    // ...and it lives under .history (durable), not .cache (regenerable).
     expect(getAdoptedRecordPath('grok', historyDir)).toContain(`${path.sep}.history${path.sep}`);
 
-    // Second call is a no-op (already adopted), never a double-rewrite.
     const again = adoptShadowingLauncher('grok', { shadowedBy: link, shimsDir, historyDir });
     expect(again.adopted).toBe(false);
     if (!again.adopted) expect(again.reason).toBe('already-adopted');
@@ -68,7 +61,6 @@ describe('adoptShadowingLauncher', () => {
 
   test('refuses to touch a REAL binary (only symlinks are adopted)', () => {
     const { shimsDir, historyDir, root } = fixture('droid');
-    // droid ships a standalone native binary (not a symlink) at ~/.local/bin.
     const realBin = path.join(root, '.local', 'bin', 'droid');
     fs.rmSync(realBin);
     fs.writeFileSync(realBin, 'ELF-ish native binary');
@@ -85,23 +77,18 @@ describe('adoptShadowingLauncher', () => {
     const { shimsDir, historyDir, realBin, link } = fixture('grok');
     adoptShadowingLauncher('grok', { shadowedBy: link, shimsDir, historyDir });
 
-    // Release WITHOUT telling it the launcher — it must recover it from the
-    // record's line 2, independent of any PATH scan.
     const restored = releaseAdoptedLauncher('grok', { shimsDir, historyDir });
     expect(restored).toBe(fs.realpathSync(realBin));
     expect(fs.realpathSync(link)).toBe(fs.realpathSync(realBin));
     expect(fs.existsSync(getAdoptedRecordPath('grok', historyDir))).toBe(false);
 
-    // Releasing again is a clean no-op.
     expect(releaseAdoptedLauncher('grok', { shimsDir, historyDir })).toBeNull();
   });
 
   test('the record survives a .cache wipe (M1 — durable reverse pointer)', () => {
     const { shimsDir, historyDir, realBin, link } = fixture('grok');
     adoptShadowingLauncher('grok', { shadowedBy: link, shimsDir, historyDir });
-    // Nuke the regenerable cache (shims dir). The record is elsewhere (.history).
     fs.rmSync(shimsDir, { recursive: true });
-    // Reverse pointer to the native binary is still intact and restorable.
     const restored = releaseAdoptedLauncher('grok', { shimsDir, historyDir });
     expect(restored).toBe(fs.realpathSync(realBin));
   });
@@ -117,12 +104,10 @@ describe('findAdoptableLauncher', () => {
   test('ignores a real binary and a broken symlink', () => {
     const { root, shimsDir } = fixture('grok');
     const localBin = path.join(root, '.local', 'bin');
-    // Replace the symlink with a real binary.
     fs.rmSync(path.join(localBin, 'grok'));
     fs.writeFileSync(path.join(localBin, 'grok'), 'native');
     expect(findAdoptableLauncher('grok', { homeDir: root, shimsDir })).toBeNull();
 
-    // A broken symlink (target missing) must not be offered.
     fs.rmSync(path.join(localBin, 'grok'));
     fs.symlinkSync(path.join(root, 'does-not-exist'), path.join(localBin, 'grok'));
     expect(findAdoptableLauncher('grok', { homeDir: root, shimsDir })).toBeNull();
@@ -132,7 +117,7 @@ describe('findAdoptableLauncher', () => {
     const { root, shimsDir, shimPath } = fixture('grok');
     const local = path.join(root, '.local', 'bin', 'grok');
     fs.rmSync(local);
-    fs.symlinkSync(shimPath, local); // already ours
+    fs.symlinkSync(shimPath, local);
     expect(findAdoptableLauncher('grok', { homeDir: root, shimsDir })).toBeNull();
   });
 });
@@ -140,18 +125,16 @@ describe('findAdoptableLauncher', () => {
 describe('getPathShadowingExecutable — adopted launcher is NOT a shadow', () => {
   test('a symlink resolving to our shim is not reported as a shadow', () => {
     const { shimsDir, shimPath, link } = fixture('grok');
-    // Adopt: repoint the ~/.local/bin launcher at our shim.
     adoptShadowingLauncher('grok', {
       shadowedBy: link,
       shimsDir,
       historyDir: path.join(path.dirname(shimsDir), '.history'),
     });
-    // link now → shim, and sits AHEAD of the shims dir on PATH.
     const shadow = getPathShadowingExecutable('grok', {
       pathDirs: [path.dirname(link), shimsDir],
       shimPath,
     });
-    expect(shadow).toBeNull(); // was `link` before the fix — the false "native binary" note
+    expect(shadow).toBeNull();
   });
 
   test('a real competing binary ahead of the shim IS still a shadow', () => {
@@ -175,9 +158,8 @@ describe('generated shim fall-through', () => {
 
     const f = path.join(tmp(), 'grok');
     fs.writeFileSync(f, script);
-    execFileSync('bash', ['-n', f]); // throws on syntax error
+    execFileSync('bash', ['-n', f]);
 
-    // Reads from the durable .history location, first line only.
     expect(script).toContain('ADOPTED_ORIGINAL="$AGENTS_USER_DIR/.history/adopted-launchers/$CLI_COMMAND"');
     expect(script).toContain('IFS= read -r orig < "$ADOPTED_ORIGINAL"');
     expect(script).toContain('exec_adopted_original');
