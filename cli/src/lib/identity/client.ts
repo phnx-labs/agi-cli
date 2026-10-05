@@ -1,3 +1,4 @@
+// Sole Phoenix ID seam: canonical base URL, owned session file/token reader/HTTP funnel/error type; never read another product's credentials.
 // Phoenix session state is replaced atomically with mode 0600.
 
 import * as fs from 'fs';

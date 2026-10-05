@@ -1,3 +1,4 @@
+// Any malformed result invalidates the peer envelope; an empty success would hide that peer's mutation, block, or failure.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';

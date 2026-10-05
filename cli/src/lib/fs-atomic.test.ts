@@ -1,5 +1,5 @@
 // proper-lockfile clamps stale windows to 2000ms; tests stay above that floor and include a no-heartbeat negative control.
-// Atomic JSON blocks sibling-temp creation, and the contended async-lock timer proves acquisition does not freeze the event loop.
+// The atomic-JSON failure test blocks sibling-temp creation, which naive overwrite bypasses; the contended timer proves acquisition stays asynchronous.
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';

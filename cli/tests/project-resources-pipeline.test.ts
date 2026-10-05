@@ -1,4 +1,4 @@
-// Project resources remain listable but never enter prompt or execution surfaces without confirmation; project MCP/plugins are excluded from launch auto-enable.
+// Project commands, skills, MCP, subagents, and permissions stay listable but are excluded from version-home sync without confirmation.
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

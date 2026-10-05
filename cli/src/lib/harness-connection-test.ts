@@ -1,3 +1,5 @@
+// Exercise saved profiles through real agents run, never mocks; classify auth → model → endpoint → unknown and return failed runs.
+// A wall-clock kill is an endpoint failure.
 /**
  * Pre-save connection test for a custom harness (PHNX-2221).
  *
