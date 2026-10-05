@@ -165,38 +165,92 @@ export function readSessionSubagents(
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BASE64 = Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 4;
+
+/** Base64 still arriving for a record larger than one timeline read. Not persisted. */
+const openInlineImages = new Map<string, { base64: string; mediaType: string; dropped: boolean }>();
+/** Files finished before the JSONL record's closing newline, attached when the line completes. */
+const pendingImagePaths = new Map<string, { path: string; size: number }[]>();
+
+export function hasOpenInlineImage(sessionId: string): boolean {
+  return openInlineImages.has(sessionId);
+}
+
+export function dropOpenInlineImage(sessionId: string): void {
+  openInlineImages.delete(sessionId);
+  pendingImagePaths.delete(sessionId);
+}
+
+/** Keep appending one image's base64. A restart mid-image calls this with no open buffer and must not. */
+export function appendInlineImage(sessionId: string, chunk: string, mediaType: string): void {
+  if (!chunk) return;
+  let open = openInlineImages.get(sessionId);
+  if (!open) {
+    open = { base64: '', mediaType, dropped: false };
+    openInlineImages.set(sessionId, open);
+  }
+  if (open.dropped || open.base64.length + chunk.length > MAX_IMAGE_BASE64) {
+    open.dropped = true;
+    open.base64 = '';
+    return;
+  }
+  open.base64 += chunk;
+}
+
+export function finishInlineImage(sessionId: string, root?: string): void {
+  const open = openInlineImages.get(sessionId);
+  openInlineImages.delete(sessionId);
+  if (!open || open.dropped || !open.base64) return;
+  const cached = cacheInlineImage(sessionId, open.base64, open.mediaType, root);
+  if (!cached) return;
+  const list = pendingImagePaths.get(sessionId) ?? [];
+  list.push(cached);
+  pendingImagePaths.set(sessionId, list);
+}
+
+export function takePendingImagePaths(sessionId: string): { path: string; size: number }[] {
+  const list = pendingImagePaths.get(sessionId) ?? [];
+  pendingImagePaths.delete(sessionId);
+  return list;
+}
+
+/** Exclusive creation preserves existing images across ticks and process restarts. */
+export function cacheInlineImage(sessionId: string, data: string, mediaType: string, root = path.join(getUserAgentsDir(), '.cache', 'attachments')): { path: string; size: number } | undefined {
+  const safe = Boolean(sessionId) && path.basename(sessionId) === sessionId && sessionId !== '.' && sessionId !== '..';
+  const ext = IMAGE_EXTENSIONS[mediaType];
+  if (!safe || !data || !ext || Buffer.byteLength(data, 'base64') > MAX_IMAGE_BYTES) return undefined;
+  const bytes = Buffer.from(data, 'base64');
+  if (!bytes.length) return undefined;
+  const dir = path.join(root, sessionId);
+  const name = `${createHash('sha256').update(bytes).digest('hex')}.${ext}`;
+  const file = path.join(dir, name);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.chmodSync(dir, 0o700);
+    const images = new Set(fs.readdirSync(dir));
+    if (!images.has(name)) {
+      if (images.size >= 10) return undefined;
+      try { fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 }); }
+      catch (err) { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err; }
+      fs.chmodSync(file, 0o600);
+    }
+    return { path: file, size: bytes.length };
+  } catch {
+    return undefined;
+  }
+}
 
 /** Exclusive creation preserves existing images across ticks and process restarts. */
 export function materializeInlineImages(events: SessionEvent[], sessionId: string, root = path.join(getUserAgentsDir(), '.cache', 'attachments')): void {
-  const safe = Boolean(sessionId) && path.basename(sessionId) === sessionId && sessionId !== '.' && sessionId !== '..';
-  const dir = path.join(root, sessionId);
-  let images: Set<string> | undefined;
   for (const event of events) {
     const data = event._imageData;
     delete event._imageData;
-    if (!safe || !data || event.path || event.type !== 'attachment') continue;
-    const ext = IMAGE_EXTENSIONS[event.mediaType ?? ''];
-    if (!ext || Buffer.byteLength(data, 'base64') > 5 * 1024 * 1024) continue;
-    const bytes = Buffer.from(data, 'base64');
-    if (!bytes.length) continue;
-    const name = `${createHash('sha256').update(bytes).digest('hex')}.${ext}`;
-    try {
-      if (!images) {
-        fs.mkdirSync(dir, { recursive: true });
-        fs.chmodSync(dir, 0o700);
-        images = new Set(fs.readdirSync(dir));
-      }
-      if (!images.has(name)) {
-        if (images.size >= 10) continue;
-        const file = path.join(dir, name);
-        try { fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 }); }
-        catch (err) { if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err; }
-        fs.chmodSync(file, 0o600);
-        images.add(name);
-      }
-      event.path = path.join(dir, name);
-      event.sizeBytes = bytes.length;
-    } catch { /* Cache permissions must not make the session unreadable. */ }
+    if (!data || event.path || event.type !== 'attachment') continue;
+    const cached = cacheInlineImage(sessionId, data, event.mediaType ?? '', root);
+    if (!cached) continue;
+    event.path = cached.path;
+    event.sizeBytes = cached.size;
   }
 }
 
