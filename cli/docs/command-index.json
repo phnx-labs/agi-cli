@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
-  "commands": 479,
+  "commands": 480,
   "root": {
     "name": "agents",
     "path": "",
@@ -10870,6 +10870,89 @@
           "examples": "agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\nagents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\nagents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\nagents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>",
           "subcommands": [
             {
+              "name": "automerge",
+              "path": "projects prs automerge",
+              "aliases": [],
+              "description": "Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--number <n>",
+                  "description": "The PR number",
+                  "long": "--number",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--sha <head-sha>",
+                  "description": "The head SHA you reviewed (required to turn it on); GitHub refuses if the branch moved since",
+                  "long": "--sha",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--method <method>",
+                  "description": "rebase | squash | merge (default: the first the repo allows, in that order)",
+                  "long": "--method",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--off",
+                  "description": "Turn auto-merge off instead",
+                  "long": "--off",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + merge.autoMergeAllowed\nagents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --off --json",
+              "notes": "GitHub has no REST endpoint for auto-merge, so each call is one GraphQL\nmutation (enablePullRequestAutoMerge / disablePullRequestAutoMerge) after a REST\nread. Turning it on passes expectedHeadOid, so a branch that moved since --sha\nis refused. The repository must allow auto-merge (merge.autoMergeAllowed in\nprs --json), and GitHub refuses it on a PR that can already merge: use prs merge\nfor that. Exits 1 unless auto-merge ends in the requested state.",
+              "subcommands": []
+            },
+            {
               "name": "comment",
               "path": "projects prs comment",
               "aliases": [],
@@ -11106,6 +11189,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--admin",
+                  "description": "Merge a PR branch protection blocks, as a repository admin. For a person's explicit confirm only; agents must never pass it",
+                  "long": "--admin",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "--json",
                   "description": "Machine-readable result",
                   "long": "--json",
@@ -11126,7 +11218,7 @@
                 }
               ],
               "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json",
-              "notes": "The merge is a single REST call pinned to --sha: if anything was pushed after\nyou read the PR, GitHub refuses and nothing merges. Branch protection, required\nchecks and reviews stay GitHub's to enforce; a refusal exits 1 with GitHub's\nmessage (merged: false in --json).",
+              "notes": "The merge is a single REST call pinned to --sha: if anything was pushed after\nyou read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose\nlive mergeable_state is not clean/unstable/has_hooks (blocked by a pending or red\nrequired check or a review, behind, conflicted, or not computed yet) is refused\nbefore the call. --admin skips that refusal and lets a\nrepository admin merge past branch protection where GitHub allows it; it exists\nfor a person's explicit confirm (AGI Menu's \"Confirm admin merge\") and agents\nmust never pass it. To land a PR once its checks pass, use prs automerge. A\nrefusal exits 1 with GitHub's reason (merged: false in --json).",
               "subcommands": []
             },
             {
@@ -11330,7 +11422,7 @@
                 }
               ],
               "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha> --body \"Checked the migration\" --json",
-              "notes": "One REST call (POST pulls/{n}/reviews, event APPROVE). The live head is read\nfirst and a moved head is refused; the review carries commit_id = that SHA, so\nit is recorded against the code you saw. GitHub refuses approving your own PR\n(exit 1, submitted: false in --json).",
+              "notes": "One REST call (POST pulls/{n}/reviews, event APPROVE). The live head is read\nfirst and a moved head is refused; the review carries commit_id = that SHA, so\nit is recorded against the code you saw. On your own PR it answers at once\n(exit 1, submitted: false) without calling GitHub, which never allows that.",
               "subcommands": []
             }
           ]
