@@ -1194,13 +1194,12 @@ export function isAccountSlotDir(dir: string): boolean {
 
 function resolveAccountCredentialPath(base: string, ...segments: string[]): string | null {
   const perVersion = path.join(base, ...segments);
-  try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
-  // A slot is the account's own HOME (PHNX-3940 T5). Never inherit another
-  // account's adopted ~/.<config> — that is the cross-account leak.
+  try { if (fs.existsSync(perVersion)) return perVersion; } catch {  }
+  // An account slot is its own HOME and must not inherit another active account's config.
   if (isAccountSlotDir(base)) return null;
   const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...segments);
   if (active !== perVersion) {
-    try { if (fs.existsSync(active)) return active; } catch { /* unreadable */ }
+    try { if (fs.existsSync(active)) return active; } catch {  }
   }
   return null;
 }
@@ -1216,15 +1215,10 @@ const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   droid: [['.factory', 'auth.v2.file']],
   antigravity: [['.gemini', 'antigravity-cli', 'antigravity-oauth-token']],
   opencode: [['.local', 'share', 'opencode', 'auth.json']],
-  // Muse Code stores OAuth / API credentials at ~/.config/muse/auth.json
-  // (or META_API_KEY in the environment, which is not a file).
   muse: [['.config', 'muse', 'auth.json']],
-  // With AGENT_CLI_CREDENTIAL_STORE=file, Cursor stores both OAuth tokens at
-  // ~/.cursor/auth.json. cli-config.json holds account metadata only.
   cursor: [['.cursor', 'auth.json']],
 };
 
-/** Whether an agent's credential file exists under a given home. */
 function credentialFileExistsUnder(agentId: AgentId, home: string): boolean {
   const alternatives = CREDENTIAL_FILE_SEGMENTS[agentId];
   if (!alternatives) return false;
@@ -1240,13 +1234,8 @@ function credentialFileExistsUnder(agentId: AgentId, home: string): boolean {
   return true;
 }
 
-/** Where an agent's credential file lives, split into the per-version copy and
- *  the active/global copy under the real HOME. */
 export interface CredentialPresence {
-  /** The credential file exists inside the passed version home. */
   perVersion: boolean;
-  /** The credential file exists under the active/global HOME (the one the login
-   *  symlink actually targets), independent of the version home. */
   active: boolean;
   /** Whether we know where this agent's credential lives (an entry in CREDENTIAL_FILE_SEGMENTS).
    * When false both probes are false, so absence is not evidence of a logout. Separate from
@@ -1258,6 +1247,7 @@ export interface CredentialPresence {
  * active HOME (`active`). A logout is provable only when both are absent. Pure existence: no
  * decrypt, network or keychain prompt. Agents with no inspectable identity return both false. */
 export function credentialPresence(agentId: AgentId, versionHome: string): CredentialPresence {
+  // Logout is provable only for a known location when both isolated and active copies are absent.
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
   const perVersion = credentialFileExistsUnder(agentId, versionHome);
   const active = credentialFileExistsUnder(agentId, realHome);
@@ -1265,7 +1255,6 @@ export function credentialPresence(agentId: AgentId, versionHome: string): Crede
   return { perVersion, active, knownLocation };
 }
 
-/** Decrypted contents of Droid's auth.v2.file (subset we consume). */
 interface DroidAuthPayload {
   access_token?: string;
   active_organization_id?: string | null;
@@ -1285,6 +1274,7 @@ export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
  * decryptDroidAuthPayload without the account-global HOME fallback, so a specific version home
  * resolves against only its own files (carryForwardAuthFiles). Null on any failure; never throws. */
 function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAuthPayload | null {
+  // Exact paths deliberately bypass active-HOME fallback for per-directory carry-forward identity.
   try {
     const blob = fs.readFileSync(filePath, 'utf-8').trim();
     const key = Buffer.from(fs.readFileSync(keyPath, 'utf-8').trim(), 'base64');
@@ -1308,6 +1298,7 @@ function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAuthPaylo
  * Decodes each on-disk format (JWT `sub`, or a SHA-256 of an opaque token so no live credential is
  * persisted). Lets carryForwardAuthFiles refuse overwriting another login (RUSH-1764). */
 export function readAuthAccountIdentity(agent: AgentId, configDir: string): string | null {
+  // Identity claims outlive JWT authorization; credential usability is decided elsewhere.
   try {
     switch (agent) {
       case 'droid': {
@@ -1342,9 +1333,7 @@ export function readAuthAccountIdentity(agent: AgentId, configDir: string): stri
         if (typeof refreshToken !== 'string' || !refreshToken) return null;
         const claims = decodeJwtPayload(refreshToken);
         const sub = normalizeIdentityPart(claims?.sub ?? claims?.user_id);
-        // An opaque (non-JWT) Google refresh token IS the credential — hash it
-        // so the identity key stays stable per login without embedding a live
-        // secret (the key is persisted as a usage-cache filename key).
+        // Opaque tokens are hashed because this identity key is persisted; never persist the secret.
         const fallback = crypto.createHash('sha256').update(refreshToken).digest('hex').slice(0, 16);
         return buildIdentityKey(agent, [['sub', sub ?? fallback]]);
       }
@@ -1383,14 +1372,14 @@ export function antigravityOsKeyringProbe(
   if (platform === 'darwin') {
     return {
       cmd: 'security',
+      // Omitting -w makes this a metadata-only probe that never reads the secret.
       args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
     };
   }
   if (platform === 'linux') {
-    // go-keyring secret_service attributes: "service" + "username" (not
-    // "account" — that flag is the macOS security(1) spelling of the same user).
     return {
       cmd: 'secret-tool',
+      // go-keyring maps the user to username, not the macOS account spelling.
       args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
     };
   }
@@ -1403,8 +1392,7 @@ export function __resetAntigravityKeychainCacheForTest(): void {
 }
 
 async function antigravityKeychainSignedIn(): Promise<boolean> {
-  // Test isolation first (before cache): real OS keyrings can't be sandboxed
-  // per-test. Same spirit as AGENTS_REAL_HOME. Not cached, so tests can toggle.
+  // Test isolation precedes the account-global cache; Linux secret stdout is discarded.
   if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
   if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
 
@@ -1414,21 +1402,17 @@ async function antigravityKeychainSignedIn(): Promise<boolean> {
     return false;
   }
   try {
-    // Discard stdout: Linux secret-tool lookup prints the secret value.
     await execFileAsync(probe.cmd, probe.args, {
       timeout: 3000,
-      // encoding so stdout is a string we can drop without ever logging it
       encoding: 'utf8',
     });
     cachedAgyKeychainSignedIn = true;
   } catch {
-    // Missing tool (ENOENT), missing item, locked collection, timeout → signed out.
     cachedAgyKeychainSignedIn = false;
   }
   return cachedAgyKeychainSignedIn;
 }
 
-/** The XDG base dirs OpenCode reads, and the env var that overrides each. */
 const OPENCODE_XDG_DIRS = {
   data: { env: 'XDG_DATA_HOME', fallback: ['.local', 'share'] },
   state: { env: 'XDG_STATE_HOME', fallback: ['.local', 'state'] },
@@ -1449,7 +1433,7 @@ export function resolveOpenCodeXdgPath(
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
   candidates.push(path.join(realHome, ...fallback, 'opencode', file));
   for (const candidate of candidates) {
-    try { if (fs.existsSync(candidate)) return candidate; } catch { /* unreadable */ }
+    try { if (fs.existsSync(candidate)) return candidate; } catch {  }
   }
   return null;
 }
@@ -1462,6 +1446,7 @@ function resolveOpenCodeAuthPath(base: string): string | null {
  * its required secret fields are non-empty, so a half-written entry doesn't read as signed in.
  * Only the shape is inspected; secret values are never read out. */
 function isValidOpenCodeCredential(value: unknown): boolean {
+  // Only complete auth.json discriminated-union credentials establish a login.
   if (!value || typeof value !== 'object') return false;
   const cred = value as Record<string, unknown>;
   const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
@@ -1493,13 +1478,9 @@ function openCodeOauthIdentity(cred: unknown): { email: string | null; plan: str
   return { email, plan };
 }
 
-/** OpenCode's signed-in identity, as far as `auth.json` can describe it. */
 export interface OpenCodeIdentity {
-  /** Sorted, "+"-joined provider ids holding a valid credential. */
   providers: string;
-  /** Account email, when some OAuth credential's token carries the claim. */
   email: string | null;
-  /** Plan tier from the same token (e.g. `Pro`), when present. */
   plan: string | null;
 }
 
@@ -1507,6 +1488,7 @@ export interface OpenCodeIdentity {
  * the stable key session/discover.ts indexes by; OAuth providers add email and plan, in sorted
  * order. The only correct source: opencode.db's account tables are empty on real installs. */
 export function resolveOpenCodeIdentity(base: string): OpenCodeIdentity | undefined {
+  // auth.json, not empty SQLite account tables, is authoritative; sorted providers form the stable key.
   const authPath = resolveOpenCodeAuthPath(base);
   if (!authPath) return undefined;
   try {
@@ -1541,6 +1523,7 @@ export function resolveOpenCodeAccountId(base: string): string | undefined {
  * `muse login`: `{ schema_version: 1, providers: { meta: { access_token, ... } } }`. Recurse: a
  * one-level walk reported signed-out after a successful login. Never returns the secret. */
 function museAuthHasToken(value: unknown, depth = 0): boolean {
+  // Live auth nests under providers.meta; bounded recursion also accepts older nested writers.
   if (depth > 4) return false;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const root = value as Record<string, unknown>;
