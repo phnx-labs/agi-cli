@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-#
-# Build the agents-cli standalone Bun executable into ./dist/bin/agents.
-#
-# Cross-compile later with:
-#   BUN_COMPILE_TARGET=bun-linux-x64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-linux-arm64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-darwin-arm64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-darwin-x64 scripts/build-bin.sh
-#   BUN_COMPILE_TARGET=bun-windows-x64 scripts/build-bin.sh
 
 set -euo pipefail
 
@@ -35,9 +26,6 @@ const buildDir = process.env.BUILD_DIR;
 const version = process.env.VERSION;
 if (!buildDir || !version) throw new Error('BUILD_DIR and VERSION are required');
 
-// VERSION lives in bootstrap.ts (RUSH-2335 split-entry). The slim index.ts
-// shell never reads package.json; stamp the constant into the bootstrap body
-// so the compiled binary does not need a package.json next to it.
 const bootstrapPath = path.join(buildDir, 'src', 'bootstrap.ts');
 let bootstrap = fs.readFileSync(bootstrapPath, 'utf8');
 const versionBlock = [

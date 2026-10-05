@@ -1,11 +1,3 @@
-// Release-time changelog step. Folds every queued note in `.changelog/next/`
-// into `.changelog/<version>.md`, regenerates the aggregate `CHANGELOG.md`, and
-// prints the folded notes to stdout (release.sh uses them as the PR body).
-//
-// Exits non-zero if the queue is empty — a release must document itself. This
-// replaces the old awk "## Unreleased -> ## <version>" promotion in release.sh.
-//
-// Run: `bun scripts/release-changelog.ts <version>`.
 
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -41,7 +33,6 @@ const notes = fragments.map((f) => f.body).join('\n\n');
 writeFileSync(join(changelogDir, `${version}.md`), `${notes}\n`);
 for (const f of fragments) rmSync(join(nextDir, f.name));
 
-// Regenerate the aggregate now that the version file exists and the queue is drained.
 writeFileSync(join(cliRoot, 'CHANGELOG.md'), generate(changelogDir));
 
 process.stdout.write(notes);

@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-#
-# Real install smoke for a pretested agents-cli tarball (RUSH-2666).
-# Installs the exact .tgz into a throwaway prefix with npm and runs the
-# installed binary. Never rebuilds the package.
-#
-# Usage: release-install-smoke.sh <tarball.tgz> [expected-version]
-#
 set -euo pipefail
 
 _scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
@@ -43,7 +36,6 @@ else
 fi
 
 OUT="$("${BIN[@]}" --version 2>&1)" || die "installed binary --version failed: $OUT"
-# Accept either a bare version or the CLI's usual "agents-cli x.y.z" line.
 if [[ -n "$EXPECT_VER" ]]; then
   printf '%s\n' "$OUT" | grep -Fq "$EXPECT_VER" \
     || die "installed --version did not contain $EXPECT_VER (got: $OUT)"

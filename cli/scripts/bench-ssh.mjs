@@ -1,23 +1,4 @@
 #!/usr/bin/env node
-/**
- * A/B benchmark for the shared SSH engine, against a real enrolled host.
- *
- *   bun run build            # build dist/ first
- *   node scripts/bench-ssh.mjs <host>
- *
- * Measures the three tangible laptop-side costs the engine targets. Each number
- * is wall-clock on the machine you run it from — the thing that matters when the
- * fleet is driven from a small laptop:
- *
- *   P3  repeated `--host` calls: fresh handshake each vs reused control socket
- *   P2  readiness: old 3 round-trips vs new 1 compound readyProbe
- *   P1  follow loop: old 2 un-muxed calls/cycle vs current 1 muxed combined
- *       call/cycle vs one persistent stream for the whole follow
- *
- * Requires a live host reachable over passwordless ssh (needs a real network
- * round-trip to be meaningful — a Tailscale-relayed peer shows the win most
- * clearly since each avoided handshake is expensive). Not a CI benchmark.
- */
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync } from 'child_process';
@@ -35,7 +16,7 @@ if (!HOST) {
 }
 
 const ms = (t0) => Number(process.hrtime.bigint() - t0) / 1e6;
-const clearSockets = () => { try { execSync('rm -f ~/.agents/.cache/ssh/cm-*', { shell: '/bin/bash' }); } catch { /* none */ } };
+const clearSockets = () => { try { execSync('rm -f ~/.agents/.cache/ssh/cm-*', { shell: '/bin/bash' }); } catch {  } };
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
 function timeLoop(label, n, fn) {
@@ -48,7 +29,6 @@ function timeLoop(label, n, fn) {
 
 console.log(`\nHost: ${HOST}   (wall-clock on this laptop)\n`);
 
-// P3: repeated same-host calls, handshake amortization.
 console.log('P3  repeated `--host` calls (10x trivial remote `true`)');
 const N = 10;
 clearSockets();
@@ -57,7 +37,6 @@ clearSockets();
 const on = timeLoop('multiplex ON  (reused socket)', N, () => sshExec(HOST, 'true', { multiplex: true }));
 console.log(`  => ${(off / on).toFixed(1)}x faster, ${(off - on).toFixed(0)}ms saved over ${N} calls\n`);
 
-// P2: readiness, old 3 round-trips (1 muxed + 2 un-muxed, as the old code did) vs new 1.
 console.log('P2  readiness check (median of 5)');
 const oldReady = [], newReady = [];
 for (let r = 0; r < 5; r++) {
@@ -76,7 +55,6 @@ console.log(`  old (3 round-trips)   ${median(oldReady).toFixed(0).padStart(6)}m
 console.log(`  new (1 readyProbe)    ${median(newReady).toFixed(0).padStart(6)}ms`);
 console.log(`  => ${(median(oldReady) / median(newReady)).toFixed(1)}x faster, ${(median(oldReady) - median(newReady)).toFixed(0)}ms saved per dispatch\n`);
 
-// P1: follow loop, per-cycle cost + process spawns.
 console.log('P1  follow loop, cost of 20 poll cycles vs one persistent stream');
 const CYCLES = 20;
 const log = '$HOME/.agents/.cache/hosts/benchfollow.log';

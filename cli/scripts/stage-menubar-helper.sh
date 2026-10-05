@@ -1,48 +1,4 @@
 #!/usr/bin/env bash
-#
-# Stage the PUBLISHED AGI Menu helper into bin/MenubarHelper.app (PHNX-4036).
-#
-# The helper's source lives in the private repo phnx-labs/agi-menu; this repo
-# never builds it. agi-menu's scripts/release.sh publishes the signed +
-# notarized bundle as release assets on the helper's own tag in the PUBLIC
-# agi-cli repo:
-#
-#   https://github.com/phnx-labs/agi-cli/releases/download/menubar/v<floor>/
-#     MenubarHelper.app.zip          the bundle (`ditto -c -k --keepParent`)
-#     MenubarHelper.app.zip.sha256   `<hex>  MenubarHelper.app.zip`
-#     menubar-source.txt             provenance: repo=/commit=/tag=/version=
-#                                    (absent on releases cut before the split)
-#
-# <floor> is the `menubar` entry in src/lib/helper-versions.ts -- the exact
-# address `src/lib/menubar/download-menubar.ts` resolves on a user's machine, so
-# what this script stages is byte-for-byte what `agents menubar enable` installs.
-#
-# Steps: resolve the floor -> download the zip + .sha256 (+ the sidecar when the
-# release has one) -> verify the sha256 -> extract into bin/MenubarHelper.app ->
-# verify the signature (`codesign --verify --deep --strict`, `spctl --assess`)
-# and the bundle gate (scripts/verify-menubar-helper.sh: designated-requirement
-# pin, universal binary, stapled ticket). Every failure is fatal: a missing asset,
-# a sha mismatch, or a bundle Gatekeeper rejects stops here -- there is no
-# fallback build, because there is no source to build from.
-#
-# Extraction + signature verification need macOS. Elsewhere the script refuses
-# unless --fetch-only is given, which downloads and sha-verifies the asset and
-# stops (what release-attestation-produce.sh uses to record the helper manifest
-# on any box).
-#
-# Usage:
-#   scripts/stage-menubar-helper.sh [--fetch-only] [--download-dir DIR]
-#                                   [--base-url URL] [--json]
-#   scripts/stage-menubar-helper.sh --print-floor
-#
-# --fetch-only     download + verify the sha256; do not extract or codesign-verify.
-# --download-dir   where the assets land (default: bin/.menubar-helper-dl).
-# --base-url       the directory the assets are read from (default: the public
-#                  release address above). A mirror or an offline copy; the
-#                  default is the only address an installed CLI ever uses.
-# --json           print one JSON object describing the staged asset instead of
-#                  prose: {helper, floor, tag, assetUrl, zip, sha256, source, app}.
-# --print-floor    print the resolved floor and exit (nothing is downloaded).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -76,10 +32,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The floor is the CLI's own resolution, read from the module the installed CLI
-# reads -- the same `bun -e` the attestation producer uses for computer-mac. Not
-# a regex over the TS source: a second parser of that table is a second place
-# for the answer to drift.
 command -v bun >/dev/null 2>&1 || die "bun not found on PATH (needed to read the menubar floor from src/lib/helper-versions.ts)"
 [[ -f src/lib/helper-versions.ts ]] || die "src/lib/helper-versions.ts not found under $(pwd)"
 FLOOR="$(bun -e "console.log((await import('./src/lib/helper-versions.ts')).helperFloor('menubar'))" 2>/dev/null)" \
@@ -96,8 +48,6 @@ ZIP_URL="$BASE_URL/$ASSET_NAME"
 SHA_URL="$BASE_URL/$ASSET_NAME.sha256"
 SOURCE_URL="$BASE_URL/$SOURCE_NAME"
 
-# Refuse BEFORE downloading: an extracted bundle is only ever staged with its
-# signature verified, and codesign/spctl exist only on macOS.
 if [[ "$FETCH_ONLY" != true && "$(uname -s)" != "Darwin" ]]; then
   die "staging $DEST needs macOS (codesign + spctl verify the published signature); pass --fetch-only to download and sha256-verify $ASSET_NAME only"
 fi
@@ -112,10 +62,6 @@ sha256_of() {
   fi
 }
 
-# fetch URL OUT -> prints the HTTP status. OUT exists only on 200. A transport
-# failure (no network, DNS, TLS, a transfer stalled under 1 KiB/s for 60s)
-# returns non-zero and prints curl's own message -- bounded, so a half-dead
-# connection fails loud instead of hanging a release.
 fetch() {
   local url="$1" out="$2" code
   rm -f "$out"
@@ -134,7 +80,6 @@ ZIP="$DOWNLOAD_DIR/$ASSET_NAME"
 SHA_FILE="$ZIP.sha256"
 SOURCE_FILE="$DOWNLOAD_DIR/$SOURCE_NAME"
 
-# The checksum first: it is tiny and 404s fast when the tag has no assets.
 log "fetching $TAG from $BASE_URL"
 code="$(fetch "$SHA_URL" "$SHA_FILE")" || die "could not download $SHA_URL (network, DNS, or a mirror that is down)"
 [[ "$code" == "200" ]] \
@@ -149,9 +94,6 @@ GOT_SHA="$(sha256_of "$ZIP")"
 [[ "$GOT_SHA" == "$WANT_SHA" ]] \
   || die "sha256 mismatch for $ZIP_URL: published $WANT_SHA, downloaded $GOT_SHA -- refusing to stage the wrong bytes"
 
-# Provenance is optional only because releases cut before agi-menu's release.sh
-# (menubar/v1.0.0, v1.1.0) predate the sidecar. Any status but 200/404 is an
-# error: a rate-limited or half-down mirror must not read as "no provenance".
 SOURCE_JSON="null"
 code="$(fetch "$SOURCE_URL" "$SOURCE_FILE")" || die "could not download $SOURCE_URL (network, DNS, or a mirror that is down)"
 case "$code" in
@@ -169,9 +111,6 @@ if [[ "$FETCH_ONLY" != true ]]; then
   trap 'rm -rf "$EXTRACT"' EXIT
   ditto -x -k "$ZIP" "$EXTRACT" || die "could not extract $ZIP"
   [[ -d "$EXTRACT/$APP_NAME" ]] || die "$ASSET_NAME on $TAG does not contain $APP_NAME at its top level"
-  # rm -rf first so a re-run does not nest the new .app INSIDE a stale bundle
-  # (cp/mv into an existing dir), which corrupts the signature ("unsealed
-  # contents present in the bundle root").
   mkdir -p bin
   rm -rf "$DEST"
   mv "$EXTRACT/$APP_NAME" "$DEST"

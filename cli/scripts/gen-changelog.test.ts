@@ -15,7 +15,6 @@ describe('buildAggregate', () => {
       { version: '0.1.0-alpha.44', body: '- alpha' },
     ]);
     const order = [...out.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
-    // numeric-segment compare: 1.20.63 > 1.20.10 > 1.20.9, and 1.x > 0.x
     expect(order).toEqual(['1.20.63', '1.20.10', '1.20.9', '0.1.0-alpha.44']);
   });
 
@@ -46,8 +45,6 @@ describe('committed CHANGELOG.md', () => {
   it('is up to date with .changelog/ (regenerate with `npm run changelog`)', () => {
     const regenerated = generate(join(cliRoot, '.changelog'));
     const committed = readFileSync(join(cliRoot, 'CHANGELOG.md'), 'utf-8');
-    // Compare content, not line-endings: a Windows checkout with core.autocrlf
-    // rewrites the committed file to CRLF, while generate() always emits LF.
     const normalize = (s: string) => s.replace(/\r\n/g, '\n');
     expect(normalize(committed)).toBe(normalize(regenerated));
   });

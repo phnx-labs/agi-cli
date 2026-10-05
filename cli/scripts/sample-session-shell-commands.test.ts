@@ -109,9 +109,6 @@ describe('session shell-command sampler', () => {
     ])).toEqual(['manual', 'probe-reachable']);
   });
 
-  // POSIX-only (RUSH-2215): the sampler spawns the real `agents` binary resolved
-  // off PATH; the Windows `.cmd` shim is not reliably resolved by that spawn
-  // (`agents exited null`), so this end-to-end spawn assertion runs on POSIX.
   it.skipIf(process.platform === 'win32')('spawns the production CLI path for candidate and exact local queries', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sampler-spawn-'));
     const binDir = path.join(root, 'bin');
@@ -205,8 +202,6 @@ describe('session shell-command sampler', () => {
         "try { count = Number.parseInt(fs.readFileSync(counterPath, 'utf8'), 10) || 0; } catch {}",
         "count += 1;",
         "fs.writeFileSync(counterPath, String(count));",
-        // Call 1 is now the explicit tools backfill. Call 2 is the retained
-        // first candidate pass; fail its retry plus the other candidate classes.
         "if (count >= 3 && count <= 6) process.exit(1);",
         "const child = spawnSync('bun', [cliEntry, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env });",
         "process.exit(Number.isInteger(child.status) ? child.status : 1);",

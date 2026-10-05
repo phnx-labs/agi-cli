@@ -1,7 +1,3 @@
-/**
- * Real npm install of a packed tarball (no mocks). This is the release smoke:
- * the bytes that would be published must actually install and run.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';

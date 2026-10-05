@@ -1,31 +1,4 @@
 #!/usr/bin/env bash
-#
-# bench-boot.sh — measure the `agents run` pre-exec wrapper cost (PHNX-3585).
-#
-# The AGI EXT "New Claude" boot runs `agents run claude --interactive`, and the
-# whole wrapper cost is spent BEFORE the harness prints anything: bootstrap,
-# version resolution, account rotation, config sync. This benchmark drives the
-# REAL command with the `AGENTS_PROFILE_BOOT=1` per-stage profiler (see
-# src/lib/boot-profile.ts) and reports the pre-exec timeline, so the boot cost
-# stays measured and a regression is visible in one command.
-#
-# It hits the real path — real version homes, real account store, real spawn —
-# and passes `-- --version` so the harness exits immediately: what's measured is
-# the wrapper, not the model. Nothing here is mocked.
-#
-# Usage:
-#   scripts/bench-boot.sh                 # build if needed, 6 runs of `run claude`
-#   scripts/bench-boot.sh --agent codex   # profile a different harness
-#   scripts/bench-boot.sh --runs 10       # more samples
-#   scripts/bench-boot.sh --no-build      # use the existing dist/ as-is
-#
-# Notes:
-#   - Run 1 is COLD (populates the file-store metadata cache); runs 2..N are
-#     WARM (the steady state the ext boot actually hits). The summary reports
-#     both, because the cold/warm gap IS the caching win this benchmark exists
-#     to track.
-#   - Needs the harness installed and an account resolvable on THIS box (it runs
-#     the real launch). It is a developer perf tool, not a CI gate.
 
 set -euo pipefail
 
@@ -57,9 +30,6 @@ if [ ! -f "$ENTRY" ]; then
   exit 1
 fi
 
-# One `agents run <agent> --headless -- --version` invocation with the profiler
-# on. Emits the boot-profile timeline to stderr right before spawn; we keep the
-# harness's own stdout out of the way.
 run_once() {
   AGENTS_PROFILE_BOOT=1 node "$ENTRY" run "$AGENT" --headless --quiet -- --version 2>&1 >/dev/null || true
 }
@@ -87,7 +57,6 @@ echo
 echo "── last full pre-exec timeline ──"
 printf '%s\n' "$LAST_TIMELINE" | grep -E 'boot-profile|\+ *[0-9.]+ms' || true
 
-# Warm median (runs 2..N) — the steady state the ext boot hits.
 if [ "$RUNS" -ge 2 ]; then
   warm_resolves="$(printf '%s\n' "${RESOLVES[@]:1}" | grep -vx NA | sort -n || true)"
   warm_totals="$(printf '%s\n' "${TOTALS[@]:1}" | grep -vx NA | sort -n || true)"

@@ -1,21 +1,3 @@
-/**
- * Direct coverage for the R2 backup COMMAND layer (RUSH-2437) — the functions
- * `agents sessions export --to-r2` / `import --from-r2` actually call, not just
- * the low-level R2Client (that is `lib/session/sync/r2.test.ts`). Two tiers:
- *
- *  - Pure, always-run: the fail-loud gates (`r2ExportGateError`,
- *    `r2ImportGateError`), the object-key selection (`r2KeyForRecord`), and the
- *    backup-key resolution (`resolveR2BackupKey`) against the real standalone
- *    `secrets` engine (PHNX-3989) in a fresh, isolated store — no mocking of
- *    the resolver.
- *  - MinIO-gated round-trip: `uploadToR2` → `pullFromR2` against a real
- *    S3-compatible endpoint, so the ACTUAL command functions (not a hand-copied
- *    wire format) are exercised end-to-end. SKIPS when AGENTS_TEST_R2_ENDPOINT is
- *    unset — see r2.test.ts for the MinIO one-liner.
- *
- * No HTTP mocking anywhere (repo "real services only" rule). Precedent for
- * importing + unit-testing a command helper directly: sessions-export-resolve.test.ts.
- */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -48,7 +30,6 @@ async function writeR2Bundle(vars: Record<string, string>): Promise<void> {
   await writeBundle(b);
 }
 
-// ── pure gate + key helpers (always run) ──────────────────────────────────────
 
 describe('R2 backup gates (pure)', () => {
   it('r2ExportGateError: no error when --to-r2 is absent', () => {
@@ -139,7 +120,6 @@ describe('resolveR2BackupKey (real standalone secrets store)', () => {
   });
 });
 
-// ── MinIO-gated round-trip through the real command functions ──────────────────
 
 const ENDPOINT = process.env.AGENTS_TEST_R2_ENDPOINT ?? '';
 const BUCKET = process.env.AGENTS_TEST_R2_BUCKET ?? '';
@@ -149,8 +129,6 @@ const ACCOUNT = process.env.AGENTS_TEST_R2_ACCOUNT_ID ?? 'test-account';
 const CONFIGURED = Boolean((ENDPOINT || ACCOUNT !== 'test-account') && BUCKET && ACCESS && SECRET);
 const suite = CONFIGURED ? describe : describe.skip;
 
-// Unique machine per run so this test's objects are isolated from r2.test.ts's,
-// which also targets the same bucket in parallel.
 const RUN = `r2cmd-${process.pid}-${Math.floor(Number(process.hrtime.bigint() % 1_000_000n))}`;
 
 suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
@@ -163,8 +141,6 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
 
   beforeEach(async () => {
     clearR2ConfigCache();
-    // A real r2.backups bundle pointing at the test endpoint, so the command
-    // functions' own loadR2Config() resolves it — no injection, real path.
     await writeR2Bundle({
       R2_ACCOUNT_ID: ACCOUNT, R2_BUCKET_NAME: BUCKET, R2_ACCESS_KEY_ID: ACCESS,
       R2_SECRET_ACCESS_KEY: SECRET, R2_ENDPOINT: ENDPOINT || '',
@@ -177,7 +153,7 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
 
   afterAll(async () => {
     for (const key of await rawClient.list(`sessions/${RUN}/`)) {
-      try { await rawClient.delete(key); } catch { /* already gone */ }
+      try { await rawClient.delete(key); } catch {  }
     }
   });
 
@@ -190,7 +166,6 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
     fs.writeFileSync(encAbs, encPlain, 'utf-8');
     fs.writeFileSync(plainAbs, plainPlain, 'utf-8');
 
-    // Encrypted record via the command's OWN key resolution.
     const key = resolveR2BackupKey();
     expect(key).not.toBeNull();
     const encRec = buildRecord(
@@ -204,49 +179,36 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
     expect(encRec.encrypted).toBe(true);
     expect(plainRec.encrypted).toBe(false);
 
-    // Upload through the REAL command function.
     const header = makeHeader({
       origin: RUN, exportedAt: new Date().toISOString(),
       encrypted: true, redacted: true, records: [encRec, plainRec],
     });
     await uploadToR2(header, [encRec, plainRec]);
 
-    // Objects landed at the shared key layout.
     const listed = await rawClient.list(`sessions/${RUN}/`);
     expect(listed).toContain('sessions/' + RUN + '/claude/enc-1.jsonl');
     expect(listed).toContain('sessions/' + RUN + '/codex/plain-1.jsonl');
 
-    // A non-bundle object under the same prefix must be skipped, not fatal.
     const junkKey = `sessions/${RUN}/claude/junk-not-a-bundle.jsonl`;
     await rawClient.put(junkKey, 'this is not json at all', 'text/plain');
 
-    // Restore through the REAL command function.
     const restored = await pullFromR2();
     const mine = restored.records.filter(r => r.machine === RUN);
     const enc = mine.find(r => r.sessionId === 'enc-1');
     const plain = mine.find(r => r.sessionId === 'plain-1');
     expect(enc).toBeTruthy();
     expect(plain).toBeTruthy();
-    // Header reflects that at least one record is encrypted.
     expect(restored.header.encrypted).toBe(true);
-    // The junk object was skipped — no restored record carries its body.
     expect(mine.some(r => r.body.includes('not json at all'))).toBe(false);
-    // The encrypted body decrypts back to the original with the shared key.
     expect(enc!.encrypted).toBe(true);
     expect(enc!.body).not.toContain('sk-XYZ');
     expect(decryptTranscriptBody(enc!.body, key)).toBe(encPlain);
-    // The plaintext body round-trips verbatim.
     expect(plain!.body).toBe(plainPlain);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });
 
-// ── MANAGED round-trip through the real Worker (workerd/miniflare) ─────────────
-// The managed path uploads through SessionsHttpClient to the real managed Worker
-// source in workerd, whose default verifier calls a real local Phoenix HTTP
-// service. It proves every uploaded record body is an ENCRYPTED envelope, restore
-// round-trips, and a fresh box recovers the escrowed DEK without r2.backups.
 
 describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
   let mf: Miniflare | undefined;
@@ -258,7 +220,7 @@ describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
 
   beforeEach(async () => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'msess-state-'));
-    process.env.AGENTS_STATE_DIR = stateDir; // isolates the DEK cache
+    process.env.AGENTS_STATE_DIR = stateDir;
     identity = createServer((request, response) => {
       if (request.url !== '/api/v1/auth/me' || request.headers.authorization !== 'Bearer managed-token') {
         response.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"unauthorized"}');
@@ -302,19 +264,16 @@ describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
     fs.writeFileSync(a, aPlain);
     fs.writeFileSync(b, bPlain);
 
-    // Managed ALWAYS encrypts — every record is sealed under the DEK.
     const recA = buildRecord({ agent: 'claude', machine: 'boxA', sessionId: 'm1', relKey: 'projects/p/m1.jsonl', absPath: a }, { redact: true, encryptKey: dek });
     const recB = buildRecord({ agent: 'codex', machine: 'boxA', sessionId: 'm2', relKey: 'm2.jsonl', absPath: b }, { redact: true, encryptKey: dek });
     expect(recA.encrypted).toBe(true);
     expect(recB.encrypted).toBe(true);
-    // The record body is a ciphertext envelope, never the plaintext.
     expect(isTranscriptEnvelope(recA.body)).toBe(true);
     expect(recA.body).not.toContain('sk-ABC');
 
     const header = makeHeader({ origin: 'boxA', exportedAt: new Date().toISOString(), encrypted: true, redacted: true, records: [recA, recB] });
     await uploadToR2(header, [recA, recB], client);
 
-    // The RAW stored objects are envelopes — Cloudflare only ever sees ciphertext.
     const rawA = await client.get('sessions/boxA/claude/m1.jsonl');
     expect(rawA).not.toBeNull();
     const rawBundle = parseBundle(rawA!);
@@ -323,15 +282,12 @@ describe('managed backup round-trip (real workerd, escrowed DEK)', () => {
     expect(isTranscriptEnvelope(rawBundle.records[0]?.body ?? '')).toBe(true);
     expect(rawA!).not.toContain('sk-ABC');
 
-    // Restore through the real command function against the real Worker.
     const restored = await pullFromR2(client);
     expect(restored.header.encrypted).toBe(true);
     const rM1 = restored.records.find(r => r.sessionId === 'm1');
     expect(rM1).toBeTruthy();
     expect(decryptTranscriptBody(rM1!.body, dek)).toBe(aPlain);
 
-    // Fresh box: wipe the local DEK cache, re-resolve — it must RECOVER the same
-    // escrowed key (zero setup), and decrypt the restored backup identically.
     fs.rmSync(backupKeyCachePath(), { force: true });
     const client2 = new SessionsHttpClient({ baseUrl: base, userId: USER, token: 'managed-token' });
     const dek2 = await resolveManagedBackupKey(client2, USER);

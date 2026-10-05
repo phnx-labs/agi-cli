@@ -78,7 +78,6 @@ function sampleKey(session: ToolSessionEvidence): string {
     .digest('hex');
 }
 
-/** Stable round-robin sampling keeps every available machine represented. */
 export function deterministicSessionSample(
   sessions: ToolSessionEvidence[],
   count: number,
@@ -148,7 +147,6 @@ export function partitionSampleDevices(
 
 const SHELL_CANDIDATE_QUERIES = ['tool:exec', 'tool:command', 'tool:shell', 'tool:bash'];
 
-/** Avoid asking a broad candidate class for an unbounded session set. */
 export function candidateQueryLimit(requestedSessions: number): number {
   return requestedSessions * SAMPLE_CANDIDATE_SESSION_MULTIPLIER;
 }
