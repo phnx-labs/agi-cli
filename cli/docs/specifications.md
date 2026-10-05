@@ -1057,7 +1057,10 @@ SSH access (§7); rendering sessions that no harness produced.
   when the directory contains transcripts, and MUST keep the tool-call count when
   the directory is missing or empty. Pasted images are written once under
   `~/.agents/.cache/attachments/<sessionId>/` and the inline bytes MUST NOT
-  remain on the folded event. Artifact sidecars join `artifacts` by session id,
+  remain on the folded event or in the persisted timeline state. A JSONL record
+  larger than one timeline read MUST resume from `partialLine` with the offset
+  advanced past the bytes already consumed, so a pasted image bigger than that
+  read does not freeze the fold. Artifact sidecars join `artifacts` by session id,
   and a `plans` bucket sets `planFile`. Older clients ignore the new fields. A
   heavy filter (agent, tools, reasoning) is not on the row: one explicit
   `agents sessions <id> --include … --json` fetches it, never a selection change
