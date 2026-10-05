@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
-  "commands": 472,
+  "commands": 474,
   "root": {
     "name": "agents",
     "path": "",
@@ -10853,7 +10853,7 @@
           "name": "prs",
           "path": "projects prs",
           "aliases": [],
-          "description": "A project's open pull requests: list them (default), or act on one: ready, review, comment, merge.",
+          "description": "A project's open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).",
           "args": [],
           "options": [
             {
@@ -10867,7 +10867,7 @@
               "negate": false
             }
           ],
-          "examples": "agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\n      agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>",
+          "examples": "agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\n      agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\n      agents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>",
           "subcommands": [
             {
               "name": "comment",
@@ -10941,6 +10941,62 @@
               ],
               "examples": "agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body \"Looks good once CI is green\"\n      printf 'Two notes:\\n- one\\n- two\\n' | agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file - --json",
               "notes": "One REST call (POST issues/{n}/comments), not the GraphQL-backed gh pr comment.\n      Pass exactly one of --body or --body-file; an empty comment is refused.",
+              "subcommands": []
+            },
+            {
+              "name": "failure",
+              "path": "projects prs failure",
+              "aliases": [],
+              "description": "Why one commit's CI failed: each failing check with the error lines of its job log.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--sha <commit>",
+                  "description": "The commit whose checks failed: a PR head, a merge commit, or the default branch head",
+                  "long": "--sha",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs rush --json                                   # read a ✗: defaultBranch.sha, a PR's headSha, or a merge's mergeCommitSha\n      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\n      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha> --json",
+              "notes": "REST only: the commit's check runs and statuses, then each failing GitHub\n      Actions job's log (GET actions/jobs/{job}/logs). The excerpt drops timestamps,\n      colour and the runner's cleanup after \"Post job cleanup.\", and keeps the lines\n      that read like an error with one line of context each side, at most 12. A log\n      that cannot be read empties that excerpt and says why in excerptError; a check\n      that is not an Actions job has no log here. Exits 1 only when the checks\n      themselves could not be read.",
               "subcommands": []
             },
             {
@@ -11136,6 +11192,62 @@
               ],
               "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read isDraft + headSha\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --json",
               "notes": "GitHub has no REST endpoint for this, so it is one GraphQL mutation\n      (markPullRequestReadyForReview) after a REST read. A PR that is already ready\n      succeeds without a write. With --sha, a head that moved is refused before the\n      write; GitHub cannot pin the mutation itself, so that check is not atomic.",
+              "subcommands": []
+            },
+            {
+              "name": "rerun",
+              "path": "projects prs rerun",
+              "aliases": [],
+              "description": "Re-run the failed jobs of one GitHub Actions workflow run.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--run-id <id>",
+                  "description": "The workflow run (runId from prs failure --json)",
+                  "long": "--run-id",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha> --json   # runId per failing check\n      agents projects prs rerun rush --repo phnx-labs/agi-cli --run-id 37243157132",
+              "notes": "One REST call (POST actions/runs/{id}/rerun-failed-jobs). Re-running only\n      repeats jobs, so it is safe to click again; GitHub refuses a run that is still\n      in progress (exit 1, requested: false in --json).",
               "subcommands": []
             },
             {
