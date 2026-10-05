@@ -1,25 +1,7 @@
-/**
- * Shared content comparison for the resource-diff engine.
- *
- * `agents doctor` (and the plugin-drift describer) reconcile a version home's
- * copy of a resource against its resolved source by comparing bytes. Two shapes
- * of resource need it: a single file (a command, a rule, a transformed subagent)
- * and a whole directory tree (a skill, a plugin mirror, a copied workflow).
- * Both live here so every kind's differ shares ONE normalize rule, ONE ignore
- * set, and ONE symlink-skip policy instead of re-deriving them (the duplication
- * `doctor-diff.ts`'s `dirsContentMatch` had before PHNX-3504; the parallel
- * `skillDirsMatch` copies in `versions.ts` / `detectors/skills.ts` are a separate
- * follow-up cleanup so this change stays inside the fast-lane CI impact budget).
- *
- * Normalize: CRLF → LF and trim, so a trailing-newline / line-ending difference
- * between two independently-written trees is not reported as content drift. This
- * mirrors the byte compare `diffCommands` / `diffRules` already apply per file.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
 
-/** OS metadata / local tooling that is never synced into a version home. */
 const RESOURCE_CONTENT_IGNORE = new Set([
   '.DS_Store',
   '.git',
@@ -29,7 +11,6 @@ const RESOURCE_CONTENT_IGNORE = new Set([
   'node_modules',
 ]);
 
-/** CRLF → LF and trim, so line-ending / trailing-newline skew is not drift. */
 export function normalizeResourceContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
 }
@@ -42,12 +23,6 @@ function readSafe(file: string): Buffer | null {
   }
 }
 
-/**
- * True when two files exist and their normalized content is identical. A missing
- * or unreadable file on either side is a mismatch (never a silent match).
- * Identical bytes match without decoding, so a binary asset (an image, a
- * dataset) is never turned into a string and run through the normalizer.
- */
 export function filesContentMatch(a: string, b: string): boolean {
   const ab = readSafe(a);
   const bb = readSafe(b);
@@ -56,12 +31,6 @@ export function filesContentMatch(a: string, b: string): boolean {
   return normalizeResourceContent(ab.toString('utf-8')) === normalizeResourceContent(bb.toString('utf-8'));
 }
 
-/**
- * True when two directory trees hold the same set of names and every file under
- * them matches by normalized content. Symlinks and ignored entries are skipped
- * on both sides; a name present on one side only, or a file/dir type mismatch,
- * is a mismatch. An unreadable directory on either side is a mismatch.
- */
 export function dirsContentMatch(src: string, dst: string): boolean {
   const srcEntries = (() => {
     try { return fs.readdirSync(src, { withFileTypes: true }); } catch { return null; }
