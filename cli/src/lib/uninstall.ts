@@ -1,20 +1,3 @@
-/**
- * Complete teardown of agents-cli — the reverse of `agents setup`.
- *
- * The hard part is undoing "adoption": normal installs move the user's real
- * `~/.<agent>` aside and replace it with a symlink into agents-cli's version
- * homes (see `switchConfigSymlink` / `importAgent`). A clean uninstall must put
- * those real directories back, release any adopted launchers, strip the shim
- * directory from the user's PATH, and only then dispose of `~/.agents`.
- *
- * Safety invariant: a `~/.<agent>` that agents-cli never adopted is a REAL user
- * directory and is never touched. Ownership is decided structurally by
- * `getConfigSymlinkVersion` (non-null only for a symlink into our versions dir),
- * exactly as `removeVersion` does it — no marker files, no guessing.
- *
- * This module is split into a read-only {@link planUninstall} and a mutating
- * {@link executeUninstall} so `--dry-run` and the real run share one code path.
- */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -37,7 +20,6 @@ import {
   getLegacySystemAgentsDir,
 } from './state.js';
 
-/** What the uninstall intends to do with one agent's config directory. */
 export type ConfigAction =
   | { agent: AgentId; realPath: string; kind: 'restore-backup'; source: string }
   | { agent: AgentId; realPath: string; kind: 'restore-version-home'; source: string }
@@ -46,14 +28,11 @@ export type ConfigAction =
   | { agent: AgentId; realPath: string; kind: 'leave-foreign' }
   | { agent: AgentId; realPath: string; kind: 'absent' };
 
-/** A home-level file symlink (e.g. `~/.claude.json`) agents-cli owns. */
 export interface HomeFileAction {
   realPath: string;
-  /** Resolved symlink target whose contents are copied back to `realPath`. */
   source: string;
 }
 
-/** The full, read-only plan describing what an uninstall would change. */
 export interface UninstallPlan {
   isInstalled: boolean;
   agentsDir: string;
@@ -64,7 +43,6 @@ export interface UninstallPlan {
   rcFiles: string[];
 }
 
-/** Structured result of an executed uninstall (for reporting). */
 export interface UninstallResult {
   restoredConfigs: Array<{ agent: AgentId; realPath: string }>;
   removedDanglingConfigs: Array<{ agent: AgentId; realPath: string }>;
@@ -73,17 +51,14 @@ export interface UninstallResult {
   cleanedRcFiles: string[];
   agentsDir: { path: string; disposition: 'moved' | 'purged' | 'absent'; movedTo?: string };
   legacySymlinkRemoved: boolean;
-  /** True when `--purge` was requested but downgraded to move-aside after errors. */
   purgeDowngraded: boolean;
   errors: string[];
 }
 
-/** Home dir honoring the AGENTS_REAL_HOME test/override, mirroring shims.ts. */
 function realHome(): string {
   return process.env.AGENTS_REAL_HOME || os.homedir();
 }
 
-/** Newest timestamped backup dir under `<backups>/<agent>/`, or null. */
 function newestBackupDir(agent: AgentId): string | null {
   const dir = path.join(getBackupsDir(), agent);
   let entries: string[];
@@ -97,7 +72,6 @@ function newestBackupDir(agent: AgentId): string | null {
   return path.join(dir, entries[entries.length - 1]);
 }
 
-/** Absolute target of a symlink, or null if `p` is not a readable symlink. */
 function symlinkTarget(p: string): string | null {
   try {
     const raw = fs.readlinkSync(p);
@@ -107,18 +81,10 @@ function symlinkTarget(p: string): string | null {
   }
 }
 
-/**
- * Remove a symlink/junction at `p` without following into its target. On POSIX
- * this is a plain `unlinkSync`; on Windows the same call correctly deletes a
- * junction or directory-symlink reparse point while leaving the target intact —
- * verified on a real Windows host, where `fs.rmSync(p, { force: true })` instead
- * throws `EFAULT` on a reparse point. `rmSync` is deliberately NOT used here.
- */
 function removeLink(p: string): void {
   fs.unlinkSync(p);
 }
 
-/** Classify one agent's config dir without mutating anything. */
 function planConfig(agent: AgentId): ConfigAction {
   const realPath = getAgentConfigPath(agent);
   let stat: fs.Stats;
@@ -127,14 +93,9 @@ function planConfig(agent: AgentId): ConfigAction {
   } catch {
     return { agent, realPath, kind: 'absent' };
   }
-  // A real directory means agents-cli never adopted it — leave it alone.
   if (!stat.isSymbolicLink()) return { agent, realPath, kind: 'leave-real' };
-  // A symlink we don't own (target not under our versions dir) — leave it alone.
   if (getConfigSymlinkVersion(agent) === null) return { agent, realPath, kind: 'leave-foreign' };
 
-  // Owned symlink: prefer the timestamped backup (switchConfigSymlink moved the
-  // real dir there); otherwise the symlink target itself holds the user's data
-  // (importAgent renamed the real dir INTO the version home).
   const backup = newestBackupDir(agent);
   if (backup) return { agent, realPath, kind: 'restore-backup', source: backup };
   const target = symlinkTarget(realPath);
@@ -144,7 +105,6 @@ function planConfig(agent: AgentId): ConfigAction {
   return { agent, realPath, kind: 'remove-dangling' };
 }
 
-/** Owned home-file symlinks (e.g. `~/.claude.json`) to copy back as real files. */
 function planHomeFiles(): HomeFileAction[] {
   const home = realHome();
   const userDir = getUserAgentsDir();
@@ -162,7 +122,6 @@ function planHomeFiles(): HomeFileAction[] {
       }
       if (!stat.isSymbolicLink()) continue;
       const target = symlinkTarget(realPath);
-      // Only ours (points into ~/.agents) and only if the target still exists.
       if (target && target.startsWith(userDir + path.sep) && fs.existsSync(target)) {
         out.push({ realPath, source: target });
       }
@@ -171,7 +130,6 @@ function planHomeFiles(): HomeFileAction[] {
   return out;
 }
 
-/** cliCommand basenames that have an adopted-launcher record to release. */
 function planLaunchers(): string[] {
   const dir = path.join(getHistoryDir(), 'adopted-launchers');
   try {
@@ -181,7 +139,6 @@ function planLaunchers(): string[] {
   }
 }
 
-/** Candidate shell rc files that currently contain a shim PATH entry. */
 function planRcFiles(): string[] {
   const home = realHome();
   const shimsDir = getShimsDir();
@@ -200,18 +157,11 @@ function planRcFiles(): string[] {
   return out;
 }
 
-/**
- * Build a read-only plan of everything a complete uninstall would change.
- * Performs no mutations; safe to run for `--dry-run` and to print for confirm.
- */
 export function planUninstall(): UninstallPlan {
   const agentsDir = getUserAgentsDir();
   const legacy = getLegacySystemAgentsDir();
   let legacySymlink: string | null = null;
   try {
-    // Only claim it if it's actually a link (symlink on POSIX, junction on Windows —
-    // both report isSymbolicLink()); a real directory here is left alone so removeLink
-    // (unlinkSync) is always the correct primitive for what we captured.
     if (fs.lstatSync(legacy).isSymbolicLink()) legacySymlink = legacy;
   } catch {
     legacySymlink = null;
@@ -227,13 +177,6 @@ export function planUninstall(): UninstallPlan {
   };
 }
 
-/**
- * Execute a plan built by {@link planUninstall}. Restores adopted config dirs
- * and home files, releases adopted launchers, strips shim PATH lines, then
- * disposes of `~/.agents` — moved aside to `~/.agents.removed-<ts>` (recoverable)
- * by default, or hard-deleted when `purge` is set. Config restore always runs
- * before disposal because the backups live inside `~/.agents`.
- */
 export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; timestamp: number }): UninstallResult {
   const result: UninstallResult = {
     restoredConfigs: [],
@@ -247,23 +190,13 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     errors: [],
   };
 
-  // 1. Restore adopted config directories (reads backups inside ~/.agents).
   for (const c of plan.configs) {
     try {
       if (c.kind === 'restore-backup') {
-        // The adopted link carries no data (the real dir is the backup); drop it,
-        // then move the backup out of ~/.agents onto the real path — EXDEV-safe so a
-        // cross-volume ~/.agents can't strand the backup mid-restore. unlinkSync (not
-        // rmSync) is deliberate: it removes a POSIX symlink AND a Windows junction/
-        // dir-symlink without following into the target, whereas rmSync throws EFAULT
-        // on a Windows reparse point.
         removeLink(c.realPath);
         moveDirCrossDevice(c.source, c.realPath);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
       } else if (c.kind === 'restore-version-home') {
-        // importAgent renamed the real dir INTO the version home; copy it back
-        // (step 6 disposes the original) while stripping resource symlinks that
-        // would dangle once ~/.agents is gone.
         removeLink(c.realPath);
         copyDirStrippingAgentsSymlinks(c.source, c.realPath, plan.agentsDir);
         result.restoredConfigs.push({ agent: c.agent, realPath: c.realPath });
@@ -271,13 +204,11 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
         removeLink(c.realPath);
         result.removedDanglingConfigs.push({ agent: c.agent, realPath: c.realPath });
       }
-      // leave-real / leave-foreign / absent: intentionally untouched.
     } catch (err) {
       result.errors.push(`config ${c.agent} (${c.realPath}): ${(err as Error).message}`);
     }
   }
 
-  // 2. Restore owned home-file symlinks as real files (e.g. ~/.claude.json).
   for (const hf of plan.homeFiles) {
     try {
       removeLink(hf.realPath);
@@ -288,7 +219,6 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 3. Release adopted launchers (reads records inside ~/.agents).
   const byCli = new Map(ALL_AGENT_IDS.map((a) => [AGENTS[a].cliCommand, a]));
   for (const cli of plan.launchers) {
     const agent = byCli.get(cli);
@@ -301,16 +231,12 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 3b. Remove the gh overload shim explicitly, so a real gh returns even if the
-  // shims dir itself is left in place. (The shim self-heals to real gh regardless,
-  // but leaving no orphan is cleaner — PHNX-3501.)
   try {
     removeGhOverloadShim();
   } catch (err) {
     result.errors.push(`gh overload shim: ${(err as Error).message}`);
   }
 
-  // 4. Strip the shim directory from the user's PATH across all rc files.
   const shimsDir = getShimsDir();
   for (const rc of plan.rcFiles) {
     try {
@@ -322,10 +248,6 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 5. Remove the legacy back-compat symlink, if present. `~/.agents-system` is a
-  // link (junction on Windows — createLink uses 'junction' for a dir source), so it
-  // goes through removeLink for the same reason as the config links: rmSync throws
-  // EFAULT on a Windows reparse point.
   if (plan.legacySymlink) {
     try {
       removeLink(plan.legacySymlink);
@@ -335,9 +257,6 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
-  // 6. Dispose of ~/.agents LAST (its backups fed step 1). If any restore above
-  // failed, downgrade a --purge to a recoverable move-aside: a swallowed restore
-  // error must never let the hard-delete take the user's only copy with it.
   if (fs.existsSync(plan.agentsDir)) {
     const purge = !!opts.purge && result.errors.length === 0;
     if (opts.purge && !purge) result.purgeDowngraded = true;

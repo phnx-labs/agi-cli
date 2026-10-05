@@ -48,13 +48,11 @@ export interface ParsedTodo {
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const DAY_WORD = /^(today|tomorrow|sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?)$/i;
 
-/** `YYYY-MM-DD` of a local date. */
 export function localDay(date: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
 }
 
-/** The date a day word names: today, tomorrow, or the next such weekday (today included). */
 export function resolveDayWord(word: string, now: Date): string {
   const w = word.toLowerCase();
   const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -65,17 +63,8 @@ export function resolveDayWord(word: string, now: Date): string {
 
 const TAG = /^#([\p{L}\p{N}_.-]+)$/u;
 const BANGS = /^!+$/;
-/** A trailing token's punctuation, as typed in "call back tomorrow," or "#AGI.". */
 const clean = (token: string) => token.replace(/[,.;:]+$/, '');
 
-/**
- * Read a typed line. The first `#project` is taken from anywhere in it. A day
- * word and a run of `!` (one: high, two or more: urgent) are taken only from
- * the tokens that end the line, so "Fix the today view bug" keeps its words
- * while "Call back tomorrow !!" does not. Tokens must stand alone ("today's" is
- * a word); trailing commas and periods on them are ignored. The rest, spaces
- * collapsed, is the title. AGI Menu's chips mirror this rule (QuickTodoParse).
- */
 export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   let project: string | null = null;
   let due: string | null = null;
@@ -99,7 +88,6 @@ export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   return { title: words.join(' '), project, due, priority };
 }
 
-/** The Linear project a `#token` or `--project` names: an `agents projects` definition's Linear project, else the token as Linear knows it. */
 export function linearProjectFor(token: string, defs: readonly ProjectDef[]): string {
   const def = defs.find((d) => d.name.toLowerCase() === token.toLowerCase() || d.linear?.name?.toLowerCase() === token.toLowerCase());
   if (!def) return token;
@@ -109,28 +97,21 @@ export function linearProjectFor(token: string, defs: readonly ProjectDef[]): st
   return def.linear.name ?? def.linear.projectId!;
 }
 
-/** One to-do as AGI Menu renders it. */
 export interface QuickTodo {
   identifier: string;
   url: string | null;
   title: string;
-  /** The Linear project name; null when none. */
   project: string | null;
-  /** `YYYY-MM-DD`; null when none. */
   due: string | null;
-  /** Linear's priority number: 0 none, 1 urgent, 2 high, 3 medium, 4 low. */
   priority: number;
   /** The workflow state's name (Todo, Doing, Done, …). */
   state: string;
   createdAt: string;
-  /** True when it was created as a quick to-do (carries {@link QUICK_TODO_MARKER}). */
   quick: boolean;
 }
 
-/** The `linear` runner; tests inject recorded answers. Resolves stdout and stderr, rejects on a non-zero exit. */
 export type LinearExec = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
-/** `linear <args>` with a 30 s timeout; the failure carries linear's stderr. */
 export const linearExec: LinearExec = async (args) => {
   try {
     const { stdout, stderr } = await execFileAsync('linear', args, { timeout: 30_000, maxBuffer: 32 * 1024 * 1024, encoding: 'utf-8' });
@@ -143,7 +124,6 @@ export const linearExec: LinearExec = async (args) => {
   }
 };
 
-/** linear's own words for a failure: its last `Error:` line, else the first stderr line (the reason; usage hints follow it). */
 export function linearFailure(err: unknown): string {
   const stderr = String((err as { stderr?: unknown })?.stderr ?? '').trim();
   const lines = stderr.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -158,7 +138,6 @@ type RawIssue = {
   priority?: number; createdAt?: string; project?: { name?: string } | null; state?: { name?: string } | null;
 };
 
-/** A `linear tasks --json` issue as a {@link QuickTodo}. */
 export function toQuickTodo(issue: RawIssue): QuickTodo {
   return {
     identifier: String(issue.identifier ?? ''),
@@ -244,8 +223,6 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   } catch (err) {
     return { ok: false, todo: null, message: linearFailure(err) };
   }
-  // linear prints "Created PHNX-123: <title>  [cycle | assignee]". Some refusals exit 0
-  // with only an "Error:" line on stderr; that line is the message.
   const id = out.stdout.match(/^Created ([A-Z][A-Z0-9]*-\d+):/m)?.[1];
   if (!id) {
     const error = out.stderr.split('\n').map((l) => l.trim()).reverse().find((l) => /^Error:/i.test(l));
@@ -263,11 +240,6 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   }
 }
 
-/**
- * The caller's to-dos: open quick to-dos plus open issues assigned to them due
- * today or earlier, due ones first (earliest due), then the newest quick to-dos;
- * at most {@link TODO_LIST_LIMIT}. `total` counts them all.
- */
 export async function listQuickTodos(now: Date, linear: LinearExec = linearExec): Promise<{ todos: QuickTodo[]; total: number }> {
   const parsed = JSON.parse((await linear(['tasks', '--assignee', 'me', '--status', 'open', '--cycle', 'all', '--all', '--json'])).stdout) as { issues?: RawIssue[] };
   const today = localDay(now);
@@ -281,19 +253,12 @@ export async function listQuickTodos(now: Date, linear: LinearExec = linearExec)
   return { todos: all.slice(0, TODO_LIST_LIMIT), total: all.length };
 }
 
-/** The proof `linear update --done` requires: what the person did. */
 export const DONE_PROOF = 'Checked off in AGI Menu';
 
-/** The team's workflow states; an issue read names its state but not the state's type. */
 async function readStates(linear: LinearExec): Promise<Array<{ name?: string; type?: string }>> {
   return JSON.parse((await linear(['states', '--json'])).stdout) as Array<{ name?: string; type?: string }>;
 }
 
-/**
- * Mark one issue Done, and confirm it is: linear queues a close it could not
- * make (a rate limit) and still exits 0, so the issue is read back and only a
- * completed state counts.
- */
 export async function completeTodo(id: string, linear: LinearExec = linearExec): Promise<TodoResult> {
   try {
     const update = await linear(['update', id, '--done', '--proof', DONE_PROOF]);
@@ -317,7 +282,6 @@ export async function undoTodo(id: string, now: Date, linear: LinearExec = linea
   let issue: QuickTodo;
   let states: Array<{ name?: string; type?: string }>;
   try {
-    // An issue read names its state but not the state's type; the team's states map one to the other.
     const [raw, read] = await Promise.all([readIssue(id, linear), readStates(linear)]);
     issue = toQuickTodo(raw);
     states = read;
@@ -331,7 +295,6 @@ export async function undoTodo(id: string, now: Date, linear: LinearExec = linea
       return { ok: true, todo: toQuickTodo(await readIssue(id, linear)), message: `${id} back to Todo` };
     }
     const age = now.getTime() - Date.parse(issue.createdAt);
-    // A few seconds of clock skew against Linear's createdAt still counts as just created.
     if (issue.quick && type !== 'canceled' && age >= -CLOCK_SKEW_MS && age <= UNDO_CREATE_WINDOW_MS) {
       const canceled = states.find((s) => s.type === 'canceled')?.name;
       if (!canceled) return { ok: false, todo: issue, message: 'The team has no canceled state to undo into' };

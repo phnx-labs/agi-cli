@@ -1,11 +1,3 @@
-/**
- * Shared cross-machine fan-out for JSON-producing `agents` commands.
- *
- * Registered online devices are queried in parallel over the canonical SSH
- * transport. A recursion-guard environment variable makes each peer answer for
- * itself, and version-skewed or unreachable peers are skipped without hiding
- * healthy results from the rest of the fleet.
- */
 import { spawn } from 'child_process';
 import { setMaxListeners } from 'node:events';
 import chalk from 'chalk';
@@ -30,35 +22,13 @@ interface RemoteAgentsJsonOptions<T> {
   noFanoutEnv: string;
   hosts?: string[];
   parse: (stdout: string, machine: string) => T[] | RemoteAgentsJsonParseResult<T>;
-  /**
-   * Suppress the per-device "unreachable — skipped" stderr line. The skipped
-   * names still come back in {@link RemoteAgentsJsonResult.skipped}, so a caller
-   * that fans out by DEFAULT can report them once, compactly, instead of
-   * printing a line per offline box above its output. Never a silent drop.
-   */
   quiet?: boolean;
-  /** Per-peer deadline. Long-running maintenance commands override 12 seconds. */
   timeoutMs?: number;
-  /**
-   * Opt-in early-exit for a globally-unique lookup (a full session UUID). When a
-   * peer returns an item that satisfies {@link isDefinitive}, the fan-out
-   * resolves immediately and SIGTERMs every still-outstanding peer instead of
-   * waiting for the slowest one to hit {@link REMOTE_TIMEOUT_MS}.
-   *
-   * OMITTED BY DEFAULT — tool-search, program-count, and the default session
-   * listing keep the all-settle behavior (ambiguity, or a label/prefix conflict,
-   * is only known once every peer has answered). Only the full-UUID resolve path
-   * opts in, since only a UUID guarantees the first hit is the only hit.
-   */
   earlyExit?: {
     isDefinitive: (item: T, machine: string) => boolean;
   };
 }
 
-/**
- * The SSH boundary as a swappable dependency so the fan-out logic is testable
- * without a live tailnet. Production wires this to the real {@link sshCapture}.
- */
 export type SshCaptureFn = (
   target: string,
   remoteCmd: string,
@@ -77,11 +47,8 @@ export interface RemoteAgentsJsonParseResult<T> {
 interface RemoteAgentsJsonResult<T> {
   items: T[];
   deviceCount: number;
-  /** Devices that were dialed but answered with an error / no CLI / a timeout. */
   skipped: string[];
-  /** Devices that exited successfully but returned invalid JSON for this command. */
   parseFailed: string[];
-  /** Whether automatic target discovery failed before any peer could be dialed. */
   discoveryFailed: boolean;
 }
 
@@ -96,15 +63,12 @@ export function parseRemoteAgentsJsonPayload<T>(
   machine: string,
   parse: RemoteAgentsJsonOptions<T>['parse'],
 ): { items: T[]; parseFailed: boolean } {
-  // A Windows peer can prefix the JSON with a PowerShell CLIXML banner; strip it
-  // before handing stdout to the command-specific parser (RUSH-2286).
   const parsed = normalizeRemoteAgentsJsonParse(parse(stripClixml(stdout), machine));
   return parsed.valid
     ? { items: parsed.items, parseFailed: false }
     : { items: [], parseFailed: true };
 }
 
-/** Build the command one peer runs, with a guard that prevents recursive fan-out. */
 export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
     return buildWindowsAgentsCommand({ args, env: { [noFanoutEnv]: '1' } });
@@ -113,29 +77,12 @@ export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?
   return `bash -lc ${shellQuote(inner)}`;
 }
 
-/**
- * The subset of a spawned `ssh` child this capture loop drives. Structural so a
- * unit test can feed synthetic `data`/`close` events through a fake without a
- * live SSH connection.
- */
 export interface CapturableChild {
   stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null;
   on(event: 'error' | 'close', listener: (arg?: number | null) => void): unknown;
   kill(signal?: NodeJS.Signals): unknown;
 }
 
-/**
- * Stream one child's stdout into memory under a hard per-peer byte ceiling.
- *
- * A cross-machine fan-out awaits every peer's capture under one `Promise.all`,
- * so an unbounded buffer means a single runaway peer (a corrupt or
- * pathologically large payload) exhausts the caller's heap and takes the whole
- * sweep down — RUSH-2065. Once the accumulated bytes would exceed
- * {@link REMOTE_STDOUT_MAX_BYTES}, the child is SIGKILLed and the capture settles
- * as `code: null` (unreachable) rather than trust a truncated body. A definitive
- * early-exit `signal` SIGTERMs the child the same way, and the timer is the
- * per-peer deadline.
- */
 export function captureBoundedStdout(
   child: CapturableChild,
   { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
@@ -149,22 +96,15 @@ export function captureBoundedStdout(
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      // A killed/aborted capture never cleanly ends its decoder; return what
-      // decoded so far (the caller treats a non-zero code as unreachable and
-      // ignores stdout anyway).
       resolve({ code, stdout: code === null ? decoded.current() : decoded.end() });
     };
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       done(null);
     }, timeoutMs);
-    // A definitive hit on a fast peer cancels the rest: SIGTERM the child so an
-    // unreachable peer is not left running to its full timeout.
     const onAbort = () => { child.kill('SIGTERM'); done(null); };
     signal?.addEventListener('abort', onAbort, { once: true });
     child.stdout?.on('data', (data: Buffer) => {
-      // Over the ceiling, SIGKILL the child and treat it as unreachable rather
-      // than trust a partial payload — the RUSH-2065 OOM guard.
       if (stdoutBytes + data.byteLength > REMOTE_STDOUT_MAX_BYTES) {
         child.kill('SIGKILL');
         done(null);
@@ -186,7 +126,6 @@ const sshCapture: SshCaptureFn = (target, remoteCmd, { timeoutMs, signal, extraS
   return captureBoundedStdout(child, { timeoutMs, signal });
 };
 
-/** Query explicit hosts, or every registered online peer when hosts is omitted. */
 export async function gatherRemoteAgentsJson<T>(
   options: RemoteAgentsJsonOptions<T>,
   deps: GatherRemoteAgentsJsonDeps = {},
@@ -205,8 +144,6 @@ export async function gatherRemoteAgentsJson<T>(
       return { items: [], deviceCount: 0, skipped: [], parseFailed: [], discoveryFailed: true };
     }
     for (const device of Object.values(devices)) {
-      // Live SSH-probe verdict first, cached tailscale snapshot only as a
-      // fallback — see isDialableDevice (mirrors session/remote-list.ts).
       if (!isDialableDevice(device)) continue;
       if (normalizeHost(device.name) === self) continue;
       if (!['windows', 'linux', 'macos'].includes(device.platform)) continue;
@@ -219,7 +156,6 @@ export async function gatherRemoteAgentsJson<T>(
           extraSshArgs: deviceIdentityArgs(device),
         });
       } catch {
-        // A registered profile without a dialable address is not a peer yet.
       }
     }
   }
@@ -227,13 +163,7 @@ export async function gatherRemoteAgentsJson<T>(
   const skipped: string[] = [];
   const parseFailed: string[] = [];
 
-  // The controller exists ONLY for early-exit: the first definitive hit aborts
-  // every still-outstanding peer. When earlyExit is not requested there is no
-  // controller and no per-peer abort listener, so the default path is a plain
-  // all-settle Promise.all, byte-identical to before (tool-search, program-count).
   const controller = options.earlyExit ? new AbortController() : undefined;
-  // A fleet can hold more peers than Node's default 10-listener cap; each peer's
-  // capture adds one abort listener, so lift the cap to avoid a spurious warning.
   if (controller) setMaxListeners(targets.length + 1, controller.signal);
   let earlyResolved = false;
 
@@ -244,9 +174,6 @@ export async function gatherRemoteAgentsJson<T>(
       signal: controller?.signal,
       extraSshArgs: target.extraSshArgs,
     });
-    // A peer we deliberately cancelled is neither a hit nor a failure — it never
-    // got to answer, so it must not pollute skipped/parseFailed (which drive the
-    // "unreachable" listing and the fail-closed partial-resolution gate).
     const cancelled = controller?.signal.aborted ?? false;
     if (result.code !== 0) {
       if (!cancelled) {
@@ -270,7 +197,7 @@ export async function gatherRemoteAgentsJson<T>(
     if (controller && options.earlyExit && !earlyResolved
       && parsed.items.some((item) => options.earlyExit!.isDefinitive(item, target.machine))) {
       earlyResolved = true;
-      controller.abort(); // SIGTERM the remaining peers; they settle fast below.
+      controller.abort();
     }
     return parsed.items;
   }));

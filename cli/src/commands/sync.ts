@@ -1,35 +1,3 @@
-/**
- * `agents sync` — synchronize central resources into an installed agent version.
- *
- * Forms:
- *   agents sync                                         # umbrella: fetch config repos -> reconcile all (secrets opt-in)
- *   agents sync status                                  # report fleet drift (former top-level `agents status`)
- *   agents sync --repos|--secrets                       # umbrella: fetch only those, then reconcile
- *   agents sync --cloud                                 # umbrella: fetch all, skip reconcile
- *   agents sync --local                                 # umbrella: reconcile all, no fetch
- *   agents sync system                                  # one repo: git pull --rebase (pull-only mirror)
- *   agents sync user                                    # one repo: git pull --rebase + push
- *   agents sync claude                                  # one agent: uses default/sole installed version
- *   agents sync claude@2.1.142                          # one agent: explicit version
- *   agents sync claude@latest                           # one agent: newest installed
- *   agents sync claude@oldest                           # one agent: oldest installed
- *   agents sync claude@pinned   (= claude@default)      # one agent: the pinned default version
- *   agents sync --agent claude --agent-version 2.1.142  # legacy form, still supported
- *
- * The umbrella stages live in lib/sync-umbrella.ts; this file dispatches to them
- * when no agent is given.
- *
- * In a TTY the command previews available/new resources and lets the user
- * select what to sync (same prompts shown after `agents add`). Pass
- * --yes for non-interactive auto-sync, --force to re-sync when nothing
- * has changed, --quiet for total silence.
- *
- * Hot path:
- *   --launch is the shim entry point. It skips version-home reconciliation
- *   and runs only the cheap project-scoped work (rules compile, workspace
- *   resource mirror, per-scope plugin marketplaces). Filesystem-only,
- *   sub-50ms steady state. Keep changes here surgical.
- */
 
 import * as path from 'path';
 import { Command, Option } from 'commander';
@@ -79,7 +47,6 @@ import { registerStatusCommand } from './status.js';
 interface SyncOpts {
   agent?: string;
   agentVersion?: string;
-  /** Version selector from --version flag: @all, @latest, @oldest, @pinned, or x.y.z. */
   version?: string;
   repo?: string;
   projectDir?: string;
@@ -90,25 +57,12 @@ interface SyncOpts {
   quiet?: boolean;
   dryRun?: boolean;
   allowExecSurfaces?: boolean;
-  /**
-   * Machine-readable output. Also required by the fleet fan-out path
-   * (`agents sync --device all`), which injects `--json` on every peer so the
-   * roster can parse per-device results. Without this option registered,
-   * remotes reject the flag with `unknown option '--json'` (RUSH-2216).
-   */
   json?: boolean;
-  // Umbrella-verb flags (only meaningful when no agent is given).
   repos?: boolean;
   secrets?: boolean;
   cloud?: boolean;
   local?: boolean;
-  /** Umbrella-only, opt-in: run the DESTRUCTIVE stale-CLI purge (deletes other
-   *  agents-cli installs when a fixed peer exists). Off by default — the purge
-   *  never runs on a routine sync. */
   pruneClis?: boolean;
-  // Per-kind selector flags (singular = primary, plural = hidden alias).
-  // Value is string[] when names were given, true when the flag was bare,
-  // undefined when the flag was not used at all.
   plugin?: string[] | true;
   plugins?: string[] | true;
   command?: string[] | true;
@@ -130,20 +84,10 @@ interface SyncOpts {
   memory?: boolean;
 }
 
-/** Emit one JSON object to stdout for `--json` callers / fleet fan-out. */
 function emitJson(payload: unknown): void {
   console.log(JSON.stringify(payload));
 }
 
-/**
- * Post-reconcile verification (PHNX-3186): after a sync writes into a set of
- * version homes, re-read each home and confirm it now matches its resolved
- * sources. The `agents sync` success line MUST NOT read "reconciled" while the
- * drift it was asked to fix stays put. Any residual drifted/missing resource
- * sets a non-zero exit code and — outside `--json` — names the exact unfixed
- * drift so the operator sees what did not converge instead of a false ✓. Orphans
- * are excluded (sync never removes them). Returns the residual for `--json`.
- */
 function verifyReconciled(
   pairs: Array<{ agent: AgentId; version: string }>,
   cwd: string,
@@ -157,17 +101,9 @@ function verifyReconciled(
     const r = verifyVersionConverged(agent, version, cwd);
     if (r) residual.push(r);
   }
-  // Residual drift is reported loudly via `ok:false` + the printed ⚠ block, but
-  // does NOT change the exit code — matching the declined-write precedent
-  // (RUSH-2700). The fleet fan-out (`agents sync --device all`) THROWS on a
-  // non-zero peer exit (`hosts/passthrough.ts`), discarding that box's JSON, so a
-  // non-zero exit here would hide the very `residualDrift` payload it emitted.
-  // Callers that must treat an incomplete sync as failure read `ok`/`residualDrift`
-  // from `--json`, exactly as they already do for declines.
   return residual;
 }
 
-/** Print the residual-drift block naming exactly what did not converge. */
 function printResidual(residual: ResidualDrift[], errLog: (msg: string) => void): void {
   if (residual.length === 0) return;
   const lines = formatResidualDrift(residual);
@@ -176,17 +112,6 @@ function printResidual(residual: ResidualDrift[], errLog: (msg: string) => void)
   errLog(chalk.gray('  Re-run the sync; a gap that survives a re-run is a real unreconcilable drift — report it.'));
 }
 
-/**
- * Translate per-kind CLI flags into a `ResourceSelection` for `buildSelection`.
- * Returns `undefined` when no kind flag was given (caller should use full sync).
- *
- * Each kind has a singular primary flag and a hidden plural alias; both carry
- * the same value. `true` = bare flag (all names for that kind), `string[]` =
- * explicit name filter, `undefined` = flag not used.
- *
- * --rule / --rules / --memory all map to the `memory` key (always `'all'` —
- * the composed file is recompiled from every layer, individual names ignored).
- */
 function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
   function resolve(singular: string[] | true | undefined, plural: string[] | true | undefined): string[] | 'all' | undefined {
     const val = singular ?? plural;
@@ -202,7 +127,6 @@ function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
   const permissions = resolve(opts.permission,  opts.permissions);
   const mcp         = resolve(opts.mcp,         opts.mcps);
   const workflows   = resolve(opts.workflow,    opts.workflows);
-  // --rule/--rules/--memory all enable a full memory recompile (no name filter).
   const memory: 'all' | undefined = (opts.rule || opts.rules || opts.memory) ? 'all' : undefined;
 
   const anySet = [plugins, commands, skills, hooks, subagents, permissions, mcp, workflows, memory]
@@ -222,10 +146,6 @@ function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
   return sel;
 }
 
-/**
- * Attach the resource-selector flag family to the sync command.
- * Exported for testing flag registration in sync.test.ts.
- */
 export function addSelectorOptions(cmd: Command): Command {
   const kindCollector = (val: string, prev: string[] | undefined): string[] => {
     const names = val.split(',').map((s) => s.trim()).filter(Boolean);
@@ -263,7 +183,6 @@ export function addSelectorOptions(cmd: Command): Command {
   return cmd;
 }
 
-/** Register the `agents sync` command. */
 export function registerSyncCommand(program: Command): void {
   const cmd = addHostOption(program.command('sync [agentSpec] [repo]'))
     .summary('Make this machine current, or sync resources into one agent')
@@ -280,7 +199,6 @@ export function registerSyncCommand(program: Command): void {
     .option('--dry-run', 'Show what would be synced without making any changes — requires an agent scope (e.g. agents sync claude --dry-run); the umbrella verb refuses it', false)
     .option('--allow-exec-surfaces', 'Allow syncing plugin exec surfaces (scripts, binaries) — off by default for safety', false)
     .option('--json', 'Emit machine-readable JSON (also accepted so fleet fan-out via --device all can parse each peer)', false)
-    // Umbrella verb (no agent given): make this machine current.
     .option('--repos', 'Umbrella: git-pull ~/.agents + enabled ~/.agents-* extras', false)
     .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
     .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
@@ -290,20 +208,10 @@ export function registerSyncCommand(program: Command): void {
       await runSync(agentSpec, repo, opts);
     });
 
-  // Per-kind resource selectors + --version. Registered after the main flags so
-  // help output groups the positional/repo/agent flags first.
   addSelectorOptions(cmd);
-  // `status` is a reserved subcommand (not an agentSpec/repo positional).
   registerStatusCommand(cmd);
 }
 
-/**
- * Resolve a DotAgent repo name to its git working directory + whether local
- * commits should be pushed. `system` is a pull-only mirror of the npm-shipped
- * upstream; `user` and enabled extra aliases are user-owned and push. `project`
- * (and unknown names) return null — the project `.agents/` lives inside the
- * user's own project repo and is not independently git-synced here.
- */
 function resolveRepoGitTarget(repo: string): { dir: string; push: boolean } | null {
   if (repo === 'system') return { dir: getSystemAgentsDir(), push: false };
   if (repo === 'user') return { dir: getUserAgentsDir(), push: true };
@@ -312,12 +220,6 @@ function resolveRepoGitTarget(repo: string): { dir: string; push: boolean } | nu
   return null;
 }
 
-/**
- * `agents sync <repo>` — git-sync a single DotAgent repo: pull --rebase against
- * origin on a clean tree; on a dirty one, fast-forward anyway when no incoming
- * path is uncommitted, else refuse naming the collision. Pushes local commits
- * for user-owned repos. Delegates the git work to `syncRepoGit`.
- */
 async function runRepoGitSync(
   repo: string,
   quiet: boolean,
@@ -344,10 +246,6 @@ async function runRepoGitSync(
 
   if (!quiet && !json) outLog(chalk.bold(`Syncing ${repo} repo…`) + chalk.gray(` (${target.dir})`));
 
-  // Self-heal a non-git / partial user checkout in place before the git sync
-  // (PHNX-3301) — otherwise syncRepoGit hard-fails with "Not a git repo" and the
-  // only fix is a destructive re-clone. Only the user repo adopts: system is
-  // cloned by setup, extras by `repo add`.
   if (repo === 'user') {
     const adopted = await adoptUserRepoIfNeeded(target.dir);
     if (adopted && !adopted.success) {
@@ -386,9 +284,6 @@ async function runRepoGitSync(
     return;
   }
 
-  // Record the resolved remote so a future partial box (lost .git) can adopt in
-  // place without the operator re-typing the URL (PHNX-3301). Before the --json
-  // early-return so the record is refreshed on every healthy sync, JSON or not.
   if (repo === 'user') {
     const u = resolveUserRepoRemoteUrl(target.dir);
     if (u) recordUserRepoRemote(target.dir, u);
@@ -411,7 +306,6 @@ async function runRepoGitSync(
   }
 }
 
-/** Human label for a repo choice in the interactive picker. */
 function repoChoiceLabel(repo: string): string {
   switch (repo) {
     case 'system': return 'system  — shared, npm-shipped defaults';
@@ -421,13 +315,6 @@ function repoChoiceLabel(repo: string): string {
   }
 }
 
-/**
- * Interactive bare `agents sync` (TTY, no flags): two checklists — which
- * DotAgent repos to sync FROM, and which installed agents to sync INTO. Then
- * freshen the selected git-syncable repos (pull-only) and reconcile the chosen
- * repos' resources into each selected agent's default version, registering
- * hooks so synced hook scripts actually fire.
- */
 async function runInteractiveReconcile(
   opts: SyncOpts,
   outLog: (msg: string) => void,
@@ -470,12 +357,9 @@ async function runInteractiveReconcile(
     throw e;
   }
 
-  // 1. Freshen the selected git-syncable repos (pull-only; `project` has no
-  //    independent remote). Failures are non-fatal — reconcile still runs.
   for (const repo of repos) {
     const target = resolveRepoGitTarget(repo);
     if (!target) continue;
-    // Adopt a non-git / partial user checkout in place before pulling (PHNX-3301).
     if (repo === 'user') {
       const adopted = await adoptUserRepoIfNeeded(target.dir);
       if (adopted?.success) {
@@ -495,11 +379,7 @@ async function runInteractiveReconcile(
     } else outLog(chalk.yellow(`  ! ${repo}: ${(res.error ?? 'pull failed').split('\n')[0]}`));
   }
 
-  // Central browser-profile claiming is the standalone `browser` CLI's now
-  // (PHNX-4101): `browser profiles claim` / `browser profiles prune` own it.
-  // agents-cli no longer evicts central `browser:` tombstones on sync.
 
-  // 2. One selection spanning the chosen repos.
   const selection = mergeRepoScopedSelections(repos, cwd);
   const hasResources = selection.memory === 'all' || Object.entries(selection).some(
     ([kind, v]) => kind !== 'memory' && Array.isArray(v) && v.length > 0,
@@ -509,8 +389,6 @@ async function runInteractiveReconcile(
     return;
   }
 
-  // 3. Reconcile into each selected agent's default (or sole) version, then
-  //    register hooks so synced hook scripts fire.
   const hookManifest = parseHookManifest();
   const hookCapable = new Set(capableAgents('hooks'));
   const touched: Array<{ agent: AgentId; version: string }> = [];
@@ -525,30 +403,16 @@ async function runInteractiveReconcile(
     touched.push({ agent: agentId, version });
   }
 
-  // Post-reconcile repair (the superset of the old `doctor --fix`): heal live-home
-  // gaps, re-wire hooks the diff left behind, and repair managed hook runtime
-  // shims for exactly the versions this reconcile touched. Always interactive
-  // here, so render its detail freely.
   for (const t of touched) {
     const repair = await repairAfterSync({ agent: t.agent, versions: [t.version], cwd });
     renderRepairAfterSync(repair, outLog);
   }
 
-  // Bare `agents sync` at a TTY is the umbrella verb — after per-agent repair,
-  // run one no-agent pass. This purges stale/legacy agents-cli copies ONLY when
-  // the user passed `--prune-clis` (the purge is never automatic); otherwise it is
-  // a cheap re-diff no-op over the just-reconciled homes.
   const umbrellaRepair = await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
   renderRepairAfterSync(umbrellaRepair, outLog);
   if (repairHadFailures(umbrellaRepair)) process.exitCode = 1;
 }
 
-/**
- * The umbrella verb: bare `agents sync` (no agent) makes this machine current.
- * Resolves the flags + a secrets passphrase (env-only for now; tokenized auth
- * arrives with `agents secrets vault unlock`) and runs the fetch+reconcile stages, then prints
- * a one-line summary. Stage failures are non-fatal and surfaced as warnings.
- */
 async function runUmbrella(
   opts: SyncOpts,
   quiet: boolean,
@@ -556,16 +420,6 @@ async function runUmbrella(
   errLog: (msg: string) => void,
   json = false,
 ): Promise<void> {
-  // `--dry-run` on the umbrella verb is NOT supported and must fail LOUD before
-  // touching anything (PHNX-3923). The umbrella composes stages that only exist
-  // as mutating operations — repo `git pull`, a full `refresh()` reconcile into
-  // every installed version home, central browser-profile eviction, device sync,
-  // and `repairAfterSync` — none of which carry a non-mutating preview mode. The
-  // old code ignored `opts.dryRun` entirely, ran `runUmbrellaSync` + evict +
-  // repair, and so MUTATED every native home despite `--dry-run`. Rather than
-  // ship a partial preview that silently skips the stages it cannot model (a
-  // lying "would sync" that contradicts the flag's promise), refuse here and
-  // point at the scoped path, which DOES honor `--dry-run` non-destructively.
   if (opts.dryRun) {
     const installed = MANAGED_AGENT_IDS.filter((id) => listInstalledVersions(id).length > 0);
     const example = installed[0] ?? 'claude';
@@ -585,11 +439,6 @@ async function runUmbrella(
     return;
   }
 
-  // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
-  // the two-checklist picker: which repos to sync from, which agents to sync
-  // into. Any explicit flag, --yes, or --json keeps the non-interactive path.
-  // --json is a machine consumer (and the fleet fan-out injects it), so never
-  // open a picker under it.
   const kindSelection = parseKindSelection(opts);
   const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.cloud || opts.local || kindSelection);
   if (!quiet && !json && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
@@ -602,17 +451,10 @@ async function runUmbrella(
     repos: opts.repos,
     secrets: opts.secrets,
     cloud: opts.cloud,
-    // A resource selector is a local reconcile unless the caller explicitly
-    // asks to fetch repos/secrets first. This keeps replacements such as
-    // `sync --mcp demo` scoped like the retired resource verb.
     local: opts.local || (!!kindSelection && !opts.repos && !opts.secrets && !opts.cloud),
   };
-  // Same chokepoint as `agents secrets push/pull` — prefers AGENTS_SYNC_PASSPHRASE,
-  // falls back to the deprecated master-key name with a single warning.
   const passphrase = resolveSyncPassphraseFromEnv().value ?? undefined;
 
-  // Fleet fan-out only injects --json (not --yes). Treat --json as non-interactive
-  // so refresh({ skipPrompts }) never tries to prompt over SSH.
   const yes = !!opts.yes || json;
 
   if (!quiet && !json) outLog(chalk.bold('Syncing this machine…'));
@@ -621,21 +463,13 @@ async function runUmbrella(
       flags,
       yes,
       passphrase,
-      // quiet under --json so refresh() cannot pollute the JSON stdout the fleet parses.
       quiet: quiet || json,
       selection: kindSelection,
       allowExecSurfaces: !!opts.allowExecSurfaces,
       log: (msg) => { if (!quiet && !json) outLog(chalk.gray(`  ${msg}`)); },
     });
 
-    // Central browser-profile claiming moved to the standalone `browser` CLI
-    // (PHNX-4101: `browser profiles claim` / `prune`), so `agents sync` no longer
-    // drains the central `browser:` tombstone.
 
-    // Post-reconcile verification (PHNX-3186): re-read every version the reconcile
-    // wrote into and confirm it now matches source. Without this the umbrella
-    // printed `✓ sync: reconciled` unconditionally, the exact false-success the
-    // ticket reports. Residual drift downgrades the line and sets a non-zero exit.
     const residual = result.reconciled && !kindSelection
       ? verifyReconciled(
           result.reconciledVersions.map((r) => ({ agent: r.agent as AgentId, version: r.version })),
@@ -643,22 +477,14 @@ async function runUmbrella(
         )
       : [];
 
-    // Post-reconcile repair, machine-wide: no agent scope → heal every installed
-    // agent, re-wire hooks the diff left behind, and repair managed hook runtime
-    // shims. The stale-CLI purge runs ONLY with `--prune-clis` (never automatic).
-    // Skipped under --cloud (fetch-only: nothing was reconciled to repair).
     const repair = opts.cloud || kindSelection
       ? null
       : await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
-    // A repair that left something for a human (an unresolvable shim, a failed
-    // rewire/purge) is a non-zero outcome, same as the deleted `doctor --fix`.
     const repairFailed = repair !== null && repairHadFailures(repair);
     if (repairFailed) process.exitCode = 1;
 
     if (json) {
       emitJson({
-        // A refused resource, residual drift, OR a repair failure is not a clean
-        // sync (RUSH-2700 + PHNX-3186).
         ok: result.declined.length === 0 && residual.length === 0 && !repairFailed,
         mode: 'umbrella',
         plan: result.plan,
@@ -683,9 +509,6 @@ async function runUmbrella(
       if (result.secrets) {
         parts.push(result.secrets.skipped ? 'secrets skipped' : `secrets ${result.secrets.pulled} pulled`);
       }
-      // Only claim "reconciled" when the reconcile actually converged. Residual
-      // drift is already printed loudly by verifyReconciled above; reflect it in
-      // the one-line summary rather than a bare ✓.
       if (result.reconciled) parts.push(residual.length === 0 ? 'reconciled' : 'reconcile INCOMPLETE');
       const symbol = residual.length === 0 ? chalk.green('✓') : chalk.yellow('⚠');
       const line = `${symbol} sync: ${parts.join(' · ') || 'nothing to do'}`;
@@ -708,37 +531,18 @@ async function runUmbrella(
 
 async function runSync(agentSpec: string | undefined, repoArg: string | undefined, opts: SyncOpts): Promise<void> {
   const json = !!opts.json;
-  // --json is a machine consumer: suppress human stdout/stderr chatter so the
-  // single JSON object on stdout stays parseable for fleet fan-out.
   const quiet = !!opts.quiet || json;
   const errLog = (msg: string) => { if (!quiet) console.error(msg); };
   const outLog = (msg: string) => { if (!quiet) console.log(msg); };
-  // Failures under --json still need a structured line on stdout so fleet
-  // fan-out's safeJsonParse gets a real object (not "unknown option").
   const failJson = (payload: Record<string, unknown>) => {
     if (json) emitJson({ ok: false, ...payload });
   };
 
-  // ---------- 1. Resolve agent + version ----------
   let agentId: AgentId | undefined;
   let version: string | undefined;
 
-  // A positional @selector typed by the user (latest/oldest/pinned/default/
-  // all/explicit). parseAgentSpec defaults a missing version to 'latest', so a
-  // bare `agents sync claude` and `agents sync claude@latest` are
-  // indistinguishable after parsing — we only treat the version as a selector
-  // when an '@' was actually typed, keeping bare `claude` on the
-  // default-version path.
   let selector: string | undefined;
 
-  // Repo-level git sync: a DotAgent repo name given ALONE (no agent, no second
-  // positional) means "git-sync that repo" — pull --rebase, and push for
-  // user-owned repos. This is distinct from the [repo] resource-scoping arg
-  // below, and it precedes agent-spec parsing because repo names like
-  // "system"/"user" would otherwise fail parseAgentSpec.
-  //
-  // DEPRECATED: prefer `agents repo sync <name>` — this positional form will be
-  // removed in a future release.
   if (agentSpec && !opts.agent && !repoArg && listRepoNames().includes(agentSpec)) {
     if (!quiet && !json) {
       console.error(chalk.yellow(`Warning: 'agents sync ${agentSpec}' is deprecated. Use: agents repo sync ${agentSpec}`));
@@ -766,12 +570,8 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (agentSpec.includes('@')) selector = parsed.version;
   }
 
-  // --version flag beats any @selector from the positional.
-  // Strip a leading @ so '--version @latest' and '--version latest' both work.
   if (opts.version) selector = opts.version.replace(/^@/, '');
 
-  // Repo scope: --repo flag wins over the positional. Validate against the
-  // known DotAgent repos so a typo fails loudly instead of syncing nothing.
   const repoScope = opts.repo || repoArg;
   if (repoScope !== undefined) {
     const known = listRepoNames();
@@ -803,15 +603,10 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     return;
   }
   if (opts.agentVersion) {
-    // Legacy flag and the launch-shim hot path (`--agent-version <concrete>`):
-    // pass through verbatim. Selector aliases are a positional-spec feature.
     version = opts.agentVersion;
   }
 
   if (!agentId) {
-    // No agent specified → the umbrella verb: make this machine current
-    // (fetch repos + secrets + sessions, then reconcile all installed agents).
-    // This is the path fleet fan-out (`--device all`) hits with injected --json.
     await runUmbrella(opts, quiet, outLog, errLog, json);
     return;
   }
@@ -820,9 +615,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   const cwd = opts.cwd || process.cwd();
   const force = !!opts.force;
 
-  // RUSH-2471: self-heal any version pointer (global/isolated default, ~/.<agent>
-  // symlink) left aimed at a version that is no longer installed BEFORE resolving
-  // the version to sync. Skipped on --dry-run since it mutates on-disk pointers.
   let healed: HealedVersionPointers = {};
   if (!opts.dryRun) {
     healed = await healDanglingVersionPointers(agentId, cwd);
@@ -842,9 +634,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
   const healedPointers = Object.keys(healed).length > 0 ? { healedPointers: healed } : {};
 
-  // Promote to @all when no version can be resolved and multiple are installed.
-  // Replaces the old "no default version pinned" error: bare `agents sync claude`
-  // with multiple installed versions and no pinned default now syncs them all.
   if (!selector && !version && !opts.agentVersion) {
     const pinned = resolveVersion(agentId, opts.cwd || process.cwd());
     if (!pinned) {
@@ -853,9 +642,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     }
   }
 
-  // ---------- 2a. @all: reconcile every installed version of this agent ----------
-  // Non-interactive by design — fanning an interactive preview across N
-  // versions is unusable. Honors optional repo scope and per-kind flags.
   if (selector === 'all') {
     const installed = listInstalledVersions(agentId);
     if (installed.length === 0) {
@@ -896,32 +682,20 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     }
     const versions: Array<{ version: string; result: SyncResult }> = [];
     for (const v of installed) {
-      // A repo scope makes @all a full reconcile of that repo → prune resources
-      // it no longer provides. Bare @all (no repo) leaves selection undefined
-      // and falls through to the full-sync orphan sweep, so prune is a no-op
-      // there (it requires a caller selection).
       const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
       versions.push({ version: v, result });
       if (!quiet && !json) printSyncDetail(result, agentId, v, cwd);
     }
-    // Verify each version actually converged; a repo-scoped sync only touched
-    // that repo's kinds, so skip verification there (the other layers legitimately
-    // still differ and are not this run's responsibility).
     const residual = repoScope
       ? []
       : verifyReconciled(versions.map(({ version: v }) => ({ agent: agentId, version: v })), cwd);
     if (!quiet && !json) printResidual(residual, errLog);
-    // Post-reconcile repair over exactly the versions just reconciled (the
-    // superset of the old `doctor --fix`). Runs under --json too (fleet fan-out);
-    // only its human detail is gated on !quiet && !json.
     const allRepair = await repairAfterSync({ agent: agentId, versions: installed, cwd });
     if (!quiet && !json) renderRepairAfterSync(allRepair, outLog);
     const allRepairFailed = repairHadFailures(allRepair);
     if (allRepairFailed) process.exitCode = 1;
     if (json) {
       emitJson({
-        // Any version that refused a write, any residual drift, or a repair
-        // failure makes the whole run not-ok (RUSH-2700 + PHNX-3186).
         ok: versions.every(({ result }) => result.declined.length === 0) && residual.length === 0 && !allRepairFailed,
         mode: 'agent-all',
         agent: agentId,
@@ -948,11 +722,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     return;
   }
 
-  // ---------- 2. Resolve version (project pin → global default → sole installed) ----------
-  // A positional @selector wins over the default-resolution below.
-  //   @latest / @oldest        → newest / oldest installed (process.exit if none)
-  //   @pinned / @default       → undefined → fall through to the default path
-  //   @x.y.z                   → that version (process.exit if not installed)
   if (selector !== undefined && !version) {
     version = resolveVersionAlias(agentId, selector);
   }
@@ -972,8 +741,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         process.exitCode = 1;
         return;
       } else {
-        // Multiple installed, no default — promoted to @all before reaching here.
-        // This branch is a safety net for unexpected flow; normal callers won't hit it.
         failJson({
           mode: 'agent',
           agent: agentId,
@@ -1012,15 +779,11 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     return;
   }
 
-  // ---------- 3. --launch mode bypasses everything below ----------
   if (opts.launch) {
     runLaunchMode(agentId, version, cwd, quiet, json);
     return;
   }
 
-  // ---------- 3b. Repo-scoped or kind-filtered single-version sync ----------
-  // An explicit --repo / positional repo, or any per-kind flag, is a targeted
-  // request: skip the interactive preview and reconcile only the specified scope.
   const kindFilter = parseKindSelection(opts);
   if (repoScope || kindFilter) {
     const scoped = buildSelection(repoScope ? [`${repoScope}:*`] : [], kindFilter ?? undefined, cwd);
@@ -1064,8 +827,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     return;
   }
 
-  // ---------- 4. Decide selection (interactive preview vs auto) ----------
-  // --json forces non-interactive (machine consumer / fleet fan-out).
   const yes = !!opts.yes || json;
   const interactive = !quiet && !yes && isInteractiveTerminal();
 
@@ -1095,11 +856,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         }
         selection = userSelection;
       } else if (!force) {
-        // Tracked resources match source — but a generated hook shim can still be
-        // broken on an otherwise in-sync version (the yosemite-s1 class), and
-        // syncResourcesToVersion never generates it. Run the repair pass BEFORE
-        // the early return so a broken shim is still fixed on bare
-        // `agents sync <agent>`, then report what (if anything) it touched.
         const repair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
         if (repairChangedAnything(repair)) {
           renderRepairAfterSync(repair, outLog);
@@ -1110,8 +866,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         if (repairHadFailures(repair)) process.exitCode = 1;
         return;
       }
-      // else: --force on a fully-synced version → selection stays undefined,
-      // syncResourcesToVersion falls through to its pattern-based full sync.
     } catch (e) {
       if (isPromptCancelled(e)) {
         outLog(chalk.gray('Cancelled. No changes made.'));
@@ -1121,7 +875,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     }
   }
 
-  // ---------- 5. Run sync ----------
   if (opts.dryRun) {
     if (!quiet && !json) {
       console.log(chalk.cyan(`Dry run — would sync into ${agentLabel(agentId)}@${version}${repoScope ? ` (repo: ${repoScope})` : ''}:`));
@@ -1139,22 +892,12 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
   const result = syncResourcesToVersion(agentId, version, selection, { projectDir, cwd, force, allowExecSurfaces: !!opts.allowExecSurfaces });
 
-  // Post-reconcile verification (PHNX-3186). Only for a FULL reconcile
-  // (`!selection`): an interactive subset-selection deliberately touched only the
-  // picked kinds, so the rest legitimately still differs and is not this run's
-  // failure. This is the exact path `agents sync <agent>[@version]` takes.
   const residual = selection ? [] : verifyReconciled([{ agent: agentId, version }], cwd);
 
-  // Post-reconcile repair over the single version just reconciled (the superset
-  // of the old `doctor --fix`). Runs under --json too; only its human detail is
-  // gated on the non-quiet path below.
   const singleRepair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
   const singleRepairFailed = repairHadFailures(singleRepair);
   if (singleRepairFailed) process.exitCode = 1;
 
-  // Compile project-scope rules into the workspace itself so each agent's
-  // native loader picks up cwd/<INSTRUCTIONS_FILE>. projectDir is the
-  // .agents/ directory; the workspace root is its parent.
   let projectCompile: ReturnType<typeof compileRulesForProject> | null = null;
   if (projectDir) {
     const projectRoot = path.dirname(projectDir);
@@ -1183,7 +926,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
 
   if (quiet) return;
 
-  // ---------- 6. Detailed output ----------
   printSyncDetail(result, agentId, version, cwd);
   printResidual(residual, errLog);
   renderRepairAfterSync(singleRepair, outLog);
@@ -1201,7 +943,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 }
 
-/** Stable `--json` payload for a single agent@version resource sync. */
 function agentSyncJson(
   agent: AgentId,
   version: string,
@@ -1209,9 +950,6 @@ function agentSyncJson(
   repo?: string,
 ): Record<string, unknown> {
   return {
-    // A refused resource is not a clean sync. `ok` was hardcoded true, so the
-    // machine surface (`--host all` fan-out) reported success for exactly the
-    // silent no-op this changed (RUSH-2677).
     ok: result.declined.length === 0,
     mode: 'agent',
     agent,
@@ -1238,11 +976,7 @@ function anyResources(r: AvailableResources): boolean {
     r.plugins.length + r.workflows.length > 0;
 }
 
-/** Format the post-sync detail output: per-kind count + a name preview. */
 function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cwd: string): void {
-  // Booleans in SyncResult (commands, skills, hooks, permissions) carry no
-  // name list. Re-derive ground truth from the version home so the user
-  // sees what's actually present after the sync.
   const synced = getActuallySyncedResources(agent, version, { cwd });
 
   type Line = { kind: string; items: string[] };
@@ -1259,8 +993,6 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
 
   const kept = formatKeptProjectResources(result.projectSkipped);
 
-  // Removals from source-deleted resources (RUSH-2438). Rendered even when
-  // nothing was added, so a reconcile that only pruned still reports it.
   const prunedLines = (Object.entries(result.pruned) as Array<[string, string[]]>)
     .filter(([, names]) => names.length > 0)
     .map(([kind, names]) => ({ kind, items: names }));
@@ -1293,8 +1025,6 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
     for (const { kind, items } of prunedLines) printKindLine(kind, items, kindWidth, chalk.yellow);
   }
 
-  // A resource agents-cli refused to write is reported, never swallowed — an
-  // empty synced list on its own reads as "nothing to do" (RUSH-2677).
   if (result.declined.length > 0) {
     console.log(chalk.yellow(`Not written to ${agentLabel(agent)}@${version}:`));
     for (const reason of result.declined) console.log(`  ${chalk.yellow(reason)}`);

@@ -1,22 +1,3 @@
-/**
- * Interactive drift-sync flow — the single "we detected drift, want to fix it?"
- * action, shared by `agents sync status`, `agents doctor`, and the menu-bar "NEEDS
- * SYNC" row.
- *
- * It composes existing pieces, re-implementing nothing:
- *   - computeSyncStatus()          — the unified detection engine (sync-status.ts)
- *   - pullRepo()                   — fast-forward the `.system` repo (git.ts)
- *   - promptAgentVersionSelection() — the "which agent types / versions?" picker
- *   - repairAfterSync()            — the shared post-reconcile repair pass
- *                                    `agents sync` runs (heal + hook rewire +
- *                                    managed hook runtime shim repair)
- *
- * Combined flow (one confirmation): if `.system` is behind AND resources drifted,
- * a single "Sync all detected" both pulls `.system` and reconciles the chosen
- * version homes. The security posture is preserved — the `.system` pull only ever
- * happens on an explicit user choice here, never silently (see auto-pull-worker.ts
- * for why system auto-pull is off by default).
- */
 
 import chalk from 'chalk';
 import { select, confirm } from '@inquirer/prompts';
@@ -34,12 +15,8 @@ import {
 
 interface DriftSyncOptions {
   cwd?: string;
-  /** Reconcile everything detected with no prompts — the "kick it" path, also the
-   * non-TTY / menu-bar-launched-with-flag behavior. Pulls `.system` if behind. */
   yes?: boolean;
-  /** Pre-computed status, to avoid a second scan when the caller already has one. */
   status?: UnifiedSyncStatus;
-  /** Skip the drift summary — set by callers that already printed their own. */
   quiet?: boolean;
 }
 
@@ -47,15 +24,12 @@ interface DriftSyncResult {
   systemBehindBefore: number;
   systemPulled: boolean;
   healed: VersionHealResult[];
-  /** True when the user declined at the prompt (nothing was changed). */
   cancelled: boolean;
-  /** True when there was no drift to act on in the first place. */
   nothingToDo: boolean;
 }
 
 const agentName = (id: AgentId): string => AGENTS[id]?.name ?? id;
 
-/** "claude@2.1.170  2 drifted · 1 missing" for one version. */
 function versionLine(v: AgentVersionStatus): string {
   const bits: string[] = [];
   if (v.counts.drifted) bits.push(`${v.counts.drifted} drifted`);
@@ -64,7 +38,6 @@ function versionLine(v: AgentVersionStatus): string {
   return `  ${label.padEnd(28)} ${chalk.yellow(bits.join(' · '))}`;
 }
 
-/** Render the drift summary (system freshness + each version owed a sync). */
 function renderSummary(status: UnifiedSyncStatus, needing: AgentVersionStatus[]): void {
   console.log(chalk.bold('\nSync status'));
   if (status.system.behind > 0) {
@@ -85,7 +58,6 @@ function renderSummary(status: UnifiedSyncStatus, needing: AgentVersionStatus[])
   }
 }
 
-/** Fast-forward the `.system` repo. Returns whether it actually moved. */
 async function pullSystem(status: UnifiedSyncStatus): Promise<boolean> {
   if (status.system.behind <= 0) return false;
   const res = await pullRepo(status.system.dir);
@@ -97,15 +69,6 @@ async function pullSystem(status: UnifiedSyncStatus): Promise<boolean> {
   return false;
 }
 
-/**
- * Reconcile a set of versions grouped by agent through the SHARED post-reconcile
- * repair pass (`repairAfterSync`) — the same superset the three `agents sync`
- * handlers run. Beyond the resources `heal()` fills, this also re-wires hooks
- * left unwired and repairs broken managed hook runtime shims, so drift-sync is
- * not a third orchestrator that silently skips shim repair. Renders each pass's
- * rewire / shim-repair detail; the heal rollup is printed separately by the
- * caller via `reportHealed`.
- */
 async function healVersions(
   versionsByAgent: Map<AgentId, string[]>,
   cwd: string,
@@ -120,7 +83,6 @@ async function healVersions(
   return out;
 }
 
-/** Report which agents received what after a heal. */
 function reportHealed(healed: VersionHealResult[]): void {
   const touched = healed.filter((v) => v.healed.length > 0);
   if (touched.length === 0) {
@@ -142,10 +104,6 @@ function groupNeeding(needing: AgentVersionStatus[]): Map<AgentId, string[]> {
   return m;
 }
 
-/**
- * The unified "drift detected — sync now?" flow. Returns a structured result so
- * callers (menu-bar, doctor) can report without re-scanning.
- */
 export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<DriftSyncResult> {
   const cwd = opts.cwd ?? process.cwd();
   const status = opts.status ?? (await computeSyncStatus({ cwd }));
@@ -167,10 +125,8 @@ export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<Drif
 
   if (!opts.quiet) renderSummary(status, needing);
 
-  // Non-interactive OR explicit --yes: reconcile everything detected.
   if (opts.yes || !isInteractiveTerminal()) {
     if (!opts.yes) {
-      // Non-TTY without --yes: report, don't act, don't throw.
       console.log(chalk.gray('\nRun `agents sync status --yes` to sync, or `agents sync status` in a terminal to choose.'));
       return base;
     }
@@ -180,7 +136,6 @@ export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<Drif
     return { ...base, systemPulled, healed };
   }
 
-  // Interactive gate.
   let choice: 'all' | 'choose' | 'no';
   try {
     choice = await select<'all' | 'choose' | 'no'>({
@@ -206,7 +161,6 @@ export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<Drif
     return { ...base, systemPulled, healed };
   }
 
-  // choice === 'choose': optional .system pull, then per-agent/version selection.
   let systemPulled = false;
   if (systemBehind > 0) {
     try {

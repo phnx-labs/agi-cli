@@ -1,13 +1,3 @@
-/**
- * Materialization helpers — install manifest CLIs, register MCP servers,
- * sync resources into installed version homes, register hooks, add shims to
- * PATH, prompt for missing default versions, install declared host-CLIs.
- *
- * The reconcile stage behind `agents sync` (the umbrella `--local` path calls
- * this; see sync-umbrella.ts) and any other caller that needs to re-derive local
- * state from declared configuration. Does NOT do any git operations — that lives
- * in `agents repo pull`.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -64,29 +54,14 @@ import { parseHookManifest, registerHooksToSettings } from './hooks/install.js';
 import { isPromptCancelled } from './format.js';
 
 interface RefreshOptions {
-  /** Limit operations to a single agent (claude/codex/etc). Default: all installed. */
   agentFilter?: AgentId;
-  /** Auto-sync everything and skip interactive prompts. */
   skipPrompts?: boolean;
-  /** Skip CLI version install/upgrade from agents.yaml. */
   skipClis?: boolean;
-  /**
-   * Suppress human progress lines on stdout. Required for machine consumers
-   * (`agents sync --json` / fleet fan-out) so stdout stays a single JSON object.
-   */
   quiet?: boolean;
-  /** Limit reconciliation to the requested resource kinds/names. */
   selection?: ResourceSelection;
-  /** Explicit consent for selected plugins that add executable surfaces. */
   allowExecSurfaces?: boolean;
 }
 
-/**
- * Old repo layout stored promptcuts under claude/promptcuts.yaml (agent-scoped).
- * The new layout is `~/.agents/.system/promptcuts.yaml` at the repo root — the
- * hook reads from a fixed path so it survives version upgrades. If the root
- * file doesn't exist yet but an agent-scoped one does, hoist the first one found.
- */
 function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
   const rootPath = path.join(agentsDir, 'promptcuts.yaml');
   if (fs.existsSync(rootPath)) return;
@@ -100,34 +75,13 @@ function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
         if (!quiet) console.log(chalk.gray(`Moved ${dir}/promptcuts.yaml → promptcuts.yaml (repo root)`));
         return;
       } catch {
-        // Best-effort migration; hook still works if the user moves it manually.
       }
     }
   }
 }
 
-/**
- * Re-materialize local state from declared configuration: install CLI versions,
- * register MCP servers, sync resources to version homes, register hooks, add
- * shims to PATH, prompt for missing defaults, install declared host-CLIs.
- *
- * Idempotent — safe to run repeatedly. No network operations.
- */
-/**
- * What a reconcile pass refused to write, so callers can report it.
- *
- * `refresh` used to return void, so a resource agents-cli declined to write was
- * visible only on the interactive path — `agents sync --yes` and the
- * `--device all` fan-out reported a clean sync (RUSH-2700).
- */
 interface RefreshResult {
-  /** User-facing sentences, one per refused resource, prefixed with the agent. */
   declined: string[];
-  /**
-   * The exact (agent, version) pairs this refresh reconciled — the set a
-   * post-reconcile verification must re-check for residual drift, so it never
-   * flags a version the reconcile never targeted (PHNX-3186).
-   */
   reconciled: Array<{ agent: AgentId; version: string }>;
 }
 
@@ -141,10 +95,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     allowExecSurfaces = false,
   } = options;
   const agentsDir = getUserAgentsDir();
-  // Gate every human progress line so --json / fleet fan-out can parse stdout.
   const log = (...args: unknown[]) => { if (!quiet) console.log(...args); };
-  // Resources this pass refused to write, surfaced by the caller. An empty
-  // synced list cannot also mean "declined and here is why" (RUSH-2700).
   const declined: string[] = [];
   const reconciled: Array<{ agent: AgentId; version: string }> = [];
 
@@ -155,7 +106,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     log(chalk.gray(`No ${MANIFEST_FILENAME} found`));
   }
 
-  // 1. Install/upgrade CLI versions from agents.yaml
   if (!skipClis && manifest?.agents) {
     log(chalk.bold('\nCLI Versions:\n'));
 
@@ -184,7 +134,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 2. Register MCP servers
   if ((!requestedSelection || requestedSelection.mcp) && manifest?.mcp && Object.keys(manifest.mcp).length > 0) {
     log(chalk.bold('\nMCP Servers:\n'));
 
@@ -229,11 +178,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 3. Sync resources into version homes.
-  // Unattended (`skipPrompts` / `agents sync --yes --local`) and explicit
-  // resource selectors: every installed version. Otherwise non-default homes
-  // keep stale resources after a system update or named plugin sync.
-  // Interactive full reconcile: default only.
   const cliStates = await getAllCliStates();
   const agentsToSync = agentFilter ? [agentFilter] : MANAGED_AGENT_IDS;
   const available = getAvailableResources();
@@ -249,10 +193,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
       : [defaultVer!];
     if (versionsToSync.length === 0) continue;
 
-    // Interactive-only: getActuallySyncedResources walks every skill tree with
-    // content compares (~1s/agent on a full install). The unattended path
-    // (`skipPrompts` / `agents sync --yes`) never reads these — it always
-    // force-full-syncs — so skip the scan entirely (RUSH-2320 #1).
     let actuallySynced: ReturnType<typeof getActuallySyncedResources> | undefined;
     let newResources: ReturnType<typeof getNewResources> | undefined;
     let hasAnySynced = false;
@@ -291,8 +231,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
       if (forceFullSync || (selection && Object.keys(selection).length > 0)) {
         const kinds = new Set<string>();
         for (const ver of versionsToSync) {
-          // Pass the already-built `available` so each version does not re-scan
-          // resource trees (RUSH-2320 #5).
           const syncResult = syncResourcesToVersion(
             agentId,
             ver,
@@ -332,7 +270,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 4. Register hooks as lifecycle events (same version set as resource sync)
   const hookManifest = requestedSelection ? {} : parseHookManifest();
   if (Object.keys(hookManifest).length > 0) {
     let hookRegistered = 0;
@@ -359,14 +296,10 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 5. Auto-add shims to PATH
-  // Refresh the gh overload shim so `gh pr checks` escapes the GraphQL rate limit
-  // for every user, transparently (PHNX-3501). Idempotent; POSIX-only in v1.
   if (!requestedSelection) {
     try {
       ensureGhOverloadShim();
     } catch {
-      // Never let a shim-write hiccup break sync — real gh stays fine without it.
     }
     if (!isShimsInPath()) {
       const pathResult = addShimsToPath();
@@ -380,7 +313,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 6. Prompt for missing default versions
   if (!skipPrompts && !requestedSelection) {
     const agentsNeedingDefault: AgentId[] = [];
     for (const agentId of agentsToSync) {
@@ -393,9 +325,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     const selectedVersions: Array<{ agentId: AgentId; version: string }> = [];
 
     for (const agentId of agentsNeedingDefault) {
-      // Isolated copies are not default-eligible — `agents use` refuses them and
-      // setting one here would also switch the config symlink, pointing the user's
-      // real ~/.<agent> at an isolated home. Keep them out of the picker entirely.
       const versions = listInstalledVersions(agentId).filter((v) => !isVersionIsolated(agentId, v));
       if (versions.length === 0) continue;
       const agent = AGENTS[agentId];
@@ -432,7 +361,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // 7. Install declared host-CLIs
   if (!requestedSelection) {
     try {
       const { statuses, errors } = listCliStatus(process.cwd());
@@ -482,8 +410,6 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     }
   }
 
-  // A resource agents-cli refused to write is reported, never swallowed —
-  // an empty synced list on its own reads as "nothing to do" (RUSH-2700).
   if (declined.length > 0) {
     log(chalk.yellow('Not written:'));
     for (const reason of declined) log(`  ${chalk.yellow(reason)}`);

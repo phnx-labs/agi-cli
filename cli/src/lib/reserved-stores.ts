@@ -20,17 +20,8 @@ import { bundleExistsSync, bundleBackendSync, isSecretsClientError } from './sec
 import type { SecretsBackend } from './secrets-types.js';
 import { AGENT_IDS, type AgentId } from './types.js';
 
-/** Legacy readable alias for `__claude__`. Not migrated in this track. */
 export const AUTH_STORE_ALIAS = 'auth';
 
-/**
- * The reserved `auth` bundle holds per-account Claude setup-tokens for
- * unattended usage/probe and MUST be file-backed (headless, fleet-shareable —
- * credential-management.md invariant 7). The standalone enforces the same
- * rule on its write path (`WRONG_BACKEND`); agents-cli asserts it on every
- * read so a keychain/vault-backed `auth` left over from an older layout fails
- * loud instead of silently being ignored by usage/probe (SEC-GAP-3).
- */
 export const AUTH_BUNDLE_BACKEND: SecretsBackend = 'file';
 
 export const RESERVED_BUNDLE_NAMES = new Set([AUTH_STORE_ALIAS]);
@@ -39,7 +30,6 @@ export function isReservedBundleName(name: string): boolean {
   return RESERVED_BUNDLE_NAMES.has(name.trim().toLowerCase());
 }
 
-/** Thrown when the reserved `auth` bundle is found on the wrong backend. */
 export class ReservedBundleWrongBackendError extends Error {
   readonly bundle: string;
   readonly backend: SecretsBackend;
@@ -55,16 +45,10 @@ export class ReservedBundleWrongBackendError extends Error {
   }
 }
 
-/** Fail loud when the reserved `auth` bundle is on any backend but `file`. */
 export function assertReservedAuthBackend(backend: SecretsBackend): void {
   if (backend !== AUTH_BUNDLE_BACKEND) throw new ReservedBundleWrongBackendError(AUTH_STORE_ALIAS, backend);
 }
 
-/**
- * True for the wrong-backend refusal in either shape: raised here from a
- * read-side check, or returned by the standalone (`WRONG_BACKEND`) when its
- * own write/resolve guard fired.
- */
 export function isReservedBundleBackendError(error: unknown): boolean {
   return error instanceof ReservedBundleWrongBackendError || isSecretsClientError(error, 'WRONG_BACKEND');
 }
@@ -87,11 +71,6 @@ export function isReservedStoreName(name: string): boolean {
 
 export type StorableCredentialKind = 'setup-token' | 'api-key';
 
-/**
- * Fail loud at the write boundary: only a setup-token or an API key may enter
- * a reserved store. Rotating OAuth/session credentials stay in their slot on
- * the device that minted them.
- */
 export function assertStorableCredentialKind(
   kind: string,
   harness?: AgentId,
@@ -110,13 +89,6 @@ function storableCredentialRefusal(kind: string, harness?: AgentId): string {
   return `${who}: reserved stores accept only a setup-token or an API key, not '${kind}'`;
 }
 
-/**
- * Whether the local reserved `auth` bundle exists and is on the expected
- * (file) backend. `ok: true` on a missing bundle — nothing to be wrong about.
- * Read-only status probe (`agents doctor`, `agents fleet apply`); an
- * unreachable standalone is treated the same as "bundle absent" so a
- * diagnostic never crashes over one optional finding.
- */
 export function inspectReservedAuthBundle(): {
   exists: boolean;
   backend: SecretsBackend | null;
