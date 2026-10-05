@@ -28,7 +28,7 @@ export function createTeamBudgetWatcher(args: {
   cwd: string;
   onBreach: (breach: BreachInfo) => void;
 }): TeamBudgetWatcher | null {
-  // One watcher aggregates every local teammate against the team's shared persisted caps.
+
   const cfg = resolveBudgetConfig(args.cwd);
   if (!hasAnyCap(cfg)) return null;
 
@@ -57,7 +57,7 @@ export function createTeamBudgetWatcher(args: {
       const teammates = await args.manager.listByTask(args.team);
       for (const agent of teammates) {
         if (agent.status !== 'running') continue;
-        if (agent.cloudProvider) continue; // Cloud streams enforce their own server-side gate.
+        if (agent.cloudProvider) continue;
 
         const stdoutPath = await agent.getStdoutPath();
         let stat: fs.Stats;

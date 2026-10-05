@@ -4,7 +4,6 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { JobConfig, RunMeta } from '../src/lib/scheduling/routines.js';
 
-// Keep mock state on globalThis for Vitest hoisting and Bun; local routines reject uncommandable agents while host-placed routines remain allowed.
 interface JobsHoistedState { TEST_DIR: string; META: Record<string, unknown> }
 const JOBS_HOISTED_KEY = '__agents_cli_jobs_test_state__';
 const hoistedState: JobsHoistedState =

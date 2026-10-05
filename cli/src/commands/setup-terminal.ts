@@ -2,7 +2,6 @@ import os from 'node:os';
 import type { SetupTool } from '../lib/setup-tool-status.js';
 import { currentContext, openRunInTerminal, parseTerminalFlag } from '../lib/terminal/index.js';
 
-/** The GUI starts a terminal; the terminal child owns wizard completion. */
 export async function openSetupTerminal(tool: SetupTool, terminal: boolean | string, installOnly = false): Promise<void> {
   if (installOnly) throw new Error('--terminal and --install-only are separate setup modes.');
   const parsed = parseTerminalFlag(terminal);

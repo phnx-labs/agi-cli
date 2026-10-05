@@ -1,4 +1,3 @@
-/** Render selected normalized session transcripts as redacted Markdown documents. */
 import * as fs from 'fs';
 import { stripVTControlCharacters } from 'node:util';
 import chalk from 'chalk';
@@ -52,7 +51,6 @@ function quotePreview(preview: string): string {
   return preview.split('\n').map((line) => `> ${line}`).join('\n');
 }
 
-/** Build one shareable Markdown document from the canonical preview and event model. */
 export function renderSessionMarkdownDocument(
   session: SessionMeta,
   options: {
@@ -67,8 +65,6 @@ export function renderSessionMarkdownDocument(
       `Cannot render ${session.agent} session ${session.shortId || session.id}: Markdown rendering supports ${MARKDOWN_RENDER_AGENTS.join(', ')}.`,
     );
   }
-  // Preserve normalized tool output here so the Markdown renderer owns the
-  // visible cap and can report exactly how much it omitted.
   const events = parseSession(session.filePath, session.agent, { maxToolOutputChars: Infinity });
   if (events.length === 0) {
     throw new Error(`Cannot render ${session.agent} session ${session.shortId || session.id}: transcript produced no normalized events.`);

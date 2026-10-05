@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 describe.skipIf(process.platform === 'win32')('agents ssh auto (RUSH-2185)', () => {
-  // Real CLI + temp HOME proves shared auto placement and rejects a local self-pick.
+
   let home: string;
   const machineId = 'ssh-auto-test-box';
 

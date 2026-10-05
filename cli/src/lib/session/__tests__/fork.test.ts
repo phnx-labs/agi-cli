@@ -29,7 +29,6 @@ describe('buildForkRecap', () => {
     expect(recap).toContain('Ticket: PHNX-3397');
     expect(recap).toContain('insight widgets need gaps 1 & 2 closed');
     expect(recap).toContain('Changes so far: +3 ~3 -7.');
-    // The escape hatch names the OWNING device and the full id for /continue.
     expect(recap).toContain('Source session b61cad38 on yosemite-m1');
     expect(recap).toContain('/continue b61cad38-ede2-4c1d-93de-9b8eef14607d');
   });
@@ -46,7 +45,6 @@ describe('buildForkRecap', () => {
     expect(recap).not.toContain('Ticket:');
     expect(recap).not.toContain('It last said:');
     expect(recap).not.toContain('Changes so far:');
-    // No owning-device suffix when machine is unknown.
     expect(recap).toContain('Source session deadbeef — run');
   });
 
@@ -65,7 +63,7 @@ describe('buildForkRecap', () => {
       lastAssistant: long,
     });
     const lastLine = recap.split('\n').find((l) => l.startsWith('It last said:'))!;
-    expect(lastLine.length).toBeLessThan(430); // 400-char cap + framing
+    expect(lastLine.length).toBeLessThan(430);
     expect(lastLine).toContain('…');
     expect(lastLine).not.toContain('\n');
   });

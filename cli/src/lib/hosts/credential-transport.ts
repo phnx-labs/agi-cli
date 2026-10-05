@@ -8,7 +8,7 @@ function hostKeyLookupName(target: string): string {
 }
 
 export function assertCredentialTransportHostPinned(target: string, pinned = isHostPinned(hostKeyLookupName(target))): void {
-  // Durable credentials may cross the fleet boundary only after the destination key is pinned.
+
   if (pinned) return;
   throw new Error(
     `Refusing to transfer provider credentials to '${target}' before its SSH host key is pinned. ` +
@@ -17,7 +17,7 @@ export function assertCredentialTransportHostPinned(target: string, pinned = isH
 }
 
 export async function resolveHostSshTarget(nameOrAlias: string): Promise<string> {
-  // Resolve policy-owned device identity before accepting a literal SSH destination.
+
   const host = await resolveHost(nameOrAlias);
   if (host) return sshTargetFor(host);
   assertValidSshTarget(nameOrAlias);

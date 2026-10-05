@@ -55,7 +55,6 @@ export function linuxDesktopEntry(invocation: string): string {
 }
 
 export function macAppleScriptSource(invocation: string): string {
-  // Escape the validated executable literal; pass the hostile URL as quoted argv data.
   const literal = invocation.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return [
     'on open location this_URL',

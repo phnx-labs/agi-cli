@@ -16,7 +16,7 @@ export type AccountVerdict =
 export type AccountProvisioning = 'portable' | 'per-device';
 
 export function loginHint(agentId: AgentId): string {
-  // File-derived login state is advisory and may false-negative; preflight warns and continues.
+
   const cli = AGENTS[agentId]?.cliCommand ?? agentId;
   switch (agentId) {
     case 'claude':
@@ -45,7 +45,7 @@ export function fixFor(input: {
   provisioning?: AccountProvisioning;
   hasSlot?: boolean;
 }): string | null {
-  // Repair respects per-device, named-slot, and worker ownership; unverified/no-evidence has no repair command.
+
   const { agent, verdict } = input;
   if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified' || verdict === 'no_evidence' || verdict === 'ready') return null;
   if (input.provisioning === 'per-device' || verdict === 'per-device') {
@@ -70,7 +70,7 @@ export function ambientClaudeToken(
   agentId: AgentId | string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  // Ambient Claude auth supersedes missing home identity and collapses rotation to one account.
+
   return agentId === 'claude' && (env.CLAUDE_CODE_OAUTH_TOKEN ?? '').trim().length > 0;
 }
 
@@ -84,7 +84,7 @@ export function shouldCheckLoginBeforeLaunch(o: {
   authCheckDisabled?: boolean;
   rotated?: boolean;
 }): boolean {
-  // forceInteractive covers injected resume prompts that otherwise look non-interactive.
+
   if (o.json || o.quiet || o.authCheckDisabled || o.rotated) return false;
   return o.interactive === true || o.forceInteractive === true || (!o.hasPrompt && o.headless !== true);
 }

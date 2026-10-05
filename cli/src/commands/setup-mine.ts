@@ -18,7 +18,7 @@ const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
 ];
 
 async function runMineWizard(): Promise<boolean> {
-  // This optional wizard returns false on cancellation; existing brands offer re-mint.
+
   if (!isInteractiveTerminal()) {
     console.log(
       chalk.dim('Non-interactive shell. Create a brand directly, e.g.:\n') +

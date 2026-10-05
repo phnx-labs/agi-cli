@@ -2,8 +2,6 @@ import type { AgentId } from '../types.js';
 import type { SyncManifest } from './types.js';
 import { getWriter, getDetector } from './registry.js';
 
-// Only commands and skills have safe inverse writers. Other kinds need registration
-// cleanup, wholesale rewrites, or still lack an ownership-safe removal path.
 export const PRUNABLE_KINDS = ['commands', 'skills'] as const;
 export type PrunableKind = typeof PRUNABLE_KINDS[number];
 
@@ -37,8 +35,8 @@ function emptyPruned(): Record<PrunableKind, string[]> {
 }
 
 export function pruneRemovedResources(input: PruneInput): PruneOutcome {
-  // Delete only names we previously installed, that still materialize, and that no source provides.
-  // Without a manifest there is no ownership proof, so pruning must delete nothing.
+
+
   const { agent, version, versionHome, cwd, previousManifest, sourceNames } = input;
 
   if (!previousManifest) {

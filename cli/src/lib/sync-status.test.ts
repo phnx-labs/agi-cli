@@ -73,7 +73,7 @@ function statusOf(s: Status, name: string): string | undefined {
 }
 
 describe('computeSyncStatus — per-resource mapping', () => {
-  // Compare installed bytes with current sources; manifests record only ever-synced state.
+
   it('maps synced / drifted / missing / orphan against the real version home', () => {
     const { cmdsHome } = makeInstalledVersion('2.0.0');
     const srcCmds = path.join(userDir, 'commands');

@@ -4,7 +4,7 @@ import type { DeviceStats } from './health.js';
 export type OnlineState = 'online' | 'offline' | 'unknown';
 
 export function deviceOnlineState(d: DeviceProfile, stats?: DeviceStats): OnlineState {
-  // Render this-run probe truth first, then persisted SSH reachability, then the Tailscale snapshot.
+
   if (stats) return stats.reachable ? 'online' : 'offline';
   if (d.reachability) return d.reachability.reachable ? 'online' : 'offline';
   if (d.tailscale) return d.tailscale.online ? 'online' : 'offline';

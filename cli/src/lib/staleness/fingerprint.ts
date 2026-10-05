@@ -24,8 +24,6 @@ export function fingerprintFile(filePath: string): Fingerprint | null {
   }
 }
 
-// This mirrors copy-time noise exclusions; it is deliberately not a blanket dotfile rule
-// because .claude-plugin/plugin.json is meaningful input.
 const FINGERPRINT_SKIP = new Set([
   '.DS_Store',
   '.git',
@@ -60,7 +58,7 @@ export function isFileStale(stored: Fingerprint, currentPath: string): boolean {
   if (stored.path !== currentPath) return true;
   try {
     const stat = fs.statSync(currentPath);
-    // Keep the hot path stat-only and pay for SHA only after metadata changes.
+
     if (stat.mtimeMs === stored.mtime && stat.size === stored.size) return false;
     return sha256(fs.readFileSync(currentPath, 'utf-8')) !== stored.sha256;
   } catch {
@@ -87,7 +85,6 @@ export function isDirStale(storedDirPath: string, storedFiles: Fingerprint[], cu
   return false;
 }
 
-// Must share the skip set and sorted absolute-path order with fingerprintDir.
 function walkDirPaths(dirPath: string): string[] {
   const results: string[] = [];
   function walk(dir: string): void {

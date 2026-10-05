@@ -16,7 +16,6 @@ import type {
   ResourceProvenance,
 } from './package-types.js';
 
-// Textual containment is insufficient: lstat/realpath reject package-source symlink escapes.
 function assertRealSourceWithin(abs: string, packageReal: string, label: string): void {
   let lst: fs.Stats;
   try {

@@ -254,7 +254,7 @@ function activitySummaryWeight(key: string, stamp: string): number {
 }
 
 function retainActivityTail(key: string, result: ActivityTail, sinceMs: number): void {
-  // Retain immutable snapshots; payload eviction may discard events but never mutate a shared result.
+
   const summaryWeight = activitySummaryWeight(key, result.stamp);
   if (summaryWeight > ACTIVITY_CACHE_BYTES) return;
   const retained = { ...result };
@@ -283,7 +283,6 @@ function retainActivityTail(key: string, result: ActivityTail, sinceMs: number):
 }
 
 function activityStamp(file: string): string {
-  // ctime makes same-size rewrites distinct even when mtime is restored.
   const st = fs.statSync(file, { bigint: true });
   return `${st.dev}:${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
 }
@@ -308,7 +307,6 @@ function readActivityTail(file: string, maxBytes: number, sinceMs = -Infinity): 
   forgetActivityTail(key);
   activityTailReads++;
   const text = readTail(file, maxBytes);
-  // Transient I/O and racing writes are not cacheable empty activity.
   if (text === undefined) return { stamp, events: [], newestMs: -Infinity, weight: 0 };
   const events: ActivityEvent[] = [];
   let newestMs = -Infinity;

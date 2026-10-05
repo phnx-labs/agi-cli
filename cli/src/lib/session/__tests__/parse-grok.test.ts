@@ -1,8 +1,3 @@
-/**
- * Verifies parseGrok normalizes Grok's chat_history.jsonl transcript into the
- * shared SessionEvent shape (user/assistant/tool_use/thinking/tool_result), and
- * that detectAgent routes Grok session paths correctly.
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -11,11 +6,6 @@ import * as path from 'path';
 import { parseGrok, detectAgent } from '@phnx-labs/sessions-cli/reader';
 import { toolCallsFromEvents } from '@phnx-labs/sessions-cli/reader';
 
-/**
- * Build a Grok session dir (summary.json + chat_history.jsonl) and return the
- * summary.json path — that is what the scanner records as the session filePath,
- * and what parseSession hands the parser.
- */
 function makeGrokSession(historyLines: object[]): string {
   const dir = path.join(
     os.tmpdir(),
@@ -44,7 +34,6 @@ describe('parseGrok', () => {
 
     const events = parseGrok(summaryPath);
 
-    // system is intentionally dropped.
     expect(events.find(e => (e as any).content === 'You are Grok.')).toBeUndefined();
 
     const user = events.find(e => e.type === 'message' && e.role === 'user');
@@ -63,16 +52,13 @@ describe('parseGrok', () => {
     expect(toolUse?.command).toBe('ls -la');
 
     const toolResult = events.find(e => e.type === 'tool_result');
-    // tool name is correlated back from the earlier tool_call id.
     expect(toolResult?.tool).toBe('bash');
     expect(toolResult?.callId).toBe('call_1');
     expect(toolResult?.success).toBeUndefined();
     expect(toolResult?.outcome).toBe('unknown');
     expect(toolResult?.output).toBe('file_a\nfile_b');
 
-    // Every event carries the session's created_at timestamp.
     expect(events.every(e => e.timestamp === '2026-07-31T00:00:00.000Z')).toBe(true);
-    // Every event is tagged as grok.
     expect(events.every(e => e.agent === 'grok')).toBe(true);
   });
 
@@ -94,7 +80,6 @@ describe('parseGrok', () => {
     expect(toolCallsFromEvents(events)).toEqual([
       expect.objectContaining({ outcome: 'unknown', output: 'Error: no such file' }),
     ]);
-    // An assistant turn with empty text emits only the tool_use, no empty message.
     expect(events.some(e => e.type === 'message')).toBe(false);
     const toolUse = events.find(e => e.type === 'tool_use');
     expect(toolUse?.path).toBe('/nope');

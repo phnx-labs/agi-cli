@@ -131,7 +131,7 @@ function sha256(input: string): string {
 }
 
 function sanitizeErrorBody(body: string): string {
-  // Prefer a bounded structured message; otherwise truncate and redact token-like unstructured text.
+
   const MAX_LEN = 300;
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
@@ -156,7 +156,7 @@ function parsePromptCode(body: string): string | null {
 }
 
 async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
-  // This is version/email routing metadata only; native OAuth and session credentials never leave the host.
+
   let candidateVersions: Array<{ version: string; email: string }>;
 
   if (strategy === 'balanced') {
@@ -303,7 +303,6 @@ export class RushCloudProvider implements CloudProvider {
 
     let res = await api('POST', '/api/v1/cloud-runs', token, body);
 
-    // A 401 is diagnostic only: fail loud instead of retrying with native credential material.
     if (res.status === 401 && accountManifest) {
       const errBody = await res.clone().text();
       const promptCode = parsePromptCode(errBody);

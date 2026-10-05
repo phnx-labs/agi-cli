@@ -24,7 +24,7 @@ function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string | null 
 }
 
 export function shareRuntimeEnv(): Record<string, string> | undefined {
-  // Background best-effort injection is endpoint-gated and agentOnly; never prompt biometrics or persist the raw token.
+
   if (!hasShareEndpoint()) return undefined;
   const fromEnv = readWriteTokenEnv();
   if (fromEnv) return { [SHARE_TOKEN_ENV_KEY]: fromEnv };

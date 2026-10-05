@@ -31,7 +31,7 @@ export function spawnUri(
   direction?: SplitDirection,
   meta?: { agent?: string; sessionId?: string; title?: string },
 ): string {
-  // One base64url JSON field keeps cwd and command bytes from becoming URI query delimiters.
+
   const payload: {
     command: string;
     cwd: string;

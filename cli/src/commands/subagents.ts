@@ -353,7 +353,6 @@ function iterSubagentCapableVersions(): Array<{ agent: AgentId; version: string;
   return out;
 }
 
-/** Compute sync targets for a single subagent by name across all capable versions. */
 function buildSubagentTargets(name: string): SyncTarget[] {
   const targets: SyncTarget[] = [];
   for (const { agent, version, home } of iterSubagentCapableVersions()) {

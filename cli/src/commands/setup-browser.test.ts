@@ -1,14 +1,3 @@
-/**
- * `agents setup browser` — the non-interactive path must NEVER mint a profile
- * (PHNX-3296). It recognizes an already-configured default (the shared
- * `browser.profile` key browser-cli also writes) but otherwise defers to the
- * fleet hub. Profile creation and browser detection are the standalone `browser`
- * CLI's now (PHNX-4101); the interactive wizard delegates to it, so the
- * non-interactive contract is the one this pins.
- *
- * Real critical path: `runBrowserWizard` runs for real against a temp
- * device-config store; only the TTY probe is forced.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -16,7 +5,6 @@ import * as path from 'node:path';
 
 let testHome = '';
 
-// Force the non-interactive path — this is the headless-worker scenario.
 vi.mock('./utils.js', async () => {
   const actual = await vi.importActual<typeof import('./utils.js')>('./utils.js');
   return { ...actual, isInteractiveTerminal: () => false };
@@ -48,7 +36,6 @@ describe('runBrowserWizard non-interactive (PHNX-3296)', () => {
     const { runBrowserWizard, getConfigValue } = await fresh();
     const ok = await runBrowserWizard();
     expect(ok).toBe(false);
-    // The crux: nothing minted, even if a browser is installed on the box.
     expect(getConfigValue('browser.profile').value).toBeUndefined();
   });
 

@@ -41,7 +41,7 @@ export async function pruneDismissedPendingSentinels(): Promise<void> {
 
 export async function reconcilePendingSentinels(pending: PendingDevice[]): Promise<void> {
   const dir = getDevicesPendingDir();
-  // Re-read registry and ignore state at write time to close the probe-versus-dismiss race.
+
   const dismissed = await loadDismissedNames();
   const want = new Map(
     pending
@@ -54,7 +54,7 @@ export async function reconcilePendingSentinels(pending: PendingDevice[]): Promi
     fs.mkdirSync(dir, { recursive: true });
     existing = fs.readdirSync(dir).filter((n) => !n.startsWith('.'));
   } catch {
-    // Sentinels are daemon hints; filesystem failure must not stop discovery.
+
     return;
   }
 

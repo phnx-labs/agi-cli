@@ -6,7 +6,7 @@ import { safeJoin } from './paths.js';
 import { markdownToGooseRecipe } from './convert.js';
 
 export function gooseCommandsDir(versionHome: string): string {
-  // Goose commands are registered recipes in commands/, separate from workflow recipes/.
+
   return path.join(versionHome, '.config', 'goose', 'commands');
 }
 
@@ -20,7 +20,7 @@ interface SlashCommandEntry {
 }
 
 function readGooseConfig(configPath: string): Record<string, unknown> {
-  // Read-modify-write preserves unrelated config; malformed non-empty config fails rather than being clobbered.
+
   if (!fs.existsSync(configPath)) return {};
   const raw = fs.readFileSync(configPath, 'utf-8');
   if (raw.trim() === '') return {};
@@ -115,7 +115,7 @@ export function listGooseCommandsInVersion(versionHome: string): string[] {
 }
 
 export function gooseCommandMatches(versionHome: string, commandName: string, sourcePath: string): boolean {
-  // A command matches only when both recipe bytes and its slash_commands registration match.
+
   const recipePath = safeJoin(gooseCommandsDir(versionHome), `${commandName}.yaml`);
   if (!fs.existsSync(recipePath) || !fs.existsSync(sourcePath)) return false;
   try {

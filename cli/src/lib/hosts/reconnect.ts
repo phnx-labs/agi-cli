@@ -5,7 +5,7 @@ import { RUN_AUTO_KEYWORD } from '../types.js';
 export const SSH_CONN_FAILURE = SSH_CONN_FAILURE_CODE;
 
 export const REMOTE_EXIT_255_REMAPPED = 254;
-// 255 is reserved for SSH connection failure, so a remote process exit 255 must be remapped.
+
 
 export const RECONNECT_WINDOW_MS = 15 * 60_000;
 
@@ -38,7 +38,7 @@ export function backoffMs(attempt: number): number {
 }
 
 export function refillsBudget(outcome: ReconnectOutcome): boolean {
-  // A brief reconnect does not reset the retry window; only a stable hold earns a fresh budget.
+
   return outcome.connected && outcome.heldMs >= MIN_HOLD_MS;
 }
 
@@ -158,7 +158,7 @@ interface ReconnectTargetInputs {
 }
 
 export function pickReconnectTarget(inputs: ReconnectTargetInputs): ReconnectTarget | undefined {
-  // Auto prefers the peer-resolved id; opaque TTY runs fall back to the launch-id join.
+
   const { agent, sessionId, resolvedId, resumeId, launchId } = inputs;
   const preferred = agent === RUN_AUTO_KEYWORD
     ? resolvedId ?? sessionId

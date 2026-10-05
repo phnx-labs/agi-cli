@@ -1,12 +1,3 @@
-/**
- * The session preview header surfaces the worked-on ticket and the PR the
- * session opened, so a reviewer can jump straight to Linear / GitHub from the
- * browser. Both are rendered by `buildPreview` (via `formatHeader`); we assert
- * the labels appear rather than the OSC 8 escape, which is TTY-gated.
- *
- * RUSH-2045 also surfaces compact checklist progress (✓N/M · step) from
- * SessionMeta.todos even when no transcript is on disk.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -40,8 +31,6 @@ function mk(overrides: Partial<SessionMeta>): SessionMeta {
     id: 'link-test-' + Math.random().toString(36).slice(2),
     shortId: 'linktest',
     agent: 'claude',
-    // No filePath → buildPreview takes the metadata-only branch, which still
-    // renders the header (and thus the ticket/PR line) without parsing a file.
     ...overrides,
   } as SessionMeta;
 }
@@ -131,7 +120,6 @@ describe('buildPreview — fleet-synced mirror renders inline, no per-row SSH (P
     const preview = stripVTControlCharacters(buildPreview(mk({
       machine: 'yosemite-m5',
       _remote: true,
-      // No topic / firstUser / mirrorSyncedAt: nothing local to render.
     })));
     expect(preview).toContain('yosemite-m5');
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -187,7 +175,6 @@ describe('relativizeDir — readable Dirs line', () => {
   });
 
   it('(b) collapses a worktree path to ⧉ <slug>/<remainder> when NOT under cwd', () => {
-    // cwd unrelated to the worktree → collapse applies for disambiguation.
     expect(
       relativizeDir(
         '/home/me/repo/.agents/worktrees/fix-crabbox-touchid-storm/cli/src/lib/crabbox/x.ts',
@@ -203,8 +190,6 @@ describe('relativizeDir — readable Dirs line', () => {
   });
 
   it('(A) cwd INSIDE the worktree, file under cwd → concise cwd-relative, NOT ⧉ (regression)', () => {
-    // The dominant case in this repo: the session edits its own worktree. cwd-relative
-    // must win so paths stay concise (`src/lib`), never longer `⧉ <slug>/cli/src/lib`.
     const cwd = '/home/me/repo/.agents/worktrees/fix-session-dirs/cli';
     const out = relativizeDir(`${cwd}/src/lib/foo.ts`, cwd);
     expect(out).toBe('src/lib');
@@ -212,8 +197,6 @@ describe('relativizeDir — readable Dirs line', () => {
   });
 
   it('(B) cwd in worktree X, file in a DIFFERENT worktree Y → ⧉ Y/<remainder>', () => {
-    // Touched dir is a genuinely different worktree than the session cwd, so the
-    // collapse still applies (it disambiguates the other worktree).
     expect(
       relativizeDir(
         '/home/me/repo/.agents/worktrees/worktree-y/cli/src/lib/bar.ts',
@@ -223,19 +206,15 @@ describe('relativizeDir — readable Dirs line', () => {
   });
 
   it('(c1) collapses a `--`/dot-dir worktree slug to ⧉ <name> (never a lossy // path)', () => {
-    // Real Claude slug: cwd /home/muqsit/.agents/repos/x/.agents/worktrees/rush1506
-    // encodes `.` and `/` to `-`, so `/.agents/worktrees/` becomes `--agents-worktrees-`.
     const out = relativizeDir(
       '-home-muqsit--agents-repos-x--agents-worktrees-rush1506/sess-id/scratchpad/n.md',
       '/home/muqsit/other',
     );
-    expect(out).not.toContain('//'); // no mangled dot-dir path
-    expect(out).toBe('⧉ rush1506'); // worktree name recovered from the encoded marker
+    expect(out).not.toContain('//');
+    expect(out).toBe('⧉ rush1506');
   });
 
   it('(c2) drops a slug that is this session\'s own cwd (internal projects-storage scratch)', () => {
-    // slug === encodeClaudeSlug(cwd) → the leaked `<id>/scratchpad` is Claude's
-    // internal store, not a code dir, so it is dropped like node_modules.
     expect(
       relativizeDir(
         '-home-muqsit-src-github-com-phnx-labs-agents-cli/sess-id/scratchpad/n.md',
@@ -245,7 +224,6 @@ describe('relativizeDir — readable Dirs line', () => {
   });
 
   it('(c3) leaves a genuine local absolute path with dashes UNTOUCHED (no false slug-decode)', () => {
-    // Starts with `/`, not `-`, so the slug branch never fires; normal cwd-relativize.
     expect(
       relativizeDir(
         '/home/me/src/phnx-labs/agents-cli/cli/x.ts',
@@ -256,7 +234,6 @@ describe('relativizeDir — readable Dirs line', () => {
 
   it('(d) collapses the home prefix to ~', () => {
     process.env.HOME = '/home/me';
-    // No cwd match; home → ~, and the path is shallow enough to keep in full.
     expect(relativizeDir('/home/me/notes/todo.md')).toBe('~/notes');
   });
 
@@ -299,9 +276,6 @@ describe('buildPreview — ticket + PR links line', () => {
   });
 
   it('embeds the canonical Linear + GitHub URLs as OSC 8 hyperlink targets when linkable', () => {
-    // The raw preview (escapes intact) should carry the hyperlink targets IF the
-    // terminal supports OSC 8. In a non-TTY test env it degrades to plain text, so
-    // we only assert the target is present when an escape was actually emitted.
     const raw = buildPreview(
       mk({ ticketId: 'RUSH-1864', prUrl: 'https://github.com/o/r/pull/42', prNumber: 42 }),
     );
@@ -333,12 +307,9 @@ describe('buildPreview — ticket + PR links line', () => {
       buildPreview(mk({ todos, topic: 'Land the checklist views', project: 'agents-cli' })),
     );
     expect(preview).toContain('✓1/2 · A5 wiring runner');
-    // Compact checklist rides the Doing verb row (RUSH-2757 part 3).
     expect(preview).toContain('Doing');
-    // Originating prompt falls back to topic when there is no transcript.
     expect(preview).toContain('Asked');
     expect(preview).toContain('Land the checklist views');
-    // Identity: shortId + project still in the header.
     expect(preview).toContain('linktest');
     expect(preview).toContain('agents-cli');
   });
@@ -354,7 +325,7 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
   it('renders the new sections from a real transcript', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-hl-'));
     try {
-      fs.mkdirSync(path.join(dir, '.git')); // a repo, so Repos: names it
+      fs.mkdirSync(path.join(dir, '.git'));
       const filePath = path.join(dir, 'session.jsonl');
       fs.writeFileSync(filePath, [
         JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', message: { role: 'user', content: 'Fix https://linear.app/acme/issue/RUSH-2076/slug' } }),
@@ -370,10 +341,6 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
         filePath,
         cwd: dir,
       })));
-      // Skills / hooks / links / dirs / repos fold into the ONE width-capped
-      // Details ▸ row (RUSH-2757 part 3); artifacts ride Made, errors ride
-      // Health. Items past the 80-col cap collapse into the `… +N more` tail
-      // rather than wrapping and swamping the pane.
       expect(preview).toContain('Details ▸');
       expect(preview).toContain('teams');
       expect(preview).toContain('SessionStart:startup');
@@ -406,18 +373,13 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
         messageCount: 4,
         tokenCount: 1234,
       })));
-      // The verb rows appear in the approved scan order.
       const order = ['Asked', 'Made', 'Health', 'Cost', 'Latest', 'Details ▸']
         .map(v => preview.indexOf(v));
       expect(order.every(i => i >= 0)).toBe(true);
       expect([...order].sort((a, b) => a - b)).toEqual(order);
-      // Asked quotes the originating prompt.
       expect(preview).toMatch(/Asked\s+"Ship the verb rows"/);
-      // Cost carries msgs + tokens — moved out of the header's old line 3, so
-      // they appear exactly once in the whole card.
       expect(preview).toMatch(/Cost\s+4 msgs/);
       expect(preview.split('msgs').length - 1).toBe(1);
-      // The full last message renders under Latest, not "Last response:".
       expect(preview).toContain('Rows are in.');
       expect(preview).not.toContain('Last response:');
     } finally {
@@ -443,16 +405,13 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
       })));
       const detailsLine = preview.split('\n').find(l => l.includes('Details ▸'))!;
       expect(detailsLine).toBeDefined();
-      // No file ops in this transcript, so the fold holds exactly the session id
-      // plus the 8 skills. Every skill is either visibly shown or counted in the
-      // `… +N more` tail — the cap may hide items, never disappear them.
       const shown = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel']
         .filter(n => detailsLine.includes(n)).length;
       const tail = detailsLine.match(/… \+(\d+) more/);
       const hidden = tail ? Number(tail[1]) : 0;
       expect(shown + hidden).toBe(8);
-      expect(shown).toBeLessThan(8); // the 80-col cap genuinely folds some
-      expect(tail).not.toBeNull(); // and the fold is visible, not silent
+      expect(shown).toBeLessThan(8);
+      expect(tail).not.toBeNull();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -472,8 +431,6 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
         filePath,
         cwd: dir,
       })));
-      // A clean transcript gets no Health row and no folded highlight names —
-      // Details still renders (it always carries the session id).
       expect(preview).not.toContain('Health');
       expect(preview).not.toContain('Skills:');
       expect(preview).not.toContain('Hooks:');
@@ -513,9 +470,6 @@ describe('buildPreview — usage metadata (RUSH-1994)', () => {
   });
 
   it('#11: a computed usedBrowser/usedComputer=true wins even when the transcript has no matching tool_use at all', () => {
-    // The persisted field comes from a real browser.navigate/computer.action
-    // event at scan time — it must not depend on classifySessionTool's
-    // transcript-regex heuristic ever having matched anything.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));
     try {
       const filePath = path.join(dir, 'session.jsonl');
@@ -536,9 +490,6 @@ describe('buildPreview — usage metadata (RUSH-1994)', () => {
   });
 
   it('#11: a computed usedBrowser/usedComputer=false suppresses the tag even when the transcript regex would have matched', () => {
-    // Reading the persisted field FIRST means a definite computed negative is
-    // trusted over the fuzzy regex — only session.usedBrowser === undefined
-    // (a legacy, never-scanned row) falls back to classifySessionTool.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));
     try {
       const filePath = path.join(dir, 'session.jsonl');
@@ -560,9 +511,6 @@ describe('buildPreview — usage metadata (RUSH-1994)', () => {
 });
 
 describe('remote preview body — richer, and sanitized', () => {
-  // A remote row's meta is peer-supplied JSON that parseRemoteList hands over
-  // verbatim, so every field the preview newly renders has to be scrubbed before
-  // it reaches the terminal.
   const remote = (over: Partial<SessionMeta>): SessionMeta =>
     mk({ machine: 'zion', _remote: true, ...over } as Partial<SessionMeta>);
 
@@ -603,12 +551,6 @@ describe('remote preview body — richer, and sanitized', () => {
   });
 });
 
-/**
- * A remote row's pane fetches the peer's already-computed digest over SSH and
- * renders the full compact preview — the metadata-only card is only the
- * pending/failed state, not the destination (the "remote sessions show no real
- * preview" gap).
- */
 describe('remote preview — fetched peer digest fills the pane', () => {
   const remote = (over: Partial<SessionMeta>): SessionMeta =>
     mk({ machine: 'peerbox', _remote: true, ...over } as Partial<SessionMeta>);
@@ -681,10 +623,10 @@ describe('remote preview — fetched peer digest fills the pane', () => {
     const after = stripVTControlCharacters(buildPreview(session));
     expect(after).toContain('on peerbox');
     expect(after).not.toContain('fetching preview');
-    expect(after).toContain('peer is asleep'); // metadata-only Prompt line
+    expect(after).toContain('peer is asleep');
 
     buildPreview(session);
-    expect(fetcher).toHaveBeenCalledTimes(1); // failed entry is cached, not retried per render
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it('scrubs terminal escapes from every peer-supplied digest string', async () => {
@@ -727,7 +669,6 @@ describe('sanitizeRemoteDigest — version-skew and shape defense', () => {
     expect(d!.toolCalls).toBe(0);
     expect(d!.dirs).toEqual(['src']);
     expect(d!.todos).toEqual({ items: [{ content: 'step', status: 'pending', activeForm: undefined }], done: 0, total: 5, activeForm: undefined });
-    // Non-http(s) URLs never become OSC 8 hyperlinks.
     expect(d!.links).toEqual([{ kind: 'other', url: 'https://github.com/a/b', label: 'a/b' }]);
   });
 
@@ -737,24 +678,19 @@ describe('sanitizeRemoteDigest — version-skew and shape defense', () => {
       changedFiles: [
         { path: 'cli/src/a.ts', op: 'created' },
         { path: '\x1b[31msrc/b.ts\x1b[0m', op: 'modified' },
-        { path: 'src/c.ts', op: 'nonsense' }, // bad op → dropped
-        { path: 42, op: 'deleted' },           // bad path → dropped
-        'junk',                                 // not an object → dropped
+        { path: 'src/c.ts', op: 'nonsense' },
+        { path: 42, op: 'deleted' },
+        'junk',
       ],
     });
     expect(d).toBeDefined();
     expect(d!.changedFiles).toEqual([
       { path: 'cli/src/a.ts', op: 'created' },
-      { path: 'src/b.ts', op: 'modified' }, // terminal escapes scrubbed
+      { path: 'src/b.ts', op: 'modified' },
     ]);
   });
 });
 
-/**
- * PHNX-2973: the digest carries the real per-file paths it used to collapse to
- * bare {created,modified,deleted} counts, so a consumer (the AGI EXT Fleet
- * detail panel) can render a per-file diff list — not just the totals.
- */
 describe('buildSessionPreviewDigest — changedFiles (PHNX-2973)', () => {
   const tool = (name: string, filePath?: string, command?: string): SessionEvent =>
     ({ type: 'tool_use', tool: name, path: filePath, command } as SessionEvent);
@@ -772,12 +708,6 @@ describe('buildSessionPreviewDigest — changedFiles (PHNX-2973)', () => {
   });
 });
 
-/**
- * The timing line used to come from the parsed transcript alone, so the two
- * sessions you most often browse for — a remote one, and a live one not indexed
- * on this box — showed no timing at all. It reads the indexed SessionMeta as
- * well now, and reports creation and last activity as separate fields.
- */
 describe('extractTiming — created / last active / lasted', () => {
   afterEach(() => vi.useRealTimers());
 
@@ -795,7 +725,6 @@ describe('extractTiming — created / last active / lasted', () => {
   });
 
   it('falls back to the indexed metadata when there is no transcript to parse', () => {
-    // The remote-session case: this line was blank before.
     vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
     expect(extractTiming(times({ lastActivity: '2026-07-04T10:00:00.000Z' }), [])).toEqual({
       createdAgo: '3d',
@@ -841,13 +770,6 @@ describe('buildPreview — timing for a session with no local transcript', () =>
   });
 });
 
-/**
- * RUSH-2198: the detailed preview collapsed to empty in the picker. This ties the
- * real buildPreview output (parsed from a transcript on disk) to the picker's row
- * budget at the default 24-row height with PICKER_RECENT_COUNT (15) list rows —
- * the exact shape that used to leave the preview slot empty. No mocking: a real
- * jsonl is written and parsed.
- */
 describe('buildPreview fits the picker preview slot at default height (RUSH-2198)', () => {
   it('is non-empty in the picker slot with a 15-row list on a 24-row terminal', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-budget-'));
@@ -859,14 +781,11 @@ describe('buildPreview fits the picker preview slot at default height (RUSH-2198
       ].join('\n') + '\n');
 
       const preview = buildPreview(mk({ id: 'budget-session', shortId: 'budget01', filePath, cwd: dir }));
-      // The transcript really parsed into a preview with the user's prompt.
       expect(stripVTControlCharacters(preview)).toContain('Fix the picker preview pane');
 
-      // The picker caps the list so the preview keeps its floor; feed that budget
-      // through limitPreviewHeight exactly as itemPicker does.
       const width = 80;
       const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 24, chromeRows: 3, previewOpen: true });
-      const availablePreviewRows = 24 - (1 /*header*/ + 1 /*subtitle*/ + page + 1 /*separator*/ + 1 /*help*/);
+      const availablePreviewRows = 24 - (1  + 1  + page + 1  + 1 );
       expect(availablePreviewRows).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
 
       const slot = limitPreviewHeight(preview, availablePreviewRows, width);
@@ -878,22 +797,12 @@ describe('buildPreview fits the picker preview slot at default height (RUSH-2198
   });
 });
 
-/**
- * PHNX-3999: an uncached preview of a transcript over the bounded-parse limit
- * must not fall back to a full synchronous `parseSession` (measured
- * unbounded/slow on real 35+ MiB transcripts). It must also never misattribute
- * the already-indexed last USER turn as the assistant's — a real regression
- * caught in review of this change.
- */
 describe('loadSessionPreviewDigest bounds an uncached parse (PHNX-3999)', () => {
   it('degrades to a real, honestly-partial digest instead of a full parse, with no false authorship', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-bounded-'));
     try {
       const filePath = path.join(dir, 'session.jsonl');
       const sessionId = 'bounded-parse-session';
-      // One real Claude user line the tail reader can find, then padding well
-      // past the 16 MiB bounded-parse limit so `loadSessionPreviewDigest`'s
-      // cache-miss path must take the bounded branch, not a full parse.
       const filler = JSON.stringify({
         type: 'assistant', timestamp: '2026-08-01T14:00:05.000Z',
         message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'x'.repeat(500) }] },
@@ -901,7 +810,6 @@ describe('loadSessionPreviewDigest bounds an uncached parse (PHNX-3999)', () => 
       const lines: string[] = [
         JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId, version: '2.1.112', message: { role: 'user', content: 'Investigate the huge-transcript preview bound' } }),
       ];
-      // ~17 MiB of filler, comfortably over the 16 MiB bound.
       const targetBytes = 17 * 1024 * 1024;
       while (lines.reduce((n, l) => n + l.length + 1, 0) < targetBytes) lines.push(filler);
       fs.writeFileSync(filePath, lines.join('\n') + '\n');
@@ -923,13 +831,8 @@ describe('loadSessionPreviewDigest bounds an uncached parse (PHNX-3999)', () => 
       expect(digest).toBeDefined();
       expect(digest!.partial).toBe(true);
       expect(digest!.partialReason).toMatch(/bounded-parse limit/);
-      // Real content, not silently empty.
       expect(digest!.firstUser).toBeTruthy();
-      // The false-authorship bug: lastAssistant must NEVER equal the indexed
-      // last USER message.
       expect(digest!.lastAssistant).not.toBe(session.lastUserMessage);
-      // Bounded means fast: reading a 17 MiB file via a 128 KiB tail (not a
-      // full parse) should complete well under a second in CI.
       expect(elapsedMs).toBeLessThan(5_000);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -950,16 +853,11 @@ describe('loadSessionPreviewDigest bounds an uncached parse (PHNX-3999)', () => 
       const lines: string[] = [
         JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId, version: '2.1.112', message: { role: 'user', content: originalRequest } }),
       ];
-      const targetBytes = 5 * 1024 * 1024; // over the 4 MiB bound
+      const targetBytes = 5 * 1024 * 1024;
       while (lines.reduce((n, l) => n + l.length + 1, 0) < targetBytes) lines.push(filler);
-      // A follow-up user turn near the END — inside the tail window, but NOT
-      // the original request. If firstUser ever came from the tail fold, it
-      // would wrongly surface this instead.
       lines.push(JSON.stringify({ type: 'user', timestamp: '2026-08-01T15:00:00.000Z', message: { role: 'user', content: followUp } }));
       fs.writeFileSync(filePath, lines.join('\n') + '\n');
 
-      // Deliberately NO firstUserMessage/lastUserMessage on the session — the
-      // scenario this fallback exists for (an index row without them yet).
       const session = mk({ id: sessionId, shortId: 'boundedhd', filePath, cwd: dir });
 
       const { digest, error } = loadSessionPreviewDigest(session);
@@ -979,19 +877,14 @@ describe('formatHeader — leads with the session title (RUSH-2757)', () => {
     const out = stripVTControlCharacters(buildPreview(mk({ label: 'Land the guard hardening' })));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
     expect(lines[0]).toBe('Land the guard hardening');
-    // The agent line ("Claude …") must come after the title, not before it.
     expect(out.indexOf('Land the guard hardening')).toBeLessThan(out.indexOf('Claude'));
   });
 
   it('does NOT lead with the topic — topic is the Asked row, never duplicated as a title', () => {
-    // Regression: the title must not fall back to session.topic, because topic is
-    // already rendered on the Asked row. Leading with it duplicated the text.
     const topic = 'Refactor the session picker';
     const out = stripVTControlCharacters(buildPreview(mk({ topic })));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
-    // The agent line leads, not the topic.
     expect(lines[0].startsWith('Claude')).toBe(true);
-    // The topic appears exactly once (on the Asked row), not twice.
     const occurrences = out.split(topic).length - 1;
     expect(occurrences).toBe(1);
     expect(out).toMatch(/Asked\s+"Refactor the session picker"/);
@@ -1000,14 +893,13 @@ describe('formatHeader — leads with the session title (RUSH-2757)', () => {
   it('shows both title and Asked when a label AND a topic exist (they are different text)', () => {
     const out = stripVTControlCharacters(buildPreview(mk({ label: 'Guard hardening', topic: 'harden the tree guard' })));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
-    expect(lines[0]).toBe('Guard hardening'); // label leads
-    expect(out).toMatch(/Asked\s+"harden the tree guard"/); // topic still shown, not dropped
+    expect(lines[0]).toBe('Guard hardening');
+    expect(out).toMatch(/Asked\s+"harden the tree guard"/);
   });
 
   it('renders no title line when there is no label', () => {
     const out = stripVTControlCharacters(buildPreview(mk({})));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
-    // First content line is the agent line, not an empty/blank title.
     expect(lines[0].startsWith('Claude')).toBe(true);
   });
 });
@@ -1016,7 +908,7 @@ describe('renderLastResponse — wraps overflowing lines to the pane (RUSH-2757)
   it('wraps a long single-line paragraph so no visible line exceeds the width', () => {
     const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
     const out = renderLastResponse(long, 50, 40);
-    expect(out.length).toBeGreaterThan(1); // it actually wrapped, not one long line
+    expect(out.length).toBeGreaterThan(1);
     for (const l of out) expect(stringWidth(l)).toBeLessThanOrEqual(40);
   });
 

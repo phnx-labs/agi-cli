@@ -117,8 +117,6 @@ describe.skipIf(process.platform !== 'linux')('process namespace ownership', () 
     const home = fs.mkdtempSync(path.join(process.env.HOME!, 'process-view-'));
     let first: ChildProcess | undefined;
     try {
-      // A real separate init survives its ordinary CLI child. An exited writer
-      // is no evidence that the namespace died or that this HOME is available.
       const init = 'import signal,subprocess,sys; child=subprocess.run(["bun",sys.argv[1],"once"],check=True,capture_output=True,text=True); print(child.stdout,end="",flush=True); signal.pause()';
       const command = initialWriter === 'separate-init'
         ? ['python3', '-c', init, fixture] : ['bun', fixture, initialWriter];

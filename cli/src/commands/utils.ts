@@ -41,7 +41,7 @@ export interface Surface {
 }
 
 export function resolveSurface(cmd: Command): Surface {
-  // Inherited flags live in optsWithGlobals; JSON output must never prompt on a TTY.
+
   const opts = cmd.optsWithGlobals() as { json?: boolean; yes?: boolean; quiet?: boolean };
   const tty = isInteractiveTerminal();
   const json = opts.json === true;
@@ -54,7 +54,7 @@ export function resolveSurface(cmd: Command): Surface {
 }
 
 export function normalizeSingleDeviceOption(value: string | string[] | undefined, commandLabel: string): string | undefined {
-  // An ancestor's variadic --device can produce an array; never route to an arbitrary first host.
+
   const list = value == null ? [] : Array.isArray(value) ? value : [value];
   const hosts = list.map((v) => String(v).trim()).filter((v) => v.length > 0);
   if (hosts.length === 0) return undefined;
@@ -82,7 +82,7 @@ export function requireDestructiveArg(opts: {
   available: string[];
   emptyHint?: string;
 }): never {
-  // Typing the target is the safety check; destructive commands never fall back to a picker.
+
   const { argName, command, itemNoun, available, emptyHint } = opts;
   console.error(chalk.red(`Missing required argument: ${argName.toUpperCase()}`));
   console.error('');

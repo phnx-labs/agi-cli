@@ -85,7 +85,7 @@ async function applyJsonlAppend(
   wasDroppingOversizedLine: boolean,
   apply: (parsed: any) => void,
 ): Promise<{ consumedBytes: number; droppingOversizedLine: boolean; skippedOversizedLine: boolean }> {
-  // Advance only through complete records; an unterminated tail belongs to the next scan.
+
   let pending = Buffer.alloc(0);
   let droppingOversizedLine = wasDroppingOversizedLine;
   let bytesBeforeChunk = 0;
@@ -1077,7 +1077,7 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
   const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
   const winnerBySession = new Map<string, string>();
-  // Live-root precedence is independent of whichever duplicate changed this scan.
+
   for (const { filePath } of allFiles) {
     const id = sessionIdOf(filePath);
     if (!winnerBySession.has(id)) winnerBySession.set(id, filePath);
@@ -1270,7 +1270,6 @@ export function decodeJwtEmail(idToken: string): string | undefined {
   }
 }
 
-// Resolve credential-shaped auth data lazily so a no-op bulk scan never touches it.
 function getCodexAccount(): string | undefined {
   if (cachedCodexAccount !== undefined) return cachedCodexAccount || undefined;
   codexAccountResolveCount++;
@@ -3181,7 +3180,6 @@ export async function scanClaudeSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
-  // Never fold saved parser state into a replacement transcript at the same path.
   let canIncrement = false;
   if (
     prior !== null &&
@@ -3656,7 +3654,6 @@ export async function scanCodexSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
-  // Never fold saved parser state into a replacement rollout at the same path.
   let canIncrement = false;
   if (
     prior !== null &&

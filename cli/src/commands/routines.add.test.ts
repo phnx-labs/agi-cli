@@ -15,10 +15,6 @@ import {
   projectsEnv,
 } from './routines.test-fixture.js';
 
-// `routines add`/`edit` CLI flag validation slice of the routines.*.test.ts
-// suite (RUSH-2819) — split off the original 2,249-line routines.test.ts
-// (measured ~194s of test time) so vitest can parallelize the file across
-// worker forks. Shared fixtures: routines.test-fixture.ts.
 
 const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome } = createDaemonHarness('add');
 registerLeakDetector();
@@ -32,7 +28,6 @@ describeRoutines('routines add help', () => {
       expect(result.stdout).toMatch(
         /Which agent runs this routine: claude, codex,\s+cursor,\s+kimi, droid/,
       );
-      // gemini is hard-deprecated and must never be advertised as a routine target.
       expect(result.stdout).not.toMatch(/routine: [^.]*gemini/);
       const agentLine = result.stdout.split('\n').find((line) => line.includes('--agent')) ?? '';
       expect(agentLine).not.toContain('antigravity');
@@ -356,7 +351,6 @@ describeRoutines('routines add --all-projects', () => {
 describeRoutines('routines add --project unknown project rejection', () => {
   it('rejects an unknown project name and does not create the routine file', () => {
     const home = makeHome({ registry });
-    // No projects written — "ghost" does not exist.
     try {
       const res = run(home, [
         'add', 'ghost-job',
@@ -396,10 +390,8 @@ describeRoutines('routines add — never rewrites the source it was handed', () 
       expect(added.status, added.stderr).toBe(0);
 
       const after = fs.readFileSync(sourcePath, 'utf-8');
-      // The exact corruption from the ticket: the key vanished from tracked config.
       expect(after).toContain('devices:');
       expect(after).toContain('yosemite-s0');
-      // Nothing at all was rewritten — not the pin, not the formatting.
       expect(after).toBe(before);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -413,10 +405,8 @@ describeRoutines('routines add — never rewrites the source it was handed', () 
     try {
       const added = run(home, ['add', external]);
       expect(added.status, added.stderr).toBe(0);
-      // Copying in is the whole point of passing a path, so the canonical file exists...
       const canonical = path.join(home, '.agents', 'routines', 'imported-train.yml');
       expect(fs.existsSync(canonical)).toBe(true);
-      // ...and the file the user authored is left alone.
       expect(yaml.parse(fs.readFileSync(external, 'utf-8')).devices).toEqual(['yosemite-s0']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });

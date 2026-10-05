@@ -5,16 +5,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-/**
- * Real-CLI regression test (RUSH-2022 review r2): a 1-edit-distance typo of a
- * device-routable command (e.g. `docto` for `doctor`) combined with `--device`
- * must not silently run LOCALLY once the auto-correct handler re-parses with
- * the corrected name. The router only ever saw the ORIGINAL (unknown) name
- * before commander parsing, so without re-checking after auto-correct, a
- * routing flag on the corrected name was dropped with no error at all -
- * worse than the pre-fix "does not support --device" message, which was at
- * least a loud failure. No mocks: spawns the actual built CLI.
- */
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -50,17 +40,10 @@ describe('command:* auto-correct re-checks --device routing (RUSH-2022 review r2
   it('a typo of a device-routable command with --device does not silently run locally', () => {
     const testHome = seedHome();
     try {
-      // `docto` is 1 edit from `doctor`, which is device-routable via
-      // REMOTE_PASSTHROUGH but NOT in OWN_HOST_COMMANDS. An unreachable device
-      // name forces a real SSH resolution attempt if (and only if) routing
-      // was actually retried after the correction.
       const r = run(testHome, 'docto', '--device', 'nonexistent-host-xyz-regression-test');
 
-      // Must NOT look like a successful local doctor report.
       expect(r.stdout).not.toContain('CRITICAL');
       expect(r.stdout).not.toContain('Installed Agent CLIs');
-      // Must show real routing was attempted (SSH resolution failure), not a
-      // silent local run and not the old "does not support --device" message.
       expect(r.stderr.toLowerCase()).not.toContain('does not support --device');
       const routed =
         r.stderr.toLowerCase().includes('nonexistent-host-xyz-regression-test') ||
@@ -75,8 +58,6 @@ describe('command:* auto-correct re-checks --device routing (RUSH-2022 review r2
   it('a typo with no routing flag still auto-corrects and runs locally as before', () => {
     const testHome = seedHome();
     try {
-      // `vew` (typo of `view`) with NO --device must behave exactly as the
-      // pre-existing auto-correct did: run locally, no SSH attempt.
       const r = run(testHome, 'vew', '--help');
       expect(r.stderr).not.toContain("unknown command 'vew'");
     } finally {

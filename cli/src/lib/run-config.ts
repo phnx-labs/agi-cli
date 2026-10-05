@@ -1,9 +1,3 @@
-/**
- * Project-local `run:` config discovery.
- *
- * The user/system `agents.yaml` is read through state.ts. Project-local
- * agents.yaml files are discovered from the current working directory upward.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -15,7 +9,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Return project-local run configs from nearest directory upward. */
 export function getProjectRunConfigs(startPath: string = process.cwd()): RunConfig[] {
   const configs: RunConfig[] = [];
   let dir = path.resolve(startPath);
@@ -30,7 +23,6 @@ export function getProjectRunConfigs(startPath: string = process.cwd()): RunConf
           configs.push(parsed.run as RunConfig);
         }
       } catch {
-        // Ignore malformed project config and keep walking.
       }
     }
     dir = path.dirname(dir);

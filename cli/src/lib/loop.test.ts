@@ -31,7 +31,6 @@ function baseCtx(runDir: string, overrides: Partial<LoopContext> = {}): LoopCont
   return { runId: 'loop-test', runDir, agent: 'claude', ...overrides };
 }
 
-/** A run-fn that records each call and returns a fixed token count + exit 0. */
 function recordingRun(tokensPerIter = 0): {
   fn: (o: ExecOptions) => Promise<IterationResult>;
   calls: ExecOptions[];

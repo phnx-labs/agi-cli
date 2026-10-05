@@ -1,4 +1,4 @@
-// Confirmed association never falls back to cwd basename; cache stamps individual definitions, and local existence cannot filter remote paths.
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

@@ -1,14 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractVersionFromManagedPath } from './discover.js';
 
-/**
- * The version a session resumes under is derived from its transcript path when
- * the transcript carries no embedded version. Every isolated agent EXCEPT codex
- * lives under `versions/<agent>/<version>/home/…`; codex is relocated by
- * CODEX_HOME to `~/.agents/.codex-homes/<version>/`, so its rollouts sit outside
- * the `versions/<agent>/` markers — which is exactly why a codex session read
- * `version = NULL` and native resume fell back to `/continue` (PHNX-3626).
- */
 describe('extractVersionFromManagedPath', () => {
   it('reads the version from the standard versions/<agent>/<version>/ home', () => {
     const p = '/home/u/.agents/versions/claude/2.1.207/home/.claude/projects/-repo/abc.jsonl';
@@ -25,8 +17,6 @@ describe('extractVersionFromManagedPath', () => {
   });
 
   it('does not match the codex-homes marker for a non-codex agent', () => {
-    // The relocated-home marker is codex-specific; another agent must not read a
-    // version off an incidental `.codex-homes/` path segment.
     const p = '/home/u/.agents/.codex-homes/0.146.0/sessions/x.jsonl';
     expect(extractVersionFromManagedPath('claude', p)).toBeUndefined();
   });

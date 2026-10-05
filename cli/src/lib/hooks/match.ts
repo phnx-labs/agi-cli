@@ -118,7 +118,7 @@ export function shouldFire(matches: HookMatches | undefined, input: HookInput): 
     }
   }
 
-  // Missing mode passes; older harness payloads omit it.
+
   if (matches.permission_mode !== undefined) {
     const allowed = arrayOf(matches.permission_mode);
     if (allowed.length > 0) {
@@ -127,7 +127,7 @@ export function shouldFire(matches: HookMatches | undefined, input: HookInput): 
     }
   }
 
-  // Negative matching keeps unknown future modes guarded rather than skipped.
+
   if (matches.permission_mode_not !== undefined) {
     const denied = arrayOf(matches.permission_mode_not);
     if (denied.length > 0) {

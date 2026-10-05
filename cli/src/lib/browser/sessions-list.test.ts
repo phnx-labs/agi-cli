@@ -29,9 +29,6 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   } as SessionMeta;
 }
 
-// Pure selection + rendering logic (no filesystem). The bug surface is the
-// `--open` selector precedence (latest / exact / substring) and the per-kind
-// counts in the human table.
 
 const groups: ProfileArtifacts[] = [
   {
@@ -83,14 +80,6 @@ describe('renderBrowserSessions', () => {
   });
 });
 
-// ─── Task-first grouping (RUSH-2407) ───────────────────────────────────────
-// groupIntoRows / matchesBrowserSessionRow / resolveLaunchSession are pure —
-// identities and the launch resolver are injected, so these run with no
-// filesystem or session-index dependency. loadTaskIdentities / buildBrowser-
-// SessionRows are the impure disk readers, covered further down against real
-// files under the machine's actual browser runtime dir (same pattern as
-// runtime-state.test.ts — CACHE_DIR resolves from HOME at module load, so a
-// per-test HOME override doesn't work; a random profile-name prefix does).
 
 const taskArtifacts = (task: string, mtimes: number[]): BrowserArtifact[] =>
   mtimes.map((mtimeMs, i) => ({
@@ -217,11 +206,6 @@ describe('resolveLaunchSession', () => {
   });
 });
 
-// ─── Disk-backed readers ────────────────────────────────────────────────────
-// Real files under the machine's actual browser runtime dir, uniquely
-// prefixed and cleaned up afterward — CACHE_DIR resolves from HOME at module
-// load (see profiles.ts / runtime-state.test.ts), so it can't be redirected
-// per test.
 
 describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
   let profile: string;
@@ -275,28 +259,17 @@ describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].task).toBe('my-task');
     expect(rows[0].artifacts).toHaveLength(2);
-    // A launchId this test just invented can't be indexed anywhere on the
-    // machine, so the row must report unresolved (has an owner + launchId,
-    // but no linked session) rather than silently claiming a link.
     expect(rows[0].linkStatus).toBe('unresolved');
     expect(rows[0].owner).toBe('muqsit@zion');
   });
 
   it('surfaces tasks stored under the composite `<profile>@<device>` dir when queried by the bare profile name (PHNX-3317)', () => {
-    // The split-identity bug: a browser launched under the bare legacy dir, but
-    // the daemon persists its tasks to the composite `<profile>@<device>` dir.
-    // A `--profile <bare>` listing used to read the empty bare store and report
-    // "no captures" while the real tasks lived one dir over. The reader must
-    // resolve the bare name to its cache dirs (keyBelongsToProfile), like
-    // status()/findTask do.
     const compositeDir = getProfileRuntimeDir(`${profile}@zion`);
     extraDirs.push(compositeDir);
 
-    // Bare dir exists but is empty — exactly the stranded legacy layout.
     fs.mkdirSync(root, { recursive: true });
     fs.writeFileSync(path.join(root, 'tasks.json'), '{}');
 
-    // Real task + capture live under the composite dir.
     const sessionsDir = path.join(compositeDir, 'sessions', 'prix-demo');
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.writeFileSync(path.join(sessionsDir, 'shot.png'), 'fake-png');

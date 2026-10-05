@@ -66,7 +66,7 @@ describe('promptDriftSync --yes — apply path', () => {
 });
 
 describe('promptDriftSync --yes — routes through the shared repair pass (BLOCKER 1)', () => {
-  // Resource sync does not generate managed hook shims; real drift apply must use shared repair.
+
   it('repairs a broken managed hook runtime shim while reconciling a drifted version', () => {
     fs.writeFileSync(path.join(srcCmds, 'drifted.md'), 'ALPHA v2 (source of truth)\n');
     fs.writeFileSync(path.join(cmdsHome, 'drifted.md'), 'ALPHA v1 (stale)\n');

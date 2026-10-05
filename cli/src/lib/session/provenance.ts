@@ -63,7 +63,6 @@ export function parseProcEnviron(buf: string): Record<string, string> {
 
 const ENV_VALUE_TOKENS: Record<string, number> = { SSH_CONNECTION: 4 };
 
-// macOS ps flattens env; consume SSH_CONNECTION at fixed four-token arity so following values survive.
 export function extractKnownEnv(text: string, keys: readonly string[]): Record<string, string> {
   const alt = keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const boundary = new RegExp(`(?:^|\\s)(${alt})=`, 'g');
@@ -88,7 +87,6 @@ export function parseSshConnection(value: string): SshOrigin | undefined {
   return { clientIp: parts[0], clientPort, serverIp: parts[2], serverPort };
 }
 
-// Exact tmux pane outranks iTerm; without an evidence rail report null, never fabricated local provenance.
 export function deriveProvenance(env: Record<string, string>, hostname: string): SessionProvenance {
   const ssh = env.SSH_CONNECTION ? parseSshConnection(env.SSH_CONNECTION) : undefined;
 

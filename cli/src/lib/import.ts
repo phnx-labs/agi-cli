@@ -35,7 +35,6 @@ export async function importAgentConfig(
     return { success: false, error: `Invalid version: ${JSON.stringify(version)}` };
   }
 
-  // Import moves live config: enforce isolation and preserve its home-relative nested path.
   assertIsolationBoundary(agentId, 'adopt your existing install');
   const agent = AGENTS[agentId];
   const configDir = agent.configDir;
@@ -82,7 +81,6 @@ export function importAgentBinary(
 ): ImportBinaryResult {
   const binaryLink = path.join(versionDir, 'node_modules', '.bin', spec.cliCommand);
 
-  // lstat keeps dangling install links visible; multi-bin packages select the exact CLI key.
   let alreadyExists = false;
   try {
     fs.lstatSync(binaryLink);
@@ -154,7 +152,7 @@ export function importInstallScriptBinary(
 ): ImportBinaryResult {
   const binaryLink = path.join(versionDir, 'node_modules', '.bin', spec.cliCommand);
 
-  // Use lstat so a dangling shim still counts as an existing install.
+
   let alreadyExists = false;
   try {
     fs.lstatSync(binaryLink);
@@ -216,7 +214,7 @@ export function seedIsolatedConfigFromLocal(
   version: string,
   opts: { withAuth?: boolean; all?: boolean } = {},
 ): { seeded: boolean; from: string; to: string; skippedAuth: string[]; skippedRuntime: string[]; error?: string } {
-  // Seeding copies rather than adopts: auth/runtime stay excluded by default, destination links are followed, overwrite is forced, and links into ~/.agents are rejected.
+
   const agent = AGENTS[agentId];
   const configDir = agent.configDir;
   const versionHome = path.join(getVersionsDir(), agentId, version, 'home');

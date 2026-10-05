@@ -4,11 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
-// RUSH-2436: the local DB is authoritative for content. A session whose
-// transcript file is gone must still LIST and RENDER its user turns (served from
-// session_text), flagged `archived`, instead of silently vanishing — and merely
-// listing it must NOT purge its redacted tool-call evidence. A contentless
-// phantom (a stale/moved file_path) stays suppressed.
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
@@ -49,7 +44,6 @@ function makeMeta(id: string, agent: string, filePath: string): SessionMeta {
   };
 }
 
-/** Index a real transcript with durable user content, then delete its file. */
 function indexThenDeleteFile(id: string, agent: string, content: string): string {
   const dir = fs.mkdtempSync(path.join(testHome, `${agent}-`));
   const filePath = path.join(dir, `${id}.jsonl`);
@@ -74,14 +68,12 @@ describe('RUSH-2436 archived session durability', () => {
     expect(row!.archived).toBe(true);
     expect(typeof row!.archivedAt).toBe('number');
 
-    // The user turns are served from session_text, not the (deleted) file.
     expect(db.readSessionContent('codex-archived-1')).toBe('refactor the retry loop please');
   });
 
   it('resolves a file-gone session by id (agents sessions <id> path), not "No session found"', () => {
     indexThenDeleteFile('grok-archived-2', 'grok', 'why did the deploy stall?');
 
-    // findSessionsById is exactly what `agents sessions <id>` resolves through.
     const byExact = db.findSessionsById('grok-archived-2');
     expect(byExact.map(s => s.id)).toContain('grok-archived-2');
     expect(byExact[0].archived).toBe(true);
@@ -108,7 +100,6 @@ describe('RUSH-2436 archived session durability', () => {
     expect(before).toBe(1);
 
     fs.rmSync(filePath, { force: true });
-    // Listing the file-gone session must not destroy its redacted evidence.
     db.querySessions();
 
     const after = (db.getDB().prepare('SELECT count(*) AS n FROM tool_calls WHERE session_id = ?').get(id) as { n: number }).n;
@@ -116,8 +107,6 @@ describe('RUSH-2436 archived session durability', () => {
   });
 
   it('still suppresses a genuine phantom (stale file_path, no cached content)', () => {
-    // A row whose file is missing AND whose session_text content is empty is a
-    // phantom (a stale/moved pointer), not an archived session — stays dropped.
     const dir = fs.mkdtempSync(path.join(testHome, 'phantom-'));
     const filePath = path.join(dir, 'phantom.jsonl');
     fs.writeFileSync(filePath, '{}\n');
@@ -131,7 +120,6 @@ describe('RUSH-2436 archived session durability', () => {
 
     const listed = db.querySessions();
     expect(listed.find(s => s.id === 'phantom-4'), 'contentless phantom must stay suppressed').toBeUndefined();
-    // And it is never stamped archived.
     const rawArchived = (db.getDB().prepare('SELECT archived_at FROM sessions WHERE id = ?').get('phantom-4') as { archived_at: number | null }).archived_at;
     expect(rawArchived).toBeNull();
   });
@@ -141,7 +129,6 @@ describe('RUSH-2436 archived session durability', () => {
 
     const first = db.querySessions().find(s => s.id === 'codex-archived-5')!.archivedAt;
     expect(typeof first).toBe('number');
-    // A second listing must not move the stamp.
     const second = db.querySessions().find(s => s.id === 'codex-archived-5')!.archivedAt;
     expect(second).toBe(first);
   });
@@ -153,7 +140,7 @@ describe('RUSH-2436 archived session durability', () => {
     fs.writeFileSync(filePath, '{}\n');
     const stat = fs.statSync(filePath);
     const meta = makeMeta(id, 'codex', filePath);
-    meta.costUsd = 4.20; // topSessionsByCost filters cost_usd IS NOT NULL
+    meta.costUsd = 4.20;
     db.upsertSessionsBatch([{ meta, content: 'a pricey session', scan: { fileMtimeMs: stat.mtimeMs, fileSize: stat.size } }]);
     fs.rmSync(filePath, { force: true });
 
@@ -173,7 +160,6 @@ describe('RUSH-2436 archived session durability', () => {
     fs.rmSync(filePath, { force: true });
     expect(db.querySessions().find(s => s.id === id)!.archived).toBe(true);
 
-    // The file returns; the next listing must clear the archived flag.
     fs.writeFileSync(filePath, '{}\n');
     const back = db.querySessions().find(s => s.id === id);
     expect(back, 'restored session still lists').toBeDefined();

@@ -10,7 +10,6 @@ describe('traces commands', () => {
     const setup = traces?.commands.find((command) => command.name() === 'setup');
 
     expect(setup).toBeDefined();
-    // Setup is the advanced/self-host path — managed sync needs only `agents auth login`.
     expect(setup?.description()).toContain('self-hosted Cloudflare Worker');
     expect(setup?.description()).toMatch(/not required/i);
     expect(setup?.opts()).toMatchObject({

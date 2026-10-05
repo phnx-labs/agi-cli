@@ -4,8 +4,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before db.js loads so its module-level DB path picks up the override.
-// (Plain top-level statements run before the dynamic `await import` below.)
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-migrations-'));
 process.env.HOME = TEST_HOME;
 
@@ -38,9 +36,6 @@ afterAll(() => {
 
 describe('empty-shortId repair migration (v16)', () => {
   it('heals a row the pre-fix parser left with an empty short_id', () => {
-    // Reproduce the corruption: a bare-prefix id whose shortId stripped to ''.
-    // upsertSession binds meta.shortId verbatim (deriveShortId lives in the
-    // parsers, not here), so '' lands in the index exactly as the old code did.
     const corrupt = {
       id: 'session_',
       shortId: '',
@@ -49,16 +44,15 @@ describe('empty-shortId repair migration (v16)', () => {
       filePath: '/tmp/gone/session_/messages.jsonl',
     } as SessionMeta;
     upsertSession(corrupt, 'hello bare prefix');
-    expect(getSessionById('session_')?.shortId).toBe(''); // corruption reproduced
+    expect(getSessionById('session_')?.shortId).toBe('');
 
-    // Simulate an un-migrated (pre-v16) DB and reopen so migrateSchema runs.
     const db = getDB();
     db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '15')`).run();
     closeDB();
 
-    getDB(); // reopen -> currentVersion 15 < SCHEMA_VERSION -> v16 repair runs
+    getDB();
     const healed = getSessionById('session_');
-    expect(healed?.shortId).toBe('session_'); // substr(id,1,8), non-empty + addressable
+    expect(healed?.shortId).toBe('session_');
     expect(healed?.shortId).not.toBe('');
   });
 });
@@ -76,11 +70,6 @@ describe('harness column migration (v41)', () => {
   });
 
   it('adds the harness column when schema_version is missing (migrateSchema skipped)', () => {
-    // currentVersion === undefined stamps SCHEMA_VERSION and never calls
-    // migrateSchema. The v41 ALTER lives only inside migrateSchema, so a
-    // sessions table that already exists without `harness` would stay that
-    // way — and the next upsertSession INSERT naming the column would throw
-    // — unless the unconditional post-migration repair adds it (PHNX-2935).
     const db = getDB();
     db.exec(`ALTER TABLE sessions DROP COLUMN harness`);
     db.prepare(`DELETE FROM meta WHERE key = 'schema_version'`).run();
@@ -130,9 +119,6 @@ describe('spawned_team column migration (v21)', () => {
   });
 
   it('clears BOTH ledgers so already-scanned dirs get re-parsed for the new column', () => {
-    // scan_ledger alone is not enough: with dir_ledger intact,
-    // collectChangedFilesInLeafDirs treats an unchanged dir's files as cold and
-    // skips them, so their spawned_team would stay NULL forever.
     const db = getDB();
     db.prepare(
       `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`
@@ -323,7 +309,6 @@ describe('tool ledger session identity migration (v29)', () => {
       .toEqual([
         'session_id', 'file_path', 'file_mtime_ms', 'file_size', 'extractor_version', 'indexed_at',
         'call_count', 'evidence_bytes',
-        // v36 resume point for the incremental tool scan.
         'parser_state', 'parsed_offset',
       ]);
     expect(reopened.prepare(`SELECT count(*) AS n FROM tool_scan_ledger`).get()).toEqual({ n: 0 });
@@ -356,9 +341,6 @@ describe('session launch mode migration (v32)', () => {
 
 describe('spawned_team round-trip', () => {
   it('persists the team a session spawned and reads it back', () => {
-    // Before this column existed the value was derived at scan time, set on the
-    // meta, and then silently dropped by the writer — so every read came back
-    // undefined. This pins the whole write -> read path.
     upsertSession(
       {
         id: 'orchestrator-1',

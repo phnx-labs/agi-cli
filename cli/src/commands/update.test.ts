@@ -1,9 +1,3 @@
-/**
- * The `agents update` surface. Pins the command shape agents and scripts call
- * (`<agent>@<installed-version>`, `--to`, `--json`) and the two
- * boundaries where a wrong answer is worse than an error: naming an agent that
- * cannot be pinned, and naming an installation that does not exist.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -22,7 +16,6 @@ async function program(): Promise<Command> {
   return p;
 }
 
-/** Run the command exactly as argv would reach it, capturing what the user sees. */
 async function run(args: string[]): Promise<{ out: string; err: string; exitCode: number | undefined }> {
   const out: string[] = [];
   const err: string[] = [];
@@ -40,7 +33,6 @@ async function run(args: string[]): Promise<{ out: string; err: string; exitCode
   }
 }
 
-/** A failure must reach the user as one actionable line, never a stack trace. */
 async function expectFailure(args: string[], pattern: RegExp): Promise<void> {
   const result = await run(args);
   expect(result.err).toMatch(pattern);
@@ -77,8 +69,6 @@ describe('agents update', () => {
     applyGlobalHelpConventions(root);
 
     const help = root.commands.find((c) => c.name() === 'update')!.helpInformation();
-    // The taught path is the bare agent (one managed installation); the
-    // `@<label>` selector keeps working but is hidden from the examples.
     expect(help).toContain('agents update claude --to 2.1.220');
     expect(help).not.toContain('agents update claude@2.0.65 --to 2.1.220');
     expect(help).not.toContain('--account');
@@ -89,8 +79,6 @@ describe('agents update', () => {
   });
 
   it('takes the run-style <agent>#<account> selector and names an unknown account, not the agent (PHNX-4116)', async () => {
-    // `agents update claude#work` used to die with "Unknown agent 'claude#work'"
-    // while `agents run claude#work` accepted the same selector.
     await expectFailure(['update', 'claude#work'], /Unknown Claude account 'work'.*agents accounts list claude/);
     await expectFailure(['update', 'claude#'], /Select an account after #/);
     await expectFailure(['update', 'claude#work@2.0.65'], /before the account/);
@@ -101,9 +89,6 @@ describe('agents update', () => {
   });
 
   it('refuses a pinned --to for a harness whose installer takes no version', async () => {
-    // droid installs one self-updating binary; honouring `--to 1.2.3` is
-    // impossible, so it must say so rather than install the current release and
-    // report it as the pin.
     await expectFailure(['update', 'droid', '--to', '1.2.3'], /no pinnable releases/);
   });
 
@@ -126,8 +111,6 @@ describe('agents update', () => {
     expect(managed.label).toBe('main');
 
     const line = describeSkippedInstallations('claude', managed.id);
-    // The legacy per-version home and the isolated copy are both named; the
-    // managed `main` install the bare update moved is not.
     expect(line).toContain('2 other Claude installations');
     expect(line).toContain('claude@2.1.112');
     expect(line).toContain('claude@iso');
@@ -177,8 +160,6 @@ describe('agents update', () => {
   it('lists installations as JSON with their stable id and current release', async () => {
     const dir = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65');
     fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
-    // Reset first: `state.ts` snapshots HOME at module load, so a graph cached
-    // by an earlier test would write this record under the previous temp home.
     vi.resetModules();
     const { createInstallation, recordRelease } = await import('../lib/installations/index.js');
     recordRelease(createInstallation('claude', '2.0.65', '2.0.65'), '2.1.220');

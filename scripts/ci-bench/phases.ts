@@ -73,7 +73,6 @@ export function isUsableRun(run: BenchRun): boolean {
   return true;
 }
 
-/** Jobs that sit on the required / release critical path. Windows never does. */
 export function requiredPathJobs(run: BenchRun): { included: BenchJob[]; excluded: BenchJob[] } {
   const included: BenchJob[] = [];
   const excluded: BenchJob[] = [];
@@ -110,14 +109,6 @@ function majorityProvider(jobs: readonly BenchJob[]): Provider {
   return best;
 }
 
-/**
- * Exact wall-clock phases for one completed run.
- *
- * - queue: event `created_at` → first required-path job start
- * - setup / execution: max across parallel required-path leaves (not the aggregator)
- * - report: aggregator job duration (or report-classified steps if no aggregator)
- * - e2e: required-check terminal (`aggregator.completed_at` else last job) − event
- */
 export function extractPhaseTimes(run: BenchRun): PhaseTimes | null {
   if (!isUsableRun(run)) return null;
   const { included, excluded } = requiredPathJobs(run);

@@ -1,4 +1,3 @@
-/** Signed webhook receiver lifecycle under the daemon service supervisor. */
 
 import { startHostedWebhookReceivers, type HostedWebhookReceivers } from '../daemon-webhooks.js';
 import type { DaemonServiceId } from '../daemon-services.js';

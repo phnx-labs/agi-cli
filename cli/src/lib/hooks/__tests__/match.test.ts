@@ -84,8 +84,6 @@ describe('shouldFire predicate evaluator', () => {
       ).toBe(true);
     });
     it('fires on a mode the exclusion list has never heard of', () => {
-      // The whole reason this predicate exists: an allowlist would stop firing
-      // here, silently un-guarding the tool call.
       expect(
         shouldFire({ permission_mode_not: 'plan' }, { permission_mode: 'someFutureMode' })
       ).toBe(true);

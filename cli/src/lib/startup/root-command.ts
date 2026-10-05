@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
 
 export function configureRootCommand(program: Command, name: string, version: string): Command {
-  // Do not enable global positional options: parent commands own flags that may follow leaf nouns,
-  // and their leaves recover those options through optsWithGlobals().
+
+
   return program
     .name(name)
     .description(

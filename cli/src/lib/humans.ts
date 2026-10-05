@@ -9,10 +9,6 @@ const HUMANS_HEADER = `# humans.yaml — owner identity and notification channel
 # Managed by agents-cli. See: agents humans --help
 `;
 
-/**
- * Read and parse humans.yaml. Returns null when the file does not exist or
- * is not a valid v1 config — never throws.
- */
 export function readHumans(): HumansConfig | null {
   const filePath = getHumansFilePath();
   if (!fs.existsSync(filePath)) return null;
@@ -63,9 +59,6 @@ export function getOwnerNotifyDestinationsFromHumans(): Array<{ channel: string;
   return [];
 }
 
-/**
- * Read the owner block from humans.yaml. Returns null if missing.
- */
 export function getOwnerFromHumans(): HumanOwner | null {
   return readHumans()?.owner ?? null;
 }

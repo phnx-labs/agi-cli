@@ -8,8 +8,6 @@ import { fileURLToPath } from 'url';
 const mockResolveRemoteDevice = vi.fn();
 vi.mock('../lib/ssh-tunnel.js', () => ({ resolveRemoteDevice: (...args: unknown[]) => mockResolveRemoteDevice(...args) }));
 
-// PHNX-4090: `secrets` has no fleet registry of its own, so `--device` must be
-// rewritten to `--host ssh://user@host` (the grammar it speaks) before exec.
 describe('rewriteDeviceToHost', () => {
   beforeEach(() => mockResolveRemoteDevice.mockReset());
 
@@ -50,11 +48,6 @@ describe('rewriteDeviceToHost', () => {
   });
 });
 
-/**
- * `agents secrets` is now a thin exec passthrough to the standalone `secrets`
- * CLI (PHNX-3989, DIST-1) — no fallback engine, so a missing binary fails loud
- * with install guidance rather than falling back to the retired in-repo one.
- */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 
@@ -75,14 +68,6 @@ function guardedHome(): void {
   );
 }
 
-/**
- * Absolute path to the bun runner so the child can start with a scrubbed PATH —
- * blanking SECRETS_BIN alone is not hermetic: on any box with a real `secrets`
- * on PATH the "not on PATH" case would resolve it and pass through instead of
- * failing loud. An empty PATH (the setup.test.ts pattern) makes the miss
- * deterministic regardless of the host. A case that needs the real standalone
- * (REAL_BIN below) restores PATH via extraEnv.
- */
 function resolveBun(): string {
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
     if (!dir) continue;
@@ -125,7 +110,6 @@ describe.skipIf(!REAL_BIN)('agents secrets passthrough (real standalone)', () =>
   it('forwards a subcommand + flags verbatim and reports the standalone bundle list', () => {
     guardedHome();
     const env = {
-      // Real standalone: restore PATH so its own subprocesses resolve.
       PATH: process.env.PATH ?? '',
       SECRETS_BIN: REAL_BIN!,
       SECRETS_HOME: path.join(testHome, '.agents'),

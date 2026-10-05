@@ -83,7 +83,7 @@ function disabledSentinelPath(): string {
 }
 
 function menubarDisabledByUser(): boolean {
-  // The opt-out sentinel is sticky across upgrades until the user explicitly enables it.
+
   return fs.existsSync(disabledSentinelPath());
 }
 
@@ -92,7 +92,7 @@ function menubarServiceInstalled(): boolean {
 }
 
 function sourceAppPath(): string | null {
-  // The independently versioned helper comes only from a shipped or verified cached bundle.
+
   const shipped = shippedAppPath();
   if (shipped) return shipped;
   const cached = cachedReleaseBundlePath();
@@ -130,7 +130,7 @@ export function cachedReleaseBundlePath(): string {
 async function menubarVersionToInstall(opts: { force?: boolean } = {}): Promise<string> {
   const resolved = await resolveMenubarVersion({ force: opts.force });
   const installed = readInstalledMenubarStamp();
-  // This independently versioned helper never rolls back to an older resolved floor.
+
   if (installed?.source === 'release' && compareVersions(installed.helperVersion, resolved) > 0) return installed.helperVersion;
   return resolved;
 }

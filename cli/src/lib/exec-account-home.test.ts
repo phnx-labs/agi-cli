@@ -234,9 +234,6 @@ describe('adopted default repoint + symlink guard (PHNX-3940 T5 review)', () => 
   });
 });
 
-// A worker's durable api-key slot holds no file: the launch must carry the
-// pushed key in the harness env var. Nothing else injects (a native login in
-// the slot, a harness without an api-key worker kind, a key not on the box).
 describe('durableSlotEnv', () => {
   it('injects the reserved worker API key for a durable api-key slot, and nothing otherwise', () => {
     const account = addNativeAccount(`gmail-${suffix}`, 'cursor', `cursor:user=t6-${suffix}`, 'g@example.com', 'version');
@@ -256,15 +253,9 @@ describe('durableSlotEnv', () => {
     const dir = slotDir('cursor', account.id);
     const durable = { accountId: account.id, slotDir: dir, authMode: 'durable' as const, verdict: 'live' as const };
     expect(durableSlotEnv('cursor', account, { slot: durable }, meta)).toEqual({ CURSOR_API_KEY: 'crsr_test_worker_key' });
-    // A native login in the slot (headed device) keeps its own credential.
     expect(durableSlotEnv('cursor', account, { slot: { ...durable, authMode: 'native' } }, meta)).toEqual({});
-    // No slot at all (legacy home) injects nothing.
     expect(durableSlotEnv('cursor', account, {}, meta)).toEqual({});
-    // A harness whose worker credential is a setup-token file, not an env key.
     expect(durableSlotEnv('claude', account, { slot: durable }, meta)).toEqual({});
-    // A headed device never trusts a durable record it did not provision — a
-    // stale one survives `agents devices role <box> personal` — and keeps its
-    // native login (invariant 7).
     expect(durableSlotEnv('cursor', account, { slot: durable }, meta, { selfRole: () => 'personal' })).toEqual({});
     expect(durableSlotEnv('cursor', account, { slot: durable }, meta, { selfRole: () => 'desktop' })).toEqual({});
     expect(durableSlotEnv('cursor', account, { slot: durable }, meta, { selfRole: () => 'worker' })).toEqual({ CURSOR_API_KEY: 'crsr_test_worker_key' });

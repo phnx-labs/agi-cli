@@ -59,7 +59,7 @@ export function listDetachRecords(): DetachRecord[] {
 }
 
 export function isHeadlessAlive(rec: DetachRecord): boolean {
-  // Liveness belongs to the recorded process incarnation, not merely to a reused PID.
+
   if (!rec.headlessPid || rec.headlessPid <= 0) return false;
   try {
     process.kill(rec.headlessPid, 0);
@@ -74,7 +74,7 @@ export function isHeadlessAlive(rec: DetachRecord): boolean {
 }
 
 export async function takeOverDetachedSession(sessionId: string): Promise<boolean> {
-  // Signal only the fingerprint-verified owner and fail closed if it survives SIGTERM.
+
   const rec = readDetachRecord(sessionId);
   if (!rec) return false;
 

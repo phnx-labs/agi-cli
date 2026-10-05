@@ -3,7 +3,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { withFileLock, atomicWriteFileSync, ensureLockTarget } from '../fs-atomic.js';
 
-// AGI EXT reads this JSONL path and event shape directly; treat both as an external contract.
 export const WATCHDOG_LOG_PATH = path.join(os.homedir(), '.agents', '.cache', 'logs', 'watchdog.log');
 
 export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'undelivered' | 'rotate' | 'error';
@@ -34,7 +33,7 @@ export interface WatchdogInspection {
 const WATCHDOG_EVENT_KINDS = new Set<WatchdogEventKind>(['tick', 'decision', 'nudge', 'undelivered', 'rotate', 'error']);
 
 export function parseWatchdogEvents(text: string): WatchdogEvent[] {
-  // Ignore malformed or partial final rows so an interrupted append cannot hide older history.
+
   const events: WatchdogEvent[] = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -121,14 +120,14 @@ export function appendWatchdogEvents(
   events: WatchdogEvent[],
   opts: { logPath?: string; maxLines?: number } = {},
 ): void {
-  // Bound retained transcript exposure and cache growth; tail content remains intentionally persisted.
+
   if (events.length === 0) return;
   const logPath = opts.logPath ?? WATCHDOG_LOG_PATH;
   const maxLines = opts.maxLines ?? WATCHDOG_LOG_MAX_LINES;
   const lockPath = path.join(path.dirname(logPath), '.watchdog.log.lock');
   try {
     ensureLockTarget(lockPath);
-    // Serialize read/trim/replace; atomic replacement alone would still lose concurrent appends.
+
     withFileLock(lockPath, () => {
       let existing = '';
       try {
@@ -143,6 +142,5 @@ export function appendWatchdogEvents(
       atomicWriteFileSync(logPath, body);
     });
   } catch {
-    // Observability is best-effort and must never abort a watchdog tick.
   }
 }

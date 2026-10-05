@@ -14,7 +14,7 @@ interface HostSessionContext {
 }
 
 export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): SessionMeta | null {
-  // Synthetic rows have no local transcript path and stamp the remote execution owner as machine.
+
   const id = task.sessionId;
   if (!id) return null;
   if (!isSessionTrackedAgent(task.agent)) return null;
@@ -64,7 +64,7 @@ interface InteractiveHostSessionContext {
 }
 
 export function registerInteractiveHostSession(ctx: InteractiveHostSessionContext): void {
-  // Interactive TTY streams cannot be tapped; their identity is recovered through the launch-id join.
+
   if (!isSessionTrackedAgent(ctx.agent)) return;
   try {
     upsertSession(

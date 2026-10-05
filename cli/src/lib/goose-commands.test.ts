@@ -45,7 +45,6 @@ describe('installGooseCommandToVersion', () => {
     const r = installGooseCommandToVersion(versionHome, 'deploy', sourcePath);
     expect(r.success).toBe(true);
 
-    // Recipe lives in the commands dir (NOT the workflow recipes dir).
     const recipePath = path.join(gooseCommandsDir(versionHome), 'deploy.yaml');
     expect(fs.existsSync(recipePath)).toBe(true);
     expect(gooseCommandsDir(versionHome).endsWith(path.join('.config', 'goose', 'commands'))).toBe(true);
@@ -56,7 +55,6 @@ describe('installGooseCommandToVersion', () => {
     expect(recipe.description).toBe('Deploy the app');
     expect(recipe.prompt).toContain('Run the deploy for $ARGUMENTS.');
 
-    // config.yaml has a slash_commands entry with an absolute recipe_path.
     const config = readConfig(versionHome);
     expect(config.slash_commands).toEqual([{ command: 'deploy', recipe_path: recipePath }]);
   });
@@ -77,7 +75,7 @@ describe('installGooseCommandToVersion', () => {
     const config = readConfig(versionHome);
     expect(config.model).toBe('gpt-5');
     expect(config.mcp_servers).toEqual({ ctx: { command: 'ctx' } });
-    expect(config.slash_commands?.map(e => e.command)).toEqual(['alpha', 'zeta']); // sorted, both kept
+    expect(config.slash_commands?.map(e => e.command)).toEqual(['alpha', 'zeta']);
   });
 
   it('refuses to clobber a pre-existing but unparseable config.yaml (fails, preserves the file)', () => {
@@ -85,15 +83,12 @@ describe('installGooseCommandToVersion', () => {
     const versionHome = makeTempDir();
     const configPath = gooseCommandConfigPath(versionHome);
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    // A real user config that happens to be malformed YAML (e.g. a bad hand-edit).
     const badContent = 'mcp_servers:\n  ctx:\n    command: ctx\n\tbad: [unclosed\n';
     fs.writeFileSync(configPath, badContent, 'utf-8');
 
     const r = installGooseCommandToVersion(versionHome, 'deploy', writeSource(src, 'deploy', '---\ndescription: D\n---\nDo D.'));
-    // Must fail loudly rather than silently discarding the user's config.
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/not valid YAML|Refusing to rewrite/);
-    // The original file must be untouched (no clobber).
     expect(fs.readFileSync(configPath, 'utf-8')).toBe(badContent);
   });
 
@@ -117,7 +112,6 @@ describe('listGooseCommandsInVersion + gooseCommandMatches', () => {
     expect(listGooseCommandsInVersion(versionHome)).toEqual(['recap']);
     expect(gooseCommandMatches(versionHome, 'recap', sourcePath)).toBe(true);
 
-    // Source drift → no match.
     fs.writeFileSync(sourcePath, '---\ndescription: Recap\n---\nRecap EVERYTHING now.', 'utf-8');
     expect(gooseCommandMatches(versionHome, 'recap', sourcePath)).toBe(false);
   });
@@ -127,7 +121,6 @@ describe('listGooseCommandsInVersion + gooseCommandMatches', () => {
     const versionHome = makeTempDir();
     const sourcePath = writeSource(src, 'x', '---\ndescription: X\n---\nDo X.');
     installGooseCommandToVersion(versionHome, 'x', sourcePath);
-    // Wipe the registration but leave the recipe file.
     fs.writeFileSync(gooseCommandConfigPath(versionHome), yaml.stringify({ model: 'gpt-5' }), 'utf-8');
     expect(gooseCommandMatches(versionHome, 'x', sourcePath)).toBe(false);
   });

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderTracesWorkerScript } from './worker-template.js';
 
-// Minimal Miniflare-style worker harness for unit tests.
-// We evaluate the worker script in a fresh JS context to get the fetch handler.
 
 function makeWorker(opts: {
   verifyResult: { userId: string; email: string } | null;
@@ -25,8 +23,6 @@ function makeWorker(opts: {
           },
         };
       },
-      // Mirror R2's delimited list: `delimitedPrefixes` are the distinct next-path
-      // segments under `prefix`, which is exactly how the worker enumerates devices.
       async list(opts: { prefix?: string; delimiter?: string }) {
         const prefix = opts?.prefix ?? '';
         const delimiter = opts?.delimiter;
@@ -71,12 +67,7 @@ function makeWorker(opts: {
   if (opts.writeToken !== undefined) env['WRITE_TOKEN'] = opts.writeToken;
   if (opts.tracesNamespace !== undefined) env['TRACES_NAMESPACE'] = opts.tracesNamespace;
 
-  // Evaluate the generated worker JS.
   const src = renderTracesWorkerScript();
-  // Evaluate the generated worker in a Function context. Strip ES module syntax
-  // so it runs in a non-module eval: replace `export default {` → `return {`,
-  // replace remaining leading `export ` with `const `, and inject the stub
-  // verifyPhoenixToken instead of the real HTTP-fetching one.
   const fn = new Function(
     'fetchImpl',
     src
@@ -233,9 +224,6 @@ describe('traces worker — BYO static write-token namespace enforcement', () =>
   });
 });
 
-// PHNX-3397: the CLI writes per-device shards (<userId>/<hostname>/…) but the
-// console asks for the "all agents" view (<userId>/all/…). `all` is not stored;
-// the worker synthesizes it by listing device prefixes and merging on read.
 describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
   const shard = (device: string, over: Record<string, unknown> = {}) => ({
     schema: 1,
@@ -270,7 +258,6 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     expect(body.wastedMsTotal).toBe(120000);
     expect(body.failurePatterns).toHaveLength(1);
     expect(body.latency.firstToolMs.p50).toBe(100);
-    // Roster passes through so the single-device "all" view can filter/re-aggregate.
     expect(body.sessions).toHaveLength(1);
     expect(body.sessions[0].id).toBe('sess-zion');
   });
@@ -292,13 +279,8 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     expect(body.wastedMsTotal).toBe(240000);
     expect(body.needsAttention).toHaveLength(2);
     expect(body.topics.find((t: { key: string }) => t.key === 'code').count).toBe(8);
-    // byCause merges over WHATEVER cause keys each shard carries — the new
-    // `behavioral` member sums across devices instead of vanishing / summing to NaN
-    // (RUSH-2988; a hand-enumerated {real,guard,hook} regressed exactly this).
     expect(body.failures.byCause).toEqual({ real: 4, guard: 0, hook: 0, behavioral: 2 });
-    expect(body.syncedAt).toBe(2000); // freshest device wins for the timestamp
-    // The same failure signature on both devices folds into ONE ranked issue with
-    // combined counts — not two half-counted rows keyed the same.
+    expect(body.syncedAt).toBe(2000);
     expect(body.failurePatterns).toHaveLength(1);
     const p = body.failurePatterns[0];
     expect(p.id).toBe('bash-x');
@@ -306,9 +288,6 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     expect(p.sessions).toBe(6);
     expect(p.occurrences).toBe(10);
     expect(p.exampleSessionIds).toEqual(expect.arrayContaining(['ex-zion', 'ex-mac']));
-    // Rosters concat across devices so the "all" view sees every session's raw row
-    // (PHNX-3483). Without this the merged shard drops `sessions` and the console
-    // degrades to the pre-rolled stats with no filtering.
     expect(body.sessions).toHaveLength(2);
     expect(body.sessions.map((s: { id: string }) => s.id)).toEqual(
       expect.arrayContaining(['sess-zion', 'sess-mac']),

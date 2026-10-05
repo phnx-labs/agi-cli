@@ -40,7 +40,6 @@ describe('cross-account config-dir leak (PHNX-3940 T5)', () => {
           expect(a[key], `${agent} slot A leaked ${key}`).not.toBe(leakedVal);
           expect(b[key], `${agent} slot B leaked ${key}`).not.toBe(leakedVal);
         }
-        // Each slot's own pin, when set, points only at that slot.
         for (const key of CONFIG_DIR_ENV_KEYS) {
           if (a[key] && a[key] !== b[key]) {
             expect(String(a[key])).toContain('t5-slot-a');

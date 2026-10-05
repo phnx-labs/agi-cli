@@ -81,7 +81,6 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
         }
       }
 
-      // Copying is insufficient for settings-backed hooks, including Grok's subrule guards.
       if (agent === 'claude' || agent === 'codex' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'goose' || agent === 'cursor' || agent === 'grok' || agent === 'hermes' || agent === 'muse') {
         registerHooksToSettings(agent, versionHome);
       }

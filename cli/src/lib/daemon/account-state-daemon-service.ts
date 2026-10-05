@@ -1,24 +1,3 @@
-/**
- * Account-state services as supervised `PeriodicService`s (PHNX-3608).
- *
- * The daemon owns usage and authentication health as first-party device state.
- * This used to run its OWN two `setInterval` loops behind a `usageRunning` /
- * `authRunning` latch with NO deadline (`account-state-service.ts`, now removed):
- * a `runUsageRefreshTick` that hung on an unbounded provider await latched
- * `usageRunning = true` forever, so the usage cache froze for the daemon's whole
- * life while the service still looked healthy — the "12h usage-dark" root cause.
- *
- * Now usage and auth are TWO independent supervised services, each with its own
- * timer, per-tick deadline, AbortSignal, and — crucially — its own circuit
- * breaker (`AccountUsageService` = `account-state`, `AccountAuthService` =
- * `account-auth`). Keeping them separate means a run of usage-refresh failures
- * parks ONLY usage and never starves the slower auth refresh (they hit different
- * endpoints), matching the old design's independent loops. Each threads its
- * deadline AbortSignal into its refresh so the tick unwinds at the deadline
- * instead of blocking; the provider fetch is itself already bounded
- * (`AbortSignal.timeout` at the leaf), and the supervisor abandons + restarts a
- * hung tick regardless.
- */
 
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -36,17 +15,12 @@ import { machineId } from '../machine-id.js';
 import { getConfigValueAsync, isHeadedDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 
-/** Usage cache refresh cadence. */
 export const USAGE_STATE_TICK_MS = 60_000;
-/** Fleet-auth refresh cadence — deliberately slower (rate-limited endpoint). */
 export const AUTH_STATE_TICK_MS = 3 * 60_000;
 
-/** A hung refresh is abandoned at this deadline; a real sweep is far under it. */
 const REFRESH_DEADLINE_MS = 2 * 60_000;
 const NOTIFY_DEADLINE_MS = 30_000;
 const ACCOUNT_TRANSITIONS_FILE = 'account-auth-transitions.json';
-// Resolve the current CLI once at daemon startup. getCliLaunch performs sync
-// filesystem probes, so it must never run inside a service tick.
 const FEED_POST_LAUNCH = getCliLaunch([]);
 
 type AccountAuthRefresh = (signal: AbortSignal) => Promise<AuthProbeRow[] | void>;
@@ -55,21 +29,11 @@ type AccountTransitionNotifier = (transition: DeadAccountTransition) => Promise<
 interface AccountTransitionState {
   version: 2;
   entries: Record<string, { verdict: AuthVerdict; checkedAt: number }>;
-  /**
-   * Outbox of transitions whose owner-important feed post has not yet
-   * succeeded. An entry is enqueued BEFORE delivery is attempted and removed
-   * only after the notifier resolves, so a failed post (or a daemon restart
-   * mid-attempt) is retried on the next tick instead of being silently
-   * swallowed. `feed post` has no idempotency key, so a crash between a
-   * successful post and the state write can still re-send once — the semantic
-   * is at-least-once, never zero.
-   */
   pending: Record<string, DeadAccountTransition>;
 }
 
 interface DeadAccountTransition {
   agent: AuthProbeRow['agent'];
-  /** Display label (email / account name) — presentation only, never a key. */
   account: string;
   verdict: 'expired' | 'revoked';
 }
@@ -79,12 +43,6 @@ interface AccountAuthServiceOptions {
   notify?: AccountTransitionNotifier;
 }
 
-/**
- * A promise that rejects when `signal` aborts (immediately if already aborted),
- * so a tick can `Promise.race` its work against the supervisor's deadline and
- * unwind instead of blocking on an await that may never settle. The signal is
- * per-tick, so the once-listener is dropped with it — no cross-tick leak.
- */
 function abortRejection(signal: AbortSignal, label: string): Promise<never> {
   return new Promise<never>((_, reject) => {
     if (signal.aborted) { reject(new Error(label)); return; }
@@ -92,10 +50,6 @@ function abortRejection(signal: AbortSignal, label: string): Promise<never> {
   });
 }
 
-/**
- * Refresh the usage cache the `agents run` router reads. Independent circuit
- * breaker from auth — a persistently-failing usage endpoint parks only this.
- */
 export class AccountUsageService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'account-state';
   readonly intervalMs = USAGE_STATE_TICK_MS;
@@ -119,11 +73,6 @@ export class AccountUsageService extends BasePeriodicService {
   }
 }
 
-/**
- * Publish this host's fleet-status row and refresh auth health. Independent
- * circuit breaker from usage, and on a slower cadence (the auth verdict rides a
- * rate-limited endpoint).
- */
 export class AccountAuthService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'account-auth';
   readonly intervalMs = AUTH_STATE_TICK_MS;
@@ -173,9 +122,6 @@ export async function publishAccountDaemonStateRows(
   const role = (await getConfigValueAsync('role', { device })).value as ConfiguredDeviceRole | undefined;
   const headed = isHeadedDeviceRole(role);
   const accountRows = [...collapseAccountRows(rows).values()].map((row) => ({
-    // The registered account id is the only stable identity: two accounts may
-    // share one email (different orgs), so the display label is never a key.
-    // Unregistered legacy homes have no registry id and fall back to the label.
     accountId: row.accountId ?? row.account ?? row.version,
     identityLabel: row.account,
     harness: row.agent,
@@ -215,8 +161,6 @@ export async function publishAccountDaemonStateRows(
 }
 
 function transitionKey(row: AuthProbeRow): string {
-  // Stable identity first (registered account id); the display label is the
-  // fallback for unregistered legacy homes, never the key for a named account.
   return `${row.agent}:${row.accountId ?? row.account ?? `version:${row.version}`}`;
 }
 
@@ -249,7 +193,6 @@ async function readTransitionState(file: string): Promise<AccountTransitionState
   try {
     const parsed = JSON.parse(await fsp.readFile(file, 'utf-8')) as { version?: number } & Omit<Partial<AccountTransitionState>, 'version'>;
     if ((parsed.version === 1 || parsed.version === 2) && parsed.entries && typeof parsed.entries === 'object') {
-      // Version 1 files predate the outbox; they upgrade with an empty one.
       return { version: 2, entries: parsed.entries, pending: parsed.pending ?? {} };
     }
   } catch (error) {
@@ -267,21 +210,6 @@ async function writeTransitionState(file: string, state: AccountTransitionState)
   await fsp.rename(temp, file);
 }
 
-/**
- * Detect live → expired/revoked transitions and deliver one owner-important
- * feed post each, through a persisted outbox:
- *
- * 1. Newly-dead accounts are ENQUEUED into `pending` and the state is written
- *    BEFORE any delivery is attempted — a crash or a failed sink can never
- *    strand a transition in the already-recorded `entries` with no retry.
- * 2. Every pending item (fresh and retried) is delivered; an item leaves
- *    `pending` only after its notifier resolves, and the state is written
- *    again. A crash in the narrow window between a successful post and that
- *    second write re-sends once — at-least-once, never zero.
- *
- * Delivery failures keep their outbox entries AND throw after the state is
- * durable, so the supervisor's circuit breaker still sees the unhealthy tick.
- */
 export async function processAccountAuthTransitions(
   rows: readonly AuthProbeRow[],
   options: { stateFile?: string; notify?: AccountTransitionNotifier } = {},
@@ -308,7 +236,6 @@ export async function processAccountAuthTransitions(
     }
   }
 
-  // Durable BEFORE delivery: a pending entry survives a crash mid-notify.
   await writeTransitionState(file, next);
 
   const delivered: DeadAccountTransition[] = [];

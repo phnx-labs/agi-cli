@@ -1,8 +1,3 @@
-/**
- * Pure chooser logic behind the setup preferences prompts (which machine you
- * sit at, which browser agents drive). The prompts themselves need a TTY; the
- * choice/default math is extracted pure so it is testable without one.
- */
 import { describe, it, expect } from 'vitest';
 import {
   defaultInteractiveHostChoice,

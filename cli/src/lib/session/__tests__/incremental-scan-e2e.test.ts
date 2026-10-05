@@ -39,13 +39,11 @@ function appendTranscript(id: string, events: object[]): void {
   fs.appendFileSync(sessionFile(id), events.map(line).join('\n') + '\n', 'utf-8');
 }
 
-// Move mtime with each append so discovery observes a changed transcript.
 function bumpMtimeToNow(fp: string, plusSeconds: number): void {
   const t = Math.floor(Date.now() / 1000) + plusSeconds;
   fs.utimesSync(fp, t, t);
 }
 
-// Age ledger stamps past the five-second debounce before each scan.
 function agePriorScans(): void {
   db.getDB().prepare('UPDATE scan_ledger SET scanned_at = ?').run(Date.now() - 60_000);
 }
@@ -55,7 +53,6 @@ async function runScan(): Promise<void> {
   await discover.discoverSessions({ agent: 'claude', all: true });
 }
 
-// Exclude Claude version: it is persisted origin-version metadata whose DB upsert semantics are tested separately.
 const PARITY_FIELDS = [
   'agent', 'timestamp', 'lastActivity', 'project', 'cwd', 'gitBranch',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',

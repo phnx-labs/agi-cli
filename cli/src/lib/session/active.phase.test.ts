@@ -19,8 +19,6 @@ describe('derivePhase', () => {
     });
   }
 
-  // The drift this fixes: a status-only map that only knew the ext's original set
-  // let orphaned/crashed fall through to idle, hiding a dead agent. They must surface.
   it('buckets orphaned/crashed to failed, never idle', () => {
     expect(derivePhase('orphaned')).not.toBe('idle');
     expect(derivePhase('crashed')).not.toBe('idle');

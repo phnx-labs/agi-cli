@@ -95,7 +95,7 @@ export function buildManifest(
     const prevMap = (previous?.[field] ?? {}) as Record<string, unknown>;
     for (const name of checker.listNames(cwd)) {
       const prev = prevMap[name];
-      // Carry fresh entries forward: rehashing every source regresses the measured launch hot path.
+
       if (prev !== undefined && checker.isFresh(name, prev, cwd)) {
         target[name] = prev;
         continue;
@@ -136,8 +136,6 @@ export function isStale(
   }
   if (isPermissionsStale(manifest.permissions)) return true;
   if (isRulesStale(manifest.rules, agent, version, cwd)) return true;
-  // Absent means a pre-upgrade manifest; [] is a valid empty baseline. Absolute
-  // writer targets independently catch deleted generated files/version homes.
   if (manifest.writtenTargets === undefined) return true;
   for (const target of manifest.writtenTargets) {
     if (!fs.existsSync(target)) return true;

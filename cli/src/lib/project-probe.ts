@@ -37,7 +37,7 @@ function git(absPath: string, args: string[]): string | undefined {
 }
 
 export function probeRepoWorkspace(absPath: string): RepoWorkspaceStatus {
-  // Status probes are offline and read-only: inspect existing refs without fetching or mutating.
+
   const status: RepoWorkspaceStatus = { path: toHomeRelative(absPath), present: false };
   if (!fs.existsSync(path.join(absPath, '.git'))) return status;
   status.present = true;

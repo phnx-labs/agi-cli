@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatRunDuration } from './routines.js';
 
-// formatRunDuration renders the wall-clock shown in the concise `routines logs`
-// header. It must produce human-friendly text (no "12m 49s" / "30.0s") and never
-// throw on incomplete or malformed timestamps.
 describe('formatRunDuration', () => {
   const start = '2026-07-01T15:00:00.000Z';
   const plus = (ms: number): string => new Date(Date.parse(start) + ms).toISOString();
@@ -13,7 +10,7 @@ describe('formatRunDuration', () => {
   });
 
   it('returns "" for a negative or unparseable span', () => {
-    expect(formatRunDuration(start, '2026-06-01T00:00:00.000Z')).toBe(''); // completed before start
+    expect(formatRunDuration(start, '2026-06-01T00:00:00.000Z')).toBe('');
     expect(formatRunDuration('not-a-date', plus(5000))).toBe('');
   });
 

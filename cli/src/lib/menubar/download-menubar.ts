@@ -6,7 +6,6 @@ export const MENUBAR_HELPER_ASSET = 'MenubarHelper.app.zip';
 export const MENUBAR_HELPER_APP_NAME = 'MenubarHelper.app';
 export const MENUBAR_HELPER_BUNDLE_ID = 'com.phnx-labs.agents-menubar';
 
-// Bundle ID plus Team designated requirement both preserve TCC identity and reject impostors.
 export const MENUBAR_HELPER_SPEC: HelperSpec = {
   helper: 'menubar',
   assetName: MENUBAR_HELPER_ASSET,

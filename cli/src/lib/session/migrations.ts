@@ -31,7 +31,6 @@ function migrationsLedgerPath(): string {
   return path.join(homeDir(), '.agents', '.history', 'migrations.jsonl');
 }
 
-// Synced lineage is append-only A→B→C; write failure warns but never fails an otherwise successful move.
 export function recordMigration(rec: MigrationRecord, file: string = migrationsLedgerPath()): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -41,7 +40,6 @@ export function recordMigration(rec: MigrationRecord, file: string = migrationsL
   }
 }
 
-// Skip a corrupt/interrupted JSONL line without discarding later migration history.
 export function readMigrations(file: string = migrationsLedgerPath()): MigrationRecord[] {
   let raw: string;
   try {

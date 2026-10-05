@@ -1,15 +1,3 @@
-/**
- * Generic reader/writer for a `.gemini/…/settings.json`-shaped JSON config.
- *
- * Despite the name, this module is no longer gemini-specific: gemini itself
- * is hard-deprecated and has no live caller left (its own settings writer,
- * `generateGeminiConfig`, was removed with the RUSH-2202 runner.ts fix — a
- * gemini routine is rejected before it ever reaches sandbox prep). Antigravity
- * nests its own `settings.json` under the same `.gemini/antigravity-cli/` tree
- * and shares this exact shape, so `permissions.ts` reuses `updateGeminiSettings`
- * for antigravity's live permission writes. Keep the generic helpers; do not
- * reintroduce gemini-only logic here.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 

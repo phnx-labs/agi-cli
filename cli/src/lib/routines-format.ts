@@ -81,7 +81,6 @@ export function humanizeNextRun(date: Date | null, now: Date, tz?: string): stri
     const locale = 'en-US';
     const tzOpts = tz ? { timeZone: tz } : {};
 
-    // Compare calendar components in the requested timezone, not host-local elapsed hours.
     const toYMD = (d: Date): { y: number; m: number; day: number } => {
       const fmt = new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'numeric', day: 'numeric', ...tzOpts });
       const parts = fmt.formatToParts(d);
@@ -118,7 +117,6 @@ export function humanizeNextRun(date: Date | null, now: Date, tz?: string): stri
 
 export const REPO_DISPLAY_MAX = 24;
 
-// Never throw: shorthand links to pulls, absolute URLs retain their target, and display truncation never truncates href.
 export function formatRepoLink(repo: unknown): { display: string; href: string | null } {
   if (repo == null || typeof repo !== 'string' || repo.trim() === '') {
     return { display: '-', href: null };

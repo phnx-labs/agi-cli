@@ -55,7 +55,6 @@ export const SSH_CONTROL_PERSIST_SECONDS = 10 * 60;
 
 let controlDirEnsured = false;
 export function controlOpts(): string[] {
-  // %C keeps sockets below macOS path limits; Windows omits unsupported multiplexing.
   if (process.platform === 'win32') return [];
   const dir = path.join(getCacheDir(), 'ssh');
   if (!controlDirEnsured) {
@@ -118,7 +117,6 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
 
 export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOptions = {}): Promise<SshExecResult> {
   assertValidSshTarget(target);
-  // Timeout-bearing calls disable ControlMaster; killing a mux client can leave remote work running.
   const mux = opts.multiplex === false || opts.timeoutMs ? [] : controlOpts();
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
   return new Promise((resolve) => {

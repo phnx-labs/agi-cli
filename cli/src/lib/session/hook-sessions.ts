@@ -36,7 +36,7 @@ export function readStateSessionRecord(
   pid: number,
   startedAtMs?: number,
 ): HookSessionRecord | undefined {
-  // This targeted graveyard read complements hook files; timestamp gating prevents PID-reuse joins.
+
   if (!pid || pid < 1) return undefined;
   let rec: HookSessionRecord | undefined;
   try {
@@ -123,7 +123,6 @@ export function captureLaunchBinding(pid: number | undefined, launchId: string):
   return entry?.launchId === launchId ? structuredClone(entry) : undefined;
 }
 
-// Persist completion only when pid, incarnation, launch id, and agent still match the captured binding.
 export function recordCompletedLaunch(binding: PidSessionEntry | undefined): void {
   if (!binding?.launchId || !hostProcessView()) return;
   const entry = readPidSessionEntry(binding.pid);
@@ -139,7 +138,7 @@ export function recordCompletedLaunch(binding: PidSessionEntry | undefined): voi
 }
 
 export function loadHookSessionIndex(): HookSessionIndex {
-  // Merge the durable hook store with only incarnation-verified PID entries; conflicting inherited launches stay ambiguous.
+
   const byLaunchId = new Map<string, HookSessionRecord>();
   const byTerminalId = new Map<string, HookSessionRecord>();
   const byPid = new Map<number, HookSessionRecord>();
@@ -199,7 +198,7 @@ interface ResolveOpts {
 }
 
 export function resolveHookSessionRecord(index: HookSessionIndex, opts: ResolveOpts): HookSessionRecord | undefined {
-  // Launch identity is authoritative; terminal and PID fallbacks must not override it.
+
   const { pid, kind, launchId, terminalId, childPids } = opts;
   const take = (rec: HookSessionRecord | undefined): HookSessionRecord | undefined =>
     rec?.session_id && kindMatches(rec.agent, kind)

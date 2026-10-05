@@ -10,18 +10,18 @@ import { execFileShellSpec } from './platform/exec.js';
 import { localBinDir } from './platform/posixpath.js';
 import { compareVersions } from './agent-spec/primitives.js';
 
-// ─── Validation primitives ───────────────────────────────────────────────────
 
-/** Token allowed inside `check:` strings — letters, digits, underscore, dot, slash, dash. */
+
+
 const SAFE_CHECK_TOKEN = /^[a-zA-Z0-9_./-]+$/;
 
-/** npm package name with optional scope and optional version/tag. */
+
 const NPM_PACKAGE = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(@[a-zA-Z0-9._-]+)?$/;
 
-/** Homebrew formula name (and optional tap prefix). */
+
 const BREW_FORMULA = /^([a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*\/)?[a-z0-9][a-z0-9_.+-]*$/;
 
-/** Path segment inside a tarball — no leading slash, no `..`, no shell metas. */
+
 const SAFE_PATH_SEGMENT = /^[a-zA-Z0-9_./-]+$/;
 
 function assertSafeCheckToken(tok: string): void {
@@ -96,7 +96,7 @@ interface CliManifestError {
 
 
 function parseCheckSpec(raw: unknown, defaultName: string): CheckSpec {
-  // Project/extra manifests are untrusted: process fields remain allowlisted argv.
+
   if (raw == null) {
     assertSafeCheckToken(defaultName);
     return { kind: 'version', cmd: defaultName, args: ['--version'] };
@@ -292,7 +292,7 @@ export function isCliInstalled(manifest: CliManifest): boolean {
   const result = spawnSync(c.cmd, c.args, { stdio: 'ignore', timeout: 10_000 });
   if (result.status === 0) return true;
   if (process.platform === 'win32' && result.error) {
-    // Shell retry is safe only because manifest parsing already validated every token.
+
     const line = composeWin32CommandLine(c.cmd, c.args);
     const retry = spawnSync(line, { stdio: 'ignore', timeout: 10_000, shell: true });
     return retry.status === 0;
@@ -311,7 +311,7 @@ export function isCliInstalledAsync(manifest: CliManifest): Promise<boolean> {
     (err) => {
       const spawnFailed = typeof (err as NodeJS.ErrnoException).code === 'string';
       if (process.platform === 'win32' && spawnFailed) {
-        // Shell retry is safe only because manifest parsing already validated every token.
+
         const line = composeWin32CommandLine(c.cmd, c.args);
         return new Promise<boolean>((resolve) => {
           execFile(line, { timeout: 10_000, shell: true }, (retryErr) => resolve(!retryErr));
@@ -406,15 +406,7 @@ export function buildInstallCommand(method: InstallMethod): string {
     : `curl -fsSL ${spec.url} -o ${path.join(binDir, 'agents-cli-downloaded')}`;
 }
 
-/**
- * Execute an install method via spawnSync with argv arrays. Each branch
- * re-validates the relevant field — defense in depth, since callers may
- * construct InstallMethod values without going through parseCliManifest
- * (tests, future programmatic use).
- *
- * For `script`, the download is staged to a temp file and then exec'd as
- * `sh <file>` so we never need a shell pipe (`curl | sh`).
- */
+
 function runInstallMethod(method: InstallMethod, stdio: 'inherit' | ['inherit', 2, 'inherit']): void {
   if ('npm' in method) {
     assertNpmPackage(method.npm);
@@ -494,11 +486,7 @@ function runInstallMethod(method: InstallMethod, stdio: 'inherit' | ['inherit', 
   }
 }
 
-/**
- * Install a single CLI by running its first compatible method. Streams the
- * underlying command's output to the parent terminal so users see brew/npm
- * progress live. Verifies success by re-running `check`.
- */
+
 export function installCli(
   manifest: CliManifest,
   opts: { dryRun?: boolean; logToStderr?: boolean } = {},
@@ -528,9 +516,9 @@ export function installCli(
     };
   }
 
-  // Re-check; many installers exit 0 but leave the binary off PATH for the
-  // current shell (e.g. brew on a fresh install). Trust `check`, not the
-  // installer's exit code.
+
+
+
   cmdExistsCache.delete(manifest.name);
   const installed = isCliInstalled(manifest);
   return { manifest, method, installed };
@@ -647,14 +635,14 @@ export async function upgradeOutdatedClis(
   return results;
 }
 
-// ─── Status snapshot ─────────────────────────────────────────────────────────
+
 
 interface CliStatus {
   manifest: CliManifest;
   installed: boolean;
 }
 
-/** Convenience: list all manifests + their installed-on-host status. */
+
 export function listCliStatus(cwd?: string): {
   statuses: CliStatus[];
   errors: CliManifestError[];

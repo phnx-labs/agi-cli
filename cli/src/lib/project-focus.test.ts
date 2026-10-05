@@ -14,8 +14,6 @@ describe('focusBucket', () => {
   });
 
   it('drops process churn that would otherwise rank as engineering', () => {
-    // This repo files one changelog fragment per PR, so .changelog ranked #2 by
-    // raw touches — a number that measures PR count, not focus.
     expect(focusBucket('apps/cli/.changelog/next/RUSH-1.md')).toBeUndefined();
     expect(focusBucket('apps/cli/CHANGELOG.md')).toBeUndefined();
     expect(focusBucket('bun.lock')).toBeUndefined();
@@ -54,7 +52,6 @@ describe('rankFocusAreas', () => {
   });
 
   it('excludes changelog churn from the ranking, not just the display', () => {
-    // 10 fragment touches must not outrank 3 real source touches.
     const files = [...Array(10).fill('apps/cli/.changelog/next/x.md'), ...Array(3).fill('apps/cli/src/a.ts')];
     expect(rankFocusAreas(files)).toEqual([{ path: 'apps/cli/src', touches: 3 }]);
   });

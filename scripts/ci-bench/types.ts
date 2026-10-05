@@ -1,4 +1,3 @@
-/** Required-CI tails the plan hard-gates at 90s. Release hard-gates P99 at 180s. */
 export const CI_TAIL_PERCENTILES = [99, 99.9, 99.99] as const;
 export const REPORTED_PERCENTILES = [50, 90, 99, 99.9, 99.99] as const;
 
@@ -25,7 +24,6 @@ export interface GatedPercentile {
   n: number;
   required: number;
   status: SampleGateStatus;
-  /** Nearest-rank observed sample. Null when the sample-count gate fails. */
   valueMs: number | null;
   rank: number | null;
 }
@@ -67,7 +65,6 @@ export interface BenchInput {
 export interface PhaseTimes {
   runId: number | string;
   kind: RunKind;
-  /** Primary provider on the required path (windows never counts). */
   provider: Provider;
   queueMs: number;
   setupMs: number;
@@ -100,7 +97,6 @@ export interface TargetEvaluation {
   p: number;
   budgetMs: number;
   sample: GatedPercentile;
-  /** Pass only when the sample-count gate cleared AND value <= budget. */
   pass: boolean;
   reason: string;
 }

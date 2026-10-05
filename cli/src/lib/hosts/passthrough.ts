@@ -79,7 +79,7 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   update: {},
   teams: {},
   message: {},
-  // `send --channel session --to <id>` types into a session that runs on that box.
+
   send: {},
   routines: {},
   jobs: {},
@@ -96,13 +96,13 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
 };
 
 export const OWN_HOST_COMMANDS = new Set([
-  // These commands interpret --device as their destination/owner, not generic CLI passthrough.
+
   'run',
   'exec',
   'harness',
   'harnesses',
   'sessions',
-  'ps', // fans out to the named devices itself (old peers answer `sessions --active`)
+  'ps',
   'feed',
   'computer',
   'browser',
@@ -136,7 +136,6 @@ export function buildPassthroughForwardedArgs(
 ): string[] {
   const spec = REMOTE_PASSTHROUGH[command];
   let forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
-  // Read-only sync status must not inherit the mutating non-interactive --yes flag.
   const skipInheritedYes = command === 'sync' && firstSubcommand(forwarded, 'sync') === 'status';
   if (!interactive && spec?.nonInteractive && !skipInheritedYes) {
     forwarded = [...forwarded, ...spec.nonInteractive];
@@ -151,7 +150,7 @@ export function renderForwardDecision(
 ): { noPty: boolean; env?: Record<string, string> } {
   const spec = REMOTE_PASSTHROUGH[command];
   const localTty = io.isTTY && !io.noTty;
-  // Pure renders use a pipe; interactive subpaths keep a PTY and JSON suppresses forced color.
+
   if (!spec?.render || !localTty) return { noPty: false };
   const forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
   if (spec.interactiveWhen?.(forwarded)) return { noPty: false };
@@ -425,7 +424,7 @@ export async function maybeRunOnHost(
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
   if (command === 'teams') {
-    // Team membership/creation and routine placement remain owned by the orchestrator.
+
     const teamsIdx = allArgs.indexOf('teams');
     const sub = teamsIdx >= 0 ? allArgs.slice(teamsIdx + 1).find((a) => !a.startsWith('-')) : undefined;
     if (sub === 'add' || sub === 'a' || sub === 'create' || sub === 'c' || sub === 'new') {
@@ -463,7 +462,6 @@ export async function maybeRunOnHost(
 
   if (!hostName) return false;
 
-  // Auto/self resolution that lands here runs locally after routing flags are stripped.
   if (isDeviceAuto(hostName)) {
     const plan = resolveDeviceAffinity({});
     if (!plan.host) {

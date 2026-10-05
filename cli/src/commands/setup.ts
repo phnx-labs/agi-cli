@@ -1,9 +1,3 @@
-/**
- * First-run setup command.
- *
- * Registers the `agents setup` command which clones the system repo into
- * ~/.agents/.system/ and installs agent CLIs with resource syncing.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -44,44 +38,29 @@ import { SETUP_TOOLS, getCachedToolSetup, refreshToolSetup, type SetupTool } fro
 
 const HOME = os.homedir();
 
-/**
- * Import an existing unmanaged agent installation into agents-cli.
- * Moves the config dir into the versions structure and creates a symlink.
- */
 async function importAgent(agentId: AgentId, version: string): Promise<{ success: boolean; skipped?: boolean; error?: string }> {
   const agent = AGENTS[agentId];
-  // setup has its own hand-rolled adoption (rename + symlink inline, rather than
-  // calling switchConfigSymlink), so the primitive gates never see it. Check the
-  // boundary here, before the first mkdirSync — which would otherwise create the
-  // scaffolding this very check reads.
   assertIsolationBoundary(agentId, 'adopt your existing install');
   const configDir = agent.configDir;
   const versionsDir = getVersionsDir();
   const versionHome = path.join(versionsDir, agentId, version, 'home');
   const versionConfigDir = path.join(versionHome, agentConfigDirName(agentId));
 
-  // Skip if version dir already exists (collision)
   if (fs.existsSync(versionConfigDir)) {
     return { success: false, skipped: true, error: `${version} already installed` };
   }
 
   try {
-    // Create version home directory
     fs.mkdirSync(versionHome, { recursive: true });
 
-    // Move existing config dir into version home
     fs.renameSync(configDir, versionConfigDir);
 
-    // Create symlink from original location to version config
     fs.symlinkSync(versionConfigDir, configDir);
 
-    // Set as global default
     setGlobalDefault(agentId, version);
 
-    // Handle home-level files (e.g. ~/.claude.json)
     switchHomeFileSymlinks(agentId, version);
 
-    // Ensure shim exists
     ensureShimCurrent(agentId);
 
     return { success: true };
@@ -99,7 +78,6 @@ interface RunSetupOptions {
   isDaemonEnabledFn?: () => boolean;
 }
 
-/** First-run setup. Clones ~/.agents/.system/ from the system repo if needed. */
 export async function runSetup(program: Command, options: RunSetupOptions = {}): Promise<void> {
   const agentsDir = getAgentsDir();
   const alreadyConfigured = isGitRepo(agentsDir);
@@ -110,7 +88,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     return;
   }
 
-  // Detect existing installations BEFORE cloning (they won't exist after if we import)
   const unmanaged = await getUnmanagedAgentInstalls();
   const sessionCounts: Partial<Record<AgentId, number>> = {};
   for (const install of unmanaged) {
@@ -139,7 +116,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     const spinner = ora(alreadyConfigured ? 'Updating system repo...' : 'Cloning system repo...').start();
 
     if (isGitRepo(agentsDir)) {
-      // --force on an existing repo: pull instead of re-clone
       const result = await pullRepo(agentsDir);
       if (!result.success) {
         spinner.fail(`Pull failed: ${result.error}`);
@@ -148,7 +124,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
       }
       spinner.succeed(`Updated to ${result.commit}`);
     } else {
-      // Check git is available
       try {
         const { execSync } = await import('child_process');
         execSync('git --version', { stdio: 'ignore' });
@@ -180,11 +155,8 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
         console.log(chalk.gray(`Started the always-on agents daemon (pid ${started.pid}).`));
       }
     }
-  } catch { /* best effort */ }
+  } catch {  }
 
-  // Populate the device registry from the tailnet on first setup. Soft mode is
-  // guaranteed non-throwing (no tailscale / corrupt file / lock contention all
-  // resolve to ok:false), so this can never block setup.
   const { runDeviceSync } = await import('../lib/devices/sync.js');
   const dev = await runDeviceSync({ soft: true });
   if (dev.ok) {
@@ -195,7 +167,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
   }
 
-  // Offer to import existing unmanaged installations
   if (unmanaged.length > 0 && isInteractiveTerminal()) {
     console.log(chalk.bold('\nFound existing installations:\n'));
 
@@ -230,7 +201,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
         }
       }
 
-      // Ensure shims are in PATH
       if (!isShimsInPath()) {
         const pathResult = addShimsToPath();
         if (pathResult.success && !pathResult.alreadyPresent) {
@@ -242,7 +212,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
         }
       }
 
-      // Show total session count
       const totalSessions = Object.values(sessionCounts).reduce((a, b) => a + (b || 0), 0);
       if (totalSessions > 0) {
         const breakdown = unmanaged
@@ -255,22 +224,15 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
     }
   }
 
-  // Register the agents:// URL scheme so deep links in rendered artifacts can
-  // resume a session (RUSH — session deep links). Best-effort and idempotent:
-  // never fails setup, only registers when missing.
   try {
     const { registerAgentsUrlScheme } = await import('../lib/deeplink/register.js');
     const scheme = registerAgentsUrlScheme({ ifMissing: true });
     if (scheme.registered) console.log(chalk.gray('Registered the agents:// URL scheme (artifact session deep links).'));
   } catch {
-    // non-fatal — the user can run `agents setup url-scheme register` later.
   }
 
   if (options.suppressFooter) return;
 
-  // Fresh-machine hub: offer to set up the optional capabilities that need their
-  // own guided flow. TTY-only and fully opt-in — a non-interactive `agents setup`
-  // stops at the system-repo bootstrap above, unchanged.
   await (options.runHub ?? runSetupHub)();
 
   console.log(chalk.bold('\nSetup complete. Try:'));
@@ -280,12 +242,6 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
   console.log(chalk.cyan('  agents repo init'));
 }
 
-/**
- * Ensure the system repo exists before running a command that needs it.
- * If ~/.agents/.system/ is not a git repo AND we're in an interactive TTY,
- * prompt the user to run setup now. In non-interactive mode, print a clear
- * error and exit.
- */
 export async function ensureInitialized(program: Command): Promise<void> {
   const agentsDir = getAgentsDir();
   if (isGitRepo(agentsDir)) return;
@@ -309,12 +265,6 @@ export async function ensureInitialized(program: Command): Promise<void> {
   await runSetup(program, { suppressFooter: true });
 }
 
-/**
- * Interactive "what else do you want to set up?" menu shown after the bare
- * `agents setup` finishes on a TTY. Each pick runs that capability's guided
- * wizard. Never throws — a cancel or an optional wizard's error just skips the
- * rest and lets core setup complete.
- */
 type SetupPhase = 'browser' | 'computer' | 'secrets' | 'term' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
 type SetupStatusState = 'ready' | 'missing' | 'n/a';
 interface SetupStatusRow {
@@ -324,10 +274,6 @@ interface SetupStatusRow {
 }
 
 export async function getSetupStatus(): Promise<SetupStatusRow[]> {
-  // Browser readiness is now config + standalone presence (PHNX-4101): the engine
-  // (@phnx-labs/browser-cli) owns profile declarations and launchability, so
-  // agents-cli reads the shared default-profile key it and browser-cli both write
-  // rather than resolving a profile through a deleted in-repo engine.
   const browserCliInstalled = browserInstalled();
   const configuredBrowserProfile = getConfigValue('browser.profile').value as string | undefined;
   const browserReady = browserCliInstalled && !!configuredBrowserProfile;
@@ -415,7 +361,6 @@ export async function runSetupHub(deps: {
   }
 }
 
-/** Register the `agents setup` command and its capability subcommands. */
 export function registerSetupCommand(program: Command): void {
   const setupCmd = program
     .command('setup')
@@ -423,9 +368,6 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|term|mine|secrets|accounts|fleet|alias|beta`.
-  // Artifact publishing is no longer set up here — it lives in the standalone
-  // `artifacts` CLI (`artifacts share setup`/`join`, PHNX-3992).
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
   registerSetupTermCommand(setupCmd);
@@ -438,10 +380,6 @@ export function registerSetupCommand(program: Command): void {
   registerAliasCommand(setupCmd);
   registerBetaCommands(setupCmd);
 
-  // `agents setup url-scheme register|unregister|status` — the canonical, visible
-  // home for the agents:// OS handler that routes artifact deep links to the
-  // machine-only `agents _callback` verb. Reuses the same builder the hidden
-  // `agents open` back-compat subcommands mount.
   const urlScheme = setupCmd
     .command('url-scheme')
     .description('Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.');

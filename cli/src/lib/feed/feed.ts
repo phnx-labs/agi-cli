@@ -36,7 +36,7 @@ export interface ReceiptOrigin {
 }
 
 export function receiptMatchesOrigin(receipt: MessageReceipt, origin: ReceiptOrigin): boolean {
-  // Generation is identity; attempt is provenance, and unbound legacy receipts match nothing.
+
   if (receipt.generation === undefined) return false;
   return receipt.generation === origin.generation;
 }
@@ -271,7 +271,7 @@ export function recordAnswer(
   }
 
   if (block) {
-    // A pending first-answer claim stays open until a consumed/continued receipt confirms delivery.
+
     if (!options.pending) {
       recordResolution({
         blockId,
@@ -298,7 +298,7 @@ export function confirmAnswerResolution(
   const record = getAnswerRecord(blockId, dir);
   if (!block || !record) return false;
   if (expected && blockGeneration(block) !== expected.generation) return false;
-  // Never synthesize acknowledgement: only a real consumed/continued receipt resolves the ask.
+
   recordResolution({
     blockId,
     generation: blockGeneration(block),
@@ -620,7 +620,7 @@ export function removeBlock(blockId: string, root?: string): boolean {
       reason,
     }, dir);
   }
-  // Persist the tombstone before unlinking so stale lifecycle reads cannot resurrect the block.
+
   clearBlockLifecycle(blockId, dir);
   try {
     fs.unlinkSync(blockPath(dir, blockId));
@@ -733,7 +733,7 @@ def main():
             with open(target) as existing_file:
                 existing = json.load(existing_file)
             answered = os.path.exists(os.path.join(answered_dir, f"{block_id}.json"))
-            # Ordinary lifecycle hooks cannot clear a declared block before it is answered.
+
             if existing.get("kind") == "declared" and not answered:
                 return
         except Exception:

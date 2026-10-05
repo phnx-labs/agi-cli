@@ -11,11 +11,6 @@ import type { AggregateOptions, PerfAggregateRow, PerfPhaseStat } from './types.
 
 export type { AggregateOptions, PerfAggregateRow, PerfPhaseStat, PerfSample } from './types.js';
 
-/**
- * Parse the `phases` map from a sample's meta_json. Fail-soft: a row with no
- * meta_json, malformed JSON, or a non-numeric phase value contributes nothing
- * rather than throwing (the warehouse must survive any writer's shape).
- */
 function parsePhases(metaJson: string | null): Record<string, number> | undefined {
   if (!metaJson) return undefined;
   let parsed: unknown;
@@ -244,8 +239,6 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     meta_json: string | null;
   }>;
 
-  // Memoize cwd -> project key: resolveProjectKey walks the filesystem for
-  // a repo root, and many rows in one warehouse query share the same cwd.
   const projectCache = new Map<string, string | undefined>();
   const projectForCwd = (cwd: string | null): string | undefined => {
     if (!cwd) return undefined;
@@ -267,7 +260,6 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     errors: number;
     blocks: number;
     timeouts: number;
-    /** phase name -> durations across samples that carried it. */
     phases: Map<string, number[]>;
   };
   const map = new Map<string, Bucket>();
@@ -291,11 +283,6 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     if (r.cache === 'hit') b.hits++;
     else if (r.cache === 'stale-prefetch') b.stale++;
     else if (r.cache === 'miss' || r.cache === 'none') b.misses++;
-    // Exit classes (Claude/Codex PreToolUse convention):
-    //   0 → allowed
-    //   2 → intentional deny/block (not a crash)
-    //   1 / other nonzero → real error
-    // Timeouts are recorded via status, not exit_code, so they don't double-count.
     if (r.status === 'timeout') b.timeouts++;
     else if (typeof r.exit_code === 'number') {
       if (r.exit_code === 2) b.blocks++;

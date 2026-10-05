@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Self-heal may alert about isolated damage but must not switch versions or cross .isolated.
 describe.skipIf(process.platform === 'win32')('isolated-only usage never disturbs a local install', () => {
   let home: string;
   const GOOD = '9.9.4';

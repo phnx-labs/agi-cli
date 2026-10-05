@@ -44,10 +44,8 @@ export function backendFromSessions(
 ): { backend: Backend; host: string } | null {
   const isAvailable = deps.isAvailable ?? realIsAvailable;
   for (const s of [...sessions].sort(byRecency)) {
-    // viewingApp is the drivable outer terminal; a tmux session's host may name only the inner rail.
     const host = s.viewingApp ?? s.host;
     if (!host) continue;
-    // Admit only explicit host mappings whose backend is actually available on this machine.
     if (!Object.hasOwn(SESSION_HOST_BACKENDS, host)) continue;
     const backend = SESSION_HOST_BACKENDS[host];
     if (!backend) continue;

@@ -10,7 +10,6 @@ function statusOf(device: DeviceProfile): HostStatus {
 }
 
 function deviceToPoolHost(rawDevice: DeviceProfile): Host | null {
-  // Password-auth devices remain visible but are never dispatchable in BatchMode.
   const device = resolveDeviceProfile(rawDevice);
   const address = device.address.dnsName ?? device.address.ip;
   if (!address) return null;

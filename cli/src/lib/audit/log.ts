@@ -26,7 +26,7 @@ export interface AuditRecord {
 export type AuditEntry = Omit<AuditRecord, 'prevHash' | 'hash'>;
 
 export function getAuditLogPath(): string {
-  // Repo labels may contain credential-bearing URLs; keep the chain in machine-local gitignored history.
+
   return path.join(getHistoryDir(), 'audit', 'log.jsonl');
 }
 
@@ -59,7 +59,7 @@ function readRecords(logPath: string): AuditRecord[] {
 }
 
 export function appendAuditRecord(entry: AuditEntry, logPath: string = getAuditLogPath()): AuditRecord {
-  // Read-last-hash and append are one locked transaction so concurrent writers cannot fork the chain.
+
   ensureLockTarget(logPath);
   return withFileLock(logPath, () => {
     const existing = readRecords(logPath);

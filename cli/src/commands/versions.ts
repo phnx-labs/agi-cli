@@ -1,11 +1,3 @@
-/**
- * Version management commands for installing, switching, and removing agent CLIs.
- *
- * Implements `agents add`, `agents prune`, `agents remove` (alias),
- * and `agents use`. Handles npm-based installation,
- * shim creation, config symlink
- * switching, resource sync prompts, and project-level version pinning.
- */
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
@@ -95,22 +87,11 @@ import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';
 import { setHelpSections } from '../lib/help.js';
 import { updateSessionFilePaths } from '../lib/session/db.js';
 
-/**
- * What `agents add <spec>` does with the harness's ONE managed installation
- * (PHNX-3940): with no managed install it installs one (label `main`); with
- * one, a bare spec reuses it and an explicit `@<release>` pins that same
- * install — exactly `agents update <agent> --to <release>`. A second home is
- * only ever an `--isolated` copy, which bypasses this plan entirely.
- */
 export function planManagedAdd(input: { explicitPin: boolean; managedInstalled: boolean }): 'reuse' | 'pin' | 'install' {
   if (!input.managedInstalled) return 'install';
   return input.explicitPin ? 'pin' : 'reuse';
 }
 
-/**
- * After removeVersion soft-deletes a version dir to trash, rewrite session
- * file_path entries in the DB so reads still work from the new trash location.
- */
 function fixSessionFilePaths(agent: AgentId, version: string, oldVersionDir: string): void {
   const trashAgentDir = path.join(getTrashVersionsDir(), agent, version);
   if (!fs.existsSync(trashAgentDir)) return;
@@ -128,8 +109,6 @@ function formatAccountHint(
 ): string {
   const parts: string[] = [];
   if (info.email) {
-    // Same-email accounts can live in different orgs (personal Max vs a Team
-    // seat) — the badge is what makes the picker disambiguate them.
     const badge = accountOrgBadge(info);
     parts.push(badge ? `${info.email} (${badge})` : info.email);
   }
@@ -195,16 +174,6 @@ function warnIfShimShadowed(agent: AgentId): void {
   console.log(chalk.gray(`  ${result.reloadHint}`));
 }
 
-/**
- * Install an isolated copy of an agent version: a fully self-contained install
- * that never touches the user's existing setup.
- *
- * Unlike a normal install it does NOT set (or offer to set) the global default,
- * does NOT create/replace the bare `<agent>` shim, does NOT back up or symlink
- * the user's real `~/.<agent>`, and does NOT carry over settings or resources.
- * It only creates the versioned alias (so the copy is launchable) and records
- * the isolated marker. Invoke the copy explicitly with `agents run <agent>@<v>`.
- */
 function finalizeIsolatedInstall(agent: AgentId, version: string): void {
   const agentConfig = AGENTS[agent];
   const label = agentLabel(agentConfig.id);
@@ -241,24 +210,15 @@ async function versionPruneAction(
     const { agent, version } = parsed;
     const agentConfig = AGENTS[agent];
 
-    // --isolated only ever applies to agents that can BE installed isolated;
-    // for the rest no isolated version can exist, so say so plainly.
     if (isIsolated && !supportsIsolatedInstall(agent)) {
       console.log(chalk.gray(`${agentLabel(agentConfig.id)} has no isolated installs (--isolated is not supported for it).`));
       continue;
     }
 
-    // Script-installed agents (droid, grok) can have a *literal* `latest`
-    // version dir on disk when the post-install version probe failed. An
-    // explicit `<agent>@latest` should remove that dir directly rather than
-    // routing to the interactive picker (which can't run non-interactively),
-    // so treat an installed literal `latest` as a concrete pinned version.
     const isLiteralLatestInstalled =
       version === 'latest' && spec.includes('@') && isVersionInstalled(agent, 'latest');
 
     if (!isLiteralLatestInstalled && (version === 'latest' || version === 'oldest' || !spec.includes('@'))) {
-      // With --isolated, only isolated installs are eligible for the picker, so
-      // a normal/default install can never be selected here by accident.
       const versions = listInstalledVersions(agent)
         .filter((v) => !isIsolated || isVersionIsolated(agent, v));
       if (versions.length === 0) {
@@ -312,8 +272,6 @@ async function versionPruneAction(
           moved.push({ agent, version: v });
         }
 
-        // Default reassignment/clearing is handled at the source in
-        // removeVersion() so it applies to every removal path uniformly.
 
         const remaining = listInstalledVersions(agent);
         if (remaining.length === 0) {
@@ -329,9 +287,6 @@ async function versionPruneAction(
     } else if (!isVersionInstalled(agent, version)) {
       console.log(chalk.gray(`${agentLabel(agentConfig.id)}@${version} not installed`));
     } else if (isIsolated && !isVersionIsolated(agent, version)) {
-      // Safety guard: `--isolated` refuses to remove a normal/default install,
-      // so an accidental `remove <agent>@<default> --isolated` can never delete
-      // the user's primary version or disturb their real ~/.<agent>.
       console.log(chalk.yellow(`${agentLabel(agentConfig.id)}@${version} is not an isolated install; refusing to remove it under --isolated.`));
       console.log(chalk.gray(`  Drop --isolated to remove a normal version: agents ${commandName} ${agent}@${version}`));
     } else {
@@ -405,7 +360,6 @@ function configureVersionPruneCommand(cmd: Command, commandName: VersionPruneVer
   cmd.action((specs: string[], options) => versionPruneAction(specs, options, commandName));
 }
 
-/** Register `agents add`, `agents prune`, `agents remove`, and `agents use`. */
 export function registerVersionsCommands(program: Command): void {
   const addCmd = program
     .command('add <specs...>')
@@ -474,14 +428,6 @@ export function registerVersionsCommands(program: Command): void {
 
         warnAgentDeprecated(agent);
 
-        // Isolation relies on a config-dir env var to redirect the copy away
-        // from the user's real ~/.<agent>. Agents without one isolate only by
-        // adopting ~/.<agent> (which --isolated skips), so an isolated copy
-        // would silently read/write the real config. Refuse rather than lie.
-        // A normal install of a currently isolated-only agent would adopt it: set the
-        // global default, create the bare shim, and repoint the real ~/.<agent>. The
-        // primitives refuse that outright, so catch it here — before spending a
-        // network install on something that cannot finish — and say what to do.
         if (!isIsolated && isIsolationProtected(agent)) {
           console.log(chalk.red(`${agentLabel(agentConfig.id)} is installed only as isolated copies.`));
           console.log(chalk.gray(`  A normal install would adopt ${agentConfig.configDir} and your ${agentConfig.cliCommand} launcher.`));
@@ -505,24 +451,13 @@ export function registerVersionsCommands(program: Command): void {
           continue;
         }
 
-        // One managed installation per harness (PHNX-3940): bare `agents add`
-        // installs it (label `main`) or reuses the one already there, and
-        // `<harness>@<release>` pins that SAME install — exactly
-        // `agents update <harness> --to <release>`. A second home exists only
-        // as an --isolated copy, which keeps its own release-labelled flow.
         let installedAsVersion = version;
         const managed = isIsolated ? null : resolveManagedInstallation(agent);
-        // `<harness>@main` (or @<the managed label>) names the installation
-        // itself, not a release: it reads as the bare form — reuse when
-        // present, install latest into `main` when absent — never an
-        // `npm install <pkg>@main` guessing at a registry tag.
         const namesManagedLabel = version === MANAGED_INSTALLATION_LABEL || (managed !== null && version === managed.label);
         const addPlan = planManagedAdd({ explicitPin: spec.includes('@') && !namesManagedLabel, managedInstalled: managed !== null });
 
         if (addPlan === 'pin' && managed) {
           if (version !== 'latest' && !supportsPinnedUpdate(agent)) {
-            // Fail loud at the boundary rather than updating to the current
-            // release and reporting it as the pin that was asked for.
             console.log(chalk.red(`${agentLabel(agentConfig.id)} is a single self-updating binary with no pinnable releases — drop the @${version}, or use @latest.`));
             process.exitCode = 1;
             continue;
@@ -553,7 +488,6 @@ export function registerVersionsCommands(program: Command): void {
           console.log(chalk.gray(`  Accounts: agents view ${agent}. Update now: agents update ${agent}.`));
           installedAsVersion = managed.label;
 
-          // Ensure shim exists (in case it was deleted or needs updating)
           createShim(agent);
         } else if (isIsolated) {
           let alreadyInstalled = false;
@@ -575,14 +509,10 @@ export function registerVersionsCommands(program: Command): void {
 
           if (alreadyInstalled) {
             if (!isVersionIsolated(agent, installedAsVersion)) {
-              // A normal and an isolated install of the SAME version share one
-              // on-disk dir, so they can't coexist. Refuse rather than silently
-              // convert the user's existing (possibly default) install.
               console.log(chalk.yellow(`${agentLabel(agentConfig.id)}@${installedAsVersion} is already installed as a normal (default-eligible) version.`));
               console.log(chalk.gray(`  Remove it first (agents remove ${agent}@${installedAsVersion}) then re-add with --isolated, or pick a different version.`));
               continue;
             }
-            // Already isolated: re-affirm the alias + marker idempotently.
             finalizeIsolatedInstall(agent, installedAsVersion);
             continue;
           }
@@ -596,10 +526,6 @@ export function registerVersionsCommands(program: Command): void {
             console.error(chalk.gray(redactSecrets(result.error || 'Unknown error')));
             continue;
           }
-          // Isolated installs stop here: no bare shim, no settings carry-over,
-          // no resource sync, no default switch, no PATH edits. Just a
-          // launchable versioned alias + the isolated marker, leaving the
-          // user's real ~/.<agent> and default untouched.
           finalizeIsolatedInstall(agent, result.installedVersion || version);
           continue;
         } else {
@@ -627,21 +553,13 @@ export function registerVersionsCommands(program: Command): void {
             );
             spinner.succeed(`Installed ${installedIdentity}`);
 
-            // The project pin below names the installation, never the release
-            // inside it — the release moves on update, the label is frozen.
             installedAsVersion = installedVersion;
 
-            // Create shim if first install
             if (!shimExists(agent)) {
               createShim(agent);
               console.log(chalk.gray(`  Created shim: ${getShimsDir()}/${agentConfig.cliCommand}`));
             }
 
-            // Seed the fresh version home with user settings from the current
-            // default version (settings.json, keybindings, codex config).
-            // Credentials are deliberately excluded so each version keeps its own
-            // login (see SETTINGS_MANIFEST). Gap-filling only — never overwrites
-            // what the new home has.
             const carrySource = getGlobalDefault(agent);
             if (carrySource && carrySource !== installedVersion) {
               const carried = carryForwardSettings(
@@ -654,7 +572,6 @@ export function registerVersionsCommands(program: Command): void {
               }
             }
 
-            // Smart resource detection: compare available vs ACTUALLY synced (source of truth: files)
             const available = getAvailableResources();
             const actuallySynced = getActuallySyncedResources(agent, installedVersion);
             const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
@@ -677,19 +594,16 @@ export function registerVersionsCommands(program: Command): void {
                   selection = buildAutomaticSelection(newResources);
                 }
               } else if (!hasAnySynced) {
-                // Nothing synced yet - prompt for ALL resources
                 const userSelection = await promptResourceSelection(agent);
                 if (userSelection) {
                   selection = userSelection;
                 }
               } else if (hasNewResources(newResources, agent, installedVersion)) {
-                // Some synced, but NEW resources available - prompt for new only
                 const userSelection = await promptNewResourceSelection(agent, newResources, installedVersion);
                 if (userSelection) {
                   selection = userSelection;
                 }
               }
-              // else: everything already synced, no prompt needed
             } catch (err) {
               if (isPromptCancelled(err)) {
                 console.log(chalk.gray('Skipped resource selection'));
@@ -698,7 +612,6 @@ export function registerVersionsCommands(program: Command): void {
               }
             }
 
-            // Sync resources if user made a selection
             if (selection && Object.keys(selection).length > 0) {
               const syncResult = syncResourcesToVersion(agent, installedVersion, selection);
               const synced: string[] = [];
@@ -715,17 +628,14 @@ export function registerVersionsCommands(program: Command): void {
               }
             }
 
-            // Set as default: auto-set if no default exists, otherwise prompt
             const currentDefault = getGlobalDefault(agent);
             if (currentDefault !== installedVersion) {
               if (!currentDefault) {
-                // First install for this agent - auto-set without prompting
                 await setDefaultVersion(agent, installedVersion);
               } else if (skipPrompts) {
                 console.log(chalk.gray(`  Default remains ${agentLabel(agentConfig.id)}@${currentDefault}. Run 'agents use ${agent}@${installedVersion}' to switch.`));
               } else {
                 try {
-                  // Fetch account info for context in the prompt
                   const home = getVersionHomePath(agent, installedVersion);
                   const info = await getAccountInfo(agent, home);
                   const usage = await getUsageInfoForIdentity({
@@ -734,9 +644,6 @@ export function registerVersionsCommands(program: Command): void {
                     cliVersion: installedVersion,
                     info,
                   });
-                  // This hint sits in a "switch your default to this version?"
-                  // confirm — the one place a stale reading directly steers a
-                  // choice, so it must not present an unconfirmed bar as fact.
                   const headless = isUsageHeadlessScopeError(usage.error);
                   const accountHint = formatAccountHint(
                     info,
@@ -765,7 +672,6 @@ export function registerVersionsCommands(program: Command): void {
               }
             }
 
-            // Auto-add shims to PATH if not already there
             if (!isShimsInPath()) {
               const pathResult = addShimsToPath();
               if (pathResult.success && !pathResult.alreadyPresent) {
@@ -779,7 +685,6 @@ export function registerVersionsCommands(program: Command): void {
           }
         }
 
-        // Update project manifest if -p flag
         if (isProject) {
           const projectManifestDir = path.join(process.cwd(), '.agents');
           const projectManifestPath = path.join(projectManifestDir, 'agents.yaml');
@@ -793,9 +698,6 @@ export function registerVersionsCommands(program: Command): void {
             : createDefaultManifest();
 
           manifest.agents = manifest.agents || {};
-          // A project pin names the installation (its frozen label), never the
-          // release inside it — the release moves on update, the label is what
-          // every resolver reads back.
           manifest.agents[agent] = installedAsVersion;
 
           writeManifest(process.cwd(), manifest);
@@ -805,9 +707,6 @@ export function registerVersionsCommands(program: Command): void {
     });
 
   configureVersionPruneCommand(program.command('prune <specs...>'), 'prune');
-  // `rm` and `purge` are commander aliases for `remove` (which is itself an
-  // alias for `prune`). Native `.aliases()` keeps them in lockstep — same
-  // action, same options, no duplicate registration.
   configureVersionPruneCommand(
     program.command('remove <specs...>', { hidden: true }).aliases(['rm', 'purge']),
     'remove',
@@ -840,10 +739,6 @@ export function registerVersionsCommands(program: Command): void {
   useCmd.action(async (agentArg: string, versionArg: string | undefined, options) => {
       try {
         const skipPrompts = options.yes || !isInteractiveTerminal();
-        // Auto-pull ~/.agents/.system if it's a git repo tracking the EXPECTED
-        // system remote (silent on success). The system repo ships hooks that run
-        // as shell on tool events, so pulling from a repointed origin would be
-        // remote code execution — tryAutoPullSystemRepo refuses that (PHNX-2957).
         const agentsDir = getAgentsDir();
         const pullResult = await tryAutoPullSystemRepo(agentsDir);
         if (pullResult.refused) {
@@ -862,7 +757,6 @@ export function registerVersionsCommands(program: Command): void {
           console.log(chalk.gray('Synced ~/.agents/.system from remote'));
         }
 
-        // Support both "claude 2.0.65" and "claude@2.0.65" formats
         let agent: string;
         let version: string | undefined;
 
@@ -892,10 +786,6 @@ export function registerVersionsCommands(program: Command): void {
         let selectedVersion = version;
 
         if (!version) {
-          // Interactive version picker. Isolated installs are walled off from the
-          // real ~/.<agent> on purpose, so they must never be selectable here —
-          // setting one as the default would repoint the real config at it. Filter
-          // them out (same as the `remove` picker), leaving only usable versions.
           const versions = listInstalledVersions(agentId).filter((v) => !isVersionIsolated(agentId, v));
           if (versions.length === 0) {
             console.log(chalk.red(`No versions of ${agentLabel(agentConfig.id)} installed`));
@@ -912,14 +802,12 @@ export function registerVersionsCommands(program: Command): void {
 
           const globalDefault = getGlobalDefault(agentId);
 
-          // Sort versions with default first
           const sortedVersions = [...versions].sort((a, b) => {
             if (a === globalDefault) return -1;
             if (b === globalDefault) return 1;
             return 0;
           });
 
-          // Pre-fetch account info for picker labels and usage identity lookup
           const pickerAccounts = await Promise.all(
             sortedVersions.map((v) =>
               getAccountInfo(agentId, getVersionHomePath(agentId, v)).then((info) => ({ v, info }))
@@ -973,21 +861,8 @@ export function registerVersionsCommands(program: Command): void {
           return;
         }
 
-        // selectedVersion is guaranteed to be defined after the check above
         const finalVersion = selectedVersion;
 
-        // An isolated install is deliberately walled off from the real
-        // ~/.<agent>. `agents use` would repoint the real config symlink at it
-        // (switchConfigSymlink) and carry settings forward INTO it
-        // (carryForwardSettings) — a direct breach of the isolation guarantee.
-        // Refuse for both the explicit `use <agent>@<isolated>` path (the picker
-        // above already filters isolated versions out of the interactive path).
-        // Isolated copies are launched explicitly via `agents run <agent>@<v>`.
-        // ...so `use` is scoped to the sandbox rather than refused. Setting the
-        // ISOLATED default records which copy a bare `agents run <agent>` should
-        // reach, and touches none of the five adopting side effects above. The
-        // pointer lives in `meta.isolatedAgents`, never in `meta.agents`, so
-        // `getGlobalDefault` still cannot return an isolated version.
         if (isVersionIsolated(agentId, finalVersion)) {
           if (options.project) {
             console.log(chalk.yellow(`${agentLabel(agentConfig.id)}@${finalVersion} is an isolated install; --project pins are for shared versions.`));
@@ -1007,7 +882,6 @@ export function registerVersionsCommands(program: Command): void {
         }
 
         if (options.project) {
-          // Set in project manifest
           const projectManifestDir = path.join(process.cwd(), '.agents');
           const projectManifestPath = path.join(projectManifestDir, 'agents.yaml');
 
@@ -1032,12 +906,10 @@ export function registerVersionsCommands(program: Command): void {
           );
           console.log(`Set ${projIdentity} for this project`);
         } else {
-          // Smart resource detection: compare available vs ACTUALLY synced (source of truth: files, not tracking)
           const available = getAvailableResources();
           const actuallySynced = getActuallySyncedResources(agentId, finalVersion);
           const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
 
-          // Check if anything is actually synced (source of truth: actual files)
           const hasAnySynced = actuallySynced.commands.length > 0 ||
             actuallySynced.skills.length > 0 ||
             actuallySynced.hooks.length > 0 ||
@@ -1070,7 +942,6 @@ export function registerVersionsCommands(program: Command): void {
                 }
               }
             } else if (!hasAnySynced) {
-              // First time: prompt for ALL resources
               console.log(chalk.yellow(`\n${agentLabel(agentConfig.id)}@${finalVersion} has no synced resources.`));
               const userSelection = await promptResourceSelection(agentId);
               if (userSelection && Object.keys(userSelection).length > 0) {
@@ -1089,7 +960,6 @@ export function registerVersionsCommands(program: Command): void {
                 }
               }
             } else if (hasNewResources(newResources, agentId, finalVersion)) {
-              // Has synced before, but NEW items available
               const userSelection = await promptNewResourceSelection(agentId, newResources, finalVersion);
               if (userSelection && Object.keys(userSelection).length > 0) {
                 const syncResult = syncResourcesToVersion(agentId, finalVersion, userSelection);
@@ -1107,7 +977,6 @@ export function registerVersionsCommands(program: Command): void {
                 }
               }
             }
-            // else: everything already synced, no prompt needed
           } catch (err) {
             if (isPromptCancelled(err)) {
               console.log(chalk.gray('No changes made'));
@@ -1119,9 +988,6 @@ export function registerVersionsCommands(program: Command): void {
 
           const previousDefault = getGlobalDefault(agentId);
 
-          // Carry user settings from the outgoing default into the target
-          // version home before switching. Gap-filling only, so versions that
-          // already have their own settings are left untouched.
           if (previousDefault && previousDefault !== finalVersion) {
             const carried = carryForwardSettings(
               agentId,
@@ -1136,15 +1002,11 @@ export function registerVersionsCommands(program: Command): void {
             }
           }
 
-          // Set global default
           setGlobalDefault(agentId, finalVersion);
 
-          // Regenerate shim so it uses the latest script format
           createShim(agentId);
           createVersionedAlias(agentId, finalVersion);
 
-          // Switch config symlink (e.g., ~/.claude -> version's config)
-          // No conflict prompts - just backup existing config if needed
           const symlinkResult = await switchConfigSymlink(agentId, finalVersion);
           if (!symlinkResult.success) {
             console.log(chalk.yellow(`Warning: Could not update config symlink: ${symlinkResult.error}`));
@@ -1152,7 +1014,6 @@ export function registerVersionsCommands(program: Command): void {
             console.log(chalk.gray(`Backed up existing config to: ${symlinkResult.backupPath}`));
           }
 
-          // Switch home-level files (e.g., ~/.claude.json -> version's auth file)
           switchHomeFileSymlinks(agentId, finalVersion);
           warnIfShimShadowed(agentId);
 
@@ -1160,9 +1021,6 @@ export function registerVersionsCommands(program: Command): void {
           const useModel = resolveConfiguredModel(agentId, finalVersion)?.model;
           const useModelStr = useModel ? chalk.yellow(useModel) : null;
           const useAcctStr = useEmail ? chalk.cyan(useEmail) : null;
-          // Self-updating agents are one binary; `use` only swaps the config
-          // symlink (the profile), it does not change which binary runs — so say
-          // "profile", not "version", to match what actually happened.
           if (isSelfUpdatingAgent(agentId)) {
             const identity = formatAgentIdentity(chalk.green(agentLabel(agentConfig.id)), useModelStr, useAcctStr);
             console.log(`Switched ${identity} to config profile ${chalk.green(finalVersion)}`);

@@ -8,7 +8,7 @@ import { trackSpawn } from '../src/index.js';
 import { clearSession } from '../src/writer.js';
 import type { AgentId, DetectionResult } from '../src/types.js';
 
-// Hooks record descendant agent PIDs; teardown searches the tree and kills fixture-cwd tmux panes too.
+
 export interface SpawnOpts {
   agent: AgentId;
   cwd?: string;

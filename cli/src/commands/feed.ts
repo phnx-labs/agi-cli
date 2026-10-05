@@ -681,8 +681,6 @@ export function registerFeedCommand(program: Command): void {
         localBlocks = enrichBlocksFromSessions(localBlocks, sessionHintsFromActive(sessions));
       }
 
-      // Policy may mutate only blocks owned by this machine; peers dispatch
-      // their own blocks so a remote agent never receives a local mailbox action.
       const preparedLocal = prepareLocalFeedBlocks(localBlocks, {
         includeLocal,
         all: opts.all,

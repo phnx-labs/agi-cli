@@ -49,8 +49,6 @@ describe('buildJobCommand', () => {
         return acc;
       }, []);
       expect(addDirIndices.length).toBe(2);
-      // The `~` expansion (os.homedir() + the rest of the entry) yields mixed
-      // separators on Windows; compare separator-agnostically.
       expect(toPosix(cmd[addDirIndices[0] + 1])).toBe(toPosix(join(homedir(), 'projects/foo')));
       expect(toPosix(cmd[addDirIndices[1] + 1])).toBe(toPosix(join(homedir(), 'reports')));
     });
@@ -92,8 +90,6 @@ describe('buildJobCommand', () => {
       expect(cmd.join(' ')).toContain('extends = ":read-only"');
     });
 
-    // A routine runs with nobody watching, so `on-request` there is not a safety
-    // net — it is a job that hangs on a dialog until the timeout kills it.
     it('auto mode keeps edit\'s sandbox but never prompts', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'auto' }), 'hello');
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -149,8 +145,6 @@ describe('buildJobCommand', () => {
     });
 
     it('builds the exact plan mode command as read-only ask mode', () => {
-      // Headless --plan answers through createPlan, which -p output never prints;
-      // ask mode is equally read-only and prints its answer (6cb76420c).
       expect(buildJobCommand(makeConfig({ agent: 'cursor', mode: 'plan' }), 'hello')).toEqual([
         'cursor-agent',
         '-p',

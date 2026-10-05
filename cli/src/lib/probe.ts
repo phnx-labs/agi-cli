@@ -1,4 +1,3 @@
-// POSIX probes own and reap a process group, including on parent exit; settle on direct-child exit, not pipe close.
 import { spawn } from 'child_process';
 
 const GROUP_REAP = process.platform !== 'win32';

@@ -28,17 +28,11 @@ function labeledPullRequestPayload(fullName: string, label: string): Record<stri
   };
 }
 
-/** Provision an isolated ~/.agents HOME with the given routine YAMLs on disk. */
 function makeHome(jobs: Record<string, unknown>[]): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-webhook-home-'));
   const routinesDir = path.join(home, '.agents', 'routines');
   fs.mkdirSync(routinesDir, { recursive: true });
-  // A populated config marks this a non-first-run home so the interactive setup
-  // path can never trigger (spawnSync is non-TTY anyway).
   fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
-  // ensureInitialized() gates every non-setup command on the system repo being a
-  // git checkout (isGitRepo → ~/.agents/.system/.git exists). Seed it so the
-  // command runs instead of erroring "agents-cli is not set up".
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
   const deviceDir = path.join(home, '.agents', 'devices', 'webhook-test');
   fs.mkdirSync(deviceDir, { recursive: true });

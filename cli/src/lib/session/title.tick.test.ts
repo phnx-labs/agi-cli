@@ -1,16 +1,8 @@
-/**
- * The titling sweep against a REAL session index (PHNX-3797). Only the model
- * call is injected — that is the module's declared boundary (the same seam the
- * watchdog agent uses); candidate selection, the source-key cache, persistence,
- * and the scan upsert's preservation of a written title all run for real.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db — db.ts captures DB_PATH at
-// module load (same pattern as the migration/mirror tests in this directory).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-titletick-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -60,7 +52,6 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     const second = await runSessionTitleTick({ run, limit: 5 });
     expect(second.generated).toBe(0);
     expect(second.cached).toBe(1);
-    // The point of the source key: a titled session costs ZERO model calls forever.
     expect(calls).toBe(1);
   });
 
@@ -70,8 +61,6 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     await runSessionTitleTick({ run: async () => 'First title', limit: 5 });
     expect(db.getSessionById(id)?.generatedTitle).toBe('First title');
 
-    // The user's first turn is re-derived by a rescan (a resumed transcript whose
-    // real first turn finally parsed): the stored key no longer matches.
     seed(id, { firstUserMessage: 'Actually: make the fleet mirror carry the title too.' });
     const changed = await runSessionTitleTick({ run: async () => 'Mirror carries title', limit: 5 });
     expect(changed.generated).toBe(1);
@@ -120,8 +109,6 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     const id = '66666666-0000-0000-0000-000000000006';
     seed(id);
     await runSessionTitleTick({ id, run: async () => 'Durable across rescan' });
-    // A normal incremental scan re-upserts the row; it carries no title column,
-    // so the value must survive (the scanner never names those columns).
     seed(id, { messageCount: 42 });
     expect(db.getSessionById(id)?.generatedTitle).toBe('Durable across rescan');
   });
@@ -142,7 +129,6 @@ describe('swappable title provider (PHNX-3797)', () => {
     const result = await runSessionTitleTick({ id, provider });
     expect(result.generated).toBe(1);
     expect(seen.name).toBe('fake-local');
-    // The provider receives the session's user text, not a pre-rendered prompt.
     expect(seen.input).toBe('wire up the local title backend');
     expect(db.getSessionById(id)?.generatedTitle).toBe('Wire up the local backend');
   });

@@ -20,8 +20,6 @@ import * as activation from '../routine-activation.js';
 import { query, _resetForTest } from '../feed/events.js';
 import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 
-// RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
-// Pure command construction and path helpers must still run on Windows.
 const describeSpawn = process.platform === 'win32' ? describe.skip : describe;
 
 describe('buildRoutineSpawnEnv (PHNX-3406)', () => {
@@ -36,9 +34,6 @@ describe('buildRoutineSpawnEnv (PHNX-3406)', () => {
 
 
 beforeEach(() => {
-  // These tests pass synthetic definitions directly to the runner. Exercise
-  // legacy definition eligibility explicitly instead of inheriting the host's
-  // real device manifest from a reused local/CI worker.
   vi.spyOn(activation, 'routineEnabledOnThisDevice').mockReturnValue(null);
 });
 
@@ -46,10 +41,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Remove every run directory for a job (its parent dir), best-effort. */
 function cleanupJobRuns(jobName: string): void {
   const jobRunsDir = path.dirname(getRunDir(jobName, 'x'));
-  try { fs.rmSync(jobRunsDir, { recursive: true, force: true }); } catch { /* nothing to clean */ }
+  try { fs.rmSync(jobRunsDir, { recursive: true, force: true }); } catch {  }
 }
 
 function baseConfig(partial: Partial<JobConfig> = {}): JobConfig {
@@ -147,9 +141,6 @@ describe('routine spawn cwd', () => {
   });
 
   it('no longer infers a checkout from repo — repo is external identity, not a cwd', () => {
-    // Removing repo→directory inference is the fix: `repo` is GitHub/cloud
-    // identity only. A repo-only routine has no execution anchor, so it lands in
-    // $HOME (and the readiness gate pauses such an agent routine before it fires).
     expect(routineSpawnCwd({ name: 'r', repo: 'phnx-labs/agents-cli' } as never)).toBe(os.homedir());
   });
 
@@ -196,24 +187,11 @@ describeSpawn('runner device enforcement', () => {
 
 
 describeSpawn('runner fire-time auth preflight (PHNX-3415)', () => {
-  // Proves the runner.ts WIRING, not just the extracted pure function
-  // (routine-readiness.auth.test.ts covers fireTimeAuthReadiness in isolation): a
-  // routine whose resolved account is provably signed out records a terminal
-  // `blocked`/`agent_auth_failed` run — with the re-login repair, exitCode/pid
-  // null, and nothing spawned — through the real executeJob/executeJobDetached
-  // call sites, instead of a `failed` run that spawned and 401'd.
-  //
-  // A PINNED version resolves through `resolveRoutineLaunch` without a live
-  // credential (the pin returns its own chain — runner.ts:1069), so the fire-time
-  // cache preflight downstream is what's exercised; `sandbox: false` keeps the run
-  // out of a version-home overlay it need not build. This is the real signed-out
-  // pinned-routine scenario, not a synthetic one.
   afterEach(() => {
     cleanupJobRuns('auth-preflight-fg');
     cleanupJobRuns('auth-preflight-detached');
   });
 
-  /** Seed the daemon-warmed auth-health cache (isolated HOME) for claude@version. */
   function seedAuth(version: string, verdict: 'revoked' | 'unconfigured', account?: string): void {
     writeAuthHealthEntries({
       [authCacheKey(machineId(), 'claude', version)]: { verdict, checkedAt: Date.now(), ...(account ? { account } : {}) },
@@ -234,7 +212,6 @@ describeSpawn('runner fire-time auth preflight (PHNX-3415)', () => {
     expect(meta.errorMessage).toContain('agent_auth_failed');
     expect(reportPath).toBeNull();
 
-    // Persisted, not just returned — `agents routines runs` sees the same block.
     const persisted = readRunMeta(config.name, meta.runId);
     expect(persisted?.status).toBe('blocked');
     expect(persisted?.readiness?.code).toBe('agent_auth_failed');
@@ -278,9 +255,6 @@ describeSpawn('runner host placement', () => {
   });
 
   it('monitorRunningJobs finalizes a host-placed run from its terminal sidecar (no local pid)', () => {
-    // A terminal sidecar means reconcileTask returns without any ssh probe —
-    // this exercises the exact daemon path that used to strand host runs at
-    // 'running' forever (the monitor skipped every pid-less meta).
     const taskId = 'ffff0001';
     const jobName = 'host-monitor-test';
     const runId = 'run-hm-1';
@@ -339,10 +313,6 @@ describeSpawn('runner host placement', () => {
   });
 
   it('reapExitedRunningJobs finalizes a host-placed run via the async reconciler (no sync ssh on the tick)', async () => {
-    // The daemon heartbeat tick reaches host-placed runs through the ASYNC path
-    // (finalizeHostRunAsync → reconcileTaskAsync). A terminal sidecar returns
-    // without any ssh probe, so this asserts the async path heals the record
-    // identically to the sync monitorRunningJobs one (PHNX-3695).
     const taskId = 'ffff0002';
     const jobName = 'host-monitor-async-test';
     const runId = 'run-hm-async-1';
@@ -392,7 +362,6 @@ describeSpawn('runner host placement', () => {
   });
 });
 
-// Pure fs archive of overlay homes — no process-group ownership.
 describe('routine transcript archiving', () => {
   const jobName = 'archive-routine-test';
   const runId = 'run-archive-1';
@@ -416,11 +385,6 @@ describe('routine transcript archiving', () => {
     expect(fs.readFileSync(archived, 'utf-8')).toContain('"content":"hi"');
   });
 
-  // Regression: Kimi splits a session across state.json (metadata) and
-  // agents/main/wire.jsonl (the actual conversation) — see
-  // session/discover.ts:4382-4384. A ROUTINE_TRANSCRIPT_SPECS entry that only
-  // matched `.json` archived the metadata shell and silently dropped every
-  // message; both extensions must be captured.
   it('archives BOTH state.json and wire.jsonl for a kimi routine session', () => {
     const kimiJobName = 'archive-kimi-test';
     const kimiRunId = 'run-kimi-1';
@@ -448,34 +412,22 @@ describe('routine transcript archiving', () => {
     }
   });
 
-  // RUSH-2271: a real Claude routine writes its transcript to the per-version
-  // CLAUDE_CONFIG_DIR home (buildExecEnv, exec.ts), NOT the sandbox overlay the
-  // archiver used to scan — so nothing was ever archived and the run never became
-  // an origin='routine' session. The archiver now reads the version home, scoped by
-  // a pre-spawn baseline so it copies ONLY this run's transcript out of that shared
-  // home, never a sibling session's.
   it('archives a Claude routine transcript from the per-version home and excludes pre-existing sessions', () => {
     const jobName = 'archive-versionhome-test';
     const runId = 'run-vh-1';
     const version = '99.0.0-rush2271';
     const runDir = getRunDir(jobName, runId);
     fs.mkdirSync(runDir, { recursive: true });
-    // Where a claude routine actually writes: <versionHome>/.claude/projects.
     const projects = path.join(getVersionHomePath('claude', version), '.claude', 'projects', 'proj');
     fs.mkdirSync(projects, { recursive: true });
-    // A sibling session already in the shared home BEFORE this run — must never be
-    // swept in and mis-tagged as this routine's.
     const preexisting = path.join(projects, 'sess-preexisting.jsonl');
     fs.writeFileSync(preexisting, '{"type":"user","message":{"content":"an earlier interactive session"}}\n', 'utf-8');
 
     const meta = { jobName, runId, agent: 'claude' as const, version };
     try {
-      // 1) Baseline captured before the run spawns (records the pre-existing session).
       snapshotRoutineTranscriptBase(meta, runDir);
-      // 2) The run produces its own transcript in the same shared home.
       const thisRun = path.join(projects, 'sess-thisrun.jsonl');
       fs.writeFileSync(thisRun, '{"type":"user","message":{"content":"the routine run"}}\n', 'utf-8');
-      // 3) Archive.
       archiveRoutineTranscripts(meta, runDir);
 
       const archivedThisRun = path.join(runDir, 'sessions', 'claude', 'projects', 'proj', 'sess-thisrun.jsonl');
@@ -488,29 +440,22 @@ describe('routine transcript archiving', () => {
     }
   });
 
-  // RUSH-2271 failover: the single-shot loop spawns each chain entry's OWN version,
-  // whose per-version home differs from chain[0]'s. When a run rate-limit-fails over to
-  // a second account, the archiver must read the home the attempt that actually ran wrote
-  // to — re-pointed via meta.version + a re-taken baseline before each attempt (runner.ts).
   it('archives the failover attempt\'s version home, not the first attempt\'s (RUSH-2271)', () => {
     const jobName = 'archive-failover-test';
     const runId = 'run-fo-1';
-    const vA = '99.0.2-rush2271'; // first attempt (rate-limited)
-    const vB = '99.0.3-rush2271'; // failover attempt that actually ran
+    const vA = '99.0.2-rush2271';
+    const vB = '99.0.3-rush2271';
     const runDir = getRunDir(jobName, runId);
     fs.mkdirSync(runDir, { recursive: true });
     const projA = path.join(getVersionHomePath('claude', vA), '.claude', 'projects', 'p');
     const projB = path.join(getVersionHomePath('claude', vB), '.claude', 'projects', 'p');
     fs.mkdirSync(projA, { recursive: true });
     fs.mkdirSync(projB, { recursive: true });
-    // A sibling session already in the failover home, and one in the first home.
     fs.writeFileSync(path.join(projB, 'old-B.jsonl'), '{"type":"user","message":{"content":"earlier B session"}}\n', 'utf-8');
     fs.writeFileSync(path.join(projA, 'old-A.jsonl'), '{"type":"user","message":{"content":"earlier A session"}}\n', 'utf-8');
 
     try {
-      // Attempt 1 on version A: baseline A (rate-limits, writes nothing new).
       snapshotRoutineTranscriptBase({ jobName, runId, agent: 'claude', version: vA }, runDir);
-      // Failover to version B: re-point meta.version + re-baseline B, then B runs.
       const metaB = { jobName, runId, agent: 'claude' as const, version: vB };
       snapshotRoutineTranscriptBase(metaB, runDir);
       fs.writeFileSync(path.join(projB, 'sess-B.jsonl'), '{"type":"user","message":{"content":"ran on B"}}\n', 'utf-8');
@@ -518,7 +463,6 @@ describe('routine transcript archiving', () => {
 
       const archivedB = path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'sess-B.jsonl');
       expect(fs.readFileSync(archivedB, 'utf-8')).toContain('ran on B');
-      // Neither the failover home's earlier session nor the first attempt's home is swept in.
       expect(fs.existsSync(path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'old-B.jsonl'))).toBe(false);
       expect(fs.existsSync(path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'old-A.jsonl'))).toBe(false);
     } finally {
@@ -528,9 +472,6 @@ describe('routine transcript archiving', () => {
     }
   });
 
-  // Safety: a shared per-version home holds every session that version+account ran,
-  // so with NO pre-spawn baseline the archiver cannot tell this run's transcript from
-  // a sibling's — it must copy nothing rather than sweep them all in as origin='routine'.
   it('copies nothing from a shared version home when no baseline was recorded', () => {
     const jobName = 'archive-nobaseline-test';
     const runId = 'run-nb-1';
@@ -543,7 +484,6 @@ describe('routine transcript archiving', () => {
 
     const meta = { jobName, runId, agent: 'claude' as const, version };
     try {
-      // No snapshotRoutineTranscriptBase() call → no baseline on disk.
       archiveRoutineTranscripts(meta, runDir);
       expect(fs.existsSync(path.join(runDir, 'sessions', 'claude'))).toBe(false);
     } finally {
@@ -559,7 +499,6 @@ describeSpawn('command-mode routines (executeJob foreground)', () => {
     for (const j of jobs.splice(0)) cleanupJobRuns(j);
   });
 
-  /** A command-mode job (no agent) that runs a plain shell command. */
   function commandConfig(name: string, command: string): JobConfig {
     jobs.push(name);
     return {
@@ -570,7 +509,6 @@ describeSpawn('command-mode routines (executeJob foreground)', () => {
       effort: 'auto',
       timeout: '1m',
       enabled: true,
-      // command routines carry no prompt; the runner never dereferences it.
       prompt: '',
     } as JobConfig;
   }
@@ -587,7 +525,6 @@ describeSpawn('command-mode routines (executeJob foreground)', () => {
     expect(result.meta.errorMessage).toBeUndefined();
     expect(result.reportPath).toBeNull();
 
-    // A real run record was written and is readable from disk.
     const metaOnDisk = JSON.parse(
       fs.readFileSync(path.join(getRunDir('cmd-ok', result.meta.runId), 'meta.json'), 'utf-8'),
     );
@@ -641,16 +578,12 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
       try {
         const m = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         if (m.status !== 'running') return m;
-      } catch { /* meta not yet written */ }
+      } catch {  }
       await new Promise((r) => setTimeout(r, 50));
     }
     return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
   }
 
-  // Regression: a detached (daemon-scheduled) command run must record its REAL
-  // terminal status. The first cut relied on monitorRunningJobs, which only infers
-  // status for agent jobs — so every successful command cron run was mis-recorded
-  // as 'failed'. child.on('exit') now writes the true status.
   it('records completed / exitCode 0 on a successful detached run (not failed)', async () => {
     const meta = await executeJobDetached(commandConfig('cmd-det-ok', 'exit 0'));
     const final = await waitTerminal('cmd-det-ok', meta.runId);
@@ -660,8 +593,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     expect(final.duration).toBeGreaterThanOrEqual(0);
     expect(final.errorMessage).toBeUndefined();
     expect(final.timeoutMs).toBe(60_000);
-    // exit-code file is the posix restart-recovery source of truth (the sh subshell
-    // wrapper writes it). Windows records status via child.on('exit') only — no file.
     if (process.platform !== 'win32') {
       expect(
         fs.readFileSync(path.join(getRunDir('cmd-det-ok', meta.runId), 'exit-code'), 'utf-8').trim(),
@@ -683,8 +614,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     const config = commandConfig('cmd-det-single-flight', command.replace('600)', '5000)'));
 
     const first = await executeJobDetached(config);
-    // The overlap no longer throws — it records a skipped attempt that links the
-    // live run and launches nothing (the plan's non-overlap contract).
     const overlap = await executeJobDetached(config);
     expect(overlap.status).toBe('skipped');
     expect(overlap.skipReason).toBe('active_run');
@@ -699,10 +628,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`;
     const config = commandConfig('cmd-det-failed-live', command);
     const first = await executeJobDetached(config);
-    // Mark the first run failed while its child is still alive — the exact shape
-    // that used to wedge the slot forever (a failed/timeout record whose pid stays
-    // live is treated as "active"). Reaping that orphaned process group is
-    // reapTerminalRoutineProcesses's job, not a reason to keep the slot occupied.
     writeRunMeta({ ...first, status: 'failed', completedAt: new Date().toISOString(), exitCode: 1 });
 
     const overlap = await executeJobDetached(config);
@@ -714,10 +639,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
 
   it('a failed run still carrying a live daemon-shaped pid no longer wedges every later slot (RUSH-2640)', async () => {
     const config = commandConfig('cmd-det-2640-failed', 'exit 0');
-    // Reproduce the release-train wedge: a prior run reached `failed` while its
-    // record still carries a pid that isPidOurs() always accepts. The daemon
-    // stamps its OWN pid on the provisional claim and the daemon never dies, so
-    // isPidOurs() can never go false — process.pid is exactly that shape here.
     const runId = 'wedged-failed-daemonpid';
     fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
     writeRunMeta({
@@ -734,8 +655,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     } as RunMeta);
 
     const meta = await executeJobDetached(config);
-    // Unfixed: the failed+live-pid record reads as active → skipped/active_run,
-    // and the routine never fires again. Fixed: the terminal state released it.
     expect(meta.skipReason).toBeUndefined();
     expect(meta.status).not.toBe('skipped');
     const final = await waitTerminal(config.name, meta.runId);
@@ -744,8 +663,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
 
   it('a stale running record past its own timeout no longer wedges the slot (RUSH-2640)', async () => {
     const config = commandConfig('cmd-det-2640-stale', 'exit 0');
-    // The sandbox-tests/triage-tickets shape: a month-old `running` record with a
-    // live pid and no spawnedAt, which isPidOurs() accepts for any live process.
     const runId = 'stale-running-nobirthtime';
     fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
     writeRunMeta({
@@ -767,8 +684,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
   });
 
   it('ignores a shadowing `agents` binary on PATH and runs the current CLI (RUSH-2431)', async () => {
-    // Place a fake `agents` binary earlier on PATH than the real one. Without the
-    // shell-function guard, the routine would run the fake and print "SHADOW".
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shadow-'));
     const fakeAgents = path.join(tmpDir, 'agents');
     fs.writeFileSync(fakeAgents, '#!/bin/sh\necho SHADOW\n', { mode: 0o755 });
@@ -777,9 +692,6 @@ describeSpawn('command-mode routines (executeJobDetached — daemon/cron path)',
     try {
       const config = commandConfig('cmd-det-shadow', 'agents --version');
       const meta = await executeJobDetached(config);
-      // The routine reaches a terminal state; its exit code depends on what the
-      // real CLI does with `--version` in this environment, so the discriminating
-      // signal is that the fake was NOT run — a broken guard would print SHADOW.
       const final = await waitTerminal('cmd-det-shadow', meta.runId);
       expect(['completed', 'failed']).toContain(final.status);
       const log = fs.readFileSync(path.join(getRunDir('cmd-det-shadow', meta.runId), 'stdout.log'), 'utf-8');
@@ -841,15 +753,9 @@ describe('RUSH-2640 scheduler slot release (pure paths)', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-'));
     process.env.AGENTS_DAEMON_DIR = tmp;
     try {
-      // No daemon pid file: a short-lived foreground launcher records its own pid
-      // so a crash between claim and spawn releases the slot fast.
       expect(launcherClaimPid()).toBe(process.pid);
-      // The daemon pid file names THIS process → we ARE the daemon → record no
-      // pid. The daemon never dies, so its pid must never anchor a run's claim
-      // (it would wedge the slot forever and mis-aim the reaper — RUSH-2640).
       fs.writeFileSync(path.join(tmp, 'daemon.pid'), String(process.pid));
       expect(launcherClaimPid()).toBeNull();
-      // A different daemon pid → this is a foreground launcher again → own pid.
       fs.writeFileSync(path.join(tmp, 'daemon.pid'), String(process.pid + 100_000));
       expect(launcherClaimPid()).toBe(process.pid);
     } finally {
@@ -879,8 +785,6 @@ describe('RUSH-2640 scheduler slot release (pure paths)', () => {
 
     monitorRunningJobs();
 
-    // Unfixed: the `if (!meta.pid) continue` guard ran before the timeout check,
-    // so a null-pid claim wedged as `running` forever. Fixed: it is aged out.
     const final = readRunMeta(jobName, runId);
     expect(final?.status).toBe('timeout');
     expect(final?.errorMessage).toBe('exceeded configured timeout');
@@ -898,12 +802,10 @@ describe('RUSH-2640 scheduler slot release (pure paths)', () => {
       base({ status: 'skipped', skipReason: 'active_run' }),
       base({ status: 'skipped', skipReason: 'active_run' }),
     ])).toBe(3);
-    // A non-matching newest record breaks the streak.
     expect(activeRunSkipStreak([
       base({ status: 'skipped', skipReason: 'active_run' }),
       base({ status: 'completed' }),
     ])).toBe(0);
-    // Only active_run counts — a wrong_owner/duplicate_slot skip is not a wedge.
     expect(activeRunSkipStreak([
       base({ status: 'skipped', skipReason: 'wrong_owner' }),
       base({ status: 'skipped', skipReason: 'active_run' }),
@@ -911,14 +813,6 @@ describe('RUSH-2640 scheduler slot release (pure paths)', () => {
   });
 });
 
-// Regression: executeJobDetached / executeCommandJobDetached (the daemon's
-// normal firing path) never wrapped their settle() with createTimer(...).end(),
-// unlike executeJob/executeJobOnCloud/executeJobOnHost — so every routine that
-// actually fired off the daemon's own schedule emitted ZERO perf.timing
-// samples, and `agents perf run` / `agents routines stats` had nothing to show
-// for the most common firing path. Verifies against the REAL disposable perf
-// warehouse (recordPerfTiming's dynamic import into perf/spool.ts respects the
-// same _resetPerfDbForTest override db.test.ts uses), not a mock.
 describeSpawn('detached routine fires record a perf.timing sample (agent.run)', () => {
   const jobs: string[] = [];
   let tmp: string;
@@ -1025,8 +919,6 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
   });
 
   it('an unattended routine fails loud with NO_VERIFIED_USAGE when every account is stale (PHNX-2526)', async () => {
-    // No picker exists for a routine, so entirely-stale usage is a hard fail —
-    // never a silent launch on the stale default that would hammer it each tick.
     const stale = { ...acct('2.1.219'), usageStatus: 'available' as const };
     const rotation: RotateResult = { picked: stale, healthy: [stale], excluded: [] };
     const err = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
@@ -1087,14 +979,11 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     const meta = { accounts: { native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } } } };
     let askedIdentity: string | undefined;
     const plan = await resolveRoutineLaunch({ ...baseConfig(), account: 'work' }, process.cwd(), {
-      findCredentialAccount: () => false, // 'work' is native, not a provider credential
+      findCredentialAccount: () => false,
       readMeta: () => meta as never,
       resolveAccountVersion: async (_agent, identity) => { askedIdentity = identity; return '2.1.220'; },
     });
-    // The durable name was translated to the identity key before matching...
     expect(askedIdentity).toBe('claude:user=1');
-    // ...and the run pins that install while forwarding `--account` so two
-    // slots sharing one managed binary still select this login.
     expect(plan).toMatchObject({ pinned: true, forwardAccount: true, chain: [{ agent: 'claude', version: '2.1.220' }] });
   });
 
@@ -1136,7 +1025,7 @@ describe('native slot routine dispatch (PHNX-3940 T5)', () => {
 
   afterEach(() => {
     for (const n of names) {
-      try { removeAccount(n); } catch { /* already gone */ }
+      try { removeAccount(n); } catch {  }
     }
     names.length = 0;
     for (const p of planted) fs.rmSync(p, { recursive: true, force: true });
@@ -1197,7 +1086,7 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
   useFreshSecretsHome();
 
   afterEach(() => {
-    try { unbindAccount(name, 'claude', 'claude'); } catch { /* not bound */ }
+    try { unbindAccount(name, 'claude', 'claude'); } catch {  }
     state.updateMeta((m) => {
       const defaults = { ...m.accounts?.defaults };
       if (defaults.claude === name) delete defaults.claude;
@@ -1205,7 +1094,7 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
       delete bindings.claude;
       return { ...m, accounts: { ...m.accounts, defaults, bindings } };
     });
-    try { removeAccount(name); } catch { /* already gone */ }
+    try { removeAccount(name); } catch {  }
   });
 
   it('does not re-enter agents run and still injects the provider credential env', () => {
@@ -1245,8 +1134,6 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
 });
 
 describe('assertRoutineAccountLocalForPlacement — native accounts never dispatch off-box', () => {
-  // Called at the top of BOTH the foreground (executeJobPlaced) and detached
-  // (executeJobDetachedClaimed) placement blocks, before host/cloud dispatch.
   it('rejects a native routine account before a host dispatch', async () => {
     await expect(
       assertRoutineAccountLocalForPlacement({ name: 'r', account: 'work' }, 'host', { account: { kind: 'native', id: 'n', name: 'work', agent: 'claude', identityKey: 'k', scope: 'version' } }),
@@ -1269,8 +1156,6 @@ describe('assertRoutineAccountLocalForPlacement — native accounts never dispat
   });
 
   it('the host dispatch boundary forwards the provider account by name (not dropped)', () => {
-    // executeJobOnHost builds its dispatch options here; the account MUST ride
-    // along or the remote runs under the wrong identity (the review regression).
     const opts = buildHostDispatchOptions(
       { name: 'r', agent: 'claude', account: 'prov', prompt: 'hello', mode: 'auto' } as never,
       { remoteCwd: '/w', runDir: '/run', detached: false },
@@ -1279,7 +1164,6 @@ describe('assertRoutineAccountLocalForPlacement — native accounts never dispat
     expect(opts.agent).toBe('claude');
     expect(opts.remoteCwd).toBe('/w');
     expect(opts.follow).toBe(true);
-    // No account configured → nothing forwarded.
     const bare = buildHostDispatchOptions({ name: 'r', agent: 'claude', prompt: 'x', mode: 'auto' } as never, { remoteCwd: '/w', runDir: '/run', detached: true });
     expect(bare.account).toBeUndefined();
     expect(bare.follow).toBe(false);
@@ -1305,9 +1189,7 @@ describe('assertRoutineAccountLocalForPlacement — native accounts never dispat
 
   it('allows a provider account on host (forwarded by name), rejects it on cloud, no-ops without an account', async () => {
     const provider = { kind: 'provider' as const, id: 'p', name: 'prov', provider: 'openrouter', auth: 'api-key' as const, secretRef: 'r' };
-    // Host: allowed — the remote resolves its own bundle from the forwarded name.
     await expect(assertRoutineAccountLocalForPlacement({ name: 'r', account: 'prov' }, 'host', { account: provider })).resolves.toBeUndefined();
-    // Cloud: fails loud — no secure provider-account injection there yet.
     await expect(assertRoutineAccountLocalForPlacement({ name: 'r', account: 'prov' }, 'cloud', { account: provider }))
       .rejects.toThrow('cloud placement cannot securely inject it');
     await expect(assertRoutineAccountLocalForPlacement({ name: 'r' }, 'host', {})).resolves.toBeUndefined();

@@ -1,7 +1,3 @@
-/**
- * Pure title logic (PHNX-3797): the prompt, the sanitizer, the source key that
- * makes generation once-per-session, and the shared headline ladder.
- */
 import { describe, expect, it } from 'vitest';
 import {
   SESSION_TITLE_MAX_CHARS,
@@ -78,15 +74,11 @@ describe('renderSessionTitlePrompt', () => {
     expect(prompt).toContain('Repository: agents-cli');
     expect(prompt).toContain('Ticket: PHNX-3797');
     expect(prompt).toContain('Branch: phnx-3797-session-title');
-    // The marker is what keeps the titler from titling its own spawned session.
     expect(isSessionTitlePrompt(prompt)).toBe(true);
   });
 
   it('asks for a descriptive action+object headline, not a single terse noun', () => {
     const prompt = renderSessionTitlePrompt({ firstUserMessage: 'triage the board' });
-    // The owner feedback: titles must be descriptive ("Triage the AGI board"),
-    // not one word ("Triage"). Pin the instruction so a future reword can't
-    // silently drop it.
     expect(prompt).toContain('ACTION + OBJECT');
     expect(prompt).toContain('4 to 8 words');
     expect(prompt).toMatch(/NOT a single noun/);

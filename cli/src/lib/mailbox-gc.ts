@@ -67,7 +67,6 @@ function archiveAllPending(boxDir: string, reason: string, feedRoot?: string): n
                 feedRoot,
               );
             } catch {
-              // Receipt surfacing is best-effort; never stall GC.
             }
           }
         } else {
@@ -75,7 +74,6 @@ function archiveAllPending(boxDir: string, reason: string, feedRoot?: string): n
         }
         n++;
       } catch {
-        // ignore racing writers
       }
     }
   }
@@ -102,23 +100,17 @@ function pruneConsumed(boxDir: string, maxAgeMinutes: number, now: Date): number
         fs.unlinkSync(file);
         n++;
       } catch {
-        // ignore
       }
     }
   }
   return n;
 }
 
-/**
- * Sweep all mailboxes. For dead boxes (not in `activeBoxIds`), archive every
- * pending message as `dropped: dead` and remove any feed block tied to that
- * mailbox. For live boxes, drop expired messages and prune old consumed files.
- */
 export function gcMailbox(
   activeBoxIds: Set<string>,
   options: GcOptions = {},
 ): GcResult {
-  // Archive expired live-box messages and retain bounced dead-box blocks through the prune window.
+
   const root = options.root ?? getMailboxRootDir();
   const feedRoot = options.feedRoot;
   const now = options.now ?? new Date();

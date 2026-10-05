@@ -22,7 +22,7 @@ export function execFileBounded(
   args: string[],
   opts: ExecFileBoundedOptions,
 ): Promise<BoundedExecResult> {
-  // Daemon-tick subprocesses stay asynchronous and deadline-bounded so one spawn cannot freeze every service.
+
   const isWin = process.platform === 'win32';
   return new Promise((resolve) => {
     const child = spawn(file, args, {
@@ -39,7 +39,6 @@ export function execFileBounded(
     let timedOut = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Kill the POSIX process group or Windows tree, escalating TERM → KILL; direct-child kill leaks descendants.
     const killGroup = (signal: NodeJS.Signals): void => {
       if (child.pid === undefined) return;
       try {
@@ -71,7 +70,6 @@ export function execFileBounded(
     child.stdout?.on('data', (chunk) => { stdout += chunk; });
     child.stderr?.on('data', (chunk) => { stderr += chunk; });
 
-    // Outcomes resolve rather than reject; stdin EPIPE is reported by close/error and must not crash the daemon.
     child.stdin?.on('error', () => {});
     if (opts.input !== undefined) child.stdin?.end(opts.input);
     else child.stdin?.end();

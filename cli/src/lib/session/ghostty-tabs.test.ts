@@ -52,7 +52,6 @@ describe('assignGhosttyTabs', () => {
       surf({ tabIndex: 1, cwd: '/repo', title: 'unrelated one thing' }),
       surf({ tabIndex: 2, cwd: '/repo', title: 'unrelated two thing' }),
     ]);
-    // No title match among 2 same-cwd candidates -> no number (never a wrong jump target).
     expect(m.has(s)).toBe(false);
   });
 

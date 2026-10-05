@@ -39,7 +39,6 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
     { rel: '.claude/settings.json', strategy: 'json-merge' },
     { rel: '.claude/settings.local.json', strategy: 'copy-if-absent' },
     { rel: '.claude/keybindings.json', strategy: 'copy-if-absent' },
-    // Claude carry-forward projects only accepted trust; credentials and session state stay version-local.
     { rel: '.claude.json', strategy: 'claude-trust' },
   ],
   codex: [
@@ -183,7 +182,6 @@ export function carryForwardSettings(
           } else {
             fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           }
-          // Running Claude rewrites this file too, so carry-forward must be atomic.
           atomicWriteFileSync(
             targetPath,
             JSON.stringify({ ...targetObj, projects: targetProjects }, null, 2) + '\n'

@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
 
-// Merge fetched profiles only while the same session token owns the file; writes are atomic mode 0600.
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-identity-'));
 process.env.AGENTS_STATE_DIR = path.join(HOME, 'state');

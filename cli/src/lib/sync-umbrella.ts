@@ -19,7 +19,7 @@ interface UmbrellaPlan {
 }
 
 export function planUmbrellaStages(f: UmbrellaFlags): UmbrellaPlan {
-  // Bare sync fetches repos and reconciles; secrets stay explicit because of their fleet-wide blast radius.
+
   if (f.local) {
     return { fetchRepos: false, fetchSecrets: false, reconcile: true };
   }
@@ -68,7 +68,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     const errors: string[] = [];
     for (const { alias, dir } of dirs) {
       if (alias === 'user') {
-        // Adopt a non-git user store before pull; missing remote is loud, never a false reconciled result.
+
         const adopted = await adoptUserRepoIfNeeded(dir);
         if (adopted && !adopted.success) {
           const hint = adopted.needsUrl ? ' — git-back it: agents repo pull user <git-url>' : '';
@@ -94,7 +94,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     }
   }
 
-  // Fetch-stage failures accumulate so independent stages still run.
+
   if (plan.fetchSecrets) {
     if (!passphrase) {
       result.secrets = {
@@ -138,7 +138,6 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     result.declined = refreshed.declined;
     result.reconciledVersions = refreshed.reconciled;
 
-    // Device refresh discovers pending devices rather than silently registering them.
     if (!selection) {
       const { runDeviceSync } = await import('./devices/sync.js');
       const { reconcilePendingSentinels } = await import('./devices/pending.js');

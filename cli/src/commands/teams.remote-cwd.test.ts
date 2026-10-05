@@ -1,10 +1,3 @@
-/**
- * `teams add --remote-cwd` is a no-op trap: the flag rides the shared --device
- * option family but `teams add` treats --device as placement, so it is
- * never read. Rather than silently ignore it (which misleads you into thinking
- * it set the teammate's repo path), the command rejects it with guidance. These
- * pin the guidance so it can't regress into a bare/empty error.
- */
 import { describe, it, expect } from 'vitest';
 import { remoteCwdOnAddError } from './teams.js';
 

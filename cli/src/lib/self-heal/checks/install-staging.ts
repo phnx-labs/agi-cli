@@ -9,7 +9,7 @@ import { resolveRunningPackageRoot } from '../../self-update.js';
 const __installStagingDirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const STALE_INSTALL_STAGING_AGE_MS = 10 * 60 * 1000;
-// The age gate must precede recursive removal so a live npm reify directory is never repaired away.
+
 
 function findAgedInstallStaging(packageRoot: string, maxAgeMs: number, now: number): string[] {
   const resolved = path.resolve(packageRoot);

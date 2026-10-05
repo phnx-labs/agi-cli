@@ -9,7 +9,7 @@ export function normalizeRoutineNames(names: Iterable<string>): string[] {
 }
 
 export function enabledRoutineNames(): string[] | null {
-  // Device activation is scheduler ownership, distinct from where a routine executes.
+
   const names = readMeta().deviceRoutines;
   return Array.isArray(names) ? normalizeRoutineNames(names) : null;
 }
@@ -71,7 +71,7 @@ export interface RoutineDeviceIndex {
 }
 
 export function routineDeviceIndex(): RoutineDeviceIndex {
-  // Report corrupt peer documents without blanking otherwise valid device activation state.
+
   const byRoutine = new Map<string, string[]>();
   const errors: string[] = [];
   let materialized = false;

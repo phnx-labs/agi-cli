@@ -1,12 +1,3 @@
-/**
- * Monitors — durable event-triggered watchers.
- *
- * Registers the `agents monitors` command tree: create, list, view, dry-run test,
- * edit, logs, fire history, pause/resume, (re)pin the owner device, and remove.
- * Mirrors `agents routines` (commands/routines.ts) and shares the same daemon +
- * dispatch engine underneath — a monitor is a routine whose trigger is a watched
- * source instead of a clock.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -65,7 +56,6 @@ function stderrLine(message: string): void {
   process.stderr.write(message + '\n');
 }
 
-/** A one-line human label for what a monitor watches. */
 function sourceLabel(source: MonitorSource): string {
   switch (source.type) {
     case 'command':
@@ -86,7 +76,6 @@ function sourceLabel(source: MonitorSource): string {
   }
 }
 
-/** Warn when a run/routine action has no postcondition — completed-exit-0 still records as ok (PHNX-2842). */
 function warnMissingPostcondition(action: ActionConfig): void {
   if ((action.type === 'run' || action.type === 'routine') && !action.postcondition) {
     stderrLine(chalk.yellow(
@@ -95,7 +84,6 @@ function warnMissingPostcondition(action: ActionConfig): void {
   }
 }
 
-/** Reconciled one-line outcome for a fire (ok / no effect / failed). */
 function fireOutcomeDisplay(name: string, f: ReturnType<typeof listFires>[number]): { label: string; note: string } {
   const rec = resolveFireOutcome(name, f);
   if (rec.ok) return { label: chalk.green('ok'), note: '' };
@@ -109,7 +97,6 @@ function fireOutcomeDisplay(name: string, f: ReturnType<typeof listFires>[number
   return { label: chalk.red('failed') + corrected, note: '' };
 }
 
-/** A one-line human label for a monitor's action. */
 function actionLabel(action: ActionConfig): string {
   switch (action.type) {
     case 'run':
@@ -125,13 +112,9 @@ function actionLabel(action: ActionConfig): string {
   }
 }
 
-/** A one-line human label for a monitor's owner/allowlist placement. */
 function ownerLabel(monitor: MonitorConfig): string {
   if (monitor.device) return monitor.device;
   if (monitor.devices && monitor.devices.length > 0) return monitor.devices.join(',');
-  // An unpinned shared-input monitor (a system built-in by default) is NOT
-  // fleet-wide — it fires only on the single resolved owner (SING-9). Show that
-  // owner, not a misleading "all"; surface the unresolved case loudly.
   if (requiresSingleOwner(monitor)) {
     const owner = monitorSharedInputOwner();
     return owner ? `${owner} (owner)` : 'unowned — set interactive.host';
@@ -139,17 +122,10 @@ function ownerLabel(monitor: MonitorConfig): string {
   return 'all';
 }
 
-/** The `(built-in)` tag for a system-layer monitor, mirroring routines' list. */
 function builtinTag(monitor: Pick<MonitorConfig, 'scope'>): string {
   return monitor.scope === 'system' ? chalk.gray(' (built-in)') : '';
 }
 
-/**
- * A one-line liveness note for a monitor living on a PEER, reconstructed from the
- * `--json` fields that box reported (it computes the colorized local label, which
- * doesn't cross the wire). Deliberately terse — the owning box's `monitors view`
- * has the full detail.
- */
 function remoteLivenessNote(d?: RemoteMonitorDisplay): string {
   if (!d) return chalk.gray('—');
   if (d.enabled === false) return chalk.gray('paused');
@@ -161,10 +137,6 @@ function remoteLivenessNote(d?: RemoteMonitorDisplay): string {
   return chalk.yellow('never polled');
 }
 
-/**
- * Print a stderr note when the fleet fan-out couldn't consult every box, so a
- * partial listing never silently reads as "these are all the monitors there are".
- */
 function fleetReachNote(fleet: { discoveryFailed: boolean; skipped: string[] }): void {
   if (fleet.discoveryFailed) {
     stderrLine(chalk.yellow('  Note: could not reach the device registry — the fleet was not checked, only this device is shown.'));
@@ -173,7 +145,6 @@ function fleetReachNote(fleet: { discoveryFailed: boolean; skipped: string[] }):
   }
 }
 
-/** A remote monitor rendered into the same `--json` row shape as a local one. */
 function remoteMonitorJsonRow(r: RemoteMonitor): Record<string, unknown> {
   const d = r.display;
   return {
@@ -199,36 +170,22 @@ function remoteMonitorJsonRow(r: RemoteMonitor): Record<string, unknown> {
   };
 }
 
-/** A monitor's evaluation cadence in ms (falls back to the engine default). */
 function monitorIntervalMs(monitor: MonitorConfig): number {
   if (monitor.source.interval) return parseInterval(monitor.source.interval) ?? 60_000;
   return 60_000;
 }
 
-/**
- * True when an enabled, locally-owned monitor's last poll is far enough past its
- * interval that the engine has plainly stopped checking it (dead engine, swallowed
- * start failure, never picked up). Tolerates a few missed ticks before flagging.
- */
 function isStalled(monitor: MonitorConfig, liveness: MonitorLiveness | null): boolean {
   if (!monitor.enabled || !monitorRunsOnThisDevice(monitor)) return false;
-  if (!liveness) return false; // "never polled" is its own state, handled separately
+  if (!liveness) return false;
   const staleAfter = Math.max(monitorIntervalMs(monitor) * 3, 90_000);
   return Date.now() - new Date(liveness.lastCheckedAt).getTime() > staleAfter;
 }
 
-/**
- * The human liveness line for a monitor. This is the RUSH-2485 fix: it makes
- * "the engine has never touched this" (`never polled`) visibly distinct from
- * "polling steadily, condition just isn't matching" (`checked Nx`), from a real
- * fire, and from a stalled engine.
- */
 function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readState>, liveness: MonitorLiveness | null): string {
   const here = monitorRunsOnThisDevice(monitor);
   if (!monitor.enabled) return chalk.gray('paused');
   if (!here) {
-    // Not owned by this box — this daemon never checks it, so there's no local
-    // liveness to report; fall back to fire history if the owner synced it.
     return state?.lastFiredAt ? chalk.gray(`fired ${formatRelativeTime(state.lastFiredAt)}`) : chalk.gray('owned elsewhere');
   }
   if (!liveness) return chalk.yellow('never polled');
@@ -252,18 +209,10 @@ function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readStat
   return chalk.gray(`checked ${liveness.checkCount}x · last ${checkedAgo} · no match yet`);
 }
 
-/**
- * Start or reload the background daemon so a newly-added monitor is watched.
- * Returns false when auto-start was refused (`daemon.enabled=false`); the add
- * itself already succeeded — the monitor is config and stays valid fleet-wide.
- * The refusal names the setting and the fix. Mirrors `ensureSchedulerRunning`
- * in commands/routines.ts (PHNX-2637).
- */
 function ensureDaemonRunning(): boolean {
   try {
     assertDaemonEnabled();
   } catch (err) {
-    // Loud stated skip, on stderr so --json stdout stays clean.
     stderrLine(chalk.yellow((err as Error).message));
     return false;
   }
@@ -276,9 +225,6 @@ function ensureDaemonRunning(): boolean {
   try {
     result = startDaemon();
   } catch (err) {
-    // The redirected-HOME refusal (W4) is an auto-start policy, not a failure
-    // of the monitor just added — state it and leave the foreground command
-    // green. Anything else (a genuinely unspawnable binary) still fails loud.
     if (err instanceof RedirectedHomeDaemonError) {
       stderrLine(chalk.yellow((err as Error).message));
       return true;
@@ -294,21 +240,12 @@ function ensureDaemonRunning(): boolean {
   return true;
 }
 
-/**
- * Assert the postcondition of `add`: the engine actually picked the monitor up.
- * Config acceptance is not enough — RUSH-2485 was a monitor that added cleanly,
- * listed as `on`, and never polled. A poll-model monitor owned by and enabled on
- * this box should show a liveness heartbeat within a couple of engine ticks; wait
- * for it and report the real outcome instead of reporting success on write. A
- * miss is a warning, not a hard failure — a freshly-started daemon may still be
- * booting — but it is surfaced so a dead engine can never masquerade as healthy.
- */
 async function assertEnginePickup(monitor: MonitorConfig): Promise<void> {
   const pollSource = POLL_SOURCE_TYPES.has(monitor.source.type);
-  if (!monitor.enabled || !monitorRunsOnThisDevice(monitor) || !pollSource) return; // nothing to assert here
+  if (!monitor.enabled || !monitorRunsOnThisDevice(monitor) || !pollSource) return;
   const before = readLiveness(monitor.name);
   const baseline = before?.checkCount ?? 0;
-  const deadline = Date.now() + 12_000; // a couple of 5s ticks, plus daemon-boot slack
+  const deadline = Date.now() + 12_000;
   stderrLine(chalk.gray('  waiting for the engine to poll it…'));
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
@@ -325,7 +262,6 @@ async function assertEnginePickup(monitor: MonitorConfig): Promise<void> {
   stderrLine(chalk.yellow(`  confirm the daemon is running (agents routines status) and re-check with: agents monitors view ${monitor.name}`));
 }
 
-/** Validate a single device name against the registered fleet; exit on miss. */
 async function validateDevice(name: string): Promise<string> {
   const normalized = normalizeHost(name.trim());
   if (!normalized) {
@@ -343,7 +279,6 @@ async function validateDevice(name: string): Promise<string> {
   return normalized;
 }
 
-/** Parse the source flags into a MonitorSource, exiting on missing/ambiguous input. `name` seeds the --watch-pid running-seen marker. */
 function buildSource(options: Record<string, any>, name: string): MonitorSource {
   const chosen: Array<{ type: MonitorSourceType; source: MonitorSource }> = [];
   if (options.watch) chosen.push({ type: 'command', source: { type: 'command', command: options.watch } });
@@ -353,9 +288,6 @@ function buildSource(options: Record<string, any>, name: string): MonitorSource 
       stderrLine(chalk.red(`--watch-pid must be a positive integer pid, got '${options.watchPid}'`));
       process.exit(1);
     }
-    // Fail loud rather than silently arming a watcher on a corpse (PHNX-3023):
-    // a pid that is already gone at arm time can never transition to "exited",
-    // so the monitor would sit enabled and never fire.
     if (!isPidAlive(pid) && !options.force) {
       stderrLine(chalk.red(`Process ${pid} is not running — there is nothing to watch.`));
       stderrLine(chalk.gray('Pass --force to arm it anyway (e.g. the pid is about to be spawned by a concurrent step).'));
@@ -376,8 +308,6 @@ function buildSource(options: Record<string, any>, name: string): MonitorSource 
   if (options.ws) chosen.push({ type: 'ws', source: { type: 'ws', wsUrl: options.ws } });
   if (options.watchFile) chosen.push({ type: 'file', source: { type: 'file', path: options.watchFile } });
   if (options.watchDevice) {
-    // Name is validated against the registry in the async add handler (fail fast,
-    // same gate as --device/--devices) — buildSource is sync so it can't await.
     chosen.push({ type: 'device', source: { type: 'device', device: options.watchDevice } });
   }
   if (options.on) {
@@ -407,12 +337,6 @@ function buildSource(options: Record<string, any>, name: string): MonitorSource 
   return chosen[0].source;
 }
 
-/**
- * Parse the condition flags into a MonitorCondition (default on-change).
- * `--watch-pid` with no explicit mode defaults to firing on exit rather than
- * on-change, since "running"/"exited" is a two-value observation where
- * on-change would fire the instant the daemon takes its first poll.
- */
 function buildCondition(options: Record<string, any>): MonitorCondition {
   const modes: Array<MonitorCondition['mode']> = [];
   if (options.onChange) modes.push('on-change');
@@ -432,7 +356,6 @@ function buildCondition(options: Record<string, any>): MonitorCondition {
   return condition;
 }
 
-/** Parse the action flags into an ActionConfig, exiting on missing/ambiguous input. */
 function buildAction(options: Record<string, any>): ActionConfig {
   const chosen: ActionConfig[] = [];
   if (options.run) {
@@ -449,9 +372,6 @@ function buildAction(options: Record<string, any>): ActionConfig {
     chosen.push(action);
   }
   if (options.notify !== undefined) {
-    // --notify may be a bare flag (notify the owner) or carry a channel that
-    // selects one channel. Left unset, the send fans out every addressable
-    // owner.policy.normal destination from humans.yaml (one source of truth).
     const channel = typeof options.notify === 'string' ? options.notify : undefined;
     chosen.push({ type: 'notify', ...(channel ? { notifyChannel: channel } : {}) });
   }
@@ -472,7 +392,6 @@ function buildAction(options: Record<string, any>): ActionConfig {
   return chosen[0];
 }
 
-/** Interactive monitor picker. Returns the selected name or null on cancel/empty. */
 async function pickMonitor(message: string, alternatives: string[] = []): Promise<string | null> {
   const monitors = listMonitors();
   if (monitors.length === 0) {
@@ -500,16 +419,6 @@ async function pickMonitor(message: string, alternatives: string[] = []): Promis
   }
 }
 
-/** Register the `agents monitors` command tree. */
-/**
- * Refuse a monitor that duplicates one already in play — same NAME (which
- * `writeMonitor` would silently overwrite) or same BEHAVIOR under any name, on
- * this box or any other. Exits the process on a refusal.
- *
- * Shared by BOTH `add` paths. The file path (`add ./watcher.yml`) returns early
- * and used to skip the guard entirely, so a duplicate could be walked straight
- * in through a YAML file — the one input an agent is most likely to generate.
- */
 async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolean): Promise<void> {
   if (force) return;
   const existing = listMonitors();
@@ -529,10 +438,6 @@ async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolea
     process.exit(1);
   }
 
-  // The case a local check cannot see: another agent, on another box, already
-  // watching this same work item with these same arguments. One work item, two
-  // triggers. Identity is the arguments, so the claim has to be fleet-wide —
-  // different arguments (another PR) are not a clash and still pass.
   if (process.env[NO_MONITOR_FANOUT_ENV]) return;
   const mine = monitorFingerprint(config);
   const fleet = await gatherFleetMonitors({ againstFingerprint: mine });
@@ -544,7 +449,6 @@ async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolea
     stderrLine(chalk.gray(`  Add anyway:   agents monitors add ${config.name} ... --force`));
     process.exit(1);
   }
-  // Never treat "could not ask" as "no duplicate".
   if (fleet.discoveryFailed) {
     stderrLine(chalk.yellow('  Note: could not reach the device registry — the fleet was not checked for duplicates.'));
   } else if (fleet.skipped.length > 0) {
@@ -615,11 +519,9 @@ export function registerMonitorsCommands(program: Command): void {
     `,
   });
 
-  // ─── add ────────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('add [nameOrPath]')
     .description('Create a monitor from inline flags or a YAML file. Auto-starts the daemon unless daemon.enabled is false.')
-    // SOURCE
     .option('--watch <cmd>', 'Run a shell command; its stdout is the observation')
     .option('--watch-pid <pid>', 'Watch a backgrounded process for exit — a reliable, daemon-polled alternative to a harness exit hook. Fails loud if the pid is already gone. Defaults to firing on exit')
     .option('--poll <cmd...>', 'Re-run a command every interval: --poll "<cmd>" <interval> (e.g. 30s)')
@@ -628,18 +530,15 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--ws <url>', 'WebSocket; each frame is an observation')
     .option('--watch-file <path>', 'Watch a file or directory for changes')
     .option('--watch-device <name>', 'A fleet device becomes the source (health/reachability)')
-    // webhook filters
     .option('--repo <owner/name>', 'GitHub repo filter for --on github:<event>')
     .option('--branch <name>', 'GitHub branch filter for --on github:<event>')
     .option('--action <name>', 'Linear action filter for --on linear:<event>')
     .option('--team-key <key>', 'Linear team key filter for --on linear:<event>')
     .option('--label <name>', 'Linear issue label filter for --on linear:Issue')
-    // CONDITION
     .option('--on-change', 'Fire when the observation differs from last-seen (the default)')
     .option('--match <regex>', 'Fire when the observation matches this regex')
     .option('--dedupe-key <expr>', 'Regex whose first match is the "same event" signature (default: full output)')
     .option('--every', 'Fire on every observation (no dedupe) — rate-limit this')
-    // ACTION
     .option('--run <agent>', 'Spawn an agent (claude, codex, ..., or a custom harness from agents harness list) with the prompt on fire')
     .option('--prompt <prompt>', 'Prompt for --run; {event} is replaced with the fired event')
     .option('--mode <mode>', 'Execution mode for --run: plan, edit, auto, or skip')
@@ -649,7 +548,6 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--routine <name>', 'Fire an existing routine on change')
     .option('--notify [channel]', 'Notify every normal-policy owner channel; [channel] selects one channel')
     .option('--webhook-out <url>', 'POST the event to this URL')
-    // PLACEMENT / hygiene
     .option('--device <name>', 'OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.')
     .option('--devices <list>', 'Allowlist (comma-separated): each device fires independently')
     .option('--run-on <host>', 'BODY placement — execute the ACTION on this machine over SSH (same idea as run --where device:<host>)')
@@ -658,7 +556,6 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--disabled', 'Create the monitor paused (enable later with resume)')
     .option('--force', 'Overwrite a same-named monitor, or add one that duplicates an existing watcher')
     .action(async (nameOrPath: string | undefined, options: Record<string, any>) => {
-      // File mode: a single arg pointing at an existing .yml with no source flags.
       const hasSourceFlag = Boolean(
         options.watch || options.watchPid || options.poll || options.pollHttp || options.on || options.ws || options.watchFile || options.watchDevice,
       );
@@ -694,16 +591,12 @@ export function registerMonitorsCommands(program: Command): void {
       }
 
       const source = buildSource(options, nameOrPath);
-      // A --watch-device source name must resolve to a registered fleet member —
-      // validate it (fail fast with the registered list) so a typo/removed device
-      // can't silently watch the local machine (same gate as --device/--devices).
       if (source.type === 'device' && source.device) {
         source.device = await validateDevice(source.device);
       }
       const condition = buildCondition(options);
       const action = buildAction(options);
 
-      // Placement.
       let device: string | undefined;
       let devices: string[] | undefined;
       if (options.device && options.devices) {
@@ -717,7 +610,6 @@ export function registerMonitorsCommands(program: Command): void {
           devices.push(await validateDevice(d));
         }
       }
-      // --run-on with no owner pin would fire from every daemon → duplicate actions.
       if (options.runOn && !device && !devices) {
         device = machineId();
         stderrLine(chalk.gray(`--run-on set with no --device/--devices: pinned owner to this machine (${device}).`));
@@ -753,8 +645,6 @@ export function registerMonitorsCommands(program: Command): void {
         process.exit(1);
       }
 
-      // Coverage lint (Anthropic's "silence is not success"): warn when a --match
-      // names only a success-shaped token with no failure branch.
       if (condition.mode === 'match' && condition.match && /^(issued|success|ok|pass(ed)?|done|ready)$/i.test(condition.match)) {
         stderrLine(chalk.yellow(`  Note: --match '${condition.match}' only fires on success — it stays silent if the source breaks or never matches.`));
       }
@@ -768,7 +658,6 @@ export function registerMonitorsCommands(program: Command): void {
       if (ensureDaemonRunning()) await assertEnginePickup(config);
     });
 
-  // ─── list ────────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('list')
     .description('See all monitors across the fleet: source, condition, action, owner, last fire, and the box each lives on.')
@@ -777,23 +666,13 @@ export function registerMonitorsCommands(program: Command): void {
     .action(async (options: { json?: boolean; local?: boolean }) => {
       const self = machineId();
       const monitors = listMonitors();
-      // A peer answering the fan-out (NO_MONITOR_FANOUT_ENV set) reports its own
-      // box only, so the parent's gather is a flat union and never recurses. The
-      // duplicate guard reads exactly this bare local array, so its shape must not
-      // change when the env is set. `--local` is the same opt-out for a human.
       const peerMode = !!process.env[NO_MONITOR_FANOUT_ENV];
       const localOnly = peerMode || options.local === true;
 
       let fleet: Awaited<ReturnType<typeof gatherFleetMonitors>> | null = null;
       if (!localOnly) {
-        // Same cross-machine fan-out `sessions --active` and the add-time guard
-        // use — visibility, not git-sync (PHNX-2506 item 3). Never throws; an
-        // unreachable fleet degrades to an empty remote set plus skipped names.
         fleet = await gatherFleetMonitors();
       }
-      // Peers may echo this box's own monitors back (a synced mirror, or the box
-      // resolving its own name); drop anything on `self` so local rows aren't
-      // double-listed.
       const remote = (fleet?.monitors ?? []).filter((r) => normalizeHost(r.machine) !== self);
 
       if (options.json) {
@@ -808,22 +687,13 @@ export function registerMonitorsCommands(program: Command): void {
             enabled: m.enabled,
             source: m.source,
             condition: m.condition,
-            // Full action, not just `type`: the cross-machine duplicate guard
-            // fingerprints source+condition+action, so a type-only action made
-            // every `--run` monitor unmatchable and the fleet check inert for
-            // exactly the case it exists for. `source` already ships whole.
             action: m.action,
             owner: ownerLabel(m),
-            // `scope`/`builtin` (PHNX-2506 item 2): where the monitor came from,
-            // so "is this a shipped built-in?" is answerable without knowing the
-            // system mirror exists. Peers read `scope` off this field.
             scope: m.scope ?? 'user',
             builtin: m.scope === 'system',
             runsHere: monitorRunsOnThisDevice(m),
             lastSeenAt: state?.lastSeenAt ?? null,
             lastFiredAt: state?.lastFiredAt ?? null,
-            // Liveness heartbeat (RUSH-2485): distinguishes never-polled from
-            // polling-not-matching from a stalled engine.
             lastCheckedAt: liveness?.lastCheckedAt ?? null,
             checkCount: liveness?.checkCount ?? 0,
             lastError: liveness?.lastError ?? null,
@@ -845,7 +715,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
 
       console.log(chalk.bold('Monitors\n'));
-      // This box first — it has full liveness detail.
       if (monitors.length > 0) {
         if (remote.length > 0) console.log(chalk.gray(`  ${self} (this device)`));
         for (const m of monitors) {
@@ -858,7 +727,6 @@ export function registerMonitorsCommands(program: Command): void {
           console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${owner}`)}  ${livenessLabel(m, state, liveness)}`);
         }
       }
-      // Then each peer's monitors, grouped by the box they live on.
       const byMachine = new Map<string, RemoteMonitor[]>();
       for (const r of remote) {
         const key = r.machine;
@@ -877,7 +745,6 @@ export function registerMonitorsCommands(program: Command): void {
       console.log();
     });
 
-  // ─── view ──────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('view [name]')
     .description('Show a monitor’s full YAML config plus its current watched-state and recent fires.')
@@ -910,8 +777,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
       console.log(chalk.bold(`Monitor: ${name}\n`));
       console.log(yaml.stringify(monitor));
-      // Liveness first (RUSH-2485): the heartbeat is the answer to "is this thing
-      // actually running?" — it renders even when the monitor has never fired.
       console.log(chalk.bold('Liveness'));
       console.log(`  ${livenessLabel(monitor, state, liveness)}`);
       if (liveness) {
@@ -932,7 +797,6 @@ export function registerMonitorsCommands(program: Command): void {
       if (recentFires.length > 0) {
         console.log(chalk.bold('\nRecent fires'));
         for (const f of recentFires) {
-          // Reconciled against the run's real status + postcondition (RUSH-2690, PHNX-2842).
           const { label, note } = fireOutcomeDisplay(name, f);
           console.log(`  ${chalk.gray(f.firedAt)}  ${f.action ?? '?'}  ${label}`);
           if (note) console.log(note);
@@ -940,7 +804,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
     });
 
-  // ─── test (DRY RUN) ───────────────────────────────────────────────────────────
   monitorsCmd
     .command('test [name]')
     .description('DRY-RUN: evaluate the source once and print the emitted event + whether it would fire. No action is taken.')
@@ -994,7 +857,6 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(chalk.gray('\n(dry run — no action taken, no state written)'));
     });
 
-  // ─── edit ─────────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('edit [name]')
     .description('Open a monitor’s YAML in $EDITOR.')
@@ -1003,9 +865,6 @@ export function registerMonitorsCommands(program: Command): void {
         name = (await pickMonitor('Select monitor to edit', ['agents monitors edit <name>'])) ?? undefined;
         if (!name) return;
       }
-      // getMonitorPath is user-layer only: edits always land in the user dir,
-      // never the pull-only system mirror. Editing a system built-in (no user
-      // copy yet) materializes one, prefilled with the built-in's own config.
       let monitorPath = getMonitorPath(name);
       if (!monitorPath) {
         const dir = getMonitorsDir();
@@ -1013,11 +872,6 @@ export function registerMonitorsCommands(program: Command): void {
         monitorPath = safeJoin(dir, `${name}.yml`);
         const builtIn = readMonitor(name);
         if (builtIn) {
-          // Route through writeMonitor, NOT a raw yaml.stringify: readMonitor
-          // stamps the derived `scope` (and a built-in's `enabled: true`), and
-          // only writeMonitor strips those from the on-disk schema. A raw dump
-          // would persist `scope: system` into the user copy — dead, contradictory
-          // state that violates the "scope never persists" contract.
           writeMonitor(builtIn);
           console.log(chalk.gray(`Editing a copy of built-in monitor '${name}' in your user dir: ${monitorPath}`));
         } else {
@@ -1053,7 +907,6 @@ export function registerMonitorsCommands(program: Command): void {
       });
     });
 
-  // ─── logs (action run history) ─────────────────────────────────────────────────
   monitorsCmd
     .command('logs [name]')
     .description('Show the latest action run’s status + report. --run for a specific run, --full for raw stdout.')
@@ -1094,7 +947,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
     });
 
-  // ─── runs (fire history) ────────────────────────────────────────────────────────
   monitorsCmd
     .command('runs [name]')
     .description('See a monitor’s fire history: when it fired, the action, and the outcome.')
@@ -1110,11 +962,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
       console.log(chalk.bold(`Fire history: ${name}\n`));
       for (const f of fires.slice(-20)) {
-        // Reconcile against the run's REAL, current status (RUSH-2690) and a
-        // declared postcondition (PHNX-2842) rather than trusting the frozen
-        // `ok` written at fire time — `dispatchAction` only sees a synchronous
-        // 'running' snapshot before the run has actually settled, and a
-        // `completed` agent that did nothing used to read `ok` here forever.
         const { label, note } = fireOutcomeDisplay(name, f);
         const runRef = f.runId ? chalk.gray(`  run ${f.runId}`) : '';
         console.log(`  ${f.firedAt}  ${(f.action ?? '?').padEnd(12)} ${label}${runRef}`);
@@ -1123,7 +970,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
     });
 
-  // ─── pause / resume ───────────────────────────────────────────────────────────
   monitorsCmd
     .command('pause [name]')
     .description('Temporarily disable a monitor. Stops watching until resumed.')
@@ -1160,7 +1006,6 @@ export function registerMonitorsCommands(program: Command): void {
       }
     });
 
-  // ─── device (re-pin the owner) ──────────────────────────────────────────────────
   monitorsCmd
     .command('device [name]')
     .description('View or (re)pin the OWNER device — the single machine that evaluates + fires (exactly-once).')
@@ -1201,7 +1046,6 @@ export function registerMonitorsCommands(program: Command): void {
       console.log(chalk.gray('  Re-pin with: agents monitors device ' + name + ' --set <device>'));
     });
 
-  // ─── remove ────────────────────────────────────────────────────────────────────
   withAliases(monitorsCmd
     .command('remove [name]'), 'remove')
     .description('Delete a monitor. Stops watching; past fire history remains on disk.')
@@ -1217,7 +1061,6 @@ export function registerMonitorsCommands(program: Command): void {
           stderrLine(chalk.gray('Daemon reloaded'));
         }
       } else if (readMonitor(name)) {
-        // Resolvable but not in the user dir: a pull-only system built-in.
         stderrLine(chalk.red(`Monitor '${name}' is a built-in and can't be removed; pause it with: agents monitors pause ${name}`));
         process.exit(1);
       } else {

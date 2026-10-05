@@ -44,7 +44,7 @@ function writeRecord(agentsDir: string, id: string, worktreeName: string, status
 const worktreePath = (repo: string, name: string) => path.join(repo, '.agents', 'worktrees', name);
 
 describe('tearDownOrphanWorktree (RUSH-2356)', () => {
-  // Torn teammate records fail closed: unguarded teardown previously deleted a live checkout.
+
   const roots: string[] = [];
   const agentDirs: string[] = [];
   afterEach(() => {

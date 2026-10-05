@@ -18,7 +18,7 @@ process.stdout.write('{"type":"assistant","message":{"model":"claude-sonnet-4-5"
 process.stdout.write('{"type":"result","usage":{"input_tokens":100,"output_tokens":50}}\\n');
 const dir = process.env.FAKE_CLAUDE_SIGNAL_DIR;
 if (dir) {
-  // Decrement a counter file; while >1 write continue:true, then continue:false.
+
   const counter = path.join(dir, 'counter');
   let n = 0;
   try { n = parseInt(fs.readFileSync(counter, 'utf-8').trim(), 10) || 0; } catch {}

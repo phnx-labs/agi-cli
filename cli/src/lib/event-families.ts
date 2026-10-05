@@ -49,7 +49,7 @@ export function applyFamilies(q: UnifiedQuery): UnifiedQuery {
 }
 
 function applyInclude(q: UnifiedQuery, families: EventFamily[]): UnifiedQuery {
-  // Selected families union together, then intersect any explicit eventTypes already supplied by the caller.
+
   const has = (f: EventFamily) => families.includes(f);
   const typeSets: EventType[][] = [];
   let level: EventLevel | undefined = q.level;
@@ -97,7 +97,7 @@ function applyInclude(q: UnifiedQuery, families: EventFamily[]): UnifiedQuery {
 }
 
 function applyExclude(q: UnifiedQuery, families: EventFamily[]): UnifiedQuery {
-  // Exclusions accumulate as a union; they do not replace caller-provided filters.
+
   const has = (f: EventFamily) => families.includes(f);
   let includeActivity = q.includeActivity !== false;
   const excludeEventTypes: EventType[] = [...(q.excludeEventTypes ?? [])];

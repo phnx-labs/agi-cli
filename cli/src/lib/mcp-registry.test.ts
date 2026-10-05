@@ -7,11 +7,6 @@ import { getMcpConfigPathForHome, getProjectMcpConfigPath, getUserMcpConfigPath 
 import type { AgentId } from './types.js';
 
 describe('MCP_TARGETS completeness', () => {
-  // The bug this pins: `capabilities.mcp` is true for every harness, so a newly
-  // added one used to resolve a config path and then fall through three separate
-  // dispatch chains -- no write, no error, `success: true`. A harness now has to
-  // declare a format here or declare, in `format: null` + `unsupportedReason`,
-  // that agents-cli cannot write it.
   it('has exactly one entry per mcp-capable agent', () => {
     const capable = [...capableAgents('mcp')].sort();
     const registered = (Object.keys(MCP_TARGETS) as AgentId[]).sort();
@@ -40,17 +35,12 @@ describe('MCP_TARGETS completeness', () => {
   });
 
   it('refuses an agent with no target at all', () => {
-    // gemini is hard-deprecated, so it is not mcp-capable and has no entry.
     expect(mcpTarget('gemini' as AgentId)).toBeUndefined();
     expect(mcpWriteUnsupportedReason('gemini' as AgentId)).toContain('no MCP target');
   });
 });
 
 describe('MCP path resolvers agree with the registry', () => {
-  // Writer, parser, and the staleness detector each resolved a path through a
-  // different switch, so a harness could be written to one file and read back
-  // from another (kimi wrote .kimi-code/mcp.json, the detector read
-  // .kimi-code/settings.json and always reported it missing).
   const home = path.join(os.tmpdir(), 'agents-mcp-registry-home');
   const cwd = path.join(os.tmpdir(), 'agents-mcp-registry-repo');
 
@@ -82,9 +72,6 @@ describe('MCP path resolvers agree with the registry', () => {
 
 describe('registry paths verified against the harnesses', () => {
   it('points antigravity at the REAL home, ignoring the version home', () => {
-    // ~/.gemini/antigravity-cli is symlinked into a version home; ~/.gemini/config
-    // is a plain directory agy opens directly, so a version-home path lands where
-    // agy never reads (same reason antigravityWorkflowsDir ignores versionHome).
     const expected = path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'mcp_config.json');
     expect(MCP_TARGETS.antigravity!.home('/some/version/home')).toBe(expected);
     expect(MCP_TARGETS.antigravity!.homeGlobal).toBe(true);
@@ -94,7 +81,6 @@ describe('registry paths verified against the harnesses', () => {
     for (const [agent, target] of Object.entries(MCP_TARGETS)) {
       if (agent === 'antigravity') continue;
       expect(target!.homeGlobal, `${agent} should be version-scoped`).toBeFalsy();
-      // A version-scoped target must actually vary with its argument.
       expect(target!.home('/a')).not.toBe(target!.home('/b'));
     }
   });

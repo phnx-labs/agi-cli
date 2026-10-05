@@ -6,7 +6,6 @@ import type { DeviceProfile } from '../../devices/registry.js';
 import { SSH_OPTS, controlOpts } from '../../ssh-exec.js';
 import { getDevicesRegistryPath } from '../../state.js';
 
-// Failures back off, park after three, and retire after ten; registry changes wake parked peers early.
 export const PEER_BACKOFF_BASE_MS = 2_000;
 export const PEER_BACKOFF_CAP_MS = 60_000;
 export const PEER_PARK_AFTER_FAILURES = 3;
@@ -76,7 +75,6 @@ async function parkedWait(options: PeerStreamOptions, delayMs: number): Promise<
   });
 }
 
-// Valid protocol data resets backoff; remove each child's abort listener when that attempt ends.
 export async function streamFromPeer(options: PeerStreamOptions): Promise<void> {
   const parkAfter = options.parkAfterFailures ?? PEER_PARK_AFTER_FAILURES;
   let failures = 0;

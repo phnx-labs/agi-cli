@@ -25,7 +25,7 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   for (const dir of tempDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
   tempDirs.length = 0;
   _resetForTest();
@@ -39,8 +39,6 @@ describe('truncate', () => {
   });
   it('shortens with a single-char ellipsis when over max', () => {
     expect(truncate('hello world', 5)).toBe('hell…');
-    // The ellipsis occupies exactly one visible column, so a 5-char budget
-    // keeps 4 chars + `…`.
     expect(truncate('hello world', 5)).toHaveLength(5);
   });
 });
@@ -69,9 +67,6 @@ describe('humanDuration', () => {
 
 describe('visibleWidth', () => {
   it('ignores ANSI SGR sequences including the escape byte', () => {
-    // The previously-buggy regex omitted the leading \x1b, so it left the ESC
-    // byte in the string and under/over-counted. The canonical version strips
-    // the whole CSI sequence.
     const colored = '\x1b[31mred\x1b[0m';
     expect(visibleWidth(colored)).toBe(3);
     expect(visibleWidth('plain')).toBe(5);
@@ -103,7 +98,6 @@ describe('isJsonMode', () => {
 
 describe('termLink', () => {
   it('returns plain text when not a TTY', () => {
-    // In the test runner stdout is not a TTY, so no OSC 8 wrapping.
     expect(termLink('label', '/tmp/x')).toBe('label');
   });
   it('returns plain text when filePath is empty', () => {
@@ -127,7 +121,6 @@ describe('formatDie (RUSH-1830 — machine-readable failures for --json callers)
   it('writes red text to stderr for humans (default, no json)', () => {
     const out = formatDie('Boom');
     expect(out.stream).toBe('stderr');
-    // chalk may be disabled in CI (no color) — assert the message survives either way.
     expect(out.text).toContain('Boom');
   });
 

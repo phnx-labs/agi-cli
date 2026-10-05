@@ -14,13 +14,8 @@ import {
 } from './quick-todo.js';
 import type { ProjectDef } from './projects.js';
 
-// Recorded from real `linear` runs on 2026-10-04 (PHNX-4234 created, marked Done,
-// reopened, Done again; PHNX-4235 created and canceled by undo).
-// tasks-assigned-open.json keeps the recorded PHNX-4234 list row and two rows
-// derived from it (no marker / no due date, and overdue), so no other issue leaks in.
 const testdata = (name: string) => fs.readFileSync(path.join(__dirname, 'testdata', 'quick-todo', name), 'utf-8');
 
-/** A linear runner answering from recorded output keyed by argv; records what was asked. */
 type Answer = string | Error | { stdout: string; stderr: string };
 function recordedLinear(routes: Record<string, Answer | Answer[]>) {
   const asked: string[][] = [];
@@ -37,7 +32,6 @@ function recordedLinear(routes: Record<string, Answer | Answer[]>) {
 
 const linearError = (stderr: string) => Object.assign(new Error('Command failed: linear'), { stderr });
 
-// Sunday 2026-10-04, 17:32 local.
 const NOW = new Date(2026, 9, 4, 17, 32);
 const agi = { name: 'agi', linear: { projectId: '00000000', name: 'AGI' } } as ProjectDef;
 
@@ -115,7 +109,6 @@ describe('addQuickTodo', () => {
     const refused = recordedLinear({ [args]: linearError('Error: Project not found: Nope\n') });
     expect(await addQuickTodo('Call back #Nope', { defs: [agi], now: NOW }, refused.linear))
       .toEqual({ ok: false, todo: null, message: 'Project not found: Nope' });
-    // linear create prints some refusals as "Error:" on stderr and still exits 0.
     const quiet = recordedLinear({ [args]: { stdout: '', stderr: 'Similar existing tickets (consider enriching one instead of creating):\nError: Issue create failed\n' } });
     expect(await addQuickTodo('Call back #Nope', { defs: [agi], now: NOW }, quiet.linear))
       .toEqual({ ok: false, todo: null, message: 'Issue create failed' });
@@ -182,7 +175,6 @@ describe('completeTodo', () => {
 
   it('does not call a close linear only queued (rate limited) done', async () => {
     const { linear } = recordedLinear({
-      // linear's own line for a close it queued, and the issue still Todo.
       [`update PHNX-4234 --done --proof ${DONE_PROOF}`]: 'PHNX-4234 -> queued for retry (rate limited / transient)\n',
       'tasks PHNX-4234 --json': testdata('tasks-PHNX-4234-todo.json'),
       'states --json': testdata('states.json'),

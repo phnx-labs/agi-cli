@@ -16,7 +16,7 @@ let home: string;
 let cacheFile: string;
 const T0 = new Date(2026, 7, 3, 12, 0, 0).getTime();
 
-// State captures HOME at import, so isolate the real disk cache through AGENTS_LINEAR_CACHE_PATH. Serve last-good data as stale and keep one file per key for concurrent writers.
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'linear-cache-'));
   cacheFile = path.join(home, 'cache');

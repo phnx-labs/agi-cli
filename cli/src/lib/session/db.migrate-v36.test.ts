@@ -3,28 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db. db.ts captures DB_PATH at module
-// load (db.ts:29), so redirecting it after the import silently opens the wrong
-// database. Every migration test in this directory uses this pattern.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv36-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v35 -> v36: the tool index becomes incremental, and its FTS rows become
- * addressable.
- *
- * Two things have to be true afterwards. `tool_scan_ledger` must carry the
- * resume columns (NULL on existing rows, which reads as "re-read this one once
- * from byte 0"), and every `tool_call_text` row must sit at the rowid of the
- * `tool_calls` row it describes — the pre-v36 rows were inserted with
- * FTS5-assigned rowids and could only be reached through the UNINDEXED
- * `call_key`, i.e. a full index scan per delete.
- *
- * The rebuild must also stay non-destructive: `tool_calls` is the source of
- * truth and is untouched, the searchable text survives, and neither ledger is
- * wiped (the contract the other migration tests here assert).
- */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -83,8 +65,6 @@ const CALLS = [
     VALUES (?, ?, ?, '2026-08-03T00:00:00Z', 'Bash', ?, 'unknown', 64)
   `);
   const text = seed.prepare(`INSERT INTO tool_call_text (call_key, tool, input, output, error) VALUES (?, 'Bash', ?, '', '')`);
-  // Insert the text rows in a different order than the calls, so a passing rowid
-  // assertion cannot be an accident of both tables counting from 1 in step.
   for (const row of CALLS) call.run(row.key, row.session, row.ordinal, row.input);
   for (const row of [...CALLS].reverse()) text.run(row.key, row.input);
   seed.prepare(`INSERT INTO scan_ledger VALUES ('/w/a.jsonl', 1, 2, 3, NULL, NULL)`).run();

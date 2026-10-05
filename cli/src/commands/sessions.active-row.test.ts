@@ -5,12 +5,6 @@ import { stringWidth } from '../lib/session/width.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
-/**
- * RUSH-2205 enriched the live `--orphan`/`--active` row: agent version, a human
- * created/idle time cell, and ticket/PR badges backfilled from the historical
- * index, with the label/topic on its own line — all width-safe. These pin the
- * pure row builder (content + width) and the pure meta-backfill join.
- */
 
 const DAY = 86_400_000;
 
@@ -43,7 +37,6 @@ describe('renderActiveRowLines', () => {
     expect(line1).toContain('idle 3d');
     expect(line1).toContain('RUSH-2198');
     expect(line1).toContain('PR#2091');
-    // The label/topic is on its own line, not buried in a grey snippet.
     expect(line2).toContain('picker preview collapses to empty');
   });
 
@@ -72,7 +65,6 @@ describe('renderActiveRowLines', () => {
       importantMessage: { text: 'Which region should I deploy to?', kind: 'question' },
     });
     const lines = renderActiveRowLines(q, '  ', 120);
-    // header + identity + the ranked secondary line.
     expect(lines).toHaveLength(3);
     expect(lines[2]).toContain('Which region should I deploy to?');
 
@@ -91,7 +83,7 @@ describe('renderActiveRowLines', () => {
       importantMessage: { text: 'editing db.ts', kind: 'activity' },
     });
     const lines = renderActiveRowLines(a, '  ', 120);
-    expect(lines).toHaveLength(2); // header + identity only
+    expect(lines).toHaveLength(2);
     expect(lines.join('\n')).not.toContain('editing db.ts');
   });
 
@@ -109,14 +101,10 @@ describe('renderActiveRowLines', () => {
   });
 
   it('emits a single line when there is no label/topic/project/locator to show', () => {
-    // cwd cleared too: formatActiveRowDescription surfaces the project (basename cwd)
-    // when present, which would otherwise fill line 2.
     const s = active({ topic: undefined, label: undefined, cwd: undefined, status: 'idle' });
     expect(renderActiveRowLines(s, '  ', 120)).toHaveLength(1);
   });
 
-  // RUSH-2336: every process-backed row now surfaces its exact machine + pid
-  // handle; a cloud row surfaces its provider + task id instead of a pid.
   it('shows the custom-harness name instead of the host process (PHNX-2935)', () => {
     const [line1] = renderActiveRowLines(
       active({ kind: 'claude', harness: 'deepseek', cwd: undefined, topic: undefined, label: undefined }),
@@ -198,9 +186,6 @@ describe('backfillActiveRowsFromMeta', () => {
     ]);
     backfillActiveRowsFromMeta([s], byId);
     expect(s.version).toBe('2.1.207');
-    // account rides the same index backfill as version (PHNX-3184) so the watch
-    // row carries it and the AGI EXT status bar reads it off the stream instead
-    // of spawning a per-tab `agents sessions <id> --device <host> --json`.
     expect(s.account).toBe('muqsit@getrush.ai');
     expect(s.label).toBe('refresh auth');
     expect(s.firstUserMessage).toBe('Fix auth\nand keep the full acceptance criteria.');

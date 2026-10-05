@@ -1,4 +1,4 @@
-// Dead means closed/crashed only; abandoned may be live and unknown is not proven dead. Headline and roster use the same split.
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

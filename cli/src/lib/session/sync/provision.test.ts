@@ -31,8 +31,6 @@ describe('provisionSessions', () => {
     const path = ({ url, init }: { url: string; init: RequestInit }) =>
       `${init.method} ${new URL(url).pathname}`;
 
-    // The Worker is Phoenix-only (PHNX-3726): exactly ONE secret PUT, and it is
-    // PHOENIX_ID_BASE — never a WRITE_TOKEN static-token principal.
     expect(requests.map(path)).toEqual([
       'POST /client/v4/accounts/acct_1/r2/buckets',
       'PUT /client/v4/accounts/acct_1/workers/scripts/agents-sessions',
@@ -54,7 +52,6 @@ describe('provisionSessions', () => {
     });
     expect(secretPuts.some(s => s.name === 'WRITE_TOKEN')).toBe(false);
 
-    // The deployed script is the canonical Worker template, byte-for-byte.
     const form = requests[1]?.init.body as FormData;
     expect(await (form?.get('worker.js') as Blob).text()).toBe(renderSessionsWorkerScript());
   });

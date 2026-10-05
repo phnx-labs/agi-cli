@@ -272,7 +272,6 @@ export async function teamPicker(rows: TeamRow[], initialSearch?: string): Promi
     ...rows.map((r) => formatComposition(r.agents).length)
   );
 
-  // Precompute haystacks so the filter stays O(terms × rows) per keystroke.
   const haystacks = new Map<TeamRow, string>();
   for (const r of rows) haystacks.set(r, searchHaystack(r));
 
@@ -282,9 +281,6 @@ export async function teamPicker(rows: TeamRow[], initialSearch?: string): Promi
     filter: (query: string) => {
       const trimmed = query.trim().toLowerCase();
       if (!trimmed) return rows;
-      // Multi-term AND: every whitespace-split term must match somewhere. This
-      // lets "claude done" surface claude-only teams that finished, and
-      // "alice working" surface teams where alice is still running.
       const terms = trimmed.split(/\s+/).filter(Boolean);
       return rows.filter((r) => {
         const hay = haystacks.get(r) || '';

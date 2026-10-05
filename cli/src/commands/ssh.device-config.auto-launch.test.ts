@@ -1,13 +1,3 @@
-/**
- * agents devices — enable/disable sugar over auto-launch.enabled, and the
- * retired per-setting verbs staying gone.
- *
- * Split out of a single 18-test `ssh.device-config.test.ts` that ran ~44s
- * locally (151s on a loaded worker) — 8.4s per test, and one of the files
- * setting the suite's floor: vitest parallelises across FILES and runs one
- * file's tests sequentially in a single worker. Shared spawn harness lives in
- * `device-config-test-harness.ts`.
- */
 import { describe, expect, it } from 'vitest';
 import {
   guardedHome,

@@ -28,7 +28,7 @@ export interface ToolSnapshot {
 }
 
 export function collectToolRows(scope: string, sources: ToolSources = {}): ToolSnapshot {
-  // Failed reads produce an incomplete snapshot, never authoritative removals.
+
   let complete = true;
   const read = <T>(source: () => T, empty: T): T => {
     try { return source(); } catch { complete = false; return empty; }
@@ -104,7 +104,6 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
   let raw: string;
   try { raw = fs.readFileSync(file, 'utf8'); }
   catch (error) {
-    // Only absence means no live tasks; malformed or inaccessible state is incomplete.
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
@@ -179,7 +178,7 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
     } catch {  }
   };
   for (const root of roots) armRoot(root);
-  // Watchers can die after startup, so armed is live state and sweeps keep re-arming.
+
   const armed = () => [...watchers.values()].every((watcher) => watcher !== undefined);
   const reproject = () => {
     const snapshot = collectToolRows(options.scope, options.sources);

@@ -6,7 +6,6 @@ export interface UpgradeOptions {
 
 type UpgradeAction = (version: string | undefined, options: UpgradeOptions) => Promise<void>;
 
-/** Register the public self-upgrade surface; the entry point supplies its runtime action. */
 export function registerUpgradeCommand(program: Command, action?: UpgradeAction): Command {
   const command = program.command('upgrade')
     .description('Upgrade agents-cli to the latest version (or a specific [version])')

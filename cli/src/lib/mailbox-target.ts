@@ -9,7 +9,7 @@ type MessageResolution =
   | { kind: 'ambiguous'; candidates: Array<{ id: string; label: string }> };
 
 export function mailboxIdForActiveSession(s: ActiveSession): string | undefined {
-  // Teams use durable agentId; bare runs use sessionId; spawn-time AGENTS_MAILBOX_DIR must use this same canonical ID.
+
   return s.agentId ?? s.sessionId;
 }
 
@@ -22,7 +22,7 @@ export function resolveMessageTarget(
   sessions: ActiveSession[],
   isCloudTask: (id: string) => boolean,
 ): MessageResolution {
-  // Exact matches precede prefixes; route only one canonical mailbox and never guess zero or multiple matches.
+
   if (isCloudTask(target)) return { kind: 'cloud', id: target };
   if (target.length === 0) return { kind: 'none' };
 
@@ -55,7 +55,7 @@ export type HostTaskRoute =
   | { kind: 'not-found' };
 
 export function decideHostTaskRoute(task: HostTask | null, target: string): HostTaskRoute {
-  // Remote rerouting follows the captured host/session identity.
+
   if (!task) return { kind: 'not-found' };
   if (task.status === 'running') {
     return { kind: 'reroute', remoteRef: task.sessionId ?? task.name ?? target, host: task.host };

@@ -95,7 +95,7 @@ function readCache(tool: SetupTool, options: ToolSetupOptions): CachedTool | nul
 }
 
 export function getCachedToolSetup(options: ToolSetupOptions = {}): ToolSetupRow[] {
-  // Cached presence is metadata; health changes only on explicit refresh, never a timer.
+
   return SETUP_TOOLS.map((tool) => {
     const { row, fingerprint } = binaryMetadata(tool);
     const cached = readCache(tool, options);
@@ -120,7 +120,7 @@ export function toolReadiness(tool: SetupTool, status: unknown): Pick<ToolSetupR
 }
 
 async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
-  // Settings UI never unlocks secrets; term PATH presence alone is readiness.
+
   if (!row.installed || !row.executable) return { ...row, checkedAtMs: Date.now() };
   if (row.tool === 'secrets') return { ...row, checkedAtMs: Date.now(), detail: 'Installed. Secret access is checked when used; this check does not unlock secrets.' };
   if (row.tool === 'term') return { ...row, readiness: 'ready', detail: 'Installed. Spawned on demand by `agents accounts add`/`login`.', checkedAtMs: Date.now() };
@@ -134,7 +134,7 @@ async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
 }
 
 export async function refreshToolSetup(tool: SetupTool | 'all' = 'all', options: ToolSetupOptions = {}): Promise<ToolSetupRow[]> {
-  // A disk lock coalesces concurrent clients around one explicit probe.
+
   const requestedAt = Date.now();
   const dir = toolSetupCacheDir(options);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -152,7 +152,7 @@ export async function refreshToolSetup(tool: SetupTool | 'all' = 'all', options:
 }
 
 export function subscribeToolSetup(listener: (rows: ToolSetupRow[]) => void, options: ToolSetupOptions = {}): () => void {
-  // Subscribers watch cache/input files only; they never initiate health probes.
+
   const dir = toolSetupCacheDir(options);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const paths = new Set([dir, ...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean)]);

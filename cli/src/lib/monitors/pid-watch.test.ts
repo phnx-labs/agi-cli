@@ -20,7 +20,6 @@ function tmpMarker(tag: string): string {
 describe('pidLivenessCommand (PHNX-3023)', () => {
   it.skipIf(process.platform === 'win32')('reports "running" for a live pid that touches the marker', () => {
     const marker = tmpMarker('live');
-    // process.pid is this test runner — guaranteed alive for the duration of the call.
     const out = execFileSync('/bin/sh', ['-c', pidLivenessCommand(process.pid, marker)], { encoding: 'utf-8' }).trim();
     expect(out).toBe(PID_WATCH_RUNNING_TOKEN);
     expect(fs.existsSync(marker)).toBe(true);
@@ -28,15 +27,11 @@ describe('pidLivenessCommand (PHNX-3023)', () => {
 
   it.skipIf(process.platform === 'win32')('reports "notyetspawned" (not "exited") for a dead pid never seen running', () => {
     const marker = tmpMarker('never-seen');
-    // A real, guaranteed-dead pid: spawned and waited on already.
     const dead = execFileSync('/bin/sh', ['-c', 'sh -c "exit 0" & echo $!; wait'], { encoding: 'utf-8' });
     const deadPid = Number.parseInt(dead.trim().split('\n')[0], 10);
 
     const out = execFileSync('/bin/sh', ['-c', pidLivenessCommand(deadPid, marker)], { encoding: 'utf-8' }).trim();
 
-    // PHNX-3023 review finding: a pid that has never been observed alive must
-    // NOT report the exit token — a --force watch armed before the process
-    // spawns must not look identical to "it ran and then exited".
     expect(out).toBe(PID_WATCH_NOT_YET_SPAWNED_TOKEN);
     expect(out).not.toBe(PID_WATCH_EXITED_TOKEN);
   });
@@ -54,18 +49,11 @@ describe('pidLivenessCommand (PHNX-3023)', () => {
   });
 });
 
-/**
- * PHNX-3023's acceptance bar: a REAL watcher, armed on a REAL backgrounded
- * process, must actually fire once that process exits — no exit-based harness
- * hook involved, only the monitor engine's own poll (`evaluateMonitorOnce`,
- * the exact call `MonitorEngine.tick` makes). This is the scenario the ticket
- * names dead: "5 shells still running" that "never wakes up, never alerts".
- */
 describe('--watch-pid arms a watcher that actually fires on exit (PHNX-3023)', () => {
   const names: string[] = [];
   afterEach(() => {
     for (const n of names.splice(0)) {
-      try { fs.rmSync(getMonitorHistoryDir(n), { recursive: true, force: true }); } catch { /* ignore */ }
+      try { fs.rmSync(getMonitorHistoryDir(n), { recursive: true, force: true }); } catch {  }
     }
   });
 
@@ -87,8 +75,6 @@ describe('--watch-pid arms a watcher that actually fires on exit (PHNX-3023)', (
     names.push(name);
     const config = pidWatchMonitor(name, pid);
 
-    // Alive: the source observes 'running', the condition never matches → no fire.
-    // This is the "5 shells still running" state — armed, but correctly quiet.
     const aliveOnce = await evaluateMonitorOnce(config);
     expect(aliveOnce.observation?.raw).toBe(PID_WATCH_RUNNING_TOKEN);
     expect(aliveOnce.decision?.fire).toBe(false);
@@ -96,9 +82,6 @@ describe('--watch-pid arms a watcher that actually fires on exit (PHNX-3023)', (
     child.kill('SIGKILL');
     await new Promise<void>((resolve) => child.once('exit', () => resolve()));
 
-    // Dead: the exact same poll the daemon's engine runs on its own schedule now
-    // observes the exit and fires — the notify/re-invoke path that never ran
-    // for an exit-based hook watching a process that outlives the session.
     const deadOnce = await evaluateMonitorOnce(config);
     expect(deadOnce.observation?.raw).toBe(PID_WATCH_EXITED_TOKEN);
     expect(deadOnce.decision?.fire).toBe(true);
@@ -110,43 +93,29 @@ describe('--watch-pid arms a watcher that actually fires on exit (PHNX-3023)', (
     async () => {
       const name = `test-pidwatch-force-${process.pid}-${Date.now()}`;
       names.push(name);
-      // The real engine — not the dry-run evaluate — so state persists across
-      // polls exactly as the daemon's tick loop persists it. This is what
-      // exposed the bug: match-mode's `hasChanged` treats "no prior state" as
-      // changed, so a first-poll "exited" observation fired immediately AND
-      // persisted "exited" as the baseline, silencing the real exit forever.
       const engine = new MonitorEngine();
 
-      // A pid guaranteed not to belong to any process right now — the --force
-      // "arm before it spawns" scenario the review flagged.
       const reserved = execFileSync('/bin/sh', ['-c', 'sh -c "exit 0" & echo $!; wait'], { encoding: 'utf-8' });
       const notYetSpawnedPid = Number.parseInt(reserved.trim().split('\n')[0], 10);
       const beforeConfig = pidWatchMonitor(name, notYetSpawnedPid);
 
-      // Poll before the real process exists: must NOT fire and must NOT
-      // record a fire — the exact false positive the review caught.
       await engine.runMonitor(beforeConfig);
       expect(listFires(name)).toHaveLength(0);
 
-      // The real process now spawns and is watched under the SAME monitor
-      // name/marker path (pid reuse isn't controllable from a test, so a
-      // freshly spawned child stands in for "the pid the caller meant").
       const child = spawn('sleep', ['30']);
       const liveConfig = pidWatchMonitor(name, child.pid!);
 
       await engine.runMonitor(liveConfig);
-      expect(listFires(name)).toHaveLength(0); // running — still no fire
+      expect(listFires(name)).toHaveLength(0);
 
       child.kill('SIGKILL');
       await new Promise<void>((resolve) => child.once('exit', () => resolve()));
 
       await engine.runMonitor(liveConfig);
-      // Exactly one fire, and it's the real exit.
       const fires = listFires(name);
       expect(fires).toHaveLength(1);
       expect(fires[0].summary).toContain(PID_WATCH_EXITED_TOKEN);
 
-      // A subsequent poll must not re-fire (dedupe holds once persisted).
       await engine.runMonitor(liveConfig);
       expect(listFires(name)).toHaveLength(1);
     },

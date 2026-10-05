@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Unattended repair must not adopt/switch defaults, create normal shims, or cross .isolated.
 
 describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation boundary', () => {
   let home: string;

@@ -20,7 +20,7 @@ export interface ResourceRef {
 }
 
 export interface ResourceInventory {
-  // Capability, declaration, disk presence, wiring, and unmanaged state are orthogonal facts.
+
   agent: AgentId;
   version: string;
   kind: InventoryKind;
@@ -41,7 +41,7 @@ export function getResourceInventory(
   kind: InventoryKind,
   opts: { cwd?: string } = {}
 ): ResourceInventory {
-  // Unimplemented kinds fail loud rather than fabricating an empty inventory.
+
   if (!IMPLEMENTED_KINDS.includes(kind)) {
     throw new Error(
       `getResourceInventory: kind '${kind}' is not implemented yet (implemented: ${IMPLEMENTED_KINDS.join(', ')}; tracked under RUSH-2236)`
@@ -87,7 +87,6 @@ function hooksInventory(agent: AgentId, version: string, cwd?: string): Resource
 
     const report = checkVersionHookWiring(agent, version);
     wiring = report;
-    // wired: [] is authoritative only after a supported native format parsed successfully.
     wiringSupported = report.supported && !report.settingsUnparseable;
     if (wiringSupported) {
       const eventsByName = new Map<string, Set<string>>();

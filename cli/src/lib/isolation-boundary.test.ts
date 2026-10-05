@@ -1,5 +1,5 @@
-// Scan every config-adopting primitive and hand-rolled rename; repointAdoptedConfigToHome is exempt only for existing symlinks.
-// Protection derives from real installs, not scaffolding or stored settings.
+
+
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

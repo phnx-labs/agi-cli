@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 
-// Isolate HOME before importing modules that capture path constants at import.
+
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-setup-test-'));
 process.env.HOME = TEST_HOME;
 
@@ -18,9 +18,9 @@ describe('agents setup command group', () => {
     const setup = program.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
     const subs = setup!.commands.map((c) => c.name()).sort();
-    // `share` is deliberately absent: artifact sharing moved out to the standalone
-    // `artifacts` CLI (PHNX-3992), so the `share` phase is gone from the hub too.
-    // `url-scheme` is the agents:// OS deep-link handler home (PHNX-3949).
+
+
+
     expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'term', 'tools', 'url-scheme', 'watchdog']);
   });
 
@@ -120,9 +120,9 @@ describe('agents setup command group', () => {
   });
 
   it('is ready when the Browser CLI is installed and a default profile is configured', async () => {
-    // Readiness is config + standalone presence now (PHNX-4101): the engine owns
-    // profile declarations and launchability. BROWSER_BIN points at a resolvable
-    // executable so `browserInstalled()` is true deterministically.
+
+
+
     const { setConfigValue } = await import('../lib/device-config.js');
     const prevBin = process.env.BROWSER_BIN;
     process.env.BROWSER_BIN = process.execPath;
@@ -156,10 +156,10 @@ describe('agents setup command group', () => {
 });
 
 describe('agents setup secrets', () => {
-  // `agents setup secrets` installs the standalone when missing, then hands
-  // off to `secrets migrate`. The wizard is unit-tested in setup-secrets.test.ts;
-  // here we pin the registered command surface: the old wizard flags are gone,
-  // and a PATH with no `secrets` and no npm fails loud rather than writing prefs.
+
+
+
+
   it('no longer accepts the removed --backend/--policy wizard flags', async () => {
     const program = new Command();
     program.exitOverride();
@@ -174,8 +174,8 @@ describe('agents setup secrets', () => {
     const originalPath = process.env.PATH;
     const originalBin = process.env.SECRETS_BIN;
     const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
-    // A PATH with no `secrets` on it and no explicit override — deterministic
-    // "not installed" regardless of the machine running this.
+
+
     process.env.PATH = '';
     delete process.env.SECRETS_BIN;
     _resetSecretsClientForTest();
@@ -188,7 +188,7 @@ describe('agents setup secrets', () => {
       await program.parseAsync(['setup', 'secrets'], { from: 'user' });
 
       expect(process.exitCode).toBe(1);
-      // Setup did not complete, so no prefs file is written.
+
       expect(
         fs.existsSync(path.join(TEST_HOME, '.agents', '.history', 'setup', 'secrets.json')),
       ).toBe(false);

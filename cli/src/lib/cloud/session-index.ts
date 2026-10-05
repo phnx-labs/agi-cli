@@ -12,7 +12,7 @@ interface CloudSessionContext {
 }
 
 export function registerCloudSession(task: CloudTask, ctx: CloudSessionContext = {}): void {
-  // Empty filePath is the remote-transcript sentinel; indexing is best-effort and cannot fail dispatch.
+
   if (!task.agent || !isSessionTrackedAgent(task.agent)) return;
   if (!task.id || !EXECUTION_ID_RE.test(task.id)) return;
   try {

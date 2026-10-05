@@ -54,7 +54,7 @@ describe('namespacedServiceLabel', () => {
 });
 
 describe('every generated service manifest carries the caller HOME (RUSH-2639)', () => {
-  // Redirect both HOME seams or launchd/systemd children escape into the operator home.
+
   it('the daemon launchd plist bakes HOME and a namespaced Label', () => {
     withRedirectedHome((home) => {
       const plist = generateLaunchdPlist('/usr/local/bin/agents');
@@ -73,9 +73,6 @@ describe('every generated service manifest carries the caller HOME (RUSH-2639)',
     });
   });
 
-  // Regression: this plist carried PATH/AGENTS_NODE/AGENTS_ENTRY/AGENTS_BIN and
-  // no HOME, so the launchd-started helper resolved the account home and every
-  // `agents` call it made bootstrapped that home's ~/.agents.
   it('the menu-bar launchd plist bakes HOME and a namespaced Label', () => {
     withRedirectedHome((home) => {
       const plist = generateServicePlist('/some/MenubarHelper.app/Contents/MacOS/AGI Menu');

@@ -7,8 +7,6 @@ import { parseRemoteList } from '../lib/session/remote-list.js';
 import { writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 
 describe('agents sessions --resolve local-peer critical path', () => {
-  // 90s, not the default 30s: several real `agents` CLI boots, measured 9.4s
-  // idle and 18.1s under 16 CPU-bound background processes (RUSH-2839).
   it('fails ambiguity with every full-id candidate and keeps misses explicit', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-errors-'));
     try {
@@ -63,8 +61,6 @@ describe('agents sessions --resolve local-peer critical path', () => {
         }),
       ].join('\n') + '\n');
 
-      // Prime the durable index the same way a normal sessions listing does.
-      // The resolver invocation below must then read only that indexed row.
       const indexed = runAgents(['sessions', '--all', '--json', '--local'], repoDir, tempHome);
       expect(indexed.status, indexed.stderr).toBe(0);
 
@@ -108,8 +104,6 @@ describe('agents sessions --resolve local-peer critical path', () => {
         tempHome,
         { AGENTS_DEVICES_DIR: devicesDir },
       );
-      // RUSH-2492: an incomplete peer sweep degrades to a warning + exit 1
-      // instead of the old hard-abort exit 2 (SES-IF-2a, amended 2026-08-10).
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain('device registry');

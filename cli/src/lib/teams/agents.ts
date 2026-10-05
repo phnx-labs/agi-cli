@@ -458,7 +458,6 @@ export class AgentProcess {
   workspaceDir: string | null;
   mode: Mode = 'plan';
   pid: number | null = null;
-  // Signal only when the live process start time still matches, guarding PID reuse.
   startTime: string | null = null;
   status: AgentStatus = AgentStatus.RUNNING;
   startedAt: Date = new Date();
@@ -933,7 +932,6 @@ export class AgentProcess {
     try {
       metaContent = await fs.readFile(metaPath, 'utf-8');
     } catch (err) {
-      // Read uncertainty fails closed: leave the record so its worktree stays claimed.
       return null;
     }
 
@@ -1029,7 +1027,6 @@ export class AgentProcess {
         multiplex: true,
         extraSshArgs: this.hostIdentityFile ? ['-i', this.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
       });
-      // SSH timeout is alive/unknown so a transient outage cannot reap remote work.
       if (res.code === null) return true;
       return res.stdout.trim().endsWith('ALIVE');
     }

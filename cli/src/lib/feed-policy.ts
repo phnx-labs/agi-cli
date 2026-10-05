@@ -72,7 +72,6 @@ export function blockClass(block: OpenBlock): BlockClass {
 }
 
 export function isPhoneUrgent(block: OpenBlock, policy: FeedPolicy): boolean {
-  // State, not answer presence, decides openness: an unconfirmed claimed answer remains eligible for escalation.
   if (deriveBlockState(block) !== 'open') return false;
   const cost = block.costOfDelay ?? 'low';
   return COST_RANK[cost] >= COST_RANK[policy.phoneNotifyThreshold];
@@ -109,7 +108,6 @@ export function applyPolicyToBlock(
   root?: string,
   mailboxRoot?: string,
 ): PolicyResult {
-  // Approvals may default; decisions hard-park rather than inventing an answer.
   if (deriveBlockState(block) !== 'open' || block.parkedAt || block.defaultedAt) {
     return { blockId: block.blockId, action: 'none' };
   }

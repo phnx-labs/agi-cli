@@ -13,7 +13,6 @@ function makeTempDir(): string {
   return dir;
 }
 
-/** A real events log + a real activity root — no mocks, both writers run. */
 function setup(): { activityRoot: string } {
   const dir = makeTempDir();
   _resetForTest(path.join(dir, 'events.jsonl'));
@@ -24,7 +23,7 @@ function setup(): { activityRoot: string } {
 
 afterEach(() => {
   for (const dir of tempDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
   tempDirs.length = 0;
   _resetForTest();
@@ -48,11 +47,9 @@ describe('routing between the two stores', () => {
     const records = query({});
     expect(records).toHaveLength(1);
     expect(records[0].event).toBe('factory.command');
-    // This is what makes `agents events --module factory` work.
     expect(records[0].module).toBe('factory');
     expect((records[0] as Record<string, unknown>).commandId).toBe('agents.newClaude');
 
-    // ...and nothing leaked into the activity store.
     expect(fs.readdirSync(activityRoot)).toEqual([]);
   });
 
@@ -76,10 +73,8 @@ describe('routing between the two stores', () => {
     const written = JSON.parse(fs.readFileSync(path.join(activityRoot, 'abc-123.jsonl'), 'utf-8').trim());
     expect(written.event).toBe('factory.launch');
     expect(written.tier).toBe('milestone');
-    // terminalId is the ext's join key onto the CLI's pid registry — it must survive.
     expect(written.terminalId).toBe('CC-3');
-    expect(written.mailboxId).toBe('abc-123'); // defaults to sessionId
-    // The operational log stays empty for a routed milestone.
+    expect(written.mailboxId).toBe('abc-123');
     expect(query({})).toHaveLength(0);
   });
 
@@ -102,7 +97,6 @@ describe('rejection is loud, per line, and lossless', () => {
     expect(res.written).toBe(0);
     expect(res.rejected).toHaveLength(1);
     expect(res.rejected[0].reason).toMatch(/sessionId/);
-    // The dangerous failure would be writing it SOMEWHERE and looking successful.
     expect(query({})).toHaveLength(0);
     expect(fs.readdirSync(activityRoot)).toEqual([]);
   });
@@ -164,7 +158,6 @@ describe('caller-supplied timestamps', () => {
     );
 
     const byCommand = new Map(query({}).map((r) => [(r as Record<string, unknown>).commandId, r.ts]));
-    // The whole point: NOT both stamped at flush time.
     expect(byCommand.get('first')).toBe(t1);
     expect(byCommand.get('second')).toBe(t2);
   });

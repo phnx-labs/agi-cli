@@ -91,12 +91,10 @@ describe('computeSyncStatus — directory docs are not commands (PHNX-3186)', ()
     const srcCmds = path.join(userDir, 'commands');
     fs.mkdirSync(srcCmds, { recursive: true });
 
-    // A real command, plus two directory docs the sync writer never installs.
     fs.writeFileSync(path.join(srcCmds, 'plan.md'), 'PLAN\n');
     fs.writeFileSync(path.join(cmdsHome, 'plan.md'), 'PLAN\n');
     fs.writeFileSync(path.join(srcCmds, 'README.md'), '# Commands index\n');
     fs.writeFileSync(path.join(srcCmds, 'AGENTS.md'), '# maintenance contract\n');
-    // A stale doc left in a home from an older sync must not become an `extra` either.
     fs.writeFileSync(path.join(cmdsHome, 'AGENTS.md'), '# old\n');
 
     const s = runStatus('claude', ['commands']);
@@ -111,14 +109,10 @@ describe('computeSyncStatus — directory docs are not commands (PHNX-3186)', ()
 
 describe('computeSyncStatus — command shadowed by a same-named skill (PHNX-3186)', () => {
   it('a command whose name collides with a real skill is not "missing" on a command-as-skill agent', () => {
-    // codex >= 0.117 installs commands AS skills; a plugin that ships both a
-    // /continue command and a `continue` skill makes the skill win the shared
-    // skills/continue slot, and the command wrapper is deliberately never written.
     const { configDir } = makeInstalledVersion('codex', '0.146.0', 'codex', '.codex');
     const skillsHome = path.join(configDir, 'skills');
     fs.mkdirSync(skillsHome, { recursive: true });
 
-    // Sources: a command `foo` AND a real skill `foo`.
     const srcCmds = path.join(userDir, 'commands');
     const srcSkills = path.join(userDir, 'skills');
     fs.mkdirSync(srcCmds, { recursive: true });
@@ -127,14 +121,12 @@ describe('computeSyncStatus — command shadowed by a same-named skill (PHNX-318
     const realSkill = '---\nname: foo\ndescription: the real foo skill\n---\n# foo skill\n';
     fs.writeFileSync(path.join(srcSkills, 'foo', 'SKILL.md'), realSkill);
 
-    // Home: the real skill occupies skills/foo (no agents_command marker).
     fs.mkdirSync(path.join(skillsHome, 'foo'), { recursive: true });
     fs.writeFileSync(path.join(skillsHome, 'foo', 'SKILL.md'), realSkill);
 
     const s = runStatus('codex', ['commands']);
 
     const foo = resource(s, 'commands', 'foo');
-    // Reported present (shadowed by the skill), NOT the phantom "missing".
     expect(foo?.status).toBe('synced');
     expect(foo?.detail).toBe('provided by same-named skill');
     expect(s.counts.missing).toBe(0);
@@ -155,8 +147,6 @@ describe('computeSyncStatus — command shadowed by a same-named skill (PHNX-318
 
 describe('computeSyncStatus — presence-only kinds are capability-gated (PHNX-3186)', () => {
   it('a source subagent is not "missing" on a version below the subagents floor', () => {
-    // kimi subagents land only at >= 0.29.0; 0.28.0 structurally cannot hold one,
-    // so the sync writer never installs it — counting it missing is phantom drift.
     makeInstalledVersion('kimi', '0.28.0', 'kimi', '.kimi-code');
     const srcSub = path.join(userDir, 'subagents');
     fs.mkdirSync(srcSub, { recursive: true });
@@ -169,11 +159,6 @@ describe('computeSyncStatus — presence-only kinds are capability-gated (PHNX-3
 });
 
 describe('describePluginDrift — a stale marketplace copy is reportable drift (PHNX-2955)', () => {
-  // A skill/command that exists in both central and the per-version marketplace
-  // mirror but whose BYTES went stale (a skill edit pulled into central, the
-  // mirror never refreshed) must be reported as drift — presence alone missed it,
-  // so `plugins list`/`doctor`/`sync status` called it `everywhere`/`ok` while
-  // agents ran the OLD skill text.
   function makePlugin(dir: string, skillBody: string, cmdBody: string) {
     fs.mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'code', version: '0.2.0' }));

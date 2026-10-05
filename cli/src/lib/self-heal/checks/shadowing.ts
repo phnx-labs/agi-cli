@@ -18,7 +18,6 @@ export const shadowingCheck: HealCheck = {
     const fixed: string[] = [];
     const needsAttention: string[] = [];
 
-    // Isolated-only agents must never enter adoption: it repoints the user's own launcher.
     for (const agent of listAgentsWithNonIsolatedInstalledVersions()) {
       if (!getGlobalDefault(agent)) continue;
       const cmd = AGENTS[agent].cliCommand;
@@ -37,7 +36,7 @@ export const shadowingCheck: HealCheck = {
       }
 
       const res = adoptShadowingLauncher(agent);
-      // Adopt managed symlinks automatically, but surface real binaries for human resolution.
+
       if (res.adopted) fixed.push(`adopted ${cmd} launcher (${res.launcher})`);
       else if (res.reason === 'not-a-symlink') {
         needsAttention.push(`${cmd}: real binary shadows the shim (${shadowedBy})`);

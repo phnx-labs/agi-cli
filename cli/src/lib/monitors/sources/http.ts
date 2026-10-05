@@ -1,9 +1,3 @@
-/**
- * Poll-http source evaluator.
- *
- * GETs the URL; the observation is `<status>\n<body>` so a status flip OR a body
- * change both register as a diff. Uses the built-in fetch (Node 22+).
- */
 
 import type { MonitorSource } from '../config.js';
 import type { Observation } from './types.js';
@@ -11,7 +5,6 @@ import type { Observation } from './types.js';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_BODY = 1024 * 1024;
 
-/** GET the source URL and return status + body as the observation. */
 export async function evaluate(source: MonitorSource): Promise<Observation | null> {
   const url = source.url;
   if (!url) return null;
@@ -27,8 +20,6 @@ export async function evaluate(source: MonitorSource): Promise<Observation | nul
       meta: { status: res.status, ok: res.ok },
     };
   } catch (err) {
-    // A network failure is itself a real observation (the endpoint went down);
-    // surface it so an on-change monitor can fire on reachability flips.
     return { raw: `error: ${(err as Error).message}`, meta: { status: 0, ok: false } };
   } finally {
     clearTimeout(timer);

@@ -1,19 +1,3 @@
-/**
- * `agents sessions share <id>` — publish one session transcript as a link.
- *
- * Renders the session locally — `renderSessionMarkdownDocument()` (redacted
- * transcript) and `renderSessionHtmlDocument()` (self-contained branded page) —
- * then publishes it through the standalone `artifacts` CLI (`artifacts share`),
- * the single home for artifact sharing since PHNX-3992. agents-cli holds no
- * share engine of its own; this command contributes the session-specific
- * rendering and redaction, and forwards the finished page to `artifacts share`.
- *
- * Unlisted by default, unlike `artifacts share` (public by default). A transcript
- * carries file paths, command output, error text, and whatever a tool printed —
- * strictly more than a plan does — so it does not belong in the public `/<user>`
- * gallery unless the operator asks for it with `--public`. The URL itself stays
- * world-readable: unlisted is a capability URL, not a secret.
- */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -49,7 +33,6 @@ interface ShareOptions {
   cover?: boolean;
 }
 
-/** The shape `artifacts share --json` prints (`formatSharePublishResult`). */
 interface ArtifactsShareResult {
   url: string;
   slug?: string;
@@ -65,18 +48,10 @@ function parseReasoning(value: string): ReasoningMode {
   throw new Error(`Unknown reasoning mode "${value}". Expected omit, fold, or include.`);
 }
 
-/** `session-<shortId>` — stable per session, so re-sharing updates the same URL. */
 export function defaultSessionSlug(session: SessionMeta): string {
   return `session-${session.shortId || session.id}`;
 }
 
-/**
- * Build the `artifacts share` argv for a session publish.
- *
- * Extracted so the mapping is testable directly. The security-relevant default
- * is `--visibility unlisted` — it inverts `artifacts share`'s public default, and
- * a test that re-implements this mapping would still pass with it flipped.
- */
 export function buildArtifactsShareArgs(
   session: SessionMeta,
   options: Pick<ShareOptions, 'public' | 'slug' | 'label' | 'expire' | 'force' | 'cover'>,
@@ -160,8 +135,6 @@ Manage published sessions with 'artifacts share list' and 'artifacts share delet
       process.exitCode = 1;
       return;
     }
-    // One link per share: several sessions in one page would give the reader no
-    // way to reference just the one that matters, and the slug could only name one.
     if (sessions.length > 1) {
       process.stderr.write(chalk.yellow(
         `"${selector}" matched ${sessions.length} sessions. Share one at a time — pass a full or unique session id.\n`,
@@ -177,23 +150,9 @@ Manage published sessions with 'artifacts share list' and 'artifacts share delet
       reasoning,
       knownSecrets: redact ? knownSecretValuesFromEnv() : undefined,
     });
-    // Emails on top of what the renderer masks. Almost every real transcript
-    // carries a few — git author addresses, `gh api user`, a pasted log — and
-    // `artifacts share` refuses a body containing any (its own scan). Masking
-    // them means the published page genuinely does not carry them; the
-    // alternative, telling people to pass --force, trains everyone to bypass the
-    // gate that also catches real credentials.
-    //
-    // Applied to the RENDERED PAGE, not the Markdown, so the text that is masked
-    // is exactly the text the publish scan will see. Markdown escaping stands
-    // between the two: `foo\@example.com` hides from the pattern in the Markdown
-    // and reappears as a live address once marked drops the backslash.
     const page = renderSessionHtmlDocument(session, markdown, { redacted: redact });
     const html = redact ? redactEmails(page) : page;
 
-    // A real file on disk is what `artifacts share` takes, and its OG capturer
-    // opens it in a browser. 0600 + a per-run directory keeps the intermediate
-    // off a world-readable /tmp path while it exists.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-session-share-'));
     const file = path.join(dir, `${defaultSessionSlug(session)}.html`);
     try {
@@ -225,10 +184,6 @@ Manage published sessions with 'artifacts share list' and 'artifacts share delet
       try {
         result = JSON.parse(proc.stdout) as ArtifactsShareResult;
       } catch {
-        // A 0 exit with non-JSON stdout (a version-skewed `artifacts` that
-        // printed a banner before the JSON, or one predating `--json` here) must
-        // fail loud with the bytes it actually returned, not an uncaught parse
-        // stack trace — mirroring `secrets-client.ts`'s `parseResponse`.
         const preview = proc.stdout.trim().slice(0, 200);
         process.stderr.write(chalk.red(
           `artifacts share returned a non-JSON response${preview ? `: ${preview}` : ' (empty output)'}\n`,

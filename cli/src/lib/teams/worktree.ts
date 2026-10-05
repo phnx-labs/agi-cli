@@ -76,7 +76,7 @@ export async function commitsBehindDefault(
 }
 
 export async function createWorktree(repoDir: string, worktreeName: string): Promise<string> {
-  // Place under the main checkout and fetch before branching from origin/default.
+
   if (!WORKTREE_NAME_RE.test(worktreeName)) {
     throw new Error(`Invalid worktree name: ${worktreeName}`);
   }
@@ -149,7 +149,7 @@ export function getWorktreeBranch(worktreeName: string): string {
 }
 
 export async function worktreeCheckoutExists(repoDir: string, worktreeName: string): Promise<boolean> {
-  // Checkout presence and dangling branch presence are distinct ownership signals.
+
   if (!WORKTREE_NAME_RE.test(worktreeName)) {
     throw new Error(`Invalid worktree name: ${worktreeName}`);
   }

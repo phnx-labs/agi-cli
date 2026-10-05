@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --no-warnings=ExperimentalWarning
-// Keep this entry shell free of static imports: internal delegates and eligible session reads must stay above bootstrap to skip update and registration.
-// SIGINT defers only during guarded install swaps; daemon crashes log and exit for supervisor restart; missing/old remote sessions fall back to the canonical engine.
+
+
 
 
 export {};

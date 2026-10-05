@@ -1,10 +1,3 @@
-/**
- * RUSH-2022 — a session that ran on another device must never resume here.
- *
- * Real path, no mocks: `sessionOwnerDevice` reads the same `isSelfHost()` this
- * machine answers with, and the tests drive it through `AGENTS_SYNC_MACHINE_ID`
- * (the documented override in lib/machine-id.ts) rather than stubbing anything.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { sessionOwnerDevice } from './resume-owner.js';
 import { resetSelfHostCache } from '../devices/self-host.js';
@@ -23,7 +16,6 @@ afterEach(() => {
 
 describe('sessionOwnerDevice', () => {
   it('names the peer for a session whose transcript originated elsewhere', () => {
-    // The exact shape of a synced mirror row: machine-tagged, readable here.
     expect(sessionOwnerDevice({ machine: 'zion' })).toBe('zion');
   });
 

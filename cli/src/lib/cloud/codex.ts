@@ -127,7 +127,7 @@ export class CodexCloudProvider implements CloudProvider {
     }
 
     const taskId = extractTaskId(stdout) ?? extractTaskId(stderr);
-    // Persist only the execution id returned by Codex; a fabricated fallback cannot be resumed or queried.
+
     if (!taskId) {
       throw new Error(
         'codex cloud exec did not report a task id — the run may have dispatched, but ' +

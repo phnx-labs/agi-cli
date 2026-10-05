@@ -9,7 +9,6 @@ import {
   type ExecutionContextInput,
 } from './routine-context.js';
 
-// Resolve separators and absolute paths from the target platform/home; defer remote existence checks.
 function realProbe(): ContextFsProbe {
   return {
     exists: (p) => fs.existsSync(p),

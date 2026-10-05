@@ -9,7 +9,7 @@ type RemoteExitState =
   | { state: 'unreachable' };
 
 export function classifyExit(res: Pick<SshExecResult, 'code' | 'stdout' | 'timedOut'>): RemoteExitState {
-  // Unreachable, absent, or empty exit state is still running; only a confirmed code is terminal.
+
   if (res.timedOut || res.code === null || res.code === 255) return { state: 'unreachable' };
   const out = res.stdout.trim();
   if (out === '') return { state: 'running' };
@@ -36,7 +36,7 @@ export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6
 }
 
 async function readRemoteExitAsync(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): Promise<RemoteExitState> {
-  // Daemon callers use async SSH so a dead host cannot block the event loop.
+
   return classifyExit(await sshExecAsync(target, remoteExitCommand(remoteExit, remoteShell), remoteExitSshOpts(timeoutMs, identityFile)));
 }
 

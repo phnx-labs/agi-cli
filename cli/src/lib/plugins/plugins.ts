@@ -163,7 +163,7 @@ export function pluginResourceGroups(plugin: DiscoveredPlugin): PluginResourceGr
 }
 
 function manifestDeclaresExecSurface(value: unknown): boolean {
-  // Inline hooks and MCP declarations execute even when no hooks/MCP directory exists.
+
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (value && typeof value === 'object') return Object.keys(value).length > 0;
@@ -246,7 +246,7 @@ export function assertPluginTargetContained(targetRoot: string, pluginsDir: stri
 }
 
 export function getPlugin(name: string): DiscoveredPlugin | null {
-  // Discovery is low-to-high precedence; reverse lookup yields project, extra, user, system.
+
   const plugins = discoverPlugins();
   for (let i = plugins.length - 1; i >= 0; i--) {
     if (plugins[i].name === name) return plugins[i];
@@ -879,7 +879,7 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
 
 
 function stripEscapingSymlinks(destRoot: string, sourceRoot: string): string[] {
-  // Managed-marker writes are safe only when copied links remain inside source or destination.
+
   const realRoots = [destRoot, sourceRoot].map((r) => {
     try { return fs.realpathSync(r); }
     catch { return r; }

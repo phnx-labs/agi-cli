@@ -1,9 +1,3 @@
-/**
- * The session-title service (PHNX-3797) against a REAL session index: only the
- * model call is injected. The property under test is cost containment — a box
- * with no usable harness must stop spawning one subprocess per session every two
- * minutes, and must resume the moment generation works again.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -50,7 +44,6 @@ describe('SessionTitleService', () => {
     expect(calls).toBe(1);
     expect(db.getSessionById('aaaa1111-0000-0000-0000-000000000001')?.generatedTitle).toBe('Fleet headline fix');
 
-    // Steady state: no candidate, so no model call at all — never per-tick.
     await svc.tick(ctx(), new AbortController().signal);
     expect(calls).toBe(1);
     await svc.stop();
@@ -70,20 +63,17 @@ describe('SessionTitleService', () => {
     await svc.tick(ctx(), new AbortController().signal);
     expect(calls).toBe(1);
 
-    // The next tick is skipped by the backoff — the whole point.
     await svc.tick(ctx(), new AbortController().signal);
     expect(calls).toBe(1);
     await svc.tick(ctx(), new AbortController().signal);
     expect(calls).toBe(1);
 
-    // Backoff elapsed: one more attempt, which now succeeds.
     fail = false;
     await svc.tick(ctx(), new AbortController().signal);
     expect(calls).toBe(2);
     expect(db.getSessionById('bbbb2222-0000-0000-0000-000000000002')?.generatedTitle)
       .toBe('Daemon owns session titles');
 
-    // A success clears the backoff: the next pending session is attempted at once.
     seed('cccc3333-0000-0000-0000-000000000003', 'Publish the title on the fleet mirror too.');
     await svc.tick(ctx(), new AbortController().signal);
     expect(calls).toBe(3);

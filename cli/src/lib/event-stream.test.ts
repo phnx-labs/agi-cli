@@ -68,7 +68,7 @@ describe('readUnifiedEvents', () => {
   });
 
   it('finds a matching-bundle record older than the newest `limit` window (no data loss)', () => {
-    // Every source applies its filters before its local read limit.
+
     setup();
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share' });
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
@@ -114,7 +114,6 @@ describe('readUnifiedEvents', () => {
   });
 
   it('sessionId filters BOTH the operational and activity halves — the scoped read enrichCachedSessionMeta relies on', () => {
-    // sessionId scopes both halves of the merged stream.
     const { activityRoot } = setup();
     emit('browser.navigate', { sessionId: 's-target', profile: 'default', url: 'https://x' });
     emit('browser.navigate', { sessionId: 's-other', profile: 'default', url: 'https://y' });
@@ -161,7 +160,6 @@ describe('readUnifiedEvents', () => {
   });
 
   it('applies event-type filter BEFORE limit so a rare match survives routine churn (RUSH-2093)', () => {
-    // Filtering after a capped activity read would permanently hide this match.
     const { activityRoot } = setup();
     appendActivityEvent(
       {

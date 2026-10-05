@@ -22,7 +22,6 @@ function parseNdjson(out: string): Array<Record<string, unknown>> {
   return rows;
 }
 
-// Every later verdict is anchored to this exact head SHA, never the mutable PR object.
 export async function prHead(
   repo: string,
   number: number,
@@ -33,7 +32,6 @@ export async function prHead(
   return { number, sha };
 }
 
-// Query checks and statuses for one reviewed commit so superseded results cannot leak in.
 export async function rollupForSha(
   repo: string,
   sha: string,
@@ -69,7 +67,6 @@ export async function rollupForSha(
   return [...byName.values()];
 }
 
-// Pending suites distinguish checks not registered yet from a genuinely settled empty rollup.
 export async function pendingCheckSuites(
   repo: string,
   sha: string,

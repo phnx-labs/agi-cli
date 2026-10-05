@@ -12,8 +12,8 @@ export function copyAppBundle(
   dest: string,
   io: { renameSync?: (from: string, to: string) => void } = {},
 ): void {
-  // Stage beside the destination, preserve signature/xattrs with cp -R, then
-  // rename with rollback so readers never observe a partial signed bundle.
+
+
   const rename = io.renameSync ?? fs.renameSync;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const staging = `${dest}.installing.${process.pid}`;
@@ -43,7 +43,7 @@ export function copyAppBundle(
 }
 
 export function withInstallLock(dest: string, fn: (heartbeat: () => void) => void): void {
-  // Callers must invoke the heartbeat between long synchronous copy/codesign stages.
+
   const lockTarget = `${dest}.install-lock`;
   ensureLockTarget(lockTarget);
   withFileLock(lockTarget, (heartbeat) => fn(heartbeat), {

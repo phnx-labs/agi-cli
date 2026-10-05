@@ -44,7 +44,6 @@ export interface VersionProvider {
   listInstalled(agent: AgentId): string[];
   getProjectVersion(agent: AgentId, cwd: string): string | null;
   getGlobalDefault(agent: AgentId): string | null;
-  // Isolated defaults cannot acquire launcher, bare-shim, or real-config ownership.
   getIsolatedDefault(agent: AgentId): string | null;
   isInstalled(agent: AgentId, version: string): boolean;
 }

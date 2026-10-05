@@ -11,7 +11,7 @@ interface OwnerMessageOptions {
 }
 
 function ownerMessageContext(rawText: string, opts: OwnerMessageOptions = {}): FeedBroadcastContext {
-  // Use the feed broadcast shaper; expand short IDs so console links resolve, and resolve context once before plain/mrkdwn fan-out.
+
   const identity = resolvePostIdentity({ sessionId: opts.sessionId });
   const session = resolveFullSessionId(identity?.sessionId);
   const ticket = session ? getSessionById(session)?.ticketId : undefined;

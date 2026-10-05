@@ -57,7 +57,7 @@ describe('encrypt/decrypt round-trip', () => {
   it('a fresh IV per seal makes ciphertext non-deterministic', () => {
     const a = encryptTranscript(TRANSCRIPT, KEY);
     const b = encryptTranscript(TRANSCRIPT, KEY);
-    expect(a).not.toBe(b); // different IV/ct
+    expect(a).not.toBe(b);
     expect(decryptEnvelope(parseEnvelope(a)!, KEY)).toBe(decryptEnvelope(parseEnvelope(b)!, KEY));
   });
 
@@ -91,7 +91,6 @@ describe('envelope detection (migration-safe pull)', () => {
 
   it('does NOT mistake NDJSON plaintext for an envelope', () => {
     expect(isTranscriptEnvelope(TRANSCRIPT)).toBe(false);
-    // A single-line transcript is still a JSON object per line — must not match.
     expect(isTranscriptEnvelope(JSON.stringify({ type: 'user', v: 1 }) + '\n')).toBe(false);
   });
 

@@ -25,7 +25,6 @@ function buildRulesWriter(agent: AgentId): ResourceWriter<RulesSelection> {
       const agentDir = path.join(versionHome, agentConfigDirName(agent));
       const destFile = path.join(agentDir, targetName);
       fs.mkdirSync(path.dirname(destFile), { recursive: true });
-      // Unlink a stale symlink before writing so we never follow and clobber its external target.
       try {
         const st = fs.lstatSync(destFile);
         if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(destFile);

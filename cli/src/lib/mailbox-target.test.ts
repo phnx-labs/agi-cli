@@ -3,14 +3,12 @@ import { resolveMessageTarget, mailboxIdForActiveSession, decideHostTaskRoute } 
 import type { ActiveSession } from './session/active.js';
 import type { HostTask } from './hosts/tasks.js';
 
-/** Minimal live-session builder (only the fields the resolver reads). */
 function mk(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'headless', kind: 'claude', status: 'running', ...over };
 }
 
 const noCloud = () => false;
 
-/** Minimal HostTask builder (only the fields decideHostTaskRoute reads). */
 function mkTask(over: Partial<HostTask>): HostTask {
   return {
     id: 'task-1',
@@ -94,21 +92,15 @@ describe('resolveMessageTarget', () => {
   it('treats an empty target as no match (no startsWith-matches-everything footgun)', () => {
     const sessions = [mk({ sessionId: 'aaaa-1111' }), mk({ sessionId: 'bbbb-2222' })];
     expect(resolveMessageTarget('', sessions, noCloud)).toEqual({ kind: 'none' });
-    // even with a single running agent, empty must not silently deliver.
     expect(resolveMessageTarget('', [mk({ sessionId: 'only-one' })], noCloud)).toEqual({ kind: 'none' });
   });
 
   it('exact match wins over a prefix that would be ambiguous', () => {
     const sessions = [mk({ sessionId: 'aaaa' }), mk({ sessionId: 'aaaa-longer' })];
-    // 'aaaa' is an exact id of the first AND a prefix of the second — exact wins.
     expect(resolveMessageTarget('aaaa', sessions, noCloud)).toEqual({ kind: 'local', id: 'aaaa' });
   });
 });
 
-// RUSH-2366 follow-up: `agents message` could not reach a detached
-// `agents run --device <host> --no-follow` dispatch — resolveMessageTarget
-// returns 'none' because getActiveSessions() has no visibility into it, even
-// though `agents devices ps` shows the same dispatch running with a live pid.
 describe('decideHostTaskRoute', () => {
   it('returns not-found when no host task matches the target', () => {
     expect(decideHostTaskRoute(null, 'nope')).toEqual({ kind: 'not-found' });

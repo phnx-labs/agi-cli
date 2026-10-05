@@ -296,8 +296,8 @@ export async function runAdd(
   opts: AddOptions,
   runners?: AddRunners,
 ): Promise<AddResult> {
-  // Portable-credential enrollment is headed-only and rejects ambient provider
-  // tokens before any slot or metadata side effect can mint the wrong identity.
+
+
   assertAddSupported(agent);
   assertAddAllowedOnThisDevice(agent, name);
   const kinds = harnessWorkerKinds(agent);
@@ -427,7 +427,6 @@ export async function runLogin(
   opts: AddOptions,
   runners?: AddRunners,
 ): Promise<AddResult> {
-  // A live credential and observed identity, never a metadata row, prove sign-in.
   if (opts.perDevice && !hasPerDeviceWorkerKind(agent)) throw new Error(perDeviceRefusal(agent));
   if (hasPortableWorkerKind(agent) && !opts.perDevice) assertAddAllowedOnThisDevice(agent, name);
   if (!opts.noWorkerToken && harnessWorkerKinds(agent).includes('setup-token')) {

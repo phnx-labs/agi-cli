@@ -15,7 +15,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function readAllDeviceDocs(): DeviceDoc[] {
-  // Discovery, host, and device-account auto-writers touch only their box's document; readers fold all docs.
+
   const devicesDir = path.join(getUserAgentsDir(), 'devices');
   if (!fs.existsSync(devicesDir)) return [];
   const out: DeviceDoc[] = [];
@@ -43,7 +43,7 @@ export function readAllDeviceDocs(): DeviceDoc[] {
 }
 
 export function unionDeviceDiscovery(docs: DeviceDoc[] = readAllDeviceDocs()): Record<string, 'approved' | 'ignored'> {
-  // Omission never deletes another box's decision, and ignored always wins over approved.
+
   const out: Record<string, 'approved' | 'ignored'> = {};
   for (const { device, doc } of docs) {
     const fleet = doc.fleet;

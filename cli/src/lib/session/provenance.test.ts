@@ -32,18 +32,15 @@ describe('parseProcEnviron', () => {
 
 describe('extractKnownEnv (macOS `ps eww` output)', () => {
   it('extracts known keys from a command+env line, preserving spaces in values', () => {
-    // Real shape: the full command, then space-joined KEY=VALUE env entries.
     const line =
       '/usr/local/bin/node /path/to/claude --resume LANG=en_US.UTF-8 ' +
       'SSH_CONNECTION=203.0.113.7 51828 10.0.0.3 22 TMUX=/tmp/tmux-501/default,914,2 ' +
       'TMUX_PANE=%5 TERM_PROGRAM=iTerm.app PWD=/Users/m/src';
     const env = extractKnownEnv(line, PROVENANCE_ENV_KEYS);
-    // SSH_CONNECTION has three internal spaces — must survive intact.
     expect(env.SSH_CONNECTION).toBe('203.0.113.7 51828 10.0.0.3 22');
     expect(env.TMUX).toBe('/tmp/tmux-501/default,914,2');
     expect(env.TMUX_PANE).toBe('%5');
     expect(env.TERM_PROGRAM).toBe('iTerm.app');
-    // Unknown keys (LANG, PWD) are not captured.
     expect(env.LANG).toBeUndefined();
   });
 
@@ -64,7 +61,7 @@ describe('parseSshConnection', () => {
 
   it('rejects malformed values', () => {
     expect(parseSshConnection('nope')).toBeUndefined();
-    expect(parseSshConnection('a b c d')).toBeUndefined(); // non-numeric ports
+    expect(parseSshConnection('a b c d')).toBeUndefined();
   });
 });
 
@@ -125,7 +122,7 @@ describe('deriveProvenance', () => {
     const p = deriveProvenance({ TERM_PROGRAM: 'vscode' }, 'this-mac');
     expect(p.transport).toBe('local');
     expect(p.mux).toBeUndefined();
-    expect(p.reply).toBeNull(); // plain VS Code integrated terminal — resolver checks disk instead
+    expect(p.reply).toBeNull();
   });
 
   it('screen session is recognized but not (yet) addressable', () => {
@@ -138,12 +135,10 @@ describe('deriveProvenance', () => {
 describe('detectProvenance (real process, no mocks)', () => {
   it('reads the running test process env and reports its own host', async () => {
     const p = await detectProvenance(process.pid);
-    // On Linux (/proc) and macOS (ps eww) this must resolve; other platforms undefined.
     if (process.platform === 'linux' || process.platform === 'darwin') {
       expect(p).toBeDefined();
       expect(p!.host.length).toBeGreaterThan(0);
       expect(p!.transport === 'local' || p!.transport === 'ssh').toBe(true);
-      // transport must agree with the actual env of this very process.
       expect(p!.transport).toBe(process.env.SSH_CONNECTION ? 'ssh' : 'local');
     } else {
       expect(p).toBeUndefined();

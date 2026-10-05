@@ -109,8 +109,8 @@ export function readProfile(name: string): Profile {
 }
 
 function migrateLegacyProfileAuth(profile: Profile, file: string): void {
-  // Persist the portable account name, resolve its device-local secret at exec,
-  // and delete the legacy item only after no sibling profile references it.
+
+
   if (!profile.auth || profile.account) return;
   if (!profile.provider) {
     throw new Error(`Profile '${profile.name}' owns a legacy credential without a provider. Add a durable account with 'agents accounts add', then set account: <name> in ${file}.`);
@@ -247,8 +247,8 @@ function inlineAuthToken(profile: Profile): string | undefined {
 }
 
 export function profileAuthLabel(profile: Profile): string {
-  // Labels expose a JWT identity claim or a masked opaque token. Keychain-backed
-  // auth checks presence without reading the secret or triggering a prompt.
+
+
   const provider = profileProviderLabel(profile);
   const token = inlineAuthToken(profile);
   if (token) {
@@ -266,7 +266,7 @@ export function profileAuthLabel(profile: Profile): string {
     try {
       stored = hasKeychainTokenSync(profile.auth.keychainItem);
     } catch (err) {
-      // Only standalone transport failure degrades availability; data errors fail loud.
+
       if (isSecretsTransportError(err)) return `${provider} unavailable`;
       throw err;
     }
@@ -411,8 +411,8 @@ export interface ForkProfileOptions {
 }
 
 export function forkProfile(source: Profile, name: string, opts: ForkProfileOptions = {}): Profile {
-  // Cross-host forks translate model, endpoint, and auth keys. Explicit model,
-  // endpoint, or host changes drop stale preset identity.
+
+
   validateProfileName(name);
   const sourceHost = source.host.agent;
   const host = opts.host ?? sourceHost;
@@ -490,8 +490,8 @@ export function renameProfile(oldName: string, newName: string): void {
 }
 
 export function resolveProfileEnv(profile: Profile): Record<string, string> {
-  // Optional auth injects nothing when absent so the host's native login survives;
-  // required auth fails loud. All secrets resolve only at execution time.
+
+
   const env: Record<string, string> = { ...profile.env };
   if (profile.account) {
     if (!findAccount(profile.account)) {
@@ -539,7 +539,7 @@ function resolveProfileTierModel(
   profile: Profile,
   tier: ModelTier,
 ): { model: string; clampedFrom?: ModelTier } | null {
-  // Tier tokens resolve against this profile's catalog and clamp only downward.
+
   if (!profile.models) return null;
   const idx = MODEL_TIERS.indexOf(tier);
   for (let i = idx; i >= 0; i--) {
@@ -559,7 +559,7 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
     env,
     profileName: profile.name,
   };
-  // Same-host fallback swaps only this model value so auth and endpoint survive the retry.
+
   if (profile.fallback_model) {
     const envKey = profileModelEnvKey(profile);
     if (envKey) {
@@ -578,7 +578,7 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
     }
   }
   if (resolved.resolvedModel === undefined && !requestedModel && profile.host.agent === 'opencode') {
-    // OpenCode ignores OPENCODE_MODEL unless the same pin is also carried into argv.
+
     const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost('opencode');
     const pinned = env[envKey];
     if (pinned) resolved.resolvedModel = pinned;

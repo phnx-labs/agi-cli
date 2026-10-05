@@ -1,4 +1,3 @@
-// Check every installed version: hook wiring/runtime and source-behind are drift even with fresh manifests; orphans stay informational.
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import { getGlobalDefault, listInstalledVersions } from './installations/versions.js';

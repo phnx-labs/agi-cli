@@ -30,7 +30,7 @@ export function planOwnerForward(
   self: string,
   opts: { guarded?: boolean } = {},
 ): OwnerForwardPlan {
-  // Only Rush-backed transports need a headed macOS peer; the guard prevents fleet recursion.
+
   if (opts.guarded) return { candidates: [], skip: 'guarded' };
   if (!isRushBackedTransport(channel, meta)) return { candidates: [], skip: 'not-rush-backed' };
 
@@ -42,7 +42,7 @@ export function planOwnerForward(
   const interactiveHost = typeof meta.config?.interactiveHost === 'string'
     ? normalizeHost(meta.config.interactiveHost)
     : undefined;
-  // Prefer the configured interactive host, then try other capable peers in stable order.
+
   const rank = (name: string): number => (interactiveHost && normalizeHost(name) === interactiveHost ? 0 : 1);
   const candidates = capable
     .map((d) => normalizeHost(d.name))
@@ -77,7 +77,6 @@ async function sendOnPeer(
   const args = ['send', '--channel', channel, '--to', target, '--text', text, '--json'];
   if (envelope.thread) args.push('--thread', envelope.thread);
   if (envelope.from) args.push('--from', envelope.from);
-  // Use the shared remote builder for OS quoting and inject the recursion guard remotely.
   const remoteCmd = buildRemoteAgentsInvocation(args, undefined, peer.os, { [OWNER_FORWARD_GUARD_ENV]: '1' });
   const capture = await sshCapture(peer.target, remoteCmd, PEER_SEND_TIMEOUT_MS);
   if (capture.code !== 0) return undefined;
@@ -116,7 +115,7 @@ export async function forwardOwnerNotifyToPeer(
   const send = opts.send ?? sendOnPeer;
   for (const machine of plan.candidates) {
     const result = await send(machine, text, channel, target, opts.envelope);
-    // A successful peer owns delivery; continuing would duplicate the owner notification.
+
     if (result?.ok) return result;
   }
   return undefined;

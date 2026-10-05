@@ -1,5 +1,3 @@
-// Fleet status is publish-own/read-union: daemons probe only themselves, readers union peers, and mirror writes preserve other hosts.
-// running means active work; live includes every tracked state.
 import * as fs from 'fs';
 import * as path from 'path';
 

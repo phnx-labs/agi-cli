@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Disk .isolated markers enforce the boundary inside primitives, including setup scaffolding that creates empty dirs before its gate.
 describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
   let home: string;
   const V = '9.9.4';

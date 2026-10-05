@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { decideRoutineAuthReadiness, decideHostAuthFromPing } from './routine-readiness.js';
 
-// With no auth row, readiness requires launchable:true; older payloads fail closed only in that case.
 describe('decideRoutineAuthReadiness (shared local/host decision)', () => {
   it('worker with no probe row but a launchable token → ready', () => {
     expect(decideRoutineAuthReadiness(undefined, true)).toEqual({ ok: true });

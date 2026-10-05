@@ -4,7 +4,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Redirect HOME/USERPROFILE before dynamic import; state paths initialize once and Windows resolves USERPROFILE.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-accounts-test-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;

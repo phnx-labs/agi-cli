@@ -28,7 +28,6 @@ describe('summarizeFeedBlocks', () => {
     const summary = summarizeFeedBlocks(blocks, 2);
     expect(summary.openBlocks).toBe(3);
     expect(summary.blocks).toHaveLength(2);
-    // Newest first.
     expect(summary.blocks[0].blockId).toBe('c');
     expect(summary.blocks[1].blockId).toBe('b');
     expect(summary.blocks[1].ticket).toBe('RUSH-1');

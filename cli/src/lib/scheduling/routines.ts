@@ -1215,7 +1215,7 @@ export function substituteWebhookPrompt(prompt: string, context: WebhookContext)
 }
 
 export function substituteWebhookCommand(command: string, context: WebhookContext): string {
-  // Preserve operator shell syntax; quote only untrusted substituted values.
+
   return command.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
     const value = getPath(context, rawPath.trim());
     if (value === undefined || value === null) return "''";
@@ -1227,7 +1227,7 @@ export function assertShellSubstitutionSupported(
   command: string,
   platform: NodeJS.Platform = process.platform,
 ): void {
-  // cmd.exe has no equivalent safe quoting, so placeholder commands fail closed on Windows.
+
   if (platform === 'win32' && /\{\{[^{}]+\}\}/.test(command)) {
     throw new Error(
       'run.command with {{…}} placeholders is not supported on Windows: the values come from an ' +
@@ -1393,7 +1393,7 @@ const DAY_MS = 24 * HOUR_MS;
 const SLOT_LOOKBACK_WINDOWS_MS = [HOUR_MS, DAY_MS, 7 * DAY_MS, 32 * DAY_MS, 93 * DAY_MS, 400 * DAY_MS];
 
 export function alignedSlotForFire(cron: Cron, at: Date): Date | null {
-  // Live and catch-up derive one aligned identity; widening windows cover sparse schedules.
+
   for (const window of SLOT_LOOKBACK_WINDOWS_MS) {
     let cursor: Date = new Date(at.getTime() - window);
     let last: Date | null = null;
@@ -1409,7 +1409,7 @@ export function alignedSlotForFire(cron: Cron, at: Date): Date | null {
 }
 
 export function claimRunSlot(jobName: string, runId: string): boolean {
-  // Non-recursive mkdir is the cross-process atomic claim; only its winner launches.
+
   const runDir = getRunDir(jobName, runId);
   fs.mkdirSync(path.dirname(runDir), { recursive: true });
   try {

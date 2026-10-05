@@ -19,7 +19,6 @@ import {
   replayRemoteCache,
 } from './remote.js';
 
-// Reproduce both remote login-shell layers; this is the quoting/injection proof, not a direct argv unit test.
 function decodeRemoteArgv(forwarded: string[]): string[] {
   const shim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; `;
   const res = spawnSync('bash', ['-c', shim + buildRemoteCommand(forwarded)], { encoding: 'utf-8' });

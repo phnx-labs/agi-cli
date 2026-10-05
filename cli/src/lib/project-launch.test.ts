@@ -1,4 +1,4 @@
-// Launch mirrors commands/skills/subagents but never cwd .mcp.json; plugins carrying .mcp.json install for inspection but are not auto-enabled.
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

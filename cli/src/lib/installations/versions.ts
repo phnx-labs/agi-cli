@@ -446,7 +446,6 @@ export interface ProjectOnlyResources {
   workflows: Set<string>;
 }
 
-// Project-only executable resources are untrusted until an installed layer supplies the same name.
 export function getProjectOnlyResources(cwd: string = process.cwd()): ProjectOnlyResources {
   const empty: ProjectOnlyResources = {
     commands: new Set(), skills: new Set(), hooks: new Set(),
@@ -1291,7 +1290,6 @@ export async function installVersion(
   }, { ...INSTALLATION_LOCK_OPTIONS, realpath: false });
 }
 
-// Reinstall replaces artifacts, not the credential home, isolation marker, leases, or identity record.
 const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated', '.launch-leases', INSTALLATION_RECORD_FILE, `${INSTALLATION_RECORD_FILE}.lock`]);
 
 function removeInstallArtifacts(versionDir: string): void {
@@ -2163,7 +2161,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Permission groups come only from durable user/system layers, never from the cloned project.
   const permissionGroups = discoverPermissionGroups();
   const allGroupNames = permissionGroups.map(g => g.name);
   const activePresetName = getActivePermissionPresetName();
@@ -2194,7 +2191,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     result.permissions = r.synced.length > 0;
   }
 
-  // Project MCP commands cross into a durable version home only after explicit trust.
   const projectMcpTrusted = projectAgentsDir ? isProjectMcpTrusted(projectAgentsDir) : false;
   const untrustedProjectMcpNames = new Set(
     projectMcpTrusted
@@ -2249,7 +2245,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Plugin executable surfaces require the caller's explicit opt-in.
   if (pluginsToSync.length > 0 && pluginsWriter) {
     if (options.allowExecSurfaces) {
       const allPlugins = discoverPlugins();

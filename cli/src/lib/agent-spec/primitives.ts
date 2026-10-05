@@ -7,7 +7,6 @@ function numericParts(v: string): number[] {
   return v.split('.').map((n) => parseInt(n, 10) || 0);
 }
 
-// OpenClaw's trailing -N is a rebuild counter: larger is newer, unlike a SemVer prerelease.
 function buildSuffix(v: string): number {
   const m = /-(\d+)$/.exec(v);
   return m ? parseInt(m[1], 10) : 0;

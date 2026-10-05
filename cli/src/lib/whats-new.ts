@@ -2,8 +2,8 @@ import chalk from 'chalk';
 import { compareVersions } from './agent-spec/primitives.js';
 
 export function renderWhatsNew(changelog: string, fromVersion: string, toVersion: string): string[] {
-  // Emit one heading per version in (from,to]. Legacy bold sub-bullets are prose,
-  // while standalone legacy headings remain entries.
+
+
   const out: string[] = [];
   let inRelevantSection = false;
   let sectionUsesStandaloneHeadings = false;

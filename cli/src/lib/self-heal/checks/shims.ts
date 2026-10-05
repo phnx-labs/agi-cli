@@ -35,7 +35,6 @@ export const shimsCheck: HealCheck = {
           if (!ctx.dryRun) ensureShimCurrent(agent);
           fixed.push(`${cmd} shim`);
         } else if (!shimPointsAtLiveInstall(agent)) {
-          // A schema-current shim may bake a dead AGENTS_BIN; ensureShimCurrent would no-op.
           if (!ctx.dryRun) createShim(agent);
           fixed.push(`${cmd} shim (repointed to current install)`);
         }

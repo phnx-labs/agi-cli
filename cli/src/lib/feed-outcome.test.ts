@@ -110,7 +110,7 @@ describe('outcomeForBlock + groupBlocksByOutcome', () => {
       makeBlock('b', { ticket: 'RUSH-1125', questions: [{ text: 'other?' }] }),
       makeBlock('c', { pr: '#534' }),
       makeBlock('d', { worktreeSlug: 'ship-1-20-29' }),
-      makeBlock('e'), // orphan
+      makeBlock('e'),
     ];
     const groups = groupBlocksByOutcome(blocks);
     const keys = groups.map((g) => g.outcome.key);
@@ -118,7 +118,6 @@ describe('outcomeForBlock + groupBlocksByOutcome', () => {
     expect(keys).toContain('pr:#534');
     expect(keys).toContain('worktree:ship-1-20-29');
     expect(keys).toContain('unassigned');
-    // Every block lands somewhere exactly once.
     expect(groups.reduce((n, g) => n + g.blocks.length, 0)).toBe(blocks.length);
     const rush = groups.find((g) => g.outcome.key === 'ticket:RUSH-1125')!;
     expect(rush.counts.agents).toBe(2);

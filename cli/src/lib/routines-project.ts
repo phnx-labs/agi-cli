@@ -57,26 +57,25 @@ function readProjectGitSource(projectRoot: string): Pick<JobSource, 'repo' | 'br
     }).trim();
     const repo = parseOwnerRepoFromRemote(remote);
     if (repo) out.repo = repo;
-  } catch { /* no origin */ }
+  } catch {  }
   try {
     out.branch = execFileSync('git', ['-C', abs, 'rev-parse', '--abbrev-ref', 'HEAD'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5_000,
     }).trim();
-    if (out.branch === 'HEAD') delete out.branch; // detached
-  } catch { /* not a git repo */ }
+    if (out.branch === 'HEAD') delete out.branch;
+  } catch {  }
   try {
     out.commit = execFileSync('git', ['-C', abs, 'rev-parse', '--short', 'HEAD'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5_000,
     }).trim();
-  } catch { /* ignore */ }
+  } catch {  }
   return out;
 }
 
-/** List project routine YAML files (name + absolute path). */
 export function listProjectRoutineFiles(projectRoot: string): Array<{ name: string; path: string }> {
   const routinesDir = getProjectRoutinesDir(expandProjectPath(projectRoot));
   if (!routinesDir || !fs.existsSync(routinesDir)) return [];
@@ -117,7 +116,7 @@ interface SyncProjectResult {
 }
 
 export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
-  // Project YAML never auto-fires: refresh matching materialized copies, preserve createdAt, and keep the existing device pin only when YAML omits one.
+
   ensureAgentsDir();
   const abs = expandProjectPath(projectRoot);
   const git = readProjectGitSource(abs);
@@ -203,7 +202,7 @@ export interface SyncAllResult {
 }
 
 export function materialisedProjectRoots(): string[] {
-  // Sync is limited to sources already materialized in the job store.
+
   const roots = new Set<string>();
   for (const job of listJobs()) {
     if (job.source?.kind === 'project') roots.add(expandProjectPath(job.source.projectPath));
@@ -227,20 +226,13 @@ export function syncAllProjectRoutines(opts: { extraRoots?: string[] } = {}): Sy
   return { projects, missing };
 }
 
-/** A project routine available to enable, not yet materialised on this device. */
 export interface DiscoveredProjectRoutine {
   name: string;
   projectRoot: string;
   file: string;
-  /** Display config for `list` (always disabled — enablement is a local act). */
   config: JobConfig;
 }
 
-/**
- * Absolute local checkout roots for every registered project, deduped. This is
- * the discovery universe for project routines: bounded to projects the user
- * registered (`agents projects`), never an arbitrary filesystem scan.
- */
 function registeredProjectRoots(): string[] {
   const roots = new Set<string>();
   for (const def of listProjectDefs()) {
@@ -252,7 +244,7 @@ function registeredProjectRoots(): string[] {
 }
 
 export function discoverProjectRoutines(): DiscoveredProjectRoutine[] {
-  // Discovery is restricted to registered projects, never an arbitrary filesystem scan.
+
   const materialisedNames = new Set(listJobs().map((j) => j.name));
   const out: DiscoveredProjectRoutine[] = [];
   const seen = new Set<string>();
@@ -309,7 +301,7 @@ export function materialiseProjectRoutine(
   projectRoot: string,
   name: string,
 ): { job: JobConfig } | { error: string } {
-  // Materialization and enablement are separate; copying a routine must not activate it.
+
   ensureAgentsDir();
   const abs = expandProjectPath(projectRoot);
   const match = listProjectRoutineFiles(abs).find((f) => f.name === name);

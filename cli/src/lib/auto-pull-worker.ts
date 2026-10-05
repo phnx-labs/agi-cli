@@ -18,7 +18,7 @@ import {
 } from './auto-pull.js';
 
 const ENABLE_AUTO_PULL = process.env.AGENTS_AUTO_PULL === '1';
-// Pulling executable hooks/commands is opt-in; system repos retain their expected origin.
+
 
 interface RepoTarget {
   alias: string;

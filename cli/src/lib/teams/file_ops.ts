@@ -1,15 +1,4 @@
-/**
- * Bash command file-operation inference.
- *
- * Heuristically extracts file read, write, and delete operations from
- * shell command strings using regex patterns. Used by the event parsers
- * and summarizer to attribute file-level side effects to bash tool calls.
- */
 
-/**
- * Try to infer file operations (read/write/delete) from a bash command string.
- * Returns three arrays: files read, written, and deleted.
- */
 export function extractFileOpsFromBash(command: string): [string[], string[], string[]] {
   const filesRead: string[] = [];
   const filesWritten: string[] = [];

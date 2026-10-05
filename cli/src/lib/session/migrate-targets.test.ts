@@ -9,7 +9,6 @@ import type { Host } from '../hosts/types.js';
 import type { DeviceStats } from '../devices/health.js';
 import type { CrabboxBox } from '../crabbox/cli.js';
 
-/** Minimal Host builder — only the fields the scorer reads. */
 function host(name: string, opts: Partial<Host> = {}): Host {
   return {
     name,
@@ -20,7 +19,6 @@ function host(name: string, opts: Partial<Host> = {}): Host {
   };
 }
 
-/** DeviceStats builder driving a specific headroom bucket via loadPercent. */
 function stats(hostName: string, loadPercent: number): DeviceStats {
   return { host: hostName, reachable: true, loadPercent, fetchedAt: 0 };
 }
@@ -95,7 +93,6 @@ describe('enumerateTargets — exclusion of the interactive machine and the sour
 
 describe('rankTargets — auto ordering', () => {
   it('prefers a platform match with the source over a busier same-platform box? no — platform first, then headroom', () => {
-    // linux-loaded vs darwin-idle, source is darwin: darwin wins on platform match.
     const targets = enumerateTargets(
       [host('linux-idle', { os: 'linux' }), host('mac-busy', { os: 'darwin' })],
       [],

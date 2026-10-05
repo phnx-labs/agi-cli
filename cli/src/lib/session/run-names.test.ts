@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate the cache under a temp HOME before state.js captures HOME at import.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-runnames-'));
 process.env.HOME = TEST_HOME;
 

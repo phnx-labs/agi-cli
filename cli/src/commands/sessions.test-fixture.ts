@@ -5,27 +5,11 @@ import { spawnSync } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
-/**
- * Shared fixture for the sessions.*.test.ts suite slices (RUSH-2819).
- *
- * sessions.test.ts was one 2,600-line file measured at 172s — the single
- * slowest file in CI, serializing an entire fork while every other selected
- * file finished. The suite is split into topical slices so vitest's per-file
- * fork parallelism can spread the subprocess-heavy tests across workers; the
- * helpers each slice shares live here.
- */
 
-// win32: Claude projects path joins absolute cwd with colons (RUSH-2215).
 export const describeLive: typeof describe.skip = process.platform === 'win32' ? describe.skip : describe;
 
 export const repoRoot = process.cwd();
 export const cliEntry = path.join(repoRoot, 'src', 'index.ts');
-// Run the CLI as `node --import <tsx loader> src/index.ts`: spawning `node`
-// (always on PATH, no .cmd shell launcher) with the tsx ESM loader resolved to
-// an absolute file URL keeps tsx loadable regardless of the spawn cwd (which we
-// point at the project dir). Avoids both the Windows `tsx.cmd`-needs-a-shell
-// problem and shell:true arg-concatenation (which would split multi-word query
-// args like "prompt text").
 export const tsxLoaderUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 
 export function writeUpdateCache(tempHome: string): void {
@@ -39,7 +23,6 @@ export function writeUpdateCache(tempHome: string): void {
     JSON.stringify({ lastCheck: Date.now(), latestVersion: packageJson.version }),
     'utf-8'
   );
-  // ensureInitialized() checks for ~/.agents/.system/.git to confirm setup.
   fs.mkdirSync(path.join(tempHome, '.agents', '.system', '.git'), { recursive: true });
 }
 
@@ -212,14 +195,6 @@ exit 1
   return path.join(activeHome, 'sergey');
 }
 
-/**
- * The runner's PATH minus package-manager `node_modules/.bin` dirs. `bun run test`
- * prepends them, and `@phnx-labs/sessions-cli` links a `sessions` bin there.
- * `runAgents` also sets `SESSIONS_BIN` empty so `resolveSessionsBin` does not
- * pick the dependency's own bin: these tests exercise the in-repo engine, which
- * scans, rather than the standalone, which reads the index. A caller passes a
- * real `SESSIONS_BIN` in `envOverrides` when it wants the fast path.
- */
 function pathWithoutPackageBins(): string {
   return (process.env.PATH || '')
     .split(path.delimiter)
@@ -233,15 +208,9 @@ export function runAgents(args: string[], cwd: string, home: string, envOverride
     env: {
       ...process.env,
       HOME: home,
-      // os.homedir() (used via homeDir() in discovery) reads USERPROFILE on
-      // Windows and ignores HOME, so set both to redirect the home to tempHome.
       USERPROFILE: home,
-      // Empty skips the dependency bin. envOverrides may pin a stub afterward.
       SESSIONS_BIN: '',
       PATH: `${path.join(home, 'bin')}${path.delimiter}${pathWithoutPackageBins()}`,
-      // Some fixtures place files at $HOME/.agents/versions/<agent>/<ver>/ as
-      // legacy / synthetic state. The bootstrap-time migration would otherwise
-      // move those into ~/.agents-system/, breaking workspace-scoped lookups.
       AGENTS_SKIP_MIGRATION: '1',
       NODE_NO_WARNINGS: '1',
       ...envOverrides,

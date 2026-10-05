@@ -26,7 +26,6 @@ function writeWorkflow(body: string): string {
   return dir;
 }
 
-/** Antigravity's store is HOME-global, so point HOME at the fake home for the test. */
 function withHome<T>(home: string, fn: () => T): T {
   const real = process.env.HOME;
   process.env.HOME = home;
@@ -43,8 +42,6 @@ afterEach(() => {
 
 describe('workflow registry completeness', () => {
   it('has a shape for exactly every workflows-capable agent', () => {
-    // The `workflows` capability flag is the version gate; this table is the
-    // shape. A harness with one and not the other is a lying capability table.
     const capable = capableAgents('workflows').sort();
     const shaped = Object.keys(WORKFLOW_TARGETS).sort();
     expect(shaped).toEqual(capable);
@@ -74,21 +71,16 @@ describe('writer, lister, detector, and doctor drift agree per harness', () => {
         const synced = syncWorkflowToVersion(workflowDir, 'registry-flow', agent, home);
         expect(synced).toEqual({ success: true });
 
-        // The detector (what `agents doctor` believes is installed) and the
-        // lister (what `agents workflows` shows) read the same registry entry.
         expect(listWorkflowsForAgent(agent, home)).toEqual(['registry-flow']);
         expect(detect()).toEqual(['registry-flow']);
         expect(workflowContentMatches(agent, home, 'registry-flow', workflowDir)).toBe(true);
 
-        // A body edit to the source under an unchanged name is drift, not `ok`.
         fs.writeFileSync(path.join(workflowDir, 'WORKFLOW.md'), source.replace('Do the work.', 'Do different work.'), 'utf-8');
         expect(workflowContentMatches(agent, home, 'registry-flow', workflowDir)).toBe(false);
 
-        // Re-sync is idempotent over an agents-cli-managed copy and clears the drift.
         expect(syncWorkflowToVersion(workflowDir, 'registry-flow', agent, home)).toEqual({ success: true });
         expect(workflowContentMatches(agent, home, 'registry-flow', workflowDir)).toBe(true);
 
-        // Removal goes through the same occupied() the writer populated.
         const target = workflowTarget(agent);
         const dir = target.dir(home);
         for (const entry of target.occupied(dir, 'registry-flow')) fs.rmSync(entry, { recursive: true, force: true });
@@ -118,9 +110,6 @@ describe('ownership markers refuse to clobber user-authored files', () => {
   });
 
   it('kimi: a foreign <name>/ dir with no SKILL.md is refused too, never written into', () => {
-    // The one deliberate tightening over the old arms: presence of the dir is
-    // the collision, the marker decides ownership. Old code only looked at the
-    // file and would have dropped SKILL.md into a user's directory.
     const home = tmp('agents-wf-registry-kimi-bare-dir-');
     const workflowDir = writeWorkflow('---\nname: F\ndescription: d\n---\n\nbody\n');
     const foreign = path.join(home, '.kimi-code', 'skills', 'flow');
@@ -141,7 +130,6 @@ describe('ownership markers refuse to clobber user-authored files', () => {
     expect(syncWorkflowToVersion(workflowDir, 'g-flow', 'grok', home).success).toBe(true);
     const rendered = fs.readFileSync(path.join(home, '.grok', 'workflows', 'g-flow.rhai'), 'utf-8');
     expect(rendered.split('\n')[0]).toBe('// agents_workflow: g-flow');
-    // Strip the marker: the file is now user-owned and disappears from both views.
     fs.writeFileSync(path.join(home, '.grok', 'workflows', 'g-flow.rhai'), rendered.split('\n').slice(1).join('\n'), 'utf-8');
     expect(listWorkflowsForAgent('grok', home)).toEqual([]);
     expect(workflowsDetectors.grok!.list({ version: '0.0.0', versionHome: home, cwd: home })).toEqual([]);

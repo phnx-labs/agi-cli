@@ -4,15 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Resuming a session from an ISOLATED install was broken 100% of the time.
-//
-// `buildResumeCommand` returns `<cli>@<version> resume <id>`, and the guard checked
-// for that launcher with `findExecutable` — a plain PATH lookup. But the shims
-// directory is deliberately absent from PATH for an isolated install, which is the
-// whole promise of `--isolated`. So the alias was never found, the guard concluded
-// the version was uninstalled, and it fell back to spawning `<cli> "/continue <id>"`
-// — feeding a slash command into the TUI as a prompt. Neither CLI has `/continue`
-// (codex documents `/resume`), so the session simply never resumed.
 describe.skipIf(process.platform === 'win32')('resuming an isolated session', () => {
   let home: string;
   const V = '9.9.4';
@@ -27,15 +18,12 @@ describe.skipIf(process.platform === 'win32')('resuming an isolated session', ()
     fs.writeFileSync(path.join(vdir, 'node_modules', '.bin', 'codex'), '#!/bin/sh\nexit 0\n');
     fs.chmodSync(path.join(vdir, 'node_modules', '.bin', 'codex'), 0o755);
     fs.writeFileSync(path.join(vdir, '.isolated'), 'x\n');
-    // The versioned alias, exactly where `agents add --isolated` puts it: on disk,
-    // NOT on PATH.
     fs.mkdirSync(shimsDir(), { recursive: true });
     const alias = path.join(shimsDir(), `codex@${V}`);
     fs.writeFileSync(alias, '#!/bin/sh\nexit 0\n');
     fs.chmodSync(alias, 0o755);
   }
 
-  /** Ask the CLI's own builder what it would spawn. */
   function resumeCmd(version?: string): string[] | null {
     const script = `
       import { buildResumeCommand } from ${JSON.stringify(path.resolve(process.cwd(), 'src/commands/sessions.ts'))};
@@ -63,25 +51,20 @@ describe.skipIf(process.platform === 'win32')('resuming an isolated session', ()
     plantIsolated();
     const cmd = resumeCmd(V);
     expect(cmd).not.toBeNull();
-    // Absolute path into the shims dir — a bare `codex@9.9.4` would be unresolvable.
     expect(path.isAbsolute(cmd![0])).toBe(true);
     expect(cmd![0]).toBe(path.join(shimsDir(), `codex@${V}`));
-    // ...and it is genuinely not on PATH, which is the whole reason this matters.
     expect((process.env.PATH ?? '').split(path.delimiter)).not.toContain(shimsDir());
   }, 120_000);
 
   it('uses codex\'s real resume verb, never a /continue slash command', () => {
     plantIsolated();
     expect(resumeCmd(V)!.slice(1)).toEqual(['resume', 'sess-123']);
-    // Unversioned form too.
     expect(resumeCmd()).toEqual(['codex', 'resume', 'sess-123']);
   }, 120_000);
 
   it('falls back to a real resume against the current version, not /continue', () => {
-    // No alias on disk and nothing on PATH: the pinned version really is gone.
     const cmd = resumeCmd('0.0.0-missing');
     expect(cmd).toEqual(['codex@0.0.0-missing', 'resume', 'sess-123']);
-    // The point: no argument anywhere is a slash command.
     expect(cmd!.some((a) => a.startsWith('/'))).toBe(false);
   }, 120_000);
 });

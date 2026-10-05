@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { itemToSecret, type OpItem } from './onepassword.js';
 
-/**
- * Real `op item get --format=json` payload shape for an API_CREDENTIAL item:
- * a CONCEALED credential field alongside a NOTES-purpose `notesPlain` field.
- * Verified against the live `npm-phnx-labs` item (RUSH-2348).
- */
 function apiCredentialItem(overrides: Partial<OpItem> = {}): OpItem {
   return {
     id: 'abc123',
@@ -38,11 +33,9 @@ describe('itemToSecret notesPlain handling (RUSH-2348)', () => {
     expect('secret' in result).toBe(true);
     if (!('secret' in result)) throw new Error('expected a secret');
 
-    // The CONCEALED credential remains the secret value, not the notes.
     expect(result.secret.value).toBe('npm_secretTokenValue');
     expect(result.secret.fieldLabel).toBe('credential');
     expect(result.secret.envKey).toBe('NPM_PHNX_LABS');
-    // notesPlain becomes descriptive metadata.
     expect(result.secret.description).toBe('Publish token for @phnx-labs scope');
   });
 

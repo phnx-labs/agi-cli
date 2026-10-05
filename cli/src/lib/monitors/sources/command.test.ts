@@ -18,8 +18,6 @@ describe('command source evaluate', () => {
   });
 
   it('flags a rate-limit error shape even on exit 0 (the `gh … | jq` case, PHNX-3510)', async () => {
-    // A clean exit whose output carries the gh GraphQL rate-limit error: the pipe
-    // to jq swallowed gh's non-zero status, so only the text shape catches it.
     const obs = await evaluate({
       type: 'command',
       command: 'echo "GraphQL: API rate limit already exceeded for user ID 13007401."',
@@ -35,10 +33,6 @@ describe('command source evaluate', () => {
   });
 
   it('trims trailing whitespace so identical output diffs stably', async () => {
-    // `echo` appends a trailing newline (CRLF on Windows); a monitor re-runs the
-    // same command each poll, so that trailing whitespace must trim away to a
-    // stable observation rather than spuriously diffing. `echo` is portable across
-    // `/bin/sh -c` and `cmd /c`; `printf` is not (it's not a cmd builtin on Windows).
     const a = await evaluate({ type: 'command', command: 'echo x' });
     const b = await evaluate({ type: 'command', command: 'echo x' });
     expect(a!.raw).toBe('x');

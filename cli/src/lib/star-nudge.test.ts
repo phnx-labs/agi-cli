@@ -5,7 +5,6 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
-// Concurrent processes prove O_EXCL coordination; every child shares only this isolated state dir.
 const savedHome = process.env.HOME;
 const savedCI = process.env.CI;
 const savedOptOut = process.env.AGENTS_NO_NUDGE;

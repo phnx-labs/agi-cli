@@ -1,7 +1,3 @@
-/**
- * Real-CLI tests for unknown-command spellcheck without full-tree registration
- * (RUSH-2329). Spawns the actual entrypoint; no mocks.
- */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -51,10 +47,8 @@ describe('unknown-command spellcheck (RUSH-2329)', () => {
   it('suggests sessions for session without auto-running it as unknown', () => {
     const home = seedHome();
     try {
-      // distance 1 → auto-corrects to sessions and runs it (help path is fine)
       const r = run(home, 'session', '--help');
       expect(r.stderr).not.toContain("unknown command 'session'");
-      // sessions --help should mention sessions somewhere in help output
       expect(`${r.stdout}${r.stderr}`.toLowerCase()).toMatch(/session/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });

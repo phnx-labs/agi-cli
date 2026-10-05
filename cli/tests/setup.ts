@@ -5,51 +5,40 @@ import { afterAll } from 'vitest';
 import { shouldArmHermeticGuards } from './hermetic-guards.js';
 import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-sandbox.js';
 
-// Capture the real home before this fork redirects every HOME-derived module and child process.
 const realHome = process.env.HOME ?? os.homedir();
 const realUserAgentsDir = path.join(realHome, '.agents');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-'));
 
-// This setup runs before test imports, so module-level HOME constants cannot resolve into the operator's home.
 const sandboxHome = path.join(tmp, 'home');
 fs.mkdirSync(sandboxHome, { recursive: true });
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
-// Pin this separately because login shells and service managers may restore HOME.
 process.env.AGENTS_REAL_HOME = sandboxHome;
 
-// PATH-level opener stubs close the desktop-launch class; afterAll catches any escape.
 installOpenerSandbox({ tmp });
 
-// Both secrets clients stay fork-private and use a deterministic headless file-store credential.
 process.env.AGENTS_SECRETS_AGENT_DIR = path.join(tmp, 'secrets-agent');
 process.env.AGENTS_SECRETS_NO_AGENT = '1';
 
 process.env.SECRETS_NO_AGENT = '1';
 process.env.SECRETS_PASSPHRASE = 'agents-vitest-file-store';
 
-// Usage reads update bundle metadata, so disable tracking to keep those writes out of operator state.
 process.env.AGENTS_NO_USAGE_TRACK = '1';
 
-// Ambient Claude auth would change logged-out rendering and make the release gate host-dependent.
 delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
-// Preserve real event writes for assertions while redirecting event and device state away from the operator.
 process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 
 process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
 
-// Do not set AGENTS_DAEMON_DIR: real-daemon tests isolate through HOME and must not share a singleton dir.
-// Hook shims, caches, logs, and perf samples use call-time paths and need explicit fork-private roots.
+
 process.env.AGENTS_HOOK_SHIMS_DIR = path.join(tmp, 'hook-shims');
 process.env.AGENTS_HOOK_CACHE_DIR = path.join(tmp, 'hook-cache');
 process.env.AGENTS_LOGS_DIR = path.join(tmp, 'logs');
 process.env.AGENTS_PERF_DIR = path.join(tmp, 'perf');
-// Device-pending sentinels must not make the operator's fleet appear newly discovered during tests.
 process.env.AGENTS_STATE_DIR = path.join(tmp, 'state');
 
-// CI fingerprints detect any escape into quiet real state; local boxes may have legitimate concurrent writers.
 const realEventsLog = path.join(realUserAgentsDir, 'events.jsonl');
 const sizeBefore = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
 
@@ -72,7 +61,6 @@ function snapshotTopLevel(dir: string): string | null {
 }
 const userAgentsTopLevelBefore = snapshotTopLevel(realUserAgentsDir);
 
-// Claude settings live outside ~/.agents, so guard them separately from the top-level agents-dir fingerprint.
 const realClaudeSettings = path.join(realHome, '.claude', 'settings.json');
 const claudeSettingsBefore = fs.existsSync(realClaudeSettings)
   ? fs.statSync(realClaudeSettings).mtimeMs
@@ -82,7 +70,6 @@ afterAll(() => {
   try {
     assertNoUnauthorizedOpenerSpawn();
 
-    // Release-attestation runs set CI on a live machine; the guard excludes only that explicit non-quiet mode.
     if (shouldArmHermeticGuards(process.env)) {
       const sizeAfter = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
       if (sizeAfter > sizeBefore) {

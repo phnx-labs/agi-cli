@@ -1,23 +1,9 @@
-/**
- * The DB join behind {@link foldExecutionMachine}, against a REAL SQLite index
- * (RUSH-2479). This is the one piece of the attribution that can silently read
- * the wrong column, miss the batching chunk boundary, or throw — the pure fold
- * itself is covered by injecting a lookup, which by construction cannot catch
- * any of that.
- *
- * The row shape under test is exactly what a host dispatch writes:
- * `registerHostSession` upserts `machine: normalizeHost(task.host)` with an
- * EMPTY `file_path` (the transcript is on the peer) — see
- * `lib/hosts/session-index.ts`.
- */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate the sessions DB under a temp HOME before db.js/state.js capture the
-// path at import time.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-execmachine-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -31,7 +17,6 @@ function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
     shortId: id.slice(0, 8),
     agent: 'claude',
     timestamp: new Date().toISOString(),
-    // A host-dispatched row carries no local transcript.
     filePath: '',
     ...extra,
   };
@@ -49,11 +34,6 @@ describe('findSessionMachinesByIds', () => {
   });
 
   it('returns THIS box for an ordinary local session — the upsert infers it', async () => {
-    // Not a quirk to route around: `session-index.ts` documents that omitting
-    // `machine` makes the upsert infer this box from the empty file path. So the
-    // lookup answers for nearly every row, and it is `foldExecutionMachine`'s
-    // `recorded === self` guard — not an absent row — that keeps a local session
-    // from being re-attributed. The next test pins that.
     upsertSession(meta('local-1'), '');
     const { machineId } = await import('../machine-id.js');
     expect(findSessionMachinesByIds(['local-1']).get('local-1')).toBe(machineId());

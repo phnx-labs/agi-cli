@@ -1,9 +1,3 @@
-/**
- * `agents run --broadcast` — run the same task/prompt across an agent × model
- * matrix (formerly `agents bench`).
- *
- * Task definitions live under cli/bench/tasks/<id>/task.json.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -63,14 +57,11 @@ interface BroadcastOpts {
   model?: string;
   concurrency?: string;
   json?: boolean;
-  /** Comma-separated agents from the run [agent] positional when broadcasting. */
   agentsCsv?: string;
   prompt?: string;
-  /** When true, run the matrix (not just list/results). */
   requireRun?: boolean;
 }
 
-/** Handle --broadcast / --list-tasks / --results on `agents run`. Always completes the path. */
 export async function handleBroadcast(opts: BroadcastOpts): Promise<void> {
   if (opts.listTasks) {
     const tasks = taskIds();

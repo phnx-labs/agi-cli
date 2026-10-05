@@ -26,7 +26,7 @@ export interface CopySetupResult {
 }
 
 export function enumerateTrackedFiles(dir: string): string[] {
-  // Copy git-tracked setup only; native OAuth and untracked history/cache stay local.
+
   const r = spawnSync('git', ['-C', dir, 'ls-files', '-z'], { encoding: 'utf-8' });
   if (r.status !== 0 || !r.stdout) return [];
   return r.stdout
@@ -39,7 +39,7 @@ export function enumerateTrackedFiles(dir: string): string[] {
 }
 
 export function sshTransportFromArgv(sshArgv: string[]): { rsh: string; host: string } {
-  // Reuse crabbox's per-lease SSH transport, not ambient fleet SSH configuration.
+
   const host = sshArgv[sshArgv.length - 1];
   const rsh = sshArgv.slice(0, -1).join(' ');
   return { rsh, host };

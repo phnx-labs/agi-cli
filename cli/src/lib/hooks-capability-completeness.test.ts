@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { capableAgents } from './capabilities.js';
 
-// Every hooks:true agent needs a registerHooksToSettings branch; bound the static slice to that function so later text cannot satisfy it.
+
 describe('hooks capability <-> registrar completeness', () => {
   it('every hooks-capable agent has a branch in registerHooksToSettings', () => {
     const hooksSource = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/hooks/install.ts'), 'utf-8');

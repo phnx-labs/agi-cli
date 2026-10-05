@@ -185,7 +185,7 @@ export function migrateDeviceConfigStores(): void {
   if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending && !legacyIgnoredPending && !centralFleetState && !centralHostsPending && !accountsPending) return;
 
   if (hasDestinationWork) {
-    // Commit every destination before removing a legacy source so interruption can only cause a safe retry.
+
     withMetaLock(() => {
       if (docAgents || docIsolated) {
         const pins: typeof selfPins = { ...selfPins };
@@ -309,7 +309,7 @@ export function migrateDeviceConfigStores(): void {
   }
 
   if (accountsPending) {
-    // Device-scoped account identity is machine-local and must leave the tracked central account map.
+
     updateMeta((m) => {
       const native = { ...m.accounts?.native };
       const bindings = { ...m.accounts?.bindings };

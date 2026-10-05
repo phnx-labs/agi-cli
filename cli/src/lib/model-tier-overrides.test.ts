@@ -4,7 +4,7 @@ import { resolveTierOverrideFrom, parseTier } from './model-tier-overrides.js';
 describe('resolveTierOverrideFrom — layered precedence', () => {
   const store = {
     'kimi:*': { best: 'kimi-code/k3', default: 'kimi-code/kimi-for-coding' },
-    'kimi:0.19.2': { best: 'kimi-code/k3-256k' }, // version-specific
+    'kimi:0.19.2': { best: 'kimi-code/k3-256k' },
     'claude:*': { cheap: 'claude-haiku-4-5' },
   };
 
@@ -16,8 +16,8 @@ describe('resolveTierOverrideFrom — layered precedence', () => {
 
   it('lets an exact <agent>:<version> selector win per tier, keeping wildcard for the rest', () => {
     const r = resolveTierOverrideFrom(store, 'kimi', '0.19.2');
-    expect(r.best).toBe('kimi-code/k3-256k'); // exact wins
-    expect(r.default).toBe('kimi-code/kimi-for-coding'); // still from wildcard
+    expect(r.best).toBe('kimi-code/k3-256k');
+    expect(r.default).toBe('kimi-code/kimi-for-coding');
   });
 
   it('returns empty when nothing matches the agent', () => {

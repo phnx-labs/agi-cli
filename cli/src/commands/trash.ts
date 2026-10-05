@@ -106,7 +106,7 @@ function humanSize(bytes: number): string {
 }
 
 export function restoreVersion(target: string): void {
-  // Removal is recoverable: trash never auto-expires. Restore only prunes empty parents.
+
   const parsed = parseAgentVersion(target);
   if (!parsed) {
     console.error(chalk.red(`Expected <agent>@<version>, got: ${target}`));

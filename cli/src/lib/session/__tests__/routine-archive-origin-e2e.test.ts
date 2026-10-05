@@ -3,14 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// End-to-end proof of RUSH-2271: a routine's archived transcript, once it lands
-// under <runsDir>/<job>/<run>/sessions/claude/projects/, is discovered and indexed
-// as an origin='routine' session linked to its routine name + run id. Real fs, real
-// sqlite, real discovery under a throwaway HOME. No mocks.
-//
-// The archiver-side half (making the transcript LAND in that dir out of the shared
-// per-version CLAUDE_CONFIG_DIR home) is covered by runner.test.ts; this closes the
-// loop on the scan side so "routine runs land as origin='routine'" is proven whole.
 
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
@@ -33,7 +25,7 @@ beforeAll(async () => {
   discover = await import('../discover.js');
   state = await import('../../state.js');
   versions = await import('../../installations/versions.js');
-  db.getDB(); // create schema
+  db.getDB();
 });
 
 afterAll(() => {
@@ -43,7 +35,6 @@ afterAll(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-/** A minimal but real Claude transcript (parseable by readClaudeMeta). */
 function claudeTranscript(id: string): string {
   return [
     { type: 'user', timestamp: '2026-08-05T00:00:00.000Z', cwd: '/home/u/repo', version: '2.1.0', entrypoint: 'cli', message: { role: 'user', content: `run job ${id}` } },
@@ -59,17 +50,12 @@ describe('RUSH-2271 routine archive → origin=routine (e2e)', () => {
 
     const transcript = claudeTranscript(sessionId);
 
-    // The ORIGINAL still lives in the per-version CLAUDE_CONFIG_DIR home (where the
-    // routine wrote it, and where the ordinary scan finds it as origin='cli') — the
-    // archive is a COPY. The routine-archive scan runs after the version-home scan
-    // within one discoverSessions pass, so origin='routine' must win deterministically.
     const versionHomeProjects = path.join(
       versions.getVersionHomePath('claude', '2.1.0'), '.claude', 'projects', '-home-u-repo',
     );
     fs.mkdirSync(versionHomeProjects, { recursive: true });
     fs.writeFileSync(path.join(versionHomeProjects, `${sessionId}.jsonl`), transcript, 'utf-8');
 
-    // Exactly what archiveRoutineTranscripts writes: the run's own sessions tree.
     const archiveDir = path.join(
       state.getRunsDir(), jobName, runId, 'sessions', 'claude', 'projects', '-home-u-repo',
     );

@@ -1,28 +1,3 @@
-/**
- * Daemon-warmed cross-surface cache for live session status (RUSH-2062).
- *
- * Problem: menubar / Factory / watchdog / CLI each independently run a full
- * `sessions --active` gather (~9s wall / ~170MB) with no sharing. Measured on
- * zion: back-to-back runs were 9.22s then 8.16s — no speedup, full SSH fan-out
- * every call.
- *
- * Pattern mirrors {@link ../devices/stats-cache.ts} / {@link ../fleet-status.ts}:
- *
- * - **Daemon publish:** each daemon publishes THIS host's local active sessions
- *   (`publishLocalActiveSessions`). Each write appends row deltas to the journal
- *   consumed by long-lived watchers. Publish-own only — no
- *   cross-host SSH from the daemon (avoids the N² fan-out of RUSH-2061).
- * - **Readers** (`loadLocalActiveSessions`, fleet path in `gatherActiveSessions`)
- *   serve the warm snapshot when it is within {@link DEFAULT_ACTIVE_CACHE_MAX_AGE_MS};
- *   `forceRefresh` / age expiry re-gathers live.
- * - **Immutable memo:** per-session fields that only change when the transcript
- *   does (topic, label, cwd, …) are keyed on `(sessionId, transcriptMtimeMs)`.
- *   Live status fields (`status`, `activity`, `preview`, `pidAlive`, …) are
- *   NEVER stored in that memo — they only ride the short-lived snapshot.
- *
- * Best-effort disk IO: a missing/corrupt cache never throws; the caller falls
- * through to a live gather.
- */
 import * as fs from 'fs';
 import { writerProcessView, requireWriterProcessView } from './process-view.js';
 import * as path from 'path';
@@ -34,30 +9,19 @@ import { enrichGlanceFiles } from './glance-files.js';
 import { readSessionSummaryAny, readSessionTimelineAny } from './db.js';
 import { isSummarizerReady } from '../summarizer/config.js';
 
-/** Snapshot file under `getCacheDir()` (regenerable, gitignored). */
 const SNAPSHOT_FILE = '.active-sessions.json';
-/** Immutable-field memo file (keyed by sessionId + transcript mtime). */
 const IMMUTABLE_FILE = '.active-session-immutable.json';
 const JOURNAL_FILE = '.active-sessions.journal.jsonl';
 
-/**
- * How long a snapshot may be served before a reader re-gathers.
- * Short on purpose: live status (running/idle/waiting) must not go stale.
- * One-shot readers may re-gather after this ceiling. Long-lived watchers never
- * do: they read one reset then tail the canonical writer journal.
- */
 export const DEFAULT_ACTIVE_CACHE_MAX_AGE_MS = 15_000;
 
-/** Snapshot scope: this host only, or a fleet-wide merge written by a reader. */
 export type ActiveCacheScope = 'local' | 'fleet';
 
 interface ActiveSessionsSnapshot {
   version: 1;
   scope: ActiveCacheScope;
-  /** Epoch ms the sessions array was captured. */
   capturedAt: number;
   sessions: ActiveSession[];
-  /** Peer count from the last fleet gather (fleet scope only). */
   remoteDeviceCount?: number;
 }
 
@@ -78,17 +42,11 @@ export function activeSessionJournalIdentity(row: ActiveSession): string {
   return row.sessionId ?? `${row.context}:${row.kind}:${row.pid ?? ''}:${row.startedAtMs ?? ''}`;
 }
 
-/** Process-local L1. The atomic snapshot remains the cross-process source. */
 const activeSnapshotMemory = createMemoryCache<ActiveCacheScope, ActiveSessionsSnapshot>({
   max: 2,
   ttlMs: DEFAULT_ACTIVE_CACHE_MAX_AGE_MS,
 });
 
-/**
- * Per-session fields that are stable until the transcript changes. Keyed on
- * transcript mtime so a rewrite invalidates them. Live status is intentionally
- * absent — see {@link LIVE_STATUS_KEYS}.
- */
 interface ImmutableSessionFields {
   topic?: string;
   firstUserMessage?: string;
@@ -111,7 +69,6 @@ interface ImmutableSessionFields {
   context?: ActiveSession['context'];
 }
 
-/** Keys stored in the immutable memo (transcript-stable). */
 export const IMMUTABLE_FIELD_KEYS = [
   'topic',
   'firstUserMessage',
@@ -134,12 +91,6 @@ export const IMMUTABLE_FIELD_KEYS = [
   'context',
 ] as const satisfies ReadonlyArray<keyof ImmutableSessionFields>;
 
-/**
- * Live / volatile fields that MUST NOT be served from the immutable memo.
- * They either change without a transcript write (pid death, attach state) or
- * are short-window signals (preview, tok/s). The short snapshot TTL is the
- * only cache that may carry them — and only as a whole-row snapshot.
- */
 export const LIVE_STATUS_KEYS = [
   'status',
   'activity',
@@ -169,35 +120,22 @@ export const LIVE_STATUS_KEYS = [
 interface ImmutableMemoEntry {
   mtimeMs: number;
   fields: ImmutableSessionFields;
-  /** When this memo row was written (debug / eviction). */
   writtenAt: number;
 }
 
 interface ImmutableMemoFile {
   version: 1;
-  /** sessionId → memo. */
   entries: Record<string, ImmutableMemoEntry>;
 }
 
-/**
- * How long after the last reader heartbeat the daemon considers the journal
- * to have no active consumer and skips the expensive `ps`+`lsof` gather.
- *
- * Must be significantly larger than {@link SESSION_WATCH_HEARTBEAT_MS} (15s)
- * so a single delayed heartbeat does not cause a false-idle. Three tick-lengths
- * gives adequate margin while still cutting load within ~45s of the last
- * watcher disconnecting.
- */
 export const ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS = 45_000;
 
-// ── path overrides (test seam) ─────────────────────────────────────────────
 
 let snapshotPathOverride: string | null = null;
 let immutablePathOverride: string | null = null;
 let journalPathOverride: string | null = null;
 let readerPresencePathOverride: string | null = null;
 
-/** Test seam: redirect the snapshot file. Returns the previous override. */
 export function setActiveSessionsSnapshotPathForTest(p: string | null): string | null {
   const prev = snapshotPathOverride;
   snapshotPathOverride = p;
@@ -205,19 +143,16 @@ export function setActiveSessionsSnapshotPathForTest(p: string | null): string |
   return prev;
 }
 
-/** Test seam: isolate process-local entries between fixtures. */
 export function clearActiveSnapshotMemoryForTest(): void {
   activeSnapshotMemory.clear();
 }
 
-/** Test seam: redirect the immutable-memo file. Returns the previous override. */
 export function setImmutableMemoPathForTest(p: string | null): string | null {
   const prev = immutablePathOverride;
   immutablePathOverride = p;
   return prev;
 }
 
-/** Test seam: redirect the reader-presence file. Returns the previous override. */
 export function setActiveSessionsReaderPresencePathForTest(p: string | null): string | null {
   const prev = readerPresencePathOverride;
   readerPresencePathOverride = p;
@@ -243,30 +178,14 @@ function readerPresencePath(): string {
   return readerPresencePathOverride ?? path.join(getCacheDir(), READER_PRESENCE_FILE);
 }
 
-/**
- * Record that a journal consumer is active right now.
- *
- * Called by {@link watchLocalSessions} on startup and on each heartbeat so
- * the daemon warm tick can gate the expensive `ps`+`lsof` gather on reader
- * presence and skip it when no watcher has checked in recently.
- */
 export function noteActiveSessionsJournalReader(nowMs: number = Date.now()): void {
   try {
     const p = readerPresencePath();
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, String(nowMs));
-  } catch { /* best-effort: a failed write does not block the caller */ }
+  } catch {  }
 }
 
-/**
- * True when a journal consumer has signalled its presence within
- * {@link ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS}.
- *
- * Used by the daemon warm tick to decide whether to run the expensive
- * `ps`+`lsof` gather. On an idle box with no watcher the tick skips the
- * gather entirely; the moment a new watcher connects it calls
- * {@link noteActiveSessionsJournalReader} and the following tick gathers.
- */
 export function isActiveSessionsJournalReaderRecent(
   nowMs: number = Date.now(),
   idleWindowMs: number = ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS,
@@ -281,25 +200,8 @@ export function isActiveSessionsJournalReaderRecent(
   }
 }
 
-/** Default poll cadence for {@link watchActiveSessionsReaderPresence}. */
 const ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS = 1_000;
 
-/**
- * Watch for a reader going from absent/idle to present and fire `onConnect`
- * out of band, instead of waiting for the next scheduled warm tick (RUSH-2484).
- *
- * {@link noteActiveSessionsJournalReader} only writes a timestamp — it has no
- * path back to the daemon process that owns the warm tick's `setInterval`. A
- * watcher connecting to a cold or long-idle daemon therefore used to wait up
- * to one full {@link ACTIVE_SESSIONS_WARM_TICK_MS} tick for its first fresh
- * rows. This polls the tiny presence file (not the expensive `ps`+`lsof`
- * gather) at {@link ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS} and calls
- * `onConnect` only on the idle→recent edge, so a steadily-connected reader's
- * repeated heartbeats never re-trigger it and an idle box with no reader never
- * gathers — the CPU win from RUSH-3193 is preserved.
- *
- * Returns a disposer that stops the poll.
- */
 export function watchActiveSessionsReaderPresence(
   onConnect: () => void,
   opts: { pollMs?: number; idleWindowMs?: number; nowMs?: () => number } = {},
@@ -316,9 +218,7 @@ export function watchActiveSessionsReaderPresence(
   return () => clearInterval(timer);
 }
 
-// ── snapshot read / write ──────────────────────────────────────────────────
 
-/** Read one scope from the snapshot file (best-effort; missing/corrupt → null). */
 export function readActiveSessionsCache(scope: ActiveCacheScope): ActiveSessionsSnapshot | null {
   const memory = activeSnapshotMemory.get(scope);
   if (memory) return memory;
@@ -334,10 +234,6 @@ export function readActiveSessionsCache(scope: ActiveCacheScope): ActiveSessions
   }
 }
 
-/**
- * Persist a snapshot for one scope (best-effort). Other scopes are preserved
- * so a local warm never drops a fleet snapshot a reader just wrote.
- */
 export function writeActiveSessionsCache(
   scope: ActiveCacheScope,
   sessions: ActiveSession[],
@@ -359,19 +255,14 @@ export function writeActiveSessionsCache(
       const prev = JSON.parse(fs.readFileSync(snapshotPath(), 'utf-8')) as SnapshotFile;
       if (prev?.entries && typeof prev.entries === 'object') entries = { ...prev.entries };
     } catch {
-      // empty
     }
     const hadPrevious = Boolean(entries[scope]);
     const previousSessions = entries[scope]?.sessions ?? [];
     entries[scope] = snap;
     const body: SnapshotFile = { version: 1, entries };
-    // Atomic replace so a concurrent reader never sees a partial write.
     const tmp = `${snapshotPath()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(body));
     fs.renameSync(tmp, snapshotPath());
-    // The snapshot writer is the canonical publisher. Watchers tail this
-    // append-only journal and compute stream deltas; they never trigger their
-    // own full active-session gather on a timer.
     const previous = new Map(previousSessions.map((row) => [activeSessionJournalIdentity(row), row]));
     const next = new Map(sessions.map((row) => [activeSessionJournalIdentity(row), row]));
     const upserts = sessions.filter((row) => {
@@ -386,19 +277,13 @@ export function writeActiveSessionsCache(
         } satisfies ActiveSessionsJournalRecord)}\n`);
       }
     } catch {
-      // Journal delivery is best-effort; the canonical snapshot remains valid.
     }
     activeSnapshotMemory.set(scope, snap);
   } catch {
-    // best-effort
   }
   return snap;
 }
 
-/**
- * True when a snapshot is still within the freshness window. Pure — the
- * staleness invariant for live status lives here.
- */
 export function isActiveSnapshotFresh(
   capturedAt: number,
   nowMs: number,
@@ -409,9 +294,7 @@ export function isActiveSnapshotFresh(
   return nowMs - capturedAt <= maxAgeMs;
 }
 
-// ── immutable memo ─────────────────────────────────────────────────────────
 
-/** Pull only the transcript-stable fields from a live row. */
 export function pickImmutableFields(s: ActiveSession): ImmutableSessionFields {
   const out: ImmutableSessionFields = {};
   for (const k of IMMUTABLE_FIELD_KEYS) {
@@ -421,11 +304,6 @@ export function pickImmutableFields(s: ActiveSession): ImmutableSessionFields {
   return out;
 }
 
-/**
- * Transcript mtime used as the memo key. Prefer {@link ActiveSession.lastActivityMs}
- * (the transcript's last write); fall back to `startedAtMs` when no activity
- * stamp exists. Returns null when neither is known — caller must not memoize.
- */
 export function transcriptMtimeMs(s: ActiveSession): number | null {
   if (typeof s.lastActivityMs === 'number' && Number.isFinite(s.lastActivityMs)) return s.lastActivityMs;
   if (typeof s.startedAtMs === 'number' && Number.isFinite(s.startedAtMs)) return s.startedAtMs;
@@ -439,16 +317,10 @@ function readImmutableFile(): ImmutableMemoFile {
       return parsed;
     }
   } catch {
-    // missing/corrupt
   }
   return { version: 1, entries: {} };
 }
 
-/**
- * Read memoized immutable fields for `(sessionId, mtimeMs)`.
- * Returns null when missing OR when the stored mtime does not match — a
- * transcript rewrite must force re-derivation of topic/label/etc.
- */
 export function readImmutableMemo(
   sessionId: string,
   mtimeMs: number,
@@ -457,11 +329,9 @@ export function readImmutableMemo(
   const file = readImmutableFile();
   const entry = file.entries[sessionId];
   if (!entry || entry.mtimeMs !== mtimeMs) return null;
-  // Defence in depth: strip any live-status key that snuck into a bad write.
   return stripLiveStatusKeys({ ...entry.fields }) as ImmutableSessionFields;
 }
 
-/** Persist immutable fields for `(sessionId, mtimeMs)`. Live keys are stripped. */
 export function writeImmutableMemo(
   sessionId: string,
   mtimeMs: number,
@@ -482,11 +352,9 @@ export function writeImmutableMemo(
     fs.writeFileSync(tmp, JSON.stringify(file));
     fs.renameSync(tmp, immutablePath());
   } catch {
-    // best-effort
   }
 }
 
-/** Drop every live-status key from a field bag (defence in depth). */
 export function stripLiveStatusKeys<T extends Record<string, unknown>>(fields: T): T {
   const out = { ...fields };
   for (const k of LIVE_STATUS_KEYS) {
@@ -495,10 +363,6 @@ export function stripLiveStatusKeys<T extends Record<string, unknown>>(fields: T
   return out;
 }
 
-/**
- * True when `fields` contains no live-status key. The invariant the tests pin:
- * the immutable memo never carries status/activity/preview/etc.
- */
 export function assertNoLiveStatusFields(fields: Record<string, unknown>): boolean {
   for (const k of LIVE_STATUS_KEYS) {
     if (k in fields && fields[k as string] !== undefined) return false;
@@ -506,11 +370,6 @@ export function assertNoLiveStatusFields(fields: Record<string, unknown>): boole
   return true;
 }
 
-/**
- * Write immutable memos for every session that has an id + transcript mtime.
- * Called after a live gather so the next gather (when mtime is unchanged) can
- * refill identity fields without re-deriving them.
- */
 export function updateImmutableMemos(sessions: ReadonlyArray<ActiveSession>, nowMs: number = Date.now()): void {
   requireWriterProcessView();
   for (const s of sessions) {
@@ -521,21 +380,6 @@ export function updateImmutableMemos(sessions: ReadonlyArray<ActiveSession>, now
   }
 }
 
-/**
- * Fill missing immutable fields on a live row from the memo when the transcript
- * mtime matches. Never overwrites a field the live gather already set, and
- * never copies live-status keys.
- */
-/**
- * Merge the daemon-computed session summary (PHNX-3939) onto a live row from the
- * transcript-keyed `session_summaries` cache. This is the low-cost display merge:
- * one indexed by-id read, NEVER a model call — the background
- * SessionSummarizerService is the only producer. It fills only what the cache
- * holds; the `pending`/`skipped` default for a row with no summary yet is applied
- * at the watch-stream boundary ({@link resolveStreamSummaryState}), so a
- * non-stream ActiveSession consumer is unaffected. Best-effort: a DB error leaves
- * the row untouched.
- */
 function mergeSessionSummary(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
   try {
@@ -546,18 +390,10 @@ function mergeSessionSummary(s: ActiveSession): ActiveSession {
     if (s.summaryChecklist === undefined && stored.summaryChecklist !== undefined) s.summaryChecklist = stored.summaryChecklist;
     if (s.summaryState === undefined) s.summaryState = stored.summaryState;
   } catch {
-    // best-effort: never let the summary merge break the gather path.
   }
   return s;
 }
 
-/**
- * The `summaryState` a watch-stream row carries when the merge left it unset:
- * `pending` while the summarizer is READY (enabled AND has an endpoint, so a
- * summary is genuinely coming), `skipped` when it is off OR enabled-but-
- * unconfigured (nothing will ever populate the cache). This is the only place
- * the readiness flag is read on the read path, and it is memoized (PHNX-3939).
- */
 export function resolveStreamSummaryState(
   current: import('@phnx-labs/sessions-cli/reader').SummaryState | undefined,
   nowMs: number = Date.now(),
@@ -566,14 +402,6 @@ export function resolveStreamSummaryState(
   return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }
 
-/**
- * Merge the daemon-folded timeline (PHNX-3939) onto a live row from the
- * transcript-keyed `session_timelines` cache. Sibling of
- * {@link mergeSessionSummary} and the same contract: one indexed by-id read of
- * the BOUNDED projection (never the fold's resume state), never a parse, never
- * a model call. `runTimelinePass` in the daemon tick is the only producer.
- * Best-effort — a DB error leaves the row untouched.
- */
 export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
   try {
@@ -586,18 +414,11 @@ export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
     if (s.timeline === undefined) s.timeline = stored.timeline;
     if (s.files === undefined && stored.files !== undefined) s.files = stored.files;
     if (stored.request) {
-      // `request` is the one field where the FOLD wins over what the gather
-      // already put there. `foldRecap` tidies whatever turn the INDEX had for the
-      // row, which lags a live session by up to a scan; the daemon fold read the
-      // transcript itself this tick and counted the turns. Re-deriving the recap
-      // afterwards keeps the row's title and `userPromptClean` agreeing with the
-      // request they are supposed to describe.
       const changed = s.request?.headline !== stored.request.headline || s.request?.turns !== stored.request.turns;
       s.request = stored.request;
       if (changed) foldRecap([s]);
     }
   } catch {
-    // best-effort: never let the timeline merge break the gather path.
   }
   return s;
 }
@@ -618,37 +439,22 @@ export function applyImmutableMemo(s: ActiveSession): ActiveSession {
   return s;
 }
 
-// ── cache-first load ───────────────────────────────────────────────────────
 
 interface LoadLocalActiveSessionsOptions {
-  /** Skip the cache and re-gather (the force-refresh path). */
   forceRefresh?: boolean;
-  /** Freshness window; defaults to {@link DEFAULT_ACTIVE_CACHE_MAX_AGE_MS}. */
   maxAgeMs?: number;
-  /** Clock (injectable for tests). */
   nowMs?: number;
-  /**
-   * Live gather. Defaults to `getActiveSessions({ localOnly: true })` so a
-   * warm never dials a remote-host teammate (RUSH-2118).
-   */
   gather?: () => Promise<ActiveSession[]>;
-  /** Injectable cache IO for tests. */
   readCache?: typeof readActiveSessionsCache;
   writeCache?: typeof writeActiveSessionsCache;
 }
 
 interface LoadLocalActiveSessionsResult {
   sessions: ActiveSession[];
-  /** True when the row set came from the warm snapshot, not a live gather. */
   servedFromCache: boolean;
   capturedAt: number;
 }
 
-/**
- * Cache-first load of THIS host's active sessions. Default path serves the
- * daemon-warmed snapshot when fresh; `forceRefresh` or an expired snapshot
- * re-gathers and rewrites the cache.
- */
 export async function loadLocalActiveSessions(
   opts: LoadLocalActiveSessionsOptions = {},
 ): Promise<LoadLocalActiveSessionsResult> {
@@ -681,8 +487,8 @@ export async function loadLocalActiveSessions(
         import('./active.js'),
         import('../machine-id.js'),
       ]);
-      // Stamp this box like every other gatherer: a row with no machine fails
-      // isRunningLiveSession, so a daemon-published snapshot read `--active` empty.
+
+
       const self = machineId();
       const rows = await getActiveSessions({ localOnly: true });
       for (const s of rows) if (!s.machine) s.machine = self;
@@ -690,9 +496,6 @@ export async function loadLocalActiveSessions(
     });
 
   const sessions = await gather();
-  // The index owns transcript-derived labels (Claude custom-title / ai-title).
-  // Enrich before publishing so the canonical watch snapshot carries the same
-  // label as one-shot `sessions --active` output.
   backfillActiveRowsFromIndex(sessions);
   for (const s of sessions) applyImmutableMemo(s);
   enrichGlanceFiles(sessions, now);
@@ -705,13 +508,10 @@ interface LoadFleetActiveSessionsOptions {
   forceRefresh?: boolean;
   maxAgeMs?: number;
   nowMs?: number;
-  /** Live fleet gather (local + remote). Required — this module does not own SSH. */
   gather: () => Promise<{
     sessions: ActiveSession[];
     remoteDeviceCount: number;
-    /** Peer names that went unheard on this gather (RUSH-2507). Undefined when the gather didn't compute it. */
     remoteSkipped?: string[];
-    /** True when the device list itself could not be loaded — no peer was even attempted. */
     remoteDiscoveryFailed?: boolean;
   }>;
   readCache?: typeof readActiveSessionsCache;
@@ -723,21 +523,10 @@ interface LoadFleetActiveSessionsResult {
   remoteDeviceCount: number;
   servedFromCache: boolean;
   capturedAt: number;
-  /**
-   * Diagnostics from the gather that produced this result. Only populated on a
-   * live gather (`servedFromCache: false`) — a cache hit serves a prior
-   * snapshot that never persisted these fields, so they read `undefined`
-   * ("not probed this call") rather than falsely claiming a clean fleet.
-   */
   remoteSkipped?: string[];
   remoteDiscoveryFailed?: boolean;
 }
 
-/**
- * Cache-first load of the fleet-wide active set. A prior gather (or any surface
- * that just paid the SSH cost) leaves a fleet snapshot; subsequent menubar /
- * Factory / CLI / watchdog calls within the freshness window share it.
- */
 export async function loadFleetActiveSessions(
   opts: LoadFleetActiveSessionsOptions,
 ): Promise<LoadFleetActiveSessionsResult> {
@@ -771,9 +560,6 @@ export async function loadFleetActiveSessions(
     capturedAt: now,
     remoteDeviceCount: live.remoteDeviceCount,
   });
-  // Also refresh the local slice so a `--local` reader benefits from this gather.
-  // Identity is machineId() when available; fall back to "rows with no machine
-  // stamp" so a pure-local gather that never set machine still warms the cache.
   let self: string | undefined;
   try {
     const { machineId } = await import('../machine-id.js');
@@ -781,18 +567,7 @@ export async function loadFleetActiveSessions(
   } catch {
     self = undefined;
   }
-  // Always rewrite the local slice when we know self — including the empty
-  // case. If the last local session just died, leaving a still-fresh snapshot
-  // with ghost rows would make watchdog / `--local` report sessions that are
-  // gone (review on RUSH-2062 / PR #2116).
   if (self !== undefined) {
-    // "Local" here means the PROCESS is on this box, which is not `machine ===
-    // self` for an offloaded run: its shim runs here while the agent executes on
-    // the peer (RUSH-2479). The other writer of this same key,
-    // `loadLocalActiveSessions`, seeds from `getActiveSessions({localOnly:true})`
-    // and keeps that shim — so comparing `machine` here would make the two
-    // disagree and leave `--local` showing or hiding the row depending on which
-    // surface last warmed the 15s cache.
     const localOnly = live.sessions.filter((s) => sessionProcessIsLocal(s, self));
     writeCache('local', localOnly, { capturedAt: now });
   }
@@ -806,10 +581,6 @@ export async function loadFleetActiveSessions(
   };
 }
 
-/**
- * Daemon warm entry point: live-gather THIS host and write the local snapshot.
- * Never SSHes. Returns the published row count for the daemon log line.
- */
 export async function publishLocalActiveSessions(
   opts: { gather?: () => Promise<ActiveSession[]>; nowMs?: number } = {},
 ): Promise<{ sessions: ActiveSession[]; capturedAt: number }> {

@@ -37,12 +37,6 @@ function persist(broker: Broker, record: RunRecord): void {
   writeFileSync(file, JSON.stringify(record, null, 2));
 }
 
-/**
- * Controller-side execution. The worker sees only the worktree and a
- * read-only cache, via Firecracker. The controller observes exit status,
- * hashes reports, and signs the attestation with a key that is never
- * mounted into the worker.
- */
 export function runAdmittedJob(opts: ExecuteOptions): ExecuteResult {
   const now = opts.now ?? Date.now;
   const { broker } = opts;
@@ -154,7 +148,6 @@ export function loadAttestation(path: string): ReturnType<typeof JSON.parse> {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
-/** Sweep completed run records. Active admitted/running records stay. */
 export function janitorCompletedRuns(broker: Broker, olderThanMs: number, now = Date.now()): string[] {
   const runsDir = join(broker.layout.state, 'runs');
   if (!existsSync(runsDir)) return [];

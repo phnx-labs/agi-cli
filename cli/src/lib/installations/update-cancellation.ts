@@ -37,7 +37,7 @@ function endGuardedAutoUpdate(): void {
 export async function withGuardedUpdateCancellation<T>(
   run: (cancelled: () => boolean) => Promise<T>,
 ): Promise<T> {
-  // Cancellation is cooperative; forced termination could interrupt the swap transaction.
+
   let cancelled = typeof process.send === 'function' && process.connected === false;
   const requestStop = (): void => {
     cancelled = true;

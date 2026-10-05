@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
-# E2E regression test for issues #112/#137: installing agents-cli on a machine
-# with existing Claude Code / Codex user config must not lose any settings.
-#
-# Builds the CLI from the current checkout, packs it, and replays the full
-# fresh-machine flow (npm install -> setup -> import -> launch sync) inside a
-# clean node:24 Linux container. Requires a running docker daemon (colima ok).
-#
-# Usage: bash tests/e2e/fresh-install-settings.sh
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 REPO_DIR=$(pwd)
-# Keep the pack dir inside the repo: colima/Docker Desktop only share /Users
-# by default, so a /var/folders mktemp dir would mount as an empty directory.
 WORK_DIR=$(mktemp -d "$REPO_DIR/.e2e-pack-XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -20,9 +10,6 @@ docker info >/dev/null 2>&1 || { echo "SKIP: docker daemon not available"; exit 
 
 echo "==> build + pack"
 bun run build >/dev/null
-# --ignore-scripts: skip the prepack keychain-helper verification; the signed
-# macOS app only exists in release builds and is unused on Linux. The packed
-# tarball still contains scripts/postinstall.js, which runs in the container.
 npm pack --silent --ignore-scripts --pack-destination "$WORK_DIR" >/dev/null
 TGZ=$(ls "$WORK_DIR"/*.tgz)
 echo "    $(basename "$TGZ")"

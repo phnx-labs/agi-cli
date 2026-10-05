@@ -6,7 +6,6 @@ import * as TOML from 'smol-toml';
 import type { AgentId, PermissionSet } from './types.js';
 
 
-// Forward maps own the vocabulary; reverse maps are derived here to prevent drift.
 export const GROK_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
   bash: 'bash',
   read: 'read',
@@ -33,7 +32,7 @@ export const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
 };
 
 function invertFirstWins(forward: Record<string, string | undefined>): Record<string, string> {
-  // Inversion is lossy and deliberately first-wins so aliases cannot widen grants.
+
   const out: Record<string, string> = {};
   for (const [canonical, native] of Object.entries(forward)) {
     if (!native) continue;
@@ -92,7 +91,7 @@ function permissionSet(allow: string[], deny: string[]): PermissionSet | null {
 
 
 export function stripJsonComments(content: string): string {
-  // JSONC stripping is string-aware; regex removal would corrupt values such as https:// URLs.
+
   let result = '';
   let inString = false;
   let escape = false;
@@ -271,7 +270,6 @@ function readCodexDenyRules(configPath: string): string[] {
 }
 
 
-// Keep registry entries in parity with permission capabilities and each harness's native schema.
 interface PermissionTarget {
   home(home: string): string;
   project?: (cwd: string) => string;
@@ -298,7 +296,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   },
 
   opencode: {
-    // Probe both suffixes from the supplied root; detection must not depend on process cwd.
     home: (h) => existingOr(
       path.join(h, '.config', 'opencode', 'opencode.jsonc'),
       path.join(h, '.config', 'opencode', 'opencode.json'),

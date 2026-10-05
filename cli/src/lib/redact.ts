@@ -1,4 +1,3 @@
-// Match Anthropic setup tokens before generic sk-, redact quoted headers and structured fields, bound control scanning, and literal-mask environment secrets; public text also masks email.
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/(^|[\s,"'`(=:])\/(?:home|Users)\/[^/\s,"'`]+/g, '$1[HOME]'],

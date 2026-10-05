@@ -1,5 +1,3 @@
-// Memory resolves project → user → system; prune only recorded managed names, never user-native files.
-// Claude project memory uses the version-independent canonical directory; migrate without clobbering and accept a concurrent same-target link.
 
 import * as fs from 'fs';
 import * as path from 'path';

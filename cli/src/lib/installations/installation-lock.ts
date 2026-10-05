@@ -4,7 +4,7 @@ import { getHistoryDir } from '../state.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
 import { isAgentId, type AgentId } from '../types.js';
 
-// The launch/update lock lives outside the swapped installation tree.
+
 export function installationLockTarget(agent: AgentId, label: string): string {
   if (!isAgentId(agent) || !VERSION_RE.test(label)) throw new Error('Invalid managed installation.');
   const canonicalLabel = process.platform === 'win32' ? label.toLowerCase().replace(/\.+$/, '') : label;

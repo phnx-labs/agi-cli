@@ -5,9 +5,7 @@ import { prunePidSessionRegistry, readPidSessionEntry, writePidSessionEntry } fr
 import { getActiveSessions } from '../active.js';
 import { loadLocalActiveSessions, loadFleetActiveSessions, writeActiveSessionsCache, updateImmutableMemos, readActiveSessionsCache } from '../session-cache.js';
 
-// Invoked only by the isolated-HOME test fork, inside a real unshare namespace.
 const hostPid = Number(process.argv[2]);
-// Names convey no authority: this is PID 1 with its own procfs in one variant.
 fs.writeFileSync('/proc/self/comm', 'init');
 assert.equal(readPidSessionEntry(hostPid)?.sessionId, 'host-session');
 assert.throws(() => process.kill(hostPid, 0), { code: 'ESRCH' });

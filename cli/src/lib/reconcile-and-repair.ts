@@ -147,7 +147,6 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
 
   const hookRewire = rewireUnwiredHooks(opts.agent, opts.versions);
 
-  // One requested version is scoped exactly; multiple versions use one harness-wide repair pass.
   const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({
     filter: runtimeRepairFilter(opts.agent, opts.versions),
   });
@@ -156,7 +155,6 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
     ? purgeStaleAgentsCliCopies(opts.purgeInjection)
     : null;
 
-  // Reproject account slots after sync so native homes cannot retain stale assignments.
   const slotProjection: SlotProjection[] = [];
   const slotProjectionErrors: string[] = [];
   const slotAgents = opts.agent ? [opts.agent] : ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);

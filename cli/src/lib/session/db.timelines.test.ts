@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Fresh HOME before importing state/db (db.ts captures DB_PATH at module load).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-timelines-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -50,14 +49,12 @@ describe('session_timelines cache', () => {
     const stored = entry();
     writeSessionTimeline({ id: 'tl-1', fileMtimeMs: 100, fileSize: 4096, timeline: stored });
 
-    // The display read returns the bounded projection and never the resume state.
     const projection = readSessionTimelineAny('tl-1');
     expect(projection?.timeline).toEqual(stored.timeline);
     expect(projection?.request?.headline).toBe('Ship the timeline card.');
     expect(projection?.files?.changes[0].path).toBe('/repo/src/timeline.ts');
     expect((projection as Record<string, unknown>).state).toBeUndefined();
 
-    // The pass's read also carries the byte offset it must resume from.
     expect(readSessionTimelineEntry('tl-1')?.state.offset).toBe(4096);
   });
 
@@ -84,7 +81,6 @@ describe('session_timelines cache', () => {
       timeline: { timeline: stored.timeline, request: stored.request, files: stored.files },
     }, 'worker-1', Date.now())).toBe(true);
     expect(readSessionTimelineAny('peer-tl')?.timeline).toEqual(stored.timeline);
-    // This box has no such transcript, so it must never hold a resume offset into one.
     expect(readSessionTimelineEntry('peer-tl')?.state).toEqual(emptyTimelineState());
   });
 
@@ -117,9 +113,6 @@ describe('the folded timeline reaches every row surface (PHNX-3939)', () => {
   });
 
   it('lets the daemon fold replace the recap\'s indexed guess, and re-derives the title with it', () => {
-    // The recap tidies whatever turn the INDEX had, which lags a live session;
-    // the fold read the transcript this tick. The fold wins, and the row's title
-    // is re-derived so the two cannot disagree.
     writeSessionTimeline({ id: ID, fileMtimeMs: 5, fileSize: 4096, timeline: entry() });
     const stale = { text: 'an older turn', headline: 'an older turn', kind: 'text' as const, attachments: [], pastedLines: 0 };
     const row: ActiveSession = {

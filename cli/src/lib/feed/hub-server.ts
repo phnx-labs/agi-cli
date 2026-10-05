@@ -75,7 +75,7 @@ class ReaderWriter {
   }
 
   private judgeBacklog(): void {
-    // Backlog must stay over budget for the grace period; a drain stall is judged separately.
+
     if (this.liveBytes <= this.limits.backlogBytes) {
       if (this.overBudget) { clearTimeout(this.overBudget); this.overBudget = null; }
       return;
@@ -215,7 +215,6 @@ export class FeedHubServer {
 
       const attach = (hub: FeedHub) => {
         if (socket.destroyed || this.detachers.has(socket)) return;
-        // subscribe synchronously queues catch-up before this writer admits live events.
         const detach = hub.subscribe((event) => writer.write(JSON.stringify(event)));
         writer.startLive();
         this.detachers.set(socket, detach);
@@ -237,7 +236,7 @@ export class FeedHubServer {
         let scope: unknown;
         try { scope = (JSON.parse(handshake.slice(0, newline)) as { scope?: unknown }).scope; }
         catch { reject('scope line is not valid JSON'); return; }
-        // Scope is mandatory: silently defaulting a local reader would trigger fleet fan-out.
+
         if (typeof scope !== 'string' || !HUB_SCOPES.has(scope)) {
           reject(`unknown scope ${JSON.stringify(scope)}; expected "fleet" or "local"`);
           return;
@@ -338,7 +337,7 @@ export function streamFeedFromHub(options: {
     socket.on('close', () => {
       options.signal.removeEventListener('abort', stop);
       if (aborted) { resolve(); return; }
-      // Unsolicited close, including a partial frame, is failure; clients do not fall back locally.
+
       if (failure) { reject(failure); return; }
       if (partialBytes > 0) { reject(new Error(`feed hub closed mid-frame: ${partialBytes} chars of an unterminated line`)); return; }
       reject(new Error('feed hub closed the stream'));

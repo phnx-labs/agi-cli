@@ -22,9 +22,6 @@ describe('staged cloud teammate dispatch', () => {
       mode: 'edit',
     });
 
-    // A write-capable cloud teammate carries the brief plus the self-merge
-    // policy (PHNX-3236 — cloud is the surface with no inherited merge-guard.sh),
-    // so the prompt is no longer the bare brief.
     expect(options.prompt).toContain('ship it');
     expect(options.prompt).toContain('do NOT merge your OWN PR');
     expect(options).toMatchObject({

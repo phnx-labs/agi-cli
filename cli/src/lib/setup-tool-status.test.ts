@@ -83,7 +83,6 @@ describe('standalone setup metadata and explicit health checks', () => {
     fs.writeFileSync(executable, '#!/bin/sh\nexit 88\n', { mode: 0o755 });
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@phnx-labs/term-cli', version: '0.1.0' }));
     fs.symlinkSync(executable, path.join(root, 'bin', 'term'));
-    // term is index 3 in SETUP_TOOLS (browser, computer, secrets, term).
     const [checked] = await refreshToolSetup('term', opts());
     expect(checked).toMatchObject({ tool: 'term', installed: true, version: '0.1.0', readiness: 'ready' });
     expect(checked.checkedAtMs).toBeTypeOf('number');

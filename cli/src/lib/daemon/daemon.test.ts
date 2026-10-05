@@ -1,23 +1,3 @@
-/**
- * Daemon service-manifest generation.
- *
- * The load-bearing security contract under test: the service manifest (launchd
- * plist / systemd unit) NEVER embeds a Claude OAuth token — even when one is
- * configured in the `claude` secrets bundle. The daemon holds no Claude
- * credential of its own; routine runs authenticate through the per-account
- * CLAUDE_CONFIG_DIR login on the device. The bundle is seeded through the real
- * standalone `secrets` engine (PHNX-3989) in a fresh, isolated store
- * (`installKeychainHermeticity`) so a token can be configured and the
- * generators proven to omit it.
- *
- * RUSH-2819: this is the residual slice of the original daemon.test.ts (2201
- * lines / 88 tests / ~112s in CI) — the manifest/plist/systemd/launch-shape
- * tests, which are fast (no real process spawns). The heavier integration
- * suites live in the sibling daemon.lifecycle.test.ts, daemon.stop.test.ts, and
- * daemon.registry.test.ts; shared helpers are in daemon.test-fixture.ts. Kept
- * as `daemon.test.ts` because CI's companion-test selection maps
- * lib/daemon/daemon.ts -> daemon.test.ts.
- */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
@@ -43,7 +23,6 @@ import { DIST_ENTRY, installKeychainHermeticity } from './daemon.test-fixture.js
 const systemdQuote = (value: string): string =>
   `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
-/** Seed the `claude` bundle with a keychain-backed CLAUDE_CODE_OAUTH_TOKEN. */
 function seedKeychainBacked(value: string): void {
   const bundle: SecretsBundle = { name: 'claude', vars: { CLAUDE_CODE_OAUTH_TOKEN: 'keychain:CLAUDE_CODE_OAUTH_TOKEN' } };
   writeBundleWithItemsSync(bundle, new Map([[secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), value]]));
@@ -57,7 +36,6 @@ describe('writeOwnerOnlyServiceManifest', () => {
     const manifestPath = path.join(tmpDir, 'com.agents.daemon.plist');
     writeOwnerOnlyServiceManifest(manifestPath, generateLaunchdPlist());
     expect(fs.existsSync(manifestPath)).toBe(true);
-    // NTFS has no POSIX mode bits — the 0o600 lockdown is a no-op on Windows.
     if (process.platform !== 'win32') {
       expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o600);
     }
@@ -67,7 +45,6 @@ describe('writeOwnerOnlyServiceManifest', () => {
   it('re-locks a pre-existing world-readable manifest to 0600 on overwrite', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-manifest-'));
     const manifestPath = path.join(tmpDir, 'com.agents.daemon.plist');
-    // Simulate a stale manifest left world-readable by an older install.
     fs.writeFileSync(manifestPath, 'stale', { mode: 0o644 });
     if (process.platform !== 'win32') {
       fs.chmodSync(manifestPath, 0o644);
@@ -75,8 +52,6 @@ describe('writeOwnerOnlyServiceManifest', () => {
     }
     writeOwnerOnlyServiceManifest(manifestPath, generateLaunchdPlist());
     expect(fs.readFileSync(manifestPath, 'utf-8')).not.toBe('stale');
-    // writeFileSync's mode is a no-op when overwriting an existing file, so the
-    // unlink-before-create is what forces this back to 0600.
     if (process.platform !== 'win32') {
       expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o600);
     }
@@ -88,11 +63,7 @@ describe('generateLaunchdPlist', () => {
   it('never embeds CLAUDE_CODE_OAUTH_TOKEN, only PATH', () => {
     const plist = generateLaunchdPlist();
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
-    // The PATH entry is always present so EnvironmentVariables is never empty.
     expect(plist).toContain('<key>PATH</key>');
-    // PATH pins the agents shim dir first so routines resolve the same binary
-    // (RUSH-2431), and drops the stale hardcoded nvm version that bricked the
-    // daemon fleet-wide when it was pruned.
     expect(plist).toContain(`<string>${path.dirname(getAgentsBinPath())}:`);
     expect(plist).not.toContain('v24.0.0');
   });
@@ -105,16 +76,6 @@ describe('generateLaunchdPlist', () => {
   });
 });
 
-// RUSH-2639 (reopened from the 1.22.40 macOS release CI legs): launchd does
-// NOT inherit `launchctl load`'s caller's process environment, so a plist
-// whose EnvironmentVariables dict carries only PATH lets a launchd-started
-// daemon resolve HOME against the login session's real value regardless of
-// what HOME the process that generated (and loaded) the plist was running
-// under. Under the hermetic test harness (tests/setup.ts redirects HOME to a
-// fork-private sandbox) that meant a launchd-started daemon silently escaped
-// the sandbox and bootstrapped a real ~/.agents on the CI runner — see
-// tests/setup.ts:222's hermeticity tripwire, which caught exactly this:
-// "Before: null. After: .cache:...|.history:...|.system:...|routines:...".
 describe('generateLaunchdPlist / generateSystemdUnit — HOME seam (RUSH-2639)', () => {
   let prevHome: string | undefined;
   let prevRealHome: string | undefined;
@@ -136,8 +97,6 @@ describe('generateLaunchdPlist / generateSystemdUnit — HOME seam (RUSH-2639)',
     try {
       const plist = generateLaunchdPlist();
       expect(plist).toMatch(new RegExp(`<key>HOME</key>\\s*<string>${sandboxHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</string>`));
-      // With AGENTS_REAL_HOME unset, it falls back to the same sandbox HOME —
-      // never to os.homedir()'s un-redirected real value.
       expect(plist).toMatch(new RegExp(`<key>AGENTS_REAL_HOME</key>\\s*<string>${sandboxHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</string>`));
     } finally {
       fs.rmSync(sandboxHome, { recursive: true, force: true });
@@ -176,18 +135,6 @@ describe('generateLaunchdPlist / generateSystemdUnit — HOME seam (RUSH-2639)',
   );
 });
 
-// RUSH-2639 (residual): baking HOME into the plist/unit content (above) keeps
-// a STARTED daemon inside its sandbox, but launchd/systemd route
-// unload/load/list by the service identifier alone, never by file path — so
-// every hermetic test instance and the real production install shared one
-// literal label/unit name. `launchctl unload <this-instance's-own-plist>`
-// silently kills whatever job the OS already has registered under that same
-// label, confirmed directly against real launchctl with two throwaway plists
-// sharing one label: the second job's own unload (which the code's comment
-// calls "not loaded, expected") tore down the first, still alive under a
-// different path. Namespace the identifier itself under a redirected HOME so
-// two isolated instances (concurrent CI test forks, or a developer's suite
-// racing their own always-on daemon) can never collide on it.
 describe('daemonServiceLabel / daemonSystemdUnitName — isolated-HOME namespacing (RUSH-2639 residual)', () => {
   let prevHome: string | undefined;
 
@@ -262,17 +209,6 @@ describe('daemonServiceLabel / daemonSystemdUnitName — isolated-HOME namespaci
   });
 });
 
-// RUSH-2639: reproduce the actual macOS CI leak end to end. launchd applies a
-// plist's EnvironmentVariables dict on top of the login session's OWN
-// environment — never the environment of whatever process called `launchctl
-// load` — so a shim that (like every other shim in this file) simply execs the
-// program with `env: {...process.env}` inherited is unrealistic here and would
-// never have caught this bug: it silently hands the daemon child the CALLING
-// test's sandboxed HOME regardless of what the plist says. This shim instead
-// parses the real generated plist and applies ONLY its ProgramArguments /
-// EnvironmentVariables against a deliberately foreign base env (no HOME at
-// all) — the same shape launchd actually uses — so the assertion only passes
-// when `generateLaunchdPlist()` itself carries HOME/AGENTS_REAL_HOME.
 describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not inherit the caller env (RUSH-2639)', () => {
   let tmpHome = '';
   const saved: Record<string, string | undefined> = {};
@@ -281,7 +217,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
     tmpHome = fs.mkdtempSync(path.join('/tmp', 'agd-2639-launchd-'));
     for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR', 'AGENTS_REAL_HOME', 'AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME', 'AGENTS_ALLOW_TEST_DAEMON']) saved[k] = process.env[k];
     process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
-    // W4: these tests deliberately launch daemons under a sandbox HOME.
     process.env.AGENTS_ALLOW_TEST_DAEMON = '1';
   });
 
@@ -293,10 +228,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
     if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  // RUSH-2968: the originating leak site. launchctl is per-user-session and
-  // HOME-independent, so startDaemon under a redirected HOME must never touch
-  // the real launchd — without the test seam it falls back to a detached
-  // spawn, and the launchctl shim must record ZERO invocations.
   it('never invokes launchctl under a redirected HOME (falls back to detached)', () => {
     delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
 
@@ -305,7 +236,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
     fs.mkdirSync(daemonDir, { recursive: true });
     fs.mkdirSync(shimDir, { recursive: true });
 
-    // Recording launchctl shim: ANY invocation writes the marker.
     const markerPath = path.join(tmpHome, 'launchctl-invoked');
     fs.writeFileSync(
       path.join(shimDir, 'launchctl'),
@@ -313,7 +243,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
       { mode: 0o755 },
     );
 
-    // Stand-in daemon child: records its pid then exits shortly.
     const childPath = path.join(tmpHome, 'fake-daemon-2968.mjs');
     fs.writeFileSync(childPath, [
       `import fs from 'fs';`,
@@ -335,11 +264,10 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
       expect(fs.existsSync(markerPath)).toBe(false);
     } finally {
       delete process.env.AGD_PID_2968;
-      // Reap the detached stand-in child if it recorded a pid.
       const pidFile = path.join(tmpHome, 'child-pid-2968');
       if (fs.existsSync(pidFile)) {
         const pid = parseInt(fs.readFileSync(pidFile, 'utf-8'), 10);
-        if (!isNaN(pid)) { try { process.kill(pid); } catch { /* already gone */ } }
+        if (!isNaN(pid)) { try { process.kill(pid); } catch {  } }
       }
     }
   });
@@ -353,8 +281,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
     const lockPath = path.join(daemonDir, 'daemon.lock');
     const pidPath = path.join(daemonDir, 'daemon.pid');
     const resultPath = path.join(tmpHome, 'observed-home.json');
-    // The stand-in "daemon": records what HOME it was actually launched with,
-    // then behaves exactly like the other launchd-shim test's child.
     const childPath = path.join(tmpHome, 'fake-daemon.mjs');
     fs.writeFileSync(childPath, [
       `import fs from 'fs';`,
@@ -365,13 +291,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
       `}, 400);`,
     ].join('\n'), 'utf-8');
 
-    // A minimal parser+launcher standing in for launchd: reads the REAL plist
-    // `startDaemon()` wrote, pulls only its <key>EnvironmentVariables</key>
-    // dict, and spawns the stand-in child with that dict as the WHOLE
-    // environment plus a foreign base (no HOME) — never `process.env` of
-    // whatever called `launchctl load`. This is what makes the test able to
-    // fail: without the RUSH-2639 fix, EnvironmentVariables carries only PATH,
-    // so the child would see no HOME at all instead of the sandbox HOME.
     const launcherPath = path.join(tmpHome, 'fake-launchd.mjs');
     fs.writeFileSync(launcherPath, [
       `import fs from 'fs';`,
@@ -381,8 +300,6 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
       `const envSection = xml.match(/<key>EnvironmentVariables<\\/key>\\s*<dict>([\\s\\S]*?)<\\/dict>/)?.[1] || '';`,
       `const pairs = [...envSection.matchAll(/<key>([^<]+)<\\/key>\\s*<string>([^<]*)<\\/string>/g)];`,
       `const plistEnv = Object.fromEntries(pairs.map((m) => [m[1], m[2]]));`,
-      // A "foreign login session" base — deliberately WITHOUT HOME, so the
-      // only way the child ever sees the sandbox HOME is via the plist.
       `const loginSessionEnv = { PATH: '/usr/bin:/bin', AGD_RESULT: process.env.AGD_RESULT, AGD_PID: process.env.AGD_PID };`,
       `spawn(process.execPath, [process.env.AGD_CHILD], { env: { ...loginSessionEnv, ...plistEnv }, detached: true, stdio: 'ignore' }).unref();`,
     ].join('\n'), 'utf-8');
@@ -422,18 +339,11 @@ describe.skipIf(process.platform !== 'darwin')('startDaemon — launchd does not
     } finally {
       for (const k of ['AGD_CHILD', 'AGD_LOCK', 'AGD_PID', 'AGD_RESULT']) delete process.env[k];
       const pid = fs.existsSync(pidPath) ? parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10) : NaN;
-      if (!isNaN(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+      if (!isNaN(pid)) { try { process.kill(pid, 'SIGKILL'); } catch {  } }
     }
   }, 30_000);
 });
 
-// RUSH-2418: crash-loop prevention had no application-level guarantee at all —
-// only the OS supervisor's retry, uncapped. `KeepAlive` with no
-// `ThrottleInterval` lets launchd relaunch on its ~10s default, so a daemon that
-// dies while booting is restarted six times a minute forever. This is the same
-// defect the menu-bar helper already fixed (`menubar/install-menubar.ts:308`,
-// pinned by install-menubar.test.ts's "sets a ThrottleInterval so a startup
-// crash-loop cannot respawn every 10s"), applied to the daemon's own plist.
 describe('generateLaunchdPlist — crash-loop throttle (RUSH-2418)', () => {
   it('sets a ThrottleInterval so a startup crash-loop cannot respawn every 10s', () => {
     const plist = generateLaunchdPlist();
@@ -449,18 +359,11 @@ describe('generateLaunchdPlist — crash-loop throttle (RUSH-2418)', () => {
   });
 });
 
-// The systemd half of the PHNX-4116 "always recovers" guarantee. Restart is
-// PACED (RestartSec=30) but deliberately UNCAPPED (StartLimitIntervalSec=0), so a
-// repeatedly deadline-breaching daemon is restarted every ~30s forever instead of
-// being abandoned in `failed`. KillMode=process keeps a killed daemon from also
-// killing any detached routine children in its cgroup on restart.
 describe.skipIf(process.platform === 'win32')('generateSystemdUnit — restart-always, uncapped (PHNX-4116)', () => {
   it('sets StartLimitIntervalSec=0 so systemd never gives up retrying', () => {
     const unit = generateSystemdUnit();
-    // The [Unit] section carries the (0 =) uncapped limit, where systemd reads it.
     const unitSection = unit.slice(unit.indexOf('[Unit]'), unit.indexOf('[Service]'));
     expect(unitSection).toContain('StartLimitIntervalSec=0');
-    // The old burst cap is gone — a repeating hang must keep being restarted.
     expect(unit).not.toContain('StartLimitBurst');
   });
 
@@ -485,10 +388,6 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     expect(unit).not.toContain('sk-ant-oat01-abc123');
   });
 
-  // Parse the daemon PATH into ordered segments — robust to whatever
-  // `process.execPath` is on the runner (CI's Node is /usr/local/bin/node, a dev
-  // box's is deep in nvm), so the assertions test the real invariants, not a
-  // substring that only holds for one machine's layout.
   const systemdPath = (unit: string): string[] => {
     const m = unit.match(/^Environment=PATH=(.+)$/m);
     if (!m) throw new Error('no PATH line in systemd unit');
@@ -508,11 +407,6 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
   });
 
   it('puts the agents shim dir ahead of the Node dir so a stale agents in the Node prefix cannot shadow it (RUSH-2431)', () => {
-    // A shim installed OUTSIDE the Node bin dir — the ~/.local/bin global-install
-    // shape. The Node dir must still be present (for the shim's shebang), but the
-    // agents shim dir has to lead so a `command` routine's bare `agents ...`
-    // resolves the same binary the daemon is running, not a stale install in the
-    // Node prefix.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-'));
     const shimDir = path.join(tmpDir, 'local-bin');
     fs.mkdirSync(shimDir, { recursive: true });
@@ -520,8 +414,8 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     fs.writeFileSync(shim, '');
     try {
       const unitSegs = systemdPath(generateSystemdUnit(shim));
-      expect(unitSegs[0]).toBe(shimDir); // agents shim dir now first
-      expect(unitSegs).toContain(path.dirname(process.execPath)); // Node still present
+      expect(unitSegs[0]).toBe(shimDir);
+      expect(unitSegs).toContain(path.dirname(process.execPath));
       expect(launchdPath(generateLaunchdPlist(shim))).toContain(shimDir);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -529,8 +423,6 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
   });
 
   it('dedups the whole PATH — no dir appears twice, even for a /usr/local/bin install', () => {
-    // Shim beside Node, and (on CI) Node itself in /usr/local/bin: the assembled
-    // list collides with the system dirs. Full-list dedup must collapse them.
     const nodeDir = path.dirname(process.execPath);
     const segs = systemdPath(generateSystemdUnit(path.join(nodeDir, 'agents')));
     expect(segs.length).toBe(new Set(segs).size);
@@ -538,11 +430,6 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
   });
 
   it('pins ~/.rush/bin and ~/.local/bin so `which rush` succeeds under the daemon (PHNX-3075)', () => {
-    // systemd/launchd pin PATH and never source ~/.profile, so a login-shell
-    // install at ~/.rush/bin/rush is invisible to the daemon. The notify
-    // preflight (`which rush` in providers/rush.ts) then fails forever while
-    // `agents send --to owner --dry-run` from a login shell reports ok. Reproduce that
-    // split against the generated unit PATH, not a mocked lookup.
     const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-3075-path-'));
     const prevHome = process.env.HOME;
     const prevRealHome = process.env.AGENTS_REAL_HOME;
@@ -630,11 +517,6 @@ describe('service manifest CLI entry injection', () => {
 });
 
 describe('getDaemonLaunch', () => {
-  // #556: the detached daemon must be launched as `node <entry> __daemon-run`,
-  // not by executing the entry path directly. Executing a `.js`/shim path relies
-  // on a shebang (POSIX) or a console-owning shell wrapper (Windows); on Windows
-  // that wrapper's exit closes its console and tears the daemon down ~36ms after
-  // it binds the browser IPC socket.
   it('launches a .js entry through the Node runtime', () => {
     const { command, args } = getDaemonLaunch('/opt/agents/dist/index.js');
     expect(command).toBe(process.execPath);
@@ -653,9 +535,6 @@ describe('getDaemonLaunch', () => {
     expect(args).toEqual(['__daemon-run']);
   });
 
-  // The fleet-wide crash-loop: `bin/agents` is a symlink to `dist/index.js`, so
-  // an extension check on the *link name* (`agents`) misses it, the daemon runs
-  // the shim's shebang, and `env node` lands on a pruned/ancient node.
   it('launches an extension-less symlink to a .js entry through the Node runtime', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-symlink-'));
     const indexJs = path.join(tmpDir, 'index.js');
@@ -671,8 +550,6 @@ describe('getDaemonLaunch', () => {
     }
   });
 
-  // A real extension-less `#!/usr/bin/env node` shim (dev install) must also be
-  // pinned to process.execPath, not run bare off PATH.
   it('launches an extension-less node-shebang shim through the Node runtime', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
     const shim = path.join(tmpDir, 'agents');
@@ -686,7 +563,6 @@ describe('getDaemonLaunch', () => {
     }
   });
 
-  // A real compiled binary (no #!node shebang) runs directly — it owns its runtime.
   it('runs a real compiled launcher (no node shebang) directly', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-native-'));
     const bin = path.join(tmpDir, 'agents');
@@ -702,10 +578,6 @@ describe('getDaemonLaunch', () => {
 });
 
 describe('getAgentsInvocation', () => {
-  // Regression for the #315 compiled-binary self-spawn bug: teams/message/profiles
-  // used to relaunch as `[process.execPath, process.argv[1], …]`. Under the bun
-  // standalone binary process.argv[1] is the virtual entry `/$bunfs/root/agents`,
-  // so the child became `agents /$bunfs/root/agents …` → "unknown command".
   it('launches a .js entry through the Node runtime', () => {
     const { command, args } = getAgentsInvocation(['run', 'claude'], '/opt/agents/dist/index.js');
     expect(command).toBe(process.execPath);
@@ -716,7 +588,6 @@ describe('getAgentsInvocation', () => {
     const { command, args } = getAgentsInvocation(['run', 'claude'], '/Users/me/.local/bin/agents');
     expect(command).toBe('/Users/me/.local/bin/agents');
     expect(args).toEqual(['run', 'claude']);
-    // The compiled binary is the entry; its own bunfs path must not appear as an arg.
     expect(args.some((a) => a.includes('$bunfs'))).toBe(false);
   });
 

@@ -13,14 +13,13 @@ export interface CaptureInputs {
   routines?: string[];
 }
 
-// Capture serializes device names only; addresses and usernames never enter the manifest.
 export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInputs): FleetManifest {
   const prevDevices = prev && prev.devices !== 'all' && typeof prev.devices === 'object'
     ? prev.devices
     : {};
 
   const devices: Record<string, FleetDeviceOverride> = {};
-  // Preserve hand-authored config for absent peers and legacy manifests during migration.
+
   for (const [name, prevOverride] of Object.entries(prevDevices)) {
     if (inputs.devices.includes(name)) continue;
     const config = prevOverride?.config;
@@ -45,7 +44,6 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
     manifest.discovery = { ...prev.discovery };
   }
 
-  // Discovery dismissals are operator state, not disposable scan output.
   if (prev?.ignored && prev.ignored.length > 0) {
     manifest.ignored = prev.ignored.map((e) => ({ ...e }));
   }

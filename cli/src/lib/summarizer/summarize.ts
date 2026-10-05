@@ -91,7 +91,6 @@ export async function summarize(
   if (!prompt.trim()) return undefined;
   const baseUrl = opts.baseUrl.replace(/\/+$/, '');
   const doFetch = opts.fetchImpl ?? fetch;
-  // Never send ambient Anthropic credentials to an operator-configured compatible endpoint.
   const apiKey = opts.apiKey ?? process.env.AGENTS_SUMMARIZER_API_KEY ?? '';
   try {
     const res = await doFetch(`${baseUrl}/v1/messages`, {

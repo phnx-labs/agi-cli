@@ -186,7 +186,7 @@ export function compileRulesForProject(
   cwd: string,
   opts: { preset?: string; layers?: RulesLayer[] } = {}
 ): ProjectCompileResult {
-  // Only files bearing our compiled header are mutable; authored instructions stay untouched.
+
   const projectRulesDir = path.join(cwd, '.agents', 'rules');
 
   const empty: ProjectCompileResult = {
@@ -238,7 +238,7 @@ export function compileRulesForProject(
   }
 
   const symlinks: string[] = [];
-  // Native instruction links are managed only when this compiler owns AGENTS.md.
+
   if (weOwnAgentsMd) {
     const seen = new Set<string>(['AGENTS.md']);
     for (const agent of Object.values(AGENTS)) {

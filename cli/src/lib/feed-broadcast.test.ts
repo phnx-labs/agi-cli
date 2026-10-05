@@ -35,7 +35,6 @@ const ctx = (over: Partial<FeedBroadcastContext> = {}): FeedBroadcastContext => 
   ...over,
 });
 
-/** The config an operator would actually write for this stack. */
 const CONFIG: FeedBroadcastConfig = {
   ticket: { command: ['linear', 'update', '{ticket}', '--comment', '{text}'] },
   message: { command: ['rush', 'message', 'send', '--text', '{message}'], minLevel: 'important' },
@@ -67,8 +66,6 @@ describe('sink argv rendering', () => {
   });
 
   it('skips a template whose placeholder this post cannot fill', () => {
-    // No ticket on the session — commenting on nothing is worse than not
-    // commenting, so the sink does not run at all.
     expect(renderSinkArgv(['linear', 'update', '{ticket}', '--comment', '{text}'], ctx())).toBeUndefined();
   });
 
@@ -104,9 +101,6 @@ describe('channel message rendering', () => {
 });
 
 describe('message composition (plain — iMessage / owner / command sinks)', () => {
-  // PHNX-3698: a plain sink cannot render a labeled link and a dumped naked URL
-  // reads as noise, so the plain message is the human sentence with NO URLs —
-  // the crumb and ticket keys turn blue only on a Slack (mrkdwn) sink.
   it('is the human sentence with no trailing URL line — title, body, Sent from footer', () => {
     expect(composeBroadcastMessage(ctx({ links: ['https://github.com/phnx-labs/agents-cli/pull/1690'] })))
       .toBe(
@@ -171,7 +165,6 @@ describe('message composition (plain — iMessage / owner / command sinks)', () 
         links: ['https://example.com/p'],
       }),
     );
-    // Plain sink: the human sentence, no CLI command and no trailing URL line.
     expect(msg).toBe(
       'CI green, merging\n' +
         '\n' +
@@ -195,11 +188,11 @@ describe('message composition (plain — iMessage / owner / command sinks)', () 
   it('truncates a many-line body to a phone excerpt, keeping the title', () => {
     const wall = Array.from({ length: 18 }, (_, i) => `line ${i + 1} of the session summary`).join('\n');
     const msg = composeBroadcastMessage(ctx({ title: 'Session summary', text: wall }));
-    expect(msg).toContain('Session summary'); // title (headline) preserved
+    expect(msg).toContain('Session summary');
     expect(msg).toContain('line 1 of the session summary');
     expect(msg).toContain('line 8 of the session summary');
-    expect(msg).not.toContain('line 9 of the session summary'); // capped at 8 body lines
-    expect(msg).toContain('… (full in feed)'); // plain pointer, not a CLI command
+    expect(msg).not.toContain('line 9 of the session summary');
+    expect(msg).toContain('… (full in feed)');
     expect(msg).not.toContain('agents focus');
   });
 
@@ -208,7 +201,6 @@ describe('message composition (plain — iMessage / owner / command sinks)', () 
     const msg = composeBroadcastMessage(ctx({ title: 'Big update', text: wall }));
     expect(msg).toContain('Big update');
     expect(msg).toContain('… (full in feed)');
-    // The forwarded copy is far shorter than the 900-char body.
     expect(msg.length).toBeLessThan(700);
   });
 
@@ -242,11 +234,9 @@ describe('Slack mrkdwn labeled links (PHNX-3698)', () => {
 
   it('turns the session crumb into a labeled console link, keeping the human sentence', () => {
     const msg = composeBroadcastMessage(ctx(), 'mrkdwn');
-    // The crumb reads as `claude/c854ae60` but taps through to the console page.
     expect(msg).toContain(
       'Sent from <https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0|claude/c854ae60> on yosemite-s1',
     );
-    // No trailing naked URL line: every http(s) reference is inside a `<url|label>`.
     for (const line of msg.split('\n')) {
       expect(line.trim()).not.toMatch(/^https?:\/\/\S+$/i);
     }
@@ -268,7 +258,6 @@ describe('Slack mrkdwn labeled links (PHNX-3698)', () => {
       ctx({ title: 'Deploy blocked', text: 'PHNX-3689 is the root cause.', ticket: undefined, ticketUrl: undefined }),
       'mrkdwn',
     );
-    // The key itself becomes the blue link, in place — never a trailing URL line.
     expect(msg).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689> is the root cause.');
   });
 
@@ -283,8 +272,6 @@ describe('Slack mrkdwn labeled links (PHNX-3698)', () => {
       ctx({ ticket: 'PHNX-3572', ticketUrl: url, text: 'still blocked on PHNX-3572' }),
       'mrkdwn',
     );
-    // The one prose mention is the one labeled link; the session's own ticketUrl
-    // is not dumped separately, so the URL appears exactly once.
     expect(msg.match(new RegExp(url.replace(/[/.]/g, '\\$&'), 'g'))).toHaveLength(1);
     expect(msg).toContain('still blocked on <https://linear.app/getrush/issue/PHNX-3572|PHNX-3572>');
   });
@@ -365,9 +352,6 @@ describe('running sinks', () => {
 
 describe('channel sink planning', () => {
   it('plans the owner alias without requiring `to`, carrying its ctx for per-destination compose', () => {
-    // The owner alias fans out to every policy channel, each with its own
-    // provider, so it carries the ctx + template to re-render per destination
-    // (Slack mrkdwn vs iMessage plain — PHNX-3698). `text` is the plain default.
     const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx());
     expect(planned).toEqual([
       {
@@ -427,7 +411,6 @@ describe('channel sink planning', () => {
       phone: { channel: 'owner' },
     };
     const [slackSink, ownerSink] = planFeedBroadcast(config, ctx());
-    // The Slack sink's crumb is a labeled console link; the owner sink is the bare sentence.
     expect(slackSink.text).toContain(
       'Sent from <https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0|claude/c854ae60> on yosemite-s1',
     );
@@ -437,9 +420,6 @@ describe('channel sink planning', () => {
   });
 
   it('keys format off the RESOLVED provider — a channel aliased to slack via notify.transports gets mrkdwn', () => {
-    // The format decision must match delivery: `eng-alerts` delivers through the
-    // real slack provider, so it must compose mrkdwn even though its declared
-    // channel name is not literally "slack" (PHNX-3698, review).
     const meta = { notify: { transports: { 'eng-alerts': 'slack' } } } as Meta;
     const config: FeedBroadcastConfig = { eng: { channel: 'eng-alerts', to: 'C0' } };
     const [sink] = planFeedBroadcast(config, ctx(), meta);
@@ -449,8 +429,6 @@ describe('channel sink planning', () => {
   });
 
   it('keys format off the RESOLVED provider — the literal name "slack" remapped away stays plain', () => {
-    // Remapping `slack` -> a non-mrkdwn transport must NOT emit `<url|label>`
-    // markup the recipient would see literally.
     const meta = { notify: { transports: { slack: 'mailbox' } } } as Meta;
     const config: FeedBroadcastConfig = { s: { channel: 'slack', to: 'box' } };
     const [sink] = planFeedBroadcast(config, ctx(), meta);
@@ -501,7 +479,6 @@ describe('withDesktopNotify — feed post --notify', () => {
   it('layers the desktop sink ON TOP of configured sinks — never replaces them', () => {
     const merged = withDesktopNotify(CONFIG, true);
     expect(merged).toEqual({ ...CONFIG, [DESKTOP_NOTIFY_SINK]: desktopSink });
-    // The operator's own sinks survive intact.
     expect(merged?.ticket).toEqual(CONFIG.ticket);
     expect(merged?.message).toEqual(CONFIG.message);
   });
@@ -509,7 +486,6 @@ describe('withDesktopNotify — feed post --notify', () => {
   it('never clobbers an operator sink that shares the reserved name — both fire', () => {
     const operatorNotify = { command: ['my-notifier', '{message}'] };
     const merged = withDesktopNotify({ [DESKTOP_NOTIFY_SINK]: operatorNotify }, true);
-    // The operator's `notify` sink is untouched; the banner lands under `notify-2`.
     expect(merged?.[DESKTOP_NOTIFY_SINK]).toEqual(operatorNotify);
     expect(merged?.[`${DESKTOP_NOTIFY_SINK}-2`]).toEqual(desktopSink);
   });
@@ -522,27 +498,22 @@ describe('withDesktopNotify — feed post --notify', () => {
   });
 
   it('banners locally without buzzing the phone on a milestone — the important-gated owner sink stays skipped', () => {
-    // An operator with an important-only phone sink, plus --notify on a milestone.
     const config = withDesktopNotify(
       { phone: { channel: 'mailbox', to: 'x', minLevel: 'important' } },
       true,
     );
     const planned = planFeedBroadcast(config, ctx({ level: 'milestone' }));
-    // Only the desktop banner plans; the phone sink is gated out at milestone.
     expect(planned.map((p) => p.name)).toEqual([DESKTOP_NOTIFY_SINK]);
   });
 });
 
 describe('channel delivery — real provider registry, no mocking', () => {
-  // Unique throwaway mailbox box in the real spool (repo rule: real services,
-  // no mocking — same pattern as channels/providers/mailbox.test.ts).
   const BOX = `agents-feed-broadcast-test-${process.pid}`;
 
   afterEach(() => {
     try {
       fs.rmSync(mailboxDir(BOX), { recursive: true, force: true });
     } catch {
-      /* ignore */
     }
   });
 
@@ -557,11 +528,6 @@ describe('channel delivery — real provider registry, no mocking', () => {
     expect(pending.map((m) => m.text)).toContain(composeBroadcastMessage(postCtx));
   });
 
-  // RUSH-2123: before effectiveBroadcastConfig, this exact scenario
-  // (notify.owner set, feed.broadcast never written) returned [] from
-  // broadcastBlock and the block reached nobody, even though blockDeliveryFailure
-  // would have reported it undelivered — nothing in the outbound stack knew
-  // notify.owner existed. Now it delivers.
   it('was silent before RUSH-2123: --blocked with notify.owner set and no feed.broadcast now delivers', async () => {
     const meta = { notify: { owner: { channel: 'mailbox', to: BOX } } } as Meta;
     const postCtx = ctx({ level: 'important' });
@@ -585,20 +551,6 @@ describe('channel delivery — real provider registry, no mocking', () => {
   });
 });
 
-/**
- * PHNX-3303 integration: the feed owner sink must actually INVOKE the SSH
- * forward when local owner delivery fails on a box with no working provider —
- * not just leave the pure `owner-forward.ts` functions correct in isolation.
- *
- * Real path, no mocking of the logic: the owner channel is the macOS-only
- * `imessage` transport, so on this Linux box the local send genuinely fails on
- * platform, a real device registry names a macOS peer, and a fake `ssh` on PATH
- * stands in for the transport (the same kind of on-PATH fake the
- * notify/openclaw tests use) and returns the peer's `agents send --json` result.
- */
-// Linux-only: the scenario is a headless worker whose local iMessage provider
-// fails on platform (rush.ts sends via osascript now, no `rush` preflight), so
-// on macOS the "local failure" would be a real Messages.app send attempt.
 describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH on local failure (PHNX-3303)', () => {
   let tmp: string;
   let sshRecord: string;
@@ -613,7 +565,6 @@ describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-owner-forward-'));
-    // A real device registry naming one reachable macOS peer.
     const devicesDir = path.join(tmp, 'devices');
     fs.mkdirSync(devicesDir, { recursive: true });
     const now = new Date().toISOString();
@@ -625,11 +576,9 @@ describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH
       },
     }));
     process.env.AGENTS_DEVICES_DIR = devicesDir;
-    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self'; // not the mac peer
-    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml'); // absent -> meta.notify.owner wins
+    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self';
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
 
-    // A fake `ssh` that records its argv and returns the peer's send result.
-    // The LOCAL imessage send fails on platform (not macOS) before any I/O.
     sshRecord = path.join(tmp, 'ssh.log');
     process.env.SSH_RECORD = sshRecord;
     const bin = path.join(tmp, 'bin');
@@ -657,10 +606,7 @@ describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH
     const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ level: 'important' }));
     const outcomes = await runFeedBroadcast(planned, meta);
 
-    // Local rush send failed, but the owner sink forwarded and reports success.
     expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
-    // The forward really ran `agents send --to owner` on the peer over SSH,
-    // carrying the loop guard so the peer never forwards onward.
     const log = fs.readFileSync(sshRecord, 'utf-8');
     expect(log).toContain('mac-test.example');
     expect(log).toContain('AGENTS_OWNER_NO_FORWARD');
@@ -691,20 +637,10 @@ describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH
 
     expect(outcomes[0].ok).toBe(false);
     expect(outcomes[0].error).toContain('iMessage requires macOS');
-    expect(fs.existsSync(sshRecord)).toBe(false); // never dialed a peer
+    expect(fs.existsSync(sshRecord)).toBe(false);
   });
 });
 
-/**
- * PHNX-3698 — the RUNTIME half of the important-`feed post` → owner fan-out.
- * The planning tests above prove `ctx`/`messageTemplate` land on the owner-alias
- * sink; this proves the sink, once RUN, re-renders the body PER destination so a
- * Slack channel in the owner policy gets mrkdwn labeled links while iMessage
- * stays plain — the same two-different-bodies guarantee notify.test.ts asserts
- * for `agents send --to owner`, but through the `feed post` entry point. Real path, no
- * mocking of the composer: spy providers stand in for the rush `imessage`/`slack`
- * transports and capture the exact body each was handed.
- */
 describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', () => {
   const savedHumans = process.env.AGENTS_HUMANS_FILE;
   const savedWorkspace = process.env.LINEAR_WORKSPACE;
@@ -729,8 +665,6 @@ describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', 
       `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
     );
     process.env.LINEAR_WORKSPACE = 'getrush';
-    // Overlay spies AFTER the guard is set, so sendToOwner's internal
-    // registerBuiltinProviders() is a no-op and cannot restore the real ones.
     registerBuiltinProviders();
     realImessage = resolveChannelProvider('imessage');
     realSlack = resolveChannelProvider('slack');
@@ -761,13 +695,10 @@ describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', 
 
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0].ok).toBe(true);
-    // Slack: the named ticket key is an inline labeled link.
     expect(captured.slack).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>');
-    // iMessage: the same key as bare text, no angle-bracket markup, no URL.
     expect(captured.imessage).toContain('PHNX-3689');
     expect(captured.imessage).not.toContain('<https://');
     expect(captured.imessage).not.toContain('http');
-    // Two destinations, two different bodies from the one post.
     expect(captured.slack).not.toEqual(captured.imessage);
   });
 });

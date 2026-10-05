@@ -28,8 +28,7 @@ describe('SYNC_AGENTS expanded beyond claude+codex', () => {
     const kimi = spec('kimi');
     expect(kimi.dirShaped).toBe(true);
     expect(kimi.exts).toEqual(['.json', '.jsonl']);
-    expect(kimi.mergeableExts).toEqual(['.jsonl']); // wire.jsonl unions; state.json is LWW
-    // lock files are machine-local and excluded
+    expect(kimi.mergeableExts).toEqual(['.jsonl']);
     expect(kimi.fileFilter!('session_x/agents/main/wire.jsonl')).toBe(true);
     expect(kimi.fileFilter!('session_x/.lock')).toBe(false);
   });
@@ -120,9 +119,6 @@ describe('mirrorPath — peer-controlled path containment (C1)', () => {
     expect(p.endsWith(path.join('laptop-a', claude.subdir, 'projects', 'sess-1.jsonl'))).toBe(true);
   });
 
-  // A malicious fleet peer controls `relKey` in the manifest it PUTs to the
-  // shared bucket; without containment this reaches fs.writeFileSync on the
-  // pulling machine → overwrite ~/.ssh/authorized_keys → fleet compromise.
   it('rejects a relKey that traverses out of the mirror root', () => {
     expect(() => mirrorPath(claude, 'evil-peer', '../../../../../../.ssh/authorized_keys')).toThrow();
   });

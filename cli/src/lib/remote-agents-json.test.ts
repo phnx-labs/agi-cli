@@ -1,4 +1,4 @@
-// Bound each peer before buffering; early exit cancels only pending peers, while already-returned duplicate matches remain visible as collisions.
+
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import { EventEmitter } from 'events';

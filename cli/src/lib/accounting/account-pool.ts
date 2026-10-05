@@ -3,7 +3,6 @@ import type { AccountAuthKind } from '../account-provider-registry.js';
 import { providerAuthenticatesHarness } from '../account-provider-registry.js';
 
 
-// A provider account is a runnable candidate only when this device has its secret.
 export interface RegistryAccountRecord {
   id?: string;
   name: string;
@@ -28,7 +27,7 @@ export function registryPoolCandidates(
 ): RegistryAccountInput[] {
   const out: RegistryAccountInput[] = [];
   for (const r of records) {
-    // Harness eligibility belongs to the provider registry, not caller-side maps.
+
     if (!providerAuthenticatesHarness(r.provider, r.auth, agent)) continue;
     out.push({
       id: r.id,

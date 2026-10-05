@@ -74,8 +74,6 @@ describe('filterCachedUnattributed', () => {
 
 describe('process-table memo (#2047)', () => {
   it('reuses one live ps/CIM snapshot across callers within PROCESS_TABLE_FRESH_MS', async () => {
-    // hostFromPid walks the process table; two calls in the same window must
-    // share the snapshot (one live read, not two).
     let t = 1_000_000;
     setActiveScanClockForTest(() => t);
     clearActiveScanCachesForTest();
@@ -88,7 +86,6 @@ describe('process-table memo (#2047)', () => {
     await hostFromPid(process.pid);
     expect(processTableLiveReadCountForTest()).toBe(afterFirst);
 
-    // Advance past the fresh window — next call must re-snapshot.
     t += PROCESS_TABLE_FRESH_MS + 1;
     await hostFromPid(process.pid);
     expect(processTableLiveReadCountForTest()).toBe(afterFirst + 1);
@@ -102,25 +99,20 @@ describe('unattributed rescan throttle (#2047)', () => {
 
     const first = await listUnattributedActive(new Set());
     expect(unattributedFullRescanCountForTest()).toBe(1);
-    // Shape: array of sessions (may be empty on a quiet box).
     expect(Array.isArray(first)).toBe(true);
 
     const second = await listUnattributedActive(new Set());
     expect(unattributedFullRescanCountForTest()).toBe(1);
-    // Reuse path only DROPS rows (dead / pid-reuse / newly attributed) — never
-    // invents pids. Second is a subset of first.
     const firstPids = new Set(first.map((s) => s.pid));
     for (const s of second) {
       expect(firstPids.has(s.pid)).toBe(true);
     }
 
-    // A cached headless result also reuses its ancestry, even after ps's shorter TTL.
     const processReads = processTableLiveReadCountForTest();
     t += PROCESS_TABLE_FRESH_MS + 1;
     await listUnattributedActive(new Set());
     expect(processTableLiveReadCountForTest()).toBe(processReads);
 
-    // Growing the attributed set filters without a full rescan.
     const samplePid = first.find((s) => s.pid != null)?.pid;
     if (samplePid != null) {
       const filtered = await listUnattributedActive(new Set([samplePid]));
@@ -128,7 +120,6 @@ describe('unattributed rescan throttle (#2047)', () => {
       expect(filtered.some((s) => s.pid === samplePid)).toBe(false);
     }
 
-    // Past the rescan window → full rescan.
     t += UNATTRIBUTED_RESCAN_MS + 1;
     await listUnattributedActive(new Set());
     expect(unattributedFullRescanCountForTest()).toBe(2);
@@ -141,7 +132,6 @@ describe('unattributed rescan throttle (#2047)', () => {
     await listUnattributedActive(new Set([999_001, 999_002]));
     expect(unattributedFullRescanCountForTest()).toBe(1);
 
-    // Still inside the window, but a pid left the attributed set — rescan.
     await listUnattributedActive(new Set([999_001]));
     expect(unattributedFullRescanCountForTest()).toBe(2);
   });

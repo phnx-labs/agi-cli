@@ -61,8 +61,8 @@ function filterBundleNamesForActiveProfile(names: string[]): string[] {
 }
 
 export function resolveAllowedBundlesForActiveProfile(allNames: string[]): string[] | undefined {
-  // Recompute from the current profile each run. Undefined deliberately means
-  // full trust; an empty array means the active profile allows no bundles.
+
+
   const filtered = filterBundleNamesForActiveProfile(allNames);
   return filtered.length === allNames.length ? undefined : filtered;
 }
@@ -162,8 +162,8 @@ export function electPublisher(
   ready: readonly string[],
   roleOf: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>,
 ): string | null {
-  // Prefer a headed source: interactive OAuth is minted there and durable keys
-  // flow outward to workers, never back into headed devices.
+
+
   const rank = (name: string): number => (isHeadedDeviceRole(roleOf(name)) ? 0 : 1);
   return [...ready].sort((a, b) => rank(a) - rank(b) || normalizeHost(a).localeCompare(normalizeHost(b)))[0] ?? null;
 }
@@ -313,8 +313,8 @@ export function planReservedStoreSync(
   accounts: ReservedSyncAccount[],
   peers: ReservedSyncPeer[],
 ): ReservedSyncPlanItem[] {
-  // Deliver durable credentials only to non-headed worker-equivalent peers. A missing peer reply
-  // or account inventory fails closed rather than guessing the remote state.
+
+
   const keysByBundle = new Map<string, Set<string>>();
   for (const account of accounts) {
     let keys = keysByBundle.get(account.bundle);
@@ -415,8 +415,8 @@ export function peerPresentKeys(
   verdicts: PeerAccountVerdict[],
   delivered: (bundle: string, key: string) => string | undefined,
 ): Record<string, ReadonlySet<string>> {
-  // Presence requires both a non-missing peer verdict and the fingerprint of
-  // this credential version; rotation must force a new delivery.
+
+
   const held = new Set(
     verdicts.filter((v) => v.verdict !== 'missing').map((v) => `${v.harness}:${v.accountId}`),
   );
@@ -588,9 +588,6 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
   const slotSeeded = deps.slotSeeded ?? defaultSlotSeeded;
   const byId = new Map(listNativeAccounts(meta).map((account) => [account.id, account]));
 
-  // Destructive cleanup is allowed only on an explicit worker with a nonempty
-  // authoritative registry. Delete the credential before dropping its record;
-  // keep the slot directory because it contains transcripts and legacy state.
   if (role === 'worker' && byId.size > 0) {
     const stale = Object.values(slots).filter((slot) => !byId.has(slot.accountId));
     const droppable: DeviceAccountSlot[] = [];

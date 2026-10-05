@@ -5,14 +5,13 @@ const MIN = 60_000;
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
-/** parseTimeFilter returns an absolute epoch-ms; assert the delta from now. */
 function agoMs(input: string): number {
   return Date.now() - parseTimeFilter(input);
 }
 
 describe('parseTimeFilter', () => {
   it('supports minute/hour/day/week units', () => {
-    expect(agoMs('1m')).toBeCloseTo(MIN, -3); // minutes, unchanged
+    expect(agoMs('1m')).toBeCloseTo(MIN, -3);
     expect(agoMs('1h')).toBeCloseTo(HOUR, -4);
     expect(agoMs('24h')).toBeCloseTo(24 * HOUR, -5);
     expect(agoMs('7d')).toBeCloseTo(7 * DAY, -6);
@@ -26,7 +25,6 @@ describe('parseTimeFilter', () => {
   });
 
   it('does not read "1mo" as "1m" + stray text', () => {
-    // 1mo (month) must be far larger than 1m (minute).
     expect(agoMs('1mo')).toBeGreaterThan(agoMs('1m') * 1000);
   });
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export function realpathExistingPrefix(target: string): string {
-  // Resolve the longest existing ancestor so a symlink cannot escape through a not-yet-created tail.
+
   let current = path.resolve(target);
   const tail: string[] = [];
   for (;;) {
@@ -28,7 +28,7 @@ export function isSafeSegmentName(name: string): boolean {
 }
 
 export function safeJoin(base: string, name: string): string {
-  // safeJoin accepts one segment; assertWithin intentionally accepts nested relative paths.
+
   if (!isSafeSegmentName(name)) {
     throw new Error(`Invalid name: ${name}`);
   }

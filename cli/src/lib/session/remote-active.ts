@@ -4,7 +4,6 @@ import { parseViewingIn } from './viewing-in.js';
 
 export const NO_FANOUT_ENV = 'AGENTS_SESSIONS_LOCAL';
 
-// Stamp the dialed machine unless an explicitly offloaded row reports its actual execution host.
 export function parseRemoteActive(stdout: string, machine: string): ActiveSession[] {
   let parsed: unknown;
   try {

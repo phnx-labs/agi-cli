@@ -7,7 +7,6 @@ import { spawnSync } from 'child_process';
 import { memoryTargetDir, syncClaudeProjectMemoryDir, getClaudeProjectMemoryDir } from './memory.js';
 import { claudeProjectDirName } from './project-key.js';
 
-// Inject EEXIST deterministically because the real lstat→symlink race is too short to reproduce.
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return { ...actual, symlinkSync: vi.fn(actual.symlinkSync) };

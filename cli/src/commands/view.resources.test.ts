@@ -7,9 +7,6 @@ import { fileURLToPath } from 'url';
 import { descriptionForPrefix, parseResourceSections, summarizeDescription } from './view.js';
 import { stringWidth } from '../lib/session/width.js';
 
-// parseResourceSections is the merge point between the --resources/--detailed
-// flags and the historically-ignored per-section booleans in --json mode. These
-// tests pin the exact section set it produces for each flag combination.
 
 const ALL = ['commands', 'skills', 'mcp', 'memory', 'hooks', 'workflows', 'plugins'].sort();
 
@@ -54,7 +51,6 @@ describe('parseResourceSections', () => {
   });
 
   test('section booleans do NOT fold in outside --json mode', () => {
-    // Without --json the per-section flags drive the human detail view, not JSON.
     expect(sections({ skills: true }, false)).toEqual([]);
   });
 
@@ -87,7 +83,6 @@ describe('responsive descriptions', () => {
   });
 });
 
-// ─── drift-check regression (issue #2058) ────────────────────────────────────
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -115,7 +110,6 @@ describe('view: no implicit drift-check or sync on bare agent view (issue #2058)
       JSON.stringify({ lastCheck: 4102444800000, latestVersion: '0.0.0' }),
     );
 
-    // claude@2.0.0 installed and set as default.
     fs.writeFileSync(path.join(userDir, 'agents.yaml'), `agents:\n  claude: "2.0.0"\n`);
 
     const versionBase = path.join(userDir, '.history', 'versions', 'claude', '2.0.0');
@@ -127,16 +121,10 @@ describe('view: no implicit drift-check or sync on bare agent view (issue #2058)
     fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n');
     fs.chmodSync(stub, 0o755);
 
-    // Add a skill to the user repo that was NOT synced to the version home — the
-    // "new resource" the old drift block would have detected and prompted about.
     const skillDir = path.join(userDir, 'skills', 'my-new-skill');
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# my-new-skill\n');
 
-    // Snapshot the entire versionBase tree: relative path, type, octal mode, and
-    // file content. Recording content (not just names) catches in-place mutations
-    // (e.g. a manifest write that overwrites an existing file without changing its
-    // name). Directories are recorded as type 'dir' with no content field.
     type SnapEntry = { rel: string; type: 'file' | 'dir'; mode: string; content?: string };
     const treeSnapshot = (): SnapEntry[] => {
       const entries: SnapEntry[] = [];
@@ -176,7 +164,6 @@ describe('view: no implicit drift-check or sync on bare agent view (issue #2058)
     const out = (r.stdout ?? '') + (r.stderr ?? '');
     expect(out).not.toContain('New resources available');
     expect(out).not.toContain('Sync new resources');
-    // Post-snapshot must deep-equal pre: no files added, removed, or mutated.
     expect(treeSnapshot()).toEqual(before);
   });
 });

@@ -3,17 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db so the sessions DB path they
-// capture at import time points at our temp dir. Real sqlite, no mocking.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv14-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Build a v13-shaped DB on disk (sessions + scan_ledger populated, no
-// dir_ledger), then let db.js's getDB() upgrade it to v14 on first open. Locks
-// the load-bearing invariants: dir_ledger is created, scan_ledger is cleared so
-// the first post-upgrade scan does a clean full walk, and existing session rows
-// survive the migration.
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

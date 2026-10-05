@@ -14,7 +14,7 @@ export const SPEC_KILL_GRACE_MS = 250;
 
 export function runLocal(spec: LaunchSpec, timeoutMs?: number): Promise<RunResult> {
   return new Promise((resolve) => {
-    // Deadline cancellation owns a detached process group so grandchildren cannot outlive the timeout.
+
     const child = spawn(spec.argv[0], spec.argv.slice(1), { stdio: 'ignore', detached: !!timeoutMs });
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,7 +37,6 @@ export function runLocal(spec: LaunchSpec, timeoutMs?: number): Promise<RunResul
           done({ ok: false, error: `${spec.argv[0]} did not finish in ${timeoutMs}ms` });
         }, timeoutMs)
       : null;
-    // Keep SIGKILL armed after resolving timeout; clear it only when the child is actually gone.
     const childGone = (): void => { if (killTimer) { clearTimeout(killTimer); killTimer = null; } };
     child.on('error', (err: any) => { childGone(); done({ ok: false, error: err.message }); });
     child.on('close', (code) => {

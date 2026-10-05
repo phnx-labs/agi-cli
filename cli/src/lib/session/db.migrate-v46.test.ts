@@ -14,9 +14,6 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v45 shape: first_user_message exists (added in v45), but the
-  // PHNX-3792 mirror provenance columns are deliberately absent so getDB must
-  // add them through migrateSchema(45).
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (
@@ -51,7 +48,6 @@ describe('schema migration v45 -> v46 (session mirror provenance, PHNX-3792)', (
     const row = getDB()
       .prepare(`SELECT mirror_synced_at, mirror_source, file_path FROM sessions WHERE id = 'legacy'`)
       .get() as { mirror_synced_at: number | null; mirror_source: string | null; file_path: string };
-    // A genuine legacy local row is NOT a mirror row: both provenance columns NULL.
     expect(row.mirror_synced_at).toBeNull();
     expect(row.mirror_source).toBeNull();
     expect(row.file_path).toBe('/s/legacy.jsonl');

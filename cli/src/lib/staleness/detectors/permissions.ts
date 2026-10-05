@@ -25,7 +25,7 @@ function buildClaudeDetector(): ResourceDetector {
         const denyRules: string[] = settings.permissions?.deny || [];
         if (allowRules.length === 0 && denyRules.length === 0) return [];
 
-        // Claude retains concrete rules, so provenance can be reconstructed by intersection.
+
         const groups = discoverPermissionGroups();
         const applied: string[] = [];
         for (const group of groups) {
@@ -47,8 +47,8 @@ function buildClaudeDetector(): ResourceDetector {
 }
 
 function buildCodexDetector(): ResourceDetector {
-  // Native formats below lose group identity; once an artifact exists they must
-  // report all known groups rather than invent lossy per-group provenance.
+
+
   return {
     kind: 'permissions',
     agent: 'codex',

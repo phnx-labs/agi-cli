@@ -44,7 +44,7 @@ describe('parseLinuxMemInfo', () => {
   it('computes used% and total/free bytes from MemTotal/MemAvailable', () => {
     const out = 'MemTotal:       16384000 kB\nMemFree:         1000000 kB\nMemAvailable:   14417920 kB\n';
     const m = parseLinuxMemInfo(out);
-    expect(Math.round(m.memPercent!)).toBe(12); // (16384000 - 14417920) / 16384000
+    expect(Math.round(m.memPercent!)).toBe(12);
     expect(m.memTotalBytes).toBe(16384000 * 1024);
     expect(m.memFreeBytes).toBe(14417920 * 1024);
   });
@@ -65,8 +65,6 @@ describe('parseVmStat', () => {
       'Pages occupied by compressor:         50000.',
     ].join('\n');
     const m = parseVmStat(out);
-    // used = 400000; available = free(100000)+inactive(100000)+speculative(50000)=250000
-    // total = 650000 -> 400000/650000 = 61.5%
     expect(Math.round(m.memPercent!)).toBe(62);
     expect(m.memTotalBytes).toBe(650000 * 16384);
     expect(m.memFreeBytes).toBe(250000 * 16384);
@@ -80,7 +78,6 @@ describe('parseVmStat', () => {
       'Pages occupied by compressor:         50000.',
     ].join('\n');
     const m = parseVmStat(out);
-    // used = 400000, total = 500000 -> 80%
     expect(Math.round(m.memPercent!)).toBe(80);
     expect(m.memFreeBytes).toBe(100000 * 16384);
   });
@@ -141,7 +138,7 @@ describe('parseProbeOutput', () => {
     const s = parseProbeOutput('box', stdout, 111);
     expect(s.loadAvg1).toBe(4);
     expect(s.ncpu).toBe(16);
-    expect(s.loadPercent).toBeCloseTo(25); // 4/16
+    expect(s.loadPercent).toBeCloseTo(25);
     expect(Math.round(s.memPercent!)).toBe(80);
     expect(s.diskTotalBytes).toBe(1967215868 * 1024);
     expect(s.reachable).toBe(true);
@@ -165,7 +162,7 @@ describe('parseWinProbeOutput', () => {
     const s = parseWinProbeOutput('uranus', 'AGWINSTAT load=12.5 freeKb=44447908 totalKb=66875660 ncpu=32\n', 111);
     expect(s.loadPercent).toBe(12.5);
     expect(s.ncpu).toBe(32);
-    expect(Math.round(s.memPercent!)).toBe(34); // (66875660 - 44447908) / 66875660
+    expect(Math.round(s.memPercent!)).toBe(34);
     expect(s.memTotalBytes).toBe(66875660 * 1024);
     expect(s.memFreeBytes).toBe(44447908 * 1024);
     expect(s.loadAvg1).toBeUndefined();
@@ -227,7 +224,7 @@ describe('fleetCapacity', () => {
     const list: DeviceStats[] = [
       { host: 'a', reachable: true, ncpu: 16, memTotalBytes: 64e9, memFreeBytes: 40e9, fetchedAt: 0 },
       { host: 'b', reachable: true, ncpu: 20, memTotalBytes: 128e9, memFreeBytes: 100e9, fetchedAt: 0 },
-      { host: 'c', reachable: false, ncpu: 8, memTotalBytes: 32e9, memFreeBytes: 8e9, fetchedAt: 0 }, // excluded
+      { host: 'c', reachable: false, ncpu: 8, memTotalBytes: 32e9, memFreeBytes: 8e9, fetchedAt: 0 },
     ];
     const cap = fleetCapacity(list);
     expect(cap.reachable).toBe(2);
@@ -238,10 +235,6 @@ describe('fleetCapacity', () => {
 });
 
 describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => {
-  // retainHardwareFacts (RUSH-3096) carries specsFetchedAt forward across an
-  // unreachable probe to say when the retained hardware facts were actually
-  // observed. Any success path that forgets to stamp it degrades that
-  // provenance to the coarser fetchedAt.
   it('windows: unparseable probe output still stamps it', () => {
     const s = parseWinProbeOutput('winbox', 'garbage that matches nothing', 1000);
     expect(s.reachable).toBe(true);
@@ -259,14 +252,6 @@ describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => 
 });
 
 
-/**
- * PHNX-3682 — a relayed peer needs a bigger probe budget than a direct one.
- *
- * The regression: one 2.5s budget was applied to every device, which is shorter
- * than a cold DERP-relayed SSH handshake (measured 1.7-6.6s across a 9-box
- * relayed fleet). `--device auto` then reported every healthy worker as
- * "unreachable" and refused to launch.
- */
 function device(over: Partial<DeviceProfile> = {}): DeviceProfile {
   return {
     name: 'box',
@@ -292,8 +277,6 @@ describe('probeBudgetMs (PHNX-3682)', () => {
   });
 
   it('treats a device with no tailscale snapshot as unknown-path, not relayed', () => {
-    // A `via:"manual"` device never gets a peer entry. Absence must not silently
-    // widen its budget — that would slow every manual device's probe.
     expect(probeBudgetMs(device())).toBe(PROBE_TIMEOUT_MS);
   });
 
@@ -304,15 +287,12 @@ describe('probeBudgetMs (PHNX-3682)', () => {
   });
 
   it('allows a relayed handshake the measured cold-path range', () => {
-    // The slowest healthy box in the PHNX-3682 capture answered at 6588ms.
     expect(RELAYED_PROBE_TIMEOUT_MS).toBeGreaterThan(6_588);
   });
 });
 
 describe('probeDeviceStats reports a timeout apart from unreachable (PHNX-3682)', () => {
   it('sets timedOut when the real ssh probe exceeds its budget', async () => {
-    // Real ssh, real timeout — 192.0.2.0/24 is TEST-NET-1 (RFC 5737) and
-    // blackholes, so the client hangs until the budget kills it.
     const stats = await probeDeviceStats(
       device({ name: 'blackhole', address: { via: 'manual', ip: '192.0.2.1' } }),
       { timeoutMs: 1_200 },

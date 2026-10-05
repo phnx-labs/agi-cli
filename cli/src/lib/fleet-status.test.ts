@@ -18,8 +18,8 @@ describe('computeAgentCounts — running-agent workload with per-context/agent b
       { status: 'running', context: 'terminal', kind: 'claude' },
       { status: 'running', context: 'teams', kind: 'codex' },
       { status: 'running', context: 'terminal', kind: 'claude' },
-      { status: 'idle', context: 'terminal', kind: 'claude' }, // live but not running
-      { status: 'orphaned', context: 'headless', kind: 'droid' }, // live but not running
+      { status: 'idle', context: 'terminal', kind: 'claude' },
+      { status: 'orphaned', context: 'headless', kind: 'droid' },
     ]);
     expect(counts.running).toBe(3);
     expect(counts.live).toBe(5);
@@ -63,7 +63,7 @@ describe('fleet-status mirror — publish-own / union read', () => {
       stats: null, capturedAt: 2,
     };
     writeFleetStatusRows({ zion: rowA });
-    writeFleetStatusRows({ 'mac-mini': rowB }); // a later union must NOT drop zion's row
+    writeFleetStatusRows({ 'mac-mini': rowB });
     const mirror = readFleetStatus();
     expect(Object.keys(mirror).sort()).toEqual(['mac-mini', 'zion']);
     expect(mirror.zion.agents.running).toBe(2);
@@ -88,7 +88,6 @@ describe('probeLocalFleetStatus — this host, no ssh, carries a running-agent c
   });
 
   it('returns a row with a numeric running-agent count (the RUSH-2061 enrichment)', async () => {
-    // Real path: probes this machine locally and reads its own live-session set.
     const row = await probeLocalFleetStatus('zion', 12345);
     expect(row.host).toBe('zion');
     expect(row.capturedAt).toBe(12345);

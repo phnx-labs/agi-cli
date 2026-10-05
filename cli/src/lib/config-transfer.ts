@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export function moveDirCrossDevice(source: string, dest: string): void {
-  // On EXDEV, remove the only source copy only after recursive copy succeeds.
+
   try {
     fs.renameSync(source, dest);
   } catch (err) {
@@ -13,7 +13,7 @@ export function moveDirCrossDevice(source: string, dest: string): void {
 }
 
 export function copyDirStrippingAgentsSymlinks(source: string, dest: string, agentsDir: string): void {
-  // Exports omit managed links into ~/.agents so they cannot become dangling/private references.
+
   const inside = agentsDir + path.sep;
   fs.cpSync(source, dest, {
     recursive: true,

@@ -1,15 +1,3 @@
-/**
- * RUSH-2682: the id resolver behind `preview` / `resume` / `focus` MUST resolve a
- * session the live registry already knows about, even with no transcript row yet.
- * Indexing is lazy (only `discoverSessions` writes the index), so a session THIS
- * box just started is "running" in `agents sessions --active` minutes before it
- * is indexed — during which `preview`/`resume` said "No session matching". The
- * resolver now unions the indexed rows with the live registry on a cold id miss.
- *
- * HOME is pinned to a temp dir BEFORE importing db.js/discover.js/sessions.js so
- * the real (empty) SQLite index and any filesystem scan stay under the fixture.
- * Only the live-registry loader is injected — the DB path runs for real.
- */
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -69,7 +57,6 @@ describe('computeLocalMetadataMatches — live-registry cold-miss (RUSH-2682)', 
   });
 
   it('forces one fresh gather when the warm snapshot missed the just-started session', async () => {
-    // First call (cache) has no rows; the forced refresh surfaces the session.
     const calls: Array<{ forceRefresh?: boolean }> = [];
     const load = (async (opts?: { forceRefresh?: boolean }) => {
       calls.push(opts ?? {});

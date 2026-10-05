@@ -1,4 +1,4 @@
-// Drop bare cloud/prefix artifacts only when a specific sibling proves them legacy; never backtrack ids, and keep equal-priced models distinct.
+
 import { describe, it, expect } from 'vitest';
 import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS, applyTierOverrides, type TierResolution } from './model-tiers.js';
 import { getModelCatalog, dropBareLegacyIds, scanClaudeCatalogIds, type ModelInfo } from './models.js';

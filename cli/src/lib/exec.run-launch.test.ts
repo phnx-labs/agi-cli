@@ -54,7 +54,6 @@ describe('buildRunLaunchPayload (pre-launch run.launch payload — signedIn -> l
     });
     expect(p.signedIn).toBeNull();
     expect(p.launchedLoggedOut).toBe(false);
-    // No version resolved -> the typed version field is omitted, not null.
     expect('version' in p ? p.version : undefined).toBeUndefined();
   });
 
@@ -62,13 +61,11 @@ describe('buildRunLaunchPayload (pre-launch run.launch payload — signedIn -> l
     const p = buildRunLaunchPayload({ agent: 'claude', version: '1', signedIn: true, email: null });
     expect('harnessName' in p).toBe(false);
     expect('resolvedVia' in p).toBe(false);
-    // strategy is always present (null when unset) so the stream shape is stable.
     expect(p.strategy).toBeNull();
   });
 });
 
 describe('run.launch fires on the real spawn path, before the harness runs (persisted to the event sink)', () => {
-  /** A fake harness binary on a temp PATH that just exits 0. */
   function fakeHarness(): { binDir: string } {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-launch-'));
     tmpDirs.push(root);
@@ -100,8 +97,6 @@ describe('run.launch fires on the real spawn path, before the harness runs (pers
       strategy: 'balanced',
       env: {
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
-        // Keep the spawn bare — no tmux wrap — so the assertion is about the
-        // pre-launch emit, not the interactive substrate.
         AGENTS_NO_TMUX: '1',
       },
     });
@@ -113,21 +108,11 @@ describe('run.launch fires on the real spawn path, before the harness runs (pers
     expect(launch.module).toBe('run');
     expect(launch.agent).toBe('amp');
     expect(launch.strategy).toBe('balanced');
-    // amp is not an installed version here, so the signed-in verdict is unknown
-    // and the run is NOT flagged logged-out on an absent verdict.
     expect(launch.launchedLoggedOut).toBe(false);
-    // hostname is auto-stamped by emit(), never added by the payload builder.
     expect(typeof launch.hostname).toBe('string');
   });
 
   it('a threaded LOGGED-OUT verdict (the interactive picker case) surfaces launchedLoggedOut:true', async () => {
-    // The picker->logged-out scenario (RUSH-2334 / PHNX-2526): the command
-    // deliberately launches the account the user picked, which can be LOGGED OUT
-    // and is a DIFFERENT candidate than the auto-pick. The command threads the
-    // SELECTED candidate's verdict via ExecOptions.launchSignedIn, and run.launch
-    // must report it verbatim (not re-probe, not read the auto-pick) — otherwise a
-    // logged-out launch reports launchedLoggedOut:false, the exact false-negative
-    // this event exists to prevent (the yosemite-m3 shape).
     const { binDir } = fakeHarness();
     const eventsPath = path.join(binDir, '..', 'events.jsonl');
     _resetForTest(eventsPath);
@@ -140,7 +125,6 @@ describe('run.launch fires on the real spawn path, before the harness runs (pers
       headless: true,
       cwd: binDir,
       strategy: 'balanced',
-      // What commands/exec.ts now threads from a logged-out `selected`.
       launchSignedIn: false,
       launchEmail: null,
       env: {

@@ -20,8 +20,8 @@ export async function runInteractiveShimHeal(): Promise<InteractiveShimHealResul
     if (!c.result) continue;
     if (c.id === 'shadowing') shadowNotes.push(...c.result.needsAttention);
     if (c.id === 'path') {
-      for (const f of c.result.fixed) pathAdded = f; // "added shims to PATH (~/.zshrc)"
-      for (const a of c.result.needsAttention) pathReload = a; // "...not loaded — open a new terminal"
+      for (const f of c.result.fixed) pathAdded = f;
+      for (const a of c.result.needsAttention) pathReload = a;
     }
   }
 
@@ -44,7 +44,6 @@ export async function runInteractiveShimHeal(): Promise<InteractiveShimHealResul
   return { noticeLines: lines.length > 0 ? lines : null, report };
 }
 
-// ─── Persistent notice-state (replaces the per-PPID sentinel) ──────────────────
 
 type PathNoticeState = 'ok' | 'added' | 'reload';
 

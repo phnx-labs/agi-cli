@@ -159,7 +159,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(db.readSessionTimelineAny('kimi-1')!.timeline.steps).toHaveLength(2);
   });
 
-  // Real Grok rows point at summary.json while the parser reads sibling chat_history.jsonl.
   function writeGrokSession(id: string, atLeastBytes: number): ActiveSession {
     const dir = fs.mkdtempSync(path.join(tmpHome, `grok-${id}-`));
     const history = path.join(dir, 'chat_history.jsonl');
@@ -182,7 +181,7 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     return { ...row(id, summary, 'grok'), activity: 'working' } as ActiveSession;
   }
 
-  // Exercise the former 4–16 MiB dead band between per-session and whole-file limits.
+
   it('folds a 4-16 MiB non-resumable transcript instead of leaving it with no row at all', () => {
     const grok = writeGrokSession('grok-band', 5 * 1024 * 1024);
     const size = fs.statSync(path.join(path.dirname(grok.sessionFile!), 'chat_history.jsonl')).size;
@@ -208,7 +207,7 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(db.readSessionTimelineAny('grok-tight')!.timeline.state).toBe('ready');
   });
 
-  // Whole-file harnesses charge total bytes read, not growth since the prior fold.
+
   it('debits the tick budget by the bytes a whole-file re-parse actually reads', () => {
     const a = writeGrokSession('grok-debit-a', 5 * 1024 * 1024);
     const b = writeGrokSession('grok-debit-b', 5 * 1024 * 1024);

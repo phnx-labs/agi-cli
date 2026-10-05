@@ -1220,7 +1220,7 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   const db = new Database(DB_PATH);
   try {
-    // Concurrent first opens need the wait policy before WAL negotiation.
+
     db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(initialBusyTimeoutMs))}`);
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
@@ -1242,7 +1242,7 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
     } else if (currentVersion < SCHEMA_VERSION) {
       const migrate = db.transaction(() => {
-        // Another opener may have migrated before this writer acquired the lock.
+
         const lockedVersion = readSchemaVersion();
         if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
         migrateSchema(db, lockedVersion);
@@ -1251,7 +1251,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       migrate();
     }
 
-    // Column-dependent indexes must follow migrations for older databases.
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
@@ -3382,7 +3381,6 @@ export interface MirrorSessionUpsert {
   timeline?: SessionTimelineProjection | null;
 }
 
-// A peer digest may refresh mirror/stub rows, never overwrite genuine local transcript data.
 export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, syncedAt: number): boolean {
   const db = getDB();
   const lastActivity = row.lastActivity ?? row.timestamp;
@@ -3537,7 +3535,6 @@ export function setSessionGeneratedTitle(
   return result.changes > 0;
 }
 
-// Only stamped mirror rows are eligible; local sessions and their derived data are never pruned.
 export function pruneMirrorSessions(cutoffMs: number): number {
   const db = getDB();
   const stale = db.prepare(

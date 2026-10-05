@@ -1,11 +1,3 @@
-/**
- * RUSH-2062 — cross-surface active-session cache invariants.
- *
- * Real disk files under a temp dir (no mocks of the cache layer itself). The
- * live gather is injected as a pure function so the test pins cache behaviour
- * without SSH / process-table cost; the critical path under test is the
- * freshness/staleness + immutable-memo contract.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -90,7 +82,7 @@ describe('loadLocalActiveSessions — cross-surface snapshot', () => {
 
     let gathers = 0;
     const res = await loadLocalActiveSessions({
-      nowMs: 10_000 + 5_000, // still within 15s window
+      nowMs: 10_000 + 5_000,
       gather: async () => {
         gathers++;
         return [session({ sessionId: 'b', status: 'idle' })];
@@ -100,7 +92,7 @@ describe('loadLocalActiveSessions — cross-surface snapshot', () => {
     expect(gathers).toBe(0);
     expect(res.servedFromCache).toBe(true);
     expect(res.sessions).toEqual(warm);
-    expect(res.sessions[0].status).toBe('running'); // live status rides the snapshot
+    expect(res.sessions[0].status).toBe('running');
   });
 
   it('re-gathers when the snapshot is older than maxAgeMs (live status never stale)', async () => {
@@ -121,8 +113,7 @@ describe('loadLocalActiveSessions — cross-surface snapshot', () => {
     expect(gathers).toBe(1);
     expect(res.servedFromCache).toBe(false);
     expect(res.sessions[0].sessionId).toBe('fresh');
-    expect(res.sessions[0].status).toBe('idle'); // live status from the gather, not the stale snap
-    // And the cache is rewritten so the next surface shares the fresh result.
+    expect(res.sessions[0].status).toBe('idle');
     const onDisk = readActiveSessionsCache('local');
     expect(onDisk?.sessions[0].sessionId).toBe('fresh');
   });
@@ -219,8 +210,6 @@ describe('loadFleetActiveSessions — fleet snapshot share', () => {
   });
 
   it('rewrites local to empty when a live fleet gather has no local rows (no ghost sessions)', async () => {
-    // Prior warm left a local session; the next fleet gather has only remotes
-    // — the local snapshot must not keep ghosting the dead row.
     writeActiveSessionsCache(
       'local',
       [session({ sessionId: 'ghost', status: 'running', lastActivityMs: 1 })],
@@ -239,9 +228,6 @@ describe('loadFleetActiveSessions — fleet snapshot share', () => {
     });
 
     const local = readActiveSessionsCache('local');
-    // When machineId() is available, local is rewritten at nowMs and must not
-    // contain `ghost`. When machineId is unavailable the write is skipped —
-    // assert the invariant only when the rewrite ran.
     if (local && local.capturedAt === 10_000) {
       expect(local.sessions.some((s) => s.sessionId === 'ghost')).toBe(false);
     }
@@ -283,7 +269,6 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
     expect(hit!.topic).toBe('fix the auth bug');
     expect(hit!.label).toBe('auth');
     expect(hit!.cwd).toBe('/tmp/wt');
-    // Live status must not be in the memo.
     expect(assertNoLiveStatusFields(hit as Record<string, unknown>)).toBe(true);
     expect((hit as Record<string, unknown>).status).toBeUndefined();
     expect((hit as Record<string, unknown>).preview).toBeUndefined();
@@ -292,7 +277,6 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
   it('invalidates the memo when transcript mtime changes', () => {
     writeImmutableMemo('s1', 100, { topic: 'old topic' }, 1);
     expect(readImmutableMemo('s1', 100)?.topic).toBe('old topic');
-    // Same session, newer transcript write → miss (must re-derive).
     expect(readImmutableMemo('s1', 200)).toBeNull();
   });
 
@@ -313,7 +297,6 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
       expect(k in fields).toBe(false);
     }
     for (const k of IMMUTABLE_FIELD_KEYS) {
-      // only assert the ones we set
       if (k === 'topic') expect(fields.topic).toBe('t');
     }
   });
@@ -339,19 +322,17 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
       1,
     );
 
-    // Live gather produced a row with status (live) but no topic yet.
     const live = session({
       sessionId: 's3',
-      status: 'idle', // live — must stay
-      lastActivityMs: 77, // mtime match
+      status: 'idle',
+      lastActivityMs: 77,
     });
     applyImmutableMemo(live);
     expect(live.topic).toBe('memoized topic');
     expect(live.label).toBe('memo-label');
     expect(live.cwd).toBe('/memo');
-    expect(live.status).toBe('idle'); // live status untouched
+    expect(live.status).toBe('idle');
 
-    // Mtime mismatch → no fill.
     const other = session({ sessionId: 's3', status: 'running', lastActivityMs: 99 });
     applyImmutableMemo(other);
     expect(other.topic).toBeUndefined();
@@ -378,14 +359,6 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
 });
 
 describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader connect (RUSH-2484)', () => {
-  // Real defect this closes: noteActiveSessionsJournalReader() (called by
-  // watchLocalSessions on connect) ONLY writes a timestamp file — it has no
-  // path back into the daemon process that owns the 15s warm-tick
-  // setInterval. A watcher connecting to a cold/idle daemon used to sit on
-  // "awaiting publisher" for up to a full ACTIVE_SESSIONS_WARM_TICK_MS (15s).
-  // These tests drive real setInterval-based scheduling via fake timers and
-  // assert the callback fires from the poll noticing the presence-file edge —
-  // never from a second, manually-invoked call to the tick function.
   const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
   let dir: string;
   let prevPresence: string | null;
@@ -406,17 +379,11 @@ describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader co
     let connects = 0;
     const stop = watchActiveSessionsReaderPresence(() => { connects++; }, { pollMs: 100 });
 
-    // Cold daemon, no reader: several polls pass with zero connects — proves
-    // the poll itself is not what triggers a gather.
     vi.advanceTimersByTime(2_000);
     expect(connects).toBe(0);
 
-    // A watcher connects. This mirrors watch.ts:165 exactly: it only writes
-    // a presence timestamp, nothing more.
     noteActiveSessionsJournalReader();
 
-    // The idle->recent edge is caught on the very next 100ms poll — far
-    // short of the 15s scheduled warm-tick a watcher used to wait on.
     vi.advanceTimersByTime(100);
     expect(connects).toBe(1);
     expect(100).toBeLessThan(ACTIVE_SESSIONS_WARM_TICK_MS);
@@ -432,8 +399,6 @@ describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader co
     vi.advanceTimersByTime(100);
     expect(connects).toBe(1);
 
-    // Simulate the watcher's periodic heartbeat re-noting presence (watch.ts's
-    // heartbeatTimer) — must not trigger a second out-of-band gather per beat.
     for (let i = 0; i < 5; i++) {
       noteActiveSessionsJournalReader();
       vi.advanceTimersByTime(100);
@@ -451,13 +416,9 @@ describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader co
     vi.advanceTimersByTime(100);
     expect(connects).toBe(1);
 
-    // Reader disconnects — no further presence writes — and ages past the
-    // idle window with no reconnect yet.
     vi.advanceTimersByTime(600);
     expect(connects).toBe(1);
 
-    // A new watcher connects to what is now, from the daemon's view, an idle
-    // box — exactly the reconnect-after-idle case the fix targets.
     noteActiveSessionsJournalReader();
     vi.advanceTimersByTime(100);
     expect(connects).toBe(2);

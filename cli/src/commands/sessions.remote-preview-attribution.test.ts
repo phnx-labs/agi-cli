@@ -1,20 +1,3 @@
-/**
- * PHNX-3890: `agents sessions preview <full-uuid>` of a session running on a PEER
- * must render that peer's digest, not the local "not indexed here" stub.
- *
- * The failure was a locality conflation on the DISPATCHER box. A box that
- * launched a session executing elsewhere holds a live launcher-shim row for it:
- * no transcript on disk, and a `machine` that defaulted to itself
- * (`active.machine ?? self`). The full-UUID resolver treated any local hit as
- * definitive and returned with zero fan-out, so the read was routed back to a box
- * with no transcript. A passive peer, holding no local row at all, fanned out and
- * rendered the same session fine — the tell that the local row was the problem.
- *
- * Reproduced here at the real seam: `resolveSessionMetadataValue` against the
- * real SQLite index and the real live-registry bridge, with only the two I/O
- * edges injected (the live/fleet snapshot readers and the SSH fan-out). HOME is
- * pinned before importing db.js/sessions.js so the index stays under the fixture.
- */
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -47,7 +30,6 @@ afterAll(() => {
 
 const SELF = 'this-box';
 const PEER = 'peer-box';
-/** The session whose agent + transcript live on PEER, launched from SELF. */
 const DISPATCHED_ID = 'a1b2c3d4-1111-2222-3333-444444444444';
 
 function transcript(id: string): string {
@@ -57,11 +39,6 @@ function transcript(id: string): string {
   return file;
 }
 
-/**
- * The launcher-shim row a dispatcher holds: the launch process is here, so the
- * registry lists it, but there is no transcript on this disk and no machine to
- * attribute it to — `activeSessionToSessionMeta` defaults that to `self`.
- */
 function launcherShimRow(id: string): ActiveSession {
   return {
     context: 'interactive',
@@ -76,8 +53,6 @@ function launcherShimRow(id: string): ActiveSession {
   } as unknown as ActiveSession;
 }
 
-/** How the fleet-wide `agents sessions --active` merge reports the same session:
- * attributed to the box the AGENT runs on. */
 function fleetActiveRow(id: string, machine: string): ActiveSession {
   return { ...launcherShimRow(id), machine } as ActiveSession;
 }
@@ -86,8 +61,6 @@ function loader(sessions: ActiveSession[]): LoadActive {
   return (async () => ({ sessions, servedFromCache: false, capturedAt: Date.now() })) as unknown as LoadActive;
 }
 
-/** A peer answering the `--resolve-safe-v1` sweep. The real fan-out stamps
- * `machine` + `_remote` on every row it brings back (remote-list.ts:128,164). */
 function peerAnswer(id: string, machine = PEER): SessionMeta {
   return {
     id,
@@ -106,8 +79,6 @@ function fanOut(sessions: SessionMeta[], unreachable: string[] = []): GatherRemo
 
 describe('remote-session preview attribution (PHNX-3890)', () => {
   it('attributes a transcript-less launcher shim to the peer the fleet says runs it', async () => {
-    // The fleet-active snapshot is the only local source that knows the truth
-    // when no index row has synced yet.
     const matches = await computeLocalMetadataMatches(DISPATCHED_ID, {}, {
       loadActive: loader([launcherShimRow(DISPATCHED_ID)]),
       loadFleetActive: () => [fleetActiveRow(DISPATCHED_ID, PEER)],
@@ -130,8 +101,6 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
   });
 
   it('consults the fleet for a full UUID whose only local match is a launcher shim', async () => {
-    // The zion case: fleet-active snapshot cold, so the shim still reads as
-    // local. The short-circuit must NOT fire, and the peer's row must win.
     const gather = vi.fn(fanOut([peerAnswer(DISPATCHED_ID)]));
     const outcome = await resolveSessionMetadataValue(DISPATCHED_ID, {}, {
       gatherRemoteList: gather as unknown as GatherRemoteList,
@@ -168,8 +137,6 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
   });
 
   it('resolves a synced mirror locally even though it is owned by a peer', async () => {
-    // A mirror has a real filePath on THIS disk, so it renders here without an
-    // SSH hop even though `machine` names its owner.
     const mirrorId = 'dddddddd-1111-2222-3333-444444444444';
     upsertSession(
       {
@@ -191,10 +158,6 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
   });
 
   it('does NOT skip the sweep because the snapshot names THIS box', async () => {
-    // The fleet snapshot is a merge that INCLUDES this box's own rows, so for a
-    // transcript-less row with no index row to fold from, a `self` entry may be
-    // an echo of the self-default rather than proof. Trusting it would resurrect
-    // the PHNX-3890 dead end whenever the owning peer had not reported yet.
     const echoedId = '11111111-aaaa-bbbb-cccc-222222222222';
     const gather = vi.fn(fanOut([peerAnswer(echoedId)]));
     const outcome = await resolveSessionMetadataValue(echoedId, {}, {
@@ -207,9 +170,6 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
   });
 
   it('keeps the local shim when no peer answers for it', async () => {
-    // With no fleet evidence at all, a transcript-less self-attributed row is
-    // indistinguishable from a session this box just started — so it must still
-    // resolve here rather than becoming a not-found.
     const gather = vi.fn(fanOut([]));
     const outcome = await resolveSessionMetadataValue(DISPATCHED_ID, {}, {
       gatherRemoteList: gather as unknown as GatherRemoteList,
@@ -235,7 +195,6 @@ describe('remote-session preview attribution (PHNX-3890)', () => {
 describe('the corrected row renders the peer digest, not the local stub (PHNX-3890)', () => {
   it('routes a fleet-attributed launcher shim into the async peer-digest fetch', async () => {
     const picker = await import('./sessions-picker.js');
-    // Resolve the shim exactly as `preview <id>` does, then render it.
     const [resolved] = await computeLocalMetadataMatches(DISPATCHED_ID, {}, {
       loadActive: loader([launcherShimRow(DISPATCHED_ID)]),
       loadFleetActive: () => [fleetActiveRow(DISPATCHED_ID, PEER)],
@@ -249,8 +208,6 @@ describe('the corrected row renders the peer digest, not the local stub (PHNX-38
     });
     try {
       const preview = stripVTControlCharacters(picker.buildPreview(resolved));
-      // The acceptance criterion: the peer is named and the fetch is under way,
-      // instead of the dead-end stub this box used to print for the session.
       expect(preview).toContain(PEER);
       expect(preview).toContain('fetching preview from');
       expect(preview).not.toContain('full transcript not indexed here');

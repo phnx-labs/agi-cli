@@ -1,4 +1,3 @@
-// Legacy folding prefers the new tree, renames when possible, and leaves the compatibility link.
 
 import * as fs from 'fs';
 import * as path from 'path';

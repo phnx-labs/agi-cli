@@ -3,9 +3,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// db.ts resolves its sqlite path from HOME at module-import time. Point HOME at
-// a throwaway dir BEFORE importing so the whole parity test runs against a
-// clean, isolated ledger (no mocking — a real sqlite DB under a temp HOME).
 const REAL_HOME = process.env.HOME;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-filter-parity-'));
 
@@ -31,7 +28,6 @@ function writeFileAt(filePath: string, contents: string, mtimeSec: number): void
   fs.utimesSync(filePath, mtimeSec, mtimeSec);
 }
 
-/** Sort a changed-set into a stable comparable shape. */
 function normalize(changed: Array<{ filePath: string; scan: { fileMtimeMs: number; fileSize: number } }>) {
   return changed
     .map((c) => ({ filePath: c.filePath, fileMtimeMs: c.scan.fileMtimeMs, fileSize: c.scan.fileSize }))
@@ -40,8 +36,6 @@ function normalize(changed: Array<{ filePath: string; scan: { fileMtimeMs: numbe
 
 beforeAll(async () => {
   process.env.HOME = tmpHome;
-  // USERPROFILE too: os.homedir() ignores HOME on Windows, and discover.ts
-  // captures its scan root from os.homedir() at import time (discover.ts:58).
   process.env.USERPROFILE = tmpHome;
   db = await import('./db.js');
   discover = await import('./discover.js');
@@ -49,8 +43,6 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  // Close before removing the tree: Windows refuses to unlink an open file, so
-  // a leaked connection (plus its WAL sidecars) fails the whole suite there.
   db.closeDB();
   if (REAL_HOME === undefined) delete process.env.HOME;
   else process.env.HOME = REAL_HOME;
@@ -72,7 +64,6 @@ describe('filterChangedFiles vs filterChangedEntries parity', () => {
     const viaStat = discover.filterChangedFiles(paths);
     const viaPreStat = discover.filterChangedEntries(prestat);
 
-    // Every file is new (empty ledger) → both must surface all three, identically.
     expect(normalize(viaPreStat)).toEqual(normalize(viaStat));
     expect(viaStat.length).toBe(3);
   });
@@ -83,7 +74,6 @@ describe('filterChangedFiles vs filterChangedEntries parity', () => {
     writeFileAt(warm, 'hello', 1_500);
 
     const fresh = fs.statSync(warm);
-    // Seed the ledger with the floored mtime, exactly as a prior scan would.
     db.recordScans([
       { filePath: warm, scan: { fileMtimeMs: Math.floor(fresh.mtimeMs), fileSize: fresh.size } },
     ]);
@@ -95,9 +85,6 @@ describe('filterChangedFiles vs filterChangedEntries parity', () => {
     const viaStat = discover.filterChangedFiles(paths);
     const viaPreStat = discover.filterChangedEntries(prestat);
 
-    // Warm file matches the ledger → neither path re-parses it. If the pre-stat
-    // path failed to floor, a sub-millisecond mtime fraction would spuriously
-    // re-surface it and break this parity.
     expect(viaStat).toEqual([]);
     expect(normalize(viaPreStat)).toEqual(normalize(viaStat));
   });
@@ -111,12 +98,8 @@ describe('filterChangedFiles vs filterChangedEntries parity', () => {
     db.recordScans([
       { filePath: grow, scan: { fileMtimeMs: Math.floor(before.mtimeMs), fileSize: before.size } },
     ]);
-    // recordScans stamps scannedAt = now, which would trip the 5s append
-    // debounce. Backdate every ledger row so the append is detected, not
-    // deferred — this is the isolated temp DB, so a blanket update is safe.
     db.getDB().prepare('UPDATE scan_ledger SET scanned_at = ?').run(0);
 
-    // Append content and bump mtime forward past the seeded stamp.
     fs.appendFileSync(grow, '-more-more', 'utf-8');
     fs.utimesSync(grow, 5_000, 5_000);
 
@@ -127,8 +110,6 @@ describe('filterChangedFiles vs filterChangedEntries parity', () => {
     const viaStat = discover.filterChangedFiles(paths);
     const viaPreStat = discover.filterChangedEntries(prestat);
 
-    // The grown file must surface on both paths (append detected), with the same
-    // floored mtime + size.
     expect(viaStat.length).toBe(1);
     expect(viaStat[0].filePath).toBe(grow);
     expect(normalize(viaPreStat)).toEqual(normalize(viaStat));

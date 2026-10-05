@@ -6,7 +6,7 @@ import { isSafeSegmentName, safeJoin } from '../../paths.js';
 import { AGENTS } from '../../agents.js';
 
 function trustedSourceBases(): { dir: string }[] {
-  // Executable materialization trusts user, system, and enabled extras, never the current project.
+
   return [
     { dir: getUserAgentsDir() },
     { dir: getAgentsDir() },
@@ -108,7 +108,6 @@ export function listPluginSkillNames(options: { agent?: AgentId; plugins?: Set<s
   return Array.from(names);
 }
 
-// Keep this skip set in lockstep with the hook-group discovery in hooks/install.ts.
 const HOOK_GROUP_SKIP_DIRS = new Set(['node_modules', '.git', '.cache']);
 
 const HOOK_SCRIPT_EXTS = new Set([

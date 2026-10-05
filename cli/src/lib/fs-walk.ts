@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 function walkEntries(dir: string, ext: string, onFile: (filePath: string, mtimeMs: number, size: number) => void): void {
-  // Dirents avoid stat-per-entry; follow symlinks deliberately and carry stats to hot-path callers.
+
   function walk(d: string, depth: number) {
     if (depth > 5) return;
     let entries: fs.Dirent[];

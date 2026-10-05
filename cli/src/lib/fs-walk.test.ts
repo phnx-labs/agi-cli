@@ -12,7 +12,6 @@ function makeTempDir(): string {
   return dir;
 }
 
-/** Create a file with a deterministic mtime (seconds since epoch). */
 function writeFileAt(filePath: string, mtimeSec: number): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, 'x', 'utf-8');
@@ -48,7 +47,6 @@ describe('walkForFiles', () => {
 
     fs.symlinkSync(path.join(outside, 'linked-dir'), path.join(dir, 'linked-dir'));
     fs.symlinkSync(path.join(outside, 'target.jsonl'), path.join(dir, 'link.jsonl'));
-    // Dangling symlink must be skipped, not crash the walk.
     fs.symlinkSync(path.join(outside, 'missing.jsonl'), path.join(dir, 'dangling.jsonl'));
 
     const found = walkForFiles(dir, '.jsonl', 10).map((p) => path.basename(p));
@@ -78,7 +76,6 @@ describe('walkForFilesWithStat', () => {
     const withStat = walkForFilesWithStat(dir, '.jsonl', 10);
     expect(withStat.map((r) => r.path)).toEqual(paths);
 
-    // The limit applies to the same newest-first ordering.
     const limitedPaths = walkForFiles(dir, '.jsonl', 2);
     const limitedWithStat = walkForFilesWithStat(dir, '.jsonl', 2);
     expect(limitedWithStat.map((r) => r.path)).toEqual(limitedPaths);

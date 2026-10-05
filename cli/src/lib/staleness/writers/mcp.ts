@@ -12,7 +12,6 @@ function buildMcpWriter(agent: AgentId): ResourceWriter<string[]> {
     agent,
     write({ version, versionHome, selection, cwd }: WriteArgs<string[]>): WriteResult {
       const r = installMcpServers(agent, version, versionHome, selection, { cwd });
-      // Record the canonical config only when it exists, or the manifest stays perpetually stale.
       const configPath = getMcpConfigPathForHome(agent, versionHome);
       const paths = r.applied.length > 0 && fs.existsSync(configPath) ? [configPath] : [];
       return { synced: r.applied, paths, ...(r.errors.length ? { errors: r.errors } : {}) };

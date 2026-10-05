@@ -57,7 +57,6 @@ export interface DeviceProfile {
 }
 
 export function isDialableDevice(d: DeviceProfile): boolean {
-  // A successful SSH probe adds a route; a short negative probe cannot override Tailscale or manual routes.
   if (d.reachability?.reachable) return true;
   return !d.tailscale || d.tailscale.online === true;
 }
@@ -105,7 +104,7 @@ export function platformFromOs(os: string | undefined): DevicePlatform {
 }
 
 export function shellForPlatform(platform: DevicePlatform): DeviceShell {
-  // Platform and shell are one coupled value; callers must never preserve a shell across a platform change.
+
   return platform === 'windows' ? 'powershell' : 'posix';
 }
 
@@ -192,7 +191,7 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
     const now = new Date().toISOString();
     const prev = reg[name];
     const platform = input.platform ?? prev?.platform ?? 'unknown';
-    // Recompute rather than merge shell so registry refreshes cannot leave a Windows device on POSIX quoting.
+
     const merged: DeviceProfile = {
       name,
       platform,

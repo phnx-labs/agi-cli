@@ -1,8 +1,3 @@
-# Project-level preset. Empty `default` so the only content in the
-# composed output is whatever auto-appends from the project layer
-# (i.e., the subrules below). Keeps the test deterministic — the
-# user's own ~/.agents/rules/rules.yaml is irrelevant once a temp HOME
-# is set up around this fixture.
 presets:
   default:
     subrules: []

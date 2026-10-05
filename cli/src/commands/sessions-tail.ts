@@ -1,11 +1,3 @@
-/**
- * Live-tail a session file and stream new events as they're written.
- *
- * Implements `agents sessions tail` — position-tracked reader on the session
- * JSONL, driven by an fs.watch on the parent directory. Claude and Codex
- * only for v1 (both use append-only JSONL). Output is compact by default;
- * --json keeps the raw JSONL stream.
- */
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
@@ -18,27 +10,14 @@ import { makeStreamRenderer } from '@phnx-labs/sessions-cli/reader';
 
 const TAIL_SUPPORTED: SessionAgentId[] = ['claude', 'codex'];
 
-/** Whether a session's transcript can be live-tailed (append-only JSONL agents). */
 export function isTailable(agent: SessionAgentId): boolean {
   return TAIL_SUPPORTED.includes(agent);
 }
 
 interface TailFileOptions {
-  /** If true, emit every line from byte 0 first, then follow. Default false (EOF). */
   fromStart?: boolean;
 }
 
-/**
- * Tail a file: emit each newline-terminated line via onLine as it's written.
- *
- * Returns a promise that resolves when the AbortController fires. Uses
- * fs.watch on the parent directory (more reliable on macOS than watching
- * the file directly) and tracks byte offset to avoid re-reading content.
- *
- * Emits each line exactly once. Handles partial lines across reads, file
- * truncation (offset reset), and files that don't exist yet (watches the
- * parent dir until the file appears).
- */
 export async function tailFile(
   filePath: string,
   onLine: (line: string) => void,
@@ -63,7 +42,6 @@ export async function tailFile(
       const st = await fd.stat();
       offset = opts.fromStart ? 0 : st.size;
     } else {
-      // File appeared after we started watching — emit from byte 0.
       offset = 0;
       partial = '';
     }
@@ -74,7 +52,7 @@ export async function tailFile(
     const h = fd;
     fd = null;
     if (h) {
-      try { await h.close(); } catch { /* already closed */ }
+      try { await h.close(); } catch {  }
     }
   };
 
@@ -89,7 +67,6 @@ export async function tailFile(
         }
         const st = await fd!.stat();
         if (st.size < offset) {
-          // Truncation or rotation: reset to start of the new content.
           offset = 0;
           partial = '';
         }
@@ -122,21 +99,16 @@ export async function tailFile(
 
   const watcher = fs.watch(dir, { recursive: false }, (_event, filename) => {
     if (ac.signal.aborted) return;
-    // On macOS, filename is sometimes null — don't filter in that case.
     if (filename !== null && filename !== base) return;
-    // Stat detects append, truncation, or reappearance in drain(); trust that
-    // over the event type, which macOS coalesces inconsistently.
     void drain();
   });
 
-  // Initial drain in case the file has content beyond EOF-of-our-offset
-  // (e.g. --from-start, or a write between stat and watch attach).
   await drain();
 
   await new Promise<void>((resolve) => {
     const onAbort = (): void => {
       ac.signal.removeEventListener('abort', onAbort);
-      try { watcher.close(); } catch { /* noop */ }
+      try { watcher.close(); } catch {  }
       void closeFd().then(() => resolve());
     };
     if (ac.signal.aborted) onAbort();
@@ -164,7 +136,6 @@ async function resolveTailable(sessionId: string): Promise<SessionMeta | undefin
   const sessions = await discoverSessions({ all: true, limit: 5000 });
   const matches = resolveSessionById(sessions, sessionId);
   if (matches.length === 0) return undefined;
-  // Prefer a supported agent among matches; if only unsupported match, signal.
   const supported = matches.find(s => TAIL_SUPPORTED.includes(s.agent));
   if (supported) return supported;
   return 'unsupported';
@@ -201,10 +172,6 @@ async function runTail(sessionId: string | undefined, options: TailOptions): Pro
   await streamSessionTail(session, { fromStart: options.fromStart, raw: options.json });
 }
 
-/**
- * Live-tail one already-resolved session's transcript to stdout until Ctrl+C.
- * Shared by `agents sessions tail` and `agents logs -f`.
- */
 export async function streamSessionTail(
   session: SessionMeta,
   options: { fromStart?: boolean; raw?: boolean } = {},
@@ -239,7 +206,6 @@ export async function streamSessionTail(
   }
 }
 
-/** Attach the `tail` subcommand to an existing `sessions` command. */
 export function registerSessionsTailCommand(sessionsCmd: Command): void {
   const tailCmd = sessionsCmd
     .command('tail [sessionId]')

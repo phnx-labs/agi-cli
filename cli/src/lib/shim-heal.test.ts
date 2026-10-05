@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { computeShimNoticeSignature } from './shim-heal.js';
 
-// The signature is a pure function — safe to test in-process.
 describe('computeShimNoticeSignature', () => {
   it('is empty when nothing is actionable', () => {
     expect(computeShimNoticeSignature({ shadowNotes: [], pathState: 'ok' })).toBe('');
@@ -24,9 +23,6 @@ describe('computeShimNoticeSignature', () => {
   });
 });
 
-// shouldSurfaceShimNotice persists a marker under HOME/.agents/.cache/state, so it
-// must run against a planted temp HOME in a subprocess (state paths are resolved at
-// module-eval from process.env.HOME) — the established pattern from doctor-diff.test.ts.
 describe('shouldSurfaceShimNotice (persistent, once per condition)', () => {
   let home: string;
   beforeEach(() => {
@@ -44,9 +40,6 @@ describe('shouldSurfaceShimNotice (persistent, once per condition)', () => {
     `;
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
-      // AGENTS_STATE_DIR must travel with HOME — it outranks HOME in
-      // getRuntimeStateDir(), and tests/setup.ts pins it fork-wide, so inheriting
-      // the parent's value would put the marker outside this planted HOME.
       env: {
         ...process.env,
         HOME: home,
@@ -58,7 +51,6 @@ describe('shouldSurfaceShimNotice (persistent, once per condition)', () => {
   }
 
   it('surfaces a condition once, suppresses the identical repeat, re-surfaces on change, clears on empty', () => {
-    // same sig twice -> [true, false]; new sig -> true; empty -> false; the old sig again -> true (marker was cleared)
     const res = run(['shadow:claude=/x', 'shadow:claude=/x', 'shadow:codex=/y', '', 'shadow:claude=/x']);
     expect(res).toEqual([true, false, true, false, true]);
   });

@@ -27,7 +27,7 @@ export function parseTerminalFlag(value: unknown): { backend?: Backend; error?: 
 }
 
 export function stripTerminalFlag(argv: string[], consumedValue?: string): string[] {
-  // Strip only Commander's consumed option/value and stop at -- so passthrough argv remains untouched.
+
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];

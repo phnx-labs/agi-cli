@@ -1,13 +1,3 @@
-/**
- * RUSH-2211: the three query hot-path fixes in querySessions/ftsSearch.
- *   1. The default listing sort uses the bare `last_activity` column (not
- *      `IFNULL(last_activity, timestamp)`) so idx_sessions_last_activity serves it.
- *   2. The post-query existence check batches `fs.existsSync` per directory
- *      (`findMissingFilePaths`) instead of one stat syscall per row, but must
- *      still drop exactly the rows whose file vanished.
- *   3. Label-first search (`ftsSearch`) routes through the FTS5 `label` column
- *      instead of a leading-wildcard `LOWER(label) LIKE '%q%'` table scan.
- */
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -57,9 +47,6 @@ describe('querySessions default sort uses the last_activity index', () => {
     ).all() as Array<{ detail: string }>;
     const detail = plan.map(r => r.detail).join(' | ');
     expect(detail).toMatch(/USING INDEX idx_sessions_last_activity/);
-    // The old shape wrapped the column in IFNULL(), which this same plan check
-    // would have shown as a SCAN + a separate sort — this asserts the fix, not
-    // just that *a* plan exists.
     expect(detail).not.toMatch(/USE TEMP B-TREE FOR ORDER BY/);
   });
 
@@ -89,9 +76,6 @@ describe('querySessions batched existence check', () => {
       .toEqual(['exist-cache-first']);
     expect(getSessionExistenceCacheStats().sweeps).toBe(afterFirstSweep);
 
-    // A concurrent writer can create the transcript without touching SQLite.
-    // The directory metadata is the cross-process invalidation signal, so this
-    // process must not keep the cached "missing" membership result.
     fs.writeFileSync(concurrent, '{}');
     expect(new Set(querySessions({ idPrefix: 'exist-cache-' }).map(row => row.id)))
       .toEqual(new Set(['exist-cache-first', 'exist-cache-concurrent']));
@@ -144,15 +128,11 @@ describe('querySessions batched existence check', () => {
     const goneB = path.join(dirB, 'gone-b.jsonl');
     fs.writeFileSync(liveA, '{}');
     fs.writeFileSync(liveB, '{}');
-    // goneA/goneB are referenced by session rows but never written to disk —
-    // simulates a transcript deleted out from under the index.
 
     upsertSession(meta('exist-live-a', { filePath: liveA }), '');
     upsertSession(meta('exist-gone-a', { filePath: goneA }), '');
     upsertSession(meta('exist-live-b', { filePath: liveB }), '');
     upsertSession(meta('exist-gone-b', { filePath: goneB }), '');
-    // A synthetic row (no file_path) must survive untouched — it's exempt from
-    // the existence check entirely.
     upsertSession(meta('exist-synthetic', { filePath: '' }), '');
 
     const rows = querySessions({ idPrefix: 'exist-' });
@@ -180,9 +160,6 @@ describe('querySessions batched existence check', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-purge-'));
     const file = path.join(dir, 'purge-me.jsonl');
     const db = getDB();
-    // Empty content => a phantom (stale/moved file_path), still suppressed from
-    // listings. But listing must no longer DELETE data: the destructive
-    // purge-on-read is gone; only directory-scoped cleanup purges.
     upsertSession(meta('exist-purge', { filePath: file }), '');
     db.prepare(
       `INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, tool, input, outcome, evidence_bytes)
@@ -216,8 +193,6 @@ describe('ftsSearch label tier routes through the FTS5 index, not a leading-wild
     const exactHit = ftsSearch('nightly-audit').find(h => h.sessionId === 'label-exact');
     expect(exactHit?.score).toBe(1_000_000);
 
-    // Exact match short-circuits the tier (see ftsSearch docblock), so re-query
-    // with a term that only prefix/contains-matches to see those tiers.
     const prefixHits = ftsSearch('nightly-audit-follow');
     expect(prefixHits.find(h => h.sessionId === 'label-prefix')?.score).toBe(900_000);
   });

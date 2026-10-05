@@ -41,9 +41,6 @@ describe.skipIf(process.platform !== 'linux')('daemon process-view startup with 
         const home = fs.mkdtempSync('/tmp/agd-pv-');
         const cache = path.join(home, '.agents', '.cache');
         const daemonDir = path.join(cache, 'helpers', 'daemon');
-        // Daemon-liveness vehicle: a socket the daemon binds unconditionally on
-        // boot. The browser IPC socket left with the standalone browser CLI
-        // (PHNX-4101), so this waits on the feed-stream hub socket instead.
         const socket = path.join(cache, 'helpers', 'feed', 'feed-stream.sock');
         const marker = path.join(cache, 'terminals', 'process-view.json');
         const config = path.join(home, '.agents', 'daemon');
@@ -66,8 +63,6 @@ describe.skipIf(process.platform !== 'linux')('daemon process-view startup with 
           expect(fs.readFileSync(path.join(daemonDir, 'daemon.pid'), 'utf8').trim()).toBe(String(original.pid));
           if (legacy === 'absent') fs.unlinkSync(marker);
           else fs.writeFileSync(marker, JSON.stringify({ bootId: 'previous-kernel-boot', pidNamespace: 'previous-namespace' }));
-          // Cross-repository seam: opt in to the canonical system worktree
-          // hook, never an installed mirror or an absolute developer path.
           const identityHook = process.env.AGENTS_SESSION_IDENTITY_TEST_HOOK;
           if (identityHook) {
             const registry = path.join(cache, 'terminals', 'by-pid');
@@ -88,13 +83,9 @@ describe.skipIf(process.platform !== 'linux')('daemon process-view startup with 
               expect(nativeHook.status, nativeHook.stderr).toBe(0);
               expect(JSON.parse(fs.readFileSync(nativeRecord, 'utf8'))).toMatchObject({ sessionId: 'native-hook', terminalId: 'native-terminal', launchId: 'native-launch' });
               expect(JSON.parse(fs.readFileSync(path.join(metadata, `${process.pid}.json`), 'utf8')).session_id).toBe('native-hook');
-              // The initial host can enroll before its daemon starts; a
-              // noninitial namespace needs the live socket and does not enroll.
               expect(fs.existsSync(marker)).toBe(fs.readlinkSync('/proc/self/ns/pid') === 'pid:[4026531836]');
             }
           }
-          // Sentinels catch the old lock's PID-based stale cleanup and registry
-          // mutations, independently of whether the nested daemon exits cleanly.
           const lock = path.join(daemonDir, 'daemon.lock');
           fs.writeFileSync(lock, '2147483646');
           const record = path.join(cache, 'terminals', 'by-pid', `${original.pid}.json`);
@@ -113,8 +104,6 @@ describe.skipIf(process.platform !== 'linux')('daemon process-view startup with 
           expect(watched.map(file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null)).toEqual(before);
           expect(await accepting(socket)).toBe(true);
           expect(original.exitCode).toBeNull();
-          // The native namespace authenticates the actual browser socket owner
-          // and performs the normal last-wins singleton handover.
           fs.unlinkSync(lock);
           const replacement = launch();
           await until(() => fs.existsSync(path.join(daemonDir, 'daemon.pid')) && fs.readFileSync(path.join(daemonDir, 'daemon.pid'), 'utf8').trim() === String(replacement.pid) && accepting(socket), () => `native migration failed: ${output}`);

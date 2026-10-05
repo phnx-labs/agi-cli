@@ -5,7 +5,6 @@ import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 
-/** Minimal SessionMeta with a resolvable version, for the harness-parity gate. */
 function meta(agent: SessionAgentId): SessionMeta {
   return {
     id: '2026-07-31T00-00-00-000Z',
@@ -40,11 +39,8 @@ describe('effectiveMode — harness parity gate', () => {
   });
 
   it('rehydrateCommand uses each agent\'s real binary (cliCommand), not the session-agent id', () => {
-    // antigravity's executable is `agy`, not `antigravity` — launching the raw id
-    // on the target would fail with a shell error instead of rehydrating.
     expect(rehydrateCommand(meta('antigravity'))[0]).toBe('agy');
     expect(rehydrateCommand(meta('claude'))[0]).toBe('claude');
-    // Pin the whole set to the registry so a renamed binary can't drift silently.
     for (const agent of SESSION_AGENTS) {
       const expected = AGENTS[agent as AgentId]?.cliCommand ?? agent;
       expect(rehydrateCommand(meta(agent))[0]).toBe(expected);
@@ -52,8 +48,6 @@ describe('effectiveMode — harness parity gate', () => {
   });
 
   it('stays in lockstep with buildResumeCommand for EVERY session agent (the parity invariant)', () => {
-    // The gate must downgrade exactly when buildResumeCommand returns null — if a
-    // new agent gains/loses resume support, this pins the two together.
     for (const agent of SESSION_AGENTS) {
       const m = meta(agent);
       const resumable = buildResumeCommand(m) !== null;
@@ -74,20 +68,12 @@ describe('buildMigrateResumeCommands — the migrated session must land on the A
 
   it('every tmux invocation in the launch command carries -S <agents socket>, never bare `tmux`', () => {
     const { launchCmd } = buildMigrateResumeCommands(base);
-    // The old bug: `tmux set-option ...` with no -S landed the session on
-    // tmux's own default OS socket — invisible to readAllPaneOwners, so the
-    // reaper's next tick killed the migrated agent's helpers as
-    // 'tmux-session-gone'. Assert that exact bare-invocation shape is absent
-    // (the mkdir path also contains the substring "tmux", so this checks the
-    // COMMAND shape, not a bare substring match).
     expect(launchCmd).not.toContain('tmux set-option');
     expect(launchCmd).toContain('tmux -S "$HOME/.agents/.cache/helpers/tmux/server.sock" set-option');
   });
 
   it('$HOME is left as a literal, unresolved token for the REMOTE shell to expand', () => {
     const { launchCmd, probeCmd } = buildMigrateResumeCommands(base);
-    // Must never be pre-resolved to a LOCAL absolute path (the local and
-    // remote HOME can differ — different user, different OS).
     expect(launchCmd).toContain('$HOME/');
     expect(probeCmd).toContain('$HOME/');
   });

@@ -12,7 +12,7 @@ let cached: Set<string> | null = null;
 function selfAliases(): Set<string> {
   if (cached) return cached;
   const aliases = new Set<string>([machineId(), ...LOOPBACK]);
-  // The registered MagicDNS FQDN and its short form are also self, preventing recursive SSH probes.
+
   try {
     const dns = loadDevicesSync()[machineId()]?.address?.dnsName;
     if (dns) {

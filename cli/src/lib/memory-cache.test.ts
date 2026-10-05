@@ -4,7 +4,6 @@ import { createMemoryCache } from './memory-cache.js';
 
 describe('createMemoryCache', () => {
   it('expires entries without returning or extending stale values', () => {
-    // lru-cache reserves a zero start time for entries without TTL metadata.
     let now = 100;
     const cache = createMemoryCache<string, string>({ max: 2, ttlMs: 10, now: () => now });
 

@@ -12,7 +12,6 @@ const PACKAGE_VERSION = JSON.parse(
 
 const tempHomes: string[] = [];
 
-/** Scaffold a fake $HOME with a system + user DotAgents repo, each holding a skill. */
 function makeTempHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-repo-view-'));
   tempHomes.push(home);
@@ -25,7 +24,6 @@ function makeTempHome(): string {
     JSON.stringify({ lastCheck: Date.now(), latestVersion: PACKAGE_VERSION.version }),
   );
 
-  // System repo: marker manifest + one skill so the summary has content to render.
   fs.writeFileSync(path.join(systemDir, 'agents.yaml'), 'agents: {}\n');
   fs.mkdirSync(path.join(systemDir, 'skills', 'demo-skill'), { recursive: true });
   fs.writeFileSync(
@@ -33,7 +31,6 @@ function makeTempHome(): string {
     '---\ndescription: A demo skill\n---\n\n# demo-skill\n',
   );
 
-  // User repo: its own manifest + skill.
   fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents: {}\n');
   fs.mkdirSync(path.join(userDir, 'skills', 'user-skill'), { recursive: true });
   fs.writeFileSync(
@@ -52,7 +49,6 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
   });
 }
 
-/** Drop ANSI colors + OSC-8 hyperlink escapes so we can assert on plain text. */
 function strip(s: string): string {
   // eslint-disable-next-line no-control-regex
   return s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;]*m/g, '');
@@ -93,7 +89,6 @@ describe('agents repo view', () => {
 
   it('errors with a hint when no name is given in a non-interactive terminal', () => {
     const home = makeTempHome();
-    // spawnSync gives the child a piped (non-TTY) stdin → picker is unavailable.
     const result = runAgents(home, ['repo', 'view']);
     expect(result.status).not.toBe(0);
     expect(strip(result.stdout)).toContain('not an interactive terminal');

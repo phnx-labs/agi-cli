@@ -2,10 +2,6 @@ import { afterAll, expect, test } from 'vitest';
 import { spawnAndDetect, killAndCleanup } from '../harness.js';
 import { ScenarioRecorder, percentile, sleep } from '../lib/scenario-record.js';
 
-// The bug that motivated this whole package: a dead agent's stale state file
-// outliving it and shadowing the NEW agent that replaces it in the same cwd.
-// Each iteration spawns A, kills it, spawns B in the same directory, and
-// asserts the tracker now reports B's session — not A's ghost.
 const ITERATIONS = 20;
 const MATCH_RATE_THRESHOLD = 0.99;
 const P95_LATENCY_MS = 1000;
@@ -27,7 +23,6 @@ test(
       await killAndCleanup(a);
       await sleep(500);
 
-      // Reuse the SAME cwd so a stale A entry could shadow B if dedup is wrong.
       const b = await spawnAndDetect({ agent: 'claude', cwd });
       try {
         const newSessionWon =
@@ -35,7 +30,6 @@ test(
           !!b.detected.sessionId &&
           b.detected.sessionId !== aSession;
         if (b.detected.sessionId && b.detected.sessionId === aSession) {
-          // Tracker handed back A's id for B — the exact stale-entry bug.
           freshCarryOver++;
         }
         recorder.add({

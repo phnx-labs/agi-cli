@@ -1,4 +1,3 @@
-// Helper floors belong to independent helper release trains and are offline minimums, never CLI-version pins.
 
 export type HelperName = 'menubar';
 

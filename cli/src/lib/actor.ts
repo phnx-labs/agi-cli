@@ -121,7 +121,7 @@ export function httpsUrl(value: string | undefined): string | undefined {
 }
 
 export function actorAvatar(actor: ResolvedActor, session: PhoenixSession | null): string | undefined {
-  // Session avatars belong only to the same normalized email identity.
+
   if (actor.kind !== 'human' || !actor.email || !session?.email) return undefined;
   if (actor.email.trim().toLowerCase() !== session.email.trim().toLowerCase()) return undefined;
   return httpsUrl(session.avatarUrl);
@@ -144,7 +144,7 @@ export function computeActor(
 
   const sshRaw = env.SSH_CONNECTION;
   const ssh = sshRaw ? parseSshConnection(sshRaw) : undefined;
-  // A failed SSH whois remains unresolved; never misattribute the remote human to this box's owner.
+
   let who = ssh?.clientIp ? resolvers.whois(ssh.clientIp) : undefined;
   if (!who && !sshRaw) who = resolvers.self();
   const actor = actorFromIdentity(who, machineId(), readActors());

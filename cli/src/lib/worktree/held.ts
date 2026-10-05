@@ -51,7 +51,6 @@ export async function resolveDefaultRef(repoRoot: string): Promise<string | null
   return null;
 }
 
-// Patch identity via git cherry survives rebase-merge SHA rewriting; indeterminate reads fail closed.
 async function countUnmergedCommits(
   worktreePath: string,
   defaultRef: string | null,
@@ -102,7 +101,6 @@ interface HeldFacts {
   unmergedCommits: number;
 }
 
-// Unmerged commits outrank dirty state so recoverable work is never hidden by incidental files.
 export function classifyHeld(facts: HeldFacts): { bucket: HeldBucket; reason: HeldReason } | null {
   if (facts.unmergedCommits < 0) return { bucket: 'undeterminable', reason: 'merge-state-unknown' };
   if (facts.unmergedCommits > 0) return { bucket: 'unmerged-commits', reason: 'unmerged-commits' };
@@ -288,7 +286,6 @@ interface PushResult {
   reason: string;
 }
 
-// Reclassify live state and refuse any existing remote branch; recovery never force-pushes.
 export async function pushStrandedBranch(repoRoot: string, wt: HeldWorktree): Promise<PushResult> {
   const base: PushResult = { name: wt.name, branch: wt.branch, pushed: false, reason: '' };
   if (!WORKTREE_NAME_RE.test(wt.name)) return { ...base, reason: 'unsafe worktree name' };

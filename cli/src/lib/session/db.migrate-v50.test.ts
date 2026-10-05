@@ -14,10 +14,6 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v49 shape: the PHNX-3792 mirror columns, the PHNX-3798 phoenix_id
-  // column, the PHNX-3939 last_user_message column, and the PHNX-3940 account_id
-  // column all exist; the PHNX-3797 generated-title columns deliberately do not,
-  // so getDB must add them through migrateSchema(49).
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (
@@ -59,13 +55,9 @@ describe('schema migration v49 -> v50 (daemon-generated session title, PHNX-3797
         first_user_message: string;
         phoenix_id: string | null;
       };
-    // An untitled legacy row stays untitled — the ladder falls back to the
-    // user's own first message, which the migration must not have disturbed.
     expect(row.generated_title).toBeNull();
     expect(row.generated_title_key).toBeNull();
     expect(row.first_user_message).toBe('fix the release gate');
-    // Earlier columns survive the v50 step — this migration is purely additive
-    // and runs AFTER PHNX-3798's, PHNX-3939's, and PHNX-3940's, never in place of them.
     expect(row.phoenix_id).toBe('phx_ada');
     const version = getDB().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
     expect(version.value).toBe(String(SCHEMA_VERSION));

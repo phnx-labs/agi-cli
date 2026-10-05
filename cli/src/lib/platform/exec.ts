@@ -29,8 +29,8 @@ export function posixShellPath(platform: NodeJS.Platform = process.platform): st
 }
 
 export function quoteWin32ExecArg(arg: string): string {
-  // Shell composition is a DEP0190/CVE-2024-1874 boundary; callers must not pass
-  // untrusted percent/exclamation expansion because cmd.exe expands those after quoting.
+
+
   if (arg.length > 0 && !/[\s"&|<>()^]/.test(arg)) return arg;
   let result = '"';
   let backslashes = 0;
@@ -60,7 +60,7 @@ export function execFileShellSpec(
   args: string[],
   platform: NodeJS.Platform = process.platform,
 ): { command: string; args: string[]; shell: boolean } {
-  // Windows PATH commands and cmd/bat files require a shell; direct binaries must avoid it.
+
   if (!needsWindowsShell(bin, platform)) {
     return { command: bin, args, shell: false };
   }

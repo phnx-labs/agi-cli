@@ -3,7 +3,7 @@ import path from 'path';
 import { getHistoryDir } from '../state.js';
 import { isAgentTmuxAlias, type SessionRunMode } from '@phnx-labs/sessions-cli/reader';
 
-// Actor sidecars are durable attribution; the PID registry is ephemeral and pruned when a process exits.
+
 interface SessionActorRecord {
   sessionId: string;
   actor?: string;
@@ -21,7 +21,6 @@ function sidecarDir(): string {
   return path.join(getHistoryDir(), 'by-session');
 }
 
-// Reject, rather than sanitize, ids that could escape the by-session directory.
 function isSafeSessionId(sessionId: string): boolean {
   return sessionId.length > 0 && !/[/\\]/.test(sessionId) && sessionId !== '.' && sessionId !== '..';
 }

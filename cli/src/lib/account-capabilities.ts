@@ -1,7 +1,5 @@
 import type { AgentId } from './types.js';
 
-// Inspection is identity strength; scope is login isolation; status is selector support.
-// Device-scoped opaque logins stay unsupported until NativeAccount carries a device key.
 interface NativeAccountCapability {
   inspection: 'strong' | 'email' | 'opaque' | 'none';
   scope: 'version' | 'device' | 'unsupported';
@@ -72,8 +70,8 @@ export function nativeIdentityKey(
   info: { signedIn?: boolean; email?: string | null; accountKey?: string | null },
   capability: NativeAccountCapability,
 ): string | null {
-  // Every path prefers stable accountKey; normalized email is the legacy fallback.
-  // Muse still requires email presence, and a supplied key remains muse:email=....
+
+
   if (!info.signedIn) return null;
   if (capability.inspection === 'email' && !info.email) return null;
   return info.accountKey ?? info.email?.toLowerCase() ?? null;

@@ -11,7 +11,6 @@ import type { DesktopNotification } from '../menubar/notify-desktop.js';
 
 const ctx: DaemonContext = { log: () => {} };
 
-/** Minimal live session — only the fields the reconciler + banner builder read. */
 function session(partial: Partial<ActiveSession>): ActiveSession {
   return {
     context: 'terminal',
@@ -111,13 +110,10 @@ describe('AttentionNotifyService — ledger idempotency', () => {
     posts = [];
   });
   afterEach(() => {
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {  }
   });
 
   function makeService() {
-    // A live Claude row parked on a real permission prompt: the hook's block is in
-    // the feed store with the subtype recorded, and the row's last transcript event
-    // (the tool call) precedes the block's write-time cursor.
     const feedRoot = path.join(tmp, 'feed');
     publishBlock({
       blockId: blockIdForSession('sess-perm'), sessionId: 'sess-perm', mailboxId: 'sess-perm', host: 'zion', runtime: 'claude',
@@ -136,7 +132,6 @@ describe('AttentionNotifyService — ledger idempotency', () => {
 
   it('posts exactly one banner per key across two ticks, and writes a ledger sidecar', async () => {
     const service = makeService();
-    // tick() (public, from PeriodicService) drives the real onTick + reconciler.
     const signal = new AbortController().signal;
     await service.tick(ctx, signal);
     await service.tick(ctx, signal);
@@ -146,7 +141,6 @@ describe('AttentionNotifyService — ledger idempotency', () => {
     expect(posts[0].key).toContain('/sess-perm/');
     expect(posts[0].choices?.map((c) => c.id)).toEqual(['approve', 'approve-session', 'deny']);
 
-    // The idempotency truth is the on-disk ledger, not memory.
     const ledgerFiles = fs.readdirSync(path.join(tmp, 'notified'));
     expect(ledgerFiles).toHaveLength(1);
     const record = JSON.parse(fs.readFileSync(path.join(tmp, 'notified', ledgerFiles[0]), 'utf-8'));
@@ -158,7 +152,6 @@ describe('AttentionNotifyService — ledger idempotency', () => {
     const signal = new AbortController().signal;
     await makeService().tick(ctx, signal);
     expect(posts).toHaveLength(1);
-    // New instance = a daemon restart. Memory is gone; the ledger is not.
     await makeService().tick(ctx, signal);
     expect(posts).toHaveLength(1);
   });

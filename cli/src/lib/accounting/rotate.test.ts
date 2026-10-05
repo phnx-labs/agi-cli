@@ -420,7 +420,7 @@ describe('runWithFallback re-dispatch on a mid-run 429 (the reused failover path
   });
 
   function fakeAmp(): { binDir: string; stateFile: string } {
-    // A stateful executable exercises the real runWithFallback child-process path.
+
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-failover-'));
     tmpDirs.push(root);
     const binDir = path.join(root, 'bin');
@@ -439,8 +439,8 @@ if (mode === 'plain-fail') {
   process.exit(1);
 }
 if (mode === 'stdout-spend-limit-then-ok') {
-  // Claude prints billing refusals to STDOUT, not stderr — the cascade must
-  // still detect them (via the SpawnResult stdout tail).
+
+
   if (n === 1) {
     process.stdout.write("You've hit your org's monthly spend limit \\u00b7 run /usage-credits to raise it\\n");
     process.exit(1);
@@ -459,7 +459,7 @@ process.exit(0);
     fs.writeFileSync(bin, script);
     fs.chmodSync(bin, 0o755);
     if (process.platform === 'win32') {
-      // cmd.exe cannot launch the shebang script directly; keep an adjacent shim.
+
       fs.writeFileSync(path.join(binDir, 'amp.js'), script);
       fs.writeFileSync(path.join(binDir, 'amp.cmd'), `@node "%~dp0amp.js" %*\r\n`);
     }
@@ -1111,7 +1111,7 @@ describe('--strategy available applies the same freshness rule as balanced', () 
     const result = pickAvailableCandidate([a, b], null, NOW)!;
 
     expect(result.usageUnverified).toBe(true);
-    expect(result.picked.version).toBe('2.1.181'); // still the headroom sort
+    expect(result.picked.version).toBe('2.1.181');
   });
 
   it('a verified MINORITY still wins the deterministic pick — no whole-pool relaxation here', () => {
@@ -1430,7 +1430,7 @@ describe('resolveRunVersion — never auto-pick from entirely stale usage (PHNX-
 
   it('a BLIND pool (no snapshots) still routes — the worker-box case is not "stale" (PHNX-3392)', async () => {
     const a = candidate({ version: '2.1.181' });
-    const b = candidate({ version: '2.1.207' }); // blind — no snapshot
+    const b = candidate({ version: '2.1.207' });
     const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [a, b]);
     expect(resolved.noVerifiedUsage).toBeFalsy();
     expect(['2.1.181', '2.1.207']).toContain(resolved.version);

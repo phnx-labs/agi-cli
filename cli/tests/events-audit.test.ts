@@ -1,4 +1,3 @@
-// Drive the real CLI under temp HOME and clear inherited AGENTS_EVENTS_PATH; preserve provenance and secret redaction in the child's canonical log.
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

@@ -1,10 +1,3 @@
-/**
- * `agents setup fleet` — guided Tailscale device onboarding.
- *
- * This wizard is a front door over the existing fleet/device commands: sync
- * Tailscale into the registry, choose auth, render SSH config, test devices, and
- * optionally run the fleet updater without reimplementing those subcommands.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -194,14 +187,10 @@ export async function runFleetSetupWizard(opts: SetupFleetOptions = {}): Promise
 
   printOnboardingSummary(names, choices.auth);
 
-  // With a fleet registered, the next wrong-machine trap is artifacts opening on
-  // some other box — offer to pin the interactive host (TTY-only, skippable,
-  // silent non-TTY and when already set).
   await maybePickInteractiveHost();
   return true;
 }
 
-/** Register `agents setup fleet` under the parent `setup` command. */
 export function registerSetupFleetCommand(setupCmd: Command): void {
   setupCmd
     .command('fleet')

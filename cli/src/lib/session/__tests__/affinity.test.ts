@@ -41,7 +41,6 @@ function seed(partial: {
 
 describe('queryAffinityRollup + machine persistence', () => {
   beforeAll(() => {
-    // Touch DB so schema v17 migrates on a fresh home.
     getDB();
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
@@ -90,7 +89,7 @@ describe('queryAffinityRollup + machine persistence', () => {
     const rows = queryAffinityRollup({ groupBy: 'machine', sinceMs: Date.now() - 14 * 24 * 60 * 60 * 1000 });
     const s1 = rows.find((r) => r.key === 'yosemite-s1');
     const s0 = rows.find((r) => r.key === 'yosemite-s0');
-    expect(s1?.launches).toBe(2); // team excluded
+    expect(s1?.launches).toBe(2);
     expect(s0?.launches).toBe(1);
     expect(s1!.launches).toBeGreaterThan(s0!.launches);
   });

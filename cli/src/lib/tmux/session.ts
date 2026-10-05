@@ -8,10 +8,8 @@ import { ensureTmuxDir, getDefaultSocketPath, getSessionMetaPath } from './paths
 
 const VALID_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 
-// Bound long-running agent panes without truncating ordinary interactive scrollback.
 export const AGENTS_TMUX_HISTORY_LIMIT = 20_000;
 
-// Any generated-config change requires a schema bump so existing shared servers re-source it.
 export const AGENTS_TMUX_CONFIG_SCHEMA = 1;
 const CONFIG_SCHEMA_OPTION = '@ag_tmux_config_schema';
 
@@ -44,7 +42,6 @@ function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
     `startup-${process.pid}-${startupConfigSequence++}.conf`,
   );
   const lines = [
-    // Cold start stamps the schema before the post-create reconciliation check.
     `set-option -g ${CONFIG_SCHEMA_OPTION} ${AGENTS_TMUX_CONFIG_SCHEMA}`,
     'set-option -g mouse on',
     'set-option -s set-clipboard on',
@@ -52,7 +49,7 @@ function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
     'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
     'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
   ];
-  // Source every existing user config after defaults; tmux parse failures remain loud.
+
   for (const userConfig of userConfigs) {
     lines.push(userConfigSourceLine(userConfig));
   }
@@ -218,7 +215,7 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   }
 
   if (pane) {
-    // Only the agent pane remains visible after exit; user-created splits must not linger as husks.
+
     await runTmux({ socket, args: ['set-option', '-pt', pane, 'remain-on-exit', 'on', ';', 'set-option', '-g', 'remain-on-exit', 'off'], throwOnError: false }).catch(() => {});
   }
 
@@ -238,7 +235,6 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
     name: opts.name,
     socket,
     createdAt: Date.now(),
-    // metaCmd is redacted; resolved secret-bearing argv must never reach persisted metadata.
     cmd: opts.metaCmd ?? opts.cmd,
     cwd: opts.cwd,
     source: opts.source ?? 'cli',
@@ -270,7 +266,7 @@ export async function killSession(
     }
   }
   if (opts.reapOrphans !== false) {
-    // tmux teardown also owns detached helpers whose terminal parent has disappeared.
+
     const { reapProcessesForTmuxSession } = await import('./orphan-reap.js');
     await reapProcessesForTmuxSession(name, sock).catch(() => ({ killed: 0, details: [], candidates: [], warnings: [] }));
   }
@@ -332,7 +328,6 @@ export async function reapDeadTmuxPanes(
   const sock = socket ?? getDefaultSocketPath();
   const result: ReapDeadPanesResult = { reaped: 0, sessions: [], details: [], processes: 0, processDetails: [], warnings: [] };
 
-  // Attribute processes before deleting ownership; sessions with any live pane stay intact.
   const { reapOrphanAgentProcesses } = await import('./orphan-reap.js');
   const orphans = await reapOrphanAgentProcesses({ socket: sock, dryRun: opts.dryRun, pids: opts.pids });
   result.warnings = orphans.warnings;
@@ -467,7 +462,7 @@ const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 const TMUX_HOOK_REPAIR_TIMEOUT_MS = 5_000;
 
 export function agentPaneDiedHook(sessionName: string, agentPane: string): string {
-  // Agent death detaches attached clients or kills unattended work; a user split kills only itself.
+
   const agentPaneAction = `if -F '#{session_attached}' 'detach-client -s =${sessionName}' 'kill-session -t =${sessionName}'`;
   return `if -F '#{==:#{hook_pane},${agentPane}}' "${agentPaneAction}" 'run-shell -b -C "kill-pane -t #{hook_pane}"'`;
 }
@@ -519,7 +514,7 @@ export async function prepareSessionForResume(
 }
 
 async function repairSessionHookIfStale(name: string, sock: string, meta: SessionMeta | undefined, timeoutMs: number = TMUX_HOOK_REPAIR_TIMEOUT_MS): Promise<boolean> {
-  // Schema gates upgrades; repair is bounded and best-effort because it runs against live sessions.
+
   if (await readHookSchema(name, sock, timeoutMs) === String(AGENT_HOOK_SCHEMA)) return false;
   const agentPane = meta?.pane ?? await lowestPaneId(name, sock, timeoutMs);
   if (!agentPane) return false;
@@ -540,7 +535,6 @@ export async function reconcileSessionHooks(socket?: string): Promise<{ scanned:
   }
   let reconciled = 0;
   for (const s of sessions) {
-    // Only agents-cli-owned sessions participate; never mutate arbitrary user tmux sessions.
     if (!s.name.startsWith('ag-')) continue;
     if (await repairSessionHookIfStale(s.name, sock, s.meta)) reconciled++;
   }

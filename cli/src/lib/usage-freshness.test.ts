@@ -1,12 +1,3 @@
-/**
- * W3 usage freshness: real home-layout / real shared-store path, no mocks.
- *
- *  1. Two headed boxes publish; a worker applies each envelope over the SSH
- *     exchange (applyPeerFleetState) and balanced auto-picks (no picker) on
- *     synced rows 10 min old.
- *  2. A worker / setup-token-only box lists zero poll accounts, so
- *     runUsageRefresh issues zero usage API calls.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -125,7 +116,6 @@ describe('W3.4 two headed boxes push over the exchange; worker balanced auto-pic
       userAgentsDir: desktopHome, cachePath: desktopCache, role: 'desktop', device: 'desktop',
     })).toMatchObject({ published: true, changed: true });
 
-    // Each headed box's tick dials the worker with its own envelope; the worker applies both.
     let merged = 0;
     for (const [device, home] of [['zion', zionHome], ['desktop', desktopHome]] as const) {
       merged += (await applyPeerFleetState(buildFleetStatePayload({ device, userAgentsDir: home }).state, {
@@ -139,7 +129,6 @@ describe('W3.4 two headed boxes push over the exchange; worker balanced auto-pic
     expect(alpha?.freshness).toEqual({ source: 'sync', poller: 'zion' });
     expect(beta?.freshness).toEqual({ source: 'sync', poller: 'desktop' });
 
-    // 10 min is past the local 5-min bar but inside the sync cadence.
     expect(now - (alpha?.capturedAt?.getTime() ?? 0)).toBeGreaterThan(USAGE_DECISION_MAX_AGE_MS);
     expect(now - (alpha?.capturedAt?.getTime() ?? 0)).toBeLessThan(USAGE_SYNC_TRUST_MS);
 
@@ -183,7 +172,6 @@ describe('W3.1 / W3.4 worker with only setup tokens makes zero usage API calls',
       { usageKey: 'claude:org=a', holdsNativeLogin: false },
       { role: 'personal', selfDevice: 'zion' },
     )).toBe(false);
-    // desktop < zion — desktop is the sticky poller, zion defers.
     expect(shouldPollUsageAccount(
       { usageKey: 'claude:org=a', holdsNativeLogin: true },
       { role: 'personal', selfDevice: 'zion', peerPollers: ['desktop'] },
@@ -192,7 +180,6 @@ describe('W3.1 / W3.4 worker with only setup tokens makes zero usage API calls',
       { usageKey: 'claude:org=a', holdsNativeLogin: true },
       { role: 'desktop', selfDevice: 'desktop', peerPollers: ['zion'] },
     )).toBe(true);
-    // A statusline-only peer is not a poller claim — this box still polls.
     expect(shouldPollUsageAccount(
       { usageKey: 'claude:org=a', holdsNativeLogin: true },
       { role: 'personal', selfDevice: 'zion', peerPollers: [] },

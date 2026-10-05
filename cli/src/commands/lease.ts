@@ -1,12 +1,3 @@
-/**
- * `agents devices lease` — manage the disposable cloud boxes used by `agents run --lease`.
- *
- * Today: `agents devices lease prune`, which stops expired + idle "orphan" boxes that are
- * holding a provider's server quota (the cause of the `server_limit` 403 a new
- * lease hits). Reaping is conservative: only boxes whose lease has expired AND
- * that have been untouched for a safety window are eligible (see `isReapSafe`),
- * so a box a concurrent run just reused is never stopped.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -22,10 +13,7 @@ function fmtIdle(box: CrabboxBox): string {
   return `idle since ${iso}Z`;
 }
 
-// ── Shared box helpers (consumed by exec.ts's reuse picker + ssh.ts's devices
-// section, so the reuse/format logic lives in exactly one place) ─────────────
 
-/** Compact human duration: "45s", "12m", "2h", "1h 5m". Clamps negatives to 0. */
 export function fmtDurationShort(secs: number): string {
   const s = Math.max(0, Math.round(secs));
   if (s < 60) return `${s}s`;
@@ -36,41 +24,31 @@ export function fmtDurationShort(secs: number): string {
   return rem ? `${h}h ${rem}m` : `${h}h`;
 }
 
-/** Idle time since the box was last touched, e.g. "idle 5m" / "idle ?". */
 export function fmtIdleShort(box: CrabboxBox, nowSecs: number): string {
   if (box.lastTouchedAt === null) return 'idle ?';
   return `idle ${fmtDurationShort(nowSecs - box.lastTouchedAt)}`;
 }
 
-/** Time until the lease expires, e.g. "expires 42m" / "expires ?" / "expired". */
 export function fmtExpiresShort(box: CrabboxBox, nowSecs: number): string {
   if (box.expiresAt === null) return 'expires ?';
   const left = box.expiresAt - nowSecs;
   return left <= 0 ? 'expired' : `expires ${fmtDurationShort(left)}`;
 }
 
-/** Reachable address for a leased box: tailnet FQDN/IP first, else public IP. */
 export function boxAddress(box: CrabboxBox): string | undefined {
   return box.tailscaleFQDN || box.tailscaleIPv4 || box.ip || undefined;
 }
 
-/** Human status: "ready" when usable, else the raw bootstrap state/status. */
 export function boxStatus(box: CrabboxBox): string {
   return box.ready ? 'ready' : box.state || box.status || 'pending';
 }
 
-/**
- * Warm boxes eligible for reuse: `ready` and the lease has not expired.
- * Sorted most-recently-touched first so `--reuse` / the auto-pick lands on the
- * freshest box (an untouched `lastTouchedAt` sorts last).
- */
 export function reusableBoxes(boxes: CrabboxBox[], nowSecs: number): CrabboxBox[] {
   return boxes
     .filter((b) => b.ready && (b.expiresAt === null || b.expiresAt > nowSecs))
     .sort((a, b) => (b.lastTouchedAt ?? 0) - (a.lastTouchedAt ?? 0));
 }
 
-/** One aligned row for the reuse picker / `agents devices lease list`. */
 export function formatBoxRow(box: CrabboxBox, nowSecs: number): string {
   const slug = box.slug.padEnd(16);
   const cls = (box.class ?? '?').padEnd(10);
@@ -88,14 +66,6 @@ const TAILSCALE_BUNDLE = 'tailscale.com';
 const TAILSCALE_KEY = 'CRABBOX_TAILSCALE_AUTH_KEY';
 const TAILSCALE_KEYS_URL = 'https://login.tailscale.com/admin/settings/keys';
 
-/**
- * Optional Tailscale setup for private-network leases (`--tailscale`). Collects
- * an EPHEMERAL, pre-authorized, `tag:crabbox` auth key and stores it in the
- * `tailscale.com` keychain bundle under `CRABBOX_TAILSCALE_AUTH_KEY` (the exact
- * key `crabboxEnv` auto-injects). Blank input skips — public-IP leases still
- * work with no Tailscale key. Never throws for cancel; mirrors the Hetzner
- * capture above but does no live validation (Tailscale has no cheap probe).
- */
 async function captureTailscaleAuthKey(): Promise<void> {
   console.error(chalk.bold('\nOptional: private-network leases over Tailscale'));
   console.error(chalk.dim('Mint an EPHEMERAL, pre-authorized auth key tagged `tag:crabbox` in the Tailscale admin,'));
@@ -127,7 +97,6 @@ async function captureTailscaleAuthKey(): Promise<void> {
   console.error(chalk.dim('  Add --tailscale to a lease (reuse defaults to it) to reach the box over your tailnet.'));
 }
 
-/** Validate a Hetzner token against the live API. Exported for unit tests (fetch injectable). */
 export async function validateHetznerToken(
   token: string,
   fetchImpl: typeof fetch = fetch,
@@ -144,13 +113,6 @@ export async function validateHetznerToken(
   }
 }
 
-/**
- * One-time credential setup for `agents run --lease` (Hetzner today). Opens the
- * token page, collects a token, validates it against the live API, stores it in
- * the keychain bundle `hetzner.com`, and persists it as the default lease bundle
- * (so `--lease` needs no env var or flag afterward). Returns true on success.
- * Never throws for expected outcomes (non-interactive, cancel, repeated failure).
- */
 export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<boolean> {
   const provider = opts.provider ?? 'hetzner';
   if (provider !== 'hetzner') {
@@ -192,7 +154,6 @@ export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<b
       if (result === 'unreachable') spinner.warn('Could not reach the Hetzner API to validate — storing anyway.');
       else spinner.succeed('Token valid — Hetzner API reachable.');
 
-      // Store into the `hetzner.com` keychain bundle (mirrors writeSyncBundle).
       const bundle: SecretsBundle = (await bundleExists(HETZNER_BUNDLE))
         ? await readBundle(HETZNER_BUNDLE)
         : { name: HETZNER_BUNDLE, description: 'Hetzner Cloud API token for crabbox leases', vars: {} };
@@ -203,7 +164,6 @@ export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<b
       console.error(chalk.green(`\n✔ Stored in keychain bundle '${HETZNER_BUNDLE}' and set as the default lease provider.`));
       console.error(chalk.dim('  Run `agents run <agent> "…" --lease` — no env var, no flag needed.'));
 
-      // Also offer to capture a Tailscale auth key for private-network leases.
       await captureTailscaleAuthKey();
       return true;
     }
@@ -315,7 +275,6 @@ export function registerLeaseCommand(devicesCommand: Command): void {
         return;
       }
 
-      // Destructive: stopping boxes the agent did not create needs an explicit yes.
       if (!opts.yes) {
         const { isInteractiveTerminal, isPromptCancelled } = await import('./utils.js');
         if (!isInteractiveTerminal()) {
@@ -339,8 +298,6 @@ export function registerLeaseCommand(devicesCommand: Command): void {
         }
       }
 
-      // Re-list at stop time (freshness re-check) so a box touched since the
-      // preview is not stopped out from under an active run.
       const { candidates: stopped, reaped } = reapOrphans({ ...boxOpts, nowSecs });
       if (opts.json) console.log(JSON.stringify({ candidates: stopped, reaped }, null, 2));
       else console.error(chalk.green(`Stopped ${reaped.length}/${stopped.length} box(es): ${reaped.join(', ') || '(none)'}`));

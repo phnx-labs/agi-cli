@@ -1,10 +1,3 @@
-/**
- * `teams message` / `teams resume` routing table. The command reconciles the
- * teammate's status, then decideTeamMessageRoute picks the delivery: running ->
- * steer (mailbox), stopped -> resume, pending -> not-started, and any actionable
- * status without a message -> need-message. This is the pure source of truth the
- * command switch dispatches on.
- */
 import { describe, it, expect } from 'vitest';
 import { decideTeamMessageRoute } from './teams.js';
 import { AgentStatus } from '../lib/teams/agents.js';

@@ -2,7 +2,7 @@
 import { sshExec, shellQuote } from '../ssh-exec.js';
 
 export function resolveRemoteSessionId(target: string, launchId: string, timeoutMs = 6000): string | undefined {
-  // Resolve on the execution owner; launch id is the durable join for opaque interactive streams.
+
   if (!launchId) return undefined;
   const cmd = `agents sessions --resolve-launch-id ${shellQuote(launchId)} --json --local`;
   const res = sshExec(target, cmd, { timeoutMs, multiplex: true });

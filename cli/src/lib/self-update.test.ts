@@ -57,10 +57,7 @@ afterEach(() => {
 });
 
 describe('resolveRunningPackageRoot', () => {
-  /** An npm-global-shaped install carrying both shipped entrypoints. */
   function makeCompiledInstall(label: string) {
-    // realpath the base: on macOS the tmpdir lives under /var -> /private/var,
-    // and resolveRunningPackageRoot resolves without canonicalizing symlinks.
     const base = fs.realpathSync(makeTempDir(label));
     const packageRoot = path.join(base, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
     fs.mkdirSync(path.join(packageRoot, 'dist', 'bin'), { recursive: true });
@@ -75,7 +72,6 @@ describe('resolveRunningPackageRoot', () => {
   }
 
   it('returns the parent of __dirname for an ordinary JS install', () => {
-    // dist/index.js runs with __dirname = <packageRoot>/dist.
     const { packageRoot } = makeCompiledInstall('js-install');
     expect(resolveRunningPackageRoot(path.join(packageRoot, 'dist'), '/usr/local/bin/node')).toBe(
       packageRoot,
@@ -83,16 +79,11 @@ describe('resolveRunningPackageRoot', () => {
   });
 
   it('maps the Bun virtual __dirname to the real root via process.execPath', () => {
-    // The reported bug: under the compiled standalone binary Bun sets
-    // __dirname to /$bunfs/root, so <__dirname>/.. was "/$bunfs" — a path that
-    // exists nowhere. It was then reported as a phantom second install and
-    // rejected by deriveGlobalPrefix, so every self-upgrade failed.
     const { packageRoot, execPath } = makeCompiledInstall('bunfs');
 
     const resolved = resolveRunningPackageRoot('/$bunfs/root', execPath);
 
     expect(resolved).toBe(packageRoot);
-    // The whole point: the result is a real, installable npm prefix.
     expect(fs.existsSync(resolved)).toBe(true);
     expect(() => deriveGlobalPrefix(resolved)).not.toThrow();
   });
@@ -115,8 +106,6 @@ describe('resolveRunningPackageRoot', () => {
 describe('deriveGlobalPrefix', () => {
   it('resolves the POSIX npm global layout (<prefix>/lib/node_modules/<scoped pkg>)', () => {
     const root = path.join('/Users/x/.nvm/versions/node/v24.15.0', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
-    // path.resolve so the expected carries a drive on Windows, matching the
-    // function's own path.resolve of the input.
     expect(deriveGlobalPrefix(root)).toBe(path.resolve('/Users/x/.nvm/versions/node/v24.15.0'));
   });
 
@@ -153,7 +142,6 @@ describe('detectPackageManager', () => {
 
   it('detects bun structurally when BUN_INSTALL is not exported (default ~/.bun)', () => {
     delete process.env.BUN_INSTALL;
-    // A bun install rooted at a `.bun` dir other than the current $HOME's.
     const root = path.join('/opt/someuser/.bun/install/global', 'node_modules', '@phnx-labs', 'agents-cli');
     expect(detectPackageManager(root)).toBe('bun');
   });
@@ -185,15 +173,11 @@ describe('verifyInstalledVersion', () => {
   });
 
   it('throws with both versions when the running root was not updated', async () => {
-    // The original incident: npm exits 0 after installing into a different
-    // prefix, while the running copy's root still carries the old version.
     const root = writePackage(makeTempDir('verify-stale'), '1.20.4');
     await expect(verifyInstalledVersion(root, '1.20.7')).rejects.toThrow(/still 1\.20\.4 \(expected 1\.20\.7\)/);
   });
 
   it('suggests `bun add -g` (not npm --prefix) when the stale install is bun-managed', async () => {
-    // The bun incident: the npm --prefix command in the hint is exactly what
-    // could not update a bun install, so the manual hint must use bun instead.
     const saved = process.env.BUN_INSTALL;
     const base = makeTempDir('verify-bun');
     process.env.BUN_INSTALL = base;
@@ -235,23 +219,15 @@ describe('installPackageIntoPrefix', () => {
 
     await installPackageIntoPrefix(tarball, prefix);
 
-    // npm prefix layout is platform-divergent: POSIX nests under lib/, Windows
-    // installs node_modules directly under the prefix. Source handles both.
     const installedRoot = process.platform === 'win32'
       ? path.join(prefix, 'node_modules', '@agents-cli-test', 'dummy')
       : path.join(prefix, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
     expect(await readInstalledVersion(installedRoot)).toBe('2.0.0');
     await expect(verifyInstalledVersion(installedRoot, '2.0.0')).resolves.toBeUndefined();
-    // The exact upgrade-flow composition: the prefix derived from the
-    // installed root must round-trip back to the prefix we installed into.
     expect(deriveGlobalPrefix(installedRoot)).toBe(prefix);
   });
 
   it('verification catches an install that landed in a different prefix', { timeout: 120_000 }, async () => {
-    // Reproduces the divergent-prefix incident end-to-end: the "running"
-    // copy lives in prefix A at 1.0.0, the install writes 2.0.0 into prefix
-    // B, and verification against A's root must fail rather than report a
-    // successful upgrade.
     const prefixA = makeTempDir('prefix-a');
     const prefixB = makeTempDir('prefix-b');
     const runningRoot = path.join(prefixA, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
@@ -279,8 +255,6 @@ describe('verifyTarballIntegrity', () => {
   });
 
   it('rejects a tarball whose bytes do not match the SRI digest (tampered/corrupt)', () => {
-    // The security gate: the registry attested one hash, the delivered bytes
-    // hash to another — self-update must refuse it, not install it.
     const attested = sriFor(tarball);
     const tampered = Buffer.concat([tarball, Buffer.from('!')]);
     expect(() => verifyTarballIntegrity(tampered, attested)).toThrow(/integrity check failed/);
@@ -327,8 +301,6 @@ describe('downloadVerifiedTarball', () => {
   });
 
   it('rejects a wrong-hash tarball and writes nothing', async () => {
-    // End-to-end over real HTTP + real crypto: the server delivers bytes that
-    // do not match the attested integrity; the download must reject.
     const attested = sriFor(Buffer.from('the legitimate published tarball'));
     const url = await serve(Buffer.from('a malicious substituted tarball'));
     await expect(downloadVerifiedTarball(url, attested)).rejects.toThrow(/integrity check failed/);
@@ -357,9 +329,6 @@ describe('update-check cache', () => {
   });
 
   it('a background refresh does not erase a dismissed version', () => {
-    // The original bug: the user picked "Skip 1.20.7", then the next 24h
-    // background refresh rewrote the cache without the dismissed marker and
-    // re-prompted for the exact version they skipped.
     const file = cacheFile();
     dismissUpdateVersion(file, '1.20.7');
     expect(shouldPromptUpgrade(readUpdateCache(file), '1.20.4')).toBe(false);
@@ -389,9 +358,6 @@ describe('update-check cache', () => {
   });
 });
 
-// findAgentsCliInstalls is POSIX-only (Windows npm bins are .cmd wrappers, not
-// symlinks — the function returns [] on win32), and the fixtures here create
-// symlinks that need Developer Mode on Windows. Skip the whole block there.
 describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
   function pathOnlyOptions(base: string) {
     return {
@@ -402,7 +368,6 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     };
   }
 
-  /** Lay out an npm-global-shaped install and a bin dir whose `agents` symlinks into it. */
   function makeInstall(base: string, name: string, version: string, pkgName = '@phnx-labs/agents-cli') {
     const packageRoot = path.join(base, name, 'lib', 'node_modules', ...pkgName.split('/'));
     fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
@@ -411,8 +376,6 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     const binDir = path.join(base, name, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
     fs.symlinkSync(path.join(packageRoot, 'dist', 'index.js'), path.join(binDir, 'agents'));
-    // realpath the root: on macOS the tmpdir lives under /var -> /private/var,
-    // and the scanner reports canonicalized paths.
     return { packageRoot: fs.realpathSync(packageRoot), binDir };
   }
 
@@ -457,10 +420,6 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
   });
 
   it('resolves a shim pointing at the compiled binary to the same root as the JS entry', () => {
-    // The reported false positive: ~/.local/bin/agents -> dist/bin/agents is
-    // first on PATH and is the copy that runs, but the scan only recognized
-    // dist/index.js. The running copy was invisible here while its sibling
-    // npm bin was reported — one install looked like two.
     const base = makeTempDir('compiled');
     const real = makeInstall(base, 'npm-prefix', '1.20.73');
     const compiled = path.join(real.packageRoot, 'dist', 'bin', 'agents');
@@ -470,14 +429,11 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     fs.mkdirSync(localBin, { recursive: true });
     fs.symlinkSync(compiled, path.join(localBin, 'agents'));
 
-    // A compiled shim on its own must resolve — before the fix this was [],
-    // i.e. the copy that actually runs was invisible to the scan entirely.
     const compiledOnly = findAgentsCliInstalls(localBin, pathOnlyOptions(base));
     expect(compiledOnly).toHaveLength(1);
     expect(compiledOnly[0].packageRoot).toBe(real.packageRoot);
     expect(compiledOnly[0].version).toBe('1.20.73');
 
-    // And alongside the sibling npm bin it dedups to one install, not two.
     const both = findAgentsCliInstalls([localBin, real.binDir].join(path.delimiter), pathOnlyOptions(base));
     expect(both).toHaveLength(1);
     expect(both[0].binPath).toBe(path.join(localBin, 'agents'));
@@ -485,13 +441,10 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
 
   it('skips unrelated binaries, foreign packages, and missing entries', () => {
     const base = makeTempDir('noise');
-    // A plain executable named `agents` that is some other tool entirely.
     const plainBin = path.join(base, 'plain-bin');
     fs.mkdirSync(plainBin, { recursive: true });
     fs.writeFileSync(path.join(plainBin, 'agents'), '#!/bin/sh\necho other tool\n', { mode: 0o755 });
-    // A dist/index.js layout that belongs to a different npm package.
     const foreign = makeInstall(base, 'foreign', '3.0.0', '@other/agents-tool');
-    // A dangling symlink and a dir with no `agents` at all.
     const dangling = path.join(base, 'dangling-bin');
     fs.mkdirSync(dangling, { recursive: true });
     fs.symlinkSync(path.join(base, 'nowhere', 'dist', 'index.js'), path.join(dangling, 'agents'));
@@ -576,8 +529,6 @@ describe('buildMultiInstallInventory', () => {
     }]);
   });
 
-  // RUSH-2705: the multi-install banner chooses its remedy from these flags —
-  // `agents doctor --fix` for auto-purgeable peers, a manual command otherwise.
   it('flags an npx-cache peer auto-purgeable but not a healthy >=1.22.30 duplicate', () => {
     const runningRoot = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli';
     const nvmRoot = '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
@@ -590,18 +541,12 @@ describe('buildMultiInstallInventory', () => {
 
     const byRoot = new Map(inventory.map((entry) => [entry.packageRoot, entry]));
     expect(byRoot.get(runningRoot)).toMatchObject({ running: true, autoPurgeable: false });
-    // The stale-but-safe global: detected, never auto-purged.
     expect(byRoot.get(nvmRoot)).toMatchObject({ running: false, autoPurgeable: false });
-    // npx-cache + pre-1.22.30 with a fixed peer: --fix removes it.
     expect(byRoot.get(npxRoot)).toMatchObject({ running: false, autoPurgeable: true });
   });
 });
 
 describe('manualUninstallCommand (RUSH-2705)', () => {
-  // The two POSIX-literal cases are layout-specific (nvm / a bare checkout under
-  // /srv exist only on POSIX): on win32, path resolution rewrites the literal to
-  // D:\home\... and the expectation can never hold. The bun case stays — it
-  // builds its path from os.homedir(), so it is platform-correct everywhere.
   it.skipIf(process.platform === 'win32')('pins the peer npm prefix for a POSIX global layout (the nvm duplicate case)', () => {
     const root = '/home/u/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli';
     expect(manualUninstallCommand(root)).toBe(
@@ -620,10 +565,6 @@ describe('manualUninstallCommand (RUSH-2705)', () => {
   });
 });
 
-/**
- * RUSH-2324: short-TTL cache for the multi-install PATH scan that every
- * ordinary CLI invocation runs via maybeWarnMultiInstall. Real fs only.
- */
 describe('multi-install scan cache (RUSH-2324)', () => {
   const NOW = 1_700_000_000_000;
   const runningRoot = '/prefix/lib/node_modules/@phnx-labs/agents-cli';
@@ -679,7 +620,6 @@ describe('multi-install scan cache (RUSH-2324)', () => {
     const dir = makeTempDir('multi-install-cache-old-shape');
     const file = path.join(dir, '.multi-install-scan');
     fs.writeFileSync(file, JSON.stringify(makeCache({
-      // The shape written before running/autoPurgeable existed.
       inventory: [
         { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
       ] as unknown as MultiInstallScanCache['inventory'],
@@ -690,9 +630,6 @@ describe('multi-install scan cache (RUSH-2324)', () => {
   it('resolveMultiInstallInventory returns the cached inventory without re-scanning when fresh', () => {
     const dir = makeTempDir('multi-install-resolve');
     const file = path.join(dir, '.multi-install-scan');
-    // Seed a cache that claims a second install. A re-scan with an empty PATH
-    // and no known roots would produce only the running entry — so if the
-    // cache is honored we get length 2, not 1.
     const seeded = makeCache({
       pathEnv: '',
       inventory: [
@@ -708,7 +645,6 @@ describe('multi-install scan cache (RUSH-2324)', () => {
       file,
       {
         now: NOW + 1_000,
-        // Force no known-root discovery so a re-scan cannot invent the second entry.
         findOpts: {
           homeDir: path.join(dir, 'no-home'),
           fnmDir: path.join(dir, 'no-fnm'),
@@ -748,7 +684,6 @@ describe('multi-install scan cache (RUSH-2324)', () => {
         },
       },
     );
-    // Empty PATH + empty known roots → inventory is just the running copy.
     expect(resolved).toEqual([
       { packageRoot: runningRoot, version: '1.22.35', note: 'running', running: true, autoPurgeable: false },
     ]);
@@ -800,7 +735,6 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
       { packageRoot: stale, version: '1.22.18', atomicHelperInstall: true },
     ];
     const removable = classifyRemovableAgentsCliInstalls(running, installs);
-    // No fixed peer → no pre-fixed-version reason. Neither is legacy/npx.
     expect(removable).toEqual([]);
   });
 
@@ -900,8 +834,6 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     expect(fs.existsSync(root)).toBe(true);
   });
 
-  // findAgentsCliInstalls is POSIX-only (returns [] on win32 — Windows npm
-  // bins are .cmd wrappers, not symlinks; see findAgentsCliInstalls).
   it.skipIf(process.platform === 'win32')('remediateStaleAgentsCliInstalls end-to-end: fixed peer + npx stale → purged', () => {
     const homeDir = makeTempDir('remediate');
     const fixedRoot = path.join(homeDir, 'fixed', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
@@ -939,8 +871,6 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     expect(fs.existsSync(fixedRoot)).toBe(true);
   });
 
-  // RUSH-2705: the bug this pins — a healthy >=1.22.30 duplicate was detected
-  // (and nagged about) but never purged, while --fix reported nothing at all.
   it.skipIf(process.platform === 'win32')('remediateStaleAgentsCliInstalls reports a healthy duplicate as unresolved with its exact removal command', () => {
     const homeDir = makeTempDir('remediate-unresolved');
     const runningRoot = path.join(homeDir, 'brew', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
@@ -951,8 +881,6 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     );
     fs.writeFileSync(path.join(runningRoot, 'dist', 'lib', 'app-bundle-install.js'), '// atomic\n');
 
-    // The nvm-shaped peer: >=1.22.30, atomic helper, not npx-cache. --fix must
-    // leave it on disk and hand back the npm uninstall pinned to its prefix.
     const nvmPrefix = path.join(homeDir, '.nvm', 'versions', 'node', 'v24.15.0');
     const dupRoot = path.join(nvmPrefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
     fs.mkdirSync(path.join(dupRoot, 'dist', 'lib'), { recursive: true });
@@ -987,12 +915,6 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
 });
 
 describe('sweepStaleInstallStaging', () => {
-  /**
-   * npm's own retire-path naming (@npmcli/arborist `lib/retire-path.js`):
-   * `.<basename>-<8-char sha1(base64, alnum-only) of the full path>`,
-   * sibling to the directory it retires. Reproduced here (not imported) so the
-   * test proves the sweep matches npm's real scheme, not just its own guess.
-   */
   function npmRetirePath(from: string): string {
     const dir = path.dirname(from);
     const base = path.basename(from);
@@ -1008,18 +930,10 @@ describe('sweepStaleInstallStaging', () => {
     fs.mkdirSync(packageRoot);
     fs.writeFileSync(path.join(packageRoot, 'package.json'), '{"name":"@phnx-labs/agents-cli"}');
 
-    // Simulate a crash mid-reify: the retire-rename completed (the live
-    // package moved to its staging path) but the final rename never ran, so
-    // the staging dir is left behind non-empty — the exact orphan this bug
-    // report describes.
     const stagingPath = npmRetirePath(packageRoot);
     fs.mkdirSync(stagingPath);
     fs.writeFileSync(path.join(stagingPath, 'package.json'), '{"name":"@phnx-labs/agents-cli","version":"old"}');
 
-    // Prove the failure is real, not asserted from prose: a second reify's
-    // retire-rename (renaming the CURRENT live package out of the way again,
-    // onto the same deterministic path) hits ENOTEMPTY on this actual
-    // filesystem, exactly as it does for npm.
     let threw: NodeJS.ErrnoException | undefined;
     try {
       fs.renameSync(packageRoot, stagingPath);
@@ -1027,19 +941,14 @@ describe('sweepStaleInstallStaging', () => {
       threw = err as NodeJS.ErrnoException;
     }
     expect(threw?.code).toBe('ENOTEMPTY');
-    // The failed rename must not have moved anything.
     expect(fs.existsSync(packageRoot)).toBe(true);
 
     const swept = await sweepStaleInstallStaging(packageRoot);
 
     expect(swept).toEqual([stagingPath]);
     expect(fs.existsSync(stagingPath)).toBe(false);
-    // The sweep clears the collision, not the live package it protects.
     expect(fs.existsSync(packageRoot)).toBe(true);
 
-    // With the orphan gone, the exact rename that failed above now succeeds —
-    // proving the sweep is what unblocks a real reify, not just a directory
-    // deletion in isolation.
     expect(() => fs.renameSync(packageRoot, stagingPath)).not.toThrow();
     expect(fs.existsSync(stagingPath)).toBe(true);
     expect(fs.existsSync(packageRoot)).toBe(false);
@@ -1076,12 +985,6 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     computer: 'dist/computer.js',
   };
 
-  /**
-   * A real npm-global-shaped POSIX install: `<prefix>/lib/node_modules/...`
-   * with the four shipped bin targets on disk. Returns the prefix + package
-   * root; the caller decides which (if any) `<prefix>/bin/*` links to create,
-   * so a test can model the healthy box or the stranded one.
-   */
   function makeInstall(label: string): { prefix: string; packageRoot: string; binDir: string } {
     const prefix = fs.realpathSync(makeTempDir(label));
     const packageRoot = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
@@ -1105,8 +1008,6 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
   }
 
   it('restores every bin link the upgrade left missing — the zion strand', async () => {
-    // Reproduce the bug: package upgraded in place, but `<prefix>/bin/*` gone,
-    // so `command -v agents` finds nothing on the box.
     const { prefix, packageRoot, binDir } = makeInstall('strand');
     for (const name of Object.keys(BIN)) {
       expect(fs.existsSync(path.join(binDir, name))).toBe(false);
@@ -1114,12 +1015,10 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
 
     const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
-    // All four siblings restored, not just `agents`.
     expect(repairs.map((r) => r.name).sort()).toEqual(['ag', 'agents', 'browser', 'computer']);
     expect(repairs.every((r) => r.action === 'repaired')).toBe(true);
     for (const name of Object.keys(BIN)) {
       expect(linkResolvesTo(binDir, name, packageRoot)).toBe(true);
-      // Relative link, mirroring npm's own bin links and the by-hand repair.
       expect(fs.readlinkSync(path.join(binDir, name)).startsWith('..')).toBe(true);
     }
   });
@@ -1137,7 +1036,6 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
     expect(repairs.every((r) => r.action === 'ok')).toBe(true);
-    // Untouched: same link content, still resolving.
     for (const name of Object.keys(BIN)) {
       expect(fs.readlinkSync(path.join(binDir, name))).toBe(before[name]);
       expect(linkResolvesTo(binDir, name, packageRoot)).toBe(true);
@@ -1146,7 +1044,6 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
 
   it('repairs a dangling or stale link pointing at a foreign path', async () => {
     const { prefix, packageRoot, binDir } = makeInstall('stale');
-    // `agents` points at a since-removed old install; the others are missing.
     fs.symlinkSync('/nonexistent/old-install/dist/index.js', path.join(binDir, 'agents'));
 
     const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
@@ -1159,17 +1056,13 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
 
   it('reports a link it cannot make resolve as failed — never a silent pass', async () => {
     const { prefix, packageRoot, binDir } = makeInstall('unrepairable');
-    // The upgrade landed the package.json but not the `agents` entry target,
-    // so the link can be created but can never resolve.
     fs.rmSync(path.join(packageRoot, 'dist', 'index.js'));
 
     const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
 
     const failed = repairs.filter((r) => r.action === 'failed');
-    // agents + ag both target the missing dist/index.js.
     expect(failed.map((r) => r.name).sort()).toEqual(['ag', 'agents']);
     expect(failed[0].error).toBeTruthy();
-    // browser + computer still repaired — one bad target does not abort the rest.
     expect(repairs.filter((r) => r.action === 'repaired').map((r) => r.name).sort()).toEqual([
       'browser',
       'computer',
@@ -1202,10 +1095,6 @@ describe('resolveRunningPackageRoot', () => {
   }
 
   it('walks up from a module nested under dist/lib/… to the package root, not one level up', () => {
-    // The daemon's self-update tick called this from dist/lib/daemon and got
-    // `dist/lib` back, so deriveGlobalPrefix threw "not an npm-managed install"
-    // on every tick, fleet-wide — the running daemon never relaunched onto a
-    // release (2026-09-07).
     const root = makeInstall();
     expect(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'daemon'))).toBe(root);
     expect(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'self-heal', 'checks'))).toBe(root);

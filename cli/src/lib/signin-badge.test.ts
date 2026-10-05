@@ -13,7 +13,7 @@ const acct = (over: Partial<AccountInfo>): Pick<AccountInfo, 'signedIn' | 'email
   ...over,
 });
 
-// Unverified auth is non-actionable; per-device repair happens on that device. Interactive preflight includes forceInteractive, suppressors win, and Claude ambient tokens never label another harness.
+
 describe('loginHint', () => {
   it('uses the correct login command per agent', () => {
     expect(loginHint('codex')).toBe('codex login');

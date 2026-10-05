@@ -46,7 +46,7 @@ function stripUndefined(cfg: BudgetConfig): BudgetConfig {
 }
 
 function getProjectBudgets(startPath: string): BudgetConfig[] {
-  // Merge ancestor manifests from root to cwd so the nearest project wins field by field.
+
   const configs: BudgetConfig[] = [];
   let dir = path.resolve(startPath);
   const userAgentsYaml = path.join(getUserAgentsDir(), 'agents.yaml');
@@ -60,7 +60,6 @@ function getProjectBudgets(startPath: string): BudgetConfig[] {
           configs.push(coerceBudget(parsed.budget));
         }
       } catch {
-        // Malformed project budgets do not erase valid user or ancestor limits.
       }
     }
     dir = path.dirname(dir);
@@ -74,7 +73,7 @@ export function resolveBudgetConfig(cwd: string = process.cwd()): BudgetConfig {
   for (const projectBudget of getProjectBudgets(cwd)) {
     merged = mergeBudget(merged, projectBudget);
   }
-  // An omitted policy fails closed: configured caps block unless explicitly set to warn.
+
   if (merged.on_exceed === undefined) merged.on_exceed = 'block';
   return merged;
 }

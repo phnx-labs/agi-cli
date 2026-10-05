@@ -26,7 +26,6 @@ function nextAttemptBackoffMs(consecutiveFailures: number): number {
   return Math.min(30_000 * 2 ** (capped - 1), 30 * 60_000);
 }
 
-// Lease wait, SQLite access, and SSH share this deadline; SSH gets only the bounded remainder.
 const REMOTE_PREVIEW_TOTAL_DEADLINE_MS = 10_000;
 const CACHE_BUSY_TIMEOUT_MS = 250;
 const REMOTE_PREVIEW_SSH_TIMEOUT_MS = 8_000;
@@ -90,7 +89,7 @@ function isValidRevision(revision: string): boolean {
   return revision.length > 0 && revision.length <= REVISION_MAX_CHARS;
 }
 
-// The cross-process device/session lease coalesces success and failure; reuse last-good stale data instead of redialing.
+
 async function fetchOrServe(
   sessionId: string,
   device: string,
@@ -198,7 +197,6 @@ async function fetchOrServe(
   }
 }
 
-// Trust only bounded schema-v1 payloads whose session id and owner exactly match this request.
 function validateEnvelope(envelope: unknown, sessionId: string, device: string): { ok: true } | { ok: false; reason: string } {
   const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
   const text = (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0;
@@ -259,7 +257,6 @@ function leaseTarget(device: string, sessionId: string): string {
   return path.join(getCacheDir(), 'remote-preview-locks', `${digest}.lock`);
 }
 
-// Lock staleness exceeds the fetch bound, and every retry remains inside the caller's one deadline.
 async function withBoundedRemoteLease<T>(
   device: string,
   sessionId: string,

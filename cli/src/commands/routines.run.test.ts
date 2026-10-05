@@ -147,7 +147,6 @@ function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-// Meta writes are not atomic; tolerate absent or torn JSON and let the caller poll again.
 function readRunStatus(runsDir: string, runId: string): string | null {
   const metaPath = path.join(runsDir, runId, 'meta.json');
   try {
@@ -204,7 +203,6 @@ describeRoutines('routines run --json', () => {
   });
 
   it('two independent CLI processes do not serialize overlapping foreground runs', async () => {
-    // A stop file synchronizes the processes without wall-clock races.
     const stopFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-overlap-')), 'stop');
     const home = makeHome({
       jobs: [{
@@ -335,7 +333,7 @@ describeRoutines('buildRunsJson', () => {
   });
 });
 
-// Named projects and same-titled special buckets have distinct keys and deterministic ordering.
+
 describeRoutines('groupRoutineJobsByProject — named projects never collide with special buckets', () => {
   const mk = (name: string, projects?: string[]): JobConfig =>
     ({ ...baseJob, name, ...(projects ? { projects } : {}) }) as unknown as JobConfig;
@@ -395,7 +393,6 @@ describeRoutines('groupRoutineJobsByProject — named projects never collide wit
   });
 });
 
-// Without a TTY, bare `routines` and `routines --json` must exactly fall through to static list output.
 describeRoutines('bare routines command routing', () => {
   it('bare `routines --json` matches `routines list --json` byte-for-byte', () => {
     const home = makeHome({ jobs: [baseJob, { ...baseJob, name: 'other-job', projects: ['*'] }] });
@@ -488,9 +485,8 @@ describeRoutines('routines edit — headless context repair', () => {
   });
 });
 
-// Linux /proc verifies the detached daemon inherited the test home rather than production history state.
 describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
-  // The isolated history dir prevents the daemon's SIGTERM sweep from touching real user processes.
+
   it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
     const home = makeDaemonHome();
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;

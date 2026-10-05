@@ -18,9 +18,6 @@ describe('cloud session cache path safety', () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     process.env.HOME = tmpRoot;
-    // cloud.ts resolves ~/.rush/user.yaml via os.homedir(), which reads
-    // USERPROFILE (not HOME) on Windows — set both so the temp home takes
-    // effect and readToken() finds the fixture token cross-platform.
     process.env.USERPROFILE = tmpRoot;
     fs.mkdirSync(path.join(tmpRoot, '.rush'), { recursive: true });
     fs.writeFileSync(path.join(tmpRoot, '.rush', 'user.yaml'), 'session:\n  access_token: test-token\n');

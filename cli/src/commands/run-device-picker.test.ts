@@ -51,7 +51,6 @@ function stat(reachable: boolean, fetchedAt: number, loadPercent?: number, memPe
   return { host: 'x', reachable, loadPercent, memPercent, fetchedAt };
 }
 
-/** The standard 5-device fleet: local, two online workers, one stats-less, one offline. */
 async function seedFleet(): Promise<void> {
   await upsertDevice('zion', { platform: 'macos', address: { via: 'manual' } });
   await upsertDevice('worker-1', { platform: 'linux', address: { via: 'manual' } });

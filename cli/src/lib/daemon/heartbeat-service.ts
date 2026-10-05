@@ -1,4 +1,3 @@
-/** Daemon heartbeat and routine-process reconciliation under supervision. */
 
 import type { DaemonServiceId } from '../daemon-services.js';
 import { reapExitedRunningJobs } from './runner.js';

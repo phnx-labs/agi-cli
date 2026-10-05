@@ -68,7 +68,6 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
   const itemIndentWidth = 2;
   const itemSeparatorWidth = 2;
 
-  // Commander 15 owns wrapping through formatItem; keep its width calculation intact.
   function formatItem(term: string, description?: string): string {
     if (description) {
       return helper.formatItem(term, termWidth, description, helper);
@@ -80,7 +79,6 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
     return textArray.join('\n');
   }
 
-  // Commander 12 Argument lacks hideHelp(), so hidden is our compatibility field.
   const isHidden = (a: { hidden?: boolean }): boolean => a.hidden === true;
   const registeredArgs = (cmd as unknown as { registeredArguments?: ReadonlyArray<{ name(): string; required: boolean; variadic: boolean; hidden?: boolean }> }).registeredArguments ?? [];
 

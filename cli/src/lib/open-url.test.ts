@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Use injected opener callbacks and inert/missing binaries; never launch the operator's real browser.
 
 let testHome = '';
 

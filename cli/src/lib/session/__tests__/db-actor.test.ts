@@ -28,16 +28,9 @@ function upsert(over: Partial<SessionMeta> & { id: string }): void {
   );
 }
 
-/**
- * RUSH-2018: the sessions DB records who launched a session (`actor`) and the
- * actor's kind (`initiated_by`). The contract that matters is write-once
- * preservation: those columns are stamped at creation and a later content
- * rescan — which carries no actor — must NOT clobber them. That is enforced by
- * keeping both columns out of the upsert's ON CONFLICT update set.
- */
 describe('sessions DB actor provenance (RUSH-2018)', () => {
   beforeAll(() => {
-    getDB(); // migrate a fresh home to schema v19
+    getDB();
   });
   afterAll(() => {
     closeDB();
@@ -64,10 +57,8 @@ describe('sessions DB actor provenance (RUSH-2018)', () => {
 
   it('preserves the original actor + phoenixId on a content rescan (ON CONFLICT excludes it)', () => {
     upsert({ id: 'sess-actor-2', actor: 'grace@example.com', initiatedBy: 'human', phoenixId: 'phx_grace' });
-    // A rescan re-upserts the same id with NO actor (the scanner can't know it).
     upsert({ id: 'sess-actor-2', topic: 'rescanned' });
     const meta = getSessionById('sess-actor-2');
-    // The rescan updated content but must NOT have wiped who launched it.
     expect(meta?.topic).toBe('rescanned');
     expect(meta?.actor).toBe('grace@example.com');
     expect(meta?.initiatedBy).toBe('human');

@@ -10,10 +10,6 @@ const entrypoint = path.join(repoRoot, 'src/index.ts');
 function writeExecutable(filePath: string, body: string): void {
   fs.writeFileSync(filePath, body, 'utf-8');
   fs.chmodSync(filePath, 0o755);
-  // Windows cmd.exe can't run the extensionless Node script directly. Drop a
-  // `.cmd` companion that forwards to node so the fake CLI resolves via PATHEXT
-  // (and via spawn shell:true for `.cmd`/bare names). The companion captures the
-  // same argv the POSIX shebang script would.
   if (process.platform === 'win32') {
     fs.writeFileSync(filePath + '.cmd', `@echo off\r\nnode "${filePath}" %*\r\n`, 'utf-8');
   }
@@ -36,11 +32,6 @@ describe('agents run defaults', () => {
     fs.mkdirSync(projectDir, { recursive: true });
     const managedBinDir = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.45', 'node_modules', '.bin');
     fs.mkdirSync(managedBinDir, { recursive: true });
-    // Off macOS, account-strategy resolution requires a real credential file
-    // for a version to count as healthy (PHNX-2685's credential floor) — this
-    // fixture's fake `claude@2.1.45` needs to look genuinely signed in, or
-    // `strategy: pinned` excludes it as signed_out before ever reaching the
-    // fake binary this test is actually exercising.
     const versionHomeDir = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.45', 'home');
     fs.mkdirSync(path.join(versionHomeDir, '.claude'), { recursive: true });
     fs.writeFileSync(

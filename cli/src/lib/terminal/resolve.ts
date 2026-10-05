@@ -49,7 +49,6 @@ export function resolveInjectTargetForSession(
 ): InjectResolution {
   const prov = session.provenance;
 
-  // Prefer exact rails only: tmux pane, then exact iTerm/IDE identity; never guess a frontmost split.
   if (prov?.mux?.kind === 'tmux' && prov.mux.pane) {
     return {
       addressable: true,
@@ -83,7 +82,7 @@ export function resolveInjectTargetForSession(
   }
 
   if (session.host === 'ghostty') {
-    // Ghostty can address only the focused split, so focus injection remains an explicit opt-in.
+
     if (opts.allowGhosttyFocus) {
       return {
         addressable: true,

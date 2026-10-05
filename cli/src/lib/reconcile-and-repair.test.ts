@@ -1,4 +1,3 @@
-// Tail repair supersets resource copy by regenerating/rewiring hook runtimes; stale-CLI purge is explicit-only and sandbox-confined.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';

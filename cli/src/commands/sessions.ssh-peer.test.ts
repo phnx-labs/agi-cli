@@ -14,22 +14,11 @@ interface SessionResolverSshPeer {
   fixture: ChildProcess;
   socket: string;
   proofFile: string;
-  /** The test's temp home — every process of this test carries it in argv. */
   home: string;
 }
 
-/**
- * Temp base for the ssh-peer tests. The production ControlPath is
- * `<home>/.agents/.cache/ssh/cm-%C`, and ssh appends a ~18-char listener
- * suffix — under macOS CI's deep TMPDIR (/var/folders/<30 chars>/T/sr-XXXXXX)
- * that blows past the 104-byte sun_path limit and every peer test fails at
- * ControlMaster startup. `/tmp` resolves to /private/tmp (12 chars), keeping
- * the full socket path under the limit. Linux paths are short already.
- */
 const sshPeerTmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
 
-/** Start the real ssh2 peer and graft its ephemeral TCP listener onto the exact
- * default-port OpenSSH ControlPath the production parent will look up. */
 async function startSessionResolverSshPeer(
   mode: 'old-peer' | 'malformed',
   tempHome: string,
@@ -82,8 +71,6 @@ async function startSessionResolverSshPeer(
     fixture.once('exit', (code) => fail(new Error(`exited ${code ?? 'without a code'}`)));
   });
 
-  // `ssh -G` expands `%C` exactly as the real parent will, including its
-  // default port 22. Do not use ~/.ssh/config: HOME is deliberately isolated.
   const expanded = spawnSync('ssh', [
     '-G',
     '-o', 'ControlMaster=auto',
@@ -95,9 +82,6 @@ async function startSessionResolverSshPeer(
   const socket = expanded.stdout.match(/^controlpath\s+(.+)$/m)?.[1];
   if (!socket) throw new Error(`ssh -G did not emit a controlpath: ${expanded.stdout}`);
 
-  // The only TCP connection goes to the fixture's ephemeral port. `-S` forces
-  // that master to listen at the port-22 path production's unmodified ssh call
-  // will reuse below.
   const master = spawnSync('ssh', [
     '-F', '/dev/null', '-f', '-M', '-N', '-p', port, '-S', socket,
     '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
@@ -113,35 +97,9 @@ async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise
   });
   if (!peer.fixture.killed) peer.fixture.kill('SIGTERM');
   await new Promise<void>((resolve) => peer.fixture.once('exit', () => resolve()));
-  // The peer side lingers past fixture death: the peer CLI that answered over
-  // ssh (still flushing its index into peer-home/.agents) and the parent's own
-  // ControlPersist master. Both keep writing into the temp home, which raced
-  // the cleanup rmdir ENOTEMPTY on CI even with rm retries. Every one of those
-  // processes carries this test's unique temp path in argv, so a path-scoped
-  // pkill reaps exactly them and nothing else.
   spawnSync('pkill', ['-f', peer.home]);
 }
 
-/**
- * rm -rf the peer test's temp home, tolerating the trailing writes the peer
- * side (the peer CLI answering over ssh, plus the ControlPersist master
- * winding down) races into it after stop — a bare rmSync intermittently
- * dies ENOTEMPTY on CI. Retries absorb exactly that window.
- *
- * Two hardenings after 8 x 250ms still lost the race on a loaded runner
- * (`ENOTEMPTY: rmdir '/tmp/sr-46716N/peer-home'`, which failed PRs whose diff
- * never touched sessions at all):
- *
- *  - The window is now 20 x 500ms. `stopSessionResolverSshPeer` awaits the ssh
- *    exit, but the ControlPersist master and the peer CLI are separate
- *    processes that can outlive it, so the tail is bounded by process teardown,
- *    not by anything this test controls.
- *  - Cleanup is best-effort. Every assertion has already run by the time this
- *    is reached in `finally`; a leaked directory under TMPDIR on an ephemeral
- *    runner is not a test failure, and turning one into a red shard hides which
- *    PRs are actually broken. The failure is still reported on stderr rather
- *    than swallowed, so a genuine leak stays visible in the CI log.
- */
 function rmTempHomeWithRetries(tempHome: string): void {
   try {
     fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
@@ -151,10 +109,6 @@ function rmTempHomeWithRetries(tempHome: string): void {
 }
 
 describe('agents sessions --resolve against a real ssh peer', () => {
-  // POSIX-only (RUSH-2215): grafts a real ssh2 peer onto an OpenSSH
-  // `ControlMaster=auto` multiplexing socket, which Windows OpenSSH does not
-  // support — the ControlMaster startup hangs the fixture (and the suite) rather
-  // than failing fast, so this real-peer path only runs on a POSIX host.
   it.skipIf(process.platform === 'win32')('returns a partial fleet result when an old peer rejects the safe resolver protocol', async () => {
     const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
     let peer: SessionResolverSshPeer | undefined;
@@ -169,8 +123,6 @@ describe('agents sessions --resolve against a real ssh peer', () => {
         repoDir,
         tempHome,
       );
-      // RUSH-2492: an incomplete peer sweep degrades to a warning + exit 1
-      // instead of the old hard-abort exit 2 (SES-IF-2a, amended 2026-08-10).
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain(peer.target);
@@ -184,8 +136,6 @@ describe('agents sessions --resolve against a real ssh peer', () => {
     }
   }, 90_000);
 
-  // POSIX-only (RUSH-2215): same real ssh2 peer over an OpenSSH ControlMaster
-  // multiplexing socket as the sibling test above — hangs on Windows OpenSSH.
   it.skipIf(process.platform === 'win32')('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
     const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
     let peer: SessionResolverSshPeer | undefined;
@@ -200,8 +150,6 @@ describe('agents sessions --resolve against a real ssh peer', () => {
         repoDir,
         tempHome,
       );
-      // RUSH-2492: an incomplete peer sweep degrades to a warning + exit 1
-      // instead of the old hard-abort exit 2 (SES-IF-2a, amended 2026-08-10).
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain(peer.target);

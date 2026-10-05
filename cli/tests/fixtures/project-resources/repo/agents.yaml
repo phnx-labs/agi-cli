@@ -1,4 +1,2 @@
-# Project-root manifest. Acts as the walk-up boundary for getProjectAgentsDir
-# and pins per-project agent versions for the shim launcher.
 agents:
   claude: "0.0.0-fixture"

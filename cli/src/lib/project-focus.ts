@@ -12,7 +12,6 @@ export interface FocusArea {
 const DEPTH = 3;
 export const FOCUS_LIMIT = 4;
 
-// Focus is local read-only git history: no fetch/API; churn is excluded and counts are file touches.
 const NOISE = /(^|\/)(\.changelog|CHANGELOG\.md|bun\.lock|package-lock\.json|yarn\.lock)(\/|$)/;
 
 export function focusBucket(file: string): string | undefined {

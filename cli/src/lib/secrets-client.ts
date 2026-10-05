@@ -99,8 +99,6 @@ const SECRETS_TRANSPORT_CODES: ReadonlySet<string> = new Set([
   'IO_ERROR',
 ]);
 
-// Only transport failures may degrade to "unavailable". Data and policy errors
-// returned by the standalone are real answers and must surface.
 export function isSecretsTransportError(error: unknown): error is SecretsClientError {
   return error instanceof SecretsClientError && SECRETS_TRANSPORT_CODES.has(error.code);
 }
@@ -138,8 +136,6 @@ export function parseBundleValue(raw: BundleValue): { literal: string } | { ref:
 
 let cachedBin: string | undefined;
 
-// findInPath excludes agents-cli's legacy shims; accepting that `secrets` shim
-// would recurse through `agents secrets` indefinitely after an upgrade.
 export function resolveSecretsBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.SECRETS_BIN?.trim();
@@ -162,7 +158,7 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
 }
 
 export function buildServeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  // Adopt the existing agents state root and bridge the old passphrase name.
+
   const env: NodeJS.ProcessEnv = {
     ...base,
     SECRETS_HOME: base.SECRETS_HOME ?? getUserAgentsDir(),
@@ -246,8 +242,6 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
     input.on('error', () => {});
     input.end(request);
 
-    // Wait for both fd-4 EOF and process exit: the standalone releases locks
-    // and flushes logs after closing its response pipe.
     const out = child.stdio[4] as Readable;
     const chunks: Buffer[] = [];
     let size = 0;
@@ -296,9 +290,6 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   }
   const { command, prefix } = invocation(resolveSecretsBin());
   const request = Buffer.from(JSON.stringify(buildRequest(op, args, context)));
-  // Bun cannot portably wire numbered fds in spawnSync. A POSIX shell duplicates
-  // anonymous stdin/stdout pipes onto fd 3/4; exec keeps timeout ownership on the
-  // standalone and no secret bytes touch disk. Named FIFOs do not EOF on macOS.
   const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
   const script = `exec ${serve} 3<&0 4>&1 1>/dev/null`;
   const result = spawnSync('sh', ['-c', script], {
@@ -531,7 +522,6 @@ export function remoteResolveEnv(
   return secretsRequest('remote.remoteResolveEnv', [target, bundle, opts ?? {}]);
 }
 
-// Remote pushes must land in the same state root the receiving agents-cli reads.
 export const REMOTE_USER_AGENTS_DIR = '~/.agents';
 
 export function withRemoteStateRoot(opts: PushBundleOptions): PushBundleOptions {
@@ -602,8 +592,8 @@ function isLoaderOrInterpreterEnv(name: string): boolean {
 }
 
 export function sanitizeProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  // Apply at every agent and teammate spawn boundary: loader/interpreter knobs
-  // can execute caller-controlled code before the target harness starts.
+
+
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;

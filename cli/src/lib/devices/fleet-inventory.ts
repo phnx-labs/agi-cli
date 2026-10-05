@@ -46,7 +46,7 @@ export async function collectLocalFleetSignIn(): Promise<Record<string, FleetVer
           } catch {
           }
           let provable = false;
-          // Logout is provable only when known locations lack credentials in both version and active/global homes.
+
           if (!signedIn && supportsAccountInspection(agent)) {
             const presence = credentialPresence(agent, home);
             provable = presence.knownLocation && !presence.perVersion && !presence.active;

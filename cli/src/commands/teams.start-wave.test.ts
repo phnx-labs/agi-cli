@@ -1,11 +1,3 @@
-/**
- * `teams start` (no --watch) must never report a fabricated success: startReady()
- * terminalizes placement/spawn/cloud/dependency failures to FAILED instead of
- * leaving them PENDING, so a teammate that failed during the wave appears in
- * neither `launched` nor `still_pending`. runOneWave diffs against the pre-wave
- * roster and surfaces those in text and JSON, and a wave that only produced
- * failures exits non-zero.
- */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

@@ -8,7 +8,7 @@ import { resetActorCache } from './actor.js';
 import { getUserAgentsDir, getHistoryDir } from './state.js';
 import { listInstalledVersions } from './installations/versions.js';
 
-// Cold setup runs once per task: one sample/no warmup; real signed-in/out pins isolate decrypt cost.
+
 function execOpts(over: Partial<ExecOptions> & { agent: ExecOptions['agent'] }): ExecOptions {
   return { mode: 'plan', effort: 'auto', cwd: process.cwd(), ...over } as ExecOptions;
 }

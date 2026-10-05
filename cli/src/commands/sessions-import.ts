@@ -1,13 +1,3 @@
-/**
- * `agents sessions import <bundle|->` — restore an export bundle (RUSH-1711).
- *
- * The inverse of `sessions export`: read a bundle (file or stdin), validate it,
- * and place each transcript where the cross-machine sync would — a mirror keyed
- * by the session's ORIGIN machine (see bundle.ts / mirrorPath). Placement dedups
- * byte-exact against what is already on disk and never clobbers this machine's
- * own live sessions ("local always wins" falls out of the scanner's
- * live-home-first dedup), so a re-import or an overlapping bundle is safe.
- */
 import * as fs from 'fs';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -34,11 +24,11 @@ import { setHelpSections } from '../lib/help.js';
 interface ImportOptions {
   dryRun?: boolean;
   overwrite?: boolean;
-  decrypt?: string | boolean; // commander: true when --decrypt bare, string when --decrypt <key>
+  decrypt?: string | boolean;
   fromHost?: string[];
   fromR2?: boolean;
   byo?: boolean;
-  agent?: string; // read from the parent `sessions` command via optsWithGlobals
+  agent?: string;
 }
 
 export function registerSessionsImportCommand(sessionsCmd: Command): void {
@@ -92,10 +82,7 @@ async function runImport(
   g: { since?: string; all?: boolean; limit?: string },
   command: Command,
 ): Promise<void> {
-  // 1. Obtain the bundle — from R2, remote peer(s), stdin, or a file.
   let bundle: ParsedBundle;
-  // A managed restore recovers the per-account DEK (from the local cache or the
-  // Worker escrow) and decrypts with it; BYO falls back to the r2.backups key.
   let managedDecryptKey: Buffer | undefined;
   if (options.byo && !options.fromR2) {
     process.stderr.write(chalk.red('--byo is only valid with --from-r2.\n'));
@@ -146,7 +133,6 @@ async function runImport(
     }
   }
 
-  // 2. Optional agent filter.
   if (options.agent) {
     bundle = { header: bundle.header, records: bundle.records.filter(r => r.agent === options.agent) };
     if (bundle.records.length === 0) {
@@ -155,14 +141,10 @@ async function runImport(
     }
   }
 
-  // 3. Resolve the decryption key if the bundle is encrypted. A managed restore
-  //    already recovered the per-account DEK; otherwise fall back to an explicit
-  //    --decrypt <key> or the shared r2.backups key.
   const decryptKey = bundle.header.encrypted
     ? (managedDecryptKey ?? resolveDecryptKey(options.decrypt))
     : null;
 
-  // 4. Plan.
   let plan: ImportPlanItem[];
   try {
     plan = planImport(bundle, { decryptKey });
@@ -176,7 +158,6 @@ async function runImport(
     return;
   }
 
-  // 5. Write.
   const res = writeImport(plan, { overwrite: options.overwrite === true, decryptKey });
   const parts: string[] = [];
   if (res.placed) parts.push(`${res.placed} placed`);
@@ -187,20 +168,12 @@ async function runImport(
   process.stderr.write(chalk.green(`Imported: ${parts.join(', ') || 'nothing to do'}.\n`));
 }
 
-/** Drain all of stdin to a string. Works for pipes (non-seekable) and redirects
- *  alike — unlike readFileSync(0), which fails on a pipe. */
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks).toString('utf-8');
 }
 
-/**
- * --from-host: run `agents sessions export …` on each peer over SSH and merge
- * the streamed bundles into one for import. The optional positional acts as a
- * remote selector (id/query); the parent selection flags (--since, -a, --all,
- * -n) forward too.
- */
 async function pullForImport(
   hosts: string[],
   selector: string | undefined,
@@ -232,20 +205,6 @@ async function pullForImport(
   return { header, records };
 }
 
-/**
- * --from-r2: download every session-backup object from the r2.backups bucket and
- * assemble them into one bundle for the normal placement path. Each object is a
- * self-describing one-record bundle written by `export --to-r2`, so it parses
- * with the same parseBundle. A non-bundle object under the prefix (e.g. a legacy
- * plaintext transcript from the retired sync) is skipped with a count, never
- * silently swallowed. Fails loud when the bucket holds no restorable backups.
- */
-/**
- * `--from-r2` preflight as a pure, unit-testable function: fail loud when the
- * backup target is not configured. Returns the message to fail loud with, or null
- * when the restore may proceed. Kept pure (no process.exit, no keychain read) so
- * the command and its test drive the same decision.
- */
 export function r2ImportGateError(fromR2: boolean, isConfigured: boolean): string | null {
   if (fromR2 && !isConfigured) {
     return (
@@ -257,10 +216,6 @@ export function r2ImportGateError(fromR2: boolean, isConfigured: boolean): strin
 }
 
 export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise<ParsedBundle> {
-  // The resolved client (managed HTTP or BYO R2) is passed in by the command; the
-  // no-client overload preserves the original BYO-only signature (loadR2Config)
-  // for the direct unit test. The managed client's list() ignores the prefix and
-  // enumerates the whole owner namespace, so one call site serves both.
   let client: SessionsBackupClient;
   let bucket: string;
   if (resolvedClient) {
@@ -292,7 +247,6 @@ export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise
   let redactedAll = true;
   let skipped = 0;
   for (const key of keys) {
-    // The retired sync wrote a per-machine manifest.json; it is not a bundle.
     if (key.endsWith('/manifest.json')) continue;
     let body: string | null;
     try {
@@ -309,11 +263,6 @@ export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise
       skipped++;
       continue;
     }
-    // Managed transcripts are mandatory AES-256-GCM (SES-51). A plaintext object
-    // in the managed store is a contract violation — an older/buggy writer or
-    // tampering — so fail loud rather than importing readable plaintext. Check
-    // the header AND every record body (matching the Worker's per-record
-    // isEncryptedManagedBundle boundary guard), never just the header flag.
     if (client.kind === 'managed') {
       const plaintext = !parsed.header.encrypted
         || parsed.records.some(rec => !rec.encrypted || !isTranscriptEnvelope(rec.body));
@@ -351,11 +300,6 @@ export async function pullFromR2(resolvedClient?: SessionsBackupClient): Promise
   return { header, records: deduped };
 }
 
-/**
- * Decrypt-key resolution: an explicit `--decrypt <key>` (base64 or hex) wins;
- * otherwise fall back to the fleet-shared R2_SYNC_ENC_KEY from the r2.backups
- * bundle. Fails loudly when an encrypted bundle has no usable key.
- */
 function resolveDecryptKey(decrypt: string | boolean | undefined): Buffer {
   if (typeof decrypt === 'string' && decrypt.trim()) {
     const raw = decrypt.trim();
@@ -370,7 +314,6 @@ function resolveDecryptKey(decrypt: string | boolean | undefined): Buffer {
     const key = resolveSyncEncKey(loadR2Config());
     if (key) return key;
   } catch {
-    // sync bundle not configured
   }
   process.stderr.write(chalk.red(
     'This bundle is encrypted but no key is available. Pass --decrypt <key>, ' +
@@ -379,9 +322,7 @@ function resolveDecryptKey(decrypt: string | boolean | undefined): Buffer {
   process.exit(1);
 }
 
-/** Print the dry-run table, grouped by session. Reads disk, writes nothing. */
 function printDryRun(plan: ImportPlanItem[], bundle: ParsedBundle): void {
-  // Group file-level plan items by session for a readable table.
   const bySession = new Map<string, { agent: string; machine: string; sessionId: string; statuses: Set<string>; files: number }>();
   for (const item of plan) {
     const key = `${item.record.agent}:${item.record.machine}:${item.record.sessionId}`;

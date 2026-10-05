@@ -72,7 +72,7 @@ describe('pickLinearProject', () => {
   });
 });
 
-// Re-link refreshes name; retain missing URL only for the same projectId, otherwise drop it.
+
 describe('nextLinearLink', () => {
   it('refreshes a stale name when the Linear project was renamed', () => {
     const prior = { projectId: 'lin_1', name: 'Agents CLI' };

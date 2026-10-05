@@ -3,11 +3,6 @@ import { fireTimeAuthReadiness } from './routine-readiness.js';
 import { writeAuthHealthEntries, authCacheKey, type AuthVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
 
-/**
- * Seed the daemon-warmed auth-health cache (isolated HOME per tests/setup.ts) for
- * a unique (agent, version) so each case is independent of the merge that
- * `writeAuthHealthEntries` performs. Returns the version key.
- */
 let n = 0;
 function seed(verdict: AuthVerdict, account?: string): string {
   const version = `9.9.${n++}`;

@@ -11,7 +11,7 @@ import {
   openerSandboxTripped,
 } from './opener-sandbox.js';
 
-// This file alone may spawn opener names to prove PATH hits stubs; all other tests fail on an opener.
+
 const stubDir = process.env.AGENTS_TEST_OPENER_STUB_DIR;
 const platformOpener = process.platform === 'darwin' ? 'open' : 'xdg-open';
 

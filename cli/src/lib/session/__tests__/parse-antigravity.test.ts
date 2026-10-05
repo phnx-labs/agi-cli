@@ -24,7 +24,6 @@ function strField(field: number, s: string): number[] {
   return [...varint((field << 3) | 2), ...varint(bytes.length), ...bytes];
 }
 
-// Hand-encode the real protobuf: fields 1/2/3 are call id/tool/JSON args; field 7 tests recursive descent.
 function toolStep(opts: {
   id: string;
   name: string;

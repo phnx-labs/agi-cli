@@ -41,9 +41,6 @@ describe('resolveSessionQuery indexed metadata coverage', () => {
         indexed: { ids: ['a7c1d88d-b543-48c1-993d-dd5cd8e210c9'], byId: true, completeId: true },
         rush: { ids: ['session_001fa16e-9f97-453d-b0f0-5c35317bcd04'], byId: true, completeId: true },
         absent: { ids: [], byId: true, completeId: true },
-        // PHNX-2767: a content phrase against an empty listing pool still
-        // hydrates the FTS hit. Id-shaped selectors (mention / prefix /
-        // noFallback) stay id-only and must not fall through to this path.
         phrase: { ids: ['a7c1d88d-b543-48c1-993d-dd5cd8e210c9'], byId: false, completeId: false },
         mention: { ids: [], byId: true, completeId: false },
         prefix: { ids: ['cccc3333-1111-2222-3333-444455556666'], byId: true, completeId: false },
@@ -68,14 +65,10 @@ describe('RUSH-2203 local full-UUID hit skips SSH', () => {
         "const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';",
         "const filePath = path.join(home, id + '.jsonl'); fs.writeFileSync(filePath, '');",
         "upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath, label: 'ship the resume fix' }, '');",
-        // Any dial throws so we can prove whether a peer was contacted.
         "let dialed = 0;",
         "const deps = { gatherRemoteList: async () => { dialed++; throw new Error('SSH DIALED'); } };",
-        // Full UUID: globally unique, resolves before any fan-out (dialed stays 0).
         "const byId = await resolveSessionMetadataValue(id, {}, deps);",
         "const idDials = dialed;",
-        // Label: NOT globally unique, so it must consult the fleet (a peer could
-        // hold a same-label session) — the throwing dep makes it fail closed.
         "const byLabel = await resolveSessionMetadataValue('ship the resume fix', {}, deps);",
         "closeDB();",
         "process.stdout.write(JSON.stringify({ byIdKind: byId.kind, byIdId: byId.session && byId.session.id, idDials, byLabelKind: byLabel.kind, labelDialed: dialed > idDials }));",
@@ -89,9 +82,9 @@ describe('RUSH-2203 local full-UUID hit skips SSH', () => {
       expect(JSON.parse(result.stdout)).toEqual({
         byIdKind: 'resolved',
         byIdId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
-        idDials: 0,          // zero SSH: the local index answered the UUID lookup
-        byLabelKind: 'partial', // label failed closed because the (throwing) fleet was consulted
-        labelDialed: true,   // the label DID reach the fan-out
+        idDials: 0,
+        byLabelKind: 'partial',
+        labelDialed: true,
       });
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
@@ -100,8 +93,6 @@ describe('RUSH-2203 local full-UUID hit skips SSH', () => {
 });
 
 describe('agents sessions --resolve local-peer critical path', () => {
-  // 90s, not the default 30s: several real `agents` CLI boots, measured 8.1s
-  // idle and 15.0s under 16 CPU-bound background processes (RUSH-2839).
   it('resolves a full id, unique prefix, and keywords through the metadata-only CLI contract', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-resolve-local-'));
     try {
@@ -144,16 +135,11 @@ describe('agents sessions --resolve local-peer critical path', () => {
     };
     const offline = { sessions: [], unreachable: ['offline-box'] };
     expect(metadataResolveOutcome([session], offline, id)).toEqual({ kind: 'resolved', session });
-    // A short id is a UUID prefix, so an offline peer cannot be hiding a second
-    // session that shares it — one reachable hit is the answer, not a `partial`.
     expect(metadataResolveOutcome([session], offline, '019fd0c8')).toEqual({ kind: 'resolved', session });
     expect(metadataResolveOutcome([session], offline, '019fd0c8-b3e9')).toEqual({ kind: 'resolved', session });
   });
 
   it('keeps a LABEL selector fail-closed when a peer is unreachable', () => {
-    // Unlike an id, a label is not unique across the fleet: the offline box may
-    // genuinely hold a different session carrying the same label, so resolving
-    // from one reachable hit would be a guess.
     const session: SessionMeta = {
       id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
       shortId: '019fd0c8',
@@ -172,10 +158,6 @@ describe('agents sessions --resolve local-peer critical path', () => {
   });
 
   it('reports ambiguity — not a resolve — when two reachable sessions share the prefix', () => {
-    // The accepted risk in SES-9a is bounded by this: a prefix collision among
-    // peers that ANSWERED still surfaces, because each distinct full id is its
-    // own candidate. Only a collision hiding on a peer that never answered can
-    // slip through, which is the trade the spec names explicitly.
     const base = {
       agent: 'codex' as const,
       version: '0.146.0',
@@ -184,23 +166,16 @@ describe('agents sessions --resolve local-peer critical path', () => {
     };
     const a: SessionMeta = { ...base, id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897', shortId: '019fd0c8', machine: 'yosemite-s0', filePath: '/sessions/a.jsonl' };
     const b: SessionMeta = { ...base, id: '019fd0c8-aaaa-4bbb-8ccc-dddddddddddd', shortId: '019fd0c8', machine: 'yosemite-s1', filePath: '/sessions/b.jsonl' };
-    // With a peer still missing, two candidates means we cannot claim
-    // uniqueness at all — fail closed rather than pick one.
     expect(metadataResolveOutcome([a, b], { sessions: [], unreachable: ['offline-box'] }, '019fd0c8')).toEqual({
       kind: 'partial',
       failedPeers: ['offline-box'],
     });
-    // Once every peer has answered, the same collision surfaces as a real
-    // ambiguity listing both machines — never a silent resolve.
     const settled = metadataResolveOutcome([a, b], { sessions: [], unreachable: [] }, '019fd0c8');
     expect(settled.kind).toBe('ambiguous');
     expect(settled.kind === 'ambiguous' && settled.candidates.map(c => c.id).sort()).toEqual([b.id, a.id].sort());
   });
 
   it('keeps a keyword-shaped selector fail-closed even though it is all hex characters', () => {
-    // looksLikeSessionId accepts any 6+ char [0-9a-f-] run, so ordinary words
-    // like `facade` and `decade` match it. Those are searches, not identifiers,
-    // and must still wait for every peer.
     const session: SessionMeta = {
       id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
       shortId: '019fd0c8',
@@ -223,8 +198,6 @@ describe('agents sessions --resolve local-peer critical path', () => {
   });
 
   it('still reports partial for an id-shaped selector that matched nothing reachable', () => {
-    // Nothing was found here, so the session may well live on the offline peer —
-    // that is the case where an unreachable box genuinely changes the answer.
     expect(metadataResolveOutcome([], { sessions: [], unreachable: ['offline-box'] }, 'deadbeef')).toEqual({
       kind: 'partial',
       failedPeers: ['offline-box'],

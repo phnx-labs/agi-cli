@@ -39,7 +39,7 @@ function joinedSql(argv: string[]): string {
 }
 
 export function classifyActionDanger(argv: string[], _argvComplete = true): DangerVerdict {
-  // Stable danger categories come from structural argv rules, not raw-text matching.
+
   if (argv.length === 0) return NORMAL;
   const exe = baseName(argv[0]);
   const rest = argv.slice(1);

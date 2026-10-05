@@ -1,17 +1,4 @@
-/**
- * Quick to-dos for AGI Menu's Home: `agents projects todo add|list|done|undo`.
- *
- * Linear is the record; nothing is stored here. `add` turns one typed line into a
- * Linear issue with `linear create` (the active cycle, status Todo, no milestone, no
- * delegate), reading `#project`, a day word and `!`/`!!` from the text unless an
- * option names that field. The issue description carries
- * {@link QUICK_TODO_MARKER}, which is how `list` tells a quick to-do from any other
- * issue (the team has no "todo" label, and taxonomy is not ours to add). `list`
- * shows the caller's open quick to-dos plus anything assigned to them that is due
- * today or overdue. `done` closes one; `undo` reopens a closed one, or cancels a
- * quick to-do created moments ago (linear-cli has no issue archive; Canceled is
- * the workflow's own discard state).
- */
+
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -19,13 +6,13 @@ import type { ProjectDef } from './projects.js';
 
 const execFileAsync = promisify(execFile);
 
-/** The description line every quick to-do carries. */
+
 export const QUICK_TODO_MARKER = 'Created from AGI Menu';
-/** How many to-dos `list` returns. */
+
 export const TODO_LIST_LIMIT = 6;
-/** How long after creation `undo` may cancel a quick to-do instead of refusing. */
+
 export const UNDO_CREATE_WINDOW_MS = 30_000;
-/** How far this machine's clock may run behind Linear's for the undo window. */
+
 const CLOCK_SKEW_MS = 5_000;
 
 export type TodoPriority = 'urgent' | 'high';
@@ -35,12 +22,12 @@ export const TITLE_MIN = 3;
 export const TITLE_MAX = 120;
 export const DESCRIPTION_MAX = 10_000;
 
-/** One typed line, read. */
+
 export interface ParsedTodo {
   title: string;
-  /** The `#project` token as typed, without `#`; null when none. */
+
   project: string | null;
-  /** `YYYY-MM-DD` in local time; null when no day word was typed. */
+
   due: string | null;
   priority: TodoPriority | null;
 }
@@ -65,7 +52,7 @@ const TAG = /^#([\p{L}\p{N}_.-]+)$/u;
 const BANGS = /^!+$/;
 const clean = (token: string) => token.replace(/[,.;:]+$/, '');
 
-// Shared AGI Menu grammar: first #project anywhere; day/priority only in the trailing suffix.
+
 export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   let project: string | null = null;
   let due: string | null = null;
@@ -157,7 +144,7 @@ async function readIssue(id: string, linear: LinearExec): Promise<RawIssue> {
   return JSON.parse((await linear(['tasks', id, '--json'])).stdout) as RawIssue;
 }
 
-/** The outcome of one to-do verb. `todo` is the issue afterwards; null when the verb failed before reading it. */
+
 export interface TodoResult {
   ok: boolean;
   todo: QuickTodo | null;
@@ -194,10 +181,7 @@ export function addRefusal(title: string, opts: AddOptions): string | null {
   return null;
 }
 
-/**
- * Create a quick to-do from a typed line and the options. Nothing is created
- * when {@link addRefusal} names a reason.
- */
+
 export async function addQuickTodo(text: string, opts: AddOptions, linear: LinearExec = linearExec): Promise<TodoResult> {
   const parsed = parseQuickTodo(text, opts.now);
   const due = opts.due ?? parsed.due;
@@ -216,7 +200,7 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   if (due) args.push('--due-date', due);
   const assignee = opts.assignee?.trim();
   if (assignee && assignee.toLowerCase() !== 'me') args.push('--assign', assignee);
-  // The title goes after `--`, so one that starts with "-" is never read as a flag.
+
   args.push('--', parsed.title);
   let out: { stdout: string; stderr: string };
   try {
@@ -224,7 +208,7 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   } catch (err) {
     return { ok: false, todo: null, message: linearFailure(err) };
   }
-  // linear may report Error: on stderr despite exit zero; success requires a stdout issue ID.
+
   const id = out.stdout.match(/^Created ([A-Z][A-Z0-9]*-\d+):/m)?.[1];
   if (!id) {
     const error = out.stderr.split('\n').map((l) => l.trim()).reverse().find((l) => /^Error:/i.test(l));
@@ -233,7 +217,7 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   try {
     return { ok: true, todo: toQuickTodo(await readIssue(id, linear)), message: `Created ${id}` };
   } catch (err) {
-    // The issue exists: report it created (a retry would duplicate it) with what is known.
+
     const todo: QuickTodo = {
       identifier: id, url: null, title: parsed.title, project: null, due,
       priority: Math.max(0, ['none', 'urgent', 'high', 'medium', 'low'].indexOf(priority)), state: 'Todo', createdAt: '', quick: true,
@@ -264,7 +248,7 @@ async function readStates(linear: LinearExec): Promise<Array<{ name?: string; ty
 export async function completeTodo(id: string, linear: LinearExec = linearExec): Promise<TodoResult> {
   try {
     const update = await linear(['update', id, '--done', '--proof', DONE_PROOF]);
-    // Read back completion because queued/rate-limited updates may exit zero before state changes.
+
     const [raw, states] = await Promise.all([readIssue(id, linear), readStates(linear)]);
     const todo = toQuickTodo(raw);
     if (states.find((s) => s.name === todo.state)?.type === 'completed') return { ok: true, todo, message: `${id} marked Done` };
@@ -291,7 +275,7 @@ export async function undoTodo(id: string, now: Date, linear: LinearExec = linea
   } catch (err) {
     return { ok: false, todo: null, message: linearFailure(err) };
   }
-  // Map state name to workflow type and allow bounded negative age for clock skew.
+
   const type = states.find((s) => s.name === issue.state)?.type;
   try {
     if (type === 'completed') {

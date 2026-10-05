@@ -55,7 +55,7 @@ function formatHourMinute(iso: string): string {
 }
 
 export function buildRunDeviceChoices(rows: RunDeviceRow[], accountLabel?: string): RunDeviceChoice[] {
-  // A device without a published account catalog is unknown, not proof that the account is absent.
+
   const byHeadroomLoadName = (a: RunDeviceRow, b: RunDeviceRow): number =>
     HEADROOM_ORDER[a.headroom] - HEADROOM_ORDER[b.headroom]
     || (a.loadPercent ?? Number.POSITIVE_INFINITY) - (b.loadPercent ?? Number.POSITIVE_INFINITY)
@@ -100,14 +100,6 @@ export function buildRunDeviceChoices(rows: RunDeviceRow[], accountLabel?: strin
   });
 }
 
-/**
- * The catalog's per-device answer for one account label, straight off the
- * fleet-synced shared state (the same rows `agents view` renders): the daemon
- * on each box publishes an auth verdict per registered account, and absence of
- * a verdict row on a publishing box means the account is not provisioned
- * there. A box that publishes no account rows at all (an older release) cannot
- * be answered for — its devices stay `undefined`, never guessed.
- */
 function resolveAccountDevices(
   agent: AgentId,
   accountLabel: string,
@@ -129,7 +121,7 @@ function resolveAccountDevices(
 }
 
 export function readRunDeviceRows(opts: { agent: AgentId; accountLabel?: string }): { rows: RunDeviceRow[]; snapshotAgeMs?: number } {
-  // Picker reads are cache/disk-only: never add SSH, probes, refresh, or other network work to this path.
+
   const registry = loadDevicesSync();
   const statsCache = readStatsCache();
   const names = Object.keys(registry);
@@ -176,7 +168,6 @@ export function readRunDeviceRows(opts: { agent: AgentId; accountLabel?: string 
   return { rows, snapshotAgeMs };
 }
 
-/** Human age for the prompt's "fleet state as of …" note: 'just now', '2 min ago', '3 h ago', … */
 function formatSnapshotAge(ageMs: number): string {
   if (ageMs < 45_000) return 'just now';
   if (ageMs < 90_000) return '1 min ago';
@@ -186,7 +177,6 @@ function formatSnapshotAge(ageMs: number): string {
 }
 
 export async function pickRunDevice(opts: { agent: AgentId; accountLabel?: string }): Promise<string | null> {
-  // Off-TTY selection fails loud, and cancellation must launch nothing.
   const { rows, snapshotAgeMs } = readRunDeviceRows(opts);
   if (rows.length === 0) {
     throw new Error('No devices are registered. Add one with: agents devices add <name>');

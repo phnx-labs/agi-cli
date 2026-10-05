@@ -305,7 +305,6 @@ export function registerWatchdogCommand(program: Command): void {
     .description('Show whether the daemon watchdog pass is enabled and where state is written.')
     .option('--json', 'Emit status as JSON (for the menu-bar / scripts)')
     .action((_opts, command) => {
-      // --json may bind on a parent before dispatch, so read merged Commander options.
       const json = command.optsWithGlobals().json === true;
       const on = getConfigValue('watchdog.enabled').value === true;
       const rotate = isWatchdogRotateEnabled() ? 'on' : 'off';

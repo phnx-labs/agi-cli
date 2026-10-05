@@ -16,8 +16,6 @@ export const claudeAdapter: HarnessAdapter = {
         result.DISABLE_AUTOUPDATER = '1';
       }
     }
-    // Credentials follow device role, not run mode: headed devices keep native OAuth;
-    // workers receive only their setup-token, and inherited ambient tokens are stripped.
     const headedDevice = isHeadedDeviceRole(ctx.deviceRole);
     if (headedDevice) {
       if (setupToken && result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {

@@ -121,7 +121,7 @@ function listLayerSubruleNames(layer: RulesLayer): string[] {
 }
 
 export function composeRules(opts: ComposeOptions): ComposeResult {
-  // Layers are ordered project, user, extras, system; first match shadows by rule name.
+
   const presetName = opts.preset || DEFAULT_PRESET;
 
   const presetMatch = resolvePreset(opts.layers, presetName);
@@ -148,7 +148,6 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
     seen.add(name);
   }
 
-  // Unnamed non-system rules auto-append; system rules require explicit preset membership.
   for (const layer of opts.layers) {
     if (layer.scope === 'system') continue;
     for (const name of listLayerSubruleNames(layer)) {

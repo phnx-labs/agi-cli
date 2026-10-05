@@ -20,7 +20,7 @@ interface ViewingIn {
 export function viewingInLabel(
   s: Pick<ActiveSession, 'provenance' | 'viewingIn' | 'tmuxTarget'>,
 ): string | undefined {
-  // undefined means unobservable; "detached" requires a resolved pane with no attached client.
+
   if (s.provenance?.mux?.kind !== 'tmux' || !s.provenance.mux.pane) return undefined;
   if (!s.viewingIn) return s.tmuxTarget ? 'detached' : undefined;
   return s.viewingIn.tab != null ? `${s.viewingIn.app} tab ${s.viewingIn.tab}` : s.viewingIn.app;

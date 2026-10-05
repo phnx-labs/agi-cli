@@ -1,4 +1,4 @@
-// Plain Bash is the shared blanket grant: OpenCode maps it to allow-all and Codex auto-approves it so headless jobs do not stall.
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';

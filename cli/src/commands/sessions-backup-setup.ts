@@ -1,14 +1,3 @@
-// `agents sessions backup-setup` — the OPERATOR command that provisions the
-// managed session-backup endpoint (`sessions.agents-cli.sh`): the Cloudflare
-// Worker + R2 bucket a signed-in user's `sessions export --to-r2` talks to with
-// NO `r2.backups` bucket of their own. It is the deploy producer for that
-// endpoint — first-party infrastructure, not a per-user step. The zero-knowledge
-// `--byo` backup path uses the user's own R2 bucket directly and never touches
-// this Worker, so there is nothing here for an ordinary user to run.
-//
-// Mirrors `agents traces setup`: the same `readCloudflareCreds` bundle plumbing,
-// the same idempotent `deployWorker`/`createBucket` primitives. Provisioning is
-// idempotent — re-running redeploys the current Worker template in place.
 
 import type { Command } from 'commander';
 import chalk from 'chalk';

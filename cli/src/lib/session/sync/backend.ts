@@ -26,7 +26,6 @@ interface ResolveSessionsBackendOpts {
   session?: PhoenixSession | null;
 }
 
-// Managed-first: a stored r2.backups bundle is not an override; only explicit BYO inputs select it.
 function sessionsByoOverride(opts: ResolveSessionsBackendOpts): boolean {
   if (opts.byo === true) return true;
   if (opts.writeToken) return true;
@@ -40,7 +39,6 @@ export function shouldUseManagedSessions(opts: ResolveSessionsBackendOpts = {}):
   );
 }
 
-// Resolve Phoenix identity once so logout cannot switch principals mid-flight.
 export function resolveSessionsBackend(opts: ResolveSessionsBackendOpts = {}): SessionsBackend {
   const session = opts.session === undefined ? readSession() : opts.session;
   const explicitByo = sessionsByoOverride(opts);

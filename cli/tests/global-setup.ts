@@ -5,7 +5,7 @@ import { ensureStandaloneSecretsBin } from './secrets-standalone.js';
 
 const STALE_AGE_MS = 60 * 60 * 1000;
 
-// Global setup runs once before forks: resolve secrets once and sweep only stale homes; the age floor protects concurrent runs.
+
 export default function globalSetup(): void {
   const secretsBin = ensureStandaloneSecretsBin();
   process.env.SECRETS_BIN = secretsBin;

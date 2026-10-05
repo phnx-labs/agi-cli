@@ -222,7 +222,7 @@ function metadataBlob(name: string): string {
   return storeGetSync(bundle.backend ?? 'keychain', `agents-cli.bundles.${name}`);
 }
 
-// Bundles are canonical and secret-free in metadata; provider spawns resolve env while native lookup stays harness-scoped.
+
 describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', () => {
   let root: string;
   useFreshSecretsHome();
@@ -696,7 +696,7 @@ describe('native account device-scoping (PHNX-3315)', () => {
   });
 });
 
-// Legacy Claude homes without registry rows remain discoverable by identity; other harnesses do not use this fallback.
+
 describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () => {
   const testVersionLabel = `test-unregistered-${process.pid}`;
   let versionHome: string;

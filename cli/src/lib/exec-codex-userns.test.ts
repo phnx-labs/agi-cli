@@ -26,7 +26,6 @@ describe('codexSandboxPreflight', () => {
     expect(msg).toContain('bwrap: setting up uid map: Permission denied');
     expect(msg).toContain('yosemite-m1');
     expect(msg).toContain('PHNX-3285');
-    // Names the sandbox-preserving remediation and the escape hatch.
     expect(msg).toContain('apparmor_restrict_unprivileged_userns=0');
     expect(msg).toContain('--mode skip');
   });

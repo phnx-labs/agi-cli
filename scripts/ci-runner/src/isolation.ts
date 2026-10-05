@@ -6,7 +6,6 @@ import {
   type ForbiddenRequestField,
 } from './types';
 
-/** Env names that must never enter a worker. */
 export const FORBIDDEN_WORKER_ENV = [
   'GITHUB_TOKEN',
   'GH_TOKEN',
@@ -25,7 +24,6 @@ export const FORBIDDEN_WORKER_ENV = [
   'AGENTS_CONTROLLER_KEY',
 ] as const;
 
-/** Host paths a worker must never receive as a mount. */
 export const FORBIDDEN_MOUNTS = [
   '/var/run/docker.sock',
   '/var/run/tailscale',

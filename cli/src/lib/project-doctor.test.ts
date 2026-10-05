@@ -6,8 +6,6 @@ const def = (over: Partial<ProjectDef> = {}): ProjectDef => ({ name: 'agents-cli
 
 describe('checkRepoSlug', () => {
   it('flags the disagreement that silently reads the wrong repository', () => {
-    // The real case: both slugs resolve to real repos, so nothing errors — the
-    // card just reports a stranger's merge counts.
     const f = checkRepoSlug(def({ repo: 'muqsitnawaz/agents-cli' }), 'phnx-labs/agents-cli');
     expect(f?.message).toContain('repo is muqsitnawaz/agents-cli but origin is phnx-labs/agents-cli');
     expect(f?.message).toContain('wrong repository');
@@ -19,8 +17,6 @@ describe('checkRepoSlug', () => {
   });
 
   it('says nothing when this machine cannot read a remote', () => {
-    // No checkout here, or not a git repo. The def may be perfectly right —
-    // absence of evidence is not a finding.
     expect(checkRepoSlug(def({ repo: 'phnx-labs/agents-cli' }), undefined)).toBeUndefined();
     expect(checkRepoSlug(def(), undefined)).toBeUndefined();
   });

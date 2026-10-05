@@ -4,14 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Diagnostics that misreport isolation state are the recurring failure here: an
-// isolated copy shown as `(global)` (fixed once already), a resume that claimed to
-// run and didn't, and — found by diffing every command's output between an
-// isolated-only and a normal install — `inspect` printing a bare shim path that
-// does not exist, and `view --json` carrying no isolation signal at all.
-//
-// A wrong diagnostic is worse than a missing one when the whole feature is a
-// promise about what was left alone: it is the only thing the user can check.
 describe.skipIf(process.platform === 'win32')('isolated installs report themselves honestly', () => {
   let home: string;
   const V = '9.9.4';
@@ -32,7 +24,6 @@ describe.skipIf(process.platform === 'win32')('isolated installs report themselv
     if (isolated) {
       fs.writeFileSync(path.join(vdir, '.isolated'), 'x\n');
     } else {
-      // A normal install owns the bare shim; an isolated one never creates it.
       const shim = path.join(shimsDir(), 'codex');
       fs.writeFileSync(shim, '#!/bin/sh\nexit 0\n');
       fs.chmodSync(shim, 0o755);
@@ -50,7 +41,6 @@ describe.skipIf(process.platform === 'win32')('isolated installs report themselv
           SHELL: '/bin/bash',
           AGENTS_NO_NUDGE: '1',
           FORCE_COLOR: '0',
-          // Own pins dir — vitest setup.ts pins AGENTS_DEVICES_DIR fork-wide.
           AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
           AGENTS_SYNC_MACHINE_ID: 'iso-diag',
         },
@@ -79,7 +69,6 @@ describe.skipIf(process.platform === 'win32')('isolated installs report themselv
     const d = json('inspect', 'codex', '--json');
     expect(d.shim).toBeNull();
     expect(d.isolated).toBe(true);
-    // The human view says so in words rather than printing a phantom path.
     expect(run('inspect', 'codex')).toContain('isolated installs stay off PATH');
   }, 120_000);
 
@@ -95,7 +84,6 @@ describe.skipIf(process.platform === 'win32')('isolated installs report themselv
     plant({ isolated: true });
     expect(run('use', `codex@${V}`)).toContain('ISOLATED');
     const d = json('inspect', 'codex', '--json');
-    // Not the global default — an isolated copy never is — but it IS the selected one.
     expect(d.default).toBe(false);
     expect(d.isolatedDefault).toBe(true);
     expect(run('inspect', 'codex')).toContain('[isolated default]');

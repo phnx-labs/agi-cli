@@ -8,8 +8,6 @@ import {
   warnEnvPassphraseReadableOnce,
 } from './sync-passphrase.js';
 
-/** Capture stderr for the duration of `fn` — the warnings are the behavior under
- *  test, so they are observed, never stubbed away. */
 function captureStderr(fn: () => void): string {
   const chunks: string[] = [];
   const original = process.stderr.write.bind(process.stderr);
@@ -61,8 +59,6 @@ describe('sync passphrase resolution (RUSH-1968 — split from the file-store ma
   });
 
   it('the current variable beats the legacy one when BOTH are set', () => {
-    // The migration case: a box that has set the new name while the old export
-    // is still lying around must not silently keep using the master key.
     process.env[SYNC_PASSPHRASE_ENV] = 'sync-secret';
     process.env[LEGACY_PASSPHRASE_ENV] = 'file-store-master-key';
     const err = captureStderr(() => {
@@ -86,7 +82,6 @@ describe('sync passphrase resolution (RUSH-1968 — split from the file-store ma
   });
 
   it('the deprecation warning fires exactly ONCE per process, not per call', () => {
-    // `push --all` resolves once per bundle; without the latch this floods stderr.
     process.env[LEGACY_PASSPHRASE_ENV] = 'file-store-master-key';
     const first = captureStderr(() => { resolveSyncPassphraseFromEnv(); });
     const second = captureStderr(() => { resolveSyncPassphraseFromEnv(); });
@@ -97,8 +92,6 @@ describe('sync passphrase resolution (RUSH-1968 — split from the file-store ma
   });
 
   it('the readability warning is separate and also fires once', () => {
-    // A caller on the CURRENT variable still deserves the /proc readability
-    // notice — it must not be swallowed by the deprecation latch.
     const first = captureStderr(() => { warnEnvPassphraseReadableOnce(); });
     const second = captureStderr(() => { warnEnvPassphraseReadableOnce(); });
     expect(first).toContain('readable by other');
@@ -106,8 +99,6 @@ describe('sync passphrase resolution (RUSH-1968 — split from the file-store ma
   });
 
   it('the headless error names the CURRENT variable, not the master key', () => {
-    // This message is what an operator follows when sync fails on a worker box.
-    // Naming the master key here is what put it into ~/.zshenv on seven boxes.
     const msg = missingSyncPassphraseMessage();
     expect(msg).toContain(SYNC_PASSPHRASE_ENV);
     expect(msg).not.toContain(LEGACY_PASSPHRASE_ENV);

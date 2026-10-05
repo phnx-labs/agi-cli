@@ -131,7 +131,7 @@ function fileExists(p: string | null | undefined): p is string {
 }
 
 export function isCheckedOutSymlink(filePath: string): boolean {
-  // Windows may check repository symlinks out as one-line alias files.
+
   let content: string;
   try {
     content = fs.readFileSync(filePath, 'utf-8');
@@ -195,8 +195,8 @@ function resolveSourceDirsByName(
 
 
 function diffCommands(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
-  // Mirror the writer: command-as-skill hosts compare wrappers, a real same-named
-  // skill owns that slot, plugin commands own their kind, and unsupported hosts emit nothing.
+
+
   const agentConfig = AGENTS[agent];
   const isToml = agentConfig.format === 'toml';
   const ext = isToml ? '.toml' : '.md';
@@ -304,7 +304,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
 
 
 function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
-  // Native central-skill consumers have no version-home copy to reconcile.
   if (AGENTS[agent].nativeAgentsSkillsDir) return [];
   const homeDir = getVersionSkillsDir(agent, version);
   const installed = new Set(listSkillsInVersionHome(agent, version));
@@ -353,7 +352,7 @@ function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject
 
 
 function diffHooks(agent: AgentId, version: string, cwd: string, inventory: ResourceInventory): ResourceDiff[] {
-  // Project hooks are intentionally excluded from global hook sync for security.
+
   if (!AGENTS[agent].supportsHooks) return [];
   const installedByName = new Map(inventory.onDisk.map((e) => [e.name, e]));
   const layerBases = buildLayerBases(cwd, 'hooks', { excludeProject: true });
@@ -406,7 +405,7 @@ function diffHooks(agent: AgentId, version: string, cwd: string, inventory: Reso
 
 
 function listRulesNames(cwd: string, excludeProject = false): Map<string, SourceCandidate> {
-  // Alias files are not independent rules; cursor's non-md instructions file is handled later.
+
   const projectDir = excludeProject ? null : getProjectAgentsDir(cwd);
   const userRules = getUserRulesDir();
   const systemRules = getResolvedRulesDir();
@@ -436,7 +435,6 @@ function listRulesNames(cwd: string, excludeProject = false): Map<string, Source
 }
 
 function expectedRuleContent(agent: AgentId, name: string, version: string, sourcePath: string): string | null {
-  // AGENTS compares against active preset composition, not a raw source file.
   if (name === 'AGENTS') {
     try {
       return composeRulesFromState({ preset: getActiveRulesPreset(agent, version) }).content;
@@ -479,7 +477,6 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
       rows.push({ kind: 'rules', name, status: 'diff', source: src.layer, sourcePath: src.path, homePath });
       continue;
     }
-    // Compiled non-import rules carry a provenance header that is outside semantic content.
     if (name === 'AGENTS' && !supportsRulesImports(agent) && actual.startsWith(COMPILED_HEADER)) {
       actual = actual.slice(COMPILED_HEADER.length);
     }
@@ -554,7 +551,7 @@ function diffPermissions(
   const syncedSet = new Set(synced);
   const availableSet = new Set(available);
   const representable = PERMISSIONS_REPRESENTABLE.has(agent);
-  // Lossy permission formats are presence-only and must not claim content verification.
+
   const rows: ResourceDiff[] = [];
   for (const name of available) {
     if (!syncedSet.has(name)) {
@@ -644,7 +641,7 @@ function diffWorkflows(
 
 
 function diffMemory(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
-  // Only manifest-named memory files are managed extras; user-authored files are untouched.
+
   if (!supports(agent, 'memory', version).ok) return [];
   const versionHome = getVersionHomePath(agent, version);
   const targetDir = path.join(versionHome, memoryTargetDir(agent));
@@ -785,8 +782,8 @@ export function diffVersionResources(
   version: string,
   options: DiffOptions = {},
 ): VersionResourceReport {
-  // excludeProject applies to command, skill, and rule writers; hooks always exclude project.
-  // Capability-gated kinds zero unavailable sources so stale installs still surface as extras.
+
+
   const rawCwd = options.cwd ?? process.cwd();
   const excludeProject = options.excludeProject ?? false;
   const home = getVersionHomePath(agent, version);

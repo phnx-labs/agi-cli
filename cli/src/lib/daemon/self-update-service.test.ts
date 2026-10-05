@@ -1,16 +1,3 @@
-/**
- * SelfUpdateService / attemptSelfUpdateAndExit (PHNX-3695).
- *
- * Drives the REAL install path — `npm pack` a tiny fixture package, serve it
- * over a real local HTTP server (standing in for the registry + tarball CDN,
- * following the exact fixture pattern `self-update.test.ts`'s
- * `installPackageIntoPrefix` / `downloadVerifiedTarball` suites use), and
- * install it with the real `installAndVerifyDefault` into a real temp-dir npm
- * prefix. No mocked npm client, no mocked fs/process — only the two boundaries
- * that must be fixture-controlled for a hermetic test (which "latest version"
- * the registry reports, and where "packageRoot" points) are injected, exactly
- * the seam `SelfUpdateDeps` exists for.
- */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -47,7 +34,6 @@ function sriFor(buf: Buffer): string {
   return `sha512-${createHash('sha512').update(buf).digest('base64')}`;
 }
 
-/** Pack a real fixture package at `version` with `npm pack`, and serve its bytes over a real local HTTP server. */
 async function packAndServe(version: string): Promise<{ tarballUrl: string; integrity: string }> {
   const src = makeTempDir('dummy-src');
   fs.writeFileSync(
@@ -76,7 +62,6 @@ async function packAndServe(version: string): Promise<{ tarballUrl: string; inte
   return { tarballUrl, integrity };
 }
 
-/** A real npm-prefix-shaped install directory at `version`, for `packageRoot()`. */
 function makeInstalledPackageRoot(version: string): string {
   const prefix = makeTempDir('prefix');
   const root = path.join(prefix, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
@@ -153,10 +138,6 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('a verify mismatch after a real install is surfaced as a failure, not a false success', { timeout: 120_000 }, async () => {
-    // The registry claims 2.0.0 but the fixture tarball is actually 3.0.0 —
-    // installAndVerifyDefault's verifyInstalledVersion (self-update.ts) must
-    // catch the mismatch against the CLAIMED version, exactly like `agents
-    // upgrade` would refuse to report success on a wrong install.
     const { tarballUrl, integrity } = await packAndServe('3.0.0');
     const packageRoot = makeInstalledPackageRoot('1.0.0');
     const { ctx, logs } = makeCtx();
@@ -192,10 +173,6 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('an install another process already upgraded on disk relaunches without touching the registry or installing', async () => {
-    // The fleet case (2026-09-07): every operator-typed `agents` command on a
-    // worker auto-updates the install, so the disk moved 1.22.79 -> 1.22.88
-    // while the daemon kept running the code it booted with. Nothing to
-    // download or verify — exit for the OS-supervisor relaunch.
     const { ctx, logs } = makeCtx();
     const fetchLatestMetadata = vi.fn();
     const installAndVerify = vi.fn();
@@ -213,8 +190,6 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('a stale install relaunches even when a shadow copy would otherwise decline the tick', async () => {
-    // A relaunch installs nothing, so a second `agents` on PATH cannot make it
-    // unsafe; without this a shadowed worker never leaves the release it booted on.
     const { ctx } = makeCtx();
     const fetchLatestMetadata = vi.fn();
 
@@ -230,9 +205,6 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('a newer install that has not settled defers the relaunch instead of exiting into a half-written tree', async () => {
-    // bun's write into the package dir is not atomic (self-update.ts,
-    // installPackageWithBun): package.json can be on disk before dist/ has
-    // finished landing. Trusting the version alone would relaunch into that.
     const { ctx, logs } = makeCtx();
     const fetchLatestMetadata = vi.fn();
 
@@ -310,15 +282,6 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 
   it('a deadline abort during a real in-flight install actually kills it, not just abandons the await (PHNX-3695 review)', { timeout: 30_000 }, async () => {
-    // A prior version raced the tick's AbortSignal against the download/install
-    // promises without ever cancelling the underlying fetch/child process, so a
-    // deadline abort left an orphaned `npm install` writing into the shared
-    // prefix while the very next attempt started a fresh install into the same
-    // directory. installAndVerifyDefault now threads `signal` into
-    // downloadVerifiedTarball's own `fetch` option (self-update.ts), which Node
-    // aborts for real. Prove that here with a server that stalls the response
-    // body indefinitely and observes whether the request socket was actually
-    // torn down, not just abandoned by the client.
     const src = makeTempDir('slow-src');
     fs.writeFileSync(
       path.join(src, 'package.json'),
@@ -336,9 +299,6 @@ describe('attemptSelfUpdateAndExit', () => {
     const server = http.createServer((req, res) => {
       req.on('aborted', () => { requestAborted = true; });
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
-      // Write a byte then stall — never call res.end() — so the request stays
-      // open until either the client aborts it or the test's own server
-      // teardown (afterEach) closes the socket.
       res.write(Buffer.from([0]));
     });
     servers.push(server);
@@ -356,29 +316,16 @@ describe('attemptSelfUpdateAndExit', () => {
       packageRoot,
       controller.signal,
     );
-    // Give the request time to actually reach the server before aborting.
     await new Promise((r) => setTimeout(r, 200));
     controller.abort();
 
     await expect(pending).rejects.toThrow();
-    // The abort must have reached the real HTTP request (Node's fetch cancels
-    // the underlying socket on AbortSignal), not merely stopped the caller
-    // from awaiting a still-running download.
     await new Promise((r) => setTimeout(r, 100));
     expect(requestAborted).toBe(true);
-    // The old install must remain untouched — nothing here got far enough to
-    // touch the package-manager step at all, let alone corrupt it.
     expect(await readInstalledVersion(packageRoot)).toBe('1.0.0');
   });
 
   it('two concurrent callers share one in-flight attempt — a subsequent request never starts a second install (PHNX-3695 review)', { timeout: 30_000 }, async () => {
-    // The review's second ask: prove the inFlightAttempt guard actually
-    // dedupes overlapping callers (the periodic tick racing an on-demand
-    // request-self-update, or two skewed clients asking at once) onto ONE
-    // real install rather than starting a second one into the same prefix.
-    // Count real HTTP requests the tarball server receives: with the guard
-    // working, two concurrent attemptSelfUpdateAndExit calls download the
-    // tarball exactly once.
     let requestCount = 0;
     const src = makeTempDir('dedupe-src');
     fs.writeFileSync(
@@ -414,8 +361,6 @@ describe('attemptSelfUpdateAndExit', () => {
       installAndVerify: installAndVerifyDefault,
     });
 
-    // Two callers racing in, exactly as a tick and an on-demand IPC request
-    // would: neither awaits the other before starting.
     const [first, second] = await Promise.all([
       attemptSelfUpdateAndExit(ctx, new AbortController().signal, deps),
       attemptSelfUpdateAndExit(ctx, new AbortController().signal, deps),
@@ -426,8 +371,6 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(requestCount).toBe(1);
     expect(await readInstalledVersion(packageRoot)).toBe('2.0.0');
 
-    // The guard must also release once real work is done, so a genuinely
-    // NEW attempt afterwards is not permanently swallowed by a stale guard.
     const { tarballUrl: nextUrl, integrity: nextIntegrity } = await packAndServe('3.0.0');
     const third = await attemptSelfUpdateAndExit(
       ctx,

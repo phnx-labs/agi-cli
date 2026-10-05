@@ -37,13 +37,13 @@ export function isDevicePinned(
   device: DeviceProfile,
   isPinned: (host: string) => boolean = (host) => isHostPinned(host),
 ): boolean {
-  // Enrollment keys follow the dial address; accept the legacy device-name pin while registries converge.
+
   const host = device.address ? hostNameFor(device) : undefined;
   return (host != null && isPinned(host)) || isPinned(device.name);
 }
 
 export function hostKeyCheckingOpts(pinned: boolean, file = managedKnownHostsPath()): string[] {
-  // The first dial enrolls a key; every later dial must match the enrolled key exactly.
+
   return [
     '-o', `UserKnownHostsFile=${file}`,
     '-o', `StrictHostKeyChecking=${pinned ? 'yes' : 'accept-new'}`,

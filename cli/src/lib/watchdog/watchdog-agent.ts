@@ -21,7 +21,7 @@ export function makeWatchdogAgentDecider(
   opts: { workflowCwd?: string; run?: WatchdogAgentRunner } = {},
 ): WatchdogAgentDecider {
   return async (candidates) => {
-    // One plan-mode call evaluates the batch; its override comes from daemon cwd, not an arbitrary candidate.
+
     const result = new Map<string, Decision>();
     if (candidates.length === 0) return result;
     try {
@@ -34,7 +34,6 @@ export function makeWatchdogAgentDecider(
       const stdout = await run(runTarget, prompt);
       for (const d of parseWatchdogResponse(stdout)) result.set(d.terminalId, d);
     } catch {
-      // Empty decisions make the caller retry safely instead of nudging without judgment.
     }
     return result;
   };

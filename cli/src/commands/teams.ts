@@ -340,7 +340,7 @@ export async function tearDownOrphanWorktree(
   baseCwd: string,
   name: string,
 ): Promise<void> {
-  // Cleanup fails closed: unreadable or claimed metadata means preserve possible teammate work.
+
   try {
     if (await mgr.isWorktreeClaimed(name)) return;
   } catch {
@@ -433,7 +433,7 @@ function wireCloudDispatcher(mgr: AgentManager): void {
 export function cloudDispatchOptions(
   agent: Pick<AgentProcess, 'prompt' | 'agentType' | 'cloudRepo' | 'cloudBranch' | 'model' | 'mode'>,
 ): DispatchOptions {
-  // This prompt policy is the cloud sandbox's only self-merge guard.
+
   return {
     prompt: withTeammatePrPolicy(agent.prompt, agent.mode),
     agent: agent.agentType,

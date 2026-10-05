@@ -61,7 +61,7 @@ export function formatAccountLimits(candidate: RotateCandidate): string {
 }
 
 function disabledReason(candidate: RotateCandidate, readiness: AccountReadiness): string | undefined {
-  // Only throttling disables a row: signed-out or revoked accounts stay selectable because the harness TUI is their login surface.
+
   if (readiness.ready) return undefined;
   if (isSignInRecoverable(readiness)) return undefined;
   if (readiness.reason === 'out_of_credits') return 'out of credits';
@@ -77,7 +77,6 @@ function disabledReason(candidate: RotateCandidate, readiness: AccountReadiness)
     : 'rate limit reached';
 }
 
-/** Build aligned picker rows with usable accounts first and unsafe rows disabled. */
 export function buildRunAccountChoices(
   candidates: RotateCandidate[],
   globalDefault: string | null,
@@ -171,11 +170,6 @@ function switchRowStatus(row: SwitchAccountRow): { status: string; limits: strin
   return { status, limits, ready: readiness.ready };
 }
 
-/**
- * Aligned picker rows for `accounts default`. Same columns as the run picker
- * (identity, status, limits) but the value is the named account to make default.
- * Rows stay selectable: setting a default is not a launch.
- */
 export function buildSwitchAccountChoices(rows: SwitchAccountRow[]): RunAccountChoice[] {
   const rendered = rows.map((row) => {
     const { status, limits, ready } = switchRowStatus(row);
@@ -199,10 +193,6 @@ export function buildSwitchAccountChoices(rows: SwitchAccountRow[]): RunAccountC
   }));
 }
 
-/**
- * Prompt for the named account that becomes this harness's default.
- * A cancelled picker writes nothing.
- */
 export async function pickSwitchAccount(agent: AgentId, rows: SwitchAccountRow[]): Promise<string | null> {
   if (!isInteractiveTerminal()) {
     requireInteractiveSelection(`Selecting a ${agentLabel(agent)} account`, [
@@ -227,29 +217,10 @@ export async function pickSwitchAccount(agent: AgentId, rows: SwitchAccountRow[]
   }
 }
 
-/**
- * The two-condition "human-facing" gate behind signInLaunchDecision and
- * noVerifiedUsageDecision: a real TTY and no `--json`. Off a TTY nobody can
- * answer a prompt, and `--json` marks a MACHINE consumer, which must never be
- * handed a picker or dropped into a login TUI. Mirrors the canonical
- * `Surface.interactive = tty && !json` in `commands/utils.ts`.
- */
 export function isHumanFacingRun(input: { tty: boolean; json: boolean }): boolean {
   return input.tty && !input.json;
 }
 
-/**
- * Whether a zero-healthy run may recover by launching for a login, or must keep
- * failing loud. Three inputs, all of which have to hold:
- *
- * - `recoverable` — at least one excluded account is only auth-blocked. An
- *   all-throttled set is never launched (RUSH-2132): only a window reset clears it.
- * - `tty` — a login needs a human present; off a TTY nobody can complete one.
- * - `json` — `--json` marks a MACHINE consumer, which must never be handed a
- *   picker or dropped into a login TUI. This mirrors the canonical
- *   `Surface.interactive = tty && !json` in `commands/utils.ts`; a `--json` caller
- *   gets the parseable fail-loud error instead.
- */
 export function signInLaunchDecision(
   input: { recoverable: number; tty: boolean; json: boolean },
 ): 'launch' | 'fail-loud' {
@@ -260,7 +231,7 @@ export function signInLaunchDecision(
 export function noVerifiedUsageDecision(
   input: { tty: boolean; json: boolean; headless: boolean },
 ): 'picker' | 'fail-loud' {
-  // Stale or absent usage may prompt only an attended non-JSON TTY; automation must fail loud rather than guess.
+
   const humanPresent = input.tty && !input.json && !input.headless;
   return humanPresent ? 'picker' : 'fail-loud';
 }
@@ -270,7 +241,7 @@ export async function pickSignInLaunchVersion(
   recoverable: RotateCandidate[],
   quiet = false,
 ): Promise<string | null> {
-  // An all-throttled candidate set must never reach the harness login flow.
+
   if (recoverable.length === 0) return null;
 
   if (recoverable.length > 1) {
@@ -306,10 +277,6 @@ export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCan
   }
 
   const choices = buildRunAccountChoices(candidates, getGlobalDefault(agent));
-  // "Selectable" is broader than "ready": an auth-blocked row is pickable so the
-  // launch can carry you into the harness's login (RUSH-2334). Only offer the
-  // bail-out row when literally nothing can be chosen — i.e. every account is
-  // throttled, which no amount of signing in fixes.
   const hasSelectableAccount = choices.some((choice) => !choice.disabled);
   const needsSignIn = choices.some((choice) => choice.signInRequired);
   const promptChoices = choices.map(

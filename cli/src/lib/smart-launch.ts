@@ -45,7 +45,7 @@ export function sampleWeighted(
 }
 
 export function listOnlineDeviceNames(localName: string = localMachineId()): string[] {
-  // Automatic placement excludes personal/desktop devices; after a worker is marked the default narrows to workers unless auto.pool=all.
+
   const names = new Set<string>([normalizeHost(localName)]);
   try {
     const reg = loadDevicesSync();
@@ -138,11 +138,11 @@ export async function resolveDeviceAuto(
     preferred?: ReadonlySet<string>;
   } = {},
 ): Promise<DeviceAutoPlan> {
-  // Local receives the same health/readiness checks; implicit inclusion requires auto-pool membership.
+
   const local = normalizeHost(opts.localMachine ?? localMachineId());
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
   if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);
-  // An empty live-auto candidate pool fails loud.
+
   if (pool.length === 0) throw new Error(formatEmptyAutoPoolError());
 
   const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
@@ -194,7 +194,7 @@ export function resolveDeviceAffinity(opts: DeviceAffinityOptions = {}): DeviceA
     (opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost),
   );
   if (eligible.size === 0) {
-    // An explicitly supplied empty affinity list retains the legacy local behavior.
+
     if (usingDefaultPool) throw new Error(formatEmptyAutoPoolError());
     eligible.add(local);
   }
@@ -278,7 +278,7 @@ export async function applyDeviceAutoToOptions(
   const accountPickerRequested = deps.accountPickerRequested ?? false;
   const resolve: (accountPicker: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan> =
     deps.resolve ?? ((accountPicker) => resolveDeviceAuto(deps.agent, { accountPicker }));
-  // Placement failures propagate; never rewrite unresolved auto placement into a local launch.
+
   const plan = await resolve(accountPickerRequested);
   const concrete = plan.host;
   for (const k of HOST_SLOTS) {

@@ -103,8 +103,6 @@ describe('routineDeviceIndex', () => {
   });
 
   it('reports a corrupt device document instead of throwing, and keeps the rest', async () => {
-    // devicesWithRoutineEnabled throws here. For a listing that would blank every
-    // row over one unreadable peer file, so the index collects and continues.
     vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
     writeDevice('zion', 'routines:\n  - watchdog\n');
     writeDevice('broken', 'routines: not-a-list\n');
@@ -120,12 +118,10 @@ describe('routineDeviceIndex', () => {
 
   it('normalizes exactly like the writers, so a duplicate cannot double-count', async () => {
     vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
-    // Written to THIS device so both readers describe the same document.
     writeDevice('test-host', 'routines:\n  - watchdog\n  - watchdog\n  - "  watchdog  "\n');
     const { routineDeviceIndex, enabledRoutineNames } = await load();
 
     expect(routineDeviceIndex().byRoutine.get('watchdog')).toEqual(['test-host']);
-    // The fleet index and this device's own view must not disagree.
     expect(enabledRoutineNames()).toEqual(['watchdog']);
   });
 });

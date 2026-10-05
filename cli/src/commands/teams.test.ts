@@ -107,8 +107,6 @@ function run(
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_NO_USAGE_TRACK: '1',
       AGENTS_SKIP_MIGRATION: '1',
-      // Vitest's global setup redirects the real log; point the spawned CLI at
-      // this test home's log so assertions read the right file.
       AGENTS_EVENTS_PATH: path.join(home, '.agents', 'events.jsonl'),
     },
   });
@@ -151,7 +149,6 @@ describe('teams list output modes', () => {
     });
   });
 
-  // win32: bun CLI cold-start often exceeds the 2.5s no-probe budget (RUSH-2215).
   it.skipIf(process.platform === 'win32')('does not probe unreachable remote teammates for JSON list output', () => {
     const { stdout, status, error } = run(
       ['teams', 'list', '--json'],
@@ -194,12 +191,8 @@ describe('printFeedHint', () => {
       console.log = orig;
     }
     const out = lines.join('\n');
-    // Milestones live on the feed, NOT in `teams status` (which shows transcript
-    // activity) — pin the correct watch command so the hint can't drift back.
     expect(out).toContain('agents feed timeline');
-    // Team progress is the separate, team-scoped command.
     expect(out).toContain('agents teams status pricing-page');
-    // Anti-spam framing (RUSH-2250): milestones, not every step.
     expect(out).toContain('IMPORTANT milestones');
   });
 });

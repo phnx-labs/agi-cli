@@ -255,8 +255,8 @@ function projectDirList(
     joinSubpath: boolean;
   },
 ): string[] {
-  // Spawn paths may join declared subpaths; remote resolution keeps paths that
-  // do not exist on this machine instead of filtering another host's checkout.
+
+
   const raw = [
     opts.primary,
     ...(def.repos ?? []).map((r) => {
@@ -279,7 +279,7 @@ function projectDirList(
 }
 
 export function projectRepoTargetsForDef(def: ProjectDef): ProjectRepoTarget[] {
-  // Repository probes anchor at repo roots, not narrowed spawn subpaths, and keep missing targets.
+
   const targets: ProjectRepoTarget[] = [];
   const seen = new Set<string>();
 
@@ -320,7 +320,7 @@ interface ProjectRootAbs {
 }
 
 function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
-  // A narrowed defaultPath is the strong claim; its enclosing root is only fallback attribution.
+
   const out: ProjectRootAbs[] = [];
   const push = (name: string, raw: string | undefined) => {
     if (!raw) return;
@@ -364,7 +364,7 @@ function isUnder(child: string, parent: string): boolean {
 }
 
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
-  // Longest strong multi-repo/subpath ownership wins before any weak umbrella root.
+
   if (!cwd) return undefined;
   const abs = path.resolve(expandLocalHome(cwd));
   let best: string | undefined;
@@ -389,7 +389,7 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
 let projectDefsMemo: { stamp: string; defs: ProjectDef[] } | null = null;
 
 function projectDefsStamp(): string | null {
-  // This feeds a 2 Hz path: per-file mtime+size catches retargeting, while unreadable state is uncached.
+
   try {
     const dir = getProjectsDir();
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yaml')).sort();
@@ -425,7 +425,7 @@ export function confirmedProjectForCwd(
   cwd: string | undefined | null,
   defs: ProjectDef[] = listProjectDefsCached(),
 ): string | undefined {
-  // Confirmed means a registered definition; best-effort repository keys belong only to resolveProjectNameForCwd.
+
   if (!cwd) return undefined;
   return projectNameForCwd(cwd, defs);
 }
@@ -441,7 +441,7 @@ export function resolveDefinedProjectPath(
   forRemote: boolean,
 ): string | undefined {
   if (worktree) {
-    // @worktree paths live under the repo root, never a narrowed defaultPath.
+
     const rootRaw = def.root ?? def.defaultPath;
     if (!rootRaw) return undefined;
     const wt = `${rootRaw}/.agents/worktrees/${worktree}`;

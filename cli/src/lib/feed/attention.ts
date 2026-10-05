@@ -168,7 +168,7 @@ function kindFromNotification(notificationType: string | undefined): AttentionKi
     case 'elicitation_dialog':
       return 'question';
     case 'idle_prompt':
-      // Idle is not evidence that the agent requested a decision.
+
       return undefined;
     default:
       return 'unverified';
@@ -197,7 +197,7 @@ function resolvedByLaterEvidence(block: OpenBlock, session: ActiveSession): bool
 }
 
 function permissionVerifiable(block: OpenBlock, session: ActiveSession, nowMs: number): boolean {
-  // Missing cursor evidence is trusted only inside the bounded prompt window.
+
   if (block.sourceCursor?.lastActivityMs != null && session.lastEventMs != null) return true;
   const openedMs = Date.parse(block.ts);
   return Number.isFinite(openedMs) && nowMs - openedMs < UNVERIFIED_PROMPT_AGE_MS;
@@ -303,7 +303,7 @@ function resolutionFenceMs(resolution: AttentionResolution): number | undefined 
 }
 
 function coveredByResolution(candidate: AttentionCandidate, resolution?: AttentionResolution): boolean {
-  // A tombstone covers its generation and stale cursors, but not a strictly newer turn.
+
   if (!resolution) return false;
   if (resolution.blockId !== blockIdForSession(candidate.item.sessionId)) return false;
   if (candidate.generation === resolution.generation) return true;

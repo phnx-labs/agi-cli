@@ -1,11 +1,3 @@
-/**
- * View command for inspecting installed agents, versions, accounts, and resources.
- *
- * Implements `agents view` -- shows installed agent CLIs with version info,
- * account emails, usage stats, and active status. When given an agent@version
- * argument, displays a detailed breakdown of commands, skills, MCP servers,
- * rules, hooks, and promptcuts synced to that version.
- */
 import { Option } from 'commander';
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
@@ -98,22 +90,14 @@ import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 
-/** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
 
-/**
- * The account column with the durable native-account name folded in: when the
- * signed-in identity of `agentId` has been named via `agents accounts add`,
- * render `work · email` instead of the bare email. Falls back to the plain
- * display label when the identity is unnamed.
- */
 export function namedAccountColumnLabel(agentId: AgentId, info: AccountInfo | undefined): string {
   const display = accountColumnLabel(info);
   const saved = findNativeAccountByIdentity(readMeta(), agentId, info);
   return saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display;
 }
 
-/** Human account identity; release labels belong only in installation diagnostics. */
 export function nativeAccountViewLabel(row: Pick<NativeAccountCatalogRow, 'name' | 'display'>): string {
   return row.name && row.name !== row.display ? `${row.name} · ${row.display}` : row.display;
 }
@@ -123,12 +107,6 @@ export interface AccountOrderedVersion {
   email: string | null;
 }
 
-/**
- * Human `agents view` row order: selected default first, then email-bearing
- * accounts alphabetically, then installs whose account has no email. Version
- * descending is the deterministic tie-breaker and preserves the old order for
- * every non-email harness.
- */
 export function compareAccountOrderedVersions(
   a: AccountOrderedVersion,
   b: AccountOrderedVersion,
@@ -150,29 +128,16 @@ export function compareAccountOrderedVersions(
   return compareVersions(b.version, a.version);
 }
 
-/**
- * Join fixed view columns with a consistent two-space gutter. Empty trailing
- * columns are dropped so a row without an auth chip does not grow a dangling
- * gutter, but interior empties stay padded so later columns stay aligned.
- */
 export function joinViewColumns(cols: string[]): string {
-  // Trim only pure-trailing empty strings so auth/status can be absent without
-  // shifting earlier columns for rows that do carry them.
   let end = cols.length;
   while (end > 0 && cols[end - 1] === '') end--;
   return cols.slice(0, end).join('  ');
 }
 
-/**
- * Custom harnesses (the `~/.agents/profiles/*.yml` bundles), sorted by name.
- * YAMLs that fail validation are silently skipped by `listProfiles`, so this
- * never throws on a malformed file.
- */
 function getHarnesses(): ProfileSummary[] {
   return listProfiles().map(profileSummary);
 }
 
-/** Version-first label: "<version> (forked from <host>[, tracks default])" */
 function harnessVersionLabel(harness: ProfileSummary, globalDefault: string | null): string {
   const version = harness.hostVersion ?? globalDefault;
   if (version) {
@@ -186,7 +151,6 @@ function harnessVersionLabel(harness: ProfileSummary, globalDefault: string | nu
   return chalk.gray(`(forked from ${harness.agent})`);
 }
 
-/** One-hop or two-hop fork origin label for the harness block header. */
 function buildHarnessOrigin(harness: ProfileSummary, allHarnesses: ProfileSummary[]): string {
   if (!harness.forkedFrom || harness.forkedFrom === harness.agent) return 'custom';
   const parent = allHarnesses.find((h) => h.name === harness.forkedFrom);
@@ -196,12 +160,6 @@ function buildHarnessOrigin(harness: ProfileSummary, allHarnesses: ProfileSummar
   return `custom · forked from ${harness.forkedFrom}`;
 }
 
-/**
- * Resolve a resource path to something the IDE can open inline. When `p` is a
- * directory, OSC 8 file:// links cause IDEs (Cursor/VS Code) to open it as a
- * new workspace window; pointing at the bundle's marker file (SKILL.md /
- * WORKFLOW.md / AGENT.md) opens in the current window instead.
- */
 function linkTarget(p: string): string {
   try {
     if (!fs.statSync(p).isDirectory()) return p;
@@ -263,7 +221,6 @@ interface ResourceWithSync {
   description?: string;
 }
 
-/** Per-section filter flags. When any are true, only those sections render. */
 export interface ViewSectionFilter {
   commands?: boolean;
   skills?: boolean;
@@ -279,11 +236,6 @@ export interface ViewSectionFilter {
 const SECTION_KEYS = ['commands', 'skills', 'mcp', 'workflows', 'plugins', 'rules', 'hooks', 'promptcuts', 'clis'] as const;
 type SectionKey = (typeof SECTION_KEYS)[number];
 
-/**
- * Decide whether a section should render given the filter. If no flags are set,
- * everything renders (current behavior). If any flag is set, only those sections
- * render — flags are additive.
- */
 function shouldRenderSection(key: SectionKey, filter: ViewSectionFilter | undefined): boolean {
   if (!filter) return true;
   const anySet = SECTION_KEYS.some((k) => filter[k]);
@@ -291,7 +243,6 @@ function shouldRenderSection(key: SectionKey, filter: ViewSectionFilter | undefi
   return filter[key] === true;
 }
 
-/** Trim a description to a column-friendly snippet. Strips newlines, collapses whitespace. */
 export function summarizeDescription(desc: string | undefined, maxLen = 80): string {
   if (!desc) return '';
   const cleaned = desc.replace(/\s+/g, ' ').trim();
@@ -305,16 +256,6 @@ export function descriptionForPrefix(desc: string | undefined, prefix: string): 
   return summarizeDescription(desc, budget);
 }
 
-/**
- * Render custom harnesses as their own agent-type blocks — peers of the native
- * Claude/Codex blocks, not indented rows under the host CLI that executes them.
- * `agents run <name>` already treats a custom harness like a native agent id, so
- * `agents view` lists it the same way: a bold name header, then one row carrying
- * the model, the account/auth state, and the host it runs on.
- *
- * `installedHosts` is the set of agent ids with a usable install; a harness whose
- * host is missing is flagged rather than silently listed as runnable.
- */
 export function renderHarnessBlocks(
   harnesses: ProfileSummary[],
   installedHosts: Set<AgentId>,
@@ -345,27 +286,13 @@ export function renderHarnessBlocks(
   }
 }
 
-/**
- * Show installed versions for one or all agents.
- * Called when: `agents view` or `agents view claude`
- */
-/** Color the source-layer tag for a host CLI, matching the rules-section convention. */
 function hostCliSourceTag(source: string): string {
   if (source === 'project') return chalk.blue('[project]');
   if (source === 'user') return chalk.cyan('[user]');
   if (source === 'system') return chalk.gray('[system]');
-  // Anything else is an extra repo, tagged by its alias.
   return chalk.magenta(`[${source}]`);
 }
 
-/**
- * Render the host-CLI section. Host CLIs are host-global: declared in any
- * DotAgents repo's `clis/` (project > user > system > extras), installed to PATH
- * rather than copied into a version home. They render identically in the overview
- * and in a per-agent detail view because every agent on the host shares them.
- * The source tag shows which repo layer declared each — so user-level and
- * extra-repo manifests are visibly supported.
- */
 function renderHostClisSection(cwd: string): void {
   const { statuses, errors } = listCliStatus(cwd);
   console.log(chalk.bold('\nHost CLIs\n'));
@@ -393,12 +320,6 @@ function renderHostClisSection(cwd: string): void {
   }
 }
 
-/**
- * The USAGE-READ-2 decision, isolated from its runtime inputs so it can be
- * tested directly: a usage read may fall through to the interactive OAuth login
- * ONLY for a foreground human render on a headed device (`personal` or
- * `desktop`). Both conditions are required — role alone is not sufficient.
- */
 export function allowInteractiveUsageLogin(
   role: ConfiguredDeviceRole | undefined,
   isTTY: boolean,
@@ -406,18 +327,6 @@ export function allowInteractiveUsageLogin(
   return isHeadedDeviceRole(role) && isTTY === true;
 }
 
-/**
- * Whether this `agents view` invocation may fall through to the interactive
- * OAuth login for a usage read (USAGE-READ-2). True only for a foreground human
- * render on a headed device (`personal` or `desktop`): the interactive login is
- * the sole credential carrying the `user:profile` scope the usage endpoint needs,
- * and a human
- * running one command is not the unattended-loop revocation risk RUSH-1822
- * fixed. The `--json` path never reaches these render functions (it returns
- * early via `collectAgentsJson`), and a non-TTY (piped/scripted) run is excluded
- * here too, so a machine reader can never silently acquire the interactive
- * credential — role alone is not sufficient.
- */
 function usageAllowInteractiveLogin(): boolean {
   return allowInteractiveUsageLogin(selfConfiguredDeviceRole(), process.stdout.isTTY === true);
 }
@@ -432,27 +341,11 @@ async function showInstalledVersions(
   const spinner = ora({ text: spinnerText, isSilent: !process.stdout.isTTY }).start();
 
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
-  // Overview caps meter count; single-agent view shows every blocking window.
   const usageWindowCap = filterAgentId ? undefined : OVERVIEW_MAX_USAGE_WINDOWS;
 
-  // A globally-installed CLI is superseded only by a NORMAL managed version — that
-  // is when agents-cli owns the launcher and a "global" row would just be our own
-  // shim reported back. `--isolated` promises the opposite: no default, no bare
-  // shim, no adopted launcher, the user's own `~/.<agent>` untouched. So an
-  // isolated-only install must not make that still-live global CLI disappear from
-  // `agents view` — the two are genuinely separate installs and both get listed.
   const hasNonIsolatedVersion = (agentId: AgentId): boolean =>
     listInstalledVersions(agentId).some((v) => !isVersionIsolated(agentId, v));
 
-  // Every `cliStates` read in this function feeds the "Not Managed by Agents CLI"
-  // block, so resolve it the way that block means it: the user's own CLI on PATH.
-  // `getCliState` would answer with a version-dir install — including an isolated
-  // copy that is deliberately absent from PATH — and print it as "(global)".
-  //
-  // Resolved only for agents that can actually reach that block. `getCliState`
-  // deliberately avoids subprocesses for a version-managed agent, and PATH
-  // resolution costs a `<cli> --version` spawn on a cold cache — so probing an
-  // agent whose global row is suppressed anyway would be pure added latency.
   const cliStates = Object.fromEntries(
     await Promise.all(
       agentsToShow
@@ -461,18 +354,8 @@ async function showInstalledVersions(
     )
   ) as Partial<Record<AgentId, CliState>>;
   const showPaths = !!filterAgentId && viewOpts?.versions === true;
-  // A filtered native view is about that native harness's installed versions.
-  // Custom forks are standalone agent types and only belong in the overview.
   const harnesses = filterAgentId ? [] : getHarnesses();
 
-  // Auto-heal stale versioned aliases. Pre-v2 aliases (e.g. pre-CLAUDE_CONFIG_DIR
-  // claude shims) silently route login through the default version's symlinked
-  // home, so `agents view` would never reflect the right account. Regenerate on
-  // sight — it's safe, idempotent, and fixes the symptom exactly where the user
-  // notices it.
-  // Yield between agents so the heal loop doesn't block the event loop as one
-  // long sync burst — per-version readFileSync+writeFileSync across 5 agents
-  // can otherwise stall spinners and stdout flushes.
   const healedAliases: string[] = [];
   for (const agentId of agentsToShow) {
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -483,11 +366,7 @@ async function showInstalledVersions(
       }
     }
   }
-  // Shim healing is silent — users don't need to know about internal repairs
 
-  // Pre-fetch account info for all versions in parallel. Spinner stays up through
-  // account + usage so a multi-account cold path doesn't leave a blank terminal
-  // after "Checking…" vanishes (the hang the screenshots caught).
   spinner.text = filterAgentId
     ? `Loading ${agentLabel(filterAgentId)} accounts...`
     : 'Loading accounts and usage...';
@@ -505,8 +384,6 @@ async function showInstalledVersions(
         }))
       );
     }
-    // Mirrors the classification below: fetch the global account whenever the
-    // global install will still be rendered (no versions at all, or isolated-only).
     if (!hasNonIsolatedVersion(agentId)) {
       globalInfoFetches.push(
         getAccountInfo(agentId).then((info) => ({
@@ -520,7 +397,6 @@ async function showInstalledVersions(
   const infoResults = await Promise.all(infoFetches);
   const globalInfoResults = await Promise.all(globalInfoFetches);
 
-  // Build lookup: agentId:version -> AccountInfo
   const infoMap = new Map<string, AccountInfo>();
   for (const { agentId, version, info } of infoResults) {
     infoMap.set(`${agentId}:${version}`, info);
@@ -530,11 +406,6 @@ async function showInstalledVersions(
     globalInfoMap.set(agentId, info);
   }
 
-  // Usage status, plan, and overage credits belong to the same underlying account
-  // or org scope, not a specific installed version. Version homes cache those
-  // values independently, so older installs can show stale values. Reuse the
-  // freshest cache entry per stable usage identity and keep lastActive per version.
-  // Goes through the unified usage core (SWR cache + concurrency cap + timeout).
   const { canonicalByUsageKey, usageByKey } = await getUsageInfoByIdentity([
     ...infoResults.map(({ agentId, home, version, info }) => ({
       agentId,
@@ -562,20 +433,12 @@ async function showInstalledVersions(
     if (!canon) return info;
     return {
       ...info,
-      // Prefer a plan the live usage fetch surfaced (Kimi reports membership
-      // tier in /usages; its local auth file has none) and fall back to the
-      // account-derived plan (Claude's billingType).
       plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
-      // Throttle state comes from the live usage windows, not the pay-as-you-go
-      // overage flag that AccountInfo.usageStatus used to carry. A maxed window
-      // means rate-limited; no snapshot means no badge. See
-      // deriveUsageStatusFromSnapshot.
       usageStatus: deriveUsageStatusFromSnapshot(usageByKey.get(key)?.snapshot),
       overageCredits: canon.overageCredits,
     };
   };
 
-  // Separate version-managed from globally-installed agents
   const versionManaged: AgentId[] = [];
   const globallyInstalled: AgentId[] = [];
 
@@ -587,18 +450,11 @@ async function showInstalledVersions(
       versionManaged.push(agentId);
     }
     if (cliState?.installed) {
-      // Isolated-only installs sit alongside the global CLI rather than replacing it.
       if (!hasNonIsolatedVersion(agentId)) globallyInstalled.push(agentId);
     }
   }
-  // A custom harness runs through its host CLI, so it is only launchable when
-  // that host has an install of some kind.
   const installedHosts = new Set<AgentId>([...versionManaged, ...globallyInstalled]);
 
-  // For self-updating global-binary agents (droid) the on-disk version-dir name
-  // is a stale label — the real version is whatever `<cli> --version` reports.
-  // Resolve it once so every row/width pass shows the live version, while the
-  // per-version home + account lookups keep using the real dir name.
   const liveVersionByAgent = new Map<AgentId, string>();
   await Promise.all(
     versionManaged
@@ -611,16 +467,11 @@ async function showInstalledVersions(
   const displayVersion = (agentId: AgentId, dirVersion: string): string =>
     liveVersionByAgent.get(agentId) ?? readInstallation(agentId, dirVersion)?.releaseVersion ?? dirVersion;
 
-  // Uncolored row label, shared by the width pass and the render so padding lines
-  // up. An isolated copy is never the global default (installing one deliberately
-  // records no default), so the two tags can't collide.
   const versionRowLabel = (agentId: AgentId, version: string, globalDefault: string | null): string => {
     const release = displayVersion(agentId, version);
     const shown = release === version ? version : `${version} → ${release}`;
     if (version === globalDefault) return `${shown} (default)`;
     if (isVersionIsolated(agentId, version)) {
-      // The isolated default is what a bare `agents run <agent>` reaches, so it is
-      // worth distinguishing from the other isolated copies sitting beside it.
       return getIsolatedDefault(agentId) === version
         ? `${shown} (isolated default)`
         : `${shown} (isolated)`;
@@ -628,7 +479,6 @@ async function showInstalledVersions(
     return shown;
   };
 
-  // Show version-managed agents
   if (versionManaged.length > 0 && !viewOpts?.versions) {
     const catalog = await loadAccountCatalog();
     const note = secretsUnavailableNote(catalog);
@@ -641,7 +491,7 @@ async function showInstalledVersions(
         if (selectUpdateStrategy(agentId).transactional) {
           updateLabel = `automatic updates ${isAutoUpdateEnabledForAgent(agentId) ? 'on' : 'off'}`;
         }
-      } catch { /* unsupported updater: keep the truthful manual label */ }
+      } catch {  }
       console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.gray(` · ${updateLabel}`)}`);
       if (accounts.length > 0 || providers.length > 0) {
         console.log(renderAccountRows(accounts, {
@@ -669,19 +519,14 @@ async function showInstalledVersions(
     if (filterAgentId) {
       console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]`));
     }
-    // Overview renders the same account rows with footer:false, so both paths
-    // need the legend the shared renderer would otherwise have printed.
     console.log(chalk.gray(`  ${ACCOUNT_LISTING_LEGEND}\n`));
   }
   if (versionManaged.length > 0 && viewOpts?.versions) {
-    // Calculate column widths across all agents for alignment
     let maxVerLabel = 0;
     let maxEmail = 0;
     let maxPlanWidth = 3;
     let maxUsageWidth = 0;
     let maxStatusWidth = 0;
-    // The configured model sits right after the version, at the same priority.
-    // Resolve once here (fs + catalog reads) and reuse in the render loop.
     let maxModelWidth = 0;
     const modelByKey = new Map<string, string>();
     for (const agentId of versionManaged) {
@@ -701,8 +546,6 @@ async function showInstalledVersions(
         }
       }
     }
-    // Second pass: compute max visible usage + status widths (now that maxPlanWidth is settled).
-    // stringWidth (not String.length) so chalk + block-bar glyphs pad correctly.
     for (const agentId of versionManaged) {
       const versions = listInstalledVersions(agentId);
       for (const v of versions) {
@@ -729,19 +572,11 @@ async function showInstalledVersions(
 	      const runStrategy = getConfiguredRunStrategy(agentId);
 
 	      const strategyLabel = chalk.gray(` (${runStrategy})`);
-	      // `(no default)` is a nudge to go set one. It would read as a contradiction
-	      // directly above a row tagged `(isolated default)`, and it would be bad
-	      // advice besides: for an isolated-only agent the pointer below IS how a
-	      // bare `agents run <agent>` resolves, and setting a global default is
-	      // precisely what `--isolated` exists to avoid.
 	      const noDefaultLabel = !globalDefault && !getIsolatedDefault(agentId)
 	        ? chalk.yellow(' (no default)')
 	        : '';
 	      console.log(`  ${chalk.bold(agentLabel(agentId))}${strategyLabel}${noDefaultLabel}`);
 
-	      // Account information is already loaded above. Keep the selected default
-	      // first, then make multi-account installs scannable by email. Harnesses
-	      // without email identities retain their prior version-descending order.
       const sortedVersions = versions
         .map((version) => ({
           version,
@@ -768,13 +603,7 @@ async function showInstalledVersions(
         const usageKey = getUsageLookupKey(vInfo);
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
 
-        // Fixed columns for every signed-in row so status / lastActive / auth
-        // stay vertically aligned across agents — even when this row has no
-        // usage bars or no rate-limit badge. Skipping empty columns mid-table
-        // was what made the multi-agent view look unjustified next to
-        // `agents view claude`.
         const parts = [`    ${label}`];
-        // Configured model — same priority as the version, right beside it.
         if (maxModelWidth > 0) {
           const model = modelByKey.get(`${agentId}:${version}`) ?? '';
           parts.push(chalk.yellow(padToWidth(model, maxModelWidth)));
@@ -788,37 +617,21 @@ async function showInstalledVersions(
           viewUsageSummaryOptions(agentId, signedIn, usageInfo, usageWindowCap, version),
         );
         const hasUsage = usageStr.length > 0;
-        // Only show lastActive for versions with an actual logged-in account.
-        // Otherwise it reflects install time (misleading "just now" for fresh installs).
         const lastActive = vInfo && hasEmail ? formatLastActive(vInfo.lastActive) : '';
         const activeStr = lastActive;
         const hasActive = activeStr.length > 0;
-        // The model now has its own column above; keep only the run mode here.
         const runDefaults = resolveRunDefaults(agentId, version);
         const runDefaultBits: string[] = [];
         if (runDefaults.mode) runDefaultBits.push(`mode:${runDefaults.mode}`);
         if (runDefaults.effort) runDefaultBits.push('effort:' + runDefaults.effort);
 
         if (!hasEmail && !hasUsage && !signedIn) {
-          // No per-version credential. That is NOT the same as unusable: Claude
-          // Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` when the
-          // environment carries one, and a run then succeeds against whatever
-          // account minted that token — while `signedIn` (agents.ts: `!!email`,
-          // read from this version home's `.claude.json`) stays false because no
-          // account was ever written here. Reporting that as "logged out" reads
-          // as a locked-out account and sends people hunting a login that is not
-          // missing; naming the ambient token instead points at the real state —
-          // every version on this box resolves to the SAME account, so balanced
-          // rotation across them is not actually rotating.
           parts.push(chalk.gray(
             ambientClaudeToken(agentId)
               ? '(no per-version login — using ambient CLAUDE_CODE_OAUTH_TOKEN)'
               : '(logged out — log in with: ' + loginHint(agentId) + ')',
           ));
         } else {
-          // Always emit account / usage / status / lastActive columns once any
-          // signed-in row exists in the table (widths are global). Empty cells
-          // are space-padded so later columns do not drift left.
           const display = namedAccountColumnLabel(agentId, vInfo);
           parts.push(display ? chalk.cyan(padToWidth(display, maxEmail)) : ' '.repeat(maxEmail));
           if (maxUsageWidth > 0) {
@@ -841,7 +654,6 @@ async function showInstalledVersions(
         }
       }
 
-      // Check for project override
       const projectVersion = getProjectVersionFromCwd(agentId);
       if (projectVersion && projectVersion !== globalDefault) {
         console.log(chalk.cyan(`    -> ${projectVersion} (project)`));
@@ -851,9 +663,6 @@ async function showInstalledVersions(
     }
   }
 
-  // Custom harnesses sit in the same list as the native ones — they are run the
-  // same way (`agents run <name>`), so they read as their own agent type rather
-  // than as an indented row under whichever host CLI executes them.
   const byokMap = new Map<string, ByokUsageResult>();
   const byKeychainItem = new Map<string, { profile: Profile; names: string[] }>();
   for (const h of harnesses) {
@@ -879,19 +688,15 @@ async function showInstalledVersions(
   }
   renderHarnessBlocks(harnesses, installedHosts, showPaths, byokMap.size > 0 ? byokMap : undefined);
 
-  // Show globally installed (not managed) agents
   if (globallyInstalled.length > 0) {
     console.log(chalk.bold('Not Managed by Agents CLI\n'));
 
-    // Calculate max version label width for alignment
     const globalMaxVerLabel = Math.max(
       ...globallyInstalled.map((agentId) => {
         const cliState = cliStates[agentId];
         return `${cliState?.version || 'installed'} (global)`.length;
       })
     );
-    // Pre-pass: max badge/usage/email widths so columns line up the same way
-    // the version-managed block does (stringWidth for chalk-aware padding).
     let gMaxStatusWidth = 0;
     let gMaxUsageWidth = 0;
     let gMaxEmail = 0;
@@ -949,15 +754,12 @@ async function showInstalledVersions(
       if (agent.npmPackage && cliState?.version) {
         console.log(chalk.gray(`    Manage: agents add ${agentId}@${cliState.version} -y`));
       } else if (!agent.npmPackage && cliState?.installed) {
-        // installScript-based agent already on PATH — direct users to adopt the
-        // existing install with `agents import` instead of re-running curl.
         console.log(chalk.gray(`    Adopt:  agents import ${agentId}`));
       }
       console.log();
     }
   }
 
-  // If filtering to a specific agent and not found
   if (
     filterAgentId &&
     versionManaged.length === 0 &&
@@ -968,7 +770,6 @@ async function showInstalledVersions(
     console.log();
   }
 
-  // No agents installed at all
   if (
     versionManaged.length === 0 &&
     globallyInstalled.length === 0 &&
@@ -980,11 +781,6 @@ async function showInstalledVersions(
     console.log();
   }
 
-  // `--refresh` used to print a table that looked fully refreshed no matter how
-  // many accounts it had failed to reach, so a box whose every Claude credential
-  // had expired rendered identically to a healthy one — the bars beside each row
-  // came from a cache that the run had not managed to update. Name the accounts
-  // it could not confirm, and why.
   if (viewOpts?.forceRefresh) {
     const unrefreshed: string[] = [];
     for (const [key, usage] of usageByKey) {
@@ -1000,17 +796,12 @@ async function showInstalledVersions(
     }
   }
 
-  // Host CLIs are host-global, not per-agent — show them once in the overview.
   if (!filterAgentId) {
     renderHostClisSection(process.cwd());
   }
 
 }
 
-/**
- * Show detailed resources for a specific agent version.
- * Called when: `agents view claude@2.0.65` or `agents view claude@default`
- */
 async function showAgentResources(
   agentId: AgentId,
   requestedVersion: string,
@@ -1022,7 +813,6 @@ async function showAgentResources(
   const agentsDir = getAgentsDir();
   const cliStates = await getAllCliStates();
 
-  // Resolve 'default' to actual version
   let version: string | null = null;
   if (requestedVersion === 'default') {
     version = getGlobalDefault(agentId);
@@ -1045,12 +835,9 @@ async function showAgentResources(
   }
   const home = getVersionHomePath(agentId, version);
 
-  // Git sync status if ~/.agents/ is a git repo (shared loader — see
-  // loadResourceSyncData / resolveResourceSyncState, reused by --json --resources).
   const { hasGitRepo, commands: commandsSync, skills: skillsSync, hooks: hooksSync, memory: memorySync } =
     await loadResourceSyncData();
 
-  // Collect resources for the specific version
   interface SkillError {
     name: string;
     path: string;
@@ -1087,7 +874,6 @@ async function showAgentResources(
     })),
     skills: resources.skills.map(r => ({
       ...r,
-      // ruleCount of 0 is noise — every skill has 0 unless it ships subrules, which is rare.
       ruleCount: r.ruleCount && r.ruleCount > 0 ? r.ruleCount : undefined,
       syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'skills', skillsSync),
     })),
@@ -1106,7 +892,6 @@ async function showAgentResources(
 
   spinner.stop();
 
-  // Render helper for resources
   function renderSection(
     title: string,
     items: ResourceWithSync[]
@@ -1132,7 +917,6 @@ async function showAgentResources(
       const linkedName = r.path ? termLink(r.name, linkTarget(r.path)) : r.name;
       let display = nameColor(linkedName);
       if (r.ruleCount !== undefined) display += chalk.gray(` (${r.ruleCount} rules)`);
-      // Source annotation: project overrides user, user overrides system
       const sourceTag = r.scope === 'project' ? chalk.blue('[project]')
         : r.scope === 'user' ? chalk.cyan('[user]')
         : chalk.gray('[system]');
@@ -1145,9 +929,6 @@ async function showAgentResources(
     }
   }
 
-  // Render promptcuts (cross-agent, not per-version). Shortcuts are layered
-  // across system + user files with user precedence; the displayed file path
-  // is whichever is "live" — user if it exists, else system.
   function renderPromptcuts(): void {
     console.log(chalk.bold(`\nPromptcuts\n`));
     const merged = readMergedPromptcuts();
@@ -1162,8 +943,6 @@ async function showAgentResources(
 
   const anyFilterSet = filter && SECTION_KEYS.some((k) => filter[k]);
 
-  // 1. Agent CLI info — skip the header entirely when the user asked for a
-  // specific section. They want "nothing more or less."
   if (!anyFilterSet) {
     console.log(chalk.bold('Agent CLIs\n'));
     const accountInfo = await getAccountInfo(agentId, home);
@@ -1176,7 +955,6 @@ async function showAgentResources(
     const accountLabel = accountColumnLabel(accountInfo);
     const emailStr = accountLabel ? chalk.cyan(`  ${accountLabel}`) : '';
     const status = chalk.green(version);
-    // Configured model sits right beside the version, same priority (no label).
     const configuredModel = resolveConfiguredModel(agentId, version);
     const modelStr = configuredModel ? chalk.yellow(`  ${configuredModel.model}`) : '';
     const usageStr = formatUsageSummary(usageInfo.snapshot?.plan ?? accountInfo.plan, null);
@@ -1192,14 +970,12 @@ async function showAgentResources(
     }
   }
 
-  // 2. Resources
   if (shouldRenderSection('commands', filter)) {
     renderSection('Commands', agentData.commands);
   }
   if (shouldRenderSection('skills', filter)) {
     renderSection('Skills', agentData.skills);
 
-    // Show skill parse errors only when skills section is visible
     if (agentData.skillErrors.length > 0) {
       console.log(`\n  ${chalk.red('Skill Errors')}:`);
       for (const err of agentData.skillErrors) {
@@ -1245,7 +1021,6 @@ async function showAgentResources(
     }
   }
 
-  // Rules section with subrules breakdown
   function renderRulesSection(): void {
     console.log(chalk.bold('\nRules\n'));
     const items = agentData.memory;
@@ -1258,13 +1033,11 @@ async function showAgentResources(
     const versionStr = agentData.version ? ` (${agentData.version})` : '';
     console.log(`  ${chalk.bold(agentData.agentName)}${chalk.gray(versionStr)}:`);
 
-    // Get composed subrules for the user scope
     let composedSubrules: ComposedSubrule[] = [];
     try {
       const composed = composeRulesFromState({ cwd });
       composedSubrules = composed.subrules;
     } catch {
-      // No preset configured or rules.yaml missing — show rules without subrule breakdown
     }
 
     for (const r of items) {
@@ -1284,7 +1057,6 @@ async function showAgentResources(
       const syncStr = r.syncState ? chalk.gray(` [${r.syncState}]`) : '';
       console.log(`    ${display}${syncStr}`);
 
-      // Show subrules for user-scope rules (the compiled CLAUDE.md)
       if (r.scope === 'user' && composedSubrules.length > 0) {
         for (const sub of composedSubrules) {
           const scopeLabel = sub.layerScope === 'project' ? chalk.blue('[project]')
@@ -1311,8 +1083,6 @@ async function showAgentResources(
     renderHostClisSection(cwd);
   }
 
-  // Show legend at the end if git repo exists and we showed all sections.
-  // Filtered single-section views skip it — noise for promptcuts or plugins.
   if (hasGitRepo && !anyFilterSet) {
     console.log();
     console.log(chalk.gray('Legend:'), chalk.green('Tracked'), chalk.blue('Local-only'), chalk.yellow('Modified'), chalk.red('Deleted'));
@@ -1323,7 +1093,6 @@ const ALL_RESOURCE_SECTIONS: ResourceSection[] = ['commands', 'skills', 'mcp', '
 
 type ResourceSyncType = 'commands' | 'skills' | 'hooks' | 'memory';
 
-/** Git sync-state for the four tracked resource kinds, loaded once from ~/.agents. */
 interface ResourceSyncData {
   hasGitRepo: boolean;
   commands: Awaited<ReturnType<typeof getGitSyncStatus>>;
@@ -1332,8 +1101,6 @@ interface ResourceSyncData {
   memory: Awaited<ReturnType<typeof getGitSyncStatus>>;
 }
 
-/** Load git sync-state for the tracked resource kinds. Shared by the human
- *  detail view (showAgentResources) and the `--json --resources` path. */
 async function loadResourceSyncData(): Promise<ResourceSyncData> {
   const userAgentsDir = getUserAgentsDir();
   const hasGitRepo = isGitRepo(userAgentsDir);
@@ -1346,8 +1113,6 @@ async function loadResourceSyncData(): Promise<ResourceSyncData> {
   };
 }
 
-/** Resolve one resource's git sync-state. Extracted from showAgentResources so
- *  the human view and the JSON path derive drift identically. */
 function resolveResourceSyncState(
   agentId: AgentId,
   resourceName: string,
@@ -1364,7 +1129,6 @@ function resolveResourceSyncState(
   } else if (resourceType === 'hooks') {
     relativePath = `hooks/${resourceName}`;
   } else {
-    // Rules files: map agent-specific name (CLAUDE.md) back to canonical (AGENTS.md)
     const centralName = getCentralRulesFileName(agentId);
     relativePath = `rules/${centralName}`;
   }
@@ -1375,12 +1139,9 @@ function resolveResourceSyncState(
   if (syncStatus.modified.some(matchesPath)) return 'modified';
   if (syncStatus.deleted.some(matchesPath)) return 'deleted';
   if (syncStatus.synced.some(matchesPath)) return 'synced';
-  // Not in any array = local-only (untracked with no files)
   return 'new';
 }
 
-/** Collect one version's resources for `--json`, limited to `sections`. Scans
- *  the version's `home`, so per-version differences are reported accurately. */
 function collectVersionResources(
   agentId: AgentId,
   home: string,
@@ -1410,7 +1171,6 @@ function collectVersionResources(
   if (sections.has('skills')) {
     out.skills = res.skills.map((r) => {
       const item = withSync(r, 'skills', sync.skills);
-      // ruleCount of 0 is noise — every skill has 0 unless it ships subrules.
       if (r.ruleCount && r.ruleCount > 0) item.ruleCount = r.ruleCount;
       return item;
     });
@@ -1433,9 +1193,6 @@ function collectVersionResources(
   return out;
 }
 
-/** Build the set of resource sections to include in `--json` from the
- *  `--resources` / `--detailed` flags, plus (in --json mode) the per-section
- *  boolean filters (`--skills` etc.) that plain `--json` historically ignored. */
 export function parseResourceSections(
   options: { resources?: string | boolean; detailed?: boolean } & ViewSectionFilter,
   jsonMode: boolean,
@@ -1451,7 +1208,7 @@ export function parseResourceSections(
       addAll();
     } else {
       for (const raw of String(rv).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) {
-        const section = raw === 'rules' ? 'memory' : raw; // --rules is the memory file
+        const section = raw === 'rules' ? 'memory' : raw;
         if ((ALL_RESOURCE_SECTIONS as string[]).includes(section)) set.add(section as ResourceSection);
       }
     }
@@ -1468,16 +1225,6 @@ export function parseResourceSections(
   return set;
 }
 
-/**
- * The one run-readiness gate for one agent on THIS box (PHNX-4116). Runs the
- * SAME enumeration the local router picks from — `collectRunCandidates` (native
- * slots + version homes) through `readinessFromCandidate` — so the answer
- * `agents view --json` publishes is exactly what a `run` here would find, and a
- * remote `--device auto` dispatcher can read it instead of re-deriving freshness
- * on its own box (which drifted: view.ts lists version homes, the router lists
- * slots). Returns undefined when the agent has no candidates at all (nothing
- * installed), so the field is simply absent rather than a misleading verdict.
- */
 export async function computeAgentRunReady(agentId: AgentId): Promise<ViewJsonRunReady | undefined> {
   const candidates = await collectRunCandidates(agentId);
   if (candidates.length === 0) return undefined;
@@ -1497,12 +1244,6 @@ export async function computeAgentRunReady(agentId: AgentId): Promise<ViewJsonRu
   return { ready: !!readyAccount, reason, accounts };
 }
 
-/**
- * Collect structured info for one or more agents without rendering to the
- * terminal. Used by `--json` output and any programmatic consumer (e.g. the
- * agents-cli extension's "resume current session in best available version"
- * command).
- */
 export async function collectAgentsJson(
   filterAgentId?: AgentId,
   resourceSections?: Set<ResourceSection>,
@@ -1512,7 +1253,6 @@ export async function collectAgentsJson(
   const authCache = readAuthHealthCache();
   const host = machineId();
   const wantResources = !!resourceSections && resourceSections.size > 0;
-  // Only pay for the git-status + resource scans when resources were requested.
   const resourceSync = wantResources ? await loadResourceSyncData() : null;
   const cliStates = wantResources ? await getAllCliStates() : null;
   const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
@@ -1552,14 +1292,7 @@ export async function collectAgentsJson(
     if (!canon) return info;
     return {
       ...info,
-      // Prefer a plan the live usage fetch surfaced (Kimi reports membership
-      // tier in /usages; its local auth file has none) and fall back to the
-      // account-derived plan (Claude's billingType).
       plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
-      // Throttle state comes from the live usage windows, not the pay-as-you-go
-      // overage flag that AccountInfo.usageStatus used to carry. A maxed window
-      // means rate-limited; no snapshot means no badge. See
-      // deriveUsageStatusFromSnapshot.
       usageStatus: deriveUsageStatusFromSnapshot(usageByKey.get(key)?.snapshot),
       overageCredits: canon.overageCredits,
     };
@@ -1581,10 +1314,6 @@ export async function collectAgentsJson(
       isolated: isVersionIsolated(agentId, version),
       isIsolatedDefault: getIsolatedDefault(agentId) === version,
       signedIn: info.signedIn,
-      // The strict per-version launch truth (vs the display `signedIn` above,
-      // which inherits the active/global HOME login). The same primitive
-      // `collectRunCandidates` uses locally, so remote `--device auto` placement
-      // is gated on identical launchability (PHNX-3466).
       launchable: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
       authVerdict: authHealth?.verdict ?? null,
       authCheckedAt: authHealth?.checkedAt ?? null,
@@ -1632,15 +1361,10 @@ export async function collectAgentsJson(
     else byAgent.set(agentId, [entry]);
   }
 
-  // Keep filtered native JSON consistent with the text view: custom forks are
-  // not children of the native harness they execute through.
   const harnesses = filterAgentId ? [] : getHarnesses();
   const catalog = await loadAccountCatalog();
   const note = secretsUnavailableNote(catalog);
-  if (note) console.error(chalk.yellow(note)); // stderr — never corrupts --json stdout
-  // The one run-readiness gate per agent, computed off the router's own
-  // enumeration (PHNX-4116). Runs in parallel across agents; a harness with
-  // nothing installed yields undefined and the field is omitted.
+  if (note) console.error(chalk.yellow(note));
   const runReadyByAgent = new Map<AgentId, ViewJsonRunReady>();
   await Promise.all(
     agentsToShow.map(async (agentId) => {
@@ -1656,8 +1380,6 @@ export async function collectAgentsJson(
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       return compareVersions(b.version, a.version);
     });
-    // Project through the public JSON v2 serializer — the internal catalog row
-    // (identityKey, home, installations) is not the machine contract.
     const accounts = accountListJson(
       catalog.native.filter((row) => row.agent === agentId),
       catalog.provider.filter((row) => row.harnesses.includes(agentId)),
@@ -1680,11 +1402,6 @@ interface PrunePlanEntry {
   email: string;
   keeper: string;
   isDefault: boolean;
-  /**
-   * 'duplicate'    — older version sharing an email with a newer install.
-   * 'home-leftover' — home-only dir left over after a previous removeVersion;
-   *                   no binary, but transcripts may still live here.
-   */
   reason: 'duplicate' | 'home-leftover';
 }
 
@@ -1693,34 +1410,21 @@ interface AgentPrunePlan {
   toPrune: PrunePlanEntry[];
 }
 
-/**
- * Identity key for duplicate-install detection. Prefers accountKey — which
- * encodes account AND org — over the bare email: two installs can share an
- * email yet belong to different orgs (a personal Max plan and a Team seat),
- * and grouping those by email alone would propose pruning a live account.
- * Falls back to the lowercased email for agents whose credentials expose no
- * identity key. Null when there is no usable identity.
- */
 export function pruneGroupKey(
   info: Pick<AccountInfo, 'accountKey' | 'email'>
 ): string | null {
   return info.accountKey ?? info.email?.toLowerCase() ?? null;
 }
 
-/** One installed home, reduced to the fields duplicate detection needs. */
 export interface PruneCandidate {
-  /** The version-dir label (opaque slot id). */
   version: string;
-  /** The RUNNING release inside the home (installation.releaseVersion), or the label. */
   release: string;
   email: string | null;
-  /** Present only once the home's native identity is captured (claude: account+org). */
   accountKey: string | null;
   signedIn: boolean;
   hasBinary: boolean;
 }
 
-/** A duplicate home to retire, and the keeper it collapses into. */
 export interface DuplicatePruneEntry {
   version: string;
   email: string;
@@ -1748,15 +1452,8 @@ export interface DuplicatePruneEntry {
  *    trashing the identified home is the exact bug this replaces.
  */
 export function planDuplicatePrune(candidates: PruneCandidate[]): DuplicatePruneEntry[] {
-  // Only installs with a working binary compete for "the live install for this account".
   const installed = candidates.filter((c) => c.hasBinary && c.email);
 
-  // email -> every DISTINCT captured accountKey seen for it. An email-only home
-  // folds into an identified account only when that email maps to EXACTLY ONE
-  // account; when two distinct orgs share the email (the Personal+Team case) the
-  // fold is ambiguous, so the identity-less home is left ungrouped rather than
-  // guessed into one — guessing could retire the actually-working re-login of the
-  // OTHER org (the exact bug this function exists to prevent, one level up).
   const emailToAccountKeys = new Map<string, Set<string>>();
   for (const c of installed) {
     if (!c.accountKey) continue;
@@ -1768,10 +1465,7 @@ export function planDuplicatePrune(candidates: PruneCandidate[]): DuplicatePrune
     const email = c.email?.toLowerCase();
     const keys = email ? emailToAccountKeys.get(email) : undefined;
     if (keys && keys.size === 1) return [...keys][0];
-    // ≥2 identified orgs on this email: never merge the ambiguous home. A unique
-    // key makes it its own singleton group (length 1 → never pruned).
     if (keys && keys.size >= 2) return `ambiguous:${c.email!.toLowerCase()}:${c.version}`;
-    // No identified sibling at all: group equally-bare homes by email as before.
     return pruneGroupKey(c);
   };
 
@@ -1833,20 +1527,14 @@ async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
       version: d.version,
       email: d.email,
       keeper: d.keeper,
-      // The default may itself be a to-be-retired duplicate (a freshly created
-      // home often becomes the global default). We do NOT skip it: executePrune
-      // repoints the default onto the keeper first, then retires the duplicate.
       isDefault: d.version === globalDefault,
       reason: 'duplicate',
     });
   }
 
-  // Home-only leftovers: dirs without a binary. These are residue from a
-  // prior removeVersion before the soft-delete migration, plus any hand-edited
-  // installs. Surface them so the user can move them to trash.
   for (const e of entries) {
     if (e.hasBinary) continue;
-    if (e.version === globalDefault) continue; // never auto-suggest the default
+    if (e.version === globalDefault) continue;
     toPrune.push({
       agentId,
       version: e.version,
@@ -1862,10 +1550,6 @@ async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {
 
 export async function executePrunePlan(plan: AgentPrunePlan): Promise<Array<{ agent: AgentId; version: string }>> {
   const moved: Array<{ agent: AgentId; version: string }> = [];
-  // Repoint the global default onto the keeper BEFORE retiring a duplicate that
-  // currently holds it, so consolidation collapses the duplicate instead of
-  // leaving it pinned as the default (and so removeVersion's own fallback never
-  // has to guess a replacement).
   for (const p of plan.toPrune) {
     if (p.reason === 'duplicate' && p.isDefault && p.keeper && p.keeper !== p.version) {
       setGlobalDefault(p.agentId, p.keeper);
@@ -1907,17 +1591,6 @@ function printPrunePlan(plan: AgentPrunePlan, isFirst: boolean): void {
   console.log();
 }
 
-/**
- * Consolidate to one home per logical account: retire the redundant duplicate
- * homes an account accumulated, keeping the single home that best represents it
- * (see {@link planDuplicatePrune} for the keeper/merge rules). When the retired
- * duplicate holds the global default, the default is first repointed onto the
- * keeper, so consolidation collapses it instead of leaving it pinned.
- *
- * When filterAgentId is set, prunes that agent first, then cascades: after
- * each agent, offers the next agent with duplicates. User answering "no"
- * stops the chain.
- */
 export async function pruneDuplicates(
   filterAgentId: AgentId | undefined,
   yes: boolean,
@@ -1999,10 +1672,6 @@ export async function pruneDuplicates(
   }
 }
 
-/**
- * Main view action handler.
- * Exported for use by deprecated aliases.
- */
 export async function viewAction(
   agentArg?: string,
   options?: {
@@ -2018,15 +1687,11 @@ export async function viewAction(
     merged?: boolean;
   } & ViewSectionFilter,
 ): Promise<void> {
-  // --merged renders the cross-layer, first-wins resource surface (the former
-  // `agents resources`), independent of the per-version detail view below.
   if (options?.merged) {
     renderMergedResources();
     return;
   }
-  // --live is a shorter-to-type alias of --refresh; both force a live probe.
   const forceRefresh = options?.refresh === true || options?.live === true;
-  // --resources / --detailed imply --json (they only shape structured output).
   const explicitResources = options?.detailed === true || options?.resources !== undefined;
   const json = options?.json === true || explicitResources;
   const resourceSections = parseResourceSections(options ?? {}, json);
@@ -2046,11 +1711,6 @@ export async function viewAction(
   };
   const filterIsSet = SECTION_KEYS.some((k) => filter[k]);
 
-  // RUSH-1320: fold any stale literal `latest` version-home into its concrete
-  // version before rendering, so it stops appearing as a bogus "version" next
-  // to the real ones. Best-effort — must never break `agents view`. Scoped to
-  // the queried agent when one is given (cheap no-op for agents with no
-  // `latest` dir, i.e. almost all of them).
   {
     const target = agentArg ? resolveAgentName(agentArg.split('@')[0]) : null;
     const toReconcile = agentArg ? (target ? [target] : []) : ALL_AGENT_IDS;
@@ -2071,12 +1731,9 @@ export async function viewAction(
     return;
   }
 
-  // Parse agent@version syntax
   const parts = agentArg.split('@');
   const agentName = parts[0];
 
-  // Match run resolution: an exact custom harness name wins over a native id or
-  // alias with the same spelling, so every fork remains independently viewable.
   if (profileExists(agentName)) {
     const harness = profileSummary(readProfile(agentName));
     if (json) {
@@ -2096,9 +1753,6 @@ export async function viewAction(
     console.log(chalk.red(formatAgentError(agentName)));
     process.exit(1);
   }
-  // Resolve the @version filter through the agent-spec engine:
-  //   bare/@any → null (show all versions), @default/@pinned → 'default'
-  //   (showAgentResources handles it), @latest/@oldest/@x.y.z → concrete.
   let requestedVersion: string | null;
   try {
     requestedVersion = resolveVersionFilter(agentId, parts[1]).version;
@@ -2125,26 +1779,20 @@ export async function viewAction(
   }
 
   if (json) {
-    // --json ignores the @version suffix, but --resources/--detailed (or a
-    // section flag) now attach each version's resource inventory + sync-state.
     const data = await collectAgentsJson(agentId, resourceSections, { forceRefresh });
     console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], harnesses: [] }, null, 2));
     return;
   }
 
   if (requestedVersion) {
-    // Specific version requested: show detailed resources
     await showAgentResources(agentId, requestedVersion, filter);
   } else if (filterIsSet) {
-    // `agents view claude --skills` → fall through to detail view on default.
-    // Section filters only make sense for the per-version detail view.
     await showAgentResources(agentId, 'default', filter);
   } else {
     await showInstalledVersions(agentId, { forceRefresh, versions: options?.versions });
   }
 }
 
-/** Register the `agents view` command. */
 export function registerViewCommand(program: Command): void {
   addHostOption(program.command('view [agent]'))
     .description('Show your agents, connected accounts, and usage.')

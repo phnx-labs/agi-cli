@@ -8,7 +8,7 @@ export const hookRuntimeCheck: HealCheck = {
   title: 'Generated hook runtime shims',
   cadence: 'frequent',
   async run(ctx: HealCtx): Promise<CheckResult> {
-    // One repair attempt per unique path per pass; no retries or sync recursion.
+
     const report = repairManagedHookRuntimeArtifacts({ dryRun: ctx.dryRun });
     return resultOf(report.fixed, report.needsAttention);
   },

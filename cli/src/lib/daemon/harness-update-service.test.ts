@@ -1,17 +1,3 @@
-/**
- * The daemon harness-update tick (PHNX-3940).
- *
- * Two layers are tested:
- *   1. `runHarnessUpdateTick` — the shared decision/logging logic — through the
- *      `deps` injection seam (like `self-update-service.test.ts`), so only the
- *      boundary that shells out is swapped; logging and outcome shape are real.
- *   2. `driveCooperativeChild` — the real spawn+IPC boundary — against REAL child
- *      processes: it must request a cooperative stop over IPC (never a kill) when
- *      the tick's `AbortSignal` fires, wait for the child's TRUE exit, and reject
- *      only when a wedged child has to be force-reaped. The real hidden
- *      `__harness-update-run` verb is also driven end-to-end over the real CLI
- *      entry. No mocked process, no faked FS success.
- */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -105,9 +91,6 @@ describe('runHarnessUpdateTick', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Real spawn + IPC boundary.
-// ---------------------------------------------------------------------------
 const tempDirs: string[] = [];
 function tmp(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -121,8 +104,6 @@ function writeFixture(source: string): string {
 }
 afterEach(() => { while (tempDirs.length) fs.rmSync(tempDirs.pop()!, { recursive: true, force: true }); });
 
-// Cooperative child: works until the IPC cancel flips `cancelled()`, then exits 0
-// on its OWN — the daemon must observe that true exit, never a kill.
 const COOP_FIXTURE = `
 import { withGuardedUpdateCancellation } from ${JSON.stringify(LEAF_PATH)};
 await withGuardedUpdateCancellation(async (cancelled) => {
@@ -132,8 +113,6 @@ process.stdout.write(JSON.stringify({ v: 1, cancelled: true }));
 process.exit(0);
 `;
 
-// Wedged child: never wires cancellation and sleeps well past any grace, so it
-// can only be stopped by the force-reap backstop.
 const WEDGED_FIXTURE = `await new Promise((r) => setTimeout(r, 60_000));`;
 
 describe('driveCooperativeChild (real subprocess)', () => {
@@ -141,15 +120,12 @@ describe('driveCooperativeChild (real subprocess)', () => {
     const controller = new AbortController();
     const started = Date.now();
     const result = driveCooperativeChild(process.execPath, ['--import', TSX_URL, writeFixture(COOP_FIXTURE)], controller.signal, 5_000);
-    // Abort before module loading: Node must deliver the queued IPC request.
     controller.abort();
 
     const settled = await result;
-    // Clean, self-directed exit — not a signal death.
     expect(settled.exitCode).toBe(0);
     expect(settled.cancelled).toBe(true);
     expect(settled.stdout).toContain('"cancelled":true');
-    // It exited cooperatively, well within the grace — no backstop kill.
     expect(Date.now() - started).toBeLessThan(5_000);
   }, 30_000);
 
@@ -188,7 +164,6 @@ describe('driveCooperativeChild (real subprocess)', () => {
       { cwd: CLI_ROOT, env: { ...process.env, HOME: home, USERPROFILE: home } },
     );
     expect(settled.exitCode).toBe(0);
-    // The child wrote the compact JSON summary the daemon logs.
     const summary = JSON.parse(settled.stdout);
     expect(summary.v).toBe(1);
     expect(summary.cancelled).toBe(false);

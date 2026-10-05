@@ -3,8 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate the sessions DB under a temp HOME before db.js/state.js capture the
-// path at import time (mirrors db.names.test.ts).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-resolvefsid-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -41,8 +39,6 @@ describe('resolveFullSessionId — upgrade an 8-char footer crumb to the full id
   });
 
   it('returns an unresolvable crumb unchanged (no fabricated id)', () => {
-    // A crumb the index has never seen stays a crumb — the caller then emits no
-    // console URL rather than a link that would 404.
     expect(resolveFullSessionId('deadbeef')).toBe('deadbeef');
   });
 

@@ -1,12 +1,3 @@
-/**
- * agents devices config — per-device settings.
- *
- * Split out of a single 18-test `ssh.device-config.test.ts` that ran ~44s
- * locally (151s on a loaded worker) — 8.4s per test, and one of the files
- * setting the suite's floor: vitest parallelises across FILES and runs one
- * file's tests sequentially in a single worker. Shared spawn harness lives in
- * `device-config-test-harness.ts`.
- */
 import { describe, expect, it } from 'vitest';
 import {
   guardedHome,
@@ -30,7 +21,6 @@ describe('devices config', () => {
     expect(doc).toContain('config:');
     expect(doc).toContain('maxAgents: 4');
     expect(doc).toContain('schedulerEnabled: false');
-    // Device scope never lands in central.
     expect(centralDoc()).not.toContain('maxAgents');
 
     const got = run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '--json']);
@@ -102,7 +92,6 @@ describe('devices config', () => {
     const listed = run(['devices', 'list', '--json']);
     expect(listed.status, listed.stderr).toBe(0);
     const worker = JSON.parse(listed.stdout).find((device: { name: string }) => device.name === 'worker');
-    // The row is the EFFECTIVE profile — registry overlaid with the config layers.
     expect(worker.auth).toMatchObject({ method: 'key', identityFile: '/keys/fleet worker' });
     expect(worker.config).toMatchObject({ sshIdentityFile: '/keys/fleet worker' });
   });

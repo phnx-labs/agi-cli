@@ -387,7 +387,7 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     ...o,
   });
 
-  // Identity evidence outranks a newer directory label, or pruning can trash the working login.
+
   it('keeps the identity-captured home and retires the higher-numbered NO-ID re-login duplicate', () => {
     const out = planDuplicatePrune([
       home({ version: '2.1.222', release: '2.1.263', email: 'a@x.com', accountKey: 'claude:account=acc-1:org=org-1' }),
@@ -434,7 +434,7 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     expect(out).toEqual([{ version: '2.1.100', email: 'a@x.com', keeper: '2.1.110' }]);
   });
 
-  // An identity-less re-login cannot be assigned when two organizations share its email.
+
   it('never folds an identity-less home when two orgs share the email (prunes nothing)', () => {
     const out = planDuplicatePrune([
       home({ version: '2.1.100', email: 'a@x.com', accountKey: 'org-1', signedIn: true }),
@@ -444,7 +444,7 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     expect(out).toEqual([]);
   });
 
-  // Within one group, signed-in beats release and label when selecting the keeper.
+
   it('breaks a same-group keeper tie on signed-in before release/label', () => {
     const out = planDuplicatePrune([
       home({ version: '2.1.110', release: '2.1.263', email: 'a@x.com', accountKey: null, signedIn: false }),
@@ -454,7 +454,7 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
   });
 });
 
-// Device role alone never authorizes interactive credentials for piped or JSON output.
+
 describe('allowInteractiveUsageLogin — the USAGE-READ-2 role + foreground gate', () => {
   it('allows the interactive login only for a personal device at a human TTY', () => {
     expect(allowInteractiveUsageLogin('personal', true)).toBe(true);
@@ -496,7 +496,7 @@ describe('executePrunePlan — repoint default to keeper before retiring the dup
     return binary;
   }
 
-  // Retiring a default duplicate must repoint to that account's keeper, never another account's newer home.
+
   it('keeps the account keeper as default when the retired duplicate was the default (not another account\'s home)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-prune-'));
     tempHomes.push(home);

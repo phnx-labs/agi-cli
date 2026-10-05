@@ -6,8 +6,6 @@ import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { writeUpdateCache, runAgents } from './sessions.test-fixture.js';
 
 describe('agents sessions', () => {
-  // Multiple full CLI `runAgents` passes — under ubuntu-22 CI this has hit the
-  // default 30s vitest cap (release 1.22.2/1.22.3 home-base gate). Give it 2m.
   it('queries two distinct tool calls without changing the ordinary list JSON contract', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tools-'));
     try {
@@ -26,8 +24,6 @@ describe('agents sessions', () => {
       ];
       fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
 
-      // The ordinary incremental scan owns parsing. Tool queries below read
-      // only the SQLite snapshot populated by this pass.
       expect(runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome).status).toBe(0);
 
       const toolResult = runAgents([
@@ -126,8 +122,6 @@ describe('agents sessions', () => {
     }
   }, 120_000);
 
-  // 90s, not the default 30s: several real `agents` CLI boots, measured 6.5s
-  // idle and 10.9s under 16 CPU-bound background processes (RUSH-2839).
   it('omits a synced mirror when answering a fleet evidence partition', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tool-mirror-'));
     try {

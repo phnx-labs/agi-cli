@@ -15,9 +15,6 @@ function exerciseStartup(legacy?: 'absent' | 'old-boot'): void {
   const launcher = path.join(home, 'test-agents');
   const quote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
   fs.writeFileSync(launcher, `#!/bin/sh\nexec bun ${quote(daemon)} "$@"\n`, { mode: 0o700 });
-  // The non-legacy path below calls startDaemon() directly under this
-  // deliberately redirected HOME, which is exactly the e2e opt-in
-  // assertDaemonLaunchHomeAllowed() (PHNX-3736) requires (daemon.ts).
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, AGENTS_REAL_HOME: home, AGENTS_DAEMON_TEST_HOME: home, AGENTS_ALLOW_TEST_DAEMON: '1', AGENTS_SECRETS_NO_AGENT: '1', AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' };
   delete env.AGENTS_DAEMON_DIR;
   delete env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
@@ -27,8 +24,6 @@ function exerciseStartup(legacy?: 'absent' | 'old-boot'): void {
     const terminals = path.join(cache, 'terminals');
     fs.mkdirSync(daemonDir, { recursive: true });
     fs.mkdirSync(path.join(terminals, 'by-pid'), { recursive: true });
-    // Use a real, already-exited process, rather than assuming an arbitrary
-    // numeric PID is unused on the execution machine.
     const exited = spawnSync('bun', ['-e', 'console.log(process.pid)'], { encoding: 'utf8' });
     expect(exited.status).toBe(0);
     const deadPid = Number(exited.stdout.trim());
@@ -47,8 +42,6 @@ function exerciseStartup(legacy?: 'absent' | 'old-boot'): void {
     expect(result.status, diagnostic).toBe(0);
     expect(result.stdout).toContain(`${legacy ? 'cold runDaemon' : 'ordinary startDaemon: health published'}; canonical socket ready; namespace owner verified`);
   } finally {
-    // The helper normally uses the real private-home stop path. This bounded
-    // backstop covers assertion failure and timeout before normal teardown.
     const pidFile = path.join(home, 'test-child.pid');
     if (fs.existsSync(pidFile)) {
       const pid = Number(fs.readFileSync(pidFile, 'utf8'));
@@ -63,7 +56,7 @@ function exerciseStartup(legacy?: 'absent' | 'old-boot'): void {
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
           }
         }
-      } catch { /* already terminated */ }
+      } catch {  }
     }
     fs.rmSync(home, { recursive: true, force: true });
   }

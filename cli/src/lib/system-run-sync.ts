@@ -28,11 +28,9 @@ function saveSentinel(agent: AgentId, version: string, sentinel: SystemRunSentin
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify(sentinel));
   } catch {
-    // Best-effort — a failed write just means the next run redoes the copy.
   }
 }
 
-/** Subdirectories of `dir` that carry `marker` (SKILL.md / AGENT.md). */
 function namesWithMarker(dir: string, marker: string): Map<string, string> {
   const out = new Map<string, string>();
   let entries: fs.Dirent[];
@@ -59,7 +57,7 @@ export function applySystemResourcesAtRun(
   version: string,
   versionHome: string,
 ): SystemRunSyncResult {
-  // Refresh only system skills/subagents under normal precedence; failures never block launch and leave the sentinel stale for retry.
+
   const result: SystemRunSyncResult = { skills: [], subagents: [] };
   const stored = loadSentinel(agent, version);
   const next: SystemRunSentinel = { ...stored };

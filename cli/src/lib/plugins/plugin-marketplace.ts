@@ -171,7 +171,7 @@ export function copyPluginToMarketplace(
   agent: AgentId,
   versionHome: string
 ): string {
-  // Preserve internal links, but never copy a symlink that escapes the plugin source root.
+
   const dest = pluginInstallDir(plugin, spec, agent, versionHome);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   if (fs.existsSync(dest)) {
@@ -343,7 +343,7 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
 
 
 export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versionHome: string): void {
-  // Native marketplace registries are harness-owned records; update only our named entry.
+
   const name = marketplaceNameFor(spec);
   const root = marketplaceRoot(spec, agent, versionHome);
 
@@ -401,7 +401,7 @@ export function registerDroidInstalledPlugin(
   agent: AgentId,
   versionHome: string
 ): void {
-  // Replace our user-scope record while retaining other scopes and unrelated registry keys.
+
   const registry = readInstalledPlugins(agent, versionHome);
   const key = `${pluginName}@${marketplaceName}`;
   const now = new Date().toISOString();
@@ -486,7 +486,7 @@ function writeCopilotSettings(agent: AgentId, versionHome: string, settings: Rec
 }
 
 function registerCopilotMarketplace(name: string, root: string, agent: AgentId, versionHome: string): void {
-  // Copilot stores marketplace ownership in settings; preserve every unrelated setting/key.
+
   const settings = readCopilotSettings(agent, versionHome);
   const known = (settings.extraKnownMarketplaces && typeof settings.extraKnownMarketplaces === 'object'
     ? settings.extraKnownMarketplaces
@@ -530,7 +530,7 @@ export function registerCopilotInstalledPlugin(
   agent: AgentId,
   versionHome: string
 ): void {
-  // Replace only the matching marketplace identity and preserve all unrelated installations.
+
   const config = readCopilotConfig(agent, versionHome);
   const now = new Date().toISOString();
   const prior = config.installedPlugins.find(e => e.name === pluginName && e.marketplace === marketplaceName);

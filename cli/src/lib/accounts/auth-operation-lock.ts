@@ -16,7 +16,7 @@ export interface AuthOperationLock {
 }
 
 export function acquireAuthOperationLock(agent: AgentId, stateDir?: string): AuthOperationLock {
-  // Authentication is exclusive and fail-closed: never queue silently or continue after lock loss.
+
   const target = authLockFilePath(agent, stateDir);
   ensureLockTarget(target, '{}', 0o700);
   let compromised: Error | null = null;

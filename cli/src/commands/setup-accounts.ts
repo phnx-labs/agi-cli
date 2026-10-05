@@ -1,9 +1,3 @@
-/**
- * `agents setup accounts` — mint a Claude setup-token so unattended usage/probe
- * is not stuck on "usage pending". Delegates to the same mint engine as the
- * mint step of `agents accounts add claude [name]` /
- * `agents accounts login claude#<name>`.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';

@@ -1,6 +1,3 @@
-/**
- * Real SQLite warehouse under a temp dir — no mocks.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -115,7 +112,6 @@ describe('perf/db', () => {
     recordSample({ kind: 'hook.fire', label: 'x', durationMs: 1 });
     process.env.AGENTS_DISABLE_PERF = '0';
     _resetPerfDbForTest(dbPath);
-    // re-enable and confirm empty
     delete process.env.AGENTS_DISABLE_PERF;
     _resetPerfDbForTest(dbPath);
     expect(aggregateSamples({ days: 1 })).toHaveLength(0);
@@ -148,7 +144,6 @@ describe('perf/db', () => {
 
   it('counts exit 2 as blockCount/blockRate, not errorCount (RUSH-2294)', () => {
     const base = Date.now();
-    // 1 allow, 2 intentional denials, 1 real crash
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 10, exitCode: 0 });
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 12, exitCode: 2 });
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 11, exitCode: 2 });
@@ -188,7 +183,6 @@ describe('perf/db', () => {
 
   it('aggregates a startup sub-phase from meta_json into row.phases (PHNX-3468)', () => {
     const base = Date.now();
-    // agent.run persists { phases: { startup } } in meta_json; totals still ride durationMs.
     for (const [startup, total] of [[40, 900], [60, 1200], [80, 1500], [100, 3000]]) {
       recordSample({
         tsMs: base,
@@ -199,15 +193,14 @@ describe('perf/db', () => {
         metaJson: JSON.stringify({ phases: { startup } }),
       });
     }
-    // A sample with no meta_json contributes to the total but not to the phase.
     recordSample({ tsMs: base, kind: 'perf.timing', label: 'agent.run', durationMs: 500, agent: 'claude' });
 
     const rows = aggregateSamples({ days: 1, kinds: ['perf.timing'] });
     const run = rows.find((r) => r.label === 'agent.run');
     expect(run).toBeDefined();
-    expect(run!.n).toBe(5); // all five count toward the total
+    expect(run!.n).toBe(5);
     expect(run!.phases?.startup).toBeDefined();
-    expect(run!.phases!.startup.n).toBe(4); // only the four with a phase
+    expect(run!.phases!.startup.n).toBe(4);
     expect(run!.phases!.startup.p50Ms).toBe(percentile([40, 60, 80, 100], 50));
     expect(run!.phases!.startup.p90Ms).toBe(percentile([40, 60, 80, 100], 90));
   });
@@ -218,6 +211,6 @@ describe('perf/db', () => {
     const rows = aggregateSamples({ days: 1, kinds: ['perf.timing'] });
     const run = rows.find((r) => r.label === 'agent.run');
     expect(run).toBeDefined();
-    expect(run!.phases).toBeUndefined(); // neither row yielded a numeric phase
+    expect(run!.phases).toBeUndefined();
   });
 });

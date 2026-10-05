@@ -23,30 +23,24 @@ describe('resolveUniqueLocalLiveAliasBySuffix — bare 8-hex against LIVE local 
     try {
       execFileSync('tmux', ['-S', sock, 'set-option', '-g', 'remain-on-exit', 'on', ';',
         'new-session', '-d', '-s', uniqueLive, 'sleep 300']);
-      // Dead pane: exits immediately but remain-on-exit keeps the corpse.
       execFileSync('tmux', ['-S', sock, 'new-session', '-d', '-s', deadSameSuffix, 'true']);
       execFileSync('tmux', ['-S', sock, 'new-session', '-d', '-s', collisionA, 'sleep 300']);
       execFileSync('tmux', ['-S', sock, 'new-session', '-d', '-s', collisionB, 'sleep 300']);
       await new Promise((r) => setTimeout(r, 700));
 
-      // Unique live pane resolves by its bare hex suffix.
       expect(await resolveUniqueLocalLiveAliasBySuffix('aa11bb22', sock)).toEqual({ kind: 'alias', alias: uniqueLive });
 
-      // A dead pane sharing a suffix with nothing live is a miss, not a match —
-      // a retained corpse must never be attached.
       expect(await resolveUniqueLocalLiveAliasBySuffix('cc33dd44', sock)).toEqual({ kind: 'none' });
 
-      // Two DIFFERENT agents' live panes sharing the same 8-hex fail closed.
       const collision = await resolveUniqueLocalLiveAliasBySuffix('ee55ff66', sock);
       expect(collision.kind).toBe('collision');
       if (collision.kind === 'collision') {
         expect(collision.aliases.sort()).toEqual([collisionA, collisionB].sort());
       }
 
-      // No pane at all with this suffix.
       expect(await resolveUniqueLocalLiveAliasBySuffix('00000000', sock)).toEqual({ kind: 'none' });
     } finally {
-      try { execFileSync('tmux', ['-S', sock, 'kill-server']); } catch { /* already gone */ }
+      try { execFileSync('tmux', ['-S', sock, 'kill-server']); } catch {  }
     }
   });
 });

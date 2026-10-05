@@ -1,17 +1,3 @@
-/**
- * Concurrent write benchmark for the session indexer.
- *
- * Spawns N workers that simultaneously call upsertSessionsBatch with the same
- * 300-session batch. Before the fix, concurrent writes contend on the SQLite
- * write lock and some workers fail with "database is locked". After the fix,
- * workers detect already-written rows inside the transaction and skip them —
- * making all workers fast and lock-failure-free.
- *
- * Usage:
- *   bun tests/bench-concurrent-writes.ts [workers=4] [sessions=300]
- *
- * Compare before and after applying the upsertSessionsBatch ledger-recheck fix.
- */
 
 import { mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -21,8 +7,6 @@ import { spawn } from 'child_process';
 
 const N = parseInt(process.argv[2] ?? '4', 10);
 const NUM_SESSIONS = parseInt(process.argv[3] ?? '300', 10);
-// SCAN_COORD=1 tests the scan coordinator: workers skip the write entirely
-// unless they win the tryClaimScan race (simulates discoverSessions).
 const TEST_COORDINATOR = process.env.SCAN_COORD === '1';
 const workerPath = join(dirname(fileURLToPath(import.meta.url)), 'bench-concurrent-writes.worker.ts');
 

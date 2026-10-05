@@ -2,8 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { normalizeHost } from '../machine-id.js';
 import type { SessionWatchEnvelope, SessionWatchRow } from './watch.js';
 
-/** Device observations are not sessions: a launcher may observe a peer's run.
- * Keep those observations separately and publish execution-owned state once. */
 export class SessionProjection {
   private readonly observations = new Map<string, Map<string, SessionWatchRow>>();
   private projected = new Map<string, SessionWatchRow>();
@@ -11,7 +9,6 @@ export class SessionProjection {
   private sequence = 0;
   private readonly streamId = randomUUID();
 
-  /** Only the selected observation may publish execution-owned attention. */
   rowForObservation(scope: string, rowKey: string): SessionWatchRow | undefined {
     const key = this.selected.get(`${normalizeHost(scope)}\0${rowKey}`);
     return key ? this.projected.get(key) : undefined;
@@ -27,11 +24,8 @@ export class SessionProjection {
     if (event.type === 'remove') this.observations.get(scope)?.delete(event.rowKey);
     const stamp = () => ({ version: 1 as const, streamId: this.streamId, sequence: ++this.sequence, capturedAt: event.capturedAt });
     if (event.type === 'scope' || event.type === 'heartbeat') {
-      // An unavailable owner retains its last observation until its next reset.
       return [{ ...event, ...stamp(), scope }];
     }
-    // A launch exists before a non-Claude harness mints its session id. Join an
-    // id-less placeholder only through an exact, unambiguous durable launch id.
     const launchSessions = new Map<string, Set<string>>();
     for (const [observer, rows] of this.observations) for (const row of rows.values()) {
       if (!row.launchId || !row.sessionId) continue;
@@ -57,8 +51,6 @@ export class SessionProjection {
     for (const [rowKey, observations] of groups) {
       const owner = normalizeHost(observations[0].row.machine || observations[0].row.sourceDevice || observations[0].scope);
       const authoritative = observations.filter(item => item.scope === owner);
-      // Once the owner has answered, its absence is authoritative too. A stale
-      // launcher/history mirror cannot resurrect a removed execution.
       const candidates = authoritative.length ? authoritative : this.observations.has(owner) ? [] : observations;
       candidates.sort((a, b) => Number(a.row.previous) - Number(b.row.previous)
         || (b.row.lastActivityMs ?? b.row.startedAtMs ?? 0) - (a.row.lastActivityMs ?? a.row.startedAtMs ?? 0)
@@ -79,8 +71,6 @@ export class SessionProjection {
       });
     }
     const result: SessionWatchEnvelope[] = [];
-    // A reset still replaces only its source scope. Cross-scope migrations are
-    // explicit removes/upserts, so existing clients converge without a new API.
     if (event.type === 'reset') result.push({ ...stamp(), type: 'reset', scope, rows: [...next.values()].filter(row => row.sourceDevice === scope) });
     for (const [key, row] of this.projected) if (!next.has(key) && !(event.type === 'reset' && row.sourceDevice === scope)) {
       result.push({ ...stamp(), type: 'remove', scope: row.sourceDevice, rowKey: key });

@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { IS_WINDOWS, toPosix } from '../src/lib/platform/index.js';
 
-// Project commands remain discoverable but never materialize into native homes; sync only user/system content.
 interface VersionsHoistedState {
   TEST_ROOT: string;
   AGENTS_DIR: string;

@@ -61,7 +61,7 @@ export function resolveRolloutTarget(
   explicitVersion: string | undefined,
   probes: RolloutProbe[],
 ): string | undefined {
-  // Dev stamps may reveal a shadowed install but can never elect the fleet's release target.
+
   if (explicitVersion && !isDistTag(explicitVersion)) return explicitVersion;
   let best: string | undefined;
   for (const probe of probes) {
@@ -80,7 +80,7 @@ export function classifyRolloutVerification(
   probe: RolloutProbe,
   targetVersion: string | undefined,
 ): RolloutVerification {
-  // Upgrade success requires the resolved agents binary itself to report the selected target version.
+
   const { resolvedPath, reportedVersion } = probe;
   if (!reportedVersion) {
     return {

@@ -109,7 +109,7 @@ export function isLaunchableSignedIn(
   signedIn: boolean,
   presence: Pick<CredentialPresence, 'knownLocation' | 'perVersion'>,
 ): boolean {
-  // An empty known-location version home cannot borrow the global/active login.
+
   if (!signedIn) return false;
   if (!presence.knownLocation) return true;
   return presence.perVersion;
@@ -130,7 +130,6 @@ export async function isVersionLaunchableHere(
   return { launchable, email: launchable ? info.email : null };
 }
 
-// Separate clocks govern weighting, synced trust, and hard stale refusal.
 export const USAGE_DECISION_MAX_AGE_MS = 5 * 60 * 1000;
 
 export const USAGE_SYNC_TRUST_MS = 15 * 60 * 1000;
@@ -151,14 +150,14 @@ export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date
 export function hasStaleUsage(candidate: RotateCandidate, nowMs: number = Date.now()): boolean {
   const snapshot = candidate.usageSnapshot;
   const capturedAt = snapshot?.capturedAt;
-  // Missing/meterless candidates are blind, while synced rows never trigger refusal.
+
   if (!capturedAt || !snapshot?.windows.length) return false;
   if (snapshot.freshness?.source === 'sync') return false;
   return nowMs - capturedAt.getTime() > USAGE_STALE_REFUSAL_MAX_AGE_MS;
 }
 
 function hasUsageAvailable(candidate: RotateCandidate, now: number = Date.now()): boolean {
-  // Every blocking window, including a session window, governs eligibility.
+
   const snapshot = candidate.usageSnapshot;
   if (snapshot) {
     const status = deriveUsageStatusFromSnapshot(snapshot, now);
@@ -188,13 +187,12 @@ export function readinessFromCandidate(
   if (!candidate.signedIn) {
     return { ready: false, reason: 'signed_out', email: candidate.email };
   }
-  // Absent or stale auth probes fail open; only a fresh dead verdict excludes.
   const authFresh = candidate.authCheckedAt == null
     || now - candidate.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS;
   if (authFresh && candidate.authVerdict !== null && isDeadVerdict(candidate.authVerdict)) {
     return { ready: false, reason: 'revoked', email: candidate.email };
   }
-  // Model refusals bind to the stable account id, never an organization usage id.
+
   const modelKey = claudeModelRefusalKey(candidate.nativeAccountId ?? candidate.providerAccountId, candidate.providerAccount ? undefined : candidate.slotDir ?? getVersionHomePath(candidate.agent, candidate.version));
   if (candidate.agent === 'claude' && modelKey) {
     const requested = model ?? resolveConfiguredModel(candidate.agent, candidate.version, candidate.slotDir)?.model;
@@ -233,7 +231,7 @@ export async function checkRunAccountReadiness(agent: AgentId, version: string):
 
 function getRoutingUsedPercent(snapshot: UsageSnapshot | null | undefined): number | null {
   if (!snapshot || snapshot.windows.length === 0) return null;
-  // Session windows block eligibility; longer-term windows rank healthy accounts.
+
   const routingWindows = snapshot.windows.filter((window) => window.key !== 'session');
   const windows = routingWindows.length > 0 ? routingWindows : snapshot.windows;
   return Math.max(...windows.map((window) => window.usedPercent));
@@ -256,7 +254,7 @@ function compareCandidates(a: RotateCandidate, b: RotateCandidate): number {
 }
 
 export function candidateAccountKey(c: RotateCandidate): string {
-  // Registered native/provider identities win dedupe over usage-derived keys.
+
   if (c.nativeAccountId) return `native:${c.nativeAccountId}`;
   if (c.providerAccount) return `provider:${c.providerAccount}`;
   return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}:unregistered:${c.accountLabel || c.version}`;
@@ -315,7 +313,7 @@ function preferVerified(
   choose: (from: RotateCandidate[]) => RotateCandidate,
   narrowing: 'any-verified' | 'representative' = 'any-verified',
 ): { picked: RotateCandidate; usageUnverified: boolean; noVerifiedUsage: boolean } {
-  // Balanced narrows only for a representative set; available narrows on any proof.
+
   const verified = pool.filter((c) => isUsageVerified(c, nowMs));
   const narrow =
     verified.length > 0 &&
@@ -335,7 +333,7 @@ function weightedRandomByCapacity(
   sorted: RotateCandidate[],
   nowMs: number = Date.now(),
 ): RotateCandidate {
-  // Blind candidates remain in the healthy pool for bounded post-rejection failover.
+
   const weights = sorted.map((c) =>
     capacityWeight(
       isUsageVerified(c, nowMs) ? getRoutingUsedPercent(c.usageSnapshot) : null,
@@ -481,7 +479,7 @@ export function formatNoHealthyAccountError(
   excluded: RotateCandidate[],
   nowMs: number = Date.now(),
 ): string {
-  // Watchdogs parse the literal "no healthy" and "resets" tokens below.
+
   const excludedStr = excluded.length === 0
     ? 'no installed versions'
     : excluded.map((c) => {
@@ -505,7 +503,7 @@ export function formatNoVerifiedUsageError(
   candidates: RotateCandidate[],
   nowMs: number = Date.now(),
 ): string {
-  // NO_VERIFIED_USAGE is a machine-consumed refusal marker.
+
   const detail = candidates.length === 0
     ? 'no signed-in accounts'
     : candidates.map((c) => {
@@ -537,7 +535,6 @@ export function formatNoHealthyHarnessError(
 
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
-  // Use this host's auth cache; never perform a live auth or keychain-validity probe.
   const authCache = readAuthHealthCache();
   const localHost = machineId();
   const meta = readMeta();
@@ -607,7 +604,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     for (const row of probed) {
       if (!row) continue;
       slotRows.push(row);
-      // Real paths prevent the same slot/version home entering the pool twice.
+
       slotDirs.add(fs.realpathSync(row.home));
     }
   }
@@ -616,7 +613,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     versions.map(async (version): Promise<CandidateRow | null> => {
       const home = getVersionHomePath(agent, version);
       if (fs.existsSync(home) && slotDirs.has(fs.realpathSync(home))) return null;
-      // In particular, do not validate Claude through Keychain: it can prompt.
+
       const info = await getAccountInfo(agent, home);
       const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
       const authHealth = authCache[authCacheKey(localHost, agent, version)];
@@ -641,7 +638,6 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
 
   const rows: CandidateRow[] = [...slotRows, ...versionRows.filter((row): row is CandidateRow => row !== null)];
 
-  // Usage/headroom collection is cache-only, avoiding one network call per account.
   const { usageByKey } = await getUsageInfoByIdentity(
     rows.map(({ home, info, version }) => ({
       agentId: agent,
@@ -745,7 +741,6 @@ function readRotationStamp(agent: AgentId): string | null {
   return null;
 }
 
-// Index-keyed objects avoid sink array caps and identity-key collisions.
 const ROTATION_EVENT_CANDIDATE_CAP = 32;
 
 function describeRotationCandidate(c: RotateCandidate, nowMs: number): Record<string, unknown> {
@@ -760,7 +755,6 @@ function describeRotationCandidate(c: RotateCandidate, nowMs: number): Record<st
     email: c.email,
     version: c.version,
     signedIn: c.signedIn,
-    // Avoid an `auth` field name: event redaction treats it as credential material.
     credentialVerdict: c.authVerdict,
     usageStatus: c.usageStatus,
     tier,
@@ -828,7 +822,7 @@ function emitRotationDecision(
   strategy: RunStrategy,
   extra: EventPayload = {},
 ): void {
-  // Telemetry construction and emission must never break routing.
+
   try {
     emit(event, { ...buildRotationDecisionEvent(rotation, agent, strategy), ...extra });
   } catch {
@@ -847,14 +841,14 @@ export async function resolveRunVersion(
   exhausted?: RotateCandidate[];
   noVerifiedUsage?: boolean;
 }> {
-  // Pinned throttling is forceable, but an auth-dead pin rotates to recovery.
+
   const fallback = resolveVersion(agent, cwd);
   const candidates = await collect(agent);
 
   const refuseStaleUsage = (
     rotation: RotateResult,
   ): { version: string | null; rotation: RotateResult; noVerifiedUsage: true } => {
-    // Stale usage refuses the initial route but remains available to bounded failover.
+
     emitRotationDecision('rotation.unresolved', rotation, agent, strategy, {
       reason: 'no_verified_usage',
     });
@@ -931,7 +925,7 @@ export interface PreflightHandoffContext {
 }
 
 export function preflightHandoffEligible(ctx: PreflightHandoffContext): boolean {
-  // Handoff is forbidden for interactive, ACP, loop, resume, and workflow-scoped runs.
+
   return (
     ctx.hasPrompt &&
     !ctx.interactive &&
@@ -953,7 +947,7 @@ export function preflightFallbackHandoff(
   if (signInRecoverableCandidates(exhausted).length > 0) return null;
   const entries = spec.split(',').map((e) => e.trim()).filter(Boolean);
   if (entries.length === 0) return null;
-  // Require exact non-primary agents; otherwise defer the whole spec to the canonical parser.
+
   const parsed = entries.map((entry) => entry.split('@'));
   if (parsed.some(([name]) => !isAgentId(name) || name === primary)) return null;
   const [name, version] = parsed[0];

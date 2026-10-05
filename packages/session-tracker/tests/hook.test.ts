@@ -9,11 +9,6 @@ const pkgRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hookPath = path.join(pkgRoot, 'src', 'hook.sh');
 const dirs: string[] = [];
 
-// hook.sh shells the compiled `dist/prune-state.js` for state-dir hygiene, so the
-// state-dir tests need the package built. CI runs these tests via impact analysis
-// without a prior `bun run build` (the CLI build doesn't cover this package), so
-// build the dist here when it is missing — otherwise the prune step silently
-// no-ops and the hygiene assertions fail (PHNX-3626).
 beforeAll(() => {
   if (!fs.existsSync(path.join(pkgRoot, 'dist', 'prune-state.js'))) {
     execSync('bun run build', { cwd: pkgRoot, stdio: 'inherit' });
@@ -51,8 +46,6 @@ describe('SessionStart hook launch metadata', () => {
     expect(JSON.parse(fs.readFileSync(path.join(history, 'by-session', '019fd0c8-b3e9-77a2-a1a4-444698c4d897.json'), 'utf8'))).toMatchObject({
       sessionId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
       mode: 'edit',
-      // Origin version recorded at launch so native resume can pin it even when
-      // the transcript carries no derivable version (PHNX-3626).
       version: '0.146.0',
       accountId: 'account-original',
       actor: 'muqsit',
@@ -68,14 +61,9 @@ describe('SessionStart hook launch metadata', () => {
     const sessionId = '019fd0c8-b3e9-77a2-a1a4-444698c4dabc';
     fs.mkdirSync(home);
 
-    // A version alone must trigger the durable sidecar write — a harness whose
-    // launch predates stored modes still records a resumable origin version.
     const result = spawnSync(hookPath, ['codex'], {
       input: JSON.stringify({ session_id: sessionId, cwd: '/repo' }),
       encoding: 'utf8',
-      // Clear AGENTS_RUN_MODE explicitly: the suite may itself run inside an
-      // agent session whose ambient mode would otherwise leak in through the
-      // process.env spread and defeat the "no launch mode" premise.
       env: { ...process.env, HOME: home, AGENTS_HISTORY_DIR: history, AGENTS_RUN_VERSION: '0.146.0', AGENTS_RUN_MODE: '' },
     });
 
@@ -134,12 +122,10 @@ describe('SessionStart hook state-dir hygiene', () => {
     const stateDir = path.join(home, '.agents', '.cache', 'terminals', 'sessions');
     fs.mkdirSync(stateDir, { recursive: true });
 
-    // Create a genuinely dead pid to seed stale files with.
     const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
     expect(dead.status).toBe(0);
     const deadPid = dead.pid!;
 
-    // Pre-seed stale files that the hook should reap.
     fs.writeFileSync(path.join(stateDir, `${deadPid}.json`), JSON.stringify({ session_id: 'x', cwd: '/', pid: deadPid, ts: 1 }), 'utf8');
     fs.writeFileSync(path.join(stateDir, '999999.json'), '', 'utf8');
     fs.writeFileSync(path.join(stateDir, `.${deadPid}.abcdef`), 'orphan', 'utf8');
@@ -152,9 +138,7 @@ describe('SessionStart hook state-dir hygiene', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const remaining = new Set(fs.readdirSync(stateDir));
-    // The hook runs as a child of this process, so it records THIS pid.
     expect(remaining.has(`${process.pid}.json`)).toBe(true);
-    // Stale entries are gone.
     expect(remaining.has(`${deadPid}.json`)).toBe(false);
     expect(remaining.has('999999.json')).toBe(false);
     expect([...remaining].some((f) => /^\.\d+\./.test(f))).toBe(false);

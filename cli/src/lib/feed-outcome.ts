@@ -1,5 +1,3 @@
-// Outcome precedence is ticket → repository-qualified PR → worktree/epic → unassigned; openness comes from deriveBlockState, not raw answer.
-// Fan-out requires identical open questions; attribution hints match mailbox, then session, then agent, and only fill missing fields.
 import { detectTicket, extractPrUrl } from '@phnx-labs/sessions-cli/reader';
 import { deriveBlockState, type OpenBlock } from './feed/feed.js';
 

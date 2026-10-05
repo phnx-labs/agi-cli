@@ -2,12 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { dedupeBySession } from './active.js';
 import type { ActiveSession } from './active.js';
 
-// Regression for the "Fleet is flooded with identical .openclaw rows" bug.
-// An OpenClaw gateway on mac-mini spawns N `codex` worker processes. The process
-// scan (listUnattributedActive) picks each one up, but none carries a session id,
-// transcript file, or cloud handle — so every worker used to skip dedupe entirely
-// and render as its own row: N copies of ".openclaw · bg · 0s ago". At the time
-// this was reported there were ~40 of them, burying every real session.
 
 const worker = (pid: number, cwd = '/Users/muqsit/.agents/openclaw/home/.openclaw'): ActiveSession => ({
   context: 'headless',
@@ -23,7 +17,7 @@ describe('dedupeBySession', () => {
 
     expect(out).toHaveLength(1);
     expect(out[0].pidCount).toBe(4);
-    expect(out[0].pid).toBe(1); // first row wins
+    expect(out[0].pid).toBe(1);
   });
 
   it('keeps workers in different working directories apart', () => {
@@ -74,9 +68,6 @@ describe('dedupeBySession', () => {
   });
 
   it('keeps two id-less tmux panes in the same cwd DISTINCT via paneId (the anti-collapse fix)', () => {
-    // Two born-unidentifiable non-Claude panes sharing a cwd. Without paneId they
-    // would fold under anonymousWorkerKey (kind+context+cwd) into one ×2 row —
-    // exactly the misattribution we are fixing. paneId keeps them two rows.
     const pane = (paneId: string): ActiveSession => ({
       context: 'terminal', kind: 'codex', cwd: '/repo', paneId,
     } as ActiveSession);

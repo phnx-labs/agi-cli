@@ -25,9 +25,6 @@ describe('proper-lockfile crash barrier', () => {
     fs.rmSync(`${target}.lock`, { recursive: true, force: true });
     await new Promise((resolve) => setTimeout(resolve, 1_250));
 
-    // The updater ran after the lock was rotated, yet control returned here;
-    // proper-lockfile's default callback would throw out of band and kill the
-    // test process before this assertion.
     expect(process.pid).toBeGreaterThan(0);
     await expect(release()).rejects.toMatchObject({ code: 'ERELEASED' });
   });

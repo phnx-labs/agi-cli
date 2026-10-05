@@ -5,28 +5,14 @@ import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic
 import type { Manifest } from './types.js';
 import { safeJoin } from './paths.js';
 
-/** Canonical filename for the manifest in any agents repo or project root. */
 export const MANIFEST_FILENAME = 'agents.yaml';
 
-// Per-path re-entrancy depth so withManifestLock is safe against recursive calls.
 const manifestLockDepth = new Map<string, number>();
 
-/** Parse a YAML string into a typed Manifest object. */
 function parseManifest(content: string): Manifest {
   return yaml.parse(content) as Manifest;
 }
 
-/**
- * Serialize a Manifest to YAML WITHOUT destroying hand-written comments.
- *
- * Plain `yaml.stringify(manifest)` drops every comment, so `agents mcp add`
- * (and every other writeManifest caller) used to clobber annotations in
- * agents.yaml. Matching `serializeCentral` in state.ts: when existing file
- * text is provided, parse it into a `yaml.Document` (comments + key order
- * preserved) and edit only keys that actually changed. Untouched keys and
- * their comments stay byte-stable. Falls back to plain stringify when there
- * is no existing document yet.
- */
 function serializeManifest(manifest: Manifest, existingContent?: string | null): string {
   const entries = Object.entries(manifest as Record<string, unknown>).filter(
     ([, v]) => v !== undefined,
@@ -48,8 +34,6 @@ function serializeManifest(manifest: Manifest, existingContent?: string | null):
     }
   }
 
-  // Full-document write: callers do read-modify-write, so keys absent from the
-  // new manifest are intentional removals (e.g. clearing beta).
   for (const k of Object.keys(current)) {
     const next = (manifest as Record<string, unknown>)[k];
     if (!(k in (manifest as object)) || next === undefined) {
@@ -58,18 +42,11 @@ function serializeManifest(manifest: Manifest, existingContent?: string | null):
     }
   }
 
-  // Nothing changed → keep the file byte-identical (comments intact).
   if (!changed) return existingContent;
 
-  // stringifyDoc still normalizes a legacy flow root (`{}`) to block so edited
-  // nodes do not render flow, but no longer forces block on a normal document —
-  // that flattened committed flow sequences and made this writer disagree with
-  // the other agents.yaml writers (RUSH-2505). parseDocument still preserves
-  // comments + key ordering.
   return isEmpty ? '' : stringifyDoc(doc);
 }
 
-/** Read and parse agents.yaml from a directory. Returns null if the file does not exist. */
 export function readManifest(repoPath: string): Manifest | null {
   const manifestPath = safeJoin(repoPath, MANIFEST_FILENAME);
   if (!fs.existsSync(manifestPath)) {

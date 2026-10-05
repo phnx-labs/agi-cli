@@ -10,7 +10,6 @@ const execAsync = promisify(exec);
 const PID_TREE_MAX_DEPTH = 5;
 const PID_TREE_MAX_NODES = 100;
 
-// macOS `pgrep -P` silently misses children for some pids; `ps -eo` is reliable.
 async function buildChildIndex(): Promise<Map<number, number[]>> {
   const index = new Map<number, number[]>();
   try {
@@ -25,7 +24,6 @@ async function buildChildIndex(): Promise<Map<number, number[]>> {
       else index.set(ppid, [pid]);
     }
   } catch {
-    /* empty index — caller treats as no descendants */
   }
   return index;
 }
@@ -84,7 +82,6 @@ async function scanAllStates(): Promise<SessionState[]> {
       const s = parseState(raw);
       if (s) out.push(s);
     } catch {
-      /* skip */
     }
   }
   return out;
@@ -130,7 +127,6 @@ export async function pruneStaleSessionState(): Promise<number> {
           await fs.promises.unlink(path.join(STATE_DIR, name));
           removed++;
         } catch {
-          /* best-effort */
         }
       }
     }

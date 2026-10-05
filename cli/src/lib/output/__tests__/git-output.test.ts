@@ -10,7 +10,7 @@ let root: string;
 let repo: string;
 
 function git(args: string[], dateIso?: string, identity?: { email: string; name: string }): void {
-  // Fixture identity overrides ambient Git variables, including in release-attestation runs.
+
   const env = { ...process.env } as Record<string, string>;
   if (dateIso) {
     env.GIT_AUTHOR_DATE = dateIso;
@@ -23,7 +23,6 @@ function git(args: string[], dateIso?: string, identity?: { email: string; name:
   execFileSync('git', ['-C', repo, ...args], { env, stdio: 'pipe' });
 }
 
-/** Commit an empty change authored by `email` at `dateIso`. */
 function commitAs(email: string, name: string, message: string, dateIso: string): void {
   git(['commit', '--allow-empty', '-m', message], dateIso, { email, name });
 }

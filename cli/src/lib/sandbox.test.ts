@@ -10,13 +10,12 @@ describe('buildSpawnEnv', () => {
   it('sets HOME to the overlay and AGENTS_USER_DIR to the real user agents dir', () => {
     const overlayHome = path.join(os.tmpdir(), 'test-overlay-home');
     const env = buildSpawnEnv(overlayHome);
-    
+
     expect(env.HOME).toBe(overlayHome);
     expect(env.AGENTS_USER_DIR).toBe(getUserAgentsDir());
   });
 
   it('preserves other allowlisted env vars', () => {
-    // PATH is usually allowlisted
     if (process.env.PATH) {
       const env = buildSpawnEnv('/tmp/overlay');
       expect(env.PATH).toBe(process.env.PATH);
@@ -28,9 +27,6 @@ describe('buildSpawnEnv', () => {
     expect(env.FOO).toBe('bar');
   });
 
-  // The daemon holds no Claude token, so the sandbox no longer forwards
-  // CLAUDE_CODE_OAUTH_TOKEN from the ambient env — a routine authenticates
-  // through the pinned account's own CLAUDE_CONFIG_DIR login instead.
   it('does not forward CLAUDE_CODE_OAUTH_TOKEN from the parent process', () => {
     const prev = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-test-token';
@@ -84,7 +80,6 @@ describe('assertSandboxForwardsHostGhAuth (RUSH-2860 — fail loud, never hollow
     const prev = process.env.GH_CONFIG_DIR;
     process.env.GH_CONFIG_DIR = ghDir;
     try {
-      // Empty overlay HOME, no GH_CONFIG_DIR / token — the pre-fix gap.
       expect(() => assertSandboxForwardsHostGhAuth({ HOME: path.join(hostConfig, 'empty-overlay') })).toThrow(
         /hide this host's GitHub auth|RUSH-2860/,
       );
@@ -118,8 +113,6 @@ describe('assertSandboxForwardsHostGhAuth (RUSH-2860 — fail loud, never hollow
     const prevTok = process.env.GH_TOKEN;
     const prevGht = process.env.GITHUB_TOKEN;
     const prevEnt = process.env.GH_ENTERPRISE_TOKEN;
-    // Empty XDG_CONFIG_HOME + missing GH_CONFIG_DIR + cleared tokens so
-    // hostHasGhAuth is false regardless of the developer's real ~/.config/gh.
     const emptyConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-empty-xdg-'));
     process.env.XDG_CONFIG_HOME = emptyConfig;
     process.env.GH_CONFIG_DIR = path.join(emptyConfig, 'missing-gh');
@@ -158,8 +151,6 @@ describe('getJobHomePath — routine-name path containment (C4)', () => {
     expect(() => getJobHomePath('.hidden-job')).not.toThrow();
   });
 
-  // A synced user/system routine YAML controls `name`; without containment,
-  // `../../../..` steers cleanJobHome's recursive rmSync at the user's home.
   it('rejects parent-traversal names so rmSync cannot escape the routines dir', () => {
     expect(() => getJobHomePath('../../../../..')).toThrow();
     expect(() => getJobHomePath('..')).toThrow();

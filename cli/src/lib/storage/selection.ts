@@ -1,4 +1,3 @@
-// Managed storage is selected only for signed-in non-BYO callers; this is a decision, not a fallback chain.
 
 import { readSession, type PhoenixSession } from '../identity/client.js';
 

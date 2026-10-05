@@ -401,7 +401,7 @@ export interface VersionCommandDiff {
 }
 
 export function listPluginCommandNames(): Set<string> {
-  // Plugin-bundled commands are source-managed and must never be orphan-pruned.
+
   const names = new Set<string>();
   for (const plugin of discoverPlugins()) {
     for (const cmd of plugin.commands) names.add(`${plugin.name}-${cmd}`);

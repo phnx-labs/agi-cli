@@ -22,8 +22,8 @@ function texts(msgs: MailboxMessage[]): string[] {
 }
 
 describe('mailbox', () => {
-  // Drain recovers crash-claimed processing files, drops wrong recipients without
-  // looping, and preserves sender/history; mailbox IDs are containment boundaries.
+
+
   it('drains in FIFO order, stamps `to`, and empties the inbox', () => {
     const box = mailboxDir(BOX, tmpRoot());
     enqueue(box, { to: BOX, text: 'first' });

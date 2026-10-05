@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Health and self-heal for the retained shared CI runner and idle reaper.
-# Requires the CI SSH key, gh auth, and Hetzner access; unreachable hosts are
-# reported instead of rebuilt. Healing escalates restart -> verify -> re-register.
 set -uo pipefail
 
 BOX=ci-runner-fsn1
@@ -40,7 +37,7 @@ for u in runner@1 runner@2 runner@3 runner@4 runner-phnx@1 runner-phnx@2; do
 done
 
 GH_ORG_OK=1
-# Org-admin API access is optional; unit state remains the health signal on 403.
+
 gh api orgs/phnx-labs/actions/runners --jq '.runners | length' >/dev/null 2>&1 || GH_ORG_OK=0
 [ "$GH_ORG_OK" = 0 ] && log "NOTE gh lacks org runner read (403) — GitHub-side checks/heals skipped; unit checks only"
 

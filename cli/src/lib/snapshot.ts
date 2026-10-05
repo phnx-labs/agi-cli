@@ -31,7 +31,6 @@ export type SnapshotSessionRow = {
   [key: string]: unknown;
 };
 
-// Stable machine JSON v1 assembled from the owning inventory/session/feed/sync sources; default session collection is local and performs no SSH.
 export interface FleetSnapshot {
   version: 1;
   host: string;
@@ -103,16 +102,9 @@ export function assembleSnapshot(parts: {
   };
 }
 
-/**
- * Gather inventory + active sessions (+ optional feed/sync) in one process.
- * Default `local: true` keeps the common poll path free of SSH fan-out; pass
- * `local: false` (or hosts) to match full `sessions --active` fleet scope.
- */
 export async function computeSnapshot(
   opts: ComputeSnapshotOptions = {},
 ): Promise<FleetSnapshot> {
-  // Default local-only sessions (cheap poll). Explicit hosts → scoped fan-out.
-  // local: false (from --all-hosts) → full sessions --active fan-out.
   const localOnly = opts.hosts?.length ? false : opts.local !== false;
 
   const [{ collectAgentsJson }, rosterMod, { serializeActiveSessionsForJson }] = await Promise.all([

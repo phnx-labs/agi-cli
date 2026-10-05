@@ -1,19 +1,3 @@
-/**
- * `agents sessions trace <selectors...>` (alias: `agents trace <selectors...>`) —
- * render one session as a derived trajectory, or two as a compare.
- *
- * One model (`buildTrajectory`), three renderings, audience auto-selected: a
- * person at a TTY gets the self-contained HTML opened in a browser; a piped or
- * headless caller (an agent) gets the compact text trajectory; `--json` emits the
- * versioned envelope the AGI EXT Fleet panel and triaging agents consume. Explicit
- * `--html/--text/--json` always win.
- *
- * Exactly two resolved selectors turn the single trajectory into a **compare**
- * (`diffTrajectories`, PR2/3) — the same three renderings, laid on a shared axis
- * with a divergence marker. `--tree` turns one selector into a **lineage**
- * (`buildLineage`, PR3/3): the orchestrator and every session it spawned, edges
- * read from the team records. Three or more selectors still fail loud.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
@@ -43,10 +27,8 @@ import type { LineageEdge, LineageNode, SessionLineage } from '@phnx-labs/sessio
 import { parseAgentFilter } from './sessions.js';
 import { selectSessions } from './sessions-export.js';
 
-/** Versioned envelope emitted by `--json` — the stable contract for consumers. */
 export const SESSIONS_TRACE_SCHEMA_VERSION = 1;
 
-/** The `diff` block of a `layout: 'compare'` envelope — everything but the two full trajectories, which already ride `sessions`. */
 interface SessionsTraceDiffEnvelope {
   divergence?: TrajectoryDivergence;
   added: TrajectoryStep[];
@@ -57,7 +39,6 @@ interface SessionsTraceDiffEnvelope {
   truncatedB: number;
 }
 
-/** The `lineage` block of a `layout: 'lineage'` envelope — the delegation graph. */
 interface SessionsTraceLineageEnvelope {
   rootId: string;
   nodes: LineageNode[];
@@ -66,7 +47,6 @@ interface SessionsTraceLineageEnvelope {
   unresolvedParentIds: string[];
 }
 
-/** The `--json` envelope: the versioned contract for the ext / triaging agents. */
 interface SessionsTraceEnvelope {
   schemaVersion: typeof SESSIONS_TRACE_SCHEMA_VERSION;
   kind: 'sessions-trace';
@@ -76,7 +56,6 @@ interface SessionsTraceEnvelope {
   lineage?: SessionsTraceLineageEnvelope;
 }
 
-/** Build the versioned `--json` envelope for a single-session trajectory. */
 export function buildTraceEnvelope(models: SessionTrajectory[]): SessionsTraceEnvelope {
   return {
     schemaVersion: SESSIONS_TRACE_SCHEMA_VERSION,
@@ -86,7 +65,6 @@ export function buildTraceEnvelope(models: SessionTrajectory[]): SessionsTraceEn
   };
 }
 
-/** Build the versioned `--json` envelope for a two-session compare. */
 export function buildCompareTraceEnvelope(cmp: TrajectoryComparison): SessionsTraceEnvelope {
   return {
     schemaVersion: SESSIONS_TRACE_SCHEMA_VERSION,
@@ -105,12 +83,6 @@ export function buildCompareTraceEnvelope(cmp: TrajectoryComparison): SessionsTr
   };
 }
 
-/**
- * Build the versioned `--json` envelope for a lineage. `sessions` carries the
- * ROOT's trajectory only: the graph's own numbers come from the indexed session
- * rows, so a consumer pays one transcript parse instead of one per teammate —
- * `agents sessions trace <child>` is how you get a child's full trajectory.
- */
 export function buildLineageTraceEnvelope(
   lineage: SessionLineage,
   rootTrajectory: SessionTrajectory,
@@ -135,10 +107,10 @@ interface TraceOptions {
   text?: boolean;
   json?: boolean;
   output?: string;
-  open?: boolean; // --no-open sets this false
+  open?: boolean;
   errorsOnly?: boolean;
   steps?: boolean;
-  redact?: boolean; // --no-redact sets this false
+  redact?: boolean;
   all?: boolean;
   since?: string;
   limit?: string;
@@ -149,11 +121,6 @@ interface TraceOptions {
 
 type RenderFormat = 'html' | 'text' | 'json';
 
-/**
- * Pick the rendering by audience: explicit `--html/--text/--json` win; otherwise
- * a person at a TTY gets the visual HTML and a piped/headless caller (an agent)
- * gets the compact text trajectory.
- */
 export function chooseFormat(options: TraceOptions, isTTY: boolean): RenderFormat {
   if (options.json) return 'json';
   if (options.html) return 'html';
@@ -161,13 +128,6 @@ export function chooseFormat(options: TraceOptions, isTTY: boolean): RenderForma
   return isTTY ? 'html' : 'text';
 }
 
-/**
- * Decide the trace layout from what the user TYPED (`selectorCount`) vs what
- * those selectors RESOLVED to (`resolvedCount`). Keyed on selector count so a
- * single content-search selector that happens to match two sessions never
- * silently becomes a compare — every unsupported combination fails loud with a
- * clear message. Pure, so the boundaries are unit-tested without the command.
- */
 export function decideTraceLayout(
   options: Pick<TraceOptions, 'tree' | 'compare'>,
   selectorCount: number,
@@ -216,7 +176,6 @@ export function decideTraceLayout(
   return 'single';
 }
 
-/** One step's counters, rendered as the sidebar renders them: `6 run · 2 blocked`. */
 function stepDetail(step: SessionStep): string {
   const mix = Object.entries(step.mix ?? {})
     .filter(([, count]) => (count ?? 0) > 0)
@@ -230,11 +189,6 @@ function stepDetail(step: SessionStep): string {
   ].filter(Boolean).join(' · ');
 }
 
-/**
- * Render one session's narration-anchored step list — the same fold the daemon
- * caches and the sidebar renders, computed here from the transcript so the
- * command works for any session, live or closed, cached or not.
- */
 export function renderSessionSteps(
   session: SessionMeta,
   options: { redact?: boolean; knownSecrets?: readonly string[] } = {},
@@ -268,7 +222,6 @@ export function renderSessionSteps(
   return `${lines.join('\n')}\n\n${footer}\n`;
 }
 
-/** Attach the trace behaviour to a command node (canonical or top-level alias). */
 function configureTraceCommand(cmd: Command): Command {
   cmd
     .description('Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.')
@@ -334,20 +287,11 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
   });
 
   cmd.action(async (selectors: string[], _options: TraceOptions, command: Command) => {
-    // Merge parent globals: under `agents sessions trace`, the `sessions` command
-    // owns `--json`/`--no-redact`/`--all`/`--agent`/`--since` and captures them, so
-    // read the merged view (as `render`/`insights` do) — the top-level `agents
-    // trace` alias has no such parent and its own options fill the same fields.
     const options = command.optsWithGlobals() as TraceOptions;
-    // Lineage resolves its children FROM the scanned pool, and a teammate can sit
-    // well below the orchestrator in recency order, so --tree scans wider by
-    // default than the single/compare layouts. An explicit --limit still wins.
     const defaultLimit = options.tree ? 500 : 100;
     const limit = Math.max(1, Number.parseInt(options.limit || String(defaultLimit), 10) || defaultLimit);
     const agent = parseAgentFilter(options.agent).agent;
     const pool = await discoverSessions({
-      // Default to every directory so an id from any project resolves, matching
-      // `agents sessions render` (sessions-render.ts:126).
       all: options.all !== false,
       since: options.since,
       limit,
@@ -361,10 +305,6 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
       return;
     }
 
-    // Layout is keyed on what the USER TYPED (selector count), not the resolved
-    // count — a single content-search selector matching two sessions must NOT
-    // silently become a compare. All the fail-loud boundaries live in the pure
-    // decideTraceLayout so they are unit-tested (see sessions-trace.test.ts).
     if (options.steps && selectors.length > 1) {
       throw new Error('--steps renders one session\'s step list; pass a single selector.');
     }
@@ -380,15 +320,7 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
     };
 
     if (layout === 'lineage') {
-      // The pool must keep team-origin rows: they are hidden from the ordinary
-      // listing by default (AGENTS.md invariant 7), and they ARE the children.
-      // discoverSessions does not apply that presentation filter, so `pool` is
-      // already the teams-included set the graph needs.
       const root = sessions[0];
-      // An id-shaped selector resolves through the session INDEX, which reaches
-      // rows the scanned pool does not hold (selectSessions -> findSessionsById,
-      // sessions-export.ts:386). Seed the pool with the resolved root so the
-      // graph always roots where the user pointed.
       const pooled = pool.some((s) => s.id === root.id) ? pool : [root, ...pool];
       const lineage = buildLineage(pooled, { rootId: root.id });
       const idPart = root.shortId || root.id;
@@ -415,7 +347,6 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
         return;
       }
 
-      // HTML.
       const html = renderLineageHtml(lineage, redact);
       if (options.output) {
         fs.writeFileSync(options.output, html, { mode: 0o600 });
@@ -461,7 +392,6 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
         return;
       }
 
-      // HTML.
       const html = renderTrajectoryCompareHtml(cmp);
       if (options.output) {
         fs.writeFileSync(options.output, html, { mode: 0o600 });
@@ -481,13 +411,8 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
       return;
     }
 
-    // One selector — the single-session trajectory.
     const session = sessions[0];
 
-    // --steps is the CLI door to the timeline fold the sidebar renders, so an
-    // agent can read what a session DID without the extension (PHNX-3939). It is
-    // a different model from the trajectory (narration beats, not tool steps),
-    // so it short-circuits before buildTrajectory rather than reshaping it.
     if (options.steps) {
       const out = renderSessionSteps(session, { redact, knownSecrets });
       if (options.output) {
@@ -523,7 +448,6 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
       return;
     }
 
-    // HTML.
     const html = renderTrajectoryHtml(model);
     if (options.output) {
       fs.writeFileSync(options.output, html, { mode: 0o600 });
@@ -545,12 +469,10 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
   return cmd;
 }
 
-/** Canonical `agents sessions trace <selectors...>`. */
 export function registerSessionsTraceCommand(sessionsCmd: Command): void {
   configureTraceCommand(sessionsCmd.command('trace <selectors...>'));
 }
 
-/** Top-level alias `agents trace <selectors...>` (mirrors `agents insights`). */
 export function registerTraceCommand(program: Command): void {
   configureTraceCommand(program.command('trace <selectors...>'));
 }

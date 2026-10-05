@@ -1,8 +1,3 @@
-/**
- * BasePeriodicService (RUSH-3193 P1): the convenience base every concrete
- * periodic service (e.g. SessionIndexService) extends for its health
- * bookkeeping — exercised directly here, independent of ServiceSupervisor.
- */
 import { describe, it, expect } from 'vitest';
 import { BasePeriodicService, isPeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -106,7 +101,7 @@ describe('BasePeriodicService', () => {
     await svc.start(makeCtx());
     const snapshot = svc.health();
     await svc.stop();
-    expect(snapshot.state).toBe('running'); // unaffected by the later stop()
+    expect(snapshot.state).toBe('running');
     expect(svc.health().state).toBe('stopped');
   });
 });

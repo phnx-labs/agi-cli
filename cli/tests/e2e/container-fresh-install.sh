@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Runs inside a fresh node:24 container and proves install, adoption, launch
-# sync, and version switching preserve pre-existing Claude and Codex settings.
 set -euo pipefail
 
 fail() { echo "FAIL: $1" >&2; exit 1; }

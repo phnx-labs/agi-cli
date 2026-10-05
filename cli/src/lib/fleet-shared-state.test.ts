@@ -61,7 +61,6 @@ describe('fleet shared daemon state (real files)', () => {
     const read = readFleetSharedDeviceStates(root);
     expect(read.errors).toEqual([]);
     expect(read.states).toEqual([{ version: 1, device: 'yosemite-m5', auth: { status: 'ready' }, sessions }]);
-    // An unchanged re-publish of the same mirror does not dirty the repo.
     expect(updateFleetSharedDeviceState('yosemite-m5', { sessions }, root).changed).toBe(false);
   });
 
@@ -120,7 +119,6 @@ describe('peer envelopes received over the exchange (PHNX-4116)', () => {
       1_000,
     );
     expect(first).toEqual({ changed: true, path: path.join(root, 'devices', 'peer-b', FLEET_SHARED_STATE_FILE) });
-    // A later partial envelope (sessions only) keeps the earlier auth + accounts fields.
     await storePeerFleetSharedDeviceState({ version: 1, device: 'peer-b', sessions: { rows: [] } }, root, 2_000);
     await storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500);
     const byDevice = Object.fromEntries(readFleetSharedDeviceStates(root).states.map((s) => [s.device, s]));
@@ -133,7 +131,6 @@ describe('peer envelopes received over the exchange (PHNX-4116)', () => {
       receivedAt: 2_000,
     });
     expect(byDevice['peer-c'].receivedAt).toBe(1_500);
-    // An unchanged re-store at the same stamp is a no-op write.
     expect((await storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500)).changed).toBe(false);
   });
 

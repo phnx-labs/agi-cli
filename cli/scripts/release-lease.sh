@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-# Releases can start on different hosts, so origin is the mutex. Claims and
-# reclaims use an expected-old-value force-with-lease push: a distributed CAS
-# that admits exactly one publisher. TTL applies only when holder liveness is
-# unknown; a provably alive holder is never reclaimed merely for age. Every
-# irreversible release step verifies ownership and fails closed.
+
+
+
+
+
 set -euo pipefail
 
 LEASE_REF="${RELEASE_LEASE_REF:-refs/release-lock/held}"
@@ -31,9 +31,6 @@ holder_desc() {
 }
 
 token_path()   { printf '%s/release-lease.token' "$(git rev-parse --git-common-dir)"; }
-# Renew pushes a new SHA before it can update the local token. Membership in the
-# run's full SHA history closes that race: release/verify still recognize a SHA
-# authored by this run during the push-to-token-write window.
 history_path() { printf '%s/release-lease.history' "$(git rev-parse --git-common-dir)"; }
 read_token()   { cat "$(token_path)" 2>/dev/null || true; }
 write_token()  { printf '%s\n' "$1" >> "$(history_path)"; printf '%s\n' "$1" > "$(token_path)"; }
@@ -91,8 +88,6 @@ holder_liveness() {
   printf 'alive'
 }
 
-# A live holder is never reclaimable. Dead is safe immediately; an unprobeable
-# holder must age past the TTL. Claim and clear share this one predicate.
 reclaim_reason() {
   case "$(holder_liveness "$1")" in
     alive) printf '' ;;
@@ -115,8 +110,6 @@ describe_lease() {
 make_lease_commit() {
   local tree msg pid claim_id
   tree="$(git hash-object -t tree /dev/null)"
-  # Shared identities can otherwise create byte-identical commits in the same
-  # second, letting a losing push report "up to date" instead of losing the CAS.
   claim_id="$(local_host)-$$-$RANDOM"
   msg="release lease
 
@@ -232,8 +225,6 @@ cmd_verify() {
   [[ -n "$mine" ]] || { red "release lease: no token in this checkout"; return 1; }
   held="$(remote_lease_sha)" || { red "release lease: could not read origin"; return 1; }
   [[ -n "$held" ]] || { red "release lease: the lease is gone from origin"; return 1; }
-  # Never cross an irreversible release boundary unless origin still points to
-  # a SHA authored by this run.
   if ! owned_token "$held"; then
     fetch_lease || true
     red "release lease: no longer ours -- held by $(describe_lease "$held")"
