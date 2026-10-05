@@ -1,4 +1,3 @@
-/** Opt-in registry-backed gate: AGENTS_LIVE_UPDATE_TEST=1 scripts/test.sh --here -- src/lib/installations/update.live.test.ts */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';

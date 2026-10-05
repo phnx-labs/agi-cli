@@ -1,8 +1,3 @@
-/**
- * A refused update names WHAT holds the installation (PHNX-4116 follow-up):
- * the operator saw "Account home is in use; retry after its sessions finish"
- * with a one-hour-old session on another tty and no way to find it.
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -43,7 +38,6 @@ describe('describeInstallationActivity', () => {
     expect(activity.active).toBe(true);
     expect(activity.processes).toEqual([
       'pid 2173999, up 01:10:22, pts/1: …/claude --permission-mode plan --resume 3ef30267-f84f',
-      // macOS prints `??` for no controlling terminal; it must not print as a tty.
       'pid 4242, up 05:00: …/claude -p headless',
     ]);
     const line = activeCheck.formatInUseDeferral('Claude@2.1.219', activity);
