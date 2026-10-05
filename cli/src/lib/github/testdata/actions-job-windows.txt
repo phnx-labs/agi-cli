@@ -1,0 +1,270 @@
+﻿2026-10-04T23:16:30.8849390Z Current runner version: '2.337.0'
+2026-10-04T23:16:30.8876991Z ##[group]Runner Image Provisioner
+2026-10-04T23:16:30.8877805Z Hosted Compute Agent
+2026-10-04T23:16:30.8878401Z Version: 20260901.588
+2026-10-04T23:16:30.8879030Z Commit: f88ec8081b781fac6c440065ac7ff9e710ce3d0b
+2026-10-04T23:16:30.8879753Z Build Date: 2026-09-01T19:56:44Z
+2026-10-04T23:16:30.8880466Z Worker ID: {a14aab71-8124-40ca-a26d-415bd55f2878}
+2026-10-04T23:16:30.8881228Z Azure Region: westus3
+2026-10-04T23:16:30.8881811Z ##[endgroup]
+2026-10-04T23:16:30.8883372Z ##[group]Operating System
+2026-10-04T23:16:30.8884039Z Microsoft Windows Server 2025
+2026-10-04T23:16:30.8884662Z 10.0.26100
+2026-10-04T23:16:30.8885187Z Datacenter
+2026-10-04T23:16:30.8885682Z ##[endgroup]
+2026-10-04T23:16:30.8886264Z ##[group]Runner Image
+2026-10-04T23:16:30.8886891Z Image: windows-2025-vs2026
+2026-10-04T23:16:30.8887473Z Version: 20260925.250.1
+2026-10-04T23:16:30.8888908Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260925.250/images/windows/Windows2025-VS2026-Readme.md
+2026-10-04T23:16:30.8890535Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260925.250
+2026-10-04T23:16:30.8891521Z ##[endgroup]
+2026-10-04T23:16:30.8892693Z ##[group]GITHUB_TOKEN Permissions
+2026-10-04T23:16:30.8895102Z Contents: read
+2026-10-04T23:16:30.8895809Z Metadata: read
+2026-10-04T23:16:30.8896355Z Packages: read
+2026-10-04T23:16:30.8896915Z ##[endgroup]
+2026-10-04T23:16:30.8899053Z Secret source: Actions
+2026-10-04T23:16:30.8899950Z Cache mode: write
+2026-10-04T23:16:30.8900687Z Prepare workflow directory
+2026-10-04T23:16:30.9440217Z Prepare all required actions
+2026-10-04T23:16:30.9488098Z Getting action download info
+2026-10-04T23:16:31.2883729Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-04T23:16:31.4218799Z Download action repository 'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' (SHA:0c5077e51419868618aeaa5fe8019c62421857d6)
+2026-10-04T23:16:32.0768810Z Complete job name: windows
+2026-10-04T23:16:32.2234397Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-04T23:16:32.2235671Z with:
+2026-10-04T23:16:32.2236126Z   repository: phnx-labs/agi-cli
+2026-10-04T23:16:32.2240123Z   token: ***
+2026-10-04T23:16:32.2240574Z   ssh-strict: true
+2026-10-04T23:16:32.2241027Z   ssh-user: git
+2026-10-04T23:16:32.2241485Z   persist-credentials: true
+2026-10-04T23:16:32.2241984Z   clean: true
+2026-10-04T23:16:32.2242436Z   sparse-checkout-cone-mode: true
+2026-10-04T23:16:32.2242969Z   fetch-depth: 1
+2026-10-04T23:16:32.2243418Z   fetch-tags: false
+2026-10-04T23:16:32.2243880Z   show-progress: true
+2026-10-04T23:16:32.2244340Z   lfs: false
+2026-10-04T23:16:32.2244749Z   submodules: false
+2026-10-04T23:16:32.2245208Z   set-safe-directory: true
+2026-10-04T23:16:32.2245731Z   allow-unsafe-pr-checkout: false
+2026-10-04T23:16:32.2246478Z ##[endgroup]
+2026-10-04T23:16:32.3711815Z Syncing repository: phnx-labs/agi-cli
+2026-10-04T23:16:32.3713912Z ##[group]Getting Git version info
+2026-10-04T23:16:32.3714589Z Working directory is 'D:\a\agi-cli\agi-cli'
+2026-10-04T23:16:32.4663176Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-04T23:16:32.8368376Z git version 2.55.0.windows.5
+2026-10-04T23:16:32.8416710Z ##[endgroup]
+2026-10-04T23:16:32.8433155Z Temporarily overriding HOME='D:\a\_temp\aed2a92a-f296-4656-8f57-b81c23ebf89b' before making global git config changes
+2026-10-04T23:16:32.8435075Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-04T23:16:32.8445776Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\agi-cli\agi-cli
+2026-10-04T23:16:32.9087781Z Deleting the contents of 'D:\a\agi-cli\agi-cli'
+2026-10-04T23:16:32.9093333Z ##[group]Determining repository object format
+2026-10-04T23:16:32.9095645Z ##[endgroup]
+2026-10-04T23:16:32.9098000Z ##[group]Initializing the repository
+2026-10-04T23:16:32.9106944Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\agi-cli\agi-cli
+2026-10-04T23:16:32.9981632Z Initialized empty Git repository in D:/a/agi-cli/agi-cli/.git/
+2026-10-04T23:16:33.0024988Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/phnx-labs/agi-cli
+2026-10-04T23:16:33.0649281Z ##[endgroup]
+2026-10-04T23:16:33.0659546Z ##[group]Disabling automatic garbage collection
+2026-10-04T23:16:33.0661649Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-10-04T23:16:33.0959390Z ##[endgroup]
+2026-10-04T23:16:33.0962059Z ##[group]Setting up auth
+2026-10-04T23:16:33.0963969Z Removing SSH command configuration
+2026-10-04T23:16:33.0974829Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-04T23:16:33.1278270Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-04T23:16:34.5263482Z Removing HTTP extra header
+2026-10-04T23:16:34.5278691Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-04T23:16:34.5566055Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-04T23:16:35.0958971Z Removing includeIf entries pointing to credentials config files
+2026-10-04T23:16:35.0967177Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-04T23:16:35.1258483Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-04T23:16:35.6780758Z [command]"C:\Program Files\Git\bin\git.exe" config --file D:\a\_temp\git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-10-04T23:16:35.7076839Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/agi-cli/agi-cli/.git.path D:\a\_temp\git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:16:35.7369581Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/agi-cli/agi-cli/.git/worktrees/*.path D:\a\_temp\git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:16:35.7767071Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:16:35.8150347Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:16:35.8486503Z ##[endgroup]
+2026-10-04T23:16:35.8487275Z ##[group]Fetching the repository
+2026-10-04T23:16:35.8489093Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +4b709a7e5c7026f4dcc56336235180386a992b03:refs/remotes/origin/main
+2026-10-04T23:16:39.5323435Z From https://github.com/phnx-labs/agi-cli
+2026-10-04T23:16:39.5324601Z  * [new ref]         4b709a7e5c7026f4dcc56336235180386a992b03 -> origin/main
+2026-10-04T23:16:39.5372324Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/main
+2026-10-04T23:16:39.5766371Z   origin/main
+2026-10-04T23:16:39.5808457Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/main
+2026-10-04T23:16:39.6069005Z 4b709a7e5c7026f4dcc56336235180386a992b03
+2026-10-04T23:16:39.6098520Z ##[endgroup]
+2026-10-04T23:16:39.6098960Z ##[group]Determining the checkout info
+2026-10-04T23:16:39.6099952Z ##[endgroup]
+2026-10-04T23:16:39.6108685Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-10-04T23:16:39.6590044Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-10-04T23:16:39.6885420Z ##[group]Checking out the ref
+2026-10-04T23:16:39.6893759Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B main refs/remotes/origin/main
+2026-10-04T23:16:40.7464349Z Updating files:  77% (2358/3034)
+2026-10-04T23:16:40.7566606Z Updating files:  78% (2367/3034)
+2026-10-04T23:16:40.7652966Z Updating files:  79% (2397/3034)
+2026-10-04T23:16:40.7747595Z Updating files:  80% (2428/3034)
+2026-10-04T23:16:40.7825156Z Updating files:  81% (2458/3034)
+2026-10-04T23:16:40.7896029Z Updating files:  82% (2488/3034)
+2026-10-04T23:16:40.7986343Z Updating files:  83% (2519/3034)
+2026-10-04T23:16:40.8065516Z Updating files:  84% (2549/3034)
+2026-10-04T23:16:40.8164361Z Updating files:  85% (2579/3034)
+2026-10-04T23:16:40.8242318Z Updating files:  86% (2610/3034)
+2026-10-04T23:16:40.8325828Z Updating files:  87% (2640/3034)
+2026-10-04T23:16:40.8408345Z Updating files:  88% (2670/3034)
+2026-10-04T23:16:40.8488901Z Updating files:  89% (2701/3034)
+2026-10-04T23:16:40.8562836Z Updating files:  90% (2731/3034)
+2026-10-04T23:16:40.8662003Z Updating files:  91% (2761/3034)
+2026-10-04T23:16:40.8757238Z Updating files:  92% (2792/3034)
+2026-10-04T23:16:40.8843262Z Updating files:  93% (2822/3034)
+2026-10-04T23:16:40.8932934Z Updating files:  94% (2852/3034)
+2026-10-04T23:16:40.9007167Z Updating files:  95% (2883/3034)
+2026-10-04T23:16:40.9084712Z Updating files:  96% (2913/3034)
+2026-10-04T23:16:40.9167427Z Updating files:  97% (2943/3034)
+2026-10-04T23:16:40.9243368Z Updating files:  98% (2974/3034)
+2026-10-04T23:16:40.9332592Z Updating files:  99% (3004/3034)
+2026-10-04T23:16:40.9333371Z Updating files: 100% (3034/3034)
+2026-10-04T23:16:40.9333826Z Updating files: 100% (3034/3034), done.
+2026-10-04T23:16:40.9503019Z Switched to a new branch 'main'
+2026-10-04T23:16:40.9565718Z branch 'main' set up to track 'origin/main'.
+2026-10-04T23:16:40.9675427Z ##[endgroup]
+2026-10-04T23:16:41.0474941Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-10-04T23:16:41.0985396Z 4b709a7e5c7026f4dcc56336235180386a992b03
+2026-10-04T23:16:41.1478353Z ##[group]Run oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+2026-10-04T23:16:41.1478808Z with:
+2026-10-04T23:16:41.1479005Z   no-cache: false
+2026-10-04T23:16:41.1481458Z   token: ***
+2026-10-04T23:16:41.1481646Z ##[endgroup]
+2026-10-04T23:16:41.8357547Z Downloading a new version of Bun: https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip
+2026-10-04T23:16:42.5000915Z [command]"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command "$ErrorActionPreference = 'Stop' ; try { Add-Type -AssemblyName System.IO.Compression.ZipFile } catch { } ; try { [System.IO.Compression.ZipFile]::ExtractToDirectory('D:\a\_temp\4200ed4c-bb6a-4290-9e17-2e157d3e8ecd.zip', 'D:\a\_temp\b4a77224-a02e-4c4f-979b-7b7f0be0c9d6', $true) } catch { if (($_.Exception.GetType().FullName -eq 'System.Management.Automation.MethodException') -or ($_.Exception.GetType().FullName -eq 'System.Management.Automation.RuntimeException') ){ Expand-Archive -LiteralPath 'D:\a\_temp\4200ed4c-bb6a-4290-9e17-2e157d3e8ecd.zip' -DestinationPath 'D:\a\_temp\b4a77224-a02e-4c4f-979b-7b7f0be0c9d6' -Force } else { throw $_ } } ;"
+2026-10-04T23:16:43.1975631Z [command]C:\Users\runneradmin\.bun\bin\bun.exe --revision
+2026-10-04T23:16:43.6356091Z 1.4.2+744846f84
+2026-10-04T23:16:43.6715908Z ##[group]Run bun install --frozen-lockfile
+2026-10-04T23:16:43.6716330Z [36;1mbun install --frozen-lockfile[0m
+2026-10-04T23:16:43.7166319Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-04T23:16:43.7166719Z ##[endgroup]
+2026-10-04T23:16:44.0147642Z bun install v1.4.2 (744846f84)
+2026-10-04T23:16:57.6484973Z 
+2026-10-04T23:16:57.6485763Z $ node scripts/postinstall.js
+2026-10-04T23:16:57.7610094Z 
+2026-10-04T23:16:57.7610577Z agents-cli installed locally.
+2026-10-04T23:16:57.7610991Z To complete setup, run: npx agents setup
+2026-10-04T23:16:57.7611236Z 
+2026-10-04T23:16:57.7710105Z $ bun run build
+2026-10-04T23:16:57.7857447Z $ tsc && rm -rf 'dist/lib/menubar/MenubarHelper.app' && ([ -f 'bin/agents-macos' ] && mkdir -p dist/bin && cp -f 'bin/agents-macos' 'dist/bin/agents' && chmod 755 'dist/bin/agents' || true)
+2026-10-04T23:17:18.2341946Z 
+2026-10-04T23:17:18.2342566Z + @homebridge/node-pty-prebuilt-multiarch@0.14.1
+2026-10-04T23:17:18.2346205Z + @phnx-labs/cli-docs@0.1.0
+2026-10-04T23:17:18.2346962Z + @types/diff@8.0.0
+2026-10-04T23:17:18.2347346Z + @types/marked-terminal@6.1.1
+2026-10-04T23:17:18.2347748Z + @types/node@26.1.0
+2026-10-04T23:17:18.2348095Z + @types/ssh2@1.15.5
+2026-10-04T23:17:18.2348413Z + @types/ws@8.18.1
+2026-10-04T23:17:18.2348750Z + miniflare@4.20260730.0
+2026-10-04T23:17:18.2349072Z + ssh2@1.17.0
+2026-10-04T23:17:18.2349390Z + tsx@4.23.0
+2026-10-04T23:17:18.2349700Z + typescript@6.0.3
+2026-10-04T23:17:18.2350028Z + vitest@4.1.9
+2026-10-04T23:17:18.2350336Z + @fontsource/inter@5.3.0
+2026-10-04T23:17:18.2350747Z + @fontsource/jetbrains-mono@5.3.0
+2026-10-04T23:17:18.2351178Z + @inquirer/prompts@8.5.2
+2026-10-04T23:17:18.2351549Z + @phnx-labs/sessions-cli@0.3.0
+2026-10-04T23:17:18.2351913Z + @resvg/resvg-wasm@2.6.2
+2026-10-04T23:17:18.2352247Z + @types/proper-lockfile@4.1.4
+2026-10-04T23:17:18.2352662Z + @zed-industries/agent-client-protocol@0.4.5
+2026-10-04T23:17:18.2352969Z + aws4fetch@1.0.20
+2026-10-04T23:17:18.2353182Z + chalk@5.6.2
+2026-10-04T23:17:18.2353358Z + commander@15.0.0
+2026-10-04T23:17:18.2353537Z + croner@10.0.1
+2026-10-04T23:17:18.2353759Z + diff@9.0.0
+2026-10-04T23:17:18.2354039Z + esbuild@0.28.2
+2026-10-04T23:17:18.2354351Z + lru-cache@11.5.2
+2026-10-04T23:17:18.2354533Z + marked@15.0.12
+2026-10-04T23:17:18.2354718Z + marked-terminal@7.3.0
+2026-10-04T23:17:18.2354923Z + ora@9.4.1
+2026-10-04T23:17:18.2355107Z + proper-lockfile@4.1.2
+2026-10-04T23:17:18.2355305Z + satori@0.12.2
+2026-10-04T23:17:18.2355487Z + simple-git@3.36.0
+2026-10-04T23:17:18.2355676Z + smol-toml@1.7.0
+2026-10-04T23:17:18.2355882Z + ws@8.21.0
+2026-10-04T23:17:18.2356093Z + yaml@2.9.0
+2026-10-04T23:17:18.2356272Z + yoga-wasm-web@0.3.3
+2026-10-04T23:17:18.2356397Z 
+2026-10-04T23:17:18.2356493Z 261 packages installed [34.22s]
+2026-10-04T23:17:18.3505245Z ##[group]Run bun run build
+2026-10-04T23:17:18.3505564Z [36;1mbun run build[0m
+2026-10-04T23:17:18.3579697Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-04T23:17:18.3580060Z ##[endgroup]
+2026-10-04T23:17:18.6490797Z $ tsc && rm -rf 'dist/lib/menubar/MenubarHelper.app' && ([ -f 'bin/agents-macos' ] && mkdir -p dist/bin && cp -f 'bin/agents-macos' 'dist/bin/agents' && chmod 755 'dist/bin/agents' || true)
+2026-10-04T23:17:37.5794320Z ##[group]Run bun run test -- src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/installations/shims.test.ts src/lib/installations/shims.device-pins.test.ts
+2026-10-04T23:17:37.5796877Z [36;1mbun run test -- src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/installations/shims.test.ts src/lib/installations/shims.device-pins.test.ts[0m
+2026-10-04T23:17:37.5883377Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-10-04T23:17:37.5883749Z ##[endgroup]
+2026-10-04T23:17:37.8662328Z $ TZ=UTC node ./node_modules/vitest/vitest.mjs run src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/installations/shims.test.ts src/lib/installations/shims.device-pins.test.ts
+2026-10-04T23:17:38.3117794Z 
+2026-10-04T23:17:38.3123335Z [1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mD:/a/agi-cli/agi-cli/cli[39m
+2026-10-04T23:17:38.3124239Z 
+2026-10-04T23:18:06.7291543Z [31mNo test files found, exiting with code 1
+2026-10-04T23:18:06.7291914Z [39m
+2026-10-04T23:18:06.7292917Z [2mfilter: [22m[33msrc/lib/platform[2m, [22msrc/lib/hooks[2m, [22msrc/lib/binary-shadow.test.ts[2m, [22msrc/lib/installations/shims.test.ts[2m, [22msrc/lib/installations/shims.device-pins.test.ts[39m
+2026-10-04T23:18:06.7295184Z [2minclude: [22m[33mtests/**/*.test.ts[2m, [22msrc/**/__tests__/**/*.test.ts[2m, [22msrc/**/*.test.ts[2m, [22mscripts/**/*.test.ts[39m
+2026-10-04T23:18:06.7295925Z [2mexclude:  [22m[33m**/node_modules/**[2m, [22m**/.git/**[39m
+2026-10-04T23:18:06.7296205Z 
+2026-10-04T23:18:06.7367053Z 
+2026-10-04T23:18:06.7369042Z [31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Error [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+2026-10-04T23:18:06.7372360Z [31m[1mError[22m: Installing @phnx-labs/secrets-cli@0.1.5 into C:\Users\RUNNER~1\AppData\Local\Temp\agents-secrets-cli-0.1.5 failed (exit 0). The suite needs the real standalone; set AGENTS_TEST_SECRETS_BIN to a built secrets-cli entrypoint to skip the install.
+2026-10-04T23:18:06.7373969Z [39m
+2026-10-04T23:18:06.7374484Z [36m [2m❯[22m tests/secrets-standalone.ts:[2m119:13[22m[39m
+2026-10-04T23:18:06.7422908Z     [90m117|[39m     )[33m;[39m
+2026-10-04T23:18:06.7424432Z     [90m118|[39m     [35mif[39m (result[33m.[39mstatus [33m!==[39m [34m0[39m [33m||[39m [33m![39mfs[33m.[39m[34mexistsSync[39m(entry)) {
+2026-10-04T23:18:06.7425975Z     [90m119|[39m       [35mthrow[39m [35mnew[39m [33mError[39m(
+2026-10-04T23:18:06.7426702Z     [90m   |[39m             [31m^[39m
+2026-10-04T23:18:06.7427459Z     [90m120|[39m         `Installing @phnx-labs/secrets-cli@${STANDALONE_SECRETS_VERSIO…
+2026-10-04T23:18:06.7428409Z     [90m121|[39m           `(exit ${result.status ?? 'signal'}). The suite needs the re…
+2026-10-04T23:18:06.7429049Z [90m [2m❯[22m withInstallLock tests/secrets-standalone.ts:[2m91:12[22m[39m
+2026-10-04T23:18:06.7429692Z [90m [2m❯[22m ensureStandaloneSecretsBin tests/secrets-standalone.ts:[2m109:10[22m[39m
+2026-10-04T23:18:06.7430655Z [90m [2m❯[22m Object.globalSetup [as setup] tests/global-setup.ts:[2m27:22[22m[39m
+2026-10-04T23:18:06.7431487Z [90m [2m❯[22m TestProject._initializeGlobalSetup node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m10746:50[22m[39m
+2026-10-04T23:18:06.7432383Z [90m [2m❯[22m Vitest.initializeGlobalSetup node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m13745:35[22m[39m
+2026-10-04T23:18:06.7433111Z [90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m13588:6[22m[39m
+2026-10-04T23:18:06.7433714Z [90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m13617:11[22m[39m
+2026-10-04T23:18:06.7434316Z [90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m13479:19[22m[39m
+2026-10-04T23:18:06.7435000Z [90m [2m❯[22m startVitest node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m14554:8[22m[39m
+2026-10-04T23:18:06.7435385Z 
+2026-10-04T23:18:06.7435389Z 
+2026-10-04T23:18:06.7435393Z 
+2026-10-04T23:18:06.7437891Z 
+2026-10-04T23:18:06.7890262Z error: script "test" exited with code 1
+2026-10-04T23:18:06.8916725Z ##[error]Process completed with exit code 1.
+2026-10-04T23:18:06.9178247Z Post job cleanup.
+2026-10-04T23:18:07.1447721Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-10-04T23:18:07.1736432Z git version 2.55.0.windows.5
+2026-10-04T23:18:07.1796853Z Temporarily overriding HOME='D:\a\_temp\17dc8d77-4a6d-4d3b-9f68-e83373d41882' before making global git config changes
+2026-10-04T23:18:07.1797921Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-04T23:18:07.1808584Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\agi-cli\agi-cli
+2026-10-04T23:18:07.2102789Z Removing SSH command configuration
+2026-10-04T23:18:07.2112804Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-10-04T23:18:07.2415839Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-10-04T23:18:07.8030408Z Removing HTTP extra header
+2026-10-04T23:18:07.8039994Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-04T23:18:07.8354489Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-10-04T23:18:08.3945766Z Removing includeIf entries pointing to credentials config files
+2026-10-04T23:18:08.3956349Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-04T23:18:08.4220764Z includeif.gitdir:D:/a/agi-cli/agi-cli/.git.path
+2026-10-04T23:18:08.4221941Z includeif.gitdir:D:/a/agi-cli/agi-cli/.git/worktrees/*.path
+2026-10-04T23:18:08.4222442Z includeif.gitdir:/github/workspace/.git.path
+2026-10-04T23:18:08.4223002Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-04T23:18:08.4261963Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/agi-cli/agi-cli/.git.path
+2026-10-04T23:18:08.4520906Z D:\a\_temp\git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:18:08.4563182Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/agi-cli/agi-cli/.git.path D\:\\a\\_temp\\git\-credentials\-67bc52d6\-4183\-4c69\-af0e\-1bd4ca71e01a\.config
+2026-10-04T23:18:08.4918153Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/agi-cli/agi-cli/.git/worktrees/*.path
+2026-10-04T23:18:08.5180417Z D:\a\_temp\git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:18:08.5221252Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/agi-cli/agi-cli/.git/worktrees/*.path D\:\\a\\_temp\\git\-credentials\-67bc52d6\-4183\-4c69\-af0e\-1bd4ca71e01a\.config
+2026-10-04T23:18:08.5511427Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-04T23:18:08.5770341Z /github/runner_temp/git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:18:08.5813104Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-67bc52d6\-4183\-4c69\-af0e\-1bd4ca71e01a\.config
+2026-10-04T23:18:08.6125254Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-04T23:18:08.6376904Z /github/runner_temp/git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config
+2026-10-04T23:18:08.6415397Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-67bc52d6\-4183\-4c69\-af0e\-1bd4ca71e01a\.config
+2026-10-04T23:18:08.6715981Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-10-04T23:18:09.1986880Z Removing credentials config 'D:\a\_temp\git-credentials-67bc52d6-4183-4c69-af0e-1bd4ca71e01a.config'
+2026-10-04T23:18:09.2201573Z Cleaning up orphan processes

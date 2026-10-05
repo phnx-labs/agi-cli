@@ -1388,7 +1388,9 @@ name; `auto` is `agents run --device auto`, which already refuses a `personal` o
 `pinnedProjects` (project names pinned to the top, in pin order; default `[]`),
 `tabOrder` (every one of `home`, `sessions`, `inbox`, `projects` exactly once; default
 in that order), `hiddenTabs` (any of those four but not all; default `[]`), and
-`groupTicketsByMilestone` (default `false`, a flat ticket list). Settings is never in
+`groupTicketsByMilestone` (default `false`, a flat ticket list). `prGroupOpen` and
+`prGroupMerged` (`none` | `type` | `day`; defaults `none` and `day`) group the PR board's
+open filters and its Merged filter. Settings is never in
 either tab list: it is always shown. The three list keys are `string-list` keys stored
 as YAML lists and emitted as JSON arrays; `agents config set` replaces the whole list
 from a JSON array (`'["Rush","Ops, west"]'`, what the menu writes) or comma-separated

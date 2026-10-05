@@ -722,6 +722,28 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: false,
     description: 'AGI Menu: group a project\'s tickets under milestone headers. Off = one flat list ordered by ticketSort.',
   },
+  {
+    name: 'menubar.menu.prGroupOpen',
+    yamlKey: 'menubarMenuPrGroupOpen',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'none',
+    description:
+      'AGI Menu: how a project\'s open pull requests are grouped (the All, Ready, Drafts and Mine filters) — ' +
+      'none, type (the conventional-commit type in the title), or day.',
+    validate: oneOf('menubar.menu.prGroupOpen', ['none', 'type', 'day']),
+  },
+  {
+    name: 'menubar.menu.prGroupMerged',
+    yamlKey: 'menubarMenuPrGroupMerged',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'day',
+    description:
+      'AGI Menu: how a project\'s recently merged pull requests are grouped — none, type (the ' +
+      'conventional-commit type in the title), or day (Today, Yesterday, Earlier this week).',
+    validate: oneOf('menubar.menu.prGroupMerged', ['none', 'type', 'day']),
+  },
 ];
 
 /** Look up a key spec by CLI dotted name, or throw listing the known keys. */

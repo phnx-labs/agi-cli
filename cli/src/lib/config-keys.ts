@@ -44,6 +44,8 @@ export const MENUBAR_MENU_PROPERTIES = [
   'tabOrder',
   'hiddenTabs',
   'groupTicketsByMilestone',
+  'prGroupOpen',
+  'prGroupMerged',
 ] as const;
 
 /** A run-time default key: model, mode, effort, or tier override. */
