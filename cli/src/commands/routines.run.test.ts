@@ -134,9 +134,6 @@ describeRoutines('routines run --device SELF follows the normal local eligibilit
     const home = makeHome({ jobs: [job], registry });
     try {
       const res = run(home, ['run', 'test-job', '--device', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
-      // Eligibility passes; the run then fails because no claude version is
-      // configured in the isolated HOME. The important thing is it did not fail
-      // with the device-mismatch message.
       const output = res.stdout + res.stderr;
       expect(output).not.toContain("Job 'test-job' can only run on");
       expect(output).toMatch(/no version of claude configured|not installed|spawn failed/);
@@ -146,18 +143,11 @@ describeRoutines('routines run --device SELF follows the normal local eligibilit
   });
 });
 
-/** POSIX single-quote a string so it is safe to embed in a `/bin/sh -c` script. */
 function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Read a run's status from meta.json, tolerating a torn read of a file another
- * process is mid-write on (writeRunMeta is not atomic — same defensive parse
- * `readRunMeta` in lib/routines.ts already applies to production readers).
- * Returns null when the file is absent, empty, or not yet valid JSON — the
- * caller polls again rather than treating a transient read race as a failure.
- */
+// Meta writes are not atomic; tolerate absent or torn JSON and let the caller poll again.
 function readRunStatus(runsDir: string, runId: string): string | null {
   const metaPath = path.join(runsDir, runId, 'meta.json');
   try {
@@ -345,6 +335,7 @@ describeRoutines('buildRunsJson', () => {
   });
 });
 
+// Named projects and same-titled special buckets have distinct keys and deterministic ordering.
 describeRoutines('groupRoutineJobsByProject — named projects never collide with special buckets', () => {
   const mk = (name: string, projects?: string[]): JobConfig =>
     ({ ...baseJob, name, ...(projects ? { projects } : {}) }) as unknown as JobConfig;
@@ -352,26 +343,24 @@ describeRoutines('groupRoutineJobsByProject — named projects never collide wit
   it('keeps a project named "Operations" separate from the no-project Operations special', () => {
     const known = new Set(['Operations']);
     const jobs = [
-      mk('in-operations-project', ['Operations']), // named project literally "Operations"
-      mk('no-project'),                             // untagged -> special Operations bucket
+      mk('in-operations-project', ['Operations']),
+      mk('no-project'),
     ];
     const groups = groupRoutineJobsByProject(jobs, known);
     const named = groups.find((g) => g.key === 'named:Operations');
     const special = groups.find((g) => g.key === 'special:operations');
-    // Two distinct buckets, both titled "Operations", never merged.
     expect(named).toBeDefined();
     expect(special).toBeDefined();
     expect(named!.jobs.map((j) => j.name)).toEqual(['in-operations-project']);
     expect(special!.jobs.map((j) => j.name)).toEqual(['no-project']);
-    // The named project sorts before the special that shares its title.
     expect(groups.indexOf(named!)).toBeLessThan(groups.indexOf(special!));
   });
 
   it('keeps a project named "Cross-project" separate from the multi-project span special', () => {
     const known = new Set(['Cross-project', 'a', 'b']);
     const jobs = [
-      mk('in-crossproject-project', ['Cross-project']), // named project literally "Cross-project"
-      mk('spans-two', ['a', 'b']),                       // multiple names -> special Cross-project bucket
+      mk('in-crossproject-project', ['Cross-project']),
+      mk('spans-two', ['a', 'b']),
     ];
     const groups = groupRoutineJobsByProject(jobs, known);
     const named = groups.find((g) => g.key === 'named:Cross-project');
@@ -386,12 +375,12 @@ describeRoutines('groupRoutineJobsByProject — named projects never collide wit
   it('orders named projects (alphabetically) before All projects, Cross-project, Operations, Unknown projects', () => {
     const known = new Set(['zeta', 'alpha', 'a', 'b']);
     const jobs = [
-      mk('op'),                       // Operations special
-      mk('unknown', ['ghost']),       // Unknown projects special
-      mk('all', ['*']),               // All projects special
-      mk('cross', ['a', 'b']),        // Cross-project special
-      mk('named-z', ['zeta']),        // named
-      mk('named-a', ['alpha']),       // named
+      mk('op'),
+      mk('unknown', ['ghost']),
+      mk('all', ['*']),
+      mk('cross', ['a', 'b']),
+      mk('named-z', ['zeta']),
+      mk('named-a', ['alpha']),
     ];
     const titles = groupRoutineJobsByProject(jobs, known).map((g) => g.title);
     expect(titles).toEqual(['alpha', 'zeta', 'All projects', 'Cross-project', 'Operations', 'Unknown projects']);
@@ -406,10 +395,7 @@ describeRoutines('groupRoutineJobsByProject — named projects never collide wit
   });
 });
 
-// The bare `agents routines` command (RUSH-2503): on a TTY it opens the interactive
-// browser, but with --json or in a non-interactive shell it MUST reproduce the
-// static `routines list` output byte-for-byte. spawnSync gives the child no TTY, so
-// these exercise the static fall-through path.
+// Without a TTY, bare `routines` and `routines --json` must exactly fall through to static list output.
 describeRoutines('bare routines command routing', () => {
   it('bare `routines --json` matches `routines list --json` byte-for-byte', () => {
     const home = makeHome({ jobs: [baseJob, { ...baseJob, name: 'other-job', projects: ['*'] }] });
@@ -502,6 +488,7 @@ describeRoutines('routines edit — headless context repair', () => {
   });
 });
 
+// Linux /proc verifies the detached daemon inherited the test home rather than production history state.
 describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
   // The isolated history dir prevents the daemon's SIGTERM sweep from touching real user processes.
   it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
@@ -513,8 +500,6 @@ describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUS
       pid = await daemon.pidPromise;
       expect(pid).not.toBeNull();
 
-      // On Linux, /proc/<pid>/environ is the ground truth for what a detached child
-      // actually inherited. macOS lacks /proc — the fix applies, the assertion is skipped.
       if (process.platform === 'linux' && pid !== null) {
         const expectedHistoryDir = path.join(home, '.agents', '.history');
         let actualHistoryDir: string | undefined;
@@ -523,11 +508,8 @@ describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUS
           const entry = environ.split('\0').find((v) => v.startsWith('AGENTS_HISTORY_DIR='));
           if (entry) actualHistoryDir = entry.slice('AGENTS_HISTORY_DIR='.length);
         } catch {
-          // /proc/<pid>/environ unreadable — skip env assertion
         }
         if (actualHistoryDir !== undefined) {
-          // Before the RUSH-2545 fix, this was the real production AGENTS_HISTORY_DIR
-          // inherited from the parent vitest process — not the test's tmpHome.
           expect(actualHistoryDir).toBe(expectedHistoryDir);
           expect(actualHistoryDir).not.toBe(process.env.AGENTS_HISTORY_DIR ?? '');
         }

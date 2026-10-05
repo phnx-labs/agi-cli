@@ -205,11 +205,7 @@ export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMi
   return { accountName, email };
 }
 
-/**
- * Write (or rotate) the reserved FILE-BASED `auth` bundle's per-account key.
- * Usage/probe ignores a keychain- or vault-backed bundle of this name, so a
- * wrong backend fails loud instead of looking like a successful mint.
- */
+// The reserved auth bundle must be file-backed; a wrong backend fails loud instead of silently hiding a seeded token.
 export function seedReservedAuthToken(email: string, token: string): { key: string } {
   const cleaned = assertValidSetupToken(token);
   const key = claudeAccountTokenKey(email);
@@ -248,12 +244,7 @@ export function seedReservedAuthToken(email: string, token: string): { key: stri
   return { key };
 }
 
-/**
- * The env var a harness's durable worker credential injects as on a worker
- * (claude's setup-token rides CLAUDE_CODE_OAUTH_TOKEN; api-key harnesses ride
- * their MINT_FLOWS apiKeyEnv). Throws for a harness with no portable worker
- * credential — kimi/antigravity log in per box.
- */
+// Return the portable worker credential env; harnesses with per-device login deliberately throw.
 export function workerCredentialEnv(harness: AgentId): string {
   if (harness === 'claude') return 'CLAUDE_CODE_OAUTH_TOKEN';
   const flow = MINT_FLOWS[harness];
@@ -378,7 +369,6 @@ export function seedNamedAccount(name: string, token: string, flow: MintFlow): C
 export interface MintDriveHooks {
   driver?: TermDriver;
   openUrl?: (url: string) => Promise<void>;
-  /** Asked once the authorize URL is on screen, when `--code` was not given. */
   readCode?: () => Promise<string | undefined>;
   drive?: DriveOptions;
 }
@@ -594,7 +584,7 @@ export async function resolveSyncTargets(fleet: boolean, devices: string[]): Pro
   const registry = await loadDevices();
   const known = Object.keys(registry);
   if (named.length) {
-    // A self host in --device is skipped, not an error; an unknown name is.
+    // Explicit self targets are skipped; unknown device names are operator errors.
     const unknown = named.filter((d) => !known.includes(d) && !isSelfHost(d));
     if (unknown.length) {
       throw new Error(
@@ -660,9 +650,6 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
  */
 export function hasMintedSetupToken(): { ready: boolean; detail: string } {
   try {
-    // The registry is the account bundles behind the standalone `secrets` CLI, so
-    // this read is as reachable — or as unreachable — as the auth-bundle read
-    // below and sits inside the same guard.
     const records = Object.values(readAccountRegistry().accounts);
     const setup = records.filter((a) => a.auth === 'setup-token' && a.provider === 'anthropic');
     if (setup.length) {

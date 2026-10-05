@@ -144,27 +144,12 @@ export function findAccount(name: string, doc = readAccountRegistry()): Credenti
   return doc.accounts[name] ?? Object.values(doc.accounts).find(account => account.name === name) ?? null;
 }
 
-/**
- * Effective native accounts: the fleet-shared central store (version-scoped
- * identities) merged with THIS box's own device doc (device-scoped identities).
- * A native login is machine-local — its home follows its scope (PHNX-3315), so
- * a `scope:'device'` identity is read from this box's device doc and never the
- * shared central agents.yaml (which is where its email/identityKey PII used to
- * accumulate). On an id collision the device slice wins.
- */
+// Device-scoped native identities live only in this box's device doc; that slice wins an id collision with central state.
 export function listNativeAccounts(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>): NativeAccount[] {
   const merged = { ...meta.accounts?.native, ...meta.deviceAccounts?.native };
   return Object.values(merged).map(account => ({ ...account, kind: 'native' as const }));
 }
 
-/**
- * The native account registered for one harness login, or null when that login
- * is unnamed. `info` is the login's identity as `getAccountInfo` /
- * `readClaudeHomeConfig` report it; the match key is the same value every
- * catalog and inventory groups a home on — the stable `accountKey`, else the
- * lowercased email. The one lookup behind `agents view`, the device
- * inventories, and the Claude status line.
- */
 export function findNativeAccountByIdentity(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   agent: AgentId,
@@ -196,12 +181,7 @@ function nativeIdentityRows(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, age
   return listNativeAccounts(meta).filter(account => account.agent === agent && account.identityKey === identityKey);
 }
 
-/**
- * Split a management selector into its harness and name. `<harness>#<name>`
- * pins the harness; a bare name (or row id) carries none. Native names are
- * unique per harness (PHNX-3887), so a bare name alone can legitimately match a
- * claude row AND a codex row — the selector is how rename/remove say which.
- */
+// A bare native label may match several harnesses; `<harness>#<name>` pins management to one.
 export function parseAccountSelector(input: string): { agent?: AgentId; name: string } {
   const hash = input.indexOf('#');
   if (hash < 0) return { name: input };
@@ -212,12 +192,6 @@ export function parseAccountSelector(input: string): { agent?: AgentId; name: st
   return { agent: agentRaw, name };
 }
 
-/**
- * Refuse a bare name that native rows in several harnesses share. A
- * harness-qualified selector (`agent` set) never hits this — uniqueness is
- * per harness. Ids are unique so they never collide either. Shared by
- * rename/remove/view so the message stays one string.
- */
 export function assertUnambiguousNativeAccount(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   name: string,
@@ -245,23 +219,7 @@ function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, 
   return nativeIdentityRows(meta, found.agent, found.identityKey);
 }
 
-/**
- * Native label names are unique per HARNESS, not globally (PHNX-3887).
- *
- * One human identity is commonly signed into several harnesses —
- * `muqsitnawaz@icloud.com` is a claude login AND a codex login AND a grok login.
- * A global namespace let whichever harness was labelled first squat the good
- * name, forcing prefixed junk (`cxicloud`, `gkicloud`) on the rest. Nothing is
- * actually ambiguous at the point of use: the selector is `<harness>#<label>`,
- * and `findUnifiedAccount` already disambiguates via `preferAgent`.
- *
- * Pass `agent` to scope the check to that harness. Every native path has one
- * in hand — connect/label from the caller, rename from the row being renamed —
- * so the un-scoped form is only for provider accounts.
- *
- * Provider (non-native) accounts stay globally unique — they are selected by
- * bare name via `--account`, with no harness to scope them by.
- */
+// Native labels are unique per harness; provider-account labels remain globally unique.
 function assertUniqueUnifiedName(
   name: string,
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
@@ -375,15 +333,9 @@ export function setDefaultAccountIfAbsent(agent: AgentId, name: string): boolean
 
 export function bindAccount(nameOrId: string, target: string, preferAgent?: AgentId): UnifiedAccount {
   const meta = readMeta();
-  // Scope to the harness being bound to: a bare identity selector matches every
-  // harness it is signed into, so without this the binding could persist against
-  // a different harness's row than the caller validated (the attach command
-  // resolves `targetAgent` and passes it here).
+  // Resolve in the caller's harness; bindings to device-scoped identities remain machine-local.
   const account = findUnifiedAccount(nameOrId, meta, undefined, preferAgent);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
-  // A binding follows its account: one that targets a device-scoped native login
-  // is itself machine-local and lands in this box's device doc (PHNX-3315);
-  // every other binding stays fleet-shared in central.
   if (account.kind === 'native' && account.scope === 'device') {
     updateMeta(current => ({
       ...current,
@@ -400,8 +352,6 @@ export function bindAccount(nameOrId: string, target: string, preferAgent?: Agen
 
 export function unbindAccount(nameOrId: string, target: string, preferAgent?: AgentId): void {
   const meta = readMeta();
-  // Same scoping as bindAccount: detach the row on the harness the caller means,
-  // not whichever the store happened to order first for a colliding identity.
   const account = findUnifiedAccount(nameOrId, meta, undefined, preferAgent);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
   const inCentral = meta.accounts?.bindings?.[target] === account.id;
@@ -423,8 +373,6 @@ export function unbindAccount(nameOrId: string, target: string, preferAgent?: Ag
   });
 }
 
-/** Every target bound to `accountId`: this box's device-doc bindings merged over
- * the fleet-shared central bindings (PHNX-3315). */
 export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts' | 'deviceAccounts'>): string[] {
   const merged = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
   return Object.entries(merged).filter(([, id]) => id === accountId).map(([target]) => target).sort();
@@ -432,7 +380,6 @@ export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts' |
 
 interface AccountSelection { id: string; source: 'explicit' | 'binding' | 'default' }
 
-/** Explicit selection wins over a configured per-harness default. */
 export function resolveAccountSelection(
   explicit: string | undefined,
   agent: AgentId,
@@ -492,35 +439,24 @@ export function setAccountSecret(name: string, secret: string, base = getUserAge
   getAccountProvider(account.provider).validate(account.auth, secret);
   const record: AccountSchemaRecord = { id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl };
   const { bundle, items } = buildAccountBundle(record, secret);
-  bundle.created_at = readBundleSync(account.name).created_at; // rotate the secret, keep the bundle's birth time
+  bundle.created_at = readBundleSync(account.name).created_at;
   writeBundleWithItemsSync(bundle, items);
 }
 
-/**
- * `oldSelector` is a bare name, a row id, or `<harness>#<name>`. A native row
- * carries its harness, so the new name only has to be free within THAT harness
- * (PHNX-3887 / PHNX-3988): renaming codex's `cxicloud` to `icloud` is fine
- * while claude's `icloud` stays untouched. Provider accounts have no harness
- * and stay globally unique.
- */
 export function renameAccount(oldSelector: string, newName: string, base = getUserAgentsDir()): void {
   assertName(newName);
   const meta = readMeta();
   const selector = parseAccountSelector(oldSelector);
   const rows = nativeRowsForNameOrId(meta, selector.name, selector.agent);
   if (rows.length) {
+    // Sweep every identity row in its owning store; bare-name defaults rewrite only within this harness, while ids are global.
     assertUniqueUnifiedName(newName, meta, undefined, new Set(rows.map(account => account.id)), rows[0]!.agent);
-    // Sweep every row for the identity (PHNX-3206) in its owning store (PHNX-3315)
-    // and any per-harness default that points to the old name or row ids.
     const rowScope = rows[0]!.scope;
     const renamedAgent = rows[0]!.agent;
     const renamedIds = new Set(rows.map(row => row.id));
     updateMeta(current => {
       const defaults = { ...(current.accounts?.defaults as Record<string, string> | undefined) };
       for (const [agent, value] of Object.entries(defaults)) {
-        // Ids are unique so an id match may rewrite any harness's default. A
-        // bare-name match must only rewrite THIS harness — two harnesses may
-        // legitimately share the same native name (PHNX-3988).
         if (renamedIds.has(value) || (agent === renamedAgent && value === selector.name)) defaults[agent] = newName;
       }
       const next: Meta = { ...current, accounts: { ...current.accounts, defaults } };
@@ -550,11 +486,10 @@ export function renameAccount(oldSelector: string, newName: string, base = getUs
     }
     return { ...current, accounts: { ...current.accounts, defaults } };
   });
-  renameBundleSync(account.name, newName); // moves metadata + secret, preserves ACCOUNT_ID
+  renameBundleSync(account.name, newName);
   renameProfileConsumers(account.name, newName, base);
 }
 
-/** `selector` is a bare name, a row id, or `<harness>#<name>` (see {@link renameAccount}). */
 export function removeAccount(selector: string, base = getUserAgentsDir()): void {
   const meta = readMeta();
   const parsed = parseAccountSelector(selector);
@@ -563,10 +498,8 @@ export function removeAccount(selector: string, base = getUserAgentsDir()): void
     const bindings = [...new Set(rows.flatMap(row => accountBindings(row.id, meta)))].sort();
     if (bindings.length) throw new Error(`Account '${rows[0]!.name}' is attached to: ${bindings.join(', ')}. Detach it before removing it.`);
     const ids = new Set(rows.map(row => row.id));
-    // Sweep every row for the identity (PHNX-3206) from its owning store (PHNX-3315).
     const rowScope = rows[0]!.scope;
     updateMeta(current => {
-      // Drop this box's connect-home and slot records for the removed account (PHNX-3940).
       const homes = { ...current.deviceAccounts?.homes };
       const slots = { ...current.deviceAccounts?.slots };
       for (const id of ids) {
@@ -619,11 +552,7 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
   const envVar = account.auth === 'setup-token' ? 'CLAUDE_CODE_OAUTH_TOKEN' : adapter.envFor(host, account.auth);
   if (!hasKeychainTokenSync(account.secretRef)) throw new Error(`Credential for account '${account.name}' is missing on this device. Add it with 'agents accounts set-key ${account.name}'.`);
   const secretVar = secretVarFor(account.auth);
-  // Account bundles are policy `never`, so their value items carry no biometry
-  // ACL. Resolve through the bundle path that verifies that policy and attests
-  // `silentNoAcl` to the headless keychain guard. Calling getKeychainTokenSync()
-  // directly makes a headless --account launch reject the prompt-free item as
-  // if it required Touch ID before the helper ever reads it (PHNX-2939).
+  // Resolve through the policy-never bundle path so headless reads carry its silentNoAcl attestation instead of looking biometric-gated.
   const secret = readAndResolveBundleEnvSync(account.name, {
     keys: [secretVar],
     keyMode: 'storage',
@@ -645,16 +574,11 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
   };
 }
 
-/** The account a spawn should launch under, classified for the exec path. */
 export type SpawnAccount =
   | { kind: 'provider'; id: string; name: string; agent: AgentId; env: Record<string, string> }
   | { kind: 'native'; id: string; name: string; agent: AgentId; identityKey: string; scope: 'version' | 'device' };
 
-/**
- * Sync fallback: scan installed version homes to discover a native identity
- * that matches the given email, for accounts that predate the registration
- * system (empty `accounts.native`). Returns a synthetic SpawnAccount or null.
- */
+// Compatibility fallback for native homes created before account registration existed.
 function discoverUnregisteredNativeAccount(
   email: string,
   agent: AgentId,
