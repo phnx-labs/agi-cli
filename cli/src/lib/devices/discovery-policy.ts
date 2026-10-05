@@ -1,4 +1,3 @@
-/** Synced device approval/ignore policy and local registry reconciliation. */
 import { readMeta, updateMeta } from '../state.js';
 import { unionDeviceDiscovery } from './device-docs.js';
 import {
@@ -21,7 +20,6 @@ interface DeviceDiscoveryReconcileResult {
   unresolved: string[];
 }
 
-/** Read one portable decision. Absence means pending. */
 export function getDeviceDiscoveryStatus(name: string): DeviceDiscoveryStatus | undefined {
   assertValidDeviceName(name);
   return loadDeviceDiscoveryPolicies().get(name);
@@ -44,6 +42,7 @@ export function setDeviceDiscoveryStatus(name: string, status: DeviceDiscoverySt
  * central-legacy map. `ignored` beats `approved`, so every box computes the same policy. Absence
  * means pending. */
 export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus> {
+  // Corruption is fatal: silently dropping one document could re-enroll an intentionally ignored peer.
   const policies = new Map<string, DeviceDiscoveryStatus>();
   const apply = (rec: Record<string, unknown> | undefined) => {
     for (const [name, status] of Object.entries(rec ?? {})) {
@@ -51,12 +50,12 @@ export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus
       if (status !== 'approved' && status !== 'ignored') {
         throw new Error(`Device discovery policy for '${name}' must be approved or ignored.`);
       }
-      if (policies.get(name) === 'ignored') continue; // ignored is never downgraded
+      if (policies.get(name) === 'ignored') continue;
       policies.set(name, status);
     }
   };
-  apply(readMeta().fleet?.discovery); // central legacy, until the migration drains it
-  apply(unionDeviceDiscovery());       // per-box device docs (ignored still wins)
+  apply(readMeta().fleet?.discovery);
+  apply(unionDeviceDiscovery());
   return policies;
 }
 
@@ -90,7 +89,6 @@ export async function reconcileDeviceDiscoveryPolicies(): Promise<DeviceDiscover
   return registerApprovedDevicesFromTailscale(json, approved, ignored, missing);
 }
 
-/** Complete reconciliation from real `tailscale status --json` output. */
 export async function registerApprovedDevicesFromTailscale(
   json: string,
   approved: string[],

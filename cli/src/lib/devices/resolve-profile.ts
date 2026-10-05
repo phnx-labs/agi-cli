@@ -10,8 +10,8 @@ import {
 } from './registry.js';
 import { readDeviceConfigValues } from '../device-config.js';
 
-/** Overlay the central config's ssh.* / platform / user keys onto a registry profile. */
 export function resolveDeviceProfile(device: DeviceProfile): DeviceProfile {
+  // Operator config owns platform, user, and auth; shell is always re-derived from that platform.
   const config = readDeviceConfigValues(device.name);
   const platform = (config.platform as DevicePlatform | undefined) ?? device.platform;
   const method = (config.sshAuth as DeviceAuthMethod | undefined) ?? device.auth.method;

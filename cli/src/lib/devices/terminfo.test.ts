@@ -43,9 +43,6 @@ describe('terminfoHostKey', () => {
   });
 
   it('qualifies the key with the remote user — terminfo is per-user (~/.terminfo)', () => {
-    // The multi-user-host case the CLI supports via `agents ssh user@device`:
-    // alice and bob on the same host must NOT share a sync stamp, or bob's
-    // login sees alice's stamp and skips installing into bob's ~/.terminfo.
     const addr = 'box.ts.net';
     expect(terminfoHostKey({ user: 'alice', name: 'box' }, addr)).not.toBe(terminfoHostKey({ user: 'bob', name: 'box' }, addr));
     expect(terminfoHostKey({ user: 'alice', name: 'box' }, addr)).toBe('alice@box.ts.net');
@@ -60,8 +57,6 @@ describe('terminfo sync cache stamp', () => {
   let tmp: string;
 
   beforeEach(() => {
-    // A real, isolated cache root — the stamp functions write to the real
-    // filesystem here (no mocking), keyed off this dir via the cacheRoot override.
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-terminfo-'));
   });
 
@@ -77,14 +72,14 @@ describe('terminfo sync cache stamp', () => {
 
   it('keys the stamp by BOTH host and TERM', () => {
     markTerminfoSynced('host-a', 'xterm-ghostty', tmp);
-    expect(terminfoSynced('host-b', 'xterm-ghostty', tmp)).toBe(false); // different host
-    expect(terminfoSynced('host-a', 'xterm-kitty', tmp)).toBe(false); // different TERM
+    expect(terminfoSynced('host-b', 'xterm-ghostty', tmp)).toBe(false);
+    expect(terminfoSynced('host-a', 'xterm-kitty', tmp)).toBe(false);
   });
 
   it('treats a stale stamp (older than the TTL) as un-synced', () => {
     markTerminfoSynced('host-a', 'xterm-ghostty', tmp);
     const stamp = path.join(tmp, 'devices', 'terminfo', 'host-a__xterm-ghostty');
-    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000); // 8 days > 7-day TTL
+    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     fs.utimesSync(stamp, old, old);
     expect(terminfoSynced('host-a', 'xterm-ghostty', tmp)).toBe(false);
   });
@@ -98,9 +93,6 @@ describe('terminfo sync cache stamp', () => {
 
 describe('localTerminfoSource', () => {
   it('returns a compilable source for a term this machine has, or null otherwise', () => {
-    // xterm is present wherever ncurses/infocmp exists; CI Linux has it. If the
-    // box has no infocmp at all, the fail-safe path returns null — assert the
-    // contract holds either way.
     const src = localTerminfoSource('xterm');
     if (src !== null) {
       expect(src).toContain('xterm');

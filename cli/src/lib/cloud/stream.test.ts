@@ -2,14 +2,12 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { parseSSE, renderStream } from './stream.js';
 import type { CloudEvent } from './types.js';
 
-/** Build a Response whose body is a raw SSE text string. */
 function sseResponse(text: string): Response {
   return new Response(text, {
     headers: { 'Content-Type': 'text/event-stream' },
   });
 }
 
-/** Drain an AsyncIterable into an array. */
 async function collect(text: string): Promise<CloudEvent[]> {
   const events: CloudEvent[] = [];
   for await (const e of parseSSE(sseResponse(text))) {
@@ -18,7 +16,6 @@ async function collect(text: string): Promise<CloudEvent[]> {
   return events;
 }
 
-// ── parseSSE ──────────────────────────────────────────────────────────────────
 
 describe('parseSSE', () => {
   it('yields nothing for an empty stream', async () => {
@@ -171,7 +168,6 @@ describe('parseSSE', () => {
     }
   });
 
-  // Represents the factory floor SSE sequence: status → output chunks → done
   it('handles a typical factory run sequence', async () => {
     const raw = [
       'event: status\ndata: {"status":"running","id":"t123"}\n\n',
@@ -181,7 +177,7 @@ describe('parseSSE', () => {
       'event: done\ndata: {"status":"completed","exitCode":0}\n\n',
     ].join('');
     const events = await collect(raw);
-    expect(events).toHaveLength(4); // keepalive filtered out
+    expect(events).toHaveLength(4);
     expect(events[0].type).toBe('status');
     expect(events[1].type).toBe('text');
     expect(events[2].type).toBe('text');
@@ -189,7 +185,6 @@ describe('parseSSE', () => {
   });
 });
 
-// ── renderStream ──────────────────────────────────────────────────────────────
 
 describe('renderStream', () => {
   afterEach(() => {

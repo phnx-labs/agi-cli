@@ -8,7 +8,6 @@ import {
   platformFromOs,
 } from './registry.js';
 
-/** A single node distilled from `tailscale status --json`. */
 export interface TailscaleNode {
   name: string;
   platform: DevicePlatform;
@@ -18,12 +17,9 @@ export interface TailscaleNode {
   direct: boolean;
   relay?: string;
   lastSeen?: string;
-  /** True for a node another user shared INTO this tailnet — not the operator's
-   * own machine, so discovery must never auto-register or suggest it. */
   sharee: boolean;
 }
 
-/** Shape of the bits of a `tailscale status --json` peer/self entry we read. */
 interface RawTsNode {
   HostName?: string;
   DNSName?: string;
@@ -41,13 +37,11 @@ interface RawTsStatus {
   Peer?: Record<string, RawTsNode>;
 }
 
-/** Strip MagicDNS's trailing dot so the name is usable as an ssh HostName. */
 function trimDnsDot(dns: string | undefined): string | undefined {
   if (!dns) return undefined;
   return dns.endsWith('.') ? dns.slice(0, -1) : dns;
 }
 
-/** First IPv4 in the node's address list (preferred over IPv6 for ssh). */
 function firstIpv4(ips: string[] | undefined): string | undefined {
   if (!ips) return undefined;
   return ips.find((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) ?? ips[0];
@@ -58,7 +52,7 @@ function firstIpv4(ips: string[] | undefined): string | undefined {
 export function slugifyHostName(hostName: string): string {
   return hostName
     .toLowerCase()
-    .replace(/['’"]/g, '') // drop quotes/apostrophes (so "Bisma's" → "bismas", matching MagicDNS)
+    .replace(/['’"]/g, '')
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
@@ -78,8 +72,6 @@ function toNode(raw: RawTsNode): TailscaleNode | null {
   const dnsName = trimDnsDot(raw.DNSName);
   const name = deviceNameFor(raw, dnsName);
   if (!name) return null;
-  // A non-empty CurAddr means the last handshake was a direct connection;
-  // an empty CurAddr with a Relay means traffic is going through DERP.
   const direct = Boolean(raw.CurAddr && raw.CurAddr.length > 0);
   return {
     name,
@@ -115,7 +107,6 @@ export function parseTailscaleStatus(json: string): TailscaleNode[] {
   return out;
 }
 
-/** Turn a parsed Tailscale node into the registry fields it can populate. */
 export function nodeToDeviceInput(node: TailscaleNode): DeviceInput {
   return {
     platform: node.platform,

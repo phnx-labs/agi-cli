@@ -25,8 +25,6 @@ describe('extractTaskId', () => {
   });
 
   it('never invents a codex-<timestamp> id', () => {
-    // The removed synthetic fallback returned `codex-<Date.now()>`; a genuine
-    // miss must be undefined so dispatch fails loud, never a fabricated id.
     const out = extractTaskId('no id here');
     expect(out).toBeUndefined();
     expect(out === undefined || !/^codex-\d+$/.test(out)).toBe(true);

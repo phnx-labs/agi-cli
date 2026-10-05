@@ -16,9 +16,7 @@ import { resolveDeviceProfile } from './resolve-profile.js';
 import { type DeviceProfile } from './registry.js';
 import { renderPowershellCommand, windowsAgentsInvocation } from '../hosts/remote-cmd.js';
 
-/** Env var the askpass shim reads to know which bundle holds the password. */
 export const ASKPASS_BUNDLE_ENV = 'AGENTS_SSH_BUNDLE';
-/** Env var the askpass shim reads to know which key in the bundle is the password. */
 export const ASKPASS_KEY_ENV = 'AGENTS_SSH_KEY';
 /** Forces the askpass bundle resolve to be broker-only (`agentOnly`) regardless of TTY. A read-only
  * stats probe sets it so an uncached password device resolves from the broker or shows
@@ -28,6 +26,7 @@ export const ASKPASS_AGENT_ONLY_ENV = 'AGENTS_SSH_AGENT_ONLY';
 /** Build the `user@host` (or bare `host`) ssh target and validate it against the shared injection
  * guard. Throws if the device has no address. */
 export function sshTargetFor(device: DeviceProfile): string {
+  // A registered address is authoritative over any stale same-name SSH config alias.
   const resolved = resolveDeviceProfile(device);
   const host = hostNameFor(resolved);
   if (!host) {
@@ -58,21 +57,17 @@ export function wrapRemoteCommand(
   cmd: string[],
   opts: { argv?: boolean; prelude?: string[] } = {},
 ): string | undefined {
+  // Raw mode preserves caller shell syntax; argv mode preserves token boundaries.
   if (cmd.length === 0) return undefined;
   const prelude = opts.prelude ?? [];
   let script: string;
   if (opts.argv) {
-    // Quote EACH caller token so the peer receives it byte-for-byte, then prefix
-    // the prelude VERBATIM — it is already shell syntax and re-quoting it would
-    // break it (see `fleetRemotePrelude`).
     if (device.shell === 'powershell') {
       script = pwshExactArgvScript(cmd, prelude);
     } else {
       script = [...prelude, ...cmd.map(shellQuote)].join(' ');
     }
   } else {
-    // The default joins raw, which is what lets a caller hand the remote shell
-    // something to interpret. See the docblock above for why both must exist.
     script = [...prelude, ...cmd].join(' ');
   }
   if (device.shell === 'powershell') {
@@ -97,27 +92,22 @@ function pwshExactArgvScript(cmd: string[], prelude: string[]): string {
   // splats `$args` into node.exe (the lossy path). `windowsAgentsInvocation` runs the package
   // entry directly so the real parser sees exact tokens.
   const bin = cmd[0];
+  // Bypass npm's PowerShell shim: its second native hop loses exact argv boundaries.
   if (bin === 'agents' || bin === 'ag') {
-    // `windowsAgentsInvocation` leaves the child's code in `$zq`.
     return [...prelude, windowsAgentsInvocation(cmd.slice(1), bin), 'exit $zq'].join('\n');
   }
   const program = pwshQuote(cmd[0]!);
   const rest = cmd.slice(1);
   const splat = rest.length > 0 ? `@(${rest.map(pwshQuote).join(', ')})` : '@()';
+  // Native applications need the Win32 emitter; cmdlets and scripts receive a splatted PowerShell array.
   return [
     ...prelude,
     `$ErrorActionPreference='Stop'`,
     `$__c = Get-Command -Name ${program} -ErrorAction Stop`,
     `if ($__c.CommandType -eq 'Application') {`,
-    // One emitter for the .NET native-exec block, shared with the Windows
-    // `agents` launcher in `hosts/remote-cmd.ts`; a second copy would drift.
     ...pwshNativeExecStatements('$__c.Source', pwshLiteral(rest.map(quoteWin32ExecArg).join(' '))).map((line) => `  ${line}`),
-    // `pwshNativeExecStatements` names the process handle `$zp`.
     `  exit $zp.ExitCode`,
     `}`,
-    // `@__a` SPLATS the array into separate arguments. `& $__c @(...)` on an
-    // array LITERAL does not splat — it passes one array-valued argument, which
-    // a real peer reported back as every token collapsed into one.
     `$__a = ${splat}`,
     `& $__c @__a`,
     `if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`,
@@ -145,6 +135,7 @@ export function fleetRemotePrelude(
   device: Pick<DeviceProfile, 'shell'>,
   provenanceEnv: Record<string, string> = actorEnv(resolveActor()),
 ): string[] {
+  // These entries are already shell syntax and must be composed separately from argv quoting.
   if (device.shell === 'powershell') {
     return [
       `$env:AGENTS_FLEET_REMOTE='1';`,
@@ -158,7 +149,6 @@ export function fleetRemotePrelude(
   ];
 }
 
-/** True when `cmd` already carries the prelude {@link fleetRemotePrelude} emits. */
 function alreadyMarked(cmd: string[], device: Pick<DeviceProfile, 'shell'>): boolean {
   if (device.shell === 'powershell') return cmd[0] === `$env:AGENTS_FLEET_REMOTE='1';`;
   return cmd[0] === 'env' && cmd[1] === 'AGENTS_FLEET_REMOTE=1';
@@ -169,8 +159,6 @@ export function markFleetRemote(
   device: Pick<DeviceProfile, 'shell'>,
   provenanceEnv: Record<string, string> = actorEnv(resolveActor()),
 ): string[] {
-  // Exact-match guard: the marker token is always this literal, so `startsWith`
-  // would only loosen it for no gain.
   if (alreadyMarked(cmd, device)) return cmd;
   return [...fleetRemotePrelude(device, provenanceEnv), ...cmd];
 }
@@ -184,14 +172,9 @@ export function buildInteractiveShellCommand(
 ): string | undefined {
   if (!mirrorCwd) return undefined;
   const rest = homeRemainder(mirrorCwd);
-  // Only a real sub-path of the home dir is worth mirroring; the home root
-  // itself (rest === '') is where a plain login already lands, and a
-  // non-home-anchored path (rest === null) has no meaningful remote analogue.
   if (rest === null || rest === '') return undefined;
 
   if (device.shell === 'powershell') {
-    // Single-quoted PowerShell literal: the only escape inside '…' is '' for a
-    // literal quote, so this is injection-safe for any path.
     const literal = rest.replace(/'/g, "''");
     const script =
       `$d = Join-Path -Path $HOME -ChildPath '${literal}'; ` +
@@ -202,17 +185,14 @@ export function buildInteractiveShellCommand(
   return `${remoteCdPrefix(mirrorCwd, { mirror: true })}exec "$SHELL" -l`;
 }
 
-/** Host-key posture for {@link buildSshInvocation}. */
 interface SshHostKeyOptions {
   /** True when the device's host key is already pinned in the managed known_hosts store, so
    * connections use `StrictHostKeyChecking=yes`. False (default) keeps `accept-new` for first
    * enrollment, whose learned key is then pinned. See {@link hostKeyCheckingOpts}. */
   pinned?: boolean;
-  /** Managed known_hosts path override (tests). Defaults to the CLI-managed store. */
   knownHostsFile?: string;
 }
 
-/** OpenSSH argv that makes an explicit device key authoritative. */
 export function deviceIdentityArgs(device: DeviceProfile): string[] {
   const resolved = resolveDeviceProfile(device);
   return resolved.auth?.method === 'key' && resolved.auth.identityFile
@@ -230,13 +210,8 @@ export function buildSshInvocation(
   hostKey: SshHostKeyOptions = {},
   opts: { agentOnly?: boolean; interactiveCwd?: string; argv?: boolean } = {},
 ): { args: string[]; env: Record<string, string> } {
-  // The effective profile: central config (ssh.*/platform/user) overlaid on
-  // the registry's discovery record.
   device = resolveDeviceProfile(device);
   const target = sshTargetFor(device);
-  // No cmd ⇒ interactive login. It may still carry a derived cd+login-shell
-  // wrapper (interactiveCwd), which is an interactive login too and still needs
-  // a real tty below.
   const interactive = cmd.length === 0;
   // Stamp the consent marker on the remote command, not the local ssh env: AGENTS_FLEET_REMOTE
   // must be visible to the process on the peer. Provenance is a prelude, not prepended to argv:
@@ -253,6 +228,7 @@ export function buildSshInvocation(
   ];
 
   if (device.auth.method === 'password') {
+    // Passwords stay in forced askpass environment state and never enter process arguments.
     if (!device.auth.bundle) {
       throw new Error(`Device '${device.name}' uses password auth but has no secrets bundle. Set one with \`agents devices config ${device.name} ssh.bundle <name>\`.`);
     }
@@ -267,8 +243,6 @@ export function buildSshInvocation(
     args.push(...deviceIdentityArgs(device));
   }
 
-  // An interactive login needs a real tty — whether it starts a bare login
-  // shell (no remote command) or the derived cd+login-shell mirror.
   if (interactive) args.push('-tt');
   args.push(target);
   if (remote) args.push(remote);

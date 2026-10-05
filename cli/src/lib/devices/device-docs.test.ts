@@ -39,7 +39,7 @@ describe('unionDeviceDiscovery', () => {
     const { unionDeviceDiscovery } = await fresh();
     expect(unionDeviceDiscovery()).toEqual({
       'mac-mini': 'approved',
-      ipad: 'ignored', // beta's dismissal beats alpha's approval
+      ipad: 'ignored',
       'win-mini': 'approved',
     });
   });
@@ -65,7 +65,7 @@ describe('unionDeviceIgnored', () => {
     });
     const { unionDeviceIgnored } = await fresh();
     expect(unionDeviceIgnored()).toEqual([
-      { name: 'x', ignoredAt: '2026-02-01T00:00:00.000Z', ignoredOn: 'beta' }, // newest wins
+      { name: 'x', ignoredAt: '2026-02-01T00:00:00.000Z', ignoredOn: 'beta' },
       { name: 'y', ignoredAt: '2026-01-15T00:00:00.000Z', ignoredOn: 'beta' },
     ]);
   });
@@ -77,7 +77,7 @@ describe('unionDeviceHosts', () => {
     writeDoc('beta', { hosts: { shared: { source: 'inline', address: 'new', addedAt: '2026-06-01T00:00:00.000Z' } } });
     const { unionDeviceHosts } = await fresh();
     const merged = unionDeviceHosts();
-    expect(merged.shared.address).toBe('new'); // 2026-06 beats 2026-01
+    expect(merged.shared.address).toBe('new');
     expect(merged.onlyA).toEqual({ source: 'ssh-config' });
   });
 });

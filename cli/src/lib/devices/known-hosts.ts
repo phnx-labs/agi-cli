@@ -10,17 +10,14 @@ import { parseKnownHosts } from '../hosts/ssh-config.js';
 import { hostNameFor } from './ssh-config.js';
 import type { DeviceProfile } from './registry.js';
 
-/** Path to the CLI-managed known_hosts store (created lazily, mode 0600). */
 export function managedKnownHostsPath(): string {
   return path.join(getCacheDir(), 'devices', 'known_hosts');
 }
 
-/** Ensure the parent directory of the managed store exists (mode 0700). */
 export function ensureManagedKnownHostsDir(file = managedKnownHostsPath()): void {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
 }
 
-/** Read the managed store, or '' when it does not exist yet. */
 function readManagedKnownHosts(file = managedKnownHostsPath()): string {
   try {
     return fs.readFileSync(file, 'utf-8');
@@ -37,7 +34,6 @@ export function isHostPinnedIn(content: string, host: string): boolean {
   return parseKnownHosts(content).some((h) => h.toLowerCase() === needle);
 }
 
-/** True if `host` is pinned in the managed store on disk. */
 export function isHostPinned(host: string, file = managedKnownHostsPath()): boolean {
   return isHostPinnedIn(readManagedKnownHosts(file), host);
 }
@@ -49,6 +45,7 @@ export function isDevicePinned(
   device: DeviceProfile,
   isPinned: (host: string) => boolean = (host) => isHostPinned(host),
 ): boolean {
+  // Enrollment keys follow the dial address; accept the legacy device-name pin while registries converge.
   const host = device.address ? hostNameFor(device) : undefined;
   return (host != null && isPinned(host)) || isPinned(device.name);
 }
@@ -57,6 +54,7 @@ export function isDevicePinned(
  * learned and pinned keys live in one CLI-owned file; `StrictHostKeyChecking` is `yes` once pinned
  * (a swap is refused), `accept-new` before (first enrollment learns the key). Pure given `pinned`. */
 export function hostKeyCheckingOpts(pinned: boolean, file = managedKnownHostsPath()): string[] {
+  // The first dial enrolls a key; every later dial must match the enrolled key exactly.
   return [
     '-o', `UserKnownHostsFile=${file}`,
     '-o', `StrictHostKeyChecking=${pinned ? 'yes' : 'accept-new'}`,
@@ -79,9 +77,7 @@ export function newKnownHostsLines(existing: string, scanned: string): string[] 
 }
 
 interface PinResult {
-  /** True if the host is pinned in the managed store after this call. */
   pinned: boolean;
-  /** How many new key lines were appended. */
   added: number;
 }
 
@@ -106,9 +102,6 @@ function pinHostKey(
   host: string,
   opts: { file?: string; timeoutMs?: number; port?: number } = {},
 ): PinResult {
-  // Same injection guard as sshExec: a host starting with `-` (or carrying shell
-  // metacharacters) must never reach ssh-keyscan as a bare argv where it could
-  // be parsed as a flag.
   assertValidSshTarget(host);
   const file = opts.file ?? managedKnownHostsPath();
   const timeoutMs = opts.timeoutMs ?? 8000;

@@ -1,11 +1,3 @@
-/**
- * Integration tests for the tmux session module.
- *
- * These spawn a real tmux server on a temp socket — no mocks. Every test
- * cleans up its session via `afterEach` so a failure mid-test doesn't leak.
- * If tmux isn't installed (rare on dev/CI but possible on bare Linux images),
- * the whole suite is skipped at module load.
- */
 
 import { spawnSync } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -48,16 +40,13 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    // Per-test temp dir → per-test socket → guaranteed isolation from any
-    // tmux server the developer may have running, and from other tests in
-    // the suite that might run in parallel.
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-test-'));
     socket = path.join(tempDir, 'srv.sock');
   });
 
   afterEach(async () => {
-    try { await killAll(socket); } catch { /* best-effort */ }
-    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* gone */ }
+    try { await killAll(socket); } catch {  }
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {  }
   });
 
   it('assertValidSessionName rejects names with dots or colons', () => {
@@ -128,7 +117,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       XDG_CONFIG_HOME: path.join(unconfiguredHome, '.config'),
     };
 
-    // A run WITH a pre-assigned session id (what claude gets via --session-id).
     await createSession({
       name: 'ag-claude-real',
       cmd: 'sleep 30',
@@ -137,9 +125,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       labels: { agent: 'claude', sessionId: 'c8c4a2c8-1111-2222-3333-444455556666' },
     });
 
-    // A run WITHOUT one (codex today): runInTmux still names the session from a
-    // random UUID, so the NAME carries 8 hex chars that resolve to nothing. The
-    // option must stay unset rather than repeat that fabricated handle.
     await createSession({
       name: 'ag-codex-fake',
       cmd: 'sleep 30',
@@ -157,8 +142,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(await opt('ag-codex-fake', '@ag_session_id')).toBe('');
     expect(await opt('ag-codex-fake', '@ag_agent')).toBe('codex');
 
-    // The point of the option: a format resolves it per session, so a status bar
-    // can show a real id for one and fall back for the other.
     const rendered = async (session: string) =>
       (await runTmux({
         socket,
@@ -213,9 +196,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('persists the redacted metaCmd to disk while executing the real cmd (RUSH-1758)', async () => {
-    // The real command carries a secret value; the persisted informational copy
-    // must not. Prove: (a) meta.cmd stored on disk is the redacted string,
-    // (b) the secret value never appears in the meta, (c) the REAL cmd still ran.
     const secret = 'SECRET_VALUE_XYZ789';
     const outFile = path.join(tempDir, 'ran.txt');
     const meta = await createSession({
@@ -227,12 +207,10 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(meta.cmd).toBe('exec env TOKEN=<redacted> claude');
     expect(JSON.stringify(meta)).not.toContain(secret);
 
-    // Read back what actually hit disk (listSessions reads the persisted meta).
     const list = await listSessions({ socket });
     expect(list[0].meta?.cmd).toBe('exec env TOKEN=<redacted> claude');
     expect(JSON.stringify(list[0].meta)).not.toContain(secret);
 
-    // The real cmd (with the secret) still executed in the live pane.
     await wait(400);
     expect(fs.readFileSync(outFile, 'utf8')).toContain(secret);
   });
@@ -243,7 +221,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       cmd: 'echo MARKER_ABC123 && sleep 30',
       socket,
     });
-    // Give the shell time to print the marker before we capture.
     await wait(300);
     const screen = await capturePane({ name: 'capture-test', socket });
     expect(screen).toContain('MARKER_ABC123');
@@ -263,8 +240,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('shell metacharacters in --cmd survive without shell escaping bugs', async () => {
-    // This is the bug we're killing in swarmify — single quotes, $vars,
-    // semicolons, pipes used to need fragile string-level escaping.
     await createSession({
       name: 'escape-test',
       cmd: `echo 'with single' && echo "with;pipe|chars" && sleep 30`,
@@ -387,26 +362,19 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   it('createSession captures the first pane id and records it on the meta', async () => {
     const meta = await createSession({ name: 'paneid', cmd: 'sleep 30', socket });
     expect(meta.pane).toMatch(/^%\d+$/);
-    // The captured pane is a real, addressable pane in the session.
     const screen = await capturePane({ name: 'paneid', pane: meta.pane, socket });
     expect(typeof screen).toBe('string');
   });
 
   it('listClients returns [] for a detached session (no terminal attached)', async () => {
     await createSession({ name: 'noclients', cmd: 'sleep 30', socket });
-    // A detached tmux session has no attached clients — the "detached" state the
-    // viewing-in resolver keys off.
     expect(await listClients(socket)).toEqual([]);
   });
 
   it('paneExitStatus reports the dead pane exit code once the process finishes', async () => {
-    // remain-on-exit (set on the agent pane by createSession) keeps the pane around dead,
-    // so we can read the wrapped command's exit status — the spawn-wrap's exit-code path.
     const meta = await createSession({ name: 'exitcode', cmd: 'sh -c "exit 3"', socket });
     expect(meta.pane).toBeTruthy();
     await wait(400);
-    // See waitForExitStatus below: `pane_dead` can flip before `pane_dead_status`
-    // is populated under load, so poll for both together rather than one read.
     const exit = await waitForExitStatus(meta.pane!, socket);
     expect(exit.dead).toBe(true);
     expect(exit.status).toBe(3);
@@ -419,10 +387,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('a fast-failing agent leaves its error readable in the dead pane (runInTmux failure recap)', async () => {
-    // The exact scenario runInTmux now surfaces: an agent that dies the instant
-    // it spawns (e.g. a gutted install crashing with ENOENT). Before the fix the
-    // pane-died hook detached the client and the error vanished; the recap works
-    // only because remain-on-exit on the agent pane keeps the dead pane capturable until teardown.
     const meta = await createSession({
       name: 'fastfail',
       cmd: `sh -c 'echo "spawn .../codex ENOENT" >&2; exit 1'`,
@@ -430,33 +394,15 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     });
     expect(meta.pane).toBeTruthy();
     await wait(400);
-    // tmux can flip `pane_dead` to 1 before `pane_dead_status` is populated —
-    // the same class of async settle race as the capture below, just on a
-    // different field. Poll both together instead of trusting a single read.
     const exit = await waitForExitStatus(meta.pane!, socket);
     expect(exit.dead).toBe(true);
     expect(exit.status).toBe(1);
-    // capture-pane must reach into scrollback (as runInTmux does with -S -200)
-    // to recover the crash output — the dead pane's VISIBLE screen is just the
-    // "Pane is dead" banner, so a history-less capture would miss the error.
-    // The pty write of the crash line and tmux's own SIGCHLD-driven pane-dead
-    // transition are two independent async chains; on a loaded runner the
-    // dead-pane banner can render before the crash line has settled into the
-    // pane's screen/scrollback (RUSH-2342 — observed as a bare "Pane is dead"
-    // capture with no ENOENT on the crabbox VM, despite paneExitStatus above
-    // already confirming the process itself was dead+exit 1). Poll the same
-    // real capturePane() until the crash text lands, exactly like waitForPanes
-    // polls for pane teardown below — this still fails for real if the error
-    // text never appears, it just tolerates how long that takes under load.
     const screen = await waitForCapture({ name: 'fastfail', pane: meta.pane!, socket, lines: 200 }, 'ENOENT');
     expect(screen).toContain('ENOENT');
   });
 
   it('remain-on-exit keeps the pane around after the launched command finishes', async () => {
-    // A short-lived command would normally collapse the pane and the session
-    // with it. With remain-on-exit on the agent pane, the session stays alive.
     await createSession({ name: 'short', cmd: 'echo BRIEF && true', socket });
-    // Let the command finish.
     await wait(400);
     expect(await hasSession('short', socket)).toBe(true);
     const screen = await capturePane({ name: 'short', socket, lines: 10 });
@@ -464,8 +410,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('teardownIfAgentExited kills a remain-on-exit husk and keeps a live pane (PHNX-3293)', async () => {
-    // The attach verbs used to return from tmux attach and leave the husk.
-    // After attach returns, dead pane → kill; live pane (Ctrl-b d) → keep.
     await createSession({ name: 'husk-teardown', cmd: 'echo HUSK && true', socket });
     await wait(400);
     expect(await hasSession('husk-teardown', socket)).toBe(true);
@@ -485,31 +429,21 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('pane-guarded pane-died hook: exiting a user split closes only that split, agent pane survives', async () => {
-    // Replicates runInTmux()'s hook wiring: a pane-died hook scoped to the AGENT
-    // pane via #{hook_pane}. Exiting a user-created split must close that split in
-    // place (kill-pane, else-branch) WITHOUT detaching — the agent pane keeps
-    // running. Without the #{hook_pane} guard, exiting any split detached the
-    // whole client and kicked the user out of tmux.
     const meta = await createSession({ name: 'guardsplit', cmd: 'sleep 30', socket });
     const agentPane = meta.pane!;
     expect(agentPane).toMatch(/^%\d+$/);
-    // Same hook string runInTmux installs (detach agent-pane / kill-pane others).
     await setSessionHook(
       'guardsplit',
       'pane-died',
       agentPaneDiedHook('guardsplit', agentPane),
       socket,
     );
-    // User opens a split (a plain shell), then exits it.
     const splitPaneId = await splitPane({ name: 'guardsplit', direction: 'v', cmd: '/bin/sh', socket });
     await wait(200);
     let panes = (await runTmux({ socket, args: ['list-panes', '-t', 'guardsplit', '-F', '#{pane_id}'] })).stdout.trim().split('\n');
     expect(panes).toHaveLength(2);
     await runTmux({ socket, args: ['send-keys', '-t', splitPaneId, 'exit', 'Enter'] });
 
-    // Session is still alive, the split is gone (no lingering dead husk), and the
-    // agent pane is still live — i.e. the user was NOT kicked out. Poll for the
-    // kill-pane to land rather than racing a fixed sleep.
     panes = await waitForPanes('guardsplit', socket, 1);
     expect(await hasSession('guardsplit', socket)).toBe(true);
     expect(panes).toHaveLength(1);
@@ -517,18 +451,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('#5a: agent pane dies with NO client attached → the whole session is torn down (no lingering husk)', async () => {
-    // The core graceful-shutdown fix (AGENT_HOOK_SCHEMA v6): a wrapped agent that
-    // exits with nobody attached must NOT leave a dead `remain-on-exit` husk on the
-    // socket until the daemon's periodic reap — the "second exit" / orphaned-idle
-    // session bug. The session_attached-aware hook kill-sessions it the instant the
-    // agent pane dies. This is the exact scenario a closed terminal / a `/exit`
-    // after detaching produces: no attach client, agent exits, session must be GONE.
-    //
-    // Keep the agent ALIVE while we arm the hook, then kill its process on demand.
-    // A fast-exiting command could race the hook install under CI load (the pane
-    // would die before the hook is armed, so it would never fire). runInTmux has
-    // its own before-attach dead-pane check for exactly that window; here we just
-    // guarantee the hook is armed before the pane dies.
     const meta = await createSession({ name: 'ag-shutdown', cmd: 'sh -c "sleep 300"', socket });
     const agentPane = meta.pane!;
     expect(agentPane).toMatch(/^%\d+$/);
@@ -538,11 +460,6 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       agentPaneDiedHook('ag-shutdown', agentPane),
       socket,
     );
-    // Make the agent exit deterministically: read the pane's real leaf pid and
-    // SIGKILL it, rather than racing send-keys against shell readiness under load.
-    // The pane dies with the hook armed and NO client attached (headless), so the
-    // hook's agent-pane branch kill-sessions — exactly what an unattended `/exit`
-    // does — instead of leaving a dead `remain-on-exit` husk.
     const panePid = await waitForPanePid(agentPane, socket);
     expect(panePid).toBeGreaterThan(0);
     process.kill(panePid, 'SIGKILL');
@@ -552,22 +469,15 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('reconcileSessionHooks retrofits the guarded hook onto a session left with the OLD unconditional one', async () => {
-    // A session a pre-fix binary created: the OLD unconditional `detach-client`
-    // hook fired on ANY pane death, so exiting a user split detached the whole
-    // client (and, with no kill-pane, left the split as a dead husk).
     const meta = await createSession({ name: 'ag-reco-old', cmd: 'sleep 30', socket });
     const agentPane = meta.pane!;
     await setSessionHook('ag-reco-old', 'pane-died', 'detach-client -s =ag-reco-old', socket);
 
     const res = await reconcileSessionHooks(socket);
     expect(res.reconciled).toBeGreaterThanOrEqual(1);
-    // The schema marker is stamped so a re-run skips this session.
     const marker = (await runTmux({ socket, args: ['show-options', '-v', '-t', 'ag-reco-old', '@ag_hook_schema'] })).stdout.trim();
     expect(marker).toBe(String(AGENT_HOOK_SCHEMA));
 
-    // The guarded hook is now in force: open a split and exit it → only that split
-    // closes (kill-pane, no lingering husk), the agent pane survives. Under the OLD
-    // hook this pane would have stayed as a dead second pane.
     const splitPaneId = await splitPane({ name: 'ag-reco-old', direction: 'v', cmd: '/bin/sh', socket });
     await wait(200);
     await runTmux({ socket, args: ['send-keys', '-t', splitPaneId, 'exit', 'Enter'] });
@@ -579,22 +489,16 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
 
   it('reconcileSessionHooks is idempotent and leaves non-run sessions alone', async () => {
     await createSession({ name: 'ag-reco-idem', cmd: 'sleep 30', socket });
-    await createSession({ name: 'user-made', cmd: 'sleep 30', socket }); // no `ag-` prefix
+    await createSession({ name: 'user-made', cmd: 'sleep 30', socket });
 
     const first = await reconcileSessionHooks(socket);
     expect(first.reconciled).toBeGreaterThanOrEqual(1);
-    // Marker present → the second pass is a no-op.
     const second = await reconcileSessionHooks(socket);
     expect(second.reconciled).toBe(0);
-    // The non-run session was never touched (no marker stamped).
     const r = await runTmux({ socket, args: ['show-options', '-v', '-t', 'user-made', '@ag_hook_schema'], throwOnError: false });
     expect(r.stdout.trim()).toBe('');
   });
 
-  // RUSH-2435: the 5-minute tmux-reconcile poll that used to retrofit a stale
-  // hook was deleted (RUSH-2495) with nothing replacing it — a legacy session
-  // could sit unrepaired indefinitely. ensureSessionHookRepaired is the
-  // steady-state fix: a single-session repair called right before attach.
   it('ensureSessionHookRepaired retrofits a stale hook on the ONE session named', async () => {
     await createSession({ name: 'ag-repair-one', cmd: 'sleep 30', socket });
     await setSessionHook('ag-repair-one', 'pane-died', 'detach-client -s =ag-repair-one', socket);
@@ -650,9 +554,7 @@ describe.skipIf(skipReason)('reapDeadTmuxPanes', () => {
   });
 
   it('reaps a session whose only pane is dead', async () => {
-    // Create a session that exits immediately.
     const { name } = await createSession({ name: 'dead-reap-test', cmd: 'true', socket });
-    // Wait for the pane to die.
     const pane = (
       await runTmux({ socket, args: ['list-panes', '-t', `=${name}`, '-F', '#{pane_id}'], throwOnError: false })
     ).stdout.trim().split('\n')[0];
@@ -661,17 +563,14 @@ describe.skipIf(skipReason)('reapDeadTmuxPanes', () => {
     const result = await reapDeadTmuxPanes(socket);
     expect(result.reaped).toBeGreaterThanOrEqual(1);
     expect(result.sessions).toContain(name);
-    // Session must be gone.
     expect(await hasSession(name, socket)).toBe(false);
   });
 
   it('does NOT reap a session with a live pane', async () => {
-    // Create a long-running session.
     const { name } = await createSession({ name: 'alive-reap-test', cmd: 'sleep 60', socket });
 
     const result = await reapDeadTmuxPanes(socket);
     expect(result.sessions).not.toContain(name);
-    // Session must still exist.
     expect(await hasSession(name, socket)).toBe(true);
   });
 });
@@ -680,34 +579,19 @@ function wait(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Poll a pane's `#{pane_pid}` until it resolves to a running process (a real,
- * non-zero pid whose process actually exists), or the timeout elapses. The pane
- * command starts asynchronously after `new-session` returns, so a bare read can
- * observe pid 0 / a not-yet-running process under CI load. Returns 0 on timeout
- * (a genuine miss still fails the caller's `> 0` assertion).
- */
 async function waitForPanePid(pane: string, socket: string, timeoutMs = 5000): Promise<number> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const r = await runTmux({ socket, args: ['display-message', '-pt', pane, '-p', '#{pane_pid}'], throwOnError: false });
     const pid = parseInt(r.stdout.trim(), 10);
     if (Number.isFinite(pid) && pid > 0) {
-      try { process.kill(pid, 0); return pid; } catch { /* not running yet */ }
+      try { process.kill(pid, 0); return pid; } catch {  }
     }
     if (Date.now() >= deadline) return 0;
     await wait(50);
   }
 }
 
-/**
- * Poll `hasSession` until the named session is GONE, or the timeout elapses.
- * Used by the #5a graceful-shutdown test: the session_attached-aware pane-died
- * hook kill-sessions on agent-pane death when no client is attached, and that
- * teardown is an async tmux operation whose latency varies under CI load — so
- * poll for it rather than racing a fixed sleep. Returns true once it's gone,
- * false if it never converged (so a genuine failure still fails the assertion).
- */
 async function waitForSessionGone(
   name: string,
   socket: string,
@@ -721,26 +605,10 @@ async function waitForSessionGone(
   }
 }
 
-/**
- * Poll `list-panes` until the session has exactly `expected` panes, or the
- * timeout elapses. Returns the last observed `#{pane_id}:#{pane_dead}` rows.
- *
- * A pane exiting is asynchronous end-to-end: the shell processes `exit`, tmux
- * fires the `pane-died` hook, and the hook's `kill-pane` then removes the dead
- * pane — a chain that can exceed any fixed sleep under CI load, leaving the
- * dead pane transiently listed (the `expected 1, got 2` flake). Polling settles
- * as soon as the count is right and only fails if it genuinely never converges.
- */
 async function waitForPanes(
   name: string,
   socket: string,
   expected: number,
-  // The pane teardown this waits on (the guarded pane-died hook killing the dead
-  // split) is a real async tmux operation whose latency balloons on a loaded CI
-  // runner. 5s was too tight under the full parallel suite; give it generous
-  // headroom (still well under the 30s vitest testTimeout). The loop still
-  // returns the instant the count converges, so the ceiling only bites on a
-  // genuinely stuck teardown.
   timeoutMs = 20000,
 ): Promise<string[]> {
   const deadline = Date.now() + timeoutMs;
@@ -753,14 +621,6 @@ async function waitForPanes(
   }
 }
 
-/**
- * Poll the real `paneExitStatus()` until it reports a finished exit (both
- * `dead` AND a defined `status`), or the timeout elapses. `pane_dead` and
- * `pane_dead_status` are two separate tmux format variables that can settle
- * at slightly different times under load, so a single read can observe
- * `dead: true, status: undefined`. Returns the last observed result either
- * way — a genuine miss still fails the caller's assertions.
- */
 async function waitForExitStatus(
   pane: string,
   socket: string,
@@ -775,15 +635,6 @@ async function waitForExitStatus(
   }
 }
 
-/**
- * Poll the real `capturePane()` until its output contains `needle`, or the
- * timeout elapses. Same rationale as `waitForPanes`: a dead pane's screen
- * content settles asynchronously relative to tmux's own dead/exit-status
- * bookkeeping, and a fixed sleep that is fine locally can be too tight on a
- * loaded CI runner. Returns the last observed capture either way, so a
- * genuine miss (the text never appears) still fails the caller's assertion —
- * this only removes timing flakiness, it does not weaken what is checked.
- */
 async function waitForCapture(
   opts: Parameters<typeof capturePane>[0],
   needle: string,
@@ -799,10 +650,6 @@ async function waitForCapture(
 }
 
 describe('already-running server reconcile (RUSH-3066)', () => {
-  // These drive the REAL createSession() against a REAL tmux server, because the
-  // bug being fixed lives in createSession's control flow, not in tmux. A test
-  // that only shells out to `tmux` directly would still pass with the fix
-  // deleted, which is exactly the ceremony cli/AGENTS.md forbids.
   const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ag-reconcile-'));
 
   it('configures a server that was ALREADY running before agents-cli touched it', async () => {
@@ -810,8 +657,6 @@ describe('already-running server reconcile (RUSH-3066)', () => {
     const dir = mk();
     const socket = path.join(dir, 's.sock');
     try {
-      // A pre-existing server started WITHOUT our config — the state every
-      // machine is in at upgrade.
       spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'preexisting'], { encoding: 'utf-8' });
       const before = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
       expect(before.stdout.trim()).toBe('off');
@@ -821,8 +666,6 @@ describe('already-running server reconcile (RUSH-3066)', () => {
       const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
       const hist = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'history-limit'], { encoding: 'utf-8' });
       const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
-      // Without the reconcile branch these are 'off' / '2000' / '' — tmux
-      // ignores -f on a server that is already up.
       expect(mouse.stdout.trim()).toBe('on');
       expect(hist.stdout.trim()).toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
       expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
@@ -855,12 +698,10 @@ describe('already-running server reconcile (RUSH-3066)', () => {
     const home = path.join(dir, 'home');
     fs.mkdirSync(home, { recursive: true });
     const marker = path.join(dir, 'sourced.log');
-    // A side-effectful user config, the way TPM's run-shell behaves.
     fs.writeFileSync(path.join(home, '.tmux.conf'), `run-shell "echo x >> ${marker}"\n`);
     const socket = path.join(dir, 's.sock');
     try {
       await createSession({ name: 'cold', socket, cmd: 'sleep 30', env: { ...process.env, HOME: home } });
-      // Give run-shell a moment to land.
       await new Promise((r) => setTimeout(r, 400));
       const fired = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf-8').trim().split('\n').length : 0;
       expect(fired).toBeLessThanOrEqual(1);

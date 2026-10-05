@@ -11,8 +11,6 @@ import * as path from 'path';
 // ssh-config.ts builds ~/.ssh from it.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-target-test-'));
 process.env.HOME = TEST_HOME;
-// Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
-// call time, so it survives the module-cache race a plain HOME override loses.
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 process.env.USERPROFILE = TEST_HOME;
 
@@ -94,7 +92,7 @@ describe('resolveExplicitTargets — fan-out through the unified core', () => {
   it('makes an ssh_config-only alias visible to the fan-out (divergence #2)', async () => {
     writeSshConfig('Host only-in-ssh\n  HostName 10.0.0.9\n');
     const [r] = await resolveExplicitTargets(['only-in-ssh']);
-    expect(r?.target).toBe('only-in-ssh'); // bare name → ssh applies the stanza
+    expect(r?.target).toBe('only-in-ssh');
     expect(r?.machine).toBe('only-in-ssh');
   });
 
@@ -129,7 +127,7 @@ describe('run --device and sessions --device resolve to the SAME target (diverge
 
   it('#1 name in BOTH ssh_config and the device registry → device route wins for both', async () => {
     await addDevice('mac-mini', { platform: 'macos', address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' } });
-    writeSshConfig('Host mac-mini\n  HostName 192.168.1.50\n'); // a stale LAN stanza
+    writeSshConfig('Host mac-mini\n  HostName 192.168.1.50\n');
     const { dispatch, fanout } = await bothTargets('mac-mini');
     expect(dispatch).toBe('muqsit@mac-mini.tail1a85a1.ts.net');
     expect(fanout).toBe(dispatch);

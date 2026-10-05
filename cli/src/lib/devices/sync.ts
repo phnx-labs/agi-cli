@@ -46,6 +46,7 @@ export function withDefaultUser(
   prevUser: string | undefined,
   localUser: string | undefined,
 ): DeviceInput {
+  // Discovery may supply a default, but it never overwrites an explicit or previously pinned SSH user.
   if (input.user || prevUser || !localUser) return input;
   return { ...input, user: localUser };
 }
@@ -56,15 +57,10 @@ export function withDefaultUser(
 type DeviceSyncMode = 'bootstrap' | 'refresh';
 
 interface DeviceSyncResult {
-  /** False when discovery could not run (e.g. tailscale absent) in soft mode. */
   ok: boolean;
-  /** Number of tailscale nodes upserted into the registry. */
   synced: number;
-  /** Names upserted, for explicit onboarding surfaces to persist approval. */
   syncedNames: string[];
-  /** Nodes discovered but neither registered-before nor ignored (name+platform). */
   pending: PendingDevice[];
-  /** Populated when ok is false: why discovery was skipped. */
   reason?: string;
 }
 
@@ -72,6 +68,7 @@ interface DeviceSyncResult {
  * are not the operator's machines and are never bootstrap-registered or surfaced as pending.
  * Explicit paths (`devices register`, `devices add`, `fleet:` bootstrap) stay unfiltered. Pure. */
 export function discoverableNodes(nodes: TailscaleNode[]): TailscaleNode[] {
+  // Shared ingress nodes are never implicit fleet machines.
   return nodes.filter((n) => !n.sharee);
 }
 
@@ -109,6 +106,7 @@ export function selectNodesToUpsert(
   ignored: Set<string>,
   mode: DeviceSyncMode,
 ): TailscaleNode[] {
+  // Bootstrap may enroll own-tailnet peers; refresh may only update routes already in the registry.
   return nodes.filter((n) => {
     if (ignored.has(n.name)) return false;
     if (mode === 'refresh' && !registered.has(n.name)) return false;
@@ -146,6 +144,7 @@ export async function runDeviceSync(
 
     return { ok: true, synced: toUpsert.length, syncedNames: toUpsert.map((node) => node.name), pending };
   } catch (err: any) {
+    // Daemon callers request soft mode so every discovery or registry failure is contained in the result.
     if (opts.soft) {
       return { ok: false, synced: 0, syncedNames: [], pending: [], reason: err?.message ?? String(err) };
     }
@@ -154,9 +153,7 @@ export async function runDeviceSync(
 }
 
 interface EnsureDevicesResult {
-  /** Names newly resolved from Tailscale and upserted into the registry. */
   registered: string[];
-  /** Names that could not be resolved (not on the tailnet / tailscale absent). */
   unresolved: string[];
 }
 
@@ -187,6 +184,7 @@ export function partitionWantedDevices(
  * is missing locally by resolving it live from Tailscale, so a names-only `agents.yaml` rebuilds
  * its roster. Soft: no tailscale or an offline name yields `unresolved`, never a throw. */
 export async function ensureDevicesRegistered(wantedNames: string[]): Promise<EnsureDevicesResult> {
+  // Apply resolves missing approved routes from live Tailscale state instead of persisting connection details.
   const registryBefore = await loadDevices();
   const registered = new Set(Object.keys(registryBefore));
   const missing = wantedNames.filter((n) => !registered.has(n));
@@ -196,7 +194,6 @@ export async function ensureDevicesRegistered(wantedNames: string[]): Promise<En
   try {
     nodes = parseTailscaleStatus(tailscaleStatusJson());
   } catch {
-    // Tailscale absent/unreachable — nothing resolvable; report all missing.
     return { registered: [], unresolved: missing };
   }
 

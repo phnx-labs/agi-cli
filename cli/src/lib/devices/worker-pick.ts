@@ -12,28 +12,22 @@ import {
 import { pickBestDevice, type DevicePlacementSignal } from '../teams/scheduler.js';
 import { probePoolSignals } from '../teams/placement-probe.js';
 
-/** Why a candidate was dropped, for the fail-loud error message. */
 export interface WorkerExclusion {
   device: string;
   reason: 'unreachable' | 'probe timed out' | 'overloaded' | 'wrong-platform' | 'interactive';
 }
 
 interface WorkerPickPlan {
-  /** The chosen device name. Never the local box unless it is an auto-pool member. */
   device: string;
-  /** True when the pick IS this machine (the caller should run in place). */
   isLocal: boolean;
   candidates: Array<{ device: string; loadPercent?: number; headroom?: string }>;
   excluded: WorkerExclusion[];
 }
 
 interface WorkerPickOptions {
-  /** Restrict to these platforms. Defaults to POSIX (`linux`, `macos`). */
   platforms?: string[];
-  /** Override the candidate pool (tests). */
   eligibleHosts?: string[];
   localMachine?: string;
-  /** Injected probe (tests). */
   probe?: (pool: string[]) => Promise<Map<string, DevicePlacementSignal>>;
 }
 
@@ -46,15 +40,15 @@ const POSIX_PLATFORMS = ['linux', 'macos'] as const;
  * deciding "no worker, run here" would pin the operator's laptop while they believe the work went
  * to the fleet. Callers surface the thrown message verbatim. */
 export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise<WorkerPickPlan> {
+  // Offloaded work reuses the role/disable pool and load ranker, not agent/account eligibility.
   const local = normalizeHost(opts.localMachine ?? localMachineId());
+  // Local participates only when explicitly in that auto pool; failure never falls back to the operator box.
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
-  // The local box joins the pool only when a role does not exclude it — the same
-  // rule resolveDeviceAuto applies. A box marked `personal` is marked precisely
-  // so long jobs stay off it, and that mark must hold for the suite too.
   if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);
   if (pool.length === 0) throw new Error(formatEmptyAutoPoolError());
 
   const excluded: WorkerExclusion[] = [];
+  // POSIX is the default, while unknown platforms remain eligible until a real probe resolves them.
   const wanted = new Set((opts.platforms ?? POSIX_PLATFORMS).map((p) => p.toLowerCase()));
   const reg = loadDevicesSync();
   const platformOf = (name: string): string | undefined => {
@@ -63,12 +57,8 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
     return d?.platform ? String(d.platform).toLowerCase() : undefined;
   };
 
-  // Platform first: it is a static registry fact, so filtering here keeps the
-  // live probe off boxes that could never be picked anyway.
   const onPlatform = pool.filter((device) => {
     const platform = platformOf(device);
-    // Unknown platform stays a candidate — a registry-only box with no recorded
-    // platform is a gap in the registry, not positive evidence it is Windows.
     if (platform && !wanted.has(platform)) {
       excluded.push({ device, reason: 'wrong-platform' });
       return false;
@@ -80,10 +70,8 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
   const signals = await (opts.probe ?? ((p: string[]) => probePoolSignals(p)))(onPlatform);
   const eligible = onPlatform.filter((device) => {
     const signal = signals.get(device);
+    // Preserve timeout separately from a confirmed negative so diagnostics expose relay congestion.
     if (signal?.reachable !== true) {
-      // A probe killed for exceeding its budget says nothing about whether the
-      // box is up — on a relayed fleet it usually is. Report the two apart so
-      // the message points at the link, not at a fleet outage (PHNX-3682).
       excluded.push({ device, reason: signal?.timedOut ? 'probe timed out' : 'unreachable' });
       return false;
     }
@@ -108,7 +96,6 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
   };
 }
 
-/** The one no-worker message, naming every candidate and why it was dropped. */
 export function formatNoWorkerError(excluded: WorkerExclusion[], platforms: Set<string>): string {
   const detail = excluded.length
     ? excluded.map((e) => `${e.device} (${e.reason})`).join(', ')

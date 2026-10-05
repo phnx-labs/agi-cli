@@ -11,7 +11,6 @@ function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEve
   try {
     parsed = data ? JSON.parse(data) : {};
   } catch {
-    // non-JSON payloads are kept as raw text below
   }
 
   switch (name) {
@@ -71,7 +70,6 @@ export async function* parseSSE(response: Response): AsyncIterable<CloudEvent> {
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
-        // Keepalive comment
         if (line.startsWith(':')) continue;
 
         if (line.startsWith('event: ')) {
@@ -79,7 +77,6 @@ export async function* parseSSE(response: Response): AsyncIterable<CloudEvent> {
         } else if (line.startsWith('data: ')) {
           currentData += (currentData ? '\n' : '') + line.slice(6);
         } else if (line === '') {
-          // Empty line = end of event
           if (currentEvent || currentData) {
             yield decodeSSEFrame(currentEvent || 'output', currentData, new Date().toISOString());
             currentEvent = '';
@@ -89,7 +86,6 @@ export async function* parseSSE(response: Response): AsyncIterable<CloudEvent> {
       }
     }
 
-    // Flush remaining
     if (currentEvent || currentData) {
       yield decodeSSEFrame(currentEvent || 'output', currentData, new Date().toISOString());
     }
@@ -133,7 +129,6 @@ export async function renderStream(
         break;
       }
       case 'tool_result': {
-        // Tool results are usually verbose; just acknowledge inline.
         process.stderr.write(chalk.dim(`[tool_result] ${event.tool}\n`));
         break;
       }
@@ -169,7 +164,6 @@ export async function renderStream(
   return { status: lastStatus, summary, prUrl };
 }
 
-/** Map a task status string to a colored terminal label. */
 function statusLabel(status: string): string {
   switch (status) {
     case 'queued':

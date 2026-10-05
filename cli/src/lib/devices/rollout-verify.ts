@@ -32,13 +32,10 @@ export function rolloutVerifyCommand(): string[] {
 }
 
 interface RolloutProbe {
-  /** Path the box's own `agents` resolves to, symlinks followed. */
   resolvedPath?: string;
-  /** Version that resolved copy reports. */
   reportedVersion?: string;
 }
 
-/** Parse the probe's stdout. Unlabelled lines (shell banners, motd) are ignored. */
 export function parseRolloutVerifyOutput(stdout: string): RolloutProbe {
   const probe: RolloutProbe = {};
   for (const raw of stdout.split('\n')) {
@@ -55,22 +52,16 @@ export function parseRolloutVerifyOutput(stdout: string): RolloutProbe {
 }
 
 export type RolloutVerdict =
-  /** The resolved `agents` reports the target version. */
   | 'on-target'
-  /** The resolved `agents` is a `scripts/install.sh` dev build shadowing the upgraded global. */
   | 'dev-shadowed'
-  /** The resolved `agents` reports some other version — the upgrade did not reach it. */
   | 'not-upgraded'
-  /** The probe produced no usable answer, so upgraded-ness is unknown. */
   | 'unverified';
 
 export interface RolloutVerification extends RolloutProbe {
   verdict: RolloutVerdict;
-  /** One-line human reason, always set for a non-`on-target` verdict. */
   detail: string;
 }
 
-/** A verdict other than `on-target` MUST NOT be reported as a successful rollout. */
 export function isRolloutSuccess(verdict: RolloutVerdict): boolean {
   return verdict === 'on-target';
 }
@@ -82,6 +73,7 @@ export function resolveRolloutTarget(
   explicitVersion: string | undefined,
   probes: RolloutProbe[],
 ): string | undefined {
+  // Dev stamps may reveal a shadowed install but can never elect the fleet's release target.
   if (explicitVersion && !isDistTag(explicitVersion)) return explicitVersion;
   let best: string | undefined;
   for (const probe of probes) {
@@ -99,11 +91,11 @@ function isDistTag(version: string): boolean {
   return !/^\d/.test(version);
 }
 
-/** Classify one box's probe against the rollout target. */
 export function classifyRolloutVerification(
   probe: RolloutProbe,
   targetVersion: string | undefined,
 ): RolloutVerification {
+  // Upgrade success requires the resolved agents binary itself to report the selected target version.
   const { resolvedPath, reportedVersion } = probe;
   if (!reportedVersion) {
     return {
@@ -142,15 +134,11 @@ export function classifyRolloutVerification(
   };
 }
 
-/** Probe deadline. The probe is two shell builtins plus `agents --version`. */
 const VERIFY_TIMEOUT_MS = 60_000;
 
 interface VerifyFleetRolloutOptions {
-  /** Name of THIS machine; its target is probed locally, mirroring `runFleet`. */
   self?: string;
-  /** Injectable ssh runner (tests). */
   runner?: typeof runOnDevice;
-  /** Injectable local runner (tests). */
   localRunner?: typeof runLocalCommand;
 }
 

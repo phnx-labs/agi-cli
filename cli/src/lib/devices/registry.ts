@@ -14,44 +14,28 @@ import { addIgnoredEntry, unionDeviceIgnored } from './device-docs.js';
 import { logAndContinueOnLockCompromised } from '../lock-compromise.js';
 import { removeStatsCacheEntry } from './stats-cache.js';
 
-/** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
 
-/** Remote shell dialect derived from the platform. */
 export type DeviceShell = 'powershell' | 'posix';
 
-/** How `agents ssh` authenticates to a device. Both are first-class, fully
- * non-interactive: `key` uses the ssh agent / on-disk keys, `password` pulls
- * the secret from a Keychain-backed secrets bundle via an askpass shim. */
 export type DeviceAuthMethod = 'key' | 'password';
 
-/** How to reach a device on the network. */
 export interface DeviceAddress {
-  /** Where the address came from: a Tailscale node, or a manual entry. */
   via: 'tailscale' | 'manual';
-  /** Fully-qualified DNS name (Tailscale MagicDNS), without a trailing dot. */
   dnsName?: string;
-  /** Raw IP address (IPv4 preferred). */
   ip?: string;
 }
 
-/** Authentication settings for a device. */
 export interface DeviceAuth {
   method: DeviceAuthMethod;
-  /** Explicit private-key path passed to OpenSSH for key authentication. */
   identityFile?: string;
-  /** Secrets bundle holding the password (when method === 'password'). */
   bundle?: string;
-  /** Key within the bundle whose value is the password. Defaults to 'password'. */
   bundleKey?: string;
 }
 
-/** Last-known Tailscale reachability snapshot for a device. */
 export interface DeviceTailscale {
   online: boolean;
-  /** True when the last handshake was a direct (non-relayed) connection. */
   direct: boolean;
-  /** DERP relay region code (e.g. 'sfo'); empty when direct. */
   relay?: string;
   lastSeen?: string;
 }
@@ -60,15 +44,11 @@ export interface DeviceTailscale {
  * word reads a fresh probe instead of the stale {@link DeviceTailscale.online} snapshot. A
  * `via:"manual"` device, with no tailscale entry, gets a verdict this way too. */
 export interface DeviceReachability {
-  /** Whether the last live probe reached the device. */
   reachable: boolean;
-  /** Transport the verdict came through — the address kind used to dial it. */
   via?: DeviceAddress['via'];
-  /** ISO-8601 timestamp of the probe that produced this verdict. */
   checkedAt: string;
 }
 
-/** A single registered device. */
 export interface DeviceProfile {
   name: string;
   platform: DevicePlatform;
@@ -77,9 +57,6 @@ export interface DeviceProfile {
   address: DeviceAddress;
   auth: DeviceAuth;
   tailscale?: DeviceTailscale;
-  /** Last live SSH-probe reachability verdict (RUSH-1965). Preferred over the
-   * cached {@link DeviceTailscale.online} snapshot when rendering online/offline,
-   * because the live probe reflects whether the box answered right now. */
   reachability?: DeviceReachability;
   createdAt: string;
   updatedAt: string;
@@ -99,15 +76,12 @@ export function isDialableDevice(d: DeviceProfile): boolean {
 // `tailscale.online === true` and skip manual devices. Left alone on purpose: neither is a session
 // surface and changing `agents apply` targeting deserves its own PR.
 
-/** Map of device name to profile. */
 export type DeviceRegistry = Record<string, DeviceProfile>;
 
 function registryPath(): string {
   return getDevicesRegistryPath();
 }
 
-/** Valid logical device name: the ssh-alias charset, so it renders into an
- * unambiguous `Host` stanza and is safe as an ssh target. */
 const DEVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 /** `--device` values that mean "resolve me", not a box name. A real device under one of these would
@@ -139,7 +113,6 @@ export function assertRegistrableDeviceName(name: string): void {
   }
 }
 
-/** Map a Tailscale `OS` field to our platform enum. */
 export function platformFromOs(os: string | undefined): DevicePlatform {
   switch ((os ?? '').toLowerCase()) {
     case 'windows':
@@ -154,8 +127,8 @@ export function platformFromOs(os: string | undefined): DevicePlatform {
   }
 }
 
-/** The remote shell a platform speaks. */
 export function shellForPlatform(platform: DevicePlatform): DeviceShell {
+  // Platform and shell are one coupled value; callers must never preserve a shell across a platform change.
   return platform === 'windows' ? 'powershell' : 'posix';
 }
 
@@ -226,13 +199,11 @@ async function saveDevices(reg: DeviceRegistry): Promise<void> {
   atomicWriteJsonSync(registryPath(), reg);
 }
 
-/** Get a single device profile, or null if it is not registered. */
 export async function getDevice(name: string): Promise<DeviceProfile | null> {
   const reg = await loadDevices();
   return reg[name] ?? null;
 }
 
-/** Fields a caller may supply when creating or updating a device. */
 export interface DeviceInput {
   platform?: DevicePlatform;
   user?: string;
@@ -252,6 +223,7 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
     const now = new Date().toISOString();
     const prev = reg[name];
     const platform = input.platform ?? prev?.platform ?? 'unknown';
+    // Recompute rather than merge shell so registry refreshes cannot leave a Windows device on POSIX quoting.
     const merged: DeviceProfile = {
       name,
       platform,
@@ -284,7 +256,7 @@ export async function writeReachability(
     const changed: string[] = [];
     for (const name of names) {
       const prev = reg[name];
-      if (!prev) continue; // never resurrect a device the user removed
+      if (!prev) continue;
       const next = updates[name];
       const cur = prev.reachability;
       if (
@@ -292,7 +264,7 @@ export async function writeReachability(
         cur.reachable === next.reachable &&
         Date.parse(cur.checkedAt) >= Date.parse(next.checkedAt)
       ) {
-        continue; // unchanged verdict, no fresher timestamp — skip the write
+        continue;
       }
       reg[name] = { ...prev, reachability: next };
       changed.push(name);
@@ -302,7 +274,6 @@ export async function writeReachability(
   });
 }
 
-/** Remove a device. Returns false if it was not registered. */
 export async function removeDevice(name: string): Promise<boolean> {
   const p = registryPath();
   return withRegistryLock(p, async () => {
@@ -368,13 +339,10 @@ export function loadIgnoredEntries(meta: Meta = readMeta()): IgnoredDeviceEntry[
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Load the set of ignored node names. Same corruption contract as
- * {@link loadIgnoredEntries}. */
 export async function loadIgnored(): Promise<Set<string>> {
   return new Set(loadIgnoredEntries().map((e) => e.name));
 }
 
-/** True if `name` is on the ignore-list. */
 export async function isIgnored(name: string): Promise<boolean> {
   return (await loadIgnored()).has(name);
 }
@@ -383,7 +351,7 @@ export async function isIgnored(name: string): Promise<boolean> {
  * machine's id. Existing entries keep their original who/when, so re-adding is a no-op; returns
  * the input unchanged when no name is new. Also used by the legacy migration. */
 export function withIgnoredAdded(meta: Meta, names: string[], ignoredAt: string): Meta {
-  const entries = loadOwnIgnoredEntries(meta); // throws on a corrupted block — never wipe it
+  const entries = loadOwnIgnoredEntries(meta);
   const have = new Set(entries.map((e) => e.name));
   const fresh = names.filter((n) => !have.has(n));
   if (fresh.length === 0) return meta;
@@ -403,12 +371,10 @@ export async function addIgnored(name: string): Promise<Set<string>> {
   return new Set(unionDeviceIgnored().map((e) => e.name));
 }
 
-/** Remove a node name from the ignore-list (un-ignore). Returns false if it was
- * not ignored. */
 export async function removeIgnored(name: string): Promise<boolean> {
   let removed = false;
   updateMeta((m) => {
-    const entries = loadOwnIgnoredEntries(m); // only this box's own dismissals are ours to drop
+    const entries = loadOwnIgnoredEntries(m);
     const next = entries.filter((e) => e.name !== name);
     if (next.length === entries.length) return m;
     removed = true;

@@ -107,60 +107,50 @@ function loginShape(agent: AgentId): 'subcommand' | 'in-tui' | 'on-launch' {
 
 export type FindingSeverity = 'critical' | 'warning';
 
-/** A machine-stable class for a finding — drives {@link remediationFor} and lets
- *  the JSON consumer group by kind. */
-/** Every finding class. Severity is NOT annotated here — {@link FINDING_SEVERITY}
- *  below owns it, and a second copy in these comments is a fourth place to drift. */
 export const ALL_FINDING_KINDS = [
-  'logged-out',          // provable per-version logout
-  'logout-unprovable',   // credential absent but not provable
-  'missing-hook',        // a declared hook absent from a version home
-  'missing-plugin',      // a declared plugin absent from a version home
-  'unwired-hook',        // hook present on disk but not wired into settings.json
-  'hook-runtime-broken', // a wired hook's generated shim wrapper is missing/unusable
-  'hook-runtime-visibility-unavailable', // remote CLI cannot report generated wrapper health
-  'cli-missing',         // a managed agent whose binary won't resolve
-  'missing-resource',    // a missing command/skill/rule/mcp/permission/subagent/workflow/memory
-  'content-drift',       // a resource (any synced kind) diverged from source
-  'never-synced',         // installed but never synced
-  'stale',               // sources changed since last sync
-  'repo-behind',         // a config repo behind origin
-  'repo-drift',          // a config repo diverged from the fleet baseline
-  'fleet-resource-gap',  // a resource in another box's central repos, absent here
-  'host-cli-missing',    // a declared host CLI not installed on this box
-  'host-cli-invalid',    // a host-CLI manifest that failed to parse
-  'version-skew',        // an agent version present elsewhere, absent here
-  'orphan',              // orphan resources in a version home
-  'duplicate-hook',      // one hook materialized in several version homes, byte-identical
-  'duplicate-hook-drift',// …with differing content, so a stale copy can disagree
-  'rc-secret-export',    // credential-shaped export in a shell rc file
-  'env-secret-export',   // the file-store master key live in THIS process's env
-  'auth-bundle-wrong-backend', // reserved `auth` bundle exists but is not file-backed
-  'exec-policy',         // Windows execution policy blocks agents.ps1
-  'ssh-key-enrollment',  // Windows OpenSSH public-key path/content/ACL is invalid
+  'logged-out',
+  'logout-unprovable',
+  'missing-hook',
+  'missing-plugin',
+  'unwired-hook',
+  'hook-runtime-broken',
+  'hook-runtime-visibility-unavailable',
+  'cli-missing',
+  'missing-resource',
+  'content-drift',
+  'never-synced',
+  'stale',
+  'repo-behind',
+  'repo-drift',
+  'fleet-resource-gap',
+  'host-cli-missing',
+  'host-cli-invalid',
+  'version-skew',
+  'orphan',
+  'duplicate-hook',
+  'duplicate-hook-drift',
+  'rc-secret-export',
+  'env-secret-export',
+  'auth-bundle-wrong-backend',
+  'exec-policy',
+  'ssh-key-enrollment',
   'stale-cli',
-  'binary-shadow',         // another agents binary on PATH or in a well-known dir shadows the running copy
-  'owner-sink-unreachable', // the feed/notify owner-delivery lane can't reach the owner from this box
-  'leaked-daemon',         // a `__daemon-run` process no owner record names (not the unit main PID, not daemon.pid)
+  'binary-shadow',
+  'owner-sink-unreachable',
+  'leaked-daemon',
 ] as const;
 
 /** The severity each kind is emitted with, the single source of truth, read by the builders and
  * asserted against both prose rubrics by `doctor-findings.test.ts`. Severity drifted for three
  * days after RUSH-2162 because the test only checked a kind was named, not its bucket. */
 export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
-  // Needs you now: the harness cannot do its job until this is fixed.
   'logged-out': 'critical',
   'missing-hook': 'critical',
   'missing-plugin': 'critical',
   'unwired-hook': 'critical',
   'hook-runtime-broken': 'critical',
   'cli-missing': 'critical',
-  // A factory that cannot escalate a blocked agent to the owner is not healthy,
-  // and the failure is otherwise silent until a block is filed (RUSH-2262/2258).
   'owner-sink-unreachable': 'critical',
-  // Everything else is resolvable by a routine sync/cleanup and does not block
-  // the harness right now. RUSH-2162 moved never-synced and duplicate-hook-drift
-  // here: both are stale-sync states that one `agents sync` resolves.
   'logout-unprovable': 'warning',
   'hook-runtime-visibility-unavailable': 'warning',
   'missing-resource': 'warning',
@@ -189,31 +179,17 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'leaked-daemon': 'warning',
 };
 
-/** A machine-stable class for a finding. Derived from the runtime list above so
- *  the rubric test can enumerate every kind. */
-export type FindingKind = typeof ALL_FINDING_KINDS[number];          // an older CLI that can't report per-version sign-in (WARNING)
+export type FindingKind = typeof ALL_FINDING_KINDS[number];
 
-/** One prioritized finding, attributed to a device (and, when relevant, an agent
- *  version + account). `remediation` is the exact command/hint to fix it. */
 export interface DoctorFinding {
   severity: FindingSeverity;
   kind: FindingKind;
-  /** The device this finding is about. */
   device: string;
-  /** Agent id, when the finding is about a specific agent (else undefined). */
   agent?: AgentId;
-  /** Version id, when about a specific installed version. Absent on a finding
-   *  collapsed across versions — read {@link DoctorFinding.versions} instead. */
   version?: string;
-  /** Set only on a finding collapsed across several versions of one agent (the
-   *  same problem on each). The row renders `<agent> (N versions)` and the
-   *  remediation widens to the agent-wide sweep. */
   versions?: string[];
-  /** Human account label (email/org/opaque id), when known. */
   account?: string | null;
-  /** One-line plain-English description of the problem. */
   message: string;
-  /** Exact remediation command / hint. */
   remediation: string;
 }
 
@@ -221,8 +197,6 @@ function agentName(agent: AgentId): string {
   return AGENT_NAMES[agent] || agent;
 }
 
-/** Agent ids in the registry's display order — the one stable ordering, used
- *  wherever output would otherwise inherit a map's insertion order. */
 function sortedAgentIds(ids: string[]): string[] {
   const rank = (a: string) => {
     const i = ALL_AGENT_IDS.indexOf(a as AgentId);
@@ -243,7 +217,6 @@ export function remediationFor(finding: DoctorFinding): string {
       if (!agent) return 'log in';
       const native = loginHint(agent);
       if (!version || NO_PER_VERSION_LOGIN.has(agent)) {
-        // Shared login across versions — no per-version isolation to target.
         return NO_PER_VERSION_LOGIN.has(agent)
           ? `${native} (shared across all ${agentName(agent)} versions)`
           : native;
@@ -253,14 +226,10 @@ export function remediationFor(finding: DoctorFinding): string {
       // into the wrong version rather than the logged-out one.
       switch (loginShape(agent)) {
         case 'subcommand':
-          // `-- <args>` is forwarded verbatim to the binary in that version home
-          // (`commands/exec.ts:723`, `lib/exec.ts:1004`) — one correct invocation.
           return `agents run ${idLabel} -- ${LOGIN_SUBCOMMAND[agent]}`;
         case 'in-tui':
-          // Claude has no login subcommand; it logs in from inside its own TUI.
           return `agents run ${idLabel}, then /login`;
         case 'on-launch':
-          // The device/oauth flow starts when the agent launches — nothing to add.
           return `agents run ${idLabel}`;
       }
     }
@@ -278,24 +247,15 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'hook-runtime-visibility-unavailable':
       return 'upgrade agents-cli on this device';
     case 'never-synced':
-      // A bare `agents sync <agent>` targets only the default/sole installed
-      // version (`commands/sync.ts:8`), so a row collapsed across versions must
-      // ask for the `@all` selector or it silently fixes just one of them.
       if (!agent) return 'agents sync';
       return version ? `agents sync ${agent}@${version} --yes` : `agents sync ${agent}@all --yes`;
     case 'cli-missing':
       return agent ? `agents add ${agent}` : 'agents add <agent>';
     case 'orphan':
-      // Without `--all`, cleanup sweeps only each agent's DEFAULT version
-      // (`commands/prune.ts:351`, `collectOrphans(..., options.all === true)`) —
-      // and this row aggregates every version on the machine.
       return 'agents prune cleanup --all';
     case 'repo-behind':
       return `agents repo pull ${finding.version ?? 'user'}`;
     case 'repo-drift':
-      // `version` carries the repo alias (`user` for ~/.agents, `system` for
-      // ~/.agents/.system) — hardcoding `user` would send a `.system` drift at
-      // the wrong repo.
       return `agents repo pull ${version ?? 'user'}`;
     case 'fleet-resource-gap':
       // The resource is absent from this box's central repos, not a version home, so `agents sync`
@@ -306,22 +266,14 @@ export function remediationFor(finding: DoctorFinding): string {
       return idLabel ? `agents add ${idLabel}` : 'agents add <agent>@<version>';
     case 'duplicate-hook':
     case 'duplicate-hook-drift':
-      // The copies live in SEVERAL version homes, so the reconcile has to reach
-      // every one — `agents sync <agent>@<one-version>` would leave the others
-      // holding their stale copy.
       return agent ? `agents sync ${agent}@all --yes` : 'agents sync';
     case 'host-cli-missing':
       return 'agents cli install';
     case 'host-cli-invalid':
-      // Nothing installs a manifest the loader cannot parse — the file has to be
-      // fixed where it is declared.
       return 'fix the manifest';
     case 'rc-secret-export':
       return 'agents secrets add';
     case 'env-secret-export':
-      // Not just "restart the shell": the value is in every long-lived parent
-      // that inherited it — an editor, a tmux server, the agents daemon — and
-      // each keeps handing it to new children until IT restarts.
       return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
     case 'auth-bundle-wrong-backend':
       return 'agents secrets delete auth --yes && agents secrets create auth --backend file';
@@ -334,9 +286,6 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'binary-shadow':
       return 'remove or repoint the shadowing agents install(s)';
     case 'leaked-daemon':
-      // The builder emits the concrete `kill <pid>` — the pid is a property of
-      // the row it builds, not of anything remediationFor can see. This is the
-      // shape only, for a kind constructed through finding() by a future caller.
       return 'kill <pid>';
     case 'owner-sink-unreachable':
       return 'check the channel transport: iMessage needs macOS, Slack needs SLACK_BOT_TOKEN in env or the webhooks bundle';
@@ -347,9 +296,6 @@ function finding(f: Omit<DoctorFinding, 'remediation'>): DoctorFinding {
   return { ...f, remediation: remediationFor({ ...f, remediation: '' }) };
 }
 
-/** One affected resource inside a group: `short` is the bare subject used in a
- *  collapsed count line (`'git-guard'`, `command 'audit'`), `full` is the whole
- *  sentence used when the group holds exactly one item. */
 interface ResourceItem {
   short: string;
   full: string;
@@ -376,20 +322,14 @@ function emitGroup(
   out.push(finding({ severity, kind, device, agent, version, message }));
 }
 
-// ─── local (this-machine) findings ──────────────────────────────────────────
 
 export interface LocalFindingInputs {
   device: string;
   syncRows: SyncStatusRow[];
   orphanRows: OrphanRow[];
   repoBehind: FetchStatusMarker[];
-  /** Per-version resource reports (one per installed version) — the source of the
-   *  missing-hook / missing-plugin / missing-resource / content-drift / unwired
-   *  criticals+warnings. */
   reports: VersionResourceReport[];
-  /** Per-version sign-in per agent id. */
   signIn: Record<string, FleetVersionSignIn[]>;
-  /** Managed agents (installed versions) whose binary won't resolve. */
   cliMissing?: AgentId[];
   /** Host CLIs declared in a DotAgents repo's `cli/`: install state on this box plus any manifest
    * the loader could not parse. Host-global (on PATH, never in a version home), so a machine-level
@@ -398,23 +338,14 @@ export interface LocalFindingInputs {
     statuses: Array<{ name: string; installed: boolean }>;
     errors: Array<{ file: string; reason: string }>;
   };
-  /** Hooks materialized into several version homes at once — identical copies are
-   *  installation noise, differing ones are drift a stale gate can act on. */
   duplicateHooks?: DuplicateVersionHook[];
-  /** Credential-shaped exports found in the user's shell rc files (RUSH-1968). */
   rcSecrets?: RcSecretFinding[];
   /** True when the file-store master key is live in this process's environment. Distinct from
    * `rcSecrets` (which scans files): an inherited value survives deleting the rc line, so the rc
    * scan reads clean while the leak continues (RUSH-1968). Never the value. */
   masterPassphraseInEnv?: boolean;
-  /** True when the reserved `auth` bundle exists on a non-file backend
-   *  (SEC-GAP-3): usage/probe ignores the setup-tokens and falls through to
-   *  Touch ID. Collected by `inspectReservedAuthBundle`. */
   authBundleWrongBackend?: boolean;
-  /** The effective PowerShell execution policy and the platform it was read on.
-   *  Only `win32` yields a finding — the `agents.ps1` launcher is Windows-only. */
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
-  /** Read-only Windows OpenSSH AuthorizedKeysFile/content/ACL audit. */
   windowsSshEnrollment?: WindowsSshEnrollmentAudit | null;
   /** `<agent>@<version>` keys whose home is an isolated copy. Their findings are never collapsed
    * across versions: the `agents sync <agent>@all` sweep skips isolated copies, so a collapsed row
@@ -424,7 +355,6 @@ export interface LocalFindingInputs {
    * Collected by `probeOwnerSink` in the command (it spawns the real `rush` transport, keeping
    * this module pure). Absent means no probe ran and no finding. */
   ownerSink?: OwnerSinkStatus;
-  /** `agents` binaries that shadow the currently running CLI (RUSH-2431). */
   binaryShadows?: AgentsBinaryShadow[];
   /** `__daemon-run` processes no owner record names: neither the service manager's unit main PID
    * nor the recorded daemon.pid (W4, PHNX-3736). Collected by `findLeakedDaemons` in the command
@@ -438,12 +368,8 @@ export interface LocalFindingInputs {
 export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   const out: DoctorFinding[] = [];
   const device = input.device;
-  /** `<agent>@<version>` keys that already named their specific drift/missing
-   *  resources below — a `stale` row for those would repeat the same fact in
-   *  vaguer words, so it is suppressed. */
   const detailedVersions = new Set<string>();
 
-  // cli-missing (managed agent, binary broken) — critical.
   for (const agent of input.cliMissing ?? []) {
     out.push(finding({
       severity: FINDING_SEVERITY['cli-missing'], kind: 'cli-missing', device, agent,
@@ -451,9 +377,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }));
   }
 
-  // owner-sink-unreachable — the feed/notify owner-delivery lane can't reach the
-  // owner from this box (RUSH-2262). Only when owner delivery is CONFIGURED for the
-  // fleet; an un-opted-in box is not broken. The message names the concrete reason.
   const sink = input.ownerSink;
   if (sink?.configured && !sink.reachable) {
     const chan = sink.channel ?? 'owner';
@@ -470,8 +393,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }));
   }
 
-  // Per-version resource reports → missing hook/plugin (critical), unwired hook
-  // (critical), other missing kinds (warning), content drift (warning).
   for (const report of input.reports) {
     const agent = report.agent as AgentId;
     const version = report.version;
@@ -496,9 +417,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
         }
       }
     }
-    // Generated shim wrapper missing/unusable for a wired hook — independent of
-    // whether the native settings format itself is understood, so this fires
-    // even for harnesses `w.supported` is false for (RUSH-2382).
     for (const issue of w?.runtimeBroken ?? []) {
       out.push(finding({
         severity: FINDING_SEVERITY['hook-runtime-broken'], kind: 'hook-runtime-broken', device, agent, version,
@@ -550,7 +468,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
         }));
       }
     } else {
-      // Synced-but-drifted: one line per kind of gap on this version.
       emitGroup(out, missingHooks, FINDING_SEVERITY['missing-hook'], 'missing-hook', device, agent, version, 'hook', 'missing');
       emitGroup(out, missingPlugins, FINDING_SEVERITY['missing-plugin'], 'missing-plugin', device, agent, version, 'plugin', 'missing');
       emitGroup(out, missingOther, FINDING_SEVERITY['missing-resource'], 'missing-resource', device, agent, version, 'resource', 'missing');
@@ -572,9 +489,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
         message: 'sources changed since last sync',
       }));
     } else if (row.status === 'never-synced') {
-      // Only surface a never-synced warning when the collapsed critical above did
-      // NOT fire (a version with zero declared resources to miss — nothing landed
-      // in the critical section, so name the never-synced state here).
       const hadCritical = input.reports.some(
         (rep) => rep.agent === row.agent && rep.version === row.version &&
           Object.values(rep.kinds).some((rows) => rows.some((r) => r.status === 'missing')),
@@ -588,8 +502,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }
   }
 
-  // Repo-behind markers (warning). `version` carries the alias so remediationFor
-  // can build `agents repo pull <alias>`.
   for (const m of input.repoBehind) {
     if (m.behind <= 0) continue;
     const stales = input.syncRows.filter((r) => r.status === 'stale').length;
@@ -600,14 +512,8 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }));
   }
 
-  // Orphans (warning) — ONE line for the whole device. Orphans are cleanup-only
-  // and `agents prune cleanup` fixes every version at once, so a row per version
-  // was the single largest block of noise in the readout for zero added action.
   out.push(...orphanFinding(device, input.orphanRows));
 
-  // Host CLIs declared but not on PATH. One row for the machine, naming the
-  // count and two examples — `agents cli install <name>` is per-CLI, so the
-  // names have to survive into the message.
   const missingClis = (input.hostClis?.statuses ?? []).filter((c) => !c.installed).map((c) => c.name);
   if (missingClis.length > 0) {
     out.push({
@@ -615,16 +521,11 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
       message: missingClis.length === 1
         ? `host CLI '${missingClis[0]}' declared but not installed`
         : `${missingClis.length} declared host CLIs not installed (${missingClis.slice(0, 2).join(', ')}${missingClis.length > 2 ? ', …' : ''})`,
-      // `agents cli install <name>` takes ONE optional name; with none it installs
-      // every declared CLI that is missing (`commands/cli.ts:118,133-146`). A
-      // second positional — or a literal ellipsis — is not a runnable command.
       remediation: missingClis.length === 1
         ? `agents cli install ${missingClis[0]}`
         : 'agents cli install',
     });
   }
-  // A manifest the loader rejected declares a CLI that can never install — one
-  // row per bad file, since each needs its own edit.
   for (const e of input.hostClis?.errors ?? []) {
     out.push(finding({
       severity: FINDING_SEVERITY['host-cli-invalid'], kind: 'host-cli-invalid', device,
@@ -634,19 +535,14 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
 
   out.push(...duplicateHookFindings(device, input.duplicateHooks ?? []));
 
-  // Credential-shaped exports in shell rc files (RUSH-1968) — a warning per class
-  // of fix: the file-store master key moves to its own file, everything else goes
-  // into `agents secrets`.
   for (const f of rcSecretFindings(device, input.rcSecrets ?? [])) out.push(f);
 
-  // The same key, live in this process's environment rather than in a file.
   const envFinding = envSecretFinding(device, input.masterPassphraseInEnv ?? false);
   if (envFinding) out.push(envFinding);
 
   const authFinding = authBundleWrongBackendFinding(device, input.authBundleWrongBackend ?? false);
   if (authFinding) out.push(authFinding);
 
-  // Windows execution policy blocking the generated agents.ps1 launcher.
   const policyFinding = execPolicyFinding(device, input.execPolicy);
   if (policyFinding) out.push(policyFinding);
 
@@ -660,13 +556,8 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }
   }
 
-  // Per-version sign-in → logged-out (critical, provable) / logout-unprovable
-  // (warning). Signed-in versions produce no finding — the accounts line shows
-  // them. Agents that can't be inspected never yield a logout finding.
   out.push(...signInToFindings(device, input.signIn));
 
-  // agents binary shadows (warning) — another install could be resolved by a
-  // scheduled routine or by a different shell PATH, running stale code.
   const shadows = input.binaryShadows ?? [];
   if (shadows.length > 0) {
     const examples = shadows.slice(0, 2).map((s) => `${s.path}${s.version ? ` (${s.version})` : ''}`).join(', ');
@@ -684,9 +575,6 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   for (const d of input.leakedDaemons ?? []) {
     const home = d.home ?? 'unknown HOME';
     const started = d.startedAt ? `, started ${d.startedAt}` : '';
-    // The launch entry names WHICH install leaked the daemon — part of what
-    // the operator judges before killing. Only a real path: for a stand-in
-    // (`node -e '<code>' __daemon-run`) the token is the code blob.
     const entry = d.entry && path.isAbsolute(d.entry) ? ` · ${d.entry}` : '';
     out.push({
       severity: FINDING_SEVERITY['leaked-daemon'], kind: 'leaked-daemon', device,
@@ -797,7 +685,6 @@ function envSecretFinding(device: string, present: boolean): DoctorFinding | nul
   if (!present) return null;
   return finding({
     severity: FINDING_SEVERITY['env-secret-export'], kind: 'env-secret-export', device,
-    // Never the value — only that it is set.
     message: 'AGENTS_SECRETS_PASSPHRASE is set in this process environment — every '
       + 'child inherits it and any same-user process can read it from /proc/<pid>/environ. '
       + 'It outlives the shell rc line that set it, so deleting that line is not enough. '
@@ -839,11 +726,7 @@ export function collapseAcrossVersions(
     const mergeable = f.agent && f.version
       && !isolated.has(`${f.agent}@${f.version}`)
       && !NEVER_COLLAPSED.has(f.kind);
-    // A non-mergeable finding gets a unique key so it passes through untouched.
     const key = mergeable
-      // `account` is part of the key: two versions with the SAME problem but
-      // DIFFERENT signed-in accounts are not one row — merging them would
-      // attribute every version to the first member's account.
       ? `${f.device}\0${f.agent}\0${f.kind}\0${f.severity}\0${f.account ?? ''}\0${f.message}`
       : `${order.length}`;
     if (!groups.has(key)) { groups.set(key, []); order.push(key); }
@@ -954,8 +837,6 @@ export function fleetDivergenceToFindings(
       case 'repo-drift':
         out.push(finding({
           severity: FINDING_SEVERITY['repo-drift'], kind: 'repo-drift', device: laggingDevice,
-          // `category` is the repo ('agents' | 'system'); carry it as the alias
-          // `agents repo pull` expects — ~/.agents is the `user` repo.
           version: d.category === 'system' ? 'system' : 'user',
           message: d.message,
         }));
@@ -972,17 +853,13 @@ export function fleetDivergenceToFindings(
   return out;
 }
 
-// ─── rendering ──────────────────────────────────────────────────────────────
 
-/** Sort key so the worst device floats to the top: criticals, then warnings. */
 function deviceSeverityRank(findings: DoctorFinding[]): number {
   const crit = findings.filter((f) => f.severity === 'critical').length;
   const warn = findings.filter((f) => f.severity === 'warning').length;
   return crit * 1000 + warn;
 }
 
-/** `claude @2.1.170` for one version, `claude (5 versions)` for a collapsed row,
- *  the bare agent id when neither applies. */
 function subjectLabel(f: DoctorFinding): string {
   if (!f.agent) return '';
   if (f.versions && f.versions.length > 1) return `${f.agent} (${f.versions.length} versions)`;
@@ -990,8 +867,6 @@ function subjectLabel(f: DoctorFinding): string {
 }
 
 function critLabel(f: DoctorFinding): { left: string; account: string; message: string } {
-  // Machine-level criticals with no agent get a category subject so the left
-  // column is not blank; the owner-sink row reads `owner  …`, not an empty label.
   if (f.kind === 'owner-sink-unreachable') return { left: 'owner', account: '', message: f.message };
   return {
     left: subjectLabel(f),
@@ -1007,19 +882,13 @@ function pad(s: string, width: number): string {
   return padToWidth(s, width);
 }
 
-/** Display width of the widest entry, floored at `min`. */
 function widestOf(values: string[], min: number): number {
   return Math.max(...values.map(stringWidth), min);
 }
 
 export interface RenderOptions {
-  /** Fleet mode (`--devices`): render the `─── by computer ───` header + one
-   *  block per device. Single-machine mode collapses to one `▸ <machine>` block
-   *  with no fleet header. */
   fleet: boolean;
-  /** The baseline (local) machine name — tagged `· this machine`. */
   baseline?: string;
-  /** Header line context: device count (fleet) or the local version string. */
   header?: string;
 }
 
@@ -1033,19 +902,13 @@ export function renderFindings(
 ): string[] {
   const lines: string[] = [];
 
-  // Header.
   if (opts.header) lines.push(opts.header);
   lines.push('');
 
-  // Group by device up front: the CRITICAL section orders its rows by the SAME
-  // worst-device-first ranking the per-computer blocks use, so the two sections
-  // agree and the worst machine's criticals lead.
   const byDevice = new Map<string, DoctorFinding[]>();
   for (const f of findings) {
     (byDevice.get(f.device) ?? byDevice.set(f.device, []).get(f.device)!).push(f);
   }
-  // Also include devices that have accounts but no findings (a clean box still
-  // needs its block + accounts line).
   for (const device of Object.keys(accounts)) {
     if (!byDevice.has(device)) byDevice.set(device, []);
   }
@@ -1053,17 +916,13 @@ export function renderFindings(
   const devices = Array.from(byDevice.keys()).sort((a, b) => {
     const ra = deviceSeverityRank(byDevice.get(a)!);
     const rb = deviceSeverityRank(byDevice.get(b)!);
-    if (rb !== ra) return rb - ra; // worst first
-    // Baseline (local) first among ties, then alphabetical.
+    if (rb !== ra) return rb - ra;
     if (a === opts.baseline) return -1;
     if (b === opts.baseline) return 1;
     return a.localeCompare(b);
   });
   const deviceOrder = new Map(devices.map((d, i) => [d, i]));
 
-  // ── CRITICAL section — all devices, worst device first, input order within ──
-  // Array.prototype.sort is stable, so equal device ranks keep the order the
-  // builders emitted — deterministic across runs.
   const criticals = findings
     .filter((f) => f.severity === 'critical')
     .sort((a, b) => (deviceOrder.get(a.device) ?? 0) - (deviceOrder.get(b.device) ?? 0));
@@ -1071,7 +930,6 @@ export function renderFindings(
   if (criticals.length === 0) {
     lines.push(`  ${chalk.green('✓')} ${chalk.gray('nothing critical across the fleet')}`);
   } else {
-    // Column widths computed on visible text.
     const rows = criticals.map((f) => ({ f, ...critLabel(f) }));
     const showDevice = opts.fleet;
     const devW = showDevice ? widestOf(rows.map((r) => r.f.device), 6) : 0;
@@ -1089,7 +947,6 @@ export function renderFindings(
     }
   }
 
-  // ── by-computer section ──
   if (opts.fleet) {
     lines.push('');
     lines.push(chalk.gray('─── by computer ───'));
@@ -1107,7 +964,6 @@ export function renderFindings(
       : '';
     lines.push(`${chalk.hex('#a3e635')(`▸ ${device}`)}${tagStr}${critMarker}`);
 
-    // Warnings for this device.
     const warnings = df.filter((f) => f.severity === 'warning');
     if (warnings.length === 0) {
       lines.push(`    ${chalk.green('✓')} ${chalk.gray('no warnings')}`);
@@ -1121,7 +977,6 @@ export function renderFindings(
       }
     }
 
-    // Accounts / versions line for this device.
     const acctLine = renderAccountsLine(accounts[device] ?? {});
     if (acctLine) lines.push(`    ${acctLine}`);
   }
@@ -1129,15 +984,9 @@ export function renderFindings(
   return lines;
 }
 
-/** The left-hand subject label for a warning row (agent@version, repo alias, or
- *  a short category). */
 function warningSubject(f: DoctorFinding): string {
-  // Both the user and system repos live under ~/.agents — name which one, or the
-  // two rows read as duplicates of each other.
   if (f.kind === 'repo-behind') return f.version ? `~/.agents (${f.version})` : '~/.agents';
   if (f.kind === 'repo-drift') return 'config repo';
-  // Never "this device" — the row already sits under its own `▸ <device>` block,
-  // so a self-referential subject reads as the local machine in fleet mode.
   if (f.kind === 'stale-cli') return 'agents-cli';
   if (f.kind === 'binary-shadow') return 'agents-cli';
   if (f.kind === 'orphan') return 'orphans';
@@ -1157,15 +1006,12 @@ function warningSubject(f: DoctorFinding): string {
  * 2.1.999 ✓team(Team) · codex ✗ · grok ✓`. */
 export function renderAccountsLine(signIn: Record<string, FleetVersionSignIn[]>): string {
   const parts: string[] = [];
-  // Stable agent order matches AGENT display order.
   const agents = sortedAgentIds(Object.keys(signIn));
   for (const agentId of agents) {
     const rows = signIn[agentId];
     if (!rows || rows.length === 0) continue;
     const agent = agentId as AgentId;
     if (rows.length === 1) {
-      // Single version — collapse to `<agent> <badge>` (omit the version to keep
-      // the healthy fleet line short), matching the target layout's `codex ✓`.
       const r = rows[0];
       parts.push(`${agentId} ${badge(agent, r)}`);
     } else {

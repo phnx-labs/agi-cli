@@ -46,17 +46,16 @@ export async function collectLocalFleetSignIn(): Promise<Record<string, FleetVer
           try {
             const info = await getAccountInfo(agent, home);
             signedIn = info.signedIn;
-            // Prefix the durable account name when this identity has been named.
             const display = accountDisplayLabel(info);
             const saved = findNativeAccountByIdentity(readMeta(), agent, info);
             account = (saved ? `${saved.name} · ${display || saved.identityLabel || saved.identityKey}` : display) || null;
           } catch {
-            /* advisory only — treat as logged out, provability decided below */
           }
           // Provable logout: the agent is inspectable and the credential is absent from both the
           // version home and the active/global HOME. Opaque/keychain-only agents and shared global
           // logins never qualify.
           let provable = false;
+          // Logout is provable only when known locations lack credentials in both version and active/global homes.
           if (!signedIn && supportsAccountInspection(agent)) {
             const presence = credentialPresence(agent, home);
             // `knownLocation` is load-bearing: an agent can be inspectable yet have no credential
@@ -83,7 +82,6 @@ export async function collectLocalFleetInventory(cwd: string = process.cwd()): P
     if (kind === 'promptcuts') {
       resources[kind] = available.promptcuts ? ['promptcuts.yaml'] : [];
     } else if (kind === 'rules') {
-      // getAvailableResources exposes top-level rules under `memory`.
       resources[kind] = [...available.memory].sort();
     } else {
       resources[kind] = [...(available[kind] ?? [])].sort();

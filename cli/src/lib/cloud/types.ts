@@ -20,7 +20,6 @@ export type CloudTaskStatus =
   | 'failed'
   | 'cancelled';
 
-/** Cloud backends whose wire status is normalized by `normalizeProviderStatus`. */
 type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity' | 'cursor';
 
 /** Normalize a provider's raw status into `CloudTaskStatus`, per provider with explicit defaults:
@@ -42,7 +41,6 @@ export function normalizeProviderStatus(
   }
 }
 
-/** Cursor Cloud run status → canonical enum. Unknown non-terminal states remain running. */
 function normalizeCursorStatus(s: string): CloudTaskStatus {
   switch (s.toUpperCase()) {
     case 'CREATING': return 'queued';
@@ -55,7 +53,6 @@ function normalizeCursorStatus(s: string): CloudTaskStatus {
   }
 }
 
-/** Rush Factory Floor status → canonical enum. Default `running`; no `queued`. */
 function normalizeRushStatus(s: string): CloudTaskStatus {
   switch (s) {
     case 'allocating': return 'allocating';
@@ -71,7 +68,6 @@ function normalizeRushStatus(s: string): CloudTaskStatus {
   }
 }
 
-/** Codex Cloud CLI status → canonical enum. Substring match; default `running`. */
 function normalizeCodexStatus(s: string): CloudTaskStatus {
   const lower = s.toLowerCase();
   if (lower.includes('queued') || lower.includes('pending')) return 'queued';
@@ -96,7 +92,6 @@ function normalizeAntigravityStatus(s: string | undefined): CloudTaskStatus {
   return 'completed';
 }
 
-/** Snapshot of a dispatched task, stored locally and refreshed from the provider. */
 export interface CloudTask {
   id: string;
   provider: CloudProviderId;
@@ -130,22 +125,18 @@ export type CloudEvent =
   | { type: 'error'; message: string; timestamp?: string }
   | { type: 'unknown'; name: string; data: string; timestamp?: string };
 
-/** Reference to a skill that should ride along with a cloud dispatch. */
 export interface SkillRef {
   id: string;
   version?: string;
 }
 
-/** A vision attachment carried along with a prompt (base64-encoded image bytes). */
 export interface ImageAttachment {
   data: string;
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
 }
 
-/** Maximum images allowed per dispatch (matches Cursor Background Agents). */
 export const MAX_IMAGES_PER_DISPATCH = 5;
 
-/** Parameters for dispatching a new cloud task. */
 export interface DispatchOptions {
   prompt: string;
   agent?: string;
@@ -167,9 +158,7 @@ export interface DispatchOptions {
   skills?: SkillRef[];
   /** Image attachments for vision dispatch, capped at MAX_IMAGES_PER_DISPATCH. */
   images?: ImageAttachment[];
-  /** Provider-specific options (e.g., codex env ID, factory computer name). */
   providerOptions?: Record<string, unknown>;
-  /** Runtime env vars to inject into the remote agent process when the provider supports it. */
   env?: Record<string, string>;
 }
 
@@ -195,7 +184,6 @@ export function resolveDispatchRepos(options: DispatchOptions): string[] {
 /** What a provider can actually do, so callers check flags and surface a typed error instead of
  * try/catch. Replaces the single-bool `supports()`. */
 export interface ProviderCapabilities {
-  /** Configured + reachable (auth present, binary installed, etc.). */
   available: boolean;
   dispatch: boolean;
   status: boolean;
@@ -211,14 +199,11 @@ export interface ProviderCapabilities {
 /** A pre-provisioned target a provider runs inside (Codex `env_...` or a Factory Droid Computer
  * name), surfaced by `agents cloud envs` and the picker. */
 export interface CloudTarget {
-  /** The value passed to dispatch (env id / computer name). */
   id: string;
-  /** Human label — repo, description, or status. */
   label?: string;
   kind: TargetKind;
 }
 
-/** Which dispatch option a provider's pre-provisioned target maps to. */
 export type TargetKind = 'env' | 'computer' | 'host';
 
 /** Thrown by `dispatch()` when a required pre-provisioned target (Codex env / Factory computer) is
@@ -237,19 +222,16 @@ export interface CloudProvider {
   id: CloudProviderId;
   name: string;
 
-  /** Static capability map for this provider. Read before calling feature methods. */
   capabilities(): ProviderCapabilities;
 
   dispatch(options: DispatchOptions): Promise<CloudTask>;
   status(taskId: string): Promise<CloudTask>;
   list(filter?: { status?: CloudTaskStatus }): Promise<CloudTask[]>;
 
-  /** Stream live output. Yields events until task completes or caller breaks. */
   stream(taskId: string): AsyncIterable<CloudEvent>;
 
   cancel(taskId: string): Promise<void>;
 
-  /** Send a follow-up message to a finished/idle/needs_review task. */
   message(taskId: string, content: string): Promise<void>;
 
   /** The pre-provisioned target this provider runs inside: Codex `env`, Factory `computer`;
@@ -262,10 +244,8 @@ export interface CloudProvider {
   listTargets?(): Promise<CloudTarget[]>;
 }
 
-/** Autonomy level passed to `droid exec --auto` for Factory cloud dispatches. */
 export type DroidAutonomy = 'low' | 'medium' | 'high';
 
-/** Per-provider configuration stored in the `cloud.providers` section of agents.yaml. */
 export interface CloudProviderConfig {
   rush?: Record<string, string>;
   codex?: { env?: string };
@@ -275,11 +255,9 @@ export interface CloudProviderConfig {
   /** Antigravity cloud. The Gemini key comes from the `agents secrets` bundle named here (never
    * agents.yaml), else GEMINI_API_KEY / GOOGLE_API_KEY. `model` overrides the default agent id. */
   antigravity?: { secretsBundle?: string; model?: string };
-  /** Cursor Cloud Agents API. The API key remains in the named secrets bundle. */
   cursor?: { secretsBundle?: string };
 }
 
-/** Top-level `cloud` section of agents.yaml. */
 export interface CloudConfig {
   default_provider?: CloudProviderId;
   providers?: CloudProviderConfig;

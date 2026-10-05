@@ -6,9 +6,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Same isolation pattern as ../hosts/registry.test.ts: HOME must be overridden
-// before state.ts loads so both the devices registry and hosts overlay resolve
-// paths from the sandbox, not the real machine's ~/.agents.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-target-test-'));
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');

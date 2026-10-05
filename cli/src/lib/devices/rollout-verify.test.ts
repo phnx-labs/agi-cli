@@ -40,7 +40,6 @@ function makeInstalls(which: 'dev' | 'global'): string {
   return binDir;
 }
 
-/** Run the real probe argv through a real shell with `binDir` first on PATH. */
 function runProbe(binDir: string): string {
   const cmd = rolloutVerifyCommand();
   const res = spawnSync(cmd.join(' '), {

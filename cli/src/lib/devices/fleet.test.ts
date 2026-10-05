@@ -36,7 +36,7 @@ describe('planFleetTargets', () => {
     const reg: DeviceRegistry = {
       alive: device({ name: 'alive', tailscale: { online: true, direct: true } }),
       dead: device({ name: 'dead', tailscale: { online: false, direct: false, lastSeen: 'yesterday' } }),
-      manual: device({ name: 'manual' }), // no tailscale snapshot → try
+      manual: device({ name: 'manual' }),
     };
     const plan = planFleetTargets(reg);
     const byName = Object.fromEntries(plan.map((t) => [t.device.name, t]));
@@ -57,22 +57,20 @@ describe('planFleetTargets', () => {
 describe('remoteFleetTargets (fleet health/drift gate targeting)', () => {
   it('drops this machine, but keeps offline/no-address as faults', () => {
     const reg: DeviceRegistry = {
-      zion: device({ name: 'zion', tailscale: { online: true, direct: true } }), // self
+      zion: device({ name: 'zion', tailscale: { online: true, direct: true } }),
       worker: device({ name: 'worker', tailscale: { online: true, direct: true } }),
       dead: device({ name: 'dead', tailscale: { online: false, direct: false, lastSeen: 'y' } }),
     };
     const targets = remoteFleetTargets(planFleetTargets(reg), 'zion');
     const byName = Object.fromEntries(targets.map((t) => [t.device.name, t]));
-    expect(byName.zion).toBeUndefined(); // self is probed in-process, not fanned out
-    expect(byName.worker.skip).toBeUndefined(); // a real probe target
-    expect(byName.dead.skip).toBe('offline'); // genuine fault — kept, surfaces as unreachable
+    expect(byName.zion).toBeUndefined();
+    expect(byName.worker.skip).toBeUndefined();
+    expect(byName.dead.skip).toBe('offline');
   });
 });
 
 describe('fleetHealthSkip (gate version+doctor dials on the reachability verdict)', () => {
   it('skips a box the stats probe found unreachable — on the DEFAULT path, no --refresh', () => {
-    // The regression this pins: before RUSH-1964 the skip was gated behind
-    // --refresh, so a default `fleet status` still spent 15s+30s per offline box.
     expect(fleetHealthSkip(undefined, stats('dead', false))).toBe('unreachable');
   });
 
@@ -90,19 +88,16 @@ describe('fleetHealthSkip (gate version+doctor dials on the reachability verdict
   });
 
   it('an unreachable-planned target never triggers a version/doctor probe', async () => {
-    // Full chain: fleetHealthSkip marks the row skip, fanOutDevices then returns
-    // it as skipped WITHOUT invoking the probe — so no ssh dial happens for a box
-    // already known unreachable (the 45s-per-box hang is never paid).
     const dialed: string[] = [];
     const targets = [
       { name: 'alive', skip: fleetHealthSkip(undefined, stats('alive', true)) },
       { name: 'dead', skip: fleetHealthSkip(undefined, stats('dead', false)) },
     ];
     const results = await fanOutDevices(targets, async (t) => {
-      dialed.push(t.name); // stands in for the version+doctor round-trips
+      dialed.push(t.name);
       return t.name;
     });
-    expect(dialed).toEqual(['alive']); // 'dead' was never dialed
+    expect(dialed).toEqual(['alive']);
     expect(results.map((r) => [r.name, r.status, r.reason])).toEqual([
       ['alive', 'ok', undefined],
       ['dead', 'skipped', 'unreachable'],
@@ -148,7 +143,7 @@ describe('runFleet', () => {
 
   it('runs the self target locally (never ssh) so fleet update upgrades this box too', () => {
     const targets: FleetTarget[] = [
-      { device: device({ name: 'zion' }) }, // this machine
+      { device: device({ name: 'zion' }) },
       { device: device({ name: 'worker' }) },
     ];
     const sshed: string[] = [];
@@ -158,7 +153,6 @@ describe('runFleet', () => {
       runner: (d) => { sshed.push(d.name); return { code: 0, stdout: '', stderr: '' }; },
       localRunner: (cmd) => { localRan.push(cmd); return { code: 0, stdout: '', stderr: '' }; },
     });
-    // self went through the local runner, NOT ssh; the remote box still ssh'd.
     expect(sshed).toEqual(['worker']);
     expect(localRan).toEqual([['agents', 'upgrade', '--yes']]);
     expect(results.map((r) => [r.name, r.status])).toEqual([['zion', 'ok'], ['worker', 'ok']]);
@@ -210,8 +204,6 @@ describe('fanOutDevices', () => {
   });
 
   it('per-device timeout: a probe slower than perDeviceTimeoutMs is recorded as failed', async () => {
-    // Simulate a device whose ssh probe hangs for longer than the per-device budget.
-    // The probe uses a 200 ms artificial delay; the timeout is 50 ms — so it fires.
     const results = await fanOutDevices(
       [{ name: 'fast' }, { name: 'slow' }],
       async (target) => {
@@ -231,7 +223,6 @@ describe('fanOutDevices', () => {
   }, 2000);
 
   it('per-device timeout: a probe that finishes within the budget is not affected', async () => {
-    // 200 ms timeout, 10 ms probe — must succeed.
     const results = await fanOutDevices(
       [{ name: 'quick' }],
       async () => {
@@ -245,11 +236,9 @@ describe('fanOutDevices', () => {
   }, 2000);
 
   it('per-device timeout: skipped devices are not subject to the probe timeout', async () => {
-    // A skipped device should still be returned as 'skipped' — not 'failed'.
     const results = await fanOutDevices(
       [{ name: 'gone', skip: 'offline' }],
       async () => {
-        // This probe must never be called for a skipped device.
         throw new Error('probe was called for a skipped device');
       },
       { perDeviceTimeoutMs: 10 },

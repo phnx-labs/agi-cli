@@ -21,9 +21,8 @@ import { dispatchPromptToHost, resolveHostRunTarget } from '../hosts/run-target.
 import { listAllHosts } from '../hosts/registry.js';
 import { terminateDispatchedTask } from '../hosts/dispatch.js';
 
-/** Host-task lifecycle → canonical cloud enum. `unknown` stays `running`
- *  (completion is confirmed, never guessed — reconcile.ts's rule). */
 function toCloudStatus(status: HostTask['status']): CloudTaskStatus {
+  // Unknown or unreachable is still running; only the remote exit file proves terminal state.
   switch (status) {
     case 'completed': return 'completed';
     case 'failed': return 'failed';
@@ -34,7 +33,6 @@ function toCloudStatus(status: HostTask['status']): CloudTaskStatus {
   }
 }
 
-/** Project a host-task sidecar into the cloud task shape. */
 export function hostTaskToCloudTask(task: HostTask): CloudTask {
   return {
     id: task.id,
@@ -59,13 +57,13 @@ export class HostCloudProvider implements CloudProvider {
 
   capabilities(): ProviderCapabilities {
     return {
-      available: true, // ssh is the only dependency; per-host reachability is probed at dispatch
+      available: true,
       dispatch: true,
       status: true,
       list: true,
       stream: true,
       cancel: true,
-      message: true, // gated per task: needs the sessionId only Claude runs carry
+      message: true,
       multiRepo: false,
       skills: false,
       images: false,
@@ -91,8 +89,6 @@ export class HostCloudProvider implements CloudProvider {
       throw new Error('--branch has no meaning for --provider host (no clone step). Check out the branch on the host, or use --remote-cwd.');
     }
 
-    // DeviceOffloadUnsupportedError / HostResolutionError propagate — both carry
-    // actionable messages the CLI prints verbatim.
     const host = await resolveHostRunTarget(hostName, {
       any: options.providerOptions?.any === true,
     });
@@ -104,7 +100,7 @@ export class HostCloudProvider implements CloudProvider {
       timeout: options.timeout,
       remoteCwd: options.providerOptions?.remoteCwd as string | undefined,
       name: options.providerOptions?.name as string | undefined,
-      follow: false, // the cloud pipeline streams via stream(); never block dispatch
+      follow: false,
     });
     return hostTaskToCloudTask(task);
   }
@@ -124,6 +120,7 @@ export class HostCloudProvider implements CloudProvider {
    * leaves tasks `running`. */
   private reconcileMemoized(task: HostTask): HostTask {
     if (task.status !== 'running') return task;
+    // Probe each target once per provider instance; many tasks on one offline host share the timeout.
     if (!this.reachable.has(task.target)) {
       this.reachable.set(task.target, sshReachable(task.target, 6000));
     }
@@ -159,10 +156,10 @@ export class HostCloudProvider implements CloudProvider {
       if (fetched) {
         if (fetched.logChunk.length > 0) {
           offset += fetched.logChunk.length;
-          pollMs = fastPollMs; // output is flowing — snap back to the fast poll
+          pollMs = fastPollMs;
           yield { type: 'text', content: fetched.logChunk.toString('utf8') };
         } else {
-          pollMs = Math.min(Math.round(pollMs * 1.5), maxPollMs); // idle backoff
+          pollMs = Math.min(Math.round(pollMs * 1.5), maxPollMs);
         }
         const exit = fetched.exit.trim();
         if (exit !== '') {
@@ -204,7 +201,6 @@ export class HostCloudProvider implements CloudProvider {
     });
   }
 
-  /** The unified host pool (enrolled hosts ∪ devices), dispatchable ones only. */
   async listTargets(): Promise<CloudTarget[]> {
     const hosts = await listAllHosts();
     return hosts

@@ -6,7 +6,6 @@ import { loadDevicesSync } from './registry.js';
 
 const LOOPBACK = ['localhost', '127.0.0.1', '::1'];
 
-/** Lowercase + strip a trailing dot (FQDNs are equivalent with or without it). */
 function normalize(name: string): string {
   return name.trim().toLowerCase().replace(/\.$/, '');
 }
@@ -19,15 +18,15 @@ let cached: Set<string> | null = null;
 function selfAliases(): Set<string> {
   if (cached) return cached;
   const aliases = new Set<string>([machineId(), ...LOOPBACK]);
+  // The registered MagicDNS FQDN and its short form are also self, preventing recursive SSH probes.
   try {
     const dns = loadDevicesSync()[machineId()]?.address?.dnsName;
     if (dns) {
       const d = normalize(dns);
       aliases.add(d);
-      aliases.add(d.split('.')[0]); // the short form of the FQDN
+      aliases.add(d.split('.')[0]);
     }
   } catch {
-    /* registry unreadable — the short id + loopback aliases still hold */
   }
   cached = aliases;
   return cached;
@@ -42,7 +41,6 @@ export function isSelfHost(name: string | undefined | null): boolean {
   return n.length > 0 && selfAliases().has(n);
 }
 
-/** Test hook: drop the memoized alias set so a fresh registry/env is re-read. */
 export function resetSelfHostCache(): void {
   cached = null;
 }

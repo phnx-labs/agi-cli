@@ -10,12 +10,10 @@ import type { DeviceStats } from './health.js';
 
 export type FleetSkipReason = 'offline' | 'no-address';
 
-/** npm dist-tags / semver pins only — rejects shell metacharacters. */
 const FLEET_VERSION_RE = /^[A-Za-z0-9._-]+$/;
 
 export interface FleetTarget {
   device: DeviceProfile;
-  /** When set, this device is not reached (skip with reason). */
   skip?: FleetSkipReason;
 }
 
@@ -24,7 +22,6 @@ export interface FleetRunResult {
   status: 'ok' | 'failed' | 'skipped';
   code: number | null;
   reason?: FleetSkipReason | string;
-  /** Truncated combined stderr/stdout for failures. */
   detail?: string;
 }
 
@@ -77,12 +74,12 @@ export function fleetHealthSkip(
   currentSkip: FleetSkipReason | string | undefined,
   stats: DeviceStats | undefined,
 ): FleetSkipReason | string | undefined {
+  // Only fleet health trusts its same-route probe failure enough to skip the later version and doctor dials.
   if (currentSkip) return currentSkip;
   if (stats?.reachable === false) return 'unreachable';
   return undefined;
 }
 
-/** Human label for a skip reason. */
 export function skipLabel(reason: FleetSkipReason): string {
   switch (reason) {
     case 'offline':
@@ -167,9 +164,7 @@ interface RunFleetOptions {
   /** Name of this machine. Its target runs the command locally (no ssh), since a box cannot
    * reliably ssh to itself. Omit to ssh every target. Callers pass `machineId()`. */
   self?: string;
-  /** Injectable ssh runner (tests). */
   runner?: typeof runOnDevice;
-  /** Injectable local runner (tests). */
   localRunner?: typeof runLocalCommand;
 }
 
@@ -224,7 +219,6 @@ interface FanOutDeviceOptions {
   perDeviceTimeoutMs?: number;
 }
 
-/** Run one async probe per device in parallel, preserving input order. */
 export async function fanOutDevices<T, Target extends FanOutDeviceTarget = FanOutDeviceTarget>(
   targets: Target[],
   probe: (target: Target) => Promise<T>,

@@ -22,21 +22,19 @@ import { addIgnoredEntry } from './device-docs.js';
 import type { Meta } from '../types.js';
 import type { FleetDeviceOverride, FleetManifest, IgnoredDeviceEntry } from '../fleet/types.js';
 
-/** One parsed device doc under ~/.agents/devices/. */
 interface DeviceDoc {
   name: string;
   path: string;
   doc: Record<string, unknown>;
 }
 
-/** Read every device doc. A doc that fails to parse is loudly skipped. */
 function readDeviceDocs(devicesRoot: string): DeviceDoc[] {
   const docs: DeviceDoc[] = [];
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(devicesRoot, { withFileTypes: true });
   } catch {
-    return docs; // no devices/ tree — nothing to fold
+    return docs;
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -49,7 +47,7 @@ function readDeviceDocs(devicesRoot: string): DeviceDoc[] {
       console.error(`device config migration: could not parse ${docPath} (${(err as Error).message}); leaving it for a later retry`);
       continue;
     }
-    if (parsed === null || parsed === undefined) continue; // empty doc
+    if (parsed === null || parsed === undefined) continue;
     if (typeof parsed !== 'object' || Array.isArray(parsed)) {
       console.error(`device config migration: ${docPath} is not a YAML map; leaving it for manual repair`);
       continue;
@@ -59,14 +57,13 @@ function readDeviceDocs(devicesRoot: string): DeviceDoc[] {
   return docs;
 }
 
-/** Write a device doc, or remove it (and its dir) when nothing remains. */
 function writeDeviceDoc(docPath: string, doc: Record<string, unknown>): void {
   try {
     if (Object.keys(doc).length === 0) {
       fs.rmSync(docPath, { force: true });
       try {
         fs.rmdirSync(path.dirname(docPath));
-      } catch { /* not empty — other files live in the device dir */ }
+      } catch {  }
     } else {
       fs.mkdirSync(path.dirname(docPath), { recursive: true });
       atomicWriteFileSync(docPath, META_HEADER + yaml.stringify(doc));
@@ -76,14 +73,13 @@ function writeDeviceDoc(docPath: string, doc: Record<string, unknown>): void {
   }
 }
 
-/** The legacy auto-launch.json flags, keyed by device name ({} when absent). */
 function readAutoLaunchFlags(autoLaunchPath: string): Record<string, Record<string, unknown>> {
   const out: Record<string, Record<string, unknown>> = {};
   let raw: string;
   try {
     raw = fs.readFileSync(autoLaunchPath, 'utf-8');
   } catch {
-    return out; // absent — nothing to fold
+    return out;
   }
   let parsed: unknown;
   try {
@@ -115,7 +111,7 @@ function readLegacyIgnoredFile(p: string): { names: string[]; updatedAt?: string
   try {
     raw = fs.readFileSync(p, 'utf-8');
   } catch {
-    return null; // absent — nothing to fold
+    return null;
   }
   try {
     const parsed = JSON.parse(raw) as { ignored?: unknown; updatedAt?: unknown };
@@ -136,8 +132,6 @@ export function migrateDeviceConfigStores(): void {
   const autoLaunchPath = getDevicesAutoLaunchPath();
   const self = machineId();
 
-  // ── 1. Gather ────────────────────────────────────────────────────────────
-  // Central per-device config (the #2458 store).
   const fleet = readMeta().fleet;
   const centralDevices: Record<string, FleetDeviceOverride> =
     fleet && fleet.devices !== 'all' ? fleet.devices : {};
@@ -152,23 +146,15 @@ export function migrateDeviceConfigStores(): void {
   const legacyIgnoredPending = fs.existsSync(legacyIgnoredPath);
   const legacyIgnored = legacyIgnoredPending ? readLegacyIgnoredFile(legacyIgnoredPath) : null;
 
-  // Central shared fleet.discovery / fleet.ignored (PHNX-3315): the maps N boxes
-  // used to rewrite. Folded into THIS box's device doc below, then stripped.
   const centralFleetState = !!(
     fleet &&
     ((fleet.discovery && Object.keys(fleet.discovery).length > 0) ||
       (Array.isArray(fleet.ignored) && fleet.ignored.length > 0))
   );
 
-  // Central shared `hosts:` map (PHNX-3315): the host registry N boxes used to
-  // rewrite. Folded into THIS box's device doc below, then the central key is
-  // dropped entirely.
   const centralHosts = readMeta().hosts;
   const centralHostsPending = !!(centralHosts && Object.keys(centralHosts).length > 0);
 
-  // Central device-scoped native accounts (PHNX-3315): a native login is
-  // machine-local, so `scope:'device'` identities (and the bindings that target
-  // them) belong in this box's device doc, off the git-tracked shared file.
   const centralAccounts = readMeta().accounts;
   const accountsPending = !!(
     centralAccounts?.native && Object.values(centralAccounts.native).some((a) => a.scope === 'device')
@@ -178,10 +164,8 @@ export function migrateDeviceConfigStores(): void {
   let selfPins: { agents?: Record<string, string>; isolatedAgents?: Record<string, string> } = {};
   try {
     selfPins = (JSON.parse(fs.readFileSync(pinsPath, 'utf-8')) as typeof selfPins) || {};
-  } catch { /* absent or malformed — the fold below recreates it */ }
+  } catch {  }
 
-  // ── 1b. Plan (pure) — so a converged install never takes the meta lock or
-  //    rewrites a byte-identical doc on every boot.
   const plans: Array<{ name: string; path: string; next: Record<string, unknown> }> = [];
   for (const { name, path: docPath, doc } of docs) {
     const plan = planDeviceDocFold(name, docPath, doc, centralDevices[name]?.config, autoLaunchFlags[name]);
@@ -211,10 +195,8 @@ export function migrateDeviceConfigStores(): void {
   // writeMetaUnlocked. Only taken when there is a write; locking a converged install would create
   // a default central agents.yaml.
   if (hasDestinationWork) {
+    // Commit every destination before removing a legacy source so interruption can only cause a safe retry.
     withMetaLock(() => {
-      // 2a. THIS machine's pins: doc pins merge INTO the pins file (pins file
-      //     wins — it is the destination, and a re-fold after a crash must not
-      //     clobber pins the new CLI already wrote).
       if (docAgents || docIsolated) {
         const pins: typeof selfPins = { ...selfPins };
         if (docAgents) pins.agents = { ...docAgents, ...selfPins.agents };
@@ -226,7 +208,6 @@ export function migrateDeviceConfigStores(): void {
           console.error(`device config migration: could not write ${pinsPath} (${(err as Error).message}); a later run retries`);
         }
       }
-      // 2b/2c. The planned doc rewrites + creations.
       for (const plan of plans) writeDeviceDoc(plan.path, plan.next);
       for (const nd of newDocs) writeDeviceDoc(nd.path, nd.doc);
     });
@@ -264,7 +245,6 @@ export function migrateDeviceConfigStores(): void {
     });
   }
 
-  // 3b. The legacy auto-launch.json.
   if (autoLaunchPending) {
     try {
       fs.rmSync(autoLaunchPath, { force: true });
@@ -302,7 +282,7 @@ export function migrateDeviceConfigStores(): void {
       if (hasDisc) {
         for (const [name, status] of Object.entries(disc!)) {
           if (status !== 'approved' && status !== 'ignored') continue;
-          if (discovery[name] === 'ignored') continue; // ignored is never downgraded
+          if (discovery[name] === 'ignored') continue;
           discovery[name] = status;
         }
       }
@@ -322,8 +302,6 @@ export function migrateDeviceConfigStores(): void {
         delete fleet.discovery;
         delete fleet.ignored;
       }
-      // Drop an emptied fleet block entirely (mirrors step 3a's guard) so the
-      // strip does not leave a bare `fleet: { devices: {} }` behind.
       const fleetEmpty =
         !fleet ||
         ((fleet.devices === undefined ||
@@ -346,8 +324,6 @@ export function migrateDeviceConfigStores(): void {
     updateMeta((m) => {
       const hosts = m.hosts;
       if (!hosts || Object.keys(hosts).length === 0) return m;
-      // This box's own device-doc entries win over the shared legacy on a name
-      // collision (a re-fold after a crash must not clobber a fresher local edit).
       const deviceHosts = { ...hosts, ...m.deviceHosts };
       const { hosts: _drop, ...rest } = m;
       void _drop;
@@ -359,6 +335,7 @@ export function migrateDeviceConfigStores(): void {
   // device doc, removing identity PII from the tracked file. Selection is recomputed inside the
   // lock so concurrent writes are not clobbered; the id-keyed merge makes a re-fold a no-op.
   if (accountsPending) {
+    // Device-scoped account identity is machine-local and must leave the tracked central account map.
     updateMeta((m) => {
       const native = { ...m.accounts?.native };
       const bindings = { ...m.accounts?.bindings };
@@ -392,8 +369,6 @@ export function migrateDeviceConfigStores(): void {
       else delete accounts.native;
       if (Object.keys(bindings).length > 0) accounts.bindings = bindings;
       else delete accounts.bindings;
-      // Drop the whole central `accounts` block only when nothing fleet-shared
-      // remains (no version natives, no bindings, no defaults).
       const accountsEmpty = !accounts.native && !accounts.bindings && !accounts.defaults;
       if (accountsEmpty) {
         const { accounts: _drop, ...rest } = m;
@@ -405,7 +380,6 @@ export function migrateDeviceConfigStores(): void {
   }
 }
 
-/** Shallow-set equality for folded doc content (values compared deep via JSON). */
 function sameDocContent(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   const ak = Object.keys(a);
   const bk = Object.keys(b);
@@ -438,7 +412,6 @@ function planDeviceDocFold(
   if (isConfigMap(centralConfig)) Object.assign(config, centralConfig);
 
   const next: Record<string, unknown> = {};
-  // Preserve fields the migration does not own (routines:, anything else).
   for (const [k, v] of Object.entries(doc)) {
     if (k === 'config' || k === 'defaultBrowserProfile' || k === 'agents' || k === 'isolatedAgents') continue;
     next[k] = v;

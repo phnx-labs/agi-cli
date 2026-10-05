@@ -43,7 +43,6 @@ describe('device registry round-trip', () => {
       tailscale: { online: true, direct: true, relay: 'sfo', lastSeen: '2026-06-30T00:00:00Z' },
     });
 
-    // shell is derived, never supplied — windows must yield powershell.
     expect(created.shell).toBe('powershell');
 
     const back = await getDevice('win-mini');
@@ -56,8 +55,8 @@ describe('device registry round-trip', () => {
     await upsertDevice('box', { platform: 'windows', user: 'admin' });
     const updated = await upsertDevice('box', { platform: 'linux' });
     expect(updated.platform).toBe('linux');
-    expect(updated.shell).toBe('posix'); // must follow the new platform, not stay 'powershell'
-    expect(updated.user).toBe('admin'); // untouched field preserved
+    expect(updated.shell).toBe('posix');
+    expect(updated.user).toBe('admin');
   });
 
   it('removes a device and reports absence', async () => {
@@ -102,9 +101,6 @@ describe('device registry corruption surfacing', () => {
  * skipped while two sleeping boxes were dialed and their timeouts read as doubt. */
 describe('isDialableDevice', () => {
   it('dials a manually-registered device that the live probe reached', () => {
-    // The real yosemite-s1: address.via 'manual', so it never gets a tailscale
-    // peer entry and `tailscale.online` is permanently undefined. Gating on
-    // `online === true` hid every session on that box from the fleet sweep.
     expect(isDialableDevice({
       name: 'yosemite-s1',
       platform: 'linux',
@@ -192,7 +188,6 @@ describe('device-name validation — shape vs policy', () => {
 
   it('assertValidDeviceName is SHAPE-ONLY, so observed names keep working', async () => {
     const { assertValidDeviceName } = await import('./registry.js');
-    // A tailnet node really can be called this. Sync must not care.
     for (const observed of ['auto', 'interactive', 'all', 'AUTO']) {
       expect(() => assertValidDeviceName(observed), observed).not.toThrow();
     }
@@ -205,16 +200,10 @@ describe('device-name validation — shape vs policy', () => {
       expect(() => assertRegistrableDeviceName(reserved), reserved).toThrow(/reserved/i);
     }
     expect(() => assertRegistrableDeviceName('mac-mini')).not.toThrow();
-    // A padded name fails the SHAPE check first, which is right — spaces are
-    // invalid in an ssh alias whether or not the word is reserved. Asserting
-    // /reserved/ there would have been asserting the wrong guard.
     expect(() => assertRegistrableDeviceName('  Interactive  ')).toThrow(/Invalid device name/);
   });
 
   it('upsertDevice accepts an observed reserved name — devices sync must not abort', async () => {
-    // The regression this exists for: `devices sync` upserts every observed node
-    // in a loop with no per-node catch, so one node named `auto` would abort the
-    // whole sync and register nothing after it.
     const { upsertDevice } = await import('./registry.js');
     await expect(
       upsertDevice('auto', {
@@ -226,8 +215,6 @@ describe('device-name validation — shape vs policy', () => {
   });
 
   it('addIgnored accepts one too — otherwise the node can be neither registered nor dismissed', async () => {
-    // With both strict, `agents devices ignore auto` threw and the node stayed
-    // pending, re-prompting on every sync with no way out.
     const { addIgnored, removeIgnored } = await import('./registry.js');
     try {
       await expect(addIgnored('auto')).resolves.toBeTruthy();

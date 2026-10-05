@@ -36,8 +36,6 @@ describe('synced device discovery policy', () => {
 
     setDeviceDiscoveryStatus('mac-mini', 'approved');
     expect(getDeviceDiscoveryStatus('mac-mini')).toBe('approved');
-    // The decision lands in THIS box's device doc, so the fleet-shared central
-    // file — and its sibling fleet config — is left untouched (PHNX-3315).
     expect(fs.readFileSync(file, 'utf-8')).toContain('maxAgents: 2');
     expect(fs.readFileSync(file, 'utf-8')).not.toContain('discovery');
 
@@ -52,15 +50,13 @@ describe('synced device discovery policy', () => {
 
   it('unions discovery decisions across two boxes, ignored beating approved (PHNX-3315)', async () => {
     const { loadDeviceDiscoveryPolicies, setDeviceDiscoveryStatus } = await freshModules();
-    // This box approves mac-mini.
     setDeviceDiscoveryStatus('mac-mini', 'approved');
-    // A peer box's device doc dismisses mac-mini and approves win-mini.
     const peer = path.join(home, '.agents', 'devices', 'peer', 'agents.yaml');
     fs.mkdirSync(path.dirname(peer), { recursive: true });
     fs.writeFileSync(peer, 'fleet:\n  discovery:\n    mac-mini: ignored\n    win-mini: approved\n');
 
     const policies = loadDeviceDiscoveryPolicies();
-    expect(policies.get('mac-mini')).toBe('ignored'); // the peer's dismissal wins
+    expect(policies.get('mac-mini')).toBe('ignored');
     expect(policies.get('win-mini')).toBe('approved');
   });
 
@@ -70,7 +66,6 @@ describe('synced device discovery policy', () => {
       platform: 'macos',
       address: { via: 'tailscale', dnsName: 'mac-mini.example.ts.net' },
     });
-    // A conflicting stale local state is exactly what pull reconciliation fixes.
     expect(await getDevice('mac-mini')).not.toBeNull();
     expect(await isIgnored('mac-mini')).toBe(false);
     setDeviceDiscoveryStatus('mac-mini', 'ignored');
@@ -108,9 +103,6 @@ describe('synced device discovery policy', () => {
       platform: 'linux',
       address: { via: 'manual', dnsName: 'never-in-policy.internal' },
     });
-    // A sibling device DOES have an explicit policy entry, so the discovery
-    // map is non-empty/defined — the exact condition that used to treat
-    // absence as "pending removal".
     setDeviceDiscoveryStatus('mac-mini', 'ignored');
 
     const result = await reconcileDeviceDiscoveryPolicies();

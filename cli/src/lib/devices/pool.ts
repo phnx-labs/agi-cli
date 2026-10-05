@@ -17,9 +17,7 @@ import { normalizeHost } from '../machine-id.js';
 const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal', 'desktop']);
 
 interface AutoPoolOptions {
-  /** Pool mode; defaults to the configured `auto.pool`. */
   mode?: AutoPoolMode;
-  /** Configured roles by device name; defaults to the fleet-shared block. */
   roles?: Record<string, ConfiguredDeviceRole>;
   /** Device names to resolve roles for when `roles` is not given, so a fleet-wide role default
    * reaches a device with no per-device doc. Ignored once `roles` is supplied; see {@link
@@ -51,7 +49,6 @@ export function filterAutoPool(pool: string[], opts: AutoPoolOptions = {}): stri
   return eligible.filter((host) => roleOf(host) === 'worker');
 }
 
-/** Normalized hosts the operator turned off with `auto-launch.enabled` = false. */
 function disabledAutoLaunchSet(pool: string[], opts: AutoPoolOptions): Set<string> {
   const prefs = opts.autoLaunch ?? loadAutoLaunchPreferences(opts.roster ?? pool);
   return new Set(
@@ -73,12 +70,10 @@ export function autoLaunchPreferredSet(pool: string[], opts: AutoPoolOptions = {
   );
 }
 
-/** True when this host is one automatic placement may pick. */
 export function isAutoPoolMember(host: string, opts: AutoPoolOptions = {}): boolean {
   return filterAutoPool([host], opts).length > 0;
 }
 
-/** Device names explicitly marked `worker`, in registry order. */
 export function listWorkerDevices(opts: Pick<AutoPoolOptions, 'roles'> = {}): string[] {
   const roles = opts.roles ?? listConfiguredDeviceRoles();
   return Object.entries(roles)

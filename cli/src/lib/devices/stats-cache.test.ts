@@ -26,7 +26,6 @@ function stat(host: string, fetchedAt: number, loadPercent = 10): DeviceStats {
   return { host, reachable: true, loadPercent, memPercent: 20, ncpu: 4, memTotalBytes: 16 * 1024 ** 3, diskTotalBytes: 256 * 1024 ** 3, fetchedAt, specsFetchedAt: fetchedAt };
 }
 
-/** A probe stub that records which devices it was asked to probe. */
 function fakeProbe(now: number, probed: string[]) {
   return (async (devices: DeviceProfile[]) => {
     const m = new Map<string, DeviceStats>();
@@ -49,14 +48,14 @@ describe('loadFleetStats', () => {
     const probed: string[] = [];
     const cache = { a: stat('a', 1000), b: stat('b', 1000) };
     const res = await loadFleetStats([dev('a'), dev('b')], {
-      selfName: 'z', // not in the list — no local probe needed either
+      selfName: 'z',
       now: 2000,
       readCache: () => ({ ...cache }),
       writeCache: () => {},
       probeFleet: fakeProbe(2000, probed),
       probeLocal: (async (h: string) => stat(h, 2000)) as never,
     });
-    expect(probed).toEqual([]); // both served from cache
+    expect(probed).toEqual([]);
     expect(res.servedFromCache).toBe(true);
     expect(res.stats.get('a')?.fetchedAt).toBe(1000);
     expect(res.oldestFetchedAt).toBe(1000);
@@ -73,8 +72,6 @@ describe('loadFleetStats', () => {
       probeFleet: fakeProbe(2000, probed),
       probeLocal: (async (h: string) => stat(h, 2000)) as never,
     });
-    // self went through probeFleet (which handles selfName locally); it is never
-    // served stale from cache.
     expect(probed).toContain('z');
     expect(res.stats.get('z')?.fetchedAt).toBe(2000);
   });
@@ -91,11 +88,11 @@ describe('loadFleetStats', () => {
       probeFleet: fakeProbe(2000, probed),
       probeLocal: (async (h: string) => stat(h, 2000)) as never,
     });
-    expect(probed).toEqual(['b']);            // only the uncached one
-    expect(res.stats.get('a')?.fetchedAt).toBe(1000); // cached
-    expect(res.stats.get('b')?.fetchedAt).toBe(2000); // fresh
+    expect(probed).toEqual(['b']);
+    expect(res.stats.get('a')?.fetchedAt).toBe(1000);
+    expect(res.stats.get('b')?.fetchedAt).toBe(2000);
     expect(written).toHaveLength(1);
-    expect(Object.keys(written[0])).toEqual(['b']);   // only fresh rows persisted
+    expect(Object.keys(written[0])).toEqual(['b']);
   });
 
   it('forceRefresh bypasses the cache and probes every device', async () => {
@@ -125,15 +122,13 @@ describe('loadFleetStats', () => {
     expect(res.stats.get('z')?.fetchedAt).toBe(3000);
   });
 
-  // #2666: a cache entry older than STATS_STALE_MS must never be presented as
-  // current load — it is re-probed live and the fresh row rewrites the cache.
   it('re-probes and rewrites a cache entry older than STATS_STALE_MS instead of serving it', async () => {
     const now = 10_000_000;
     const probed: string[] = [];
     const written: Record<string, DeviceStats>[] = [];
     const cache = {
-      fresh: stat('fresh', now - STATS_STALE_MS, 10),          // exactly on the bound — still served
-      stale: stat('stale', now - STATS_STALE_MS - 1, 1058),    // the fossilized 9-day-old shape
+      fresh: stat('fresh', now - STATS_STALE_MS, 10),
+      stale: stat('stale', now - STATS_STALE_MS - 1, 1058),
     };
     const res = await loadFleetStats([dev('fresh'), dev('stale')], {
       selfName: 'z',
@@ -143,11 +138,11 @@ describe('loadFleetStats', () => {
       probeFleet: fakeProbe(now, probed),
       probeLocal: (async (h: string) => stat(h, now)) as never,
     });
-    expect(probed).toEqual(['stale']);                    // stale re-probed, fresh untouched
-    expect(res.stats.get('stale')?.loadPercent).toBe(10); // the live number, not 1058
+    expect(probed).toEqual(['stale']);
+    expect(res.stats.get('stale')?.loadPercent).toBe(10);
     expect(res.stats.get('stale')?.fetchedAt).toBe(now);
     expect(res.stats.get('fresh')?.fetchedAt).toBe(now - STATS_STALE_MS);
-    expect(written).toHaveLength(1);                      // the default read is the writer now
+    expect(written).toHaveLength(1);
     expect(Object.keys(written[0])).toEqual(['stale']);
   });
 
@@ -155,7 +150,7 @@ describe('loadFleetStats', () => {
   // last recorded cores/RAM/disk (it rendered an offline row with an empty spec cell).
   it('a real failed probe keeps the hardware from the last successful one, and persists it', async () => {
     const seen = 5_000_000;
-    const now = seen + STATS_STALE_MS + 1; // cache is stale, so the box IS re-probed
+    const now = seen + STATS_STALE_MS + 1;
     const written: Record<string, DeviceStats>[] = [];
     const cache = { 'ci-runner': stat('ci-runner', seen) };
 
@@ -167,28 +162,20 @@ describe('loadFleetStats', () => {
     });
 
     const row = res.stats.get('ci-runner')!;
-    expect(row.reachable).toBe(false);               // the probe really failed
-    expect(row.ncpu).toBe(4);                        // …and the spec survived it
+    expect(row.reachable).toBe(false);
+    expect(row.ncpu).toBe(4);
     expect(row.memTotalBytes).toBe(16 * 1024 ** 3);
     expect(row.diskTotalBytes).toBe(256 * 1024 ** 3);
-    // Volatile readings are NOT carried: a stale load/mem number rendered as
-    // current is the failure mode the staleness bound exists to prevent.
     expect(row.loadPercent).toBeUndefined();
     expect(row.memPercent).toBeUndefined();
     expect(row.diskFreeBytes).toBeUndefined();
-    // "This hardware, seen then; unreachable, as of now" — never a backdated
-    // read. `fetchedAt` is stamped by the probe's own clock (opts.now drives
-    // only the staleness bound), so assert it advanced past the observation.
     expect(row.fetchedAt).toBeGreaterThan(seen);
     expect(row.specsFetchedAt).toBe(seen);
-    // The retention is persisted, so the NEXT invocation still has the spec.
     expect(written).toHaveLength(1);
     expect(written[0]['ci-runner'].ncpu).toBe(4);
     expect(written[0]['ci-runner'].reachable).toBe(false);
   }, 15_000);
 
-  // --refresh used to drop the cache entirely before probing, so a forced read
-  // of a down box was exactly the call that erased its hardware.
   it('retains hardware across forceRefresh, which never serves the cache but must not erase it', async () => {
     const seen = 5_000_000;
     const cache = { 'ci-runner': stat('ci-runner', seen) };
@@ -206,8 +193,6 @@ describe('loadFleetStats', () => {
     expect(row.specsFetchedAt).toBe(seen);
   }, 15_000);
 
-  // The retention is self-correcting: it only ever fills gaps on an unreachable
-  // row, so a re-specced box overwrites its facts the moment it answers again.
   it('a reachable probe replaces the retained facts instead of merging them', async () => {
     const probed: string[] = [];
     const cache = { a: { ...stat('a', 1000), ncpu: 99, memTotalBytes: 1 } };
@@ -220,14 +205,13 @@ describe('loadFleetStats', () => {
       probeLocal: (async (h: string) => stat(h, 2000)) as never,
     });
     expect(probed).toEqual(['a']);
-    expect(res.stats.get('a')?.ncpu).toBe(4);                          // live, not 99
-    expect(res.stats.get('a')?.memTotalBytes).toBe(16 * 1024 ** 3);    // live, not 1
+    expect(res.stats.get('a')?.ncpu).toBe(4);
+    expect(res.stats.get('a')?.memTotalBytes).toBe(16 * 1024 ** 3);
   });
 
   it('retainHardwareFacts is a no-op with no prior row, so a never-probed box stays blank', () => {
     const bare: DeviceStats = { host: 'new-box', reachable: false, fetchedAt: 42 };
     expect(retainHardwareFacts(bare, undefined)).toBe(bare);
-    // A prior row that never captured a spec adds nothing either.
     expect(retainHardwareFacts(bare, { host: 'new-box', reachable: false, fetchedAt: 1 })).toBe(bare);
   });
 
@@ -236,6 +220,6 @@ describe('loadFleetStats', () => {
     expect(isFreshDeviceStats(stat('a', now), now)).toBe(true);
     expect(isFreshDeviceStats(stat('a', now - STATS_STALE_MS), now)).toBe(true);
     expect(isFreshDeviceStats(stat('a', now - STATS_STALE_MS - 1), now)).toBe(false);
-    expect(isFreshDeviceStats(stat('a', now - 9 * 24 * 3600_000), now)).toBe(false); // the observed 9d row
+    expect(isFreshDeviceStats(stat('a', now - 9 * 24 * 3600_000), now)).toBe(false);
   });
 });

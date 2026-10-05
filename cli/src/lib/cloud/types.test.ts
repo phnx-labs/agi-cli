@@ -60,9 +60,6 @@ describe('resolveDispatchRepos', () => {
 });
 
 describe('normalizeProviderStatus', () => {
-  // Each provider kept its own copy of this mapping before consolidation; these
-  // pin each one's vocabulary + default so a behavior-changing merge trips the
-  // suite. Guards the drift the consolidation was meant to keep centralized.
   describe('rush (Factory Floor switch; default running; has allocating, no queued)', () => {
     it('maps the known Factory Floor strings', () => {
       expect(normalizeProviderStatus('rush', 'allocating')).toBe('allocating');

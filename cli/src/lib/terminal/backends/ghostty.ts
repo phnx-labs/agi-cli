@@ -1,12 +1,3 @@
-/**
- * Ghostty backend — drives Ghostty (>= 1.3) via AppleScript (`osascript`).
- *
- * Ghostty's `new surface configuration` record carries the working directory and
- * command natively, so no `cd` wrapper is needed. Tab: `new tab` (or a window
- * when none is open). Split: `split <surface> direction right|down`, where the
- * current surface is `focused terminal of selected tab of front window`
- * (verified against Ghostty 1.3.1 — a surface is a "terminal" in its AS model).
- */
 import * as fs from 'fs';
 import type { TerminalBackend, LaunchSpec, SplitDirection, EngineContext } from '../types.js';
 import { appleScriptStr } from '../quote.js';
@@ -22,7 +13,6 @@ function appExists(p: string): boolean {
   }
 }
 
-/** Shared prologue: activate + a surface configuration carrying cwd + command. */
 function configPrologue(cwd: string, command: string[]): string[] {
   const cmd = appleScriptStr(iLoginShell(execOnly(command)));
   return [
@@ -34,7 +24,6 @@ function configPrologue(cwd: string, command: string[]): string[] {
   ];
 }
 
-/** AppleScript that opens a Ghostty tab (a window if none is open). */
 export function ghosttyTabScript(cwd: string, command: string[]): string {
   return [
     ...configPrologue(cwd, command),
@@ -47,7 +36,6 @@ export function ghosttyTabScript(cwd: string, command: string[]): string {
   ].join('\n');
 }
 
-/** AppleScript that splits the current Ghostty surface (a window if none is open). */
 export function ghosttySplitScript(cwd: string, command: string[], direction: SplitDirection): string {
   return [
     ...configPrologue(cwd, command),

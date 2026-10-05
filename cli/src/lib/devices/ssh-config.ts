@@ -10,15 +10,11 @@ const HEADER = [
   '# Include from ~/.ssh/config with:  Include config.d/agents',
 ].join('\n');
 
-/** The HostName an ssh client should dial for a device: DNS name first, then IP. */
 export function hostNameFor(device: DeviceProfile): string | undefined {
   return device.address.dnsName ?? device.address.ip;
 }
 
-/** Render a single device into an ssh_config `Host` stanza, or null if it has no address. */
 function renderHost(device: DeviceProfile): string | null {
-  // Effective profile: operator config (ssh.user / ssh.identity-file) overlaid
-  // on the discovery record, so the rendered stanza matches what `agents ssh` dials.
   const resolved = resolveDeviceProfile(device);
   const hostName = hostNameFor(resolved);
   if (!hostName) return null;

@@ -50,7 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.AGENTS_SYNC_MACHINE_ID;
   delete process.env.AGENTS_DEVICES_DIR;
-  try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {  }
 });
 
 describe('resolveDeviceProfile', () => {
@@ -69,9 +69,7 @@ describe('resolveDeviceProfile', () => {
     expect(resolved.user).toBe('ops');
     expect(resolved.auth.identityFile).toBe('/keys/fleet');
     expect(resolved.platform).toBe('windows');
-    // The shell follows the overridden platform.
     expect(resolved.shell).toBe('powershell');
-    // Discovery fields are untouched.
     expect(resolved.address.dnsName).toBe('worker.example.ts.net');
   });
 
@@ -81,8 +79,8 @@ describe('resolveDeviceProfile', () => {
     const { resolveDeviceProfile } = await freshModules();
 
     const resolved = resolveDeviceProfile(profile());
-    expect(resolved.user).toBe('fleetops'); // inherited from the fleet default
-    expect(resolved.platform).toBe('linux'); // device layer wins
+    expect(resolved.user).toBe('fleetops');
+    expect(resolved.platform).toBe('linux');
   });
 
   it('a doc ssh.identity-file wins in the real buildSshInvocation argv', async () => {
@@ -95,7 +93,6 @@ describe('resolveDeviceProfile', () => {
     expect(i).toBeGreaterThan(-1);
     expect(args[i + 1]).toBe('/keys/central');
     expect(args).toContain('IdentitiesOnly=yes');
-    // The target still uses the discovered address (+ the discovered user).
     expect(args).toContain('discovered@worker.example.ts.net');
   });
 

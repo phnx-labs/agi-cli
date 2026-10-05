@@ -17,7 +17,6 @@ const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/inter
 const DEFAULT_MODEL = 'antigravity-preview-05-2026';
 const KEY_NAMES = ['GEMINI_API_KEY', 'GOOGLE_API_KEY'] as const;
 
-/** Shape of the Interactions API response we consume (defensive: all optional). */
 interface InteractionResponse {
   id?: string;
   interaction_id?: string;
@@ -27,7 +26,6 @@ interface InteractionResponse {
   error?: { message?: string } | string;
 }
 
-/** Build the Interactions API request body for a fresh dispatch. */
 export function buildInteractionBody(prompt: string, model: string): Record<string, unknown> {
   return {
     agent: model,
@@ -36,7 +34,6 @@ export function buildInteractionBody(prompt: string, model: string): Record<stri
   };
 }
 
-/** Parse an Interactions API response into a CloudTask (minus prompt/timestamps). */
 export function parseInteraction(resp: InteractionResponse): { id: string; status: CloudTaskStatus; summary?: string; environmentId?: string } {
   const id = resp.id ?? resp.interaction_id ?? `antigravity-${Date.now()}`;
   return {
@@ -47,7 +44,6 @@ export function parseInteraction(resp: InteractionResponse): { id: string; statu
   };
 }
 
-/** A completed interaction, buffered in-process for `stream()` to replay. */
 interface BufferedRun {
   events: CloudEvent[];
   task: CloudTask;
@@ -72,7 +68,6 @@ export class AntigravityCloudProvider implements CloudProvider {
     return KEY_NAMES.some((k) => Boolean(process.env[k]));
   }
 
-  /** Resolve the Gemini API key from the configured bundle or the environment. */
   private async resolveApiKey(): Promise<string> {
     if (this.secretsBundle) {
       try {
@@ -115,8 +110,6 @@ export class AntigravityCloudProvider implements CloudProvider {
   }
 
   async dispatch(options: DispatchOptions): Promise<CloudTask> {
-    // The Interactions sandbox has no GitHub repo → PR flow. Reject repos
-    // loudly rather than silently ignoring them (point the user at Rush).
     const repos = resolveDispatchRepos(options);
     if (repos.length > 0) {
       throw new Error(

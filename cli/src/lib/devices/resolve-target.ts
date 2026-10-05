@@ -10,8 +10,6 @@ import { type DeviceProfile } from './registry.js';
 
 export { splitUserHost };
 
-/** A dialable peer: the ssh target, the machine id used to tag its rows, a
- * display name, and the OS family that picks the remote shell dialect. */
 interface ResolvedSshTarget {
   target: string;
   machine: string;
@@ -25,12 +23,8 @@ interface ResolvedExplicitTargetSet {
   unresolved: string[];
 }
 
-/** Timestamps for a synthesized ad-hoc profile — never persisted, so a constant
- * keeps the value deterministic (and side-effect free) without reading the clock. */
 const SYNTH_TS = '1970-01-01T00:00:00.000Z';
 
-/** Synthesize a throwaway device profile for an ad-hoc `user@host` / `host`
- * literal so `agents ssh` can dial a box that was never registered. */
 function adHocDevice(token: string, host: string, user?: string): DeviceProfile {
   const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
   return {
@@ -48,13 +42,14 @@ function adHocDevice(token: string, host: string, user?: string): DeviceProfile 
 /** Resolve one token to a dialable {@link ResolvedSshTarget}, or undefined when it fails the
  * injection guard or names nothing reachable. */
 async function toResolvedTarget(token: string): Promise<ResolvedSshTarget | undefined> {
+  // Fleet fan-out accepts registered devices, SSH-config hosts, and explicit user@host literals.
   const host = await matchHost(token);
   if (!host) return undefined;
   let target: string;
   try {
     target = sshTargetFor(host);
   } catch {
-    return undefined; // matched a device/host with no address to dial
+    return undefined;
   }
   const hostPart = host.device ? host.device.name : splitUserHost(host.name).host;
   const name = host.device ? host.device.name : host.name;
@@ -75,6 +70,7 @@ export async function resolveDeviceTarget(
   token: string,
   opts: Pick<MatchHostOptions, 'resolveAuto'> = {}
 ): Promise<DeviceProfile | undefined> {
+  // Interactive SSH also accepts bare IP/FQDN literals, but not unknown or SSH-config-only bare aliases.
   const host = await matchHost(token, { allowBareLiteral: true, ...opts });
   if (!host) return undefined;
   if (host.device) {
@@ -85,8 +81,6 @@ export async function resolveDeviceTarget(
     const { user, host: hostPart } = splitUserHost(token);
     return adHocDevice(token, hostPart, user);
   }
-  // An overlay / ssh_config-only match is not a device — `agents ssh` stays
-  // devices-and-literals only, so report it as unknown.
   return undefined;
 }
 
@@ -97,7 +91,6 @@ export async function resolveExplicitTargets(hosts: string[]): Promise<ResolvedS
   return (await resolveExplicitTargetSet(hosts)).targets;
 }
 
-/** Resolve explicit tokens while retaining failures for coverage-sensitive callers. */
 export async function resolveExplicitTargetSet(hosts: string[]): Promise<ResolvedExplicitTargetSet> {
   const targets: ResolvedSshTarget[] = [];
   const unresolved: string[] = [];

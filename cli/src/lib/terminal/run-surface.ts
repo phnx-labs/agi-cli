@@ -1,16 +1,3 @@
-/**
- * `agents run … --terminal` — re-open this exact run as a tab in a real terminal.
- *
- * A GUI caller (the menu bar's "New Session") cannot host a TUI, so it has to
- * hand the run to a terminal. It used to do that by hardcoding AppleScript at
- * Terminal.app; now it appends `--terminal` and the CLI decides WHICH terminal
- * from the user's own live sessions (preferred.ts) and opens the tab through the
- * launch engine — the same engine `sessions resume` and `sessions focus` use.
- *
- * The re-invocation is the caller's own argv with the `--terminal` flag removed,
- * so every other flag (`--mode`, `--cwd`, a `--` passthrough) rides along
- * untouched and there is no second place that knows how to spell a run.
- */
 import type { Backend, EngineContext } from './types.js';
 import type { ActiveSession } from '../session/active.js';
 import { BACKENDS } from './backends/index.js';
@@ -24,22 +11,12 @@ import {
   type SessionHostSample,
 } from './preferred.js';
 
-/** Backends a user may name in `--terminal <backend>`. */
 export const TERMINAL_FLAG_BACKENDS: Backend[] = Object.keys(BACKENDS) as Backend[];
 
-/**
- * Validate a `--terminal <value>`. Returns the backend, or an error message
- * naming the valid ids — never a silent fallback to auto-detection, which would
- * open a terminal the user did not ask for.
- */
 export function parseTerminalFlag(value: unknown): { backend?: Backend; error?: string } {
   if (value === undefined || value === true || value === '') return {};
   const raw = String(value);
   if ((TERMINAL_FLAG_BACKENDS as string[]).includes(raw)) return { backend: raw as Backend };
-  // `--terminal [backend]` takes an OPTIONAL value, and commander assigns the
-  // next non-option token to it — so `agents run claude --terminal "fix the bug"`
-  // lands the prompt here. Say that, or the user just sees their prompt called a
-  // bad backend name and has no idea why.
   const looksLikeAPrompt = /\s/.test(raw) || raw.length > 24;
   const hint = looksLikeAPrompt
     ? ` That looks like a prompt: put it BEFORE the flag — agents run <agent> "${raw.length > 40 ? `${raw.slice(0, 40)}…` : raw}" --terminal.`
@@ -49,18 +26,11 @@ export function parseTerminalFlag(value: unknown): { backend?: Backend; error?: 
   };
 }
 
-/**
- * The argv to re-invoke, with `--terminal` (and the value commander consumed for
- * it) removed. `consumedValue` is the parsed option value when it is a string —
- * that is the only token after the flag that belongs to it, so a prompt or a
- * following flag is never eaten.
- */
 export function stripTerminalFlag(argv: string[], consumedValue?: string): string[] {
+  // Strip only Commander's consumed option/value and stop at -- so passthrough argv remains untouched.
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
-    // Everything past a bare `--` is forwarded verbatim to the agent's own CLI
-    // (`agents run kimi -- --terminal`), so it is not ours to rewrite.
     if (tok === '--') {
       out.push(...argv.slice(i));
       break;
@@ -75,32 +45,11 @@ export function stripTerminalFlag(argv: string[], consumedValue?: string): strin
   return out;
 }
 
-/** `agents run …` as a shell-safe command line for the surface to exec. */
 export function buildRunCommand(argv: string[]): string[] {
   const { command, args } = getCliLaunch(argv);
   return [command, ...args].map(shellQuote);
 }
 
-/**
- * Turn live sessions into the samples the resolver reads, filling in the app
- * each tmux-hosted session is currently VIEWED in.
- *
- * This step is what makes detection work for the common case: `agents run`
- * wraps interactive runs in tmux, so a session the user started in Ghostty is
- * attributed `host: 'tmux'` on the discovery path and would otherwise name no
- * terminal at all. `resolveViewingIn` walks the attached tmux client's pid up to
- * its host app — the same resolver `agents sessions` uses to print
- * "viewing in Ghostty tab 2". Sessions that are detached (no client attached)
- * legitimately have no viewer and keep their `tmux` host.
- *
- * One inherited nuance: `resolveViewingIn` labels a client whose app it cannot
- * identify `'terminal'` (viewing-in.ts:87), so a tmux session viewed from an
- * unrecognized emulator resolves to Terminal.app rather than falling through.
- * That lands on the same every-Mac floor the fallback chain ends at anyway, so
- * it costs nothing here — but it is a default, not a detection.
- *
- * Best-effort: any probe failure degrades to the plain host, never throws.
- */
 export async function toHostSamples(sessions: ActiveSession[]): Promise<SessionHostSample[]> {
   const samples: SessionHostSample[] = sessions.map((s) => ({
     host: s.host,
@@ -117,7 +66,6 @@ export async function toHostSamples(sessions: ActiveSession[]): Promise<SessionH
     const { enumerateGhosttyTabs } = await import('../session/ghostty-tabs.js');
     const { mapPanesToTargets, listClients } = await import('../tmux/session.js');
     const { resolveViewingIn } = await import('../session/viewing-in.js');
-    // One Ghostty enumeration shared across sockets, as the sessions renderer does.
     const ghosttySurfaces = await enumerateGhosttyTabs();
     const sockets = new Set(tmuxIdx.map(({ s }) => s.provenance!.mux!.socket));
     for (const socket of sockets) {
@@ -131,20 +79,15 @@ export async function toHostSamples(sessions: ActiveSession[]): Promise<SessionH
       }
     }
   } catch {
-    // tmux/Ghostty probes are best-effort; fall back to the plain host values.
   }
   return samples;
 }
 
 export interface OpenRunSurfaceParams {
-  /** This process's argv after the program name (i.e. `['run','claude',…]`). */
   argv: string[];
-  /** The parsed `--terminal` value, when the user named a backend. */
   forced?: Backend;
-  /** The value commander consumed for `--terminal`, so it can be stripped. */
   consumedValue?: string;
   cwd: string;
-  /** Live sessions, used to detect the terminal the user actually works in. */
   sessions: SessionHostSample[];
   ctx: EngineContext;
 }
@@ -152,16 +95,10 @@ export interface OpenRunSurfaceParams {
 export interface OpenRunSurfaceResult {
   ok: boolean;
   choice?: LaunchBackendChoice;
-  /** Human line describing the terminal that was chosen. */
   description?: string;
   error?: string;
 }
 
-/**
- * Open the run as a tab in the resolved terminal. Never throws — a failure comes
- * back as `ok: false` with the reason, so the caller can tell the user rather
- * than exiting silently.
- */
 export async function openRunInTerminal(params: OpenRunSurfaceParams): Promise<OpenRunSurfaceResult> {
   const choice: LaunchBackendChoice | null = params.forced
     ? { backend: params.forced, source: 'forced' }

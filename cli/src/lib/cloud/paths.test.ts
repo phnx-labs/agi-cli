@@ -3,9 +3,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { getUserAgentsDir, getCloudDir } from '../state.js';
 
-// state.ts resolves its root as `process.env.HOME ?? os.homedir()`. On Windows
-// HOME is unset, so mirror that exact resolution rather than asserting against a
-// bare `process.env.HOME!` (which is `undefined` → `path.join` throws there).
 const HOME = process.env.HOME ?? os.homedir();
 
 describe('cloud path roots', () => {

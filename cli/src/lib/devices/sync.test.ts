@@ -12,9 +12,6 @@ function node(name: string): TailscaleNode {
 
 describe('discoverableNodes', () => {
   it('drops sharee nodes so a machine shared into the tailnet is never auto-registered or suggested', () => {
-    // Regression: a `funnel-ingress-node` shared by another user (ShareeNode)
-    // was bootstrap-registered by `agents devices sync` as if it were the
-    // operator's own box, and showed up in `fleet ls`.
     const shared: TailscaleNode = { ...node('funnel-ingress-node'), sharee: true };
     const nodes = [node('zion'), shared, node('win-mini')];
     expect(discoverableNodes(nodes).map((n) => n.name)).toEqual(['zion', 'win-mini']);
@@ -50,8 +47,6 @@ describe('withDefaultUser', () => {
   });
 
   it('never clobbers a pinned user: leaves input.user unset so upsert preserves the registered one', () => {
-    // With a prev user, withDefaultUser must NOT stamp localUser — it returns the
-    // input untouched so upsertDevice's `input.user ?? prev.user` keeps 'root'.
     expect(withDefaultUser(base, 'root', 'muqsit').user).toBeUndefined();
   });
 
@@ -66,8 +61,6 @@ describe('withDefaultUser', () => {
 
 describe('sanitizeLoginUser', () => {
   it('strips a Windows COMPUTER\\user / DOMAIN\\user prefix to the bare ssh account', () => {
-    // Regression: `win-mini\muqsit` failed the charset guard on the `\`, so
-    // Windows boxes pinned no user at all.
     expect(sanitizeLoginUser('win-mini\\muqsit')).toBe('muqsit');
     expect(sanitizeLoginUser('CORP\\muqsit')).toBe('muqsit');
   });
@@ -111,12 +104,12 @@ describe('selectNodesToUpsert (bootstrap vs refresh)', () => {
 
   it('bootstrap upserts every non-ignored node, newcomers included', () => {
     const got = selectNodesToUpsert(nodes, registered, ignored, 'bootstrap').map((n) => n.name);
-    expect(got).toEqual(['zion', 'yosemite-s0', 'win-mini']); // ipad165 ignored, zion (new) INCLUDED
+    expect(got).toEqual(['zion', 'yosemite-s0', 'win-mini']);
   });
 
   it('refresh upserts only already-registered non-ignored nodes — newcomers are skipped', () => {
     const got = selectNodesToUpsert(nodes, registered, ignored, 'refresh').map((n) => n.name);
-    expect(got).toEqual(['yosemite-s0', 'win-mini']); // zion (new) SKIPPED so it can stay pending
+    expect(got).toEqual(['yosemite-s0', 'win-mini']);
   });
 
   it('never upserts an ignored node in either mode', () => {
@@ -131,9 +124,6 @@ describe('planDeviceReconciliation', () => {
   const all = ['zion', 'yosemite-s0', 'ipad165', 'win-mini', 'mac-mini'];
 
   it('registers checked, removes+ignores unchecked-that-were-registered', () => {
-    // registered: zion, yosemite-s0, win-mini. ignored: ipad165. mac-mini is new.
-    // user keeps zion + yosemite-s0, unchecks win-mini (registered) and leaves
-    // ipad165/mac-mini unchecked.
     const plan = planDeviceReconciliation(
       all,
       ['zion', 'yosemite-s0'],
@@ -141,8 +131,8 @@ describe('planDeviceReconciliation', () => {
       ['ipad165'],
     );
     expect(plan.toRegister).toEqual(['zion', 'yosemite-s0']);
-    expect(plan.toRemove).toEqual(['win-mini']); // was registered, now unchecked
-    expect(plan.toIgnore).toEqual(['ipad165', 'win-mini', 'mac-mini']); // every unchecked
+    expect(plan.toRemove).toEqual(['win-mini']);
+    expect(plan.toIgnore).toEqual(['ipad165', 'win-mini', 'mac-mini']);
     expect(plan.toUnignore).toEqual([]);
   });
 
@@ -155,8 +145,6 @@ describe('planDeviceReconciliation', () => {
   });
 
   it('does not try to remove an unchecked node that was never registered', () => {
-    // mac-mini is newly discovered (not registered, not ignored) and left
-    // unchecked: it should be ignored but NOT removed (nothing to remove).
     const plan = planDeviceReconciliation(['mac-mini'], [], [], []);
     expect(plan.toRemove).toEqual([]);
     expect(plan.toIgnore).toEqual(['mac-mini']);

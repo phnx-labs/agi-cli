@@ -11,7 +11,6 @@ import { ensureLockTarget } from '../fs-atomic.js';
 const CACHE_FILE = '.doctor-overview.json';
 const LOCK_TARGET_FILE = '.doctor-overview.lock-target';
 
-/** Serve a cached snapshot without recomputing while it is younger than this. */
 export const DOCTOR_OVERVIEW_FRESH_MS = 90_000;
 /** A held lock older than this is a crashed computer and is broken. proper-lockfile refreshes mtime
  * every `stale/2` while a live computer holds it, so only a dead holder is broken. */
@@ -27,11 +26,8 @@ interface CacheFile {
   payload: unknown;
 }
 
-/** Injectable IO + clock so tests exercise the real fs at a temp dir, no mocks. */
 interface DoctorOverviewCacheDeps {
-  /** Cache directory (default: the real `~/.agents/.cache`). */
   dir?: string;
-  /** Clock (default: {@link Date.now}). */
   now?: () => number;
 }
 
@@ -39,7 +35,6 @@ function cachePath(dir: string): string {
   return path.join(dir, CACHE_FILE);
 }
 
-/** Read the last snapshot (best-effort; missing/corrupt/wrong-version → null). */
 export function readDoctorOverviewCache(
   deps: DoctorOverviewCacheDeps = {},
 ): { fetchedAt: number; payload: unknown } | null {
@@ -50,12 +45,10 @@ export function readDoctorOverviewCache(
       return { fetchedAt: parsed.fetchedAt, payload: parsed.payload };
     }
   } catch {
-    // missing or corrupt — treat as no snapshot
   }
   return null;
 }
 
-/** Persist a fresh overview payload (best-effort; tmp+rename so reads are atomic). */
 export function writeDoctorOverviewCache(payload: unknown, deps: DoctorOverviewCacheDeps = {}): void {
   const dir = deps.dir ?? getCacheDir();
   const now = deps.now ?? Date.now;
@@ -66,7 +59,6 @@ export function writeDoctorOverviewCache(payload: unknown, deps: DoctorOverviewC
     fs.writeFileSync(tmp, JSON.stringify(body, null, 2));
     fs.renameSync(tmp, cachePath(dir));
   } catch {
-    // best-effort; a failed write just means the next read falls back to live
   }
 }
 
@@ -78,7 +70,6 @@ export function invalidateDoctorOverviewCache(deps: DoctorOverviewCacheDeps = {}
   try {
     fs.unlinkSync(cachePath(dir));
   } catch {
-    // Missing/unlinkable cache is already equivalent to invalidated.
   }
 }
 
@@ -108,42 +99,33 @@ export async function enterDoctorOverviewGate(
     return null;
   };
 
-  // 1. Fast path: a fresh snapshot serves without any compute or lock.
   const fast = serveFresh();
   if (fast !== null) return { cached: fast };
 
+  // The lock makes fleet collection singleflight; the winner's cache is checked again after waiting.
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   } catch {
-    // Can't even make the cache dir — fall back to an unguarded compute.
     return { cached: null, release: () => {} };
   }
 
   const lockTarget = path.join(dir, LOCK_TARGET_FILE);
   ensureLockTarget(lockTarget);
 
-  // 2. Singleflight via proper-lockfile: one caller holds the lock and computes;
-  //    the rest block here until it releases.
   let release: (() => Promise<void>) | null = null;
   try {
     release = await lockfile.lock(lockTarget, {
       stale: LOCK_STALE_MS,
       retries: LOCK_RETRIES,
-      // A peer broke our lock (only possible if we somehow went stale). Don't
-      // crash on the async callback; we re-check the cache and serve/recompute.
       onCompromised: () => {},
     });
   } catch {
-    // 3. Winner held the lock past our wait budget. Serve the last snapshot
-    //    (even if stale) rather than pile on; only if there is genuinely none do
-    //    we compute unguarded (rare cold-start under sustained load).
+    // If locking fails, stale data is safer than launching another fleet-wide collection.
     const c = readDoctorOverviewCache({ dir });
     if (c) return { cached: JSON.stringify(c.payload, null, 2) };
     return { cached: null, release: () => {} };
   }
 
-  // 4. Acquired. The winner may have written a fresh snapshot while we waited —
-  //    serve it and release, instead of recomputing.
   const afterWait = serveFresh();
   if (afterWait !== null) {
     // Await, don't fire-and-forget: returning while the lockfile is on disk makes the next caller
@@ -154,6 +136,7 @@ export async function enterDoctorOverviewGate(
 
   const rel = release;
   let released = false;
+  // The collecting caller owns this release and may call it defensively more than once.
   return {
     cached: null,
     release: () => {

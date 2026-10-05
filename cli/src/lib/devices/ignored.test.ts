@@ -7,7 +7,6 @@ import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the override.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-ignored-test-'));
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
@@ -23,7 +22,6 @@ function centralPath(): string {
 function readCentral(): string {
   return fs.existsSync(centralPath()) ? fs.readFileSync(centralPath(), 'utf-8') : '';
 }
-// This box's OWN tracked device doc — where dismissals live post-PHNX-3315.
 function deviceDocPath(): string {
   return path.join(TEST_HOME, '.agents', 'devices', 'testbox', 'agents.yaml');
 }
@@ -35,7 +33,6 @@ function node(name: string): TailscaleNode {
 }
 
 beforeEach(async () => {
-  // Fresh central store (and its lock dir) per test.
   await fsp.rm(path.join(TEST_HOME, '.agents'), { recursive: true, force: true });
 });
 
@@ -52,11 +49,7 @@ describe('device ignore-list', () => {
   it("persists a dismissal across reloads and lands in THIS box's device doc, not central", async () => {
     await addIgnored('ipad165');
     expect(await isIgnored('ipad165')).toBe(true);
-    // Fresh read from disk — not the in-memory set from addIgnored.
     expect([...(await loadIgnored())]).toEqual(['ipad165']);
-    // The dismissal lives in this box's OWN tracked device doc, with who/when
-    // recorded — never the fleet-shared central agents.yaml, so N boxes never
-    // rewrite one file (PHNX-3315). The effective list is the cross-box union.
     const doc = readDeviceDoc();
     expect(doc).toContain('ignored:');
     expect(doc).toContain('ipad165');
@@ -88,22 +81,16 @@ describe('device ignore-list', () => {
   it('throws on a corrupted fleet.ignored on READ, and a write never clobbers the block', async () => {
     await fsp.mkdir(path.dirname(centralPath()), { recursive: true });
     await fsp.writeFile(centralPath(), 'fleet:\n  devices: {}\n  ignored: not-a-list\n');
-    // The effective (union) read surfaces the corruption loudly rather than
-    // returning an empty set the next write could clobber.
     await expect(loadIgnored()).rejects.toThrow(/corrupted/);
-    // A dismissal now lands in this box's device doc and leaves the corrupt
-    // central block exactly as it was — never the data-loss replace.
     await addIgnored('win-mini');
     expect(readCentral()).toContain('not-a-list');
     expect(readDeviceDoc()).toContain('win-mini');
 
-    // An entry missing its who/when is corruption too, surfaced on read.
     await fsp.writeFile(centralPath(), 'fleet:\n  devices: {}\n  ignored:\n    - name: ipad165\n');
     await expect(loadIgnored()).rejects.toThrow(/corrupted/);
   });
 
   it('keeps an ignored node subtracted from the discovery pending-diff', async () => {
-    // The sync.ts read path: loadIgnored() feeds computePendingDevices.
     await addIgnored('ipad165');
     const pending = computePendingDevices(
       [node('zion'), node('ipad165')],

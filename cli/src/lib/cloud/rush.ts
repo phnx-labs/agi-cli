@@ -26,8 +26,6 @@ import { selectBalancedVersion } from '../accounting/rotate.js';
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
-// Native OAuth/session credentials never cross the cloud boundary. A server
-// token request fails loud rather than materializing a harness login (see dispatch()).
 
 interface UserYaml {
   session?: {
@@ -81,7 +79,6 @@ export function readToken(yamlPath: string = USER_YAML): string {
   return token;
 }
 
-/** Read the user's email from the Rush session config, if available. */
 function readEmail(): string | undefined {
   try {
     const raw = fs.readFileSync(USER_YAML, 'utf-8');
@@ -92,7 +89,6 @@ function readEmail(): string | undefined {
   }
 }
 
-/** Make an authenticated request to the Rush API proxy. */
 async function api(method: string, endpoint: string, token: string, body?: unknown): Promise<Response> {
   const url = endpoint.startsWith('http') ? endpoint : `${PROXY_BASE}${endpoint}`;
   const headers: Record<string, string> = {
@@ -106,7 +102,6 @@ async function api(method: string, endpoint: string, token: string, body?: unkno
   });
 }
 
-/** Find the GitHub App installation ID for a given owner/repo pair. */
 async function findInstallation(token: string, owner: string, repo: string): Promise<number> {
   const res = await api('GET', '/api/v1/github/app/installations', token);
   if (!res.ok) {
@@ -128,7 +123,6 @@ async function findInstallation(token: string, owner: string, repo: string): Pro
   );
 }
 
-/** One version's entry in the account manifest sent on every dispatch. */
 interface AccountManifestEntry {
   version: string;
   email: string;
@@ -142,7 +136,6 @@ interface AccountManifest {
   versions: AccountManifestEntry[];
 }
 
-/** sha256 → hex. */
 function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
@@ -150,12 +143,13 @@ function sha256(input: string): string {
 /** Strip tokens from a server error body before surfacing: prefer a JSON `message`/`error` field,
  * else truncate and redact bearer tokens and JWTs. */
 function sanitizeErrorBody(body: string): string {
+  // Prefer a bounded structured message; otherwise truncate and redact token-like unstructured text.
   const MAX_LEN = 300;
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
     const msg = (parsed.message ?? parsed.error ?? parsed.detail) as string | undefined;
     if (typeof msg === 'string') return msg.slice(0, MAX_LEN);
-  } catch { /* not JSON, fall through */ }
+  } catch {  }
   let safe = body.slice(0, MAX_LEN);
   safe = safe.replace(/eyJ[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]');
   safe = safe.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
@@ -178,18 +172,16 @@ function parsePromptCode(body: string): string | null {
 /** Build the manifest of local Claude installations sent on every cloud dispatch, so the server can
  * detect new accounts or rotated tokens. Null when no Claude is signed in. */
 async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
+  // This is version/email routing metadata only; native OAuth and session credentials never leave the host.
   let candidateVersions: Array<{ version: string; email: string }>;
 
   if (strategy === 'balanced') {
-    // Use the same health-checked, deduped-by-email set that `agents run --balanced` uses.
-    // `result.healthy` contains one candidate per unique email, ordered by remaining capacity.
     const result = await selectBalancedVersion('claude');
     if (!result || result.healthy.length === 0) return null;
     candidateVersions = result.healthy
       .filter((c) => !!c.email)
       .map((c) => ({ version: c.version, email: c.email! }));
   } else {
-    // Default: all installed versions that have a signed-in account.
     const versions = listInstalledVersions('claude');
     if (versions.length === 0) return null;
     const rows = await Promise.all(
@@ -233,7 +225,6 @@ export function buildDispatchBody(input: {
   /** Base64 image attachments for vision dispatch, sliced to MAX_IMAGES_PER_DISPATCH (extras
    * dropped). Omitted when empty. */
   images?: ImageAttachment[] | null;
-  /** Runtime env vars mounted into the cloud agent process. */
   env?: Record<string, string> | null;
 }): Record<string, unknown> {
   if (input.resolvedRepos.length === 0) {
@@ -309,9 +300,6 @@ export class RushCloudProvider implements CloudProvider {
       }
     }
 
-    // Validate each repo's shape and resolve its installation_id up front.
-    // Any bad entry fails the whole dispatch — we never want a half-started
-    // multi-repo run that only found installations for some of the repos.
     const token = readToken();
     const parsed = repos.map((full) => {
       const parts = full.split('/');
@@ -330,9 +318,6 @@ export class RushCloudProvider implements CloudProvider {
     );
 
     const strategy = (options.providerOptions as { strategy?: string } | undefined)?.strategy;
-    // When balanced, the server owns the pool and rotates internally — no
-    // client-side manifest needed. We just forward the strategy so the server
-    // knows to load from Vault instead of waiting for a manifest.
     const accountManifest = strategy === 'balanced' ? null : await buildAccountManifest();
 
     const body = buildDispatchBody({

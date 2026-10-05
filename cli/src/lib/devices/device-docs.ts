@@ -8,7 +8,6 @@ import { getUserAgentsDir } from '../state.js';
 import type { HostEntry } from '../types.js';
 import type { IgnoredDeviceEntry } from '../fleet/types.js';
 
-/** One parsed device doc under `~/.agents/devices/`. */
 export interface DeviceDoc {
   device: string;
   doc: Record<string, unknown>;
@@ -21,6 +20,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Every device doc, sorted by name so the union is order-independent. A corrupt or non-map doc
  * throws; a silently skipped doc would let the next writer clobber that peer's slice. */
 export function readAllDeviceDocs(): DeviceDoc[] {
+  // Discovery, host, and device-account auto-writers touch only their box's document; readers fold all docs.
   const devicesDir = path.join(getUserAgentsDir(), 'devices');
   if (!fs.existsSync(devicesDir)) return [];
   const out: DeviceDoc[] = [];
@@ -50,6 +50,7 @@ export function readAllDeviceDocs(): DeviceDoc[] {
 /** Union the per-box `fleet.discovery` maps. For a name declared by several boxes `ignored` beats
  * `approved`, so every box computes the same policy regardless of walk order. */
 export function unionDeviceDiscovery(docs: DeviceDoc[] = readAllDeviceDocs()): Record<string, 'approved' | 'ignored'> {
+  // Omission never deletes another box's decision, and ignored always wins over approved.
   const out: Record<string, 'approved' | 'ignored'> = {};
   for (const { device, doc } of docs) {
     const fleet = doc.fleet;
@@ -62,7 +63,6 @@ export function unionDeviceDiscovery(docs: DeviceDoc[] = readAllDeviceDocs()): R
       if (status !== 'approved' && status !== 'ignored') {
         throw new Error(`Device discovery policy for '${name}' in devices/${device}/agents.yaml must be approved or ignored.`);
       }
-      // ignored beats approved; once ignored, never downgraded by another box.
       if (out[name] === 'ignored') continue;
       out[name] = status;
     }
@@ -91,7 +91,6 @@ export function unionDeviceIgnored(docs: DeviceDoc[] = readAllDeviceDocs()): Ign
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Insert/replace a dismissal, newest ignoredAt (then ignoredOn) winning. */
 export function addIgnoredEntry(byName: Map<string, IgnoredDeviceEntry>, entry: IgnoredDeviceEntry): void {
   const prev = byName.get(entry.name);
   if (!prev) { byName.set(entry.name, entry); return; }

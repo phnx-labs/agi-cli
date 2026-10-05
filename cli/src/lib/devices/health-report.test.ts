@@ -34,7 +34,6 @@ function row(overrides: Partial<FleetHealthRow> & { name: string }): FleetHealth
   };
 }
 
-/** N of the known CLIs installed, out of `total` — for stark-gap tests. */
 function clis(installed: number, total: number): FleetHealthRow['clis'] {
   const out: FleetHealthRow['clis'] = {};
   for (let i = 0; i < total; i++) {
@@ -118,8 +117,6 @@ describe('fleet health renderers', () => {
     expect(matrix).toContain('fresh-box');
     expect(matrix).toContain('drift-box');
     expect(matrix).toContain('cold');
-    // Header must reserve the same 2-char status-glyph slot the rows prepend, so every
-    // column lines up (regression guard for the shipped-broken-table review fix).
     const mlines = matrix.split('\n');
     const header = mlines.find((l) => l.includes('Device'))!;
     const dataRow = mlines.find((l) => l.includes('fresh-box'))!;
@@ -132,16 +129,16 @@ describe('Auth column + freshness', () => {
     const report = buildFleetHealthReport([
       row({ name: 'live-box', auth: { live: 4, present: 0, degraded: 0, revoked: 0, total: 4, oldestCheckedAt: 1000 } }),
       row({ name: 'mixed-box', auth: { live: 2, present: 3, degraded: 1, revoked: 1, total: 7, oldestCheckedAt: 1000 } }),
-      row({ name: 'nocache-box' }), // no auth rollup → em dash
+      row({ name: 'nocache-box' }),
     ]);
     const lines = renderFleetMatrix(report).map(stripAnsi);
     expect(lines.find((l) => l.includes('Device'))).toContain('Auth');
     expect(lines.find((l) => l.includes('live-box'))).toContain('●4');
     const mixed = lines.find((l) => l.includes('mixed-box'))!;
     expect(mixed).toContain('●2');
-    expect(mixed).toContain('·3'); // present (signed in, unprobeable) — neutral, not alarming
-    expect(mixed).toContain('◐1'); // degraded (soft)
-    expect(mixed).toContain('○1'); // revoked (re-login)
+    expect(mixed).toContain('·3');
+    expect(mixed).toContain('◐1');
+    expect(mixed).toContain('○1');
     expect(lines.find((l) => l.includes('nocache-box'))).toContain('—');
   });
 
@@ -151,7 +148,7 @@ describe('Auth column + freshness', () => {
     // must start at the same column in the wide-auth row and the em-dash row.
     const report = buildFleetHealthReport([
       row({ name: 'aaaa', version: '9.9.9', auth: { live: 2, present: 3, degraded: 1, revoked: 1, total: 7, oldestCheckedAt: 1 } }),
-      row({ name: 'bbbb', version: '9.9.9' }), // no auth → '—'
+      row({ name: 'bbbb', version: '9.9.9' }),
     ]);
     const lines = renderFleetMatrix(report).map(stripAnsi);
     const wide = lines.find((l) => l.includes('aaaa'))!;
@@ -160,14 +157,12 @@ describe('Auth column + freshness', () => {
   });
 
   it('does not paint present (unverified) accounts as degraded ◐', () => {
-    // The bug this guards: a fleet of signed-in codex/grok accounts (all
-    // `unverified`) must not read as degraded. Only `·` should appear, no `◐`.
     const report = buildFleetHealthReport([
       row({ name: 'unprobeable', auth: { live: 0, present: 6, degraded: 0, revoked: 0, total: 6, oldestCheckedAt: 1000 } }),
     ]);
     const cell = renderFleetMatrix(report).map(stripAnsi).find((l) => l.includes('unprobeable'))!;
     expect(cell).toContain('·6');
-    expect(cell).not.toContain('◐'); // never rendered as degraded
+    expect(cell).not.toContain('◐');
   });
 
   it('freshnessFooter dates both stats and auth and points at --refresh', () => {
@@ -212,12 +207,12 @@ describe('buildFleetAttentionItems (only real, actionable problems)', () => {
   it('flags a genuinely-offline box, but NOT an unknown/unconfigured one', () => {
     const report = buildFleetHealthReport([
       row({ name: 'down', online: 'offline', lastSeen: '2026-07-28T00:00:00.000Z' }),
-      row({ name: 'never-set-up', online: 'unknown' }), // registered, never addressed
+      row({ name: 'never-set-up', online: 'unknown' }),
       row({ name: 'up', online: 'online' }),
     ]);
     const items = buildFleetAttentionItems(report, Date.parse('2026-07-31T00:00:00.000Z'));
     const offline = items.filter((i) => i.glyph === 'offline');
-    expect(offline.map((i) => i.subject)).toEqual(['down']); // not 'never-set-up', not 'up'
+    expect(offline.map((i) => i.subject)).toEqual(['down']);
     expect(offline[0].detail).toContain('last seen');
     expect(offline[0].fix).toBe('check the box');
   });
@@ -228,14 +223,14 @@ describe('buildFleetAttentionItems (only real, actionable problems)', () => {
     ]);
     const items = buildFleetAttentionItems(report);
     const apply = items.filter((i) => i.fix === 'agents fleet apply --device multi');
-    expect(apply).toHaveLength(1); // one line, not two
+    expect(apply).toHaveLength(1);
     expect(apply[0].detail).toContain('config drift');
     expect(apply[0].detail).toContain('only 1 of 9');
   });
 
   it('does not flag a normal partial CLI install (6 of 9) — only a stark gap', () => {
     const report = buildFleetHealthReport([
-      row({ name: 'normal', online: 'online', clis: clis(6, 9) }), // no drift, benign CLI count
+      row({ name: 'normal', online: 'online', clis: clis(6, 9) }),
     ]);
     expect(buildFleetAttentionItems(report)).toEqual([]);
   });
@@ -275,16 +270,12 @@ describe('renderFleetSummary (default view)', () => {
     expect(text).toContain('1 offline');
     expect(text).toContain('macOS');
     expect(text).toContain('Linux');
-    // this machine's row is prefixed and annotated (not the rollup line, which
-    // also names self in its right-aligned suffix)
     const selfLine = lines.find((l) => l.includes('← this machine'))!;
     expect(selfLine).toContain('▸');
     expect(selfLine).toContain('zion');
-    // an offline row shows a dash for load/mem and version, and its last-seen
     const downLine = lines.find((l) => l.includes('down'))!;
     expect(downLine).toContain('offline');
     expect(downLine).toContain('last seen');
-    // footer nudges toward --verbose for the full grid
     expect(text).toContain('--verbose');
   });
 

@@ -34,8 +34,6 @@ describe('isDeviceInteractive', () => {
 
   it('does not match anything else', async () => {
     const { isDeviceInteractive } = await fresh();
-    // `auto` in particular must stay a distinct sentinel: it means "pick by
-    // load", this means one specific pinned box.
     for (const v of ['auto', 'zion', 'interactive-host', 'inter', '', undefined, null]) {
       expect(isDeviceInteractive(v as string | undefined | null), String(v)).toBe(false);
     }
@@ -44,9 +42,6 @@ describe('isDeviceInteractive', () => {
 
 describe('resolveInteractiveDevice', () => {
   it('returns null when no host is pinned', async () => {
-    // Callers must refuse on null. Falling back to the local machine would run
-    // the command on a headless worker with nobody watching — the exact failure
-    // the sentinel exists to prevent, and it would fail invisibly.
     const { resolveInteractiveDevice } = await fresh();
     expect(resolveInteractiveDevice()).toBeNull();
   });
@@ -60,9 +55,6 @@ describe('resolveInteractiveDevice', () => {
   });
 
   it('cannot be pinned to a blank host — the config layer rejects it first', async () => {
-    // Worth pinning down where the guard lives: `interactive.host` validates the
-    // device name at write time, so a blank pin never reaches this module. The
-    // trim in resolveInteractiveDevice is therefore defensive, not the guard.
     const { setConfigValue } = await fresh();
     expect(() => setConfigValue('interactive.host', '   ')).toThrow(/Invalid device name/);
 
@@ -80,8 +72,6 @@ describe('resolveInteractiveDevice', () => {
   });
 
   it('ignores a reserved pin written by an older version', async () => {
-    // The read-side check is defensive only, for a config that predates the
-    // write-time guard. Written straight to the store to bypass validation.
     const { getUserAgentsDir } = await import('../state.js');
     const fsMod = await import('fs');
     const pathMod = await import('path');

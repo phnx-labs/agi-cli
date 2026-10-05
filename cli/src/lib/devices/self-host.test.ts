@@ -6,9 +6,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Redirect the device registry to a test-private temp + pin this machine's id.
-// getDevicesDir()/machineId() read AGENTS_DEVICES_DIR / AGENTS_SYNC_MACHINE_ID at
-// call time, immune to the module-cache race a plain HOME override loses.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-selfhost-test-'));
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';

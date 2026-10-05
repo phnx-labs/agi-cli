@@ -28,66 +28,44 @@ import { machineId } from '../machine-id.js';
 import { fixFor, type AccountVerdict } from '../signin-badge.js';
 import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 
-/** An account's usage headroom rolled into one glanceable summary. */
 export interface QuotaSummary {
   /** `available` / `rate_limited` from the live usage windows, or `null` when there is no snapshot
    * at all (no data yet, or no usage source). */
   status: 'available' | 'rate_limited' | 'out_of_credits' | null;
-  /** Canonical launch verdict. Kept separate from utilization for JSON clients. */
   verdict: 'available' | 'rate_limited' | 'out_of_credits' | 'unavailable';
-  /** Max utilization across blocking windows (0-100, rounded), or null when unknown. */
   usedPercent: number | null;
-  /** True when the snapshot is a cached `last_seen`, not a fresh `live` read. */
   stale: boolean;
-  /** ISO-8601 timestamp for the underlying usage observation. */
   capturedAt: string | null;
-  /** Earliest reset across blocking windows, ISO-8601. */
   resetsAt: string | null;
-  /** Why quota could not be evaluated; null when a verdict is available. */
   unavailableReason: string | null;
 }
 
-/** One installed (agent, version) on a host, fully resolved. */
 export interface HarnessRow {
   agent: AgentId;
   version: string;
-  /** Account display label (email / id), or null when signed out or unidentifiable. */
   account: string | null;
   signedIn: boolean;
   quota: QuotaSummary;
-  /** signed in AND not rate-limited — usable for a run right now. */
   ready: boolean;
-  /** When `!ready`, a short reason ("signed out" / "rate-limited"). */
   reason?: string;
   verdict: AccountVerdict;
   fix: string | null;
-  /** The live usage snapshot backing `quota`, or null when none was collected. */
   snapshot: UsageSnapshot | null;
-  /** Raw error string from the usage fetch, if any (headless scope, expired, etc.). */
   usageError: string | null;
 }
 
-/** One host's rows, or the reason it produced none. */
 export interface HostHarnessResult {
   host: string;
   rows: HarnessRow[];
-  /** Set when the host failed to probe (offline / error). */
   error?: string;
-  /** Set when the host was skipped (control / offline). */
   skipped?: string;
 }
 
-/** An account collapsed across the installs on one host that share it. */
 interface AccountGroup {
-  /** Account display label, or null for the signed-out bucket. */
   account: string | null;
-  /** Distinct agent ids using this account, sorted. */
   agents: AgentId[];
-  /** How many (agent, version) installs share this account. */
   installs: number;
-  /** True when at least one install under this account is signed in. */
   signedIn: boolean;
-  /** Representative quota — an account maps to one provider identity, so its usage is shared. */
   quota: QuotaSummary;
   ready: boolean;
   reason?: string;
@@ -136,7 +114,6 @@ export function summarizeQuota(
   const windows = blocking.length > 0 ? blocking : live;
   const derived = deriveUsageStatusFromSnapshot(snapshot);
   const status = accountStatus === 'out_of_credits' ? accountStatus : derived;
-  // Every window rolled over: no live utilization to show (status is `available`).
   let usedPercent = windows.length > 0
     ? Math.round(Math.max(...windows.map((w) => w.usedPercent)))
     : 0;
@@ -240,8 +217,6 @@ export async function collectLocalHarnessInventory(opts?: {
       const home = getVersionHomePath(agent, version);
       const info = await getAccountInfo(agent, home).catch(() => null);
       pending.push({ agent, version, info });
-      // Only signed-in installs can have usage; a signed-out one has no identity
-      // to look up (and would just widen the fetch set for nothing).
       if (info?.signedIn) {
         usageInputs.push({ agentId: agent, info, home, cliVersion: version });
       }
@@ -259,9 +234,6 @@ export async function collectLocalHarnessInventory(opts?: {
     const key = getUsageLookupKey(info);
     const usage = key ? usageByKey.get(key) : undefined;
     const snapshot = usage?.snapshot ?? null;
-    // Normalize the internal 'stale' not-collected sentinel out before it reaches
-    // the JSON `quota.unavailableReason` — same leak PHNX-3348 fixed for
-    // `agents view --json`, here for `agents devices harnesses/accounts --json`.
     const observed = summarizeObservedQuota(snapshot, usage?.error, info?.usageStatus ?? null);
     const quota = observed.quota;
     const signedIn = !!info?.signedIn;
@@ -302,9 +274,6 @@ export function groupByAccount(rows: HarnessRow[]): AccountGroup[] {
   const order: string[] = [];
   const groups = new Map<string, HarnessRow[]>();
   for (const row of rows) {
-    // Signed-out rows share one bucket under a sentinel key. Use the NUL-prefixed
-    // literal (a TS `\0` escape, NOT a raw NUL byte in the source) so the key can
-    // never collide with a real account label named literally "signed-out".
     const key = row.account ?? '\0signed-out';
     if (!groups.has(key)) {
       groups.set(key, []);
@@ -318,8 +287,6 @@ export function groupByAccount(rows: HarnessRow[]): AccountGroup[] {
     const account = members[0].account;
     const agents = [...new Set(members.map((m) => m.agent))].sort() as AgentId[];
     const signedIn = members.some((m) => m.signedIn);
-    // Prefer a throttled member's quota (a hidden rate-limit is the dangerous
-    // miss), else the first member with any real usage data, else the first row.
     const withData = members.filter((m) => m.quota.status !== null);
     const rep =
       withData.find((m) => m.quota.status === 'out_of_credits') ??
@@ -338,7 +305,6 @@ export function groupByAccount(rows: HarnessRow[]): AccountGroup[] {
   });
 }
 
-/** Short human quota cell: "12%", "limited", or "—" when no data. */
 export function formatQuota(quota: QuotaSummary): string {
   if (quota.status === 'out_of_credits') return 'no credits';
   if (quota.status === 'rate_limited') return 'limited';
@@ -349,31 +315,26 @@ export function formatQuota(quota: QuotaSummary): string {
 // Rendering: pad each cell as plain text to a computed width before coloring, so chalk's escape
 // codes do not skew alignment; chalk disables color off a TTY, keeping test strings plain.
 
-/** Pad plain `text` to `width`, then apply `paint`. Alignment survives coloring. */
 function cell(text: string, width: number, paint: (s: string) => string): string {
   return paint(text.padEnd(width));
 }
 
-/** Color for a quota value: red limited, yellow ≥80%, green below, dim unknown. */
 function quotaPaint(quota: QuotaSummary): (s: string) => string {
   if (quota.status === 'rate_limited') return chalk.red;
   if (quota.usedPercent === null) return chalk.dim;
   return quota.usedPercent >= 80 ? chalk.yellow : chalk.green;
 }
 
-/** The ready cell text + color: green "ready", else the reason. */
 function readyCell(ready: boolean, reason: string | undefined, width: number): string {
   if (ready) return cell('ready', width, chalk.green);
   const label = reason ?? 'not ready';
   return cell(label, width, reason === 'signed out' ? chalk.gray : chalk.yellow);
 }
 
-/** The signed-in cell — three chars so the column stays aligned. */
 function signedCell(signedIn: boolean): string {
   return signedIn ? chalk.green('yes') : chalk.gray('no ');
 }
 
-/** A host note (skipped / error / no installs), or '' when the host has rows. */
 function hostNote(result: HostHarnessResult): string {
   if (result.skipped) return chalk.dim(`  ${result.skipped}`);
   if (result.error) return chalk.red(`  ${result.error}`);
@@ -381,7 +342,6 @@ function hostNote(result: HostHarnessResult): string {
   return '';
 }
 
-/** Widest string in a list, floored at `min`. */
 function colWidth(values: string[], min: number): number {
   return Math.max(min, ...values.map((v) => v.length));
 }

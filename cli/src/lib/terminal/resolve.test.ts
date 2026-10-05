@@ -1,18 +1,8 @@
-/**
- * Tests for the inject-target resolver (RUSH-1415) — the safety choke point.
- *
- * `resolveInjectTargetForSession` is PURE (takes an ActiveSession, returns a
- * resolution), so the whole tmux > iterm > vscodium precedence and the
- * Ghostty refusal are asserted here without touching the process table. The
- * fixtures mirror what active.ts produces: provenance (env-derived rails) + host
- * (detectHost) + sessionId.
- */
 import { describe, it, expect } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, ReplyRail, MuxLocation } from '../session/provenance.js';
 import { resolveInjectTargetForSession, addressabilityRecoveryHint } from './resolve.js';
 
-/** Minimal ActiveSession with the fields the resolver reads. */
 function session(over: {
   sessionId?: string;
   host?: string;
@@ -161,9 +151,6 @@ describe('addressabilityRecoveryHint', () => {
   });
 
   it('renders the real id from the fallback when the live session id is absent (PHNX-3070)', () => {
-    // The `focus` case: the live row has no sessionId, but the caller knows the
-    // real id (meta.id). Without the fallback the hint printed the useless
-    // `agents sessions resume <id>` placeholder.
     const s = session({ host: 'codium', sessionId: undefined }) as ActiveSession;
     s.context = 'terminal';
     const hint = addressabilityRecoveryHint(s, 'ffffffff-1111-2222-3333-444444444444');
@@ -179,4 +166,3 @@ describe('addressabilityRecoveryHint', () => {
     expect(hint).toContain('agents sessions resume <id>');
   });
 });
-

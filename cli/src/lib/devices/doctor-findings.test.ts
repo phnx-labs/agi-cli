@@ -23,8 +23,6 @@ import { stringWidth } from '../session/width.js';
 
 const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
 
-// A minimal VersionResourceReport with all resource kinds empty; tests fill in
-// only the rows they exercise.
 function report(
   agent: VersionResourceReport['agent'],
   version: string,
@@ -94,7 +92,6 @@ describe('severity rubric', () => {
     expect(f?.message).toContain('Tue Sep  1 02:14:00 2026');
     expect(f?.message).toContain('/home/user/.local/bin/agents');
     expect(f?.remediation).toBe('kill 2416767');
-    // No leak → no row.
     expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'leaked-daemon')).toBe(false);
   });
 
@@ -122,7 +119,6 @@ describe('severity rubric', () => {
   it('a missing hook from a synced version is CRITICAL', () => {
     const findings = buildLocalFindings(localInput({
       reports: [report('claude', '2.1.0', { hooks: [{ kind: 'hooks', name: 'git-guard', status: 'missing' }] })],
-      // NOT never-synced (no syncRow), so it's a per-hook critical, not collapsed.
     }));
     const crit = findings.find((f) => f.kind === 'missing-hook');
     expect(crit?.severity).toBe('critical');
@@ -201,8 +197,6 @@ describe('severity rubric', () => {
       reports: [report('opencode', '1.16.0', { hooks })],
       syncRows: [{ agent: 'opencode', version: '1.16.0', status: 'never-synced', isDefault: true }],
     }));
-    // A never-synced version is an old/unused install — WARNING, not a critical.
-    // It must NOT flood the critical section (it used to emit 1+ criticals).
     const crits = findings.filter((f) => f.severity === 'critical');
     expect(crits).toHaveLength(0);
     const ns = findings.filter((f) => f.kind === 'never-synced');
@@ -210,7 +204,6 @@ describe('severity rubric', () => {
     expect(ns[0].severity).toBe('warning');
     expect(ns[0].message).toContain('never synced');
     expect(ns[0].message).toContain('20 hook');
-    // A never-synced version's fix is the sync, not a resource-level --fix.
     expect(ns[0].remediation).toBe('agents sync opencode@1.16.0 --yes');
   });
 
@@ -258,14 +251,10 @@ describe('de-noise — one root cause is one line', () => {
     expect(crits).toHaveLength(1);
     expect(crits[0].versions).toEqual(versions);
     expect(crits[0].version).toBeUndefined();
-    // The agent-wide sweep heals every (non-isolated) version in one command.
     expect(crits[0].remediation).toBe('agents sync claude@all --yes');
   });
 
   it('a collapsible row keyed on a DIFFERENT account stays separate; the same account merges', () => {
-    // `collapseAcrossVersions` is exported and generic, so pin its grouping
-    // contract directly: a merged row copies the first member wholesale, so two
-    // members that disagree on `account` must never become one row.
     const row = (version: string, account: string): DoctorFinding => ({
       severity: 'warning', kind: 'content-drift', device: 'boxA', agent: 'claude',
       version, account, message: "plugin 'code' — mirror missing", remediation: '',
@@ -338,12 +327,9 @@ describe('duplicate version-home hooks', () => {
       }],
     }));
     const f = findings.find((x) => x.kind === 'duplicate-hook-drift');
-    // The hook is installed on every version, just stale on some — sync drift, not
-    // a missing/unfired hook. WARNING, not critical.
     expect(f?.severity).toBe('warning');
     expect(f?.message).toBe("hook 'git-guard' differs across 2.1.170, 2.1.219 — 2.1.219 is authoritative");
     expect(f?.remediation).toBe('agents sync claude@all --yes');
-    // The row spans versions, so it renders `claude (2 versions)`, not one of them.
     expect(f?.versions).toEqual(['2.1.170', '2.1.219']);
     expect(f?.version).toBeUndefined();
   });
@@ -372,8 +358,6 @@ describe('duplicate version-home hooks', () => {
     expect(rows[0].message).toBe(
       "24 hooks duplicated (identical) across 5 versions (incl. 'hook-0', 'hook-1') — 2.1.219 is authoritative",
     );
-    // The copies live in FIVE homes, so the reconcile must reach all of them —
-    // `agents sync claude@2.1.219` would leave the other four holding their copy.
     expect(rows[0].remediation).toBe('agents sync claude@all --yes');
   });
 
@@ -401,8 +385,6 @@ describe('host CLIs (restored — `renderOverviewText` was its only text rendere
     const f = findings.find((x) => x.kind === 'host-cli-missing');
     expect(f?.severity).toBe('warning');
     expect(f?.message).toBe('2 declared host CLIs not installed (mq, fd)');
-    // Bare `agents cli install` installs every missing declared CLI; a second
-    // positional (or an ellipsis) would not be a runnable command.
     expect(f?.remediation).toBe('agents cli install');
   });
 
@@ -420,8 +402,6 @@ describe('host CLIs (restored — `renderOverviewText` was its only text rendere
   });
 
   it('a manifest the loader rejected is its own warning — it can never install', () => {
-    // These were printed by the deleted `renderOverviewText` and would otherwise
-    // survive only in `--json`.
     const findings = buildLocalFindings(localInput({
       hostClis: {
         statuses: [],
@@ -448,8 +428,6 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
     expect(rc[0].severity).toBe('warning');
     expect(rc[0].message).toContain('3 credential-shaped exports in shell rc files');
     expect(rc[0].message).toContain('.zshrc:12 OPENAI_API_KEY');
-    // `agents secrets add` stores ONE variable and never edits the rc file, so an
-    // aggregated row must say the command repeats and the deletion is manual.
     expect(rc[0].remediation).toBe('agents secrets add once per export (3), then delete each rc line');
   });
 
@@ -475,18 +453,12 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
     const env = findings.filter((f) => f.kind === 'env-secret-export');
     expect(env).toHaveLength(1);
     expect(env[0].severity).toBe('warning');
-    // "restart the shell" alone is wrong: the value lives in every long-lived
-    // parent that inherited it, each still handing it to new children.
     expect(env[0].remediation).toContain('unset at the source');
     expect(env[0].remediation).toContain('agents daemon');
-    // The message must never carry the value — only that it is set.
     expect(env[0].message).toContain('AGENTS_SECRETS_PASSPHRASE is set in this process environment');
   });
 
   it('the env finding fires with NO rc export present — the gap it exists for', () => {
-    // The whole point: a value inherited by a long-lived process outlives the rc
-    // line that set it, so deleting the line leaves `rcSecrets` empty while the
-    // key is still in flight. A file scan alone reports that box clean.
     const findings = buildLocalFindings(localInput({ rcSecrets: [], masterPassphraseInEnv: true }));
     expect(findings.some((f) => f.kind === 'rc-secret-export')).toBe(false);
     expect(findings.some((f) => f.kind === 'env-secret-export')).toBe(true);
@@ -495,8 +467,6 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
   it('not set → no env finding', () => {
     expect(buildLocalFindings(localInput({ masterPassphraseInEnv: false }))
       .some((f) => f.kind === 'env-secret-export')).toBe(false);
-    // Absent input behaves as false rather than throwing — every other local
-    // input is optional and a remote payload may omit it.
     expect(buildLocalFindings(localInput({}))
       .some((f) => f.kind === 'env-secret-export')).toBe(false);
   });
@@ -550,9 +520,6 @@ describe('signInToFindings — provable vs unprovable logout', () => {
     expect(findings).toHaveLength(0);
   });
 
-  // The two sets are DERIVED from the registry, never hardcoded: `main` has moved
-  // agents between them mid-review (antigravity, then cursor), and a hardcoded
-  // list turns that into a red CI shard instead of a passing test.
   const inspectable = ALL_AGENT_IDS.filter(supportsAccountInspection);
   const opaque = ALL_AGENT_IDS.filter((a) => !supportsAccountInspection(a));
 
@@ -563,8 +530,6 @@ describe('signInToFindings — provable vs unprovable logout', () => {
   });
 
   it('an agent with NO inspectable identity yields nothing — not even the hedge', () => {
-    // agents-cli knows no credential path for these, so "logged out" is
-    // unknowable and silence beats a false claim.
     for (const agent of opaque) {
       expect(signInToFindings('boxA', {
         [agent]: [{ version: '1.0.0', signedIn: false, account: null, provable: true }],
@@ -589,7 +554,6 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
   // assert the bucket, against FINDING_SEVERITY, which the builders read.
   const read = (rel: string) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
 
-  /** Split a rubric into its critical and warning halves. */
   function buckets(text: string, criticalMark: string, warningMark: string) {
     const c = text.indexOf(criticalMark);
     const w = text.indexOf(warningMark);
@@ -604,7 +568,6 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
   const names = (half: string, kind: string): boolean =>
     new RegExp(`(^|[^a-z-])${kind}($|[^a-z-])`).test(half);
 
-  /** Kinds named in the wrong half, as `kind: documented-as -> actually`. */
   function misplaced(critical: string, warning: string): string[] {
     const out: string[] = [];
     for (const kind of ALL_FINDING_KINDS) {
@@ -616,18 +579,15 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
   }
 
   it('the token matcher does not credit a kind that is only a substring of a longer one', () => {
-    // Guards the guard: these three pairs are why plain `includes` was wrong.
     expect(names('host-cli-missing', 'cli-missing')).toBe(false);
     expect(names('stale-cli', 'stale')).toBe(false);
     expect(names('duplicate-hook-drift', 'duplicate-hook')).toBe(false);
-    // …while still matching the real thing in prose and in backticks.
     expect(names('`cli-missing` and more', 'cli-missing')).toBe(true);
     expect(names('· stale ·', 'stale')).toBe(true);
     expect(names('duplicate-hook, host-cli-missing', 'duplicate-hook')).toBe(true);
   });
 
   it('every builder emits the severity FINDING_SEVERITY declares', () => {
-    // Drive the builders and compare what actually comes out.
     const emitted = [
       ...buildLocalFindings(localInput({
         reports: [report('claude', '2.1.0', {
@@ -672,8 +632,6 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
   });
 
   it('the docs/observability.md rubric puts every kind in the right bucket', () => {
-    // A THIRD rubric — missed by the previous version of this test, and stale for
-    // the same three days. Every prose copy of the severities gets pinned.
     const doc = read('../../../docs/observability.md');
     const start = doc.indexOf('**Severity rubric**');
     expect(start).toBeGreaterThan(-1);
@@ -698,14 +656,10 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
         .split(/(?<=[.!?])\s+|\n{2,}/)
         .map((x) => x.replace(/\u0000/g, '.'));
       for (const sentence of sentences) {
-        // `criticals` / `warnings` must count: \b...\b missed the plural, which
-        // is ordinary prose ("the criticals are listed first").
         const hasCritical = /\bcriticals?\b/i.test(sentence);
         const hasWarning = /\bwarnings?\b/i.test(sentence);
         if (!hasCritical && !hasWarning) continue;
         for (const kind of ALL_FINDING_KINDS) {
-          // Backtick-delimited so a kind is never credited to a longer one that
-          // contains it (`cli-missing` inside `host-cli-missing`, and two more).
           if (!sentence.includes(`\`${kind}\``)) continue;
           const actual = FINDING_SEVERITY[kind];
           const saysRight = actual === 'critical' ? hasCritical : hasWarning;
@@ -731,14 +685,10 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
 
 describe('determinism', () => {
   it('logout rows follow the registry agent order, not the probe-completion order', () => {
-    // `collectLocalFleetSignIn` fills its map inside a Promise.all, so key order
-    // is whichever account probe finished first. Two runs on identical state must
-    // still print identical output.
     const rows = (v: string) => [{ version: v, signedIn: false, account: null, provable: true }];
     const a = signInToFindings('boxA', { droid: rows('1'), codex: rows('2'), claude: rows('3') });
     const b = signInToFindings('boxA', { claude: rows('3'), droid: rows('1'), codex: rows('2') });
     expect(a.map((f) => f.agent)).toEqual(b.map((f) => f.agent));
-    // And that shared order is the registry's, not either input's.
     expect(a.map((f) => f.agent)).toEqual(['claude', 'codex', 'droid']);
   });
 });
@@ -747,8 +697,6 @@ describe('remediationFor', () => {
   const base = { severity: 'critical' as const, device: 'd', message: 'm', remediation: '' };
 
   it('a subcommand login runs INSIDE the version home via `--`, not as a second global command', () => {
-    // A bare `codex login` afterwards resolves through the native shim to the
-    // project/default version, so it would log into the wrong one.
     const r = remediationFor({ ...base, kind: 'logged-out', agent: 'codex', version: '1.2.3' });
     expect(r).toBe('agents run codex@1.2.3 -- login');
     expect(remediationFor({ ...base, kind: 'logged-out', agent: 'grok', version: '0.2.82' }))
@@ -758,7 +706,6 @@ describe('remediationFor', () => {
   it('claude launches ONCE and logs in from its own TUI', () => {
     const r = remediationFor({ ...base, kind: 'logged-out', agent: 'claude', version: '2.1.0' });
     expect(r).toBe('agents run claude@2.1.0, then /login');
-    // The old string launched claude twice ("agents run claude@X, then claude, …").
     expect(r).not.toMatch(/then claude,/);
   });
 
@@ -777,9 +724,6 @@ describe('remediationFor', () => {
   );
 
   it('cursor now isolates its token per version home → version-targeted run (RUSH-2400)', () => {
-    // Cursor's login used to be shared; it now pins XDG_CONFIG_HOME per version
-    // home (buildExecEnv), so each account authenticates from its own token and
-    // the remediation must target the specific version, not claim a shared login.
     const r = remediationFor({ ...base, kind: 'logged-out', agent: 'cursor', version: '9.9.9' });
     expect(r).toBe('agents run cursor@9.9.9');
     expect(r).not.toContain('shared across all');
@@ -803,7 +747,6 @@ describe('remediationFor', () => {
   it('never-synced → agents sync; orphan → prune cleanup; repo-behind → repo pull', () => {
     expect(remediationFor({ ...base, kind: 'never-synced', agent: 'claude', version: '2.1.0' }))
       .toBe('agents sync claude@2.1.0 --yes');
-    // Without --all, cleanup sweeps only each agent's DEFAULT version.
     expect(remediationFor({ ...base, kind: 'orphan', agent: 'claude', version: '2.1.0' }))
       .toBe('agents prune cleanup --all');
     expect(remediationFor({ ...base, kind: 'repo-behind', version: 'user' }))
@@ -837,7 +780,6 @@ describe('owner-sink-unreachable finding (RUSH-2262)', () => {
     }));
     expect(noToken).toHaveLength(1);
     expect(noToken[0].message).toContain('SLACK_BOT_TOKEN');
-    // Severity emitted matches FINDING_SEVERITY — the rubric-consistency contract.
     expect(noToken[0].severity).toBe(FINDING_SEVERITY['owner-sink-unreachable']);
   });
 
@@ -848,11 +790,9 @@ describe('owner-sink-unreachable finding (RUSH-2262)', () => {
   });
 
   it('an un-opted-in box (no owner configured) emits NO finding', () => {
-    // configured:false means the fleet does not use owner delivery — not "broken".
     expect(buildLocalFindings(localInput({
       ownerSink: { configured: false, reachable: false },
     }))).toEqual([]);
-    // And an absent probe (no ownerSink input) also emits nothing.
     expect(buildLocalFindings(localInput())).toEqual([]);
   });
 
@@ -864,8 +804,6 @@ describe('owner-sink-unreachable finding (RUSH-2262)', () => {
       .map(stripAnsi);
     const critLine = out.find((l) => l.includes('owner unreachable'));
     expect(critLine).toBeDefined();
-    // Left column is `owner` (subjectLabel would be empty for a no-agent finding),
-    // and the row carries its remediation.
     expect(critLine).toMatch(/\bowner\b/);
     expect(critLine).toContain('SLACK_BOT_TOKEN');
   });
@@ -892,8 +830,6 @@ describe('fleetDivergenceToFindings', () => {
   });
 
   it('a .agents repo drift pulls the USER repo; a .system drift pulls the SYSTEM repo', () => {
-    // `category` is the repo — dropping it and hardcoding `user` sends a
-    // `.system` drift at the wrong repo.
     const drift = (category: string, name: string): FleetDivergence => ({
       kind: 'repo-drift', device: 'boxB', category, name,
       message: `boxB ${name} repo diverged: HEAD abc != local def`,
@@ -907,16 +843,12 @@ describe('fleetDivergenceToFindings', () => {
   });
 
   it('a fleet resource gap pulls the config repos — NOT `agents doctor --fix`', () => {
-    // The resource is absent from the lagging box's CENTRAL repos, so the
-    // central -> version-home reconcile has nothing to copy.
     const d: FleetDivergence = {
       kind: 'resource-missing-remote', device: 'boxB', category: 'skills', name: 'cgraph',
       message: "boxB is missing skill 'cgraph'",
     };
     const f = fleetDivergenceToFindings([d], 'boxA')[0];
     expect(f).toMatchObject({ kind: 'fleet-resource-gap', device: 'boxB' });
-    // Neither a bare `agents repo pull` nor the sync umbrella touches the system
-    // repo, so the hint must not promise a single command that covers both.
     expect(f.remediation).toBe('agents repo pull user (or upgrade agents-cli if it ships in .system)');
     expect(f.remediation).not.toContain('doctor');
     expect(f.remediation).not.toBe('agents repo pull');
@@ -938,8 +870,6 @@ describe('renderAccountsLine', () => {
   });
 
   it('an UNPROVABLE logout shows gray ? — never a red ✗ the warning contradicts', () => {
-    // The finding for this row is the hedged "could not verify sign-in"; a red ✗
-    // here would have one report say both "unverifiable" and "logged out".
     const line = stripAnsi(renderAccountsLine({
       cursor: [{ version: '1.0', signedIn: false, account: null, provable: false }],
       codex: [{ version: '0.1', signedIn: false, account: null, provable: true }],
@@ -972,13 +902,9 @@ describe('renderFindings — exact layout', () => {
     expect(out).toContain('✗ CRITICAL — needs you now  (1)');
     expect(out).toContain('▸ zion · this machine  ✗ 1 critical (above)');
     expect(out).not.toContain('─── by computer ───');
-    // The critical row (single-machine: no device column) names version + fix.
     expect(out).toContain('codex @0.1');
     expect(out).toContain('→ codex login');
-    // The warning appears under the block.
     expect(out).toContain('⚠');
-    // Accounts line present — single-version agents collapse to `<agent> <badge>`,
-    // logged-out codex shows ✗.
     expect(out).toContain('claude ✓me@x.com (Max)');
     expect(out).toContain('codex ✗');
   });
@@ -991,11 +917,8 @@ describe('renderFindings — exact layout', () => {
     const fleetAccounts = { ...accounts, 'yos-s1': { claude: [{ version: '2.1.170', signedIn: true, account: null, provable: false }] } };
     const out = stripAnsi(renderFindings(findings, fleetAccounts, { fleet: true, baseline: 'zion', header: 'agents doctor · 2 devices · baseline zion' }).join('\n'));
     expect(out).toContain('─── by computer ───');
-    // Device column present in the critical row.
     expect(out).toMatch(/zion\s+codex @0\.1/);
-    // Worst box (zion, has a critical) sorts before yos-s1 (warning only).
     expect(out.indexOf('▸ zion')).toBeLessThan(out.indexOf('▸ yos-s1'));
-    // The version-skew warning lands under yos-s1.
     expect(out).toMatch(/grok @1\.4\s+not installed/);
   });
 
@@ -1014,8 +937,6 @@ describe('renderFindings — exact layout', () => {
   });
 
   it('columns align on DISPLAY width — a wide-glyph account must not skew the row', () => {
-    // `.length` counts UTF-16 code units; a CJK glyph is 1 unit but 2 columns, so
-    // padding on `.length` shifts every later column on that row.
     const findings: DoctorFinding[] = [
       { severity: 'critical', kind: 'logged-out', device: 'zion', agent: 'codex', version: '0.1', account: '张三@example.com', message: 'logged out — no account signed in', remediation: 'agents run codex@0.1 -- login' },
       { severity: 'critical', kind: 'logged-out', device: 'zion', agent: 'claude', version: '2.1.0', account: 'me@x.com', message: 'logged out — no account signed in', remediation: 'agents run claude@2.1.0, then /login' },
@@ -1023,14 +944,11 @@ describe('renderFindings — exact layout', () => {
     const out = stripAnsi(renderFindings(findings, accounts, { fleet: false, baseline: 'zion', header: 'h' }).join('\n'));
     const rows = out.split('\n').filter((l) => l.includes('logged out'));
     expect(rows).toHaveLength(2);
-    // Both rows put the arrow at the same terminal column.
     const arrowCols = rows.map((l) => stringWidth(l.slice(0, l.indexOf('→'))));
     expect(arrowCols[0]).toBe(arrowCols[1]);
   });
 
   it('the CRITICAL section leads with the WORST device, not input order', () => {
-    // boxA has one critical, boxB has three — boxB's rows must come first even
-    // though boxA appears first in the input.
     const crit = (device: string, agent: 'codex' | 'claude' | 'grok', msg: string): DoctorFinding =>
       ({ severity: 'critical', kind: 'missing-hook', device, agent, version: '1.0', message: msg, remediation: 'x' });
     const findings: DoctorFinding[] = [
@@ -1041,7 +959,6 @@ describe('renderFindings — exact layout', () => {
     ];
     const out = stripAnsi(renderFindings(findings, {}, { fleet: true, baseline: 'boxA', header: 'h' }).join('\n'));
     expect(out.indexOf('b-one')).toBeLessThan(out.indexOf('a-only'));
-    // Stable within a device: b-one, b-two, b-three keep their emitted order.
     expect(out.indexOf('b-one')).toBeLessThan(out.indexOf('b-two'));
     expect(out.indexOf('b-two')).toBeLessThan(out.indexOf('b-three'));
   });
