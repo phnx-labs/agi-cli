@@ -16,6 +16,7 @@ const sandboxHome = path.join(tmp, 'home');
 fs.mkdirSync(sandboxHome, { recursive: true });
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
+// Pin this separately because login shells and service managers may restore HOME.
 process.env.AGENTS_REAL_HOME = sandboxHome;
 
 // PATH-level opener stubs close the desktop-launch class; afterAll catches any escape.
@@ -28,6 +29,7 @@ process.env.AGENTS_SECRETS_NO_AGENT = '1';
 process.env.SECRETS_NO_AGENT = '1';
 process.env.SECRETS_PASSPHRASE = 'agents-vitest-file-store';
 
+// Usage reads update bundle metadata, so disable tracking to keep those writes out of operator state.
 process.env.AGENTS_NO_USAGE_TRACK = '1';
 
 // Ambient Claude auth would change logged-out rendering and make the release gate host-dependent.

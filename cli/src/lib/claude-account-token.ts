@@ -227,6 +227,7 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
   const checkedAt = new Date().toISOString();
 
   if (!durable) {
+    // Per-device harnesses keep an explicit unconfigured slot until that worker performs its own login.
     const record: DeviceAccountSlot = { ...slot, authMode: 'per-device', verdict: 'unconfigured', checkedAt };
     recordSlot(account.id, record);
     return record;
@@ -234,6 +235,7 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
 
   if (harness === 'claude') {
     const cred = account.workerCredential;
+    // Pre-T1 rows lack workerCredential, so retain the legacy email-keyed auth-bundle lookup.
     const token = cred
       ? readReservedCredential(cred.bundle, cred.key)
       : account.identityLabel
@@ -249,6 +251,7 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
     writeClaudeWorkerOauthToken(slot.slotDir, token);
     if (account.identityLabel) seedClaudeWorkerHomeIdentity(slot.slotDir, account.identityLabel);
   }
+  // API-key harnesses intentionally materialize no file: spawn injects their credential from the reserved store.
 
   const record: DeviceAccountSlot = { ...slot, authMode: 'durable', verdict: 'unverified', checkedAt };
   recordSlot(account.id, record);
