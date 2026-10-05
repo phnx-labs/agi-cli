@@ -4,21 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/**
- * `agents ssh auto` used to reject with "Unknown device 'auto'" (RUSH-2185)
- * because only `agents run --device auto` pre-processed the `auto` affinity
- * sentinel before it reached the host resolver. It now resolves through the
- * same shared core (matchHost in ../lib/hosts/registry.ts) `agents teams add
- * --device auto` uses.
- *
- * Real CLI, real filesystem, no mocking: a throwaway HOME with no devices
- * registered under a unique machine id makes the affinity engine's only
- * eligible candidate "this machine" — deterministic without a real device
- * fleet. `agents ssh` dials OUT to a remote device, so a self-pick is refused
- * with a clear message rather than silently self-SSHing (the escape valve the
- * RUSH-2185 brief calls for when parity with `run`'s "local" outcome isn't the
- * useful one for this command).
- */
 describe.skipIf(process.platform === 'win32')('agents ssh auto (RUSH-2185)', () => {
   let home: string;
   const machineId = 'ssh-auto-test-box';

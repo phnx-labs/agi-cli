@@ -1,10 +1,3 @@
-/**
- * Workflow management commands.
- *
- * Implements `agents workflows` — list, view, add, remove pipeline workflows
- * (WORKFLOW.md bundles with optional subagents/, skills/, plugins/ subdirs).
- * Run a workflow with: agents run <workflow-name>
- */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -54,7 +47,6 @@ import {
   type SyncTarget,
 } from './resource-view.js';
 
-/** Register the `agents workflows` command tree (list, view, add, remove). */
 export function registerWorkflowsCommands(program: Command): void {
   const workflowsCmd = program
     .command('workflows')
@@ -168,7 +160,6 @@ Examples:
         let workflows: WorkflowRef[];
 
         if (!source) {
-          // Interactive: pick from central storage
           const installed = listInstalledWorkflows();
           if (installed.size === 0) {
             console.log(chalk.yellow('No workflows in ~/.agents/workflows/'));
@@ -197,7 +188,6 @@ Examples:
           }
           workflows = selected.map(name => ({ name, path: installed.get(name)!.path }));
         } else {
-          // Fetch from repo or local path
           const spinner = ora('Fetching workflows...').start();
           const isGitRepo = source.startsWith('gh:') || source.startsWith('git:') ||
                             source.startsWith('https://') || source.startsWith('http://');
@@ -224,7 +214,6 @@ Examples:
             return;
           }
 
-          // --names filter: pluck specific workflows from a multi-workflow source.
           const requestedNames = parseCommaSeparatedList(options.names);
           if (requestedNames.length > 0) {
             const discoveredNames = new Set(discovered.map((w) => w.name));
@@ -264,7 +253,6 @@ Examples:
           }));
         }
 
-        // Agent/version selection
         let selectedAgents: AgentId[];
         let versionSelections: Map<AgentId, string[]>;
 
@@ -388,7 +376,6 @@ Examples:
         const info = workflowTargetMap.get(workflowName);
 
         if (!info || info.targets.length === 0) {
-          // Not synced to any version — try removing from central storage directly
           const result = removeWorkflow(workflowName);
           if (result.success) {
             console.log(`  ${chalk.red('-')} ${workflowName}: removed from central storage`);

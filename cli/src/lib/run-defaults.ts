@@ -1,16 +1,3 @@
-/**
- * Selector-based defaults for `agents run`.
- *
- * Stored under agents.yaml:
- *
- *   run:
- *     defaults:
- *       "claude:*":
- *         mode: auto
- *         model: opus
- *       "claude:2.1.45":
- *         mode: plan
- */
 
 import type { AgentId, Mode, RunConfig, RunDefaults, RunEffort } from './types.js';
 import { ALL_MODES } from './types.js';
@@ -272,7 +259,6 @@ export function unsetRunDefault(selectorInput: string): boolean {
   return removed;
 }
 
-/** Convenience setters used by `agents config` for single-field updates. */
 export function setRunDefaultModel(selectorInput: string, model: string): RunDefaultEntry {
   return setRunDefault(selectorInput, { model });
 }

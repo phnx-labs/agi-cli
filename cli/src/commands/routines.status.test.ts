@@ -9,10 +9,6 @@ import {
   writeRunMeta,
 } from './routines.test-fixture.js';
 
-// `routines status --json` surface (PHNX-3215) — the daemon-owned status view:
-// per routine its single owner device, last-fire outcome + error, and any
-// in-flight spawn, plus the scheduler block. Distinct from `list --json`
-// (definition-shaped). Exercises the real CLI subprocess, no mocking.
 
 describeRoutines('routines status --json', () => {
   it('emits a scheduler block plus per-routine owner device, last fire, and last error', () => {
@@ -23,7 +19,6 @@ describeRoutines('routines status --json', () => {
       deviceRoutines: { 'yosemite-s0': ['test-job'] },
     });
     try {
-      // A failed last fire on THIS device.
       writeRunMeta(home, 'test-job', '2026-07-21T10-00-00-000Z', {
         jobName: 'test-job',
         runId: '2026-07-21T10-00-00-000Z',
@@ -69,10 +64,6 @@ describeRoutines('routines status --json', () => {
       deviceRoutines: { 'yosemite-s0': ['test-job'] },
     });
     try {
-      // A run genuinely in flight: status 'running', a pid that is alive (this
-      // test process, alive for the whole subprocess call), no spawnedAt so the
-      // reaper's liveness check passes on pid alone, and startedAt=now so it is
-      // not aged out. monitorRunningJobs() must therefore leave it running.
       writeRunMeta(home, 'test-job', '2026-07-21T12-00-00-000Z', {
         jobName: 'test-job',
         runId: '2026-07-21T12-00-00-000Z',
@@ -109,11 +100,6 @@ describeRoutines('routines status --json', () => {
       deviceRoutines: { 'yosemite-s0': ['test-job'] },
     });
     try {
-      // The window writeActiveClaim opens BEFORE the child spawns: status
-      // 'running' with pid null and no hostTaskId. monitorRunningJobs() does not
-      // reap this (nothing to probe; within timeout), so a daemon crash here
-      // would otherwise surface a phantom in-flight run (RUSH-2640). It must read
-      // as running-but-not-in-flight, never as a live spawn.
       writeRunMeta(home, 'test-job', '2026-07-21T13-00-00-000Z', {
         jobName: 'test-job',
         runId: '2026-07-21T13-00-00-000Z',
@@ -146,7 +132,6 @@ describeRoutines('routines status --json', () => {
       deviceRoutines: { zion: ['test-job'], 'yosemite-s0': [] },
     });
     try {
-      // A run recorded elsewhere must not read as this device's last fire.
       writeRunMeta(home, 'test-job', '2026-07-25T10-00-00-000Z', {
         jobName: 'test-job',
         runId: '2026-07-25T10-00-00-000Z',

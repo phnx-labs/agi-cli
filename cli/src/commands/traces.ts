@@ -10,9 +10,6 @@ import { DEFAULT_BUCKET_NAME, DEFAULT_WORKER_NAME } from '../lib/traces/config.j
 import { DEFAULT_TRACES_DOMAIN } from '../lib/traces/backend.js';
 import { provisionTraces } from '../lib/traces/provision.js';
 
-// ---------------------------------------------------------------------------
-// Help text
-// ---------------------------------------------------------------------------
 
 const SYNC_EXAMPLES = `
   $ agents traces sync
@@ -60,9 +57,6 @@ const SETUP_EXAMPLES = `
   Provision non-interactively with explicit Cloudflare credentials.
 `.trimStart();
 
-// ---------------------------------------------------------------------------
-// Command handlers
-// ---------------------------------------------------------------------------
 
 async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string }): Promise<void> {
   const limit = opts.limit !== undefined ? parseInt(opts.limit, 10) : undefined;
@@ -74,7 +68,6 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
     return;
   }
 
-  // A dry-run computes locally and needs no Phoenix backend; a real sync does.
   if (!dryRun) {
     try {
       resolveTracesBackend();
@@ -104,8 +97,6 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
     parts.push(chalk.dim(`${result.skipped} skipped`));
   }
   if (result.errors > 0) {
-    // Distinguish expected history (transcripts cleaned off disk) from genuine
-    // failures that will be retried, so the operator knows which need attention.
     const detail: string[] = [];
     if (result.transcriptUnavailable > 0) {
       detail.push(`${result.transcriptUnavailable} transcripts no longer on disk`);
@@ -125,9 +116,6 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
 
   console.log(parts.join(chalk.dim('  ·  ')));
 
-  // The per-session data can upload cleanly while the aggregated console shard
-  // fails to refresh (e.g. the sessions DB is locked by a running app). That used
-  // to be silent, so the console sat stale with no signal here (PHNX-3401).
   if (result.indexError) {
     console.log(
       chalk.yellow('  ⚠ console index not refreshed') +
@@ -170,7 +158,6 @@ async function handleStatus(): Promise<void> {
 }
 
 async function handleOpen(): Promise<void> {
-  // M2 console — for now open the base URL which will route to the console once deployed.
   const url = managedTracesBaseUrl();
   console.log(chalk.dim(`Opening ${url}`));
   const outcome = await showUrl(url);
@@ -208,9 +195,6 @@ async function handleSetup(opts: SetupOptions): Promise<void> {
   console.log(chalk.green(`Traces endpoint ready → ${chalk.bold(result.baseUrl)}`));
 }
 
-// ---------------------------------------------------------------------------
-// Registration
-// ---------------------------------------------------------------------------
 
 export function registerTracesCommands(program: Command): void {
   const tracesCmd = program
@@ -237,7 +221,6 @@ export function registerTracesCommands(program: Command): void {
 
   setHelpSections(setupCmd, { examples: SETUP_EXAMPLES });
 
-  // sync
   const syncCmd = tracesCmd
     .command('sync')
     .description('Push derived, redacted trajectories (incremental)')
@@ -248,7 +231,6 @@ export function registerTracesCommands(program: Command): void {
 
   setHelpSections(syncCmd, { examples: SYNC_EXAMPLES, notes: SYNC_NOTES });
 
-  // status
   const statusCmd = tracesCmd
     .command('status')
     .description('Show last sync time for this device')
@@ -256,7 +238,6 @@ export function registerTracesCommands(program: Command): void {
 
   setHelpSections(statusCmd, { examples: STATUS_EXAMPLES });
 
-  // open
   const openCmd = tracesCmd
     .command('open')
     .description('Open the Phoenix Evals console')

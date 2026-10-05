@@ -4,15 +4,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * Real-filesystem tests for the unified sync-status engine. No mocks: we build a
- * temp HOME with a real version home + real sources, run computeSyncStatus in a
- * subprocess with HOME pointed at the fixture, and assert the mapping.
- *
- * These target the exact bug class that motivated this module: a resource that
- * was synced and then had its SOURCE changed must report `drifted`, not `synced`
- * — the false-positive the old git-based `agents view` checkmark produced.
- */
 
 let testHome: string;
 let userDir: string;
@@ -27,7 +18,6 @@ beforeEach(() => {
   fs.mkdirSync(userDir, { recursive: true });
   fs.mkdirSync(systemDir, { recursive: true });
   fs.mkdirSync(projectDir, { recursive: true });
-  // Keep the migrator from running on a missing legacy state.
   fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
 });
 
@@ -35,7 +25,6 @@ afterEach(() => {
   fs.rmSync(testHome, { recursive: true, force: true });
 });
 
-/** Create an installed claude version: home dirs + a binary so listInstalledVersions sees it. */
 function makeInstalledVersion(version: string): { home: string; cmdsHome: string } {
   const versionDir = path.join(userDir, '.history', 'versions', 'claude', version);
   const home = path.join(versionDir, 'home');
@@ -89,21 +78,17 @@ describe('computeSyncStatus — per-resource mapping', () => {
     const srcCmds = path.join(userDir, 'commands');
     fs.mkdirSync(srcCmds, { recursive: true });
 
-    // synced: source and home identical
     fs.writeFileSync(path.join(srcCmds, 'a.md'), 'ALPHA\n');
     fs.writeFileSync(path.join(cmdsHome, 'a.md'), 'ALPHA\n');
-    // drifted: THE key case — synced, then the source changed
     fs.writeFileSync(path.join(srcCmds, 'b.md'), 'BETA v2 (changed)\n');
     fs.writeFileSync(path.join(cmdsHome, 'b.md'), 'BETA v1\n');
-    // missing: source exists, nothing installed
     fs.writeFileSync(path.join(srcCmds, 'c.md'), 'GAMMA\n');
-    // orphan: installed with no source
     fs.writeFileSync(path.join(cmdsHome, 'orphan.md'), 'ORPHAN\n');
 
     const s = runStatus(['commands']);
 
     expect(statusOf(s, 'a')).toBe('synced');
-    expect(statusOf(s, 'b')).toBe('drifted'); // not a false "synced"
+    expect(statusOf(s, 'b')).toBe('drifted');
     expect(statusOf(s, 'c')).toBe('missing');
     expect(statusOf(s, 'orphan')).toBe('orphan');
 
@@ -129,10 +114,8 @@ describe('computeSyncStatus — per-resource mapping', () => {
     const { home } = makeInstalledVersion('2.0.0');
     fs.mkdirSync(path.join(userDir, 'commands'), { recursive: true });
 
-    // No manifest yet → cold.
     expect(runStatus(['commands']).agents[0].everSynced).toBe(false);
 
-    // A valid (v:1) manifest → warm.
     fs.writeFileSync(path.join(home, '.sync-manifest.json'), JSON.stringify({ v: 1, syncedAt: 0 }));
     expect(runStatus(['commands']).agents[0].everSynced).toBe(true);
   });

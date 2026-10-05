@@ -1,20 +1,9 @@
-/**
- * Locks the package name and repo URL consistency.
- *
- * The canonical npm package is @phnx-labs/agents-cli, published from
- * github.com/phnx-labs/agents-cli. The old @companion scope is a
- * deprecated mirror. Every reference must use @phnx-labs.
- */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-// These two are deliberately DIFFERENT and must not be unified. The npm package
-// keeps its original name — renaming it would orphan every installed CLI — while
-// the GitHub repository was renamed agents-cli -> agi-cli. Code that conflates
-// them ends up depending on GitHub's rename redirect for binary downloads.
 const NPM_PACKAGE = '@phnx-labs/agents-cli';
 const GITHUB_REPO = 'github.com/phnx-labs/agi-cli';
 
@@ -26,7 +15,6 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
   it('package.json declares the canonical npm name', () => {
     const pkg = JSON.parse(read('package.json'));
     expect(pkg.name).toBe(NPM_PACKAGE);
-    // The package name must NOT follow the repository rename.
     expect(pkg.name).not.toContain('agi-cli');
   });
 
@@ -43,29 +31,21 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
   });
 
   it('slim index.ts and bootstrap never reference the old @companion npm scope', () => {
-    // RUSH-2335: index.ts is the leaf shell; bootstrap.ts holds upgrade/version URLs.
     expect(read('src/index.ts')).not.toContain('@companion/agents-cli');
     expect(read('src/bootstrap.ts')).not.toContain('@companion/agents-cli');
   });
 
   it('upgrade installs are built from the canonical package constant', () => {
-    // The npm install itself lives in src/lib/self-update.ts; bootstrap.ts
-    // (loaded after the argv fast paths) resolves the package to install from
-    // the shared NPM_PACKAGE_NAME constant.
     const selfUpdate = read('src/lib/self-update.ts');
     expect(selfUpdate).toContain(`export const NPM_PACKAGE_NAME = '${NPM_PACKAGE}';`);
     expect(selfUpdate).not.toContain('@companion');
     const src = read('src/bootstrap.ts');
-    // The upgrade resolves the canonical package's registry metadata (version +
-    // integrity + tarball) from the shared constant, then downloads and
-    // integrity-verifies that tarball before installing the local .tgz.
     const metadataFetches = src.match(/registry\.npmjs\.org\/\$\{NPM_PACKAGE_NAME\}\//g) ?? [];
     expect(metadataFetches.length).toBeGreaterThan(0);
     expect(src).toContain('downloadVerifiedTarball(metadata.tarball, metadata.integrity)');
   });
 
   it('bootstrap.ts version-check URLs target the canonical package', () => {
-    // RUSH-2335 moved the update-check body out of the slim index shell.
     const src = read('src/bootstrap.ts');
     expect(src).toContain(`unpkg.com/${NPM_PACKAGE}`);
     expect(src).toContain(`registry.npmjs.org/${NPM_PACKAGE}/latest`);

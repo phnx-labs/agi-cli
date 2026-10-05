@@ -4,9 +4,6 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { JobConfig, RunMeta } from '../src/lib/scheduling/routines.js';
 
-// Mutable override state lives on globalThis so vitest's hoist of vi.mock
-// above the local const (TDZ error) and Bun's missing vi.hoisted both
-// remain non-issues. globalThis is always initialized.
 interface JobsHoistedState { TEST_DIR: string; META: Record<string, unknown> }
 const JOBS_HOISTED_KEY = '__agents_cli_jobs_test_state__';
 const hoistedState: JobsHoistedState =
@@ -21,10 +18,6 @@ vi.mock('../src/lib/state.js', async (importOriginal) => {
     gt.__agents_cli_jobs_test_state__ = { TEST_DIR: '', META: {} };
   }
   const state = () => gt.__agents_cli_jobs_test_state__ as JobsHoistedState;
-  // Spread the real module so every export the (post-cycle-break) import graph pulls
-  // in is present, then override only the path/meta accessors this suite redirects to
-  // TEST_DIR. getSystemRoutinesDir points at a nested path that won't exist under
-  // TEST_DIR, so listJobs()/readJob() union it but find nothing (existing tests unchanged).
   return {
     ...actual,
     getRoutinesDir: () => nodePath.join(state().TEST_DIR, 'routines'),
@@ -157,11 +150,6 @@ describe('validateJob', () => {
     expect(errors.some((e) => e.includes('agent must be one of'))).toBe(true);
   });
 
-  // RUSH-2102: opencode is a real, installable agent (ALL_AGENT_IDS) but has no
-  // entry in ROUTINE_AGENT_IDS, so the local daemon can't build a command for
-  // it (runner.ts buildJobCommand throws "Unsupported agent for daemon jobs").
-  // Reject it at add time instead of accepting the routine and failing later
-  // when the scheduled job fires.
   it('rejects a real agent the local daemon cannot fire, at add time', () => {
     const errors = validateJob({ ...makeConfig(), agent: 'opencode' as any });
     expect(errors.some((e) => e.includes("agent 'opencode' is not supported by the local routine daemon"))).toBe(true);
@@ -273,8 +261,6 @@ describe('job CRUD', () => {
   });
 
   it('applies defaults for omitted fields', () => {
-    // Write a minimal job YAML with no mode/effort/timeout/enabled so readJob
-    // must fall back to JOB_DEFAULTS for each.
     writeJob({
       name: `${PREFIX}crud-defaults`,
       schedule: '0 9 * * *',

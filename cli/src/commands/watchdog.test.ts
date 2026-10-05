@@ -1,22 +1,11 @@
-/**
- * Tests for the `agents watchdog` command surface (RUSH-1415).
- *
- * Focus: `watchdog status --json` — the read the Swift menu-bar helper decodes to
- * drive its auto-nudge toggle. The parent `watchdog` command ALSO declares --json
- * and greedily parses it before dispatching to `status`, so the flag lands on the
- * parent, not the subcommand. The action reads it via optsWithGlobals(); if that
- * regressed to plain opts.json, `status --json` would silently emit human text and
- * the Swift JSONDecoder would get nothing. These tests lock that behavior.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { formatWatchdogTickLines, registerWatchdogCommand } from './watchdog.js';
 import type { WatchdogTickResult } from '../lib/watchdog/runner.js';
 
-/** Run `agents watchdog <args...>`, capturing stdout lines the action prints. */
 async function runWatchdog(args: string[]): Promise<string[]> {
   const program = new Command();
-  program.exitOverride(); // throw instead of process.exit on parse errors
+  program.exitOverride();
   registerWatchdogCommand(program);
 
   const lines: string[] = [];
@@ -47,7 +36,6 @@ describe('watchdog status --json', () => {
   it('without --json prints human text, not JSON', async () => {
     const lines = await runWatchdog(['status']);
     expect(lines.length).toBeGreaterThanOrEqual(1);
-    // The human path is two lines starting with the enable-state label.
     expect(lines[0]).toContain('always-on watchdog');
     expect(() => JSON.parse(lines[0])).toThrow();
   });
@@ -98,10 +86,6 @@ describe('watchdog tick output', () => {
   });
 
   it('headlines a session by its generated title, not the raw first prompt (PHNX-3797)', () => {
-    // Regression: the first fix here called sessionHeadline() on a SessionOutcome
-    // that never carried `generatedTitle`, so it silently collapsed back to
-    // `label || topic` and the report kept showing the raw prompt. The call site
-    // read correctly — only the projection was wrong.
     const withTitle: WatchdogTickResult = {
       ...result,
       outcomes: [{
@@ -160,7 +144,6 @@ describe('watchdog enable/disable verbs (PHNX-3949)', () => {
     const disable = watchdogSub('disable');
     expect(enable).toBeDefined();
     expect(disable).toBeDefined();
-    // Regression guard: they must not be hidden the way the old enable/disable aliases were.
     expect((enable as unknown as { _hidden?: boolean })._hidden).toBeFalsy();
     expect((disable as unknown as { _hidden?: boolean })._hidden).toBeFalsy();
   });
@@ -168,7 +151,6 @@ describe('watchdog enable/disable verbs (PHNX-3949)', () => {
   it('on/off remain as back-compat aliases (no separate command)', () => {
     expect(watchdogSub('enable')?.aliases()).toContain('on');
     expect(watchdogSub('disable')?.aliases()).toContain('off');
-    // on/off must NOT be their own top-level watchdog subcommands anymore.
     expect(watchdogSub('on')).toBeUndefined();
     expect(watchdogSub('off')).toBeUndefined();
   });

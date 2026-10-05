@@ -108,9 +108,6 @@ describe('resolveProjectRef — definition first', () => {
       '~/src/acme/.agents/worktrees/fix',
     );
   });
-  // The convention fallback (undefined slug → <root>/<slug>) is covered by the
-  // buildProjectPath tests above; exercising it through resolveProjectRef would
-  // couple to the machine's cached projectRoot, so it is not re-tested here.
 });
 
 describe('resolveProjectDirs', () => {
@@ -121,7 +118,6 @@ describe('resolveProjectDirs', () => {
   beforeAll(() => {
     projDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-dirs-'));
     process.env.AGENTS_PROJECTS_DIR = projDir;
-    // Real directories: the local branch of projectDirsAbs filters by existence.
     mainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-main-'));
     sysDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-sys-'));
     writeProjectDef({
@@ -153,10 +149,6 @@ describe('resolveProjectDirs', () => {
   });
 
   it('a @worktree ref keeps the worktree as cwd and grants the main checkout too', async () => {
-    // The worktree is the cwd, so the project's own checkout stops being the
-    // primary and becomes a grant like any other bound directory. That is the
-    // wanted behavior: a teammate isolated in a worktree still needs to read
-    // the checkout it branched from, and the siblings.
     const wt = path.join(mainDir, '.agents', 'worktrees', 'fix');
     fs.mkdirSync(wt, { recursive: true });
     const { cwd, extraDirs } = await resolveProjectDirs('multi@fix', { forRemote: false });
@@ -173,12 +165,6 @@ describe('inferProjectRoot', () => {
     toHomeRelative(process.platform === 'win32' ? tmp : fs.realpathSync(tmp));
 
   beforeAll(() => {
-    // Canonicalize the temp dir so it matches the long real path git — and thus
-    // inferProjectRoot — resolves to. realpathSync.native resolves BOTH the macOS
-    // /var → /private/var symlink AND Windows 8.3 short names (CI runners hand back
-    // os.tmpdir() as C:\Users\RUNNER~1\..., which would never fold under the
-    // long-form home dir). Without this the home-relative comparison mismatches on
-    // Windows (short vs long) even though inferProjectRoot is correct.
     tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'proot-')));
     repo = path.join(tmp, 'my-repo');
     fs.mkdirSync(path.join(repo, 'sub', 'deep'), { recursive: true });
@@ -198,8 +184,6 @@ describe('inferProjectRoot', () => {
 
   it('returns the directory ABOVE the git root, resolved from a nested cwd', async () => {
     const root = await inferProjectRoot(path.join(repo, 'sub', 'deep'));
-    // Windows realpath emits an 8.3 home alias (RUNNER~1) that cannot compare
-    // against HOME; macOS still needs realpath for /var → /private/var.
     expect(root && path.normalize(root)).toBe(path.normalize(expectedRoot()));
   });
 
@@ -207,7 +191,6 @@ describe('inferProjectRoot', () => {
     const wt = path.join(repo, '.agents', 'worktrees', 'feat');
     fs.mkdirSync(path.dirname(wt), { recursive: true });
     execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
-    // Regression: naive --show-toplevel would yield <repo>/.agents/worktrees here.
     expect(path.normalize((await inferProjectRoot(wt))!)).toBe(path.normalize(expectedRoot()));
   });
 

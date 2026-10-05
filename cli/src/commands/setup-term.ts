@@ -1,18 +1,3 @@
-/**
- * `agents setup term` — install the standalone `term` CLI if missing (PHNX-4092).
- *
- * The PTY engine lives in `@phnx-labs/term-cli` (extracted PHNX-4091);
- * agents-cli never rebundles it. The setup-token mint behind `agents accounts
- * add` / `agents accounts login` (auth-mint.ts → term-driver.ts) spawns `term`
- * on demand and fails loud when it is absent, so onboarding installs it here
- * like every other standalone tool.
- *
- * Unlike browser/computer/secrets there is nothing to configure — no profile,
- * no OS permission, no migrate step. A missing binary is a routine install
- * (`agents clis install term` via the system `clis/term.yaml`, then a pinned
- * `npm i -g`, both handled by installSetupTool), and once it is on PATH the
- * tool is ready.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -24,15 +9,10 @@ import { refreshToolSetup } from '../lib/setup-tool-status.js';
 
 const INSTALL_HINT = 'agents clis install term   # or: npm i -g @phnx-labs/term-cli';
 
-/** True when the standalone `term` executable resolves ($TERM_BIN or PATH). */
 export function isTermCliInstalled(): boolean {
   return resolveTermBin() !== null;
 }
 
-/**
- * Install the standalone `term` CLI if missing. Returns whether `term` is on
- * PATH afterwards. There is no further onboarding — presence is readiness.
- */
 export async function runTermWizard(): Promise<boolean> {
   if (isTermCliInstalled()) {
     console.log(chalk.green('The standalone `term` CLI is installed.'));
@@ -48,7 +28,6 @@ export async function runTermWizard(): Promise<boolean> {
   return false;
 }
 
-/** Register `agents setup term` under the parent `setup` command. */
 export function registerSetupTermCommand(setupCmd: Command): void {
   setupCmd
     .command('term')

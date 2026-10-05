@@ -30,7 +30,6 @@ function cachePath(tool: SetupTool, options: ToolSetupOptions): string {
 
 function setupInputs(tool: SetupTool): string[] {
   const inputs = [path.join(getUserAgentsDir(), 'agents.yaml'), getDeviceMetaPath()];
-  // browser-cli's IPC socket (integration contract §4). computer's is the helper socket.
   if (tool === 'browser') inputs.push(path.join(getHelpersDir(), 'browser', 'browser.sock'));
   if (tool === 'computer') inputs.push(process.env.COMPUTER_HELPER_SOCKET || path.join(getHelpersDir(), 'computer.sock'));
   return inputs;
@@ -73,7 +72,7 @@ function binaryMetadata(tool: SetupTool): { row: ToolSetupRow; fingerprint: stri
       try {
         const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
         if (pkg.name === `@phnx-labs/${tool}-cli` && typeof pkg.version === 'string') { version = pkg.version; break; }
-      } catch { /* Executables need not be npm packages. */ }
+      } catch {  }
       const parent = path.dirname(dir);
       if (parent === dir) break;
       dir = parent;
@@ -91,11 +90,10 @@ function readCache(tool: SetupTool, options: ToolSetupOptions): CachedTool | nul
   try {
     const cached = JSON.parse(fs.readFileSync(cachePath(tool, options), 'utf8')) as CachedTool;
     if (cached.v === 1 && cached.row?.tool === tool && typeof cached.fingerprint === 'string') return cached;
-  } catch { /* No health result yet. */ }
+  } catch {  }
   return null;
 }
 
-/** Presence is metadata; health is the last explicit check, never a timer probe. */
 export function getCachedToolSetup(options: ToolSetupOptions = {}): ToolSetupRow[] {
   return SETUP_TOOLS.map((tool) => {
     const { row, fingerprint } = binaryMetadata(tool);
@@ -122,13 +120,7 @@ export function toolReadiness(tool: SetupTool, status: unknown): Pick<ToolSetupR
 
 async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
   if (!row.installed || !row.executable) return { ...row, checkedAtMs: Date.now() };
-  // The standalone has no non-interactive health JSON. Do not list bundles or
-  // unlock the broker merely to paint a settings row.
   if (row.tool === 'secrets') return { ...row, checkedAtMs: Date.now(), detail: 'Installed. Secret access is checked when used; this check does not unlock secrets.' };
-  // term is a headless PTY engine with no `status --json` health surface; it is
-  // spawned on demand by the setup-token mint (`agents accounts add`/`login`,
-  // via auth-mint.ts → term-driver.ts, the sole term-client consumers).
-  // Presence on PATH is the whole readiness signal — do not probe it.
   if (row.tool === 'term') return { ...row, readiness: 'ready', detail: 'Installed. Spawned on demand by `agents accounts add`/`login`.', checkedAtMs: Date.now() };
   try {
     const { command, prefix } = invocation(row.executable);
@@ -139,7 +131,6 @@ async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
   }
 }
 
-/** A shared disk lock coalesces overlapping requests from separate CLI clients. */
 export async function refreshToolSetup(tool: SetupTool | 'all' = 'all', options: ToolSetupOptions = {}): Promise<ToolSetupRow[]> {
   const requestedAt = Date.now();
   const dir = toolSetupCacheDir(options);
@@ -157,7 +148,6 @@ export async function refreshToolSetup(tool: SetupTool | 'all' = 'all', options:
   return getCachedToolSetup(options).filter((row) => tool === 'all' || row.tool === tool);
 }
 
-/** File notifications are shared by the daemon collector; no background probes. */
 export function subscribeToolSetup(listener: (rows: ToolSetupRow[]) => void, options: ToolSetupOptions = {}): () => void {
   const dir = toolSetupCacheDir(options);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -166,7 +156,7 @@ export function subscribeToolSetup(listener: (rows: ToolSetupRow[]) => void, opt
   for (const row of getCachedToolSetup(options)) {
     if (row.executable) {
       paths.add(path.dirname(row.executable));
-      try { paths.add(path.dirname(fs.realpathSync(row.executable))); } catch { /* Removed since discovery. */ }
+      try { paths.add(path.dirname(fs.realpathSync(row.executable))); } catch {  }
     }
   }
   let previous = JSON.stringify(getCachedToolSetup(options));
@@ -184,7 +174,7 @@ export function subscribeToolSetup(listener: (rows: ToolSetupRow[]) => void, opt
   const watchers: fs.FSWatcher[] = [];
   for (const target of paths) {
     try { const watcher = fs.watch(target, { persistent: false }, changed); watcher.on('error', changed); watchers.push(watcher); }
-    catch { /* Absent PATH entries have no executable to report. */ }
+    catch {  }
   }
   changed();
   return () => { if (debounce) clearTimeout(debounce); for (const watcher of watchers) watcher.close(); };

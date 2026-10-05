@@ -4,11 +4,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * End-to-end apply test for the drift-sync flow. The `yes` path must actually
- * reconcile the version home: overwrite a drifted file with its source and
- * install a missing one. No mocks — real heal, real file writes.
- */
 
 let testHome: string;
 let userDir: string;
@@ -41,7 +36,6 @@ function runYesApply(): { result: string; drifted: string; missingPresent: boole
     const r = await promptDriftSync({ cwd: ${JSON.stringify(userDir)}, yes: true, quiet: true });
     console.error(JSON.stringify({ healedVersions: r.healed.length }));
   `;
-  // heal resolves against the HOME dir; point HOME at the fixture.
   execFileSync('bun', ['-e', script], {
     cwd: process.cwd(),
     env: { ...process.env, HOME: testHome },
@@ -59,17 +53,13 @@ function runYesApply(): { result: string; drifted: string; missingPresent: boole
 
 describe('promptDriftSync --yes — apply path', () => {
   it('overwrites a drifted resource with its source and installs a missing one', () => {
-    // source of truth
     fs.writeFileSync(path.join(srcCmds, 'drifted.md'), 'ALPHA v2 (source of truth)\n');
     fs.writeFileSync(path.join(srcCmds, 'missing.md'), 'GAMMA (new)\n');
-    // home: drifted has stale content, missing is absent
     fs.writeFileSync(path.join(cmdsHome, 'drifted.md'), 'ALPHA v1 (stale)\n');
 
     const after = runYesApply();
 
-    // drifted was reconciled to the source
     expect(after.drifted.trim()).toBe('ALPHA v2 (source of truth)');
-    // missing was installed
     expect(after.missingPresent).toBe(true);
     expect(after.missing.trim()).toBe('GAMMA (new)');
   });
@@ -77,11 +67,8 @@ describe('promptDriftSync --yes — apply path', () => {
 
 describe('promptDriftSync --yes — routes through the shared repair pass (BLOCKER 1)', () => {
   it('repairs a broken managed hook runtime shim while reconciling a drifted version', () => {
-    // A drifted command makes the version needsSync so drift-sync selects it.
     fs.writeFileSync(path.join(srcCmds, 'drifted.md'), 'ALPHA v2 (source of truth)\n');
     fs.writeFileSync(path.join(cmdsHome, 'drifted.md'), 'ALPHA v1 (stale)\n');
-    // A managed hook whose generated runtime shim does NOT exist — the class
-    // syncResourcesToVersion/heal never generates, only the repair pass does.
     const systemDir = path.join(userDir, '.system');
     fs.writeFileSync(
       path.join(systemDir, 'agents.yaml'),
@@ -123,11 +110,8 @@ describe('promptDriftSync --yes — routes through the shared repair pass (BLOCK
       healed: number; beforeReasons: string[]; afterBrokenCount: number;
     };
 
-    // The drifted command was reconciled to source (drift-sync's normal job)…
     expect(fs.readFileSync(path.join(cmdsHome, 'drifted.md'), 'utf-8').trim())
       .toBe('ALPHA v2 (source of truth)');
-    // …AND the broken shim (missing before) was repaired by the shared pass, so
-    // drift-sync is not a third orchestrator that skips shim repair.
     expect(out.beforeReasons).toContain('missing');
     expect(out.afterBrokenCount).toBe(0);
   });

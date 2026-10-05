@@ -4,7 +4,6 @@ import { setConfiguredDeviceRole } from './device-config.js';
 import { ambientClaudeToken, fixFor, formatSignInBadge, loginHint, shouldCheckLoginBeforeLaunch } from './signin-badge.js';
 import type { AccountInfo } from './agents.js';
 
-// Strip ANSI so assertions read against text, not color codes.
 const plain = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
 
 const acct = (over: Partial<AccountInfo>): Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'> => ({
@@ -15,19 +14,15 @@ const acct = (over: Partial<AccountInfo>): Pick<AccountInfo, 'signedIn' | 'email
 });
 
 describe('loginHint', () => {
-  // The whole point of the warning is telling the user the RIGHT command — a
-  // wrong hint sends them down the wrong path, so pin the per-agent overrides.
   it('uses the correct login command per agent', () => {
     expect(loginHint('codex')).toBe('codex login');
     expect(loginHint('grok')).toBe('grok login --device-auth');
     expect(loginHint('opencode')).toBe('opencode auth login');
     expect(loginHint('claude')).toBe('claude, then /login');
-    // Warp Agent CLI has no `login` subcommand — bare `warp` opens sign-in.
     expect(loginHint('warp')).toBe('warp');
   });
 
   it('falls back to the bare cli command for device/oauth-on-launch agents', () => {
-    // kimi/gemini start their flow on launch — no subcommand.
     expect(loginHint('kimi')).toBe('kimi');
     expect(loginHint('gemini')).toBe('gemini');
   });
@@ -74,17 +69,13 @@ describe('fixFor', () => {
       .toBe('agents run claude@2.1.220, then /login');
     expect(fixFor({ agent: 'codex', version: '0.146.0', verdict: 'missing' }))
       .toBe('agents run codex@0.146.0 -- login');
-    // grok's wired login is the device-code flow — the fix must carry the flag.
     expect(fixFor({ agent: 'grok', version: '0.2.118', verdict: 'missing' }))
       .toBe('agents run grok@0.2.118 -- login --device-auth');
-    // cursor signs in on launch — no `--` subcommand, same as `agents doctor`.
     expect(fixFor({ agent: 'cursor', version: '9.9.9', verdict: 'missing' }))
       .toBe('agents run cursor@9.9.9');
   });
 
   it('emits no repair for unverified — an unconfirmed probe is not an actionable failure', () => {
-    // A worker whose setup-token lacks the usage scope reads UNVERIFIED; there
-    // is nothing to fix, and a fake `accounts sync` hint would be unrunnable.
     expect(fixFor({ agent: 'claude', name: 'work', verdict: 'unverified' })).toBeNull();
     expect(fixFor({ agent: 'claude', verdict: 'unverified' })).toBeNull();
   });
@@ -97,8 +88,6 @@ describe('fixFor', () => {
   });
 
   it('points per-device harnesses at the harness\'s own login on the box', () => {
-    // No fleet-login orchestration: a per-device harness logs in on the box
-    // itself, so the fix is `loginHint` — run the harness there and log in.
     expect(fixFor({ agent: 'kimi', name: 'work', verdict: 'per-device', provisioning: 'per-device' }))
       .toBe(loginHint('kimi'));
     expect(fixFor({ agent: 'antigravity', verdict: 'missing', provisioning: 'per-device' }))
@@ -123,7 +112,6 @@ describe('formatSignInBadge', () => {
   });
 
   it('renders a bare signed-in badge for opaque credentials (no email, no id)', () => {
-    // Kimi / Antigravity: signed in but no surfaceable identity.
     expect(plain(formatSignInBadge(acct({ signedIn: true })))).toBe('✓ signed in');
   });
 });
@@ -139,8 +127,6 @@ describe('shouldCheckLoginBeforeLaunch', () => {
   });
 
   it('fires on a forced-interactive resume even though the prompt was rewritten to /continue', () => {
-    // The finding-1 regression: `agents run kimi --resume` sets forceInteractive
-    // AND rewrites the prompt, so hasPrompt is true — but the TUI still opens.
     expect(shouldCheckLoginBeforeLaunch({ hasPrompt: true, forceInteractive: true })).toBe(true);
   });
 
@@ -154,7 +140,6 @@ describe('shouldCheckLoginBeforeLaunch', () => {
     expect(shouldCheckLoginBeforeLaunch({ ...base, quiet: true })).toBe(false);
     expect(shouldCheckLoginBeforeLaunch({ ...base, authCheckDisabled: true })).toBe(false);
     expect(shouldCheckLoginBeforeLaunch({ ...base, rotated: true })).toBe(false);
-    // A suppressor wins even when forceInteractive is set.
     expect(shouldCheckLoginBeforeLaunch({ ...base, forceInteractive: true, rotated: true })).toBe(false);
   });
 });
@@ -171,8 +156,6 @@ describe('ambientClaudeToken', () => {
   });
 
   it('never claims an ambient token for another agent', () => {
-    // The var is claude-specific; codex/kimi read their own credential files, so
-    // a stray value must not relabel their badge.
     expect(ambientClaudeToken('codex', { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test' })).toBe(false);
   });
 });

@@ -3,9 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// resolveConfiguredModel walks: run-default (agents.yaml) -> the agent's native
-// settings.json -> the CLI's built-in default. state/versions resolve HOME at
-// import time, so we point HOME at a throwaway dir and re-import fresh per test.
 let TMP: string;
 
 async function freshModels() {
@@ -18,14 +15,12 @@ function writeJson(file: string, data: unknown) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-/** The agents.yaml run-default that layer 1 reads. */
 function setRunDefault(model: string) {
   const yaml = `run:\n  defaults:\n    "claude:*":\n      model: ${model}\n`;
   fs.mkdirSync(path.join(TMP, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(TMP, '.agents', 'agents.yaml'), yaml);
 }
 
-/** The agent's OWN native settings.json that layer 2 reads. */
 function setNativeModel(version: string, model: string) {
   writeJson(
     path.join(TMP, '.agents', '.history', 'versions', 'claude', version, 'home', '.claude', 'settings.json'),
@@ -46,20 +41,18 @@ describe('resolveConfiguredModel precedence', () => {
 
   it('prefers the agents.yaml run default over everything', async () => {
     setRunDefault('opus');
-    setNativeModel('9.9.9', 'sonnet'); // present, but run default must win
+    setNativeModel('9.9.9', 'sonnet');
     const { resolveConfiguredModel } = await freshModels();
     expect(resolveConfiguredModel('claude', '9.9.9')).toEqual({ model: 'opus', source: 'run-default' });
   });
 
   it("falls back to the agent's native settings.json model", async () => {
-    setNativeModel('9.9.9', 'sonnet'); // no run default configured
+    setNativeModel('9.9.9', 'sonnet');
     const { resolveConfiguredModel } = await freshModels();
     expect(resolveConfiguredModel('claude', '9.9.9')).toEqual({ model: 'sonnet', source: 'config' });
   });
 
   it('returns null when nothing is configured and no model catalog exists', async () => {
-    // No run default, no settings.json model, and no installed binary/bundle in
-    // the temp HOME -> no catalog -> nothing to report.
     const { resolveConfiguredModel } = await freshModels();
     expect(resolveConfiguredModel('claude', '9.9.9')).toBeNull();
   });
@@ -70,15 +63,11 @@ describe('resolveConfiguredModel precedence', () => {
       { model: '   ' },
     );
     const { resolveConfiguredModel } = await freshModels();
-    // blank model is not a real selection; with no catalog it resolves to null
     expect(resolveConfiguredModel('claude', '9.9.9')).toBeNull();
   });
 });
 
 describe('resolveConfiguredModel — OpenCode', () => {
-  // OpenCode reads ~/.config/opencode/opencode.{jsonc,json}, NOT the
-  // .opencode/settings.json every Claude-shaped harness uses, and ships no
-  // default model — it persists the TUI's pick to $XDG_STATE_HOME/opencode.
   let prevXdgState: string | undefined;
   let prevRealHome: string | undefined;
 
@@ -101,7 +90,6 @@ describe('resolveConfiguredModel — OpenCode', () => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cfgmodel-oc-'));
     process.env.HOME = TMP;
     process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
-    // Keep the developer's real ~/.local/state/opencode out of the resolution.
     prevXdgState = process.env.XDG_STATE_HOME;
     process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-xdgstate-'));
     prevRealHome = process.env.AGENTS_REAL_HOME;
@@ -132,8 +120,6 @@ describe('resolveConfiguredModel — OpenCode', () => {
   });
 
   it('never reads a model from .opencode/settings.json, which is not OpenCode config', async () => {
-    // That file is agents-cli's plugin-enablement file. Treating it as OpenCode
-    // config is what this fixes; it must not become a model source now either.
     writeJson(path.join(versionHome(), '.opencode', 'settings.json'), { model: 'wrong/model' });
     const { resolveConfiguredModel } = await freshModels();
     expect(resolveConfiguredModel('opencode', '1.18.15')?.model).not.toBe('wrong/model');
@@ -146,7 +132,6 @@ describe('resolveConfiguredModel — OpenCode', () => {
       { providerID: 'openai', modelID: 'gpt-5.6-terra-fast' },
     ]);
     const { resolveConfiguredModel } = await freshModels();
-    // recent[0] is the current pick, spelled the way OpenCode's config spells it.
     expect(resolveConfiguredModel('opencode', '1.18.15')).toEqual({
       model: 'opencode/muse-spark-1.3',
       source: 'cli-default',
@@ -170,7 +155,6 @@ describe('resolveConfiguredModel — OpenCode', () => {
   it('ignores an empty or malformed model.json rather than throwing', async () => {
     setSelectedModel([]);
     const { resolveConfiguredModel } = await freshModels();
-    // No catalog in the temp HOME either, so there is simply nothing to report.
     expect(resolveConfiguredModel('opencode', '1.18.15')).toBeNull();
   });
 });
@@ -178,7 +162,6 @@ describe('resolveConfiguredModel — OpenCode', () => {
 describe('formatAgentIdentity', () => {
   it('joins pieces with a separator and drops empty ones', async () => {
     const { formatAgentIdentity } = await freshModels();
-    // Split on the middot so the test is agnostic to chalk color codes.
     const parts = (s: string) => s.split('·').map((p) => p.trim()).filter(Boolean);
     expect(parts(formatAgentIdentity('claude@2.1.186', 'opus', 'you@rush.dev'))).toEqual([
       'claude@2.1.186',

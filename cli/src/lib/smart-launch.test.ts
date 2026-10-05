@@ -44,8 +44,6 @@ describe('formatNoHealthyDeviceError separates a timeout from an outage (PHNX-36
   });
 
   it('drops the usage-window hint when nothing was turned away for a window', () => {
-    // "earliest window resets unknown" implies a rate limit. On a timed-out pool
-    // that sent operators looking for a quota problem that did not exist.
     const msg = formatNoHealthyDeviceError(['m1'], new Map([
       ['m1', { reachable: false, timedOut: true }],
     ]), 'codex');
@@ -84,9 +82,6 @@ it('truthfully describes installed devices with no ready account', () => {
 });
 
 it("surfaces the box's own reason for a no-ready device (PHNX-4116)", () => {
-  // The incident message was a bare "no ready harness account" for all 8 boxes,
-  // leaving the operator to guess. When the box reported WHY (runReady.reason,
-  // threaded into the signal), name it so the outage is legible.
   const msg = formatNoHealthyDeviceError(['w1', 'w2'], new Map([
     ['w1', { reachable: true, headroom: 'idle', installed: true, signedIn: false, reason: 'all signed_out' }],
     ['w2', { reachable: true, headroom: 'idle', installed: true, signedIn: false, reason: 'all rate_limited' }],
@@ -96,8 +91,6 @@ it("surfaces the box's own reason for a no-ready device (PHNX-4116)", () => {
 });
 
 it('falls back to the bare reason when the box gave none (older CLI)', () => {
-  // A signal with no `reason` (older remote CLI, or the local path) keeps the
-  // original wording rather than printing an empty parenthetical.
   expect(formatNoHealthyDeviceError(['w1'], new Map([
     ['w1', { reachable: true, headroom: 'idle', installed: true, signedIn: false }],
   ]), 'claude')).toContain('w1 (no ready harness account)');
@@ -186,8 +179,6 @@ describe('resolveDeviceAuto', () => {
   });
 
   it('ranks a preferred device ahead of a less-loaded one (agents devices prefer)', async () => {
-    // `busy-preferred` is loaded heavier than `idle`, but the operator boosted
-    // it — so it wins. Without the boost `idle` would.
     const probe = async () => new Map([
       ['idle', { reachable: true, loadPercent: 5, memPercent: 5, headroom: 'idle', installed: true, signedIn: true }],
       ['busy-preferred', { reachable: true, loadPercent: 60, memPercent: 30, headroom: 'busy', installed: true, signedIn: true }],
@@ -387,8 +378,6 @@ describe('applyDeviceAutoToOptions', () => {
 });
 
 describe('device roles narrow automatic placement', () => {
-  // A real agents.yaml under a throwaway HOME — the same store `agents devices
-  // role` writes, read back through the placement engine. No mocks.
   let TMP = '';
 
   beforeEach(() => {
@@ -398,7 +387,7 @@ describe('device roles narrow automatic placement', () => {
   });
   afterEach(() => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
-    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {  }
   });
 
   async function fresh() {
@@ -432,9 +421,6 @@ describe('device roles narrow automatic placement', () => {
   });
 
   it('resolveDeviceAffinity fails loud instead of degrading to a personal local box', async () => {
-    // The generic `auto` sentinel (agents ssh auto, the --device auto passthrough,
-    // matchHost) resolves through resolveDeviceAffinity, and a null host there
-    // means "run locally" — on the very box the personal mark exists to protect.
     const mod = await fresh();
     mod.setConfiguredDeviceRole('zion', 'personal');
     expect(() => mod.resolveDeviceAffinity({ localMachine: 'zion' }))

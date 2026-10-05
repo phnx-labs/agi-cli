@@ -1,11 +1,3 @@
-/**
- * `agents trash` — list and restore soft-deleted version directories.
- *
- * `removeVersion` moves a version dir to ~/.agents/.history/trash/versions/<agent>/<version>/<timestamp>/
- * instead of hard-deleting. These commands let the user inspect what's there
- * and put a soft-deleted version back. The trash never auto-expires; only
- * `rm -rf ~/.agents/.history/trash/` removes bytes from disk.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
@@ -113,11 +105,6 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-/**
- * Restore a soft-deleted version back into ~/.agents/.history/versions/.
- * Backs the top-level `agents restore` command.
- * Exits the process with a non-zero code on any failure.
- */
 export function restoreVersion(target: string): void {
   const parsed = parseAgentVersion(target);
   if (!parsed) {
@@ -145,20 +132,15 @@ export function restoreVersion(target: string): void {
     console.error(chalk.red(`Restore failed: ${(err as Error).message}`));
     process.exit(1);
   }
-  // Best-effort cleanup of empty stamp/version parents in trash.
   try {
     const verDir = path.dirname(entry.trashPath);
     if (fs.readdirSync(verDir).length === 0) fs.rmdirSync(verDir);
     const agentDir = path.dirname(verDir);
     if (fs.readdirSync(agentDir).length === 0) fs.rmdirSync(agentDir);
-  } catch { /* best-effort */ }
+  } catch {  }
   console.log(chalk.green(`Restored ${agentLabel(agent)}@${version} to ${dest}`));
 }
 
-/**
- * Register the top-level `agents restore` command — a shorthand for
- * `agents restore` so users can undo a `remove`/`prune` directly.
- */
 export function registerRestoreCommand(program: Command): void {
   program
     .command('restore <target>')

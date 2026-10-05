@@ -1,11 +1,3 @@
-/**
- * `agents uninstall` — completely remove agents-cli and restore the user's
- * original agent configs. The reverse of `agents setup`.
- *
- * Thin command layer: the restore/teardown logic lives in `lib/uninstall.ts`
- * (planUninstall / executeUninstall) so it can be tested against a real temp
- * HOME without the CLI wrapper.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
@@ -20,7 +12,6 @@ interface UninstallOptions {
   yes?: boolean;
 }
 
-/** Render the read-only plan so the user sees exactly what will change. */
 function printPlan(plan: UninstallPlan, purge: boolean): void {
   const restores = plan.configs.filter((c) => c.kind === 'restore-backup' || c.kind === 'restore-version-home');
   const dangling = plan.configs.filter((c) => c.kind === 'remove-dangling');
@@ -68,7 +59,6 @@ function printPlan(plan: UninstallPlan, purge: boolean): void {
   console.log();
 }
 
-/** Report what actually happened, then the final manual npm step. */
 function printResult(result: UninstallResult, cleanedPath: boolean): void {
   for (const r of result.restoredConfigs) console.log(chalk.green(`Restored ${r.realPath}`));
   for (const r of result.removedDanglingConfigs) console.log(chalk.yellow(`Removed dangling symlink ${r.realPath}`));
@@ -102,7 +92,6 @@ function printResult(result: UninstallResult, cleanedPath: boolean): void {
   }
 }
 
-/** Register `agents uninstall`. */
 export function registerUninstallCommands(program: Command): void {
   const cmd = program
     .command('uninstall')
@@ -131,9 +120,6 @@ export function registerUninstallCommands(program: Command): void {
   });
 
   cmd.action(async (options: UninstallOptions) => {
-    // We are tearing ~/.agents down. Silence the JSONL audit log for the rest
-    // of this process so a late emit() (its events path is memoized to the old
-    // location) can't re-create ~/.agents after we move it aside.
     process.env.AGENTS_DISABLE_EVENT_LOG = '1';
 
     const plan = planUninstall();

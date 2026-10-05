@@ -223,15 +223,10 @@ describe('resource resolution', () => {
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.resolved).toMatchObject({ name: 'deploy', repoRoot: userAgentsDir });
-    // JSON.stringify drops an undefined-valued key entirely — asserting its
-    // absence from the SERIALIZED object, not just reading it back as
-    // undefined, is what proves the getter really returned undefined (not a
-    // literal "undefined" string or a thrown-then-caught value).
     expect(parsed.resolved.snapshotSha).toBeUndefined();
   });
 });
 
-/** Write a skill directory with a SKILL.md carrying the given frontmatter. */
 function writeSkill(root: string, name: string, frontmatter: Record<string, unknown>): void {
   const dir = path.join(root, '.agents', 'skills', name);
   fs.mkdirSync(dir, { recursive: true });
@@ -259,7 +254,6 @@ describe('resource aliases (RUSH-2504)', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    // Both aliases resolve to the canonical skill (its real name, not the alias).
     expect(parsed.byAlias).toMatchObject({ name: 'browser', source: 'user' });
     expect(parsed.byAlias2).toMatchObject({ name: 'browser', source: 'user' });
     expect(parsed.byCanonical).toMatchObject({ name: 'browser', source: 'user' });
@@ -292,7 +286,6 @@ describe('resource aliases (RUSH-2504)', () => {
   it('canonical name always wins a collision with another resource that aliases it', () => {
     const home = makeHome();
     const project = makeProject();
-    // A real skill named `browser`, and a DIFFERENT skill that tries to alias `browser`.
     writeSkill(home, 'browser', { description: 'the real browser skill' });
     writeSkill(home, 'agi-browser', { description: 'imposter', aliases: ['browser'] });
 
@@ -304,7 +297,6 @@ describe('resource aliases (RUSH-2504)', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    // The canonical `browser` skill wins, not the `agi-browser` skill that aliases it.
     expect(parsed.name).toBe('browser');
     expect(parsed.path.endsWith(path.join('skills', 'browser'))).toBe(true);
   });
@@ -312,7 +304,6 @@ describe('resource aliases (RUSH-2504)', () => {
   it('canonical in a lower layer still beats an alias in a higher layer', () => {
     const home = makeHome();
     const project = makeProject();
-    // Project layer: a skill that ALIASES `deploy`. User layer: the canonical `deploy`.
     writeSkill(project, 'shipper', { description: 'aliaser', aliases: ['deploy'] });
     writeSkill(home, 'deploy', { description: 'the real deploy skill' });
 
@@ -324,7 +315,6 @@ describe('resource aliases (RUSH-2504)', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    // Canonical `deploy` (user) wins over the project-layer alias — canonical always wins.
     expect(parsed).toMatchObject({ name: 'deploy', source: 'user' });
   });
 
@@ -342,7 +332,6 @@ describe('resource aliases (RUSH-2504)', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    // Project layer is searched before user, so the project aliaser wins.
     expect(parsed).toMatchObject({ name: 'proj-skill', source: 'project' });
   });
 
@@ -360,8 +349,6 @@ describe('resource aliases (RUSH-2504)', () => {
 
     expect(result.status, result.stderr).toBe(0);
     const parsed = JSON.parse(result.stdout).sort((a, b) => a.name.localeCompare(b.name));
-    // `aliases` is undefined (not []) when a resource declares none, mirroring
-    // snapshotSha — so JSON.stringify drops the key for the alias-less skill.
     expect(parsed).toEqual([
       { name: 'browser', aliases: ['web'] },
       { name: 'plain' },

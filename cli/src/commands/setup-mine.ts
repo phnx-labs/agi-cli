@@ -1,13 +1,3 @@
-/**
- * `agents setup mine` — interactive wizard to white-label the CLI under your own
- * name. Pick a name, choose which features to turn off, and get a personally-
- * named binary (e.g. `jack`) that runs every agents verb as yours. Delegates the
- * actual minting to `initBrand` (see mine.ts). Manage verbs (init/list/toggle/
- * remove) live under the same `setup mine` command.
- *
- * Idempotent: re-running for an existing brand offers to re-mint it.
- * Bare `agents setup mine` (no subcommand) runs the wizard.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -17,11 +7,6 @@ import { validateBrandName, getBrandConfig } from '../lib/brand.js';
 import { isShimsInPath } from '../lib/installations/shims.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
-/**
- * Optional/heavier top-level commands a brand commonly turns off. Kept short so
- * the checkbox is scannable — anything can still be toggled later with
- * `agents setup mine toggle <name> --disable <cmd>`.
- */
 const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'teams', hint: 'coordinate multiple agents on shared work' },
   { name: 'cloud', hint: 'dispatch agent tasks to the cloud' },
@@ -32,11 +17,6 @@ const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'monitors', hint: 'event-triggered watchers' },
 ];
 
-/**
- * Interactive white-label setup. Returns true when a brand exists afterward,
- * false if the user backed out. Never throws on cancel — the `agents setup` hub
- * relies on that.
- */
 async function runMineWizard(): Promise<boolean> {
   if (!isInteractiveTerminal()) {
     console.log(
@@ -60,7 +40,6 @@ async function runMineWizard(): Promise<boolean> {
     })
   ).trim();
 
-  // Existing brand → offer to re-mint rather than error out.
   let force = false;
   if (getBrandConfig(name)) {
     const again = await confirm({
@@ -105,10 +84,6 @@ function printNextSteps(name: string, pathWarning: boolean): void {
   }
 }
 
-/**
- * Register `agents setup mine` under the parent `setup` command.
- * Bare invocation runs the wizard; init/list/toggle/remove manage brands.
- */
 export function registerSetupMineCommand(setupCmd: Command): void {
   const mineCmd = setupCmd
     .command('mine')

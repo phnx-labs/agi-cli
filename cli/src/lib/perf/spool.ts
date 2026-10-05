@@ -1,10 +1,3 @@
-/**
- * Hot-path perf writers — append-only NDJSON spool, no SQLite.
- *
- * Loaded from the CLI root `postAction` and from `events.ts` timing helpers.
- * Must stay free of `../sqlite.js` so ordinary commands never load node:sqlite
- * (which emits ExperimentalWarning on stderr).
- */
 
 import * as fs from 'fs';
 import * as os from 'os';
@@ -18,7 +11,6 @@ export type { PerfSample } from './types.js';
 let _spoolOverride: string | null = null;
 let _disabled = false;
 
-/** Test seam — pair with db._resetPerfDbForTest. */
 export function _resetPerfSpoolForTest(spoolPath?: string | null): void {
   _spoolOverride = spoolPath === undefined ? null : spoolPath;
   _disabled = false;
@@ -36,16 +28,12 @@ function isDisabled(): boolean {
   return v === '1' || v === 'true';
 }
 
-/** Short session id: first 8 chars (sessions.short_id shape). */
 export function shortSessionId(sessionId: string | undefined | null): string | undefined {
   if (!sessionId) return undefined;
   const cleaned = sessionId.replace(/^session_/, '');
   return cleaned.length >= 8 ? cleaned.slice(0, 8) : cleaned || undefined;
 }
 
-/**
- * Append one sample to the spool. Never throws. Never opens SQLite.
- */
 export function recordSample(sample: PerfSample): void {
   if (isDisabled()) return;
   if (!sample.label || !Number.isFinite(sample.durationMs)) return;
@@ -77,6 +65,5 @@ export function recordSample(sample: PerfSample): void {
     fs.mkdirSync(path.dirname(spool), { recursive: true, mode: 0o700 });
     fs.appendFileSync(spool, line + '\n', { mode: 0o600 });
   } catch {
-    // Fail soft.
   }
 }

@@ -1,15 +1,3 @@
-/**
- * Read-only Software Factory state aggregation.
- *
- * ~/.agents/factory.yml example:
- *
- * ceiling: 4
- * max_dispatch_per_tick: 2
- * per_project:
- *   Agents CLI: { weight: 2, cap: 2 }
- * idle_boxes: [yosemite-m1, yosemite-m2]
- * digest: { times: ["09:00", "17:00"], tz: America/Los_Angeles }
- */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -186,7 +174,7 @@ function readRecentRuns(home: string, limit = 3): FactorySnapshot['recentRuns'] 
         const ended = Date.parse(String(meta.finishedAt ?? meta.completedAt ?? meta.updatedAt ?? ''));
         const duration = typeof meta.durationMs === 'number' ? meta.durationMs : Number.isFinite(started) && Number.isFinite(ended) ? ended - started : null;
         routineRuns.push({ routine, status: String(meta.status ?? 'unknown'), durationMs: duration, mtime: fs.statSync(file).mtimeMs });
-      } catch { /* A concurrently-written or malformed run is not a completed outcome. */ }
+      } catch {  }
     }
     found.push(...routineRuns.sort((a, b) => b.mtime - a.mtime).slice(0, limit));
   }
@@ -222,8 +210,6 @@ export async function buildFactorySnapshot(overrides: Partial<SnapshotDependenci
     return [name, queueCounts(todo, open)] as const;
   })).then(Object.fromEntries);
   const prsPromise = Promise.all(FACTORY_PROJECTS.map(async ({ repo }) => parsePullRequests(repo, await safeRun('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number,title,statusCheckRollup,reviewDecision,mergeable'])))).then((rows) => rows.flat());
-  // `devices list --json` is the registry's read-only JSON surface. Load comes
-  // from the daemon-warmed cache so snapshot never probes or writes reachability.
   const devicesPromise = safeRun('agents', ['devices', 'list', '--json']).then((payload) => parseDevices(payload, deps.readDeviceStats()));
 
   const [sessions, queues, prs, devices] = await Promise.all([sessionsPromise, queuePromise, prsPromise, devicesPromise]);

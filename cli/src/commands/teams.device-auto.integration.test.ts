@@ -4,27 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/**
- * `agents teams add <team> <teammate> <task> --device auto` used to reject
- * with "Couldn't resolve --device 'auto'" (RUSH-2185) because only `agents
- * run --device auto` pre-processed the `auto` affinity sentinel before it
- * reached the host resolver. It now resolves through the same shared core
- * (matchHost in ../lib/hosts/registry.ts) that `agents ssh auto` uses.
- *
- * Real CLI, real filesystem, no mocking: drive the built entrypoint against a
- * throwaway HOME with no devices registered under a unique machine id. With no
- * signed-in harness in that isolated home, authoritative placement must reach
- * the shared resolver and fail loud with "no healthy device" — deterministic
- * without needing a real device fleet.
- */
 describe.skipIf(process.platform === 'win32')('agents teams add --device auto (RUSH-2185)', () => {
   let home: string;
   const machineId = 'device-auto-test-box';
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'teams-device-auto-'));
-    // The CLI refuses to run before setup; the gate is just "is
-    // ~/.agents/.system a git repo" (same as view.isolated.integration.test.ts).
     const systemDir = path.join(home, '.agents', '.system');
     fs.mkdirSync(systemDir, { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: systemDir, stdio: 'ignore' });

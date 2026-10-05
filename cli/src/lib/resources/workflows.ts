@@ -1,10 +1,3 @@
-/**
- * Workflows resource handler.
- *
- * Workflows are directory bundles with a WORKFLOW.md containing YAML frontmatter.
- * They optionally contain subagents/, skills/, and plugins/ subdirectories.
- * Resolution order (docs/07-entrypoints): project > user > plugin > extra > system.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -53,7 +46,6 @@ function listWorkflowsInDir(dir: string): Array<{ name: string; path: string }> 
   }
 }
 
-/** Precedence-ordered (dir, layer) pairs for name lookup / listing. */
 function orderedWorkflowSearchDirs(cwd?: string): Array<{ dir: string; layer: Layer }> {
   const dirs = getLayerDirs(cwd);
   const out: Array<{ dir: string; layer: Layer }> = [];
@@ -67,7 +59,6 @@ function orderedWorkflowSearchDirs(cwd?: string): Array<{ dir: string; layer: La
   return out;
 }
 
-/** Map a resolved absolute workflow dir to its origin layer (best-effort). */
 function layerForWorkflowPath(workflowPath: string, cwd?: string): Layer {
   const abs = path.resolve(workflowPath);
   const under = (root: string) => {
@@ -81,7 +72,6 @@ function layerForWorkflowPath(workflowPath: string, cwd?: string): Layer {
   for (const extra of getEnabledExtraRepos()) {
     if (under(path.join(extra.dir, 'workflows'))) return 'system';
   }
-  // Plugin marketplaces (and anything else plugin-shaped).
   return 'plugin';
 }
 
@@ -116,7 +106,6 @@ class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   }
 
   resolve(_agent: AgentId, name: string, cwd?: string): ResolvedItem<WorkflowItem> | null {
-    // Delegate to resolveWorkflowRef so bare, workflow:, and name@source share one path.
     const workflowPath = resolveWorkflowRef(name, cwd ?? process.cwd());
     if (!workflowPath) return null;
     const fm = parseWorkflowFrontmatter(workflowPath);
@@ -137,8 +126,6 @@ class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   }
 
   sync(_agent: AgentId, _versionHome: string, _cwd?: string): void {
-    // Version-home copies are written by syncResourcesToVersion in versions.ts.
-    // exec.ts resolves workflows at run time from source dirs directly.
   }
 
   format(_agent: AgentId): 'md' {

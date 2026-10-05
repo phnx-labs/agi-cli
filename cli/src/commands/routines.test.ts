@@ -13,13 +13,6 @@ import {
   writeDeviceRoutines,
 } from './routines.test-fixture.js';
 
-// Residual slice of the routines.*.test.ts suite (RUSH-2819): device
-// pin/activation lifecycle (`routines devices --set/--clear`) plus the
-// --device flag help/routing coverage. The subprocess-heavy behavior tests
-// live in the routines.*.test.ts slices next to this file (add, list, run),
-// split so vitest can parallelize them across worker forks — this file was
-// one 2,249-line suite measured at ~194s of test time. Shared fixtures:
-// routines.test-fixture.ts.
 
 describeRoutines('routines devices --set persists', () => {
   it('writes activation to the target device manifest without changing definition metadata', () => {
@@ -79,8 +72,6 @@ describeRoutines('routines devices --set normalizes mixed case and FQDN duplicat
       const doc = readRoutineYaml(home, 'test-job');
       expect(doc).not.toBeNull();
       expect(doc!.devices).toEqual(['yosemite-s0']);
-      // First materialization of an empty manifest seeds every currently-enabled
-      // routine so nothing is silently disabled.
       expect(readDeviceRoutines(home, 'yosemite-s0')).toEqual(['test-job']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -125,16 +116,11 @@ describeRoutines('routines devices --set unknown is nonzero/no mutation', () => 
   });
 });
 
-// #2118: --set fans out pause/resume to every registered device. An offline
-// peer that is NOT in the new set must be a warning, not a hard fail — the
-// pin on the reachable target already succeeded.
 describeRoutines('routines devices --set skips unreachable non-targets (#2118)', () => {
   it('enables on the local target and warns about an offline peer that cannot be paused', () => {
     const offlinePeer = {
       name: 'offline-box',
       platform: 'macos',
-      // No dnsName/ip: resolveHost fails immediately (no SSH hang) the same way
-      // a sleeping Tailscale host does for applyDevices' remote pause.
       address: { via: 'manual' },
       auth: { method: 'key' },
     };
@@ -180,8 +166,6 @@ describeRoutines('routines devices --set skips unreachable non-targets (#2118)',
       });
       expect(res.status).not.toBe(0);
       expect(res.stderr + res.stdout).toMatch(/Could not enable 'test-job' on: offline-box/i);
-      // Local pause (removing the routine from this device) still applied before
-      // the remote target failed — pin must not claim full success.
       expect(readDeviceRoutines(home, 'yosemite-s0')).not.toContain('test-job');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -286,7 +270,6 @@ describeRoutines('routines devices --set empty/whitespace fails closed', () => {
   });
 });
 
-/** Parse direct subcommand names from `routines --help`. */
 function directSubcommandNames(home: string): string[] {
   const res = run(home, ['--help']);
   expect(res.status).toBe(0);
@@ -315,7 +298,5 @@ describeRoutines('routines subcommand --help documents --device once each', () =
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-    // ~15 subcommands, each a cold `node --import tsx` boot; Windows subprocess
-    // spawn is slow enough to tip the aggregate over the 30s global timeout.
   }, 90_000);
 });
