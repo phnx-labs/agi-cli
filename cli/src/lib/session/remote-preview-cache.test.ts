@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 
+// getDB() is process-global, so each scenario needs a subprocess; a fresh HOME alone is insufficient.
 function runScript(script: string): { status: number | null; stdout: string; stderr: string } {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-remote-preview-cache-'));
   try {
@@ -227,6 +228,7 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
     expect(calls).toBe(1);
   });
 
+  // The real delay guarantees overlap so coalescing cannot pass through serialized calls.
   it('two genuinely concurrent requests for the same (device, id) coalesce onto ONE SSH attempt, not a serial redial', () => {
     const script = [
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",

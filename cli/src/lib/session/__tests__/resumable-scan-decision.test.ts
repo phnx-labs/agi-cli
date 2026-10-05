@@ -103,6 +103,7 @@ describe('scanClaudeSessionResumable — the full-vs-incremental decision', () =
     expect(r.scan.topic).toBe('short');
   });
 
+  // Unchanged identity keeps the independent file-size truncation guard load-bearing.
   it('TRUNCATION with the identity UNCHANGED still falls back to FULL', async () => {
     const fp = path.join(dir, 's.jsonl');
     const first = claudeLines('2026-06-28T00:00:00.000Z', 'kept');
@@ -149,6 +150,7 @@ describe('scanClaudeSessionResumable — the full-vs-incremental decision', () =
     expect(r.mode).toBe('full');
   });
 
+  // Both stored and current identity are absent to exercise the required-prior-identity guard.
   it('a prior continuation with no recorded identity falls back to FULL', async () => {
     const fp = path.join(dir, 's.jsonl');
     const anonymous = (n: number) => [{ type: 'summary', summary: `preamble ${n}`, leafUuid: `u${n}` }];
@@ -204,6 +206,7 @@ describe('scanCodexSessionResumable — the full-vs-incremental decision', () =>
     expect(r.mode).toBe('full');
   });
 
+  // Unchanged rollout id keeps the independent file-size truncation guard load-bearing.
   it('TRUNCATION with the rollout id UNCHANGED still falls back to FULL', async () => {
     const fp = path.join(dir, 'r.jsonl');
     const first = codexLines('sess-1', 'kept');
@@ -252,6 +255,7 @@ describe('scanCodexSessionResumable — the full-vs-incremental decision', () =>
     expect(r.mode).toBe('full');
   });
 
+  // Both stored and current rollout identity are absent to exercise the required-prior-identity guard.
   it('a prior continuation with no recorded rollout id falls back to FULL', async () => {
     const fp = path.join(dir, 'r.jsonl');
     const turn = (text: string) => [

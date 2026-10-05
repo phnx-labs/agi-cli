@@ -56,6 +56,7 @@ function storedCalls(sessionId: string) {
   `).all(sessionId) as Array<{ ordinal: number; source_call_id: string; input: string; rowid: number }>;
 }
 
+// Equal-byte mutation proves an append scan did not reread the stored prefix.
 function mutatePrefix(session: SessionMeta, from: string, to: string): void {
   expect(Buffer.byteLength(to)).toBe(Buffer.byteLength(from));
   const body = fs.readFileSync(session.filePath, 'utf8');
@@ -90,6 +91,7 @@ describe('incremental tool index', () => {
     expect(afterSecond.parsed_offset).toBe(fs.statSync(session.filePath).size);
   });
 
+  // Exceed the 64-KiB chunk so a straddled record cannot lose its resume offset.
   it('accounts for every byte of a transcript larger than one read chunk', async () => {
     const body = Array.from({ length: 400 }, (_, i) =>
       callRecords(`bulk-${i}`, `git log --oneline -${i} # ${'x'.repeat(400)}`, `ok ${'y'.repeat(400)}`)).join('');
@@ -154,6 +156,7 @@ describe('incremental tool index', () => {
     expect(storedCalls(session.id).map((row) => row.source_call_id)).toEqual(['old-call', 'new-call']);
   });
 
+  // Keep resume before the unterminated indexed tail so rereading it cannot assign a second ordinal.
   it('re-derives the same ordinals for a record that had no trailing newline', async () => {
     const unterminated = JSON.stringify({
       type: 'assistant', timestamp: '2026-08-03T00:00:00Z', message: { content: [

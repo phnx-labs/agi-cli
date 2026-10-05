@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+// Redirect HOME before dynamic import so the fixture never opens the real user database.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-rescov-'));
 process.env.HOME = TEST_HOME;
 

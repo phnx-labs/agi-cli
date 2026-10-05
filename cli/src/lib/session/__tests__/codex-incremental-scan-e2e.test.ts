@@ -38,11 +38,13 @@ function appendRollout(id: string, events: object[]): void {
   fs.appendFileSync(rolloutFile(id), events.map(line).join('\n') + '\n', 'utf-8');
 }
 
+// Move mtime with each append so discovery observes a changed rollout.
 function bumpMtimeToNow(fp: string, plusSeconds: number): void {
   const t = Math.floor(Date.now() / 1000) + plusSeconds;
   fs.utimesSync(fp, t, t);
 }
 
+// Age ledger stamps past the five-second debounce before each scan.
 function agePriorScans(): void {
   db.getDB().prepare('UPDATE scan_ledger SET scanned_at = ?').run(Date.now() - 60_000);
 }
@@ -52,6 +54,7 @@ async function runScan(): Promise<void> {
   await discover.discoverSessions({ agent: 'codex', all: true });
 }
 
+// Exclude timestamp/activity: each ground-truth file intentionally has a different mtime.
 const PARITY_FIELDS = [
   'agent', 'project', 'cwd', 'gitBranch', 'version',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',

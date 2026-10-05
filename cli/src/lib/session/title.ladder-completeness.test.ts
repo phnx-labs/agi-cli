@@ -6,10 +6,12 @@ import { sessionHeadline } from './title.js';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+// Rebuilt literals evade TypeScript because generatedTitle is optional; guard both ladder spellings textually.
 const HAND_ROLLED = /\blabel\b[^;\n]{0,40}(\|\||\?\?)[^;\n]{0,40}\btopic\b/;
 
 const REBUILT_LITERAL = /\blabel\s*:[^,;]{1,40},[^;]{0,60}\btopic\s*:/;
 
+// ladder-exempt is deliberately per-line; whole-file exemptions are only non-headline subsystems.
 const LADDER_EXEMPT_MARKER = 'ladder-exempt';
 
 const EXEMPT_FILES: Array<{ file: string; why: string }> = [
