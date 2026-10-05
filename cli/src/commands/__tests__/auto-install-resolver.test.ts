@@ -1,11 +1,3 @@
-/**
- * Tests for resolveAgentTargetsAutoInstalling — the wrapper that catches
- * VersionNotInstalledError, prompts (or auto-installs with --yes), and
- * retries the underlying resolver.
- *
- * installVersion is the only IO-heavy dependency we mock (it shells out to
- * npm). The rest goes through real fs in a tmpdir.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -81,8 +73,6 @@ describe('resolveAgentTargetsAutoInstalling', () => {
 
   it('with --yes, auto-installs the missing version then resolves', async () => {
     makeFakeInstall('claude', '2.1.141');
-    // Simulate a successful install — also materialise the version on disk
-    // so the post-install resolve() actually finds it.
     installVersionMock.mockImplementation(async (agent: string, version: string) => {
       makeFakeInstall(agent, version);
       return { success: true, installedVersion: version };
@@ -123,7 +113,6 @@ describe('resolveAgentTargetsAutoInstalling', () => {
     makeFakeInstall('claude', '2.1.141');
     const { resolveAgentTargetsAutoInstalling } = await loadUtils();
 
-    // bare agent, @default, @all, literal `all` — none of these are "specific missing version"
     await resolveAgentTargetsAutoInstalling('claude', ['claude'], { yes: true });
     await resolveAgentTargetsAutoInstalling('claude@all', ['claude'], { yes: true });
     await resolveAgentTargetsAutoInstalling('all', ['claude'], { yes: true });

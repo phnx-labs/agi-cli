@@ -34,7 +34,6 @@ const Vignette: React.FC = () => (
   />
 );
 
-// Typewriter caption above the terminal. Same mono font as agi-cli.sh.
 const CaptionOverlay: React.FC<{
   text: string;
   frameInScene: number;
@@ -104,8 +103,6 @@ const CaptionOverlay: React.FC<{
   );
 };
 
-// Intro: 1.5s logo + wordmark fade-in. Lighter cousin of Finale — no CTA,
-// no footer. Just the agents cover image + green glow + brief wordmark.
 const Intro: React.FC<{ frameInScene: number; fps: number }> = ({
   frameInScene,
   fps,
@@ -183,7 +180,6 @@ const Intro: React.FC<{ frameInScene: number; fps: number }> = ({
   );
 };
 
-// Finale: agents 'a' mark + wordmark + CTA.
 const Finale: React.FC<{ frameInScene: number; fps: number }> = ({
   frameInScene,
   fps,
@@ -323,7 +319,6 @@ const Finale: React.FC<{ frameInScene: number; fps: number }> = ({
   );
 };
 
-// Main composition.
 export const AgentsDemo: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -357,7 +352,6 @@ export const AgentsDemo: React.FC = () => {
     config: { damping: 30, stiffness: 120 },
   });
 
-  // Scenes that deserve a "positive" stinger when they resolve (after install / use / etc).
   const successScenes = new Set([
     "install",
     "use",
@@ -415,10 +409,10 @@ export const AgentsDemo: React.FC = () => {
       <CRTOverlay />
       <Vignette />
 
-      {/* Background music — fades handled in the mp3 itself. */}
+      {}
       <Audio src={staticFile("music.mp3")} volume={0.55} />
 
-      {/* Per-scene transition stinger at each scene start (skip scene 0 to avoid hit at t=0). */}
+      {}
       {SCENES.map((s, i) =>
         i === 0 ? null : (
           <Sequence
@@ -431,7 +425,7 @@ export const AgentsDemo: React.FC = () => {
         ),
       )}
 
-      {/* Success chirp ~2/3 into scenes with a successful command output. */}
+      {}
       {SCENES.map((s, i) =>
         successScenes.has(s.id) ? (
           <Sequence
@@ -448,7 +442,7 @@ export const AgentsDemo: React.FC = () => {
         ) : null,
       )}
 
-      {/* Keystroke tick on prompt appearance for each scene. */}
+      {}
       {SCENES.map((s, i) => (
         <Sequence
           key={`k-${s.id}`}

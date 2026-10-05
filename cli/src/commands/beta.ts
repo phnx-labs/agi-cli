@@ -1,8 +1,3 @@
-/**
- * `agents setup beta` — enable or disable preview features like factory.
- * Nested under setup because opting into a preview is machine configuration,
- * not its own noun (RUSH-2981).
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import {
@@ -18,9 +13,6 @@ const BETA_DESCRIPTIONS: Record<BetaFeatureName, string> = {
   factory: 'Cloud-based agent dispatch via Rush Factory',
 };
 
-// Features that used to be beta and are now always-on. `beta enable/disable` on
-// one of these is a friendly no-op, not an "Unknown beta feature" error — so
-// muscle memory and old bootstrap scripts survive the graduation.
 const GRADUATED_FEATURES = new Set<string>(['projects']);
 
 function parseFeatures(values: string[]): BetaFeatureName[] {
@@ -37,7 +29,6 @@ function parseFeatures(values: string[]): BetaFeatureName[] {
   return values.filter((v) => valid.has(v as BetaFeatureName)) as BetaFeatureName[];
 }
 
-/** Register `agents setup beta` under the parent `setup` command. */
 export function registerBetaCommands(setupCmd: Command): void {
   const beta = setupCmd
     .command('beta')
@@ -76,7 +67,7 @@ export function registerBetaCommands(setupCmd: Command): void {
     .description('Enable one or more beta features.')
     .action((features: string[]) => {
       const parsed = parseFeatures(features);
-      if (parsed.length === 0) return; // only graduated/no-op names
+      if (parsed.length === 0) return;
       const result = setBetaEnabled(parsed, true);
       console.log(chalk.green(`Enabled: ${parsed.join(', ')}`));
       console.log(chalk.gray(`Saved to ${result.path}`));
@@ -87,7 +78,7 @@ export function registerBetaCommands(setupCmd: Command): void {
     .description('Disable one or more beta features.')
     .action((features: string[]) => {
       const parsed = parseFeatures(features);
-      if (parsed.length === 0) return; // only graduated/no-op names
+      if (parsed.length === 0) return;
       const result = setBetaEnabled(parsed, false);
       console.log(chalk.green(`Disabled: ${parsed.join(', ')}`));
       console.log(chalk.gray(`Saved to ${result.path}`));

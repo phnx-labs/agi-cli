@@ -1,13 +1,3 @@
-/**
- * Cost command — roll up $ spend and wall-clock duration across the local,
- * cross-agent session index.
- *
- * This is the read side of issue #323. Cost and duration are computed and
- * persisted at scan time (see src/lib/session/discover.ts + db.ts); this
- * command only queries and renders them — a pure SQLite/CLI win, no server,
- * no telemetry. Distinct from `agents view`, which reports live rate-limit /
- * quota status per agent and is left untouched.
- */
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
@@ -30,7 +20,6 @@ interface CostOptions {
   by?: string;
 }
 
-/** Register `agents insights cost` under the insights parent. */
 export function registerCostCommand(insightsCmd: Command): void {
   addHostOption(insightsCmd.command('cost'))
     .description('Roll up $ cost and duration across local agent sessions')
@@ -47,18 +36,11 @@ Examples:
 
 Cost is computed offline from a versioned per-model price table (${PRICING_VERSION}).
 `)
-    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide by name
-    // with the `insights` parent's own options, so commander binds them to the
-    // parent at parse time and the leaf's plain opts() never sees them. Merging
-    // ancestor opts is what the sibling `insights mix` recipes already do
-    // (mix-commands.ts) — without it every flag on this command is silently
-    // dropped (e.g. `agents insights cost --json` printed the human table).
     .action(async (_options: CostOptions, command: Command) => {
       await costAction(command.optsWithGlobals() as CostOptions);
     });
 }
 
-/** Map the --by flag to a rollup group, rejecting unknown values. */
 function resolveGroup(by: string | undefined): UsageRollupGroup {
   if (by === undefined) return 'agent';
   if (by === 'agent' || by === 'project' || by === 'day' || by === 'model' || by === 'account') return by;
@@ -69,7 +51,6 @@ function resolveGroup(by: string | undefined): UsageRollupGroup {
 async function costAction(options: CostOptions): Promise<void> {
   const sinceMs = options.since ? parseTimeFilter(options.since) : undefined;
 
-  // Ensure the index is fresh (and migrated to v6) before we read costs.
   await discoverSessions({ all: true, since: options.since, limit: 1 });
 
   const filter: QueryOptions = {};
@@ -126,14 +107,12 @@ async function costAction(options: CostOptions): Promise<void> {
   );
   out.push('');
 
-  // Daily histogram (unicode block sparkline, zero deps).
   if (daily.length > 0) {
     out.push(chalk.bold('Daily'));
     out.push(renderDailyHistogram(daily));
     out.push('');
   }
 
-  // Top sessions by cost.
   if (top.length > 0) {
     out.push(chalk.bold('Top sessions by cost'));
     const cols = terminalWidth();
@@ -154,7 +133,6 @@ async function costAction(options: CostOptions): Promise<void> {
     out.push('');
   }
 
-  // Per-agent / per-project / per-day breakdown.
   const groupLabel = groupBy === 'agent' ? 'agent'
     : groupBy === 'project' ? 'project'
     : groupBy === 'account' ? 'account'
@@ -181,12 +159,9 @@ async function costAction(options: CostOptions): Promise<void> {
   console.log(out.join('\n'));
 }
 
-/** Eight levels of vertical block characters for sparkline rendering. */
 const BLOCKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
-/** Render a per-day cost histogram as a unicode sparkline plus a labeled list. */
 function renderDailyHistogram(daily: Array<{ key: string; costUsd: number }>): string {
-  // Daily comes back cost-desc; show it chronologically for the sparkline.
   const sorted = [...daily].sort((a, b) => a.key.localeCompare(b.key));
   const max = Math.max(...sorted.map(d => d.costUsd), 0);
   const spark = sorted
@@ -198,7 +173,6 @@ function renderDailyHistogram(daily: Array<{ key: string; costUsd: number }>): s
     .join('');
 
   const lines: string[] = [`  ${chalk.green(spark)}`];
-  // Show the most expensive days as a short list under the sparkline.
   const topDays = [...daily].slice(0, 7);
   const costW = Math.max(...topDays.map(d => formatUsd(d.costUsd).length), 4);
   for (const d of topDays) {

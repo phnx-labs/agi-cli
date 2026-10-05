@@ -1,12 +1,7 @@
-# Defense-in-depth on top of package.json "files" allowlist.
-# Anything here is excluded from the published tarball even if
-# "files" is widened by mistake.
 
-# Repo-maintenance scripts (contain personal/internal data)
 scripts/scrub-history.sh
 scripts/rebuild-sqlite.sh
 
-# Build/test/dev artifacts
 **/*.map
 **/*.test.js
 **/*.test.d.ts
@@ -21,7 +16,6 @@ packages/
 assets/
 src/
 
-# Local debug / config
 error.log
 *.log
 .env
@@ -30,12 +24,10 @@ error.log
 .DS_Store
 .plans/
 
-# Editor / VCS
 .vscode/
 .idea/
 .git/
 .github/
 
-# Lockfiles & node-modules (npm handles these itself)
 node_modules/
 bun.lock

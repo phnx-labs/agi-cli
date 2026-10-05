@@ -1,43 +1,3 @@
-/**
- * `agents browser` — the consumer surface over the standalone `browser` CLI
- * (@phnx-labs/browser-cli, PHNX-4101).
- *
- * WHAT THIS FILE IS NOW. Every verb below forwards its arguments verbatim to the
- * standalone engine and propagates its exit code. agents-cli contributes what the
- * engine cannot know, carried on the fd-3 context (`lib/browser/context.ts`):
- *
- *   1. `--device <name>` resolved against the fleet — the device registry, ssh
- *      identity and platform — so the engine drives the right remote box without
- *      a fleet registry of its own (it matches the alias against `context.target`,
- *      then `~/.ssh/config`);
- *   2. whether THIS machine consents to being driven by a peer
- *      (`browser.remote-control`); the engine enforces the resolved flag;
- *   3. the acting actor and agent session, so an action lands in the right
- *      session history.
- *
- * The engine streams back the actions it performed on fd 4, and agents-cli — which
- * owns `sessions.db` — records each into the durable `browser_sessions` row that
- * `agents browser sessions` and `agents sessions --browser` read
- * (`lib/browser/record.ts`).
- *
- * THE REMOTE PATH IS THE ENGINE's. `--device <name>` is resolved to an ssh target
- * here and forwarded verbatim (the engine binds the device once at `start` and
- * runs page verbs against the task's bound device). agents-cli opens no tunnel and
- * publishes no endpoint: the engine owns the CDP/BiDi/Arc drivers, the IPC service,
- * the chrome-data store and the profile declarations, keeping every on-disk path
- * the in-repo subsystem used (integration contract §4).
- *
- * WHY VERB FLAGS ARE NOT REDECLARED HERE. Each passthrough verb takes everything
- * as opaque operands via `allowUnknownOption`. Mirroring the engine's flags would
- * create a second, silently drifting copy of its surface: a flag added upstream
- * would be rejected here as unknown until someone noticed. The engine also owns
- * per-verb `--help` for the same reason. What agents-cli keeps is the verb CATALOG
- * — names, one-line descriptions, help groups — because that is what makes the
- * surface discoverable from `agents browser --help`.
- *
- * `sessions` is the one verb that never reaches the engine: it reads agents-cli's
- * own capture/session history (`browser-sessions-picker.ts`).
- */
 
 import { Command } from 'commander';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -50,8 +10,6 @@ import {
 } from '../lib/browser-client.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 
-// Help groups — mirror the standalone `browser --help` so the mental model
-// carries over, and mirror `agents computer` where the two surfaces overlap.
 const BROWSER_HELP_GROUPS = [
   { title: 'Session lifecycle', names: ['use', 'start', 'done', 'status', 'prune'] },
   { title: 'Fast action loop', names: ['stream'] },
@@ -61,18 +19,6 @@ const BROWSER_HELP_GROUPS = [
   { title: 'Other', names: ['profiles', 'remote-control', 'stop', 'show', 'tab', 'ps', 'tasks', 'hover', 'scroll', 'upload', 'set', 'devices', 'download', 'waitdownload'] },
 ] as const;
 
-/**
- * The verb catalog. Descriptions are the consumer's (they appear in
- * `agents browser --help`); flags are the engine's.
- *
- * This list is the contract with the engine: a verb the engine drops should fail
- * loud here rather than silently vanish, and `browser.test.ts` pins the names so a
- * drift shows up as a failing test. `sessions` is deliberately NOT in the list —
- * it is agents-cli's own reader, registered separately.
- *
- * `start` is the ONE verb that resolves `--device`; the engine binds the device
- * there and rejects `--device` on the page verbs itself.
- */
 export const BROWSER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; description: string }> = [
   { name: 'use', description: 'Pick the profile `agents browser start` uses when no --profile is passed' },
   { name: 'start', description: 'Start a browser task — --profile/--url/--record/--title, and --device <name> to bind a remote box' },
@@ -113,11 +59,6 @@ export const BROWSER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; descriptio
   { name: 'waitdownload', description: 'Wait for a download to complete' },
 ];
 
-/**
- * Peek `--device <name>` (or `--device=name`) out of a raw argv without consuming
- * it — the flag is forwarded to the engine verbatim, and agents-cli only reads it
- * to resolve the fleet target for the fd-3 context. Pure, so it is unit-testable.
- */
 export function peekDevice(argv: string[]): string | undefined {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -127,18 +68,9 @@ export function peekDevice(argv: string[]): string | undefined {
   return undefined;
 }
 
-/**
- * Forward one invocation to the engine and propagate its exit code.
- *
- * A missing standalone is the one failure agents-cli reports itself, because it
- * is the one the engine cannot: it prints the install line and exits 1. There is
- * no fallback engine to reach for — that is the point of the extraction.
- */
 async function forwardToBrowser(opts: {
   argv: string[];
-  /** `--device <name>`, resolved to the fd-3 target. Only `start` sets it. */
   device?: string;
-  /** Read the engine's stdout instead of letting it reach the terminal. */
   capture?: boolean;
 }): Promise<{ exitCode: number; stdout: string }> {
   try {
@@ -161,21 +93,11 @@ async function forwardToBrowser(opts: {
   });
 }
 
-/** Forward, then exit with the engine's status so shells and agents see the truth. */
 async function forwardAndExit(opts: Parameters<typeof forwardToBrowser>[0]): Promise<void> {
   const { exitCode } = await forwardToBrowser(opts);
   if (exitCode !== 0) process.exit(exitCode);
 }
 
-/**
- * Register every plain verb as an opaque forwarder.
- *
- * `allowUnknownOption` is what makes this thin: commander stops trying to parse
- * flags it does not own and hands them through in `cmd.args`, so the engine's flag
- * surface (and its `tab`/`set`/`record`/`profiles` subverbs) can grow without a
- * matching edit here. `start` resolves `--device` from the raw args for the fd-3
- * target; every other verb forwards it (and lets the engine reject a stray one).
- */
 function registerPassthroughVerbs(program: Command): void {
   for (const verb of BROWSER_PASSTHROUGH_VERBS) {
     program
@@ -192,10 +114,6 @@ function registerPassthroughVerbs(program: Command): void {
   }
 }
 
-// sessions — task-first history over the on-disk captures + `browser_sessions`
-// rows (RUSH-2407), the browser counterpart of `agents computer sessions`. It
-// reads agents-cli's own store, so it never reaches the engine. `agents sessions
-// --browser` (sessions.ts) routes to the same runBrowserSessionsCommand.
 function registerSessionsCommand(program: Command): void {
   program
     .command('sessions')

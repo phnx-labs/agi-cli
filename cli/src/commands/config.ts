@@ -1,17 +1,3 @@
-/**
- * Unified configuration command barrel.
- *
- * `agents config` consolidates the fragmented config surface into one namespace:
- *   - run defaults (model, mode, effort)
- *   - tier overrides (folded into the run namespace)
- *   - interactive host
- *   - browser profile
- *   - local projects root
- *   - per-device config keys
- *
- * The underlying YAML schema is unchanged; this command translates the new key
- * grammar into reads/writes of the existing stores.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -67,7 +53,6 @@ interface ConfigListOptions {
 }
 
 
-/** Parse a boolean value the same way `agents devices configure` does. */
 function parseBool(value: string, key: string): boolean {
   const v = value.trim().toLowerCase();
   if (v === 'on' || v === 'true') return true;
@@ -75,10 +60,6 @@ function parseBool(value: string, key: string): boolean {
   throw new Error(`Config key '${key}' expects a boolean ('on' or 'off'), got '${value}'.`);
 }
 
-/**
- * A list value replaces the whole list: a JSON array of strings (what a program
- * writes, safe for any name) or comma-separated items (what a person types).
- */
 function parseStringList(raw: string, key: string): string[] {
   const text = raw.trim();
   if (!text.startsWith('[')) return text.split(',').map((item) => item.trim());
@@ -94,7 +75,6 @@ function parseStringList(raw: string, key: string): string[] {
   return parsed as string[];
 }
 
-/** Parse the value for a given key, enforcing type rules. */
 function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown {
   switch (parsed.scope) {
     case 'run':
@@ -112,8 +92,6 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
     case 'updates':
       return parseBool(raw, key);
     case 'menubar': {
-      // The type (and enum validation) live in the device-config spec; parse the
-      // raw string to that type here so setConfigValue's assertion passes.
       const spec = configKeySpec(formatConfigKey(parsed));
       if (spec.type === 'bool') return parseBool(raw, key);
       if (spec.type === 'int') {
@@ -155,18 +133,12 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'computer.host':
           return raw.trim();
       }
-      // A device property with no arm above used to fall out of the switch and
-      // return `undefined`, so the write failed downstream with "expects a
-      // boolean, got undefined" instead of naming the real gap. The `never`
-      // binding makes adding a DeviceConfigProperty without a parse rule a
-      // compile error rather than a runtime mystery.
       const unhandled: never = property;
       throw new Error(`Config key '${key}' has no parse rule for device property '${String(unhandled)}'.`);
     }
   }
 }
 
-/** Write a value for a parsed config key. */
 function setConfig(parsed: ParsedConfigKey, value: unknown): void {
   switch (parsed.scope) {
     case 'run': {
@@ -194,14 +166,9 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
     }
     case 'browser': {
       if (parsed.property === 'device') {
-        // Fleet hub: user scope, one central value, never peer-targeted.
         setConfigValue('browser.device', value as string);
         return;
       }
-      // Device-local default lives in the per-device doc's config: block
-      // (same store `agents devices config` / getConfigValue use). Bare
-      // browser.profile targets this machine; devices.<name>.browser.profile
-      // targets a peer.
       setConfigValue(
         parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         value as string,
@@ -238,7 +205,6 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
   }
 }
 
-/** Unset a parsed config key. */
 function unsetConfig(parsed: ParsedConfigKey): boolean {
   switch (parsed.scope) {
     case 'run': {
@@ -265,9 +231,6 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
         return had;
       }
       const target = parsed.device ? { device: parsed.device } : undefined;
-      // Must follow parsed.property. Hardcoding 'browser.profile' here meant
-      // `config unset browser.viewer` deleted the user's browser.profile while
-      // printing success, and left browserViewer in place.
       const name = parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile';
       const had = getConfigValue(name, target).value !== undefined;
       unsetConfigValue(name, target);
@@ -275,11 +238,6 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
     }
     case 'project': {
       const had = getProjectRoot() !== undefined;
-      // `projectRoot` is a machine-local key that `writeMeta` persists to the
-      // device doc; it only clears that doc when the key is PRESENT-but-falsy
-      // (`writesProjectRoot` needs the own-property, state.ts). Dropping the key
-      // from the returned object left the device-doc value in place, so
-      // `config get` still returned it after unset. Set it undefined instead.
       updateMeta((meta) => ({ ...meta, projectRoot: undefined }));
       return had;
     }
@@ -314,7 +272,6 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
   }
 }
 
-/** Read the stored value for a parsed config key. */
 function getConfig(parsed: ParsedConfigKey): unknown {
   switch (parsed.scope) {
     case 'run': {
@@ -352,14 +309,12 @@ function getConfig(parsed: ParsedConfigKey): unknown {
   }
 }
 
-/** Format a config value for display. */
 function formatValue(value: unknown): string {
   if (value === undefined) return chalk.gray('(unset)');
   if (typeof value === 'boolean') return value ? chalk.green('true') : chalk.red('false');
   return chalk.cyan(JSON.stringify(value));
 }
 
-/** Collect all set config entries for a given device scope (self or peer). */
 function* listRunConfigEntries(): Generator<{ key: string; value: unknown; hint: string }> {
   const meta = readMeta();
   for (const [selector, defaults] of Object.entries(meta.run?.defaults ?? {})) {
@@ -388,7 +343,6 @@ function* listRunConfigEntries(): Generator<{ key: string; value: unknown; hint:
   }
 }
 
-/** Collect central non-run config entries. */
 function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; hint: string }> {
   const meta = readMeta();
   if (meta.config?.interactiveHost !== undefined) {
@@ -400,8 +354,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   if (meta.projectRoot !== undefined) {
     yield { key: 'project.root', value: meta.projectRoot, hint: 'devices.<self>.projectRoot' };
   }
-  // This machine's default browser profile lives in fleet.devices.<self>.config
-  // (device-config), not the legacy top-level Meta.defaultBrowserProfile field.
   const browserProfile = getConfigValue('browser.profile').value;
   if (browserProfile !== undefined) {
     const key = 'browser.profile';
@@ -414,15 +366,12 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     yield { key, value: browserViewer, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
 
-  // Fleet browser hub — user scope, so it belongs in the central listing next to
-  // its siblings. Omitting it repeats the browser.viewer invisibility bug.
   const browserDevice = getConfigValue('browser.device').value;
   if (browserDevice !== undefined) {
     const key = 'browser.device';
     yield { key, value: browserDevice, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
 
-  // Session-summarizer keys (PHNX-3939) — user scope, syncs fleet-wide.
   for (const key of ['summarizer.enabled', 'summarizer.baseUrl', 'summarizer.model'] as const) {
     const value = getConfigValue(key).value;
     if (value !== undefined) {
@@ -430,7 +379,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     }
   }
 
-  // Managed-harness auto-update switches (PHNX-3940) — user scope, syncs fleet-wide.
   const globalAutoUpdate = rawGlobalAutoUpdateSetting();
   if (globalAutoUpdate !== undefined) {
     yield { key: 'updates.auto', value: globalAutoUpdate, hint: configKeyStorageHint(parseConfigKey('updates.auto')) };
@@ -443,8 +391,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     }
   }
 
-  // AGI Menu preferences (PHNX-3999) — user scope, syncs fleet-wide. Only set
-  // keys are listed; the native menu falls back to its own defaults for the rest.
   for (const prop of MENUBAR_MENU_PROPERTIES) {
     const key = `menubar.menu.${prop}`;
     const value = getConfigValue(key).value;
@@ -454,7 +400,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   }
 }
 
-/** Collect device-scope config entries. */
 function* listDeviceConfigEntries(device: string): Generator<{ key: string; value: unknown; hint: string }> {
   for (const entry of listConfig({ device })) {
     if (entry.value === undefined) continue;
@@ -489,13 +434,10 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         key = `${prefix}formFactor`;
         break;
       case 'browser.profile':
-        // The self device's default browser profile is already surfaced as the
-        // top-level `browser.profile` key; skip it here to avoid duplication.
         if (device === machineId()) continue;
         key = `${prefix}browser.profile`;
         break;
       case 'browser.viewer':
-        // Same duplication rule as browser.profile above.
         if (device === machineId()) continue;
         key = `${prefix}browser.viewer`;
         break;
@@ -503,12 +445,6 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         key = `${prefix}computer.host`;
         break;
       default:
-        // A `default: continue` here silently drops any device property with no
-        // arm — which is how browser.viewer was invisible to `config list` after
-        // being added everywhere else. This is the fourth switch enumerating
-        // DeviceConfigProperty; unlike parseValue's it cannot use a `never`
-        // binding (it must keep skipping properties that are deliberately not
-        // listed), so the completeness test in config.test.ts is the guard.
         continue;
     }
     yield { key, value: entry.value, hint: configKeyStorageHint(parseConfigKey(key)) };

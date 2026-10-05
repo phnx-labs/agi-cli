@@ -35,12 +35,10 @@ import { isSecretsClientError, pushBundleToHost, readAndResolveBundleEnv, readBu
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, assertUnambiguousNativeAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, type UnifiedAccount } from '../lib/account-registry.js';
 
-/** Comma-joined list of harnesses `accounts add` can drive today. */
 function addSupportedList(): string {
   return supportedAddHarnesses().join(', ');
 }
 
-/** Shared result printer for `accounts add` / `accounts login`. */
 function printAddResult(result: AddResult, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -67,7 +65,6 @@ function cleanCommandError(command: Command, err: unknown): never {
   command.error(err instanceof Error ? err.message : String(err), { exitCode: 1, code: 'accounts.error' });
 }
 
-/** Turn a thrown user-facing Error into commander's clean CLI error instead of Node's stack dump. */
 async function runAccountsAction(command: Command, fn: () => void | Promise<void>): Promise<void> {
   try {
     await fn();
@@ -83,13 +80,6 @@ export function parseBundleKey(raw: string): { bundle: string; key: string } {
   return { bundle: raw.slice(0, colon), key: raw.slice(colon + 1) };
 }
 
-/**
- * Copy one value out of an `agents secrets` bundle for `--from-secrets`. The
- * standalone reports failures only as codes, so the bundle, the key, and the
- * repair are named here — and existence is checked first, because a
- * prompt-free (`agentOnly`) read of a bundle that does not exist reports
- * LOCKED rather than NOT_FOUND.
- */
 async function secretFromBundle(raw: string): Promise<string> {
   const { bundle, key } = parseBundleKey(raw);
   let vars: Record<string, unknown>;
@@ -115,7 +105,6 @@ async function secretFromBundle(raw: string): Promise<string> {
   }
 }
 
-/** Interactive secret entry for add/set-key. Ctrl+C must not become accounts.error. */
 async function promptAccountSecret(message: string): Promise<string | null> {
   try {
     return await password({ message });
@@ -133,7 +122,7 @@ async function printAccounts(json: boolean, fleet = false, harnessRaw?: string):
   const harness = harnessRaw ? parseHarness(harnessRaw) : undefined;
   const catalog = await loadAccountCatalog();
   const note = secretsUnavailableNote(catalog);
-  if (note) console.error(chalk.yellow(note)); // stderr — never corrupts --json stdout
+  if (note) console.error(chalk.yellow(note));
   const native = harness ? catalog.native.filter((row) => row.agent === harness) : catalog.native;
   const providers = harness
     ? catalog.provider.filter((row) => row.harnesses.includes(harness))
@@ -157,7 +146,6 @@ async function printAccounts(json: boolean, fleet = false, harnessRaw?: string):
   console.log(renderAccountRows(native, { providers, harness, localDevice: machineId() }));
 }
 
-/** Compatibility export for tests/consumers; the canonical renderer is shared with view. */
 export function renderAccountList(
   native: NativeAccountCatalogRow[],
   providers: ProviderAccountCatalogRow[] = [],
@@ -176,7 +164,6 @@ function parseHarness(agentRaw: string): AgentId {
   return agentRaw as AgentId;
 }
 
-/** Every account (native + provider) registered/usable for this harness, oldest-first by name. */
 function accountsForHarness(agent: AgentId): UnifiedAccount[] {
   const meta = readMeta();
   const native = listNativeAccounts(meta).filter(account => account.agent === agent);
@@ -186,20 +173,12 @@ function accountsForHarness(agent: AgentId): UnifiedAccount[] {
   return [...native, ...providers].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Named accounts that `accounts default` can pin for this harness. */
 export async function listSwitchableAccounts(agent: AgentId): Promise<UnifiedAccount[]> {
   return accountsForHarness(agent);
 }
 
-/**
- * Pin the per-harness default — the `accounts default` write path.
- * Provider accounts must authenticate the harness; native accounts must belong to it.
- */
 export function setDefaultAccount(agentRaw: string, name: string): { agent: AgentId; account: UnifiedAccount } {
   const agent = parseHarness(agentRaw);
-  // Scope to the harness this default is FOR: a bare identity (`<email>`) matches
-  // every harness that identity is signed into, so an un-scoped lookup resolved
-  // the wrong row and then rejected it as "is a <other> login" just below.
   const account = findUnifiedAccount(name, readMeta(), undefined, agent);
   if (!account) throw new Error(`Unknown account '${name}'.`);
   if (account.kind === 'provider') {
@@ -208,16 +187,8 @@ export function setDefaultAccount(agentRaw: string, name: string): { agent: Agen
     if (account.agent !== agent) {
       throw new Error(`Account '${account.name}' is a ${account.agent} login and cannot be the default for ${agent}.`);
     }
-    // Adopted harnesses isolate by slot + symlink, not a version home, so the
-    // nameable-by-version-home gate does not apply to `accounts default`.
     if (!isSymlinkAdoptedHarness(agent)) assertNativeAccountNameable(account.agent);
   }
-  // Reference by NAME, not id: defaults sync fleet-wide with `agents repo push/pull`
-  // while account ids are minted per-device, so an id ref breaks on every other
-  // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
-  // registry resolves both, and existing uuid entries still resolve.
-  // Repoint first: a written default whose symlink still points at another
-  // account is a wrong home that looks like success.
   if (account.kind === 'native') ensureAdoptedDefaultRepoint(agent, account, readMeta());
   updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.name } } }));
   return { agent, account };
@@ -284,12 +255,6 @@ export async function runAccountsDefault(
   console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
 }
 
-/**
- * Parse a `logout` target into its parts (pure). Supports `<harness>`,
- * `<harness>@<label>`, `<harness>#<account>`, and a bare account name (no
- * harness). `#` binds tighter than `@` so a `<harness>#<label>` selector is
- * never mis-split on a `@` inside the selector.
- */
 export function parseLogoutTarget(target: string): { agentRaw: string; installationLabel?: string; identitySelector?: string } {
   const hash = target.indexOf('#');
   if (hash > 0) {
@@ -304,7 +269,6 @@ export function parseLogoutTarget(target: string): { agentRaw: string; installat
   return { agentRaw: target };
 }
 
-/** Explicit account logout must never fall back to another account's home. */
 async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native' }): Promise<string> {
   const rows = await collectNativeHomeRows();
   const homes = rows
@@ -319,11 +283,6 @@ async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native
   return label;
 }
 
-/**
- * Resolve a `logout` target to the exact `(agent, installed label)` whose home
- * should be signed out — honoring a passed `@label` or `#account` selector
- * instead of always selecting the global default (PHNX-3940).
- */
 export async function resolveLogoutTarget(target: string): Promise<{ agent: AgentId; version: string }> {
   const parsed = parseLogoutTarget(target);
   const meta = readMeta();
@@ -355,7 +314,6 @@ export async function resolveLogoutTarget(target: string): Promise<{ agent: Agen
     if (!version) throw new Error(`No installed version of ${agent}. Install one with: agents add ${agent}`);
     return { agent, version };
   }
-  // A bare, non-harness target may be a native account name.
   const account = findUnifiedAccount(target, meta);
   if (account?.kind === 'native') {
     return { agent: account.agent, version: await resolveAccountHomeLabel(account) };
@@ -408,7 +366,6 @@ agents accounts list --fleet`,
         const agent = resolveAgentName(target);
         const providerFlags = o.provider !== undefined || o.auth !== undefined || o.baseUrl !== undefined || o.fromSecrets !== undefined;
         if (agent) {
-          // Harness form: an account is a credential slot, not a bundle.
           if (providerFlags) {
             throw new Error(
               `'${target}' is a harness id — mixing the harness and provider forms is ambiguous. `
@@ -428,7 +385,6 @@ agents accounts list --fleet`,
           printAddResult(result, json);
           return;
         }
-        // Provider form (the pre-v2 `accounts add <name> --provider …`).
         if (o.apiKey !== undefined || o.perDevice || o.workerToken === false) {
           throw new Error(`'${target}' is not a harness id — --api-key/--per-device/--no-worker-token belong to the harness form: agents accounts add <harness> [name].`);
         }
@@ -675,9 +631,6 @@ agents accounts rename codex#icloud cloud`,
           );
         }
         const { agent } = await resolveLogoutTarget(target);
-        // Acquire the per-harness auth-operation mutex before logout — a concurrent
-        // connect for the same harness could allocate and install into the same home
-        // while this logout is in-flight, leaving the home in an ambiguous state.
         const lock = acquireAuthOperationLock(agent);
         try {
           const resolved = await resolveLogoutTarget(target);
@@ -686,10 +639,6 @@ agents accounts rename codex#icloud cloud`,
           const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
           const { getVersionHomePath } = await import('../lib/installations/versions.js');
           const { buildExecEnv } = await import('../lib/exec.js');
-          // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
-          // the resolved home so `logout` signs out THAT account's home — not
-          // whichever the global default happens to be. HOME alone was insufficient
-          // for a config-dir-env harness, which is why a passed @label was ignored.
           const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
           env.HOME = getVersionHomePath(agent, version);
           lock.assertHeld();

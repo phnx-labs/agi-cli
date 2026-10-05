@@ -1,11 +1,3 @@
-/**
- * Tests for the pure grouping function backing `agents sessions --active`.
- *
- * The renderer (renderActiveSessions) couples grouping with chalk+console
- * output, which is awkward to assert against. groupActiveSessions extracts
- * the logic so workspace/window splits, sort orders, and the cloud/unknown
- * bucket rules can be tested in isolation.
- */
 
 import { describe, it, expect } from 'vitest';
 import { groupActiveSessions } from '../sessions.js';
@@ -59,7 +51,6 @@ describe('groupActiveSessions — workspace splitting', () => {
       mk({ cwd: '/banana', sessionId: '4' }),
       mk({ cwd: '/banana', sessionId: '5' }),
     ]);
-    // /apple and /banana tie at 2 each → alphabetical → /apple, /banana, /zebra
     expect(layout.workspaces.map((w) => w.key)).toEqual(['/apple', '/banana', '/zebra']);
   });
 });
@@ -70,12 +61,11 @@ describe('groupActiveSessions — window splitting within a workspace', () => {
       mk({ cwd: '/r', context: 'terminal', windowId: 'win-100', sessionId: 't1', startedAtMs: 100 }),
       mk({ cwd: '/r', context: 'terminal', windowId: 'win-100', sessionId: 't2', startedAtMs: 200 }),
       mk({ cwd: '/r', context: 'terminal', windowId: 'win-200', sessionId: 't3', startedAtMs: 50 }),
-      mk({ cwd: '/r', context: 'terminal', sessionId: 'orphan', startedAtMs: 1 }),       // no windowId → flat
-      mk({ cwd: '/r', context: 'cloud', sessionId: 'cloud-in-r', startedAtMs: 2 }),       // cloud → flat
+      mk({ cwd: '/r', context: 'terminal', sessionId: 'orphan', startedAtMs: 1 }),
+      mk({ cwd: '/r', context: 'cloud', sessionId: 'cloud-in-r', startedAtMs: 2 }),
     ]);
     const ws = layout.workspaces[0];
     expect(ws.windows).toHaveLength(2);
-    // Windows sort by oldest startedAtMs: win-200 (50) before win-100 (100).
     expect(ws.windows[0].windowId).toBe('win-200');
     expect(ws.windows[1].windowId).toBe('win-100');
     expect(ws.flat.map((s) => s.sessionId)).toEqual(['orphan', 'cloud-in-r']);
@@ -96,7 +86,6 @@ describe('groupActiveSessions — window splitting within a workspace', () => {
       mk({ cwd: '/r', context: 'terminal', windowId: 'has-time', sessionId: 't1', startedAtMs: 500 }),
       mk({ cwd: '/r', context: 'terminal', windowId: 'no-time', sessionId: 't2' }),
     ]);
-    // has-time (500) sorts before no-time (Infinity).
     expect(layout.workspaces[0].windows[0].windowId).toBe('has-time');
     expect(layout.workspaces[0].windows[1].windowId).toBe('no-time');
   });

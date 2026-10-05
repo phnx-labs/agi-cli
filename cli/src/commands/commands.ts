@@ -1,11 +1,3 @@
-/**
- * Slash command management for extending agents with custom markdown commands.
- *
- * Implements `agents commands` -- list, add, remove, sync, prune, and view
- * markdown files that agents invoke mid-session as slash commands. Central
- * storage lives in ~/.agents/commands/ and commands are synced to individual
- * version homes.
- */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -68,7 +60,6 @@ import {
   resolveListFilterOrExit,
 } from './utils.js';
 
-/** Register the `agents commands` command tree (list, add, remove, sync, prune, view). */
 export function registerCommandsCommands(program: Command): void {
   const commandsCmd = program
     .command('commands')
@@ -166,7 +157,6 @@ Examples:
         let fromCentral = false;
 
         if (!source) {
-          // Interactive mode: pick from central storage
           const centralCommands = listCentralCommands();
           if (centralCommands.length === 0) {
             console.log(chalk.yellow('No commands in ~/.agents/commands/'));
@@ -194,7 +184,6 @@ Examples:
               ]);
             }
 
-            // Build choices with descriptions
             const choices = centralCommands.map((name) => {
               const cmdPath = path.join(getCommandsDir(), `${name}.md`);
               let description = '';
@@ -230,7 +219,6 @@ Examples:
           commands = selectedNames.map((name) => ({ name, description: '' }));
           fromCentral = true;
         } else {
-          // Source provided: fetch from repo or local path
           const spinner = ora('Fetching commands...').start();
 
           const isGitRepo = source.startsWith('gh:') || source.startsWith('git:') ||
@@ -268,7 +256,6 @@ Examples:
 
           commands = discovered;
 
-          // Install to central storage first
           const installSpinner = ora('Installing commands to central storage...').start();
           let installed = 0;
 
@@ -289,7 +276,6 @@ Examples:
           installSpinner.succeed(`Installed ${installed} commands to ~/.agents/commands/`);
         }
 
-        // Get agent and version selection
         let selectedAgents: AgentId[];
         let versionSelections: Map<AgentId, string[]>;
 
@@ -314,7 +300,6 @@ Examples:
           return;
         }
 
-        // Sync to selected versions
         const syncSpinner = ora('Syncing to agent versions...').start();
         let synced = 0;
         const commandNames = commands.map((c) => c.name);
@@ -358,7 +343,6 @@ Examples:
   agents commands remove
 `)
     .action(async (name?: string, options?: { agents?: string }) => {
-      // Build map of command -> targets for all installed versions
       type CmdTargetInfo = { name: string; targets: Array<{ agent: AgentId; version: string }> };
       const cmdTargetMap = new Map<string, CmdTargetInfo>();
 
@@ -429,9 +413,6 @@ Examples:
           continue;
         }
 
-        // Filter by --agents if specified. Routes through resolveInstalledAgentTargets
-        // so the same selector syntax used everywhere else (agent, agent@default,
-        // agent@x.y.z, agent@all, literal all) works here too.
         let availableTargets = cmdInfo.targets;
         if (options?.agents) {
           const requestedTargets = resolveInstalledAgentTargets(options.agents, capableAgents('commands'));
@@ -488,7 +469,6 @@ Examples:
       }
     });
 
-  // `commands prune` moved to the top-level `agents prune cleanup` command.
   commandsCmd
     .command('prune', { hidden: true })
     .allowUnknownOption()
@@ -511,7 +491,6 @@ Examples:
   agents commands view
 `)
     .action(async (name?: string) => {
-      // If no name provided, show interactive select
       if (!name) {
         const centralCommands = listCentralCommands();
         if (centralCommands.length === 0) {
@@ -551,14 +530,12 @@ Examples:
 
       const { renderMarkdown } = await import('../lib/markdown.js');
 
-      // Build header
       console.log(chalk.bold(`\n${command.name}`));
       if (command.description) {
         console.log(`${command.description}`);
       }
       console.log(chalk.gray(`Path: ${command.path}\n`));
 
-      // Render markdown content
       if (command.content) {
         const rendered = renderMarkdown(command.content);
         const contentLines = command.content.split('\n');
@@ -567,10 +544,6 @@ Examples:
     });
 }
 
-/**
- * Build the row data for `agents commands list`. Each row = one central
- * command with a sync-status target per (agent, version) in scope.
- */
 function buildCommandRows(opts: {
   filterAgent?: AgentId;
   filterVersion?: string;

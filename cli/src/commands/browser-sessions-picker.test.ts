@@ -1,10 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { shouldOpenInteractiveBrowserSessions } from './browser-sessions-picker.js';
 
-// Pure interactive-routing gate — the picker itself needs a TTY and isn't
-// exercised here. This pins the flag precedence: --json / --open / an
-// explicit --no-interactive all must fall through to the static printer even
-// on a real terminal, and no flag combination opens the picker off a TTY.
 
 describe('shouldOpenInteractiveBrowserSessions', () => {
   it('opens on a bare TTY invocation', () => {
