@@ -309,6 +309,7 @@ type ReservedSyncPlanItem =
   | { action: 'push'; device: string; bundle: string; keys: string[] }
   | { action: 'skip'; device: string; reason: string };
 
+// Durable credentials flow headed-to-worker only; missing peer/account role truth fails closed.
 export function planReservedStoreSync(
   accounts: ReservedSyncAccount[],
   peers: ReservedSyncPeer[],
@@ -577,6 +578,7 @@ function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
   return harness === 'claude' ? isClaudeWorkerHomeSeeded(slotDir) : true;
 }
 
+// Delete a stale worker credential before its registry row, but retain the slot directory for transcripts.
 export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): ReconcileWorkerSlotsResult {
   const result: ReconcileWorkerSlotsResult = { provisioned: [], dropped: [], skipped: [], errors: [] };
   const role = 'selfRole' in deps ? deps.selfRole : selfConfiguredDeviceRole();

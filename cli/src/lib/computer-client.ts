@@ -1,48 +1,6 @@
-/**
- * computer-client.ts — the ONE process client through which agents-cli talks to
- * the standalone `computer` CLI (PHNX-4075).
- *
- * This is the agents-owned half of the computer extraction, and it is
- * deliberately small. agents-cli no longer carries a helper daemon, an RPC
- * transport, an element cache, an RFB client, or an autonomous loop — the
- * standalone engine owns all of it, exactly as `secrets` took the keychain
- * engine (PHNX-3989) and `sessions` took the transcript engine (PHNX-4012).
- * What stays here is what only the fleet CLI can know: which apps the
- * permissions layer allows, which device a `--device` name resolves to, who the
- * acting session is, and where an action must be recorded.
- *
- * THERE IS NO FALLBACK. A missing executable throws `COMPUTER_BIN_MISSING` with
- * install guidance (DIST-1) rather than silently driving a bundled engine —
- * agents-cli has none to drive, and a fallback would re-couple the two release
- * trains this extraction exists to separate.
- *
- * Transport — inherited-fd passthrough, not request/response:
- *
- * The engine's ENVIRONMENT is inherited verbatim — no overlay. Transport
- * selection (`COMPUTER_HELPER_TCP`, `COMPUTER_HELPER_VNC`,
- * `COMPUTER_HELPER_SOCKET`) is the engine's: it opens the `--device` tunnel and
- * hydrates its own endpoint AND the auth token that goes with it. Publishing a
- * bare endpoint from here would hand the daemon a connection it then rejects
- * with `auth_failed`.
- *
- *   - stdio 0/1/2 are INHERITED. The engine owns the user's terminal: its
- *     stdout is the command's stdout, its `--json` is the command's `--json`,
- *     its prompts reach a real tty. agents-cli never re-formats engine output,
- *     which is what keeps the surface honest as the engine evolves.
- *   - fd 3 (`COMPUTER_CONTEXT_FD`) carries ONE JSON object — the consumer
- *     context built by `lib/computer/context.ts` — written and closed
- *     immediately, so the engine reads to EOF and proceeds.
- *   - fd 4 (`COMPUTER_EVENTS_FD`) carries NDJSON action events back: one JSON
- *     object per line, each an action the engine actually performed. agents-cli
- *     turns those into feed events and `sessions --computer` history
- *     (`lib/computer/record.ts`). The engine may emit none; it must never block
- *     on this pipe.
- *
- * Both fds are anonymous pipes on the child's side, the same shape
- * `secrets-client.ts` settled on after a named FIFO wedged macOS reads. The
- * context is pushed rather than pulled so the engine needs no callback into
- * agents-cli — one direction each way, no reentrancy.
- */
+/* Thin client for the standalone computer CLI: no bundled fallback or duplicate engine. */
+/* stdio is inherited; fd3 sends one context object and fd4 receives NDJSON action events. */
+/* Anonymous one-way pipes avoid credentials in endpoint metadata and named-FIFO deadlocks. */
 
 import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';

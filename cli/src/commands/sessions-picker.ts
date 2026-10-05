@@ -59,6 +59,7 @@ export function githubRepoUrlFromCwd(cwd?: string): string | undefined {
   return m ? `https://github.com/${m[1]}` : undefined;
 }
 
+// Peer metadata is untrusted: bound its shape and strip terminal escapes before rendering.
 function sanitizeMeta(s: SessionMeta): SessionMeta {
   const clean = (v: string | undefined) => (v == null ? v : sanitizeForTerminal(v));
   const todos = s.todos
@@ -161,6 +162,7 @@ function remoteDigestForPreview(session: SessionMeta, machine: string): RemoteDi
   return pending;
 }
 
+// Remote links retain OSC-8 only for http(s); every other field is terminal-sanitized and size-bounded.
 export function sanitizeRemoteDigest(raw: unknown): SessionPreviewDigest | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const d = raw as Record<string, unknown>;
@@ -313,6 +315,7 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
     fileSize: sourceStamp.size,
   });
   if (!digest) {
+    // Large uncached transcripts use bounded tail plus bounded head, so a tail follow-up is never mislabeled as the first prompt.
     if (sourceStamp.size > PREVIEW_DIGEST_MAX_PARSE_BYTES) {
       events = readSessionTail(session.filePath, session.agent);
       digest = buildSessionPreviewDigest(events, safe);

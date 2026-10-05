@@ -2081,6 +2081,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         const versionHome = getVersionHomePath('claude', resolvedVersion ?? getGlobalDefault('claude') ?? '');
         const claudeAgentsDir = path.join(versionHome, '.claude', 'agents');
 
+        // allowedAgents copies only named definitions; an explicit empty list means none, and pruning touches only managed copies.
         const subagentsDir = path.join(workflowDir, 'subagents');
         const allowedAgents = workflowFrontmatter?.allowedAgents;
         if (fs.existsSync(subagentsDir)) {
@@ -2185,6 +2186,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               process.stderr.write(chalk.gray(`[workflow] kept Task tool: workflow ships subagents to dispatch\n`));
             }
           }
+          // Named MCP scope always writes strict config, even when no name resolves, so ambient servers cannot leak into the workflow.
           if (mcpServerNames && mcpServerNames.length > 0) {
             const servers = getMcpServersByName(mcpServerNames, { cwd });
             const found = new Set(servers.map(s => s.name));

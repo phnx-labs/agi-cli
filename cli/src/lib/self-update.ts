@@ -196,6 +196,7 @@ function isPackageRoot(dir: string): boolean {
   }
 }
 
+// Anchor to the physical running package; compiled Bun must use process.execPath rather than PATH or npm guesses.
 export function resolveRunningPackageRoot(
   dirname: string,
   execPath: string = process.execPath,
@@ -247,6 +248,7 @@ export function deriveGlobalPrefix(packageRoot: string): string {
   return path.basename(parent) === 'lib' ? path.dirname(parent) : parent;
 }
 
+// Sweep only npm's exact retired-sibling shape, never arbitrary neighboring directories.
 export async function sweepStaleInstallStaging(packageRoot: string): Promise<string[]> {
   const resolved = path.resolve(packageRoot);
   const dir = path.dirname(resolved);
@@ -274,6 +276,7 @@ export async function sweepStaleInstallStaging(packageRoot: string): Promise<str
   return swept;
 }
 
+// Package-manager installs never run lifecycle scripts; callers verify sha512, exact version, bins, and shims themselves.
 export async function installPackageIntoPrefix(spec: string, prefix: string, signal?: AbortSignal): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
@@ -286,6 +289,7 @@ export async function installPackageIntoPrefix(spec: string, prefix: string, sig
 
 export const INSTALL_SETTLE_MS = 60_000;
 
+// Foreign Bun version bumps require a quiet package.json and complete declared bins before relaunch.
 export function installLooksSettled(packageRoot: string, settleMs: number = INSTALL_SETTLE_MS, now: number = Date.now()): boolean {
   try {
     const pkgJsonPath = path.join(packageRoot, 'package.json');
@@ -306,6 +310,7 @@ export async function installPackageWithBun(spec: string, signal?: AbortSignal):
   await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], { shell: needsWindowsShell('bun'), signal });
 }
 
+// Fail closed on anything except the registry's sha512 bytes before handing a tarball to a package manager.
 export function verifyTarballIntegrity(tarball: Buffer, integrity: string): void {
   const dash = integrity.indexOf('-');
   if (dash <= 0) {
@@ -575,6 +580,7 @@ export function isTouchIdStormFixedVersion(version: string): boolean {
   return compareVersions(version, TOUCH_ID_STORM_FIXED_SINCE) >= 0;
 }
 
+// Never select the running root; a pre-fix install is removable only when a fixed peer prevents stranding the box.
 export function classifyRemovableAgentsCliInstalls(
   runningRoot: string,
   installs: AgentsCliInstall[],
@@ -646,6 +652,7 @@ export function purgeRemovableAgentsCliInstalls(
       result.skippedRunning += 1;
       continue;
     }
+    // Re-read package identity immediately before unlink so a raced or foreign tree cannot be deleted.
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8')) as {
         name?: unknown;

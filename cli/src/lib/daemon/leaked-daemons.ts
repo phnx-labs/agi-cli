@@ -15,6 +15,7 @@ export interface DaemonRunProcess {
   tokens: string[];
 }
 
+// A real daemon has __daemon-run as the final argv token; prompt text containing it is not identity.
 export function listDaemonRunProcesses(): DaemonRunProcess[] {
   if (process.platform === 'win32') return [];
   let out: string;
@@ -75,6 +76,7 @@ function processStartTime(pid: number): string | null {
   }
 }
 
+// Different-HOME processes are not duplicates; report only this uid's pid absent from manager and real-HOME owner records.
 export function findLeakedDaemons(): LeakedDaemon[] {
   const owned = new Set<number>();
   const recorded = readDaemonPid();

@@ -160,6 +160,7 @@ export async function publishAccountDaemonStateRows(
   });
 }
 
+// Collapse and notify by registered account id, never display email, so same-email organizations remain distinct.
 function transitionKey(row: AuthProbeRow): string {
   return `${row.agent}:${row.accountId ?? row.account ?? `version:${row.version}`}`;
 }
@@ -236,6 +237,7 @@ export async function processAccountAuthTransitions(
     }
   }
 
+  // Persist the transition to the outbox before notifying; delete only after success for at-least-once delivery.
   await writeTransitionState(file, next);
 
   const delivered: DeadAccountTransition[] = [];

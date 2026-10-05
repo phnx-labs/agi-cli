@@ -200,6 +200,7 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     process.exit(1);
   }
 
+  // Managed off-box backup requires client-side AES-GCM; BYO storage without a key warns explicitly.
   let encryptKey: Buffer | null;
   if (g.toR2 && managedBackupUserId) {
     encryptKey = await resolveManagedBackupKey(managedClient!, managedBackupUserId);
@@ -335,6 +336,7 @@ export function resolveR2BackupKey(): Buffer | null {
   return null;
 }
 
+// Remote pull is SSH-only and never combines per-host encryption keys.
 async function runRemoteExport(g: GlobalSelection, selectors: string[], command: Command): Promise<void> {
   if (g.encrypt) {
     process.stderr.write(chalk.yellow('Note: --encrypt is ignored with --device (the SSH stream is already encrypted). Encrypt a local bundle instead.\n'));
@@ -393,6 +395,7 @@ function resolveAgentShorthand(g: GlobalSelection): string | undefined {
   return undefined;
 }
 
+// An id-shaped selector that misses selects nothing; never widen it to content search and export unrelated transcripts.
 export function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[] {
   if (selectors.length === 0) return metas;
 

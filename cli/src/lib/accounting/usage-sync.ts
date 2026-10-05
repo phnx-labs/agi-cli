@@ -150,6 +150,7 @@ export interface PublishOwnFleetStateResult {
   errors: string[];
 }
 
+// Peer exchange carries usage, auth verdict, and session digests only; credentials never cross device roles.
 export async function publishOwnFleetState(
   options: PublishUsageSnapshotOptions = {},
 ): Promise<PublishOwnFleetStateResult> {
@@ -186,6 +187,7 @@ interface BuildPayloadOptions {
   errors?: string[];
 }
 
+// Workers never initiate or poll OAuth usage; only headed peers publish the usage rows they own.
 export function buildFleetStatePayload(options: BuildPayloadOptions = {}): FleetStateExchangePayload {
   const device = options.device ?? machineId();
   if (options.usageOnly) {
@@ -265,6 +267,7 @@ export interface ApplyPeerStateResult {
   receivedAt: number;
 }
 
+// Peer state is newest-wins and can never overwrite this device's own publisher file.
 export async function applyPeerFleetState(
   state: FleetSharedDeviceState,
   options: ApplyPeerStateOptions = {},
@@ -331,6 +334,7 @@ export interface ExchangeResult {
   outcomes: PeerExchangeOutcome[];
 }
 
+// Bound peers independently so one slow device cannot stall the rest of the exchange.
 export async function exchangeFleetStateWithPeers(options: ExchangeOptions = {}): Promise<ExchangeResult> {
   const device = options.device ?? machineId();
   const self = normalizeHost(device);

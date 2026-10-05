@@ -43,6 +43,7 @@ const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 
+// Redirected HOME instances namespace manager ids because launchd/systemd key by label/unit, not manifest path; tests must never unload production.
 export function productionDaemonServiceNames(): { systemdUnit: string; launchdLabel: string } {
   return { systemdUnit: SYSTEMD_UNIT, launchdLabel: PLIST_NAME };
 }
@@ -66,6 +67,7 @@ const DAEMON_THROTTLE_SECONDS = 30;
 
 export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
 
+// A scheduler gate reload has exactly four truthful outcomes: boot, reload, stop, or remain dark.
 type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
 
 export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
@@ -73,6 +75,7 @@ export function schedulerGateTransition(running: boolean, enabled: boolean): Sch
   return enabled ? 'boot' : 'none';
 }
 
+// Latch before the first await and never retry after rejection: daemon shutdown is single-shot.
 export function singleShot(fn: () => Promise<void>): () => Promise<void> {
   let ran = false;
   return async () => {
@@ -96,6 +99,7 @@ function getLockPath(): string {
   return path.join(ensureDaemonDir(), LOCK_FILE);
 }
 
+// Start, claim, and stop share this O_EXCL lifecycle lock; unreadable live identity is unverified, never stale.
 function acquireStartLock(): (() => void) | null {
   const lockPath = getLockPath();
   try {
@@ -172,6 +176,7 @@ export function removeDaemonPid(): void {
   }
 }
 
+// Remove registration only while it still names the owner observed by this cleanup.
 function removeDaemonPidIfOwned(pid: number): boolean {
   if (readDaemonPid() !== pid) return false;
   try { fs.unlinkSync(getPidPath()); } catch {  }
@@ -217,6 +222,7 @@ function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
 const STOP_GRACE_MS = 5000;
 const STOP_KILL_GRACE_MS = 2000;
 
+// A fresh heartbeat may repair a lost pid record; unknown identity is preserved so inspection failure cannot create a second daemon.
 function resolveLiveDaemonPid(repair: boolean = false): number | null {
   const pid = readDaemonPid();
   const pidIdentity = pid !== null ? daemonProcessIdentity(pid) : 'dead';
@@ -816,6 +822,7 @@ export async function runDaemon(): Promise<void> {
 
 
 
+  // Clear the start-failure streak only after every startup subsystem is live.
   recordSubsystemOk(SUBSYSTEM_DAEMON_START);
 
   const handleReload = () => {
@@ -883,6 +890,7 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
+  // Cleanup removes lifetime, pid, heartbeat, and registry state only when each still belongs to this instance.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
     await supervisor.stopAll();
@@ -930,6 +938,7 @@ function xmlEscape(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
+// Manifests are owner-only and carry only the canonical HOME/AGENTS_REAL_HOME/PATH surface.
 export function writeOwnerOnlyServiceManifest(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
@@ -1041,6 +1050,7 @@ export class RedirectedHomeDaemonError extends Error {
   override name = 'RedirectedHomeDaemonError';
 }
 
+// A redirected HOME daemon is invisible to production takeover and can outlive its sandbox, so explicit test opt-in is required.
 function assertDaemonLaunchHomeAllowed(): void {
   const suffix = isolatedHomeSuffix();
   if (!suffix) return;
@@ -1109,6 +1119,7 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   }
 }
 
+// Release the start lock before the child claims it; manager success is not health until pid/heartbeat proof appears.
 function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: number | null; method: string } {
   const platform = os.platform();
   const detachedFallback = (): { pid: number | null; method: string } => {
@@ -1361,6 +1372,7 @@ export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
   return findStateDirDaemonProcesses(exclude).live;
 }
 
+// Stop crosses the same lifecycle lock as start and claim, preventing teardown from racing takeover.
 export function stopDaemon(): DaemonStopResult {
   const releaseLock = acquireLifecycleLock();
   if (!releaseLock) {
@@ -1380,6 +1392,7 @@ export function stopDaemon(): DaemonStopResult {
   }
 }
 
+// Cleanup compares device+inode so a successor's newly-created path is never unlinked as stale residue.
 interface PathIdentity {
   dev: number;
   ino: number;

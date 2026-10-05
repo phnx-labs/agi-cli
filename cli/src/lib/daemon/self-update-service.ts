@@ -76,6 +76,7 @@ async function fetchLatestNpmMetadata(signal: AbortSignal): Promise<NpmLatestMet
   return { version: data.version, integrity: data.dist.integrity, tarball: data.dist.tarball };
 }
 
+// Exit is allowed only after tarball, installed version, shims, and global bin links are verified.
 export async function installAndVerifyDefault(
   metadata: NpmLatestMetadata,
   packageRoot: string,
@@ -146,6 +147,7 @@ function defaultSelfUpdateDeps(): SelfUpdateDeps {
   };
 }
 
+// Periodic and on-demand triggers share the actual in-flight install, not merely its caller's wait.
 let inFlightAttempt: Promise<SelfUpdateOutcome> | null = null;
 
 export async function attemptSelfUpdateAndExit(
@@ -173,6 +175,7 @@ async function runSelfUpdateAttempt(
 
   const current = deps.currentVersion();
   const installed = deps.installedVersion();
+  // Bun writes incrementally, so a newer on-disk version is trusted only after the install settles.
   if (installedIsNewerThanRunning(installed, current)) {
     if (!deps.installedIsSettled()) {
       ctx.log('INFO', `self-update: the install on disk is ${installed} (this daemon is running ${current}) but it is still settling; relaunch deferred to the next tick`);
@@ -208,6 +211,7 @@ async function runSelfUpdateAttempt(
     return { updated: false, reason: 'install or verify failed' };
   }
 
+  // Post-install repo and local reconciliation is best-effort after install verification succeeds.
   try {
     await deps.syncSystemRepo();
   } catch (err) {
@@ -225,6 +229,7 @@ async function runSelfUpdateAttempt(
   return { updated: true };
 }
 
+// Give an on-demand caller's IPC response time to flush before the supervised process exits.
 const SELF_UPDATE_EXIT_DELAY_MS = 250;
 
 let exitScheduled = false;

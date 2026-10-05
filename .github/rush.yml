@@ -1,3 +1,4 @@
 version: 1
 
+# Automated review stays paused because upstream auth capture can expose live credentials; keep this empty until fixed and use independent review.
 agents: []

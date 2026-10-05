@@ -91,6 +91,7 @@ export const IMMUTABLE_FIELD_KEYS = [
   'context',
 ] as const satisfies ReadonlyArray<keyof ImmutableSessionFields>;
 
+// Immutable transcript-mtime memoization must never absorb volatile status, activity, or preview truth.
 export const LIVE_STATUS_KEYS = [
   'status',
   'activity',
@@ -581,6 +582,7 @@ export async function loadFleetActiveSessions(
   };
 }
 
+// Daemon warm publishes this host only and never SSHes; readers may write fleet snapshots without becoming a second publisher.
 export async function publishLocalActiveSessions(
   opts: { gather?: () => Promise<ActiveSession[]>; nowMs?: number } = {},
 ): Promise<{ sessions: ActiveSession[]; capturedAt: number }> {

@@ -99,6 +99,7 @@ const SECRETS_TRANSPORT_CODES: ReadonlySet<string> = new Set([
   'IO_ERROR',
 ]);
 
+// Only transport failures may degrade to unavailable; policy and data errors remain authoritative.
 export function isSecretsTransportError(error: unknown): error is SecretsClientError {
   return error instanceof SecretsClientError && SECRETS_TRANSPORT_CODES.has(error.code);
 }
@@ -136,6 +137,7 @@ export function parseBundleValue(raw: BundleValue): { literal: string } | { ref:
 
 let cachedBin: string | undefined;
 
+// Resolution skips the legacy agents shim to avoid recursive secrets passthrough.
 export function resolveSecretsBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.SECRETS_BIN?.trim();
@@ -215,6 +217,7 @@ function parseResponse(raw: Buffer): unknown {
 }
 
 
+// Anonymous fd3/fd4 pipes keep secret bytes off disk; success waits for both response EOF and child exit.
 function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promise<unknown> {
   const { command, prefix } = invocation(resolveSecretsBin());
   const request = Buffer.from(JSON.stringify(buildRequest(op, args, context)));
@@ -591,6 +594,7 @@ function isLoaderOrInterpreterEnv(name: string): boolean {
   );
 }
 
+// Strip loader/interpreter injection variables before spawning the standalone secrets engine.
 export function sanitizeProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 
 
