@@ -20,7 +20,6 @@ import { setHelpSections } from '../lib/help.js';
 import type { AgentId } from '../lib/types.js';
 import { getGlobalDefault, listInstalledVersions, resolveVersion, resolveVersionAlias } from '../lib/installations/versions.js';
 
-/** Agents that show in the no-arg overview (skip hard-deprecated). */
 const MODE_AGENTS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
 interface Target {
@@ -29,7 +28,6 @@ interface Target {
   isDefault: boolean;
 }
 
-/** Register `agents modes [agent[@version]]`. */
 export function registerModesCommand(program: Command): void {
   const modes = program
     .command('modes [agentSpec]')
@@ -134,7 +132,6 @@ function resolveTargets(agentSpec: string | undefined): Target[] {
   }
 
   if (versionSpec) {
-    // resolveVersionAlias exits process if the concrete version is not installed.
     const version = resolveVersionAlias(agent, versionSpec) ?? null;
     return [{ agent, version, isDefault: version === getGlobalDefault(agent) }];
   }
@@ -174,7 +171,6 @@ function printCatalog(catalog: AgentModesCatalog, version: string | null, isDefa
   }
 
   for (const note of catalog.notes) {
-    // Keep the full-alias note quiet; surface degrades more visibly.
     if (note.startsWith("'full'")) continue;
     console.log(chalk.gray(`  note: ${note}`));
   }

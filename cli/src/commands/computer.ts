@@ -22,7 +22,6 @@ import {
 } from '../lib/computer-client.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 
-// Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [
   { title: 'Installation', names: ['setup'] },
   { title: 'Daemon lifecycle', names: ['start', 'stop', 'reload', 'status'] },
@@ -65,9 +64,9 @@ export function shouldBlockOffPlatform(opts: {
   device?: string;
 }): boolean {
   if (opts.platform === 'darwin') return false;
-  if (opts.tcpConfigured) return false; // remote (Windows) daemon over a tunnel
-  if (opts.vncConfigured) return false; // RFB/VNC desktop (Linux GUI over the wire)
-  if (opts.device) return false; // remote path resolves its own endpoint
+  if (opts.tcpConfigured) return false;
+  if (opts.vncConfigured) return false;
+  if (opts.device) return false;
   return true;
 }
 
@@ -89,7 +88,6 @@ export async function resolveDeviceHost(device: string): Promise<{ host: string;
   if (configured) {
     const addr = parseAddress(configured);
     if (addr.scheme === 'vnc' || addr.scheme === 'tcp') {
-      // No ssh identity involved — the transport is RFB or a raw helper socket.
       return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
     }
     // The configured address is the connection target: an ssh:// override naming a different
@@ -117,9 +115,7 @@ export async function resolveDeviceHost(device: string): Promise<{ host: string;
 async function forwardToComputer(opts: {
   argv: string[];
   device?: string;
-  /** Skip recording — lifecycle verbs are not user actions. */
   record?: boolean;
-  /** Read the engine's stdout instead of letting it reach the terminal. */
   capture?: boolean;
 }): Promise<{ exitCode: number; stdout: string }> {
   let bin: string;
@@ -136,9 +132,6 @@ async function forwardToComputer(opts: {
   const hostFlag = opts.argv.findIndex(arg => arg === '--host' || arg.startsWith('--host='));
   let host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
   let target: ComputerTargetContext | undefined;
-  // A device is resolved to --host here rather than forwarded as --device: the
-  // engine has no fleet registry of its own (PHNX-4090). An explicit --host on
-  // the command line always wins over --device, so this only runs without one.
   if (!host && opts.device) {
     const resolved = await resolveDeviceHost(opts.device);
     host = resolved.host;
@@ -156,7 +149,6 @@ async function forwardToComputer(opts: {
   });
 }
 
-/** Forward, then exit with the engine's status so shells and agents see the truth. */
 async function forwardAndExit(opts: Parameters<typeof forwardToComputer>[0]): Promise<void> {
   const { exitCode } = await forwardToComputer(opts);
   if (exitCode !== 0) process.exit(exitCode);
@@ -166,8 +158,6 @@ export function registerComputerCommand(program: Command): void {
   const computer = program
     .command('computer')
     .description('Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type')
-    // A VNC/RFB desktop is driven over the wire (--vnc host:port, e.g. an x11vnc
-    // server on a headless Linux box or an LXD container). Set it before the gate.
     .option('--vnc <host:port>', 'Drive a GUI desktop over VNC/RFB (x11vnc/Xvnc; port defaults to 5901) instead of a native helper')
     .option('--vnc-password <password>', 'VNC password for --vnc (or set COMPUTER_HELPER_VNC_PASSWORD)')
     // The subsystem is macOS Accessibility/TCC for local driving. Off macOS it works against a
@@ -175,7 +165,6 @@ export function registerComputerCommand(program: Command): void {
     // message only when no remote path is available.
     .hook('preAction', async (_thisCommand, actionCommand) => {
       const globals = actionCommand.optsWithGlobals() as { vnc?: string; vncPassword?: string; device?: string };
-      // --vnc selects the RFB transport for every verb under this command.
       if (globals.vnc) {
         process.env.COMPUTER_HELPER_VNC = globals.vnc;
         if (globals.vncPassword) process.env.COMPUTER_HELPER_VNC_PASSWORD = globals.vncPassword;
@@ -297,8 +286,6 @@ function registerStopCommand(program: Command): void {
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      // The engine owns both halves of a remote stop — the tunnel it opened and
-      // the scheduled task it registered — and reports each one itself.
       await forwardAndExit({ argv: ['stop', ...cmd.args], device: opts.device, record: false });
     });
 }

@@ -7,7 +7,6 @@
  * internal protocol, not a public command. */
 export const HARNESS_UPDATE_CHILD_CMD = '__harness-update-run';
 
-/** IPC message `type` the daemon sends to request a cooperative stop. */
 export const HARNESS_UPDATE_CANCEL_MSG = 'harness-update:cancel';
 
 /** Well-known cross-realm key for the count of guarded auto-update passes in this process.
@@ -17,7 +16,6 @@ export const GUARDED_AUTO_UPDATE_SYMBOL = Symbol.for('agents.guardedAutoUpdateDe
 
 type GuardHolder = { [GUARDED_AUTO_UPDATE_SYMBOL]?: number };
 
-/** The IPC payload the daemon sends; `child.send(cancelMessage())`. */
 export function cancelMessage(): { type: typeof HARNESS_UPDATE_CANCEL_MSG } {
   return { type: HARNESS_UPDATE_CANCEL_MSG };
 }
@@ -54,6 +52,7 @@ function endGuardedAutoUpdate(): void {
 export async function withGuardedUpdateCancellation<T>(
   run: (cancelled: () => boolean) => Promise<T>,
 ): Promise<T> {
+  // Cancellation is cooperative; forced termination could interrupt the swap transaction.
   let cancelled = typeof process.send === 'function' && process.connected === false;
   const requestStop = (): void => {
     cancelled = true;

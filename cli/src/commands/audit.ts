@@ -26,7 +26,6 @@ Examples:
 `)
     .action((_options: EventsOptions, command: Command) => {
       const opts = command.optsWithGlobals() as EventsOptions;
-      // Bare audit defaults to --include runs unless the user already set families.
       if (!opts.include && !opts.exclude) opts.include = 'runs';
       return runEventsCommand(opts);
     });

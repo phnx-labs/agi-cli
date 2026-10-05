@@ -34,6 +34,13 @@ describe('tests.yml required Linux gate', () => {
     expect(TESTS_YML).not.toContain('--deadline-sec');
   });
 
+  test('the comment ratchet scans the checked-out merge tree before proof reuse', () => {
+    expect(TESTS_YML).toContain('bun scripts/comment-lines.ts --check --base "$(git rev-parse HEAD^1)"');
+    expect(TESTS_YML.indexOf('- name: Enforce the exact comment-line ratchet')).toBeLessThan(
+      TESTS_YML.indexOf('- name: Restore exact-tree proof'),
+    );
+  });
+
   test('fork code stays on GitHub-hosted runners', () => {
     expect(TESTS_YML).toMatch(/runs-on: ubuntu-latest/);
     expect(TESTS_YML).not.toMatch(/runs-on: \[self-hosted/);
@@ -56,17 +63,11 @@ describe('dependency cache on the required check (R1)', () => {
   });
 
   test('keys on the toolchain, because a cached native addon is Node-ABI-specific', () => {
-    // cli/package.json trusts @homebridge/node-pty-prebuilt-multiarch, a native
-    // addon. Nothing pins Node here, so a runner-image bump would otherwise reuse
-    // a node_modules built for the previous ABI and fail confusingly at load.
     expect(cacheBlock).toContain('steps.toolchain.outputs.fp');
     expect(TESTS_YML).toContain('fp=$(node -v)-$(bun -v)');
   });
 
   test('keys on EVERY lockfile whose node_modules it caches', () => {
-    // packages/session-tracker has its own bun.lock. Keying on cli/bun.lock alone
-    // would serve a stale session-tracker tree under a key claiming freshness
-    // whenever that package's deps moved independently -- cache poisoning.
     expect(cacheBlock).toContain("hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock')");
     expect(cacheBlock).toContain('runner.os');
   });
@@ -94,9 +95,6 @@ describe('dependency cache on the required check (R1)', () => {
   });
 
   test('the warm job uses the IDENTICAL key and paths, or it warms nothing usable', () => {
-    // Drift between the two keys is silent: the warm job would populate an entry
-    // the required job never asks for, and the cache would look healthy while
-    // never hitting.
     const warm = TESTS_YML.slice(TESTS_YML.indexOf('warm-dep-cache:'), TESTS_YML.indexOf('  windows:'));
     const keyLine = "key: bun-deps-${{ runner.os }}-${{ steps.toolchain.outputs.fp }}-${{ hashFiles('cli/bun.lock', 'packages/session-tracker/bun.lock') }}";
     expect(cacheBlock).toContain(keyLine);
@@ -107,8 +105,6 @@ describe('dependency cache on the required check (R1)', () => {
   });
 
   test('the warm job is NOT on the required check identity', () => {
-    // It must never gate a PR: push-only trigger, and branch protection waits on
-    // `Tests / test` alone.
     const warm = TESTS_YML.slice(TESTS_YML.indexOf('warm-dep-cache:'), TESTS_YML.indexOf('  windows:'));
     expect(warm).not.toContain('pull_request');
   });

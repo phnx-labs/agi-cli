@@ -1,49 +1,11 @@
 #!/usr/bin/env bash
-#
-# The canonical way to run the agents-cli suite. Every other script that needs
-# tests calls THIS one -- build.sh and release-attestation-produce.sh included.
-#
-# WHY THIS EXISTS (RUSH-3178). The suite is ~13k tests and pins a machine for
-# ~10 minutes. It must never land on an interactive box. Before this script the
-# only offloaded path was the `test:remote` package.json alias, and offloading
-# was opt-in AT EACH CALL SITE because scripts/sandbox.sh took a hand-composed
-# command string rather than a verb. Every call site opted out: build.sh:95 and
-# release-attestation-produce.sh:151 both ran `bun run test` on whatever box
-# invoked them, and agents ran vitest directly for the same reason. Making the
-# offload the DEFAULT, inside one entry point, is what makes that impossible
-# rather than merely discouraged.
-#
-# The default is now `auto` (RUSH-3211), not crabbox. Crabbox needs its binary
-# plus provider credentials, so a default that required them failed on any box
-# without them -- and a default that fails is a default nobody uses. `auto` draws
-# from the fleet workers the operator has already marked, through the CLI's own
-# picker, so the no-argument invocation works everywhere.
-#
-# Usage:
-#   scripts/test.sh                      # auto-pick the least-loaded worker (default)
-#   scripts/test.sh --device auto        # the same thing, said explicitly
-#   scripts/test.sh --device <box>       # run on a named fleet box over ssh
-#   scripts/test.sh --shard 6            # fan out across 6 auto-picked workers (fastest)
-#   scripts/test.sh --devices m1,m2,m3   # fan out across named workers
-#   scripts/test.sh --crabbox            # offload to a disposable crabbox instead
-#   scripts/test.sh --here               # run on THIS machine (explicit, loud)
-#   scripts/test.sh --repo-root <dir>    # test that tree instead of this one
-#   scripts/test.sh -- --retry=2         # everything after `--` goes to vitest
-#
-# NO SILENT FALLBACK. When no worker is eligible this script FAILS and names the
-# exact `--device` command to re-run, rather than quietly running the suite
-# locally. A fallback here would recreate the very bug it exists to stop: the
-# operator believes work was offloaded while their laptop melts.
 set -euo pipefail
+
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 cd "$(dirname "$0")/.."
 CLI_DIR="$(pwd)"
-
-red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-gray()  { printf '\033[2m%s\033[0m\n'  "$*"; }
-bold()  { printf '\033[1m%s\033[0m\n'  "$*"; }
-die()   { red "error: $*"; exit 1; }
 
 # `auto` is the default (RUSH-3211): call sites that name no box get a real worker without knowing
 # which are free. crabbox stays available as an explicit choice; defaulting to it failed on any
@@ -81,9 +43,6 @@ while [[ $# -gt 0 ]]; do
     --device) [[ -n "${2:-}" ]] || die "--device needs a machine name"; DEVICE="$2"; set_mode device --device; shift 2 ;;
     --device=*) DEVICE="${1#*=}"; set_mode device --device; shift ;;
     --crabbox) set_mode crabbox --crabbox; shift ;;
-    # Fan out across N workers. This is the lever that hits the release-time
-    # target: the suite is throughput-bound (3079s CPU / 11.5x on one box), so
-    # dividing the CPU across machines is what shortens it.
     --shard) shard_count_ok "${2:-}"; SHARDS="$2"; set_mode shard --shard; shift 2 ;;
     # Name the workers explicitly instead of auto-picking: it lets an operator pin the fan-out to
     # known-idle boxes and removes the `devices pick --json` (>= 1.22.49) dependency.
@@ -99,8 +58,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# `--device auto` is the same sentinel `agents run --device auto` uses; accept it
-# here rather than dialing a literal, nonexistent host named "auto".
 if [[ "$MODE" == "device" && "$DEVICE" == "auto" ]]; then MODE="auto"; DEVICE=""; fi
 
 # Resolve an explicit --devices list before any prerequisite check so a bad invocation fails on
@@ -117,8 +74,6 @@ if [[ "$MODE" == "shard" && -n "$SHARD_LIST" ]]; then
   (( SHARDS )) || { SHARDS=${#SHARD_DEVICES[@]}; shard_count_ok "$SHARDS" --devices; }
 fi
 
-# --repo-root lets the attestation producer test the isolated worktree it built
-# at an exact commit, so the bytes tested are the bytes attested.
 if [[ -n "$REPO_ROOT" ]]; then
   [[ -d "$REPO_ROOT/cli" ]] || die "--repo-root '$REPO_ROOT' has no cli"
   CLI_DIR="$(cd "$REPO_ROOT/cli" && pwd)"
@@ -167,8 +122,6 @@ if [[ "$MODE" == "auto" ]]; then
     || die "the 'agents' CLI is not on PATH, so a worker cannot be auto-picked.
   Name one explicitly:  scripts/test.sh --device yosemite-m1
   Or pin THIS machine:  scripts/test.sh --here"
-  # stdout is the name alone; the candidate/load detail goes to stderr, so let it
-  # through to the operator instead of swallowing it.
   if ! DEVICE="$(agents devices pick)"; then
     # Distinguish "the fleet has nothing free" from "your CLI is too old to ask": both exit
     # non-zero, and conflating them sends the operator hunting a capacity problem. This is a
@@ -240,8 +193,6 @@ case "$MODE" in
     fi
     cd "$CLI_DIR"
     # shellcheck disable=SC2046
-    # Local exec: pass the array straight through. No command string is built,
-    # so there is nothing for a second shell to re-split.
     if ((${#VITEST_ARGS[@]})); then
       exec bun run test -- "${VITEST_ARGS[@]}"
     fi
@@ -263,9 +214,6 @@ case "$MODE" in
     # not exceed the per-shard budget or it becomes the floor.
     command -v rsync >/dev/null || die "rsync not found"
     command -v ssh   >/dev/null || die "ssh not found"
-    # SHARD_DEVICES is already populated when --devices was passed (resolved and
-    # floor-checked right after argument parsing). Only the auto-pick path has
-    # work left to do here.
     if (( ${#SHARD_DEVICES[@]} )); then :; else
     command -v agents >/dev/null 2>&1 || die "the 'agents' CLI is not on PATH, so workers cannot be picked"
     # `devices pick --json` supplies the fan-out's candidate list with loads, from the same auto
@@ -311,8 +259,6 @@ for c in cands: print(c["device"])
       SHARD_PIDS+=("$!"); SHARD_LOGS+=("$log"); SHARD_NAMES+=("$dev")
     done
 
-    # Wait for ALL shards before reporting, so one early failure does not hide
-    # the others -- the operator needs every failing shard, not the first.
     failed=0
     for ((i = 0; i < ${#SHARD_PIDS[@]}; i++)); do
       if wait "${SHARD_PIDS[$i]}"; then

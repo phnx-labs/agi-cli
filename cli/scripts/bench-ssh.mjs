@@ -19,7 +19,7 @@ if (!HOST) {
 }
 
 const ms = (t0) => Number(process.hrtime.bigint() - t0) / 1e6;
-const clearSockets = () => { try { execSync('rm -f ~/.agents/.cache/ssh/cm-*', { shell: '/bin/bash' }); } catch { /* none */ } };
+const clearSockets = () => { try { execSync('rm -f ~/.agents/.cache/ssh/cm-*', { shell: '/bin/bash' }); } catch {  } };
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
 function timeLoop(label, n, fn) {
@@ -32,7 +32,6 @@ function timeLoop(label, n, fn) {
 
 console.log(`\nHost: ${HOST}   (wall-clock on this laptop)\n`);
 
-// P3: repeated same-host calls, handshake amortization.
 console.log('P3  repeated `--host` calls (10x trivial remote `true`)');
 const N = 10;
 clearSockets();
@@ -41,7 +40,6 @@ clearSockets();
 const on = timeLoop('multiplex ON  (reused socket)', N, () => sshExec(HOST, 'true', { multiplex: true }));
 console.log(`  => ${(off / on).toFixed(1)}x faster, ${(off - on).toFixed(0)}ms saved over ${N} calls\n`);
 
-// P2: readiness, old 3 round-trips (1 muxed + 2 un-muxed, as the old code did) vs new 1.
 console.log('P2  readiness check (median of 5)');
 const oldReady = [], newReady = [];
 for (let r = 0; r < 5; r++) {
@@ -60,7 +58,6 @@ console.log(`  old (3 round-trips)   ${median(oldReady).toFixed(0).padStart(6)}m
 console.log(`  new (1 readyProbe)    ${median(newReady).toFixed(0).padStart(6)}ms`);
 console.log(`  => ${(median(oldReady) / median(newReady)).toFixed(1)}x faster, ${(median(oldReady) - median(newReady)).toFixed(0)}ms saved per dispatch\n`);
 
-// P1: follow loop, per-cycle cost + process spawns.
 console.log('P1  follow loop, cost of 20 poll cycles vs one persistent stream');
 const CYCLES = 20;
 const log = '$HOME/.agents/.cache/hosts/benchfollow.log';

@@ -158,6 +158,8 @@ export function policyDigest(repoRoot: string): string {
   const parts = [
     join(repoRoot, 'cli/vitest.config.ts'),
     join(repoRoot, 'cli/ci/test-ownership.yaml'),
+    join(repoRoot, 'scripts/comment-budget.json'),
+    join(repoRoot, 'scripts/comment-lines.ts'),
     join(repoRoot, 'scripts/ci-scope.ts'),
   ]
     .filter((p) => existsSync(p))

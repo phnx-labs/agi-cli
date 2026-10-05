@@ -12,12 +12,14 @@ import {
   compactTimelineState,
   emptyTimelineState,
   foldTimeline,
+  projectGlance,
   projectSessionFiles,
   projectTimeline,
   unavailableTimeline,
   TIMELINE_EXTRACTOR_VERSION,
   type TimelineState,
 } from '@phnx-labs/sessions-cli/reader';
+import { appendInlineImage, dropOpenInlineImage, finishInlineImage, hasOpenInlineImage, materializeInlineImages, readSessionSubagents, takePendingImagePaths } from './glance-files.js';
 
 /** Sessions folded per tick. The tick's own deadline is 30 s; this stays well inside it. */
 const TIMELINE_PASS_MAX_PER_TICK = 8;
@@ -76,37 +78,176 @@ interface TimelinePassOptions {
   statFile?: (path: string) => { mtimeMs: number; size: number };
 }
 
-/** Read `[start, end)` of a file, keeping only complete newline-terminated lines. */
+/** Bytes of elided JSON kept for one oversized record. Image payloads never count toward this. */
+const MAX_PARTIAL_TEXT = 256 * 1024;
+
+/** Don't split a UTF-8 sequence at the edge of a window. */
+function utf8Cut(buffer: Buffer, length: number): number {
+  let i = length - 1;
+  while (i >= 0 && i >= length - 4 && (buffer[i] & 0xc0) === 0x80) i--;
+  if (i < 0 || i < length - 4) return length;
+  const byte = buffer[i];
+  const need = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
+  return length - i < need ? i : length;
+}
+
+/**
+ * Read `[start, end)` of a file.
+ *
+ * A window that contains a newline returns only the complete lines and stops
+ * on that newline. A window that is full and still has no newline is one
+ * record larger than this read: the bytes are returned with `partial` so the
+ * caller can resume them. A short tail that ends at EOF stays unread.
+ */
 function readCompleteLines(
   filePath: string,
   start: number,
   end: number,
   maxBytes: number,
-): { text: string; offset: number } {
+  allowPartial: boolean,
+): { text: string; offset: number; partial: boolean } {
   const stop = Math.min(end, start + maxBytes);
-  if (stop <= start) return { text: '', offset: start };
+  if (stop <= start) return { text: '', offset: start, partial: false };
   const fd = fs.openSync(filePath, 'r');
   try {
     const buffer = Buffer.alloc(stop - start);
     const read = fs.readSync(fd, buffer, 0, buffer.length, start);
     const lastNewline = buffer.lastIndexOf(0x0a, read - 1);
-    // Nothing complete in this window: leave the offset where it was so the
-    // record is folded whole once its closing newline lands.
-    if (lastNewline < 0) return { text: '', offset: start };
+    if (lastNewline >= 0) {
+      return {
+        text: buffer.toString('utf8', 0, lastNewline + 1),
+        offset: start + lastNewline + 1,
+        partial: false,
+      };
+    }
+    // A record that still fits in one window stays unread until its newline
+    // arrives. `stop` is already the file end when the tail is shorter than
+    // the cap, so a full read of that tail compares equal and must not be
+    // consumed: a fragment over the partial-text cap would be discarded and
+    // the finished turn would never reach the watch row.
+    const atEof = start + read >= end;
+    if (!allowPartial || atEof || read < stop - start) return { text: '', offset: start, partial: false };
+    const cut = utf8Cut(buffer, read);
+    if (cut <= 0) return { text: '', offset: start, partial: false };
     return {
-      text: buffer.toString('utf8', 0, lastNewline + 1),
-      offset: start + lastNewline + 1,
+      text: buffer.toString('utf8', 0, cut),
+      offset: start + cut,
+      partial: true,
     };
   } finally {
     fs.closeSync(fd);
   }
 }
 
+interface PartialResume {
+  text: string;
+  skippingData: boolean;
+  discarded?: boolean;
+}
+
+/** Continue one JSONL record across reads. Image `"data"` strings go to the attachment cache;
+ * `partialLine` keeps an empty string in their place so `state_json` never stores them. */
+function resumePartialLine(
+  prior: PartialResume | undefined,
+  chunk: string,
+  sessionId: string | undefined,
+  captureImages: boolean,
+): { lines: string[]; partial?: PartialResume } {
+  let text = prior?.text ?? '';
+  let skipping = prior?.skippingData ?? false;
+  let discarded = prior?.discarded === true;
+  const lines: string[] = [];
+  let i = 0;
+
+  const lostImage = skipping && captureImages && !!sessionId && !hasOpenInlineImage(sessionId);
+  if (skipping) {
+    const quote = chunk.indexOf('"');
+    if (quote < 0) {
+      if (captureImages && sessionId && !lostImage) appendInlineImage(sessionId, chunk, 'image/png');
+      return { lines, partial: { text, skippingData: true, ...(discarded ? { discarded: true } : {}) } };
+    }
+    if (captureImages && sessionId && !lostImage) {
+      appendInlineImage(sessionId, chunk.slice(0, quote), mediaTypeOf(text));
+      finishInlineImage(sessionId);
+    }
+    text += '"';
+    skipping = false;
+    i = quote + 1;
+  }
+
+  while (i < chunk.length) {
+    if (discarded) {
+      const nl = chunk.indexOf('\n', i);
+      if (sessionId) dropOpenInlineImage(sessionId);
+      if (nl < 0) return { lines, partial: { text: '', skippingData: false, discarded: true } };
+      discarded = false;
+      text = '';
+      i = nl + 1;
+      continue;
+    }
+    const nl = chunk.indexOf('\n', i);
+    const regionEnd = nl < 0 ? chunk.length : nl;
+    const region = chunk.slice(i, regionEnd);
+    // Only a marker that finishes in this new region. One already closed in
+    // `text` (the `"data":""` we just wrote) must not start a second skip.
+    const tail = text.slice(-32);
+    const hay = tail + region;
+    const marker = hay.match(/"data"\s*:\s*"/);
+    const markerAt = marker?.index ?? -1;
+    const markerEnd = marker ? markerAt + marker[0].length : -1;
+    if (marker && markerEnd >= tail.length && isImageData(hay.slice(0, markerAt))) {
+      const dataStart = markerEnd - tail.length;
+      const rest = dataStart < 0 ? region : region.slice(dataStart);
+      if (dataStart > 0) text += region.slice(0, dataStart);
+      const quote = rest.indexOf('"');
+      if (quote < 0) {
+        if (captureImages && sessionId) appendInlineImage(sessionId, rest, mediaTypeOf(text));
+        const next = capped(text, true);
+        if (next.discarded && sessionId) dropOpenInlineImage(sessionId);
+        return { lines, partial: next };
+      }
+      if (captureImages && sessionId) {
+        appendInlineImage(sessionId, rest.slice(0, quote), mediaTypeOf(text));
+        finishInlineImage(sessionId);
+      }
+      text += '"';
+      i += (dataStart < 0 ? 0 : dataStart) + quote + 1;
+      continue;
+    }
+    if (nl < 0) {
+      text += region;
+      if (text.length > MAX_PARTIAL_TEXT) {
+        if (sessionId) dropOpenInlineImage(sessionId);
+        return { lines, partial: { text: '', skippingData: false, discarded: true } };
+      }
+      return { lines, partial: text ? { text, skippingData: false } : undefined };
+    }
+    text += region;
+    if (text.trim()) lines.push(text);
+    text = '';
+    i = nl + 1;
+  }
+  return { lines, partial: undefined };
+}
+
+function capped(text: string, skippingData: boolean): PartialResume {
+  if (text.length <= MAX_PARTIAL_TEXT) return { text, skippingData };
+  return { text: '', skippingData: false, discarded: true };
+}
+
+function mediaTypeOf(text: string): string {
+  return text.match(/"media_type"\s*:\s*"(image\/(?:png|jpeg|gif|webp))"/)?.[1] ?? 'image/png';
+}
+
+function isImageData(before: string): boolean {
+  return before.slice(-180).includes('base64');
+}
+
 /** Normalize one transcript chunk into fold events. Interrupts and the file ledger are opted in
  * without changing the published stream. */
 function eventsForChunk(agent: SessionAgentId, text: string): SessionEvent[] {
   if (agent === 'claude') {
-    return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true });
+    return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
   }
   return parseCodexItemsContent(text);
 }
@@ -118,7 +259,7 @@ export function parseTimelineEvents(filePath: string, agent: SessionAgentId): Se
   if (isResumableTimelineSource(agent)) {
     return eventsForChunk(agent, fs.readFileSync(filePath, 'utf8'));
   }
-  return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true });
+  return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
 }
 
 /** One session's fold: the entry to cache, and what it actually cost to produce. */
@@ -161,21 +302,36 @@ function foldSessionTimeline(
   let offset: number;
   let bytesRead: number;
 
+  let partial: PartialResume | undefined;
   if (isResumableTimelineSource(agent)) {
     const resumable = prior?.state
       && prior.state.version === TIMELINE_EXTRACTOR_VERSION
       && prior.state.offset <= fileSize;
     state = resumable ? prior!.state : emptyTimelineState();
+    if (!resumable && session.sessionId) dropOpenInlineImage(session.sessionId);
     const start = resumable ? state.offset : 0;
     const maxBytes = Math.min(byteBudget, TIMELINE_PASS_MAX_BYTES_PER_SESSION);
-    const chunk = readCompleteLines(filePath, start, fileSize, maxBytes);
-    // Nothing complete in the readable window (a record mid-write, or a budget too small to reach
-    // a newline). Leave the cached row and offset alone: writing would stamp an empty fold over a
-    // real one and skip unfolded bytes.
+    // A window smaller than the per-session cap is a tick that ran out of
+    // budget, not a record too big to read. Leave that tail for a fuller tick.
+    const chunk = readCompleteLines(filePath, start, fileSize, maxBytes, maxBytes === TIMELINE_PASS_MAX_BYTES_PER_SESSION);
+    // A short tail still being written, or a budget too small to reach a
+    // newline that would fit in a fuller window. Leave the cached row alone.
     if (!chunk.text && chunk.offset === start) return undefined;
-    events = eventsForChunk(agent, chunk.text);
+    const resumed = resumePartialLine(resumable ? state.partialLine : undefined, chunk.text, session.sessionId, agent === 'claude');
+    partial = chunk.partial ? resumed.partial : undefined;
+    if (!chunk.partial && session.sessionId && resumed.partial?.discarded) dropOpenInlineImage(session.sessionId);
+    events = resumed.lines.length ? eventsForChunk(agent, resumed.lines.map(line => line + '\n').join('')) : [];
     offset = chunk.offset;
     bytesRead = chunk.offset - start;
+    if (agent === 'claude' && session.sessionId && !partial) {
+      const paths = takePendingImagePaths(session.sessionId);
+      for (const event of events) {
+        if (event.type !== 'attachment' || event.path || !paths.length) continue;
+        const cached = paths.shift()!;
+        event.path = cached.path;
+        event.sizeBytes = cached.size;
+      }
+    }
   } else {
     // No resumable reader for this harness: re-parse whole, bounded, from a fresh state (a partial
     // re-fold would double-count). Rate-limited so large transcripts are not re-parsed every tick
@@ -219,6 +375,7 @@ function foldSessionTimeline(
     bytesRead = fileSize;
   }
 
+  if (agent === 'claude' && session.sessionId) materializeInlineImages(events, session.sessionId);
   const folded = compactTimelineState(
     foldTimeline(events, state, {
       attachments: session.attachments,
@@ -226,9 +383,18 @@ function foldSessionTimeline(
       offset,
     }),
   );
+  if (partial) folded.partialLine = partial;
+  else delete folded.partialLine;
   const files = projectSessionFiles(folded);
+  const glance = projectGlance(folded.glance);
+  if (offset < fileSize) delete glance.activityHistogram;
+  const subagents = agent === 'claude'
+    ? readSessionSubagents(filePath, session.pidAlive === true, folded.glance.failedAgentCalls, nowMs)
+    : undefined;
   return {
     entry: {
+      ...glance,
+      ...(subagents?.length ? { subagents } : {}),
       timeline: projectTimeline(folded, session.activity),
       ...(folded.request ? { request: folded.request } : {}),
       ...(files ? { files } : {}),
@@ -292,7 +458,7 @@ export function runTimelinePassSync(
 
     const prior = readSessionTimelineEntry(id);
     // Cached against these exact bytes: nothing was appended, nothing to fold.
-    if (prior && prior.state.offset === stamp.fileSize) {
+    if (prior && prior.state.version === TIMELINE_EXTRACTOR_VERSION && prior.state.offset === stamp.fileSize) {
       result.reused++;
       continue;
     }

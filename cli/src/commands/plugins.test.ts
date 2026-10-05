@@ -117,7 +117,7 @@ describe('discoverMarketplaces with project cwd', () => {
   });
 
   afterEach(() => {
-    try { process.chdir(savedCwd); } catch { /* ignore */ }
+    try { process.chdir(savedCwd); } catch {  }
   });
 
   it('exposes a project marketplace when <cwd>/.agents/plugins/ exists', () => {

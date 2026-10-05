@@ -24,7 +24,6 @@ describe('buildLoopConfig — flag/frontmatter merge (issue #332)', () => {
       { loop: true, maxIterations: '7', budget: '999' },
       { max_iterations: 3, budget: 100, interval: '10m' },
     );
-    // CLI wins for max_iterations and budget; interval falls through from workflow.
     expect(cfg).toEqual({ maxIterations: 7, budget: 999, interval: '10m' });
   });
 
@@ -48,8 +47,6 @@ describe('buildLoopConfig — flag/frontmatter merge (issue #332)', () => {
   });
 
   it('rejects an unparseable --interval instead of silently running back-to-back (FIX 3)', () => {
-    // Before: parseTimeout returned null for these and the driver coalesced to
-    // 0ms, so a typo ran the loop full-speed. Now they're rejected at config build.
     expect(() => buildLoopConfig({ loop: true, interval: '30s' })).toThrow(/Invalid --interval/);
     expect(() => buildLoopConfig({ loop: true, interval: '5' })).toThrow(/Invalid --interval/);
     expect(() => buildLoopConfig({ loop: true, interval: 'abc' })).toThrow(/Invalid --interval/);

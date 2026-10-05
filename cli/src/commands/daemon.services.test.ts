@@ -32,11 +32,8 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
       secretsBroker: unknown;
       services: Array<{ id: string; enabled: boolean; state: string; supervised: boolean; consecutiveFailures: number }>;
     };
-    // Old field still present (pinned above), new field additive.
     expect(payload.secretsBroker).toBeDefined();
     expect(Array.isArray(payload.services)).toBe(true);
-    // No daemon has ever run in this HOME, so every service is "stopped" and
-    // none has a real supervisor-reported state yet.
     expect(payload.services.length).toBe(DAEMON_SERVICE_IDS.length);
     const sessionIndex = payload.services.find((s) => s.id === 'session-index');
     expect(sessionIndex).toBeDefined();
@@ -72,9 +69,6 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
     expect(res.stdout).toContain('enabled');
   });
 
-  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
-  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
-  // processes on a 20-core box (RUSH-2839).
   it('webhooks add/list/remove drive the real daemon/webhooks.yaml (RUSH-2548)', () => {
     const home = makeHome();
     const configPath = path.join(home, '.agents', 'daemon', 'webhooks.yaml');

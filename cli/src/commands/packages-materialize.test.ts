@@ -75,8 +75,6 @@ describe('agents packages materialize help', () => {
     expect(examplesAt).toBeGreaterThan(-1);
     expect(optionsAt).toBeGreaterThan(-1);
     expect(examplesAt).toBeLessThan(optionsAt);
-    // The documented manifest key must match what the parser actually reads
-    // (snake_case schema_version, package-schema.ts), never the camelCase form.
     expect(help).toContain('schema_version');
     expect(help).not.toContain('schemaVersion');
   });
@@ -108,18 +106,15 @@ describe('agents packages materialize', () => {
     expect(receipt.agent.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(receipt.harness).toEqual({ id: harness, version: '1.2.3' });
 
-    // The front door projected real resources via the canonical materializer.
     const kinds = receipt.resources.map((r) => r.kind).sort();
     expect(kinds).toEqual(['instructions', 'skills']);
     for (const entry of receipt.resources) {
       expect(fs.existsSync(path.join(outputHome, entry.target)), `${entry.kind}:${entry.name}`).toBe(true);
     }
 
-    // The receipt on disk is byte-identical to the emitted --json.
     const onDisk = fs.readFileSync(path.join(outputHome, 'materialization-receipt.json'), 'utf-8');
     expect(JSON.parse(onDisk)).toEqual(receipt);
 
-    // Never the live home, never a secret leak.
     expect(fs.existsSync(path.join(home, `.${harness}`))).toBe(false);
     expect(stderr).not.toMatch(/secret/i);
   });
@@ -204,8 +199,6 @@ describe('agents packages materialize', () => {
     const outputHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-hookname-'));
     tempDirs.push(outputHome);
 
-    // A package with a hook whose `name:` is a path traversal. If unguarded, the
-    // materializer would copy + chmod +x a script outside the output home.
     const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mat-evilhook-pkg-'));
     tempDirs.push(pkg);
     fs.writeFileSync(
@@ -249,7 +242,6 @@ describe('agents packages materialize', () => {
     expect(status).not.toBe(0);
     const payload = JSON.parse(stdout) as { error: string };
     expect(payload.error).toMatch(/not a safe single path segment/i);
-    // Nothing was copied outside the output home.
     expect(fs.existsSync(path.join(path.dirname(outputHome), 'pwned.sh'))).toBe(false);
     expect(fs.existsSync(path.join(outputHome, 'materialization-receipt.json'))).toBe(false);
   });
@@ -260,7 +252,6 @@ describe('agents packages materialize', () => {
     tempDirs.push(sandbox);
     const outputHome = path.join(sandbox, 'home');
     fs.mkdirSync(outputHome);
-    // Keep the literal `..` segment; path.join() would normalize it away.
     const escaped = `${outputHome}/../outside`;
 
     const { stdout, status } = runCli(home, [

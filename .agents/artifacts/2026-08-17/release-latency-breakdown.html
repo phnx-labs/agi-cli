@@ -422,7 +422,7 @@ release-shaped impact mapping and <code>--auto</code> merge, takes the release f
 <ol>
 <li><strong>The self-hosted runner pool already exists and is idle.</strong> <code>ci-runner-fsn1</code>
 (Hetzner fsn1, 16 cores, 465G free, load 0.00) answers to
-<code>ssh -i ~/.ssh/ci-runner-ops root@78.46.183.46</code> (the documented ops path in
+<code>ssh -i ~/.ssh/ci-runner-ops root@ci-runner-fsn1</code> (the documented ops path in
 <code>agents/infra/ci-runner/RUNBOOK.md:28</code>) and runs <strong>six active runner units</strong>:
 <code>runner@1..4</code> (the agents monorepo's whole CI runs on them at $0) and
 <code>runner-phnx@1..2</code> (the phnx-labs org pool, labels

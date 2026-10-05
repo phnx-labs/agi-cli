@@ -14,7 +14,6 @@ function agentAutoKey(agent: AgentId): string {
   return `updates.${agent}.auto`;
 }
 
-/** The raw, explicitly-set global switch, or `undefined` when never set (default: on). */
 export function rawGlobalAutoUpdateSetting(): boolean | undefined {
   return getConfigValue('updates.auto').value as boolean | undefined;
 }
@@ -27,12 +26,10 @@ export function unsetGlobalAutoUpdateEnabled(): void {
   unsetConfigValue('updates.auto');
 }
 
-/** True unless the operator explicitly turned automatic updates off globally. */
 export function isGlobalAutoUpdateEnabled(): boolean {
   return rawGlobalAutoUpdateSetting() !== false;
 }
 
-/** The raw, explicitly-set per-harness switch, or `undefined` when it defers to the global one. */
 export function rawAgentAutoUpdateSetting(agent: AgentId): boolean | undefined {
   return getConfigValue(agentAutoKey(agent)).value as boolean | undefined;
 }
@@ -49,6 +46,7 @@ export function unsetAgentAutoUpdateEnabled(agent: AgentId): void {
  * kill switch that wins over `updates.<agent>.auto=true`; with the global switch on (default),
  * an explicit per-harness switch refines it, else the harness is enabled. */
 export function isAutoUpdateEnabledForAgent(agent: AgentId): boolean {
+  // The global switch is an emergency stop that no per-agent setting may override.
   if (!isGlobalAutoUpdateEnabled()) return false;
   const perAgent = rawAgentAutoUpdateSetting(agent);
   return perAgent !== false;

@@ -52,7 +52,6 @@ describe('groupSessionsByMachine', () => {
       ],
       'local-box',
     );
-    // beta (2) before alpha/gamma (1 each); alpha before gamma by name.
     expect(layout.machines.map((m) => m.machine)).toEqual(['beta', 'alpha', 'gamma']);
   });
 
@@ -94,19 +93,16 @@ describe('groupSessionsByMachine', () => {
   it('lifts cloud tasks into their own top-level "cloud" group, off the querier machine, sorted last', () => {
     const layout = groupSessionsByMachine(
       [
-        // A cloud task is attributed to the querier ('zion') for reply routing, but
-        // it runs in a provider sandbox — it must not fold under the local device.
         mk({ context: 'cloud', machine: 'zion', sessionId: 'task_e', kind: 'codex', status: 'queued' }),
         mk({ context: 'cloud', machine: 'zion', sessionId: 'vclfel94', status: 'waiting' }),
         mk({ machine: 'zion', cwd: '/repo/a', sessionId: 'local1' }),
       ],
       'zion',
     );
-    // 'zion' (local, real session only) first; the synthetic 'cloud' category last.
     expect(layout.machines.map((m) => m.machine)).toEqual(['zion', 'cloud']);
     const zion = layout.machines.find((m) => m.machine === 'zion')!;
     const cloud = layout.machines.find((m) => m.machine === 'cloud')!;
-    expect(zion.total).toBe(1); // the two cloud tasks are NOT counted here
+    expect(zion.total).toBe(1);
     expect(cloud.total).toBe(2);
     expect(cloud.isLocal).toBe(false);
   });
@@ -227,23 +223,20 @@ describe('mergeLocalFirst', () => {
 
 describe('pickerColumnsFor machine column width', () => {
   it('sizes the column to fit the widest hostname whole (no ellipsis truncation)', () => {
-    // 'yosemite-s0' (11) shares no prefix with 'zion', so it is shown whole and
-    // the column must be wide enough (>= 12) to render it without truncating.
     const cols = pickerColumnsFor([
       mkMeta({ id: 'a', machine: 'yosemite-s0' }),
       mkMeta({ id: 'b', machine: 'zion' }),
     ]);
     expect(cols.showMachine).toBe(true);
-    expect(cols.machineWidth).toBe(12); // 11 + 1 trailing space
+    expect(cols.machineWidth).toBe(12);
   });
 
   it('uses the COMPACTED label width when a shared prefix is stripped', () => {
-    // 'yosemite-s0'/'yosemite-s1' compact to 's0'/'s1' (width 2) → floored to MIN.
     const cols = pickerColumnsFor([
       mkMeta({ id: 'a', machine: 'yosemite-s0' }),
       mkMeta({ id: 'b', machine: 'yosemite-s1' }),
     ]);
-    expect(cols.machineWidth).toBe(8); // MIN floor, not the full 11
+    expect(cols.machineWidth).toBe(8);
   });
 
   it('caps the column so a pathological hostname cannot devour the row', () => {
@@ -251,6 +244,6 @@ describe('pickerColumnsFor machine column width', () => {
       mkMeta({ id: 'a', machine: 'a-really-absurdly-long-hostname-that-goes-on' }),
       mkMeta({ id: 'b', machine: 'zion' }),
     ]);
-    expect(cols.machineWidth).toBe(18); // MAX cap
+    expect(cols.machineWidth).toBe(18);
   });
 });

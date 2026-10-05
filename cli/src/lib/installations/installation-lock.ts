@@ -7,10 +7,9 @@ import { getHistoryDir } from '../state.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
 import { isAgentId, type AgentId } from '../types.js';
 
+// The launch/update lock lives outside the swapped installation tree.
 export function installationLockTarget(agent: AgentId, label: string): string {
   if (!isAgentId(agent) || !VERSION_RE.test(label)) throw new Error('Invalid managed installation.');
-  // Encode labels so a valid "foo.lock" cannot collide with the lock directory
-  // for "foo". Windows aliases must still contend for the same physical home.
   const canonicalLabel = process.platform === 'win32' ? label.toLowerCase().replace(/\.+$/, '') : label;
   const key = Buffer.from(canonicalLabel).toString('hex') || 'empty';
   const target = path.join(getHistoryDir(), 'installation-locks', agent, key);

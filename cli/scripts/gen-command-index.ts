@@ -16,7 +16,6 @@ export const AGENTS_REFERENCE: ReferenceOptions = {
   regenerate: 'npm run gen:index',
 };
 
-// Only when executed directly; vitest imports AGENTS_REFERENCE without side effects.
 if ((import.meta as { main?: boolean }).main) {
   const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs');
   runReferenceScript(await buildFullCommandTree(), { ...AGENTS_REFERENCE, outDir });

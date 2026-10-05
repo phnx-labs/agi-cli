@@ -14,7 +14,6 @@ import {
   type WizardChoice,
 } from './harness-wizard.js';
 
-/** Sentinel select values for the two non-catalog rows in the model pick. */
 const CUSTOM_MODEL = '__custom_model__';
 const KEEP_MODEL = '__keep_model__';
 

@@ -52,7 +52,7 @@ def _rusage(ru, wall, extra=None):
         user_cpu_s=round(ru.ru_utime, 3),
         sys_cpu_s=round(ru.ru_stime, 3),
         cpu_s=round(ru.ru_utime + ru.ru_stime, 3),
-        max_rss_mb=round(ru.ru_maxrss / 1024.0, 1),  # Linux reports KB
+        max_rss_mb=round(ru.ru_maxrss / 1024.0, 1),
     )
     if extra:
         d.update(extra)

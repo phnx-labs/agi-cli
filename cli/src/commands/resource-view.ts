@@ -22,8 +22,8 @@ export interface SyncTarget {
 export interface ResourceRow {
   name: string;
   description?: string;
-  extra?: string; // small per-type metric (e.g., "3 rules", "http")
-  extra2?: string; // optional secondary metric (e.g., marketplace name)
+  extra?: string;
+  extra2?: string;
   targets: SyncTarget[];
   buildDetail: () => string;
 }
@@ -36,10 +36,8 @@ interface ResourceViewOptions {
   rows: ResourceRow[];
   emptyMessage: string;
   centralPath?: string;
-  /** When the user specified agent or agent@version, we scope per-agent. */
   filterAgent?: AgentId;
   filterVersion?: string;
-  /** Emit machine-readable JSON instead of the picker/table (for agents/scripts). */
   json?: boolean;
   /** Show the "Synced" column (default true: central-storage commands answer 'which agent versions
    * have this?'). `agents inspect <repo>` sets false: the repo is the source, and empty `targets`
@@ -49,21 +47,15 @@ interface ResourceViewOptions {
    * names) want a wider cap, else long variants truncate identically while the empty Description
    * column wastes the terminal. */
   nameCap?: number;
-  /** Per-row OSC-8 link target, keyed by row name; makes names clickable. */
   linkFor?: (row: ResourceRow) => string | undefined;
 }
 
-/** Whether the Synced column renders for this view. */
 function syncEnabled(opts: ResourceViewOptions): boolean {
   return opts.showSync !== false;
 }
 
-/** Display a resource list: interactive picker in TTY mode, plain table otherwise. */
 export async function showResourceList(opts: ResourceViewOptions): Promise<void> {
   if (opts.json) {
-    // Strip the non-serializable buildDetail thunk; emit the row metadata plus
-    // each resource's per-agent-version sync targets. One shared JSON contract
-    // for every resource `list` built on this helper.
     const rows = opts.rows.map(({ buildDetail, ...row }) => row);
     console.log(JSON.stringify(rows, null, 2));
     return;
@@ -87,9 +79,6 @@ export async function showResourceList(opts: ResourceViewOptions): Promise<void>
       filter: (query) => filterRows(opts.rows, query),
       labelFor: (row) => formatPickerRow(row, opts),
       buildPreview: (row) => row.buildDetail(),
-      // Row numbers say where each entry sits in the list while scrolling —
-      // and read against the total when the caller prints one, as
-      // `agents inspect` does with its "commands (12)" header.
       numbered: true,
       pageSize: 12,
       emptyMessage: `No matching ${opts.resourcePlural}.`,
@@ -102,13 +91,11 @@ export async function showResourceList(opts: ResourceViewOptions): Promise<void>
 
   if (!picked) return;
 
-  // Dump the full detail in a pager for inspection.
   const detail = picked.item.buildDetail();
   const lines = detail.split('\n');
   printWithPager(detail, lines.length);
 }
 
-/** Build the prompt message shown above the picker, including any scope label. */
 function buildPickerMessage(opts: ResourceViewOptions): string {
   const scope = opts.filterVersion
     ? ` (${opts.filterAgent}@${opts.filterVersion})`
@@ -118,7 +105,6 @@ function buildPickerMessage(opts: ResourceViewOptions): string {
   return `Search ${opts.resourcePlural}${scope}:`;
 }
 
-/** Filter rows by a case-insensitive substring match on name or description. */
 function filterRows(rows: ResourceRow[], query: string): ResourceRow[] {
   const q = query.trim().toLowerCase();
   if (!q) return rows;
@@ -128,11 +114,7 @@ function filterRows(rows: ResourceRow[], query: string): ResourceRow[] {
   );
 }
 
-/** Row label rendered inside the picker list. */
 function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
-  // Link here, not in the wide table: that renders only when stdout is NOT a
-  // TTY, and termLink is a no-op off-TTY — so a link there could never appear.
-  // The picker is the TTY path, which is where the pre-picker list had one.
   const linkTarget = opts.linkFor?.(row);
   const padded = chalk.cyan(padVisible(row.name, opts.nameCap ?? 22));
   const name = linkTarget ? termLink(padded, linkTarget) : padded;
@@ -144,7 +126,6 @@ function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
     : '';
   const descRaw = row.description ? truncate(row.description, 40) : '';
   if (!syncEnabled(opts)) {
-    // No sync column: give the reclaimed width back to the description.
     return `${name} ${extra}${extra2}${chalk.gray(row.description ? truncate(row.description, 84) : '')}`;
   }
   const desc = padVisible(chalk.gray(descRaw), 42);
@@ -152,9 +133,7 @@ function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
   return `${name} ${extra}${extra2}${desc} ${sync}`;
 }
 
-/** Max width for the Name column in the wide table. */
 const NAME_CAP = 22;
-/** Below this many columns of description budget, the list stacks into cards. */
 const MIN_DESC_W = 24;
 
 interface ResourceLayout {
@@ -175,9 +154,6 @@ export function resourceLayout(
 ): ResourceLayout {
   const extraW = o.hasExtra ? 10 : 0;
   const extra2W = o.hasExtra2 ? 16 : 0;
-  // Cap Sync so a long "missing on …" tail can't starve the description.
-  // syncW 0 means the caller dropped the column — keep it 0 rather than
-  // floor it to 14, which would reserve width for a column we never draw.
   const syncW = o.syncW === 0 ? 0 : Math.min(o.syncW, Math.max(14, Math.floor(cols * 0.32)));
   const fixed =
     o.nameW + 1 + (extraW ? extraW + 1 : 0) + (extra2W ? extra2W + 1 : 0) + 1 + syncW;
@@ -192,7 +168,6 @@ export function resourceLayout(
   };
 }
 
-/** Render resources (used when output is piped). Responsive: wide table or cards. */
 function printResourceTable(opts: ResourceViewOptions): void {
   const cols = terminalWidth();
   const syncStrings = opts.rows.map((r) => formatSyncSummary(r.targets, opts));
@@ -226,7 +201,6 @@ function printResourceTable(opts: ResourceViewOptions): void {
   console.log(chalk.gray(summary.join(' · ')));
 }
 
-/** Wide aligned table: Name · [Extra] · [Extra2] · Description (flex) · Synced. */
 function renderResourceWideTable(
   opts: ResourceViewOptions,
   L: ResourceLayout,
@@ -237,8 +211,6 @@ function renderResourceWideTable(
     return padToWidth(color ? color(clipped) : clipped, width);
   };
 
-  // Pass the colour as the third arg: cell() truncates the plain text first, then
-  // colours the result. Pre-colouring here would be stripped by truncateToWidth.
   const headerParts = [cell('Name', L.nameW, chalk.bold)];
   if (L.extraW) headerParts.push(cell(opts.extraLabel ?? '', L.extraW, chalk.bold));
   if (L.extra2W) headerParts.push(cell(opts.extra2Label ?? '', L.extra2W, chalk.bold));
@@ -251,8 +223,6 @@ function renderResourceWideTable(
   console.log(chalk.gray('─'.repeat(Math.min(contentW, terminalWidth()))));
 
   opts.rows.forEach((row, i) => {
-    // No link here: this path renders only when stdout is not a TTY, where
-    // termLink is a no-op. The picker (formatPickerRow) carries the link.
     const parts = [cell(row.name, L.nameW, chalk.cyan)];
     if (L.extraW) parts.push(cell(row.extra ?? '-', L.extraW));
     if (L.extra2W) parts.push(cell(row.extra2 ?? '-', L.extra2W));
@@ -266,7 +236,6 @@ function renderResourceWideTable(
   });
 }
 
-/** Stacked cards for narrow terminals: name + meta on one line, description below. */
 function renderResourceCards(
   opts: ResourceViewOptions,
   cols: number,
@@ -287,7 +256,6 @@ function renderResourceCards(
   });
 }
 
-/** Compact sync summary: "everywhere", "14 of 16 installs", or "not installed". */
 function formatSyncSummary(targets: SyncTarget[], opts: ResourceViewOptions): string {
   if (targets.length === 0) {
     return chalk.gray('no installed versions');
@@ -297,7 +265,6 @@ function formatSyncSummary(targets: SyncTarget[], opts: ResourceViewOptions): st
   const stale = targets.filter((t) => t.status === 'stale');
   const missing = targets.filter((t) => t.status === 'missing');
 
-  // Narrow case: single-version scope gives a boolean answer.
   if (opts.filterVersion && targets.length === 1) {
     const t = targets[0];
     if (t.status === 'synced') return chalk.green('installed');
@@ -324,7 +291,6 @@ function formatSyncSummary(targets: SyncTarget[], opts: ResourceViewOptions): st
     parts.push(chalk.yellow(`${stale.length} stale`));
   }
 
-  // Hint which agents are missing when the spread is lopsided.
   if (missing.length > 0 && missing.length <= 2) {
     const missLabels = missing.map((t) => `${t.agent}@${t.version}`).join(', ');
     parts.push(chalk.gray(`missing on ${missLabels}`));
@@ -333,11 +299,9 @@ function formatSyncSummary(targets: SyncTarget[], opts: ResourceViewOptions): st
   return parts.join(chalk.gray(' · '));
 }
 
-/** Build the sync targets section showing version pills grouped by agent. */
 export function buildTargetsSection(targets: SyncTarget[]): string {
   if (targets.length === 0) return chalk.gray('  No capable agent versions installed.');
 
-  // Group by agent
   const byAgent = new Map<AgentId, SyncTarget[]>();
   for (const t of targets) {
     const list = byAgent.get(t.agent) || [];
@@ -354,7 +318,6 @@ export function buildTargetsSection(targets: SyncTarget[]): string {
   return lines.join('\n');
 }
 
-/** Render a single version as a colored pill (green/yellow/strikethrough). */
 function formatVersionPill(t: SyncTarget): string {
   const star = t.isDefault ? chalk.yellow('★ ') : '';
   const vtxt = `v${t.version}`;
@@ -367,5 +330,3 @@ function formatVersionPill(t: SyncTarget): string {
       return star + chalk.gray.strikethrough(vtxt);
   }
 }
-
-/** Pad a string to a fixed width, accounting for ANSI escape codes in length calculation. */

@@ -25,6 +25,7 @@ import {
 import { tryAutoPullSystemRepo } from '../git.js';
 import { getSystemAgentsDir } from '../state.js';
 import { runUmbrellaSync } from '../sync-umbrella.js';
+import { upgradeOutdatedClis, type CliUpgradeResult } from '../cli-resources.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -332,6 +333,7 @@ export class SelfUpdateService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+    const deadlineAt = Date.now() + this.deadlineMs;
     const outcome = await attemptSelfUpdateAndExit(ctx, signal);
     if (outcome.updated) {
       scheduleSelfUpdateExit();
@@ -345,5 +347,21 @@ export class SelfUpdateService extends BasePeriodicService {
           'process upgrades the install (`agents doctor` lists the shadow copy)',
       );
     }
+    await upgradeHostClis(ctx, signal, deadlineAt);
+  }
+}
+
+export async function upgradeHostClis(ctx: DaemonContext, signal: AbortSignal, deadlineAt: number, cwd?: string): Promise<void> {
+  let results: CliUpgradeResult[];
+  try {
+    results = await upgradeOutdatedClis({ signal, deadlineAt, cwd });
+  } catch (err) {
+    ctx.log('WARN', `host-cli upgrade: could not read CLI manifests: ${(err as Error).message}`);
+    return;
+  }
+  for (const r of results) {
+    if (r.status === 'upgraded') ctx.log('INFO', `host-cli upgrade: ${r.name} ${r.from} -> ${r.to}`);
+    else if (r.status === 'failed') ctx.log('WARN', `host-cli upgrade: ${r.name} failed, left as is: ${r.reason}`);
+    else if (r.status === 'skipped' && r.reason.startsWith('outdated')) ctx.log('WARN', `host-cli upgrade: ${r.name} ${r.reason}`);
   }
 }

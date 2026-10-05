@@ -23,7 +23,6 @@ function makeVersionDir(agent: string, label: string): void {
   fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', agent, label, 'home'), { recursive: true });
 }
 
-/** A strategy whose `commit()` never actually touches disk — only ordering/timing matters here. */
 function fakeStrategy(opts: { onCommit?: () => Promise<void> | void } = {}): UpdateStrategy {
   return {
     id: 'npm-package',
@@ -33,8 +32,6 @@ function fakeStrategy(opts: { onCommit?: () => Promise<void> | void } = {}): Upd
       return '2.0.66';
     },
     async stage(_ctx, target): Promise<StagedRelease> {
-      // A binary that genuinely launches (real `node --version`) so the
-      // post-stage health probe in update.ts passes without a vendor fetch.
       return { release: target, binary: process.execPath, home: path.join(home, '.agents'), stagingDir: null };
     },
     async commit() {
@@ -63,7 +60,6 @@ describe('launch/update mutual exclusion', () => {
     expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(false);
     await expect(activeCheck.isInstallationLikelyActive(installation)).resolves.toBe(false);
 
-    // Our own pid is guaranteed alive for the duration of this test.
     shims.recordLaunchLease('claude', '2.0.65', process.pid);
     expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(true);
     await expect(activeCheck.isInstallationLikelyActive(installation)).resolves.toBe(true);
@@ -75,7 +71,6 @@ describe('launch/update mutual exclusion', () => {
     const { installationLockTarget, INSTALLATION_LOCK_OPTIONS } = await import('./installation-lock.js');
     let gate: Promise<void> | undefined;
     await withFileLockAsync(installationLockTarget('claude', 'main'), async () => {
-      // Publishing the directory happens only AFTER lock acquisition.
       expect(store.listInstallations('claude')).toEqual([]);
       makeVersionDir('claude', 'main');
       gate = launchGate.withLaunchGate('claude', 'main', () => {});
@@ -120,7 +115,6 @@ describe('launch/update mutual exclusion', () => {
     makeVersionDir('claude', '2.0.65');
     store.createInstallation('claude', '2.0.65', '2.0.65');
 
-    // A pid essentially guaranteed not to be alive right now.
     shims.recordLaunchLease('claude', '2.0.65', 999_999);
     expect(shims.hasLiveLaunchLease('claude', '2.0.65')).toBe(false);
   });
@@ -154,7 +148,7 @@ describe('launch/update mutual exclusion', () => {
     fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, birth: 'definitely-not-this-process' }));
     expect(shims.hasLiveLaunchLease('claude', 'main')).toBe(false);
-    expect(fs.readdirSync(dir)).toEqual([`${process.pid}.json`]); // read-only preview
+    expect(fs.readdirSync(dir)).toEqual([`${process.pid}.json`]);
   });
 
   it('a launch (withLaunchGate) waits for an in-progress update of the SAME installation to finish', async () => {
@@ -177,7 +171,7 @@ describe('launch/update mutual exclusion', () => {
           },
         }),
       })
-      .catch(() => { /* the post-commit live-probe fails in this fake setup — only timing matters here */ });
+      .catch(() => {  });
 
     await commitReached;
     expect(commitStarted).toBe(true);
@@ -187,8 +181,6 @@ describe('launch/update mutual exclusion', () => {
     await launchGate.withLaunchGate('claude', '2.0.65', () => {});
     const waitedMs = Date.now() - waitStartedAt;
 
-    // The launch gate could only resolve once the update released the lock —
-    // i.e. after commit() finished, not while it was in flight.
     expect(commitFinished).toBe(true);
     expect(waitedMs).toBeGreaterThanOrEqual(200);
 
@@ -216,7 +208,7 @@ describe('launch/update mutual exclusion', () => {
       .catch(() => { updateResolved = true; });
 
     await new Promise((r) => setTimeout(r, 200));
-    expect(updateResolved).toBe(false); // still waiting on the lock the launch gate holds
+    expect(updateResolved).toBe(false);
 
     releaseGate();
     await updatePromise;

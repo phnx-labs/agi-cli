@@ -5,7 +5,6 @@ import {
   type ChangeAction, type DeviceRepoStatus,
 } from './repo.js';
 
-/** Strip ANSI color codes so assertions are stable regardless of TTY/color env. */
 function plain(s: string): string {
   // eslint-disable-next-line no-control-regex
   return s.replace(/\[[0-9;]*m/g, '');
@@ -69,7 +68,7 @@ describe('formatResourceDelta', () => {
       e('new', 'workflows/g.ts'),
     ];
     const out = plain(formatResourceDelta(entries, 5));
-    expect(out.split(', ').length).toBe(6); // 5 phrases + "+N more"
+    expect(out.split(', ').length).toBe(6);
     expect(out.endsWith('+2 more')).toBe(true);
   });
 
@@ -101,7 +100,6 @@ describe('resourceDelta', () => {
 
 describe('deltaBrief', () => {
   it('shows the top kinds and folds the rest into +N by unit count', () => {
-    // 24 skills, 9 commands, 4 plugins, 7 hooks, 1 workflow -> total 45
     const entries: { action: ChangeAction; file: string }[] = [];
     const add = (kind: string, n: number) => {
       for (let i = 0; i < n; i++) entries.push(e('new', `${kind}/u${i}/f.md`));
@@ -109,7 +107,6 @@ describe('deltaBrief', () => {
     add('skills', 24); add('commands', 9); add('plugins', 4); add('hooks', 7); add('workflows', 1);
     const d = resourceDelta(entries);
     expect(d.total).toBe(45);
-    // top 2 kinds shown (24 + 9 = 33 units), remainder 45 - 33 = 12
     expect(plain(deltaBrief(d))).toBe('(24 skills, 9 commands, +12)');
   });
 
@@ -125,8 +122,7 @@ describe('deltaBrief', () => {
 
 describe('wrapPhrases', () => {
   it('packs phrases into lines no wider than the budget', () => {
-    const parts = ['aaaa', 'bbbb', 'cccc']; // each 4 wide, ", " adds 2
-    // width 10 fits "aaaa, bbbb" (10) but not a third -> two lines
+    const parts = ['aaaa', 'bbbb', 'cccc'];
     expect(wrapPhrases(parts, 10)).toEqual(['aaaa, bbbb', 'cccc']);
   });
 
@@ -136,7 +132,6 @@ describe('wrapPhrases', () => {
 
   it('measures visible width, ignoring ANSI color codes', () => {
     const red = (s: string) => `[31m${s}[39m`;
-    // Two 4-char words colored; budget 10 fits both on one line by visible width.
     expect(wrapPhrases([red('aaaa'), red('bbbb')], 10)).toEqual([`${red('aaaa')}, ${red('bbbb')}`]);
   });
 });
@@ -219,7 +214,6 @@ describe('parseRemoteRepoRows', () => {
 });
 
 describe('renderDeviceStatusRows', () => {
-  // Collapse ANSI + column padding so assertions key on content, not spacing.
   const norm = (s: string) => plain(s).replace(/\s+/g, ' ').trim();
 
   it('renders one row per (device, repo) with the device shown once per group', () => {
@@ -234,7 +228,6 @@ describe('renderDeviceStatusRows', () => {
     const rows = renderDeviceStatusRows(results).map(norm);
     expect(rows[0]).toBe('DEVICE REPO SYNC CHANGES');
     expect(rows).toContain('zion system up to date clean');
-    // Second repo of the same device: device column blank -> trims away.
     expect(rows).toContain('user up to date ~1 edit');
   });
 

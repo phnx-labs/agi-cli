@@ -8,15 +8,10 @@ import { configureRootCommand } from '../lib/startup/root-command.js';
 import { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 export { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 
-/** A function that registers one or more commands onto the root program. */
 export type Registrar = (program: Command) => void;
 
-/** A thunk that dynamically imports a command module and returns its registrar. */
 export type ModuleLoader = () => Promise<Registrar>;
 
-// One loader per command module. Each dynamically imports the module and hands
-// back its register function. Kept as named consts so src/index.ts can compose
-// them into the exact main-branch registration order for the slow path.
 const loadView: ModuleLoader = async () => (await import('../commands/view.js')).registerViewCommand;
 const loadInspect: ModuleLoader = async () => (await import('../commands/inspect.js')).registerInspectCommand;
 const loadFeedback: ModuleLoader = async () => (await import('../commands/feedback.js')).registerFeedbackCommand;
@@ -133,9 +128,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   monitors: [loadMonitors],
   projects: [loadProjects],
   run: [loadRun],
-  // `_callback` is the machine-only agents:// deep-link verb; `open` is its
-  // hidden back-compat alias (OS handlers written by older CLIs call it). Both
-  // tokens must lazy-load the same module so either resolves. See commands/open.ts.
   _callback: [loadOpen],
   open: [loadOpen],
   fork: [loadFork],
@@ -155,8 +147,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   'refresh-rules': [loadRefreshRules],
   factory: [loadFactory],
   insights: [loadInsights],
-  // `agents trace` is a top-level alias of `agents sessions trace` (precedent:
-  // `agents insights` aliases `agents sessions insights`). One implementation.
   trace: [loadTrace],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
@@ -166,12 +156,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   events: [loadEvents],
   ssh: [loadSsh],
   devices: [loadSsh],
-  // `fleet` is a commander alias of `devices` (see commands/ssh.ts); list it so
-  // lazy registration loads the devices tree when the user types `agents fleet`.
   fleet: [loadSsh],
-  // `repos` is the canonical command name; `repo` remains a convenience alias
-  // (see commands/repo.ts). List both so lazy registration loads the tree
-  // whichever the user types.
   repos: [loadRepo],
   repo: [loadRepo],
   setup: [loadSetup],

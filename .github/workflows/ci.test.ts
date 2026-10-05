@@ -7,7 +7,6 @@ import { join } from 'node:path';
 
 const CI_YML = readFileSync(join(import.meta.dir, 'ci.yml'), 'utf8');
 
-/** Extract the top-level `on:` block (everything before `jobs:`). */
 function onBlock(source: string): string {
   const start = source.search(/^on:\s*$/m);
   const jobs = source.search(/^jobs:\s*$/m);

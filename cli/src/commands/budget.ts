@@ -13,7 +13,6 @@ import { formatUsd } from '../lib/pricing/index.js';
 
 const TOP_CAPS = ['per_run', 'per_day', 'per_project'] as const;
 
-/** Register `agents config budget` under the config parent. */
 export function registerBudgetCommand(configCmd: Command): void {
   const budgetCmd = configCmd
     .command('budget')
@@ -118,7 +117,6 @@ interface SpendSnapshot {
   day: string;
 }
 
-/** Render one cap line: "  per_run     $0.42 / $5.00  ▮▮▯▯▯▯▯▯▯▯". Unset caps render as "(unset)". */
 function capLine(label: string, spend: number | null, cap: number | undefined): string {
   if (cap === undefined) {
     return `  ${label.padEnd(14)} ${chalk.dim('(unset)')}`;

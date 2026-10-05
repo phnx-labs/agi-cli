@@ -26,8 +26,6 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
   });
 
   it('a positional query does not — the peer runs FTS the browser cannot', () => {
-    // The browser's `s` search is a cheap substring test over visible fields;
-    // routing a query there would silently weaken it to less than the peer does.
     expect(hasNoBrowserDisqualifyingFlags({}, 'auth bug')).toBe(false);
   });
 
@@ -57,8 +55,6 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
   });
 
   it('--cloud disqualifies: it lists provider tasks and has no host scope', () => {
-    // Without this, `--device box --cloud` fell through the device routing guard and
-    // reached runCloudSessions, which silently drops the device the user named.
     expect(hasNoBrowserDisqualifyingFlags({ cloud: true }, undefined)).toBe(false);
   });
 
@@ -179,7 +175,6 @@ describe('formatTeamLineage — the preview pane Team: line', () => {
   });
 
   it('omits the orchestrator when the record carries no parent session', () => {
-    // A team started outside any agent session records no parent_session_id.
     const line = strip(formatTeamLineage(meta({ teamOrigin: { handle: 'ui', team: 'redesign' } })));
     expect(line).toContain('redesign');
     expect(line).not.toContain('spawned by');
@@ -195,8 +190,6 @@ describe('peer-supplied team data is neither trusted nor rendered raw', () => {
   // enrichTeamOrigins leaves a populated teamOrigin alone, so the type and content of these fields
   // belong to another machine.
   it('does not throw on a non-string spawnedTeam or team', () => {
-    // teamBadge runs on EVERY picker row, so one malformed row used to take down
-    // the whole listing rather than degrade a single entry.
     const bad = { ...meta(), spawnedTeam: 99 as unknown as string };
     expect(() => teamBadge(bad)).not.toThrow();
     expect(teamBadge(bad).plain).toBe('');
@@ -208,8 +201,6 @@ describe('peer-supplied team data is neither trusted nor rendered raw', () => {
   });
 
   it('strips terminal escapes out of the team name on the row', () => {
-    // The row path never went through sanitizeMeta (that is preview-only), so a
-    // peer's escape sequence reached the terminal through the new team: badge.
     const row = formatPickerLabel(meta({ spawnedTeam: '\x1b[31mEVIL' }), '', {});
     expect(row).not.toContain('\x1b[31m');
     expect(strip(row)).toContain('EVIL');
@@ -230,9 +221,6 @@ describe('peer-supplied team data is neither trusted nor rendered raw', () => {
 
 describe('matchesTeam guards its needle, not just the row', () => {
   it('does not throw when the team argument is not a string', () => {
-    // In the browser the needle is `f.team`, taken off a cycle built from rows
-    // another machine sent — so it is peer-derived exactly like the fields it is
-    // compared against, and it runs over every row in the pool.
     expect(() => matchesTeam(meta({ spawnedTeam: 'redesign' }), 42 as unknown as string)).not.toThrow();
     expect(matchesTeam(meta({ spawnedTeam: 'redesign' }), 42 as unknown as string)).toBe(true);
   });

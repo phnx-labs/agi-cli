@@ -19,7 +19,6 @@ export function buildBackgroundArgv(agent: string, sessionId: string, cwd?: stri
   return argv;
 }
 
-/** What to do with a resolved session, given which machine we're on. */
 type DetachTarget =
   | { kind: 'local'; sessionId: string }
   | { kind: 'remote'; machine: string; sessionId: string }
@@ -42,9 +41,6 @@ export function resolveDetachTarget(s: ActiveSession, self: string): DetachTarge
   if (!sessionId) {
     return { kind: 'refuse', reason: 'That session has no id to resume, so it cannot be detached.' };
   }
-  // The box to hop to is where the PROCESS is (a shim lives on its dispatcher),
-  // which is not always `machine`. `sessionProcessHost` returns undefined when
-  // the process is here, so a value means a genuine remote takeover.
   const processHost = sessionProcessHost(s, self);
   if (processHost) {
     return { kind: 'remote', machine: processHost, sessionId };

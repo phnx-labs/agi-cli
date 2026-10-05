@@ -56,9 +56,6 @@ describe('looksLikePath', () => {
 });
 
 describe('detectProjectForPath', () => {
-  // A narrowed subproject (prix) shares a monorepo root with its umbrella; a
-  // second unrelated project has no Linear binding. All matching is pure string
-  // containment (projectNameForCwd), so these synthetic roots need not exist.
   const defs: ProjectDef[] = [
     {
       name: 'prix',
@@ -175,7 +172,6 @@ describe('projects view <path> — CLI dispatch disambiguation', () => {
 });
 
 describe('computeProjectListWidths', () => {
-  /** Render a row the way `list` does, so a bleeding column shows up as a shifted gridline. */
   const render = (r: ProjectListRow, w: { name: number; path: number; repo: number }) =>
     `  ${r.name.padEnd(w.name)} ${r.path.padEnd(w.path)} ${r.repo.padEnd(w.repo)} 0 agents`;
 
@@ -186,8 +182,6 @@ describe('computeProjectListWidths', () => {
     ];
     const w = computeProjectListWidths(rows);
     expect(w).toEqual({ name: 10, path: 39, repo: 22 });
-    // The repo column starts at the same offset on every row — the bug was a
-    // 32-char pad that a ~39-char home-relative path ran straight through.
     const offsets = rows.map((r) => render(r, w).indexOf(r.repo));
     expect(new Set(offsets).size).toBe(1);
   });
@@ -207,7 +201,6 @@ describe('computeProjectListWidths', () => {
 });
 
 describe('formatMilestoneDue', () => {
-  /** Local noon on 2026-08-03, so a timezone slip shows up as a whole-day error. */
   const now = new Date(2026, 7, 3, 12, 0, 0).getTime();
 
   it('speaks in days a person would use', () => {
@@ -220,13 +213,10 @@ describe('formatMilestoneDue', () => {
 
   it('switches to a calendar date once the countdown stops being useful', () => {
     expect(formatMilestoneDue('2026-08-21', now)).toBe('due Aug 21');
-    // A different year has to say which one.
     expect(formatMilestoneDue('2027-01-15', now)).toBe('due Jan 15, 2027');
   });
 
   it('reads the date at LOCAL midnight, not UTC', () => {
-    // `new Date('2026-08-03')` is UTC midnight — west of Greenwich that is
-    // Aug 2 locally, and this would read "overdue by a day" instead of "today".
     expect(formatMilestoneDue('2026-08-03', new Date(2026, 7, 3, 23, 59).getTime())).toBe('due today');
     expect(formatMilestoneDue('2026-08-03', new Date(2026, 7, 3, 0, 1).getTime())).toBe('due today');
   });
@@ -252,8 +242,6 @@ describe('formatNextMilestone', () => {
   });
 
   it('omits the fraction when nothing is filed under the milestone yet', () => {
-    // 0/0 is noise. This is the real shape of every milestone in this repo's
-    // own Linear project.
     expect(stripAnsi(formatNextMilestone({ name: 'Factory onboarding', targetDate: '2026-09-15', done: 0, total: 0 }, now)))
       .toBe('Factory onboarding  ·  due Sep 15');
   });
@@ -294,8 +282,6 @@ describe('formatMilestoneLines', () => {
   });
 
   it('leads with the NEXT milestone even when a different one is dated earlier', () => {
-    // Linear can flag a later milestone as next. Slicing the date-ordered front
-    // would show the earlier one and bury the actual next under "+N more".
     const out = formatMilestoneLines(ms, ms[2], now, 1).map(stripAnsi);
     expect(out[0]).toContain('next');
     expect(out[0]).toContain('Factory onboarding');
@@ -314,7 +300,6 @@ describe('formatMilestoneLines', () => {
       { name: 'Cut', targetDate: '2026-09-01', done: 0, total: 0 },
       { name: 'Cut', targetDate: '2026-10-01', done: 0, total: 0 },
     ];
-    // Matching on name alone put the label on the Sep row.
     const out = formatMilestoneLines(dup, dup[1], now, 99).map(stripAnsi);
     expect(out[0]).toContain('next');
     expect(out[0]).toContain('Oct 1');
@@ -326,7 +311,6 @@ describe('formatMilestoneLines', () => {
   });
 
   it('still renders a next carried alone by an older cached answer', () => {
-    // A cache entry written before `milestones` existed has only `nextMilestone`.
     const out = formatMilestoneLines([], ms[0], now, 1).map(stripAnsi);
     expect(out).toHaveLength(1);
     expect(out[0]).toContain('Factory converts strategy');
@@ -334,8 +318,6 @@ describe('formatMilestoneLines', () => {
 });
 
 describe('projectRepoFromDir', () => {
-  // Real git repos with real remotes — the whole point of the function is that
-  // it reads `git remote get-url origin`, so a fixture without git tests nothing.
   let tmp: string;
 
   const git = (cwd: string, args: string[]) =>
@@ -357,8 +339,6 @@ describe('projectRepoFromDir', () => {
   });
 
   it('reads the slug from the directory OWN origin, not from its path', () => {
-    // The regression this guards: a checkout under `.../muqsitnawaz/agents-cli`
-    // whose origin is `phnx-labs/agents-cli` must record what it pushes to.
     const dir = repoAt(path.join('muqsitnawaz', 'agents-cli'), 'git@github.com:phnx-labs/agents-cli.git');
     const r = projectRepoFromDir(dir);
     expect(r.ok).toBe(true);
@@ -395,7 +375,6 @@ describe('projectRepoFromDir', () => {
   });
 
   it('stores the path home-relative when the directory lives under $HOME', () => {
-    // Portability: the same definition has to re-root on every machine.
     const home = process.env.HOME ?? os.homedir();
     const under = path.join(home, `.projrepo-test-${process.pid}`);
     fs.mkdirSync(under, { recursive: true });
@@ -411,9 +390,6 @@ describe('projectRepoFromDir', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// formatFleetUnverifiedNote
-// ---------------------------------------------------------------------------
 
 describe('formatFleetUnverifiedNote', () => {
   it('says nothing when every answer verified', () => {
@@ -428,9 +404,6 @@ describe('formatFleetUnverifiedNote', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// `projects pull` → `projects pull-local` CLI-arg round trip (RUSH-2536)
-// ---------------------------------------------------------------------------
 
 /** The seam the fleet fan-out crosses: `pull` serializes targets into argv, ssh hands it to a peer,
  * whose `pull-local` rebuilds them. Both halves run for real: `expectedSlug` never crossed (slug
@@ -449,7 +422,6 @@ describe('projects pull-local — CLI-arg round trip from pull', () => {
     await g.addConfig('commit.gpgsign', 'false');
   }
 
-  /** Run the real `agents projects pull-local …` argv and capture its stdout. */
   async function runPullLocal(args: string[]): Promise<string> {
     const program = new Command();
     program.exitOverride();
@@ -484,7 +456,6 @@ describe('projects pull-local — CLI-arg round trip from pull', () => {
     await configIdentity(plain);
     await simpleGit().clone(remote, mismatched);
     await configIdentity(mismatched);
-    // This checkout hosts a DIFFERENT repo than the project declares.
     await simpleGit(mismatched).raw(['remote', 'set-url', 'origin', 'https://github.com/org/other.git']);
   });
 
@@ -497,31 +468,23 @@ describe('projects pull-local — CLI-arg round trip from pull', () => {
       { path: plain },
       { path: mismatched, expectedSlug: 'org/a' },
     ];
-    // Exactly what the orchestrating `pull` sends each peer, and exactly the
-    // fingerprint it will verify the peer's answer against.
     const expectedFingerprint = fingerprintTargets(targets);
     const stdout = await runPullLocal(pullLocalArgs(targets));
 
     const parsed = parseProjectPullEnvelope(stdout, machineId(), { expectedFingerprint });
 
-    // Fingerprint agreement: the slug survived the hop. With bare paths on the
-    // wire this is `valid: false` / zero items — the peer's whole answer gone.
     expect(parsed.valid).toBe(true);
     expect(parsed.items).toHaveLength(2);
 
-    // Slug verification actually ran on the peer.
     const blocked = parsed.items.find((r) => r.path === mismatched);
     expect(blocked?.status).toBe('blocked');
     expect(blocked?.message).toMatch(/Slug mismatch: expected org\/a, found org\/other/);
     expect(blocked?.expectedSlug).toBe('org/a');
 
-    // The slug-less target is still pulled normally.
     expect(parsed.items.find((r) => r.path === plain)?.status).toBe('current');
   });
 
   it('rejects a peer answer whose fingerprint does not match the targets that were sent', async () => {
-    // A peer that answered about a DIFFERENT target set must never be folded
-    // into the results as if it had answered ours.
     const sent: ProjectRepoTarget[] = [{ path: plain, expectedSlug: 'org/a' }];
     const stdout = await runPullLocal(pullLocalArgs([{ path: plain }]));
 
@@ -613,5 +576,16 @@ describe('projects prs — list is the default, merge owns its flags', () => {
     expect(empty.err).toContain('The comment is empty.');
     const missing = await run(['prs', 'comment', 'merge', '--repo', 'acme/mono', '--number', '7', '--body-file', path.join(projectsDir, 'nope.md')]);
     expect(missing.err).toContain('Could not read --body-file');
+  });
+
+  it('`prs automerge` needs --sha to turn on and refuses --method with --off, before touching GitHub', async () => {
+    const noSha = await run(['prs', 'automerge', 'merge', '--repo', 'acme/mono', '--number', '7']);
+    expect(noSha.exit).toBe(1);
+    expect(noSha.err).toContain('Pass --sha <head-sha>');
+    const offMethod = await run(['prs', 'automerge', 'merge', '--repo', 'acme/mono', '--number', '7', '--off', '--method', 'rebase']);
+    expect(offMethod.exit).toBe(1);
+    expect(offMethod.err).toContain('--method only applies when turning auto-merge on');
+    const method = await run(['prs', 'automerge', 'merge', '--repo', 'acme/mono', '--number', '7', '--sha', 'abc1234', '--method', 'fast']);
+    expect(method.err).toContain('--method expects one of rebase, squash, merge');
   });
 });

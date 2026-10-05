@@ -20,7 +20,6 @@ const execFileAsync = promisify(execFile);
  * index: `agents trash`/`prune` move the dir wholesale, so identity travels with it. Depends
  * only on base lib, never `plugins/`, `rules/`, `session/` or `devices/`, to avoid cycles. */
 
-/** Directory holding one installation. Same path as {@link getVersionDir}. */
 export function installationDir(agent: AgentId, label: string): string {
   return path.join(getVersionsDir(), agent, label);
 }
@@ -29,7 +28,7 @@ export function installationRecordPath(agent: AgentId, label: string): string {
   return path.join(installationDir(agent, label), INSTALLATION_RECORD_FILE);
 }
 
-/** Mint an opaque installation id. Random, never derived from the release. */
+// IDs are opaque and permanent; repair/update must preserve them.
 export function mintInstallationId(): string {
   return `ins_${crypto.randomBytes(12).toString('hex')}`;
 }
@@ -84,7 +83,6 @@ export function readInstallation(agent: AgentId, label: string): Installation | 
   return assertValidRecord(parsed, file);
 }
 
-/** Semantic feature checks use the release, while paths and settings keep the label. */
 export function installedReleaseFor(agent: AgentId, label: string): string {
   if (!Object.hasOwn(AGENTS, agent) || !VERSION_RE.test(label)) return label;
   return readInstallation(agent, label)?.releaseVersion ?? label;
@@ -109,7 +107,6 @@ export function ensureInstallation(agent: AgentId, label: string): Installation 
     { ...INSTALLATION_LOCK_OPTIONS, acquireTimeoutMs: 0 });
 }
 
-/** Migration for callers already holding the canonical installation lock. */
 export function ensureInstallationLocked(agent: AgentId, label: string, legacyCreatedAt?: string): Installation {
   const existing = readInstallation(agent, label);
   if (existing) return existing;
@@ -185,7 +182,6 @@ export function recordRelease(installation: Installation, releaseVersion: string
   return next;
 }
 
-/** Version-dir basenames present for an agent, oldest-first by directory name. */
 export function listInstallationLabels(agent: AgentId): string[] {
   const agentDir = path.join(getVersionsDir(), agent);
   let entries: fs.Dirent[];
@@ -208,7 +204,6 @@ export function listInstallations(agent: AgentId): Installation[] {
     try {
       out.push(ensureInstallation(agent, label));
     } catch {
-      /* dir vanished or unreadable — not an installation we can act on */
     }
   }
   return out;
@@ -234,7 +229,6 @@ export function resolveManagedInstallation(agent: AgentId): Installation | null 
 
 export interface EnsureHarnessInstallationResult {
   installation: Installation;
-  /** True when this call installed the harness just now; false when the managed installation already existed and was reused unchanged. */
   installed: boolean;
 }
 
@@ -248,9 +242,6 @@ export async function ensureHarnessInstallation(
   const existing = resolveManagedInstallation(agent);
   if (existing) return { installation: existing, installed: false };
   const release = opts.release ?? 'latest';
-  // installVersion lives in ./versions.js, which imports this file. A dynamic
-  // import keeps the static module graph acyclic (see the docblock at the top
-  // of this file) while the call itself runs after both modules are loaded.
   const { installVersion } = await import('./versions.js');
   const result = await installVersion(agent, release, opts.onProgress, { installationLabel: MANAGED_INSTALLATION_LABEL });
   if (!result.success) {
@@ -263,9 +254,6 @@ export async function ensureHarnessInstallation(
   return { installation: record, installed: true };
 }
 
-/**
- * Get the directory where a specific version is installed.
- */
 export function getVersionDir(agent: AgentId, version: string): string {
   return path.join(getVersionsDir(), agent, version);
 }
@@ -316,18 +304,12 @@ export function resolveGrokCurrentBinary(grokHome: string): string | null {
   }
 }
 
-/**
- * Get the binary path for a specific agent version.
- */
 export function getBinaryPath(agent: AgentId, version: string): string {
   const agentConfig = AGENTS[agent];
   if (agent === 'grok') {
     const current = resolveGrokCurrentBinary(path.join(getVersionHomePath(agent, version), '.grok'));
     if (current) return current;
     const grokDownloads = path.join(getVersionHomePath(agent, version), '.grok', 'downloads');
-    // The directory token is the stable installation/account label. A
-    // self-updating slot may carry a newer vendor release, whose binary keeps
-    // the release in its filename; resolve through the frozen install record.
     const releaseVersion = readInstallation(agent, version)?.releaseVersion ?? version;
     try {
       const entries = fs.readdirSync(grokDownloads);
@@ -372,17 +354,13 @@ export function getBinaryPath(agent: AgentId, version: string): string {
  * `getBinaryPath` with two versions, not an agent id. Narrower than `isSelfUpdatingAgent`: grok
  * self-updates but keeps a real per-version copy, so its homes must not be collapsed. */
 export function isGlobalBinaryAgent(agent: AgentId): boolean {
+  // Only identical paths across two labels prove a global binary; per-home binaries stay isolated.
   return getBinaryPath(agent, '0.0.0-probe-a') === getBinaryPath(agent, '0.0.0-probe-b');
 }
 
-// Live-version cache for self-updating global binaries. `<cli> --version` is a
-// ~real shell-out, so hold the result briefly: the same `agents view` render
-// asks for it from both listInstalledVersions (sync) and the label path (async).
 const LIVE_VERSION_TTL_MS = 5000;
 const liveVersionCache = new Map<AgentId, { at: number; version: string | null }>();
 
-/** Drop the live-version cache (call after an install/remove that changes the
- * running binary, e.g. `agents add droid@latest`). */
 export function invalidateLiveVersionCache(agent?: AgentId): void {
   if (agent) liveVersionCache.delete(agent);
   else liveVersionCache.clear();
@@ -444,7 +422,6 @@ function getPackageBinaryPath(agent: AgentId, version: string): string | null {
     rel = bin;
   } else if (bin && typeof bin === 'object') {
     const map = bin as Record<string, string>;
-    // Prefer the entry named after our launch command; else the first bin.
     rel = map[agentConfig.cliCommand] ?? Object.values(map)[0];
   }
   if (!rel || typeof rel !== 'string') return null;
@@ -465,7 +442,6 @@ export function isVersionInstalled(agent: AgentId, version: string): boolean {
 // cache in state.ts; hot path for every enumerate-style consumer.
 const installedVersionsCache = new Map<AgentId, { stamp: number; versions: string[] }>();
 
-/** Drop the installed-versions cache (call after install/remove mutations). */
 export function invalidateInstalledVersionsCache(agent?: AgentId): void {
   if (agent) installedVersionsCache.delete(agent);
   else installedVersionsCache.clear();
@@ -507,8 +483,6 @@ export function listInstalledVersions(agent: AgentId): string[] {
 
   const cached = installedVersionsCache.get(agent);
   if (cached && cached.stamp === stamp) {
-    // Collapse is applied per-call (not cached): it depends on the live-version
-    // cache + config symlink, which can change without the versions-dir mtime.
     return collapseGlobalBinaryVersions(agent, cached.versions);
   }
 
@@ -530,9 +504,6 @@ export function listInstalledVersions(agent: AgentId): string[] {
   return collapseGlobalBinaryVersions(agent, versions);
 }
 
-/**
- * Get the global default version for an agent.
- */
 export function getGlobalDefault(agent: AgentId): string | null {
   const meta = readMeta();
   return meta.agents?.[agent] || null;
@@ -566,9 +537,6 @@ export function isVersionIsolated(agent: AgentId, version: string): boolean {
   return fs.existsSync(getIsolatedMarkerPath(agent, version));
 }
 
-/**
- * Get version specified in a project-root agents.yaml (not the user ~/.agents/.system/agents.yaml).
- */
 export function getProjectVersion(agent: AgentId, startPath: string): string | null {
   const userAgentsYaml = path.join(getUserAgentsDir(), 'agents.yaml');
   let dir = path.resolve(startPath);
@@ -591,7 +559,6 @@ export function getProjectVersion(agent: AgentId, startPath: string): string | n
         if (err instanceof Error && err.message.startsWith('Invalid version in agents.yaml')) {
           throw err;
         }
-        // Ignore parsing errors
       }
     }
     dir = path.dirname(dir);
@@ -603,7 +570,6 @@ export function getProjectVersion(agent: AgentId, startPath: string): string | n
 /** Get the resolved version for an agent in the current context: project manifest first, then
  * the global default. */
 export function resolveVersion(agent: AgentId, projectPath?: string): string | null {
-  // Check project manifest
   if (projectPath) {
     const version = getProjectVersion(agent, projectPath);
     if (version) {
@@ -611,7 +577,6 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
     }
   }
 
-  // Fall back to global default
   const globalDefault = getGlobalDefault(agent);
   if (globalDefault) return globalDefault;
 

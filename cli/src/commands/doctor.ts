@@ -76,7 +76,6 @@ const AGENT_NAMES: Record<string, string> = Object.fromEntries(
 );
 
 interface DoctorOptions {
-  /** Bypass the cached bare-`--json` overview snapshot and recompute live (also refreshes the shared cache). */
   refresh?: boolean;
   json?: boolean;
   diff?: boolean;
@@ -90,7 +89,6 @@ interface DoctorOptions {
   quiet?: boolean;
 }
 
-// ─── overview mode (no target) ────────────────────────────────────────────────
 
 // doctor must never crash on one subsystem. The standalone secrets CLI missing from PATH is
 // routine, so these two checks degrade to "nothing to report" on a transport error while every
@@ -143,9 +141,6 @@ export function wrapLine(prefix: string, text: string, width = terminalWidth()):
   return lines;
 }
 
-/** Reshape  into the pure finding-builder's input: install state
- *  per declared CLI, plus the manifests the loader rejected (a bad manifest
- *  declares a CLI that can never install, so it is a finding, not silence). */
 function toHostCliInput(
   status: ReturnType<typeof listCliStatus>,
 ): NonNullable<LocalFindingInputs['hostClis']> {
@@ -159,12 +154,10 @@ function printWrappedLine(prefix: string, text: string): void {
   for (const line of wrapLine(prefix, text)) console.log(chalk.gray(line));
 }
 
-// ─── repo-behind advisory ─────────────────────────────────────────────────────
 
 /** Render repo-behind notices from background fetch markers as a "Repo updates" section. Reads
  * without consuming the markers, so the notice persists until the user runs `agents repo pull`. */
 
-// ─── devices / fleet mode ─────────────────────────────────────────────────────
 
 interface DeviceDoctorResult {
   name: string;
@@ -181,8 +174,6 @@ interface DeviceDoctorResult {
   secretFindings?: DoctorFinding[];
 }
 
-/** What one remote `doctor --json` contributes: its inventory (for the
- *  divergence comparator) plus the findings only it can observe. */
 interface RemoteDoctorPayload {
   inventory: FleetInventory | null;
   secretFindings: DoctorFinding[];
@@ -194,7 +185,6 @@ interface RemoteDoctorPayload {
 const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'auth-bundle-wrong-backend', 'ssh-key-enrollment'] as const;
 type RemoteForwardedKind = typeof REMOTE_FORWARDED_KINDS[number];
 
-/** Canonical, locally-authored text for a forwarded kind. Never the remote's. */
 const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
   'rc-secret-export': 'a credential-shaped export was found in this box\'s shell rc files'
     + ' — run `agents doctor` there for the file and line',
@@ -215,7 +205,7 @@ export function asRemoteSecretFindings(raw: unknown, device: string): DoctorFind
     const kind = (item as Record<string, unknown>).kind;
     if (typeof kind !== 'string') continue;
     if (!(REMOTE_FORWARDED_KINDS as readonly string[]).includes(kind)) continue;
-    if (seen.has(kind)) continue;   // one row per kind per box
+    if (seen.has(kind)) continue;
     seen.add(kind);
     const k = kind as RemoteForwardedKind;
     const base = {
@@ -239,8 +229,6 @@ interface FleetTarget {
 async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> {
   const singleName = opts.device;
   if (singleName) {
-    // --device as a single-device filter: resolve through the device
-    // registry first, then the general host registry, then ad-hoc user@host.
     const registry = await loadDevices();
     const deviceProfile = registry[singleName];
     if (deviceProfile) {
@@ -262,8 +250,6 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
   const registry = await loadDevices();
   const localName = machineId();
   return Object.values(registry)
-    // Normalize names so zion/ZION/zion.local all match machineId() and we never
-    // self-SSH the local box during fleet probes (RUSH-2114).
     .filter((d) => normalizeHost(d.name) !== localName)
     .map((d) => ({
       name: d.name,
@@ -280,9 +266,6 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
     forwarded,
     undefined,
     isWin ? 'windows' : undefined,
-    // POSIX login shells often lack the shims dir; Windows PowerShell usually
-    // has it via the install profile, and our single-quote escaping would
-    // prevent $HOME expansion there, so skip the bootstrap on Windows.
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
   const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs: target.extraSshArgs });
@@ -416,8 +399,6 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
   const localName = machineId();
   const results: DeviceDoctorResult[] = [];
 
-  // Local machine first, directly. Its inventory is collected in-process — no
-  // SSH round-trip to this box.
   if (!singleName) {
     results.push({
       name: localName,
@@ -427,9 +408,6 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
     });
   }
 
-  // Remote targets in parallel: agent readiness (teams doctor) and the harness
-  // inventory (top-level doctor --json) in one fan-out per concern. Both run
-  // through the shared fleet helper so an offline box degrades to a skipped row.
   const [remoteResults, inventoryResults] = await Promise.all([
     fanOutDevices(targets, probeFleetTarget),
     fanOutDevices(targets, probeFleetInventory),
@@ -480,7 +458,6 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
 
   for (const r of results) {
     if (r.name === localName) {
-      // Local findings from the real reports (not just the inventory summary).
       const localReports: VersionResourceReport[] = [];
       for (const agent of ALL_AGENT_IDS) {
         for (const version of listInstalledVersions(agent)) {
@@ -510,23 +487,15 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         isolatedVersions: localReports
           .filter((rep) => isVersionIsolated(rep.agent, rep.version))
           .map((rep) => `${rep.agent}@${rep.version}`),
-        // Can the owner-delivery lane escalate a block from THIS box? Local only —
-        // remote boxes self-report it in their own `agents doctor --json`.
         ownerSink: await probeOwnerSink(readMeta()),
         binaryShadows: detectAgentsBinaryShadows(),
-        // A `__daemon-run` no unit main PID or daemon.pid owns (W4, PHNX-3736) —
-        // the /tmp/pin-e2e leak class the registry-scoped duplicate check cannot
-        // see. Local only: a remote box self-reports in its own doctor.
         leakedDaemons: findLeakedDaemons(),
       }));
       accounts[localName] = r.inventory?.signIn ?? {};
       continue;
     }
 
-    // Remote device.
     if (!r.online) {
-      // An offline / unreachable box: surface it as a warning so it isn't
-      // silently dropped from the per-computer section.
       findings.push({
         severity: 'warning', kind: 'stale-cli', device: r.name,
         message: r.error ? `unreachable — ${r.error}` : 'unreachable',
@@ -534,21 +503,14 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
       });
       continue;
     }
-    // Secret hygiene the aggregator cannot see for itself — the remote's shell
-    // rc files and its process environment. Without this the fleet readout
-    // reports a leaking box as clean (RUSH-1968).
     if (r.secretFindings?.length) findings.push(...r.secretFindings);
 
-    // Unlike sign-in, the remote's hook-runtime payload is deliberately just a
-    // closed enum state. Rebuild the finding locally so no remote file path or
-    // detector text reaches this host's output.
     findings.push(...hookRuntimeToFindings(r.name, r.inventory?.hookRuntime));
 
     if (r.inventory?.signIn) {
       findings.push(...signInToFindings(r.name, r.inventory.signIn));
       accounts[r.name] = r.inventory.signIn;
     } else {
-      // Reachable, but an older CLI that can't report per-version sign-in.
       findings.push({
         severity: 'warning', kind: 'stale-cli', device: r.name,
         message: "older agents-cli — can't report per-version sign-in",
@@ -558,8 +520,6 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
     }
   }
 
-  // Cross-device divergence → version-skew / repo-drift / missing-resource
-  // warnings, attributed to the lagging box.
   if (divergence) {
     findings.push(...fleetDivergenceToFindings(divergence.divergences, divergence.baseline));
   }
@@ -578,13 +538,10 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
   }
 }
 
-// ─── target mode ──────────────────────────────────────────────────────────────
 
 interface ResolvedTarget {
   agent: AgentId;
   versions: string[];
-  /** Did the user name a concrete VERSION (`codex@1.2.3`), or just the agent?
-   *  The former is an explicit, isolated-copy-inclusive target for diagnosis. */
   versionExplicit: boolean;
 }
 
@@ -596,14 +553,12 @@ function parseTargetArg(arg: string): ResolvedTarget | { error: string } {
   const agent = resolveAgentName(agentPart);
   if (!agent) return { error: formatAgentError(agentPart) };
 
-  // No qualifier → diagnose every installed version of the agent.
   if (!qualifier) {
     const versions = listInstalledVersions(agent);
     if (versions.length === 0) return { error: `${AGENTS[agent].name} has no installed versions. Run \`agents add ${agent}@<version>\` first.` };
     return { agent, versions, versionExplicit: false };
   }
 
-  // All explicit qualifiers (@all, @latest, @oldest, @default, @pinned, @x.y.z) → shared resolver
   try {
     const targets = resolveAgentTargets(`${agent}@${qualifier}`, { availableAgents: [agent] });
     const versions = targets.map((t) => t.version).filter((v): v is string => v !== null);
@@ -641,7 +596,6 @@ function statusLabel(status: ResourceDiff['status']): string {
 function sourceLabel(diff: ResourceDiff, layers: VersionResourceReport['layers']): string {
   if (!diff.source) return '';
   if (diff.source === 'extra') {
-    // Find which extra repo this came from.
     const sourcePath = diff.sourcePath;
     if (sourcePath) {
       for (const e of layers.extras) {
@@ -684,8 +638,6 @@ function renderKindSection(
 
   if (total === 0) return;
 
-  // Hide ok rows by default for big lists; show them only with --diff so the
-  // operator can verify presence; otherwise keep output focused on problems.
   const visible = options.showDiff ? rows : rows.filter((r) => r.status !== 'ok');
   if (visible.length === 0) {
     console.log(`    ${chalk.gray('all ok')}`);
@@ -721,9 +673,6 @@ function safeRead(p: string): string | null {
 }
 
 function readExpectedForDiff(kind: DoctorKind, row: ResourceDiff): string | null {
-  // Skills are directories; per-file diffs would need recursive walking.
-  // Keep the v1 behaviour minimal: the row already says DIFF, the user can
-  // open the source path to inspect.
   if (kind === 'skills') return null;
   if (!row.sourcePath) return null;
   return safeRead(row.sourcePath);
@@ -736,16 +685,10 @@ export type IssueSeverity = 'critical' | 'warning' | 'info';
  * breakage (unwired hook, bad settings.json); warning is drift (RUSH-2947); info an orphan. */
 export interface VerdictIssue {
   severity: IssueSeverity;
-  /** machine-stable class: unwired-hook | settings-missing | settings-unparseable
-   *  | missing | source-behind | divergent | extra | stale | never-synced | orphan */
   category: string;
-  /** the hook / resource / layer / version the finding is about */
   subject: string;
-  /** one-line plain-English consequence */
   impact: string;
-  /** exact remediation command */
   fix: string;
-  /** terse combined label (legacy) */
   text: string;
   color: 'yellow' | 'red' | 'magenta';
 }
@@ -753,13 +696,9 @@ export interface VerdictIssue {
 export interface DoctorVerdict {
   healthy: boolean;
   issues: VerdictIssue[];
-  /** Resources (target) / versions (overview) reconciled clean — drives the
-   *  healthy line's count. */
   reconciled: number;
 }
 
-/** Categories `agents sync` reconciles (vs. `agents repo pull` for a behind
- *  source, or `agents prune cleanup` for an orphan). Drives the heal footer. */
 const AUTO_FIXABLE_CATEGORIES = new Set([
   'hook-runtime-broken', 'unwired-hook', 'settings-missing', 'settings-unparseable', 'missing', 'divergent', 'stale', 'never-synced',
 ]);
@@ -783,12 +722,9 @@ function missingResourceSeverity(kind: DoctorKind): IssueSeverity {
 export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
   const issues: VerdictIssue[] = [];
   const idLabel = `${report.agent}@${report.version}`;
-  // doctor diagnoses; `agents sync` fixes. Every auto-fixable finding points at
-  // the one fixer — a command sync can actually deliver (asserted in the tests).
   const fixCmd = `agents sync ${idLabel} --yes`;
   const syncCmd = fixCmd;
 
-  // ── critical: settings.json / unwired hooks (silent breakage) ──
   const w = report.hookWiring;
   for (const issue of w?.runtimeBroken ?? []) {
     issues.push({
@@ -824,8 +760,6 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
     }
   }
 
-  // ── missing resources (declared in sources, absent from home) — severity
-  // follows FINDING_SEVERITY: hooks/plugins are critical, everything else warns ──
   for (const kind of DOCTOR_ALL_KINDS) {
     for (const r of report.kinds[kind]) {
       if (r.status !== 'missing') continue;
@@ -839,7 +773,6 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
     }
   }
 
-  // ── warning: source layer behind origin (home reconciled against stale truth) ──
   for (const b of report.sourceBehind ?? []) {
     if (b.behind <= 0) continue;
     issues.push({
@@ -850,7 +783,6 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
     });
   }
 
-  // ── warning: divergent resources (drifted from source) ──
   for (const kind of DOCTOR_ALL_KINDS) {
     for (const r of report.kinds[kind]) {
       if (r.status !== 'diff') continue;
@@ -863,7 +795,6 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
     }
   }
 
-  // ── info: extra / orphan resources (present in home, no source) ──
   for (const kind of DOCTOR_ALL_KINDS) {
     for (const r of report.kinds[kind]) {
       if (r.status !== 'extra') continue;
@@ -879,15 +810,12 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
   return { healthy: issues.length === 0, issues, reconciled: report.summary.ok };
 }
 
-// ─── triaged health block (shared by target + overview) ────────────────────────
 
 const SEVERITY_COLOR: Record<IssueSeverity, (s: string) => string> = {
   critical: chalk.red,
   warning: chalk.yellow,
   info: chalk.magenta,
 };
-// Restrained terminal glyphs — the ✓ ✗ ⚠ set plus a subtle info dot, colored via
-// chalk to match the man-page voice. No colorful emoji.
 const SEVERITY_GLYPH: Record<IssueSeverity, string> = {
   critical: '✗',
   warning: '⚠',
@@ -924,7 +852,7 @@ export function healthBlockLines(verdict: DoctorVerdict, opts: { healthySummary:
   lines.push(`  ${chalk.red('✗')} ${chalk.red('unhealthy')} ${chalk.gray(`— ${total} issue${total === 1 ? '' : 's'} (${bits.join(' · ')})`)}`);
   lines.push('');
 
-  const cont = ' '.repeat(14); // aligns the fix line under the subject column
+  const cont = ' '.repeat(14);
   const issueLines = (i: VerdictIssue): void => {
     const glyph = SEVERITY_COLOR[i.severity](SEVERITY_GLYPH[i.severity]);
     const word = SEVERITY_COLOR[i.severity](i.severity.padEnd(8));
@@ -965,9 +893,6 @@ export function computeOverviewHealth(
   const issues: VerdictIssue[] = [];
   const pretty = (agent: string, version: string) => `${AGENT_NAMES[agent] || agent}@${version}`;
 
-  // critical/warning: same hook resource materialized in several version homes.
-  // Different content is more severe because a stale copy can disagree with
-  // the active gate; byte-identical copies are noise and duplicate runtime cost.
   for (const finding of duplicateHooks) {
     const versions = finding.copies.map((copy) => copy.version).join(', ');
     const active = finding.authoritative.version;
@@ -983,7 +908,6 @@ export function computeOverviewHealth(
     });
   }
 
-  // critical: generated hook runtime / unwired hooks / broken settings.json per version
   for (const row of syncRows) {
     const brokenRuntime = row.brokenHookRuntime ?? 0;
     if (brokenRuntime > 0) {
@@ -1006,7 +930,6 @@ export function computeOverviewHealth(
     });
   }
 
-  // warning: source layers behind origin
   for (const m of repoBehindMarkers) {
     if (m.behind <= 0) continue;
     const label = m.alias === 'user' ? '~/.agents' : m.alias;
@@ -1018,7 +941,6 @@ export function computeOverviewHealth(
     });
   }
 
-  // warning: stale / never-synced versions
   for (const row of syncRows) {
     const label = pretty(row.agent, row.version);
     if (row.status === 'stale') {
@@ -1038,7 +960,6 @@ export function computeOverviewHealth(
     }
   }
 
-  // info: orphan resources per version
   for (const row of orphanRows) {
     const parts: string[] = [];
     if (row.commands) parts.push(`${row.commands} command${row.commands === 1 ? '' : 's'}`);
@@ -1097,8 +1018,6 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
   ].filter(Boolean).join(' ');
   printWrappedLine('  layers: ', layerStr);
 
-  // Staleness manifest verdict — single-line summary from the staleness
-  // library, sitting alongside the detailed per-resource diff below.
   const manifest = loadManifest(report.agent, report.version);
   if (!manifest) {
     console.log(chalk.gray(`  manifest: ${chalk.gray('cold')} (never synced)`));
@@ -1124,8 +1043,6 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
       console.log(chalk.gray(`  inventory: capable ${report.hookInventory.capable ? 'yes' : 'no'} · on-disk ${report.hookInventory.onDisk.length} · wired ${wired}${unmanaged}`));
     }
     renderKindSection(kind, rows, report.layers, options);
-    // A hook file can reconcile "ok" above yet be absent from settings.json — a
-    // present-but-dead hook. Surface that right under the hooks section.
     if (kind === 'hooks' && report.hookWiring) renderHookWiringRows(report.hookWiring);
   }
 
@@ -1184,8 +1101,6 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
   }
 
   if (drift.syncRows.length === 0) {
-    // Nothing installed is a clean state, not a failure — CI on a fresh
-    // checkout with no versions should pass, not error.
     console.log(chalk.gray('check: no installed versions — nothing to verify'));
     process.exit(0);
   }
@@ -1252,7 +1167,6 @@ function checkPayload(device: string, drift: ReturnType<typeof computeDrift>): D
 
 interface CheckFanOutTarget extends FanOutDeviceTarget {
   platform?: string;
-  /** Registry Tailscale address to dial, not the bare name — see {@link fleetDialTarget}. */
   dialTarget: string;
   extraSshArgs?: string[];
 }
@@ -1335,7 +1249,6 @@ async function runDevicesCheck(opts: DoctorOptions, cwd: string): Promise<void> 
   process.exit(1);
 }
 
-// ─── command registration ────────────────────────────────────────────────────
 
 export function registerDoctorCommand(program: Command): void {
   const doctorCmd = addHostOption(program.command('doctor [target]'))
@@ -1395,9 +1308,6 @@ export function registerDoctorCommand(program: Command): void {
   doctorCmd.action(async (target: string | undefined, opts: DoctorOptions) => {
       const cwd = opts.cwd ? opts.cwd : process.cwd();
 
-      // CI drift gate. Kept BEFORE the --devices branch so `doctor --check
-      // --devices` routes to the drift gate fan-out (runDevicesCheck), while a
-      // bare `doctor --devices` still routes to the readiness matrix below.
       if (opts.check) {
         if (target) {
           console.error(chalk.red('Cannot combine --check with a target argument.'));
@@ -1420,8 +1330,6 @@ export function registerDoctorCommand(program: Command): void {
         return;
       }
 
-      // Launcher adoption escape hatch. `--adopt <agent>` forces the take-over
-      // even for a non-default agent; `--release <agent>` reverses it.
       if (opts.adopt || opts.release) {
         if (opts.adopt && opts.release) {
           console.error(chalk.red('--adopt and --release are mutually exclusive; pass only one.'));
@@ -1443,9 +1351,6 @@ export function registerDoctorCommand(program: Command): void {
           }
           return;
         }
-        // adoptShadowingLauncher resolves the launcher itself (PATH shadow, then
-        // the durable ~/.local/bin symlink), so it forces the take-over even when
-        // this shell's PATH already has the shim first.
         let result;
         try {
           result = adoptShadowingLauncher(agent);
@@ -1483,24 +1388,13 @@ export function registerDoctorCommand(program: Command): void {
         const clis = checkAllClis();
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
-        // Parallel host-CLI probe (RUSH-2136): the serial spawnSync version ran a
-        // dozen+ blocking 10s-timeout checks one after another, which measured
-        // ~136s on an idle box and stalled the menu-bar helper's poll.
         const hostClis = await listCliStatusAsync(cwd);
         const repoBehindMarkers = readRepoBehindMarkers();
-        // The local inventory now carries per-version sign-in (RUSH-2069), so it
-        // is the single source for both the accounts line and the logged-out
-        // criticals. Collected once (async: it parses each version's account).
         const inventory = await collectLocalFleetInventory(cwd);
         const localName = machineId();
         const duplicateHooks = inspectDuplicateVersionHooks(cwd);
-        // A routine belongs to one device. A multi-device pin used to fire it
-        // once per listed device — duplicate agent runs, duplicate spend — so
-        // surface any that are still on disk with the exact fix.
         const ambiguousPins = findAmbiguousDevicePins(cwd);
 
-        // Legacy account-global sign-in map, kept for `--json` back-compat
-        // (ssh.ts RemoteDoctorJson / menubar read `signIn`). File-based, no home.
         const signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>> = {};
         await Promise.all(
           Object.entries(clis)
@@ -1509,28 +1403,20 @@ export function registerDoctorCommand(program: Command): void {
               try {
                 signIn[name] = await getAccountInfo(name as AgentId);
               } catch {
-                /* advisory only */
               }
             }),
         );
 
-        // Per-version resource reports drive the missing-hook / missing-plugin /
-        // unwired / content-drift findings. Non-project layers only (the global
-        // home is never reconciled against per-cwd project resources).
         const reports: VersionResourceReport[] = [];
         for (const agent of ALL_AGENT_IDS) {
           for (const version of listInstalledVersions(agent)) {
             reports.push(diffVersionResources(agent, version, { cwd, excludeProject: true }));
           }
         }
-        // A MANAGED agent (installed versions) whose binary won't resolve is a
-        // real critical — an unmanaged-and-absent agent is not.
         const cliMissing = ALL_AGENT_IDS.filter(
           (a) => listInstalledVersions(a).length > 0 && clis[a] && !clis[a].installed,
         );
 
-        // An isolated copy is skipped by the agent-wide `agents sync` sweep, so
-        // its findings must never fold into a collapsed cross-version row.
         const isolatedVersions = reports
           .filter((r) => isVersionIsolated(r.agent, r.version))
           .map((r) => `${r.agent}@${r.version}`);
@@ -1549,16 +1435,11 @@ export function registerDoctorCommand(program: Command): void {
           rcSecrets: scanUserRcFiles(),
           masterPassphraseInEnv: masterPassphraseInEnv(),
           authBundleWrongBackend: !inspectReservedAuthBundle().ok,
-          // getEffectiveExecutionPolicy spawns powershell — a doomed process on
-          // POSIX, where the advisory never applies. Probe only on Windows.
           execPolicy: process.platform === 'win32'
             ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
             : undefined,
           isolatedVersions,
-          // Can the owner-delivery lane (feed/notify) escalate a block from this
-          // box? A factory that cannot escalate is not healthy (RUSH-2262).
           ownerSink: await probeOwnerSink(readMeta()),
-          // A `__daemon-run` no unit main PID or daemon.pid owns (W4, PHNX-3736).
           leakedDaemons: findLeakedDaemons(),
         });
 
@@ -1566,22 +1447,12 @@ export function registerDoctorCommand(program: Command): void {
           const overviewPayload = {
             clis,
             signIn,
-            // Cached auth-health rollup for THIS host — lets `agents fleet status`
-            // show a live-verified Auth column from the same fan-out it already
-            // runs, without a separate fleet-wide `fleet ping`.
             auth: summarizeHostAuth(readAuthHealthCache(), machineId()),
             sync: syncRows,
             orphans: orphanRows,
-            // Triaged overview health — severity/category/subject/impact/fix per
-            // finding, aggregated across versions. Additive; existing consumers
-            // reading `sync`/`orphans`/`repos` are unaffected.
             health: computeOverviewHealth(syncRows, orphanRows, repoBehindMarkers, duplicateHooks),
             duplicateHooks,
-            // Routines whose `devices` names more than one machine — each used to
-            // fire once per device. `owner` is the one that fires now.
             ambiguousDevicePins: ambiguousPins,
-            // Prioritized RUSH-2069 findings (critical/warning, per-version, with
-            // remediation). Additive alongside the legacy fields above.
             findings,
             // This host's harness inventory (resources per kind, version ids per agent,
             // `.agents`/`.system` repo state, per-version sign-in), so `agents doctor --devices`
@@ -1596,8 +1467,6 @@ export function registerDoctorCommand(program: Command): void {
               })),
               errors: hostClis.errors,
             },
-            // Repos behind upstream — emitted here so menubar and other consumers
-            // can surface the notices without reading stderr from normal commands.
             repos: repoBehindMarkers.map((m) => ({
               alias: m.alias,
               dir: m.dir,
@@ -1606,15 +1475,12 @@ export function registerDoctorCommand(program: Command): void {
               fetchedAt: m.fetchedAt,
             })),
           };
-          // Persist for the next poller and release the singleflight lock BEFORE
-          // printing, so a concurrent caller picks up the fresh snapshot at once.
           writeDoctorOverviewCache(overviewPayload);
           releaseOverviewGate?.();
           console.log(JSON.stringify(overviewPayload, null, 2));
           return;
         }
 
-        // Single-machine hybrid: CRITICAL section + one `▸ <machine>` block.
         const accounts: Record<string, Record<string, FleetVersionSignIn[]>> = {
           [localName]: inventory.signIn ?? {},
         };
@@ -1622,14 +1488,9 @@ export function registerDoctorCommand(program: Command): void {
         for (const line of renderFindings(findings, accounts, { fleet: false, baseline: localName, header })) {
           console.log(line);
         }
-        // Point at the interactive reconcile when anything is out of sync — each
-        // finding carries its own fix, but `agents sync status` is the one place that
-        // reviews and applies them together (opt-in, never auto-fires here).
         if (syncRows.some((r) => r.status !== 'fresh' || (r.unwiredHooks ?? 0) > 0) || repoBehindMarkers.some((m) => m.behind > 0)) {
           console.log(chalk.gray('\nRun `agents sync status` to review and sync what has drifted.'));
         }
-        // A routine runs on exactly one device. Each of these named several and
-        // used to fire once per device — duplicate agent runs on every schedule.
         if (ambiguousPins.length > 0) {
           console.log();
           console.log(chalk.yellow(`${ambiguousPins.length} routine(s) pin more than one device — a routine runs on exactly one:`));
@@ -1665,16 +1526,10 @@ export function registerDoctorCommand(program: Command): void {
         diffVersionResources(parsed.agent, v, { cwd, kinds }),
       );
 
-      // Source-layer staleness is global (same across versions) and needs a git
-      // probe kept out of the pure diff — compute once, attach to every report so
-      // both --json and the text verdict carry it.
       const sourceBehind = computeSourceBehind();
       for (const r of reports) r.sourceBehind = sourceBehind;
 
       if (opts.json) {
-        // Carry the triaged verdict (severity/category/subject/impact/fix per
-        // issue) alongside the report — additive, so existing consumers reading
-        // `summary`/`kinds`/`hookWiring`/`sourceBehind` are unaffected.
         const withVerdict = reports.map((r) => ({ ...r, verdict: computeVerdict(r) }));
         console.log(JSON.stringify(withVerdict.length === 1 ? withVerdict[0] : withVerdict, null, 2));
         return;

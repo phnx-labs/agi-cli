@@ -12,6 +12,7 @@ const TEST_SCRIPT = path.resolve(__dirname, 'test.sh');
 const BUILD_SCRIPT = path.resolve(__dirname, 'build.sh');
 const PRODUCE_SCRIPT = path.resolve(__dirname, 'release-attestation-produce.sh');
 const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
+const COMMON_SCRIPT = path.resolve(__dirname, 'lib/common.sh');
 const MANIFEST_SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
 const STAGE_SCRIPT = path.resolve(__dirname, 'stage-menubar-helper.sh');
 const roots: string[] = [];
@@ -38,9 +39,6 @@ function git(cwd: string, ...args: string[]): string {
 // release-attestation.sh's identity() to resolve. A fake bun/npm on PATH stands in for the
 // toolchain; `failSuite` makes the fake `bun run test` exit non-zero.
 function fakeSuiteBody(opts: { failSuite?: boolean; suite?: 'greenWorkerCrash' | 'redWorkerCrash' }): string {
-  // Summary lines mirror real vitest output so the producer's
-  // suite_green_despite_worker_crash parser is exercised against the shape it
-  // sees in production (RUSH-2758).
   if (opts.suite === 'greenWorkerCrash')
     return [
       '  echo " Test Files  861 passed | 8 skipped (870)"',
@@ -71,6 +69,8 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
   fs.mkdirSync(path.join(caller, 'cli/ci'), { recursive: true });
   fs.mkdirSync(path.join(caller, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'cli/scripts/lib'), { recursive: true });
+  fs.copyFileSync(COMMON_SCRIPT, path.join(caller, 'cli/scripts/lib/common.sh'));
   // RUSH-3178: the producer calls scripts/test.sh, which owns where the suite runs, so the fixture
   // carries the real test.sh. runProduce passes --test-here so the fake `bun run test` still
   // executes; this pins the producer -> test.sh contract.
@@ -108,9 +108,6 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
       'if [[ "$1" == "-e" ]]; then echo "1.0.0"; exit 0; fi',
       'if [[ "$1" == "install" ]]; then exit 0; fi',
       'if [[ "$1" == "run" && "$2" == "test" ]]; then',
-      // RUSH-3007: the producer must run the suite with AGENTS_ATTEST_PRODUCER=1
-      // and CI unset, never CI=true -- see the "sets AGENTS_ATTEST_PRODUCER..."
-      // test below, which asserts on this exact line.
       '  echo "RUSH-3007-ENV: producer=${AGENTS_ATTEST_PRODUCER:-<unset>} ci=${CI:-<unset>}"',
       fakeSuiteBody(opts),
       'fi',
@@ -155,8 +152,6 @@ function runProduce(
     [
       path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
       fx.headCommit,
-      // Run the suite in place: the fixture's fake `bun` IS the suite, and these
-      // tests assert on attestation/manifest behavior, not on offload routing.
       '--test-here',
       '--repo-root',
       fx.caller,
@@ -203,8 +198,6 @@ describe('release-attestation-produce.sh', () => {
     // negative one: a non-Mac producer must still succeed.
     const root = tmp('attest-produce-noseed-');
     const fx = buildFixture(root);
-    // Already-signed apps present in the CALLER checkout — the exact condition
-    // that used to trigger seeding.
     for (const [app, binName] of [
       ['MenubarHelper.app', 'AGI Menu'],
     ] as const) {
@@ -215,9 +208,7 @@ describe('release-attestation-produce.sh', () => {
     const result = runProduce(fx, ['--keep']);
     const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
 
-    // It still produces an attestation.
     expect(result.status, out).toBe(0);
-    // …without copying either bundle anywhere.
     expect(out).not.toContain('seeded bin/');
     const kept = out.match(/kept worktree for inspection: (\S+)/);
     expect(kept, out).toBeTruthy();
@@ -293,9 +284,6 @@ describe('release-attestation-produce.sh', () => {
   });
 
   it('counts only headroom != "loaded", matching test.sh\'s shard-worker filter', () => {
-    // The producer's count must be the SAME eligible pool test.sh will fan across
-    // (scripts/test.sh filters headroom != "loaded"). Counting raw candidates would
-    // ask for more shards than test.sh finds eligible. Here 2 idle + 2 loaded -> 2.
     const root = tmp('attest-produce-loaded-');
     const fx = buildFixture(root);
     const { r, argsLog } = withRecordingTestSh(fx, root, ['idle', 'idle', 'loaded', 'loaded']);
@@ -306,9 +294,6 @@ describe('release-attestation-produce.sh', () => {
   });
 
   it('falls back to a single auto-picked box when fewer than 2 workers are eligible (no thin-fleet release break)', () => {
-    // test.sh --shard has no silent fallback and refuses <2 workers, so a blind
-    // default of --shard N would fail a release on a small fleet. The producer
-    // resolves the count itself and only shards when >=2 are eligible.
     const root = tmp('attest-produce-thin-');
     const fx = buildFixture(root);
     const { r, argsLog } = withRecordingTestSh(fx, root, [null]);
@@ -323,7 +308,7 @@ describe('release-attestation-produce.sh', () => {
     const fx = buildFixture(root);
     const result = runProduce(fx);
     const out = result.stdout + result.stderr;
-    expect(result.status, out).toBe(0); // fake npm pack has no prepack gates
+    expect(result.status, out).toBe(0);
     expect(out).not.toContain('seeded bin/');
   });
 
@@ -338,7 +323,6 @@ describe('release-attestation-produce.sh', () => {
       [
         path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
         fx.headCommit,
-        // In-place: the fixture's fake `bun` is the suite (see runProduce).
         '--test-here',
         '--repo-root',
         fx.caller,
@@ -375,8 +359,6 @@ describe('release-attestation-produce.sh', () => {
     expect(record.tarball.filename).toBe('phnx-labs-agents-cli-9.9.9.tgz');
     expect(record.tarball.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
 
-    // The tarball itself must be sitting next to the attestation JSON so
-    // release-attestation.sh tarball/promote can resolve it by directory.
     const tgzPath = path.join(fx.store, record.tarball.filename);
     expect(fs.existsSync(tgzPath)).toBe(true);
     const actualDigest = spawnSync('sha256sum', [tgzPath], { encoding: 'utf-8' }).stdout.trim().split(/\s+/)[0];
@@ -392,8 +374,6 @@ describe('release-attestation-produce.sh', () => {
     expect(worktrees).toHaveLength(1);
     expect(worktrees[0]).toMatch(new RegExp(`^${fx.caller.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${fx.headCommit.slice(0, 7)}`));
 
-    // The actual consumer: release.sh's require call (no --suite, no
-    // --bun/--node/--platform) must find and accept what the producer wrote.
     const required = spawnSync(
       'bash',
       [ATTEST_SCRIPT, 'require', '--dir', fx.store, '--tree', record.candidateTree, '--repo-root', fx.caller],
@@ -411,7 +391,6 @@ describe('release-attestation-produce.sh', () => {
       [
         path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
         fx.headCommit,
-        // In-place: the fixture's fake `bun` is the suite (see runProduce).
         '--test-here',
         '--repo-root',
         fx.caller,
@@ -486,13 +465,9 @@ function priorReleaseManifest(root: string, menubarDigest: string): string {
   );
   if (created.status !== 0) throw new Error(created.stderr || created.stdout);
   fs.writeFileSync(file, created.stdout);
-  // `put` verifies the asset exists on disk, so give it a real one in a temp
-  // dist/ and run from there — the same shape a signing box would have.
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
   const asset = path.join(root, 'dist/MenubarHelper.app.zip');
   fs.writeFileSync(asset, 'prior release helper asset\n');
-  // put refuses a declared digest that does not match the real bytes, so
-  // compute it rather than asserting a placeholder.
   const assetDigest =
     'sha256:' + createHash('sha256').update(fs.readFileSync(asset)).digest('hex');
   const put = spawnSync(
@@ -590,7 +565,6 @@ function buildManifestFixture(
   fs.copyFileSync(STAGE_SCRIPT, path.join(caller, 'cli/scripts/stage-menubar-helper.sh'));
   fs.chmodSync(path.join(caller, 'cli/scripts/stage-menubar-helper.sh'), 0o755);
 
-  // The published menubar/v1.0.0 release the producer records the helper from.
   const releaseDir = path.join(root, 'menubar-release');
   const { zipSha } = publishMenubarRelease(releaseDir, menubarRelease);
   installFakeCurl(fx.fakebin, releaseDir);
@@ -656,9 +630,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   it('carries forward an unchanged helper rather than re-recording it', () => {
     const root = tmp('attest-produce-manifest-');
     const fx = buildManifestFixture(root);
-    // Pre-seed menubar matching its current digest -- it must be carried forward
-    // untouched, since this producer never rebuilds a helper and the published
-    // release it would otherwise re-fetch has not moved.
     seedManifest(fx.store, { menubar: { inputDigest: fx.manifestDigests.menubar } });
 
     const result = runProduceWithHelpers(fx);
@@ -669,7 +640,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(fs.existsSync(manifestFile)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
 
-    // Untouched, still the seeded placeholder record — and NOT re-fetched.
     expect(manifest.helpers.menubar.helperVersion).toBe('prev-1.0.0');
     expect(manifest.helpers.menubar.inputDigest).toBe(fx.manifestDigests.menubar);
     expect(result.stdout + result.stderr).not.toContain('Recorded menubar from published');
@@ -678,8 +648,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   it('records a changed helper from its PUBLISHED release, never a rebuild', () => {
     const root = tmp('attest-produce-manifest-record-');
     const fx = buildManifestFixture(root);
-    // A stale digest: menubar reads as changed, so the record-from-published
-    // path runs. Nothing in this tree can build it (PHNX-4036).
     seedManifest(fx.store, { menubar: { inputDigest: 'sha256:' + '0'.repeat(64) } });
 
     const result = runProduceWithHelpers(fx);
@@ -705,9 +673,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
       version: '1.0.0',
     });
 
-    // The actual consumer: release-manifest.sh require must accept what the
-    // producer wrote, against the SAME caller checkout used to compute the
-    // expected digests above.
     const required = spawnSync(
       'bash',
       [MANIFEST_SCRIPT, 'require', '--file', manifestFile, '--repo-root', fx.caller],
@@ -722,10 +687,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   it('seeds the manifest from the last release instead of dead-ending on a fresh store', () => {
     const root = tmp('attest-produce-manifest-seed-');
     const fx = buildManifestFixture(root);
-    // Built with the real generator, so the fixture is a manifest the shipped
-    // tooling actually produces rather than a hand-rolled shape.
     const priorManifest = priorReleaseManifest(root, fx.manifestDigests.menubar);
-    // A `gh` that answers exactly the two calls the seed makes.
     fs.writeFileSync(
       path.join(fx.fakebin, 'gh'),
       '#!/usr/bin/env bash\n' +
@@ -744,15 +706,10 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
 
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout + result.stderr).toContain('Seeded the helper manifest from v9.9.8');
-    // The dead-end this fix exists to remove must NOT have fired.
     expect(result.stdout + result.stderr).not.toContain('helper menubar input changed');
 
     const manifest = JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8'));
-    // The seeded menubar record carried forward, so the unchanged helper
-    // needed no re-fetch — the whole point.
     expect(manifest.helpers.menubar.inputDigest).toBe(fx.manifestDigests.menubar);
-    // …and the seed did not disable the check: the other helper was still
-    // recorded fresh against this tree.
     for (const helper of ['menubar'] as const) {
       expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
     }
@@ -787,8 +744,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status, out).not.toBe(0);
     expect(out).toContain('sha256 mismatch');
     expect(out).toContain('phnx-labs/agi-menu');
-    // Fail CLOSED: the stale seeded record must still be stale. Recording the
-    // corrupt download's digest would bind the release to unverified bytes.
     const written = JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8'));
     expect(written.helpers.menubar.inputDigest).toBe('sha256:' + '0'.repeat(64));
     expect(written.helpers.menubar.inputDigest).not.toBe(fx.manifestDigests.menubar);
@@ -845,8 +800,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
 
     expect(output).toContain(expected);
     expect(output).not.toContain(notExpected);
-    // Whatever the cause, it still falls back rather than dying here — the
-    // per-helper gate below is what fails closed.
     expect(output).toContain('Starting a fresh helper manifest');
   });
 
@@ -860,15 +813,12 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     fs.writeFileSync(
       path.join(fx.fakebin, 'gh'),
       '#!/usr/bin/env bash\n' +
-        // Newest first, exactly as `gh release list` orders them.
         'if [[ "$1" == release && "$2" == list ]]; then printf "%s\\n" v9.9.9 v9.9.8; exit 0; fi\n' +
-        // v9.9.9 is helper-only; v9.9.8 is the real CLI release.
         'if [[ "$1" == release && "$2" == view ]]; then\n' +
         '  if [[ "$3" == v9.9.9 ]]; then echo ""; else echo 0; fi\n' +
         '  exit 0\n' +
         'fi\n' +
         'if [[ "$1" == release && "$2" == download ]]; then\n' +
-        // Fail loudly if the seed asks for the helper-only tag — that is the bug.
         '  for a in "$@"; do [[ "$a" == v9.9.9 ]] && { echo "asked for the helper-only release" >&2; exit 1; }; done\n' +
         '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
         `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${priorManifest}\nMANIFEST\n` +
@@ -895,7 +845,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const marker = path.join(root, 'signed.marker');
     fs.writeFileSync(path.join(fx.fakebin, 'uname'), '#!/usr/bin/env bash\necho Darwin\n');
     fs.chmodSync(path.join(fx.fakebin, 'uname'), 0o755);
-    // `agents secrets exec apple.com -- <cmd>` → just run <cmd> after the `--`.
     fs.writeFileSync(
       path.join(fx.fakebin, 'agents'),
       '#!/usr/bin/env bash\nfor a in "$@"; do shift; [ "$a" = "--" ] && break; done\nexec "$@"\n',
@@ -904,7 +853,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const signer = path.join(fx.caller, 'cli/scripts/sign-cli-binary.sh');
     fs.writeFileSync(signer, `#!/usr/bin/env bash\necho SIGNER_RAN >> ${JSON.stringify(marker)}\n`);
     fs.chmodSync(signer, 0o755);
-    // headless-sign-context.sh is sourced before signing; a no-op stand-in.
     fs.writeFileSync(path.join(fx.caller, 'cli/scripts/headless-sign-context.sh'), ': \n');
     // The sign block signs only the CLI binary; the menu-bar helper is never built here
     // (PHNX-4036). The producer runs in an isolated worktree, so fixture files must be committed
@@ -928,18 +876,13 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   });
 
   it('DOES sign with --with-helpers, so cutting a helper release still works (PHNX-3699)', () => {
-    // The other half of the gate: this is what proves the fix narrowed the branch
-    // rather than deleting it, and it is what makes the test above non-vacuous —
-    // same fixture, only the flag differs.
     const fx = signableFixture(tmp('attest-produce-sign-'));
     const result = runProduce(fx, ['--with-helpers']);
     const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
     expect(out).toContain('Signing + notarizing');
     expect(fs.existsSync(fx.marker), 'the signer must run for a helper release').toBe(true);
-    // ...and it signs the CLI binary only: no helper build ran (PHNX-4036).
     expect(out).not.toContain('swift build');
     expect(fs.existsSync(path.join(fx.caller, 'cli/bin/MenubarHelper.app'))).toBe(false);
-    // Status, so the title is earned: the run COMPLETES, not merely starts.
     expect(result.status, out).toBe(0);
   });
 
@@ -959,8 +902,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
 });
 
 describe('release-attestation-produce.sh --inherit-suite-from (PHNX-3237)', () => {
-  // Inherit mode forbids any --test-* flag, so it cannot reuse runProduce (which
-  // always passes --test-here). Run the producer directly with the fake toolchain.
   function runInherit(
     fx: ReturnType<typeof buildFixture>,
     commit: string,
@@ -987,14 +928,12 @@ describe('release-attestation-produce.sh --inherit-suite-from (PHNX-3237)', () =
   it('mints the release-tree record from a green base without re-running the suite', () => {
     const root = tmp('attest-inherit-');
     const fx = buildFixture(root);
-    // 1. Produce the BASE (default-branch tree) attestation the normal way.
     const baseRun = runProduce(fx);
     const baseOut = (baseRun.stdout + baseRun.stderr).replace(/\[[0-9;]*m/g, '');
     expect(baseRun.status, baseOut).toBe(0);
     const baseJson = baseOut.match(/Wrote (\S+\.json)/)?.[1];
     expect(baseJson).toBeTruthy();
 
-    // 2. Metadata-only release commit: version bump + a changelog fragment.
     fs.writeFileSync(
       path.join(fx.caller, 'cli/package.json'),
       '{"name":"@phnx-labs/agents-cli","version":"9.9.10"}\n',
@@ -1005,12 +944,10 @@ describe('release-attestation-produce.sh --inherit-suite-from (PHNX-3237)', () =
     git(fx.caller, 'commit', '-q', '-m', 'chore(release): 9.9.10');
     const relCommit = git(fx.caller, 'rev-parse', 'HEAD');
 
-    // 3. Derive the release-tree attestation from the base — no suite run.
     const r = runInherit(fx, relCommit, baseJson!);
     const out = (r.stdout + r.stderr).replace(/\[[0-9;]*m/g, '');
     expect(r.status, out).toBe(0);
     expect(out).toContain('Inheriting the suite result');
-    // The fake `bun run test` prints these; inherit must NOT have invoked it.
     expect(out).not.toContain('RUSH-3007-ENV');
     expect(out).not.toContain('tests passed');
 
@@ -1021,7 +958,6 @@ describe('release-attestation-produce.sh --inherit-suite-from (PHNX-3237)', () =
     expect(rec.conclusion).toBe('pass');
     const baseRec = JSON.parse(fs.readFileSync(baseJson!, 'utf-8'));
     expect(rec.derivedFrom.baseTree).toBe(baseRec.candidateTree);
-    // lock/policy inherited from base == the release tree's own (allowlist proof)
     expect(rec.lockfileDigest).toBe(baseRec.lockfileDigest);
     expect(rec.policyVersion).toBe(baseRec.policyVersion);
   });
@@ -1032,7 +968,6 @@ describe('release-attestation-produce.sh --inherit-suite-from (PHNX-3237)', () =
     const baseRun = runProduce(fx);
     const baseJson = (baseRun.stdout + baseRun.stderr).replace(/\[[0-9;]*m/g, '').match(/Wrote (\S+\.json)/)?.[1];
     expect(baseJson).toBeTruthy();
-    // A source change, not a metadata change.
     fs.mkdirSync(path.join(fx.caller, 'cli/src'), { recursive: true });
     fs.writeFileSync(path.join(fx.caller, 'cli/src/foo.ts'), 'export const x = 1;\n');
     git(fx.caller, 'add', '-A');

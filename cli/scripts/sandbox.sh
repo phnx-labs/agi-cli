@@ -1,22 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# sandbox.sh - Run commands on a remote crabbox VM
-#
-# Modes:
-#   ./sandbox.sh <cmd>          rsync local tree -> box, run cmd (test mode)
-#   ./sandbox.sh --pr <cmd>     clone repo on box from GitHub via cached
-#                               bare mirror, branch off main, run cmd
-#                               (PR-authoring mode; works on a real branch
-#                                so `gh pr create` works)
-#
-# Set TASK_ID to reuse a specific workspace across calls.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_NAME="$(basename "$REPO_ROOT")"
 TASK_ID="${TASK_ID:-$(date +%s)-$$}"
 
-# Crabbox config
 BOX_CLASS="${CRABBOX_CLASS:-cpx62}"
 
 # Read the profile from .crabbox.yaml so we pick only boxes warmed for this repo, falling back to
@@ -26,19 +15,15 @@ PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.cr
 PROFILE="${PROFILE:-default}"
 export PROFILE
 
-die() { echo "error: $*" >&2; exit 1; }
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
-# Ensure deps. `agents` is only needed when secrets must be pulled from the
-# local Keychain — CI passes them in via env, so we don't require it there.
 command -v crabbox >/dev/null || die "crabbox not installed"
 
 # Load credentials: prefer already-set env vars (CI path), else re-enter under chained `agents
 # secrets exec` so bundle values ride the child env and never touch stdout (RUSH-2774). Each
 # bundle is probed with a real resolve first, so a locked or absent bundle is skipped.
 if [[ -z "${SANDBOX_SECRETS_EXEC:-}" ]] && command -v agents >/dev/null; then
-  # Each bundle loads independently, gated on its own target var being unset —
-  # a caller with HCLOUD_TOKEN pre-set but no GitHub App creds still gets the
-  # github.com link (matching the old per-bundle loads).
   chain=()
   want=()
   [[ -z "${HCLOUD_TOKEN:-}" ]] && want+=(hetzner.com)
@@ -57,8 +42,6 @@ export HCLOUD_TOKEN
 # Generate a GitHub App token for private repo access, resolving the installation ID from a target
 # repo so it works for a user or an org install. TOKEN_REPO (required) picks the installation.
 generate_github_token() {
-  # APP_ID / APP_PRIVATE_KEY arrive via the github.com link of the secrets-exec
-  # chain at the top of this script (or CI env) — never printed to stdout.
   [[ -n "${APP_ID:-}" && -n "${APP_PRIVATE_KEY:-}" ]] || return 1
 
   local target_repo="${TOKEN_REPO:?TOKEN_REPO must be set (e.g. owner/.agents) to pick the GitHub App installation}"
@@ -87,10 +70,9 @@ print(jwt.encode({'iat': int(time.time())-60, 'exp': int(time.time())+600, 'iss'
   [[ -n "$token" ]] && echo "$token"
 }
 
-# Parse flags
 PR_MODE=0
 LINEAR_TICKET=""
-POST_FILE="COMPLIANCE_AUDIT.md"   # default file the agent writes its report to
+POST_FILE="COMPLIANCE_AUDIT.md"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pr) PR_MODE=1; shift ;;
@@ -102,9 +84,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# In PR mode, detect upstream and target the token at THIS repo's installation.
-# UPSTREAM env var lets you override the auto-detected origin (useful for testing
-# against repos other than the one sandbox.sh lives in).
 UPSTREAM="${UPSTREAM:-}"
 REPO_SLUG=""
 if [[ "$PR_MODE" == "1" ]]; then
@@ -117,15 +96,11 @@ if [[ "$PR_MODE" == "1" ]]; then
   export TOKEN_REPO="$REPO_SLUG"
 fi
 
-# Prefer a pre-set GITHUB_TOKEN (CI injects ${{ secrets.GITHUB_TOKEN }} or a PAT).
-# Otherwise mint one from the GitHub App via the Keychain bundle.
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   GITHUB_TOKEN=$(generate_github_token || true)
 fi
 [[ -n "$GITHUB_TOKEN" ]] || echo "warn: no GITHUB_TOKEN available (private repos won't clone)" >&2
 
-# Claude token for running agents on sandbox: a pre-set env var (CI), or the
-# anthropic.com link of the secrets-exec chain at the top. Optional either way.
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
 # List the slugs of running boxes matching $PROFILE, oldest first. Box slugs are ephemeral, so
@@ -157,8 +132,6 @@ box_ready() {
     | grep -qE '(^|[[:space:]])ready=true([[:space:]]|$)'
 }
 
-# Echo the first SSH-ready running box for $PROFILE, or nothing. Not-ready boxes
-# (failed bootstrap or still booting) are skipped, never selected.
 pick_ready_box() {
   local slug
   while IFS= read -r slug; do
@@ -178,8 +151,6 @@ get_or_create_box() {
   echo "No ready box for profile '$PROFILE', warming up (~60s)..." >&2
   crabbox warmup --class "$BOX_CLASS" --profile "$PROFILE" >/dev/null || die "crabbox warmup failed"
 
-  # warmup normally blocks until ready, but can return a box that never finished
-  # bootstrapping -- poll for an actually-ready box rather than trusting it.
   waited=0
   while [[ $waited -lt 180 ]]; do
     box_id="$(pick_ready_box)"
@@ -190,37 +161,27 @@ get_or_create_box() {
   die "warmed a box for profile '$PROFILE' but none became SSH-ready within 3m (check 'crabbox list' / 'crabbox status')"
 }
 
-# Bootstrap script for remote (repo-specific: agents-cli = TypeScript)
 bootstrap_remote() {
   cat <<'BOOTSTRAP'
 set -euo pipefail
 
-# Build tools for native modules (node-pty, etc.) — install BEFORE bun, since
-# bun's installer requires unzip.
 if ! command -v make &>/dev/null || ! command -v unzip &>/dev/null; then
   echo "Installing build-essential + unzip..."
   sudo apt-get update -qq && sudo apt-get install -y -qq build-essential unzip
 fi
 
-# Node.js — tests spawn `node`/`tsx` subprocesses; without it, the bun shim
-# misroutes shebang lines and ESM imports fail (Cannot find module './cjs/index.cjs').
-# Vitest 4 uses rolldown internally which imports `styleText` from `node:util`
-# (added in node 20.12), so apt's nodejs (often 18 on jammy) is too old.
-# Install node 22 via NodeSource to match .github/workflows/ci.yml.
 if ! command -v node &>/dev/null || ! node -e "process.exit(parseInt(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)" 2>/dev/null; then
   echo "Installing nodejs 22 from NodeSource..."
   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/dev/null 2>&1
   sudo apt-get install -y -qq nodejs
 fi
 
-# Bun (for TypeScript projects)
 if ! command -v bun &>/dev/null; then
   echo "Installing bun..."
   curl -fsSL https://bun.sh/install | bash
 fi
 export PATH="$HOME/.bun/bin:$PATH"
 
-# GitHub CLI (gh) — used by agents to open PRs, query issues, etc.
 if ! command -v gh &>/dev/null; then
   echo "Installing gh..."
   sudo mkdir -p -m 755 /etc/apt/keyrings
@@ -232,15 +193,10 @@ if ! command -v gh &>/dev/null; then
   sudo apt-get update -qq && sudo apt-get install -y -qq gh
 fi
 
-# Git identity for tests
 git config --global user.email 2>/dev/null || git config --global user.email "ci@crabbox.local"
 git config --global user.name 2>/dev/null || git config --global user.name "Crabbox CI"
 
-# GitHub token for private repos (passed from local via env)
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-  # Remove ALL stale x-access-token rewrites (each previous run added a new
-  # section with the token embedded in the section name — they accumulate
-  # and git picks one nondeterministically).
   git config --global --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' 2>/dev/null \
     | awk '{print $1}' \
     | sed 's/\.insteadof$//' \
@@ -250,40 +206,30 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
       done
   git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
   git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-  # gh CLI looks at GH_TOKEN/GITHUB_TOKEN — set both so `gh pr create` etc. work
   export GH_TOKEN="$GITHUB_TOKEN"
   echo "GitHub App token configured for private repos"
 fi
 
-# agents-cli + coding agents: PR mode only. Agents run in the sandbox only when
-# authoring PRs; test mode just builds + runs the suite and needs none of this.
-# Skipping the install in test mode also keeps the box matching GitHub CI, where
-# claude is absent so the claude-dependent model-catalog tests skip rather than
-# fail on a partially-installed CLI (0 models => "mid-install", see models.ts).
 if [[ "$PR_MODE" == "1" ]]; then
   if ! command -v agents &>/dev/null; then
     echo "Installing agents-cli..."
     sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
   fi
   if command -v agents &>/dev/null; then
-    # First-time setup: clones ~/.agents/.system (public) and provisions ~/.agents
     if [[ ! -d ~/.agents/.system ]]; then
       echo "Setting up agents-cli..."
       agents setup 2>&1 | tail -3 || true
     fi
-    # Put agents shims on PATH so installed CLIs (claude, codex, etc.) are reachable
     export PATH="$HOME/.agents/.cache/shims:$PATH"
     if ! grep -q '\.agents/\.cache/shims' ~/.bashrc 2>/dev/null; then
       echo 'export PATH="$HOME/.agents/.cache/shims:$PATH"' >> ~/.bashrc
     fi
-    # Install Claude Code if not present
     if ! command -v claude &>/dev/null; then
       echo "Installing Claude Code via agents-cli..."
       agents add claude 2>&1 | tail -3 || true
     fi
   fi
 
-  # Claude Code auth (passed from local via env)
   if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
     echo "Claude Code OAuth token configured"
   fi
@@ -307,7 +253,6 @@ main() {
   local test_cmd='cd cli && bun install && bun run build && bun run test'
   case "${1:-}" in
     ''|test)
-      # Trailing args ride through to vitest: `sandbox.sh test --retry=2`.
       cmd="$test_cmd"
       if [[ $# -gt 0 ]]; then shift; fi
       if [[ $# -gt 0 ]]; then
@@ -323,7 +268,6 @@ main() {
     *)       cmd="$*" ;;
   esac
 
-  # Isolated workspace path on remote (under $HOME so it survives rsync prune)
   workspace_dir="workspaces/${REPO_NAME}-${TASK_ID}"
 
   crabbox run --id "$box_id" --reclaim -- bash -c "
@@ -397,9 +341,6 @@ echo \"--- Running: $cmd ---\"
 $cmd
 "
 
-  # ---- Post-run: optionally post a report file to a Linear ticket ----
-  # Box has zero Linear access by design; the laptop fetches the file via
-  # crabbox run and calls linear update locally.
   if [[ -n "$LINEAR_TICKET" ]]; then
     echo "[linear] fetching $POST_FILE from box and posting to $LINEAR_TICKET"
     local tmp_post="/tmp/sandbox-post-${TASK_ID}.md"

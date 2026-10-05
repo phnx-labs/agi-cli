@@ -128,7 +128,7 @@ describe('reusableBoxes', () => {
     const expired = box({ slug: 'd', ready: true, expiresAt: NOW - 1 });
     const neverExpires = box({ slug: 'e', ready: true, expiresAt: null, lastTouchedAt: NOW - 9999 });
     const out = reusableBoxes([ready1, readyFresh, notReady, expired, neverExpires], NOW);
-    expect(out.map((b) => b.slug)).toEqual(['b', 'a', 'e']); // most-recent first; not-ready + expired dropped
+    expect(out.map((b) => b.slug)).toEqual(['b', 'a', 'e']);
   });
 });
 

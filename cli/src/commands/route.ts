@@ -39,7 +39,6 @@ function requireEditableRouter(name: string): Router {
   return readRouter(name);
 }
 
-/** Highest-tier-reached summary for a router's declared model/tier allowlist. */
 function routerTierSummary(router: Router): string {
   const seen = new Set<string>();
   for (const allowlist of Object.values(router.harnesses)) {

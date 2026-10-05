@@ -117,8 +117,6 @@ describe('accounts add/inspect CLI errors', () => {
       '--from-secrets', 'does-not-exist:KEY',
     ]);
     expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
-    // The standalone reports only a code; agents-cli names the bundle, as one
-    // clean line, never a stack dump.
     expect(err.message).toMatch(/Secrets bundle 'does-not-exist' not found/);
     expect(err.message).not.toMatch(/\n\s+at /);
   });
@@ -240,7 +238,7 @@ describe('accounts default write path', () => {
       expect(path.resolve(path.dirname(configPath), target)).toBe(path.resolve(dir, '.factory'));
     } finally {
       if (native) {
-        try { removeAccount(native.name); } catch { /* already gone */ }
+        try { removeAccount(native.name); } catch {  }
       }
       updateMeta((m) => {
         const defaults = { ...m.accounts?.defaults };
@@ -281,8 +279,6 @@ describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', 
 });
 
 describe('accounts add/login/default surface (PHNX-3940 T4)', () => {
-  // Each case gets its own SECRETS_HOME (real standalone), so bundle writes are
-  // isolated per test with no in-memory keychain mock.
   useFreshSecretsHome();
 
   afterEach(() => {
@@ -338,7 +334,7 @@ describe('accounts add/login/default surface (PHNX-3940 T4)', () => {
       expect(readMeta().accounts?.defaults?.claude).toBe('t4-default');
     } finally {
       updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, claude: undefined } } }));
-      try { removeAccount('t4-default'); } catch { /* absent */ }
+      try { removeAccount('t4-default'); } catch {  }
     }
   });
 

@@ -37,8 +37,6 @@ codesign \
 echo "Verifying signature..."
 codesign --verify --strict --verbose=2 "$BIN"
 
-# Run the signed binary: catches a missing JIT entitlement (the binary signs
-# fine but dies on startup) and a version drift between build and package.json.
 echo "Smoke-running the signed binary..."
 VERSION="$(node -p "require('./package.json').version")"
 GOT="$("$BIN" --version)"
@@ -58,8 +56,6 @@ xcrun notarytool submit "$ZIP_DIR/agents-cli-bin.zip" \
   --wait | tee "$NOTARY_LOG"
 grep -q "status: Accepted" "$NOTARY_LOG" || { echo "notarization did not report 'status: Accepted'" >&2; exit 1; }
 
-# No stapling: stapler cannot staple bare Mach-Os (it needs a bundle/dmg/pkg).
-# Gatekeeper and EDR fetch the ticket online from the signature's cdhash.
 
 echo "Staging for packaging + pinning sha256..."
 mkdir -p bin

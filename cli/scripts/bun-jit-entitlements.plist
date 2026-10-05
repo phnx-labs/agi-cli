@@ -2,17 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- bun's JavaScriptCore needs MAP_JIT under the hardened runtime. Signing
-       the compiled binary with "options runtime" and no JIT entitlement does
-       not fail at sign time - it breaks at RUN time: JSC silently loses
-       SharedArrayBuffer and the CLI dies on startup with
-       "ReferenceError: SharedArrayBuffer is not defined". allow-jit alone is
-       sufficient (verified empirically; the heavier
-       allow-unsigned-executable-memory / disable-executable-page-protection
-       exceptions from bun's docs are NOT needed).
-       This CLI never touches the OS keychain itself - that is the standalone
-       `secrets` engine's job (PHNX-3989), a separate signed helper release
-       entirely outside this repo. -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
 </dict>

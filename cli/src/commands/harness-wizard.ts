@@ -20,10 +20,8 @@ import type { ConnectionTestResult } from '../lib/harness-connection-test.js';
 
 export type { ConnectionTestResult } from '../lib/harness-connection-test.js';
 
-/** Whether the wizard is creating a new harness or editing an existing one. */
 export type WizardMode = 'create' | 'edit';
 
-/** A single `select` choice. `disabled` greys the row (used by the edit matrix). */
 export interface WizardChoice<T> {
   name: string;
   value: T;
@@ -37,7 +35,6 @@ export interface WizardIO {
   input(opts: { message: string; default?: string; validate?: (v: string) => true | string }): Promise<string>;
   password(opts: { message: string }): Promise<string>;
   confirm(opts: { message: string; default?: boolean }): Promise<boolean>;
-  /** Emit an informational line — a disabled field's reason, or a preset note. */
   note(message: string): void;
 }
 
@@ -46,34 +43,25 @@ export interface WizardIO {
  * are byte-identical. */
 export interface HarnessDraft {
   readonly mode: WizardMode;
-  /** create: the fork source (a native agent id or an existing harness name). */
   source?: string;
-  /** The resolved host CLI — drives the editability seams. edit: the profile host. */
   host?: AgentId;
   name?: string;
   model?: string;
   baseUrl?: string;
   authProvider?: string;
   account?: string;
-  /** `<bundle>` or `<bundle>:<key>` — a value copied out of an agents secrets bundle. */
   fromSecrets?: string;
   version?: string;
   description?: string;
   fallbackModel?: string;
-  /** edit: the profile being edited, providing current values. Read-only. */
   readonly original?: Profile;
   /** RUSH-2223 seam: target host to re-key a cloned harness onto (`fork --to-host`).
    * Not set by the scaffold; kept so the draft shape stays stable. */
   toHost?: AgentId;
 
-  // --- transient wizard state (never persisted) ---
-  /** The user chose "build custom" over a preset (create only). */
   custom?: boolean;
-  /** The preset a create run selected, if any. */
   preset?: string;
-  /** Pre-computed default for the name prompt (source or preset name). */
   defaultName?: string;
-  /** The provider step has run (distinguishes "no auth chosen" from "not asked"). */
   providerAsked?: boolean;
 }
 
@@ -81,14 +69,12 @@ export interface HarnessDraft {
  * and `{ disabled }` shows the reason without prompting (the edit matrix, RUSH-2222). */
 export type StepDecision = 'run' | 'skip' | { disabled: string };
 
-/** One wizard step: decide, then (only when decided `'run'`) prompt + apply. */
 export interface WizardStep {
   readonly id: string;
   decide(draft: HarnessDraft): StepDecision;
   run(io: WizardIO, draft: HarnessDraft, hooks: WizardHooks): Promise<void>;
 }
 
-/** Per-host editability — which params this host's API format lets you change. */
 export interface HarnessEditable {
   model: boolean;
   baseUrl: boolean;
@@ -97,14 +83,11 @@ export interface HarnessEditable {
   fallback: boolean;
 }
 
-/** One field's editability plus, when disabled, the one-line reason to surface. */
 interface EditableField {
   enabled: boolean;
-  /** Set only when `enabled` is false — the greyed field's stated reason. */
   reason?: string;
 }
 
-/** Per-host editability with a reason attached to every disabled field. */
 interface HarnessEditability {
   model: EditableField;
   baseUrl: EditableField;
@@ -161,18 +144,13 @@ export interface WizardHooks {
   ) => Promise<string | null>;
   /** RUSH-2221 connection test after configure, before save. Absent means no test. */
   connectionTest?: (draft: HarnessDraft) => Promise<ConnectionTestResult>;
-  /**
-   * RUSH-2222 — per-host editability matrix. Absent → {@link defaultEditable}.
-   */
   editable?: (host: AgentId) => HarnessEditable;
 }
 
-/** Resolve the host CLI a fork `source` runs under (the host `buildFork` will use). */
 export function hostForSource(source: string | undefined): AgentId | undefined {
   if (!source) return undefined;
   const native = resolveAgentName(source);
   if (native) return native;
-  // An existing custom harness: its own host.
   const custom = listProfiles().find((p) => p.name === source);
   return custom?.host.agent;
 }
@@ -196,7 +174,6 @@ export async function runWizardSteps(
   return draft;
 }
 
-// --- shared prompt fragments ------------------------------------------------
 
 const NO_AUTH = '__none__';
 const CUSTOM = '__custom__';
@@ -204,12 +181,10 @@ const TYPE_NOW = 'type';
 const FROM_SECRETS = 'secrets';
 const KEEP = '__keep__';
 
-/** The first `_MODEL`-suffixed env var in a preset's static env block, if any. */
 function presetModel(preset: Preset): string | undefined {
   return Object.entries(preset.env).find(([k]) => k.endsWith('_MODEL'))?.[1];
 }
 
-/** Providers offered in the custom-auth select, deduped from the preset catalog. */
 function knownProviders(): string[] {
   return [...new Set(listPresets().map((p) => p.provider))];
 }
@@ -246,7 +221,6 @@ async function askKeySource(io: WizardIO, draft: HarnessDraft, provider: string)
   draft.fromSecrets = `${bundleName}:${key}`;
 }
 
-/** Free-text model prompt, unless RUSH-2220's catalog hook picks one first. */
 async function askModel(io: WizardIO, draft: HarnessDraft, hooks: WizardHooks, current?: string): Promise<string> {
   if (hooks.pickModel) {
     const picked = await hooks.pickModel(io, draft.host, draft.version ?? draft.original?.host.version, current);
@@ -255,7 +229,6 @@ async function askModel(io: WizardIO, draft: HarnessDraft, hooks: WizardHooks, c
   return io.input({ message: 'Model id', default: current });
 }
 
-// --- create steps -----------------------------------------------------------
 
 /** The create step list for `agents harness add`/`fork`, the same sequence as the old
  * `runHarnessWizard` expressed as engine steps. Produces the same `{ source, name, opts }` draft
@@ -300,8 +273,6 @@ export function createSteps(): WizardStep[] {
         d.baseUrl = preset.env.ANTHROPIC_BASE_URL || preset.env.OPENAI_BASE_URL || undefined;
         d.authProvider = preset.authOptional ? undefined : preset.provider;
         d.providerAsked = true;
-        // Pre-fill the name with the preset's own name (e.g. 'deepseek'), not a
-        // model detail, so users aren't nudged toward baking one into the identity.
         d.defaultName = preset.name;
       },
     },
@@ -382,14 +353,11 @@ export function createSteps(): WizardStep[] {
   ];
 }
 
-// --- edit steps -------------------------------------------------------------
 
-/** The raw model id currently pinned on a profile (not the display label). */
 function currentModel(p: Profile): string | undefined {
   return p.env[modelEnvKeyForHost(p.host.agent)];
 }
 
-/** The raw base URL currently pinned on a profile, if the host carries one. */
 function currentBaseUrl(p: Profile): string | undefined {
   const key = baseUrlEnvKeyForHost(p.host.agent);
   return key ? p.env[key] : undefined;
@@ -401,9 +369,6 @@ function currentBaseUrl(p: Profile): string | undefined {
 export function editSteps(original: Profile): WizardStep[] {
   const host = original.host.agent;
   const editableFor = (hooks: WizardHooks) => (hooks.editable ?? defaultEditable)(host);
-  // decide() has no access to hooks, so gate on the resolver-sourced matrix; a
-  // hook that narrows editability further is applied inside run(). The matrix is
-  // the resolver truth (RUSH-2222), reasons and all.
   const cap = harnessEditable(host);
   return [
     {
@@ -476,7 +441,6 @@ function connectionTestStep(): WizardStep {
     id: 'connectionTest',
     decide: () => 'skip',
     async run() {
-      /* no-op: superseded by runConnectionTest, kept so the step id is stable */
     },
   };
 }

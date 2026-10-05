@@ -5,7 +5,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionMeta, SessionRequest, SessionRunMode, SessionTimeline, SummaryState } from '@phnx-labs/sessions-cli/reader';
+import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionGlance, SessionMeta, SessionRequest, SessionRunMode, SessionSubagent, SessionTimeline, SummaryState } from '@phnx-labs/sessions-cli/reader';
+import { claudeSubagentFiles, resolvedSubAgentCount } from './glance-files.js';
 import { parseSession, sessionFilePathContainer } from '@phnx-labs/sessions-cli/reader';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
@@ -32,9 +33,6 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-/** Current schema version; bumped when migrations are added. Exported so tests
- * assert against the constant instead of hardcoding a number that every bump
- * then has to chase (docs/sessions.md calls the constant the source of truth). */
 export const SCHEMA_VERSION = 51;
 
 /** Bump to force the content extractor to re-derive on every session's next scan.
@@ -65,7 +63,6 @@ function canonicalLedgerKey(filePath: string): string {
 /** BM25 column weights for FTS5: label > topic > project > content > assistant. */
 const BM25_WEIGHTS = [5.0, 2.0, 1.5, 1.0, 0.5] as const;
 
-/** DDL for the sessions database (tables, indexes, FTS5 virtual table). */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -545,23 +542,15 @@ CREATE INDEX IF NOT EXISTS idx_remote_preview_cache_fetched ON session_remote_pr
  * role as RESOURCE_INDEX_VERSION. */
 /** Bump when facet extraction changes so cached rows recompute (shell-command-by-binary v7). */
 export const INSIGHTS_EXTRACTOR_VERSION = 7;
-/** Bump when classifyTopic's output changes so cached topics recompute (human task taxonomy v2). */
 export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
-// Bumped to 2 (PHNX-2973): the digest now carries `changedFiles` (per-file
-// paths). Bumping invalidates v1 cache rows so a fresh recompute populates the
-// new field instead of serving a stale digest that predates it.
 const PREVIEW_EXTRACTOR_VERSION = 3;
-/** Bump when classifyPhenotype's output changes so cached phenotypes recompute (PHNX-3327 v1). */
 export const SESSION_PHENOTYPE_EXTRACTOR_VERSION = 1;
-/** Bump when the summarizer output shape changes so cached summaries recompute (PHNX-3939 v1). */
 export const SESSION_SUMMARY_EXTRACTOR_VERSION = 1;
 
-/** Raw row shape returned from the sessions table. */
 interface SessionRow {
   id: string;
   short_id: string;
   agent: string;
-  /** Custom harness/profile name; NULL for a native host run (PHNX-2935). */
   harness: string | null;
   origin: string | null;
   routine_name: string | null;
@@ -615,16 +604,13 @@ interface SessionRow {
   linear_project_url: string | null;
   actor: string | null;
   initiated_by: string | null;
-  /** Phoenix id of the actor, joined write-once from the actor sidecar (PHNX-3798). */
   phoenix_id: string | null;
-  /** NULL means "not yet computed" (a row scanned before this field existed) — see rowToMeta. */
   used_browser: number | null;
   used_computer: number | null;
   /** Epoch ms the transcript file was first confirmed gone while content survived (RUSH-2436); NULL
    * = live. Optional: the scanner upsert omits it so a rescan preserves the sticky stamp; only
    * querySessions writes it. */
   archived_at?: number | null;
-  /** Epoch ms last written from a peer's fleet session mirror (PHNX-3792); NULL for a local row. */
   mirror_synced_at?: number | null;
   mirror_source?: string | null;
   /** Daemon-generated title (PHNX-3797) and the {@link sessionTitleSourceKey} of the user text it
@@ -635,7 +621,6 @@ interface SessionRow {
   generated_title_at?: number | null;
 }
 
-/** File stat snapshot used to detect changes between scan runs. */
 export interface ScanStamp {
   fileMtimeMs: number;
   fileSize: number;
@@ -646,34 +631,26 @@ export interface ScanStamp {
   extractorVersion?: number | null;
 }
 
-/** Filter and pagination options for querying the sessions table. */
 export interface QueryOptions {
   agent?: SessionAgentId;
   agents?: SessionAgentId[];
   origin?: 'cli' | 'routine';
   version?: string;
   cwd?: string;
-  /** Match any session whose cwd equals this or is a descendant of it. */
   cwdPrefix?: string;
   project?: string;
-  /** Only sessions recorded on this machine (host), case-insensitive. */
   machine?: string;
-  /** Match the full session id or short id, case-insensitively (exact). */
   idExact?: string;
-  /** Match sessions whose id or short id begins with this (case-insensitive prefix). */
   idPrefix?: string;
   sinceMs?: number;
   untilMs?: number;
   limit?: number;
-  /** Drop rows flagged as team-origin before LIMIT is applied. */
   excludeTeamOrigin?: boolean;
-  /** Keep only team-origin rows (for hidden-count queries). */
   onlyTeamOrigin?: boolean;
   /** Column to order by, all descending. 'timestamp' (default) is newest first; 'cost' and
    * 'duration' put the priciest/longest on top, with NULLs last so unpriced rows never crowd out
    * real data. */
   sortBy?: 'timestamp' | 'cost' | 'duration';
-  /** Internal warm-cache path; callers must validate the small final result set. */
   skipExistenceCheck?: boolean;
   /** Only sessions that invoked this skill (#12), joined on session_resource_usage.kind='skill'.
    * Matches the full stored name (bare or `plugin:name`) or the short name after the colon, so
@@ -691,14 +668,10 @@ let dbInstance: Database.Database | null = null;
  * here. */
 function migrateSchema(db: Database.Database, fromVersion: number): void {
   if (fromVersion < 2) {
-    // v1 → v2: add `label` column to sessions and switch session_text from
-    // single `content` column to multi-column (label, topic, project, content).
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'label')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN label TEXT`);
     }
-    // FTS5 virtual tables can't be ALTERed — drop and recreate. Scan ledger
-    // is cleared so every file gets re-parsed on next run, repopulating FTS5.
     db.exec(`
       DROP TABLE IF EXISTS session_text;
       CREATE VIRTUAL TABLE session_text USING fts5(
@@ -713,15 +686,9 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
   if (fromVersion < 3) {
-    // v2 → v3: topic extraction now strips team-spawn wrapper prompts
-    // (HEADLESS PLAN MODE prefix + summary suffix). Force a rescan so cached
-    // topics like "You are running in HEADLESS PLAN MODE..." get re-extracted.
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 4) {
-    // v3 → v4: team-origin is now captured structurally from the JSONL
-    // `entrypoint` field at scan time. Add the column and force a rescan so
-    // every existing Claude session gets its flag populated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'is_team_origin')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN is_team_origin INTEGER DEFAULT 0`);
@@ -735,9 +702,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 6) {
-    // v5 → v6: cost ($) and wall-clock duration are now computed at scan time
-    // from raw per-model token usage. Add the columns and force a full rescan
-    // so every existing session gets its cost_usd / duration_ms populated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'cost_usd')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN cost_usd REAL`);
@@ -748,9 +712,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 7) {
-    // v6 → v7: the session-state engine now persists durable signals (PR opened,
-    // worktree, tracker ticket) at scan time. Add the columns and force a full
-    // rescan so every existing session gets them populated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'pr_url')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_url TEXT`);
     if (!cols.some(c => c.name === 'pr_number')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_number INTEGER`);
@@ -806,9 +767,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 13) {
-    // v12 → v13: routine runs archive their sandboxed transcript into the run
-    // directory and get indexed as origin='routine', linked by routine_name and
-    // routine_run_id. Existing rows are normal CLI-origin sessions.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'origin')) db.exec(`ALTER TABLE sessions ADD COLUMN origin TEXT DEFAULT 'cli'`);
     if (!cols.some(c => c.name === 'routine_name')) db.exec(`ALTER TABLE sessions ADD COLUMN routine_name TEXT`);
@@ -850,7 +808,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 17) {
-    // v16 → v17 (main): todos / recent dirs / linear project metadata.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'todos')) db.exec(`ALTER TABLE sessions ADD COLUMN todos TEXT`);
     if (!cols.some(c => c.name === 'recent_directories_touched')) db.exec(`ALTER TABLE sessions ADD COLUMN recent_directories_touched TEXT`);
@@ -860,7 +817,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 18) {
-    // v17 → v18: persist origin machine for smart-launch affinity GROUP BY machine.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'machine')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN machine TEXT`);
@@ -873,8 +829,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
       .all() as Array<{ id: string; agent: string; file_path: string }>;
     const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
-    // migrateSchema runs inside getDB's schema transaction, so these writes
-    // deliberately share that transaction instead of opening a nested one.
     for (const row of rows) {
       upd.run(machineForSessionFile(row.file_path, row.agent), row.id);
     }
@@ -890,7 +844,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 20) {
-    // v19 → v20: persist the transcript's model for the static session list.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'model')) db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
@@ -906,7 +859,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 22) {
-    // v21 → v22: persist the transcript's aggregate tool-call count.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'tool_call_count')) db.exec(`ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
@@ -922,9 +874,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 24) {
-    // v23 → v24: session_resource_usage (#12) — skill/slash-command usage per
-    // session, joined against the currently-installed resource/plugin for
-    // provenance. No ledger wipe: writeResourceUsage() owns this table.
     db.exec(`
       CREATE TABLE IF NOT EXISTS session_resource_usage (
         session_id TEXT NOT NULL,
@@ -943,9 +892,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 25) {
-    // v24 → v25: tool-call evidence uses an independent ledger. Do not clear
-    // scan_ledger or dir_ledger: normal session listing stays warm, while tool
-    // history is filled once on demand.
     db.exec(`
       CREATE TABLE IF NOT EXISTS tool_calls (
         call_key TEXT PRIMARY KEY,
@@ -995,8 +941,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 26) {
-    // v25 → v26: make append accounting O(changed calls), including empty
-    // deltas, instead of reading every historical evidence row per append.
     const callCols = db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>;
     if (!callCols.some((column) => column.name === 'evidence_bytes')) {
       db.exec(`ALTER TABLE tool_calls ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
@@ -1005,8 +949,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!ledgerCols.some((column) => column.name === 'evidence_bytes')) {
       db.exec(`ALTER TABLE tool_scan_ledger ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
     }
-    // The first tool schema existed only in prerelease development builds. Force its tool
-    // evidence through one bounded rebuild rather than trusting zeroed totals.
     db.exec(`DELETE FROM tool_scan_ledger`);
   }
 
@@ -1031,9 +973,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 28) {
-    // v27 → v28: retain every static program occurrence instead of only the
-    // distinct program set. The source transcript is rebuilt only by the
-    // explicit tools backfill; normal session and directory ledgers stay warm.
     db.exec(`
       CREATE TABLE IF NOT EXISTS tool_program_occurrences (
         call_key TEXT NOT NULL,
@@ -1049,9 +988,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 29) {
-    // v28 → v29: coverage and query planning address the independent tool
-    // ledger by session id. Rebuild only this derived ledger so a tool query
-    // never has to resolve or stat transcript paths.
     db.exec(`
       DROP TABLE tool_scan_ledger;
       CREATE TABLE tool_scan_ledger (
@@ -1068,9 +1004,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 30) {
-    // v29 → v30: prerelease tool-index builds temporarily used schema versions
-    // later owned by independent main migrations. Repair from the physical
-    // schema because a v29 marker alone cannot prove these columns are present.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
     );
@@ -1103,9 +1036,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 32) {
-    // v31 → v32: persist the effective managed launch mode so resume can
-    // restore the same permission boundary instead of falling back to a CLI
-    // default that may be more or less permissive.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
     );
@@ -1307,8 +1237,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       `SELECT id, timestamp, last_activity FROM sessions
        WHERE duration_ms IS NULL AND last_activity IS NOT NULL`,
     ).all() as Array<{ id: string; timestamp: string; last_activity: string }>;
-    // Runs inside migrateSchema's own transaction (db.ts:1468), so no nested
-    // db.transaction() here — that would raise "transaction within a transaction".
     const update = db.prepare(`UPDATE sessions SET duration_ms = ? WHERE id = ?`);
     for (const row of nullDurationRows) {
       const startMs = Date.parse(row.timestamp);
@@ -1338,8 +1266,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     );
     if (!cols.has('mirror_synced_at')) db.exec(`ALTER TABLE sessions ADD COLUMN mirror_synced_at INTEGER`);
     if (!cols.has('mirror_source')) db.exec(`ALTER TABLE sessions ADD COLUMN mirror_source TEXT`);
-    // The idx_sessions_mirror_synced index is created unconditionally after this
-    // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
   }
 
   if (fromVersion < 47) {
@@ -1363,7 +1289,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 49) {
-    // v48 -> v49: account-first storage (PHNX-3940).
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name),
     );
@@ -1440,7 +1365,6 @@ function backfillClaudeAccounts(
   }
 }
 
-/** Open (or return the cached) sessions database, applying migrations as needed. */
 export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   if (dbInstance) return dbInstance;
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -1449,20 +1373,13 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   // race for its schema lock. Many agents open this DB at once and a first scan can exceed 10s;
   // the ledger recheck in upsertSessionsBatch makes later writers fast.
   try {
+    // Concurrent first opens need the wait policy before WAL negotiation.
     db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(initialBusyTimeoutMs))}`);
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.exec(SCHEMA);
 
-    // `session_remote_preview_cache` is a lazy cache table (like the others
-    // below), independent of SCHEMA_VERSION — but it shipped once already
-    // without `last_caller_revision` before this column was added, so a DB
-    // that already ran that earlier version has the table WITHOUT the column,
-    // and `CREATE TABLE IF NOT EXISTS` above is a no-op against it. Guard with
-    // the same PRAGMA-table_info pattern the versioned `sessions` migrations
-    // use, so an existing cache DB gains the column instead of every read/write
-    // throwing "no such column".
     const remotePreviewCacheCols = db.prepare(`PRAGMA table_info(session_remote_preview_cache)`).all() as Array<{ name: string }>;
     if (!remotePreviewCacheCols.some(c => c.name === 'last_caller_revision')) {
       db.exec(`ALTER TABLE session_remote_preview_cache ADD COLUMN last_caller_revision TEXT`);
@@ -1477,9 +1394,8 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
     if (currentVersion === undefined) {
       db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
     } else if (currentVersion < SCHEMA_VERSION) {
-      // Re-read after BEGIN IMMEDIATE acquires the writer lock. A second process
-      // may have completed the migration while this connection was waiting.
       const migrate = db.transaction(() => {
+        // Another opener may have migrated before this writer acquired the lock.
         const lockedVersion = readSchemaVersion();
         if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
         migrateSchema(db, lockedVersion);
@@ -1493,15 +1409,10 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
     // migration.
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
-    // Same fresh-vs-migrated rule: the column is guaranteed above (fresh from
-    // CREATE TABLE, existing from migration v46), so index the mirror pruner's
-    // scan column here rather than in SCHEMA (PHNX-3792).
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
     const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
     if (['account_id', 'phoenix_id'].some(name => !sessionColumns.some(column => column.name === name))) {
-      // Partial upgrades can stamp the current version before every column exists.
-      // Recheck under the writer lock so concurrent openers cannot add it twice.
       db.transaction(() => {
         const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
         if (!columns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
@@ -1529,9 +1440,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       }
     }
 
-    // machine column + indexes: only after the column is guaranteed present.
-    // Fresh SCHEMA (v17) includes the column; older DBs get it from migrate v17.
-    // If a partial upgrade left schema_version ahead of the column, repair here.
     {
       const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
       if (!cols.some((c) => c.name === 'machine')) {
@@ -1561,8 +1469,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       }
     }
 
-    // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
-    // them anymore. Guarded by a meta flag so we only try once.
     const cleaned = db.prepare(`SELECT value FROM meta WHERE key = 'legacy_indexes_removed'`).get() as { value: string } | undefined;
     if (!cleaned) {
       for (const p of [
@@ -1570,7 +1476,7 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
         path.join(SESSIONS_DIR, 'content_index.jsonl'),
         path.join(SESSIONS_DIR, 'index.jsonl.bak'),
       ]) {
-        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {  }
       }
       db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('legacy_indexes_removed', '1')`).run();
     }
@@ -1584,7 +1490,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   }
 }
 
-/** Bound synchronous cache contention without changing other database callers. */
 export function withSessionDBTimeout<T>(timeoutMs: number, operation: () => T): T {
   const db = getDB(timeoutMs);
   const previous = (db.prepare('PRAGMA busy_timeout').get() as { timeout: number }).timeout;
@@ -1593,7 +1498,6 @@ export function withSessionDBTimeout<T>(timeoutMs: number, operation: () => T): 
   finally { db.pragma(`busy_timeout = ${previous}`); }
 }
 
-/** Close the cached database connection. */
 export function closeDB(): void {
   clearSessionExistenceCache();
   if (dbInstance) {
@@ -1617,7 +1521,6 @@ interface FtsOptimizeResult {
  * segment non-destructively; VACUUM (daemon stopped) returns space. */
 export function optimizeSessionSearchIndex(): FtsOptimizeResult[] {
   const db = getDB();
-  // Hardcoded literals — never interpolate caller input into an identifier.
   const tables = ['tool_call_text', 'session_text'];
   const segments = (table: string): number =>
     (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
@@ -1645,7 +1548,6 @@ export function maintainSessionSearchIndex(
 ): FtsOptimizeResult[] {
   const threshold = options.segmentThreshold ?? FTS_MAINTENANCE_SEGMENT_THRESHOLD;
   const pages = options.mergePages ?? FTS_MAINTENANCE_MERGE_PAGES;
-  // Hardcoded literals — never interpolate caller input into an identifier.
   const tables = ['tool_call_text', 'session_text'];
   const segments = (table: string): number =>
     (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
@@ -1659,12 +1561,8 @@ export function maintainSessionSearchIndex(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// Scan coordinator — prevents concurrent full scans across processes
-// ---------------------------------------------------------------------------
 
-/** How long a scan claim is trusted before it's considered stale (ms). */
-const SCAN_CLAIM_TTL_MS = 120_000; // 2 minutes
+const SCAN_CLAIM_TTL_MS = 120_000;
 
 function isProcessAlive(pid: number): boolean {
   if (!pid || isNaN(pid)) return false;
@@ -1693,9 +1591,8 @@ export function tryClaimScan(pid: number): boolean {
       const existingTs = parseInt(parts[1], 10);
       const ageMs = Date.now() - existingTs;
       if (isProcessAlive(existingPid) && ageMs < SCAN_CLAIM_TTL_MS) {
-        return false; // another live process is scanning — skip
+        return false;
       }
-      // Dead PID or expired TTL — take over below
     }
 
     db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('scan_in_progress', ?)`)
@@ -1738,7 +1635,6 @@ export function releaseScan(pid: number): void {
   txn();
 }
 
-/** Return the absolute path to the sessions database file. */
 export function getDBPath(): string {
   return DB_PATH;
 }
@@ -1775,7 +1671,6 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
 
   const canonicalKeys = [...canonicalToOriginals.keys()];
 
-  // SQLite parameter limit is typically 999 / 32766 — chunk defensively.
   const CHUNK = 500;
   for (let i = 0; i < canonicalKeys.length; i += CHUNK) {
     const chunk = canonicalKeys.slice(i, i + CHUNK);
@@ -1818,9 +1713,6 @@ interface ParserStateRow {
   fileMtimeMs: number;
   fileSize: number;
   scannedAt: number;
-  /** See {@link ScanStamp.extractorVersion}. A mismatch vs CONTENT_INDEX_VERSION
-   *  means this continuation predates the current content extractor and MUST
-   *  be treated as absent (forcing a full re-parse) rather than resumed from. */
   extractorVersion: number | null;
 }
 
@@ -1904,7 +1796,6 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
   txn(entries);
 }
 
-/** Snapshot of a leaf transcript directory used to detect create/delete/rename. */
 export interface DirStamp {
   dirMtimeMs: number;
   entryCount: number;
@@ -2212,21 +2103,22 @@ function writeResourceUsage(sessionId: string, events: SessionEvent[], cwd: stri
 function fanOutCounts(
   events: SessionEvent[],
   agent: SessionAgentId,
+  sessionFile?: string,
 ): { subAgentCount: number; backgroundShellCount: number | undefined } {
   let subAgentCount = 0;
   for (const e of events) {
     if (e.type !== 'tool_use' || e._local) continue;
     if (isSubAgentTool(e.tool || '', e.command || '')) subAgentCount++;
   }
+  const children = agent === 'claude' && sessionFile ? claudeSubagentFiles(sessionFile) : undefined;
   return {
-    subAgentCount,
+    subAgentCount: resolvedSubAgentCount(children, subAgentCount),
     backgroundShellCount: harnessTracksBackgroundShells(agent)
       ? extractBackgroundShells(events).length
       : undefined,
   };
 }
 
-/** Fold transcript-derived metadata that every parser can supply uniformly. */
 function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): SessionMeta {
   return {
     ...meta,
@@ -2234,7 +2126,7 @@ function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): Sessio
     lastUserMessage: meta.lastUserMessage ?? lastUserMessageFromEvents(events),
     todos: extractTodoProgressFromEvents(events),
     recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
-    ...fanOutCounts(events, meta.agent),
+    ...fanOutCounts(events, meta.agent, meta.filePath),
   };
 }
 
@@ -2245,7 +2137,6 @@ function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
     writeResourceUsage(meta.id, events, meta.cwd);
     return enrichMetaFromEvents(meta, events);
   } catch {
-    // Synthetic/cloud rows can intentionally name a transcript that is not local.
     return meta;
   }
 }
@@ -2256,12 +2147,8 @@ const SESSION_TEXT_ROWID = `(SELECT rowid FROM sessions WHERE id = ?)`;
 
 const deleteTextStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
-// Binds the session id twice: once for the rowid lookup, once for the column.
 const insertTextStmt = (db: Database.Database) =>
   db.prepare(`INSERT INTO session_text (rowid, session_id, label, topic, project, content, assistant) VALUES (${SESSION_TEXT_ROWID}, ?, ?, ?, ?, ?, ?)`);
-// Read back the label the upsert actually stored (which may be the preserved
-// one, not the incoming blank) so the FTS label column stays consistent with
-// sessions.label after a bare rescan.
 const readLabelStmt = (db: Database.Database) =>
   db.prepare(`SELECT label FROM sessions WHERE id = ?`);
 
@@ -2292,7 +2179,6 @@ function storedFtsLabel(readLabel: Database.Statement<unknown[]>, id: string): s
   return row?.label ?? '';
 }
 
-/** Resolve origin machine for a row: prefer caller-stamped meta, else path. */
 function resolveMachine(meta: SessionMeta): string {
   if (meta.machine && meta.machine.trim()) return meta.machine.trim();
   return machineForSessionFile(meta.filePath, meta.agent);
@@ -2377,8 +2263,6 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     insText.run(
       meta.id,
       meta.id,
-      // Use the label the upsert actually stored (preserve-non-empty rule),
-      // not the raw incoming one, so FTS label ranking survives a bare rescan.
       storedFtsLabel(readLabel, meta.id),
       meta.topic ?? '',
       meta.project ?? '',
@@ -2401,27 +2285,20 @@ function reconcileCodexFileOwners(db: Database.Database, metas: SessionMeta[]): 
       .all(...chunk) as Array<{ id: string; file_path: string }>;
     for (const row of rows) {
       if (owners.get(row.file_path) === row.id) continue;
-      // The text row is keyed by the sessions rowid, so it goes before the row.
       db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`).run(row.id);
       db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
       for (const table of ['session_preview_cache', 'session_summaries', 'session_insights', 'session_topics', 'session_phenotypes', 'session_resource_usage', 'resource_scan_ledger']) {
         db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(row.id);
       }
-      // The tool ledger has a unique file path too; release the wrong binding
-      // before the child evidence is persisted below. Transcript files stay put.
       purgeToolCalls(db, row.id);
     }
   }
 }
 
-/** Batch-upsert sessions with their FTS5 content and scan stamps in a single transaction. */
 export function upsertSessionsBatch(
   entries: Array<{
     meta: SessionMeta;
     content: string;
-    /** Assistant-answer text, accumulated the same way as `content` (the
-     *  user-prompt text) but stored in session_text's own `assistant` column
-     *  with a lower BM25 weight — see BM25_WEIGHTS. */
     assistantContent?: string;
     scan?: ScanStamp;
     parserState?: string;
@@ -2506,13 +2383,9 @@ export function upsertSessionsBatch(
       return {
         ...entry,
         meta: enrichMetaFromEvents(entry.meta, events),
-        // The CHANGED calls only. On a resume these are the newly appended tail
-        // (append-safe upsert); on a full scan they are the whole history.
         toolCalls: scanned.calls,
         toolScan,
         toolIndexMode: (prior ? 'append' : 'replace') as 'replace' | 'append',
-        // Persist where the NEXT scan resumes: the collector snapshot + how many
-        // events this scan folded.
         toolResume: { parserState: JSON.stringify(scanned.snapshot), parsedOffset: scanned.eventCount },
       };
     } catch {
@@ -2529,9 +2402,7 @@ export function upsertSessionsBatch(
   );
 
   const txn = db.transaction((items: typeof entries) => {
-    // Re-read the ledger now that we hold the write lock. Any file committed
-    // by a concurrent process since our pre-scan is visible here.
-    const CHUNK = 500; // stay under SQLite's 999-variable limit
+    const CHUNK = 500;
     const alreadyIndexed = new Set<string>();
     const paths = [...byPath.keys()];
     for (let i = 0; i < paths.length; i += CHUNK) {
@@ -2581,8 +2452,6 @@ export function upsertSessionsBatch(
         origin: meta.origin ?? 'cli',
         routine_name: meta.routineName ?? null,
         routine_run_id: meta.routineRunId ?? null,
-        // Backfill the origin version from the launch-time sidecar when the scan
-        // couldn't derive one — see the single-row upsert above (PHNX-3626).
         version: meta.version ?? actorIndex.get(meta.id)?.version ?? null,
         account: meta.account ?? null,
         account_key: meta.accountKey ?? null,
@@ -2638,8 +2507,6 @@ export function upsertSessionsBatch(
       insText.run(
         meta.id,
         meta.id,
-        // Mirror upsertSession: index the label the upsert actually stored
-        // (preserve-non-empty rule), not the raw incoming one.
         storedFtsLabel(readLabel, meta.id),
         meta.topic ?? '',
         meta.project ?? '',
@@ -2667,22 +2534,15 @@ export function upsertSessionsBatch(
     reconcileCodexFileOwners(db, writtenEntries.map(entry => entry.meta));
   });
   txn(enrichedEntries);
-  // Tool evidence shares the transcript parse above but owns an independent
-  // transaction/ledger. If this write fails, the normal session row remains
-  // valid and ensureToolIndex retries from the missing tool ledger later.
   for (const entry of writtenEntries) {
     const toolScan = entry.toolScan ?? entry.scan;
     if (!toolScan || !entry.toolCalls) continue;
     try {
-      // `resume` is set only by the full-file harness path above; claude/codex
-      // pass none, so their tool ledger keeps carrying no event-offset resume
-      // point (their resume rides the content-scan ledger instead) — unchanged.
       persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, {
         mode: entry.toolIndexMode ?? 'replace',
         resume: entry.toolResume,
       });
     } catch {
-      // Boundary is intentionally retryable via tool_scan_ledger.
     }
   }
   // Every batch appends FTS segments, so pay a bounded slice of the merge here and keep the scan
@@ -2708,8 +2568,6 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
       .all(...chunk) as Array<{ id: string; label: string | null }>;
     for (const row of rows) {
       const live = labelMap.get(row.id)?.trim() || null;
-      // A missing/empty live label means "no refinement yet", not "erase the
-      // generated title or launch handle already stored for this session".
       if (live && live !== (row.label ?? '')) {
         updates.push({ id: row.id, label: live });
       }
@@ -2748,7 +2606,6 @@ export function seedLabelsFromNames(nameMap: Map<string, string | null>): number
       .all(...chunk) as Array<{ id: string; label: string | null }>;
     for (const row of rows) {
       const seed = nameMap.get(row.id);
-      // Only fill an empty label; a real agent title (non-empty) always wins.
       if (seed && !(row.label ?? '').trim()) {
         updates.push({ id: row.id, label: seed });
       }
@@ -2806,7 +2663,6 @@ export function syncTopics(topicMap: Map<string, string>): number {
   return updates.length;
 }
 
-/** Convert a raw database row into a SessionMeta object. */
 function rowToMeta(row: SessionRow): SessionMeta {
   return {
     id: row.id,
@@ -2859,18 +2715,10 @@ function rowToMeta(row: SessionRow): SessionMeta {
     linearProjectUrl: row.linear_project_url ?? undefined,
     machine: row.machine ?? undefined,
     actor: row.actor ?? undefined,
-    // Narrow the free-text column to the known kinds; an unexpected value maps
-    // to undefined rather than being asserted as a valid kind.
     initiatedBy: row.initiated_by === 'human' || row.initiated_by === 'agent' ? row.initiated_by : undefined,
     phoenixId: row.phoenix_id ?? undefined,
-    // NULL = never computed by this scanner (legacy row) — leave undefined so
-    // the sessions picker knows to fall back to the transcript-regex detection
-    // instead of trusting a false "never used browser/computer".
     usedBrowser: row.used_browser === null ? undefined : row.used_browser === 1,
     usedComputer: row.used_computer === null ? undefined : row.used_computer === 1,
-    // A stamped archived_at means the transcript file is gone but the session's
-    // user turns still live in session_text — the row is served from the DB and
-    // flagged, never dropped (RUSH-2436). NULL leaves both undefined (live row).
     archivedAt: row.archived_at ?? undefined,
     archived: row.archived_at != null ? true : undefined,
     mirrorSyncedAt: row.mirror_synced_at ?? undefined,
@@ -2919,7 +2767,6 @@ export function isSessionActivityFresh(
   return activityMs != null && nowMs - activityMs <= maxAgeMs;
 }
 
-/** Persist a lazily resolved Linear project without reparsing the transcript. */
 export function cacheLinearProject(sessionId: string, project: string, projectUrl: string): void {
   getDB().prepare(`UPDATE sessions SET linear_project = ?, linear_project_url = ? WHERE id = ?`)
     .run(project, projectUrl, sessionId);
@@ -2931,7 +2778,7 @@ export function cacheLinearProject(sessionId: string, project: string, projectUr
 export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string, options?: { maxAgeMs?: number; nowMs?: number }): string | undefined {
   if (!cwd) return undefined;
   let normalized = cwd;
-  try { normalized = fs.realpathSync(cwd); } catch { /* use as-is */ }
+  try { normalized = fs.realpathSync(cwd); } catch {  }
   const db = getDB();
   const row = db
     .prepare(`SELECT file_path, last_activity, timestamp, file_mtime_ms
@@ -2947,7 +2794,6 @@ export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string, opti
   return row.file_path;
 }
 
-/** Build a parameterized WHERE clause from query options. */
 function buildSessionWhere(options: QueryOptions): { clause: string; params: any[] } {
   const where: string[] = [];
   const params: any[] = [];
@@ -3006,7 +2852,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   }
 
   if (typeof options.sinceMs === 'number') {
-    // Compare as strings; ISO 8601 timestamps sort lexicographically.
     where.push('timestamp >= ?');
     params.push(new Date(options.sinceMs).toISOString());
   }
@@ -3056,12 +2901,10 @@ const directoryMembershipCache = new Map<string, DirectoryMembershipCacheEntry>(
 let directoryMembershipSweepCount = 0;
 const DIRECTORY_MTIME_SETTLE_MS = 2_000;
 
-/** Process-local diagnostics for the real-filesystem existence-cache tests. */
 export function getSessionExistenceCacheStats(): { sweeps: number } {
   return { sweeps: directoryMembershipSweepCount };
 }
 
-/** Clear process-local directory membership state when the session DB closes. */
 function clearSessionExistenceCache(): void {
   directoryMembershipCache.clear();
   directoryMembershipSweepCount = 0;
@@ -3110,9 +2953,6 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
       }
     } catch {
       directoryMembershipCache.delete(dir);
-      // Directory itself is gone (or unreadable) — every file in it is missing.
-      // Also covers the race where readdir loses to a concurrent delete: fall
-      // back to a direct stat rather than assuming existence.
       for (const [base, originals] of bases) {
         const filePath = path.join(dir, base);
         if (!fs.existsSync(filePath)) markMissing(originals);
@@ -3126,13 +2966,9 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
   return missing;
 }
 
-/** Query sessions from the database, applying filters and ordering by last-activity descending (default). */
 export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const db = getDB();
   const { clause, params } = buildSessionWhere(options);
-  // When a LIMIT is in play, we still need to filter stale rows AFTER the query,
-  // so over-fetch a small buffer. Without this, a page of 50 rows where the first
-  // 5 are stale would return only 45 to the caller even when there are more.
   const limitClause = options.limit
     ? `LIMIT ${Math.max(1, Math.floor(options.limit)) + 16}`
     : '';
@@ -3166,8 +3002,6 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
       for (const row of missing) {
         const content = (readContent.get(row.id) as { content: string } | undefined)?.content;
         if (content && content.trim() !== '') {
-          // Genuine archived session: stamp archived_at the first time we confirm
-          // the file is gone, and reflect it on the in-memory row we return.
           if (row.archived_at == null) {
             markArchived.run(now, row.id);
             row.archived_at = now;
@@ -3213,7 +3047,6 @@ export function querySessionsForDeferredToolIndex(limit: number): SessionMeta[] 
   return rows.map(rowToMeta);
 }
 
-/** Count sessions matching the given filter options. */
 export function countSessions(options: QueryOptions = {}): number {
   const db = getDB();
   const { clause, params } = buildSessionWhere(options);
@@ -3222,7 +3055,6 @@ export function countSessions(options: QueryOptions = {}): number {
   return row ? row.n : 0;
 }
 
-/** One grouped row in a cost/duration rollup. */
 interface UsageRollupRow {
   /** Grouping key value: the agent id, project name, shortened model id, ISO date (YYYY-MM-DD), or
    * account identity (`claude:org=<uuid>` / `unattributed:<reason>`). */
@@ -3238,13 +3070,9 @@ interface UsageRollupRow {
   durationMs: number;
   sessionCount: number;
   tokenCount: number;
-  /** Real generated (output) tokens — excludes cache-read/-write context. */
   outputTokens: number;
-  /** Uncached input tokens summed across the group (0 where no harness recorded a split). */
   inputTokens: number;
-  /** Cache-read tokens summed across the group. */
   cacheReadTokens: number;
-  /** Cache-write (cache-creation) tokens summed across the group. */
   cacheWriteTokens: number;
 }
 
@@ -3256,7 +3084,7 @@ export function readSessionInsights<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
   if (ids.length === 0) return out;
-  const CHUNK = 400; // chunk.length + 1 binds, well under SQLite's 999-variable limit
+  const CHUNK = 400;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const phs = chunk.map(() => '?').join(',');
@@ -3273,7 +3101,6 @@ export function readSessionInsights<T>(ids: string[]): Map<string, T> {
       try {
         out.set(row.id, JSON.parse(row.facets) as T);
       } catch {
-        // A corrupt cache row is not a reason to fail the report; recompute it.
       }
     }
   }
@@ -3307,12 +3134,10 @@ export function writeSessionInsights<T>(
   })();
 }
 
-/** Drop every cached facet row. Backs `agents insights --refresh`. */
 export function clearSessionInsights(): void {
   getDB().exec(`DELETE FROM session_insights`);
 }
 
-/** Read cached trace topics only when their transcript byte stamps still match. */
 export function readSessionTopics<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
@@ -3334,14 +3159,12 @@ export function readSessionTopics<T>(ids: string[]): Map<string, T> {
       try {
         out.set(row.id, JSON.parse(row.topicJson) as T);
       } catch {
-        // Invalid derived cache data is a miss and self-heals on the next write.
       }
     }
   }
   return out;
 }
 
-/** Persist trace topics against the exact transcript bytes used to classify them. */
 export function writeSessionTopics<T>(
   entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; topic: T }>,
 ): void {
@@ -3373,7 +3196,6 @@ export function writeSessionTopics<T>(
   })();
 }
 
-/** Read cached failure phenotypes only when their transcript byte stamps still match. */
 export function readSessionPhenotypes<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
@@ -3395,14 +3217,12 @@ export function readSessionPhenotypes<T>(ids: string[]): Map<string, T> {
       try {
         out.set(row.id, JSON.parse(row.phenotypeJson) as T);
       } catch {
-        // Invalid derived cache data is a miss and self-heals on the next write.
       }
     }
   }
   return out;
 }
 
-/** Persist failure phenotypes against the exact transcript bytes used to classify them. */
 export function writeSessionPhenotypes<T>(
   entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; phenotype: T }>,
 ): void {
@@ -3434,7 +3254,6 @@ export function writeSessionPhenotypes<T>(
   })();
 }
 
-/** Read one derived preview only when it matches the transcript bytes on disk. */
 export function readSessionPreviewCache<T>(
   id: string,
   sourceStamp: { fileMtimeMs: number | null; fileSize: number | null },
@@ -3460,7 +3279,6 @@ export function readSessionPreviewCache<T>(
   }
 }
 
-/** Persist normalized preview data against the exact transcript bytes parsed. */
 export function writeSessionPreviewCache<T>(entry: {
   id: string;
   fileMtimeMs: number | null;
@@ -3487,7 +3305,6 @@ export function writeSessionPreviewCache<T>(entry: {
   );
 }
 
-/** Bump when the cached remote preview envelope shape changes so cached rows recompute (PHNX-3999 v1). */
 export const REMOTE_PREVIEW_SCHEMA_VERSION = 1;
 
 /** Cap on distinct (device, sessionId) rows in this cache, bounding growth as the fleet session
@@ -3506,23 +3323,15 @@ const REMOTE_PREVIEW_CACHE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 export const REMOTE_PREVIEW_ENVELOPE_MAX_BYTES = 512 * 1024;
 
 export interface RemotePreviewCacheRow {
-  /** When the envelope currently stored here (if `ok`) was fetched. */
   fetchedAt: number;
-  /** Whether `envelope` is a real, successfully-fetched payload. */
   ok: boolean;
   envelope?: unknown;
   failureReason?: string;
   consecutiveFailures: number;
-  /** Epoch ms before which a fresh fetch attempt should be skipped (negative backoff). */
   nextAttemptAt: number;
-  /** The caller's own last-observed `--revision` cursor, or undefined if no
-   * caller has ever supplied one for this (device, sessionId) pair. */
   lastCallerRevision?: string;
 }
 
-/** Read the durable cached remote preview row for one (device, sessionId) pair,
- * regardless of whether it currently holds a successful envelope. Undefined
- * means this box has never attempted (or recorded) a fetch for that pair. */
 export function readRemotePreviewCache(device: string, sessionId: string): RemotePreviewCacheRow | undefined {
   const row = getDB().prepare(`
     SELECT fetched_at AS fetchedAt, ok, envelope_json AS envelopeJson, failure_reason AS failureReason,
@@ -3545,7 +3354,6 @@ export function readRemotePreviewCache(device: string, sessionId: string): Remot
     try {
       envelope = JSON.parse(row.envelopeJson);
     } catch {
-      // Corrupt cache row: treat as no payload rather than throwing.
     }
   }
   return {
@@ -3578,8 +3386,6 @@ function pruneRemotePreviewCache(maxRows: number = REMOTE_PREVIEW_CACHE_MAX_ROWS
       SELECT rowid FROM session_remote_preview_cache ORDER BY fetched_at DESC LIMIT ?
     )
   `).run(maxRows);
-  // Total-byte budget, independent of row count: walk newest-first, keep
-  // rows until the running total would exceed the budget, drop the rest.
   const rows = db.prepare(`
     SELECT rowid AS rowid,
            envelope_bytes + length(CAST(COALESCE(failure_reason, '') AS BLOB))
@@ -3725,7 +3531,6 @@ export function readArchivedSessionPreview<T>(id: string): T | undefined {
   }
 }
 
-/** The daemon-computed summary stored in `session_summaries` (PHNX-3939). */
 export interface SessionSummaryEntry {
   goal?: string;
   checkpoints?: SessionCheckpoint[];
@@ -3777,7 +3582,6 @@ export function readSessionSummaryAny(id: string): SessionSummaryEntry | undefin
   }
 }
 
-/** Persist a computed summary against the exact transcript bytes it was derived from. */
 export function writeSessionSummary(entry: {
   id: string;
   fileMtimeMs: number | null;
@@ -3806,20 +3610,18 @@ export function writeSessionSummary(entry: {
 
 /** The daemon-computed timeline stored in `session_timelines` (PHNX-3939): the bounded projection a
  * row merges, plus the request and files derived in the same fold. */
-export interface SessionTimelineProjection {
+export interface SessionTimelineProjection extends SessionGlance {
+  subagents?: SessionSubagent[];
   timeline: SessionTimeline;
   request?: SessionRequest;
   files?: SessionFiles;
 }
 
-/** One folded timeline, as the pass produces it for writing. */
 export interface SessionTimelineEntry extends SessionTimelineProjection {
   state: TimelineState;
 }
 
-/** One cached row as READ back: the folded entry plus when it was folded. */
 export interface SessionTimelineCacheRow extends SessionTimelineEntry {
-  /** Epoch ms this row was folded — the pass's re-parse rate limit reads it. */
   computedAt: number;
 }
 
@@ -3868,13 +3670,11 @@ export function readSessionTimelineAny(
   return parseTimelineProjection(row.projectionJson);
 }
 
-/** Persist a folded timeline against the exact transcript bytes it was folded to. */
 export function writeSessionTimeline(entry: {
   id: string;
   fileMtimeMs: number | null;
   fileSize: number | null;
   timeline: SessionTimelineEntry;
-  /** Fold time. Injected by the pass so its re-parse interval is testable without the wall clock. */
   computedAtMs?: number;
 }): void {
   const { state, ...projection } = entry.timeline;
@@ -3900,7 +3700,6 @@ export function writeSessionTimeline(entry: {
   );
 }
 
-/** A local-origin session, projected to the compact fields the fleet mirror publishes. */
 export interface LocalMirrorSource {
   id: string;
   shortId: string;
@@ -3911,15 +3710,12 @@ export interface LocalMirrorSource {
   topic: string | null;
   firstUserMessage: string | null;
   label: string | null;
-  /** The daemon-generated headline (PHNX-3797), so a peer row shows the same title. */
   generatedTitle: string | null;
   lastActivity: string | null;
   timestamp: string;
   ticketId: string | null;
   prUrl: string | null;
-  /** Daemon-computed summary (PHNX-3939), so peers carry it without a transcript. */
   summary: SessionSummaryEntry | null;
-  /** Daemon-folded request/timeline/files (PHNX-3939), same reason as {@link summary}. */
   timeline: SessionTimelineProjection | null;
 }
 
@@ -3949,14 +3745,11 @@ export function queryLocalOriginSessionsForMirror(self: string, limit: number): 
     cwd: r.cwd, topic: r.topic, firstUserMessage: r.first_user_message, label: r.label,
     generatedTitle: r.generated_title,
     lastActivity: r.last_activity, timestamp: r.timestamp, ticketId: r.ticket_id, prUrl: r.pr_url,
-    // Ride the daemon-computed summary alongside the digest so a peer renders it
-    // without a transcript (PHNX-3939); only a summarized session carries one.
     summary: readSessionSummaryAny(r.id) ?? null,
     timeline: readSessionTimelineAny(r.id) ?? null,
   }));
 }
 
-/** One peer session digest to write into this box's local mirror. */
 export interface MirrorSessionUpsert {
   id: string;
   shortId: string;
@@ -3967,15 +3760,12 @@ export interface MirrorSessionUpsert {
   topic?: string | null;
   firstUser?: string | null;
   label?: string | null;
-  /** The publisher's daemon-generated headline (PHNX-3797); undefined when it has none yet. */
   generatedTitle?: string | null;
   lastActivity?: string | null;
   timestamp: string;
   ticketId?: string | null;
   prUrl?: string | null;
-  /** Daemon-computed summary carried from the publishing peer (PHNX-3939). */
   summary?: SessionSummaryEntry | null;
-  /** Daemon-folded request/timeline/files carried from the publishing peer (PHNX-3939). */
   timeline?: SessionTimelineProjection | null;
 }
 
@@ -4042,7 +3832,6 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
     source,
   });
   if (result.changes === 0) return false;
-  // Keep the mirror row searchable by topic + first user turn, like a local row.
   db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`).run(row.id);
   db.prepare(`
     INSERT INTO session_text (rowid, session_id, label, topic, project, content, assistant)
@@ -4068,7 +3857,6 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
   return true;
 }
 
-/** One indexed session the daemon titler may generate a headline for (PHNX-3797). */
 export interface SessionTitleCandidateRow {
   id: string;
   agent: string;
@@ -4099,8 +3887,6 @@ export function querySessionTitleCandidates(
     clauses.push(`(id = ? OR short_id = ?)`);
     params.push(opts.id, opts.id);
   } else {
-    // An explicitly requested session is titled even when it carries a label or
-    // is older than the window; the periodic sweep honours both bounds.
     clauses.push(`(label IS NULL OR trim(label) = '')`);
     if (opts.sinceMs != null) {
       clauses.push(`COALESCE(last_activity, timestamp) >= ?`);
@@ -4168,7 +3954,6 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   const delTimeline = db.prepare(`DELETE FROM session_timelines WHERE session_id = ?`);
   const txn = db.transaction(() => {
     for (const { id } of stale) {
-      // Text first: its rowid lookup needs the sessions row still present.
       delText.run(id);
       delRow.run(id);
       delPreview.run(id);
@@ -4180,7 +3965,6 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   return stale.length;
 }
 
-/** Plugin provenance already indexed for resources used by one session. */
 export function getSessionPlugins(id: string): string[] {
   const rows = getDB().prepare(`
     SELECT DISTINCT plugin
@@ -4199,7 +3983,6 @@ export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'model' | 'account'
 type AffinityGroup = 'machine' | 'agent' | 'machine_agent';
 
 export interface AffinityRow {
-  /** Group key: machine name, agent id, or "machine\\tagent". */
   key: string;
   machine?: string;
   agent?: string;
@@ -4211,13 +3994,9 @@ export interface AffinityRow {
 
 export function queryAffinityRollup(options: {
   groupBy: AffinityGroup;
-  /** ISO cutoff or ms; defaults to 14 days ago when omitted. */
   sinceMs?: number;
-  /** Restrict to these harnesses (e.g. claude/codex/kimi). */
   agents?: SessionAgentId[];
-  /** Default true: only origin=cli rows. */
   onlyCli?: boolean;
-  /** Default true: drop team-spawned sessions. */
   excludeTeamOrigin?: boolean;
   project?: string;
 }): AffinityRow[] {
@@ -4226,7 +4005,6 @@ export function queryAffinityRollup(options: {
   const params: unknown[] = [];
 
   const sinceMs = options.sinceMs ?? (Date.now() - 14 * 24 * 60 * 60 * 1000);
-  // ISO timestamps sort lexicographically; compare as string prefix of datetime.
   where.push(`timestamp >= ?`);
   params.push(new Date(sinceMs).toISOString());
 
@@ -4288,8 +4066,6 @@ export function queryUsageRollup(
       : options.groupBy === 'project'
         ? `IFNULL(NULLIF(project, ''), '(no project)')`
         : options.groupBy === 'model'
-          // Match shortenModel(): remove Claude's redundant harness prefix and
-          // an optional eight-digit release-date suffix before grouping.
           ? `IFNULL(NULLIF(CASE
               WHEN substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -9, 1) = '-'
                 AND length(substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -8)) = 8
@@ -4303,15 +4079,12 @@ export function queryUsageRollup(
           // mechanism, lib/session/claude-accounts.ts). Bucket per agent so rows are named
           // honestly, not called "not indexed" or joined to a real account.
           ? `IFNULL(NULLIF(account_key, ''), 'unattributed:' || agent)`
-          // ISO timestamps are lexicographically date-sortable; the date is the
-          // first 10 chars (YYYY-MM-DD).
           : `substr(timestamp, 1, 10)`;
 
   const sql = `
     SELECT
       ${keyExpr} AS key,
       ${options.groupBy === 'account'
-        // One label per account_key by construction, so MAX just picks it out.
         ? `MAX(CASE WHEN account_org IS NOT NULL AND account IS NOT NULL
                     THEN account_org || ' <' || account || '>' END) AS label,`
         : ''}
@@ -4335,19 +4108,12 @@ export function queryUsageRollup(
   return db.prepare(sql).all(...params) as UsageRollupRow[];
 }
 
-/** One aggregated resource (skill or slash-command) in a usage-stats rollup. */
 export interface ResourceStatRow {
-  /** 'skill' or 'command' (singular, as stored in session_resource_usage.kind). */
   kind: string;
-  /** Stored resource name — bare, or `plugin:short` for a plugin-owned resource. */
   name: string;
-  /** Owning plugin, or null for a flat (non-namespaced) resource. */
   plugin: string | null;
-  /** DotAgents layer or plugin marketplace the resource resolved to at write time. */
   source: string | null;
-  /** Distinct sessions that invoked this resource within the filter window. */
   sessions: number;
-  /** Total invocations (sum of per-session counts) within the window. */
   invocations: number;
 }
 
@@ -4421,7 +4187,6 @@ export function resourceUsageCoverage(): { covered: number; scanned: number; tot
   return { covered, scanned, total };
 }
 
-/** Has this session's resource usage been derived at the current extractor version for this exact file? */
 function needsResourceIndex(
   db: Database.Database,
   sessionId: string,
@@ -4436,7 +4201,6 @@ function needsResourceIndex(
     || row.extractor_version !== RESOURCE_INDEX_VERSION;
 }
 
-/** Record that a session's resource usage is current at RESOURCE_INDEX_VERSION for this file stamp. */
 function stampResourceLedger(
   db: Database.Database,
   sessionId: string,
@@ -4458,17 +4222,11 @@ function stampResourceLedger(
   `).run(sessionId, filePath, stamp.fileMtimeMs, stamp.fileSize, RESOURCE_INDEX_VERSION, Date.now(), resourceCount);
 }
 
-/** Outcome of a resource-usage backfill run. */
 interface ResourceBackfillResult {
-  /** Sessions considered (matched the filter, had a real transcript). */
   scanned: number;
-  /** Sessions (re)parsed and written this run. */
   updated: number;
-  /** Sessions already current at this extractor version, skipped. */
   skipped: number;
-  /** Sessions whose transcript could not be stat'd or parsed. */
   failed: number;
-  /** Total session_resource_usage rows written across updated sessions. */
   resourceRows: number;
 }
 
@@ -4480,8 +4238,6 @@ export function backfillResourceUsage(
   onProgress?: (done: number, total: number) => void,
 ): ResourceBackfillResult {
   const db = getDB();
-  // No LIMIT: the backfill covers the whole matching history. skipExistenceCheck
-  // stays off so vanished transcripts are dropped, matching querySessions.
   const sessions = querySessions({ ...filter, limit: undefined });
   const result: ResourceBackfillResult = { scanned: 0, updated: 0, skipped: 0, failed: 0, resourceRows: 0 };
   let done = 0;
@@ -4490,8 +4246,6 @@ export function backfillResourceUsage(
     result.scanned++;
     let stamp: { fileMtimeMs: number; fileSize: number };
     try {
-      // Composite rows (`<container>#<id>`) stat their container file — the
-      // per-session bytes/mtime stamp is derived during discovery, not here.
       const st = fs.statSync(sessionFilePathContainer(meta.filePath));
       stamp = { fileMtimeMs: st.mtimeMs, fileSize: st.size };
     } catch {
@@ -4527,11 +4281,9 @@ export function backfillResourceUsage(
   return result;
 }
 
-/** Who spawned a team: the orchestrator session, from its transcript. */
 export interface TeamSpawner {
   sessionId: string;
   shortId: string;
-  /** The human the orchestrator ran as, when the row carries actor provenance. */
   actor?: string;
 }
 
@@ -4555,7 +4307,6 @@ export function teamSpawners(): Map<string, TeamSpawner> {
   return out;
 }
 
-/** A session with its cost, for the top-N-by-cost listing. */
 interface TopCostSession {
   meta: SessionMeta;
   costUsd: number;
@@ -4572,7 +4323,6 @@ export function topSessionsByCost(
   const { clause, params } = buildSessionWhere(options);
   const whereCost = clause ? `${clause} AND cost_usd IS NOT NULL` : 'WHERE cost_usd IS NOT NULL';
   const limit = Math.max(1, Math.floor(n));
-  // Over-fetch a small buffer to survive the on-disk liveness filter below.
   const sql = `SELECT * FROM sessions ${whereCost} ORDER BY cost_usd DESC, timestamp DESC LIMIT ${limit + 16}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
   // Keep a row whose file is present or whose transcript is archived: an expensive real session
@@ -4610,7 +4360,7 @@ export function findSessionMachinesByIds(ids: string[]): Map<string, string> {
   if (uniq.length === 0) return out;
   try {
     const db = getDB();
-    const CHUNK = 500; // stay well under SQLite's default 999-variable limit
+    const CHUNK = 500;
     for (let i = 0; i < uniq.length; i += CHUNK) {
       const batch = uniq.slice(i, i + CHUNK);
       const placeholders = batch.map(() => '?').join(',');
@@ -4620,7 +4370,6 @@ export function findSessionMachinesByIds(ids: string[]): Map<string, string> {
       for (const r of rows) if (r.machine) out.set(r.id, r.machine);
     }
   } catch {
-    /* index read is best-effort — an unavailable DB leaves rows un-attributed */
   }
   return out;
 }
@@ -4631,7 +4380,6 @@ export function getSessionById(id: string): SessionMeta | null {
   return row ? rowToMeta(row) : null;
 }
 
-/** Exact ids win over prefixes; the normal existence check preserves archived content but excludes phantoms. */
 export function findSessionsById(
   idQuery: string,
   scope: Pick<QueryOptions, 'agent' | 'version' | 'cwd' | 'project'> = {},
@@ -4649,22 +4397,20 @@ export function findSessionsById(
 export function resolveFullSessionId(idOrCrumb: string | undefined): string | undefined {
   const id = idOrCrumb?.trim();
   if (!id) return undefined;
-  if (!/^[0-9a-f]{8}$/i.test(id)) return id; // already a full id (or non-hex shape) — nothing to resolve
+  if (!/^[0-9a-f]{8}$/i.test(id)) return id;
   const hit = findSessionsByShortIds([id]).get(id.toLowerCase());
   return hit?.id ?? id;
 }
 
-/** Batch-resolve pane short ids; on collision the most recently active session wins. */
 export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionMeta> {
   const out = new Map<string, SessionMeta>();
   const uniq = [...new Set(shortIds.map((s) => s.trim().toLowerCase()).filter(Boolean))];
   if (uniq.length === 0) return out;
   const db = getDB();
-  const CHUNK = 500; // stay well under SQLite's default 999-variable limit
+  const CHUNK = 500;
   for (let i = 0; i < uniq.length; i += CHUNK) {
     const batch = uniq.slice(i, i + CHUNK);
     const placeholders = batch.map(() => '?').join(',');
-    // timestamp ASC so a later (newer) row overwrites an earlier one per short_id.
     const rows = db
       .prepare(`SELECT * FROM sessions WHERE short_id IN (${placeholders}) ORDER BY timestamp ASC`)
       .all(...batch) as SessionRow[];
@@ -4676,7 +4422,6 @@ export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionM
   return out;
 }
 
-/** A single full-text search result with ranking score. */
 interface FtsHit {
   sessionId: string;
   score: number;
@@ -4734,7 +4479,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
 
   let hasExactLabelMatch = false;
   for (const row of labelRows) {
-    // Score the label by match quality (exact > prefix > contains).
     let score = 0;
     const handle = row.label;
     if (handle) {
@@ -4751,14 +4495,10 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
       }
     }
     if (score === 0) continue;
-    // matchedTerms is empty for handle hits — the picker can render the handle
-    // itself as the highlight, no badge needed.
     hits.push({ sessionId: row.id, score, matchedTerms: [] });
     seen.add(row.id);
   }
 
-  // If the query exactly names a labeled session, don't dilute the result
-  // with FTS5 content hits — the user typed a specific thing, show just it.
   if (hasExactLabelMatch) {
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, limit);
@@ -4791,7 +4531,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
         seen.add(r.session_id);
       }
     } catch {
-      /* invalid MATCH expression — tier 4 just yields nothing */
     }
   }
 
@@ -4836,7 +4575,6 @@ export function updateSessionFilePaths(oldPrefix: string, newPrefix: string): nu
   return reindexMovedSessionPaths([{ from: oldPrefix, to: newPrefix }]);
 }
 
-/** Count indexed sessions whose transcript path sits under `prefix`. */
 export function countSessionsWithFilePrefix(prefix: string): number {
   if (!prefix) return 0;
   const row = getDB()
@@ -4845,9 +4583,7 @@ export function countSessionsWithFilePrefix(prefix: string): number {
   return row.c;
 }
 
-// ─── Tool sessions: durable browser / computer-use metadata (RUSH-2549) ──────
 
-/** Per-kind capture tallies for a browser task. Counts only -- never the bytes. */
 interface BrowserCaptureCounts {
   screenshot: number;
   pdf: number;
@@ -4855,7 +4591,6 @@ interface BrowserCaptureCounts {
   download: number;
 }
 
-/** One durable browser-task row. `machine` defaults to this device. */
 interface BrowserSessionRecord {
   task: string;
   profile: string;
@@ -4870,7 +4605,6 @@ interface BrowserSessionRecord {
   capturesRemote?: string;
 }
 
-/** One durable computer-use invocation row. `machine` defaults to this device. */
 interface ComputerSessionRecord {
   invocationId: string;
   sessionId?: string;
@@ -4956,7 +4690,6 @@ export function recordComputerSession(record: ComputerSessionRecord): void {
   );
 }
 
-/** A stored browser row as read back, with counts rehydrated. */
 interface StoredBrowserSession extends Required<Pick<BrowserSessionRecord, 'task' | 'profile'>> {
   sessionId?: string;
   launchId?: string;
@@ -5022,7 +4755,6 @@ export function listBrowserSessionRecords(
   return rows.map(toStoredBrowserSession);
 }
 
-/** One stored browser task by its (profile, task) key, or null. */
 export function getBrowserSessionRecord(profile: string, task: string): StoredBrowserSession | null {
   const db = getDB();
   const row = db
@@ -5031,7 +4763,6 @@ export function getBrowserSessionRecord(profile: string, task: string): StoredBr
   return row ? toStoredBrowserSession(row) : null;
 }
 
-/** A stored computer-use invocation as read back. */
 interface StoredComputerSession {
   invocationId: string;
   sessionId?: string;
@@ -5060,7 +4791,6 @@ interface ComputerSessionRow {
  * not unbounded. `computer_sessions` gets a row per `agents computer` CLI process (hundreds a
  * day), so an unbounded table would grow forever and be read in full on every listing. */
 const TOOL_SESSION_MAX_AGE_DAYS = 365;
-/** Default ceiling on rows one listing will read. */
 const TOOL_SESSION_LIST_LIMIT = 2000;
 
 /** Drop tool-session rows past {@link TOOL_SESSION_MAX_AGE_DAYS}. Called from the listing path,

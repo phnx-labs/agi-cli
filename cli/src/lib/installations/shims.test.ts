@@ -44,8 +44,6 @@ describe('generateShimScript', () => {
   });
 
   it('disables the Claude Code auto-updater in the claude shim, honoring an explicit value', () => {
-    // Pinned per-version installs must not self-mutate. The `:-1` default lets a
-    // user-set DISABLE_AUTOUPDATER win while defaulting to disabled otherwise.
     const script = generateShimScript('claude');
     expect(script).toContain('export DISABLE_AUTOUPDATER="${DISABLE_AUTOUPDATER:-1}"');
   });
@@ -53,7 +51,6 @@ describe('generateShimScript', () => {
   it('does not touch DISABLE_AUTOUPDATER for the codex shim (codex path unchanged)', () => {
     const script = generateShimScript('codex');
     expect(script).not.toContain('DISABLE_AUTOUPDATER');
-    // codex keeps its own suppression flag, injected at exec.
     expect(script).toContain('check_for_update_on_startup=false');
     expect(script).toContain('default_permissions=\"agents-edit\"');
     expect(script).toContain('approval_policy=\"on-request\"');
@@ -61,7 +58,6 @@ describe('generateShimScript', () => {
 
   it('resolves the repo .agents from $PWD at runtime and passes --add-dir (codex sandbox hardcodes .agents read-only)', () => {
     const script = generateShimScript('codex');
-    // worktree-aware resolution mirroring repoAgentsDirForCwd, then --add-dir
     expect(script).toContain('*/.agents/worktrees/*)');
     expect(script).toContain('_repo_agents');
     expect(script).toContain('--add-dir "$_repo_agents"');
@@ -81,9 +77,6 @@ describe('generateVersionedAliasScript', () => {
   });
 
   it('carries the Linux .oauth_token setup-token fallback in a claude@version alias (interactive auth on a keychain-less worker)', () => {
-    // Regression: the alias env was a hand-copied subset of the main shim that had
-    // dropped this fallback, so interactive Claude on a worker could not authenticate
-    // from an attached setup-token. The alias now reuses claudeAdapter.shimConfigEnvBash.
     const script = generateVersionedAliasScript('claude', '2.1.196');
     expect(script).toContain('.oauth_token');
     expect(script).toContain('CLAUDE_CODE_OAUTH_TOKEN');
@@ -97,13 +90,11 @@ describe('generateVersionedAliasScript', () => {
     expect(script).toContain('export AGENTS_REAL_HOME="${AGENTS_REAL_HOME:-$HOME}"');
     expect(script).toContain('BINARY="$AGENTS_REAL_HOME/.agents/.history/versions/cursor/main/node_modules/.bin/cursor-agent"');
     expect(script).not.toMatch(/BINARY="\$HOME\//);
-    // The lease runs under the real home, and before cursor's HOME swap.
     const lease = script.indexOf('HOME="$AGENTS_REAL_HOME" ');
     expect(lease).toBeGreaterThan(0);
     expect(script.slice(lease)).toMatch(/^HOME="\$AGENTS_REAL_HOME" '[^']+' __launch-lease "cursor" "main" "\$\$"/);
     const swap = script.indexOf('export HOME="$AGENTS_REAL_HOME/.agents/.history/versions/cursor/main/home"');
     expect(swap).toBeGreaterThan(lease);
-    // The swap yields to a spawner that already chose HOME (the slot).
     expect(script).toContain('if [ "$HOME" = "$AGENTS_REAL_HOME" ]; then');
     expect(script).toContain('export AGENT_CLI_CREDENTIAL_STORE="file"');
   });
@@ -127,7 +118,6 @@ describe('generateVersionedAliasScript', () => {
   });
 
   it('yields every harness config-dir pin to an account-slot launch (bare shim and direct alias)', () => {
-    // Same override existed for every harness whose shim pins a config-dir env.
     const cases: Array<[Parameters<typeof generateShimScript>[0], string, string[]]> = [
       ['grok', '0.2.91', ['GROK_HOME']],
       ['opencode', '1.18.4', ['OPENCODE_CONFIG_DIR']],
@@ -240,35 +230,22 @@ describe('grok binary resolution order', () => {
   it('checks the versioned home before the global ~/.grok/downloads in the versioned alias', () => {
     const script = generateVersionedAliasScript('grok', '0.2.91');
     const versionedIdx = script.indexOf('/home/.grok/downloads');
-    // The global dir is under the REAL home (a slot launch swaps HOME).
     const globalIdx = script.indexOf('$AGENTS_REAL_HOME/.grok/downloads');
     expect(versionedIdx, 'versioned home path must be present').toBeGreaterThanOrEqual(0);
     expect(globalIdx, 'global fallback path must be present').toBeGreaterThanOrEqual(0);
     expect(versionedIdx, 'versioned home must be checked before the global dir').toBeLessThan(globalIdx);
-    // The concrete version is interpolated into the versioned-home path.
     expect(script).toContain('/versions/grok/0.2.91/home/.grok/downloads');
   });
 
   it('routes both the versioned home and the global fallback through the validated resolver (RUSH-2459)', () => {
-    // Same fix as the dispatcher shim: no more "ls | head -1" — both branches
-    // must call the shared, size-and-mtime-validated `_resolve_grok_binary`
-    // so a stray non-binary artifact can never win by sorting first.
     const script = generateVersionedAliasScript('grok', '0.2.91');
-    // The function is defined exactly once (not duplicated per call site) and
-    // called from both the versioned-home and global-fallback branches.
     expect(script.match(/_resolve_grok_binary\(\) \{/g) ?? []).toHaveLength(1);
     const calls = script.match(/_resolve_grok_binary "\$GROK[A-Z_]*DOWNLOADS"/g) ?? [];
     expect(calls).toHaveLength(2);
-    // Old bug: an un-validated "ls grok-* | grep -i <version> | head -1" (plus
-    // a blind "| head -1" fallback) duplicated per call site. Neither survives
-    // — the shared resolver matches filenames via a `case` glob, never `head`.
     expect(script).not.toContain('| head -1');
   });
 
   it('dispatcher execs the grok binary from the versioned home when the global dir is empty', () => {
-    // This is the exact bug from #830: binary in the versioned home, global
-    // ~/.grok/downloads empty. Pre-fix the dispatcher checked only the global
-    // dir and died "not installed"; post-fix it resolves the versioned home.
     const dir = makeTempDir();
     const home = path.join(dir, 'home');
     const project = path.join(dir, 'project');
@@ -276,18 +253,16 @@ describe('grok binary resolution order', () => {
     const logPath = path.join(dir, 'exec.log');
     const version = '0.2.91';
 
-    // Versioned home downloads dir holds the real binary; global stays empty.
     const versionedDownloads = path.join(
       home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads',
     );
     fs.mkdirSync(versionedDownloads, { recursive: true });
-    fs.mkdirSync(path.join(home, '.grok', 'downloads'), { recursive: true }); // empty global
+    fs.mkdirSync(path.join(home, '.grok', 'downloads'), { recursive: true });
     const binary = path.join(versionedDownloads, `grok-${version}-macos-aarch64`);
     fs.writeFileSync(binary, `#!/bin/sh\nprintf "ran:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`, { mode: 0o755 });
 
     fs.mkdirSync(project, { recursive: true });
     fs.writeFileSync(path.join(project, 'agents.yaml'), `agents:\n  grok: "${version}"\n`, 'utf-8');
-    // Fake agents-cli entrypoint: swallows the `sync --launch` hot-path call.
     fs.writeFileSync(fakeAgents, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 
     const shimPath = path.join(dir, 'grok-shim');
@@ -305,8 +280,6 @@ describe('grok binary resolution order', () => {
   });
 
   it('dispatcher falls back to the global ~/.grok/downloads when the versioned home is empty', () => {
-    // Pre-fix installs left the binary in the global dir. The fallback must
-    // still find it so existing grok users are not broken by this change.
     const dir = makeTempDir();
     const home = path.join(dir, 'home');
     const project = path.join(dir, 'project');
@@ -314,7 +287,6 @@ describe('grok binary resolution order', () => {
     const logPath = path.join(dir, 'exec.log');
     const version = '0.2.91';
 
-    // Empty versioned-home downloads dir; binary lives only in the global dir.
     fs.mkdirSync(
       path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads'),
       { recursive: true },
@@ -358,15 +330,12 @@ describe('grok binary resolution order', () => {
     );
     fs.mkdirSync(versionedDownloads, { recursive: true });
 
-    // Sorts alphabetically FIRST ("0" < "1") — must never be exec'd.
     fs.writeFileSync(
       path.join(versionedDownloads, 'grok-0.2.118-linux-aarch64'),
       `#!/bin/sh\nprintf "WRONG:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`,
       { mode: 0o755 },
     );
 
-    // The real, self-updated binary — no filename match for "0.2.82", padded
-    // well past the 1MB floor so it clears the size-based fallback filter.
     const padding = '# '.repeat(600_000);
     fs.writeFileSync(
       path.join(versionedDownloads, 'grok-1.0.0-linux-aarch64'),
@@ -397,9 +366,6 @@ describe('grok binary resolution order', () => {
 
 describe('grok shim follows the vendor bin/grok pointer', () => {
   it('execs the release `grok update` pointed bin/grok at, not the newest file in downloads/', () => {
-    // yosemite-s0, 2026-10-01: `grok update` installed bin/grok-1.0.46 and
-    // repointed bin/grok, leaving downloads/ holding only 1.0.4, which xAI
-    // rejects with 426. The downloads/ scan kept exec'ing 1.0.4.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-current-'));
     try {
       const home = path.join(dir, 'home');
@@ -416,7 +382,6 @@ describe('grok shim follows the vendor bin/grok pointer', () => {
       fs.writeFileSync(path.join(grokHome, 'downloads', 'grok-1.0.4-linux-aarch64'), fakeGrok('STALE'), { mode: 0o755 });
       fs.writeFileSync(path.join(grokHome, 'bin', 'grok-1.0.46'), fakeGrok('CURRENT'), { mode: 0o755 });
       fs.symlinkSync('grok-1.0.46', path.join(grokHome, 'bin', 'grok'));
-      // downloads/ is the newer mtime, so the old scan alone picks the stale release.
       fs.utimesSync(path.join(grokHome, 'bin', 'grok-1.0.46'), new Date('2026-09-01'), new Date('2026-09-01'));
 
       fs.mkdirSync(project, { recursive: true });
@@ -444,7 +409,6 @@ describe('claude shim .oauth_token fallback', () => {
     envToken?: string;
     shimPlatform?: 'linux' | 'darwin';
   } = {}): { shimPath: string; configDir: string; fakeBin: string; logPath: string } {
-    // Fake binary that logs the CLAUDE_CODE_OAUTH_TOKEN env var and exits.
     const fakeBin = path.join(dir, 'claude');
     const logPath = path.join(dir, 'env.log');
     fs.writeFileSync(fakeBin, [
@@ -453,12 +417,10 @@ describe('claude shim .oauth_token fallback', () => {
     ].join('\n'), 'utf-8');
     fs.chmodSync(fakeBin, 0o755);
 
-    // Version directory structure matching what the real shim uses.
     const versionDir = path.join(dir, 'versions', 'claude', '2.1.0');
     const configDir = path.join(versionDir, 'home', '.claude');
     fs.mkdirSync(configDir, { recursive: true });
     fs.mkdirSync(path.join(versionDir, 'node_modules', '.bin'), { recursive: true });
-    // Symlink "claude" binary into node_modules/.bin/claude
     const binTarget = path.join(versionDir, 'node_modules', '.bin', 'claude');
     fs.symlinkSync(fakeBin, binTarget);
 
@@ -466,15 +428,12 @@ describe('claude shim .oauth_token fallback', () => {
       fs.writeFileSync(path.join(configDir, '.oauth_token'), opts.tokenFileContent, { mode: 0o600 });
     }
 
-    // Build a minimal shim from the real template but with the dirs patched
-    // to point at our temp tree, and uname -s overridden to simulate platform.
     const unameSim = opts.shimPlatform === 'darwin' ? 'Darwin' : 'Linux';
     const shim = [
       '#!/bin/bash',
       `VERSION_DIR=${JSON.stringify(versionDir)}`,
       `BINARY=${JSON.stringify(binTarget)}`,
       `export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/.claude"`,
-      // The actual new logic from the shim, with uname -s replaced for test isolation
       `if [ "${unameSim}" = "Linux" ] && [ -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "$CLAUDE_CONFIG_DIR/.oauth_token" ]; then`,
       `  CLAUDE_CODE_OAUTH_TOKEN=$(cat "$CLAUDE_CONFIG_DIR/.oauth_token")`,
       `  export CLAUDE_CODE_OAUTH_TOKEN`,
@@ -541,7 +500,6 @@ describe('claude shim .oauth_token fallback', () => {
     const dir = makeTempDir();
     const { shimPath, logPath } = buildTestShim(dir, {
       shimPlatform: 'linux',
-      // no tokenFileContent
     });
 
     const result = spawnSync('bash', [shimPath], {
@@ -567,9 +525,6 @@ describe('hasAliasShadowingShim', () => {
   });
 
   it('returns false when a later `unalias codex` cancels an earlier alias', () => {
-    // Real-world: rc declares an alias near the top, then a cleanup block
-    // unalias's a list of names later. Static regex on whole-file content
-    // (the previous implementation) reported true here.
     const home = makeFakeHome(
       `alias codex="codex --sandbox workspace-write"\n# ... more rc ...\nunalias claude codex gemini 2>/dev/null || true\n`,
     );

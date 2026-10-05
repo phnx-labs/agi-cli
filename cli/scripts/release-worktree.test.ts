@@ -231,7 +231,6 @@ describe('release-worktree.sh — the attestation store the caller owns', () => 
  * Integration tests, because the bug lived at the seam: the resolver was called by a relative path
  * before any cd into cli/, so it never ran and `|| true` fell back to the tip. */
 describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () => {
-  /** Caller repo whose release.sh stub prints the HEAD it was actually run at. */
   function callerRepoRecordingHead(root: string): string {
     const remote = path.join(root, 'remote.git');
     const caller = path.join(root, 'caller');
@@ -242,7 +241,6 @@ describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () =
     fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
     fs.mkdirSync(path.join(caller, '.agents/worktrees'), { recursive: true });
     fs.copyFileSync(SCRIPT, path.join(caller, 'cli/scripts/release-worktree.sh'));
-    // The real resolver, beside the real wrapper — exercising the path seam.
     fs.copyFileSync(
       path.resolve(__dirname, 'release-attested-base.sh'),
       path.join(caller, 'cli/scripts/release-attested-base.sh'),
@@ -262,7 +260,6 @@ describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () =
     return caller;
   }
 
-  /** Add `n` more commits on main and push, so the tip moves past the base. */
   function advanceMain(caller: string, n: number): void {
     for (let i = 0; i < n; i++) {
       fs.writeFileSync(path.join(caller, `later-${i}.txt`), `${i}\n`);
@@ -277,7 +274,7 @@ describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () =
       'bash',
       [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
       {
-        cwd: os.tmpdir(), // deliberately NOT inside the repo: the seam that broke
+        cwd: os.tmpdir(),
         encoding: 'utf-8',
         env: assets === undefined
           ? { ...process.env, RELEASE_ATTEST_ASSETS: '' }
@@ -292,12 +289,10 @@ describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () =
     const caller = callerRepoRecordingHead(root);
     const base = git(caller, 'rev-parse', 'HEAD');
     const baseTree = git(caller, 'rev-parse', 'HEAD^{tree}');
-    advanceMain(caller, 2); // tip is now 2 ahead and NOT attested
+    advanceMain(caller, 2);
 
     const r = run(caller, `attest-${baseTree}.json`);
     expect(r.status, r.stderr).toBe(0);
-    // The release ran at the ancestor, not the tip. This is the assertion that
-    // fails if the resolver is not wired in (relative path, missing call, etc).
     expect(r.stdout).toContain(`HEAD=${base}`);
     expect(r.stderr).toContain('newest ATTESTED ancestor');
     expect(r.stderr).toContain('2 commit(s) behind');
@@ -314,7 +309,6 @@ describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () =
     const r = run(caller, `attest-${tipTree}.json`);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain(`HEAD=${tip}`);
-    // No "behind" note when we are releasing from the tip.
     expect(r.stderr).not.toContain('newest ATTESTED ancestor');
   });
 
@@ -327,8 +321,6 @@ describe('release-worktree.sh cuts from the attested ancestor (PHNX-3705)', () =
 
     const r = run(caller, 'attest-deadbeef.json');
     expect(r.status, r.stderr).toBe(0);
-    // Deliberately the tip: the wrapper must not invent a base, it hands the
-    // unattested tip to release.sh so phase 2 dies with its usual message.
     expect(r.stdout).toContain(`HEAD=${tip}`);
   });
 });

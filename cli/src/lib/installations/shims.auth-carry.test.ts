@@ -52,7 +52,6 @@ function writeDroidAuth(home: string, body: string, mtimeMs?: number): void {
   }
 }
 
-/** Minimal JWT — only the payload segment is ever decoded (matches agents.ts). */
 function makeJwt(payload: Record<string, unknown>): string {
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
   return `${b64({ alg: 'ES256', typ: 'JWT' })}.${b64(payload)}.sig`;
@@ -87,7 +86,6 @@ function writeDroidCred(
   return blob;
 }
 
-/** Kimi credential dir (~/.kimi-code) — exact JSON shape from agents.test.ts. */
 function writeKimiCred(home: string, userId: string, mtimeMs: number): void {
   const dir = path.join(TEST_VERSIONS_DIR, 'kimi', home, 'home', '.kimi-code', 'credentials');
   fs.mkdirSync(dir, { recursive: true });
@@ -105,7 +103,6 @@ function writeKimiCred(home: string, userId: string, mtimeMs: number): void {
   fs.utimesSync(file, t, t);
 }
 
-/** Antigravity token dir (~/.gemini/antigravity-cli) — { token: { refresh_token } }. */
 function writeAntigravityCred(home: string, refreshToken: string, mtimeMs: number): void {
   const dir = path.join(TEST_VERSIONS_DIR, 'antigravity', home, 'home', '.gemini', 'antigravity-cli');
   fs.mkdirSync(dir, { recursive: true });
@@ -128,17 +125,13 @@ describe('carryForwardAuthFiles — account-identity guard (RUSH-1764)', () => {
   beforeEach(() => { makeHome(); });
 
   it('droid: does NOT carry a NEWER foreign-account credential over an existing login', () => {
-    const v1 = droidHome('latest');    // foreign account B, newer mtime
-    const v2 = droidHome('0.159.1');   // active account A, older mtime
-    // REAL AES-256-GCM credential with a distinct per-account key — a foreign
-    // source can't even be decrypted with account A's key (identity mismatch).
+    const v1 = droidHome('latest');
+    const v2 = droidHome('0.159.1');
     const blobA = writeDroidCred(v2, { email: 'a@x.com', org_id: 'orgA' }, 1_000_000);
     writeDroidCred(v1, { email: 'b@x.com', org_id: 'orgB' }, 2_000_000);
 
     carryForwardAuthFiles('droid', path.join(v2, '.factory'));
 
-    // Account B's newer file must NOT have replaced account A's login — the
-    // ciphertext AND the key are still account A's, so the login stays intact.
     expect(fs.readFileSync(path.join(v2, '.factory', 'auth.v2.file'), 'utf8')).toBe(blobA);
   });
 
@@ -150,13 +143,12 @@ describe('carryForwardAuthFiles — account-identity guard (RUSH-1764)', () => {
 
     carryForwardAuthFiles('droid', path.join(v2, '.factory'));
 
-    // Same email+org -> same identity -> the newer refreshed blob is carried.
     expect(fs.readFileSync(path.join(v2, '.factory', 'auth.v2.file'), 'utf8')).toBe(refreshed);
   });
 
   it('droid: seeds an EMPTY target from the freshest source (no identity to protect yet)', () => {
     const v1 = droidHome('latest');
-    const v2 = droidHome('0.159.1'); // no auth files written -> empty target
+    const v2 = droidHome('0.159.1');
     const blobA = writeDroidCred(v1, { email: 'a@x.com', org_id: 'orgA' }, 2_000_000);
 
     carryForwardAuthFiles('droid', path.join(v2, '.factory'));
@@ -165,26 +157,26 @@ describe('carryForwardAuthFiles — account-identity guard (RUSH-1764)', () => {
   });
 
   it('kimi: does NOT carry a NEWER foreign-account credential over an existing login', () => {
-    writeKimiCred('0.159.1', 'USER_A', 1_000_000); // active account A, older
-    writeKimiCred('latest', 'USER_B', 2_000_000);  // foreign account B, newer
+    writeKimiCred('0.159.1', 'USER_A', 1_000_000);
+    writeKimiCred('latest', 'USER_B', 2_000_000);
     const destDir = path.join(TEST_VERSIONS_DIR, 'kimi', '0.159.1', 'home', '.kimi-code');
 
     carryForwardAuthFiles('kimi', destDir);
 
     const body = JSON.parse(fs.readFileSync(path.join(destDir, 'credentials', 'kimi-code.json'), 'utf8'));
     const payload = JSON.parse(Buffer.from(body.access_token.split('.')[1], 'base64url').toString());
-    expect(payload.user_id).toBe('USER_A'); // account B's newer file was refused
+    expect(payload.user_id).toBe('USER_A');
   });
 
   it('antigravity: does NOT carry a NEWER foreign-account token over an existing login', () => {
-    writeAntigravityCred('1.0.12', 'REFRESH_A', 1_000_000); // active account A, older
-    writeAntigravityCred('1.0.13', 'REFRESH_B', 2_000_000); // foreign account B, newer
+    writeAntigravityCred('1.0.12', 'REFRESH_A', 1_000_000);
+    writeAntigravityCred('1.0.13', 'REFRESH_B', 2_000_000);
     const destDir = path.join(TEST_VERSIONS_DIR, 'antigravity', '1.0.12', 'home', '.gemini', 'antigravity-cli');
 
     carryForwardAuthFiles('antigravity', destDir);
 
     const body = JSON.parse(fs.readFileSync(path.join(destDir, 'antigravity-oauth-token'), 'utf8'));
-    expect(body.token.refresh_token).toBe('REFRESH_A'); // account B's newer token was refused
+    expect(body.token.refresh_token).toBe('REFRESH_A');
   });
 });
 
@@ -192,10 +184,9 @@ describe('readAuthFileIdentity — decodes each agent REAL format', () => {
   beforeEach(() => { makeHome(); });
 
   it('returns null for a missing dir and an undecryptable droid credential', () => {
-    const v = droidHome('x'); // dir exists, no auth files
+    const v = droidHome('x');
     expect(readAuthFileIdentity('droid', path.join(v, '.factory'))).toBeNull();
     expect(readAuthFileIdentity('droid', path.join(v, 'nope'))).toBeNull();
-    // Plaintext (not the AES-GCM format) can't be decrypted -> no identity.
     fs.writeFileSync(path.join(v, '.factory', 'auth.v2.file'), 'not-encrypted');
     fs.writeFileSync(path.join(v, '.factory', 'auth.v2.key'), 'KEY');
     expect(readAuthFileIdentity('droid', path.join(v, '.factory'))).toBeNull();
@@ -206,7 +197,7 @@ describe('readAuthFileIdentity — decodes each agent REAL format', () => {
     const a2 = droidHome('a2');
     const b = droidHome('b');
     writeDroidCred(a1, { email: 'a@x.com', org_id: 'orgA' }, 1_000_000);
-    writeDroidCred(a2, { email: 'a@x.com', org_id: 'orgA' }, 2_000_000); // fresh key+token, same account
+    writeDroidCred(a2, { email: 'a@x.com', org_id: 'orgA' }, 2_000_000);
     writeDroidCred(b, { email: 'b@x.com', org_id: 'orgB' }, 1_000_000);
     const idA1 = readAuthFileIdentity('droid', path.join(a1, '.factory'));
     expect(idA1).not.toBeNull();
@@ -226,16 +217,12 @@ describe('readAuthFileIdentity — decodes each agent REAL format', () => {
   it('antigravity: identity from the refresh_token; null when absent', () => {
     writeAntigravityCred('a', 'REFRESH_A', 1_000_000);
     const dirA = path.join(TEST_VERSIONS_DIR, 'antigravity', 'a', 'home', '.gemini', 'antigravity-cli');
-    // A non-JWT refresh token is a live credential — the identity carries its
-    // SHA-256 fingerprint, never the token itself (it lands in cache keys).
     const idA = readAuthFileIdentity('antigravity', dirA);
     expect(idA).toMatch(/^antigravity:sub=[0-9a-f]{16}$/);
     expect(idA).not.toContain('REFRESH_A');
-    // Distinct refresh tokens -> distinct identities.
     writeAntigravityCred('b', 'REFRESH_B', 1_000_000);
     const dirB = path.join(TEST_VERSIONS_DIR, 'antigravity', 'b', 'home', '.gemini', 'antigravity-cli');
     expect(readAuthFileIdentity('antigravity', dirB)).not.toBe(idA);
-    // No refresh_token -> no identity.
     fs.writeFileSync(path.join(dirA, 'antigravity-oauth-token'), JSON.stringify({ token: {} }));
     expect(readAuthFileIdentity('antigravity', dirA)).toBeNull();
   });
@@ -249,24 +236,19 @@ describe('carryForwardAuthFiles / switchConfigSymlink — auth survives version 
     const v1 = droidHome('latest');
     const v2 = droidHome('0.159.1');
     writeDroidAuth(v1, 'LOGGED_IN_BLOB');
-    // Active config symlink starts at v1 (where the user logged in).
     const link = path.join(home, '.factory');
     fs.symlinkSync(path.join(v1, '.factory'), link);
 
     const res = await switchConfigSymlink('droid', '0.159.1');
     expect(res.success).toBe(true);
 
-    // v2 now has the login...
     const dst = path.join(v2, '.factory', 'auth.v2.file');
     expect(fs.existsSync(dst)).toBe(true);
     expect(fs.readFileSync(dst, 'utf8')).toBe('LOGGED_IN_BLOB');
     expect(fs.existsSync(path.join(v2, '.factory', 'auth.v2.key'))).toBe(true);
-    // POSIX perms don't survive on Windows — Node reports 0o666 regardless of the
-    // mode copyFileSync was given, so asserting 0o600 there tests the OS, not us.
     if (process.platform !== 'win32') {
       expect(fs.statSync(dst).mode & 0o777).toBe(0o600);
     }
-    // ...and the source is untouched (copy, not move).
     expect(fs.existsSync(path.join(v1, '.factory', 'auth.v2.file'))).toBe(true);
   });
 
@@ -274,13 +256,11 @@ describe('carryForwardAuthFiles / switchConfigSymlink — auth survives version 
     const v1 = droidHome('latest');
     const v2 = droidHome('0.159.1');
 
-    // Case A: v1 newer than v2 -> v2 gets overwritten with v1's blob.
     writeDroidAuth(v1, 'FRESH', 2_000_000);
     writeDroidAuth(v2, 'STALE', 1_000_000);
     carryForwardAuthFiles('droid', path.join(v2, '.factory'));
     expect(fs.readFileSync(path.join(v2, '.factory', 'auth.v2.file'), 'utf8')).toBe('FRESH');
 
-    // Case B: target already newest -> left alone.
     writeDroidAuth(v1, 'OLDER', 1_000_000);
     writeDroidAuth(v2, 'NEWEST', 3_000_000);
     carryForwardAuthFiles('droid', path.join(v2, '.factory'));
@@ -305,7 +285,6 @@ describe('carryForwardAuthFiles / switchConfigSymlink — auth survives version 
   it('is a no-op for agents without authFiles (claude)', () => {
     const cHome = path.join(TEST_VERSIONS_DIR, 'claude', '2.1.0', 'home', '.claude');
     fs.mkdirSync(cHome, { recursive: true });
-    // Must not throw and must not create any file.
     expect(() => carryForwardAuthFiles('claude', cHome)).not.toThrow();
     expect(fs.readdirSync(cHome)).toEqual([]);
   });
@@ -316,13 +295,11 @@ describe('getAccountInfo — non-active version reflects account-global sign-in 
   beforeEach(() => { home = makeHome(); });
 
   it('reports droid signed-in for a version whose isolated home lacks auth, via active HOME fallback', async () => {
-    const v1 = droidHome('latest');     // logged-in home
-    const v2 = droidHome('0.159.1');    // isolated, empty
+    const v1 = droidHome('latest');
+    const v2 = droidHome('0.159.1');
     writeDroidAuth(v1, 'BLOB');
-    // Active ~/.factory -> v1 (has auth).
     fs.symlinkSync(path.join(v1, '.factory'), path.join(home, '.factory'));
 
-    // Querying the EMPTY v2 home still resolves signed-in via the HOME fallback.
     const info = await getAccountInfo('droid', path.join(v2));
     expect(info.signedIn).toBe(true);
   });

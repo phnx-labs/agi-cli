@@ -9,7 +9,6 @@ import { buildPreview } from '../sessions-picker.js';
 
 const self = 'zion';
 
-/** The shim row zion's live scan produces for a run offloaded to yosemite-s0. */
 function offloadedRow(): ActiveSession {
   return {
     context: 'terminal',
@@ -39,8 +38,6 @@ describe('offloaded session: live row -> meta -> preview', () => {
   });
 
   it('without the attribution the same row still dead-ends (the regression guard)', () => {
-    // Deliberately skips foldExecutionMachine: this is the pre-fix behavior, and
-    // it is what the assertion above must never silently return to.
     const meta = liveSessionToMeta(offloadedRow(), self);
     expect(meta._remote).toBe(false);
   });

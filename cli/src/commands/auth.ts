@@ -39,7 +39,6 @@ async function login(): Promise<void> {
   console.log('');
   console.log(chalk.gray('  Waiting for you to approve it in the browser…'));
 
-  // The server sets the pace; `slow_down` widens it (RFC 8628 §3.5).
   let interval = Math.max(1, grant.interval) * 1000;
   const deadline = Date.now() + grant.expires_in * 1000;
 
@@ -82,8 +81,6 @@ async function whoami(json: boolean): Promise<void> {
   }
   try {
     const me = await fetchWhoAmI();
-    // Keep the persisted profile picture current: the actor env and share
-    // attribution read it from the session file, never from the network.
     await refreshSessionProfile(me);
     if (json) {
       console.log(JSON.stringify({ signedIn: true, ...me }, null, 2));
@@ -108,7 +105,6 @@ function printSpaces(spaces: Awaited<ReturnType<typeof listSpaces>>): void {
   }
 }
 
-/** Resolve a space reference (or the caller's only space) to a concrete space. */
 async function requireSpace(ref?: string): Promise<Awaited<ReturnType<typeof listSpaces>>[number]> {
   const spaces = await listSpaces();
   const space = resolveSpaceFromList(spaces, ref);

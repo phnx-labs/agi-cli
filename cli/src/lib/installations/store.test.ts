@@ -61,17 +61,13 @@ describe('installation store', () => {
     const store = await load();
     const dir = makeVersionDir('1.9.0');
     expect(fs.existsSync(path.join(dir, 'installation.json'))).toBe(false);
-    // Snapshot before migrating: writing the record into the dir bumps its mtime.
     const dirCreated = fs.statSync(dir).mtime.toISOString();
 
     const migrated = store.ensureInstallation('claude', '1.9.0');
     expect(migrated.label).toBe('1.9.0');
     expect(migrated.releaseVersion).toBe('1.9.0');
-    // Dated from the directory, not from "now" — a migrated install did not
-    // start existing at migration time.
     expect(migrated.createdAt).toBe(dirCreated);
 
-    // Migration is persisted, so the id is stable across reads.
     expect((await load()).ensureInstallation('claude', '1.9.0').id).toBe(migrated.id);
   });
 
@@ -92,7 +88,6 @@ describe('installation store', () => {
     expect(updated.releaseVersion).toBe('2.1.220');
     expect(updated.history.map((h) => h.releaseVersion)).toEqual(['2.0.65', '2.1.220']);
 
-    // And it survives a reload, so the label keeps addressing the same install.
     expect((await load()).readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.1.220');
   });
 
@@ -103,12 +98,9 @@ describe('installation store', () => {
     const main = store.createInstallation('claude', 'main', '2.0.65');
     store.createInstallation('claude', '2.0.65-b', '2.0.65');
 
-    // The store stays honest about what is on disk — both records persist…
     const listed = store.listInstallations('claude');
     expect(listed.map((i) => i.label)).toEqual(['2.0.65-b', 'main']);
     expect(listed.every((i) => i.releaseVersion === '2.0.65')).toBe(true);
-    // …but the managed surface resolves to exactly one installation, and the
-    // `main` label wins over any legacy sibling carrying the same release.
     expect(store.resolveManagedInstallation('claude')?.id).toBe(main.id);
   });
 
@@ -119,7 +111,6 @@ describe('installation store', () => {
     store.createInstallation('claude', 'acct-work', '2.0.65');
     store.createInstallation('claude', '2.0.65', '2.0.65');
 
-    // No default recorded: the first non-isolated label is the deterministic pick.
     expect(store.resolveManagedInstallation('claude')?.label).toBe('2.0.65');
 
     const { setGlobalDefault } = await import('./versions.js');
@@ -136,7 +127,6 @@ describe('installation store', () => {
     store.markVersionIsolated('claude', '2.1.112');
     expect(store.resolveManagedInstallation('claude')?.label).toBe('main');
 
-    // An isolated-only harness has NO managed installation at all.
     store.markVersionIsolated('claude', 'main');
     expect(store.resolveManagedInstallation('claude')).toBeNull();
   });
@@ -149,8 +139,6 @@ describe('installation store', () => {
     const ensured = await store.ensureHarnessInstallation('claude');
     expect(ensured.installed).toBe(false);
     expect(ensured.installation.id).toBe(created.id);
-    // A release request against an existing install is NOT applied — moving the
-    // release is `agents update --to`'s job, never a silent side effect of add.
     const again = await store.ensureHarnessInstallation('claude', { release: '9.9.9' });
     expect(again.installed).toBe(false);
     expect(again.installation.releaseVersion).toBe('2.0.65');
@@ -158,9 +146,6 @@ describe('installation store', () => {
 
   it('does not list a HOME-shaped slot dir (no binary, no record) as an installation', async () => {
     const store = await load();
-    // The shape of an account credential slot (PHNX-3940): a home/ tree with no
-    // launch binary and no installation.json. It must never appear as an
-    // installation, and listing must not mint it a record either.
     makeVersionDir('acct-slot-1');
     expect(store.listInstalledVersions('claude')).toEqual([]);
     expect(fs.existsSync(path.join(versionDir('acct-slot-1'), 'installation.json'))).toBe(false);
@@ -225,7 +210,6 @@ describe('installation store', () => {
   });
 });
 
-/** Opt-in registry-backed gate: AGENTS_LIVE_UPDATE_TEST=1 — the real npm install path. */
 describe.runIf(process.env.AGENTS_LIVE_UPDATE_TEST === '1')('ensureHarnessInstallation — live install path', () => {
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ensure-install-'));
@@ -243,7 +227,6 @@ describe.runIf(process.env.AGENTS_LIVE_UPDATE_TEST === '1')('ensureHarnessInstal
     expect(first.installed).toBe(true);
     expect(first.installation.label).toBe('main');
     expect(first.installation.releaseVersion).toBe('0.147.0');
-    // A concrete release is an expert pin — recorded as pinned from birth.
     expect(first.installation.updatePolicy).toBe('pinned');
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'codex', 'main', 'installation.json'))).toBe(true);
 

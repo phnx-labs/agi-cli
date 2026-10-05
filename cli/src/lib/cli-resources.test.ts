@@ -12,6 +12,10 @@ import {
   hasCommand,
   isCliInstalled,
   isCliInstalledAsync,
+  npmPin,
+  owningNpmPrefix,
+  upgradeCliToPin,
+  installedCliVersion,
   type CliManifest,
   type InstallMethod,
 } from './cli-resources.js';
@@ -317,4 +321,85 @@ describe('host detection', () => {
       expect(isCliInstalled(m)).toBe(false);
     });
   });
+});
+
+describe.skipIf(process.platform === 'win32')('version pins (host CLI auto-upgrade)', () => {
+  let root: string;
+  let savedPath: string | undefined;
+  let savedRegistry: string | undefined;
+  let savedRetries: string | undefined;
+
+  function installFake(prefix: string, pkg: string, cmd: string, version: string): void {
+    const pkgDir = path.join(prefix, 'lib', 'node_modules', ...pkg.split('/'));
+    fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true });
+    const script = path.join(pkgDir, 'bin', 'cli.js');
+    fs.writeFileSync(script, `#!/usr/bin/env node\nconsole.log('${version}');\n`, { mode: 0o755 });
+    fs.mkdirSync(path.join(prefix, 'bin'), { recursive: true });
+    fs.symlinkSync(path.relative(path.join(prefix, 'bin'), script), path.join(prefix, 'bin', cmd));
+  }
+
+  function pinned(cmd: string, npm: string): CliManifest {
+    return { name: cmd, check: { kind: 'version', cmd, args: ['--version'] }, install: [{ npm }], source: 'user', path: '/tmp/t.yaml' };
+  }
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-pin-'));
+    savedPath = process.env.PATH;
+    savedRegistry = process.env.npm_config_registry;
+    savedRetries = process.env.npm_config_fetch_retries;
+  });
+  afterEach(() => {
+    process.env.PATH = savedPath;
+    if (savedRegistry === undefined) delete process.env.npm_config_registry; else process.env.npm_config_registry = savedRegistry;
+    if (savedRetries === undefined) delete process.env.npm_config_fetch_retries; else process.env.npm_config_fetch_retries = savedRetries;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('reads an exact npm pin and ignores tags and unpinned specs', () => {
+    expect(npmPin(pinned('x', '@phnx-labs/secrets-cli@0.1.8'))).toEqual({ pkg: '@phnx-labs/secrets-cli', version: '0.1.8' });
+    expect(npmPin(pinned('x', '@higgsfield/cli@latest'))).toBeNull();
+    expect(npmPin(pinned('x', '@scope/tool'))).toBeNull();
+    expect(npmPin(manifest([{ brew: 'gh' }]))).toBeNull();
+  });
+
+  it('resolves the prefix that owns the binary on PATH, not npm\'s own prefix', () => {
+    const prefix = path.join(root, 'local');
+    installFake(prefix, '@acme/pin-tool', 'pin-tool-a', '0.1.0');
+    process.env.PATH = `${path.join(prefix, 'bin')}${path.delimiter}${savedPath}`;
+    expect(owningNpmPrefix('pin-tool-a', '@acme/pin-tool')).toBe(fs.realpathSync(prefix));
+    expect(owningNpmPrefix('pin-tool-a', '@acme/other')).toBeNull();
+  });
+
+  it('reports a binary at or above its pin as current and never downgrades it', async () => {
+    const prefix = path.join(root, 'local');
+    installFake(prefix, '@acme/pin-tool', 'pin-tool-b', '0.2.0');
+    process.env.PATH = `${path.join(prefix, 'bin')}${path.delimiter}${savedPath}`;
+    expect(await upgradeCliToPin(pinned('pin-tool-b', '@acme/pin-tool@0.1.9'))).toEqual({ name: 'pin-tool-b', status: 'current', version: '0.2.0' });
+  });
+
+  it('never installs a missing tool', async () => {
+    expect(await upgradeCliToPin(pinned('pin-tool-absent-xyz', '@acme/pin-tool@0.1.0'))).toMatchObject({ status: 'skipped' });
+  });
+
+  it('refuses to upgrade a binary that is not an npm install of the pinned package', async () => {
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'pin-tool-c'), '#!/bin/sh\necho 0.1.0\n', { mode: 0o755 });
+    process.env.PATH = `${bin}${path.delimiter}${savedPath}`;
+    const r = await upgradeCliToPin(pinned('pin-tool-c', '@acme/pin-tool@0.2.0'));
+    expect(r).toMatchObject({ status: 'skipped' });
+    expect((r as { reason: string }).reason).toMatch(/outdated \(0\.1\.0 < 0\.2\.0\).*not an npm install/);
+  });
+
+  it('leaves the old version in place when the install fails', async () => {
+    const prefix = path.join(root, 'local');
+    installFake(prefix, '@acme/pin-tool', 'pin-tool-d', '0.1.0');
+    process.env.PATH = `${path.join(prefix, 'bin')}${path.delimiter}${savedPath}`;
+    process.env.npm_config_registry = 'http://127.0.0.1:9/';
+    process.env.npm_config_fetch_retries = '0';
+    const m = pinned('pin-tool-d', '@acme/pin-tool@0.2.0');
+    const r = await upgradeCliToPin(m);
+    expect(r).toMatchObject({ name: 'pin-tool-d', status: 'failed' });
+    expect(await installedCliVersion(m)).toBe('0.1.0');
+  }, 60_000);
 });

@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const TEST_SH = path.resolve(__dirname, 'test.sh');
+const COMMON_SH = path.resolve(__dirname, 'lib/common.sh');
 
 function run(args: string[], env: NodeJS.ProcessEnv = {}) {
   return spawnSync('bash', [TEST_SH, ...args], {
@@ -27,25 +28,18 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('fails loud and names --device when the default auto-pick cannot run', () => {
-    // A missing prerequisite must fail rather than silently run locally. The
-    // default mode is `auto`, so the first prerequisite is the CLI that does the
-    // picking; with an empty PATH there is nothing to pick with.
     const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopath-'));
     const r = run([], { PATH: `${emptyBin}:/usr/bin:/bin` });
     fs.rmSync(emptyBin, { recursive: true, force: true });
 
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/not on PATH/);
-    // It must hand the operator the actionable alternatives, not just die.
     expect(r.stderr).toMatch(/--device/);
     expect(r.stderr).toMatch(/--here/);
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
   it('fails loud when --crabbox is asked for and crabbox is missing', () => {
-    // crabbox is now an explicit choice, so its absence is only an error when
-    // the operator actually asked for it — and the message must say to drop the
-    // flag rather than leave them guessing.
     const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nocrab-'));
     const r = run(['--crabbox'], { PATH: `${emptyBin}:/usr/bin:/bin` });
     fs.rmSync(emptyBin, { recursive: true, force: true });
@@ -63,8 +57,9 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     const scripts = path.join(dir, 'cli', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
     fs.copyFileSync(TEST_SH, path.join(scripts, 'test.sh'));
+    fs.mkdirSync(path.join(scripts, 'lib'));
+    fs.copyFileSync(COMMON_SH, path.join(scripts, 'lib/common.sh'));
 
-    // Stand-in sandbox.sh records exactly what the offload branch handed it.
     const record = path.join(dir, 'got.txt');
     fs.writeFileSync(
       path.join(scripts, 'sandbox.sh'),
@@ -72,7 +67,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     );
     fs.chmodSync(path.join(scripts, 'sandbox.sh'), 0o755);
 
-    // A fake `crabbox` so the branch gets past its installed-check.
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'crabbox'), '#!/usr/bin/env bash\nexit 0\n');
@@ -105,9 +99,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('names the version requirement when the installed CLI cannot enumerate workers', () => {
-    // `devices pick --json` landed in 1.22.49. An older CLI answers with a
-    // commander "unknown option" that says nothing about sharding, so the script
-    // must name the version AND the fix rather than pass the confusion through.
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-oldcli-'));
     fs.writeFileSync(
       path.join(bin, 'agents'),
@@ -122,7 +113,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/has no 'devices pick --json'/);
     expect(r.stderr).toMatch(/1\.22\.49/);
-    // And never silently degrades into a local run.
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
@@ -141,7 +131,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     const r = run(['--oops']);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/unexpected argument: --oops/);
-    // Names the escape hatch so the next person does not guess.
     expect(r.stderr).toMatch(/-- --oops/);
   });
 
@@ -152,13 +141,10 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('refuses the interactive host by name, and says how to override', () => {
-    // The registry marks exactly one device `interactive: true` — the laptop
-    // someone is sitting at. Naming it as a --device target is almost always a
-    // mistake, and silently honoring it is the bug this script exists to stop.
     const interactive = JSON.parse(
       spawnSync('agents', ['devices', 'list', '--json'], { encoding: 'utf-8' }).stdout || '[]',
     ).find((d: { interactive?: boolean }) => d.interactive)?.name;
-    if (!interactive) return; // no interactive host registered on this box
+    if (!interactive) return;
 
     const r = run(['--device', interactive]);
     expect(r.status).not.toBe(0);
@@ -193,7 +179,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     + '  exit 0\n'
     + 'fi\n';
 
-  /** A fake `agents` whose `devices pick` prints `picked`. Returns its bin dir. */
   function fakeAgents(picked: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-fakeagents-'));
     fs.writeFileSync(
@@ -215,16 +200,12 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     const r = run([], { PATH: `${bin}:${process.env.PATH}` });
     fs.rmSync(bin, { recursive: true, force: true });
 
-    // It got as far as resolving the PICKED device's address — proof the default
-    // went through the picker, not through crabbox and not through a local run.
     expect(r.stderr).toMatch(/picked-worker-7/);
     expect(r.status).not.toBe(0);
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
   it('treats `--device auto` as the sentinel, never as a host literally named auto', () => {
-    // Dialing a box called "auto" would hang until ConnectTimeout, which reads
-    // as a network problem rather than the mistake it is.
     const bin = fakeAgents('picked-worker-7');
     const r = run(['--device', 'auto'], { PATH: `${bin}:${process.env.PATH}` });
     fs.rmSync(bin, { recursive: true, force: true });
@@ -234,8 +215,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('fails loud, naming --device and --here, when no worker is eligible', () => {
-    // The picker exiting non-zero means the fleet has nothing to offer. That must
-    // abort with the alternatives spelled out — never degrade into a local run.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopick-'));
     fs.writeFileSync(path.join(dir, 'agents'), `${HELP_STANZA}exit 1\n`);
     fs.chmodSync(path.join(dir, 'agents'), 0o755);
@@ -250,8 +229,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('refuses an empty pick rather than proceeding with no device', () => {
-    // `pick` exiting 0 with nothing on stdout would otherwise rsync to ":" —
-    // a confusing failure far from the cause.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-emptypick-'));
     fs.writeFileSync(path.join(dir, 'agents'), `${HELP_STANZA}exit 0\n`);
     fs.chmodSync(path.join(dir, 'agents'), 0o755);
@@ -279,7 +256,6 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     throw new Error('no bash on this machine — scripts/test.sh cannot be exercised');
   })();
 
-  /** Run test.sh with nothing on PATH but bash, so it can never dispatch. */
   function runSealed(args: string[]) {
     const onlyBash = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-sealed-'));
     fs.symlinkSync(BASH, path.join(onlyBash, 'bash'));
@@ -302,7 +278,6 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     const r = runSealed(args);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/needs at least 2 workers/);
-    // Never a false green, and never a local run.
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/All 0 shards passed/);
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
@@ -320,7 +295,6 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     const r = runSealed(['--devices', 'onebox']);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/needs at least 2 workers/);
-    // The message names the flag the caller actually passed.
     expect(r.stderr).toMatch(/--devices/);
   });
 
@@ -330,9 +304,6 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     expect(r.stderr).toMatch(/--devices needs a comma-separated list/);
   });
 
-  // Regression: MODE was last-write-wins with no cross-flag validation, so one
-  // of the two flags was dropped purely on argument order, silently. Both
-  // orders are pinned because argument order was the whole bug.
   it.each([
     [['--shard', '2', '--device', 'box'], '--device', '--shard'],
     [['--device', 'box', '--shard', '2'], '--shard', '--device'],
@@ -344,11 +315,8 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     const r = runSealed(args as string[]);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/conflicts with/);
-    // Naming BOTH flags is the point: the operator has to know which two
-    // disagreed, not just that something did.
     expect(r.stderr).toContain(named as string);
     expect(r.stderr).toContain(other as string);
-    // A conflict must never resolve into a local run.
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
@@ -359,7 +327,6 @@ describe('scripts/test.sh — the shard flags cannot silently do the wrong thing
     const r = runSealed(['--devices', 'a,b', '--shard', '2']);
 
     expect(r.stderr).not.toMatch(/conflicts with/);
-    // Reached the shard branch — so the flags were accepted together.
     expect(r.stderr).toMatch(/rsync not found/);
   });
 });

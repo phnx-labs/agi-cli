@@ -91,9 +91,6 @@ function runInHome(home: string, body: string): Record<string, unknown> {
       HOME: home,
       USERPROFILE: home,
       AGENTS_REAL_HOME: home,
-      // tests/setup.ts pins a fork-wide AGENTS_DEVICES_DIR; pins (global +
-      // isolated defaults) live there, so inherit-and-share would leak
-      // setGlobalDefault across cases. Point it at THIS home.
       AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
     },
     encoding: 'utf-8',

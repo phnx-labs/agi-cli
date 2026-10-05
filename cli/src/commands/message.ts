@@ -36,30 +36,22 @@ import {
 import { injectIntoTerminal } from '../lib/terminal/index.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Find the still-open block addressed to `mailboxId`, if any. */
 function findOpenBlockForMailbox(mailboxId: string): OpenBlock | undefined {
-  // Fast path: the mailbox id is usually the session id, so the block id is
-  // directly derivable. This avoids scanning the whole feed store.
   const direct = readBlock(blockIdForSession(mailboxId));
   if (direct && direct.mailboxId === mailboxId) return direct;
-  // Fallback: scan (agentId-based mailbox ids, rare).
   return listBlocks().find((b) => b.mailboxId === mailboxId);
 }
 
-/** Live session whose mailbox id equals `mailboxId`. */
 function findSessionForMailbox(mailboxId: string, sessions: ActiveSession[]): ActiveSession | undefined {
   return sessions.find((s) => mailboxIdForActiveSession(s) === mailboxId);
 }
 
-/** Claim first-answer-wins on the open block; dies if already answered / unauthorized. */
 function claimBlockAnswer(
   block: OpenBlock | undefined,
   opts: { from?: string; as?: string; surface?: string },
 ): void {
   if (!block) return;
   const operatorId = opts.as;
-  // High-consequence answers require env-proven identity (AGENTS_OPERATOR_ID),
-  // not merely a caller-supplied known --as id (RUSH-1619).
   const verified = verifyOperatorIdentity(operatorId);
   const claim = recordAnswer(block.blockId, {
     answeredBy: opts.from,
@@ -113,9 +105,7 @@ async function deliverViaInject(route: AnswerRoute, mailboxId: string): Promise<
     die(`Internal error: inject route missing target/payload for ${mailboxId}.`);
   }
   const result = await injectIntoTerminal(route.inject, route.payload, {
-    // Digit selection and free text both need Enter to submit the TUI choice.
     enter: true,
-    // Digit+Enter as two writes is safer for Ink TUI.
     combined: false,
   });
   if (!result.ok) {
@@ -250,7 +240,6 @@ export function registerMessageCommand(program: Command): void {
               die(route.reason);
             }
 
-            // First-answer-wins for any path that closes an open block.
             claimBlockAnswer(block, opts);
 
             if (route.kind === 'mailbox') {

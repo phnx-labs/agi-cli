@@ -1,52 +1,8 @@
 #!/usr/bin/env bash
-#
-# Immutable helper mapping for an agents-cli release (RUSH-2666).
-#
-# Ordinary release reuses already-signed helper artifacts keyed by a digest of
-# their complete inputs. Missing or changed inputs fail closed. Rebuild and
-# notarization live outside this path.
-#
-# What counts as a helper's input differs by where its source lives:
-#   menubar       NOT source -- AGI Menu lives in phnx-labs/agi-menu (PHNX-4036)
-#                 and this repo only pins which published build it uses. Its
-#                 input is src/lib/helper-versions.ts, the file that holds the
-#                 `menubar` floor; its asset is the published MenubarHelper.app.zip
-#                 on menubar/v<floor>, staged by scripts/stage-menubar-helper.sh.
-#
-# Usage:
-#   release-manifest.sh new --cli-version VER --cli-tree TREE
-#   release-manifest.sh input-digest --repo-root DIR --helper NAME
-#   release-manifest.sh put --file MANIFEST.json --helper NAME --input-digest D \
-#                           --asset-digest D --helper-version VER [--asset-url U]
-#                           [--asset-path P] [--signer-team T] [--arch A] [--platform P]
-#                           [--source JSON]
-#   release-manifest.sh verify --file MANIFEST.json
-#   release-manifest.sh resolve --file MANIFEST.json --helper NAME
-#   release-manifest.sh reuse --file MANIFEST.json --helper NAME --input-digest D
-#   release-manifest.sh require --file MANIFEST.json --repo-root DIR [--helper NAME]
-#   release-manifest.sh copy-asset --file MANIFEST.json --helper NAME --asset-path DESTDIR
-#
 set -euo pipefail
 
-die() { echo "error: $*" >&2; exit 1; }
-
-file_sha256() {
-  local f="$1"
-  [[ -f "$f" ]] || die "not a file: $f"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$f" | awk '{print $1}'
-  else
-    shasum -a 256 "$f" | awk '{print $1}'
-  fi
-}
-
-str_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s' "$1" | sha256sum | awk '{print $1}'
-  else
-    printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
-  fi
-}
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 usage() {
   sed -n '3,20p' "$0" | sed 's/^# \?//'
@@ -276,8 +232,6 @@ require_helpers() {
   printf '%s\n' "$FILE"
 }
 
-# Copy verified helper bytes into DEST without rebuilding. Used to stage a
-# helper asset onto v<new> for a --with-helpers release, without a rebuild.
 copy_asset() {
   [[ -n "$FILE" ]] || die "copy-asset needs --file"
   [[ -n "$HELPER" ]] || die "copy-asset needs --helper"

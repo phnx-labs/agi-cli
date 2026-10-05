@@ -136,13 +136,9 @@ async function pickRegistryName(
   }
 }
 
-/** Register the `agents registry`, `agents search`, `agents install`, and `agents packages` commands. */
 export function registerPackagesCommands(program: Command): void {
   registerPortablePackageCommands(program);
 
-  // ==========================================================================
-  // REGISTRY COMMANDS
-  // ==========================================================================
 
   const registryCmd = program
     .command('registry')
@@ -210,7 +206,6 @@ export function registerPackagesCommands(program: Command): void {
       }
 
       if (!nameArg) {
-        // Show only user-added registries — default registries can't be removed.
         const registries = getRegistries(type as RegistryType);
         const removable = Object.keys(registries).filter(
           (n) => !DEFAULT_REGISTRIES[type as RegistryType]?.[n]
@@ -225,7 +220,6 @@ export function registerPackagesCommands(program: Command): void {
       }
       const name = nameArg;
 
-      // Check if it's a default registry
       if (DEFAULT_REGISTRIES[type as RegistryType]?.[name]) {
         console.log(chalk.yellow(`Cannot remove default registry '${name}'. Use 'agents registry disable' instead.`));
         process.exit(1);
@@ -274,7 +268,6 @@ export function registerPackagesCommands(program: Command): void {
       }
 
       if (!nameArg) {
-        // Disabling is reversible but still mutates state; force typing.
         const registries = getRegistries(type as RegistryType);
         const candidates = Object.entries(registries)
           .filter(([, cfg]) => cfg.enabled)
@@ -336,9 +329,6 @@ export function registerPackagesCommands(program: Command): void {
       console.log(chalk.green(`Updated ${type} registry '${name}'`));
     });
 
-  // ==========================================================================
-  // SEARCH COMMAND
-  // ==========================================================================
 
   program
     .command('search <query>')
@@ -386,7 +376,6 @@ When to use:
 
         console.log(chalk.bold(`Found ${results.length} packages`));
 
-        // Group by type
         const mcpResults = results.filter((r) => r.type === 'mcp');
         const skillResults = results.filter((r) => r.type === 'skill');
 
@@ -418,9 +407,6 @@ When to use:
       }
     });
 
-  // ==========================================================================
-  // INSTALL COMMAND (unified package installation)
-  // ==========================================================================
 
   program
     .command('install <identifier>')
@@ -526,7 +512,6 @@ delegate to the same underlying installers.
             console.log(chalk.gray('Install them with: agents install plugin:<name>@<source>'));
           }
 
-          // Same sync loop as `agents plugins install` (default version per harness).
           console.log();
           let synced = 0;
           for (const agentId of capableAgents('plugins')) {
@@ -564,7 +549,6 @@ delegate to the same underlying installers.
         }
 
         if (resolved.type === 'mcp') {
-          // Install MCP server
           const entry = resolved.mcpEntry;
           if (!entry) {
             console.log(chalk.red('Failed to get MCP server details'));
@@ -579,7 +563,6 @@ delegate to the same underlying installers.
             console.log(chalk.gray(`  ${entry.repository.url}`));
           }
 
-          // Get package info
           const pkg = entry.packages?.[0];
           if (!pkg) {
             console.log(chalk.yellow('\nNo installable package found for this server.'));
@@ -642,9 +625,6 @@ delegate to the same underlying installers.
 
           console.log(chalk.green('\nMCP server installed.'));
         } else if (resolved.type === 'git' || resolved.type === 'skill') {
-          // Install from git source: sniff every resource type the repo
-          // contains. Optional --types narrows which kinds get installed;
-          // --names narrows which specific resources within those kinds.
           console.log(chalk.bold(`\nInstalling from ${resolved.source}`));
 
           const { localPath } = await cloneRepo(resolved.source);
@@ -673,8 +653,6 @@ delegate to the same underlying installers.
             return items.filter((item) => requestedNames.has(item.name));
           };
 
-          // Discover everything; filter to requested types up front so the
-          // summary table reflects what will actually be installed.
           let commands = includeType('commands') ? discoverCommands(localPath) : [];
           let skills = includeType('skills') ? discoverSkillsFromRepo(localPath) : [];
           let hooks = includeType('hooks') ? discoverHooksFromRepo(localPath) : [];
@@ -683,9 +661,6 @@ delegate to the same underlying installers.
           let permissions = includeType('permissions') ? discoverPermissionsFromRepo(localPath) : [];
           let mcpServers = includeType('mcp') ? discoverMcpConfigsFromRepo(localPath) : [];
 
-          // --names filter applies across every discovered type. If the user
-          // typed a name that matched nothing, fail loud so they can fix the
-          // typo rather than silently install zero items.
           if (requestedNames.size > 0) {
             const allNames = new Set<string>([
               ...commands.map((c) => c.name),
@@ -755,7 +730,6 @@ delegate to the same underlying installers.
             return;
           }
 
-          // Install commands
           if (commands.length > 0) {
             console.log(chalk.bold('\nInstalling commands...'));
             let directInstalled = 0;
@@ -800,7 +774,6 @@ delegate to the same underlying installers.
             }
           }
 
-          // Install skills
           if (skills.length > 0) {
             console.log(chalk.bold('\nInstalling skills...'));
             const directAgents = targets.directAgents.filter(
@@ -831,7 +804,6 @@ delegate to the same underlying installers.
             console.log(`  Synced skills to ${syncedVersions} managed version(s)`);
           }
 
-          // Install hooks
           if (hooks.length > 0) {
             console.log(chalk.bold('\nInstalling hooks...'));
             let syncedVersions = 0;
@@ -857,7 +829,6 @@ delegate to the same underlying installers.
             console.log(`  Synced hooks to ${syncedVersions} managed version(s)`);
           }
 
-          // Install workflows
           if (workflows.length > 0) {
             console.log(chalk.bold('\nInstalling workflows...'));
             let installed = 0;
@@ -881,7 +852,6 @@ delegate to the same underlying installers.
             console.log(`  Synced workflows to ${syncedVersions} managed version(s)`);
           }
 
-          // Install subagents
           if (subagents.length > 0) {
             console.log(chalk.bold('\nInstalling subagents...'));
             let installed = 0;
@@ -905,7 +875,6 @@ delegate to the same underlying installers.
             console.log(`  Synced subagents to ${syncedVersions} managed version(s)`);
           }
 
-          // Install permissions
           if (permissions.length > 0) {
             console.log(chalk.bold('\nInstalling permission sets...'));
             let installed = 0;
@@ -921,7 +890,6 @@ delegate to the same underlying installers.
             console.log(chalk.gray('  Apply with: agents permissions apply <name> --agents <selector>'));
           }
 
-          // Install MCP server configs
           if (mcpServers.length > 0) {
             console.log(chalk.bold('\nInstalling MCP server configs...'));
             let installed = 0;

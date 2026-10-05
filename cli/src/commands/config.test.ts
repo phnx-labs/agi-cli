@@ -101,18 +101,14 @@ describe('config command', () => {
     runAgents(home, ['config', 'set', 'browser.viewer', 'reading']);
 
     expect(runAgents(home, ['config', 'get', 'browser.profile'])).toContain('comet-local');
-    // The inversion: this used to print comet-local.
     expect(runAgents(home, ['config', 'get', 'browser.viewer'])).toContain('reading');
 
-    // Both must be visible; browser.viewer was silently dropped by the
-    // `default: continue` arm of the device-property switch in `config list`.
     const listed = runAgents(home, ['config', 'list']);
     expect(listed).toContain('browser.profile');
     expect(listed).toContain('browser.viewer');
 
     runAgents(home, ['config', 'unset', 'browser.viewer']);
     expect(runAgents(home, ['config', 'get', 'browser.viewer'])).toContain('(unset)');
-    // The destructive half: browser.profile must survive.
     expect(runAgents(home, ['config', 'get', 'browser.profile'])).toContain('comet-local');
   });
 
@@ -120,10 +116,8 @@ describe('config command', () => {
     runAgents(home, ['config', 'set', 'browser.device', 'mac-mini']);
     expect(runAgents(home, ['config', 'get', 'browser.device'])).toContain('mac-mini');
 
-    // Must be enumerated, not just get-able — the browser.viewer invisibility bug.
     expect(runAgents(home, ['config', 'list'])).toContain('browser.device');
 
-    // Lands in the fleet-synced central config block (user scope).
     const yaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
     expect(yaml).toContain('defaultBrowserDevice');
 
@@ -135,11 +129,9 @@ describe('config command', () => {
     runAgents(home, ['config', 'set', 'menubar.menu.workingRowsShown', '4']);
     expect(runAgents(home, ['config', 'get', 'menubar.menu.workingRowsShown'])).toContain('4');
 
-    // Lands in the fleet-synced central config block (user scope).
     const yaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
     expect(yaml).toContain('menubarMenuWorkingRowsShown');
 
-    // config list --json is the native menu's read surface: [{key,value,hint}].
     const jsonOut = runAgents(home, ['config', 'list', '--json']);
     const parsed = JSON.parse(jsonOut) as Array<{ key: string; value: unknown; hint: string }>;
     const row = parsed.find((r) => r.key === 'menubar.menu.workingRowsShown');
@@ -149,7 +141,6 @@ describe('config command', () => {
 
     runAgents(home, ['config', 'unset', 'menubar.menu.workingRowsShown']);
     expect(runAgents(home, ['config', 'get', 'menubar.menu.workingRowsShown'])).toContain('(unset)');
-    // Unset keys are OMITTED from the list so the native app uses its defaults.
     const after = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string }>;
     expect(after.find((r) => r.key === 'menubar.menu.workingRowsShown')).toBeUndefined();
   });
@@ -215,8 +206,6 @@ describe('config command', () => {
   });
 
   it('lists a device-scope tmux.enabled after it is set', () => {
-    // tmux.enabled is machine-local, so it can only be written for THIS
-    // machine — pin the self id so the set and the list agree deterministically.
     const env = { AGENTS_SYNC_MACHINE_ID: 'testbox' };
     runAgents(home, ['config', 'set', 'devices.testbox.tmux', 'off'], env);
 
@@ -231,8 +220,6 @@ describe('config command', () => {
   it('lists browser.profile once for this machine', () => {
     runAgents(home, ['config', 'set', 'browser.profile', 'work']);
     const listOut = runAgents(home, ['config', 'list']);
-    // Count how many times the top-level key appears; the self device must not
-    // duplicate it as devices.<self>.browser.profile.
     const matches = listOut.match(/browser\.profile/g) ?? [];
     expect(matches.length).toBe(1);
     expect(listOut).not.toMatch(/devices\.[\w-]+\.browser\.profile/);

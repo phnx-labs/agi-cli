@@ -29,7 +29,6 @@ import { isPromptCancelled, isInteractiveTerminal } from './utils.js';
 
 interface ImportOptions {
   all?: boolean;
-  /** Version label to import as. Named `--as`, not `--version`: see registerImportCommand. */
   as?: string;
   isolated?: boolean;
   withAuth?: boolean;
@@ -76,8 +75,6 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
       process.exit(1);
     }
     if (isInstallScriptAgent) {
-      // With --from-path on an installScript agent, the path is the binary
-      // itself (or a directory containing it). Accept either.
       if (fs.statSync(globalPath).isDirectory()) {
         const candidate = path.join(globalPath, agent.cliCommand);
         if (!fs.existsSync(candidate)) {
@@ -126,7 +123,6 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
           installScriptBinary = path.join(downloads, exact);
         }
       } catch {
-        /* fall back to PATH binary already set above */
       }
     }
   }
@@ -138,7 +134,6 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
         const pkg = JSON.parse(fs.readFileSync(path.join(globalPath, 'package.json'), 'utf8'));
         version = typeof pkg.version === 'string' ? pkg.version : undefined;
       } catch {
-        /* fall through */
       }
     }
     // Fall back to the PATH binary's `--version` only when auto-detecting: with `--from-path` on
@@ -214,8 +209,6 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   if (opts.isolated && configDirExists && configAlreadyManaged) {
     console.log(chalk.gray(`  Skipping config copy: ${agent.configDir} is a managed symlink, not your real settings.`));
   } else if (opts.isolated && configDirExists) {
-    // COPY the user's settings in; never move, never symlink. The original stays
-    // exactly where it is — that is what separates this from adoption.
     const seedSpinner = ora(`Copying ${agent.configDir} into the isolated copy...`).start();
     const seed = seedIsolatedConfigFromLocal(agentId, version, { withAuth: opts.withAuth, all: opts.all });
     if (seed.error) {
@@ -271,13 +264,7 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     process.exit(1);
   }
 
-  // Wire the imported version into the resolver: global default, main shim,
-  // versioned alias, home-file symlinks. Idempotent — safe to call even if
-  // importAgentConfig already set the global default.
   if (opts.isolated) {
-    // The isolated finalizer: launchable alias + marker, and nothing else. No global
-    // default, no bare shim, no config symlink — the same shape as
-    // `agents add --isolated`.
     createVersionedAlias(agentId, version);
     markVersionIsolated(agentId, version);
     console.log();

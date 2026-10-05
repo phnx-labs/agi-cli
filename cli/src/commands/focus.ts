@@ -44,7 +44,6 @@ import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Options for `sessions focus` — device scope + the `--active` live-state filters. */
 interface FocusOptions {
   /** Resolve the target from the launcher's AGENT_LAUNCH_ID instead of a session id (RUSH-3125).
    * The id is minted before the connection opens, so it survives a dropped link; the lookup runs
@@ -96,9 +95,6 @@ const INHERITED_FOCUS_OPTIONS: Array<keyof FocusOptions> = [
   'closed', 'abandoned', 'queued', 'unknown',
 ];
 
-/** Commander gives overlapping `sessions` flags to the parent command, even
- * when they appear after `focus`. Fold only values explicitly provided there
- * into the child options; child defaults (limit/sort) otherwise stay intact. */
 export function inheritFocusOptions(child: FocusOptions, parent?: Command): FocusOptions {
   if (!parent) return child;
   const merged = { ...child };
@@ -111,12 +107,10 @@ export function inheritFocusOptions(child: FocusOptions, parent?: Command): Focu
   return merged;
 }
 
-/** Collect device targets from `--device`; repeatable. Returns a host list. */
 export function mergeFocusHosts(opts: FocusOptions): string[] {
   return [...(opts.device ?? [])];
 }
 
-/** Picker header that reflects the active filter + device, e.g. "Focus orphaned sessions on yosemite-s0:". */
 export function focusHeader(statuses: LiveStatusFilter[], hosts: string[]): string {
   const where = hosts.length ? ` on ${hosts.join(', ')}` : '';
   if (statuses.length === 0) return `Focus a live session${where}:`;
@@ -124,7 +118,6 @@ export function focusHeader(statuses: LiveStatusFilter[], hosts: string[]): stri
   return `Focus ${word} sessions${where}:`;
 }
 
-/** The adjective shown in the header for a single live-state filter. */
 function statusWord(status: LiveStatusFilter): string {
   return status === 'orphaned' ? 'orphaned' : status;
 }
@@ -247,7 +240,6 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
   }
   const hosts = mergeFocusHosts(opts);
   const statuses = requestedLiveStatuses(opts);
-  // A device scope needs the cross-host sweep; --local only wins when no host is named.
   const local = !!opts.local && hosts.length === 0;
   const fallback = selectFallback(opts.attachOnly);
 
@@ -255,9 +247,6 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
   let textSelector = id && !agentSelector ? id : undefined;
   const filtered = !!id || hasFocusFilters(opts, statuses);
 
-  // Preserve the fast live multi-picker for an unqualified `focus`. Every
-  // selector/filter path below uses the sessions browser's shared candidate
-  // pipeline and rich preview.
   if (filtered) {
     if (!isInteractiveTerminal() && !looksLikeIdentitySelector(textSelector)) {
       console.error(chalk.red('focus selectors need an interactive terminal; pass a session id for direct focus.'));
@@ -290,9 +279,6 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
         self,
       );
       if (localMatch.length === 1 && !sessionProcessHost(localMatch[0], self)) {
-        // Local live index only (ps/tmux, no fleet sweep) so a still-live pane is
-        // still joined instead of resumed as a copy; a crashed session has no live
-        // row and recovers in place.
         const { activeById } = await gatherLiveTargets(true, { statuses: [] });
         await focusResolvedSession(localMatch[0], activeById, self, fallback, opts.attachOnly === true, opts.reconnectReattach === true);
         return;
@@ -413,7 +399,6 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
 
   const header = focusHeader(statuses, hosts);
 
-  // --attach-only keeps the old `go` single-jump: pick one, attach it in place (or refuse).
   if (opts.attachOnly) {
     const target = await pickLiveTarget(activeById, self, header, 'focus');
     if (!target) return;
@@ -421,13 +406,11 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
     return;
   }
 
-  // Default: multi-select → open each selected session as a tab in this terminal.
   const targets = await pickLiveTargets(activeById, self, header);
   if (targets.length === 0) return;
   await openFocusTabs(targets, self);
 }
 
-/** A retained pane is not attachable merely because tmux can still display it. */
 export function isAttachableLiveSession(session: ActiveSession): boolean {
   return isRunningLiveSession(session);
 }
@@ -591,8 +574,6 @@ export async function focusResolvedSession(
   await resumeSessionInPlace(meta);
 }
 
-/** Focus one row selected by the shared session browser through the same
- * attach/recover decision as `agents sessions focus <id>`. */
 export async function focusSelectedSession(
   meta: SessionMeta,
   active: ActiveSession | undefined,
@@ -626,7 +607,6 @@ function activeFromMeta(meta: SessionMeta): ActiveSession {
   };
 }
 
-/** Human scope suffix for the empty-pool message, e.g. " (orphaned on yosemite-s0)". */
 function describeScope(statuses: LiveStatusFilter[], hosts: string[]): string {
   const parts: string[] = [];
   if (statuses.length) parts.push(statuses.map(statusWord).join('/'));
@@ -668,8 +648,6 @@ export function planFocusSurface(
   const mux = s.provenance?.mux;
   const sid = shortId(s);
 
-  // Join rail = tmux only (local or remote over SSH). A new tab attaching the live
-  // tmux session is a second client: join, no fork.
   if (mux?.kind === 'tmux' && mux.pane && rail.state === 'alive') {
     const script = tmuxAttachScript({ socket: mux.socket, pane: mux.pane });
     if (remote) {
@@ -683,10 +661,7 @@ export function planFocusSurface(
     return { kind: 'attach', command: ['sh', '-c', shellQuote(script)], note: `attach ${mux.pane}` };
   }
 
-  // No join rail → resume a copy (never a silent drop).
   if (remote) {
-    // Recover ON the peer so health and installed versions are resolved where
-    // the transcript actually originated.
     const command = resumeCommandFor(s);
     if (!command) return { kind: 'skip', note: `${sid} has no recovery command` };
     assertValidSshTarget(remote);
@@ -701,19 +676,13 @@ export function planFocusSurface(
   return { kind: 'resume', command: cmd, note: 'resume a copy (no live tmux to join)' };
 }
 
-/** The engine seam — real `openSurfaces`, overridable in tests to assert the tab requests. */
 type OpenSurfacesFn = typeof openSurfaces;
 
-/** Test seams for `openFocusTabs`: inject the engine boundary + force a backend. */
 interface OpenFocusTabsDeps {
   open?: OpenSurfacesFn;
-  /** Skip `resolveBackend` (which needs a live terminal) when set — tests pass 'tmux'. */
   backend?: Backend | 'inplace';
-  /** Rich rows selected by the shared browser pipeline (including remote history). */
   metas?: SessionMeta[];
-  /** Liveness boundary; production probes tmux, tests exercise planning deterministically. */
   probe?: typeof probeAttachRail;
-  /** Strict focus mode: open living attach rails only; never recover a copy. */
   attachOnly?: boolean;
 }
 
@@ -726,13 +695,12 @@ export async function openFocusTabs(
 ): Promise<void> {
   const open = deps.open ?? openSurfaces;
   const probe = deps.probe ?? probeAttachRail;
-  // Resolve rich indexed metas ONCE so local resume commands stay version-pinned.
   let byId = new Map<string, SessionMeta>((deps.metas ?? []).map((m) => [m.id, m]));
   if (!deps.metas) {
     try {
       const metas = await discoverSessions({ all: true, since: '90d', limit: 2000 });
       byId = new Map(metas.map((m) => [m.id, m]));
-    } catch { /* fall back to synthesized metas per session */ }
+    } catch {  }
   }
   const metaFor = (s: ActiveSession): SessionMeta => byId.get(s.sessionId ?? '') ?? metaFromActive(s);
   const resumeCommandFor = (s: ActiveSession): string[] | null => {
@@ -746,7 +714,6 @@ export async function openFocusTabs(
     return { s, plan: planFocusSurface(s, self, resumeCommandFor, rail) };
   }));
 
-  // Skips are reported, never silently dropped.
   for (const p of planned) if (p.plan.kind === 'skip') console.log(chalk.yellow(`  skip ${p.plan.note}`));
   const openable = planned.filter((p): p is { s: ActiveSession; plan: Exclude<FocusSurfacePlan, { kind: 'skip' }> } => p.plan.kind !== 'skip');
   if (openable.length === 0) {
@@ -757,14 +724,11 @@ export async function openFocusTabs(
   const backend = deps.backend ?? (await resolveBackend({}, currentContext(), openable.length));
   if (backend === 'cancel') return;
 
-  // Guard against opening a flood of live agents at once.
   if (openable.length > CONFIRM_THRESHOLD) {
     const proceed = await confirm({ message: `Open ${openable.length} sessions at once?`, default: false }).catch(() => false);
     if (!proceed) return;
   }
 
-  // No tab-capable terminal (off-macOS, not in tmux): fall back to the single
-  // foreground jump for the first, and say the rest need a tab-capable terminal.
   if (backend === 'inplace') {
     if (openable.length > 1) {
       console.log(chalk.yellow(`This terminal can't open tabs — jumping to the first; open in Ghostty/iTerm/tmux to focus several at once.`));
@@ -774,9 +738,6 @@ export async function openFocusTabs(
   }
 
   console.log(chalk.gray(`Opening ${openable.length} session${openable.length === 1 ? '' : 's'} in ${backend} (tabs)…`));
-  // Pass agent + sessionId so the vscodium-agent backend can stamp the tab
-  // chip without sniffing the local process tree (remote attach has no agent
-  // binary on this box — #2478).
   const results = await open(
     openable.map((p) => ({
       cwd: cwdFor(p.s, byId),
@@ -799,7 +760,6 @@ export async function openFocusTabs(
   console.log(chalk.gray(`\nOpened ${opened}/${openable.length} in ${backend}.`));
 }
 
-/** A real cwd for the tab: the session's indexed cwd if it still exists, else here. */
 function cwdFor(s: ActiveSession, byId: Map<string, SessionMeta>): string {
   const cwd = byId.get(s.sessionId ?? '')?.cwd ?? s.cwd;
   return cwd && fs.existsSync(cwd) ? cwd : process.cwd();
@@ -809,7 +769,6 @@ function shortId(s: ActiveSession): string {
   return (s.sessionId ?? '').slice(0, 8) || '-';
 }
 
-/** Minimal SessionMeta for a live session, enough for `buildResumeCommand` + placement. */
 export function metaFromActive(s: ActiveSession): SessionMeta {
   return {
     id: s.sessionId ?? '',
@@ -821,7 +780,6 @@ export function metaFromActive(s: ActiveSession): SessionMeta {
   };
 }
 
-/** Look up the rich indexed SessionMeta by id so `version` survives (version-pinned resume). */
 async function richMetaById(id: string): Promise<SessionMeta | undefined> {
   try {
     const metas = await discoverSessions({ all: true, since: '90d', limit: 2000 });
@@ -841,9 +799,6 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
     return;
   }
 
-  // Remote: the transcript + pinned version live on the peer, so resume THERE over SSH.
-  // runOnPeer runs `agents sessions resume <id>` with a real TTY (`-tt`) in the foreground —
-  // it actually delivers you to the session (the peer picks the right version + HOME).
   if (remote) {
     console.log(chalk.gray(`${shortId(s)} has no live terminal on ${remote} — resuming it there over SSH…`));
     const rc = await runOnPeer(sessionRecoveryRunArgs({ id }), remote, { tty: true, sessionId: id });
@@ -854,8 +809,6 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
     return;
   }
 
-  // Local: resume in a new tab. Use the indexed meta so the version-pinned binary
-  // resumes in the same isolated HOME the transcript was written in.
   const meta = (await richMetaById(id)) ?? metaFromActive(s);
   const command = buildSessionRecoveryCommand(meta);
   const cwd = meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : process.cwd();
@@ -863,7 +816,6 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
   const ctx = currentContext();
   const backend: Backend | undefined = detectCurrentBackend(ctx) ?? availableBackends(ctx)[0]?.id;
   if (!backend) {
-    // No tab-capable surface (off-macOS, not in tmux) — resume in this process.
     await resumeSessionInPlace(meta);
     return;
   }

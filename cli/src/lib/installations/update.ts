@@ -22,11 +22,8 @@ import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installatio
 import type { Installation, UpdateOutcome } from './types.js';
 
 export interface UpdateInstallationOptions {
-  /** Persist together with a successfully selected release, under this transaction's lock. */
   updatePolicy?: Installation['updatePolicy'];
-  /** Cooperative cancellation is honored before the swap, never during record/rollback. */
   shouldCancel?: () => boolean;
-  /** `latest` (default), `oldest`, or a concrete release. */
   to?: string;
   onProgress?: (message: string) => void;
   /** Replace the registry-selected strategy. The seam lets the transaction run against a real
@@ -134,9 +131,6 @@ async function runUpdateInstallation(
       );
     }
 
-    // The installer may have reported a release the installation already has
-    // (a self-updating binary that was already current). Recording it would
-    // claim a change that did not happen and append a bogus history entry.
     if (staged.release === installation.releaseVersion) {
       if (options.updatePolicy) {
         installation.updatePolicy = options.updatePolicy;
@@ -220,8 +214,6 @@ async function runUpdateInstallation(
 
     const handles = await strategy.commit(ctx, staged);
     try {
-      // Probe what will actually execute — `getBinaryPath` is the same resolver
-      // the shims and `agents run` use — not the staging copy probed above.
       const liveBinary = getBinaryPath(agent, installation.label);
       const liveHealth = await verifyBinaryLaunches(liveBinary, staged.home);
       if (!liveHealth.ok) {
@@ -259,6 +251,7 @@ async function runUpdateInstallation(
             + `binary it manages globally — repair it with: agents add ${agent}@latest`
       );
     }
+    // Persist the new release before finalize discards the only rollback material.
     handles.finalize();
 
     // Installations of a global-binary harness share one file, so the replaced binary is live for
@@ -271,9 +264,6 @@ async function runUpdateInstallation(
 
     invalidateInstalledVersionsCache(agent);
     invalidateLiveVersionCache(agent);
-    // A release really was installed, so this is the right event; `installation`
-    // says WHICH frozen install received it, since the label no longer equals
-    // the release.
     emit('version.install', { agent, version: staged.release, installation: installation.label });
 
     return {

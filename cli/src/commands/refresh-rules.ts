@@ -28,7 +28,6 @@ export function registerRefreshRulesCommand(program: Command): void {
       }
 
       if (supportsRulesImports(agentId)) {
-        // Nothing to do — agent resolves @-imports natively.
         return;
       }
 

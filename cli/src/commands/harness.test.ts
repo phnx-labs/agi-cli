@@ -59,7 +59,6 @@ describe('addProfile — host + model one-shot (custom harness)', () => {
   it('refuses to overwrite an existing harness without --force', async () => {
     await addProfile('spark', { host: 'opencode', model: 'meta/muse-spark-1.1' });
     await expect(addProfile('spark', { host: 'claude', model: 'x' })).rejects.toThrow(/already exists/i);
-    // --force overwrites
     await addProfile('spark', { host: 'claude', model: 'claude-x', force: true });
     expect(readProfile('spark').env.ANTHROPIC_MODEL).toBe('claude-x');
   });
@@ -111,8 +110,6 @@ describe('buildFork — one verb over two kinds of source', () => {
   });
 
   it('prefers an existing custom harness over a native id of the same name', async () => {
-    // A harness may legally be named after a native agent; the custom one wins
-    // so `fork claude my-claude` copies the user's tuning, not a bare host.
     await addProfile('claude', { host: 'opencode', model: 'meta/muse-spark-1.1' }, 'Harness');
     expect(buildFork('claude', 'copy', {}).host.agent).toBe('opencode');
   });
@@ -129,8 +126,6 @@ describe('buildFork — one verb over two kinds of source', () => {
     addAccount('corp-key', 'openrouter', 'api-key', 'test-key', USER_DIR);
     const forked = buildFork('claude', 'corp', { model: 'gpt-x', baseUrl: 'https://gw.corp/v1', account: 'corp-key' });
     expect(forked.env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
-    // The portable NAME is stored, not the per-device id — a profile synced to
-    // another machine must still resolve its account there (RUSH-2930).
     expect(forked.account).toBe('corp-key');
     expect(forked.auth).toBeUndefined();
   });
@@ -143,7 +138,6 @@ describe('buildEdit — pure builder for `agents harness edit`', () => {
 
   it('changes exactly the given field and leaves the rest untouched', () => {
     const before = readProfile('deepseek-flash');
-    // --description alone touches only the description — model, version, host stay put.
     const edited = buildEdit('deepseek-flash', { description: 'new description' });
     expect(edited.description).toBe('new description');
     expect(edited.env.ANTHROPIC_MODEL).toBe(before.env.ANTHROPIC_MODEL);
@@ -319,7 +313,6 @@ describe.skipIf(!fileBacked)('applyFromSecrets — copy a value out of an agents
     };
     await applyFromSecrets(profile, 'prod');
     expect(getKeychainTokenSync('agents-cli.corp.token')).toBe('sk-test-secret');
-    // Existing auth binding is left exactly as it was — only the value rotated.
     expect(profile.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
 

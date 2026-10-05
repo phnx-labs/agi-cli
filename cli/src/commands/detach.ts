@@ -39,7 +39,7 @@ export async function stopInteractive(s: ActiveSession, socket: string = getDefa
     try {
       process.kill(s.pid, 'SIGTERM');
     } catch {
-      return; /* already gone — nothing to wait on */
+      return;
     }
   }
   if (s.pid && s.pid > 0) await waitForExit(s.pid);
@@ -54,13 +54,12 @@ async function waitForExit(pid: number, timeoutMs = 5000): Promise<void> {
     try {
       process.kill(pid, 0);
     } catch {
-      return; /* gone */
+      return;
     }
     if (Date.now() >= deadline) {
       try {
         process.kill(pid, 'SIGKILL');
       } catch {
-        /* raced to exit */
       }
       return;
     }
@@ -85,11 +84,11 @@ function spawnHeadless(command: string, args: string[], logFile: string): Promis
     child.once('spawn', () => {
       const pid = child.pid ?? 0;
       child.unref();
-      try { closeSync(fd); } catch { /* fd handed to the child */ }
+      try { closeSync(fd); } catch {  }
       resolve(pid);
     });
     child.once('error', (err) => {
-      try { closeSync(fd); } catch { /* never opened for the child */ }
+      try { closeSync(fd); } catch {  }
       reject(err instanceof Error ? err : new Error(String(err)));
     });
   });
@@ -106,7 +105,6 @@ async function detachAction(id: string, opts: { local?: boolean } = {}): Promise
   const s = resolved;
   const target = resolveDetachTarget(s, self);
 
-  // Cloud, team, and id-less sessions can't be backgrounded from here.
   if (target.kind === 'refuse') {
     console.error(chalk.red(target.reason));
     process.exitCode = 1;
@@ -115,9 +113,6 @@ async function detachAction(id: string, opts: { local?: boolean } = {}): Promise
 
   const short = target.sessionId.slice(0, 8);
 
-  // A session on another host: its pid and tmux socket only mean something where
-  // it runs, so detach it *there* over SSH — never kill/resume locally. Mirrors
-  // focus/jumpTo's remote branch.
   if (target.kind === 'remote') {
     console.log(chalk.gray(`${short} lives on ${target.machine} — detaching it there over SSH…`));
     const rc = await runOnPeer(['sessions', 'detach', target.sessionId, '--local'], target.machine);
@@ -128,8 +123,6 @@ async function detachAction(id: string, opts: { local?: boolean } = {}): Promise
     return;
   }
 
-  // Local: stop the interactive process, then continue it headless, detached —
-  // version-pinned via the existing `agents run --resume` path.
   const sessionId = target.sessionId;
   const agent = s.kind;
   await stopInteractive(s);
@@ -138,7 +131,6 @@ async function detachAction(id: string, opts: { local?: boolean } = {}): Promise
   const inv = getAgentsInvocation(buildBackgroundArgv(agent, sessionId, s.cwd));
   const pid = await spawnHeadless(inv.command, inv.args, logFile);
 
-  // Record it so `attach` and `agents ls --active` know it's backgrounded.
   writeDetachRecord({
     sessionId,
     agent,

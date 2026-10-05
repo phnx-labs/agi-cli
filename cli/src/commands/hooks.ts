@@ -52,7 +52,6 @@ import {
   resolveListFilterOrExit,
 } from './utils.js';
 
-/** Register the `agents hooks` command tree (list, add, remove, sync, prune, view). */
 export function registerHooksCommands(program: Command): void {
   const hooksCmd = program.command('hooks')
     .description('Automate workflows by running shell scripts in response to agent events')
@@ -91,7 +90,6 @@ When to use:
       const spinner = ora({ text: 'Loading...', isSilent: !process.stdout.isTTY }).start();
       const cwd = process.cwd();
 
-      // Parse agent input - handle agent@version syntax
       const agentInput = agentArg || options.agent;
       let agentId: AgentId | null = null;
       let requestedVersion: string | null = null;
@@ -109,12 +107,9 @@ When to use:
         requestedVersion = resolveListFilterOrExit(agentId, parts[1]) ?? null;
       }
 
-      // Load hook manifest for event display
       const hookManifest = parseHookManifest();
 
-      // Helper: get events for a hook name from manifest
       const getHookEvents = (hookName: string): string[] => {
-        // Try exact match, then try without extension
         for (const [, def] of Object.entries(hookManifest)) {
           const scriptBase = def.script.replace(/\.[^.]+$/, '');
           if (def.script === hookName || scriptBase === hookName || hookName.replace(/\.[^.]+$/, '') === scriptBase) {
@@ -124,7 +119,6 @@ When to use:
         return [];
       };
 
-      // Helper to render hooks for a specific version
       const renderVersionHooks = (
         agentId: AgentId,
         version: string,
@@ -184,14 +178,12 @@ When to use:
 
       spinner.stop();
 
-      // Single agent specified - show versions based on requestedVersion
       if (agentId) {
         const agent = AGENTS[agentId];
         const installedVersions = listInstalledVersions(agentId);
         const defaultVer = getGlobalDefault(agentId);
 
         if (installedVersions.length === 0) {
-          // Not version-managed
           console.log(chalk.bold(`Installed Hooks for ${agentLabel(agent.id)}\n`));
           if (!agent.supportsHooks) {
             console.log(`  ${chalk.bold(agentLabel(agent.id))}: ${chalk.gray('hooks not supported')}`);
@@ -246,7 +238,6 @@ When to use:
         return;
       }
 
-      // No agent specified - show default version for each hooks-capable agent
       console.log(chalk.bold('Installed Hooks\n'));
 
       for (const aid of capableAgents('hooks')) {
@@ -258,7 +249,6 @@ When to use:
           const home = getVersionHomePath(aid, defaultVer);
           renderVersionHooks(aid, defaultVer, true, home);
         } else {
-          // Not version-managed or no default
           if (!agent.supportsHooks) {
             console.log(`  ${chalk.bold(agentLabel(aid))}: ${chalk.gray('hooks not supported')}`);
           } else {
@@ -308,7 +298,6 @@ Examples:
         let hooks: string[];
 
         if (!source) {
-          // Interactive mode: pick from central storage
           const centralHooks = listCentralHooks();
           if (centralHooks.length === 0) {
             console.log(chalk.yellow('No hooks in ~/.agents/hooks/'));
@@ -358,7 +347,6 @@ Examples:
               : selected.filter((s) => s !== '__all__');
           }
         } else {
-          // Source provided: fetch from repo or local path
           const spinner = ora('Fetching hooks...').start();
 
           const isGitRepo = source.startsWith('gh:') || source.startsWith('git:') ||
@@ -394,7 +382,6 @@ Examples:
             console.log(`  ${chalk.cyan(name)}`);
           }
 
-          // Install to central storage first
           const installSpinner = ora('Installing hooks to central storage...').start();
           const centralResult = await installHooksCentrally(localPath);
 
@@ -412,7 +399,6 @@ Examples:
           }
         }
 
-        // Get agent and version selection
         let selectedAgents: AgentId[];
         let versionSelections: Map<AgentId, string[]>;
 
@@ -439,7 +425,6 @@ Examples:
           return;
         }
 
-        // Sync to selected versions
         const syncSpinner = ora('Syncing to agent versions...').start();
         let synced = 0;
 
@@ -482,7 +467,6 @@ Examples:
   agents hooks remove
 `)
     .action(async (name?: string, options?: { agents?: string }) => {
-      // Build map of hook -> targets for all installed versions
       type HookTargetInfo = { name: string; targets: Array<{ agent: AgentId; version: string }> };
       const hookTargetMap = new Map<string, HookTargetInfo>();
 
@@ -553,9 +537,6 @@ Examples:
           continue;
         }
 
-        // Filter by --agents if specified. Routes through resolveInstalledAgentTargets
-        // so the same selector syntax used everywhere else (agent, agent@default,
-        // agent@x.y.z, agent@all, literal all) works here too.
         let availableTargets = hookInfo.targets;
         if (options?.agents) {
           const requestedTargets = resolveInstalledAgentTargets(options.agents, [...capableAgents('hooks')]);
@@ -612,7 +593,6 @@ Examples:
       }
     });
 
-  // `hooks prune` moved to the top-level `agents prune cleanup` command.
   hooksCmd
     .command('prune', { hidden: true })
     .allowUnknownOption()
@@ -641,7 +621,6 @@ Examples:
         return;
       }
 
-      // If no name provided, show interactive select
       if (!name) {
         if (!isInteractiveTerminal()) {
           requireInteractiveSelection('Selecting a hook to view', [
@@ -672,15 +651,12 @@ Examples:
         return;
       }
 
-      // Build header
       console.log(chalk.bold(`\n${hook.name}`));
       console.log(chalk.gray(`Path: ${hook.path}\n`));
 
-      // Show content (hooks are usually shell scripts, not markdown - just show with syntax highlighting placeholder)
       if (hook.content) {
         const contentLines = hook.content.split('\n');
 
-        // For shell scripts, just display with line numbers
         const output = contentLines.map((line, i) => `  ${chalk.gray(String(i + 1).padStart(3))}  ${line}`).join('\n');
         printWithPager(output, contentLines.length);
       }
@@ -710,9 +686,6 @@ A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
     .option('--project <key>', 'Scope to one project (see agents insights perf --help)')
     .action(async (options: { days: string; warnMs: string; json?: boolean; project?: string }) => {
       const { DEFAULT_SLOW_HOOK_WARN_MS } = await import('../lib/hooks/profile.js');
-      // Same rollup as `agents insights perf hooks` — this command predates the `perf`
-      // surface and is kept as a documented alias; delegate instead of
-      // duplicating the SQLite-vs-legacy-JSONL fallback and table rendering.
       const { loadHookProfile, renderHookTable } = await import('./perf.js');
       const days = Math.max(1, parseInt(options.days, 10) || 7);
       const warnMs = Math.max(0, parseInt(options.warnMs, 10) || DEFAULT_SLOW_HOOK_WARN_MS);

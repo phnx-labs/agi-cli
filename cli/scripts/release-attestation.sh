@@ -1,54 +1,8 @@
 #!/usr/bin/env bash
-#
-# Immutable release attestations for agents-cli (RUSH-2666).
-#
-# An ordinary release promotes the exact pretested npm tarball bound to:
-#   candidate tree digest + toolchain + lockfile digest + test-policy version
-# Parent commits, nearby SHAs, branch names, and mutable cache keys never count.
-# A missing record fails with the exact key. This script never rebuilds a package.
-#
-# Usage:
-#   release-attestation.sh identity [--repo-root DIR] [--commit REF]
-#   release-attestation.sh key --file ATTEST.json
-#   release-attestation.sh write --dir DIR --file ATTEST.json
-#   release-attestation.sh verify --file ATTEST.json --tree TREE [--lock DIGEST]
-#                                  [--policy VER] [--bun VER] [--node VER]
-#                                  [--platform PLAT] [--suite NAME]
-#   release-attestation.sh require --dir DIR --tree TREE [--repo-root DIR] ...
-#   release-attestation.sh tarball --file ATTEST.json [--require-file]
-#   release-attestation.sh promote --file ATTEST.json --tarball TGZ
-#   release-attestation.sh derive --base BASE.json --tarball TGZ [--repo-root DIR]
-#                                  [--commit REF]
-#
-# `derive` mints a release-commit-tree attestation from an already-green BASE
-# attestation (the default-branch tree) WITHOUT re-running the suite. It is sound
-# ONLY because a release commit differs from its base by version + changelog +
-# generated command-index and nothing else -- none of which can change a test
-# outcome. It fails closed if the tree diff touches any other path, so a code
-# change can never ride a stale suite result. The freshly built TGZ (packed from
-# the release tree, carrying the new version) is what gets recorded and published;
-# only the expensive suite run is inherited.
 set -euo pipefail
 
-die() { echo "error: $*" >&2; exit 1; }
-
-file_sha256() {
-  local f="$1"
-  [[ -f "$f" ]] || die "not a file: $f"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$f" | awk '{print $1}'
-  else
-    shasum -a 256 "$f" | awk '{print $1}'
-  fi
-}
-
-str_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s' "$1" | sha256sum | awk '{print $1}'
-  else
-    printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
-  fi
-}
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 usage() {
   sed -n '3,22p' "$0" | sed 's/^# \?//'
@@ -264,8 +218,6 @@ require_from_dir() {
     [[ -f "$f" ]] || continue
     got_tree="$(jq -r '.candidateTree // empty' "$f")"
     [[ "$got_tree" == "$TREE" ]] || continue
-    # verify_file checks schema + pass + tarball. Do not pass --bun/--node/--platform
-    # so a Darwin home base can consume a Linux-tested record for the same tree.
     BUN_VER="" NODE_VER="" PLATFORM="" verify_file "$f"
     got_lock="$(jq -r '.lockfileDigest' "$f")"
     got_policy="$(jq -r '.policyVersion' "$f")"
@@ -330,7 +282,6 @@ release_diff_is_metadata_only() {
     || die "cannot diff base tree ${base_tree:0:12} against release tree ${rel_tree:0:12}"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    # Strip an optional cli/ or apps/cli/ prefix so the allowlist is layout-agnostic.
     rel="$line"
     rel="${rel#apps/cli/}"
     rel="${rel#cli/}"
@@ -342,13 +293,10 @@ release_diff_is_metadata_only() {
   done <<< "$changed"
 }
 
-# Mint a release-tree attestation that INHERITS the suite pass from a green base
-# attestation, recording a freshly built release-tree tarball. See the header.
 derive_release_tree() {
   [[ -n "$BASE" ]] || die "derive needs --base BASE.json"
   [[ -n "$TGZ" ]] || die "derive needs --tarball TGZ (the release-tree pack)"
   [[ -f "$TGZ" ]] || die "release tarball not found: $TGZ"
-  # The base MUST itself be a valid passing tarball attestation.
   TREE="" LOCK_DIGEST="" POLICY="" BUN_VER="" NODE_VER="" PLATFORM="" SUITE="" \
     verify_file "$BASE"
 

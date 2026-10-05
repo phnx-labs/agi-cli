@@ -14,7 +14,6 @@ const execFileAsync = promisify(execFile);
  * string matching without shelling out or a live agent process. */
 export interface ProcessSnapshot {
   listCommandLines(): Promise<string[]>;
-  /** Optional richer listing (pid, elapsed, tty) for naming a blocking process. */
   listProcessRows?(): Promise<ProcessRow[]>;
 }
 
@@ -44,9 +43,6 @@ async function listCommandLinesPosix(): Promise<string[]> {
     });
     return stdout.split('\n');
   } catch {
-    // A ps failure must not silently mean "nothing is running" — that would let
-    // an update proceed against a harness this pass simply failed to observe.
-    // Callers treat a thrown scan as "assume active", the safe default.
     throw new Error('could not read the process table (ps failed)');
   }
 }
@@ -92,25 +88,21 @@ export async function isInstallationLikelyActive(
     const lines = await snapshot.listCommandLines();
     return installationLooksActive(installation, lines);
   } catch {
+    // An unreadable process table cannot prove that destructive update is safe.
     return true;
   }
 }
 
 export interface InstallationActivity {
   active: boolean;
-  /** A launch lease is held (a launch is starting and may not be in the process table yet). */
   lease: boolean;
-  /** Live processes naming this installation's directory, one line each. */
   processes: string[];
-  /** The process scan failed; `active` is the fail-closed default. */
   scanError?: string;
 }
 
-/** `ps` prints `?` (Linux), `??` (macOS) or `-` for a process with no controlling terminal. */
 const NO_TTY_MARKERS = new Set(['?', '??', '-']);
 
 function shortenArgs(args: string, versionDir: string): string {
-  // Strip the long install path so the line reads as the command the user ran.
   const trimmed = args.replace(versionDir, '…').replace(/\/node_modules\/\.bin\//, '/');
   return trimmed.length > 110 ? `${trimmed.slice(0, 107)}...` : trimmed;
 }
@@ -142,7 +134,6 @@ export async function describeInstallationActivity(
   }
 }
 
-/** The one-line refusal an update prints for a busy installation. */
 export function formatInUseDeferral(name: string, activity: InstallationActivity): string {
   if (activity.scanError) return `${name}: could not confirm nothing is running (${activity.scanError}); not updating.`;
   if (activity.processes.length > 0) {

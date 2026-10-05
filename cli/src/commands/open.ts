@@ -23,9 +23,6 @@ export function registerOpenCommand(program: Command): void {
       await handleUrl(url);
     });
 
-  // Back-compat: `agents open register|unregister|status` still work as HIDDEN
-  // subcommands (muscle memory + docs). The canonical, visible home is
-  // `agents setup url-scheme <verb>`, which reuses the SAME builder below.
   addUrlSchemeSubcommands(callback, { hidden: true });
 }
 
@@ -75,7 +72,6 @@ async function handleUrl(url: string): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  // Lazy-import the resume dispatcher so `register`/`status` stay cold-start cheap.
   const { dispatchSessionLifecycleInPlace } = await import('./sessions-resume.js');
   await dispatchSessionLifecycleInPlace(parsed.id, parsed.host ? [parsed.host] : []);
 }

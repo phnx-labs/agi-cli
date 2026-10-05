@@ -8,9 +8,6 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const tempDirs: string[] = [];
 
 function makeTempDir(prefix: string): string {
-  // realpath: node's ESM loader canonicalizes the entry script's path, so the
-  // paths postinstall derives from import.meta.url are /private/var/... on
-  // macOS while os.tmpdir() reports /var/... — equality asserts need one form.
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tempDirs.push(dir);
   return dir;
@@ -23,8 +20,6 @@ const makeTempHome = () => makeTempDir('agents-postinstall-home-');
 // whether this checkout has a built dist/bin/agents.
 function stagePackageTree(opts: { nativeBin?: string } = {}): string {
   const root = makeTempDir('agents-postinstall-pkg-');
-  // Match the published package's module boundary; /tmp may contain an
-  // unrelated CommonJS package.json owned by another task on a fleet worker.
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'module' }));
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   fs.mkdirSync(path.join(root, 'dist', 'bin'), { recursive: true });
@@ -46,8 +41,6 @@ function runPostinstall(
 ) {
   const env: Record<string, string | undefined> = {
     ...process.env,
-    // postinstall derives paths from os.homedir(), which reads USERPROFILE
-    // on Windows (HOME is POSIX-only). Pin both so the temp home is honored.
     HOME: home,
     USERPROFILE: home,
     npm_config_global: 'true',
@@ -92,14 +85,10 @@ describe('postinstall alias shims', () => {
     expect(script).toContain('agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN');
     expect(script).toContain('exec "$AGENTS_BIN" teams "$@"');
     expect(script).not.toContain('exec agents teams "$@"');
-    // `browser` is a standalone CLI now (PHNX-4101) — never written as an alias shim.
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'browser'))).toBe(false);
   });
 
   it('shims-only mode writes aliases silently without the install flow', () => {
-    // The self-updater installs with --ignore-scripts and then re-invokes
-    // postinstall with this env var to refresh the alias shims. It must not
-    // prompt, print, or take the local/global install branches.
     const home = makeTempHome();
     const root = stagePackageTree();
     const result = runPostinstall(root, home, {
@@ -116,7 +105,6 @@ describe('postinstall alias shims', () => {
       expect(script).toContain(`exec "$AGENTS_BIN" ${name} "$@"`);
       expect(script).toContain(path.join(root, 'dist', 'index.js'));
     }
-    // Standalone binary names: never written as alias shims.
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'secrets'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'sessions'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'pty'))).toBe(false);
@@ -124,8 +112,6 @@ describe('postinstall alias shims', () => {
   });
 
   it('removes a retired standalone-CLI alias a previous install wrote, and only that (PHNX-3989/4101)', () => {
-    // An in-place upgrade from a pre-standalone release leaves the old alias
-    // behind; every install path runs this script, so this is where it goes.
     const home = makeTempHome();
     const root = stagePackageTree();
     const shims = path.join(home, '.agents', '.cache', 'shims');
@@ -138,19 +124,16 @@ describe('postinstall alias shims', () => {
       `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" sessions "$@"\n`,
       { mode: 0o755 },
     );
-    // pty (PHNX-4091): the engine moved to the standalone term-cli's `term`.
     fs.writeFileSync(
       path.join(shims, 'pty'),
       `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" pty "$@"\n`,
       { mode: 0o755 },
     );
-    // browser (PHNX-4101): the engine moved to the standalone browser-cli.
     fs.writeFileSync(
       path.join(shims, 'browser'),
       `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" browser "$@"\n`,
       { mode: 0o755 },
     );
-    // An unrelated file under a retired name is not ours and must survive.
     const foreign = path.join(shims, 'secrets-foreign');
     fs.writeFileSync(foreign, '#!/bin/sh\necho unrelated\n', { mode: 0o755 });
 
@@ -171,8 +154,6 @@ describe('postinstall alias shims', () => {
   });
 
   it("leaves a user's own `# Alias shim:` under a retired name alone", () => {
-    // `agents setup alias` shims carry the marker and end in the same
-    // `<name> "$@"` tail; a pre-existing user alias is the user's, not ours.
     const home = makeTempHome();
     const root = stagePackageTree();
     const shims = path.join(home, '.agents', '.cache', 'shims');
@@ -245,14 +226,10 @@ describe('postinstall signed-binary resolution (#315)', () => {
       const root = stagePackageTree({ nativeBin: '#!/bin/sh\necho 0.0.0-test\n' });
       const binDir = path.join(home, '.local', 'bin');
       fs.mkdirSync(binDir, { recursive: true });
-      // A link a pre-#315 install left at the JS entrypoint: must be repointed.
       fs.symlinkSync(path.join(root, 'dist', 'index.js'), path.join(binDir, 'agents'));
-      // A dev build's link pointing elsewhere: must be left untouched.
       const devTarget = path.join(root, 'somewhere-else', 'agents-dev');
       fs.symlinkSync(devTarget, path.join(binDir, 'ag'));
 
-      // The retarget lives in ensureAgentsResolvablePosix, which is skipped
-      // under CI=... — drop the gate for this child process only.
       const result = runPostinstall(root, home, { CI: undefined, AGENTS_NO_HEAL: undefined });
 
       expect(result.status, result.stderr).toBe(0);
@@ -265,7 +242,6 @@ describe('postinstall signed-binary resolution (#315)', () => {
   );
 });
 
-/** Stub dist modules so healLongRunningProcesses can import them under a clean CI=unset. */
 function stageDaemonHealStubs(
   root: string,
   opts: { wasRunning?: boolean; enabled?: boolean } = {},

@@ -10,8 +10,7 @@ BUMP_KIND="${2:-}"
 MAIN_VERSION="${3:-}"
 [[ -n "$LATEST" ]] || { echo "usage: stuck-release.sh <registry-latest> [<bump-kind> <main-version>] < tags" >&2; exit 2; }
 
-# Strictly newer than the registry's latest? `sort -V` is the semver order.
-newer_than_latest() { # $1 = version
+newer_than_latest() {
   [[ "$1" != "$LATEST" ]] || return 1
   [[ "$(printf '%s\n%s\n' "$LATEST" "$1" | sort -V | tail -1)" == "$1" ]]
 }
@@ -37,8 +36,6 @@ while read -r version published _rest; do
     echo "note: v$version is tagged but unpublishable (main already carries it); $BUMP_KIND steps over it" >&2
     continue
   fi
-  # Oldest stuck version wins: that is the one blocking the queue, and finishing
-  # it is what lets every later version publish in order.
   if [[ -z "$STUCK" ]] \
      || [[ "$(printf '%s\n%s\n' "$STUCK" "$version" | sort -V | head -1)" == "$version" ]]; then
     STUCK="$version"

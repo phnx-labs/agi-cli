@@ -112,7 +112,7 @@ export async function gatherLiveTargets(
         earlyExit: liveSelectorEarlyExit(opts.selector),
       });
       active = dedupeByMachineSession([...localActive, ...remote.sessions]);
-    } catch { /* remote sweep is best-effort */ }
+    } catch {  }
   }
   active = filterLivePool(active, { hosts: opts.hosts, statuses: opts.statuses });
   const activeById = new Map<string, ActiveSession>();
@@ -124,7 +124,6 @@ export async function gatherLiveTargets(
   return { self, activeById };
 }
 
-/** Interactive pick over the live sessions' rich SessionMeta; returns the chosen live session. */
 export async function pickLiveTarget(
   activeById: Map<string, ActiveSession>,
   self: string,
@@ -147,7 +146,6 @@ export async function pickLiveTargets(
 ): Promise<ActiveSession[]> {
   const pool = await buildLivePool(activeById, self);
   if (pool.length === 0) return [];
-  // gutter: 6 = the multi-select cursor + checkbox ('> [x] ') multiItemPicker prepends.
   const cols = { ...pickerColumnsFor(pool), gutter: 6 };
   let chosen: SessionMeta[] | null;
   try {
@@ -176,7 +174,7 @@ export async function buildLivePool(activeById: Map<string, ActiveSession>, self
   let metas: SessionMeta[] = [];
   try {
     metas = await discoverSessions({ all: true, since: '30d', limit: 1000 });
-  } catch { /* fall back to synthesized metas */ }
+  } catch {  }
   const byId = new Map<string, SessionMeta>();
   for (const m of metas) byId.set(m.id, m);
   const pool: SessionMeta[] = [];
@@ -206,7 +204,6 @@ function synthMeta(s: ActiveSession, self: string): SessionMeta {
   };
 }
 
-// ---------- the jump ----------
 
 export interface Where { label: string; action: string; }
 
@@ -214,8 +211,6 @@ function shortId(s: ActiveSession): string {
   return (s.sessionId ?? '').slice(0, 8) || '-';
 }
 
-/** What `jumpTo` writes after a remote tmux attach's SSH stream returns. Pure so
- *  the ControlMaster close path is unit-tested without SSH (RUSH-3227). */
 export function remoteAttachEndedNotice(
   sessionId: string | undefined,
   host: string,
@@ -235,8 +230,6 @@ export function describeWhere(s: ActiveSession, self: string): Where {
   const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
   if (mux?.kind === 'tmux' && mux.pane) {
-    // When the renderer has resolved the current viewer, fold it into the label
-    // so `focus` reports "tmux %3 (viewing in codium tab 2)" / "(detached)".
     const view = s.viewingIn
       ? ` (viewing in ${s.viewingIn.app}${s.viewingIn.tab != null ? ` tab ${s.viewingIn.tab}` : ''})`
       : '';
@@ -259,9 +252,6 @@ export type AttachRailLiveness =
   | { state: 'dead'; exitStatus?: number }
   | { state: 'missing' };
 
-/** Probe the tmux process, not just retained provenance. This is deliberately
- * called immediately before an attach so remain-on-exit panes cannot masquerade
- * as living agent sessions. */
 export async function probeAttachRail(s: ActiveSession, self: string): Promise<AttachRailLiveness> {
   const mux = s.provenance?.mux;
   if (mux?.kind !== 'tmux' || !mux.pane) return { state: 'missing' };
@@ -289,8 +279,6 @@ export async function probeAttachRail(s: ActiveSession, self: string): Promise<A
     : { state: 'alive' };
 }
 
-/** Strict attach-only fallback: no pane means no attach. Never open a shell or
- * start recovery, because both would violate the caller's no-fork intent. */
 export async function refuseFallback(s: ActiveSession, remote: string | undefined, fallbackId?: string): Promise<void> {
   if (remote) {
     console.log(chalk.yellow(`Can't attach ${shortId(s)} on ${remote} — it has no living tmux pane.`));
@@ -308,7 +296,6 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
   const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
 
-  // Path C: remote tmux — ssh in and attach, resolving the pane's session on the remote.
   if (remote) {
     if (mux?.kind === 'tmux' && mux.pane) {
       const liveness = await probeAttachRail(s, self);
@@ -331,12 +318,10 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
       if (notice) process.stderr.write(notice);
       process.exit(code);
     }
-    // Remote, not in tmux → hand off to the fallback (go: shell; focus: resume in a tab).
     await fallback(s, remote, fallbackId);
     return;
   }
 
-  // Path B: local tmux — attach (or switch-client if we're already inside tmux).
   if (mux?.kind === 'tmux' && mux.pane) {
     const liveness = await probeAttachRail(s, self);
     if (liveness.state !== 'alive') {
@@ -355,22 +340,18 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
       return;
     }
     console.log(chalk.gray(`Attaching ${shortId(s)} (tmux ${tgt}) — Ctrl-b d to detach.`));
-    // Repair a legacy/stale pane-died hook before the attach client takes over
-    // — the 5-min daemon reconcile that used to cover this was deleted;
-    // attach-time repair is what closes the gap now (RUSH-2435).
     if (session) await ensureSessionHookRepaired(session, socket);
     const code = await attachTmux({ socket, args: ['attach-session', '-t', tgt] });
     if (session) await teardownIfAgentExited(session, socket);
     process.exit(code);
   }
 
-  // Path A: local Ghostty — focus its tab (Cmd+N via System Events).
   if (s.host === 'ghostty') {
     let tab: number | undefined;
     try {
       const surfaces = await enumerateGhosttyTabs();
       tab = assignGhosttyTabs([s], surfaces).get(s);
-    } catch { /* best-effort */ }
+    } catch {  }
     if (tab != null && tab <= 9) {
       const script =
         `tell application "Ghostty" to activate\n` +
@@ -388,11 +369,9 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
     return;
   }
 
-  // Path D: no attach rail (headless / plain terminal) → hand off to the fallback.
   await fallback(s, undefined, fallbackId);
 }
 
-/** Resolve a local tmux pane id to its session name + window index. */
 async function resolveLocalPane(socket: string, pane: string): Promise<{ session?: string; window?: number }> {
   try {
     const res = await runTmux({ socket, args: ['display-message', '-pt', pane, '-p', '#{session_name}\t#{window_index}'], throwOnError: false });

@@ -14,7 +14,6 @@ import type { JobConfig, JobTrigger } from '../lib/scheduling/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/scheduling/routines.js';
 import { emit } from '../lib/feed/events.js';
 
-/** Return a chalk color function appropriate for the given task status. */
 export function statusColor(status: string): (s: string) => string {
   switch (status) {
     case 'queued':
@@ -30,7 +29,6 @@ export function statusColor(status: string): (s: string) => string {
 }
 
 
-/** Register the `agents cloud` command tree (run, list, status, logs, cancel, message, providers). */
 export function registerCloudCommands(program: Command): void {
   const cloud = program
     .command('cloud', { hidden: true })
@@ -84,7 +82,6 @@ Examples:
   agents cloud providers
 `);
 
-  // ── agents cloud run ──────────────────────────────────────────────────
   cloud
     .command('run [prompt]')
     .description('Dispatch a task to a cloud agent.')
@@ -169,22 +166,16 @@ Examples:
     .action(async (positionalPrompt: string | undefined, options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
 
-      // Resolve prompt: --prompt flag, positional arg, or file
       const prompt = resolveCloudPrompt((options.prompt as string) || positionalPrompt, {
         json,
         hint: 'agents cloud run "<task>" --repo <owner/repo>',
       });
 
-      // --device names one of YOUR machines as the target — that only means
-      // something to the host provider, so it implies --provider host rather
-      // than silently riding along to a cloud backend that would ignore it.
       if (options.device && options.provider && options.provider !== 'host') {
         die(`--device targets your own machines (--provider host), not ${options.provider}. Drop --device, or use --provider host.`, 1, { json });
       }
       const explicitProvider = (options.provider as string | undefined) ?? (options.device ? 'host' : undefined);
 
-      // Agent-aware: with no --provider, the agent routes to its native cloud
-      // (claude→rush, codex→codex, droid→factory, antigravity→antigravity).
       const provider = resolveProvider(explicitProvider, options.agent as string | undefined);
 
       // --repo is repeatable: commander gives an array via our collector. A single value arrives
@@ -253,8 +244,6 @@ Examples:
           prompt,
         };
         if (repoValues[0]) routine.repo = repoValues[0];
-        // --device controls where the enabled local receiver dispatches the run.
-        // Device activation remains in this receiver's device manifest.
         if (options.device) {
           routine.host = options.device as string;
           if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
@@ -273,9 +262,6 @@ Examples:
         return;
       }
 
-      // One dispatch path for every cloud surface — lib/cloud/dispatch.ts owns
-      // capability checks, the missing-target picker, persistence, streaming,
-      // and the budget kill-switch.
       await executeCloudDispatch({
         provider,
         dispatchOptions,
@@ -286,7 +272,6 @@ Examples:
       });
     });
 
-  // ── agents cloud list ─────────────────────────────────────────────────
   cloud
     .command('list')
     .description('List cloud tasks.')
@@ -300,8 +285,6 @@ Examples:
       const status = options.status as CloudTaskStatus | undefined;
       const limit = parseInt(options.limit as string, 10) || 20;
 
-      // Auto-refresh tasks still in transient states (queued, allocating, running, input_required).
-      // Groups by provider to minimise resolver calls, refreshes each via provider.status().
       const activeTasks = listActiveTasks();
       if (activeTasks.length > 0) {
         const byProvider = new Map<CloudProviderId, string[]>();
@@ -320,11 +303,10 @@ Examples:
               refreshJobs.push(
                 provider.status(id)
                   .then((fresh) => { insertTask(fresh); })
-                  .catch(() => {}),  // stale cache is acceptable if API is down
+                  .catch(() => {}),
               );
             }
           } catch {
-            // provider not configured — skip
           }
         }
 
@@ -345,7 +327,6 @@ Examples:
         return;
       }
 
-      // Table header
       const header = [
         chalk.dim('ID'.padEnd(14)),
         chalk.dim('Provider'.padEnd(10)),
@@ -370,7 +351,6 @@ Examples:
       }
     });
 
-  // ── agents cloud status ───────────────────────────────────────────────
   cloud
     .command('status <id>')
     .description('Show task detail and latest status.')
@@ -378,7 +358,6 @@ Examples:
     .action(async (id: string, options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
 
-      // Try local first, then remote
       let task = getTaskById(id);
       const providerId = task?.provider;
 
@@ -388,7 +367,6 @@ Examples:
           task = await provider.status(id);
           insertTask(task);
         } catch {
-          // Fall back to local cache
         }
       }
 
@@ -413,7 +391,6 @@ Examples:
       }
     });
 
-  // ── agents cloud logs ─────────────────────────────────────────────────
   cloud
     .command('logs <id>')
     .description('Stream live output from a cloud task.')
@@ -428,8 +405,6 @@ Examples:
       const provider = resolveProvider(task.provider);
 
       try {
-        // Live budget kill-switch (issue #399) — wrap the stream so a cap
-        // breach mid-stream cancels the task server-side. Dormant when no caps.
         const { wrapStreamWithBudgetGate } = await import('../lib/budget/live-cloud.js');
         const gated = wrapStreamWithBudgetGate({
           provider,
@@ -453,7 +428,6 @@ Examples:
       }
     });
 
-  // ── agents cloud cancel ───────────────────────────────────────────────
   cloud
     .command('cancel <id>')
     .description('Cancel a running cloud task.')
@@ -473,7 +447,6 @@ Examples:
       }
     });
 
-  // ── agents cloud message ──────────────────────────────────────────────
   cloud
     .command('message <id> <text>')
     .description('Send a follow-up message to a finished or needs-review task.')
@@ -493,7 +466,6 @@ Examples:
       }
     });
 
-  // ── agents cloud providers ────────────────────────────────────────────
   cloud
     .command('providers')
     .description('List available cloud providers and their status.')
@@ -536,7 +508,6 @@ Examples:
       const json = isJsonMode(options as { json?: boolean });
       const only = options.provider as CloudProviderId | undefined;
 
-      // Providers that run inside a pre-provisioned target declare targetKind.
       const providers = getAllProviders().filter((p) => p.targetKind && (!only || p.id === only));
       if (only && providers.length === 0) {
         die(`Provider '${only}' has no pre-provisioned targets (or is unknown). Targets apply to: codex, factory.`);
@@ -546,7 +517,6 @@ Examples:
       for (const p of providers) {
         const kind = p.targetKind!;
         if (!p.listTargets) {
-          // Not enumerable (Codex). Surface guidance instead of a list.
           const guidance = kind === 'env'
             ? 'Codex environments are not listable from the CLI. Browse/create them with `codex cloud` (interactive), then use --env <id>.'
             : 'Not enumerable from the CLI.';

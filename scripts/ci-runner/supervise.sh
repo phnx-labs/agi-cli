@@ -4,7 +4,7 @@
 # GitHub, re-register. An unreachable box is reported, not rebuilt.
 set -uo pipefail
 
-BOX_IP="${CI_BOX_IP:-78.46.183.46}"
+BOX=ci-runner-fsn1
 BOX_KEY="${CI_BOX_KEY:-$HOME/.ssh/ci-runner-ops}"
 LOG_DIR="$HOME/.cache/infra-ci"
 LOG="$LOG_DIR/supervise.log"
@@ -14,7 +14,7 @@ mkdir -p "$LOG_DIR"
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$LOG"; }
 fail=0
 
-box() { ssh -i "$BOX_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 "root@$BOX_IP" "$@" 2>/dev/null; }
+box() { ssh -i "$BOX_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$BOX" "$@" 2>/dev/null; }
 
 hcloud_token() {
   if [ -n "${HCLOUD_TOKEN:-}" ]; then echo "$HCLOUD_TOKEN"; return; fi
@@ -26,7 +26,7 @@ hcloud_token() {
 
 # --- 1. box reachable ---------------------------------------------------------
 if ! box 'true'; then
-  log "FATAL box $BOX_IP unreachable over SSH — runners down; manual re-provision may be needed"
+  log "FATAL box $BOX unreachable over SSH — runners down; manual re-provision may be needed"
   exit 1
 fi
 

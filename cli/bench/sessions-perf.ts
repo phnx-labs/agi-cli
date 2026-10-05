@@ -20,8 +20,6 @@ import {
 import { getDB } from '../src/lib/session/db.js';
 import { getSessionsDbPath, getSessionsDir } from '../src/lib/state.js';
 
-// Resolved through the same helpers the CLI itself uses. Re-deriving the path
-// here is what let this benchmark drift onto a directory that no longer exists.
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
@@ -100,7 +98,6 @@ function removeIfExists(p: string): void {
   try {
     fs.unlinkSync(p);
   } catch {
-    // not there
   }
 }
 
@@ -111,9 +108,6 @@ function evenlySample<T>(items: T[], limit: number): T[] {
   );
 }
 
-// BENCH_CORPUS=real: copy this machine's live index into a throwaway HOME and
-// re-run there. Copying rather than measuring in place is what keeps discover's
-// writes off the index `agents sessions` is serving.
 function relaunchAgainstRealCorpusCopy(): never {
   if (!fs.existsSync(DB_PATH)) {
     console.error(`BENCH_CORPUS=real: no index at ${DB_PATH} — run \`agents sessions\` once to build one.`);
@@ -161,11 +155,7 @@ async function main() {
     walBytes: fileSize(DB_PATH + '-wal'),
   };
 
-  // ------------------------------------------------------------------
-  // A. Cold discover
-  // ------------------------------------------------------------------
   if (mode === 'full' || mode === 'cold') {
-    // Backup and remove the existing index (SQLite + WAL/SHM) to simulate first-run cost.
     const COLD_PATHS = [
       DB_PATH,
       DB_PATH + '-wal',
@@ -182,8 +172,6 @@ async function main() {
       );
       const sessionsCount = (cold.value as any[]).length;
 
-      // Restore originals (discover wrote fresh indexes during the run — keep those)
-      // so the warm run below uses real state, not the fresh-from-scan output.
       for (const { src, bak } of backup) {
         if (fs.existsSync(src)) removeIfExists(bak);
         else if (fs.existsSync(bak)) fs.renameSync(bak, src);
@@ -192,32 +180,22 @@ async function main() {
       console.error(`A. cold discover: ${cold.ms.toFixed(0)}ms, ${sessionsCount} sessions`);
       (globalThis as any).__A = { ms: cold.ms, sessionsCount };
     } finally {
-      // safety net: restore any leftover .benchbak files if the run crashed
       for (const { src, bak } of backup) {
         if (!fs.existsSync(src) && fs.existsSync(bak)) fs.renameSync(bak, src);
       }
     }
   }
 
-  // ------------------------------------------------------------------
-  // B. Warm discover — runs with the index freshly populated from A
-  // ------------------------------------------------------------------
   let warmSessions: any[] = [];
   const warmDistribution = await distribution(async () => {
     warmSessions = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 }) as any[];
   }, 1, 10);
   console.error(`B. warm discover: p50 ${warmDistribution.p50Ms.toFixed(0)}ms, p95 ${warmDistribution.p95Ms.toFixed(0)}ms, ${warmSessions.length} sessions`);
 
-  // ------------------------------------------------------------------
-  // C. Single keystroke (filterSessionsByQuery) — using already-loaded sessions
-  // ------------------------------------------------------------------
   const singleQuery = 'rush deploy';
   const singleKey = await time(() => filterSessionsByQuery(warmSessions, singleQuery));
   console.error(`C. single keystroke ("${singleQuery}"): ${singleKey.ms.toFixed(1)}ms, ${singleKey.value.length} matches`);
 
-  // ------------------------------------------------------------------
-  // D. 10 successive keystrokes (simulates typing a query char by char)
-  // ------------------------------------------------------------------
   const typingQueries = [
     'r', 'ru', 'rus', 'rush', 'rush ',
     'rush d', 'rush de', 'rush dep', 'rush depl', 'rush deploy',
@@ -235,17 +213,11 @@ async function main() {
     `D. 10 successive keystrokes: total ${typingTotal.toFixed(0)}ms, avg ${typingAvg.toFixed(1)}ms/key, final matches ${lastMatches}`,
   );
 
-  // ------------------------------------------------------------------
-  // E. searchContentIndex alone (the heaviest component of D)
-  // ------------------------------------------------------------------
   const contentDistribution = await distribution(
     () => searchContentIndex(warmSessions, 'rush deploy yaml'),
   );
   console.error(`E. searchContentIndex: p50 ${contentDistribution.p50Ms.toFixed(1)}ms, p95 ${contentDistribution.p95Ms.toFixed(1)}ms`);
 
-  // ------------------------------------------------------------------
-  // F/G. Indexed tool-call queries, including same-session distinct calls
-  // ------------------------------------------------------------------
   const toolSinceDays = Number(process.env.BENCH_TOOL_SINCE_DAYS ?? 0);
   const toolSampleLimit = Number(process.env.BENCH_TOOL_SAMPLE ?? warmSessions.length);
   const toolCutoff = toolSinceDays > 0 ? Date.now() - toolSinceDays * 86_400_000 : 0;

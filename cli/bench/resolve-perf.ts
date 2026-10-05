@@ -19,7 +19,7 @@ const exactVer = installed[installed.length - 1];
 const pinned = getGlobalDefault(agent);
 
 function time(fn: () => void, iters: number): { totalMs: number; perCallUs: number } {
-  for (let i = 0; i < Math.min(50, iters); i++) fn(); // warmup
+  for (let i = 0; i < Math.min(50, iters); i++) fn();
   const t0 = performance.now();
   for (let i = 0; i < iters; i++) fn();
   const totalMs = performance.now() - t0;
@@ -30,7 +30,6 @@ const results: Record<string, unknown> = {
   host: { agent, installedCount: installed.length, exactVer, pinned },
 };
 
-// A. cold (cache busted each call) vs warm (cached)
 {
   const cold = time(() => {
     invalidateInstalledVersionsCache(agent);
@@ -44,9 +43,8 @@ const results: Record<string, unknown> = {
   };
 }
 
-// B. fast paths (meta-only; no enumeration warm)
 {
-  listInstalledVersions(agent); // warm
+  listInstalledVersions(agent);
   results.fastPaths = {
     exact: time(() => resolveAgentTargets(`${agent}@${exactVer}`), 100000),
     pinned: pinned ? time(() => resolveAgentTargets(`${agent}@pinned`), 100000) : 'no-default-set',
@@ -54,7 +52,6 @@ const results: Record<string, unknown> = {
   };
 }
 
-// C. enumerate paths
 {
   results.enumeratePaths = {
     latest: time(() => resolveAgentTargets(`${agent}@latest`), 100000),
@@ -62,7 +59,6 @@ const results: Record<string, unknown> = {
   };
 }
 
-// D. 1000x hot-path spec
 results.hotPath1000x = time(() => resolveAgentTargets(`${agent}@${exactVer}`), 1000);
 
 console.log(JSON.stringify(results, null, 2));

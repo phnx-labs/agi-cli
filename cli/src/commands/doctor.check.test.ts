@@ -20,18 +20,12 @@ afterEach(() => {
   if (projectDir) fs.rmSync(projectDir, { recursive: true, force: true });
 });
 
-/** Build a temp HOME with an installed claude@2.0.0 and one source command. */
 function seedHome(): { commandSrc: string } {
   testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-check-home-'));
-  // A separate, empty project dir so the project layer resolves to nothing —
-  // both `sync` and `check` are pointed at it via --cwd so they see the same
-  // (user-only) source set.
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-check-proj-'));
 
   const userDir = path.join(testHome, '.agents');
   const systemDir = path.join(userDir, '.system');
-  // `.system/.git` keeps ensureInitialized() from blocking; `.update-check`
-  // keeps the update probe from reaching the network.
   fs.mkdirSync(path.join(systemDir, '.git'), { recursive: true });
   fs.writeFileSync(
     path.join(systemDir, '.update-check'),
@@ -39,13 +33,11 @@ function seedHome(): { commandSrc: string } {
   );
   fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
 
-  // A fake installed version: a binary so listInstalledVersions() sees it.
   const binDir = path.join(userDir, '.history', 'versions', 'claude', '2.0.0', 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\nexit 0\n');
   fs.chmodSync(path.join(binDir, 'claude'), 0o755);
 
-  // One user-layer source command.
   const commandsDir = path.join(userDir, 'commands');
   fs.mkdirSync(commandsDir, { recursive: true });
   const commandSrc = path.join(commandsDir, 'demo.md');
@@ -54,7 +46,6 @@ function seedHome(): { commandSrc: string } {
   return { commandSrc };
 }
 
-/** Snapshot the manifest so the version reads as `fresh` (real sync, no mocks). */
 function syncSnapshot(): void {
   execFileSync('bun', [INDEX, 'sync', 'claude@2.0.0', '-y', '--cwd', projectDir], {
     cwd: REPO_ROOT,
@@ -66,8 +57,6 @@ function syncSnapshot(): void {
 function runCheck(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync('bun', [INDEX, 'doctor', '--check', '--cwd', projectDir, ...args], {
     cwd: REPO_ROOT,
-    // AGENTS_NO_AUTOPULL keeps the detached background fetch from racing the
-    // git-repo fixtures these tests build under HOME.
     env: { ...process.env, HOME: testHome, AGENTS_NO_AUTOPULL: '1', AGENTS_DEVICES_DIR: path.join(testHome, '.agents', '.history', 'devices') },
     encoding: 'utf-8',
   });
@@ -137,8 +126,6 @@ describe('agents doctor --check — CI drift gate exit code', () => {
   it('exits non-zero when a source drifted since last sync', () => {
     const { commandSrc } = seedHome();
     syncSnapshot();
-    // Change the SOURCE after the snapshot — the exact drift doctor detects but
-    // never failed on.
     fs.writeFileSync(commandSrc, '---\ndescription: demo CHANGED\n---\n\n# demo v2\n');
 
     const r = runCheck();
@@ -148,7 +135,6 @@ describe('agents doctor --check — CI drift gate exit code', () => {
 
   it('exits non-zero for a never-synced installed version (no manifest)', () => {
     seedHome();
-    // No syncSnapshot() → no manifest → the version reads as never-synced.
     const r = runCheck();
     expect(r.status).not.toBe(0);
   });
@@ -174,10 +160,8 @@ describe('agents doctor --check — CI drift gate exit code', () => {
     // staleness, so a present-but-unwired hook read as fresh and exited 0. This proves it now
     // fails, and only on the unwired signal (stale/never-synced/sourceBehind all zero).
     seedHome();
-    syncSnapshot(); // 1st sync: the migrator runs here, clearing legacy agents.yaml
+    syncSnapshot();
 
-    // Post-migration, declare a user-layer hook (hooks-only, no `agents:` map so
-    // the migrator stays quiet on the next sync) and its script.
     const userDir = path.join(testHome, '.agents');
     fs.writeFileSync(
       path.join(userDir, 'agents.yaml'),
@@ -185,10 +169,9 @@ describe('agents doctor --check — CI drift gate exit code', () => {
     );
     fs.mkdirSync(path.join(userDir, 'hooks'), { recursive: true });
     fs.writeFileSync(path.join(userDir, 'hooks', 'demo-guard.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    syncSnapshot(); // 2nd sync: snapshots WITH the hook (fresh) and wires settings.json
-    expect(runCheck('--json').status).toBe(0); // clean: fresh AND wired
+    syncSnapshot();
+    expect(runCheck('--json').status).toBe(0);
 
-    // Now the exact bug state: keep the hook file, strip the settings.json wiring.
     const settings = path.join(
       userDir, '.history', 'versions', 'claude', '2.0.0', 'home', '.claude', 'settings.json',
     );
@@ -211,9 +194,8 @@ describe('agents doctor --check — CI drift gate exit code', () => {
   it('exits non-zero when a source layer is behind origin (repo pull heals it, not --fix)', () => {
     seedHome();
     syncSnapshot();
-    expect(runCheck('--json').status).toBe(0); // clean before the source goes behind
+    expect(runCheck('--json').status).toBe(0);
 
-    // Make ~/.agents a git repo one commit behind its upstream.
     const userDir = path.join(testHome, '.agents');
     const remote = path.join(testHome, 'user-remote.git');
     const other = path.join(testHome, 'user-other');
@@ -227,7 +209,6 @@ describe('agents doctor --check — CI drift gate exit code', () => {
     git(userDir, 'commit', '-m', 'base');
     git(userDir, 'remote', 'add', 'origin', remote);
     git(userDir, 'push', '-u', 'origin', 'main');
-    // Advance the remote from a second clone, then fetch so ~/.agents trails it.
     execFileSync('git', ['clone', remote, other], { stdio: 'ignore' });
     git(other, 'config', 'user.email', 't@e.co');
     git(other, 'config', 'user.name', 'T');

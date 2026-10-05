@@ -42,7 +42,6 @@ function fail(err: unknown, json: boolean): never {
   die(err instanceof Error ? err.message : String(err), 1, { json });
 }
 
-/** Register `agents packages materialize`. */
 export function registerPortablePackageCommands(program: Command): void {
   const packagesCmd = program
     .command('packages')
@@ -88,8 +87,6 @@ export function registerPortablePackageCommands(program: Command): void {
         const resolved = resolveAgentPackage(pkg);
         const receipt = materializeAgentPackage(resolved, { harness, harnessVersion, outputHome });
         if (json) {
-          // Verbatim canonical receipt — byte-identical to the
-          // materialization-receipt.json the materializer wrote into the home.
           console.log(JSON.stringify(receipt, null, 2));
           return;
         }

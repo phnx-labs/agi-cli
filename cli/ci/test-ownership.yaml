@@ -62,6 +62,19 @@ groups:
     checks: [typecheck, binary-smoke]
     budget_sec: 120
 
+  - id: script-common
+    when:
+      - cli/scripts/lib/common.sh
+    tests:
+      - cli/scripts/release.test.ts
+      - cli/scripts/test.test.ts
+      - cli/scripts/release-lease.test.ts
+      - cli/scripts/release-attestation-produce.test.ts
+      - cli/scripts/release-attestation.test.ts
+      - cli/scripts/release-manifest.test.ts
+      - cli/scripts/release-install-smoke.test.ts
+      - cli/scripts/sandbox.test.ts
+
   - id: command-surface
     when:
       - cli/src/commands/**
@@ -181,9 +194,6 @@ groups:
     checks: [typecheck]
     budget_sec: 240
 
-  # 150s, not the default 85s. Moving hooks.ts into hooks/install.ts (PR #2804,
-  # run 32397180788) selected companion + importer tests inside a 129s impact
-  # run (48 files / 1099 tests, all passed). Under 85s the move cannot merge.
   - id: hooks
     when:
       - cli/src/lib/hooks/**
@@ -214,9 +224,11 @@ groups:
 
   - id: impact-policy
     when:
+      - scripts/comment-budget.json
+      - scripts/comment-lines.ts
+      - scripts/comment-lines.test.ts
       - scripts/ci-scope.ts
       - scripts/ci-scope.test.ts
-      - scripts/ci-impact-bench.ts
       - scripts/ci-bench/**
       - scripts/guard-artifacts-confidential.ts
       - scripts/guard-artifacts-confidential.test.ts
@@ -231,17 +243,13 @@ groups:
       - packages/session-tracker/**
     checks: [session-tracker]
 
-# Explicit reviewed exemptions. These paths do not select tests on this Linux
-# gate; native helpers and iOS have their own workflows.
 testless:
   # Pre-existing test-less utility scripts surfaced by the apps/cli to cli rename (RUSH-3189),
   # which made every file read as newly added so the zero-selection check demanded tests. Listed
   # per-file, not by glob, so a genuinely new script still trips the check.
   - cli/scripts/backfill-changelog.ts
   - cli/scripts/bench-boot.sh
-  - cli/scripts/bench-browser-loop.sh
   - cli/scripts/bench-ssh.mjs
-  - cli/scripts/bench-staleness.ts
   - cli/scripts/companion-shim/bin/agents.js
   - cli/scripts/companion-shim/scripts/postinstall.js
   # One-time per-box fleet fix (PHNX-3285): re-enables unprivileged userns so codex's Linux
@@ -251,15 +259,11 @@ testless:
   - cli/scripts/headless-sign-context.sh
   - cli/scripts/release-changelog.ts
   - cli/scripts/remote-sign-mac.sh
-  - cli/scripts/scrub-orphan-branches.sh
-  - cli/scripts/setup-npm-secret.sh
   - cli/scripts/sign-cli-binary.sh
   - cli/tests/bench-concurrent-writes.ts
   - cli/tests/bench-concurrent-writes.worker.ts
   - cli/tests/e2e/container-fresh-install.sh
   - cli/tests/e2e/fresh-install-settings.sh
-  # AGI EXT moved to its own repo (phnx-labs/agi-ext, RUSH-3189); kept mapped so
-  # historical paths never read as unmapped.
   - apps/ext/**
   # apps/cli moved up to cli/ (RUSH-3189 follow-up). The live paths are cli/** below; this old
   # prefix stays mapped so a historical or deleted apps/cli/... path, including this rename (read
@@ -268,18 +272,12 @@ testless:
   - .agents/**
   - assets/**
   - skills/**
-  # demo/ moved under assets/, and openspec/ + root agents.yaml + NPM_CONSOLIDATION.md
-  # were retired (PHNX-3229); kept mapped so those deletions/renames — which the
-  # selector reads as delete+add — never read as unmapped, same as apps/ext above.
   - demo/**
   - openspec/**
   - agents.yaml
   - NPM_CONSOLIDATION.md
   - native/**
   - apps/ios/**
-  # AGI Menu moved to its own repo (phnx-labs/agi-menu, PHNX-4036); kept mapped
-  # so this deletion and any historical path never read as unmapped, same as
-  # apps/ext above.
   - cli/menubar/**
   - cli/bin/**
   - cli/schema/**
@@ -307,3 +305,4 @@ testless:
   - cli/LICENSE
   - cli/CLAUDE.md
   - cli/GEMINI.md
+  - scripts/ci-runner/supervise.sh

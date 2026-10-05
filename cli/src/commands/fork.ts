@@ -12,16 +12,13 @@ import { buildForkRecap, forkLabelFor } from '../lib/session/fork.js';
 interface ForkOptions {
   name?: string;
   device?: string;
-  /** Open the sibling in a real terminal tab instead of in-place; optional backend. */
   terminal?: string | boolean;
 }
 
 /** The two process boundaries fork crosses (preview subprocess and sibling launch), injectable so
  * the argv logic is tested without real CLIs. */
 export interface ForkDeps {
-  /** Run `agents sessions preview <sub…>` and capture stdout + exit status. */
   runPreview: (sub: string[]) => { status: number | null; stdout: string };
-  /** Launch `agents <sub…>` inheriting stdio; returns its exit status. */
   launch: (sub: string[]) => { status: number | null };
 }
 
@@ -29,13 +26,11 @@ function defaultDeps(): ForkDeps {
   return {
     runPreview: (sub) => {
       const p = getCliLaunch(['sessions', 'preview', ...sub]);
-      // stderr inherited so preview's own resolution errors reach the user verbatim.
       const r = spawnSync(p.command, p.args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'inherit'] });
       return { status: r.status, stdout: r.stdout ?? '' };
     },
     launch: (sub) => {
       const l = getCliLaunch(sub);
-      // In-place stdio so the sibling takes over this terminal.
       const r = spawnSync(l.command, l.args, { stdio: 'inherit' });
       return { status: r.status };
     },
@@ -85,7 +80,6 @@ export async function runFork(
 
   const res = deps.runPreview([sessionArg, '--json']);
   if (res.status !== 0) {
-    // preview already explained why on stderr; propagate its exit code.
     process.exitCode = res.status ?? 1;
     return;
   }
@@ -123,9 +117,6 @@ export async function runFork(
     changes: digest?.changes,
   });
 
-  // Launch a NEW same-harness session, load-balanced across accounts (balanced),
-  // seeded with the recap as its opening input. Runs here by default; --device
-  // places it on the fleet; --terminal opens it in a fresh tab where the user works.
   const runArgs = ['run', source.agent, recap, '-i', '--strategy', 'balanced', '--name', options.name || `fork of ${label}`];
   if (options.device) runArgs.push('--device', options.device);
   if (options.terminal !== undefined) {

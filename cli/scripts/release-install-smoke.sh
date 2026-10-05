@@ -4,7 +4,8 @@
 # release-install-smoke.sh <tarball.tgz> [expected-version]
 set -euo pipefail
 
-die() { echo "error: $*" >&2; exit 1; }
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 [[ $# -ge 1 ]] || die "usage: release-install-smoke.sh <tarball.tgz> [expected-version]"
 TGZ="$1"
@@ -38,7 +39,6 @@ else
 fi
 
 OUT="$("${BIN[@]}" --version 2>&1)" || die "installed binary --version failed: $OUT"
-# Accept either a bare version or the CLI's usual "agents-cli x.y.z" line.
 if [[ -n "$EXPECT_VER" ]]; then
   printf '%s\n' "$OUT" | grep -Fq "$EXPECT_VER" \
     || die "installed --version did not contain $EXPECT_VER (got: $OUT)"

@@ -35,7 +35,6 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
       fs.rmSync(home, { recursive: true, force: true });
     });
 
-    /** Write the same `<id>.json` record `agents devices ps` reads. */
     function writeTask(task: Record<string, unknown>): void {
       const dir = path.join(home, '.agents', '.cache', 'hosts');
       fs.mkdirSync(dir, { recursive: true });
@@ -69,8 +68,6 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
 
       const res = runMessage('donerun');
 
-      // Fails loud, names the host and the status, and points at the log —
-      // rather than the generic "no running agent matches" this used to give.
       expect(res.status).not.toBe(0);
       expect(res.out).toContain("Task 'donerun' on host 'somebox' already completed");
       expect(res.out).toContain('agents logs donerun');

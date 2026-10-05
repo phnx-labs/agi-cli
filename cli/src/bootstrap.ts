@@ -15,7 +15,6 @@ import { bootMark } from './lib/boot-profile.js';
 // imported dynamically at their use sites, since fast commands like `--version` and `--help` never
 // need them. This keeps cold starts under the target.
 
-// Get version from package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = path.join(__dirname, '..', 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
@@ -75,13 +74,8 @@ import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/feed/events.js';
 import { stampProvenance } from './lib/event-provenance.js';
 import { die } from './lib/format.js';
-// Leaf (zero imports). Gates the dynamic passthrough import so the ~187ms
-// hosts graph is never loaded when no routing flag is present (RUSH-2374).
 import { hasHostRoutingFlag } from './lib/hosts/routing-flag.js';
 
-// White-label: the shim for a brand (e.g. `jack`) exports AGENTS_BRAND, so the
-// CLI presents its own name/help/errors as the brand. Unbranded (AGENTS_BRAND
-// unset) resolves to 'agents' and everything below is byte-identical to before.
 const BRAND = resolveBrandName();
 
 const program = configureRootCommand(new Command(), BRAND, VERSION);
@@ -92,7 +86,6 @@ program.option('--help-all', 'Show help for all commands');
 // event log (SSH/remote-user attribution added in emit()), with no per-command wiring. `agents
 // events` reads it back. Attached to the root program so every subcommand inherits it.
 
-/** Command path from the acting command up to (but excluding) the `agents` root. */
 function auditCommandPath(cmd: Command): string[] {
   const parts: string[] = [];
   let c: Command | null | undefined = cmd;
@@ -123,14 +116,10 @@ program.hook('preAction', (_thisCommand, actionCommand) => {
     emit('command.start', {
       module: parts[0],
       command: parts.join(' '),
-      // Commander exposes positional operands in actionCommand.args but omits
-      // parsed option values. Audit the real argv so sensitive flags are seen
-      // and redacted instead of silently bypassing the policy.
       args: redactArgs(process.argv.slice(2, 22)),
       cwd: process.cwd(),
     });
   } catch {
-    // Audit logging must never break command dispatch.
   }
 });
 
@@ -158,11 +147,8 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
           source: 'cli',
           meta: durationMs !== undefined ? { durationMs } : undefined,
         });
-      }).catch(() => { /* fail soft */ });
+      }).catch(() => {  });
     }
-    // Disposable perf warehouse — fail-soft spool append (no SQLite on this path).
-    // Skip the perf reader itself (now `agents insights perf`, PHNX-3391) so it
-    // never records its own latency into the board it prints.
     if (durationMs !== undefined && !(parts[0] === 'insights' && parts[1] === 'perf')) {
       // sessionId/agent resolve here the same way emit() resolves them for
       // command.start/command.end (event-provenance.ts); without this every command.end perf
@@ -177,14 +163,12 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
           sessionId,
           agent,
         });
-      }).catch(() => { /* fail soft */ });
+      }).catch(() => {  });
     }
   } catch {
-    // Best-effort completion record; the start line is the durable audit fact.
   }
 });
 
-/** Compare two semver version strings. Returns 1 if a > b, -1 if a < b, 0 if equal. */
 function compareVersions(a: string, b: string): number {
   const partsA = a.split('.').map(Number);
   const partsB = b.split('.').map(Number);
@@ -195,7 +179,6 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Fetch and display changelog entries between two versions from unpkg. */
 async function showWhatsNew(fromVersion: string, toVersion: string): Promise<void> {
   try {
     const response = await fetch(`https://unpkg.com/@phnx-labs/agents-cli@${toVersion}/CHANGELOG.md`);
@@ -212,11 +195,10 @@ async function showWhatsNew(fromVersion: string, toVersion: string): Promise<voi
       console.log();
     }
   } catch {
-    // Silently ignore changelog fetch errors
   }
 }
 
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 import { getUpdateCheckPath, getMigratedSentinelPath, getUserAgentsDir, getRuntimeStateDir } from './lib/state.js';
 import { resolveBrandName, disabledCommandsForActiveBrand } from './lib/brand.js';
 import {
@@ -231,9 +213,6 @@ import {
   type UpdateCheckCache,
 } from './lib/self-update.js';
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
-// Beside the existing update-check cache (RUSH-2324): short-TTL memo of the
-// multi-install PATH scan so every ordinary CLI invocation does not re-walk
-// PATH + known install roots (~1ms warm).
 const MULTI_INSTALL_SCAN_FILE = path.join(path.dirname(UPDATE_CHECK_FILE), '.multi-install-scan');
 
 /** Warn once when a different agents-cli install than the running copy exists on the machine:
@@ -245,13 +224,8 @@ function maybeWarnMultiInstall(): void {
   try {
     runningRoot = resolveRunningPackageRoot(__dirname);
   } catch {
-    // Without a real root for the running copy there is nothing to compare
-    // against, and a guess here is exactly what produced the phantom
-    // "/$bunfs" install. This warning is advisory — stay silent instead.
     return;
   }
-  // RUSH-2324: resolve via the short-TTL scan cache beside `.update-check`.
-  // Fresh cache → skip findAgentsCliInstalls (~1ms PATH walk).
   const inventory = resolveMultiInstallInventory(
     runningRoot,
     VERSION,
@@ -260,7 +234,7 @@ function maybeWarnMultiInstall(): void {
   );
 
   if (inventory.length < 2) {
-    try { fs.unlinkSync(sentinel); } catch { /* nothing recorded */ }
+    try { fs.unlinkSync(sentinel); } catch {  }
     return;
   }
 
@@ -270,7 +244,7 @@ function maybeWarnMultiInstall(): void {
     .join('\n');
   try {
     if (fs.readFileSync(sentinel, 'utf-8') === key) return;
-  } catch { /* not warned for this set yet */ }
+  } catch {  }
 
   console.error(chalk.yellow('Multiple agents-cli installs detected:'));
   for (const info of inventory) {
@@ -295,16 +269,14 @@ function maybeWarnMultiInstall(): void {
   try {
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
     fs.writeFileSync(sentinel, key);
-  } catch { /* best-effort; worst case the warning repeats */ }
+  } catch {  }
 }
 
-/** Determine whether enough time has elapsed since the last registry fetch. */
 function shouldFetchLatest(cache: UpdateCheckCache | null): boolean {
   if (!cache) return true;
   return Date.now() - cache.lastCheck > UPDATE_CHECK_INTERVAL_MS;
 }
 
-/** Fetch the exact latest npm version plus its registry integrity hash. */
 async function fetchNpmPackageMetadata(versionOrTag = 'latest', timeoutMs = 5000): Promise<NpmPackageMetadata> {
   const response = await fetch(`https://registry.npmjs.org/${NPM_PACKAGE_NAME}/${versionOrTag}`, {
     signal: AbortSignal.timeout(timeoutMs),
@@ -356,11 +328,9 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
       await installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot));
     }
   } finally {
-    // Best-effort cleanup of the verified tarball and its temp dir.
     try {
       fs.rmSync(path.dirname(tarball), { recursive: true, force: true });
     } catch {
-      /* leave it for the OS temp sweep */
     }
   }
   await verifyInstalledVersion(packageRoot, metadata.version);
@@ -400,12 +370,10 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
       const { updateMenubarHelperIfNewer } = await import('./lib/menubar/install-menubar.js');
       await updateMenubarHelperIfNewer({ force: true });
     } catch {
-      // Non-fatal.
     }
   }
 }
 
-/** Present an interactive upgrade prompt (TTY) or a one-line hint (non-TTY). */
 async function promptUpgrade(latestVersion: string): Promise<void> {
   const { default: ora } = await import('ora');
   const { confirm, select } = await import('@inquirer/prompts');
@@ -434,9 +402,6 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
     let spinner = ora('Resolving package metadata...').start();
     try {
       const metadata = await fetchNpmPackageMetadata();
-      // The prompt showed the cached latest, which can lag the registry (the
-      // 24h window) — sync the cache to what was actually resolved so later
-      // prompts and the install agree on the same version.
       saveUpdateCheck(UPDATE_CHECK_FILE, metadata.version);
       spinner.succeed(`Resolved ${NPM_PACKAGE_NAME}@${metadata.version}`);
       printResolvedPackage(metadata);
@@ -487,11 +452,9 @@ function refreshUpdateCacheInBackground(): void {
       }
     })
     .catch(() => {
-      /* network error, try again next invocation */
     });
 }
 
-/** Check for available updates using the local cache. Triggers a background refresh if stale. */
 async function checkForUpdates(): Promise<void> {
   if (process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE) return;
 
@@ -499,21 +462,16 @@ async function checkForUpdates(): Promise<void> {
 
   const cache = readUpdateCache(UPDATE_CHECK_FILE);
 
-  // Kick off network refresh in background if stale. Does not block.
   if (shouldFetchLatest(cache)) {
     refreshUpdateCacheInBackground();
   }
 
-  // Prompt based on current cache (may be from a previous run's background refresh).
-  // Skip if the user dismissed this exact version — they'll be prompted again when
-  // a newer version appears.
   if (shouldPromptUpgrade(cache, VERSION)) {
     try {
       await promptUpgrade(cache!.latestVersion);
     } catch (err) {
       const { isPromptCancelled } = await import('./commands/utils.js');
       if (isPromptCancelled(err)) return;
-      /* prompt error, ignore */
     }
   }
 }
@@ -554,24 +512,19 @@ async function maybeBootstrapShimIntegration(
 // re-parsing, VERSION, the npm upgrade helpers). The lazy registrar and the all-commands fallback
 // both call them, so behavior matches the old eager registration.
 
-// memory is a first-class resource command (see commands/memory.ts via
-// COMMAND_LOADERS). The old memory→rules tombstone was removed in RUSH-1330.
 
-/** Deprecated `perms` alias — re-parses as `permissions`. */
 function registerPermsAliasCommand(p: Command): void {
   p.command('perms', { hidden: true })
     .allowUnknownOption()
     .allowExcessArguments()
     .action(async () => {
       console.log(chalk.yellow('Deprecated: Use "agents permissions" instead of "agents perms"\n'));
-      // Re-parse with 'permissions' command
       const args = process.argv.slice(2);
       args[0] = 'permissions';
       await program.parseAsync(['node', 'agents', ...args]);
     });
 }
 
-/** Deprecated `exec` alias — re-parses as `run`. */
 function registerExecAliasCommand(p: Command): void {
   p.command('exec', { hidden: true })
     .allowUnknownOption()
@@ -584,7 +537,6 @@ function registerExecAliasCommand(p: Command): void {
     });
 }
 
-/** Deprecated `jobs` / `cron` aliases — re-parse as `routines`. */
 function registerJobsCronAliasCommand(p: Command, alias: string): void {
   p.command(alias, { hidden: true })
     .allowUnknownOption()
@@ -654,7 +606,7 @@ function registerInternalCommand(p: Command): void {
     .option('--command <command>', 'The command that was blocked')
     .action((opts: { surface?: string; id?: string; error?: string; command?: string }) => {
       if (!opts.surface || !opts.id) {
-        process.exit(0); // fail-open: never break the caller
+        process.exit(0);
       }
       emitFriction(opts.surface, opts.id, {
         ...(opts.error ? { error: opts.error } : {}),
@@ -671,13 +623,10 @@ function registerInternalCommand(p: Command): void {
         const refs = await listMergeableRefs();
         if (refs) process.stdout.write(`${refs}\n`);
       } catch {
-        // Empty observation — never write stderr (command.ts would treat it
-        // as the poll result and fire `mode: every` on the error text).
       }
     });
 }
 
-/** Runtime action for the shared `agents upgrade [version]` command definition. */
 async function runUpgrade(version: string | undefined, options: UpgradeOptions): Promise<void> {
       const { default: ora } = await import('ora');
       const { confirm } = await import('@inquirer/prompts');
@@ -693,8 +642,6 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
           return;
         }
 
-        // For `latest` (no explicit version) skip when already ahead. When a
-        // version is named explicitly, honor it even if it's a downgrade.
         if (!version && compareVersions(resolvedVersion, VERSION) <= 0) {
           spinner.succeed(`Already ahead of latest (${VERSION} >= ${resolvedVersion})`);
           return;
@@ -717,8 +664,6 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
         spinner = ora(`${direction === 'Downgrade' ? 'Downgrading' : 'Upgrading'} ${VERSION} -> ${resolvedVersion}...`).start();
         await installResolvedPackage(metadata);
         spinner.succeed(`${direction}d to ${resolvedVersion}`);
-        // After a successful upgrade, drop latent pre-fix / npx-cache /
-        // unsafe-legacy copies so the new binary is not shadowed (RUSH-2415).
         try {
           const runningRoot = resolveRunningPackageRoot(__dirname);
           const purge = remediateStaleAgentsCliInstalls({
@@ -744,9 +689,7 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
             ));
           }
         } catch {
-          /* best-effort; upgrade already succeeded */
         }
-        // Only show the changelog for a genuine upgrade range.
         if (compareVersions(resolvedVersion, VERSION) > 0) {
           await showWhatsNew(VERSION, resolvedVersion);
         }
@@ -765,9 +708,7 @@ function registerUpgradeRuntimeCommand(p: Command): void {
   registerUpgradeCommand(p, runUpgrade);
 }
 
-// --- Lazy registration orchestration -----------------------------------------
 
-/** Import a command module via its loader and register it on the program. */
 async function reg(loader: ModuleLoader): Promise<void> {
   (await loader())(program);
 }
@@ -778,7 +719,6 @@ async function reg(loader: ModuleLoader): Promise<void> {
 async function registerEagerForRequest(name: string): Promise<boolean> {
   switch (name) {
     case 'perms':
-      // The action re-parses as `permissions`, so that target must exist too.
       registerPermsAliasCommand(program);
       for (const loader of COMMAND_LOADERS['permissions'] ?? []) await reg(loader);
       return true;
@@ -792,12 +732,10 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       for (const loader of COMMAND_LOADERS['routines'] ?? []) await reg(loader);
       return true;
     case 'check':
-      // The action re-parses as `doctor --check`, so doctor must exist too.
       registerCheckTombstoneCommand(program);
       for (const loader of COMMAND_LOADERS['doctor'] ?? []) await reg(loader);
       return true;
     case 'resources':
-      // The action re-parses as `view --merged`, so view must exist too.
       registerResourcesTombstoneCommand(program);
       for (const loader of COMMAND_LOADERS['view'] ?? []) await reg(loader);
       return true;
@@ -832,14 +770,11 @@ program.on('command:*', (operands) => {
     // local re-parse would silently run a corrected `docto --device box` locally, not remotely,
     // so re-run the router with the CORRECTED name first (RUSH-2022 review r2).
     void (async () => {
-      // Register only the corrected command — never the full tree (RUSH-2329).
       if (LAZY_COMMAND_NAMES.has(closest)) {
         for (const loader of COMMAND_LOADERS[closest] ?? []) await reg(loader);
       } else {
         await registerEagerForRequest(closest);
       }
-      // Same RUSH-2374 gate as the main router: typo corrections with no routing
-      // flag must not load the hosts graph just to no-op.
       if (hasHostRoutingFlag(args)) {
         const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
         if (await maybeRunOnHost(closest, args)) {
@@ -858,9 +793,6 @@ program.on('command:*', (operands) => {
   process.exit(1);
 });
 
-// Parse the invocation shape up front: the first non-flag token is the command,
-// and the doc flags (--version/--help/-h) drive both the registration strategy
-// and whether the update check + background sync run at all.
 const passedArgs = normalizeResumeDeviceArgs(process.argv.slice(2));
 process.argv.splice(2, process.argv.length - 2, ...passedArgs);
 // Commander owns `--version` on the root and intercepts it even after `sessions`, before the
@@ -881,8 +813,6 @@ if (passedArgs[0] === 'sessions') {
 const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
 const verboseStartup = passedArgs.includes('--verbose');
 const helpAllRequested = passedArgs.includes('--help-all');
-// Help and version output are pure documentation — they must never gate on
-// setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
 const helpOrVersionRequested = passedArgs.some(
   (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
 );
@@ -909,21 +839,12 @@ if (
   }
 }
 
-// Register only the command(s) this invocation actually uses. Lazy commands
-// (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
-// Root help (--help, --help-all, or bare invocation) needs the full command tree
-// so the formatter can render real descriptions and the compact front-door
-// pointer can point at the real remaining surface.
 const rootHelpRequested =
   requestedCommand === undefined &&
   (helpAllRequested || passedArgs.includes('--help') || passedArgs.includes('-h') || passedArgs.length === 0);
-// Set when the requested name maps to no command. Spellcheck uses the plain
-// KNOWN_TOP_LEVEL_COMMANDS string set — never registerAllEagerCommands just to
-// build the candidate list (RUSH-2329; was 250-330ms of module evaluation).
 let requestedIsUnknown = false;
 if (requestedIsDisabled) {
-  // Brand hid this command: resolve as unknown without loading the full tree.
   requestedIsUnknown = true;
 } else if (rootHelpRequested) {
   await registerAllCommands(program);
@@ -934,19 +855,12 @@ if (requestedIsDisabled) {
   }
 }
 
-// Mirror main: help conventions are applied after the eager command tree and
-// before the lazy commands, so the latter inherit the root's custom help
-// formatter instead of getting the per-command recursive pass.
 applyGlobalHelpConventions(program);
 
-// Compact root help shows only the measured front-door groups plus a pointer to
-// the full surface. --help-all disables compact mode so every command is listed.
 if (!helpAllRequested) {
   setCompactRootHelp(program);
 }
 
-// Lazy commands pull in the SQLite-backed session/cloud stack; register them
-// only when explicitly requested, keeping lightweight commands off that path.
 if (isLazyRequest && !requestedIsDisabled) {
   for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
 } else if (requestedIsUnknown && requestedCommand) {
@@ -961,11 +875,7 @@ if (isLazyRequest && !requestedIsDisabled) {
     !requestedIsDisabled &&
     !RETIRED_TOP_LEVEL_COMMANDS.has(requestedCommand)
   ) {
-    // Auto-correct: register ONLY the corrected command, then re-route --device
-    // and reparse under the real name (RUSH-2329 + RUSH-2022 review r2).
     passedArgs[0] = closest;
-    // Keep process.argv in sync for the command:* safety-net and any code that
-    // re-reads argv after this point.
     const argvCmdIndex = process.argv.findIndex((a, i) => i >= 2 && !a.startsWith('-'));
     if (argvCmdIndex >= 0) process.argv[argvCmdIndex] = closest;
 
@@ -982,7 +892,6 @@ if (isLazyRequest && !requestedIsDisabled) {
       }
     }
   } else {
-    // No auto-correct: print the suggestion and exit without loading modules.
     console.error(`error: unknown command '${requestedCommand}'`);
     if (closest && minDist <= 3) {
       console.error(`(Did you mean ${closest}?)`);
@@ -991,9 +900,6 @@ if (isLazyRequest && !requestedIsDisabled) {
   }
 }
 
-// White-label: remove any commands this brand disabled so they resolve as
-// unknown. Unbranded or nothing-disabled → no-op. After auto-correct we may
-// have registered a non-disabled command; strip only if it is still listed.
 if (brandDisabled.size > 0) {
   const kept = program.commands.filter((c) => !brandDisabled.has(c.name()));
   if (kept.length !== program.commands.length) {
@@ -1017,25 +923,16 @@ const isReadOnlyUpdatePreview =
   passedArgs.find((arg) => !arg.startsWith('-')) === 'update' &&
   passedArgs.includes('--check');
 
-// Pure documentation paths (--version / --help / -h / --help-all) return
-// immediately: skip the update check (PATH scan + cache read) and the detached
-// background sync (spawns a child process) that every other invocation runs.
 if (!isDocumentationRequest) {
   bootMark('bootstrap:evaluated');
   if (!isReadOnlyUpdatePreview) {
-    // Run update check before parsing so the upgrade notice/prompt precedes output.
     await checkForUpdates();
 
-    // Fire-and-forget the background sync. System repo gets a real fast-forward
-    // pull (read-only locally, safe). User repo and extras get fetch-only + a
-    // status marker that `agents doctor` surfaces as a repo-behind warning.
     const { spawnDetachedSync } = await import('./lib/auto-pull.js');
     spawnDetachedSync();
   }
 }
 
-// First-run experience: no args + no config yet + TTY -> launch interactive setup.
-// Skipped when stdin/stdout isn't a terminal (CI, pipes) or when user passes any args.
 const metaFilePath = path.join(getUserAgentsDir(), 'agents.yaml');
 const firstRun =
   passedArgs.length === 0 &&
@@ -1055,9 +952,6 @@ if (firstRun) {
   process.exit(0);
 }
 
-// Every command requires the system repo to be cloned first. `setup` is the
-// command that does the cloning; `uninstall` is its reverse and must run even
-// from a broken/half-setup state (that is exactly when you want to tear down).
 const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 
 // Fold legacy ~/.agents-system/ into ~/.agents/.system/ before ensureInitialized, which exits on
@@ -1067,7 +961,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isR
   try {
     const { foldLegacySystemRepo } = await import('./lib/migrate-fold.js');
     foldLegacySystemRepo();
-  } catch { /* must never block CLI startup */ }
+  } catch {  }
 }
 
 if (
@@ -1096,16 +990,16 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isR
       if (fs.existsSync(sentinel) && fs.readFileSync(sentinel, 'utf-8').trim() === sentinelValue) {
         needRun = false;
       }
-    } catch { /* best-effort — fall through to run */ }
+    } catch {  }
     if (needRun) {
       const { runMigration } = await import('./lib/installations/migrate.js');
       await runMigration();
       try {
         fs.mkdirSync(path.dirname(sentinel), { recursive: true });
         fs.writeFileSync(sentinel, sentinelValue);
-      } catch { /* best-effort */ }
+      } catch {  }
     }
-  } catch { /* migration must never block CLI startup */ }
+  } catch {  }
 }
 
 // Auto-enable the macOS menu-bar helper once, best-effort and idempotent: it no-ops off darwin,
@@ -1119,7 +1013,7 @@ if (
   try {
     const { installMenubarLaunchAgentOnUpgrade } = await import('./lib/menubar/install-menubar.js');
     installMenubarLaunchAgentOnUpgrade();
-  } catch { /* never block CLI startup on the menu bar */ }
+  } catch {  }
 }
 
 // Bare invocation prints the root help: commander auto-displays help on an empty parse only when
@@ -1131,9 +1025,6 @@ if (passedArgs.length === 0) {
 }
 
 try {
-  // The shim self-heal regenerates shims / adopts launchers / edits PATH — all
-  // writes, so a read-only `agents update --check` skips it too (same gate as
-  // the migration/menu-bar steps above) while still parsing normally.
   if (!isReadOnlyUpdatePreview) {
     await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup);
   }

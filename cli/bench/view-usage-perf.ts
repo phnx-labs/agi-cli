@@ -39,14 +39,13 @@ function fakeSnapshot(n: number): UsageSnapshot {
 async function benchConcurrencyCap(): Promise<{ peak: number; totalMs: number }> {
   let inFlight = 0;
   let peak = 0;
-  const items = Array.from({ length: 14 }, (_, i) => i); // typical multi-account view
+  const items = Array.from({ length: 14 }, (_, i) => i);
   const start = process.hrtime.bigint();
   await mapBounded(
     items,
     async () => {
       inFlight++;
       peak = Math.max(peak, inFlight);
-      // Simulate a delayed usage HTTP call (the pile-up case).
       await new Promise((r) => setTimeout(r, 40));
       inFlight--;
     },
@@ -61,8 +60,7 @@ async function main(): Promise<void> {
   console.log(`USAGE_FETCH_CONCURRENCY = ${USAGE_FETCH_CONCURRENCY}`);
   console.log();
 
-  // --- Meter width: the alignment regressor ---
-  const wide = fakeSnapshot(4); // Antigravity-like
+  const wide = fakeSnapshot(4);
   const uncapped = formatUsageSummary('Max', wide, 3);
   const capped = formatUsageSummary('Max', wide, 3, { maxWindows: 2 });
   console.log('Overview meter width (4 windows, plan=Max):');
@@ -71,7 +69,6 @@ async function main(): Promise<void> {
   console.log(`  pickCompact:      ${pickCompactUsageWindows(wide.windows, 2).map((w) => w.shortLabel).join(', ')}`);
   console.log();
 
-  // --- Concurrency cap under delayed responses ---
   const { peak, totalMs } = await benchConcurrencyCap();
   console.log('Cold multi-account fan-out (14 identities, 40ms simulated RTT each):');
   console.log(`  peak concurrent fetches = ${peak}  (cap ${USAGE_FETCH_CONCURRENCY})`);
@@ -80,7 +77,6 @@ async function main(): Promise<void> {
   console.log(`  but delayed/straggling calls would all stay open together.`);
   console.log();
 
-  // --- Format throughput (CPU overhead of the new path) ---
   const iters = 5000;
   const snap = fakeSnapshot(2);
   const t0 = process.hrtime.bigint();

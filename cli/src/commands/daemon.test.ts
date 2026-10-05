@@ -30,7 +30,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     expect(res.stdout).toContain('funnel');
     expect(res.stdout).toContain('logs');
     expect(res.stdout).toContain('doctor');
-    // No `jobs` subcommand — scheduled work is `agents routines`, always.
     expect(res.stdout).not.toMatch(/^\s*jobs\b/m);
   });
   it('nests Funnel management under daemon and removes the top-level command', () => {
@@ -109,8 +108,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
   });
   it('a stale health.json is not trusted as live when the daemon is not running (RUSH-2368)', () => {
     const home = makeHome();
-    // Seed a supervisor record claiming session-index is "running", but no daemon
-    // is actually up in this HOME (kill -9 / crash / never relaunched).
     const healthPath = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'health.json');
     fs.mkdirSync(path.dirname(healthPath), { recursive: true });
     fs.writeFileSync(healthPath, JSON.stringify({
@@ -123,8 +120,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     expect(res.status).toBe(0);
     const payload = JSON.parse(res.stdout) as { services: Array<{ id: string; state: string }> };
     const si = payload.services.find((s) => s.id === 'session-index')!;
-    // The daemon is down, so the stale 'running' record must render as 'stopped' —
-    // trusting it would contradict the live-probed hosted-socket rows in the same output.
     expect(si.state).toBe('stopped');
   });
   it(
@@ -136,8 +131,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
       let ownDuplicate: ChildProcess | undefined;
       let foreignFixture: ChildProcess | undefined;
       try {
-        // A real __daemon-run process registered in `home`'s OWN registry — a
-        // genuine duplicate (e.g. a predecessor that crashed without cleanup).
         ownDuplicate = await spawnFakeRegisteredDaemon(home);
         // A real __daemon-run process in a separate registry (`otherHome`), standing in for the
         // leaked vitest fixture the ticket was filed over: different HOME, so a different
@@ -174,7 +167,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     await new Promise((r) => setTimeout(r, 200));
     registerInstance(home, child.pid!);
     try {
-      // Still on disk -> not stale.
       const before = JSON.parse(run(home, ['status', '--json']).stdout);
       expect(before.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
 
@@ -189,19 +181,16 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
       expect(text.stdout).toContain('Stale code');
       expect(text.stdout).toContain(String(child.pid));
 
-      // And it is a health problem, not just a display row.
       const health = JSON.parse(run(home, ['doctor', '--json']).stdout);
       expect(health.problems.some((p: string) => p.includes('deleted from disk'))).toBe(true);
     } finally {
-      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
       fs.rmSync(scriptDir, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
     }
   }, 90_000);
   it('does not flag a non-path entry as deleted code', async () => {
     const home = makeHome();
-    // `node -e '<code>' __daemon-run` — the second-to-last token is a code blob,
-    // not a file. It "does not exist on disk" and must NOT be reported.
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
       stdio: 'ignore',
     });
@@ -211,15 +200,12 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
       expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
     } finally {
-      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
   it('does not accuse a live daemon whose entry path contains spaces', async () => {
     const home = makeHome();
-    // `ps` renders the path unquoted, so the tokenizer splits it and the
-    // second-to-last token is a relative fragment. The absolute-path guard is
-    // what keeps a HEALTHY daemon on such a path from being reported.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents stale space-'));
     const sub = path.join(dir, 'sub');
     fs.mkdirSync(sub, { recursive: true });
@@ -232,7 +218,7 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
       expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
     } finally {
-      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
       fs.rmSync(dir, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -267,21 +253,17 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
         'must NOT be a doctor problem',
       ).toBe(false);
 
-      // And the text footer must not offer `kill` under a section whose only
-      // rows are visibility-tier — the same harm via the render layer.
       const text = run(home, ['status']).stdout;
       expect(text).toContain('Stale code');
       expect(text).toContain('nothing for you to stop here');
       expect(text).not.toContain('kill <pid>');
     } finally {
-      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
 
-  // root ignores mode bits, so the EACCES condition cannot be produced there and
-  // the test would pass without exercising anything. Not flake suppression.
   it.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
     'does not call an unreadable entry deleted (EACCES is not ENOENT)', async () => {
     const home = makeHome();
@@ -293,9 +275,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     const child = spawn(process.execPath, [script, '__daemon-run'], { stdio: 'ignore' });
     await new Promise((r) => setTimeout(r, 200));
     registerInstance(home, child.pid!);
-    // The file is present the whole time; only its parent becomes untraversable.
-    // fs.existsSync cannot tell this from deletion, which is the bug this pins:
-    // reporting it would tell the user to kill a healthy daemon they cannot stat.
     fs.chmodSync(inner, 0o000);
     try {
       const stillThere = (() => { try { fs.chmodSync(inner, 0o700); const ok = fs.existsSync(script); fs.chmodSync(inner, 0o000); return ok; } catch { return false; } })();
@@ -304,8 +283,8 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
       const payload = JSON.parse(run(home, ['status', '--json']).stdout);
       expect(payload.staleBinaries.some((s: { pid: number }) => s.pid === child.pid)).toBe(false);
     } finally {
-      try { fs.chmodSync(inner, 0o700); } catch { /* ignore */ }
-      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+      try { fs.chmodSync(inner, 0o700); } catch {  }
+      try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
       fs.rmSync(outer, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
     }

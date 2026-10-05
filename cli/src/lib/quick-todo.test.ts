@@ -100,7 +100,7 @@ describe('addQuickTodo', () => {
     });
   });
 
-  it('uses --project only when the text names none, and passes priority none when no ! is typed', async () => {
+  it('uses --project when the text names none, and passes priority none when no ! is typed', async () => {
     const { linear, asked } = recordedLinear({});
     await addQuickTodo('Call back', { project: 'agi', defs: [agi], now: NOW }, linear);
     expect(asked[0]).toEqual(['create', '--description', QUICK_TODO_MARKER, '--status', 'Todo', '--cycle', 'active',
@@ -118,6 +118,32 @@ describe('addQuickTodo', () => {
     const quiet = recordedLinear({ [args]: { stdout: '', stderr: 'Similar existing tickets (consider enriching one instead of creating):\nError: Issue create failed\n' } });
     expect(await addQuickTodo('Call back #Nope', { defs: [agi], now: NOW }, quiet.linear))
       .toEqual({ ok: false, todo: null, message: 'Issue create failed' });
+  });
+
+  it('sends the form fields, each beating the same field typed in the line', async () => {
+    const { linear, asked } = recordedLinear({});
+    await addQuickTodo('Rotate the share token #Rush tomorrow !!', {
+      project: 'agi', description: '  Expires Oct 20.\nMint a new one.  ', assignee: 'bisma', due: '2026-10-09', priority: 'low', defs: [agi], now: NOW,
+    }, linear);
+    expect(asked[0]).toEqual(['create', '--description', `Expires Oct 20.\nMint a new one.\n\n${QUICK_TODO_MARKER}`, '--status', 'Todo',
+      '--cycle', 'active', '--skip-milestone', '--priority', 'low', '--project', 'AGI', '--due-date', '2026-10-09',
+      '--assign', 'bisma', '--', 'Rotate the share token']);
+    await addQuickTodo('Call back', { assignee: 'me', defs: [agi], now: NOW }, linear);
+    expect(asked[1]).not.toContain('--assign');
+  });
+
+  it('refuses a short or long title, a past or malformed due date and a huge description, before calling linear', async () => {
+    const { linear, asked } = recordedLinear({});
+    const refuse = (text: string, extra: Partial<Parameters<typeof addQuickTodo>[1]> = {}) =>
+      addQuickTodo(text, { defs: [agi], now: NOW, ...extra }, linear).then((r) => (expect(r.ok).toBe(false), r.message));
+    expect(await refuse('ok')).toBe('The title needs at least 3 characters.');
+    expect(await refuse('x'.repeat(121))).toBe('The title is 121 characters; the limit is 120. Put the rest in the description.');
+    expect(await refuse('Call back', { due: '2026-10-03' })).toBe('The due date 2026-10-03 is in the past.');
+    expect(await refuse('Call back', { due: '2026-02-30' })).toBe('Expected a due date like 2026-10-09, got "2026-02-30".');
+    expect(await refuse('Call back', { description: 'x'.repeat(10_001) })).toBe('The description is over 10,000 characters.');
+    expect(asked).toHaveLength(0);
+    await addQuickTodo('Call back', { due: '2026-10-04', defs: [agi], now: NOW }, linear);
+    expect(asked[0]).toContain('2026-10-04');
   });
 
   it('reports a created issue as created even when reading it back fails, so a retry does not duplicate it', async () => {

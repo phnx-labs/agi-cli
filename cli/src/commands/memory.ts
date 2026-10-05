@@ -23,7 +23,6 @@ import {
 import { supports } from '../lib/capabilities.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Register the `agents memory` command tree. */
 export function registerMemoryCommands(program: Command): void {
   const memoryCmd = program
     .command('memory')

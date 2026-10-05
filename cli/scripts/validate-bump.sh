@@ -18,7 +18,6 @@ read -r PMAJ PMIN PPAT <<< "$(parse_v "$PKG_JSON_VERSION")"
 read -r SMAJ SMIN SPAT <<< "$(parse_v "$SWARMIFY_LATEST")"
 read -r TMAJ TMIN TPAT <<< "$(parse_v "$TARGET")"
 
-# Strictly-newer semver-triple compare: is $1.$2.$3 above $4.$5.$6?
 newer_than() {
   [[ $1 -gt $4 ]] && return 0
   [[ $1 -eq $4 && $2 -gt $5 ]] && return 0
@@ -34,11 +33,8 @@ elif [[ $TMAJ -eq $CMAJ && $TMIN -eq $((CMIN + 1)) && $TPAT -eq 0 ]]; then
 elif [[ $TMAJ -eq $((CMAJ + 1)) && $TMIN -eq 0 && $TPAT -eq 0 ]]; then
   BUMP="major"
 elif [[ "$TARGET" == "$PHNX_LATEST" ]] && newer_than "$TMAJ" "$TMIN" "$TPAT" "$SMAJ" "$SMIN" "$SPAT"; then
-  # Shim catch-up rerun after a partial publish: @phnx is already at target and
-  # only the frozen @companion shim is behind.
   BUMP="shim-catchup"
 elif [[ "$TARGET" == "$PKG_JSON_VERSION" ]] && newer_than "$PMAJ" "$PMIN" "$PPAT" "$CMAJ" "$CMIN" "$CPAT"; then
-  # Main accumulated unpublished chore(release) bumps. Publish what main says.
   BUMP="phnx-catchup"
 elif [[ $TMAJ -eq $PMAJ && $TMIN -eq $PMIN && $TPAT -eq $((PPAT + 1)) ]] \
      && newer_than "$PMAJ" "$PMIN" "$PPAT" "$CMAJ" "$CMIN" "$CPAT"; then
@@ -56,8 +52,6 @@ fi
   echo "  $CMAJ.$CMIN.$((CPAT + 1))   (patch)"
   echo "  $CMAJ.$((CMIN + 1)).0   (minor)"
   echo "  $((CMAJ + 1)).0.0   (major)"
-  # Only advertise the main-ahead options when main actually IS ahead, so the
-  # script never tells an operator to run a version it would then reject.
   if newer_than "$PMAJ" "$PMIN" "$PPAT" "$CMAJ" "$CMIN" "$CPAT"; then
     echo "  $PKG_JSON_VERSION   (phnx-catchup: package.json is ahead of registry)"
     echo "  $PMAJ.$PMIN.$((PPAT + 1))   (patch-from-main: the next patch after an unpublishable main)"

@@ -19,9 +19,6 @@ describe('permissions add broad grant gate', () => {
   // also hold for `return !allowBroadPermissions`, a guard that ignored `permissions` and refused
   // every install, so nothing proved it inspects the rules it is named for.
   it('lets a narrowly-scoped pack through even without --allow-broad-permissions', () => {
-    // Scoped on both axes: a specific bash command, and a read confined to a
-    // subtree. `Read(*)` would NOT do — containsBroadGrants counts a bare `*`
-    // or `**` read/write pattern as broad (lib/permissions.ts:112-115).
     const permissions = pack('narrow', ['Bash(git status)', 'Read(src/**)']);
 
     expect(shouldRefuseBroadPermissions(permissions, false)).toBe(false);

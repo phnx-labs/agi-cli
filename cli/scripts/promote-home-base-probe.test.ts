@@ -11,7 +11,6 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const PROBE = path.resolve(__dirname, 'promote-home-base-probe.sh');
 const RELEASE = path.resolve(__dirname, 'release.sh');
 
-/** A temp bin dir of stub executables; every listed name exits 0. */
 function stubBin(names: string[], overrides: Record<string, string> = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'promote-probe-bin-'));
   for (const name of names) {
@@ -71,8 +70,6 @@ describe('promote-home-base-probe.sh', () => {
   });
 
   it('performs no git/gh/npm mutations (it must not be able to advance a release)', () => {
-    // The whole point is to fail BEFORE the merge + tag. Strip comments and
-    // string-literal contents so an error message is not mistaken for a command.
     const code = fs
       .readFileSync(PROBE, 'utf-8')
       .split('\n')
@@ -100,8 +97,6 @@ describe('promote-home-base-probe.sh', () => {
  * release.sh; the static ordering test proves the call is placed right, this proves it fails loud.
  * `&& rc=0 || rc=$?` keeps the die branch reachable. */
 function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: string } {
-  // Extract the function definition (from its header to the first line that is a
-  // bare `}` at column 0) rather than sourcing release.sh, which executes.
   const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
   const start = lines.findIndex((l) => l.startsWith('assert_promote_home_base() {'));
   expect(start, 'assert_promote_home_base() { not found').toBeGreaterThanOrEqual(0);
@@ -111,16 +106,12 @@ function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: st
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'assert-promote-preflight-'));
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
-  // Stand in for the probe with a real script on the exact path the function
-  // invokes (`scripts/promote-home-base-probe.sh`, run in ON_HOME_BASE mode).
   const stub =
     probeExit === 'fail'
       ? "#!/usr/bin/env bash\nprintf 'promote-probe: gh is not authenticated\\n' >&2\nexit 1\n"
       : '#!/usr/bin/env bash\necho promote-ready\nexit 0\n';
   fs.writeFileSync(path.join(dir, 'scripts/promote-home-base-probe.sh'), stub, { mode: 0o755 });
 
-  // Harness: the real release.sh errexit settings + minimal stubs for the shell
-  // helpers the function calls, then the real function body, then invoke it.
   const harness = [
     'set -euo pipefail',
     'ON_HOME_BASE=true',
@@ -141,10 +132,9 @@ describe('release.sh: assert_promote_home_base fails loud under set -e', () => {
   it('aborts with the actionable die message when the probe fails', () => {
     const { status, out } = runAssert('fail');
     expect(status).not.toBe(0);
-    // The die branch MUST run -- the historical bug was errexit skipping it.
     expect(out).toContain('DIE:');
     expect(out).toContain('cannot promote + publish');
-    expect(out).toContain('promote-probe: gh is not authenticated'); // the probe's diagnostic is surfaced
+    expect(out).toContain('promote-probe: gh is not authenticated');
   });
 
   it('reports phase_ok and exits 0 when the probe passes', () => {
@@ -163,9 +153,6 @@ describe('release.sh: the promote preflight gates the mutating phases (RUSH-3026
     const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const call = lines.findIndex((l) => l.trim() === 'assert_promote_home_base');
     expect(call, 'assert_promote_home_base must be invoked').toBeGreaterThanOrEqual(0);
-    // The version-bump merge is now the async, post-publish `if … && gh pr merge …`
-    // form (RUSH-2395 decouple), so match `gh pr merge "$PR_NUMBER" --rebase`
-    // anywhere on the line rather than anchored to start-of-line.
     const merge = lines.findIndex((l) => /gh pr merge "\$PR_NUMBER" --rebase/.test(l));
     const tag = lines.findIndex((l) => /^git push origin "v\$TARGET"$/.test(l));
     expect(merge).toBeGreaterThan(call);
@@ -175,7 +162,6 @@ describe('release.sh: the promote preflight gates the mutating phases (RUSH-3026
   it('the dry-run path exits before the preflight (a dry-run must not ssh-probe anything)', () => {
     const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const dryRunExit = lines.findIndex((l) => l.includes('Dry run looks good.'));
-    // The bare CALL line, not the `assert_promote_home_base() {` definition.
     const preflightCall = lines.findIndex((l) => l.trim() === 'assert_promote_home_base');
     expect(dryRunExit).toBeGreaterThanOrEqual(0);
     expect(preflightCall).toBeGreaterThanOrEqual(0);

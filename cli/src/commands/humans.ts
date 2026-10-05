@@ -5,7 +5,6 @@ import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
 import { readHumans, getOwnerFromHumans } from '../lib/humans.js';
 
-/** Register the `agents humans` command tree. */
 export function registerHumansCommands(program: Command): void {
   const humansCmd = program
     .command('humans')

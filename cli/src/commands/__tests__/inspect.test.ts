@@ -7,8 +7,6 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
-// Run tsx via `node node_modules/tsx/dist/cli.mjs`, not the .bin/tsx shim: on
-// Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell.
 const tsxBin = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 function mkdir(p: string): void {
@@ -25,11 +23,9 @@ function writeFile(p: string, content: string): void {
 function makeFixture(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-test-' + crypto.randomBytes(4).toString('hex') + '-'));
 
-  // ensureInitialized() looks for ~/.agents/.system/.git as the setup marker.
   mkdir(path.join(home, '.agents', '.system', '.git'));
   writeFile(path.join(home, '.agents', '.system', 'hooks.yaml'), '{}\n');
 
-  // Suppress the update-check network call.
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as { version: string };
   mkdir(path.join(home, '.agents', '.cache'));
   // A normal (non-isolated) install owns the bare shim; the fixture omitted it and described an
@@ -43,34 +39,28 @@ function makeFixture(): string {
     JSON.stringify({ lastCheck: Date.now(), latestVersion: pkg.version })
   );
 
-  // Versioned Claude install: ~/.agents/.history/versions/claude/9.9.9/home/.claude/
   const versionHome = path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9', 'home');
   const claudeCfg = path.join(versionHome, '.claude');
   mkdir(claudeCfg);
   writeFile(path.join(claudeCfg, 'hooks', 'local-only.sh'), '#!/bin/sh\nexit 0\n');
 
-  // Default pin
   writeFile(
     path.join(home, '.agents', 'agents.yaml'),
     'agents:\n  claude: 9.9.9\nrun:\n  claude:\n    strategy: balanced\n'
   );
 
-  // User-scoped skill that should appear in inspect's resources & be drillable.
-  // listInstalledSkillsWithScope reads from the version home's .claude/skills/<name>/SKILL.md.
   const skillDir = path.join(claudeCfg, 'skills', 'demo-skill');
   writeFile(
     path.join(skillDir, 'SKILL.md'),
     '---\nname: demo-skill\ndescription: A demo skill for inspect tests.\ntriggers: demo, hello\n---\n\nBody.\n'
   );
 
-  // A second skill so the fuzzy/typo path has something to suggest.
   const skill2Dir = path.join(claudeCfg, 'skills', 'release');
   writeFile(
     path.join(skill2Dir, 'SKILL.md'),
     '---\nname: release\ndescription: Publish packages to a registry.\n---\n\nBody.\n'
   );
 
-  // User-scoped command.
   writeFile(
     path.join(claudeCfg, 'commands', 'hello.md'),
     '---\ndescription: Say hello.\n---\n\nGreet the user.\n'
@@ -99,14 +89,12 @@ function run(home: string, args: string[], cwd: string = home) {
 function makeProjectRepo(): string {
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-proj-' + crypto.randomBytes(4).toString('hex') + '-'));
 
-  // Decoys at the project root — a version pin and an unrelated source skills/ dir.
   writeFile(path.join(proj, 'agents.yaml'), 'agents:\n  claude: 9.9.9\n');
   writeFile(
     path.join(proj, 'skills', 'decoy-skill', 'SKILL.md'),
     '---\nname: decoy-skill\ndescription: Top-level source skill, not a DotAgents resource.\n---\n\nBody.\n'
   );
 
-  // The real DotAgents tree under .agents/.
   const dot = path.join(proj, '.agents');
   writeFile(
     path.join(dot, 'skills', 'proj-skill', 'SKILL.md'),
@@ -134,7 +122,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try { fs.rmSync(fixtureHome, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(fixtureHome, { recursive: true, force: true }); } catch {  }
 });
 
 describe('agents inspect', () => {
@@ -156,7 +144,6 @@ describe('agents inspect', () => {
     expect(data.alias).toContain('claude@9.9.9');
     expect(data.strategy).toBe('balanced');
     expect(data.capabilities.skills.ok).toBe(true);
-    // Counts include at least our two seeded skills and one command.
     expect(data.resources.skills.total).toBeGreaterThanOrEqual(2);
     expect(data.resources.commands.total).toBeGreaterThanOrEqual(1);
     expect(data.resources.hooks.capable).toBe(true);
@@ -191,40 +178,29 @@ describe('agents inspect', () => {
     expect(names).toContain('demo-skill');
     expect(names).toContain('release');
     const demo = (data.items as Array<{ name: string; path: string }>).find(i => i.name === 'demo-skill');
-    // For bundled skills, path is the skill directory.
     expect(demo?.path).toMatch(/skills[\\/]demo-skill$/);
   });
 
   it('piped list output stays a plain table — never the interactive picker', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-piped-' + crypto.randomBytes(4).toString('hex') + '-'));
     for (const n of ['alpha', 'bravo', 'charlie']) {
-      // Quoted: the description itself contains a colon ("Triggers on:"), which
-      // unquoted would make the frontmatter ambiguous YAML and silently fall
-      // back to the first body line.
       writeFile(path.join(proj, '.agents', 'skills', n, 'SKILL.md'),
         `---\nname: ${n}\ndescription: "Does the ${n} thing. Triggers on: ${n}, ${n}-alt."\n---\n\nBody.\n`);
     }
 
-    // spawnSync gives the child a pipe, not a TTY — the branch every script and
-    // CI job takes. A picker here would hang the caller forever.
     const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--skills'], {
       cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '120' }, encoding: 'utf-8',
     });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toMatch(/Name\s+Size\s+Description/);
     for (const n of ['alpha', 'bravo', 'charlie']) expect(r.stdout).toContain(n);
-    // The row shows the purpose, not the trigger keywords.
     expect(r.stdout).toContain('Does the alpha thing.');
     expect(r.stdout).not.toContain('Triggers on:');
-    // Picker chrome must never reach a pipe.
     expect(r.stdout).not.toContain('Search skills');
     expect(r.stdout).not.toContain('navigate');
   });
 
   it('keeps each plugin\'s bundled resources on the piped path', () => {
-    // The pre-picker output printed these lines under every row with no TTY
-    // check. A table alone would silently drop what a plugin actually ships
-    // from `agents inspect . --plugins | grep`, while --json still carried it.
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-groups-' + crypto.randomBytes(4).toString('hex') + '-'));
     const p = path.join(proj, '.agents', 'plugins', 'toolkit');
     writeFile(path.join(p, '.claude-plugin', 'plugin.json'),
@@ -238,7 +214,6 @@ describe('agents inspect', () => {
     });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toMatch(/Name\s+Size\s+Description/);
-    // Every bundled command, not a truncated prefix of them.
     for (const n of ['alpha', 'bravo', 'charlie']) expect(r.stdout).toContain(`/toolkit:${n}`);
     expect(r.stdout).toContain('commands');
   });
@@ -255,19 +230,12 @@ describe('agents inspect', () => {
       env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '140' }, encoding: 'utf-8',
     });
     expect(r.status, r.stderr).toBe(0);
-    // "First prose line" is a Markdown heuristic; on a script it returned the
-    // shebang with its leading '#' eaten. Skipping '#!' only promoted the next
-    // line, so the fallback is restricted to Markdown instead.
     expect(r.stdout).not.toContain('!/usr/bin/env bash');
     expect(r.stdout).not.toContain('set -euo pipefail');
-    // Both names present and distinguishable from each other.
     expect(r.stdout).toContain('guard');
     expect(r.stdout).toContain('guard_test');
   });
 
-  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
-  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
-  // processes on a 20-core box (RUSH-2839).
   it('renders every item of a long detail row, and survives a malformed manifest', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-rows-' + crypto.randomBytes(4).toString('hex') + '-'));
     const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
@@ -281,17 +249,13 @@ describe('agents inspect', () => {
     writeFile(path.join(bad, '.claude-plugin', 'plugin.json'),
       JSON.stringify({ name: 'wrongtypes', description: 42, version: 2, dependencies: 'some-plugin', author: ['a'] }));
 
-    // Narrow terminal: this is where the truncating renderer dropped items.
     const narrow = { ...process.env, COLUMNS: '60' };
     const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugin', 'many'], {
       cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
     });
     expect(r.status).toBe(0);
-    // Every command must appear. A width-truncating row renderer showed 4 of 10.
     for (const n of names) expect(r.stdout).toContain(`/many:${n}`);
 
-    // A malformed sibling must not take down the list — pluginToItem runs while
-    // BUILDING it, so one bad manifest used to break every plugin query.
     const list = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugins'], {
       cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
     });
@@ -299,9 +263,6 @@ describe('agents inspect', () => {
     expect(list.stdout).toContain('many');
     expect(list.stdout).toContain('wrongtypes');
 
-    // Detail mode on the malformed plugin itself, and the JSON path. Detail mode
-    // reaches renderers list mode does not (description .split), so asserting
-    // only the list leaves half the surface untested.
     for (const args of [['--plugin', 'wrongtypes'], ['--plugin', 'wrongtypes', '--json'], ['--plugins', '--json']]) {
       const r2 = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, ...args], {
         cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
@@ -310,15 +271,9 @@ describe('agents inspect', () => {
     }
   }, 90_000);
 
-  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
-  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
-  // processes on a 20-core box (RUSH-2839).
   it('bare `inspect <repo>` survives an agents.yaml whose hook field types are wrong', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-hookfx-' + crypto.randomBytes(4).toString('hex') + '-'));
     writeFile(path.join(proj, '.agents', 'hooks', '10-demo.sh'), '#!/usr/bin/env bash\nexit 0\n');
-    // `events` as a scalar and numeric predicates: both threw in summarizeHook,
-    // which only the DEFAULT render path reaches. --json and --hooks stayed
-    // green, which is exactly how this class kept surviving review.
     writeFile(path.join(proj, '.agents', 'agents.yaml'),
       'hooks:\n  demo:\n    script: 10-demo.sh\n    events: PreToolUse\n    matches:\n      prompt_contains: 12345\n      cwd_includes: 99\n');
 
@@ -331,20 +286,17 @@ describe('agents inspect', () => {
   }, 90_000);
 
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {
-    // Substring match still wins for "rele" → "release".
     const ok = run(fixtureHome, ['inspect', 'claude', '--skills', 'rele', '--json']);
     expect(ok.status).toBe(0);
     const okData = JSON.parse(ok.stdout);
     expect(okData.match.name).toBe('release');
 
-    // Damerau-Levenshtein typo: "demoo-skill" → "demo-skill".
     const fuzzy = run(fixtureHome, ['inspect', 'claude', '--skills', 'demoo-skill', '--json']);
     expect(fuzzy.status).toBe(0);
     const fuzzyData = JSON.parse(fuzzy.stdout);
     expect(fuzzyData.match.name).toBe('demo-skill');
     expect(fuzzyData.match.matchKind).toBe('fuzzy');
 
-    // No match → exit 1 + suggestions.
     const miss = run(fixtureHome, ['inspect', 'claude', '--skills', 'absolutelynothing', '--json']);
     expect(miss.status).toBe(1);
     const missData = JSON.parse(miss.stdout);
@@ -367,17 +319,14 @@ describe('agents inspect <repo>', () => {
   });
 
   afterEach(() => {
-    try { fs.rmSync(projectRepo, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(projectRepo, { recursive: true, force: true }); } catch {  }
   });
 
   it('inspect . from a project root reads .agents/, not the top-level source dirs', () => {
-    // cwd is the project root, which has a decoy top-level skills/ + agents.yaml.
     const r = run(fixtureHome, ['inspect', '.', '--json'], projectRepo);
     expect(r.status).toBe(0);
     const data = JSON.parse(r.stdout);
-    // Root must be the nested .agents/, not the project root.
     expect(data.root).toMatch(/\.agents$/);
-    // .agents/ has exactly one skill (proj-skill) — the decoy top-level skill is excluded.
     expect(data.resources.skills.count).toBe(1);
     expect(data.resources.commands.count).toBe(1);
     expect(data.resources.plugins.count).toBe(1);
@@ -398,7 +347,6 @@ describe('agents inspect <repo>', () => {
       .find(i => i.name === 'myplugin');
     expect(item?.description).toBe('A bundled plugin.');
 
-    // Drilling into the plugin reports its nested skill.
     const detail = run(fixtureHome, ['inspect', '.', '--plugins', 'myplugin', '--json'], projectRepo);
     expect(detail.status).toBe(0);
     const match = JSON.parse(detail.stdout).match as { name: string; skills?: string };

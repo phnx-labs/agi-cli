@@ -26,14 +26,10 @@ export interface AutoUpdatePlanEntry {
   agent: AgentId;
   installation: Installation;
   currentRelease: string;
-  /** The resolved latest release, or `null` when it could not be resolved (network error, unsupported strategy). */
   targetRelease: string | null;
   policy: UpdatePolicy;
-  /** Whether the automatic pass would act on this installation at all (ignoring whether it is currently deferred). */
   eligible: boolean;
-  /** Whether a live process for this installation held it back THIS pass. Independent of `eligible`. */
   deferred: boolean;
-  /** Human-readable reason `eligible` is false, or `deferred` is true, or `targetRelease` is null. Unset when there is nothing to explain (already current, or a real update would run). */
   reason?: string;
 }
 
@@ -46,17 +42,14 @@ export interface AutoUpdatePassOutcome {
 export interface AutoUpdatePassResult {
   plan: AutoUpdatePlanEntry[];
   outcomes: AutoUpdatePassOutcome[];
-  /** True when the pass stopped early on a cancellation request (deadline, daemon shutdown, IPC, or SIGINT/SIGTERM) rather than exhausting the plan. */
   cancelled?: boolean;
 }
 
 export interface AutoUpdatePassOptions {
-  /** Scope to these agents only. Default: every non-hard-deprecated managed agent. */
   agents?: AgentId[];
   onProgress?: (message: string) => void;
 }
 
-/** The only strategy shape the automatic pass will ever touch — see the module docblock. */
 function autoUpdateStrategyFor(agent: AgentId): UpdateStrategy | null {
   let strategy: UpdateStrategy;
   try {
@@ -64,6 +57,7 @@ function autoUpdateStrategyFor(agent: AgentId): UpdateStrategy | null {
   } catch {
     return null;
   }
+  // Unattended updates are limited to reversible, per-install npm swaps.
   return strategy.id === 'npm-package' && strategy.transactional ? strategy : null;
 }
 
@@ -100,7 +94,7 @@ export function listInstallationSnapshots(agent: AgentId): Installation[] {
     try {
       record = readInstallation(agent, label);
     } catch {
-      continue; // corrupted record — not an installation this pass can act on
+      continue;
     }
     const snapshot = record ?? ephemeralInstallationSnapshot(agent, label);
     if (snapshot) out.push(snapshot);
@@ -130,9 +124,6 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
     const strategy = autoUpdateStrategyFor(agent);
     const agentAutoEnabled = isAutoUpdateEnabledForAgent(agent);
 
-    // Resolve the latest release ONCE per agent — not once per installation —
-    // and only when at least the strategy/switch preconditions hold, so a
-    // harness nobody enabled auto-updates for never triggers a registry read.
     let target: string | null = null;
     let resolveError: string | undefined;
     if (strategy && agentAutoEnabled) {
@@ -177,9 +168,6 @@ export async function planAutoUpdates(opts: AutoUpdatePassOptions = {}): Promise
           deferred = installationLooksActive(installation, commandLines);
           if (deferred) reason = 'the installation appears to have a process running right now; deferring.';
         } else {
-          // The process scan itself failed — fail closed for every installation
-          // this pass would otherwise touch, not just the ones a scan would have
-          // flagged as active.
           deferred = true;
           reason = `could not confirm no process is running (${processScanError}); deferring.`;
         }

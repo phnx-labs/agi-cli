@@ -63,9 +63,7 @@ describe.skipIf(!fileBacked)('addProfile — --from-secrets threading (host + mo
 
     await addProfile('corp', { host: 'claude', model: 'gpt-x', fromSecrets: 'prod' }, 'Harness');
 
-    // The host's pre-existing token is untouched...
     expect(getKeychainTokenSync(profileKeychainItem('claude'))).toBe(preExisting);
-    // ...and the harness's own auth was attached under the bundle's name instead.
     const p = readProfile('corp');
     expect(p.provider).toBe('proxy');
     const account = findAccount(p.account!);
@@ -83,7 +81,6 @@ describe.skipIf(!fileBacked)('addProfile — --from-secrets threading (preset pa
     ).resolves.toBeUndefined();
 
     const profile = readProfile('kimi-account');
-    // The NAME, not the id: profiles sync fleet-wide while ids are per-device.
     expect(profile.account).toBe(account.name);
     expect(profile.provider).toBe('openrouter');
   });
@@ -123,8 +120,6 @@ describe.skipIf(!fileBacked)('applyFromSecrets — provider precedence and error
   });
 
   it('allowInheritedAuth: false rejects reusing an inherited auth binding (the fork-clobber gap)', async () => {
-    // Simulates forkProfile's behavior: `auth`/`provider` copied by reference
-    // from the fork's SOURCE harness, not established for this profile.
     const sourceToken = 'REAL-OPENROUTER-KEY-FOR-SOURCE-HARNESS';
     setKeychainTokenSync(profileKeychainItem('openrouter'), sourceToken);
 
@@ -132,7 +127,7 @@ describe.skipIf(!fileBacked)('applyFromSecrets — provider precedence and error
       name: 'forked-harness',
       host: { agent: 'claude' as const },
       env: {},
-      provider: 'openrouter', // inherited from the source, not this profile's own
+      provider: 'openrouter',
       auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: profileKeychainItem('openrouter') },
     };
 
@@ -140,7 +135,6 @@ describe.skipIf(!fileBacked)('applyFromSecrets — provider precedence and error
       applyFromSecrets(forked, 'prod', undefined, { allowInheritedAuth: false }),
     ).rejects.toThrow(/inherited its auth binding/i);
 
-    // The source harness's real credential must survive the rejected attempt.
     expect(getKeychainTokenSync(profileKeychainItem('openrouter'))).toBe(sourceToken);
   });
 

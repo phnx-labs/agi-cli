@@ -7,8 +7,6 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
-// Run tsx via `node node_modules/tsx/dist/cli.mjs`, not the .bin/tsx shim: on
-// Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell.
 const tsxBin = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 let home: string;
@@ -23,7 +21,6 @@ function run(args: string[]) {
 
 beforeAll(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'stats-cli-' + crypto.randomBytes(4).toString('hex') + '-'));
-  // ensureInitialized() looks for ~/.agents/.system/.git as the setup marker.
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
 });
 

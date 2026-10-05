@@ -46,7 +46,6 @@ describe('update-policy', () => {
 
       const pinned = await policy.setInstallationUpdatePolicy('claude', '2.0.65', 'pinned');
       expect(policy.effectiveUpdatePolicy(pinned)).toBe('pinned');
-      // Reload from disk — the write must have persisted, not just returned an in-memory copy.
       expect(policy.effectiveUpdatePolicy(store.readInstallation('claude', '2.0.65')!)).toBe('pinned');
 
       const unpinned = await policy.setInstallationUpdatePolicy('claude', '2.0.65', 'latest');
@@ -77,23 +76,18 @@ describe('update-policy', () => {
       const hold = new Promise<void>((resolve) => { releaseHold = resolve; });
       const order: string[] = [];
 
-      // Stand in for update.ts's own long-held lock on the identical record
-      // path, using the exact options it uses — the leaf both files import.
       const holderPromise = fsAtomic.withFileLockAsync(recordPath, async () => {
         order.push('holder:acquired');
         await hold;
         order.push('holder:releasing');
       }, lock.INSTALLATION_LOCK_OPTIONS);
 
-      await new Promise((resolve) => setTimeout(resolve, 20)); // let the holder acquire first
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       const policyPromise = policy.setInstallationUpdatePolicy('claude', '2.0.65', 'pinned')
         .then((result) => { order.push('policy:wrote'); return result; });
 
       await new Promise((resolve) => setTimeout(resolve, 20));
-      // The policy write must still be queued behind the held lock — a
-      // fs-atomic-default (5s) stale threshold on either side would have let
-      // it break in and write concurrently instead.
       expect(order).toEqual(['holder:acquired']);
 
       releaseHold();
@@ -118,7 +112,7 @@ describe('update-policy', () => {
       policyA.setGlobalAutoUpdateEnabled(false);
       expect(policyA.isGlobalAutoUpdateEnabled()).toBe(false);
 
-      const { policy: policyB } = await load(); // fresh module graph — forces a real disk re-read
+      const { policy: policyB } = await load();
       expect(policyB.rawGlobalAutoUpdateSetting()).toBe(false);
       expect(policyB.isGlobalAutoUpdateEnabled()).toBe(false);
     });
@@ -127,7 +121,7 @@ describe('update-policy', () => {
       const { policy: policyA } = await load();
       policyA.setAgentAutoUpdateEnabled('codex', false);
       expect(policyA.isAutoUpdateEnabledForAgent('codex')).toBe(false);
-      expect(policyA.isAutoUpdateEnabledForAgent('claude')).toBe(true); // unaffected
+      expect(policyA.isAutoUpdateEnabledForAgent('claude')).toBe(true);
 
       const { policy: policyB } = await load();
       expect(policyB.rawAgentAutoUpdateSetting('codex')).toBe(false);
@@ -151,7 +145,7 @@ describe('update-policy', () => {
 
       policy.unsetGlobalAutoUpdateEnabled();
       expect(policy.rawGlobalAutoUpdateSetting()).toBeUndefined();
-      expect(policy.isAutoUpdateEnabledForAgent('claude')).toBe(false); // per-agent false still applies
+      expect(policy.isAutoUpdateEnabledForAgent('claude')).toBe(false);
 
       policy.unsetAgentAutoUpdateEnabled('claude');
       expect(policy.rawAgentAutoUpdateSetting('claude')).toBeUndefined();

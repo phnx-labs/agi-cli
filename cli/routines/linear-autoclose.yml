@@ -2,7 +2,7 @@
 # authenticated gh, and jq. A plain-shell `command:` routine: no LLM, no tokens.
 # Dry-run by default (logs what it WOULD close); set AGENTS_LINEAR_AUTOCLOSE_DRY_RUN=0 to close.
 name: linear-autoclose
-schedule: "0 */4 * * *"   # every 4 hours
+schedule: "0 */4 * * *"
 enabled: true
 timeout: 10m
 command: |

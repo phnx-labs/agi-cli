@@ -72,7 +72,6 @@ Examples:
 `);
 
   factory.hook('preAction', (_thisCommand, actionCommand) => {
-    // Foreman must be able to read its tick input before any beta-gated action.
     if (enabled || actionCommand.name() === 'snapshot') return;
     console.error(chalk.red('agents factory is in beta.'));
     console.error(chalk.gray(betaEnableHint('factory')));
@@ -102,7 +101,6 @@ Examples:
         console.log(JSON.stringify(result, null, 2));
         return;
       }
-      // Register locally so `agents cloud logs <id>` can find it.
       const now = new Date().toISOString();
       insertTask({
         id: result.cloud_execution_id,

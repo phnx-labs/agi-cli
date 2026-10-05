@@ -26,21 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: write # create/update the rolling `main-attestations` release + upload assets
+      contents: write
     defaults:
       run:
         working-directory: cli
     env:
-      # Fixed tag for the rolling attestation release. Assets are per-tree, so
-      # many trees' proofs coexist under this one tag until pruned.
       ATTEST_TAG: main-attestations
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
 
       - name: Resolve the pushed tree
         id: tree
@@ -80,7 +78,6 @@ jobs:
       - name: Produce the exact-tree attestation
         if: steps.existing.outputs.already != 'true'
         env:
-          # The store the producer writes into; we upload from it below.
           RELEASE_ATTESTATION_DIR: ${{ runner.temp }}/attest-store
         run: |
           set -euo pipefail

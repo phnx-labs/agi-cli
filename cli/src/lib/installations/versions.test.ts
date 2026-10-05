@@ -34,8 +34,6 @@ function nodeExecPath(): string {
 }
 
 function runVersionSync(home: string, expression: string): unknown {
-  // tsx (Node) — not bun. The CLI ships against Node, and `versions.ts`
-  // transitively imports the SQLite layer that this test exercises.
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   // Run tsx via node on cli.mjs, not the .bin shim: on Windows the shim is tsx.cmd, which spawnSync
   // cannot run without a shell that would mangle the -e script.
@@ -56,8 +54,6 @@ function runVersionSync(home: string, expression: string): unknown {
 }
 
 function runReconcile(home: string, agent: string, installedVersion: string): string {
-  // tsx (Node) subprocess with an isolated HOME — exercises the real fs +
-  // session-db path that reconcileStaleLatestDir touches, no mocking.
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   // Run tsx via node on cli.mjs, not the .bin shim: on Windows the shim is tsx.cmd, which spawnSync
   // cannot run without a shell that would mangle the -e script.
@@ -104,7 +100,6 @@ describe('reconcileStaleLatestDir', () => {
     expect(action).toBe('trashed');
     expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
     expect(fs.existsSync(droidVersionDir(home, '0.158.0'))).toBe(true);
-    // Soft-deleted, not hard-deleted — recoverable from trash.
     const trashDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'droid', 'latest');
     expect(fs.existsSync(trashDir)).toBe(true);
   });
@@ -130,9 +125,6 @@ describe('reconcileStaleLatestDir', () => {
   });
 });
 
-// Full path (RUSH-1320): resolve the live CLI version via a real `--version`
-// shell-out, then fold the stale `latest` dir onto it. Uses a fake `droid` on
-// PATH — no mocking — so getCliVersionFromPath returns a concrete version.
 function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): void {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
@@ -140,7 +132,6 @@ function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): 
     import { reconcileStaleLatestForAgent } from ${JSON.stringify(moduleUrl)};
     (async () => { await reconcileStaleLatestForAgent(${JSON.stringify(agent)}); })();
   `], {
-    // Prepend the fake-bin dir so `droid --version` resolves to our stub.
     env: { ...process.env, HOME: home, PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}` },
     encoding: 'utf-8',
   });
@@ -150,12 +141,10 @@ function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): 
 describe('reconcileStaleLatestForAgent (proactive)', () => {
   it.skipIf(process.platform === 'win32')('folds a stale `latest` onto the live CLI version, preserving home/', () => {
     const home = makeTempHome();
-    // Stale latest home with a credential-like file that must survive the fold.
     const latestFactory = path.join(droidVersionDir(home, 'latest'), 'home', '.factory');
     fs.mkdirSync(latestFactory, { recursive: true });
     fs.writeFileSync(path.join(latestFactory, 'auth.v2.file'), 'LOGIN');
 
-    // Fake `droid --version` -> 0.161.0.
     const binDir = path.join(home, 'fakebin');
     fs.mkdirSync(binDir, { recursive: true });
     const droidStub = path.join(binDir, 'droid');
@@ -164,7 +153,6 @@ describe('reconcileStaleLatestForAgent (proactive)', () => {
 
     runReconcileForAgent(home, 'droid', binDir);
 
-    // `latest` is gone; its home (incl. the login file) now lives under 0.161.0.
     expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
     expect(fs.readFileSync(path.join(droidVersionDir(home, '0.161.0'), 'home', '.factory', 'auth.v2.file'), 'utf8')).toBe('LOGIN');
   });
@@ -180,7 +168,6 @@ describe('reconcileStaleLatestForAgent (proactive)', () => {
 
     runReconcileForAgent(home, 'droid', binDir);
 
-    // 0.161.0 untouched, no `latest` created.
     expect(fs.existsSync(droidVersionDir(home, '0.161.0'))).toBe(true);
     expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
   });
@@ -203,8 +190,6 @@ function grokBinaryDir(home: string, version: string): string {
   return path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads');
 }
 
-// Predicate check runs in a tsx subprocess (versions.ts pulls in the SQLite
-// layer with a top-level await the CJS test process can't statically transform).
 function runPredicates(expression: string): unknown {
   const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
@@ -234,10 +219,10 @@ describe('self-updating single-binary agents (RUSH-1321)', () => {
       droidSelf: true,
       grokSelf: true,
       antigravitySelf: true,
-      claudeSelf: false, // npm-packaged — pinnable, genuinely multi-version
-      kimiSelf: false,   // npm-packaged
-      droidGlobal: true, // one binary at ~/.local/bin/droid regardless of version
-      grokGlobal: false, // per-version binary copy under each version-home
+      claudeSelf: false,
+      kimiSelf: false,
+      droidGlobal: true,
+      grokGlobal: false,
       claudeGlobal: false,
     });
   });
@@ -245,13 +230,11 @@ describe('self-updating single-binary agents (RUSH-1321)', () => {
   it.skipIf(process.platform === 'win32')('collapses multiple droid version dirs to a single canonical entry', () => {
     const home = makeTempHome();
     makeDroidBinary(home);
-    // Two real semver dirs that both resolve to the ONE global binary.
     fs.mkdirSync(path.join(droidVersionDir(home, '0.19.3'), 'home'), { recursive: true });
     fs.mkdirSync(path.join(droidVersionDir(home, '0.21.0'), 'home'), { recursive: true });
 
     const versions = runVersionSync(home, "listInstalledVersions('droid')") as string[];
 
-    // One entry, not two phantom rows. Newest wins with no symlink/default/live cache.
     expect(versions).toEqual(['0.21.0']);
   });
 
@@ -272,13 +255,11 @@ describe('self-updating single-binary agents (RUSH-1321)', () => {
 
   it.skipIf(process.platform === 'win32')('reconcile folds every stale droid dir into the live version, preserving home/', () => {
     const home = makeTempHome();
-    // Two coexisting real-semver droid dirs; the old one carries a login file.
     const oldFactory = path.join(droidVersionDir(home, '0.19.3'), 'home', '.factory');
     fs.mkdirSync(oldFactory, { recursive: true });
     fs.writeFileSync(path.join(oldFactory, 'auth.v2.file'), 'LOGIN');
     fs.mkdirSync(path.join(droidVersionDir(home, '0.21.0'), 'home'), { recursive: true });
 
-    // Fake `droid --version` -> 0.21.0 so the live version is the survivor.
     const binDir = path.join(home, 'fakebin');
     fs.mkdirSync(binDir, { recursive: true });
     const droidStub = path.join(binDir, 'droid');
@@ -287,10 +268,8 @@ describe('self-updating single-binary agents (RUSH-1321)', () => {
 
     runReconcileForAgent(home, 'droid', binDir);
 
-    // The stale 0.19.3 dir is folded away; only the live 0.21.0 survives on disk.
     expect(fs.existsSync(droidVersionDir(home, '0.19.3'))).toBe(false);
     expect(fs.existsSync(droidVersionDir(home, '0.21.0'))).toBe(true);
-    // Soft-deleted (recoverable), not hard-deleted — its home/ (incl. login) is in trash.
     const trashDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'droid', '0.19.3');
     expect(fs.existsSync(trashDir)).toBe(true);
   });
@@ -391,9 +370,6 @@ describe('version resource sync path handling', () => {
   });
 
   it('removes a stale legacy prompts/ file left by an older Codex version', () => {
-    // The sibling test above only asserts the *current* command is absent from
-    // prompts/, which the writer never puts there anyway — so it cannot catch a
-    // regression in the legacy-dir cleanup. Pre-seed a file no sync will write.
     const home = makeTempHome();
     const sourceCommand = path.join(home, '.agents', '.system', 'commands', 'recap.md');
     const versionHome = path.join(home, '.agents', '.history', 'versions', 'codex', '0.117.0', 'home', '.codex');
@@ -410,9 +386,6 @@ describe('version resource sync path handling', () => {
 
     runVersionSync(home, "syncResourcesToVersion('codex', '0.117.0', undefined, { force: true })");
 
-    // Codex >= 0.117.0 converts commands to skills, so nothing may linger in
-    // prompts/ — the orphan sweep is gated off for those agents and `agents
-    // prune` only sees their skills, so a survivor is permanent.
     expect(fs.existsSync(stale)).toBe(false);
     expect(fs.existsSync(path.join(versionHome, 'skills', 'recap', 'SKILL.md'))).toBe(true);
   });
@@ -584,7 +557,6 @@ describe('version resource sync path handling', () => {
     fs.writeFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'stale routines body\n', 'utf-8');
     fs.mkdirSync(path.join(versionSkillRoot, 'old-shadow'), { recursive: true });
     fs.writeFileSync(path.join(versionSkillRoot, 'old-shadow', 'SKILL.md'), 'orphaned body\n', 'utf-8');
-    // Claude Code's own synced-skills bucket (ownedSkillDirs): never swept.
     fs.mkdirSync(path.join(versionSkillRoot, 'synced', 'bucket'), { recursive: true });
 
     const result = runVersionSync(
@@ -611,8 +583,6 @@ describe('version resource sync path handling', () => {
       'SKILL.md'
     );
 
-    // Claude Code loads `agents:routines` from the marketplace copy itself; a
-    // flattened skills/routines would be a second, un-namespaced `/routines`.
     expect(result.skills).toBe(false);
     expect(result.plugins).toEqual(['agents']);
     expect(fs.existsSync(path.join(versionSkillRoot, 'routines'))).toBe(false);
@@ -886,8 +856,6 @@ describe('installVersion version validation', () => {
       const outcome = runInstallVersion(home, 'codex', version);
       expect(outcome.ok).toBe(false);
       expect(outcome.error).toContain('Invalid version');
-      // No version dir was created — rejection happened at the source, before
-      // ensureAgentsDir / npm install could run.
       expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'codex'))).toBe(false);
     });
   }
@@ -944,15 +912,11 @@ describe('installVersion Grok binary relocation', () => {
     fs.mkdirSync(path.join(oldConfigDir, 'downloads'), { recursive: true });
     fs.symlinkSync(oldConfigDir, hostGrok, 'dir');
 
-    // A `grok` on PATH lets `getCliVersionFromPath` resolve `latest` to 0.2.101.
     fs.mkdirSync(binDir, { recursive: true });
     const stub = path.join(binDir, 'grok');
     fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.101"; exit 0; fi\nexit 0\n', 'utf-8');
     fs.chmodSync(stub, 0o755);
 
-    // A concrete self-updating slot reuses the already-installed live release
-    // instead of rerunning the vendor installer. Seed the previous active
-    // home's real download exactly as that live installation would.
     const existingVersioned = path.join(oldConfigDir, 'downloads', 'grok-0.2.101-macos-aarch64');
     fs.writeFileSync(existingVersioned, Buffer.alloc(1_000_001));
     fs.chmodSync(existingVersioned, 0o755);
@@ -1063,17 +1027,12 @@ describe('installVersion Grok binary relocation', () => {
       'chmod +x ~/.grok/downloads/grok-0.2.118-linux-x86_64',
     ].join(' && ');
 
-    // Only bare system dirs on PATH — no real `grok` binary this machine
-    // happens to have installed can resolve and defeat the "not yet
-    // resolvable" scenario this test exercises.
     const bareSystemPath = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter);
     const outcome = runInstallVersionWithScript(home, 'grok', 'latest', script, undefined, bareSystemPath);
     expect(outcome.ok).toBe(true);
     expect(outcome.result?.success).toBe(false);
     expect(outcome.result?.error).toContain('could not be determined');
 
-    // No bogus `versions/grok/latest/` dir, and the real binary is left in
-    // place (not silently lost) for a retry to pick up.
     const staleLatestDir = path.join(home, '.agents', '.history', 'versions', 'grok', 'latest');
     expect(fs.existsSync(staleLatestDir)).toBe(false);
     expect(fs.existsSync(path.join(oldConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'))).toBe(true);
@@ -1089,9 +1048,6 @@ describe('installVersion Grok binary relocation', () => {
     fs.mkdirSync(path.join(staleLatestConfigDir, 'downloads'), { recursive: true });
     fs.symlinkSync(staleLatestConfigDir, hostGrok, 'dir');
 
-    // The real binary from that earlier install, stranded in a wholly
-    // unrelated previous-default version home (not `latest`, not the
-    // version now being installed).
     const strandedConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.106', 'home', '.grok');
     fs.mkdirSync(path.join(strandedConfigDir, 'downloads'), { recursive: true });
     // Filename (0.2.118) deliberately mismatches the version-home (0.2.106), the RUSH-2459
@@ -1110,8 +1066,6 @@ describe('installVersion Grok binary relocation', () => {
     fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n', 'utf-8');
     fs.chmodSync(stub, 0o755);
 
-    // This install's own installer run drops nothing new — it only exercises
-    // relocation's sweep of OTHER version homes for the already-stranded file.
     const outcome = runInstallVersionWithScript(home, 'grok', 'latest', 'true', binDir);
     expect(outcome.ok).toBe(true);
     expect(outcome.result?.success).toBe(true);
@@ -1143,7 +1097,6 @@ describe('installVersion Grok binary relocation', () => {
     fs.mkdirSync(path.join(accountBDir, 'downloads'), { recursive: true });
     fs.writeFileSync(path.join(accountBDir, 'auth.json'), grokAuth('accountB@example.com', 'user-b'), 'utf-8');
 
-    // accountB (0.2.32) is the global default this update runs as.
     fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
     fs.writeFileSync(
       path.join(home, '.agents', 'agents.yaml'),
@@ -1157,9 +1110,6 @@ describe('installVersion Grok binary relocation', () => {
     const binDir = path.join(home, 'fakebin');
     fs.mkdirSync(binDir, { recursive: true });
     const stub = path.join(binDir, 'grok');
-    // The self-updater always reports the SAME upstream release ("0.2.118")
-    // regardless of which account's home invoked it — the real mechanism that
-    // makes two accounts collide on one version directory.
     fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n', 'utf-8');
     fs.chmodSync(stub, 0o755);
 
@@ -1169,8 +1119,6 @@ describe('installVersion Grok binary relocation', () => {
     expect(outcome.result?.error ?? '').toContain('accountA@example.com');
     expect(outcome.result?.error ?? '').toContain('accountB@example.com');
 
-    // accountA's install must be untouched — refusing the update must not
-    // have written or damaged the file that was already there.
     const targetAuth = JSON.parse(fs.readFileSync(path.join(accountADir, 'auth.json'), 'utf-8'));
     expect(targetAuth['https://auth.x.ai::client-id'].email).toBe('accountA@example.com');
   }, 10000);
@@ -1180,8 +1128,6 @@ describe('installVersion Grok binary relocation', () => {
 // the version. A stale 99-byte cursor-agent wrapper sorted first and was launched by the old first-
 // file fallback.
 describe('resolveGrokCurrentBinary', () => {
-  // `grok update` writes bin/grok-<v> and repoints bin/grok without touching
-  // downloads/; getBinaryPath resolves through this before any downloads/ scan.
   function makeGrokHome(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-grok-home-'));
     tempDirs.push(dir);
@@ -1296,9 +1242,6 @@ function installDroidVersions(home: string, versions: string[]): void {
   for (const v of versions) {
     fs.mkdirSync(path.join(droidVersionDir(home, v), 'home'), { recursive: true });
   }
-  // droid's binary is global and per-host, not per-version (getBinaryPath).
-  // Mirror getBinaryPath's platform split so the fixture binary lands where the
-  // SUT actually looks: Windows -> ~/bin/droid.exe, macOS/Linux -> ~/.local/bin/droid.
   const bin = process.platform === 'win32'
     ? path.join(home, 'bin', 'droid.exe')
     : path.join(home, '.local', 'bin', 'droid');
@@ -1320,8 +1263,6 @@ function installAntigravityVersions(home: string, versions: string[]): void {
 }
 
 describe('resolveVersionAlias @selectors', () => {
-  // Versions chosen so numeric ordering disagrees with lexical ordering:
-  // numeric oldest=0.9.0, newest=0.158.0; lexical would put "0.10.0" first.
   const VERSIONS = ['0.9.0', '0.10.0', '0.158.0'];
 
   it("resolves 'latest' to the highest installed version (numeric, not lexical)", () => {
@@ -1412,21 +1353,16 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
   });
 
   it('expands nested hooks/<event>/ scripts under system:* (not the group dir name)', () => {
-    // After hooks/<event-name>/<script> layout, listResources must expand group
-    // dirs so buildRepoScopedSelection('system') includes git-guard.sh — otherwise
-    // agents sync --force never re-copies nested system hooks into version homes.
     const home = makeTempHome();
     const nested = path.join(home, '.agents', '.system', 'hooks', 'pre-tool-use');
     fs.mkdirSync(nested, { recursive: true });
     fs.writeFileSync(path.join(nested, 'git-guard.sh'), '#!/bin/sh\necho multi\n', 'utf-8');
     fs.chmodSync(path.join(nested, 'git-guard.sh'), 0o755);
-    // Flat top-level still works.
     fs.writeFileSync(
       path.join(home, '.agents', '.system', 'hooks', 'registration_test.sh'),
       '#!/bin/sh\n',
       'utf-8',
     );
-    // User-layer hook must NOT appear under --repo system.
     const userHook = path.join(home, '.agents', 'hooks', 'user-only.sh');
     fs.mkdirSync(path.dirname(userHook), { recursive: true });
     fs.writeFileSync(userHook, '#!/bin/sh\n', 'utf-8');
@@ -1458,15 +1394,11 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
     );
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'fresh scoped memory body\n', 'utf-8');
 
-    // Pre-seed a stale memory file in the version home — this is what a prior
-    // sync left behind before the rules changed.
     const agentDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok');
     const agentsPath = path.join(agentDir, 'AGENTS.md');
     fs.mkdirSync(agentDir, { recursive: true });
     fs.writeFileSync(agentsPath, 'STALE memory body — must be overwritten\n', 'utf-8');
 
-    // The scoped selection now recomposes memory from all layers (memory:'all',
-    // not the old []-skip sentinel).
     expect(runBuildScoped(home, 'system').memory).toEqual('all');
 
     const result = runVersionSync(
@@ -1502,7 +1434,7 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
       "V.unionResourceSelections([{skills:['a','b']},{skills:['b','c'],commands:['x']}], false)");
     expect(out.skills.sort()).toEqual(['a', 'b', 'c']);
     expect(out.commands).toEqual(['x']);
-    expect(out.memory).toEqual([]); // includeMemory=false → skip sentinel
+    expect(out.memory).toEqual([]);
   });
 
   it('includeMemory=true requests a full memory write', () => {
@@ -1522,13 +1454,13 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
 
     const out = evalExpr(home, "V.mergeRepoScopedSelections(['user','system'], home)");
     expect(out.skills.sort()).toEqual(['system-only', 'user-only']);
-    expect(out.memory).toBe('all'); // user/system layer selected → memory written
+    expect(out.memory).toBe('all');
   });
 
   it('a project-only pick leaves the memory file untouched', () => {
     const home = makeTempHome();
     const out = evalExpr(home, "V.mergeRepoScopedSelections(['project'], home)");
-    expect(out.memory).toEqual([]); // neither user nor system → skip sentinel
+    expect(out.memory).toEqual([]);
   });
 });
 
@@ -1552,11 +1484,8 @@ function makeClaudeVersion(home: string, version: string, opts: { realBinary: bo
   fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
   fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
 
-  // Version-dir marker (present even on a gutted install).
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `agents-claude-${version}`, private: true }), 'utf-8');
-  // Installed package's package.json — declares the real launch binary.
   fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version, bin: { claude: CLAUDE_BIN_REL } }), 'utf-8');
-  // The node_modules/.bin wrappers npm always leaves behind (getBinaryPath's target).
   fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\nexit 0\n', 'utf-8');
   fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude.cmd'), '@echo off\r\n', 'utf-8');
 
@@ -1587,8 +1516,6 @@ describe('isVersionInstalled — probes the real launch binary', () => {
   it('reports a gutted install (real bin destroyed, wrappers + package.json left behind) as NOT installed', () => {
     const home = makeTempHome();
     makeClaudeVersion(home, '2.1.196', { realBinary: false });
-    // The node_modules/.bin/claude wrapper still exists — the old dir/wrapper
-    // check would call this installed. The launch binary is gone, so it isn't.
     expect(fs.existsSync(path.join(versionDir(home, 'claude', '2.1.196'), 'node_modules', '.bin', 'claude'))).toBe(true);
     expect(runNamedExport(home, 'isVersionInstalled', "isVersionInstalled('claude', '2.1.196')")).toBe(false);
   });
@@ -1617,7 +1544,7 @@ describe('listInstalledVersions — excludes gutted installs from the picker', (
   it('returns only versions whose real launch binary exists', () => {
     const home = makeTempHome();
     makeClaudeVersion(home, '2.1.195', { realBinary: true });
-    makeClaudeVersion(home, '2.1.196', { realBinary: false }); // gutted
+    makeClaudeVersion(home, '2.1.196', { realBinary: false });
     const versions = runNamedExport(home, 'listInstalledVersions', "listInstalledVersions('claude')");
     expect(versions).toEqual(['2.1.195']);
   });
@@ -1627,16 +1554,12 @@ describe('listInstalledVersions — excludes gutted installs from the picker', (
 // since every launcher shim resolves it. Reassign to the newest remaining install, or clear
 // when the last goes.
 describe('removeVersion — default reassignment when removing the pinned default', () => {
-  // Lay down a claude version on disk the way listInstalledVersions expects:
-  // a real binary file at <versionDir>/node_modules/.bin/claude.
   function installClaudeVersion(home: string, version: string): void {
     const binDir = path.join(home, '.agents', '.history', 'versions', 'claude', version, 'node_modules', '.bin');
     fs.mkdirSync(binDir, { recursive: true });
     fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\n', 'utf-8');
   }
 
-  // One subprocess so the module-level HOME + version caches stay consistent:
-  // set the default, remove a version, then read back the resolved default.
   function runRemoveScenario(home: string, defaultVersion: string, versionToRemove: string): { removed: boolean; defaultAfter: string | null } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
@@ -1660,13 +1583,10 @@ describe('removeVersion — default reassignment when removing the pinned defaul
     installClaudeVersion(home, '2.1.196');
     installClaudeVersion(home, '2.1.201');
 
-    // 2.1.196 is the default and gets removed; 2.1.185 + 2.1.201 remain.
     const { removed, defaultAfter } = runRemoveScenario(home, '2.1.196', '2.1.196');
 
     expect(removed).toBe(true);
-    // Newest remaining is 2.1.201 — not the newest overall (which was removed).
     expect(defaultAfter).toBe('2.1.201');
-    // The removed version's binary is gone (soft-deleted to trash).
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.196', 'node_modules', '.bin', 'claude'))).toBe(false);
   });
 
@@ -1677,7 +1597,6 @@ describe('removeVersion — default reassignment when removing the pinned defaul
     const { removed, defaultAfter } = runRemoveScenario(home, '2.1.196', '2.1.196');
 
     expect(removed).toBe(true);
-    // No versions remain → default cleared cleanly, not left pointing at a ghost.
     expect(defaultAfter).toBe(null);
   });
 });
@@ -1685,9 +1604,6 @@ describe('removeVersion — default reassignment when removing the pinned defaul
 describe('system-scoped selection includes system-layer plugins (RUSH-3207)', () => {
   it('a `system` repo scope selects a system-layer plugin and excludes a user-layer one', () => {
     const home = makeTempHome();
-    // One plugin in the system layer (~/.agents/.system/plugins), like `swarm`, and one
-    // in the user layer (~/.agents/plugins). A valid name+version manifest is all
-    // discoverPlugins needs to see them.
     for (const [rel, name] of [['.system/plugins', 'swarm'], ['plugins', 'mine']] as const) {
       const dir = path.join(home, '.agents', ...rel.split('/'), name, '.claude-plugin');
       fs.mkdirSync(dir, { recursive: true });
@@ -1697,9 +1613,6 @@ describe('system-scoped selection includes system-layer plugins (RUSH-3207)', ()
       home,
       `buildRepoScopedSelection('system', ${JSON.stringify(home)})`,
     ) as { plugins?: string[] };
-    // Before the fix, resourceSourceMap hardcoded every plugin to the 'user' layer, so
-    // `system:*` expanded to zero plugins and `agents sync <agent> system` silently
-    // skipped system-layer plugins — the swarm-plugin bug.
     expect(result.plugins ?? []).toContain('swarm');
     expect(result.plugins ?? []).not.toContain('mine');
   });

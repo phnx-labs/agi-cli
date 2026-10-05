@@ -1,32 +1,30 @@
-// Each scene is scripted from REAL agi-cli output (verified from source code).
-// Colors match actual chalk output: green = success, gray = hints, yellow = warnings.
 
 export interface TermLine {
   text: string;
-  color?: string;       // hex color
-  delay?: number;       // frames before this line appears (relative to scene start)
-  typing?: boolean;     // typewriter effect for commands
-  indent?: number;      // spaces of indent
-  spinner?: boolean;    // show spinner animation before text
-  badge?: { label: string; color: string }[];  // inline badges like [claude] [codex]
+  color?: string;
+  delay?: number;
+  typing?: boolean;
+  indent?: number;
+  spinner?: boolean;
+  badge?: { label: string; color: string }[];
 }
 
 export interface Scene {
   id: string;
-  title: string;          // shown in progress bar
-  caption?: string;       // human-readable description, typewritten above the terminal
-  prompt?: string;        // terminal prompt text (default: ~/payments git:(main))
+  title: string;
+  caption?: string;
+  prompt?: string;
   lines: TermLine[];
-  durationFrames: number; // how long this scene lasts
-  clear?: boolean;        // clear screen before this scene
+  durationFrames: number;
+  clear?: boolean;
 }
 
-const G = '#b3ff0c';  // green accent
-const W = '#e8e8e8';  // white text
-const D = '#777777';  // dim/gray
-const Y = '#facc15';  // yellow
-const C = '#22d3ee';  // cyan
-const R = '#f87171';  // red
+const G = '#b3ff0c';
+const W = '#e8e8e8';
+const D = '#777777';
+const Y = '#facc15';
+const C = '#22d3ee';
+const R = '#f87171';
 
 export const SCENES: Scene[] = [
   // ACT 0: COVER. A 1.5s logo and wordmark intro with no terminal lines, rendered by AgentsDemo's
@@ -36,9 +34,8 @@ export const SCENES: Scene[] = [
     id: 'intro',
     title: 'agents',
     lines: [],
-    durationFrames: 45, // 1.5s @ 30fps
+    durationFrames: 45,
   },
-  // ── ACT 1: INSTALL + VERSION SWITCH ──
   {
     id: 'install',
     title: 'INSTALL',
@@ -50,7 +47,7 @@ export const SCENES: Scene[] = [
       { text: '  Created shim: ~/.agents/shims/claude', color: D, delay: 80 },
       { text: '  Synced: commands, skills, mcp, hooks, rules', color: G, delay: 90 },
     ],
-    durationFrames: 120,  // 4s
+    durationFrames: 120,
   },
   {
     id: 'use',
@@ -65,10 +62,9 @@ export const SCENES: Scene[] = [
       { text: '', delay: 60 },
       { text: '  ~/.claude/ -> ~/.agents/versions/claude/2.1.187/home/.claude/', color: C, delay: 65 },
     ],
-    durationFrames: 100,  // 3.3s
+    durationFrames: 100,
   },
 
-  // ── ACT 2: PROFILES + CUSTOM MODELS ──
   {
     id: 'profile',
     title: 'PROFILES',
@@ -84,10 +80,9 @@ export const SCENES: Scene[] = [
       { text: "Profile 'kimi' added.", color: G, delay: 75 },
       { text: 'Try: agents run kimi "hello"', color: D, delay: 85 },
     ],
-    durationFrames: 110,  // 3.7s
+    durationFrames: 110,
   },
 
-  // ── ACT 3: SKILLS + MCP (INSTALL ONCE, SYNC EVERYWHERE) ──
   {
     id: 'skills',
     title: 'SKILLS',
@@ -103,7 +98,7 @@ export const SCENES: Scene[] = [
       { text: 'Installed 1 skills to ~/.agents/skills/', color: G, delay: 95 },
       { text: 'Synced to 4 agent version(s)', color: G, delay: 105 },
     ],
-    durationFrames: 130,  // 4.3s
+    durationFrames: 130,
   },
   {
     id: 'mcp',
@@ -121,10 +116,9 @@ export const SCENES: Scene[] = [
       { text: '', delay: 80 },
       { text: 'Run: agents mcp register to apply', color: D, delay: 85 },
     ],
-    durationFrames: 110,  // 3.7s
+    durationFrames: 110,
   },
 
-  // ── ACT 4: VERSION PINNING ──
   {
     id: 'pin',
     title: 'PIN',
@@ -139,10 +133,9 @@ export const SCENES: Scene[] = [
       { text: 'Resolved claude@2.1.187 from .agents-version', color: C, delay: 70 },
       { text: 'booting Claude Code  14 skills  3 MCP servers  ready', color: D, delay: 80 },
     ],
-    durationFrames: 110,  // 3.7s
+    durationFrames: 110,
   },
 
-  // ── ACT 5: SESSIONS ──
   {
     id: 'sessions',
     title: 'SESSIONS',
@@ -160,10 +153,9 @@ export const SCENES: Scene[] = [
       { text: '', delay: 55 },
       { text: '5 sessions across 3 agents', color: D, delay: 60 },
     ],
-    durationFrames: 100,  // 3.3s
+    durationFrames: 100,
   },
 
-  // ── ACT 6: PIPE COMPOSITION ──
   {
     id: 'pipe',
     title: 'PIPE',
@@ -178,10 +170,9 @@ export const SCENES: Scene[] = [
       { text: '[codex]  Fixed 3/3 issues across 4 files', color: G, delay: 105 },
       { text: '[kimi]   Generated 7 test cases covering all fixes', color: Y, delay: 125 },
     ],
-    durationFrames: 150,  // 5s
+    durationFrames: 150,
   },
 
-  // ── ACT 7: CLOUD DISPATCH ──
   {
     id: 'cloud',
     title: 'CLOUD',
@@ -199,10 +190,9 @@ export const SCENES: Scene[] = [
       { text: '', delay: 130 },
       { text: 'Task tsk_8f3a completed in 2 minutes', color: G, delay: 135 },
     ],
-    durationFrames: 160,  // 5.3s
+    durationFrames: 160,
   },
 
-  // ── ACT 8: DISTRIBUTED TEAMS (FLEET) ──
   {
     id: 'fleet',
     title: 'FLEET',
@@ -219,10 +209,9 @@ export const SCENES: Scene[] = [
       { text: '', delay: 110 },
       { text: '2 teammates across 2 machines — dispatched over SSH', color: G, delay: 115 },
     ],
-    durationFrames: 150,  // 5s
+    durationFrames: 150,
   },
 
-  // ── ACT 9: SESSIONS FOCUS ──
   {
     id: 'focus',
     title: 'FOCUS',
@@ -239,10 +228,9 @@ export const SCENES: Scene[] = [
       { text: 'Attaching to codex on yosemite-s0 (ssh -tt, tmux attach)...', color: D, delay: 80, spinner: true },
       { text: 'Attached — you are in the live session', color: G, delay: 95 },
     ],
-    durationFrames: 110,  // 3.7s
+    durationFrames: 110,
   },
 
-  // ── ACT 10: ROTATION (UNIQUE FEATURE) ──
   {
     id: 'rotate',
     title: 'ROTATE',
@@ -259,19 +247,16 @@ export const SCENES: Scene[] = [
       { text: 'Selected: claude@2.1.187 (work@example.com) -- lowest usage', color: G, delay: 60 },
       { text: 'booting Claude Code  14 skills  3 MCP servers  ready', color: D, delay: 70 },
     ],
-    durationFrames: 100,  // 3.3s
+    durationFrames: 100,
   },
 
-  // ── FINALE ── (rendered by <Finale> component, not the terminal)
   {
     id: 'finale',
     title: 'agents',
     clear: true,
     lines: [],
-    durationFrames: 180,  // 6s
+    durationFrames: 180,
   },
 ];
 
-// Total: ~55.8s at 30fps = 1675 frames
-// We'll adjust durationInFrames in Root.tsx to match
 export const TOTAL_FRAMES = SCENES.reduce((sum, s) => sum + s.durationFrames, 0);

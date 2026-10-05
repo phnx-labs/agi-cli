@@ -14,7 +14,6 @@ PIN="scripts/agents-cli-bin.sha256"
 
 expected="$(cut -d ' ' -f 1 "$PIN")"
 
-# Portable sha256: macOS ships `shasum`, Linux ships `sha256sum`.
 if command -v shasum >/dev/null 2>&1; then
   actual="$(shasum -a 256 "$BIN" | cut -d ' ' -f 1)"
 else
@@ -39,8 +38,6 @@ fi
 
 if command -v codesign >/dev/null 2>&1; then
   codesign --verify --strict "$BIN" || { echo "codesign --verify failed for $BIN" >&2; exit 1; }
-  # Capture, then grep: piping codesign straight into `grep -q` under pipefail
-  # fails spuriously (grep exits at first match, codesign dies with SIGPIPE).
   signature_info="$(codesign -dvv "$BIN" 2>&1)"
   if ! grep -q "^Authority=Developer ID Application" <<<"$signature_info"; then
     echo "dist/bin/agents is not Developer ID signed" >&2

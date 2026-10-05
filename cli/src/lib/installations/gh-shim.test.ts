@@ -20,9 +20,7 @@ describe('generateGhOverloadShim', () => {
 
   it('carries a recursion guard (sentinel) and self-heals to real gh', () => {
     expect(script).toContain('AGENTS_GH_SHIM=1');
-    // If the sentinel is set OR agents-cli is missing, exec the real gh.
     expect(script).toMatch(/-n "\$AGENTS_GH_SHIM".*\n?.*exec "\$REAL_GH"/s);
-    // The default tail passes every non-`pr checks` verb straight to real gh.
     expect(script.trimEnd().endsWith('exec "$REAL_GH" "$@"')).toBe(true);
   });
 
@@ -35,8 +33,6 @@ describe('generateGhOverloadShim', () => {
 describe('no real gh on PATH — fails loud, never loops (review blocker)', () => {
   it('exits 127 like command-not-found instead of infinite-recursing into itself', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-noloop-'));
-    // Bake SHIMS_DIR to this dir so find_real_gh skips it — the shim is then the
-    // ONLY `gh` reachable, the exact gh-less condition that used to loop forever.
     const script = generateGhOverloadShim().replace(
       /^SHIMS_DIR=.*$/m,
       `SHIMS_DIR='${dir}'`,
@@ -44,8 +40,6 @@ describe('no real gh on PATH — fails loud, never loops (review blocker)', () =
     const shim = path.join(dir, 'gh');
     fs.writeFileSync(shim, script, { mode: 0o755 });
 
-    // Absolute /bin/sh so spawn finds the interpreter; PATH=dir means the ONLY
-    // `gh` the shim can resolve is itself (the shim uses shell builtins only).
     const res = spawnSync('/bin/sh', [shim, 'pr', 'checks', '1'], {
       env: { PATH: dir },
       timeout: 5000,
@@ -53,8 +47,8 @@ describe('no real gh on PATH — fails loud, never loops (review blocker)', () =
     });
     fs.rmSync(dir, { recursive: true, force: true });
 
-    expect(res.signal).toBeNull(); // NOT killed by the timeout => it did not hang/loop
-    expect(res.status).toBe(127); // clean command-not-found
+    expect(res.signal).toBeNull();
+    expect(res.status).toBe(127);
     expect(res.stderr).toContain('not found');
   });
 });

@@ -28,9 +28,6 @@ const buildDir = process.env.BUILD_DIR;
 const version = process.env.VERSION;
 if (!buildDir || !version) throw new Error('BUILD_DIR and VERSION are required');
 
-// VERSION lives in bootstrap.ts (RUSH-2335 split-entry). The slim index.ts
-// shell never reads package.json; stamp the constant into the bootstrap body
-// so the compiled binary does not need a package.json next to it.
 const bootstrapPath = path.join(buildDir, 'src', 'bootstrap.ts');
 let bootstrap = fs.readFileSync(bootstrapPath, 'utf8');
 const versionBlock = [

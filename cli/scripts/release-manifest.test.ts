@@ -79,9 +79,6 @@ describeUnix('release-manifest.sh', () => {
     expect(reuse.status, reuse.out).toBe(0);
     expect(JSON.parse(reuse.out).assetDigest).toBe(assetDigest);
 
-    // The missing-helper refusal is proved on a manifest that has no record at
-    // all. With one known helper left (PHNX-4075), recording menubar and then
-    // resolving menubar would be resolving the row we just wrote.
     const emptyFile = path.join(dir, 'manifest-empty.json');
     const empty = sh(['new', '--cli-version', '1.22.40', '--cli-tree', 'abc']);
     expect(empty.status, empty.out).toBe(0);
@@ -145,9 +142,6 @@ describeUnix('release-manifest.sh', () => {
   });
 
   it("menubar's input digest is the floor pin: it moves with helper-versions.ts and nothing else", () => {
-    // A throwaway git repo (input-digest resolves --repo-root through git) that
-    // carries ONLY the floor table. No cli/menubar/ source exists anywhere any
-    // more, so hashing it would either fail or hash nothing.
     const repo = tmp('rel-manifest-floor-');
     const git = (...args: string[]) => {
       const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' });
@@ -161,15 +155,12 @@ describeUnix('release-manifest.sh', () => {
     expect(before.status, before.out).toBe(0);
     expect(before.out.trim()).toMatch(/^sha256:[0-9a-f]{64}$/);
 
-    // Something else in the tree changing must NOT move the digest...
     fs.writeFileSync(path.join(repo, 'cli/src/lib/other.ts'), 'export const x = 1;\n');
     expect(sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']).out.trim()).toBe(before.out.trim());
-    // ...and a floor bump MUST, so the producer re-records from the new release.
     fs.writeFileSync(table, "export const HELPER_RELEASES = { menubar: { tagPrefix: 'menubar', floor: '1.2.0' } };\n");
     const bumped = sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']);
     expect(bumped.status, bumped.out).toBe(0);
     expect(bumped.out.trim()).not.toBe(before.out.trim());
-    // A repo with no floor table at all cannot key the helper -- fail loud.
     fs.rmSync(table);
     const missing = sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']);
     expect(missing.status).not.toBe(0);
@@ -186,7 +177,6 @@ describeUnix('release-manifest.sh', () => {
     const assetDigest = `sha256:${createHash('sha256').update(fs.readFileSync(zip)).digest('hex')}`;
     const source = JSON.stringify({ repo: 'phnx-labs/agi-menu', commit: 'abc123', tag: 'v1.1.0', version: '1.1.0' });
 
-    // Provenance must be an object: a stray string would leave a reader guessing.
     const bad = sh([
       'put', '--file', file, '--helper', 'menubar', '--helper-version', '1.1.0',
       '--input-digest', digest, '--asset-digest', assetDigest, '--asset-path', zip,
@@ -206,7 +196,6 @@ describeUnix('release-manifest.sh', () => {
     expect(rec.source).toEqual(JSON.parse(source));
     expect(rec.helperVersion).toBe('1.1.0');
 
-    // A record without provenance (a pre-sidecar release) simply has no field.
     const plain = path.join(dir, 'plain.json');
     fs.writeFileSync(plain, sh(['new', '--cli-version', '1.22.93', '--cli-tree', 'abc']).out);
     expect(sh([
@@ -215,7 +204,6 @@ describeUnix('release-manifest.sh', () => {
     ]).status).toBe(0);
     expect(JSON.parse(sh(['resolve', '--file', plain, '--helper', 'menubar']).out)).not.toHaveProperty('source');
 
-    // copy-asset attaches the ZIP the CLI downloads (never a bare .app directory).
     const dest = path.join(dir, 'out');
     const copied = sh(['copy-asset', '--file', file, '--helper', 'menubar', '--asset-path', dest]);
     expect(copied.status, copied.out).toBe(0);

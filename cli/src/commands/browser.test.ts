@@ -29,9 +29,6 @@ describe('BROWSER_PASSTHROUGH_VERBS', () => {
   });
 });
 
-// `--device` is resolved (only on `start`) to the fd-3 fleet target, then
-// forwarded VERBATIM so the engine matches its own `--device <alias>` against the
-// context. peekDevice reads it without consuming it.
 describe('peekDevice', () => {
   it('reads --device <name>', () => {
     expect(peekDevice(['start', '--profile', 'work', '--device', 'box'])).toBe('box');

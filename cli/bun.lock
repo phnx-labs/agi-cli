@@ -8,7 +8,7 @@
         "@fontsource/inter": "^5.3.0",
         "@fontsource/jetbrains-mono": "^5.3.0",
         "@inquirer/prompts": "8.5.2",
-        "@phnx-labs/sessions-cli": "0.3.0",
+        "@phnx-labs/sessions-cli": "0.5.0",
         "@resvg/resvg-wasm": "^2.6.2",
         "@types/proper-lockfile": "4.1.4",
         "@zed-industries/agent-client-protocol": "0.4.5",
@@ -32,7 +32,7 @@
       },
       "devDependencies": {
         "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
-        "@phnx-labs/cli-docs": "0.1.0",
+        "@phnx-labs/cli-docs": "0.1.1",
         "@types/diff": "8.0.0",
         "@types/marked-terminal": "6.1.1",
         "@types/node": "26.1.0",
@@ -228,9 +228,9 @@
 
     "@oxc-project/types": ["@oxc-project/types@0.132.0", "", {}, "sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ=="],
 
-    "@phnx-labs/cli-docs": ["@phnx-labs/cli-docs@0.1.0", "", { "peerDependencies": { "commander": ">=12" } }, "sha512-5SIcT01F7corWMVvg6y/nJXHl7CiyUG4GVVulV/Di4zXXCqA5190sd3f67np9H9Lu/8EH/81meLoY7r7+ZsXfQ=="],
+    "@phnx-labs/cli-docs": ["@phnx-labs/cli-docs@0.1.1", "", { "peerDependencies": { "commander": ">=12" } }, "sha512-2gcsKyVYDia/Sh6Fu199e+OLY8Wf4uQWqISOm+KisnOuEl2m/2x8J++Izm1VRQfWnQkCZkUkuIrjLm962hKsHA=="],
 
-    "@phnx-labs/sessions-cli": ["@phnx-labs/sessions-cli@0.3.0", "", { "dependencies": { "acorn": "8.18.0", "chalk": "5.6.2", "commander": "15.0.0", "diff": "9.0.0", "marked": "15.0.12", "marked-terminal": "7.3.0", "shlex": "3.0.0", "unbash": "4.0.5" }, "bin": { "sessions": "dist/index.js" } }, "sha512-A+uX/rB2n2NwJRkW/7+dZ4xDE0gbuNCR6Zlj4PclyKCQ3I1vSB8NN10UUw5x8cpdDHrBJCdosSioKHbxOeF8yw=="],
+    "@phnx-labs/sessions-cli": ["@phnx-labs/sessions-cli@0.5.0", "", { "dependencies": { "@inquirer/core": "11.2.1", "acorn": "8.18.0", "chalk": "5.6.2", "commander": "15.0.0", "diff": "9.0.0", "marked": "15.0.12", "marked-terminal": "7.3.0", "shlex": "3.0.0", "unbash": "4.0.5" }, "bin": { "sessions": "dist/index.js" } }, "sha512-xyP7RvLcB68ga6J0qPe0q0PuLwwEVeXI4uPPvh+jGh7OGkbZP3k9a7DRoVcmMY3kl2gNlYz4GhZg4MjW4/6cxA=="],
 
     "@poppinss/colors": ["@poppinss/colors@4.1.6", "", { "dependencies": { "kleur": "^4.1.5" } }, "sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg=="],
 

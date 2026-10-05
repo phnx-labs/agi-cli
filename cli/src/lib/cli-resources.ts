@@ -11,6 +11,7 @@ import { probeCapture } from './probe.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { execFileShellSpec } from './platform/exec.js';
 import { localBinDir } from './platform/posixpath.js';
+import { compareVersions } from './agent-spec/primitives.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
 
@@ -581,6 +582,117 @@ export function installCli(
   cmdExistsCache.delete(manifest.name);
   const installed = isCliInstalled(manifest);
   return { manifest, method, installed };
+}
+
+
+const EXACT_SEMVER = /^\d+\.\d+\.\d+$/;
+const FIRST_SEMVER = /\d+\.\d+\.\d+/;
+
+export function npmPin(manifest: CliManifest): { pkg: string; version: string } | null {
+  const method = manifest.install.find((m): m is { npm: string } => 'npm' in m);
+  if (!method) return null;
+  const at = method.npm.lastIndexOf('@');
+  if (at <= 0) return null;
+  const version = method.npm.slice(at + 1);
+  return EXACT_SEMVER.test(version) ? { pkg: method.npm.slice(0, at), version } : null;
+}
+
+export async function installedCliVersion(manifest: CliManifest): Promise<string | null> {
+  const c = manifest.check;
+  if (c.kind !== 'version') return null;
+  try {
+    const { stdout } = await probeCapture(c.cmd, c.args, 10_000);
+    return FIRST_SEMVER.exec(stdout)?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveOnPath(cmd: string): string | null {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, cmd);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return fs.realpathSync(candidate);
+    } catch {
+    }
+  }
+  return null;
+}
+
+export function owningNpmPrefix(cmd: string, pkg: string): string | null {
+  const real = resolveOnPath(cmd);
+  if (!real) return null;
+  const marker = `${path.sep}lib${path.sep}node_modules${path.sep}${pkg.split('/').join(path.sep)}${path.sep}`;
+  const idx = real.indexOf(marker);
+  return idx > 0 ? real.slice(0, idx) : null;
+}
+
+export type CliUpgradeResult =
+  | { name: string; status: 'current'; version: string }
+  | { name: string; status: 'upgraded'; from: string; to: string }
+  | { name: string; status: 'skipped' | 'failed'; reason: string };
+
+export const UPGRADE_TIMEOUT_MS = 5 * 60_000;
+
+function runNpmInstall(prefix: string, spec: string, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'npm',
+      ['install', '-g', '--prefix', prefix, spec],
+      { timeout: UPGRADE_TIMEOUT_MS, signal, maxBuffer: 16 * 1024 * 1024 },
+      (err, _stdout, stderr) => {
+        if (err) reject(new Error(`npm install -g --prefix ${prefix} ${spec} failed: ${String(stderr).trim().split('\n').pop() ?? err.message}`));
+        else resolve();
+      },
+    );
+  });
+}
+
+export async function upgradeCliToPin(
+  manifest: CliManifest,
+  opts: { signal?: AbortSignal; deadlineAt?: number } = {},
+): Promise<CliUpgradeResult> {
+  const { signal, deadlineAt } = opts;
+  const name = manifest.name;
+  const pin = npmPin(manifest);
+  if (!pin) return { name, status: 'skipped', reason: 'no exact npm pin' };
+  if (manifest.check.kind !== 'version') return { name, status: 'skipped', reason: 'check reports no version' };
+  const from = await installedCliVersion(manifest);
+  if (!from) return { name, status: 'skipped', reason: 'not installed or reports no version' };
+  if (compareVersions(from, pin.version) >= 0) return { name, status: 'current', version: from };
+  if (process.platform === 'win32') return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}); unattended upgrade is POSIX-only` };
+  const prefix = owningNpmPrefix(manifest.check.cmd, pin.pkg);
+  if (!prefix) {
+    return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}) but ${manifest.check.cmd} on PATH is not an npm install of ${pin.pkg}` };
+  }
+  if (deadlineAt !== undefined && Date.now() + UPGRADE_TIMEOUT_MS > deadlineAt) {
+    return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}); deferred, not enough time left in this tick` };
+  }
+  try {
+    await runNpmInstall(prefix, `${pin.pkg}@${pin.version}`, signal);
+  } catch (err) {
+    return { name, status: 'failed', reason: (err as Error).message };
+  }
+  const to = await installedCliVersion(manifest);
+  if (to !== pin.version) {
+    return { name, status: 'failed', reason: `installed ${pin.pkg}@${pin.version} into ${prefix} but ${manifest.check.cmd} still reports ${to ?? 'no version'}` };
+  }
+  return { name, status: 'upgraded', from, to };
+}
+
+export async function upgradeOutdatedClis(
+  opts: { signal?: AbortSignal; deadlineAt?: number; cwd?: string } = {},
+): Promise<CliUpgradeResult[]> {
+  const { manifests } = listCliManifests(opts.cwd);
+  const results: CliUpgradeResult[] = [];
+  for (const manifest of manifests) {
+    if (opts.signal?.aborted) break;
+    if (manifest.source === 'project') continue;
+    results.push(await upgradeCliToPin(manifest, opts));
+  }
+  return results;
 }
 
 // ─── Status snapshot ─────────────────────────────────────────────────────────

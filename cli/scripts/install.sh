@@ -1,34 +1,4 @@
 #!/usr/bin/env bash
-#
-# Install this working tree as a dev build of agents-cli, side-by-side with
-# the registry-installed `agents` command.
-#
-# The dev install lives at its own prefix (default: $HOME/.local/agents-cli-dev)
-# and is exposed as $HOME/.local/bin/agents-dev (plus `ag-dev`). Run it by name:
-#
-#   agents-dev sessions --active     # this working tree
-#   agents      sessions --active    # your installed CLI, untouched
-#
-# This script MUST NEVER create, overwrite, or point at $HOME/.local/bin/agents,
-# `ag`, or `browser`. Those names belong to the registry install alone. A dev
-# build that answers to `agents` makes PATH order decide which code runs, and a
-# cleaned dev prefix leaves the production command dangling -- so the dev build
-# gets its own name instead. Any such shadow link a PREVIOUS run of this script
-# left behind is removed on the next run.
-#
-# Version of the dev build is `0.0.0-dev.<sha>[-dirty]`, so `agents-dev --version`
-# always tells you which commit you are driving.
-#
-# Usage: scripts/install.sh [--skip-build] [--skip-tests] [--prefix <dir>]
-#                           [--bounce-daemon]
-#
-#   --skip-build      reuse existing dist/ instead of rebuilding
-#   --skip-tests      skip the test suite (forwarded to build)
-#   --prefix <dir>    install prefix (default: $HOME/.local/agents-cli-dev)
-#   --bounce-daemon   restart a running routines daemon onto this dev build.
-#                     Off by default: the daemon is shared (browser IPC,
-#                     routines, and more), so pointing it at a dev build
-#                     changes what your everyday `agents` talks to.
 
 set -euo pipefail
 
@@ -49,13 +19,9 @@ BOUNCE_DAEMON=false
 PREFIX="$HOME/.local/agents-cli-dev"
 LINK_DIR="$HOME/.local/bin"
 
-# The dev build answers to these names. `agents`, `ag`, and `browser` are
-# deliberately absent -- see the header.
 DEV_BINS=(agents ag)
 DEV_SUFFIX="-dev"
 
-# Names this script must never leave pointing at the dev prefix. `browser` is
-# here because older revisions of this script linked it.
 PRODUCTION_BINS=(agents ag browser)
 
 while [[ $# -gt 0 ]]; do
@@ -74,8 +40,6 @@ done
 command -v npm >/dev/null || die "npm not found"
 command -v node >/dev/null || die "node not found"
 
-# Dev version keyed to the current commit so two installs from different
-# commits are distinguishable. Bin name stays stable (`agents-dev`).
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "local")
 DIRTY=""
 if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then DIRTY="-dirty"; fi
@@ -113,9 +77,6 @@ cp scripts/postinstall.js "$STAGE_DIR/scripts/"
 [[ -f README.md ]] && cp README.md "$STAGE_DIR/"
 [[ -f LICENSE ]] && cp LICENSE "$STAGE_DIR/"
 
-# Rewrite package.json: dev version. Skip the postinstall hook — it's designed
-# to nudge the user to add the registry-install shims dir to PATH, which the
-# dev install doesn't need.
 node -e "
   const fs = require('fs');
   const p = require('./package.json');
@@ -129,8 +90,6 @@ node -e "
 dim "  Packing tarball"
 (
   cd "$STAGE_DIR"
-  # --ignore-scripts: the package's prepack hook references files we don't
-  # stage (it's a publish-time check, not relevant for the dev tarball).
   TARBALL_FILE=$(npm pack --silent --ignore-scripts 2>&1 | tail -1)
   echo "$STAGE_DIR/$TARBALL_FILE" > "$STAGE_DIR/.tarball-path"
 )
@@ -145,13 +104,9 @@ npm install -g "$TARBALL" \
   --ignore-scripts \
   >/dev/null
 
-# Publish the dev bins into a stable location ($HOME/.local/bin) under their own
-# names, so the dev build can never win or lose a PATH-ordering race against the
-# registry install. Nothing in the registry-install prefix is touched.
+# Publish only suffixed dev names; production names remain owned by the registry install.
 mkdir -p "$LINK_DIR"
 
-# Marker embedded in the Windows wrapper scripts. Those are regular files, not
-# symlinks, so the cleanup below cannot recognize them by their link target.
 DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
 
 # Remove a $LINK_DIR entry that a prior run of this script created under a production name: on
@@ -160,9 +115,6 @@ DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
 cleanup_legacy_shadow() {
   local path="$1" raw
   if [[ -L "$path" ]]; then
-    # readlink, not `[[ -e ]]`: -e is FALSE for a dangling symlink, and dangling
-    # is precisely the state left behind once the dev prefix is cleaned -- the
-    # shape that makes `agents` fail with "no such file or directory".
     raw=$(readlink "$path") || return 0
     case "$raw" in
       "$PREFIX"/*|"$HOME"/.local/agents-cli-dev/*)
@@ -226,9 +178,6 @@ else
   done
 fi
 
-# Prefer the standalone Mach-O when the staged dist carries one (macOS): the
-# node-shebang shim is what EDR flags (#315). Runnable-probe first - an
-# unsigned or wrong-arch artifact must not brick the dev install.
 NATIVE_BIN="$PREFIX/lib/node_modules/$PKG_NAME/dist/bin/agents"
 if [[ "$(uname)" == "Darwin" && -x "$NATIVE_BIN" ]] && "$NATIVE_BIN" --version >/dev/null 2>&1; then
   ln -sf "$NATIVE_BIN" "$LINK_DIR/agents$DEV_SUFFIX"
@@ -236,7 +185,6 @@ if [[ "$(uname)" == "Darwin" && -x "$NATIVE_BIN" ]] && "$NATIVE_BIN" --version >
   dim "  Linked agents$DEV_SUFFIX/ag$DEV_SUFFIX to the standalone binary (dist/bin/agents)"
 fi
 
-# Confirm the dev binary is runnable.
 LINKED_PATH="$LINK_DIR/agents$DEV_SUFFIX"
 [[ -e "$LINKED_PATH" ]] || die "agents$DEV_SUFFIX not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
@@ -248,9 +196,6 @@ if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" && "$BOUNCE_DAEMON" == true ]
   INSTALLED_PKG="$PREFIX/lib/node_modules/$PKG_NAME"
   if [[ -f "$INSTALLED_PKG/dist/lib/daemon/daemon.js" ]]; then
     dim "  Reloading daemon onto this build (if running)"
-    # Export paths for the node one-shot so shell metacharacters in PREFIX
-    # can't break the import. Use the installed module (not PATH) so we
-    # don't accidentally restart with a different agents binary.
     AGENTS_INSTALL_DAEMON_MOD="$INSTALLED_PKG/dist/lib/daemon/daemon.js" \
     AGENTS_INSTALL_BIN="$LINKED_PATH" \
     node --input-type=module -e '
@@ -292,8 +237,6 @@ else
   yellow "  (or add npm's global bin dir to PATH). 'agents$DEV_SUFFIX' is unaffected."
 fi
 
-# The dev build has its own name, so PATH ORDER no longer matters -- only whether
-# $LINK_DIR is reachable at all.
 case ":$PATH:" in
   *":$LINK_DIR:"*) : ;;
   *)

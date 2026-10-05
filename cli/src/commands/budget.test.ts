@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate HOME before any module that captures path constants at import time.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-budget-test-'));
 process.env.HOME = TEST_HOME;
 
@@ -12,7 +11,7 @@ const { registerBudgetCommand } = await import('./budget.js');
 const { recordSpend, localDay } = await import('../lib/budget/ledger.js');
 const { getHistoryDir } = await import('../lib/state.js');
 
-const PROJECT = TEST_HOME; // run the command with cwd == TEST_HOME
+const PROJECT = TEST_HOME;
 const userYaml = path.join(TEST_HOME, '.agents', 'agents.yaml');
 
 function writeBudget(yamlBody: string): void {
@@ -20,7 +19,6 @@ function writeBudget(yamlBody: string): void {
   fs.writeFileSync(userYaml, yamlBody);
 }
 
-/** Run `agents config budget <args>` from cwd=PROJECT, capturing stdout + console.log. */
 async function runBudget(args: string[]): Promise<string> {
   const program = new Command();
   program.exitOverride();
@@ -51,7 +49,6 @@ const ledgerPath = () => path.join(getHistoryDir(), 'spend', 'ledger.jsonl');
 describe('agents config budget', () => {
   beforeAll(() => {
     writeBudget('budget:\n  per_run: 5\n  per_day: 50\n  per_project: 100\n  on_exceed: block\n');
-    // Cross-vendor spend today against the same project: claude $5 + codex $1.25.
     recordSpend({ runId: 'rA', agent: 'claude', project: PROJECT, model: 'claude-opus-4', usage: { inputTokens: 1_000_000 }, source: 'run', ts: new Date() }, ledgerPath());
     recordSpend({ runId: 'rB', agent: 'codex', project: PROJECT, model: 'gpt-5', usage: { inputTokens: 1_000_000 }, source: 'run', ts: new Date() }, ledgerPath());
   });
@@ -65,7 +62,6 @@ describe('agents config budget', () => {
     expect(out).toContain('per_run');
     expect(out).toContain('per_day');
     expect(out).toContain('per_project');
-    // Day spend is claude $5 + codex $1.25 = $6.25 against the $50 cap.
     expect(out).toContain('$6.25');
     expect(out).toContain('$50.00');
   });

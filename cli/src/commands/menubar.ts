@@ -24,7 +24,6 @@ function notMac(): boolean {
   return false;
 }
 
-/** Shared status readout — `status`, bare `menubar`, and `setup --check` all end here. */
 function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
   const yn = (b: boolean) => (b ? chalk.green('yes') : chalk.gray('no'));
   console.log(chalk.bold('AGI Menu\n'));
@@ -44,8 +43,6 @@ function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
   console.log(`  bundle source      ${s.source ? chalk.gray(s.source) : pendingSource}`);
   console.log(`  disabled by user   ${yn(s.disabledByUser)}`);
 
-  // Two copies of the INSTALLED bundle is the duplicate the user sees as two
-  // agents marks in the menu bar. It used to read as a healthy `running: yes`.
   if (s.instances.length > 1) {
     console.log(chalk.yellow(`\n  ${s.instances.length} copies of AGI Menu are running — that is the duplicate menu-bar icon:`));
     for (const p of s.instances) console.log(chalk.gray(`    ${p.pid}  ${p.executable}`));
@@ -121,9 +118,6 @@ export function registerMenubarCommands(program: Command): void {
     .command('menubar')
     .description('Manage AGI Menu (running sessions, agents awaiting input, routines)');
 
-  // `setup` is the one command that gets a machine to the intended state:
-  // exactly one status item, started at login. `enable` stays the narrow
-  // install+start; setup adds duplicate cleanup and verifies the end state.
   const setup = menubar
     .command('setup')
     .description('Configure AGI Menu end-to-end: one instance, started at login')
@@ -263,7 +257,6 @@ export function registerMenubarCommands(program: Command): void {
     `,
   });
 
-  // Bare `agents menubar` -> status.
   menubar.action(() => {
     const s = getMenubarStatus();
     if (s.platform !== 'darwin') {

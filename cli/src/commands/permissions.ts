@@ -60,7 +60,6 @@ export function shouldRefuseBroadPermissions(
   return !allowBroadPermissions && permissions.some((perm) => containsBroadGrants(perm.set) !== null);
 }
 
-/** Register the `agents permissions` command tree (list, add, remove, view). */
 export function registerPermissionsCommands(program: Command): void {
   const permissionsCmd = program
     .command('permissions')
@@ -184,7 +183,6 @@ When to use:
       };
 
       if (agentArg) {
-        // Parse agent@version syntax
         const parts = agentArg.split('@');
         const agentName = parts[0];
 
@@ -207,7 +205,6 @@ When to use:
         console.log(chalk.bold(`Installed Permissions for ${agentLabel(agent.id)} (${options.scope}):\n`));
 
         if (installedVersions.length === 0) {
-          // Not version-managed - use default home
           const perms = readAgentPermissions(agentId, options.scope, cwd);
           if (!perms) {
             console.log(chalk.gray(`  No permissions configured`));
@@ -219,7 +216,6 @@ When to use:
           return;
         }
 
-        // Version-managed: determine which versions to show
         let versionsToShow: string[];
         if (requestedVersion === 'default') {
           if (!defaultVer) {
@@ -235,7 +231,6 @@ When to use:
           }
           versionsToShow = [requestedVersion];
         } else {
-          // Show all versions, default first
           versionsToShow = [...installedVersions].sort((a, b) => {
             if (a === defaultVer) return -1;
             if (b === defaultVer) return 1;
@@ -248,7 +243,6 @@ When to use:
           renderVersionPermissions(agentId, version, version === defaultVer, home, options.scope);
         }
       } else {
-        // List central permission sets
         const sets = listInstalledPermissions();
 
         if (sets.length === 0) {
@@ -261,7 +255,6 @@ When to use:
         const permCols = terminalWidth();
         for (const perm of sets) {
           const prefix = `  ${chalk.cyan(perm.name)}`;
-          // Cap the description to the line so a prose-paragraph set (400+ chars) can't smear.
           const budget = permCols - stringWidth(prefix) - 3;
           const desc = perm.set.description && budget > 3
             ? ` - ${chalk.gray(truncateToWidth(perm.set.description, budget))}`
@@ -302,7 +295,6 @@ Examples:
       try {
         const skipPrompts = options.yes || !isInteractiveTerminal();
 
-        // Interactive mode: pick from central storage
         if (!source) {
           const installedSets = listInstalledPermissions();
           if (installedSets.length === 0) {
@@ -395,7 +387,6 @@ Examples:
             return;
           }
 
-          // Apply selected permission sets
           let applied = 0;
           for (const setName of selectedNames) {
             const installed = installedSets.find((s) => s.name === setName);
@@ -450,7 +441,6 @@ Examples:
         const isAgentConfig = detectPermissionAgentFromPath(localPath) !== null;
 
         if (isAgentConfig) {
-          // Handle agent config file - convert, diff, merge into default set
           const incoming = exportPermissionsFromPath(localPath);
 
           if (!incoming || (incoming.allow.length === 0 && (!incoming.deny || incoming.deny.length === 0))) {
@@ -458,10 +448,8 @@ Examples:
             return;
           }
 
-          // Get existing default permission set
           const existing = getDefaultPermissionSet();
 
-          // Compute diff
           const diff = computePermissionsDiff(existing, incoming);
           const totalNew = diff.allow.added.length + diff.deny.added.length;
           const totalExisting = diff.allow.existing.length + diff.deny.existing.length;
@@ -471,7 +459,6 @@ Examples:
             return;
           }
 
-          // Show diff
           console.log(chalk.bold('\nPermissions to add:\n'));
 
           if (diff.allow.added.length > 0) {
@@ -497,7 +484,6 @@ Examples:
 
           console.log();
 
-          // Confirm
           if (!skipPrompts) {
             const proceed = await confirm({
               message: `Add ${totalNew} new permission rule${totalNew === 1 ? '' : 's'}?`,
@@ -509,7 +495,6 @@ Examples:
             }
           }
 
-          // Merge and save
           const merged = mergePermissionSets(existing, incoming);
           const result = saveDefaultPermissionSet(merged);
 
@@ -520,7 +505,6 @@ Examples:
 
           console.log(chalk.green(`Added ${totalNew} permission${totalNew === 1 ? '' : 's'} to ~/.agents/permissions/default.yml`));
 
-          // Apply to agent versions
           let selectedAgents: AgentId[];
           let versionSelections: Map<AgentId, string[]>;
 
@@ -584,7 +568,6 @@ Examples:
             console.log(chalk.gray(`\nApplied permissions to ${applied} version(s).`));
           }
         } else {
-          // Handle permission YAML files or repo
           let permissions: ReturnType<typeof discoverPermissionsFromRepo>;
 
           if (localPath.endsWith('.yml') || localPath.endsWith('.yaml')) {
@@ -629,7 +612,6 @@ Examples:
             }
           }
 
-          // Confirm installation
           if (!skipPrompts) {
             const proceed = await confirm({
               message: 'Install these permission sets?',
@@ -657,7 +639,6 @@ Examples:
 
           installSpinner.succeed(`Installed ${installed} permission set(s) to ~/.agents/permissions/`);
 
-          // Apply to agent versions
           let selectedAgents: AgentId[];
           let versionSelections: Map<AgentId, string[]>;
 
@@ -749,7 +730,6 @@ Examples:
       if (name) {
         setsToRemove = [name];
       } else {
-        // Interactive picker
         const installedSets = listInstalledPermissions();
         if (installedSets.length === 0) {
           console.log(chalk.yellow('No permission sets installed.'));
@@ -816,7 +796,6 @@ Examples:
         return;
       }
 
-      // If no name provided, show interactive select
       if (!name) {
         if (!isInteractiveTerminal()) {
           requireInteractiveSelection('Selecting a permission set to view', [
@@ -849,7 +828,6 @@ Examples:
         return;
       }
 
-      // Build output
       const lines: string[] = [];
       lines.push(chalk.bold(`\n${perm.name}\n`));
       if (perm.set.description) {
@@ -876,7 +854,4 @@ Examples:
       printWithPager(output, lines.length);
     });
 
-  // Deprecated alias handler for 'perms'
-  // Note: This needs to be registered at the program level, not as a subcommand
-  // The actual deprecation message is shown in index.ts
 }

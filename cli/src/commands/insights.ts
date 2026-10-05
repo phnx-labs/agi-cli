@@ -68,7 +68,6 @@ function agentsFromArgv(argv: string[]): string[] {
   return values;
 }
 
-/** One reported group — an account by default, else an agent/project/day. */
 interface GroupReport {
   key: string;
   label: string;
@@ -128,23 +127,16 @@ async function collectFacets(
   let done = 0;
   for (const row of stale) {
     try {
-      // Stat BEFORE reading, so the stamp we persist describes bytes no newer than the
-      // ones parsed: a rescan landing mid-read then reads as stale, not as a hit.
       const st = fs.statSync(row.filePath!);
-      // includeInterrupts: the default event array is a versioned contract, so the
-      // marker is opt-in and this is the reader that opts in.
       const events = parseSession(row.filePath!, row.agent, { includeInterrupts: true });
       const facets = computeInsightFacets(events);
       cached.set(row.id, facets);
       fresh.push({ id: row.id, fileMtimeMs: Math.floor(st.mtimeMs), fileSize: st.size, facets });
     } catch {
-      // Deleted or corrupt since it was indexed. Counted and reported below, never
-      // silently contributing zero.
       unreadable++;
     }
     done++;
     if (done % 25 === 0) onProgress(done, stale.length);
-    // Persist in batches so an interrupted cold run does not lose everything.
     if (fresh.length >= 200) {
       writeSessionInsights(fresh.splice(0, fresh.length));
     }
@@ -186,7 +178,6 @@ function buildGroups(
   return [...byKey.values()].sort((a, b) => b.sessions - a.sessions || a.key.localeCompare(b.key));
 }
 
-/** A compact bar for a count relative to the row maximum. */
 function bar(count: number, max: number, width: number): string {
   if (max <= 0) return '';
   const filled = Math.max(1, Math.round((count / max) * width));
@@ -239,8 +230,6 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     return;
   }
 
-  // Per-group table — the headline, and the thing no sibling command produces.
-  // Includes silent-stall counts so harness/account laziness is visible without --json.
   out.push('');
   out.push(chalk.bold(`By ${dim}`));
   const labelW = Math.min(
@@ -272,18 +261,14 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     );
   }
 
-  // Everything below is the whole scope folded together; per-group detail is in --json.
   const all = newFacetAccumulator();
   for (const g of groups) mergeFacets(all, g.facets);
 
   renderCounts('Top tools', topEntries(all.toolCounts, 8), out);
-  // The `Bash`/`exec` bar above says a shell ran; this says WHICH binary — git, gh,
-  // agents, find, ssh→git — so the tool mix is actionable rather than one lump.
   renderCounts('Shell commands', topEntries(all.bashCommands, 12), out);
   renderCounts('Languages', topEntries(all.languages, 6), out);
   renderCounts('Models', topEntries(all.models, 6), out);
 
-  // Friction — the section that earns the command.
   renderCounts('Silent stalls by model', topEntries(all.silentStallsByModel ?? {}, 8), out);
   const gaps = all.responseGaps;
   const silentStalls = Object.entries(all.frictionSignals)
@@ -296,8 +281,6 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     chalk.gray('   turns you cut short'));
   out.push(`  ${padToWidth('tool errors', 18)}  ${chalk.cyan(String(all.errorCount))}`);
   if (gaps.length > 0) {
-    // Same timestamps as silent stalls; this line is the distribution. Silent
-    // stalls (below) are the agent-attributed long gaps after the model stopped.
     out.push(`  ${padToWidth('gap until next msg', 18)}  ` +
       chalk.cyan(`p50 ${Math.round(percentile(gaps, 50))}s`) + chalk.gray(` · p90 ${Math.round(percentile(gaps, 90))}s`) +
       chalk.gray('   after assistant last spoke'));
@@ -316,15 +299,11 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   }
 
   renderCounts('Friction / thrash', topEntries(all.frictionSignals, 10), out);
-  // Which shell binary was failing when a `failed tool loop: Bash` fired — makes the
-  // loop attributable (`git reconcile`, `find`, `gh`) instead of a bare tool name.
   renderCounts('Shell command failures', topEntries(all.bashCommandFailures, 8), out);
   renderCounts('Dissatisfaction / corrections', topEntries(all.correctionSignals, 10), out);
   renderCounts('Automatable repeats', topEntries(all.automationSignals, 10), out);
   renderCounts('Harness split', harnesses, out);
 
-  // Actions are built from frictionSignals/correctionSignals/automationSignals
-  // together (buildInsightActions).
   out.push('');
   out.push(chalk.bold('Actions'));
   if (actions.length === 0) {
@@ -335,21 +314,15 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
       out.push(`  ${padToWidth(action.priority, 7)} ${padToWidth(action.category, 11)} ` +
         `${String(action.evidenceCount).padStart(8)}  ${padToWidth(action.sampleSessionIds.join(', '), 25)} ${action.action}`);
     }
-    // This report is aggregate by contract (SES-IF-4c); a sample id above drills into
-    // one session's timeline via the per-session surface, not a single-session mode here.
     out.push(chalk.gray('  drill into a sample session:  agents sessions trace <id>'));
   }
 
-  // Output
   out.push('');
   out.push(chalk.bold('What you changed'));
   // Render only if something was actually measured, not merely an edit-shaped call: Codex patches
   // through `exec`, so it can log edit calls with no line arguments, and '0 lines' would misread
   // as 'wrote nothing'.
   if (all.linesTouchedAfter > 0 || all.linesTouchedBefore > 0) {
-    // "touched", not "+/-": these are the before/after line counts of each edit, so an
-    // Edit with unchanged context lines counts them on both sides. Not a diffstat, and
-    // labelled so nobody reads it as one.
     out.push(`  ${chalk.cyan(String(all.linesTouchedAfter))} ${chalk.gray('lines written,')} ` +
       `${chalk.cyan(String(all.linesTouchedBefore))} ${chalk.gray('replaced')}  ` +
       chalk.gray('(lines touched, not a diff)'));
@@ -368,13 +341,10 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
 
   renderHours(all.messageHours, out);
 
-  // Concurrency — direct evidence that a single-account view would be wrong.
   if (meta.overlap.overlappingPairs > 0) {
     out.push('');
     out.push(chalk.bold('Parallel sessions'));
     out.push(`  ${chalk.cyan(String(meta.overlap.sessionsInvolved))} ${chalk.gray('sessions ran alongside another')}`);
-    // Pairs, not sessions — stated as pairs so the two numbers are not read as a
-    // subset of each other.
     const crossNote = meta.overlap.crossAccountPairs > 0
       ? `, ${meta.overlap.crossAccountPairs} of them across two different accounts`
       : '';
@@ -405,7 +375,6 @@ interface ReportMeta {
   scanned: number;
   analyzed: number;
   filteredOut: number;
-  /** Transcripts that could not be read; reported, never silently zeroed. */
   unreadable: number;
   minMessages: number;
   overlap: ReturnType<typeof detectOverlap>;
@@ -439,9 +408,6 @@ async function renderNarrative(payload: unknown): Promise<void> {
       timeout: 180_000,
       maxBuffer: 8 * 1024 * 1024,
     });
-    // stderr, always. Under --json stdout is a machine contract, and prose appended
-    // after the closing brace makes the payload unparseable; on a TTY stderr renders
-    // identically, so there is nothing to special-case.
     process.stderr.write('\n' + chalk.bold('Narrative') + '\n');
     process.stderr.write(stdout.trim().split('\n').map((l) => `  ${l}`).join('\n') + '\n');
   } catch (err) {
@@ -451,8 +417,6 @@ async function renderNarrative(payload: unknown): Promise<void> {
     console.error('');
     console.error(chalk.red(`✗ narrative unavailable: ${msg}`));
     console.error(chalk.gray('  The report above is complete; only the written section was skipped.'));
-    // A scripted caller asked for this section and did not get it. Say so in the exit
-    // code rather than reporting success for a partial result.
     process.exitCode = 1;
   }
 }
@@ -464,14 +428,9 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
     console.error(chalk.red('error: --min-messages must be a non-negative integer'));
     process.exit(1);
   }
-  // `--all` is the spelling people reach for; `--since all` is what the window parser
-  // speaks. Accept both rather than failing on an unknown option, and let an explicit
-  // --since win so `--all --since 7d` is not silently contradictory.
   const since = options.since ?? (options.all ? 'all' : '30d');
   const sinceMs = since === 'all' ? undefined : parseTimeFilter(since);
 
-  // Refresh the index first, exactly as `agents insights cost` does, so a report never silently
-  // describes a stale picture of disk.
   await discoverSessions({ all: true, since: since === 'all' ? undefined : since, limit: 1 });
   if (options.refresh) clearSessionInsights();
 
@@ -527,8 +486,6 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
       minMessages,
       by: dim,
       overlap,
-      // Built from frictionSignals/correctionSignals/automationSignals together
-      // (buildInsightActions) — same paid friction/correction data as above.
       actions,
       harnesses,
       groups: groups.map((g) => ({
@@ -543,7 +500,6 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
           responseGapP50: Math.round(percentile(g.facets.responseGaps, 50)),
           responseGapP90: Math.round(percentile(g.facets.responseGaps, 90)),
           responseGapBuckets: bucketGaps(g.facets.responseGaps),
-          // The raw sample is large and uninteresting once bucketed.
           responseGaps: undefined,
         },
       })),
@@ -604,7 +560,6 @@ function configureInsightsCommand(cmd: Command): void {
       });
     });
 
-  // Cheap counter recipes (former top-level `agents trends`) — same parent, no peer verb.
   registerMixCommands(cmd);
 
   setHelpSections(cmd, {
@@ -655,9 +610,6 @@ export function registerInsightsCommand(program: Command): void {
   configureInsightsCommand(cmd);
   registerCostCommand(cmd);
   registerOutputCommand(cmd);
-  // Latency rollups (former top-level `agents perf` → `agents insights perf`,
-  // PHNX-3391). A sibling observe verb of cost/output, so it lives on the
-  // top-level insights group beside them, not under `sessions insights`.
   registerPerfSubcommand(cmd);
 }
 

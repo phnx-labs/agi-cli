@@ -39,7 +39,6 @@ const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor'
  * stay stable. */
 const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor']);
 
-/** Derive a version label from the PATH-installed binary location for agents without managed versions. */
 function fallbackPathVersion(agent: AgentId): string | null {
   const src = locateModelSource(agent, 'unresolved');
   if (!src) return null;
@@ -47,13 +46,11 @@ function fallbackPathVersion(agent: AgentId): string | null {
   try {
     real = fs.realpathSync(src.path);
   } catch {
-    /* keep symlink path */
   }
   const m = real.match(/\/versions\/([^/]+)\//);
   return m ? m[1] : 'installed';
 }
 
-/** Register the `agents models` command + its `tier` override subcommands. */
 export function registerModelsCommand(program: Command): void {
   const models = program
     .command('models [agentSpec]')
@@ -159,8 +156,6 @@ export function registerModelsCommand(program: Command): void {
     `,
   });
 
-  // Override subcommands. These WRITE agents.yaml so the user never hand-edits it;
-  // resolution is exact `<agent>@<version>` over `<agent>` over the auto guess.
   const tierDeprecation = chalk.yellow(
     'Deprecation: `agents models tier` is replaced by `agents config set run.<agent@version>.tier.<tier>`.',
   );
@@ -225,7 +220,6 @@ interface Target {
   isDefault: boolean;
 }
 
-/** Resolve the agent spec into one or more (agent, version) pairs to inspect. */
 async function resolveTargets(agentSpec: string | undefined): Promise<Target[]> {
   if (!agentSpec) {
     const targets: Target[] = [];
@@ -237,8 +231,6 @@ async function resolveTargets(agentSpec: string | undefined): Promise<Target[]> 
       if (version) {
         targets.push({ agent, version, isDefault: true });
       } else {
-        // Surface the gap instead of silently dropping the agent -- an
-        // uninstalled model-capable agent should tell the user how to add it.
         console.error(chalk.gray(`${agentLabel(agent)}: not installed (run 'agents add ${agent}@latest')`));
       }
     }
@@ -280,20 +272,16 @@ async function resolveTargets(agentSpec: string | undefined): Promise<Target[]> 
   return [{ agent, version, isDefault: version === getGlobalDefault(agent) }];
 }
 
-/** Print the model catalog for a single agent version with optional cloud/reasoning details. */
 function printCatalog(agent: AgentId, version: string, isDefault: boolean, options: PrintOptions): void {
   const tag = isDefault ? chalk.gray(' (default)') : '';
   const header = `${agentLabel(agent)} ${chalk.bold(version)}${tag}`;
   console.log(header);
 
-  // Cost tiers first -- the thing an orchestrating agent reads to pick a model.
   printTiers(agent, version);
 
   const src = locateModelSource(agent, version);
   if (!src) {
     if (agent === 'droid') {
-      // Droid has no extractable catalog (no models CLI/API/config); the curated
-      // tier map above is the whole surface.
       console.log(chalk.gray('  (Droid has no model list command; tiers are a curated, credit-multiplier map.)'));
       return;
     }
@@ -308,8 +296,6 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
     return;
   }
 
-  // The tier map above is what an agent reads. Keep the raw catalog behind --all
-  // so `agents models` stays a scannable menu instead of a 30-id dump.
   if (!options.all) {
     console.log(chalk.gray(`  ${catalog.models.length} models · \`agents models ${agent} --all\` for the full list`));
     return;
@@ -355,7 +341,6 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
   }
 }
 
-/** Rough blended $/Mtok label for a model id, or '' when unpriced. */
 function priceLabel(id: string): string {
   const p = getModelPricing(id);
   if (!p) return chalk.gray('  --');
@@ -363,7 +348,6 @@ function priceLabel(id: string): string {
   return chalk.gray(`  ~$${perM.toFixed(0)}/Mtok`);
 }
 
-/** Print the cheap/default/best/ultra tier map for an (agent, version). */
 function printTiers(agent: AgentId, version: string): void {
   const map = resolveTierMap(agent, version);
   if (!MODEL_TIERS.some((t) => map[t].model)) return;
@@ -379,7 +363,6 @@ function printTiers(agent: AgentId, version: string): void {
   console.log();
 }
 
-/** Abbreviate a path by replacing the home directory with ~. */
 function shortPath(p: string): string {
   return p.replace(homeDir(), '~');
 }

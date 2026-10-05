@@ -44,7 +44,6 @@ async function acquireLaunchGate(agent: AgentId, label: string, pid: number): Pr
   return withLaunchGate(agent, label, () => recordLaunchLease(agent, label, pid));
 }
 
-/** Keep a live launcher's lease until its operation ends, without holding the lock. */
 export async function withInstallationLease<T>(agent: AgentId, label: string, fn: () => Promise<T>): Promise<T> {
   const release = await acquireLaunchGate(agent, label, process.pid);
   try { return await fn(); } finally { release(); }

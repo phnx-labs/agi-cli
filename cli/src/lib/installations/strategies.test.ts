@@ -8,17 +8,14 @@ import { getBinaryPath, isGlobalBinaryAgent } from './versions.js';
 import { installationDir } from './store.js';
 import { assertValidRelease, selectUpdateStrategy, supportsPinnedUpdate } from './strategies.js';
 
-/** Every harness `agents add` can install — i.e. everything with an install path. */
 const INSTALLABLE = ALL_AGENT_IDS.filter((id) => AGENTS[id].npmPackage || AGENTS[id].installScript);
 
-/** Mirrors the production probe: is the swappable link farm the real launch target? */
 function linkFarmIsLaunchTarget(agent: (typeof ALL_AGENT_IDS)[number]): boolean {
   const probe = '0.0.0-probe';
   return getBinaryPath(agent, probe)
     === path.join(installationDir(agent, probe), 'node_modules', '.bin', AGENTS[agent].cliCommand);
 }
 
-/** Harnesses this command can update in place today. */
 const SUPPORTED = INSTALLABLE.filter(
   (id) => AGENTS[id].npmPackage || isGlobalBinaryAgent(id) || linkFarmIsLaunchTarget(id)
 );
@@ -29,7 +26,6 @@ describe('selectUpdateStrategy', () => {
     for (const agent of SUPPORTED) {
       expect(() => selectUpdateStrategy(agent), agent).not.toThrow();
     }
-    // Nothing is silently skipped: an unsupported harness throws (asserted below).
     expect(SUPPORTED.length).toBeGreaterThanOrEqual(INSTALLABLE.length - 1);
   });
 
@@ -46,9 +42,6 @@ describe('selectUpdateStrategy', () => {
   });
 
   it('refuses a harness whose binary is not in the version dir it would swap', () => {
-    // Swapping the link farm would leave the real launch target untouched, so
-    // recording a new release would be a lie. grok is the case today; the check
-    // is derived from getBinaryPath, so it covers any future one.
     const outside = INSTALLABLE.filter(
       (id) => !AGENTS[id].npmPackage && !isGlobalBinaryAgent(id) && !linkFarmIsLaunchTarget(id)
     );
@@ -59,8 +52,6 @@ describe('selectUpdateStrategy', () => {
   });
 
   it('prefers the npm package when a harness declares both a package and a script', () => {
-    // kimi is the case; assert the property rather than the id so a second such
-    // harness is covered automatically.
     const both = INSTALLABLE.filter((id) => AGENTS[id].npmPackage && AGENTS[id].installScript);
     expect(both.length).toBeGreaterThan(0);
     for (const agent of both) {
@@ -71,18 +62,14 @@ describe('selectUpdateStrategy', () => {
   it('marks a strategy transactional only when the release can be staged per-installation', () => {
     for (const agent of SUPPORTED) {
       const strategy = selectUpdateStrategy(agent);
-      // Only npm packages can be fetched into a sibling dir and swapped in; the
-      // installer-driven harnesses mutate a location the vendor owns.
       expect(strategy.transactional, agent).toBe(strategy.id === 'npm-package');
-      // A shared binary is exactly the global-binary case, and it is what makes
-      // an update fan out to sibling installations.
       expect(strategy.sharedBinary, agent).toBe(strategy.id === 'global-binary');
     }
   });
 
   it('fails loud for a harness with no install path instead of no-opping', () => {
     const unmanaged = ALL_AGENT_IDS.find((id) => !AGENTS[id].npmPackage && !AGENTS[id].installScript);
-    if (!unmanaged) return; // every harness is installable today; nothing to assert
+    if (!unmanaged) return;
     expect(() => selectUpdateStrategy(unmanaged)).toThrow(/not installed by agents-cli/);
   });
 });

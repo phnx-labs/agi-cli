@@ -1,6 +1,3 @@
-/**
- * `agents daemon funnel` — thin Tailscale Funnel wrapper for webhook ingress nodes.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { buildFunnelDownCommand, buildFunnelStatusCommand, buildFunnelUpCommand, parseFunnelPort } from '../lib/funnel.js';

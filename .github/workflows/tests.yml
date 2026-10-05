@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -30,7 +30,7 @@ jobs:
         id: toolchain
         run: echo "fp=$(node -v)-$(bun -v)" >> "$GITHUB_OUTPUT"
       - name: Restore dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
             ~/.bun/install/cache
@@ -42,6 +42,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bun scripts/guard-artifacts-confidential.ts --base "$BASE_SHA" --head "$HEAD_SHA"
+      - name: Enforce the exact comment-line ratchet
+        run: bun scripts/comment-lines.ts --check --base "$(git rev-parse HEAD^1)"
       - name: Pin release-matrix trigger policy, .agents/ layout, and the impact gate
         run: bun test ./.github/workflows/ ./scripts/ci-bench/
       - name: Impact plan
@@ -56,7 +58,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
           bun scripts/ci-scope.ts --validate-manifest
       - name: Restore exact-tree proof
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: impact-proof.json
           key: impact-proof-${{ runner.os }}-${{ steps.plan.outputs.tree }}-${{ steps.plan.outputs.policy_digest }}
@@ -106,17 +108,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
       - name: Toolchain fingerprint for the cache key
         id: toolchain
         run: echo "fp=$(node -v)-$(bun -v)" >> "$GITHUB_OUTPUT"
-      # Same key and paths as the required job. If these ever drift apart the warm
-      # cache stops being restorable there, which is the failure this job exists to
-      # prevent -- tests-gate.test.ts pins them equal.
       - name: Restore dependencies
         id: deps
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
             ~/.bun/install/cache
@@ -139,9 +138,8 @@ jobs:
       run:
         working-directory: cli
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
       - run: bun install --frozen-lockfile
       - run: bun run build
-      # Best-effort post-merge smoke. Not required for merge or release.
       - run: bun run test -- src/lib/platform src/lib/hooks src/lib/binary-shadow.test.ts src/lib/installations/shims.test.ts src/lib/installations/shims.device-pins.test.ts

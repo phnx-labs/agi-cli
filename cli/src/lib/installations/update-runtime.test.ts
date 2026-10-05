@@ -125,12 +125,12 @@ describe('planAutoUpdates', () => {
     getLatestNpmVersion.mockResolvedValue('9.9.9');
     makeVersionDir('claude', '2.0.65');
     store.createInstallation('claude', '2.0.65', '2.0.65');
-    shims.recordLaunchLease('claude', '2.0.65', process.pid); // guaranteed-alive pid
+    shims.recordLaunchLease('claude', '2.0.65', process.pid);
 
     const plan = await runtime.planAutoUpdates({ agents: ['claude'] });
 
-    expect(plan[0].eligible).toBe(true); // policy/switches allow it
-    expect(plan[0].deferred).toBe(true); // but a launch is in flight
+    expect(plan[0].eligible).toBe(true);
+    expect(plan[0].deferred).toBe(true);
     expect(plan[0].reason).toMatch(/launch is in flight/);
   });
 
@@ -139,7 +139,7 @@ describe('planAutoUpdates', () => {
     getLatestNpmVersion.mockResolvedValue('9.9.9');
     makeVersionDir('claude', '2.0.65');
     store.createInstallation('claude', '2.0.65', '2.0.65');
-    shims.recordLaunchLease('claude', '2.0.65', 999_999); // essentially guaranteed dead
+    shims.recordLaunchLease('claude', '2.0.65', 999_999);
 
     const plan = await runtime.planAutoUpdates({ agents: ['claude'] });
 
@@ -159,9 +159,6 @@ describe('planAutoUpdates', () => {
     expect(plan[0].policy).toBe('latest');
     expect(plan[0].eligible).toBe(true);
     expect(plan[0].currentRelease).toBe('2.0.65');
-    // The plan is a genuine preview — `--check` must never write. This is the
-    // fix for the prior behavior, where merely planning migrated the legacy
-    // dir's installation.json into existence as a read side effect.
     expect(fs.existsSync(recordPath)).toBe(false);
     expect(store.readInstallation('claude', '2.0.65')).toBeNull();
   });
@@ -178,8 +175,6 @@ describe('planAutoUpdates', () => {
 
     expect(fs.existsSync(recordPath)).toBe(false);
     expect(store.readInstallation('claude', '2.0.65')).toBeNull();
-    // Each preview independently derives the same eligibility from the
-    // ephemeral snapshot — no persisted id to drift between calls.
     expect(plan[0].policy).toBe('latest');
     expect(plan[0].eligible).toBe(true);
   });
@@ -195,9 +190,6 @@ describe('planAutoUpdates', () => {
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0].label).toBe('2.0.65');
       expect(snapshots[0].releaseVersion).toBe('2.0.65');
-      // Never the real ensureInstallation-minted id shape (`ins_<hex>`) — a
-      // preview id must be visibly distinct so nothing downstream can persist
-      // it as if it were a real migrated identity.
       expect(snapshots[0].id).not.toMatch(/^ins_/);
       expect(fs.existsSync(recordPath)).toBe(false);
     });

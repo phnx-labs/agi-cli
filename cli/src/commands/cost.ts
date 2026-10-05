@@ -23,7 +23,6 @@ interface CostOptions {
   by?: string;
 }
 
-/** Register `agents insights cost` under the insights parent. */
 export function registerCostCommand(insightsCmd: Command): void {
   addHostOption(insightsCmd.command('cost'))
     .description('Roll up $ cost and duration across local agent sessions')
@@ -48,7 +47,6 @@ Cost is computed offline from a versioned per-model price table (${PRICING_VERSI
     });
 }
 
-/** Map the --by flag to a rollup group, rejecting unknown values. */
 function resolveGroup(by: string | undefined): UsageRollupGroup {
   if (by === undefined) return 'agent';
   if (by === 'agent' || by === 'project' || by === 'day' || by === 'model' || by === 'account') return by;
@@ -59,7 +57,6 @@ function resolveGroup(by: string | undefined): UsageRollupGroup {
 async function costAction(options: CostOptions): Promise<void> {
   const sinceMs = options.since ? parseTimeFilter(options.since) : undefined;
 
-  // Ensure the index is fresh (and migrated to v6) before we read costs.
   await discoverSessions({ all: true, since: options.since, limit: 1 });
 
   const filter: QueryOptions = {};
@@ -116,14 +113,12 @@ async function costAction(options: CostOptions): Promise<void> {
   );
   out.push('');
 
-  // Daily histogram (unicode block sparkline, zero deps).
   if (daily.length > 0) {
     out.push(chalk.bold('Daily'));
     out.push(renderDailyHistogram(daily));
     out.push('');
   }
 
-  // Top sessions by cost.
   if (top.length > 0) {
     out.push(chalk.bold('Top sessions by cost'));
     const cols = terminalWidth();
@@ -144,7 +139,6 @@ async function costAction(options: CostOptions): Promise<void> {
     out.push('');
   }
 
-  // Per-agent / per-project / per-day breakdown.
   const groupLabel = groupBy === 'agent' ? 'agent'
     : groupBy === 'project' ? 'project'
     : groupBy === 'account' ? 'account'
@@ -171,12 +165,9 @@ async function costAction(options: CostOptions): Promise<void> {
   console.log(out.join('\n'));
 }
 
-/** Eight levels of vertical block characters for sparkline rendering. */
 const BLOCKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
-/** Render a per-day cost histogram as a unicode sparkline plus a labeled list. */
 function renderDailyHistogram(daily: Array<{ key: string; costUsd: number }>): string {
-  // Daily comes back cost-desc; show it chronologically for the sparkline.
   const sorted = [...daily].sort((a, b) => a.key.localeCompare(b.key));
   const max = Math.max(...sorted.map(d => d.costUsd), 0);
   const spark = sorted
@@ -188,7 +179,6 @@ function renderDailyHistogram(daily: Array<{ key: string; costUsd: number }>): s
     .join('');
 
   const lines: string[] = [`  ${chalk.green(spark)}`];
-  // Show the most expensive days as a short list under the sparkline.
   const topDays = [...daily].slice(0, 7);
   const costW = Math.max(...topDays.map(d => formatUsd(d.costUsd).length), 4);
   for (const d of topDays) {

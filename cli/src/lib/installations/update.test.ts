@@ -51,7 +51,6 @@ function writeUnlaunchableBinary(binDir: string): void {
   }
 }
 
-/** Remove the live launch target the way a broken install would leave it. */
 function breakLiveBinary(label: string): void {
   const binDir = path.join(versionDir(label), 'node_modules', '.bin');
   fs.rmSync(path.join(binDir, 'claude'), { force: true });
@@ -59,7 +58,6 @@ function breakLiveBinary(label: string): void {
   writeUnlaunchableBinary(binDir);
 }
 
-/** Lay down an installed release the way the npm strategy's swap expects it. */
 function writeLiveRelease(label: string, release: string): void {
   const dir = versionDir(label);
   fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
@@ -125,10 +123,8 @@ describe('updateInstallation', () => {
     expect(outcome.toRelease).toBe('2.1.220');
     expect(outcome.installation.id).toBe(before.id);
     expect(outcome.installation.label).toBe('2.0.65');
-    // The swap really happened: the live binary is the staged one.
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.1.220');
-    // Staging scratch is gone, and no rollback material is left behind.
     expect(fs.readdirSync(versionDir('2.0.65')).filter((e) => e.startsWith('.staging') || e.startsWith('.rollback')))
       .toEqual([]);
   });
@@ -184,7 +180,6 @@ describe('updateInstallation', () => {
     const { update, store, strategies, versions } = await load();
     writeLiveRelease('2.0.65', '2.0.65');
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
-    // The reference model under test: defaults are stored as the label.
     versions.setGlobalDefault('claude', '2.0.65');
 
     await update.updateInstallation(before, {
@@ -195,7 +190,6 @@ describe('updateInstallation', () => {
       }),
     });
 
-    // Unchanged pointer, still pointing at a real installation carrying the new release.
     expect(versions.getGlobalDefault('claude')).toBe('2.0.65');
     expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.1.220');
     expect(versions.getVersionDir('claude', '2.0.65')).toBe(versionDir('2.0.65'));
@@ -214,8 +208,6 @@ describe('updateInstallation', () => {
       }),
     })).rejects.toThrow(/failed to launch/);
 
-    // Nothing was swapped: the old release is still the live one, and the record
-    // still says so.
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.0.65');
     expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
@@ -229,8 +221,6 @@ describe('updateInstallation', () => {
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
 
     const realCommit = strategies.selectUpdateStrategy('claude').commit;
-    // Stage something launchable, then destroy the live binary right after the
-    // swap — the real "release installed but broken on disk" failure.
     const sabotagingCommit: UpdateStrategy['commit'] = async (ctx, staged): Promise<CommitHandles> => {
       const handles = await realCommit(ctx, staged);
       breakLiveBinary(ctx.installation.label);
@@ -242,7 +232,6 @@ describe('updateInstallation', () => {
       strategy: fileStrategy('2.1.220', { launchable: true, commit: sabotagingCommit }),
     })).rejects.toThrow(/Rolled back to 2\.0\.65/);
 
-    // The previous release is back, byte for byte, and still recorded.
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.0.65');
     expect(JSON.parse(fs.readFileSync(path.join(versionDir('2.0.65'), 'package.json'), 'utf-8')).name).toBe('live');
@@ -275,14 +264,10 @@ describe('updateInstallation', () => {
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.0.65');
     expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
-    // No orphaned rollback material.
     expect(fs.readdirSync(versionDir('2.0.65')).filter((e) => e.startsWith('.rollback'))).toEqual([]);
   });
 
   it('reports no change when the installer lands on the release already installed', async () => {
-    // A self-updating binary that was already current: the strategy cannot know
-    // the release until after it runs, so the equality check has to happen after
-    // staging. Recording it would claim a change and append a bogus history row.
     const { update, store } = await load();
     writeLiveRelease('2.0.65', '2.0.65');
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
@@ -336,8 +321,6 @@ describe('updateInstallation', () => {
 
   it('records the new release on every installation that shares one global binary', async () => {
     const { update, store } = await load();
-    // Two installations of a global-binary harness point at the same file, so an
-    // update to one is an update to all — the record must not claim otherwise.
     for (const label of ['0.30.0', '0.31.0']) {
       fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'droid', label, 'home'), { recursive: true });
     }
@@ -350,7 +333,6 @@ describe('updateInstallation', () => {
       sharedBinary: true,
       async resolveTarget() { return '0.40.0'; },
       async stage(ctx) {
-        // The installer already replaced the shared binary; nothing per-install.
         const binDir = path.join(home, 'shared-bin');
         writeLaunchableBinary(binDir, '0.40.0');
         return {
@@ -363,7 +345,6 @@ describe('updateInstallation', () => {
       async commit() { return { undo: () => {}, finalize: () => {} }; },
     };
 
-    // droid's live binary is global; point the post-commit probe at a real one.
     fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
     writeLaunchableBinary(path.join(home, '.local', 'bin'), '0.40.0');
     fs.renameSync(path.join(home, '.local', 'bin', 'claude'), path.join(home, '.local', 'bin', 'droid'));
@@ -373,7 +354,6 @@ describe('updateInstallation', () => {
     expect(outcome.toRelease).toBe('0.40.0');
     expect(outcome.alsoUpdated.map((i) => i.label)).toEqual(['0.31.0']);
     expect(store.readInstallation('droid', '0.31.0')?.releaseVersion).toBe('0.40.0');
-    // Identity is still per-installation even though the binary is shared.
     expect(store.readInstallation('droid', '0.31.0')?.id)
       .not.toBe(store.readInstallation('droid', '0.30.0')?.id);
   });
@@ -383,7 +363,7 @@ describe('updateInstallation', () => {
       const { update, store, strategies, shims } = await load();
       writeLiveRelease('2.0.65', '2.0.65');
       const before = store.createInstallation('claude', '2.0.65', '2.0.65');
-      shims.recordLaunchLease('claude', '2.0.65', process.pid); // guaranteed-alive pid
+      shims.recordLaunchLease('claude', '2.0.65', process.pid);
 
       let staged = false;
       const strategy = fileStrategy('2.1.220', {
@@ -391,16 +371,13 @@ describe('updateInstallation', () => {
         commit: strategies.selectUpdateStrategy('claude').commit,
       });
 
-      // No `abortIfPinnedBeforeCommit`/`abortIfAutoDisabledBeforeCommit` set —
-      // this is exactly a manual `agents update` call. The active check must
-      // still fire: it is unconditional for a transactional strategy.
       const outcome = await update.updateInstallation(before, {
         to: '2.1.220',
         strategy: { ...strategy, async stage(ctx, target) { staged = true; return strategy.stage(ctx, target); } },
       });
 
       expect(outcome.unchanged).toBe(true);
-      expect(staged).toBe(false); // never even reached stage() — the pre-stage check fired
+      expect(staged).toBe(false);
       expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
         .toContain('echo 2.0.65');
       expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
@@ -418,8 +395,6 @@ describe('updateInstallation', () => {
         launchable: true,
         commit: async (ctx, staged) => { committed = true; return realCommit(ctx, staged); },
       });
-      // Simulates a launch starting mid-staging — the exact race the pre-stage
-      // check alone cannot close (staging a real npm package can take minutes).
       const strategyWithLateLease: UpdateStrategy = {
         ...base,
         async stage(ctx, target) {
@@ -432,16 +407,13 @@ describe('updateInstallation', () => {
       const outcome = await update.updateInstallation(before, { to: '2.1.220', strategy: strategyWithLateLease });
 
       expect(outcome.unchanged).toBe(true);
-      expect(committed).toBe(false); // staged, but never swapped in
+      expect(committed).toBe(false);
       expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
         .toContain('echo 2.0.65');
       expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
     });
 
     it('a non-transactional strategy (no reversible swap) is not gated by the active check', async () => {
-      // The active check protects a SWAP; a global-binary/install-script
-      // strategy has none, so a live lease must not block it — matching the
-      // eligibility narrowing `update-runtime.ts` already documents.
       const { update, store, shims } = await load();
       writeLiveRelease('2.0.65', '2.0.65');
       const before = store.createInstallation('claude', '2.0.65', '2.0.65');
@@ -487,7 +459,7 @@ describe('updateInstallation', () => {
         ...base,
         async stage(ctx, target) {
           const result = await base.stage(ctx, target);
-          policy.setGlobalAutoUpdateEnabled(false); // the download "just finished" when the switch flips
+          policy.setGlobalAutoUpdateEnabled(false);
           return result;
         },
       };
@@ -546,7 +518,6 @@ describe('updateInstallation', () => {
           launchable: true,
           commit: strategies.selectUpdateStrategy('claude').commit,
         }),
-        // abortIfAutoDisabledBeforeCommit deliberately unset — a manual call.
       });
 
       expect(outcome.unchanged).toBe(false);

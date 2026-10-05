@@ -7,8 +7,6 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
-// Run tsx via `node node_modules/tsx/dist/cli.mjs`, not the .bin/tsx shim: on
-// Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell.
 const tsxBin = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 let home: string;
@@ -29,7 +27,6 @@ function run(args: string[]) {
 
 beforeAll(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmark-cli-' + crypto.randomBytes(4).toString('hex') + '-'));
-  // ensureInitialized() looks for ~/.agents/.system/.git as the setup marker.
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
 });
 
@@ -97,14 +94,10 @@ describe('agents sessions bookmark (real CLI parse)', () => {
     }[];
     expect(only.map((r) => r.sessionId)).toEqual([bookmarked]);
 
-    // Leave the store clean for the other cases in this file.
     run(['sessions', 'bookmark', bookmarked, '--remove']);
     fs.rmSync(registry, { force: true });
   }, 90_000);
 
-  // Same real-discovery cost as above, across four real CLI spawns (one to
-  // index the routine archive, three `--active` queries) — see the comment
-  // on the previous test.
   it('narrows real --active JSON output to all or one named routine', () => {
     const routineName = 'nightly-review';
     const routineId = 'dddddddd-0000-0000-0000-000000000004';
@@ -150,8 +143,6 @@ describe('agents sessions bookmark (real CLI parse)', () => {
       'utf-8',
     );
 
-    // Drive discovery through the public command so the archive becomes real
-    // indexed routine metadata before the active renderer joins against it.
     const indexed = run(['sessions', '--routine', routineName, '--all', '--local', '--json']);
     expect(indexed.status, indexed.stderr).toBe(0);
 
@@ -201,8 +192,6 @@ describe('agents sessions bookmark (real CLI parse)', () => {
   });
 
   it('still refuses a partial id that resolves to nothing', () => {
-    // Only a COMPLETE id skips the index; a short prefix must still fail loudly
-    // rather than bookmarking an id that names no session at all.
     const res = run(['sessions', 'bookmark', 'ccccc']);
     expect(res.status).toBe(1);
     expect(res.stderr).toContain('No session matches');

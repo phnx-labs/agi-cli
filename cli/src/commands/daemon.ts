@@ -53,7 +53,6 @@ import {
 } from '../lib/daemon-webhooks.js';
 import { parseFunnelPort } from '../lib/funnel.js';
 
-// ─── Process scanning — which install owns the pid, and every duplicate ──────
 
 /** startDaemon for explicit start/restart: the redirected-HOME refusal (W4, PHNX-3736) is user-
  * actionable, so it prints without a stack and exits 1; anything else throws. Kept local, since a
@@ -72,15 +71,12 @@ function startDaemonClean(): { pid: number | null; method: string } {
 
 interface DaemonProcess {
   pid: number;
-  /** The entry file/binary the process was launched from, best-effort. */
   entry: string | null;
-  /** Resolved package version for `entry`, or null if it couldn't be found. */
   version: string | null;
   /** Whether `entry` is provably absent (`ENOENT`); null when we cannot tell (permission error on a
    * parent, other stat failure). See {@link entryIsGone}: "cannot see it" must never be reported
    * as "deleted". */
   entryMissing: boolean | null;
-  /** Owning uid from `ps`, or null when unavailable. */
   uid: number | null;
 }
 
@@ -88,6 +84,8 @@ interface DaemonProcess {
  * EACCES on a parent (mode-700 /root) looks like deletion and `ps` would tell a user to `kill` a
  * healthy daemon they do not own. `statSync(throwIfNoEntry:false)` is undefined only for ENOENT. */
 function entryAbsent(p: string): boolean | null {
+  // Only ENOENT proves an entry is gone; an unreadable shared-user path must
+  // never become advice to kill a healthy process.
   try {
     return fs.statSync(p, { throwIfNoEntry: false }) === undefined;
   } catch {
@@ -110,6 +108,8 @@ function staleDaemons(
   ownerPid: number | null,
   registered: Set<number>,
 ): { actionable: DaemonProcess[]; visible: DaemonProcess[] } {
+  // Kill/restart advice is limited to this device's registry. Same-uid ghosts
+  // may be shown for diagnosis, but are not actionable.
   const isOurs = (p: DaemonProcess) => p.pid === ownerPid || registered.has(p.pid);
   const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
   const gone = processes.filter(entryIsGone);
@@ -132,17 +132,17 @@ function resolveVersionNear(entryPath: string, pid: number): string | null {
   let resolved = entryPath;
   if (!path.isAbsolute(resolved)) {
     const cwd = processCwd(pid);
-    if (!cwd) return null; // cannot anchor a relative entry — do not guess
+    if (!cwd) return null;
     resolved = path.join(cwd, resolved);
   }
-  try { resolved = fs.realpathSync(resolved); } catch { /* shim/symlink may be broken or entry may not exist locally */ }
+  try { resolved = fs.realpathSync(resolved); } catch {  }
   let dir = path.dirname(resolved);
   for (let i = 0; i < 6; i++) {
     const candidate = path.join(dir, 'package.json');
     try {
       const pkg = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
       if (typeof pkg.version === 'string') return pkg.version;
-    } catch { /* keep walking */ }
+    } catch {  }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -165,8 +165,6 @@ function scanDaemonProcesses(): DaemonProcess[] {
   for (const p of listDaemonRunProcesses()) {
     const entry = entryFromTokens(p.tokens);
     const version = entry ? resolveVersionNear(entry, p.pid) : null;
-    // Asks whether the code is on disk for the NEXT launch -- what a restart and
-    // every other reader will see -- not what this pid currently has mapped.
     const entryMissing = entry ? entryAbsent(entry) : false;
     found.push({ pid: p.pid, entry, version, entryMissing, uid: p.uid });
   }
@@ -183,7 +181,6 @@ function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number |
   return processes.filter((p) => registered.has(p.pid));
 }
 
-/** Parse a `ps -o etime=` value (`[[dd-]hh:]mm:ss`) into elapsed seconds. */
 function parseEtimeToSeconds(raw: string): number | null {
   const m = raw.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
   if (!m) return null;
@@ -195,7 +192,6 @@ function parseEtimeToSeconds(raw: string): number | null {
   return ((days * 24 + hours) * 60 + mins) * 60 + secs;
 }
 
-/** Elapsed wall-clock seconds since `pid` started, or null if unavailable (best-effort, POSIX only). */
 export function uptimeSeconds(pid: number): number | null {
   if (process.platform === 'win32') return null;
   try {
@@ -216,7 +212,6 @@ function humanDuration(seconds: number): string {
   return `${Math.round(seconds / 86400)}d`;
 }
 
-// ─── Health probes for the two hosted services ───────────────────────────────
 
 interface SecretsBrokerHealth {
   reachable: boolean;
@@ -234,7 +229,6 @@ interface SecretsBrokerHealth {
   record: SubsystemHealth | null;
 }
 
-/** Reachability probe only — the daemon does not host, supervise, or take over the broker (OWN-1). */
 async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
   const { agentPing, agentStatus, keychainUsesFileFallback } = await import('../lib/secrets-client.js');
   try {
@@ -243,16 +237,12 @@ async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
       const entries = await agentStatus();
       return { reachable: true, fileBacked: false, socketPath: null, heldBundles: entries.length, record: null };
     }
-  } catch { /* fall through to the unreachable classification below */ }
-  // Unreachable: distinguish "broker needed and absent" (a keychain-backed box)
-  // from "no broker needed" (a file-backed worker reads secrets one-shot). An
-  // unknown store defaults to broker-needed, the louder verdict.
+  } catch {  }
   let fileBacked = false;
-  try { fileBacked = await keychainUsesFileFallback(); } catch { /* unknown → not file-backed */ }
+  try { fileBacked = await keychainUsesFileFallback(); } catch {  }
   return { reachable: false, fileBacked, socketPath: null, heldBundles: null, record: null };
 }
 
-// ─── Scheduler summary (routine count / next fire / failing count) ──────────
 
 interface SchedulerSummary {
   routineCount: number;
@@ -272,7 +262,7 @@ function schedulerSummary(): SchedulerSummary {
       if (job.nextRun && (!nextFire || job.nextRun < nextFire)) nextFire = job.nextRun;
     }
     scheduler.stopAll();
-  } catch { /* best-effort */ }
+  } catch {  }
   const failingCount = enabled.filter((j) => {
     const last = getLatestRun(j.name);
     return last?.status === 'failed' || last?.status === 'timeout';
@@ -280,7 +270,6 @@ function schedulerSummary(): SchedulerSummary {
   return { routineCount: jobs.length, enabledCount: enabled.length, nextFire, failingCount };
 }
 
-// ─── Rendering ────────────────────────────────────────────────────────────
 
 /** Render one service's health line. Only `live` (a probe run now) may say `healthy` (RUSH-2368);
  * `record` is history, never the verdict. It used to come from `record.consecutiveFailures`, set
@@ -439,9 +428,7 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   }
 }
 
-// ─── Full service roster (RUSH-3193 P4) ──────────────────────────────────────
 
-/** One row of the roster every registered daemon service — supervisor-managed or legacy — renders in `agents daemon services`. */
 interface DaemonServiceRow {
   id: DaemonServiceId;
   title: string;
@@ -490,7 +477,7 @@ function serviceStateLabel(state: string): string {
   if (state === 'running') return chalk.green('running');
   if (state === 'stopped') return chalk.gray('stopped');
   if (state === 'idle') return chalk.gray('idle');
-  return chalk.yellow(state); // 'running (unsupervised)' or any future label
+  return chalk.yellow(state);
 }
 
 async function runServices(opts: { json?: boolean }): Promise<void> {
@@ -498,9 +485,7 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
   const rows = buildServiceRows(isDaemonRunning());
   if (opts.json) {
     console.log(JSON.stringify({
-      // Existing fields — unchanged shape, agents/CI consume these directly.
       secretsBroker: { reachable: secrets.reachable, socketPath: secrets.socketPath, heldBundles: secrets.heldBundles, health: secrets.record },
-      // Additive: every registered service, supervised or legacy.
       services: rows,
     }, null, 2));
     return;
@@ -520,7 +505,6 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
   console.log(chalk.gray('agents daemon services enable|disable|restart <id> apply live for supervised services.'));
 }
 
-// ─── Logs ────────────────────────────────────────────────────────────────
 
 interface DaemonLogEntry {
   ts: string;
@@ -535,7 +519,7 @@ function parseLogLines(raw: string): DaemonLogEntry[] {
     try {
       const entry = JSON.parse(line);
       if (entry && typeof entry.ts === 'string' && typeof entry.level === 'string') out.push(entry);
-    } catch { /* skip malformed line */ }
+    } catch {  }
   }
   return out;
 }
@@ -590,7 +574,6 @@ async function runLogs(opts: { lines?: string; follow?: boolean; level?: string;
   for (const entry of entries) printLogEntry(entry);
 }
 
-// ─── Doctor ──────────────────────────────────────────────────────────────
 
 async function runDoctor(opts: { json?: boolean }): Promise<void> {
   const status = getDaemonStatus();
@@ -621,10 +604,8 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
     problems.push(`${duplicates.length} duplicate daemon process(es) running: ${duplicates.map((d) => d.pid).join(', ')}. Stop the stray(s).`);
   }
 
-  // A daemon whose entry is gone from disk is a problem even when it answers
-  // every probe: it cannot restart, and it is running whatever was loaded
-  // before the file was deleted (RUSH-2493).
   for (const p of staleDaemons(healthProcesses, status.pid, new Set(findSurvivingStateDirDaemons(new Set()))).actionable) {
+    // `actionable` is registry-scoped; never recommend killing a raw ps match.
     const own = status.pid !== null && p.pid === status.pid;
     problems.push(
       `Daemon pid ${p.pid} runs code deleted from disk (${p.entry}). ` +
@@ -658,9 +639,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   process.exitCode = 1;
 }
 
-// ─── Hosted webhook receivers ────────────────────────────────────────────
 
-/** Parse a positive-integer option, failing loud rather than silently defaulting. */
 function requirePositiveInt(raw: string, label: string): number {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -760,9 +739,6 @@ function registerWebhooksSubcommand(parent: Command): void {
       }
       console.log(chalk.green(`Removed the webhook receiver on port ${port}.`));
       if (removed.funnel) {
-        // Leaving the Funnel up would keep a public HTTPS route pointed at a port
-        // nothing serves, so say what to run — this box may not be the tailnet
-        // node, and `funnel down` names the host explicitly.
         console.log(chalk.yellow(`  public ingress is still up on :${removed.funnel.publicPort} — take it down:`));
         console.log(chalk.gray(`    agents daemon funnel down <host> --port ${removed.funnel.publicPort}`));
       }
@@ -797,7 +773,6 @@ function runWebhooksList(json: boolean): void {
   console.log(chalk.gray('Changes take effect on the next daemon restart.'));
 }
 
-// ─── Command registration ────────────────────────────────────────────────
 
 export function registerDaemonCommand(program: Command): void {
   const cmd = program
@@ -916,8 +891,6 @@ export function registerDaemonCommand(program: Command): void {
         }
         return;
       }
-      // SING-12 / RUSH-2355: stop asserts its postcondition and returns what
-      // released vs survived — surface it and exit non-zero on an unclean stop.
       const result = stopDaemon();
       if (asJson) {
         console.log(JSON.stringify(result, null, 2));

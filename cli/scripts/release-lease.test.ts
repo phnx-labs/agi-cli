@@ -8,7 +8,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// win32: drives real bash release-lease.sh + process-group kill semantics (RUSH-2215).
 const describeWin = process.platform === 'win32' ? describe.skip : describe;
 
 
@@ -26,7 +25,6 @@ function git(cwd: string, ...args: string[]) {
   return r.stdout.trim();
 }
 
-/** Run the real lease script from `cwd`, as if from that machine. */
 function lease(cwd: string, args: string[], env: Record<string, string> = {}) {
   const r = spawnSync('bash', [SCRIPT, ...args], {
     cwd,
@@ -36,7 +34,6 @@ function lease(cwd: string, args: string[], env: Record<string, string> = {}) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
-/** Same as `lease`, but genuinely concurrent — for racing two claimants. */
 function leaseAsync(cwd: string, args: string[], env: Record<string, string> = {}) {
   return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
     const p = spawn('bash', [SCRIPT, ...args], {
@@ -51,12 +48,10 @@ function leaseAsync(cwd: string, args: string[], env: Record<string, string> = {
   });
 }
 
-/** The kernel's state letter for a pid, as `ps` reports it ('' when unlisted). */
 function procState(pid: number): string {
   return spawnSync('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf-8' }).stdout.trim();
 }
 
-/** Long-lived parents of the zombies below; torn down with each temp root. */
 const zombieParents: ChildProcess[] = [];
 
 /** A real unreaped zombie: a Python parent forks, lets the child exit, and never wait(2)s. Bash
@@ -85,7 +80,6 @@ function spawnZombie(): number {
   throw new Error('no zombie appeared');
 }
 
-/** A clone that behaves like a distinct release box. */
 function makeBox(name: string) {
   const dir = path.join(root, name);
   git(root, 'clone', '--quiet', origin, dir);
@@ -94,7 +88,6 @@ function makeBox(name: string) {
   return dir;
 }
 
-/** The `holder:` line the script stamped, as reported back by `status`. */
 function currentHolder(cwd: string) {
   const m = /holder=(\S+)/.exec(lease(cwd, ['status']).stdout);
   return m?.[1] ?? '';
@@ -112,8 +105,6 @@ function plantStaleLease(
   const tree = git(cwd, 'hash-object', '-t', 'tree', '/dev/null');
   const holder = opts.host ? `${opts.host}/pid-${opts.pid ?? 1}` : 'dead-box/pid-1';
   const fields = [`version: ${version}`, `holder: ${holder}`];
-  // Only a lease that names a probeable process gets liveness detection; the
-  // default (no host/pid) is the pre-RUSH-2274 shape, which must still work.
   if (opts.host) fields.push(`host: ${opts.host}`);
   if (opts.pid !== undefined) fields.push(`pid: ${opts.pid}`);
   if (opts.started) fields.push(`started: ${opts.started}`);
@@ -135,7 +126,6 @@ beforeEach(() => {
   origin = path.join(root, 'origin.git');
   git(root, 'init', '--quiet', '--bare', origin);
 
-  // origin needs at least one commit for `git clone` to produce a usable tree.
   const seed = path.join(root, 'seed');
   fs.mkdirSync(seed);
   git(seed, 'init', '--quiet');
@@ -159,9 +149,6 @@ afterEach(() => {
 describeWin('release-lease: mutual exclusion across machines', () => {
   it('guards absent-ref creation and reclaims stale leases with one CAS push', async () => {
     const boxC = makeBox('box-c');
-    // Make the two initial lease commits byte-identical except for claim-id.
-    // Without claim-id Git can report the losing expected-absent push as
-    // "up to date", so both callers falsely believe they acquired the lease.
     git(boxA, 'config', 'user.email', 'shared@test.local');
     git(boxA, 'config', 'user.name', 'shared');
     git(boxB, 'config', 'user.email', 'shared@test.local');
@@ -177,9 +164,6 @@ describeWin('release-lease: mutual exclusion across machines', () => {
     ]);
     expect([a, b].filter((r) => r.status === 0)).toHaveLength(1);
 
-    // A remote hook makes the old delete-then-create reclaim impossible. The
-    // fixed implementation succeeds because it replaces the inspected stale
-    // SHA in one force-with-lease compare-and-swap and never deletes the ref.
     plantStaleLease(boxA, '1.20.82', 90, { force: true });
     const hooks = path.join(origin, 'hooks');
     fs.writeFileSync(path.join(hooks, 'update'), [
@@ -199,8 +183,6 @@ describeWin('release-lease: mutual exclusion across machines', () => {
 
     expect(a.status).toBe(0);
     expect(b.status).toBe(1);
-    // The loser must say WHY, naming the holder — a bare failure would send the
-    // agent hunting for a cause and it would race instead.
     expect(b.stderr).toContain('release already in flight');
   });
 
@@ -239,12 +221,9 @@ describeWin('release-lease: a dead run must not wedge the pipeline', () => {
 
     expect(b.status).toBe(0);
     expect(b.stdout).toContain('reclaiming a stale release lease');
-    // The dead holder must be named, not silently overwritten — otherwise a
-    // wedged pipeline leaves no trace of what wedged it.
     expect(b.stdout).toContain('dead-box/pid-1');
     expect(b.stdout).toContain('version=1.20.82');
 
-    // And the reclaimer now genuinely holds it.
     expect(lease(boxA, ['claim', '1.20.84']).status).toBe(1);
   });
 
@@ -252,9 +231,6 @@ describeWin('release-lease: a dead run must not wedge the pipeline', () => {
     const boxC = makeBox('box-c');
     plantStaleLease(boxA, '1.20.82', 90);
 
-    // Both read the SAME stale sha and both try to reclaim it. Only the
-    // --force-with-lease pin can decide this; a plain delete+push would let
-    // both through and hand two agents the same release.
     const [b, c] = await Promise.all([
       leaseAsync(boxB, ['claim', '1.20.83', '--ttl-min', '45']),
       leaseAsync(boxC, ['claim', '1.20.84', '--ttl-min', '45']),
@@ -269,26 +245,21 @@ describeWin('release-lease: releasing what you do not own', () => {
   it('will not drop a lease this box never claimed', () => {
     lease(boxA, ['claim', '1.20.82']);
 
-    // box-b holds no token, so it has nothing to drop — and must not reach for
-    // the remote ref anyway.
     const b = lease(boxB, ['release']);
     expect(b.status).toBe(0);
     expect(b.stdout).toContain('no release lease to drop');
 
-    // box-a still holds it, so a claim from box-b still fails.
     expect(lease(boxB, ['claim', '1.20.83']).status).toBe(1);
   });
 
   it('will not drop a lease that was reclaimed out from under it', () => {
     lease(boxA, ['claim', '1.20.82']);
-    // box-a's run overran the TTL and box-b reclaimed the lease.
     plantStaleLease(boxB, '1.20.83', 0, { force: true });
 
     const a = lease(boxA, ['release']);
     expect(a.status).toBe(0);
     expect(a.stdout).toContain('no longer ours');
 
-    // box-b's lease survived box-a's cleanup — the pipeline stays exclusive.
     expect(lease(boxA, ['claim', '1.20.83']).status).toBe(1);
   });
 
@@ -306,10 +277,8 @@ describeWin('release-lease: a long healthy release must not lose its lease', () 
   it('renewing keeps a lease that would otherwise be reclaimable', () => {
     lease(boxA, ['claim', '1.20.82']);
 
-    // Simulate the run outliving the TTL, then proving it is still alive.
     expect(lease(boxA, ['renew']).status).toBe(0);
 
-    // box-b now sees a FRESH lease, so even a 45-minute TTL will not reclaim it.
     const b = lease(boxB, ['claim', '1.20.83', '--ttl-min', '45']);
     expect(b.status).toBe(1);
     expect(b.stderr).toContain('release already in flight');
@@ -317,7 +286,7 @@ describeWin('release-lease: a long healthy release must not lose its lease', () 
 
   it('renew fails loudly once the lease has been reclaimed', () => {
     lease(boxA, ['claim', '1.20.82']);
-    plantStaleLease(boxB, '1.20.83', 0, { force: true }); // box-b took over
+    plantStaleLease(boxB, '1.20.83', 0, { force: true });
 
     const a = lease(boxA, ['renew']);
     expect(a.status).toBe(1);
@@ -329,7 +298,6 @@ describeWin('release-lease: a long healthy release must not lose its lease', () 
     lease(boxA, ['release']);
 
     expect(lease(boxA, ['renew']).status).toBe(1);
-    // …and the pipeline is genuinely free for the next releaser.
     expect(lease(boxB, ['claim', '1.20.83']).status).toBe(0);
   });
 });
@@ -340,33 +308,28 @@ describeWin('release-lease: a renew must not orphan our own lease', () => {
   // in the set of shas this run pushed, not equality with the latest.
   it('release still drops a lease that renew rotated', () => {
     lease(boxA, ['claim', '1.20.82']);
-    lease(boxA, ['renew']); // origin now holds sha2
+    lease(boxA, ['renew']);
 
-    // Simulate the window: roll the token file back to the pre-renew sha, which
-    // is exactly what a `release` racing the renewer would read.
     const gitdir = git(boxA, 'rev-parse', '--git-common-dir');
     const histPath = path.resolve(boxA, gitdir, 'release-lease.history');
     const tokPath = path.resolve(boxA, gitdir, 'release-lease.token');
     const history = fs.readFileSync(histPath, 'utf-8').trim().split('\n');
     expect(history.length).toBeGreaterThanOrEqual(2);
-    fs.writeFileSync(tokPath, history[0] + '\n'); // stale token, pre-renew
+    fs.writeFileSync(tokPath, history[0] + '\n');
 
     const r = lease(boxA, ['release']);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('release lease dropped');
     expect(r.stdout).not.toContain('leaving it alone');
 
-    // Genuinely free for the next releaser — not orphaned.
     expect(lease(boxB, ['claim', '1.20.83']).status).toBe(0);
   });
 
   it('a fresh claim does not inherit ownership of a previous lease', () => {
     lease(boxA, ['claim', '1.20.82']);
     lease(boxA, ['release']);
-    // box-b now holds a completely different lease.
     lease(boxB, ['claim', '1.20.83']);
 
-    // box-a must NOT believe box-b's lease is one of its own old shas.
     const a = lease(boxA, ['verify']);
     expect(a.status).toBe(1);
   });
@@ -388,8 +351,6 @@ describeWin('release-lease: verify gates the irreversible steps', () => {
   });
 
   it('fails closed when this checkout never claimed anything', () => {
-    // The dangerous shape would be verify passing by default: release.sh would
-    // then merge/tag/publish believing it had been checked.
     expect(lease(boxB, ['verify']).status).toBe(1);
   });
 
@@ -420,21 +381,18 @@ describeWin('release-lease: status', () => {
 describeWin('release-lease: a killed holder must not wedge the pipeline', () => {
   const victims: ChildProcess[] = [];
 
-  /** A real, live process to stand in for a running release.sh. */
   function spawnVictim(): ChildProcess {
     const p = spawn('sleep', ['300'], { stdio: 'ignore' });
     victims.push(p);
     return p;
   }
 
-  /** Kill it the way an external SIGKILL would, and wait until it is really gone. */
   async function killVictim(p: ChildProcess): Promise<void> {
     const exited = new Promise<void>((resolve) => p.once('exit', () => resolve()));
     p.kill('SIGKILL');
     await exited;
   }
 
-  /** The host string the script itself stamps, so tests never guess it. */
   function thisHost(): string {
     lease(boxA, ['claim', '0.0.0'], { RELEASE_LEASE_HOLDER_PID: String(process.pid) });
     const host = currentHolder(boxA).split('/')[0];
@@ -443,7 +401,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
     return host;
   }
 
-  /** The pid start stamp exactly as the script records it. */
   function startStamp(pid: number): string {
     const r = spawnSync('bash', ['-c', `ps -p ${pid} -o lstart= | tr -s '[:space:]' '_' | sed 's/^_//; s/_$//'`], {
       encoding: 'utf-8',
@@ -465,7 +422,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
 
     const dead = lease(boxA, ['status']);
     expect(dead.stdout).toContain('holder-alive=no');
-    // Saying "held" without saying what to do is the original complaint.
     expect(dead.stdout).toContain('clear');
   });
 
@@ -474,7 +430,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
     lease(boxA, ['claim', '1.20.82'], { RELEASE_LEASE_HOLDER_PID: String(victim.pid) });
     await killVictim(victim);
 
-    // Age 0 against a 45-minute TTL: only liveness can unblock this.
     const again = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
     expect(again.status).toBe(0);
     expect(again.stdout).toContain('holder is gone');
@@ -482,9 +437,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
   });
 
   it('counts an unreaped zombie holder as dead, not as a live release', () => {
-    // A SIGKILLed release whose parent never reaps it stays LISTED in the
-    // process table. `ps -p` alone reads that as alive, so the lease would
-    // survive the very kill this feature exists to survive.
     const pid = spawnZombie();
     expect(procState(pid)).toMatch(/^Z/);
 
@@ -505,9 +457,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
   });
 
   it('treats a recycled pid as dead, not as a live release', () => {
-    // A reboot (or ordinary pid recycling) can hand the recorded number to an
-    // unrelated process. Without the start-time guard that reads as `alive`
-    // forever, which would wedge the pipeline harder than the TTL ever did.
     const pid = spawnVictim().pid!;
     plantStaleLease(boxA, '1.20.82', 0, { host: thisHost(), pid, started: 'Mon_Jan_1_00:00:00_1990' });
 
@@ -517,8 +466,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
   });
 
   it('will not probe a holder on another box — the TTL still governs there', () => {
-    // pid 1 is alive on every box, but it is not OUR pid 1. Guessing either way
-    // would be wrong, so an unprobeable holder must behave exactly as before.
     plantStaleLease(boxA, '1.20.82', 5, { host: 'some-other-box', pid: 1 });
     const fresh = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
     expect(fresh.status).toBe(1);
@@ -531,9 +478,6 @@ describeWin('release-lease: a killed holder must not wedge the pipeline', () => 
   });
 
   it('keeps the release process as the holder across a renew', () => {
-    // The trap: `renew` runs in a fresh shell every 10 minutes. Recording THAT
-    // shell would stamp every renewed lease with an already-dead pid, so every
-    // healthy long release would read as abandoned.
     const env = { RELEASE_LEASE_HOLDER_PID: String(spawnVictim().pid) };
     lease(boxA, ['claim', '1.20.82'], env);
     expect(lease(boxA, ['renew'], env).status).toBe(0);
@@ -551,9 +495,6 @@ describeWin('release-lease: clear', () => {
     p.kill('SIGKILL');
     await exited;
 
-    // A second checkout on the holder's box never claimed anything, so `release`
-    // cannot help it — that is the gap `clear` fills for an operator unwedging
-    // the pipeline after the run that held it was killed.
     expect(lease(boxB, ['release']).stdout).toContain('no release lease to drop');
 
     const cleared = lease(boxB, ['clear']);
@@ -563,8 +504,6 @@ describeWin('release-lease: clear', () => {
   });
 
   it('refuses to clear a lease that may still be held', () => {
-    // No recorded holder at all: unprobeable and fresh, so clearing it could
-    // hand the pipeline to a second releaser while the first is publishing.
     plantStaleLease(boxA, '1.20.82', 5);
     const r = lease(boxB, ['clear', '--ttl-min', '45']);
     expect(r.status).toBe(1);

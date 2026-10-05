@@ -8,7 +8,6 @@ import { join } from 'node:path';
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const RETIRED = ['reports', 'plans', 'viz'];
 
-/** Git-tracked paths under `.agents/`, repo-relative and POSIX-separated. */
 function trackedAgentsPaths(): string[] {
   return execFileSync('git', ['ls-files', '--', '.agents/'], { cwd: REPO_ROOT, encoding: 'utf8' })
     .split('\n')

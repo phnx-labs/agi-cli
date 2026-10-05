@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-#
-# Build agents-cli into ./dist.
-#
-# Usage: scripts/build.sh [<version>] [--clean] [--skip-tests] [--device <box>] [--here]
-#
-#   <version>      optional, e.g. 1.15.0 or 1.15.0-alpha.9 -- writes to package.json
-#   --clean        wipe ./dist first
-#   --skip-tests   skip the test suite
-#   --device <box> run the suite on that fleet box instead of a crabbox
-#   --here         run the suite on THIS machine (loud; never the default)
 
 set -euo pipefail
 
@@ -23,7 +13,6 @@ die() { red "  Error: $*"; exit 1; }
 
 CLEAN=false
 SKIP_TESTS=false
-# Where the suite runs; empty = scripts/test.sh's default (offload to a crabbox).
 TEST_TARGET=()
 VERSION=""
 SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)\.[0-9]+)?$'
@@ -102,13 +91,8 @@ node -e "
 if $SKIP_TESTS; then
   dim "  Skipping tests (--skip-tests)"
 else
-  # Offloaded by default (RUSH-3178). scripts/test.sh decides WHERE; build.sh
-  # only decides WHETHER. Pass --device <box> / --here through to choose.
   dim "  Running tests (via scripts/test.sh${TEST_TARGET[*]:+ ${TEST_TARGET[*]}})"
   TEST_LOG=$(mktemp)
-  # bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
-  # input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
-  # under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.
   if ! scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} >"$TEST_LOG" 2>&1; then
     echo
     red "  Tests failed"

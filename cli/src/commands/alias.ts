@@ -63,7 +63,6 @@ function isAliasShim(filePath: string): boolean {
   }
 }
 
-/** Register `agents setup alias` under the parent `setup` command. */
 export function registerAliasCommand(setupCmd: Command): void {
   const cmd = setupCmd
     .command('alias')

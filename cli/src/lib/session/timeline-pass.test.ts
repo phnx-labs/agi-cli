@@ -266,6 +266,94 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(result).toEqual({ computed: 0, reused: 0, skipped: 0 });
   });
 
+  it('resumes a pasted image larger than one read and keeps the bytes out of the timeline cache', () => {
+    const raw = Buffer.alloc(3 * 1024 * 1024, 7);
+    const data = raw.toString('base64');
+    const image = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-02T22:13:00.000Z',
+      message: { role: 'user', content: [
+        { type: 'text', text: 'see this' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data } },
+      ] },
+    });
+    const assistant = JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-10-02T22:14:00.000Z',
+      message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'looks fine' }] },
+    });
+    const file = path.join(tmpHome, 'wide-image.jsonl');
+    fs.writeFileSync(file, `${image}\n${assistant}\n`);
+    expect(image.length).toBeGreaterThan(pass.TIMELINE_PASS_MAX_BYTES_PER_SESSION);
+
+    const first = pass.runTimelinePassSync({ sessions: [row('wide-image', file)] });
+    expect(first).toMatchObject({ computed: 1, reused: 0 });
+    const mid = db.readSessionTimelineEntry('wide-image')!;
+    expect(mid.state.offset).toBeGreaterThan(0);
+    expect(mid.state.offset).toBeLessThan(fs.statSync(file).size);
+    expect(mid.state.partialLine?.skippingData).toBe(true);
+    expect(JSON.stringify(mid.state)).not.toContain(data.slice(100, 180));
+    expect(db.readSessionTimelineAny('wide-image')?.model).toBeUndefined();
+
+    const second = pass.runTimelinePassSync({ sessions: [row('wide-image', file)] });
+    expect(second).toMatchObject({ computed: 1, reused: 0 });
+    const done = db.readSessionTimelineEntry('wide-image')!;
+    expect(done.state.partialLine).toBeUndefined();
+    expect(done.state.offset).toBe(fs.statSync(file).size);
+    const rowAfter = db.readSessionTimelineAny('wide-image')!;
+    expect(rowAfter.model).toBe('claude-opus-5-5');
+    expect(rowAfter.userTurns?.some(turn => turn.text.includes('see this'))).toBe(true);
+    const imagePath = rowAfter.attachments?.find(item => item.path)?.path;
+    expect(imagePath).toBeTruthy();
+    expect(fs.statSync(imagePath!).size).toBe(raw.length);
+    expect(fs.statSync(imagePath!).mode & 0o777).toBe(0o600);
+    expect(JSON.stringify(done.state)).not.toContain(data.slice(100, 180));
+  });
+
+  it('leaves an unfinished tail unread until its newline fits in one read', () => {
+    const text = `see this ${'x'.repeat(300_000)}`;
+    const line = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-02T22:13:00.000Z',
+      message: { role: 'user', content: text },
+    });
+    const file = path.join(tmpHome, 'tail-300.jsonl');
+    fs.writeFileSync(file, line);
+    expect(line.length).toBeGreaterThan(256 * 1024);
+    expect(line.length).toBeLessThan(pass.TIMELINE_PASS_MAX_BYTES_PER_SESSION);
+
+    const waiting = pass.runTimelinePassSync({ sessions: [row('tail-300', file)] });
+    expect(waiting).toMatchObject({ computed: 0, reused: 1 });
+    expect(db.readSessionTimelineEntry('tail-300')?.state.partialLine).toBeUndefined();
+
+    fs.appendFileSync(file, '\n');
+    expect(pass.runTimelinePassSync({ sessions: [row('tail-300', file)] })).toMatchObject({ computed: 1, reused: 0 });
+    expect(db.readSessionTimelineAny('tail-300')?.userTurns?.some(turn => turn.text.includes('see this'))).toBe(true);
+  });
+
+  it('projects the glance model, and an older extractor version is refolded', () => {
+    const file = path.join(tmpHome, 'glance.jsonl');
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-10-02T22:13:00.000Z',
+      message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'hello' }], usage: { input_tokens: 1, output_tokens: 1 } },
+    }) + '\n');
+    expect(pass.runTimelinePassSync({ sessions: [row('glance-model', file)] })).toMatchObject({ computed: 1 });
+    expect(db.readSessionTimelineAny('glance-model')?.model).toBe('claude-opus-5-5');
+
+    const stored = db.readSessionTimelineEntry('glance-model')!;
+    stored.state.version = 1;
+    const stamp = fs.statSync(file);
+    db.writeSessionTimeline({
+      id: 'glance-model',
+      fileMtimeMs: Math.round(stamp.mtimeMs),
+      fileSize: stamp.size,
+      timeline: stored,
+    });
+    expect(pass.runTimelinePassSync({ sessions: [row('glance-model', file)] })).toMatchObject({ computed: 1, reused: 0 });
+    expect(db.readSessionTimelineEntry('glance-model')!.state.version).toBe(timeline.TIMELINE_EXTRACTOR_VERSION);
+  });
+
   it('does not fold a peer mirror\'s stored projection onto a local byte offset', () => {
     // A mirrored peer row carries a projection with an EMPTY resume state, so
     // this box can never resume-fold a transcript it does not have.

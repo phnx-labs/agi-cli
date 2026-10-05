@@ -2,7 +2,7 @@
 # needs 3+ days). Pin it to a reliably-online device with a live Phoenix session: `agents
 # routines devices traces-daily-sync --set <device>` (needs `agents auth login` + traces setup).
 name: traces-daily-sync
-schedule: "0 2 * * *"   # daily at 02:00 UTC
+schedule: "0 2 * * *"
 timeout: 30m
 command: |
   set -eu

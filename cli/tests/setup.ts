@@ -5,7 +5,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
-import { seedHermeticE2eWinHost } from './seed-e2e-win-host.js';
 import { shouldArmHermeticGuards } from './hermetic-guards.js';
 import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-sandbox.js';
 
@@ -62,24 +61,6 @@ process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 // tests never write fixture devices into the real ~/.agents/.history/devices. state.ts reads it at
 // call time; tests may override AGENTS_DEVICES_DIR. HOME stays untouched.
 process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
-
-// Live Windows-host e2e (AGENTS_TEST_WIN_HOST) needs a real DeviceProfile: seed the private
-// registry from the real fleet registry (or ssh -G), else the redirect above empties it (what broke
-// tests-windows-host-e2e after #1572). See tests/seed-e2e-win-host.ts.
-const e2eWinHost = process.env.AGENTS_TEST_WIN_HOST?.trim();
-if (e2eWinHost) {
-  seedHermeticE2eWinHost({
-    host: e2eWinHost,
-    devicesDir: process.env.AGENTS_DEVICES_DIR,
-    realRegistryPath: path.join(
-      realHome,
-      '.agents',
-      '.history',
-      'devices',
-      'registry.json',
-    ),
-  });
-}
 
 // AGENTS_DAEMON_DIR is deliberately NOT set globally: tests spawning a real daemon isolate via a
 // unique HOME, and a global value would be inherited by those children and collide on the

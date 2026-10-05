@@ -43,7 +43,6 @@ beforeEach(() => {
   received = [];
 });
 
-/** Build the real command tree and run one invocation, capturing output + exit. */
 async function run(...argv: string[]): Promise<{ out: string; err: string; exit: number | undefined }> {
   const { registerAuthCommand } = await import('./auth.js');
   const program = new Command();
@@ -89,7 +88,6 @@ describe('agents auth — signed out', () => {
     expect(r.exit).toBe(1);
     const text = `${r.out}${r.err}`;
     expect(text).toMatch(/Not signed in/);
-    // The regression this guards (a5c4b420e): a raw Node stack reaching the user.
     expect(text).not.toMatch(/\bat \w+.*\(.*:\d+:\d+\)/);
     expect(text).not.toMatch(/PhoenixApiError:/);
   });
@@ -117,7 +115,6 @@ describe('agents auth — signed in', () => {
     const r = await run('auth', 'whoami', '--json');
     expect(JSON.parse(r.out)).toMatchObject({ signedIn: true, avatar_url: 'https://lh3.googleusercontent.com/a/abc=s96-c' });
     expect(JSON.parse(fs.readFileSync(sessionFile, 'utf-8'))).toMatchObject({ email: 'signed-in@test.local', avatarUrl: 'https://lh3.googleusercontent.com/a/abc=s96-c' });
-    // A later whoami with a changed picture updates it; one without a picture leaves it.
     queue.push({ status: 200, body: { userId: 'u-1', email: 'signed-in@test.local', valid: true, avatar_url: 'https://lh3.googleusercontent.com/a/def=s96-c' } });
     await run('auth', 'whoami', '--json');
     expect(JSON.parse(fs.readFileSync(sessionFile, 'utf-8')).avatarUrl).toBe('https://lh3.googleusercontent.com/a/def=s96-c');
@@ -187,7 +184,6 @@ describe('agents auth — signed in', () => {
 });
 
 describe('agents auth login — the device poll loop', () => {
-  /** The server hands back a 1s interval so the loop's waits stay short. */
   function authorization(expiresIn = 30) {
     return {
       status: 200,
@@ -212,7 +208,6 @@ describe('agents auth login — the device poll loop', () => {
     expect(r.out).toMatch(/Signed in as new@test.local/);
     const { readSession } = await import('../lib/identity/index.js');
     expect(readSession()).toMatchObject({ access_token: 'pid_new', name: 'New Person' });
-    // One authorization + three polls: it did not stop early or spin extra.
     expect(received).toHaveLength(4);
   }, 20_000);
 
@@ -238,7 +233,6 @@ describe('agents auth login — the device poll loop', () => {
 
   it('gives up at the deadline instead of hanging', async () => {
     await signOut();
-    // expires_in: 0 — the loop must not enter even one poll.
     queue.push(authorization(0));
     const r = await run('auth', 'login');
     expect(r.exit).toBe(1);

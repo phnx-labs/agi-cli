@@ -23,7 +23,6 @@ interface BrowserSessionsCommandOpts {
   profile?: string;
   open?: string | boolean;
   json?: boolean;
-  /** Commander's `--no-interactive` convention: `false` opts out. */
   interactive?: boolean;
 }
 
@@ -55,8 +54,6 @@ function rowLinkSummary(row: BrowserSessionRow): string {
 }
 
 function formatRowLabel(row: BrowserSessionRow): string {
-  // Pad the raw text first, THEN colorize — padEnd on an already-chalked
-  // string counts the ANSI escape bytes as width and misaligns the column.
   const name = (row.kind === 'downloads' ? '[downloads]' : (row.task ?? '')).padEnd(30);
   const coloredName = row.kind === 'downloads' ? chalk.gray(name) : name;
   const age = formatRelativeTime(new Date(row.latestMtimeMs).toISOString());
@@ -106,16 +103,11 @@ function formatArtifactLabel(a: BrowserArtifact): string {
   return `${age.padEnd(11)}  ${a.name.padEnd(34)}  ${formatBytes(a.bytes).padStart(8)}`;
 }
 
-/** Open one artifact, printing its path (matches the non-interactive `--open`
- *  behavior) and any open failure. Routes through the same viewer seam as
- *  `--open`, so the interactive and non-interactive halves cannot diverge. */
 async function openAndReport(a: BrowserArtifact): Promise<void> {
   console.log(a.path);
   if ((await showFile(a.path)).via === 'none') console.error(`Could not open ${a.path}`);
 }
 
-/** Second-level picker over one row's captures, newest first. Enter opens the
- *  highlighted capture; esc returns to the task list. */
 async function pickArtifact(row: BrowserSessionRow): Promise<BrowserArtifact | null> {
   try {
     const picked = await itemPicker<BrowserArtifact>({
@@ -161,8 +153,6 @@ const browserSessionsPicker = createSessionsPickerCommand<BrowserSessionRow, Bro
   },
 });
 
-/** True when the interactive picker should open instead of the printed table:
- *  a real TTY, no `--json`/`--open`, and `--no-interactive` not set. */
 export function shouldOpenInteractiveBrowserSessions(opts: BrowserSessionsCommandOpts, isTTY: boolean): boolean {
   return browserSessionsPicker.shouldOpen(opts, isTTY);
 }

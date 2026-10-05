@@ -68,7 +68,7 @@ const children: ChildProcess[] = [];
 afterEach(() => {
   for (const child of children.splice(0)) {
     if (child.pid && child.exitCode === null) {
-      try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+      try { process.kill(child.pid, 'SIGKILL'); } catch {  }
     }
   }
 });
@@ -140,8 +140,6 @@ describe('loadSessionMetasForFeedEnrichment (RUSH-2006)', () => {
   });
 
   it('returns empty metas and skippedLock on a lock error instead of throwing', async () => {
-    // Real lock-shaped failure from the loader (no module mock). Before the
-    // guard, discoverSessions throwing here crashed `agents feed --local`.
     const locked = await loadSessionMetasForFeedEnrichment(async () => {
       throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
     });

@@ -24,7 +24,6 @@ function writeUpdateCache(home: string): void {
     JSON.stringify({ lastCheck: Date.now(), latestVersion: packageJson.version }),
     'utf-8'
   );
-  // ensureInitialized() checks for ~/.agents/.system/.git to confirm setup.
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
 }
 
@@ -105,7 +104,6 @@ describe('agents setup beta', () => {
       expect(fs.readFileSync(yamlPath, 'utf-8')).not.toContain('- projects');
     }
 
-    // A genuine typo still errors.
     const typo = runAgents(['setup', 'beta', 'enable', 'factroy'], home);
     expect(typo.status).toBe(1);
     expect(outputOf(typo)).toContain('Unknown beta feature');

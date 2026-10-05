@@ -55,7 +55,6 @@ export function buildProfileFromCollection(
   };
 }
 
-/** Prompt the user for a secret value with masked input. Requires an interactive TTY. */
 async function promptForSecret(message: string): Promise<string> {
   if (!isInteractiveTerminal()) {
     throw new Error('A secret is required but the shell is not interactive. Pipe the key via stdin (--key-stdin).');
@@ -64,9 +63,7 @@ async function promptForSecret(message: string): Promise<string> {
   return await password({ message, mask: true });
 }
 
-/** Read all available data from stdin synchronously, trimmed. */
 
-/** Ensure a provider API key exists in keychain, prompting or reading stdin if missing. */
 export async function ensureProviderToken(provider: string, signupUrl?: string, fromStdin?: boolean): Promise<void> {
   const item = profileKeychainItem(provider);
   if (await hasKeychainToken(item)) {
@@ -86,7 +83,6 @@ export async function ensureProviderToken(provider: string, signupUrl?: string, 
   console.log(chalk.green(`Stored in keychain: ${item}`));
 }
 
-/** Options accepted by {@link addProfile} — shared by `agents harness add` and `agents harness add`. */
 export interface AddProfileOptions {
   preset?: string;
   host?: string;
@@ -97,7 +93,6 @@ export interface AddProfileOptions {
   version?: string;
   keyStdin?: boolean;
   force?: boolean;
-  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets}. */
   fromSecrets?: string;
 }
 
@@ -117,7 +112,6 @@ export async function applyFromSecrets(
   try {
     bundle = await readBundle(bundleName);
   } catch (err) {
-    // The standalone reports only a code; name the bundle the user asked for.
     if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
     throw new Error(`Secrets bundle '${bundleName}' not found. List bundles with 'agents secrets list'.`);
   }
@@ -179,7 +173,6 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
     throw new Error(`${label} '${name}' already exists. Use --force to overwrite.`);
   }
 
-  // One-shot host + model → custom harness, no preset required.
   if (opts.host || opts.model) {
     if (!opts.host || !opts.model) {
       throw new Error('Both --host <agent> and --model <id> are required to build a harness from a host + model.');
@@ -219,7 +212,6 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
     return;
   }
 
-  // Preset path.
   const presetName = opts.preset || name;
   const preset = getPreset(presetName);
   if (!preset) {

@@ -58,7 +58,6 @@ class FakeIO implements WizardIO {
   note(m: string): void {
     this.notes.push(m);
   }
-  /** Messages of the prompts that actually fired, in order. */
   messages(): string[] {
     return this.calls.map((c) => c.message);
   }
@@ -81,7 +80,6 @@ afterEach(() => {
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
 
-/** Index a step list by id for direct `decide()` assertions. */
 function byId(steps: WizardStep[]): Record<string, WizardStep> {
   return Object.fromEntries(steps.map((s) => [s.id, s]));
 }
@@ -97,7 +95,7 @@ describe('createSteps — step gating (decide) is a function of the draft', () =
   it('model is asked only on the custom path and skipped once a model is present', () => {
     expect(steps.model.decide({ mode: 'create', custom: true })).toBe('run');
     expect(steps.model.decide({ mode: 'create', custom: true, model: 'gpt-x' })).toBe('skip');
-    expect(steps.model.decide({ mode: 'create' })).toBe('skip'); // preset path fills it
+    expect(steps.model.decide({ mode: 'create' })).toBe('skip');
   });
 
   it('baseUrl is disabled with a reason on a host that carries no endpoint slot', () => {
@@ -132,7 +130,6 @@ describe('createSteps — a full custom run drives the right prompts and skips t
 
     const draft = await runWizardSteps(createSteps(), { mode: 'create' }, io);
 
-    // The base-URL prompt never fired — it was disabled with a reason instead.
     expect(io.messages()).not.toContain('Base URL (optional)');
     expect(io.notes.join('\n')).toMatch(/opencode.*no custom-endpoint slot/);
 
@@ -143,7 +140,6 @@ describe('createSteps — a full custom run drives the right prompts and skips t
     expect(draft.baseUrl).toBeUndefined();
     expect(draft.name).toBe('spark');
 
-    // Round-trips through buildFork → writeProfile → readProfile → resolveProfileForRun.
     const profile = buildFork(draft.source!, draft.name!, {
       model: draft.model,
       baseUrl: draft.baseUrl,
@@ -199,7 +195,7 @@ describe('editSteps — matrix gating is sourced from the resolver, per host', (
     const draft: HarnessDraft = { mode: 'edit' };
     expect(steps.baseUrl.decide(draft)).toEqual({ disabled: expect.stringContaining('grok') });
     expect(steps.version.decide(draft)).toEqual({ disabled: expect.stringContaining('self-updates') });
-    expect(steps.account.decide(draft)).toBe('run'); // grok reads XAI_API_KEY
+    expect(steps.account.decide(draft)).toBe('run');
     expect(steps.model.decide(draft)).toBe('run');
   });
 
@@ -229,14 +225,11 @@ describe('harnessEditable — the RUSH-2222 matrix, sourced from the resolver wi
   it('every managed host tracks the resolver maps, disabled fields carrying a reason', () => {
     for (const host of MANAGED_AGENT_IDS) {
       const e = harnessEditable(host);
-      // model + fallback are always editable (a same-host model swap).
       expect(e.model.enabled).toBe(true);
       expect(e.fallback.enabled).toBe(true);
-      // endpoint / auth / version enablement mirrors the resolver, never a table.
       expect(e.baseUrl.enabled).toBe(baseUrlEnvKeyForHost(host) !== null);
       expect(e.auth.enabled).toBe(authEnvKeyForHost(host) !== null);
       expect(e.version.enabled).toBe(!isSelfUpdatingAgent(host));
-      // A disabled field always states why; an enabled one never carries a stale reason.
       for (const field of [e.baseUrl, e.auth, e.version] as const) {
         if (field.enabled) expect(field.reason).toBeUndefined();
         else expect(field.reason && field.reason.length).toBeTruthy();
@@ -252,7 +245,7 @@ describe('harnessEditable — the RUSH-2222 matrix, sourced from the resolver wi
     const grok = harnessEditable('grok');
     expect(grok.baseUrl.reason).toMatch(/grok.*custom-endpoint/);
     expect(grok.version.reason).toMatch(/self-updates/);
-    expect(grok.auth.enabled).toBe(true); // grok reads XAI_API_KEY
+    expect(grok.auth.enabled).toBe(true);
 
     const opencode = harnessEditable('opencode');
     expect(opencode.baseUrl.reason).toMatch(/endpoint/);
@@ -285,9 +278,9 @@ describe('editSteps — a full edit run keeps only what changed and round-trips'
     const original = readProfile('deepseek');
 
     const io = new FakeIO((p) => {
-      if (p.message === 'Model id') return 'deepseek/deepseek-v3.2'; // the one real change
+      if (p.message === 'Model id') return 'deepseek/deepseek-v3.2';
       if (p.message === 'Account') return p.choices!.find((c) => c.name.includes('unchanged'))!.value;
-      if (p.kind === 'input') return p.default ?? ''; // accept the pre-filled current value
+      if (p.kind === 'input') return p.default ?? '';
       throw new Error(`unexpected prompt: ${p.kind} '${p.message}'`);
     });
 
@@ -301,7 +294,6 @@ describe('editSteps — a full edit run keeps only what changed and round-trips'
 
     const edited = buildEdit('deepseek', opts);
     writeProfile(edited);
-    // Only the model moved; the version pin and description are intact.
     expect(readProfile('deepseek').env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-v3.2');
     expect(readProfile('deepseek').host.version).toBe('2.1.170');
     const resolved = resolveProfileForRun('deepseek');
@@ -317,7 +309,7 @@ describe('editSteps — a full edit run keeps only what changed and round-trips'
     const original = readProfile('pinned');
     const io = new FakeIO((p) => {
       if (p.message === 'Account') return p.choices!.find((c) => c.name.includes('unchanged'))!.value;
-      if (p.kind === 'input' && p.message.startsWith('Host CLI version')) return ''; // blank → unpin
+      if (p.kind === 'input' && p.message.startsWith('Host CLI version')) return '';
       if (p.kind === 'input') return p.default ?? '';
       throw new Error(`unexpected prompt: ${p.kind} '${p.message}'`);
     });

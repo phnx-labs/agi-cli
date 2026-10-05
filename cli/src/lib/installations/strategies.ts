@@ -22,33 +22,24 @@ import type { Installation, UpdateStrategyId } from './types.js';
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-/** npm install timeout, matching the install path's own installer budget. */
 const INSTALL_TIMEOUT_MS = 120_000;
 
 export interface UpdateContext {
   agent: AgentId;
   installation: Installation;
-  /** What the user asked for: `latest`, `oldest`, or a concrete release. */
   requested: string;
   onProgress?: (message: string) => void;
 }
 
-/** A release fetched but not yet live. */
 export interface StagedRelease {
   release: string;
-  /** Extensionless launch target to probe. Windows appends `.cmd` (see verifyBinaryLaunches). */
   binary: string;
-  /** HOME the probe runs under — always the installation's own home. */
   home: string;
-  /** Scratch dir to delete once the run finishes, or null when nothing was staged. */
   stagingDir: string | null;
 }
 
-/** Undo/finish handles returned by a commit, so update.ts owns the transaction. */
 export interface CommitHandles {
-  /** Put the previous release back. Must be safe to call once, immediately after commit. */
   undo: () => void;
-  /** Discard the undo material. Called only once the update is durable. */
   finalize: () => void;
 }
 
@@ -61,13 +52,9 @@ export interface UpdateStrategy {
    * inside this installation's dir and was fetched without mutating anything global. It doesn't
    * gate rollback; it changes what the user is told. */
   readonly transactional: boolean;
-  /** True when several installations of this agent share one binary on disk. */
   readonly sharedBinary: boolean;
-  /** Turn `requested` into the concrete release this run will install. */
   resolveTarget(ctx: UpdateContext): Promise<string>;
-  /** Fetch the target release into a place that is not yet live. */
   stage(ctx: UpdateContext, target: string): Promise<StagedRelease>;
-  /** Make the staged release the live one. */
   commit(ctx: UpdateContext, staged: StagedRelease): Promise<CommitHandles>;
 }
 
@@ -77,9 +64,6 @@ function runId(): string {
 
 function moveDir(from: string, to: string): void {
   fs.mkdirSync(path.dirname(to), { recursive: true });
-  // Staging and rollback are siblings on the installation filesystem. Never
-  // turn an atomic rename failure into a partially successful copy-and-delete:
-  // an open Windows file or unexpected mount must leave the source intact.
   fs.renameSync(from, to);
 }
 
@@ -141,7 +125,6 @@ const npmPackageStrategy: UpdateStrategy = {
         await execFileAsync(postinstall, [], { cwd: pkgRoot, shell: true, timeout: INSTALL_TIMEOUT_MS });
       }
     } catch {
-      /* non-fatal: the launch probe in update.ts is the real gate */
     }
 
     return {
@@ -158,8 +141,6 @@ const npmPackageStrategy: UpdateStrategy = {
     const displaced: string[] = [];
     const stagedIn: string[] = [];
 
-    // Restore each displaced entry. If restoration itself fails, retain every
-    // remaining backup and surface its path; never erase the only good copy.
     const restorePreCommitState = () => {
       const errors: string[] = [];
       for (const entry of [...stagedIn].reverse()) {
@@ -215,16 +196,12 @@ const globalBinaryStrategy: UpdateStrategy = {
   sharedBinary: true,
 
   async resolveTarget(ctx) {
-    // The installer for these carries no version token, so a requested release
-    // cannot be honoured. Fail loud rather than install something else and
-    // report it as the pin the user asked for.
     if (ctx.requested !== 'latest') {
       throw new Error(
         `${AGENTS[ctx.agent].name} is a single self-updating binary with no pinnable releases — `
         + `it can only be updated to the current one. Re-run: agents update ${ctx.agent}@${ctx.installation.label} --to latest`
       );
     }
-    // Resolved after the installer runs — `latest` here is whatever it fetches.
     return 'latest';
   },
 
@@ -248,8 +225,6 @@ const globalBinaryStrategy: UpdateStrategy = {
   },
 
   async commit() {
-    // The installer already replaced the shared binary; there is no per-install
-    // swap to perform and no previous copy to restore.
     return { undo: () => {}, finalize: () => {} };
   },
 };
@@ -280,8 +255,6 @@ const installScriptStrategy: UpdateStrategy = {
     await execAsync(script, { timeout: INSTALL_TIMEOUT_MS });
     invalidateLiveVersionCache(ctx.agent);
 
-    // findInPath skips our own shims dir, so this is the genuine vendor binary
-    // and never our dispatcher (which would produce a self-execing link farm).
     const installed = findInPath(config.cliCommand);
     if (!installed) {
       throw new Error(
@@ -306,8 +279,6 @@ const installScriptStrategy: UpdateStrategy = {
       stagingDir
     );
     if (!imported.success) {
-      // Swallowing this reported the launch probe's generic "binary not found"
-      // instead of the real reason the import failed.
       throw new Error(
         `${config.name} ${release} was installed but could not be linked into the version directory: ${imported.error ?? 'unknown error'}`
       );
@@ -366,7 +337,6 @@ export function supportsPinnedUpdate(agent: AgentId): boolean {
   return !isSelfUpdatingAgent(agent);
 }
 
-/** Guard a user-supplied release token before it reaches a path or a package spec. */
 export function assertValidRelease(requested: string): void {
   if (!VERSION_RE.test(requested)) {
     throw new Error(`Invalid release: ${JSON.stringify(requested)}`);

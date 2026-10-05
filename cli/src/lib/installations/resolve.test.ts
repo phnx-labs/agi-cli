@@ -27,9 +27,6 @@ describe('resolveInstallation', () => {
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-'));
     process.env.HOME = home;
-    // getGlobalDefault reads pins via AGENTS_DEVICES_DIR (fork-wide in setup.ts).
-    // Scope pins to this home so a prior setGlobalDefault cannot leak a pin into
-    // "no default refuses to pick".
     process.env.AGENTS_DEVICES_DIR = path.join(home, '.agents', '.history', 'devices');
     process.env.AGENTS_SYNC_MACHINE_ID = 'resolve-testbox';
   });
@@ -65,10 +62,8 @@ describe('resolveInstallation', () => {
     makeVersionDir('2.0.65');
     makeVersionDir('1.0.0');
     store.createInstallation('claude', '2.0.65', '2.0.65');
-    // A second install whose RELEASE is 2.0.65 while its label is 1.0.0.
     store.recordRelease(store.createInstallation('claude', '1.0.0', '1.0.0'), '2.0.65');
 
-    // The label is a directory name, so it is unique and decisive.
     expect((await resolve.resolveInstallation('claude', '2.0.65')).label).toBe('2.0.65');
   });
 

@@ -1,6 +1,3 @@
-/**
- * Execution command helpers.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -74,8 +71,6 @@ describe.skipIf(process.platform === 'win32')('native account launch selects a s
     }
     const credential = JSON.stringify({ tokens: { id_token: `fixture.${payload}.unsigned` } });
     fs.writeFileSync(path.join(authHome, '.codex', 'auth.json'), credential);
-    // JSON is valid YAML; the actual state reader and native identity selector
-    // are exercised, with non-secret local fixtures and no vendor request.
     fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), JSON.stringify({
       agents: { codex: binaryDefault },
       accounts: { native: { work: {
@@ -107,9 +102,6 @@ describe.skipIf(process.platform === 'win32')('native account launch selects a s
 
 describe.skipIf(process.platform === 'win32')('a balanced pick launches the picked account slot (PHNX-4116)', () => {
   it('spawns the binary with the picked slot as its home, not the version home', () => {
-    // yosemite-m0, 2026-09-23: the picker chose one account and Claude Code
-    // started in the executable's version home as another account. A native
-    // candidate is a registered slot since PHNX-3940; the spawn must use it.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'balanced-slot-launch-'));
     const capturePath = path.join(root, 'launch.json');
     const binaryDefault = '0.2.0';
@@ -118,7 +110,7 @@ describe.skipIf(process.platform === 'win32')('a balanced pick launches the pick
     fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
     const dir = path.join(root, '.agents', '.history', 'versions', 'codex', binaryDefault);
     fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
-    fs.mkdirSync(path.join(dir, 'home', '.codex'), { recursive: true }); // version home: no login
+    fs.mkdirSync(path.join(dir, 'home', '.codex'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'codex'),
       '#!/usr/bin/env node\n' +
       `if (process.argv.includes('--version')) { console.log('codex-cli ${binaryDefault}'); process.exit(0); }\n` +
@@ -133,7 +125,6 @@ describe.skipIf(process.platform === 'win32')('a balanced pick launches the pick
     fs.mkdirSync(path.join(slotDir, '.codex'), { recursive: true });
     fs.writeFileSync(path.join(slotDir, '.codex', 'auth.json'), JSON.stringify({ tokens: { id_token: `fixture.${payload}.unsigned` } }));
     fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), JSON.stringify({ agents: { codex: binaryDefault } }));
-    // The slot is device-scoped state: it lives in this box's device doc.
     const deviceDir = path.join(root, '.agents', 'devices', 'testbox');
     fs.mkdirSync(deviceDir, { recursive: true });
     fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), JSON.stringify({
@@ -155,9 +146,6 @@ describe.skipIf(process.platform === 'win32')('a balanced pick launches the pick
         encoding: 'utf8', timeout: 60_000,
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      // On macOS a deep codex home is relocated to a short real path keyed by
-      // the ORIGIN (`a-<account id>` for a slot), so accept that alias too; the
-      // version home (`versions/codex/<binary>` or key `<binary>`) is never right.
       const rawHome = path.join(slotDir, '.codex');
       const shortHome = shortCodexHome(path.join(root, '.agents'), codexShortKey(rawHome, binaryDefault, path.join(root, '.agents', '.history')));
       const captured = JSON.parse(fs.readFileSync(capturePath, 'utf8')).codexHome as string;
@@ -189,8 +177,6 @@ describe('degraded run governance mode', () => {
     fs.mkdirSync(binDir, { recursive: true });
     fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
-    // Antigravity has no read-only plan mode, so --mode plan degrades to edit.
-    // Cursor now supports plan (RUSH-2101), so it can no longer exercise this path.
     const agy = path.join(binDir, process.platform === 'win32' ? 'agy.cmd' : 'agy');
     fs.writeFileSync(
       agy,
@@ -204,9 +190,6 @@ describe('degraded run governance mode', () => {
       // tsx loader like other CLI-spawning tests. `--import` needs a module specifier, not a bare
       // path, or Windows dies on ERR_UNSUPPORTED_ESM_URL_SCHEME.
       const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
-      // Vitest setup pins AGENTS_EVENTS_PATH to a fork-local sink; clear it so the
-      // child writes under HOME (same pattern as tests/events-audit.test.ts).
-      // New runs emit run.dispatched there — not the legacy audit/log.jsonl chain.
       const eventsPath = path.join(root, 'events.jsonl');
       const result = spawnSync(
         'node',
@@ -227,7 +210,6 @@ describe('degraded run governance mode', () => {
       const rows = fs.readFileSync(eventsPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
       const dispatched = rows.filter((r) => r.event === 'run.dispatched' && r.agent === 'antigravity');
       expect(dispatched.length, `events: ${JSON.stringify(rows.slice(-5))}`).toBeGreaterThanOrEqual(1);
-      // Antigravity has no plan mode — resolved writable mode must be edit.
       expect(dispatched.at(-1)).toMatchObject({
         agent: 'antigravity',
         mode: 'edit',
@@ -303,17 +285,12 @@ describe('run picker markers (# account, @ device)', () => {
   });
 
   it('rejects a pin combined with the picker for the same thing', () => {
-    // The account picker chooses the version — a version pin conflicts.
     expect(parseRunPickerMarkers('claude@2.1.218#')).toMatchObject({ valid: false });
-    // An explicit account label conflicts with the account picker.
     expect(parseRunPickerMarkers('claude#work#')).toMatchObject({ valid: false });
-    // Same rule as today's claude@2.1.218@ for the device marker.
     expect(parseRunPickerMarkers('claude@2.1.218@')).toMatchObject({ valid: false });
-    // Doubled markers are malformed.
     expect(parseRunPickerMarkers('claude##')).toMatchObject({ valid: false });
     expect(parseRunPickerMarkers('claude@@')).toMatchObject({ valid: false });
     expect(parseRunPickerMarkers('claude#@#')).toMatchObject({ valid: false });
-    // Markers with no agent at all.
     expect(parseRunPickerMarkers('#')).toMatchObject({ valid: false });
     expect(parseRunPickerMarkers('#@')).toMatchObject({ valid: false });
   });
@@ -327,7 +304,6 @@ describe('run picker markers (# account, @ device)', () => {
       box: 'warm-one',
     })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box']);
     expect(runAccountPickerConflicts({ device: 'worker-1' })).toEqual([]);
-    // `#` asks for the account; naming one as well is the same contradiction.
     expect(runAccountPickerConflicts({ account: 'work' })).toEqual(['--account work']);
   });
 
@@ -378,8 +354,6 @@ describe('isInsideGitWorkTree — the --lease/--box pre-flight sync guard', () =
   });
 
   it('is false in a plain directory that is not a git repo', () => {
-    // crabbox builds its sync file list with `git ls-files`, which exits 128
-    // here; the guard must catch that before a box is provisioned and billed.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-nogit-'));
     try {
       expect(isInsideGitWorkTree(dir)).toBe(false);
@@ -441,8 +415,7 @@ describe('always-fresh repo set (F3 picker "remember for this repo")', () => {
     const base = ['/repo/one'];
     const added = addAlwaysFreshRepo(base, '/repo/two');
     expect(added).toEqual(['/repo/one', '/repo/two']);
-    expect(base).toEqual(['/repo/one']); // original untouched
-    // Re-adding returns the SAME array reference (no duplicate).
+    expect(base).toEqual(['/repo/one']);
     expect(addAlwaysFreshRepo(added, '/repo/two')).toBe(added);
   });
 });
@@ -503,8 +476,6 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
 
   it('the keyword does not collide with a real harness id today', () => {
     expect(RUN_AUTO_KEYWORD).toBe('auto');
-    // If this ever fails, a harness registered the id `auto` and the run-auto
-    // keyword must be renamed — the action fails loud on the collision.
     expect(ALL_AGENT_IDS).not.toContain('auto');
   });
 
@@ -527,7 +498,6 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
         },
       );
       expect(result.status).toBe(1);
-      // The watchdog contract: literal `no healthy` + `resets` on the error line.
       expect(result.stderr).toContain('no healthy');
       expect(result.stderr).toContain('resets');
     } finally {
@@ -537,7 +507,7 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
 });
 
 describe('bare interactive run defaults to --device auto (PHNX-4083)', () => {
-  const bare = {}; // no placement-owning options
+  const bare = {};
   const human = { prompt: undefined, devicePickerRequested: false };
   const tty = { tty: true, json: false };
 
@@ -561,7 +531,6 @@ describe('bare interactive run defaults to --device auto (PHNX-4083)', () => {
 
   it('--local (and --where local, --device <this machine>, which pin the same field) is an explicit local choice', () => {
     expect(bareInteractiveRunDefaultsToDeviceAuto({ ...bare, local: true }, human, tty)).toBe(false);
-    // The same pin, seen through pinLocalWhenTargetIsSelf, holds for both defaults.
     const pinned: { device?: string; local?: boolean } = { device: 'testbox' };
     pinLocalWhenTargetIsSelf(pinned, (n) => n === 'testbox');
     expect(runAutoDefaultsToAffinity(pinned)).toBe(false);
@@ -604,9 +573,6 @@ describe('bare interactive run defaults to --device auto (PHNX-4083)', () => {
 
 describe('interactive host dispatch — run auto session correlation (RUSH-2132 review #5)', () => {
   it('run auto ALWAYS mints a correlation launch id, even with an explicit --session-id', () => {
-    // The harness is picked on the remote; the explicit id is only adopted by a
-    // claude pick. Pre-registering it would strand a stale index entry when the
-    // pick lands elsewhere — so the launch-id join must resolve the REAL id.
     expect(hostInteractiveNeedsCorrelationId('auto', 'explicit-id', undefined)).toBe(true);
     expect(hostInteractiveNeedsCorrelationId('auto', undefined, undefined)).toBe(true);
   });
@@ -648,8 +614,6 @@ describe('cost tier on a profile run is discarded, not resolved against the host
         '',
       ].join('\n'),
     );
-    // Fake `claude` host binary: record the model-bearing env + argv it was spawned
-    // with (into $HOME/spawn.json), then emit a benign success line so the run ends.
     const spawnLog = path.join(root, 'spawn.json');
     const claudeBin = path.join(binDir, process.platform === 'win32' ? 'claude.cmd' : 'claude');
     fs.writeFileSync(
@@ -672,10 +636,7 @@ describe('cost tier on a profile run is discarded, not resolved against the host
           encoding: 'utf8',
         },
       );
-      // The guard runs before any spawn, so the standout warning is the invariant.
       expect(result.stderr).toContain("cost tiers don't apply to custom harness 'kimiprofile'");
-      // When the host binary is reached, it must carry the profile's own model, never
-      // a claude tier id resolved from the host harness catalog.
       if (fs.existsSync(spawnLog)) {
         const spawned = JSON.parse(fs.readFileSync(spawnLog, 'utf8')) as { argv: string[]; model?: string };
         expect(spawned.model).toBe('kimi-k2-thinking');
@@ -781,9 +742,6 @@ describe('custom harness names take precedence over native agent ids', () => {
 
 describe('opencode custom harness emits --model for its pinned model (PHNX-2577)', () => {
   it('agents run <opencode-harness> includes --model <pin> on the host argv', () => {
-    // Repro: `agents harness fork opencode oc-test --model openai/gpt-5.4-mini`
-    // then `agents run oc-test` used to spawn `opencode run --agent plan …`
-    // with no --model, so OpenCode fell back to its configured default.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-opencode-model-'));
     const binDir = path.join(root, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
@@ -841,11 +799,7 @@ describe('opencode custom harness emits --model for its pinned model (PHNX-2577)
  * died `exec: cursor-agent: not found` (127) after a wrong "logged out" banner. Real subprocess,
  * planted HOME/PATH. A self-installed harness with no version home must still run. */
 describe.skipIf(process.platform === 'win32')('agents run — harness not installed (RUSH-2339)', () => {
-  // Resolved lazily: the describe factory body runs even when skipIf skips the
-  // block, so an eager lookup would fail collection on a box without bun.
   const bunBin = () => execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
-  // Anchor on this file, not process.cwd() — vitest inherits the invoking shell's
-  // cwd, so a run started from the repo root would not find src/index.ts.
   const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
   function runAgentsRun(home: string, pathDir: string) {
@@ -875,7 +829,6 @@ describe.skipIf(process.platform === 'win32')('agents run — harness not instal
       expect(res.status).not.toBe(127);
       expect(out).toContain('cursor is not installed on this machine');
       expect(out).toContain('agents add cursor');
-      // The two wrong messages the bug produced must be gone.
       expect(out).not.toContain('looks logged out');
       expect(out).not.toContain('not found');
     } finally {
@@ -913,9 +866,6 @@ describe.skipIf(process.platform === 'win32')('--copy-creds refusal (RUSH-2527)'
   const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
   it('exits 1 and prints the refusal message — no agent launched', () => {
-    // --copy-creds is only evaluated when a --device target is given (it was a
-    // host-transfer feature). Pass --device with a dummy name; the refusal
-    // must fire before any SSH or agent launch attempt.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'copy-creds-'));
     try {
       fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });

@@ -69,8 +69,6 @@ describe('packed tarball excludes the in-repo secrets engine (PHNX-3989)', () =>
   });
 
   it('ships no keychain-helper build artifact or source', () => {
-    // Scoped to the deleted engine's own helper, not every "keychain" hit —
-    // `openclaw-keychain.js` is an unrelated, still-shipped OpenClaw module.
     const keychainEntries = entries.filter((e) => /keychain-helper|secrets\/agent\b|Agents[ _]CLI\.app/i.test(e));
     expect(keychainEntries, `unexpected keychain-helper entries: ${keychainEntries.join(', ')}`).toEqual([]);
   });

@@ -7,10 +7,8 @@ import { describe, expect, it } from 'vitest';
 const cliDir = path.resolve(__dirname, '..', '..');
 const entrypoint = path.join(cliDir, 'src', 'index.ts');
 
-/** Run the real CLI; these cases are refused before linear is ever called. */
 function runTodo(args: string[]): { code: number; stdout: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'projects-todo-'));
-  // The setup gate's marker: a cloned system repo.
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
   try {
     const stdout = execFileSync('bun', [entrypoint, 'projects', 'todo', ...args], {
@@ -39,5 +37,11 @@ describe('agents projects todo', () => {
     const { code, stdout } = runTodo(['add', '--json', '--', '#AGI tomorrow !!']);
     expect(code).toBe(1);
     expect(JSON.parse(stdout)).toMatchObject({ ok: false, todo: null });
+  });
+
+  it('answers a bad --priority with the ok:false JSON, not commander text', () => {
+    const { code, stdout } = runTodo(['add', '--json', '--priority', 'p1', '--', 'Call back']);
+    expect(code).toBe(1);
+    expect(JSON.parse(stdout)).toEqual({ ok: false, todo: null, message: 'Expected a priority of urgent, high, medium, low, none, got "p1".' });
   });
 });

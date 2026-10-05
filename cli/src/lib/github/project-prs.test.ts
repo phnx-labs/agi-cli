@@ -13,13 +13,24 @@ import {
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
+  readableMergeRefusal,
+  readRepoMergeAbility,
   rowToProjectPr,
   scopeForFiles,
+  setProjectPrAutoMerge,
+  BLOCKED_WITHOUT_ADMIN,
+  OWN_PR_APPROVAL,
 } from './project-prs.js';
 import { repoPathClaims } from '../projects.js';
 import type { ProjectDef } from '../projects.js';
 
 describe('project PR projection', () => {
+  it('decodes auto-merge from the REST row, null when off', () => {
+    expect(rowToProjectPr({ number: 1, autoMerge: { enabledBy: 'octocat', method: 'rebase' } }).autoMerge)
+      .toEqual({ enabledBy: 'octocat', method: 'rebase' });
+    expect(rowToProjectPr({ number: 1, autoMerge: null }).autoMerge).toBeNull();
+  });
+
   it('preserves draft, author, Markdown body and head identity from the REST projection', () => {
     const row = { number: 42, title: 'A change', url: 'https://github.com/example/repo/pull/42',
       isDraft: true, state: 'OPEN', updatedAt: '2026-09-13T00:00:00Z', login: 'octocat',
@@ -130,8 +141,12 @@ const REST = (() => {
 })();
 const NOW = Date.parse('2026-10-04T12:00:00Z');
 const CLOSED_PAGE = (n: number) => `repos/acme/mono/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${n}`;
-/** `repos/{r}` answers canonicalization (`.full_name`) and the default branch (`.default_branch`). */
-const repoRead = (args: string[]) => (args.includes('.default_branch') ? 'main\n' : 'acme/mono\n');
+const MERGE = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-merge.json', import.meta.url), 'utf-8')) as Record<string, string>;
+const ghError = (stderr: string) => Object.assign(new Error('Command failed: gh api'), { stderr });
+/** `repos/{r}` answers canonicalization, the default branch, and a non-admin's merge settings. */
+const repoRead = (args: string[]) => (args.includes('.default_branch')
+  ? 'main\n'
+  : args.some((a) => a.includes('allow_rebase_merge')) ? MERGE['repo-nonadmin'] : 'acme/mono\n');
 const freshCache = () => fs.mkdtempSync(path.join(os.tmpdir(), 'project-prs-'));
 
 describe('CI at a glance and recently merged PRs', () => {
@@ -383,6 +398,28 @@ describe('CI at a glance and recently merged PRs', () => {
       ciState: 'FAILURE', failingChecks: ['ci/external', 'test', 'deploy'], reviewDecision: 'APPROVED',
     });
     expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false, release: null, releaseError: null });
+    expect(repo.merge).toEqual({ viewerIsAdmin: false, adminBypass: false, autoMergeAllowed: false, methods: ['squash', 'merge'] });
+  });
+
+  it('a failed merge-settings read leaves merge null and names itself in ciError, on both paths', async () => {
+    const failing = (args: string[]) => {
+      if (args.some((a) => a.includes('allow_rebase_merge'))) throw ghError('gh: Server Error (HTTP 502)\n');
+      return repoRead(args);
+    };
+    const detail = recordedGh({
+      'repos/acme/mono': failing,
+      'user': '{"login":"octocat"}\n',
+      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: null, headRefOid: 'o1' }),
+      'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
+      'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],
+    });
+    const [one] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, detail.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(one).toMatchObject({ merge: null, ciError: 'Server Error (HTTP 502)', error: null });
+    const list = recordedGh({ ...soloRoutes(), 'repos/acme/mono': failing });
+    const [all] = (await buildProjectPrs(solo, {}, list.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(all).toMatchObject({ merge: null, ciError: 'Server Error (HTTP 502)', error: null });
+    expect(all.pullRequests.length).toBe(3);
   });
 
   it('reads the REST rollup with GitHub\'s precedence, and tells a finished rollup from a passing one', () => {
@@ -407,34 +444,158 @@ describe('CI at a glance and recently merged PRs', () => {
 describe('mergeProjectPr', () => {
   it('pins the merge to the reviewed SHA with the first method the repo allows', async () => {
     const { gh, asked } = recordedGh({
-      'repos/acme/mono': JSON.stringify({ rebase: false, squash: true, merge: true }),
+      'repos/acme/mono': MERGE['repo-nonadmin'],
+      'repos/acme/mono/pulls/7': 'clean\n',
       'PUT repos/acme/mono/pulls/7/merge': 'm1\n',
     });
     const calls: string[][] = [];
-    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, async (args) => { calls.push(args); return gh(args); });
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, {}, async (args) => { calls.push(args); return gh(args); });
     expect(result).toEqual({ repo: 'acme/mono', number: 7, method: 'squash', merged: true, sha: 'm1', message: 'Merged' });
     expect(asked).toContain('PUT repos/acme/mono/pulls/7/merge');
     expect(calls.at(-1)).toEqual(expect.arrayContaining(['sha=abc1234', 'merge_method=squash']));
   });
 
-  it('reports GitHub\'s refusal as not merged with GitHub\'s own line', async () => {
-    const refusal = Object.assign(new Error('Command failed: gh api'), {
-      stderr: 'gh: Head branch was modified. Review and try the merge again. (HTTP 409)\nsee: https://docs.github.com\n',
-    });
-    const { gh } = recordedGh({ 'PUT repos/acme/mono/pulls/7/merge': refusal });
-    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', gh);
+  it('reports a moved head (409) as not merged, in words', async () => {
+    const refusal = ghError('gh: Head branch was modified. Review and try the merge again. (HTTP 409)\nsee: https://docs.github.com\n');
+    const { gh } = recordedGh({ 'repos/acme/mono/pulls/7': 'unstable\n', 'PUT repos/acme/mono/pulls/7/merge': refusal });
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
     expect(result.merged).toBe(false);
-    expect(result.message).toBe('Head branch was modified. Review and try the merge again. (HTTP 409)');
+    expect(result.message).toBe('The head moved since you looked; reload the PR and try again (HTTP 409)');
+  });
+
+  it('refuses a blocked PR without --admin before any write', async () => {
+    const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': 'blocked\n' });
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
+    expect(result).toEqual({ repo: 'acme/mono', number: 7, method: 'rebase', merged: false, sha: null, message: BLOCKED_WITHOUT_ADMIN });
+    expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+  });
+
+  it('fails closed on a state GitHub has not computed yet, or a branch behind its base', async () => {
+    for (const [state, message] of [
+      ['', 'GitHub is still computing mergeability; try again in a moment'],
+      ['unknown', 'GitHub is still computing mergeability; try again in a moment'],
+      ['behind', 'The branch is behind its base; update it, or pass --admin to merge as an admin'],
+      ['dirty', 'Has merge conflicts'],
+    ] as const) {
+      const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': `${state}\n` });
+      const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
+      expect(result).toMatchObject({ merged: false, message });
+      expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+    }
+  });
+
+  it('--admin puts the pinned merge without reading mergeable_state', async () => {
+    const calls: string[][] = [];
+    const { gh, asked } = recordedGh({ 'PUT repos/acme/mono/pulls/7/merge': 'm2\n' });
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', { admin: true }, async (args) => { calls.push(args); return gh(args); });
+    expect(result).toEqual({ repo: 'acme/mono', number: 7, method: 'rebase', merged: true, sha: 'm2', message: 'Merged' });
+    expect(asked).toEqual(['PUT repos/acme/mono/pulls/7/merge']);
+    expect(calls[0]).toEqual(expect.arrayContaining(['sha=abc1234', 'merge_method=rebase']));
+  });
+
+  it('--admin that GitHub still refuses names the required check that has not passed', async () => {
+    const { gh } = recordedGh({ 'PUT repos/acme/mono/pulls/7/merge': ghError(MERGE['refusal-405-stderr']) });
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', { admin: true }, gh);
+    expect(result).toMatchObject({ merged: false, message: "Required check test hasn't passed (HTTP 405)" });
+  });
+
+  it('turns GitHub\'s refusals into readable reasons and leaves others verbatim', () => {
+    expect(readableMergeRefusal('Required status checks test, gitleaks are expected. (HTTP 405)'))
+      .toBe("Required checks test, gitleaks haven't passed (HTTP 405)");
+    expect(readableMergeRefusal('At least 1 approving review is required by reviewers with write access. (HTTP 405)'))
+      .toBe('At least 1 approving review is required by reviewers with write access. (HTTP 405)');
   });
 
   it('a repository read that fails is a refusal, not a crash', async () => {
     const { gh } = recordedGh({ 'repos/acme/mono': Object.assign(new Error('x'), { stderr: 'gh: Not Found (HTTP 404)\n' }) });
-    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, gh);
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, {}, gh);
     expect(result).toMatchObject({ merged: false, message: 'Not Found (HTTP 404)' });
   });
 });
 
 const HEAD = 'abc1234def5678abc1234def5678abc1234def56';
+const livePr = (sha: string, author: string) => `${JSON.stringify({ sha, author })}\n`;
+const viewer = (login: string | null) => async () => login;
+
+describe('readRepoMergeAbility', () => {
+  it('an admin on a branch that enforces protection on admins has no bypass', async () => {
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono': MERGE['repo-protected'],
+      'repos/acme/mono/branches/main/protection': MERGE['protection-enforced'],
+    });
+    expect(await readRepoMergeAbility('acme/mono', gh)).toEqual({
+      viewerIsAdmin: true, adminBypass: false, autoMergeAllowed: true, methods: ['rebase', 'squash', 'merge'],
+    });
+    expect(asked).toEqual(['repos/acme/mono', 'repos/acme/mono/branches/main/protection']);
+  });
+
+  it('an admin bypasses when enforce_admins is off, and when the branch is unprotected (404)', async () => {
+    const off = recordedGh({ 'repos/acme/mono': MERGE['repo-protected'], 'repos/acme/mono/branches/main/protection': MERGE['protection-not-enforced'] });
+    expect((await readRepoMergeAbility('acme/mono', off.gh)).adminBypass).toBe(true);
+    const none = recordedGh({ 'repos/acme/mono': MERGE['repo-protected'], 'repos/acme/mono/branches/main/protection': ghError(MERGE['protection-404-stderr']) });
+    expect((await readRepoMergeAbility('acme/mono', none.gh)).adminBypass).toBe(true);
+  });
+
+  it('a protection read that fails for another reason fails the read instead of guessing', async () => {
+    const { gh } = recordedGh({ 'repos/acme/mono': MERGE['repo-protected'], 'repos/acme/mono/branches/main/protection': ghError('gh: Server Error (HTTP 502)\n') });
+    await expect(readRepoMergeAbility('acme/mono', gh)).rejects.toMatchObject({ stderr: 'gh: Server Error (HTTP 502)\n' });
+  });
+
+  it('a non-admin never reads protection', async () => {
+    const { gh, asked } = recordedGh({ 'repos/acme/mono': MERGE['repo-nonadmin'] });
+    expect(await readRepoMergeAbility('acme/mono', gh)).toEqual({
+      viewerIsAdmin: false, adminBypass: false, autoMergeAllowed: false, methods: ['squash', 'merge'],
+    });
+    expect(asked).toEqual(['repos/acme/mono']);
+  });
+});
+
+describe('setProjectPrAutoMerge', () => {
+  const pr = (over: Record<string, unknown> = {}) => `${JSON.stringify({ sha: HEAD, nodeId: 'PR_kw7', state: 'open', merged: false, autoMethod: null, ...over })}\n`;
+
+  it('turns it on with one mutation pinned to the full live head and the repo\'s first method', async () => {
+    const calls: string[][] = [];
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono/pulls/7': pr(),
+      'repos/acme/mono': MERGE['repo-protected'],
+      graphql: 'REBASE\n',
+    });
+    const result = await setProjectPrAutoMerge('acme/mono', 7, { enable: true, sha: 'abc1234' }, async (args) => { calls.push(args); return gh(args); });
+    expect(result).toMatchObject({ repo: 'acme/mono', number: 7, enabled: true, method: 'rebase' });
+    expect(asked).toEqual(['repos/acme/mono/pulls/7', 'repos/acme/mono', 'graphql']);
+    const mutation = calls.at(-1)!;
+    expect(mutation.join(' ')).toContain('enablePullRequestAutoMerge');
+    expect(mutation).toEqual(expect.arrayContaining(['id=PR_kw7', 'method=REBASE', `head=${HEAD}`]));
+  });
+
+  it('refuses a moved head before the mutation', async () => {
+    const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': pr({ sha: `fff0000${HEAD.slice(7)}` }) });
+    const result = await setProjectPrAutoMerge('acme/mono', 7, { enable: true, sha: 'abc1234', method: 'squash' }, gh);
+    expect(result).toMatchObject({ enabled: false, method: null });
+    expect(result.message).toContain('moved to fff0000');
+    expect(asked).not.toContain('graphql');
+  });
+
+  it('turns it off with one mutation, and answers "not on" without a write', async () => {
+    const calls: string[][] = [];
+    const on = recordedGh({ 'repos/acme/mono/pulls/7': pr({ autoMethod: 'rebase' }), graphql: 'null\n' });
+    const result = await setProjectPrAutoMerge('acme/mono', 7, { enable: false }, async (args) => { calls.push(args); return on.gh(args); });
+    expect(result).toEqual({ repo: 'acme/mono', number: 7, enabled: false, method: null, message: 'Auto-merge turned off' });
+    expect(calls.at(-1)!.join(' ')).toContain('disablePullRequestAutoMerge');
+    const off = recordedGh({ 'repos/acme/mono/pulls/7': pr() });
+    expect(await setProjectPrAutoMerge('acme/mono', 7, { enable: false }, off.gh)).toMatchObject({ enabled: false, message: 'Auto-merge was not on' });
+    expect(off.asked).toEqual(['repos/acme/mono/pulls/7']);
+  });
+
+  it('reports GitHub\'s refusal and the unchanged state', async () => {
+    const { gh } = recordedGh({
+      'repos/acme/mono/pulls/7': pr(),
+      graphql: ghError('gh: Pull request is in clean status\n'),
+    });
+    const result = await setProjectPrAutoMerge('acme/mono', 7, { enable: true, sha: HEAD, method: 'rebase' }, gh);
+    expect(result).toEqual({ repo: 'acme/mono', number: 7, enabled: false, method: null, message: 'Pull request is in clean status' });
+  });
+});
 
 describe('markProjectPrReady', () => {
   it('marks a draft ready with one mutation on the node id the REST read returned', async () => {
@@ -482,11 +643,11 @@ describe('markProjectPrReady', () => {
 describe('approveProjectPr', () => {
   it('records the approval against the full live SHA the short --sha names', async () => {
     const { gh, asked } = recordedGh({
-      'repos/acme/mono/pulls/7': `${HEAD}\n`,
+      'repos/acme/mono/pulls/7': livePr(HEAD, 'someone-else'),
       'POST repos/acme/mono/pulls/7/reviews': JSON.stringify({ id: 99, url: 'https://github.com/acme/mono/pull/7#pullrequestreview-99' }),
     });
     const calls: string[][] = [];
-    const result = await approveProjectPr('acme/mono', 7, 'ABC1234', 'Checked it', async (args) => { calls.push(args); return gh(args); });
+    const result = await approveProjectPr('acme/mono', 7, 'ABC1234', 'Checked it', async (args) => { calls.push(args); return gh(args); }, viewer('octocat'));
     expect(result).toEqual({
       repo: 'acme/mono', number: 7, event: 'APPROVE', submitted: true, sha: HEAD, id: 99,
       url: 'https://github.com/acme/mono/pull/7#pullrequestreview-99', message: 'Approved',
@@ -496,21 +657,27 @@ describe('approveProjectPr', () => {
   });
 
   it('refuses a moved head without posting a review', async () => {
-    const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': `fff0000${HEAD.slice(7)}\n` });
-    const result = await approveProjectPr('acme/mono', 7, 'abc1234', undefined, gh);
+    const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': livePr(`fff0000${HEAD.slice(7)}`, 'someone-else') });
+    const result = await approveProjectPr('acme/mono', 7, 'abc1234', undefined, gh, viewer('octocat'));
     expect(result).toMatchObject({ submitted: false, sha: null, id: null });
     expect(asked.some((e) => e.startsWith('POST'))).toBe(false);
   });
 
-  it('reports GitHub\'s refusal to approve your own PR', async () => {
-    const own = Object.assign(new Error('Command failed: gh api'), {
-      stderr: 'gh: Unprocessable Entity (HTTP 422)\n',
+  it('answers your own PR without posting, whatever the head', async () => {
+    const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': livePr(HEAD, 'OctoCat') });
+    const result = await approveProjectPr('acme/mono', 7, 'fff0000', undefined, gh, viewer('octocat'));
+    expect(result).toEqual({
+      repo: 'acme/mono', number: 7, event: 'APPROVE', submitted: false, sha: HEAD, id: null, url: null, message: OWN_PR_APPROVAL,
     });
+    expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+  });
+
+  it('still reports GitHub\'s own refusal when the viewer is unknown', async () => {
     const { gh } = recordedGh({
-      'repos/acme/mono/pulls/7': `${HEAD}\n`,
-      'POST repos/acme/mono/pulls/7/reviews': own,
+      'repos/acme/mono/pulls/7': livePr(HEAD, 'octocat'),
+      'POST repos/acme/mono/pulls/7/reviews': ghError('gh: Unprocessable Entity (HTTP 422)\n'),
     });
-    const result = await approveProjectPr('acme/mono', 7, HEAD, undefined, gh);
+    const result = await approveProjectPr('acme/mono', 7, HEAD, undefined, gh, viewer(null));
     expect(result).toMatchObject({ submitted: false, sha: HEAD, message: 'Unprocessable Entity (HTTP 422)' });
   });
 });

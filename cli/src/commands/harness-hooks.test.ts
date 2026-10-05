@@ -3,7 +3,6 @@ import { buildModelChoices, chooseModelFromCatalog, pickModel } from './harness-
 import type { ModelInfo } from '../lib/models.js';
 import type { WizardIO, WizardChoice } from './harness-wizard.js';
 
-/** Minimal scripted {@link WizardIO} — answers a select/input by a matcher. */
 function fakeIO(respond: (kind: string, message: string, choices?: WizardChoice<unknown>[]) => unknown): WizardIO {
   return {
     async select<T>(o: { message: string; choices: WizardChoice<T>[] }): Promise<T> {
@@ -29,8 +28,6 @@ describe('buildModelChoices — catalog list → select choices', () => {
     const values = choices.map((c) => c.value);
     expect(values).toContain('a');
     expect(values).toContain('b');
-    // The last row is always the free-text escape, so a model the catalog omits
-    // is still reachable.
     expect(choices[choices.length - 1].name).toMatch(/custom model id/i);
   });
 

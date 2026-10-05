@@ -371,8 +371,6 @@ describeUnix('release-attestation.sh', () => {
       return { tree: git(root, 'rev-parse', 'HEAD^{tree}'), commit: git(root, 'rev-parse', 'HEAD') };
     }
 
-    // A base attestation whose lock/policy are the REAL values for the base tree,
-    // so require() (which recomputes them) round-trips against a derived record.
     function baseAttestation(root: string, tree: string, store: string): string {
       const id = JSON.parse(sh(['identity', '--repo-root', root], root).out);
       const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.0.tgz', 'base-pretested');
@@ -414,7 +412,6 @@ describeUnix('release-attestation.sh', () => {
       expect(rec.tarball.filename).toBe('phnx-labs-agents-cli-1.0.1.tgz');
       expect(rec.tarball.digest).toBe(tgz.digest);
       expect(rec.derivedFrom.baseTree).toBe(baseTree);
-      // lock/policy are inherited from base (== the release tree's own values)
       const baseRec = JSON.parse(fs.readFileSync(base, 'utf-8'));
       expect(rec.lockfileDigest).toBe(baseRec.lockfileDigest);
       expect(rec.policyVersion).toBe(baseRec.policyVersion);

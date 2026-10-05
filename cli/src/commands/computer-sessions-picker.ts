@@ -18,13 +18,9 @@ import { sessionHeadline } from '../lib/session/title.js';
 
 interface ComputerSessionsCommandOpts {
   machine?: string;
-  /** Row cap for the flat table only — the interactive picker is searchable
-   *  and shows every row regardless (see `runComputerSessions`). */
   limit?: number;
   json?: boolean;
-  /** Commander's `--no-interactive` convention: `false` opts out. */
   interactive?: boolean;
-  /** Pre-collected fleet rows. Omitted for the local ledger path. */
   rows?: ComputerRunRow[];
 }
 
@@ -40,8 +36,6 @@ function rowLinkSummary(row: ComputerRunRow): string {
 }
 
 function formatRowLabel(row: ComputerRunRow): string {
-  // Pad the raw text first, THEN colorize — padEnd on an already-chalked
-  // string counts the ANSI escape bytes as width and misaligns the column.
   const rawName = row.task ?? row.bundle ?? (row.pid ? `pid ${row.pid}` : 'recovered run');
   const name = rawName.slice(0, 40).padEnd(40);
   const coloredName = row.task ? name : chalk.gray(name);
@@ -87,8 +81,6 @@ function formatActionLabel(a: ComputerAction): string {
   return `${age.padEnd(11)}  ${a.verb.padEnd(14)}  ${target}`;
 }
 
-/** Print one run's full action list (no truncation) — the `enter` action,
- *  since a computer run has no on-disk artifact to open. */
 function printRunDetail(row: ComputerRunRow): void {
   console.log('');
   console.log(chalk.bold(row.task ?? row.bundle ?? `pid ${row.pid}`));
@@ -115,8 +107,6 @@ const computerSessionsPicker = createSessionsPickerCommand<ComputerRunRow, Compu
   onOpen: printRunDetail,
 });
 
-/** True when the interactive picker should open instead of the printed table:
- *  a real TTY, no `--json`, and `--no-interactive` not set. */
 export function shouldOpenInteractiveComputerSessions(opts: ComputerSessionsCommandOpts, isTTY: boolean): boolean {
   return computerSessionsPicker.shouldOpen(opts, isTTY);
 }

@@ -19,7 +19,7 @@ function makeTempDir(): string {
 
 afterEach(() => {
   for (const dir of tempDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
   tempDirs.length = 0;
   _resetForTest();

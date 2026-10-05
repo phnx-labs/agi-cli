@@ -13,9 +13,6 @@ const LOCAL_THRESHOLD_MS = Number(process.env.BENCH_LOCAL_THRESHOLD_MS ?? 500);
 const REMOTE_TEAMMATES = Number(process.env.BENCH_REMOTE_TEAMMATES ?? 30);
 const FAN_OUT_PEERS = Number(process.env.BENCH_FAN_OUT_PEERS ?? 8);
 const PEER_LATENCY_MS = Number(process.env.BENCH_PEER_LATENCY_MS ?? 60);
-// A regression that serializes the fan-out (N sequential round-trips instead
-// of one parallel one) blows well past this multiple of a single round-trip;
-// a healthy parallel fan-out stays close to 1x plus process-spawn overhead.
 const PARALLELISM_FACTOR = Number(process.env.BENCH_PARALLELISM_FACTOR ?? 3);
 
 const SHIM_ENV = 'BENCH_SESSIONS_SHIM_DIR';
@@ -88,9 +85,6 @@ async function time<T>(fn: () => Promise<T>): Promise<{ ms: number; value: T }> 
   return { ms, value };
 }
 
-// ---------------------------------------------------------------------------
-// Part A: `agents sessions --active --local` — RUSH-2118 guard
-// ---------------------------------------------------------------------------
 
 async function benchLocalGuard(binDir: string): Promise<{
   teammates: number;
@@ -140,12 +134,8 @@ async function benchLocalGuard(binDir: string): Promise<{
   }
   resetSentinel(binDir);
 
-  // The real case: N synthetic remote-host teammates, --local (localOnly=true).
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bench-teams-'));
   for (let i = 0; i < REMOTE_TEAMMATES; i++) {
-    // Half still RUNNING, half already terminal — RUSH-2118 covers both: a
-    // --local query must never dial either, and a terminal teammate must
-    // never be re-dialed by ANY --active query (see agents.remote-poll.test.ts).
     const status = i % 2 === 0 ? AgentStatus.RUNNING : AgentStatus.COMPLETED;
     await addTeammate(base, `bench-remote-${i}`, status);
   }
@@ -175,9 +165,6 @@ async function benchLocalGuard(binDir: string): Promise<{
   };
 }
 
-// ---------------------------------------------------------------------------
-// Part B: `agents sessions --host <peer>` — distributed fan-out
-// ---------------------------------------------------------------------------
 
 function cannedPeerPayload(): string {
   const sessions = [

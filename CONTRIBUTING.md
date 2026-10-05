@@ -32,7 +32,7 @@ Commands live in `cli/src/commands/`, business logic in `cli/src/lib/`. Tests ar
 
 - **TypeScript only** -- strict mode enabled, no `any` where avoidable.
 - **Bun** as the package manager and test runner.
-- **JSDoc on all exports** -- every exported function, type, and interface has a JSDoc comment.
+- **Comments are exceptional** -- keep directives, non-obvious invariants, security boundaries, and public API details that names and types cannot express. Delete narration and restatements.
 - **No emojis** in code, comments, or UI strings.
 - **One test file per source file** -- `foo.ts` tests go in `__tests__/foo.test.ts`.
 - **Real services in tests** -- no mocking. Tests hit actual code paths.
@@ -48,7 +48,7 @@ Commands live in `cli/src/commands/`, business logic in `cli/src/lib/`. Tests ar
 
 3. **Add tests for non-trivial logic.** Edge cases in parsing, state management, and resource syncing are the most valuable tests.
 
-4. **Document new exports.** Every new public function or type needs a JSDoc comment.
+4. **Make exports self-explanatory.** Add API documentation only when the name and type do not carry the contract.
 
 ## Adding a new agent
 

@@ -56,7 +56,6 @@ import { getPluginsDir } from '../lib/state.js';
 import { safeJoin } from '../lib/paths.js';
 import { discoverMarketplaces } from '../lib/plugins/plugin-marketplace.js';
 
-/** Replace the home directory prefix with ~ for display. */
 function formatPath(p: string): string {
   const home = homeDir();
   if (home && p.startsWith(home)) {
@@ -69,7 +68,6 @@ export function shouldRefusePluginInstall(capabilities: PluginCapabilities, allo
   return hasPluginExecSurfaces(capabilities) && !allowExecSurfaces;
 }
 
-/** Register the `agents plugins` command tree. */
 export function registerPluginsCommands(program: Command): void {
   const pluginsCmd = program
     .command('plugins')
@@ -96,13 +94,10 @@ When to use:
   - Team onboarding: distribute a full toolkit via a single plugin directory
 `);
 
-  // Shared list implementation — reused by `list` and the bare `agents plugins` default.
   const runList = async (options: { json?: boolean } = {}) => {
     const plugins = discoverPlugins();
 
     if (options.json) {
-      // Structured dump (name/description + per-agent-version sync targets) — the
-      // same rows the table is built from, mirroring `plugins marketplaces --json`.
       console.log(JSON.stringify(plugins.length === 0 ? [] : buildPluginRows(plugins), null, 2));
       return;
     }
@@ -124,19 +119,14 @@ When to use:
     });
   };
 
-  // Bare `agents plugins` → same as `list`. (--json lives on the explicit `list`
-  // subcommand only; declaring it on both parent + child makes commander bind the
-  // flag to the parent for `plugins list --json`, dropping it from the subcommand.)
   pluginsCmd.action(runList);
 
-  // agents plugins list
   withAliases(pluginsCmd
     .command('list'), 'list')
     .description('Show plugins in a table with sync status across agent versions')
     .option('--json', 'Emit machine-readable JSON')
     .action(runList);
 
-  // agents plugins marketplaces
   const marketplacesCmd = pluginsCmd
     .command('marketplaces')
     .description('List plugin marketplaces — one per DotAgents repo with a plugins/ directory')
@@ -170,7 +160,6 @@ When to use:
       console.log(chalk.gray(`${rows.length} marketplace(s) — manage via 'agents repo'.`));
     });
 
-  // Redirect add/remove/etc. on marketplaces to repo commands.
   const marketplaceRedirect = (verb: string) => () => {
     console.log(
       chalk.gray(`Use 'agents repo ${verb === 'add' ? 'add' : verb} <path|gh:user/repo>' to ${verb} a marketplace (one repo = one marketplace).`)
@@ -183,7 +172,6 @@ When to use:
       .action(marketplaceRedirect(verb));
   }
 
-  // agents plugins view [name]
   withAliases(pluginsCmd
     .command('view [name]'), 'view')
     .alias('info')
@@ -199,7 +187,6 @@ Examples:
     .action(async (nameArg?: string) => {
       let name = nameArg;
 
-      // No name → pick one from the installed plugins.
       if (!name) {
         const discovered = discoverPlugins();
         if (discovered.length === 0) {
@@ -325,7 +312,6 @@ Examples:
         console.log(`    ${chalk.gray('settings.json')}`);
       }
 
-      // Show installation status per agent version
       console.log(chalk.bold('\n  Installation Status'));
       let anyInstalled = false;
       for (const agentId of capableAgents('plugins')) {
@@ -352,7 +338,6 @@ Examples:
     });
 
 
-  // agents plugins remove [name]
   withAliases(pluginsCmd
     .command('remove [name]'), 'remove')
     .description('Unsync a plugin from all agent versions and optionally delete its source directory')
@@ -379,7 +364,6 @@ Examples:
       const pluginsDir = path.join(homeDir(), '.agents', 'plugins');
       const pluginRoot = safeJoin(pluginsDir, name);
 
-      // Use discovered plugin when present; fall back to name+root if source is already gone
       const plugin = getPlugin(name);
       const resolvedRoot = plugin?.root || pluginRoot;
 
@@ -388,7 +372,6 @@ Examples:
         process.exit(1);
       }
 
-      // Build list of targets that have this plugin synced
       const availableTargets: Array<{ agent: AgentId; version: string }> = [];
       for (const agentId of capableAgents('plugins')) {
         if (plugin && !pluginSupportsAgent(plugin, agentId)) continue;
@@ -410,7 +393,6 @@ Examples:
         return;
       }
 
-      // Show multi-select picker for targets
       const removalTargets: RemovalTarget[] = availableTargets.map((t) => ({
         agent: t.agent,
         version: t.version,
@@ -473,7 +455,6 @@ Examples:
         )
       );
 
-      // Only delete source if ALL targets were selected
       if (!options.keepSource && selectedTargets.length === availableTargets.length) {
         if (fs.existsSync(pluginRoot)) {
           fs.rmSync(pluginRoot, { recursive: true, force: true });
@@ -486,7 +467,6 @@ Examples:
       }
     });
 
-  // agents plugins add <spec>
   pluginsCmd
     .command('add <spec>')
     .alias('install')
@@ -540,14 +520,12 @@ Examples:
         process.exit(1);
       }
 
-      // Check dependencies
       const missingDeps = checkPluginDependencies(plugin.manifest);
       if (missingDeps.length > 0) {
         console.log(chalk.yellow(`Warning: missing dependencies: ${missingDeps.join(', ')}`));
         console.log(chalk.gray('Install them with: agents plugins add <name>@<source>'));
       }
 
-      // Prompt for userConfig fields
       if (plugin.manifest.userConfig && plugin.manifest.userConfig.length > 0 && isInteractiveTerminal()) {
         const existingConfig = loadUserConfig(name);
         const newConfig = await promptUserConfig(plugin.manifest, existingConfig);
@@ -557,7 +535,6 @@ Examples:
         }
       }
 
-      // Sync to all supported installed versions
       console.log();
       let synced = 0;
       for (const agentId of capableAgents('plugins')) {
@@ -586,7 +563,6 @@ Examples:
       console.log(chalk.bold(`\nInstalled ${plugin.name} v${plugin.manifest.version} to ${formatPath(root)}`));
     });
 
-  // agents plugins update [name]
   pluginsCmd
     .command('update [name]')
     .description('Re-pull a plugin from its original source and re-sync to all versions')
@@ -622,8 +598,6 @@ Examples:
         const result = await updatePlugin(plugin.name, { allowExecSurfaces: allowExec });
         if (!result.success) {
           if (result.blockedByExecSurfaces) {
-            // Security (RUSH-1757): the update introduced new executable surfaces.
-            // Refuse without renewed consent; the last-good content stays in place.
             console.log(chalk.yellow('skipped'));
             console.log(chalk.yellow(`  Update introduces new executable surfaces: ${(result.newExecSurfaces || []).join(', ')}`));
             console.log(chalk.gray('  Kept the currently-installed revision. Re-run with --allow-exec-surfaces if you trust the source.'));
@@ -634,7 +608,6 @@ Examples:
         }
         console.log(chalk.green('done'));
 
-        // Reload the plugin so the re-sync reads the freshly-applied revision.
         const updated = getPlugin(plugin.name) ?? plugin;
 
         // Re-sync to all supported installed versions. Executable surfaces are enabled only if the
@@ -712,7 +685,6 @@ export function collectMarketplaceRows(): MarketplaceRow[] {
   const marketplaces = discoverMarketplaces();
   const rows: MarketplaceRow[] = [];
 
-  // Find the default Claude version (if any) and read its enabledPlugins map.
   const claudeDefault = isCapable('claude', 'plugins') ? getGlobalDefault('claude') : null;
   let enabledMap: Record<string, boolean> = {};
   if (claudeDefault) {
@@ -724,7 +696,7 @@ export function collectMarketplaceRows(): MarketplaceRow[] {
           enabledPlugins?: Record<string, boolean>;
         };
         enabledMap = parsed.enabledPlugins ?? {};
-      } catch { /* ignore parse errors */ }
+      } catch {  }
     }
   }
 
@@ -737,7 +709,7 @@ export function collectMarketplaceRows(): MarketplaceRow[] {
         const manifestFile = path.join(root, '.claude-plugin', 'plugin.json');
         if (fs.existsSync(manifestFile)) pluginCount++;
       }
-    } catch { /* ignore unreadable dir */ }
+    } catch {  }
 
     const suffix = `@${m.name}`;
     const enabled = Object.entries(enabledMap)
@@ -750,11 +722,9 @@ export function collectMarketplaceRows(): MarketplaceRow[] {
   return rows;
 }
 
-/** Convert discovered plugins into rows suitable for the resource list view. */
 function buildPluginRows(plugins: DiscoveredPlugin[]): ResourceRow[] {
   const rows: ResourceRow[] = [];
 
-  // Cache version lists per agent once.
   const versionsByAgent = new Map<AgentId, string[]>();
   const defaultsByAgent = new Map<AgentId, string | null>();
   for (const agent of capableAgents('plugins')) {
@@ -799,7 +769,6 @@ function buildPluginRows(plugins: DiscoveredPlugin[]): ResourceRow[] {
   return rows;
 }
 
-/** Per-category color for a plugin resource breakdown (shared with `agents inspect`). */
 export const PLUGIN_GROUP_COLORS: Record<string, (s: string) => string> = {
   skills: chalk.cyan,
   commands: chalk.cyan,
@@ -813,7 +782,6 @@ export const PLUGIN_GROUP_COLORS: Record<string, (s: string) => string> = {
   settings: chalk.gray,
 };
 
-/** Human-readable section header per category, used by the picker detail pane. */
 const PLUGIN_GROUP_TITLES: Record<string, string> = {
   skills: 'Skills',
   commands: 'Commands',
@@ -827,7 +795,6 @@ const PLUGIN_GROUP_TITLES: Record<string, string> = {
   settings: 'Settings',
 };
 
-/** Build the multi-line detail pane shown when a plugin is selected in the picker. */
 function formatPluginDetail(plugin: DiscoveredPlugin, targets: SyncTarget[]): string {
   const lines: string[] = [];
 

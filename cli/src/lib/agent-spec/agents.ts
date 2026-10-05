@@ -22,7 +22,6 @@ import { supports } from '../capabilities.js';
 import { MCP_TARGETS } from '../mcp-registry.js';
 import { VERSION_RE } from './primitives.js';
 
-/** Represents the installation state of an agent's CLI binary. */
 export interface CliState {
   installed: boolean;
   version: string | null;
@@ -52,7 +51,6 @@ function loadCliVersionCache(): Record<string, CliVersionCacheEntry> {
   try {
     cliVersionCache = JSON.parse(fs.readFileSync(CLI_VERSION_CACHE_PATH, 'utf-8'));
   } catch {
-    /* missing or corrupt cache, rebuild */
     cliVersionCache = {};
   }
   return cliVersionCache!;
@@ -65,7 +63,6 @@ function saveCliVersionCache(): void {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CLI_VERSION_CACHE_PATH, JSON.stringify(cliVersionCache));
   } catch {
-    /* best-effort cache persist */
   }
 }
 
@@ -105,11 +102,11 @@ export function resolveNativeBinaryPath(
   try {
     canonicalShimsDir = fs.realpathSync(shimsDir);
   } catch {
-    /* An absent shims dir cannot make an existing native binary invalid. */
   }
 
   if (!pathIsWithin(canonicalCandidate, canonicalShimsDir)) return canonicalCandidate;
 
+  // A shim resolves only to its recorded original; never recurse into the shim tree.
   const recordPath = path.join(historyDir, 'adopted-launchers', command);
   try {
     const [original] = fs.readFileSync(recordPath, 'utf-8').split(/\r?\n/, 1);
@@ -144,7 +141,6 @@ export function findInPath(command: string, options: NativeBinaryResolutionOptio
         const native = resolveNativeBinaryPath(command, full, options);
         if (native && (!options.accept || options.accept(native))) return native;
       } catch {
-        /* not in this dir */
       }
     }
   }
@@ -264,20 +260,14 @@ interface AgentRegistryConfig extends AgentConfig {
   /** Session-transcript directory as path segments under a HOME root, or null when the harness has
    * no local session tree `agents` can walk. */
   sessionDir: string[] | null;
-  /** File extension of session transcripts, or null when unknown. */
   sessionFileExt: '.jsonl' | '.json' | null;
-  /** How to parse `cli --version` stdout. */
   versionStdoutMatch: VersionStdoutMatch;
-  /** How to find an unmanaged (non-version-home) binary. */
   unmanagedBinary: UnmanagedBinaryResolver;
   /** How `registerMcp`/`unregisterMcp` talk to the harness: `config` writes the file directly (no
    * `mcp add` CLI); `cli` shells out. */
   mcpRegister: McpRegisterPath;
-  /** Argv shape for `mcp add` over HTTP. */
   mcpAddHttp: McpAddHttpStyle;
-  /** Argv shape for `mcp add` over stdio. */
   mcpAddStdio: McpAddStdioStyle;
-  /** On-disk map key + serialization when writing MCP config directly. */
   mcpConfigWrite: McpConfigWriteStyle;
 }
 
@@ -310,6 +300,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
     nativePluginSkills: true,
+    // Harness-owned skill directories survive orphan cleanup.
     ownedSkillDirs: ['synced'],
     // Claude Code has a native `claude --cloud` (Anthropic-managed, needs claude.ai auth), but
     // routing stays on Rush Cloud deliberately, keeping cloud tasks in one tracked fleet (agents
@@ -317,7 +308,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     cloudProvider: 'rush',
     capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true, interactiveRepl: true },
   },
-  // codex hooks: gated to >= 0.116.0 (introduced [features] codex_hooks flag).
   codex: {
     id: 'codex',
     name: 'Codex',
@@ -343,8 +333,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
     cloudProvider: 'codex',
-    // Subagents: multi-agent plumbing since 0.117.0; custom agents as
-    // ~/.codex/agents/*.toml (name, description, developer_instructions).
     capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: { since: '0.138.0' }, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], interactiveRepl: true },
   },
   cursor: {
@@ -367,8 +355,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     commandsDir: path.join(HOME, '.cursor', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.cursor', 'skills'),
-    // Hooks: ~/.cursor/hooks.json (`{ "version": 1, "hooks": { event: [{ command }] } }`).
-    // CLI hooks since 2026-01-16. See registerHooksForCursor — only CLI-fired events.
     hooksDir: 'hooks',
     // Plugins: `.cursor-plugin/plugin.json` (re-enabled in CLI 2026-05). Mirror the Claude
     // marketplace layout into ~/.cursor/plugins/ and copy the manifest into pluginManifestDir
@@ -426,13 +412,14 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     cliCommand: 'openclaw',
     npmPackage: 'openclaw',
     configDir: path.join(HOME, '.openclaw'),
-    commandsDir: '', // OpenClaw uses Gateway-based slash commands, not file-based
+    commandsDir: '',
     commandsSubdir: '',
     skillsDir: path.join(HOME, '.openclaw', 'skills'),
-    nativeCommandRuntime: true, // Gateway resolves slash commands — don't convert commands to skills
+    // Gateway owns commands; converting them to skills would create a second runtime.
+    nativeCommandRuntime: true,
 
     hooksDir: 'hooks',
-    instructionsFile: 'workspace/AGENTS.md', // Primary memory file (also has SOUL.md, IDENTITY.md, etc.)
+    instructionsFile: 'workspace/AGENTS.md',
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
     // hooks: NOT supported. OpenClaw has only fixed internal hooks (e.g. `boot-md`), no general
@@ -462,9 +449,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     commandsDir: path.join(HOME, '.copilot', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.copilot', 'skills'),
-    // Hooks: user-level `~/.copilot/hooks/*.json` (GA @github/copilot, every
-    // 1.x). Schema `{ "version": 1, "hooks": { event: [...] } }` with camelCase
-    // event names (sessionStart, preToolUse, …). See registerHooksForCopilot.
     hooksDir: 'hooks',
     // Copilot reads a plugin's manifest from the plugin root (plugin.json), not
     // `.claude-plugin/plugin.json`; mirror it there. Verified against GitHub Copilot CLI 1.0.56.
@@ -473,8 +457,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // interactiveRepl: false — copilot requires a prompt for meaningful work; bare invocation
-    // opens a welcome screen but not a persistent coding REPL suitable for agents focus.
     capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '0.0.353' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'], interactiveRepl: false },
   },
   amp: {
@@ -500,7 +482,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    // interactiveRepl: false — amp requires a prompt; bare invocation exits immediately.
     capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'], interactiveRepl: false },
   },
   goose: {
@@ -521,13 +502,8 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     configDir: path.join(HOME, '.config', 'goose'),
     commandsDir: path.join(HOME, '.config', 'goose', 'commands'),
     commandsSubdir: 'commands',
-    // Goose reads skills directly from central ~/.agents/skills/ via the Summon
-    // extension (block-goose-cli ≥ 1.25.0). No per-version copy is written.
     skillsDir: path.join(HOME, '.agents', 'skills'),
     nativeAgentsSkillsDir: true,
-    // Hooks: Open Plugins format — auto-discovered from
-    // ~/.agents/plugins/<name>/hooks/hooks.json (shipped block-goose-cli
-    // ≥ 1.34.0). See registerHooksForGoose.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
@@ -567,7 +543,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false, interactiveRepl: true }, // workflows: markdown files in the shared, HOME-global ~/.gemini/config/global_workflows/ (agy scans it at startup; not version-isolated — see workflows.ts), invoked as /<name> slash commands
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false, interactiveRepl: true },
   },
   // xAI Grok Build CLI (`grok`), early beta. Auth: OAuth or XAI_API_KEY. MCP inline under
   // [mcp_servers] in ~/.grok/config.toml; hooks auto-discovered from ~/.grok/hooks/; permissions
@@ -604,20 +580,16 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       mcp: true,
       mcpHttp: false,
       mcpHeaders: false,
-      allowlist: true, // maps to Grok's granular Bash/Edit/Write/Read/Grep/WebFetch/MCPTool rules
+      allowlist: true,
       skills: true,
-      commands: true, // Grok >= 0.2.111: file-based slash commands from ~/.agents/commands/ (docs) + ~/.claude/commands/ (Claude Code compat)
+      commands: true,
       plugins: true,
-      subagents: true, // ~/.grok/agents/*.md (Claude-compatible agent defs)
+      subagents: true,
       rules: { file: 'AGENTS.md' },
-      // Native workflows (`.rhai` under ~/.grok/workflows/) shipped on-by-default
-      // in v0.2.111 (2026-07-22). See transformWorkflowForGrok in workflows.ts.
       workflows: { since: '0.2.111' },
       memory: true,
       modes: ['plan', 'edit', 'skip'],
-      // grok's `--permission-mode plan` silently stalls a headless `-p` run at
-      // its ExitPlanMode gate (no TTY to approve). Headless plan auto-downgrades
-      // to auto (→ edit via resolveMode). Interactive plan is unaffected.
+      // Headless plan stalls at Grok's approval gate; interactive plan still works.
       headlessPlan: false,
       rulesImports: true,
       interactiveRepl: true,
@@ -668,9 +640,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       workflows: true,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
-      // kimi's headless `-p` refuses to combine with `--plan` (`Cannot combine
-      // --prompt with --plan`). Headless plan auto-downgrades to auto (kimi -p
-      // auto-runs). Interactive plan is unaffected.
+      // Kimi rejects combining its headless prompt and plan flags.
       headlessPlan: false,
       rulesImports: false,
       interactiveRepl: true,
@@ -705,8 +675,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Factory Droid Computers (cloud VMs) reached via `droid computer ssh` +
-    // remote headless `droid exec`.
     cloudProvider: 'factory',
     capabilities: {
       hooks: true,
@@ -719,7 +687,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       plugins: true,
       subagents: true,
       rules: { file: 'AGENTS.md' },
-      // Factory Missions are invoke-only — no installable discovery dir (RUSH-1864).
+      // Factory Missions are invoke-only; Droid exposes no installable workflow directory.
       workflows: false,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
@@ -727,9 +695,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       interactiveRepl: true,
     },
   },
-  // Nous Hermes Agent. Config lives under ~/.hermes/config.yaml; MCP servers
-  // are YAML `mcp_servers`, skills are local SKILL.md directories, and durable
-  // memory is file-backed.
   hermes: {
     id: 'hermes',
     name: 'Hermes',
@@ -758,9 +723,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     // name is in the `plugins.enabled` allowlist in config.yaml (`plugins.disabled` wins). Not the
     // Claude layout, so install is a flat copy plus a YAML allowlist toggle.
     capabilities: {
-      // Lifecycle hooks land in ~/.hermes/config.yaml under a `hooks:` block
-      // (YAML, shared with `mcp_servers`); gated to Hermes ≥ 0.11.0 which
-      // introduced the configurable hook runner.
+      // Hooks share config.yaml since 0.11.0; permissions persist command globs/deny only.
       hooks: { since: '0.11.0' },
       mcp: true,
       mcpHttp: true,
@@ -811,29 +774,21 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     // Muse hooks use the Claude-shaped settings.json hooks block (plus project `.muse/hooks.json`);
     // registerHooksForClaude is reused with Muse's config dir and schema_version: 1.
     supportsHooks: true,
-    // Claude-compatible marketplace layout + native `.muse-plugin/` manifest.
     pluginManifestDir: '.muse-plugin',
     capabilities: {
-      // Hooks: Claude-compatible event→matcher→command groups in settings.json.
       hooks: true,
       mcp: true,
       mcpHttp: true,
       mcpHeaders: true,
-      // Muse's safety model is approval-mode + OS sandbox (CLI flags), not a
-      // Claude-style tool-name allow/deny list. No settings.permissions writer.
+      // Safety has no tool-name writer; skills replace droppable commands/workflows.
       allowlist: false,
       skills: true,
-      // No slash-command file dir; skills double as reusable workflows.
       commands: false,
-      // Plugins: Claude marketplace + .muse-plugin (syncPluginToVersion).
       plugins: true,
-      // Runtime multi-agent / subagents exist, but there is no installable
-      // subagent-definition directory for agents-cli to sync into (capability
-      // table must stay truthful — see subagents-registry completeness).
+      // Runtime subagents are not an installable definition directory.
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
-      // Portable memory at <repo>/.agents/memory/ + personal scopes.
       memory: true,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
@@ -866,47 +821,29 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    // Warp has no event->shell-command hook registration surface (its startup
-    // flags are --api-key/--auto-approve/--resume/--set-provider-api-key/
-    // --clear-provider-api-key — no hooks).
+    // No general hooks or one-shot prompt; conversations and command surfaces are server-owned.
     supportsHooks: false,
     capabilities: {
       hooks: false,
-      // MCP: Warp reads the Claude `{ "mcpServers": {...} }` schema from
-      // `.warp/.mcp.json` (user `~/.warp/.mcp.json`, project `<root>/.warp/.mcp.json`),
-      // stdio + http with headers, same schema as Claude's .mcp.json.
       mcp: true,
       mcpHttp: true,
       mcpHeaders: true,
-      // Autonomy is a single toggle (`--auto-approve`), not a Claude-style
-      // tool-name allow/deny list agents-cli can write — so no allowlist writer
-      // (mirrors muse).
       allowlist: false,
-      // Skills searched in `.agents/skills/`, `.warp/skills/`, `.claude/skills/`,
-      // `.codex/skills/`.
       skills: true,
-      // Slash-commands are native/server-managed (no droppable markdown
-      // command-file directory for agents-cli to sync into).
       commands: false,
-      // No Claude marketplace / plugin manifest support.
       plugins: false,
-      // Cloud agents are server-side; no installable subagent-definition
-      // directory to sync into (keeps the table truthful).
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,
-      // No per-run permission flag beyond `--auto-approve`; the single `edit`
-      // mode maps to no flags (mirrors hermes).
       modes: ['edit'],
       rulesImports: false,
-      // Bare `warp` opens the interactive TUI (its only run form).
+      // Bare Warp opens its only run form; there is no local transcript to index.
       interactiveRepl: true,
     },
   },
 };
 
-/** All current and legacy agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
 /** Agents the routine daemon can fire locally. Lives here, not runner.ts, so routines.ts can
@@ -921,7 +858,6 @@ export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
   'muse',
 ]);
 
-/** Agents that can receive managed installs, imports, and resource sync writes. */
 export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
 /** A self-updating agent is a single global binary from an official `curl | sh`/`brew` script with
@@ -933,8 +869,7 @@ export function isSelfUpdatingAgent(agent: AgentId): boolean {
 }
 
 export function isAgentHardDeprecated(agent: AgentId): boolean {
-  // Tolerate ids outside the registry (legacy YAML, test fixtures): an unknown
-  // agent is not hard-deprecated — its own validation rejects it elsewhere.
+  // Legacy YAML may carry unknown ids; validation rejects them at the owning boundary.
   return AGENTS[agent]?.deprecated?.hard === true;
 }
 
@@ -942,27 +877,23 @@ export function isAgentHardDeprecated(agent: AgentId): boolean {
 // on `COMMANDS_CAPABLE_AGENTS`). Use `capableAgents(cap)` from `./capabilities.js`, which reads
 // the AgentConfig matrix directly.
 
-/** Get the chalk color function for an agent. Works for any AgentId or SessionAgentId. */
 export function colorAgent(agentId: string): (s: string) => string {
   const agent = AGENTS[agentId as AgentId];
   if (!agent) return chalk.white;
   return chalk[agent.color];
 }
 
-/** Return the agent's display name, colored. */
 export function agentLabel(agentId: string): string {
   const agent = AGENTS[agentId as AgentId];
   if (!agent) return agentId;
   return chalk[agent.color](agent.name);
 }
 
-/** Check whether the given agent's CLI binary is present on PATH. */
 export async function isCliInstalled(agentId: AgentId): Promise<boolean> {
   const agent = AGENTS[agentId];
   return findInPath(agent.cliCommand) !== null;
 }
 
-/** Return the installed CLI version for the given agent, or null if not found. */
 export async function getCliVersion(agentId: AgentId): Promise<string | null> {
   const agent = AGENTS[agentId];
   const binaryPath = findInPath(agent.cliCommand);
@@ -970,18 +901,15 @@ export async function getCliVersion(agentId: AgentId): Promise<string | null> {
   return getCachedVersionForBinary(agentId, binaryPath);
 }
 
-/** Return the absolute path to the agent's CLI binary on PATH, or null. */
 export async function getCliPath(agentId: AgentId): Promise<string | null> {
   return findInPath(AGENTS[agentId].cliCommand);
 }
 
-/** Look up version from cache by (binary, mtime). On miss or stale, spawn `--version` and cache. */
 async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): Promise<string | null> {
   let mtime = 0;
   try {
     mtime = fs.statSync(binaryPath).mtimeMs;
   } catch {
-    /* binary vanished between findInPath and statSync */
     return null;
   }
 
@@ -1004,7 +932,6 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
     const match = stdout.match(versionRe);
     version = match ? match[1] : stdout.trim();
   } catch {
-    /* version command failed */
     version = null;
   }
 
@@ -1021,11 +948,9 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
 /** Resolve the full CLI state for an agent: installed, version, and binary path. Checks
  * version-managed installs first, then a plain PATH lookup. */
 export async function getCliState(agentId: AgentId): Promise<CliState> {
-  // Fast path: if version-managed, derive state from filesystem (no subprocesses)
   const agent = AGENTS[agentId];
   const agentVersionsDir = path.join(getVersionsDir(), agentId);
   if (fs.existsSync(agentVersionsDir)) {
-    // Use resolved version (project manifest -> global default)
     const resolvedVer = resolveVersion(agentId, process.cwd());
     if (resolvedVer) {
       const binaryPath = path.join(agentVersionsDir, resolvedVer, 'node_modules', '.bin', agent.cliCommand);
@@ -1039,7 +964,6 @@ export async function getCliState(agentId: AgentId): Promise<CliState> {
       }
     }
 
-    // Fallback: if no default set or resolved version not installed, return first available
     const entries = fs.readdirSync(agentVersionsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
@@ -1063,9 +987,8 @@ export async function getCliState(agentId: AgentId): Promise<CliState> {
  * meaning the user's global CLI must use this, since `getCliState`'s managed fast path would
  * return an isolated copy labelled as the global install. */
 export async function getUnmanagedCliState(agentId: AgentId): Promise<CliState> {
+  // This path must never relabel an isolated managed version as the user's global install.
   const agent = AGENTS[agentId];
-  // Grok (and any future harness with unmanagedBinary: 'grok-downloads')
-  // keeps versioned binaries under ~/.grok/downloads/, not on PATH.
   if (agent.unmanagedBinary === 'grok-downloads') {
     const grokBin = resolveGrokBinary();
     if (!grokBin) {
@@ -1089,7 +1012,6 @@ export async function getUnmanagedCliState(agentId: AgentId): Promise<CliState> 
   };
 }
 
-/** Resolve CLI state for all registered agents in parallel. */
 export async function getAllCliStates(): Promise<Partial<Record<AgentId, CliState>>> {
   const states: Partial<Record<AgentId, CliState>> = {};
   const results = await Promise.all(
@@ -1104,7 +1026,6 @@ export async function getAllCliStates(): Promise<Partial<Record<AgentId, CliStat
   return states;
 }
 
-/** Info about an existing unmanaged agent installation. */
 interface UnmanagedInstall {
   agentId: AgentId;
   configDir: string;
@@ -1132,14 +1053,12 @@ export async function getUnmanagedAgentInstalls(): Promise<UnmanagedInstall[]> {
         unmanaged.push({ agentId, configDir: agent.configDir, version });
       }
     } catch {
-      // Config dir doesn't exist
     }
   }
 
   return unmanaged;
 }
 
-/** Create the agent's slash-commands directory if it does not exist. */
 export function ensureCommandsDir(agentId: AgentId): void {
   const agent = AGENTS[agentId];
   if (!fs.existsSync(agent.commandsDir)) {
@@ -1147,7 +1066,6 @@ export function ensureCommandsDir(agentId: AgentId): void {
   }
 }
 
-/** Create the agent's skills directory if it does not exist. */
 export function ensureSkillsDir(agentId: AgentId): void {
   const agent = AGENTS[agentId];
   if (!fs.existsSync(agent.skillsDir)) {
@@ -1159,10 +1077,10 @@ export function ensureSkillsDir(agentId: AgentId): void {
  * '.config/amp'). Don't hardcode `.${agentId}`: wrong for nested or ~/.config dirs. Relative to
  * the module HOME constant, not `os.homedir()`, so it survives HOME overrides. */
 export function agentConfigDirName(agentId: AgentId): string {
+  // Use import-time HOME: nested config dirs and later HOME overrides must stay relative.
   return path.relative(HOME, AGENTS[agentId].configDir);
 }
 
-/** Account identity and billing information extracted from an agent's auth config. */
 export interface AccountInfo {
   accountKey: string | null;
   usageKey: string | null;
@@ -1212,13 +1130,13 @@ export function formatClaudeOrgLabel(orgType: string | null | undefined): string
 export function accountOrgBadge(
   info?: Pick<AccountInfo, 'organizationType' | 'organizationName'> | null
 ): string | null {
+  // Personal org names are boilerplate; only named multi-seat orgs disambiguate identity.
   const isMultiSeat =
     info?.organizationType === 'claude_team' || info?.organizationType === 'claude_enterprise';
   if (isMultiSeat && info?.organizationName) return info.organizationName;
   return null;
 }
 
-/** Agents whose local credential formats expose enough state for account selection. */
 export const ACCOUNT_INSPECTION_AGENT_IDS = [
   'claude',
   'codex',
@@ -1233,7 +1151,6 @@ export const ACCOUNT_INSPECTION_AGENT_IDS = [
 
 const ACCOUNT_INSPECTION_AGENTS = new Set<AgentId>(ACCOUNT_INSPECTION_AGENT_IDS);
 
-/** Whether agents-cli can determine this agent's per-version sign-in state. */
 export function supportsAccountInspection(agentId: AgentId): boolean {
   return ACCOUNT_INSPECTION_AGENTS.has(agentId);
 }
@@ -1255,7 +1172,6 @@ export function accountDisplayLabel(
   return '';
 }
 
-/** Return the email address associated with the agent's auth config, or null. */
 export async function getAccountEmail(
   agentId: AgentId,
   home?: string

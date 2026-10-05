@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 
 import { runFork, type ForkDeps } from './fork.js';
 
-/** Capture a console channel's output as one joined string. */
 function capture(channel: 'log' | 'error') {
   const lines: string[] = [];
   const spy = vi.spyOn(console, channel).mockImplementation((...a: unknown[]) => {
@@ -11,12 +10,10 @@ function capture(channel: 'log' | 'error') {
   return { get text() { return lines.join('\n'); }, restore: () => spy.mockRestore() };
 }
 
-/** A preview --json payload as `renderSessionPreview` emits it. */
 function previewJson(session: object, preview: object | null): string {
   return JSON.stringify({ schemaVersion: 1, session, active: null, preview, error: null });
 }
 
-/** Deps whose preview returns a canned payload and whose launch records the argv. */
 function fakeDeps(preview: { status?: number; stdout?: string }): { deps: ForkDeps; launched: string[][] } {
   const launched: string[][] = [];
   return {
@@ -46,7 +43,6 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
 
     expect(launched).toHaveLength(1);
     const [args] = launched;
-    // Same harness, interactive, load-balanced, seeded with the recap prompt.
     expect(args[0]).toBe('run');
     expect(args[1]).toBe('claude');
     expect(args).toContain('-i');
@@ -55,13 +51,10 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(recap).toContain('Continue a prior claude session ("Prix Evals")');
     expect(recap).toContain('insight widgets need gaps closed');
     expect(recap).toContain('/continue 11111111-2222-3333-4444-555555555555');
-    // A default fork label rides through.
     expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of Prix Evals']));
   });
 
   it('forks a CROSS-DEVICE, non-claude source where the old transcript copy threw "transcript not found"', async () => {
-    // A codex session owned by another box: old fork refused it twice over
-    // (non-claude gate + local-only transcript lookup). Now it launches.
     const src = { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', shortId: 'aaaaaaaa', agent: 'codex', cwd: '/w', machine: 'mark-1', label: 'remote codex' };
     const { deps, launched } = fakeDeps({ stdout: previewJson(src, { lastAssistant: 'done step 1', changes: { created: 0, modified: 0, deleted: 0 } }) });
 
@@ -84,8 +77,6 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
   });
 
   it('falls back to the source topic (not the raw short id) when it has no explicit label', async () => {
-    // The common case: an unnamed session. preview --json carries `topic` but no
-    // `label`; the recap must show the human-meaningful topic.
     const src = { id: 'dddddddd-1111-2222-3333-444444444444', shortId: 'dddddddd', agent: 'claude', topic: 'wire up the evals console' };
     const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
 
@@ -124,7 +115,6 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
   });
 
   it('propagates a preview resolution failure and never launches a context-less sibling', async () => {
-    // preview prints "No session matching…" to stderr (inherited) and exits 1.
     const { deps, launched } = fakeDeps({ status: 1, stdout: '' });
 
     await runFork('does-not-exist-zzzz', {}, deps);

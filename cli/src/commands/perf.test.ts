@@ -47,8 +47,6 @@ describe('loadHookProfile', () => {
 
   it('maps exit-2 to blockCount and exit-1 to errorCount (RUSH-2294)', () => {
     const base = Date.now();
-    // ask-user-question-guard exits 2 by design on the first AskUserQuestion;
-    // only a real crash (exit 1) should inflate errorCount.
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 10, exitCode: 0 });
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 12, exitCode: 2 });
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 11, exitCode: 2 });
@@ -68,7 +66,6 @@ describe('loadHookProfile', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'perf-cmd-repo-'));
     fs.mkdirSync(path.join(repo, '.git'));
     try {
-      // Sample exists, but under a DIFFERENT project than what we'll filter on.
       recordSample({ kind: 'hook.fire', label: 'git-guard', durationMs: 10, cwd: repo });
 
       const rows = loadHookProfile(1, 'some-other-project-name');

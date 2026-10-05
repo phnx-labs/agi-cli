@@ -1,86 +1,12 @@
 #!/usr/bin/env bash
-#
-# Interim producer for exact-tree release attestations (RUSH-2749).
-#
-# RUSH-2666 landed the CONSUMER (release.sh requires a passing attestation for
-# a candidate tree, never rebuilds) without a PRODUCER: nothing writes
-# ATTEST.json + the pretested tarball into the attestation store. Every
-# release.sh run wedges at "missing exact attestation key" as a result. The
-# durable fix is a CI lane on the near-instant-CI plan
-# (.agents/artifacts/2026-08-15/plan-ci-release-near-instant.md); this script
-# is the documented interim path an operator runs by hand until that lane
-# lands, and it doubles as the reusable step that lane will eventually call.
-#
-# What it does, against an isolated worktree at the EXACT commit given:
-#   1. Runs the full suite (bun run test). Fail closed -- no attestation is
-#      written for a red suite.
-#   2. With --with-helpers, on a macOS box with `agents` + the apple.com secrets
-#      bundle, signs and notarizes the CLI binary headlessly (the same step
-#      release.sh's privileged phase ran before RUSH-2666 relocated build/sign to
-#      attestation time). Off that box the step is simply skipped, and since
-#      RUSH-3100 that costs nothing: the tarball carries no helper bundle, so
-#      there is nothing for `npm pack` to gate on and no unsigned bundle can ship
-#      from anywhere. No helper is built here at all: the menu-bar helper's source
-#      lives in phnx-labs/agi-menu (PHNX-4036) and is recorded in the helper
-#      manifest from its PUBLISHED release (step 5). The keychain helper moved
-#      with the standalone `secrets` engine (PHNX-3989), and the computer helpers
-#      moved with the standalone `computer` engine (PHNX-4075) -- neither is a
-#      helper of this CLI any more. (The CLI binary left the tarball in
-#      RUSH-3026; the sign step below still builds it on a Mac for the
-#      per-release GitHub-asset path.)
-#   3. Packs the tarball (`npm pack`) and binds its sha256 into the record.
-#   4. Writes the attestation via release-attestation.sh write, then copies
-#      the tarball alongside it so release-attestation.sh tarball/promote can
-#      find it (`require`/`tarball` resolve the .tgz relative to the JSON's
-#      own directory).
-#
-# Usage:
-#   scripts/release-attestation-produce.sh <commit-ish> [--dir DIR]
-#                                           [--repo-root DIR] [--keep]
-#                                           [--with-helpers]
-#                                           [--inherit-suite-from BASE.json]
-#                                           [--test-shard <n> | --test-devices a,b,c
-#                                            | --test-device <box> | --test-here
-#                                            | --test-crabbox]
-#
-# --inherit-suite-from BASE.json mints the attestation from an already-green BASE
-# (the default-branch tree) WITHOUT re-running the suite -- the redundant second
-# full-suite run per release (PHNX-3237). Sound only for a release commit, whose
-# tree differs from BASE by version + changelog + generated command-index and
-# nothing else; `release-attestation.sh derive` fails closed on any other changed
-# path. build + pack still run, so the recorded tarball is the real release tree's.
-# Incompatible with any --test-* flag (there is no suite to route).
-#
-# Where the suite runs. DEFAULT SHARDS across the fleet -- the suite is
-# throughput-bound, so dividing it across N workers runs it in ~1/N the time
-# (~269s on one box -> ~31s on 9). The count is resolved from the eligible
-# workers `agents devices pick` reports, capped, and falls back to a single
-# auto-picked box when fewer than 2 are eligible. --test-shard <n> forces a
-# count; --test-devices a,b,c names the shard workers; --test-device <box> pins
-# ONE box (no sharding); --test-here pins THIS machine (loud); --test-crabbox
-# uses a disposable crabbox. All forward to scripts/test.sh, which owns the
-# routing. Every shard still runs vitest at --maxWorkers=2 --retry=2, so the
-# per-box flake mitigation is unchanged.
-#
-# --with-helpers (default OFF) additionally produces the helper input-digest
-# manifest: menubar from its published menubar/v<floor> release
-# (scripts/stage-menubar-helper.sh --fetch-only, sha256-verified; the source is
-# not in this repo). Off by default for the same reason
-# release.sh's flag is: the check aborts on any helper input change, including
-# ones the tarball does not ship.
-#
-# --dir defaults to $RELEASE_ATTESTATION_DIR or <repo-root>/.release-attestations
-# -- the same resolution release.sh uses, so producing and requiring agree
-# without any extra flags once RELEASE_ATTESTATION_DIR is set consistently.
-# --keep leaves the worktree in place for inspection instead of removing it.
+# Usage: scripts/release-attestation-produce.sh <commit-ish>
+#   [--dir DIR] [--repo-root DIR] [--keep] [--with-helpers]
+#   [--inherit-suite-from BASE.json]
+#   [--test-shard N | --test-devices a,b | --test-device HOST | --test-here | --test-crabbox]
 set -euo pipefail
 
-red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-green()  { printf '\033[32m%s\033[0m\n' "$*"; }
-gray()   { printf '\033[2m%s\033[0m\n'  "$*"; }
-bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
-
-die() { red "error: $*"; exit 1; }
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 cd "$(dirname "$0")/.."
 DEFAULT_REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -89,9 +15,6 @@ COMMIT_ISH=""
 REPO_ROOT="$DEFAULT_REPO_ROOT"
 STORE=""
 KEEP=false
-# Where the suite runs. Empty here means "no explicit target given" -- resolved
-# below to a default SHARD across the fleet (resolve_default_shards), falling
-# back to test.sh's single auto-picked worker only when <2 workers are eligible.
 TEST_TARGET=()
 # Default off, matching release.sh's flag. The helper manifest re-derives every helper's input
 # digest and fails when one moved without a rebuild. That helper has left the repo (PHNX-4075);
@@ -105,9 +28,6 @@ while [[ $# -gt 0 ]]; do
     --keep) KEEP=true; shift ;;
     --test-device) [[ -n "${2:-}" ]] || die "--test-device needs a machine name"; TEST_TARGET=(--device "$2"); shift 2 ;;
     --test-here) TEST_TARGET=(--here); shift ;;
-    # Parity with test.sh's third mode. Without it the producer could reach only
-    # two of the three lanes, and a release on a box with no fleet worker in
-    # reach had no way to ask for the disposable crabbox it can still use.
     --test-crabbox) TEST_TARGET=(--crabbox); shift ;;
     # Explicit sharding overrides (mirror test.sh). Absent these and any other --test-* flag the
     # producer shards by default (resolve_default_shards below) instead of pinning one box.
@@ -136,9 +56,6 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$COMMIT_ISH" ]] || die "usage: scripts/release-attestation-produce.sh <commit-ish> [--dir DIR] [--repo-root DIR] [--keep]"
 
-# Inherit mode skips the suite entirely, so it is incompatible with any --test-*
-# target and needs a readable base attestation. Fail loud rather than silently
-# ignore a flag the caller thought would take effect.
 if [[ -n "$INHERIT_BASE" ]]; then
   [[ -f "$INHERIT_BASE" ]] || die "--inherit-suite-from: base attestation not found: $INHERIT_BASE"
   [[ ${#TEST_TARGET[@]} -eq 0 ]] || die "--inherit-suite-from skips the suite; do not also pass a --test-* target"
@@ -157,8 +74,6 @@ resolve_default_shards() {
     printf '%s\n' "$n"
   fi
 }
-# ${#arr[@]} is safe under `set -u` on bash 3.2 (the macOS trap is "${arr[@]}"
-# expansion of an EMPTY array, not the length operator).
 if [[ -z "$INHERIT_BASE" && ${#TEST_TARGET[@]} -eq 0 ]]; then
   default_shards="$(resolve_default_shards)"
   if [[ -n "$default_shards" ]]; then
@@ -200,9 +115,6 @@ git -C "$REPO_ROOT" worktree add --quiet --detach "$WT" "$SHA" \
 missing="$(git -C "$WT" status --short | awk '$1 == "D" || $2 == "D" { print $2 }')"
 [[ -z "$missing" ]] || die "worktree $WT is incomplete; missing tracked files: $missing"
 
-# apps/cli -> cli flatten (RUSH-3189 follow-up): the CLI moved up to cli/. A tree
-# cut after the flatten carries cli/; older candidates carry apps/cli/. Drive off
-# whichever layout THIS worktree's tree actually has.
 CLI_DIR="cli"
 [[ -d "$WT/cli" ]] || CLI_DIR="apps/cli"
 cd "$WT/$CLI_DIR"
@@ -233,9 +145,6 @@ SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
 # and real-CLI install tests hit transient `npm 404`. --retry=2 (a regression fails all 3) and
 # --maxWorkers=2 are CLI flags, not vitest.config.ts, so config edits don't self-select flakes.
 if [[ -n "$INHERIT_BASE" ]]; then
-  # Inherit mode: the base attestation already proved this tree passes (the diff
-  # is version/changelog/command-index only, verified by derive below), so the
-  # suite is not re-run. build + pack still run, so the recorded tarball is real.
   green "Inheriting the suite result from $(basename "$INHERIT_BASE") (skipping the full suite)."
   rm -f "$SUITE_LOG"
 elif scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} -- --retry=2 --maxWorkers=2 2>&1 | tee "$SUITE_LOG"; then
@@ -255,11 +164,6 @@ fi
 if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary..."
-  # Unlocks rush-signing.keychain-db and authorizes codesign/notarytool to use
-  # the Developer ID key non-interactively; without it a headless `agents
-  # secrets exec` hits errSecInternalComponent (the key ACL prompts for UI
-  # approval that a headless session can never answer). Same preamble
-  # release.sh's own privileged phase sources before any signing call.
   # shellcheck source=scripts/headless-sign-context.sh
   . scripts/headless-sign-context.sh
   agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
@@ -327,8 +231,6 @@ newest_release_with_manifest() {
   while read -r tag; do
     [[ -n "$tag" && "$tag" != "null" ]] || continue
     [[ -n "$newest" ]] || newest="$tag"
-    # `--jq index(...)` prints an EMPTY line when the asset is absent, not the
-    # string "null" -- so require a digit. Index 0 is a valid match.
     if gh release view "$tag" --json assets \
          --jq '[.assets[].name] | index("release-manifest.json")' 2>/dev/null \
          | grep -qE '^[0-9]+$'; then
@@ -415,8 +317,6 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
       gray "helper $helper unchanged (${helper_digest#sha256:}) -- carrying forward its attested record"
       continue
     fi
-    # The helper is never built here -- it is recorded from its published,
-    # verified release, or fails closed inside its function.
     case "$helper" in
       menubar) record_menubar_from_published "$helper_digest" ;;
     esac

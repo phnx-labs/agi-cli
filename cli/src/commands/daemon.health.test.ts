@@ -26,11 +26,7 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
     expect(payload.duplicates).toEqual([]);
     expect(payload.daemonEnabled).toBe(true);
     expect(payload.services.secretsBroker).toHaveProperty('reachable', false);
-    // browserIpc left the daemon status with the standalone browser CLI (PHNX-4101).
     expect(payload.services.browserIpc).toBeUndefined();
-    // Daemon housekeeping (watchdog, device-probe, ...) are plain daemon-core
-    // timers, NOT routines (RUSH-2495), so a fresh install with nothing on disk
-    // carries zero scheduled routines.
     expect(payload.scheduler).toEqual(
       expect.objectContaining({
         routineCount: 0,
@@ -62,8 +58,6 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
     const home = makeHome();
     const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
     fs.mkdirSync(daemonDir, { recursive: true });
-    // The record a run of failed starts leaves behind, written in the same shape
-    // recordSubsystemError produces.
     fs.writeFileSync(path.join(daemonDir, 'health.json'), JSON.stringify({
       'daemon-start': {
         subsystem: 'daemon-start',
@@ -101,7 +95,6 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
     }), 'utf-8');
     const daemon = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
     try {
-      // A real daemon-shaped command identity, recorded as the pid-file owner.
       fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(daemon.pid), 'utf-8');
 
       const res = run(home, ['doctor', '--json']);

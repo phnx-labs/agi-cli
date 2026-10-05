@@ -16,11 +16,9 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 0
 fi
 
-# Ground truth: can THIS box create a user namespace and map root inside it?
-# This is exactly what codex's bwrap does. 0 = works, non-zero = restricted.
 probe_userns() {
   if ! command -v unshare >/dev/null 2>&1; then
-    return 2  # can't probe
+    return 2
   fi
   unshare --user --map-root-user true >/dev/null 2>&1
 }
@@ -66,7 +64,6 @@ echo
 echo "Applying: ${SYSCTL_KNOB}=0 via ${DROPIN}"
 printf '# Managed by agents-cli enable-codex-sandbox.sh (PHNX-3285).\n# Re-enables unprivileged user namespaces so codex workspace-write sandbox works.\n%s=0\n' \
   "$SYSCTL_KNOB" > "$DROPIN"
-# Apply now (drop-in makes it persist across reboots).
 sysctl -w "${SYSCTL_KNOB}=0" >/dev/null
 
 echo "Verifying..."

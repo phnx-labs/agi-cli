@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { secretsBrokerHealthLine } from './daemon.js';
 
-// Strip ANSI so the assertions hold whether or not chalk colorizes.
 const plain = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, '');
 
 describe('secretsBrokerHealthLine (PHNX-4116)', () => {

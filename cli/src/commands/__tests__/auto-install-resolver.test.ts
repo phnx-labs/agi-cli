@@ -76,8 +76,6 @@ describe('resolveAgentTargetsAutoInstalling', () => {
 
   it('with --yes, auto-installs the missing version then resolves', async () => {
     makeFakeInstall('claude', '2.1.141');
-    // Simulate a successful install — also materialise the version on disk
-    // so the post-install resolve() actually finds it.
     installVersionMock.mockImplementation(async (agent: string, version: string) => {
       makeFakeInstall(agent, version);
       return { success: true, installedVersion: version };
@@ -118,7 +116,6 @@ describe('resolveAgentTargetsAutoInstalling', () => {
     makeFakeInstall('claude', '2.1.141');
     const { resolveAgentTargetsAutoInstalling } = await loadUtils();
 
-    // bare agent, @default, @all, literal `all` — none of these are "specific missing version"
     await resolveAgentTargetsAutoInstalling('claude', ['claude'], { yes: true });
     await resolveAgentTargetsAutoInstalling('claude@all', ['claude'], { yes: true });
     await resolveAgentTargetsAutoInstalling('all', ['claude'], { yes: true });

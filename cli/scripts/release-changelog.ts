@@ -36,7 +36,6 @@ const notes = fragments.map((f) => f.body).join('\n\n');
 writeFileSync(join(changelogDir, `${version}.md`), `${notes}\n`);
 for (const f of fragments) rmSync(join(nextDir, f.name));
 
-// Regenerate the aggregate now that the version file exists and the queue is drained.
 writeFileSync(join(cliRoot, 'CHANGELOG.md'), generate(changelogDir));
 
 process.stdout.write(notes);

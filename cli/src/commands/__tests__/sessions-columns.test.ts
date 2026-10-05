@@ -103,15 +103,10 @@ describe('formatPickerLabel', () => {
   });
 
   it('renders the ssh←<device> tag in red, not folded into the whitened topic', () => {
-    // Regression: the tag used to be concatenated into the topic string, which
-    // renderTopicCell strips of ANSI and re-wraps in white — silently dropping
-    // the red. Force colour on so the assertion is deterministic across CI/TTY.
     const prev = chalk.level;
     chalk.level = Math.max(prev, 1) as 0 | 1 | 2 | 3;
     try {
       const raw = formatPickerLabel(meta(), '', {}, { device: 'zion' });
-      // chalk.red opens with \x1b[31m; it must sit immediately on the tag text,
-      // not be replaced by the topic cell's white (\x1b[37m).
       expect(raw).toContain('\x1b[31mssh←zion');
       expect(strip(raw)).toContain('ssh←zion');
     } finally {
@@ -130,9 +125,6 @@ describe('formatPickerLabel', () => {
     expect(row).not.toContain('ssh');
   });
 
-  // The browser rendered transcript metadata only, which carries no host — so a
-  // running session never said whether it was a Ghostty tab, a VS Code panel, or
-  // a detached tmux pane. The live scan knows; this is the column that shows it.
   it('renders the host program when the host column is on', () => {
     const row = strip(formatPickerLabel(meta(), '', { showHost: true }, undefined, 'tmux\u2192ghostty'));
     expect(row).toContain('tmux\u2192ghostty');
@@ -144,8 +136,6 @@ describe('formatPickerLabel', () => {
   });
 
   it('keeps the id column aligned when a live row is named by a long pid', () => {
-    // A 7-digit Linux pid overflowed the 10-wide id column and pushed every
-    // later column right, so the whole table lost its alignment.
     const row = strip(formatPickerLabel(meta({ shortId: 'pid:2813139' }), '', {}));
     expect(row.slice(0, 10)).toHaveLength(10);
     expect(row.startsWith('pid:2813\u2026')).toBe(true);
@@ -174,12 +164,9 @@ describe('formatPickerLabel', () => {
     const live = { context: 'terminal', kind: 'claude', status: 'running' } as ActiveSession;
     const withLive = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, live));
     const withoutLive = strip(formatPickerLabel(meta(), '', { showStatus: true }, undefined, '', false, undefined));
-    // The topic must start at the same column in both, or the list is ragged on
-    // exactly the rows that are not running.
     const at = (row: string) => row.indexOf('do a thing');
     expect(at(withLive)).toBeGreaterThan(0);
     expect(at(withoutLive)).toBe(at(withLive));
-    // And the live row really did render its status, so this is not vacuous.
     expect(withLive).toContain('working');
     expect(withoutLive).not.toContain('working');
   });
@@ -244,15 +231,12 @@ describe('static flat-list columns', () => {
 });
 
 describe('formatPickerLabel width fits the gutter (no wrap)', () => {
-  // Wide enough that the topic cell isn't pinned to its 16-col floor, so the
-  // test isolates gutter accounting rather than the narrow-terminal floor.
   const WIDTH = 120;
   function rowFits(gutter: number): boolean {
     const orig = process.stdout.columns;
     try {
       (process.stdout as any).columns = WIDTH;
       const cols = { showTicket: true, gutter };
-      // Long topic forces the topic cell to the binding width so the row fills the line.
       const row = strip(formatPickerLabel(meta({ prNumber: 569, worktreeSlug: 'responsive-list', topic: 'x'.repeat(300) }), '', cols));
       return row.length + gutter <= WIDTH;
     } finally {
@@ -265,8 +249,6 @@ describe('formatPickerLabel width fits the gutter (no wrap)', () => {
   });
 
   it('multi-select rows fit with the 6-cell cursor+checkbox gutter', () => {
-    // Regression: the resume picker prepends "> [x] " (6 cells). If the width
-    // calc reserved only 2, the row would overflow by 4 and wrap every line.
     expect(rowFits(6)).toBe(true);
   });
 });
@@ -291,8 +273,6 @@ describe('team badge — the orchestrator end of the lineage', () => {
   });
 
   it('renders the badge in green, not folded into the whitened topic', () => {
-    // Same regression the ssh tag hit: concatenating it into the topic string
-    // means renderTopicCell strips the ANSI and re-wraps every slice in white.
     const prev = chalk.level;
     chalk.level = Math.max(prev, 1) as 0 | 1 | 2 | 3;
     try {
@@ -329,8 +309,6 @@ describe('team badge — the orchestrator end of the lineage', () => {
   });
 
   it('marks a teammate row with [team/handle] and drops the mode', () => {
-    // The mode survives in the preview pane; in the row it would eat characters
-    // the prompt needs, against a 16-column topic floor.
     const row = strip(
       formatPickerLabel(meta({ teamOrigin: { handle: 'resume-picker', mode: 'edit', team: 'redesign' } }), '', {})
     );
@@ -349,8 +327,6 @@ describe('team badge — the orchestrator end of the lineage', () => {
 });
 
 describe('the time cell reports creation and last activity, not just one', () => {
-  // A listing sorted by last activity cannot answer "which of these is the
-  // session I started last Tuesday" — the row has to carry both ends.
   afterEach(() => {
     vi.useRealTimers();
     if (savedColumns === undefined) delete process.env.COLUMNS;
@@ -388,8 +364,6 @@ describe('the time cell reports creation and last activity, not just one', () =>
   });
 
   it('takes the extra width out of the topic, not out of the row', () => {
-    // Same invariant as the team badge: a wider time cell must shrink the topic
-    // rather than push the row past the terminal edge and wrap it.
     const long = { topic: 'x'.repeat(400) };
     const oneField = strip(flatSessionRow(meta({ ...long, timestamp: '2026-07-04T11:00:00.000Z' })));
     const twoFields = strip(flatSessionRow(meta({ ...long, ...ranForDays })));
@@ -399,8 +373,6 @@ describe('the time cell reports creation and last activity, not just one', () =>
   });
 
   it('gives up the creation field before it squeezes the topic past its floor', () => {
-    // A narrow terminal keeps the row intact and the topic readable; the
-    // creation age is the part that yields.
     process.env.COLUMNS = '70';
     const row = strip(flatSessionRow(meta({ ...ranForDays, topic: 'x'.repeat(400) })));
     expect(row).toContain('1 hour ago');

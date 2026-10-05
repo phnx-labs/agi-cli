@@ -17,13 +17,10 @@ import { updateMeta } from '../lib/state.js';
 import { KNOWN_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 import type { BrandConfig, ResourceProfilePreset } from '../lib/types.js';
 
-/** Profiled resource kinds a brand can curate via `toggle --disable-<kind>`. */
 type ToggleKind = 'plugins' | 'skills' | 'commands' | 'mcp' | 'hooks' | 'subagents';
 
-/** Built-in top-level command names, for validating `--disable <cmd>`. */
 function knownCommandNames(): Set<string> {
   const names = new Set<string>(KNOWN_TOP_LEVEL_COMMANDS);
-  // Inline aliases registered outside COMMAND_LOADERS (see src/index.ts).
   for (const n of ['perms', 'exec', 'jobs', 'cron', 'upgrade']) names.add(n);
   return names;
 }
@@ -36,8 +33,6 @@ function applyResourceToggle(
   name: string,
   enable: boolean,
 ): void {
-  // Cast to a plain string-bag: writing through the union-keyed `preset[kind]`
-  // collapses to `never` under strict TS, so index the bag instead.
   const bag = preset as unknown as Record<string, string[] | undefined>;
   const arr = [...(bag[kind] ?? [])];
   if (arr.length === 0) arr.push('*');
@@ -53,7 +48,6 @@ function applyResourceToggle(
   else bag[kind] = arr;
 }
 
-/** Ensure the brand's preset exists in meta.profiles.presets and return a mutable copy path. */
 function ensurePresetExists(name: string): void {
   const presetName = brandPresetName(name);
   updateMeta((meta) => {
@@ -66,7 +60,6 @@ function ensurePresetExists(name: string): void {
   });
 }
 
-/** Mutate the brand's resource preset under lock. */
 function editPreset(name: string, fn: (preset: ResourceProfilePreset) => void): void {
   const presetName = brandPresetName(name);
   updateMeta((meta) => {
@@ -181,7 +174,6 @@ export function registerMineManageCommands(cmd: Command): void {
         process.exit(1);
       }
 
-      // Built-in command toggles → brand.disabledCommands.
       const disabledSet = new Set(cfg.disabledCommands ?? []);
       const known = knownCommandNames();
       for (const c of options.disable ?? []) {
@@ -195,7 +187,6 @@ export function registerMineManageCommands(cmd: Command): void {
       else delete nextCfg.disabledCommands;
       upsertBrand(nextCfg);
 
-      // Resource toggles → the brand's profile preset.
       const resourceOps: Array<[ToggleKind, string, boolean]> = [];
       for (const p of options.disablePlugin ?? []) resourceOps.push(['plugins', p, false]);
       for (const p of options.enablePlugin ?? []) resourceOps.push(['plugins', p, true]);

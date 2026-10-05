@@ -14,8 +14,6 @@ export class InstallationNotFoundError extends Error {
     public readonly selector: string | undefined,
     public readonly available: readonly Installation[]
   ) {
-    // Nothing installed is a different problem from "your selector missed", and
-    // the remedy differs — say which one it is rather than printing an empty list.
     super(
       available.length === 0
         ? `No ${AGENTS[agent].name} installations are managed by agents-cli. Install one with: agents add ${agent}`
@@ -40,7 +38,6 @@ export class InstallationAmbiguousError extends Error {
   }
 }
 
-/** `2.0.65` when frozen at its original release, `2.0.65 (release 2.0.71)` after an update. */
 export function describeInstallation(installation: Installation): string {
   return installation.releaseVersion === installation.label
     ? installation.label
@@ -71,11 +68,10 @@ export async function resolveInstallation(
 
   if (selector) {
     const byLabel = candidates.filter((i) => i.label === selector);
-    // A label is unique by construction (it is a directory name), so a label hit
-    // is decisive and never competes with a release hit on another installation.
     if (byLabel.length === 1) return byLabel[0];
     const byRelease = candidates.filter((i) => i.releaseVersion === selector);
     if (byRelease.length === 1) return byRelease[0];
+    // Shared releases remain ambiguous; newest-wins could target the wrong credential home.
     if (byRelease.length > 1) throw new InstallationAmbiguousError(agent, selector, byRelease);
     throw new InstallationNotFoundError(agent, selector, all);
   }

@@ -162,7 +162,6 @@ function parseTarget(arg: string | undefined): ParsedTarget {
   if (arg === 'versions') {
     return { resourceTypes: [], includeVersions: true };
   }
-  // Try treating as an agent name — shortcut for `prune versions <agent>`.
   const agentId = resolveAgentName(arg);
   if (agentId) {
     return { resourceTypes: [], includeVersions: true, versionAgent: agentId };

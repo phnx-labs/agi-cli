@@ -15,7 +15,6 @@ function git(cwd: string, ...args: string[]): string {
   return r.stdout.trim();
 }
 
-/** A repo with `origin/main` pointing at a chain of n commits. */
 function repoWithHistory(n: number): { root: string; shas: string[]; trees: string[] } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'attested-base-'));
   spawnSync('git', ['init', '-q', '-b', 'main', root], { encoding: 'utf-8' });
@@ -52,7 +51,6 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('walks back to the newest attested ANCESTOR when the tip is not attested', () => {
-    // The starvation case: main advanced twice while attest-main was still running.
     const { root, shas, trees } = repoWithHistory(4);
     const r = resolve(root, [`attest-${trees[1]}.json`]);
     expect(r.status, r.stderr).toBe(0);
@@ -67,8 +65,6 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('fails loud (non-zero, no sha) when nothing in history is attested', () => {
-    // Must NOT fall through to some unproven commit -- the caller relies on a
-    // non-zero exit to keep failing closed.
     const { root } = repoWithHistory(3);
     const r = resolve(root, ['attest-deadbeef.json']);
     expect(r.status).not.toBe(0);
@@ -80,7 +76,6 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
     // resolver walks only `rev-list origin/<branch>`, so a divergent commit with a published
     // attestation can never be selected.
     const { root, shas } = repoWithHistory(2);
-    // A commit off the branch history, built without touching the working tree.
     const blob = spawnSync('git', ['-C', root, 'hash-object', '-w', '--stdin'], {
       input: 'evil\n', encoding: 'utf-8',
     }).stdout.trim();
@@ -96,7 +91,6 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
 
   it('respects the lookback bound rather than walking all of history', () => {
     const { root, trees } = repoWithHistory(6);
-    // Only the OLDEST tree is attested, but we only look back 2 commits.
     const r = resolve(root, [`attest-${trees[0]}.json`], '2');
     expect(r.status).not.toBe(0);
   });

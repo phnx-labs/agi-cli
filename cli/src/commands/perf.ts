@@ -43,7 +43,6 @@ function parseLimit(raw: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-/** Map warehouse rows shaped like hook.fire into the existing HookProfileRow UI. */
 export function asHookRows(rows: PerfAggregateRow[]): HookProfileRow[] {
   return rows.map((r) => ({
     hook: r.label,
@@ -154,9 +153,6 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
     ]),
     sliced.map((r) => r.p99Ms > warnMs),
   );
-  // Sub-phase break-out (agent.run's `startup` = spawn overhead before the child
-  // runs, PHNX-3468). Indented under the row so a slow boot is visible next to
-  // the total without adding columns that are empty for phaseless labels.
   for (const r of sliced) {
     if (!r.phases) continue;
     for (const [name, ph] of Object.entries(r.phases)) {
@@ -316,8 +312,6 @@ Examples:
   agents insights perf friction               # sessions stuck retrying the same guard block
 `);
 
-  // Options live on the parent so `agents insights perf --json` and
-  // `agents insights perf commands --json` both work (see leafOpts).
   attachSharedOptions(perf).action(function summary(this: Command) {
     summaryAction(this.opts() as PerfGlobalOpts);
   });

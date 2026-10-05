@@ -12,12 +12,10 @@ describe('resourceLayout', () => {
     const narrow = resourceLayout(90, base);
     const wide = resourceLayout(140, base);
     expect(wide.descW).toBeGreaterThan(narrow.descW);
-    // descW is exactly what is left after name + gap + gap + capped sync.
     expect(wide.descW).toBe(140 - (22 + 1 + 1 + wide.syncW));
   });
 
   it('falls back to cards when the description would be too thin to read', () => {
-    // Plenty of fixed columns + a small terminal leaves < MIN_DESC_W for description.
     const layout = resourceLayout(70, { hasExtra: true, hasExtra2: true, nameW: 22, syncW: 30 });
     expect(layout.mode).toBe('cards');
   });
@@ -35,7 +33,6 @@ describe('resourceLayout', () => {
     expect(none.extra2W).toBe(0);
     expect(both.extraW).toBe(10);
     expect(both.extra2W).toBe(16);
-    // Extra columns eat into the description budget, never overflow the row.
     expect(both.descW).toBe(none.descW - (10 + 1) - (16 + 1));
   });
 

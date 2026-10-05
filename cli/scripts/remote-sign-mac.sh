@@ -4,9 +4,6 @@
 # menubar/v<floor>, PHNX-4036) and bin/agents-macos.
 set -euo pipefail
 
-# The Mac that builds + signs, matching release.sh: mac-mini by default,
-# overridable with `--device <name>` (alias `--host`). A flag with a default,
-# never an env var.
 readonly RELEASE_HOME_BASE_DEFAULT="mac-mini"
 DEVICE=""
 expect_device=false
@@ -22,7 +19,6 @@ done
 $expect_device && { printf 'error: --device needs a machine name\n' >&2; exit 1; }
 readonly RELEASE_HOME_BASE="${DEVICE:-$RELEASE_HOME_BASE_DEFAULT}"
 
-# cli in THIS worktree (script lives in cli/scripts/).
 LOCAL_CLI="$(cd "$(dirname "$0")/.." && pwd)"
 
 log()  { printf '\033[36m[remote-sign]\033[0m %s\n' "$*"; }
@@ -36,8 +32,6 @@ HOME_BASE="$RELEASE_HOME_BASE"
 log "home base:        $HOME_BASE (build + sign + notarize)"
 log "local cli:   $LOCAL_CLI"
 
-# Resolve the remote build workspace. $HOME expands on the REMOTE side (never the
-# local shell), so single-quote it and let the home base's shell expand it.
 HOST_CLI="$(ssh "$HOME_BASE" 'echo $HOME/src/github.com/muqsitnawaz/agents-cli/cli')" \
   || die "could not reach the home base $HOME_BASE over ssh"
 [[ -n "$HOST_CLI" ]] || die "resolved an empty remote cli path on $HOME_BASE"
@@ -64,9 +58,6 @@ rsync -az "$LOCAL_CLI/scripts/build-bin.sh" \
           "$HOME_BASE:$HOST_CLI/scripts/"
 ok "inputs staged"
 
-# ----- 2. Stage the published helper + build/sign the CLI binary on the sign host -----
-# Runs under a login shell so `agents` is on PATH, unlocks the signing keychain
-# headless, and injects the Apple notarization creds via the `apple.com` bundle.
 log "staging + signing on $HOME_BASE (published menu-bar helper, then the standalone CLI binary) ..."
 
 # Generate the remote build script locally and ship it as a file, avoiding the multi-layer quoting
@@ -77,13 +68,8 @@ trap 'rm -f "$BUILD_SCRIPT"' EXIT
 {
   printf '#!/usr/bin/env bash\nset -euo pipefail\ncd %q\n' "$HOST_CLI"
   cat <<'REMOTE_EOF'
-# Enter the shared headless signing + secrets context (unlock the signing
-# keychain + export AGENTS_SECRETS_PASSPHRASE) -- the single source of truth,
-# also sourced by release.sh's run_home_base_phase.
 . scripts/headless-sign-context.sh
 bun install --frozen-lockfile
-# Needs no Apple credentials: the helper is already signed + notarized by its own
-# release; this downloads it, checks the sha256, and verifies codesign + Gatekeeper.
 echo "== menu-bar helper: stage the published menubar/v<floor> release =="
 bash scripts/stage-menubar-helper.sh
 agents secrets exec apple.com -- bash -c '
@@ -95,13 +81,10 @@ REMOTE_EOF
 } > "$BUILD_SCRIPT"
 
 rsync -az "$BUILD_SCRIPT" "$HOME_BASE:$HOST_CLI/.remote-sign-build.sh"
-# `bash -lc` gives the run `agents` on PATH (homebrew); `bash <file>` avoids
-# needing the staged script to be +x.
 ssh "$HOME_BASE" "bash -lc 'bash \"$HOST_CLI/.remote-sign-build.sh\"'" \
   || die "remote build/sign failed on $HOME_BASE (see output above)"
 ok "remote stage + sign complete"
 
-# ----- 3. Pull the signed bundle + refreshed sha pin back into this worktree -----
 log "pulling signed bundle back into $LOCAL_CLI/bin/ ..."
 mkdir -p "$LOCAL_CLI/bin"
 rsync -az --delete "$HOME_BASE:$HOST_CLI/bin/MenubarHelper.app" "$LOCAL_CLI/bin/"
@@ -109,7 +92,6 @@ rsync -az "$HOME_BASE:$HOST_CLI/bin/agents-macos" "$LOCAL_CLI/bin/agents-macos"
 rsync -az "$HOME_BASE:$HOST_CLI/scripts/agents-cli-bin.sha256" "$LOCAL_CLI/scripts/agents-cli-bin.sha256"
 ok "bundle pulled back"
 
-# ----- 4. Local sanity: recompute the sha over the pulled Mach-O and assert match -----
 if command -v shasum >/dev/null 2>&1; then
   SHA_TOOL=(shasum -a 256)
 else
@@ -119,8 +101,6 @@ fi
 [[ -d "$LOCAL_CLI/bin/MenubarHelper.app" ]] || die "menu-bar helper bundle missing after pull-back"
 ok "menu-bar helper bundle present: bin/MenubarHelper.app"
 
-# Same integrity assert for the standalone CLI binary (issue #315): the pulled
-# bin/agents-macos must match the sha pin its sign run produced.
 expected_cli="$(cut -d ' ' -f 1 "$LOCAL_CLI/scripts/agents-cli-bin.sha256")"
 actual_cli="$("${SHA_TOOL[@]}" "$LOCAL_CLI/bin/agents-macos" | cut -d ' ' -f 1)"
 [[ "$actual_cli" == "$expected_cli" ]] \

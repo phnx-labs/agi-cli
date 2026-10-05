@@ -25,7 +25,6 @@ function userCliDir(): string {
   return path.join(getUserAgentsDir(), 'clis');
 }
 
-/** Render the status table — one row per declared CLI. */
 function printStatus(rows: { manifest: CliManifest; installed: boolean }[]): void {
   if (rows.length === 0) {
     console.log(chalk.gray('No CLIs declared.'));
@@ -133,14 +132,12 @@ When to use:
         targets = manifests;
       }
 
-      // Filter out already-installed unless --force
       const work = targets.filter((m) => opts.force || !isCliInstalled(m));
       if (work.length === 0) {
         console.log(chalk.green(`All ${targets.length} declared CLI(s) already installed.`));
         return;
       }
 
-      // Preview + confirm
       console.log(chalk.bold('\nWill install:'));
       for (const m of work) {
         const method = selectInstallMethod(m);
@@ -165,7 +162,6 @@ When to use:
         }
       }
 
-      // Execute
       let failures = 0;
       for (const m of work) {
         console.log(chalk.bold(`\n→ ${m.name}`));

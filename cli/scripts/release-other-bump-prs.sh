@@ -10,12 +10,7 @@ CURRENT="${1:-}"
 
 while read -r number branch _rest; do
   [[ -n "${number:-}" && -n "${branch:-}" ]] || continue
-  # Only version-bump release branches -- release/v<semver>. A feature branch that
-  # merely starts with "release" (release-notes-doc, releasing-guide) is not a
-  # stuck bump and must not wedge every future release.
   [[ "$branch" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-  # The current target's own branch is handled by release.sh's same-target path,
-  # not a cross-version conflict.
   [[ "$branch" != "$CURRENT" ]] || continue
   printf '#%s %s\n' "$number" "$branch"
 done

@@ -81,7 +81,6 @@ import {
   type FeedSessionSignal,
 } from '../lib/feed-ranking.js';
 
-/** Flags for `feed post`. Declared once — the action reads them off both the child and the parent. */
 interface PostCliOpts {
   title?: string;
   session?: string;
@@ -136,13 +135,11 @@ The owner destination comes from humans.yaml; do not duplicate it in agents.yaml
 
 const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
-/** Right-hand masthead summary: `N blocks · M agents`. */
 export function formatFeedMastheadRight(blocks: OpenBlock[]): string {
   const agents = new Set(blocks.map((b) => b.mailboxId)).size;
   return `${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${agents} agent${agents === 1 ? '' : 's'}`;
 }
 
-/** Reply hint matching the shared fleet-comms reply line. */
 export function formatFeedReplyHint(mailboxId: string): string {
   return `↳ ag message ${mailboxId} "…"`;
 }
@@ -160,16 +157,12 @@ export function parseRemoteFeed(stdout: string, machine: string): OpenBlock[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const block = item as Partial<OpenBlock>;
     if (!block.blockId || !block.sessionId || !block.mailboxId || !block.questions?.length) continue;
-    // A crafted mailboxId (path separators, `.`/`..`) would throw inside
-    // mailboxDir() when policy runs against the block, aborting the whole
-    // dispatch loop — drop it here so a malicious peer can't smuggle one in.
     if (!isValidMailboxId(block.mailboxId)) continue;
     blocks.push({ ...block, host: machine } as OpenBlock);
   }
   return blocks;
 }
 
-/** Merge local and remote rows, keeping the first copy of a host/session block. */
 export function mergeFeedBlocks(...groups: OpenBlock[][]): OpenBlock[] {
   const byIdentity = new Map<string, OpenBlock>();
   for (const block of groups.flat()) {
@@ -320,7 +313,6 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   console.log();
 }
 
-/** Specific host app + routine provenance for one feed row. */
 export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 'routineName'>): string {
   const host = ({
     ghostty: 'Ghostty',
@@ -335,7 +327,6 @@ export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 
   return `${host} · routine${block.routineName ? `:${block.routineName}` : ''}`;
 }
 
-/** Human summary line for one outcome rollup. */
 export function formatOutcomeHeader(group: OutcomeGroup): string {
   const { agents, open, answered, parked } = group.counts;
   const parts = [
@@ -358,7 +349,6 @@ function renderOutcomeGroup(group: OutcomeGroup, localHost: string): void {
   }
 }
 
-/** Map active sessions into the lightweight hints outcome enrichment needs. */
 export function sessionHintsFromActive(
   sessions: Array<{
     sessionId?: string;
@@ -375,7 +365,6 @@ export function sessionHintsFromActive(
   return sessions.map((s) => ({
     sessionId: s.sessionId,
     agentId: s.agentId,
-    // Same precedence as mailboxIdForActiveSession (agentId ?? sessionId).
     mailboxId: s.agentId ?? s.sessionId,
     ticketId: s.ticket?.id,
     prNumber: s.pr?.number,
@@ -461,8 +450,6 @@ export function registerFeedCommand(program: Command): void {
     .action(async (attentionKey: string, opts: { choice?: string; text?: string; as?: string; check?: boolean; attempt?: string; json?: boolean }, invoked: Command) => {
       const wantsJson = Boolean(opts.json || (invoked.parent?.opts() as { json?: boolean } | undefined)?.json);
       try {
-        // The key's own host decides the rail; `answerOwnerIsLocal` normalizes
-        // both sides so a `.local` suffix is not read as a different machine.
         const { host: ownerHost } = parseAttentionKey(attentionKey);
         const local = answerOwnerIsLocal(ownerHost);
         if (opts.check && (opts.choice != null || opts.text != null)) {
@@ -484,9 +471,6 @@ export function registerFeedCommand(program: Command): void {
         if (wantsJson) console.log(JSON.stringify(result));
         else console.log(renderAnswerResult(result));
       } catch (error) {
-        // A failure is a first-class outcome for the operator UI, not a parse
-        // error: `--json` still gets a result object it can branch on, with a
-        // non-zero exit so a scripted caller sees the failure too.
         const message = error instanceof Error ? error.message : String(error);
         if (wantsJson) {
           const failure: FeedAnswerResult = {
@@ -520,9 +504,6 @@ export function registerFeedCommand(program: Command): void {
       opts: PostCliOpts,
       cmd?: { opts: () => PostCliOpts; parent?: { opts: () => { json?: boolean } } },
     ) => {
-      // Parent `feed` also declares `--json` (for the list view). Commander
-      // binds the flag on the parent, so a `feed post … --json` lands on
-      // parent.opts().json — not the child. Read both.
       const flags = {
         title: opts?.title ?? cmd?.opts?.()?.title,
         session: opts?.session ?? cmd?.opts?.()?.session,
@@ -572,7 +553,6 @@ export function registerFeedCommand(program: Command): void {
               cwd: event.cwd,
             },
             {
-              // Prefer title as the front-loaded ask on the phone; body is detail.
               text: event.title
                 ? (event.detail ? `${event.title}: ${event.detail}` : event.title)
                 : (event.detail ?? ''),
@@ -628,9 +608,6 @@ export function registerFeedCommand(program: Command): void {
       const includeLocal = shouldIncludeLocalFeed(opts.device, self);
       const setupWarnings: string[] = [];
       if (includeLocal) {
-        // Feed and activity hooks are independent -- install both, and register
-        // the manifest as long as at least one wrote its entries (don't couple
-        // activity registration to the feed hook succeeding).
         const hookInstall = ensureFeedPublishHook();
         const activityInstall = ensureActivityLogHook();
         if (hookInstall.error) setupWarnings.push(hookInstall.error);
@@ -650,8 +627,6 @@ export function registerFeedCommand(program: Command): void {
         }
       }
 
-      // Trailing lane under the block views: `--filter all` appends the same
-      // fleet-wide updates section, anything else the compact local lane.
       const renderTrailingActivity = async (): Promise<void> => {
         if (filter === 'all') {
           console.log();
@@ -685,14 +660,10 @@ export function registerFeedCommand(program: Command): void {
         return;
       }
 
-      // Active sessions feed both the GC sweep and outcome enrichment (ticket/PR).
       let sessions: Awaited<ReturnType<typeof getActiveSessions>> = [];
       if (includeLocal) {
         sessions = await getActiveSessions();
       }
-      // discoverSessions touches sessions.db; under concurrent scan pressure it
-      // can throw SQLITE_BUSY. Outcome enrichment is best-effort — degrade with
-      // a warning rather than crash the whole feed (RUSH-2006).
       let sessionMetas: Awaited<ReturnType<typeof discoverSessions>> = [];
       if (includeLocal && sessions.length > 0) {
         const loaded = await loadSessionMetasForFeedEnrichment(
@@ -719,8 +690,6 @@ export function registerFeedCommand(program: Command): void {
       }
 
       if (opts.dispatch && includeLocal) {
-        // Liveness sweep: drop messages to dead agents and retire stale blocks
-        // before we render the feed.
         const activeBoxIds = new Set(sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id));
         const gcResult = gcMailbox(activeBoxIds);
         if (gcResult.blocksRemoved > 0 || gcResult.messagesDroppedDead > 0) {
@@ -734,16 +703,12 @@ export function registerFeedCommand(program: Command): void {
         ? [...listBlocks(), ...synthesizeControlCards(localSignals, listAskStats())]
         : [];
 
-      // Fill missing ticket/PR/worktree from live session meta before local
-      // policy mutates the store, so outcome keys land even when the publish
-      // hook had no deliverable stamp.
       if (sessions.length > 0) {
         localBlocks = enrichBlocksFromSessions(localBlocks, sessionHintsFromActive(sessions));
       }
 
-      // Stall suppression (RUSH-1477) must only mutate blocks owned by this
-      // machine. Remote peers run their own `feed --json`; never enqueue a
-      // policy answer into a local mailbox for a remote agent.
+      // Policy may mutate only blocks owned by this machine; peers dispatch
+      // their own blocks so a remote agent never receives a local mailbox action.
       const preparedLocal = prepareLocalFeedBlocks(localBlocks, {
         includeLocal,
         all: opts.all,
@@ -758,7 +723,6 @@ export function registerFeedCommand(program: Command): void {
         const remoteHosts = remoteFeedHostsToDial(opts.device, self);
         if (!opts.device?.length || (remoteHosts && remoteHosts.length > 0)) {
           const remote = await gatherRemoteAgentsJson({
-            // Bare --json stays a block array so older peers and scripts keep working.
             args: ['feed', '--json'],
             noFanoutEnv: FEED_NO_FANOUT_ENV,
             hosts: remoteHosts,
@@ -781,9 +745,6 @@ export function registerFeedCommand(program: Command): void {
         const policy = loadPolicy();
         const now = new Date();
         for (const b of dispatchBlocksProject) {
-          // Wrap per-block policy so one malformed block (e.g. a crafted
-          // mailboxId that throws in mailboxDir) can't abort the whole loop and
-          // strand every remaining block's dispatch.
           try {
             const result = applyPolicyToBlock(b, policy, now);
             if (result.action !== 'none') {
@@ -809,8 +770,6 @@ export function registerFeedCommand(program: Command): void {
       }
 
       if (opts.json) {
-        // Always a block array (stamped with outcome + ask class) so remote fan-out
-        // and scripts keep a stable contract. Human grouping is text-only.
         const stamped = stampBlockOutcomes(blocks).map((b) => ({
           ...b,
           ask: classifyBlock(b),
@@ -825,7 +784,6 @@ export function registerFeedCommand(program: Command): void {
         return;
       }
 
-      // Shared fleet-comms masthead (same family as `agents mailboxes`).
       console.log(
         masthead({
           title: opts.project ? `${opts.project} needs you` : 'they need you',
@@ -860,12 +818,8 @@ async function broadcastPostedEvent(
   meta: Meta,
   notify = false,
 ): Promise<SinkOutcome[]> {
-  // `--notify` adds a local desktop banner on top of the configured sinks; it
-  // fires even for a milestone post that no configured sink would broadcast.
   const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, level, meta), notify);
   if (!config) return [];
-  // Upgrade an 8-char footer crumb to the full indexed id so the console session
-  // URL resolves instead of 404ing, and so the ticket join hits the right row.
   const session = resolveFullSessionId(event.sessionId) ?? event.sessionId;
   const ticket = getSessionById(session)?.ticketId;
   const planned = planFeedBroadcast(config, {
@@ -882,9 +836,6 @@ async function broadcastPostedEvent(
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
   }, meta);
-  // An important post links the session's console page; fire the trace sync now
-  // so that page exists when the owner taps it (trace sync otherwise waits for
-  // run exit — PHNX-3628/PHNX-3698). Gated + best-effort, never blocks the post.
   if (level === 'important') fireTraceSyncInBackground();
   return runFeedBroadcast(planned, meta);
 }
@@ -906,13 +857,10 @@ async function broadcastBlock(
     { ...block, sessionId, ticket: block.ticket ?? ticket },
     extras,
   );
-  // A block is always important and links the session's console page — fire the
-  // trace sync so the page exists when tapped (best-effort, gated, non-blocking).
   fireTraceSyncInBackground();
   return runFeedBroadcast(planFeedBroadcast(config, ctx, meta), meta);
 }
 
-/** One line per sink that ran. Silent when nothing is configured. */
 function reportBroadcast(outcomes: SinkOutcome[]): void {
   for (const o of outcomes) {
     if (o.ok && o.error) console.error(chalk.yellow(`  → ${o.name} partial: ${o.error}`));
@@ -921,10 +869,8 @@ function reportBroadcast(outcomes: SinkOutcome[]): void {
   }
 }
 
-/** Feed view selector (RUSH-2015): decisions, progress, or both. */
 type FeedFilter = 'needs' | 'updates' | 'all';
 
-/** Normalize a raw --filter value; unknown/empty falls back to the default. */
 export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   const v = (raw ?? '').trim().toLowerCase();
   if (v === 'updates' || v === 'update') return 'updates';
@@ -932,13 +878,11 @@ export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   return 'needs';
 }
 
-/** True when a block belongs to the requested project (case-insensitive). */
 function blockMatchesProject(block: OpenBlock, project?: string): boolean {
   if (!project) return true;
   return (block.project ?? '').toLowerCase() === project.toLowerCase();
 }
 
-/** True when an activity event belongs to the requested project (case-insensitive). */
 function eventMatchesProject(ev: EnrichedActivityEvent, project?: string): boolean {
   if (!project) return true;
   return ((ev.project ?? projectKeyFromCwd(ev.cwd) ?? '')).toLowerCase() === project.toLowerCase();
@@ -955,9 +899,7 @@ function renderActivityEntry(ev: ActivityEvent): void {
   }
 }
 
-/** How far back the updates view looks for deliberate progress posts. */
 const UPDATES_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-/** Posts kept per machine in the rendered view / the `--json` payload. */
 const UPDATES_VIEW_LIMIT = 30;
 const UPDATES_JSON_LIMIT = 100;
 

@@ -49,7 +49,6 @@ describe('consumeResumePinned', () => {
       process.env[RESUME_PINNED_ENV] = '1';
       expect(consumeResumePinned()).toBe(true);
       expect(process.env[RESUME_PINNED_ENV]).toBeUndefined();
-      // A second read is false — the pin is one-shot.
       expect(consumeResumePinned()).toBe(false);
     } finally {
       if (prior === undefined) delete process.env[RESUME_PINNED_ENV];
@@ -61,7 +60,6 @@ describe('consumeResumePinned', () => {
 describe('resumeLocalFallbackSource (prefer-device, fall back to local — PHNX-3626)', () => {
   it('rewrites the origin device to this box so recovery resolves locally', () => {
     const peerOwned = session({ machine: 'yosemite-m3' });
-    // Before: the session names a peer, so recovery would hop there.
     expect(sessionRecoveryPeer(peerOwned, (h) => h === 'zion')).toBe('yosemite-m3');
     // After the fix the fallback source names this box, so `sessionRecoveryPeer` returns undefined
     // and `agents run --resume` recovers locally (a labelled /continue replay from the synced
@@ -69,14 +67,11 @@ describe('resumeLocalFallbackSource (prefer-device, fall back to local — PHNX-
     const local = resumeLocalFallbackSource(peerOwned, 'zion');
     expect(local.machine).toBe('zion');
     expect(sessionRecoveryPeer(local, (h) => h === 'zion')).toBeUndefined();
-    // Identity/version are preserved so the same session continues.
     expect(local.id).toBe(peerOwned.id);
     expect(local.version).toBe('0.146.0');
   });
 
   it('leaves the remote hop args unchanged (device is still preferred first)', () => {
-    // The prefer-device path is untouched: resume still tries the recorded device
-    // via the canonical remote args before any local fallback.
     expect(buildResumeRemoteArgs(session().id, undefined, { interactive: true })).toEqual([
       'sessions', 'resume', '01a0555d-0675-78c1-9758-8214d1afdca2', '--interactive',
     ]);

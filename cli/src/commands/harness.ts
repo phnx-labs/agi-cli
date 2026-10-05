@@ -45,7 +45,6 @@ import {
 import { harnessHooks } from './harness-hooks.js';
 import { CONNECTION_TEST_PROMPT } from '../lib/harness-connection-test.js';
 
-/** Short capability summary for a native harness — its supported run modes. */
 function nativeModes(id: (typeof ALL_AGENT_IDS)[number]): string {
   const modes = AGENTS[id]?.capabilities?.modes ?? [];
   return modes.length ? modes.join('/') : '-';
@@ -70,7 +69,6 @@ export function renderHarnessDetail(name: string): void {
   console.log(chalk.gray(`Run: agents run ${p.name} "hello"`));
 }
 
-/** Options accepted by `agents harness fork`. */
 export interface ForkOptions {
   toHost?: string;
   model?: string;
@@ -79,29 +77,22 @@ export interface ForkOptions {
   account?: string;
   version?: string;
   description?: string;
-  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
   fromSecrets?: string;
   keyStdin?: boolean;
   force?: boolean;
-  /** Tri-state pre-save connection test: true = force, false = skip, undefined = ask on a TTY. */
   test?: boolean;
 }
 
-/** Options accepted by `agents harness edit`. */
 export interface EditOptions {
   model?: string;
   baseUrl?: string;
   authProvider?: string;
   account?: string;
-  /** Empty string ('') unpins the host CLI version. */
   version?: string;
   description?: string;
-  /** Empty string ('') clears the fallback model. */
   fallbackModel?: string;
-  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
   fromSecrets?: string;
   keyStdin?: boolean;
-  /** Tri-state pre-save connection test: true = force, false = skip, undefined = ask on a TTY. */
   test?: boolean;
 }
 
@@ -158,7 +149,6 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
   return profile;
 }
 
-/** Auth env var for a host, as a hard error when the host declares none. */
 function authEnvKeyForHostOrThrow(host: AgentId): string {
   const key = authEnvKeyForHost(host);
   if (!key) {
@@ -180,7 +170,6 @@ function buildEditOverrides(opts: EditOptions): ForkProfileOptions {
   return overrides;
 }
 
-/** True when at least one recognized edit flag was given. */
 export function hasEditFlags(opts: EditOptions): boolean {
   return (
     opts.model !== undefined ||
@@ -224,7 +213,6 @@ export function buildEdit(name: string, opts: EditOptions): Profile {
   return edited;
 }
 
-/** True when `agents harness fork` was given too little to proceed without the wizard. */
 export function forkNeedsWizard(source: string | undefined, name: string | undefined, opts: ForkOptions): boolean {
   if (!source || !name) return true;
   if (!profileExists(source) && resolveAgentName(source) && !opts.model) return true;
@@ -241,7 +229,6 @@ export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions
   return !getPreset(name);
 }
 
-/** Whether the pre-save connection test runs, or must be asked for on a TTY. */
 type ConnectionTestGate = 'on' | 'off' | 'ask';
 
 /** Resolve the tri-state connection-test choice (RUSH-2221): `--test` forces on, `--no-test` off;
@@ -306,14 +293,8 @@ async function runForkFlow(source: string, name: string, opts: ForkOptions): Pro
   if (profileExists(name) && !opts.force) {
     throw new Error(`Harness '${name}' already exists. Use --force to overwrite.`);
   }
-  // Build first so a bad source/flag combination fails before prompting for a
-  // key (or copying one from a bundle) the user would then have stored for
-  // nothing.
   const forked = buildFork(source, name, opts);
   if (opts.fromSecrets) {
-    // A fork's `auth` (when present) may just be inherited by reference from
-    // its source, not established for this harness itself -- never trust it
-    // as "safe to rotate" without an explicit --auth-provider.
     await applyFromSecrets(forked, opts.fromSecrets, opts.authProvider, { allowInheritedAuth: false });
   } else if (opts.authProvider) {
     await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
@@ -392,8 +373,6 @@ async function runEditWizard(name: string, cliOpts: EditOptions): Promise<void> 
   writeProfile(edited);
   console.log(chalk.green(`Harness '${name}' updated.`));
   console.log(chalk.gray(`Model:  ${profileModelLabel(edited)}`));
-  // An edit that touched host/model/endpoint/auth is exactly what can break the
-  // harness, so re-test after saving (RUSH-2221). cliOpts carries the --test flag.
   await preSaveConnectionTest(name, cliOpts.test);
 }
 

@@ -18,7 +18,6 @@ export const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
  * modules (TS4023). */
 export const DAEMON_TESTS_SUPPORTED = process.platform !== 'win32';
 
-/** Provision an isolated HOME with just enough scaffolding for the CLI to boot. */
 export function makeHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-test-'));
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
@@ -26,7 +25,6 @@ export function makeHome(): string {
   return home;
 }
 
-/** Run `agents daemon <args>` against an isolated HOME — no daemon process ever started. */
 export function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
   return spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'daemon', ...args], {
     cwd: REPO_ROOT,
@@ -51,9 +49,6 @@ export async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProc
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
     stdio: 'ignore',
   });
-  // Give the exec a moment to land before `ps` (read by the status command's
-  // isLiveDaemon check) is asked to see its real argv — mirrors
-  // lib/daemon.test.ts's identical fake-daemon technique.
   await new Promise((r) => setTimeout(r, 150));
   const instancesDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
   fs.mkdirSync(instancesDir, { recursive: true });
@@ -61,7 +56,6 @@ export async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProc
   return child;
 }
 
-/** Register a pid in `home`'s instance registry — the scope stale/duplicate reporting uses. */
 export function registerInstance(home: string, pid: number): void {
   const dir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
   fs.mkdirSync(dir, { recursive: true });
@@ -69,5 +63,5 @@ export function registerInstance(home: string, pid: number): void {
 }
 
 export function killFakeDaemon(child: ChildProcess): void {
-  try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+  try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
 }

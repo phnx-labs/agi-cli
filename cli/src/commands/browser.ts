@@ -13,8 +13,6 @@ import {
 } from '../lib/browser-client.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 
-// Help groups — mirror the standalone `browser --help` so the mental model
-// carries over, and mirror `agents computer` where the two surfaces overlap.
 const BROWSER_HELP_GROUPS = [
   { title: 'Session lifecycle', names: ['use', 'start', 'done', 'status', 'prune'] },
   { title: 'Fast action loop', names: ['stream'] },
@@ -83,9 +81,7 @@ export function peekDevice(argv: string[]): string | undefined {
  * one failure agents-cli reports itself (install line, exit 1); there is no fallback engine. */
 async function forwardToBrowser(opts: {
   argv: string[];
-  /** `--device <name>`, resolved to the fd-3 target. Only `start` sets it. */
   device?: string;
-  /** Read the engine's stdout instead of letting it reach the terminal. */
   capture?: boolean;
 }): Promise<{ exitCode: number; stdout: string }> {
   try {
@@ -108,7 +104,6 @@ async function forwardToBrowser(opts: {
   });
 }
 
-/** Forward, then exit with the engine's status so shells and agents see the truth. */
 async function forwardAndExit(opts: Parameters<typeof forwardToBrowser>[0]): Promise<void> {
   const { exitCode } = await forwardToBrowser(opts);
   if (exitCode !== 0) process.exit(exitCode);

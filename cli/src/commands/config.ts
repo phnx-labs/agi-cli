@@ -55,7 +55,6 @@ interface ConfigListOptions {
 }
 
 
-/** Parse a boolean value the same way `agents devices configure` does. */
 function parseBool(value: string, key: string): boolean {
   const v = value.trim().toLowerCase();
   if (v === 'on' || v === 'true') return true;
@@ -80,7 +79,6 @@ function parseStringList(raw: string, key: string): string[] {
   return parsed as string[];
 }
 
-/** Parse the value for a given key, enforcing type rules. */
 function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown {
   switch (parsed.scope) {
     case 'run':
@@ -98,8 +96,6 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
     case 'updates':
       return parseBool(raw, key);
     case 'menubar': {
-      // The type (and enum validation) live in the device-config spec; parse the
-      // raw string to that type here so setConfigValue's assertion passes.
       const spec = configKeySpec(formatConfigKey(parsed));
       if (spec.type === 'bool') return parseBool(raw, key);
       if (spec.type === 'int') {
@@ -150,7 +146,6 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
   }
 }
 
-/** Write a value for a parsed config key. */
 function setConfig(parsed: ParsedConfigKey, value: unknown): void {
   switch (parsed.scope) {
     case 'run': {
@@ -178,7 +173,6 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
     }
     case 'browser': {
       if (parsed.property === 'device') {
-        // Fleet hub: user scope, one central value, never peer-targeted.
         setConfigValue('browser.device', value as string);
         return;
       }
@@ -221,7 +215,6 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
   }
 }
 
-/** Unset a parsed config key. */
 function unsetConfig(parsed: ParsedConfigKey): boolean {
   switch (parsed.scope) {
     case 'run': {
@@ -248,9 +241,6 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
         return had;
       }
       const target = parsed.device ? { device: parsed.device } : undefined;
-      // Must follow parsed.property. Hardcoding 'browser.profile' here meant
-      // `config unset browser.viewer` deleted the user's browser.profile while
-      // printing success, and left browserViewer in place.
       const name = parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile';
       const had = getConfigValue(name, target).value !== undefined;
       unsetConfigValue(name, target);
@@ -295,7 +285,6 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
   }
 }
 
-/** Read the stored value for a parsed config key. */
 function getConfig(parsed: ParsedConfigKey): unknown {
   switch (parsed.scope) {
     case 'run': {
@@ -333,14 +322,12 @@ function getConfig(parsed: ParsedConfigKey): unknown {
   }
 }
 
-/** Format a config value for display. */
 function formatValue(value: unknown): string {
   if (value === undefined) return chalk.gray('(unset)');
   if (typeof value === 'boolean') return value ? chalk.green('true') : chalk.red('false');
   return chalk.cyan(JSON.stringify(value));
 }
 
-/** Collect all set config entries for a given device scope (self or peer). */
 function* listRunConfigEntries(): Generator<{ key: string; value: unknown; hint: string }> {
   const meta = readMeta();
   for (const [selector, defaults] of Object.entries(meta.run?.defaults ?? {})) {
@@ -369,7 +356,6 @@ function* listRunConfigEntries(): Generator<{ key: string; value: unknown; hint:
   }
 }
 
-/** Collect central non-run config entries. */
 function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; hint: string }> {
   const meta = readMeta();
   if (meta.config?.interactiveHost !== undefined) {
@@ -381,8 +367,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   if (meta.projectRoot !== undefined) {
     yield { key: 'project.root', value: meta.projectRoot, hint: 'devices.<self>.projectRoot' };
   }
-  // This machine's default browser profile lives in fleet.devices.<self>.config
-  // (device-config), not the legacy top-level Meta.defaultBrowserProfile field.
   const browserProfile = getConfigValue('browser.profile').value;
   if (browserProfile !== undefined) {
     const key = 'browser.profile';
@@ -395,15 +379,12 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     yield { key, value: browserViewer, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
 
-  // Fleet browser hub — user scope, so it belongs in the central listing next to
-  // its siblings. Omitting it repeats the browser.viewer invisibility bug.
   const browserDevice = getConfigValue('browser.device').value;
   if (browserDevice !== undefined) {
     const key = 'browser.device';
     yield { key, value: browserDevice, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
 
-  // Session-summarizer keys (PHNX-3939) — user scope, syncs fleet-wide.
   for (const key of ['summarizer.enabled', 'summarizer.baseUrl', 'summarizer.model'] as const) {
     const value = getConfigValue(key).value;
     if (value !== undefined) {
@@ -411,7 +392,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     }
   }
 
-  // Managed-harness auto-update switches (PHNX-3940) — user scope, syncs fleet-wide.
   const globalAutoUpdate = rawGlobalAutoUpdateSetting();
   if (globalAutoUpdate !== undefined) {
     yield { key: 'updates.auto', value: globalAutoUpdate, hint: configKeyStorageHint(parseConfigKey('updates.auto')) };
@@ -424,8 +404,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     }
   }
 
-  // AGI Menu preferences (PHNX-3999) — user scope, syncs fleet-wide. Only set
-  // keys are listed; the native menu falls back to its own defaults for the rest.
   for (const prop of MENUBAR_MENU_PROPERTIES) {
     const key = `menubar.menu.${prop}`;
     const value = getConfigValue(key).value;
@@ -435,7 +413,6 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
   }
 }
 
-/** Collect device-scope config entries. */
 function* listDeviceConfigEntries(device: string): Generator<{ key: string; value: unknown; hint: string }> {
   for (const entry of listConfig({ device })) {
     if (entry.value === undefined) continue;
@@ -470,13 +447,10 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         key = `${prefix}formFactor`;
         break;
       case 'browser.profile':
-        // The self device's default browser profile is already surfaced as the
-        // top-level `browser.profile` key; skip it here to avoid duplication.
         if (device === machineId()) continue;
         key = `${prefix}browser.profile`;
         break;
       case 'browser.viewer':
-        // Same duplication rule as browser.profile above.
         if (device === machineId()) continue;
         key = `${prefix}browser.viewer`;
         break;

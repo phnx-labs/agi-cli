@@ -46,7 +46,6 @@ import { claudeProjectDirName } from '../project-key.js';
 
 const execFileAsync = promisify(execFile);
 
-/** Prefer live actor attribution; the durable sidecar survives actor-less hook rewrites. */
 export function resolveOwner(pidActor: string | null | undefined, sessionId: string | undefined): string | undefined {
   return pidActor ?? (sessionId ? readSessionActorRecord(sessionId)?.actor : undefined) ?? undefined;
 }
@@ -73,10 +72,8 @@ export const PROCESS_TABLE_FRESH_MS = 5_000;
  * that left teams/terminals can reappear as headless. */
 export const UNATTRIBUTED_RESCAN_MS = 15_000;
 
-/** Injectable clock for the active-scan memos (tests only). */
 let activeScanNow: () => number = () => Date.now();
 
-/** Test seam: override the clock used by process-table / unattributed memos. */
 export function setActiveScanClockForTest(fn?: () => number): void {
   activeScanNow = fn ?? (() => Date.now());
 }
@@ -91,7 +88,6 @@ let unattributedCache: {
 } | undefined;
 let unattributedFullRescans = 0;
 
-/** Test seam: drop the process-table + unattributed memos and their counters. */
 export function clearActiveScanCachesForTest(): void {
   processTableCache = undefined;
   processTableLiveReads = 0;
@@ -100,12 +96,10 @@ export function clearActiveScanCachesForTest(): void {
   activeScanNow = () => Date.now();
 }
 
-/** Test seam: how many times the live `ps` / CIM path actually ran. */
 export function processTableLiveReadCountForTest(): number {
   return processTableLiveReads;
 }
 
-/** Test seam: how many full unattributed (ps + lsof) rescans ran. */
 export function unattributedFullRescanCountForTest(): number {
   return unattributedFullRescans;
 }
@@ -137,7 +131,6 @@ export function filterCachedUnattributed(
 
 type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
-/** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
   'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount' | 'lastActivity'
@@ -174,8 +167,6 @@ export function backfillActiveRowsFromMeta(
     if (s.tokenCount == null && m.tokenCount != null) s.tokenCount = m.tokenCount;
     if (s.durationMs == null && m.durationMs != null) s.durationMs = m.durationMs;
     if (s.subAgentCount == null && m.subAgentCount != null) s.subAgentCount = m.subAgentCount;
-    // A pane kept open for days has a start time but no activity signal of its
-    // own; the index's last transcript write is what "idle 14d" is read from.
     if (s.lastActivityMs == null && m.lastActivity) {
       const ts = Date.parse(m.lastActivity);
       if (!Number.isNaN(ts)) s.lastActivityMs = ts;
@@ -184,7 +175,6 @@ export function backfillActiveRowsFromMeta(
   }
 }
 
-/** Resolve a display name only when the indexed identity names one registered slot. */
 export function sessionAccountLabel(
   kind: string,
   session: Pick<SessionMeta, 'accountId' | 'accountKey' | 'account'>,
@@ -194,7 +184,6 @@ export function sessionAccountLabel(
     if (account.agent !== kind) return false;
     if (session.accountId) return account.id === session.accountId;
     if (session.accountKey && !session.accountKey.startsWith('unattributed:')) {
-      // Claude's index groups quota by org; the registry names a login within it.
       const indexed = parseNativeIdentityKey(account.agent, session.accountKey);
       const emailMatches = !!session.account && account.identityLabel?.toLowerCase() === session.account.toLowerCase();
       if (!indexed || (!indexed.account && !emailMatches)) return false;
@@ -218,7 +207,6 @@ function loadBackfillMetaFor(sessions: ActiveSession[]): Map<string, BackfillMet
       if (m) byId.set(s.sessionId, m);
     }
   } catch {
-    /* enrichment is best-effort — an unavailable DB leaves rows un-backfilled */
   }
   return byId;
 }
@@ -230,6 +218,7 @@ export function backfillActiveRowsFromIndex(sessions: ActiveSession[]): void {
 export function isRunningLiveSession(s: ActiveSession): boolean {
   if (s.status === 'queued' || s.status === 'closed' || s.status === 'crashed') return false;
   if (s.context === 'cloud') return Boolean(s.cloudProvider) && Boolean(s.cloudTaskId);
+  // Unknown liveness from an older peer is not enough for bare --active.
   return Boolean(s.machine) && typeof s.pid === 'number' && s.pid > 0 && s.pidAlive === true;
 }
 
@@ -247,7 +236,6 @@ export function serializeActiveSessionsForJson(
   prLink: string | null;
   viewingIn: string | null;
 }> {
-  // One definition read for the whole batch, not per row (PHNX-3999 F08/F09).
   const defs = listProjectDefsCached();
   return sessions.map((s) => ({
     ...s,
@@ -280,9 +268,7 @@ export type ActiveStatus =
   | 'input_required'
   | 'closed'
   | 'abandoned'
-  /** Alive, but no client is attached — the host window died and the agent outlived it. */
   | 'orphaned'
-  /** The host window died and took the agent with it — an unclean exit, not a normal close. */
   | 'crashed'
   | 'unknown';
 
@@ -305,9 +291,7 @@ export type ImportantMessageKind = 'question' | 'needs_you' | 'activity';
  * is doing or waiting on now, ranked by {@link deriveImportantMessage} so a blocking question
  * beats generic activity. */
 export interface SessionImportantMessage {
-  /** The message to show, trimmed + capped for a single line. */
   text: string;
-  /** Its urgency class — drives ordering and any glyph/color the renderer adds. */
   kind: ImportantMessageKind;
 }
 
@@ -318,20 +302,14 @@ export interface ActiveSession {
    * stays the host process (claude) so transcript lookup works. Shown by `sessions --active`
    * (PHNX-2935). */
   harness?: string;
-  /** Specific host app — 'code', 'cursor', 'codium', 'iterm', 'terminal', 'warp', 'tmux', etc. */
   host?: string;
   pid?: number;
   sessionId?: string;
   cwd?: string;
-  /** Project/repo key derived from cwd, when known. */
   project?: string | null;
-  /** User-given name from /rename command. */
   label?: string;
-  /** Durable `agents run --name` launch handle, when the run was named. */
   name?: string;
-  /** First meaningful line of the initial prompt (extracted topic). */
   topic?: string;
-  /** Full, cleaned first genuine user turn, backfilled from the session index. */
   firstUserMessage?: string;
   /** The latest genuine user turn, cleaned and backfilled from the index beside {@link
    * firstUserMessage}. {@link deriveSessionRecap} classifies it: a redirected session's real
@@ -345,30 +323,29 @@ export interface ActiveSession {
    * prompt (PHNX-3939), via {@link deriveSessionRecap}. A user-anchored name, never the agent's
    * latest turn. Folded on in {@link getActiveSessions}; `recapSource` names the rung. */
   title?: string;
-  /** Which ladder rung produced {@link title}. */
   recapSource?: RecapSource;
   /** The first user turn cleaned for a "You" line: a screenshot path folds to `[image]`, a pasted
    * `$ cmd` to the command, a `/skill` path to `/<name>`. See {@link classifyUserPrompt}. */
   userPromptClean?: string;
-  /** What kind of first turn {@link userPromptClean} was. */
   userPromptKind?: UserPromptKind;
   /** The most recent assistant line from the transcript tail: a live-status field beside
    * `preview`/`activity`, deliberately not a rung of the {@link title} ladder (PHNX-3797). */
   lastAgentLine?: string;
-  /** Live preview: the latest turn (agent message or tool action), from the state engine. */
   preview?: string;
   /** The row's secondary line (PHNX-3797): a pending question, needs-you block, or current
    * activity, ranked by {@link deriveImportantMessage}. Folded on beside `title` in {@link
    * foldRecap} and carried on the `sessions watch --json` feed. */
   importantMessage?: SessionImportantMessage;
-  /** Inferred activity: working / waiting_input / idle (from the transcript tail). */
   activity?: SessionActivity;
+  model?: string;
+  failures?: import('@phnx-labs/sessions-cli/reader').SessionFailure[];
+  activityHistogram?: import('@phnx-labs/sessions-cli/reader').SessionActivityHistogram;
+  userTurns?: import('@phnx-labs/sessions-cli/reader').SessionUserTurn[];
+  subagents?: import('@phnx-labs/sessions-cli/reader').SessionSubagent[];
   /** Output-token throughput (tokens/sec) over a rolling 60s window from the transcript tail;
    * absent when no transcript resolves or the format reports no usage. */
   tokPerSec?: number;
-  /** Why the agent is waiting, when activity is waiting_input. */
   awaitingReason?: AwaitingReason;
-  /** The structured decision (question/plan/permission + options) the agent is waiting on. */
   question?: StructuredQuestion;
   /** Plan markdown from the last `ExitPlanMode` call. Present if the transcript ever entered
    * plan-review; `awaitingReason === 'plan_review'` says whether it is still pending. */
@@ -377,21 +354,13 @@ export interface ActiveSession {
    * and current step. Works for remote and device-dispatched agents with no local tool-call
    * stream. */
   todos?: TodoProgress;
-  /** Last few assistant turns (most-recent last), for at-a-glance context in the UI. */
   tail?: string[];
-  /** PR opened during the session. */
   pr?: DetectedPr;
-  /** Worktree the session runs in. */
   worktree?: DetectedWorktree;
-  /** Tracker ticket the session is tied to. */
   ticket?: DetectedTicket;
-  /** Per-session rate/usage limit detected in the transcript (RUSH-1523). */
   rateLimited?: boolean;
-  /** Tracker refs the session CREATED (Linear create_issue / gh issue create). */
   createdTickets?: string[];
-  /** Team name the session SPAWNED via `agents teams create/add`. */
   spawnedTeam?: string;
-  /** Files/screenshots attached to the session prompt. */
   attachments?: SessionAttachment[];
   /** The session's operative request: the latest genuine user turn, tidied but never rewritten
    * (PHNX-3939), separating prose from screenshot paths, clips, `@dir` mentions and terminal echo.
@@ -401,16 +370,11 @@ export interface ActiveSession {
    * in full plus a fold of older ones. Produced by the daemon's timeline pass, never on the
    * request path. */
   timeline?: SessionTimeline;
-  /** Files the session created, modified or deleted; ≤ 8 rows plus a total. */
   files?: SessionFiles;
-  /** Total tokens and elapsed duration from the indexed transcript. */
   tokenCount?: number;
   durationMs?: number;
-  /** Number of subagents launched, persisted by the index scanner. */
   subAgentCount?: number;
-  /** Durable documents created in the live transcript tail. */
   artifacts?: import('@phnx-labs/sessions-cli/reader').ProducedArtifact[];
-  /** Created plan document singled out for plan-first consumers. */
   planFile?: string;
   sessionFile?: string;
   startedAtMs?: number;
@@ -438,9 +402,7 @@ export interface ActiveSession {
    * {@link foldHostLink} finalizes `status`, so `orphaned`/`crashed` land in `failed` instead of
    * being mis-bucketed as `idle`. */
   phase?: SessionPhase;
-  /** Indexed launch origin, backfilled by the sessions command for JSON consumers. */
   origin?: 'cli' | 'routine';
-  /** Routine definition name when origin is `routine`. */
   routineName?: string;
   /** Presence for detach/attach: `attached` (live TUI), `background` (detached headless via `agents
    * sessions detach`), `parked` (headless continuation exited; transcript durable). Absent for
@@ -461,7 +423,6 @@ export interface ActiveSession {
    * no IDE window owns the session; a stale value means the window is gone ({@link
    * HOST_HEARTBEAT_STALE_MS}). */
   windowHeartbeatMs?: number;
-  /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
   pidCount?: number;
   /** Where the process actually lives: host, local vs SSH, tmux pane, and whether a rail exists to
    * type into it. Read from the process env (`/proc/<pid>/environ`, `ps eww` on macOS). Absent for
@@ -484,8 +445,6 @@ export interface ActiveSession {
    * AGENTS_SESSION_ID at spawn), to group teammates under it. Distinct from `sessionId`, the
    * teammate's own transcript. */
   orchestratorSessionId?: string;
-  /** Display label for the orchestrator (its topic/label), resolved when the
-   * orchestrator is itself present in the active set. Display-only. */
   orchestratorLabel?: string;
   /** For a teams teammate: a one-line summary of its spawn prompt (the team's task), so the listing
    * shows what the team works on even before any transcript exists. Distinct from `topic`, derived
@@ -516,7 +475,6 @@ export interface ActiveSession {
    * terminal entry. It survives an SSH hop and a session rotation, unlike the spawn-time session
    * id, so `--active --device` joins on it. Absent if the launch did not inherit a terminal id. */
   terminalId?: string;
-  /** Published editor tab index, retained across agent restarts. */
   tabIndex?: number;
   /** The launch id (`AGENT_LAUNCH_ID`) stamped on every agent at spawn: a stable UUID identical
    * locally and across SSH, surviving session-id rotation, and present from the first tick (unlike
@@ -534,11 +492,8 @@ export interface ActiveSession {
    * path by `SessionSummarizerService` and merged from the `session_summaries` cache in {@link
    * applyImmutableMemo}. */
   goal?: string;
-  /** Daemon-computed progress checkpoints, newest last (PHNX-3939). */
   checkpoints?: import('@phnx-labs/sessions-cli/reader').SessionCheckpoint[];
-  /** Daemon-computed detailed checklist for the session (PHNX-3939). */
   summaryChecklist?: import('@phnx-labs/sessions-cli/reader').SessionChecklistItem[];
-  /** Lifecycle of the daemon-computed summary; `skipped` when disabled (PHNX-3939). */
   summaryState?: import('@phnx-labs/sessions-cli/reader').SummaryState;
 }
 
@@ -556,7 +511,6 @@ export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStat
 }
 
 interface ActiveQueryOptions {
-  /** Skip the `ps` scan for ad-hoc headless agents. */
   skipHeadless?: boolean;
   /** A `--local` query: this machine only. Never dial a remote-host teammate over ssh; report its
    * last-persisted meta.json state instead. RUSH-2118: otherwise `--active --local` fired one ssh
@@ -637,8 +591,6 @@ export function agentKindFromComm(commRaw: string): string | undefined {
   if (commRaw.includes('.app/Contents/')) return undefined;
   const base = path.basename(commRaw);
   const stripped = base.replace(/\.exe$/i, '');
-  // Windows image names compare case-insensitively; POSIX comms stay exact —
-  // macOS's Claude desktop app process is named 'Claude' and must NOT match.
   const key = stripped === base ? base : stripped.toLowerCase();
   return AGENT_CLI_NAMES[key];
 }
@@ -648,13 +600,11 @@ export function agentKindFromComm(commRaw: string): string | undefined {
  * AGENT_CLI_NAMES (the narrower ps-scan set), or grok/kimi/antigravity panes would be dropped. */
 const AG_NAME_RE = AG_TMUX_NAME_RE;
 
-/** Agent kind from an `ag-<agent>-<shortid>` tmux session name, else undefined. */
 export function agentKindFromName(sessName: string): string | undefined {
   const m = AG_NAME_RE.exec(sessName);
   return m ? m[1].toLowerCase() : undefined;
 }
 
-/** The 8-char session-id prefix from an `ag-<agent>-<shortid>` name, else undefined. */
 export function shortIdFromName(sessName: string): string | undefined {
   const m = AG_NAME_RE.exec(sessName);
   return m ? m[2].toLowerCase() : undefined;
@@ -715,14 +665,13 @@ export function isPidAlive(pid: number, startedAtMs?: number): boolean {
   try {
     process.kill(pid, 0);
   } catch (err: any) {
-    // EPERM means the pid exists but is owned by another user — still "alive",
-    // fall through to the identity check. Any other error means no such process.
     if (err?.code !== 'EPERM') return false;
   }
   if (startedAtMs && startedAtMs > 0) {
+    // A live recycled PID must not revive an unrelated dead session.
     const procStartMs = processStartMs(pid);
     if (procStartMs !== null && procStartMs > startedAtMs + PID_REUSE_TOLERANCE_MS) {
-      return false; // pid recycled by a newer process — this session is gone
+      return false;
     }
   }
   return true;
@@ -737,11 +686,8 @@ interface LiveTerminalEntry {
   label?: string | null;
   cwd?: string | null;
   startedAtMs: number;
-  /** Slice key from the registry — the IDE window that owns this terminal. */
   windowId?: string;
-  /** The slice's `at` stamp — when that window last republished. See {@link HOST_HEARTBEAT_STALE_MS}. */
   windowHeartbeatMs?: number;
-  /** This entry's pid is gone; kept only because its window never tore it down. */
   pidDead?: boolean;
 }
 
@@ -771,12 +717,8 @@ function readLiveTerminals(): LiveTerminalEntry[] {
     for (const e of (slice?.entries ?? []) as LiveTerminalEntry[]) {
       if (!e?.sessionId) continue;
       const alive = isPidAlive(e.pid, e.startedAtMs);
-      // Dead pid + a window still republishing = an ordinary close mid-debounce.
-      // Dead pid + a window that stopped republishing = the crash we must report.
       if (!alive && !windowGone) continue;
       const entry: LiveTerminalEntry = { ...e, windowId, windowHeartbeatMs, pidDead: !alive };
-      // A live entry always wins a dead one for the same session (the agent was
-      // relaunched into a new window while the crashed window's slice lingers).
       const prev = merged.get(e.sessionId);
       if (prev && !prev.pidDead && !alive) continue;
       merged.set(e.sessionId, entry);
@@ -794,16 +736,13 @@ const claudeSessionFileCache = new Map<string, string>();
 /** Search every version home: the live ~/.claude symlink moves after upgrades while older running
  * sessions keep writing to their original home. */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
-  // Only memoize when the exact session UUID is known. Without an id the
-  // resolver picks newest-by-mtime under the project dir; caching that path
-  // would stick to an old transcript after a new session starts in the same cwd.
   if (sessionId) {
     const cacheKey = `${cwd}\0${sessionId}`;
     const hit = claudeSessionFileCache.get(cacheKey);
     if (hit !== undefined) {
       try {
         if (fs.existsSync(hit)) return hit;
-      } catch { /* re-resolve */ }
+      } catch {  }
       claudeSessionFileCache.delete(cacheKey);
     }
     const resolved = pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
@@ -862,7 +801,7 @@ export function pickSessionFile(projectDir: string, sessionId?: string): string 
     try {
       const m = fs.statSync(p).mtimeMs;
       if (!best || m > best.mtime) best = { path: p, mtime: m };
-    } catch { /* file vanished between readdir and stat */ }
+    } catch {  }
   }
   return best?.path;
 }
@@ -925,23 +864,17 @@ function indexedSessionFileForId(kind: string, sessionId: string): string | unde
   return row.filePath || undefined;
 }
 
-/** Recover the session UUID from a transcript filename (Claude `<uuid>.jsonl`, Codex `rollout-…-<uuid>.jsonl`). */
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 function sessionIdFromFile(file?: string): string | undefined {
   if (!file) return undefined;
   return path.basename(file).match(UUID_RE)?.[0];
 }
 
-/** Live per-session signals derived from one transcript-tail read. */
 interface LiveSignals {
-  /** Rich inferred state (activity/preview/badges). Undefined when unreadable. */
   state?: SessionState;
-  /** Rolling output-token throughput (tokens/sec). Undefined when no usage in the tail. */
   tokPerSec?: number;
 }
 
-/** Cap the events fed to state inference for a non-tailable harness — the last
- * turns are all `inferActivity` needs, and a bound keeps a huge transcript cheap. */
 const LIVE_STATE_MAX_EVENTS = 80;
 
 /** Parse a non-claude/codex transcript with its harness's own parser and return its last events for
@@ -964,12 +897,10 @@ const LIVE_TAIL_CACHE_MAX = 512;
 interface LiveTail {
   mtimeMs: number | undefined;
   events: SessionEvent[];
-  /** Output-token throughput, a pure function of the tail bytes (Claude/Codex only). */
   tokPerSec?: number;
 }
 const liveTailCache = new Map<string, LiveTail>();
 
-/** Test seam: drop the in-process parsed-tail memo. */
 export function clearLiveSignalsCacheForTest(): void {
   liveTailCache.clear();
 }
@@ -999,7 +930,7 @@ export function computeLiveSignals(
 ): LiveSignals {
   if (!sessionFile) return {};
   let mtimeMs: number | undefined;
-  try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch { /* vanished between calls */ }
+  try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch {  }
 
   const cacheKey = `${kind}\0${sessionFile}\0${cwd ?? ''}`;
   let tail = liveTailCache.get(cacheKey);
@@ -1014,7 +945,6 @@ export function computeLiveSignals(
   return { state, tokPerSec: tail.tokPerSec };
 }
 
-/** Map inferred activity onto the coarse ActiveStatus used by the renderer and counts. */
 function statusFromActivity(activity: SessionActivity): ActiveStatus {
   return activity === 'working' ? 'running' : activity === 'waiting_input' ? 'input_required' : 'idle';
 }
@@ -1033,13 +963,15 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     pidAlive,
     status: life ?? statusFromActivity(state.activity),
     activity: state.activity,
+    model: state.model,
+    failures: state.failures,
+    userTurns: state.userTurns,
     awaitingReason: state.awaitingReason,
     question: state.question,
     lastEventMs: state.lastEventMs,
     plan: state.plan,
     todos: state.todos,
     tail: state.tail,
-    // Prefer the live preview (latest turn); keep the first-prompt topic as a fallback.
     preview: state.preview ?? base.preview,
     pr: state.pr,
     worktree: state.worktree,
@@ -1174,34 +1106,23 @@ export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promi
       teamName: a.taskName,
       assignedTask: summarizeMission(a.prompt),
       agentId: a.agentId,
-      // The frozen actor stamped on the teammate record (RUSH-2028) — who ran
-      // this teammate, surfaced as the owner in --active (RUSH-2018); sidecar
-      // fallback for a teammate record predating the actor field.
       owner: resolveOwner(a.actor, resolvedId),
     }, state, sessionFile, pidAlive);
   });
 }
 
-/** Live editor-terminal agents across every IDE window. */
 export async function listTerminalsActive(): Promise<ActiveSession[]> {
   const entries = readLiveTerminals();
   if (entries.length === 0) return [];
 
-  // Walk the shell PIDs through the process table once so we can name the host
-  // (code / cursor / codium) per entry rather than a generic 'terminal'.
   const procByPid = new Map<number, ProcRow>();
   for (const r of await readProcessTable()) procByPid.set(r.pid, r);
   const children = childrenByParent(new Map([...procByPid.values()].map(r => [r.pid, r.ppid])));
 
-  // Build label map from Claude's sessions/*.json for /rename support
   const labelMap = buildClaudeLabelMap();
-  // Run-name handles (`agents run --name`) keyed by session id, for the same
-  // sessionId → handle resolution as labels.
   const runNameMap = buildRunNameMap();
 
   return entries.map((t): ActiveSession => {
-    // Keep the shell pid for tab ownership and headless suppression; the live
-    // agent below it owns the session after an exit-and-rerun in the same tab.
     const directEntry = readPidSessionEntry(t.pid, procByPid.get(t.pid)?.startTime);
     const candidate = directEntry?.sessionId ? directEntry
       : (!t.pidDead ? terminalDescendantEntry(t.pid, procByPid, children) : undefined) ?? directEntry;
@@ -1211,9 +1132,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const sessionKind = pidEntry?.agent ?? t.kind;
     const sessionFile = findSessionFileForKind(sessionKind, cwd, resolvedId);
     const label = t.label ?? (resolvedId ? labelMap.get(resolvedId) : undefined) ?? undefined;
-    // Durable run name from `agents run --name`, resolved by the run's session id.
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
-    // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = isPidAlive(t.pid, t.startedAtMs);
     const { state, tokPerSec } = computeLiveSignals(sessionKind, sessionFile, cwd, pidAlive);
@@ -1243,7 +1162,6 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   });
 }
 
-/** Cloud tasks still in a non-terminal state. `tasks.db` may not exist; that's fine. */
 function listCloudActive(): ActiveSession[] {
   let tasks;
   try {
@@ -1268,12 +1186,10 @@ interface ProcRow { pid: number; ppid: number; tty?: string; comm: string; kind?
 /** Ordered ancestor-process matchers; first match wins, most specific first: an IDE renderer beats
  * the terminal app that launched it, which beats the multiplexer inside it. */
 const HOST_MATCHERS: Array<{ host: string; tokens: string[] }> = [
-  // IDE renderers (Electron helper processes on macOS, image names on Windows)
   { host: 'code',     tokens: ['Code Helper', 'Code - Insiders Helper', 'Code.exe'] },
   { host: 'cursor',   tokens: ['Cursor Helper', 'Cursor.exe'] },
   { host: 'codium',   tokens: ['VSCodium Helper', 'VSCodium.exe'] },
   { host: 'windsurf', tokens: ['Windsurf Helper', 'Windsurf.exe'] },
-  // Native terminal apps
   { host: 'iterm',    tokens: ['iTerm2', 'iTermServer', 'iTerm'] },
   { host: 'terminal', tokens: ['Terminal.app', '/Applications/Utilities/Terminal.app', 'WindowsTerminal.exe'] },
   { host: 'warp',     tokens: ['Warp.app', 'stable_'] },
@@ -1282,7 +1198,6 @@ const HOST_MATCHERS: Array<{ host: string; tokens: string[] }> = [
   { host: 'hyper',    tokens: ['Hyper.app', 'Hyper Helper'] },
   { host: 'wezterm',  tokens: ['wezterm', 'WezTerm'] },
   { host: 'ghostty',  tokens: ['ghostty', 'Ghostty'] },
-  // Multiplexers (fallback — only if no UI found above them)
   { host: 'tmux',     tokens: ['tmux'] },
   { host: 'screen',   tokens: ['screen'] },
 ];
@@ -1300,7 +1215,6 @@ async function readProcessTable(): Promise<ProcRow[]> {
   return rows;
 }
 
-/** Uncached process-table snapshot (the live `ps` / CIM path). */
 async function readProcessTableLive(): Promise<ProcRow[]> {
   processTableLiveReads += 1;
   if (process.platform === 'win32') return readProcessTableWin32();
@@ -1312,8 +1226,6 @@ async function readProcessTableLive(): Promise<ProcRow[]> {
   }
   const rows: ProcRow[] = [];
   for (const line of out.split('\n')) {
-    // pid ppid tty lstart comm — tty is a single token ('ttys003', 's003', or '??'/'?'
-    // for none); comm stays last so it may contain spaces.
     const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s+(.+)$/);
     if (!m) continue;
     const pid = parseInt(m[1], 10);
@@ -1342,7 +1254,6 @@ async function readProcessTableWin32(): Promise<ProcRow[]> {
   return parseWin32ProcessCsv(out);
 }
 
-/** Parse `ConvertTo-Csv` output of Win32_Process rows. Exported for tests. */
 export function parseWin32ProcessCsv(out: string): ProcRow[] {
   const rows: ProcRow[] = [];
   for (const line of out.split(/\r?\n/)) {
@@ -1372,8 +1283,6 @@ function terminalDescendantEntry(
   processes: Map<number, ProcRow>,
   children: Map<number, number[]>,
 ): PidSessionEntry | undefined {
-  // Windows only proves pidExists: a recycled PID can be a live shell descendant.
-  // Retain the published identity until that platform can prove process starts.
   if (process.platform === 'win32') return undefined;
   let pending = children.get(pid) ?? [];
   const seen = new Set([pid]);
@@ -1385,15 +1294,11 @@ function terminalDescendantEntry(
       if (seen.has(child)) continue;
       seen.add(child);
       const entry = readPidSessionEntry(child, processes.get(child)?.startTime);
-      // The SessionStart hook records a bare `claude` (no launcher) with an
-      // empty agent; the process name is that agent's kind.
       const agent = entry?.agent || processes.get(child)?.kind;
       if (!entry || !agent || !isSessionTrackedAgent(agent)) {
         next.push(...(children.get(child) ?? []));
         continue;
       }
-      // A recorded agent is a boundary even before its session ID is known:
-      // its tools may launch agents of their own, which never own this tab.
       recordedAgent = true;
       if (entry.sessionId && (!newest || entry.startedAtMs > newest.startedAtMs
         || (entry.startedAtMs === newest.startedAtMs && entry.pid > newest.pid))) newest = { ...entry, agent };
@@ -1430,8 +1335,6 @@ export function resolveCwds(
 /** Resolve a process's cwd via `lsof`. `-a` ANDs the filters; without it macOS treats `-p` and `-d`
  * as a union and returns every process's cwd. */
 async function getCwdForPid(pid: number): Promise<string | undefined> {
-  // No lsof on Windows and no cheap foreign-process cwd API; the pid registry
-  // written by `ag run` supplies the cwd for registry-launched agents instead.
   if (process.platform === 'win32') return undefined;
   let out: string;
   try {
@@ -1479,7 +1382,6 @@ export async function hostFromPid(pid: number): Promise<string | undefined> {
   return detectHost(pid, procByPid);
 }
 
-/** IDE / terminal / multiplexer hosts all count as UI-hosted. Absence = truly headless. */
 const UI_HOSTS = new Set<string>([
   'code', 'cursor', 'codium', 'windsurf',
   'iterm', 'terminal', 'warp', 'alacritty', 'kitty', 'hyper', 'wezterm', 'ghostty',
@@ -1558,15 +1460,12 @@ export function foldSubordinateAgents(
   const foldedByRoot = new Map<number, number>();
   for (const c of candidates) {
     if (keptPids.has(c.pid)) { kept.push(c); continue; }
-    // Walk up through folded intermediates to the nearest kept same-kind pid.
     let cur = nearestSameKindAncestor(c.pid, c.kind);
     const seen = new Set<number>();
     while (cur !== undefined && !keptPids.has(cur) && !seen.has(cur)) {
       seen.add(cur);
       cur = nearestSameKindAncestor(cur, c.kind);
     }
-    // A fold target must itself be a kept row (a ppid cycle from pid reuse
-    // can orphan the whole chain) — otherwise keep the row rather than drop it.
     if (cur === undefined || !keptPids.has(cur)) { kept.push(c); continue; }
     foldedByRoot.set(cur, (foldedByRoot.get(cur) ?? 0) + 1);
   }
@@ -1590,7 +1489,6 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   return result.sessions;
 }
 
-/** Unthrottled headless scan (live process table + cwd probes). */
 async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ sessions: ActiveSession[]; ppidMap: Map<number, number> }> {
   unattributedFullRescans += 1;
   const table = await readProcessTable();
@@ -1601,7 +1499,6 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     ppidMap.set(r.pid, r.ppid);
   }
 
-  // Candidate PIDs first — we only shell out to lsof for these, not the whole table.
   const candidates: AgentCandidate[] = [];
   for (const { pid, kind } of table) {
     if (!kind) continue;
@@ -1610,13 +1507,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     candidates.push({ pid, kind });
   }
 
-  // Forks/subagents of a live agent process collapse onto their root before
-  // the cwd probes — fewer spawns, and one session stays one row even when
-  // cwd-based dedupe is unavailable (Windows).
   const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppidMap, readPidSessionEntry);
 
-  // Bounded + staggered lsof probes: same cwds, but a trickle of spawns instead
-  // of one simultaneous system-wide burst that behavioral EDR flags as recon.
   const cwds = await resolveCwds(kept.map(c => c.pid));
 
   // Scan the hook state dir at most once per active-scan and invert the ppid map at most once,
@@ -1641,9 +1533,6 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     // (RUSH-2384); (3) the agent's own SessionStart hook, kind-guarded against a stale reused-pid
     // file; (4) newest-jsonl heuristic.
     let exactId = entry?.sessionId ?? sessionIdFromLivePid(pid);
-    // The hook record (when we fall to it) also carries the SessionStart `ts` — the
-    // real session-start epoch. Capture it so terminal/headless rows get a
-    // `startedAtMs` instead of rendering "0s ago" (they set none before this).
     let hookRec: HookSessionRecord | undefined;
     if (!exactId) {
       hookIndex ??= loadHookSessionIndex();
@@ -1668,9 +1557,6 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
-    // pidAlive is true by construction: this pid was just enumerated from the
-    // live process table, so an opaque (non-parseable) kind resolves to
-    // `running`, not a fake `idle` or blanket `unknown`.
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // Durable run name from `agents run --name`, resolved by session id: a headless row has no
@@ -1693,8 +1579,6 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       topic,
       tokPerSec,
       sessionFile,
-      // Session start: the hook's authoritative SessionStart `ts`, else the
-      // transcript's creation time. Last activity: the transcript's last write.
       startedAtMs: hookRec?.ts ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
@@ -1703,19 +1587,14 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       terminalId: entry?.terminalId ?? hookRec?.terminal_id,
     }, state, sessionFile, true));
   }
-  // Housekeeping: drop registry files for pids that have since died.
   prunePidSessionRegistry(isPidAlive);
   return { sessions: out, ppidMap };
 }
 
-/** One tmux pane's resolved agent identity for the authoritative source. */
 interface PaneIdentity {
   agent: string;
-  /** Custom harness/profile name from the launch registry, when set. */
   harness?: string;
-  /** Exact session id when resolvable (launch registry, or the hook join). */
   sessionId?: string;
-  /** The agent's OS pid from the launch registry (may differ from `pane_pid`). */
   pid?: number;
 }
 
@@ -1768,9 +1647,6 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   const { readSessionMeta } = await import('../tmux/session.js');
   const { runTmux } = await import('../tmux/binary.js');
   const socket = getDefaultSocketPath();
-  // No server has ever run on this socket — genuinely nothing to report, not
-  // a degraded read. Distinct from the throws below, which mean tmux truth
-  // exists but could not be read (RUSH-2507).
   if (!fs.existsSync(socket)) return [];
 
   let res;
@@ -1795,9 +1671,6 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     );
   }
 
-  // Index live launches by the pane they target, so a pane we did NOT wrap (a
-  // split) resolves to its own agent. Newest launch wins a pane (pid reuse), and
-  // only live pids count — a dead agent's stale entry can't light up its old pane.
   const liveByPane = new Map<string, PidSessionEntry>();
   for (const recorded of listPidSessionEntries()) {
     const e = readPidSessionEntry(recorded.pid);
@@ -1805,8 +1678,6 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const prev = liveByPane.get(e.tmuxPane);
     if (!prev || e.startedAtMs > prev.startedAtMs) liveByPane.set(e.tmuxPane, e);
   }
-  // Hook index is scanned lazily — only when a live launch lacks a recorded id
-  // (a non-Claude split) and needs the SessionStart-hook join.
   let hookIndex: HookSessionIndex | undefined;
   const getHookIndex = (): HookSessionIndex => (hookIndex ??= loadHookSessionIndex());
 
@@ -1822,8 +1693,6 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   const seen = new Set<string>();
   for (const line of res.stdout.split('\n')) {
     if (!line.trim()) continue;
-    // The path is the LAST field, so rejoin its tail: a directory containing the
-    // separator must not truncate it (the earlier fields cannot contain one).
     const parts = line.split(TMUX_FIELD_SEP);
     const [pane, sessName, pidRaw, paneDeadRaw] = parts;
     const curPath = parts.slice(4).join(TMUX_FIELD_SEP);
@@ -1831,9 +1700,6 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const meta = readSessionMeta(sessName);
     const liveEntry = liveByPane.get(pane);
     let id = resolvePaneIdentity(pane, sessName, meta, liveEntry, getHookIndex, nameToFullId);
-    // Only a genuinely foreign pane — no live entry, no meta labels, and not one
-    // of our `ag-*` names — is dropped now; every agent pane survives to be either
-    // id-resolved or emitted as its own distinct id-less row.
     if (!id) continue;
     // RUSH-2007 Layer A: a non-Claude tmux session whose id came from neither the launch registry
     // nor the undeployed session-tracker is backfilled from the deployed hook's
@@ -1848,15 +1714,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     if (id.sessionId && shortIdFromName(sessName)) {
       writeSessionAliasRecord(id.sessionId, sessName);
     }
-    // Dedupe by resolved session id; an as-yet-unresolved id (a hookless/lagging
-    // split) keys on the unique pane so it still surfaces as its own row.
     const dedupKey = id.sessionId ?? pane;
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
 
-    // Prefer the registry pid (the agent), falling back to the pane leaf pid. A
-    // pid we emit here goes into getActiveSessions' attributed set, so the ps-scan
-    // does NOT also surface this agent as a duplicate headless row.
     const pid = id.pid ?? (parseInt(pidRaw, 10) || undefined);
     const cwd = liveEntry?.cwd ?? meta?.cwd ?? (curPath || undefined);
     // Resolve a transcript only when the session id is known: with no id, findSessionFileForKind
@@ -1864,8 +1725,6 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     // stranger's transcript (the xN-badge bug). An id-less pane surfaces as its own row.
     const sessionFile = id.sessionId ? findSessionFileForKind(id.agent, cwd, id.sessionId) : undefined;
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    // `remain-on-exit` retains the pane after its child exits. pane_dead is the
-    // authoritative signal; a retained pane is diagnostic, not attachable.
     const paneDead = paneDeadRaw === '1';
     const pidAlive = !paneDead && (pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true);
     const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
@@ -1890,22 +1749,13 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       topic,
       tokPerSec,
       sessionFile,
-      // Prefer the launch registry's start when known (more accurate than
-      // transcript birth for a resumed/reused file); else transcript times.
       startedAtMs: liveEntry?.startedAtMs ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       provenance,
       owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(sessionFile)),
-      // Factory / --active join key: AGENT_TERMINAL_ID stamped on the launch
-      // registry and preserved by SessionStart. Without this, Grok/Codex tmux
-      // panes never surface terminalId even when by-pid has it (RUSH-2192).
       launchId: liveEntry?.launchId,
       terminalId: liveEntry?.terminalId,
-      // An id-less pane keys its dedupe on the unique pane, so two anonymous
-      // co-located panes stay two rows instead of folding into one.
       paneId: id.sessionId ?? sessionIdFromFile(sessionFile) ? undefined : pane,
-      // The tmux session name is the one selector an id-less row still exposes —
-      // its `<shortid>` suffix is what `sessions inject` matches on (PHNX-3688).
       tmuxName: sessName,
     }, state, sessionFile, pidAlive));
   }
@@ -1940,24 +1790,14 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   foldPresence(merged);
   await foldTmuxClients(merged);
   foldHostLink(merged);
-  // Runs before the row leaves this box so every consumer — local render, the
-  // `--json` a peer answers a fan-out with, the browser's device filter — sees
-  // the EXECUTION host rather than the dispatcher (RUSH-2479).
   foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
   annotateOrchestratorLabels(merged);
-  // Last: derive the shown title (recap ladder) from label/tail/topic now that
-  // every row's live tail + label are resolved (RUSH-3011).
   foldRecap(merged);
-  // Project the coarse lifecycle bucket once status is final (foldHostLink above may
-  // have promoted a row to orphaned/crashed) so consumers read `phase` off the row
-  // instead of re-deriving it (PHNX-2484).
   foldPhase(merged);
   return merged;
 }
 
-/** Local discovery sources probed by {@link describeActiveDiscoveryHealth}. */
 interface ActiveDiscoveryHealth {
-  /** Sources that failed on the probe (currently only `'tmux'`). Empty = nothing degraded locally. */
   degradedSources: string[];
 }
 
@@ -2015,12 +1855,10 @@ export async function foldTmuxClients(rows: ActiveSession[]): Promise<void> {
         const [pane, attached] = line.split(TMUX_FIELD_SEP);
         if (!pane) continue;
         const n = parseInt(attached ?? '', 10);
-        // A tmux too old to report `session_attached` yields NaN — leave the pane
-        // unmapped so it stays "cannot tell" rather than becoming a false zero.
         if (Number.isFinite(n)) byPane.set(pane, n);
       }
     } catch {
-      continue; // best-effort: no count is honest, a guessed count is not
+      continue;
     }
     for (const s of tmuxRows) {
       if (s.provenance!.mux!.socket !== socket) continue;
@@ -2083,15 +1921,8 @@ function recordedMachineLookup(rows: ActiveSession[]): (sessionId: string) => st
 
 export function foldHostLink(rows: ActiveSession[]): void {
   for (const s of rows) {
-    // Cloud tasks have no local pid, window, or tmux server; there is no host
-    // link to classify and no honest answer to give.
     if (s.context === 'cloud') continue;
-    // A days-stale row is already `abandoned`; whether its window is also gone
-    // adds nothing, and its pid liveness is genuinely unknown from the status
-    // (abandoned outranks closed), so claim no host link rather than guess one.
     if (s.status === 'abandoned') continue;
-    // `closed` IS the dead-pid status — `lifecycleStatus` assigns it from
-    // `!pidAlive` and nothing else — so the status is the pid answer here.
     const signals = {
       pidAlive: s.status !== 'closed',
       windowHeartbeatMs: s.windowHeartbeatMs,
@@ -2107,7 +1938,6 @@ export function foldHostLink(rows: ActiveSession[]): void {
       s.presence = undefined;
     }
     if (link === 'host-gone' && s.status === 'closed') s.status = 'crashed';
-    // A clientless running remote pane is normal; only stopped work can be called orphaned.
     else if (link === 'no-client' && (s.status === 'idle' || s.status === 'input_required')) {
       s.status = 'orphaned';
     }
@@ -2120,7 +1950,6 @@ export function foldHostLink(rows: ActiveSession[]): void {
   }
 }
 
-/** One display line, trimmed and capped, or undefined when empty. */
 function recapLine(s: string | undefined, max = 120): string | undefined {
   const t = s?.replace(/\s+/g, ' ').trim();
   if (!t) return undefined;
@@ -2142,12 +1971,7 @@ export function deriveSessionRecap(
 } {
   const lastAgentLine = recapLine(row.tail?.length ? row.tail[row.tail.length - 1] : undefined);
   const raw = row.lastUserMessage ?? row.firstUserMessage ?? row.topic ?? '';
-  // No `turns` here on purpose: this tidy sees ONE turn, not the transcript, so
-  // it cannot count them. The daemon fold sets it (see SessionRequest.turns).
   const tidied = row.request ?? tidyRequest(raw, { attachments: row.attachments });
-  // No genuine turn to show (a synthetic-only transcript, or nothing indexed
-  // yet): fall back to the legacy classifier over whatever `topic` holds rather
-  // than showing an empty prompt rung.
   const fallback = tidied ? undefined : classifyUserPrompt(row.topic ?? '', {
     hasImageAttachment: row.attachments?.some((a) => a.mediaType?.startsWith('image/')),
   });
@@ -2180,18 +2004,13 @@ export function deriveSessionRecap(
 export function deriveImportantMessage(
   row: Pick<ActiveSession, 'status' | 'activity' | 'awaitingReason' | 'question' | 'preview' | 'lastAgentLine'>,
 ): SessionImportantMessage | undefined {
-  // The agent's latest words — the fallback text for every kind. `lastAgentLine`
-  // is already trimmed/capped; `preview` (a live tool/turn line) is not.
   const recent = recapLine(row.preview) ?? row.lastAgentLine;
 
-  // A pending question is the single most important thing an agent can be saying.
   if (row.awaitingReason === 'question' || row.question) {
     const text = recapLine(row.question?.text) ?? recent;
     if (text) return { text, kind: 'question' };
   }
 
-  // Blocked on the operator: a plan review, a permission decision, or a bare
-  // input-required wait. The "needs you" case the Fleet has to make loud.
   const needsYou = row.awaitingReason === 'plan_review'
     || row.awaitingReason === 'permission'
     || row.status === 'input_required'
@@ -2205,12 +2024,10 @@ export function deriveImportantMessage(
     return { text: recent ?? fallback, kind: 'needs_you' };
   }
 
-  // Nothing blocking — just what the agent is doing now.
   if (recent) return { text: recent, kind: 'activity' };
   return undefined;
 }
 
-/** Write one row's recap fields from its current label/generatedTitle/topic/tail. */
 function applyRecap(s: ActiveSession): void {
   const recap = deriveSessionRecap(s);
   s.title = recap.title;
@@ -2219,12 +2036,9 @@ function applyRecap(s: ActiveSession): void {
   s.userPromptKind = recap.userPromptKind;
   s.lastAgentLine = recap.lastAgentLine;
   if (recap.request) s.request = recap.request;
-  // The secondary line rides the same fold as the headline (PHNX-3797), so every
-  // consumer that reads `title` off a row reads `importantMessage` beside it.
   s.importantMessage = deriveImportantMessage(s);
 }
 
-/** Fold the recap ladder onto every row (see {@link deriveSessionRecap}). */
 export function foldRecap(rows: ActiveSession[]): void {
   for (const s of rows) applyRecap(s);
 }
@@ -2252,12 +2066,10 @@ export function derivePhase(status: ActiveStatus | undefined): SessionPhase {
   }
 }
 
-/** Fold the coarse lifecycle {@link SessionPhase} onto every row (see {@link derivePhase}). */
 export function foldPhase(rows: ActiveSession[]): void {
   for (const s of rows) s.phase = derivePhase(s.status);
 }
 
-/** Reap only stale sessions with proven-dead pids; unknown or live processes remain recoverable. */
 export function isReapableOrphan(
   row: Pick<ActiveSession, 'status' | 'pidAlive'>,
 ): boolean {
@@ -2272,7 +2084,7 @@ export function annotateOrchestratorLabels(sessions: ActiveSession[]): void {
   for (const s of sessions) {
     if (!s.orchestratorSessionId) continue;
     const orch = byId.get(s.orchestratorSessionId);
-    // ladder-exempt: the team orchestrator's LABEL, resolved before any index backfill (no generatedTitle exists yet); not a headline render.
+    // ladder-exempt: pre-index team label, not a headline render.
     if (orch) s.orchestratorLabel = orch.label || orch.topic || undefined;
   }
 }
@@ -2306,8 +2118,6 @@ export async function enrichProvenance(
         s.provenance = probed;
         return;
       }
-      // Row already carries exact mux/reply (the tmux path). Fill only what a
-      // pre-set provenance can't know from the pane alone: the real launch origin.
       if (probed.transport === 'ssh' && !s.provenance.ssh) {
         s.provenance.transport = 'ssh';
         s.provenance.ssh = probed.ssh;
@@ -2369,7 +2179,6 @@ export function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
     if (!key) { out.push(s); continue; }
     const existing = byKey.get(key);
     if (existing) {
-      // Carry pre-folded fork counts (headless rows arrive with pidCount set).
       existing.pidCount = (existing.pidCount ?? 1) + (s.pidCount ?? 1);
     } else {
       s.pidCount = s.pidCount ?? 1;

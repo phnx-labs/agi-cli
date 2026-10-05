@@ -55,19 +55,12 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(names).not.toContain('unshare');
     expect(names).not.toContain('audit');
     expect(names).not.toContain('trends');
-    // 'artifacts' (and with it `artifacts unshare`) was removed entirely — artifact
-    // sharing moved to the standalone `artifacts` CLI (PHNX-3992).
     expect(names).not.toContain('artifacts');
     expect(names).toContain('events');
     expect(names).toContain('insights');
-    // 'org' stayed retired with the Prix-coupled account layer; 'auth' returned
-    // against Phoenix ID, with the team surface nested as `auth space` (RUSH-2581).
     expect(names).not.toContain('org');
     expect(names).toContain('auth');
 
-    // `unshare` no longer has a nested home either — it lived under `artifacts`,
-    // which was removed with the share engine (PHNX-3992). It stays a retired
-    // top-level name (asserted below), with no nested home.
     const events = program.commands.find((c) => c.name() === 'events');
     expect(events?.commands.map((c) => c.name())).toContain('audit');
     // The nested `insights trends` alias was removed in the recipe collapse: `insights mix` is the

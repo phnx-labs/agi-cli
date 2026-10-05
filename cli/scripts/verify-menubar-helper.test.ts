@@ -23,15 +23,11 @@ function buildLinuxLikePath(): string {
 }
 const LINUX_LIKE_PATH = buildLinuxLikePath();
 
-// A real universal (fat) Mach-O header: FAT_MAGIC (0xCAFEBABE) followed by
-// enough bytes that `od -An -tx1 -N4` still reads cleanly.
 const UNIVERSAL_MAGIC = Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x02]);
-// A thin (single-arch) Mach-O 64 header (MH_MAGIC_64) — NOT the fat magic.
 const THIN_MAGIC = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]);
 
 type Bundle = 'ticketed-universal' | 'ticketed-thin' | 'unticketed-universal' | 'absent' | 'no-executable';
 
-/** Stage the script + a fixture bundle in an isolated root and run the gate. */
 function runGate(bundle: Bundle): { status: number | null; out: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-gate-'));
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
@@ -45,11 +41,9 @@ function runGate(bundle: Bundle): { status: number | null; out: string } {
       fs.writeFileSync(path.join(contents, 'MacOS/AGI Menu'), magic);
     }
     if (bundle === 'ticketed-universal' || bundle === 'ticketed-thin') {
-      // The stapled notarization ticket `stapler staple` writes.
       fs.writeFileSync(path.join(contents, 'CodeResources'), 'ticket-bytes\n');
     }
   }
-  // PATH without codesign/xcrun = the Linux producer environment.
   const r = spawnSync('/bin/bash', [path.join(root, 'scripts/verify-menubar-helper.sh')], {
     encoding: 'utf-8',
     env: { ...process.env, PATH: LINUX_LIKE_PATH },
@@ -62,7 +56,7 @@ describe('verify-menubar-helper.sh off-Mac (no codesign/xcrun)', () => {
     const { status, out } = runGate('unticketed-universal');
     expect(status).not.toBe(0);
     expect(out).toContain('NO stapled notarization ticket');
-    expect(out).toContain('1.22.44'); // names the incident so the operator knows the stakes
+    expect(out).toContain('1.22.44');
   });
 
   it('fails closed on a THIN (single-arch) binary even with a stapled ticket — the other half of RUSH-3031', () => {

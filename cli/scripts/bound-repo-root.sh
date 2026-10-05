@@ -20,7 +20,5 @@ fi
 # failure (an empty tree has nothing to commit; the repo still bounds the walk).
 git init -q
 git add -A
-# Identity via `-c`, never written to the box's config: a worker generally has
-# no git identity, and without one the commit fails and leaves an unborn HEAD.
 git -c user.email=agents@localhost -c user.name=agents \
     commit -q -m 'shipped tree' >/dev/null 2>&1 || true

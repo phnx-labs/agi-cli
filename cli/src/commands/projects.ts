@@ -84,6 +84,7 @@ import {
   markProjectPrReady,
   mergeProjectPr,
   resolveTargetSlugs,
+  setProjectPrAutoMerge,
   MERGE_METHODS,
   MERGED_WINDOW_DAYS,
   type CiState,
@@ -93,7 +94,6 @@ import { ghExec } from '../lib/github/pr-mergeable.js';
 import { readCiFailure, rerunFailedJobs } from '../lib/github/ci-failure.js';
 import { registerProjectTodoCommands } from './projects-todo.js';
 
-/** One glyph for a CI verdict in the human `prs` list; blank when there are no checks. */
 function ciMark(state: CiState | null): string {
   if (state === 'SUCCESS') return chalk.green('✓');
   if (state === 'FAILURE' || state === 'ERROR') return chalk.red('✗');
@@ -101,10 +101,8 @@ function ciMark(state: CiState | null): string {
   return ' ';
 }
 
-/** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
 const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
 
-/** Max peers named in the skipped note before the rest collapse to `+N`. */
 const SKIPPED_NAME_LIMIT = 4;
 
 /** A path-shaped `projects view` argument (`.`, `..`, `~`-prefixed, or containing a separator)
@@ -114,13 +112,9 @@ export function looksLikePath(token: string): boolean {
   return token === '.' || token === '..' || token.startsWith('~') || token.includes('/');
 }
 
-/** Machine-readable shape of `agents projects view <path> --json`. */
 interface ViewDetection {
-  /** Detected project name, or null when no definition contains the path. */
   name: string | null;
-  /** The detected project's Linear binding; fields are null when unbound. */
   linear: { name: string | null; projectId: string | null };
-  /** The detected project's repo/monorepo root (home-relative), or null. */
   root: string | null;
 }
 
@@ -164,14 +158,12 @@ export function formatFleetUnverifiedNote(unverified: string[]): string {
   return chalk.red(`  · ${unverified.length} ${noun} answered with a result that could not be verified: ${list}\n`);
 }
 
-/** `path:purpose` → a context anchor. Purpose may contain colons. */
 function parseContextFlag(raw: string): ProjectContext {
   const i = raw.indexOf(':');
   if (i === -1) return { path: raw.trim(), purpose: '' };
   return { path: raw.slice(0, i).trim(), purpose: raw.slice(i + 1).trim() };
 }
 
-/** `objective:measure` → a goal. The measure is optional; the objective may contain colons only after the first is claimed. */
 function parseGoalFlag(raw: string): ProjectGoal {
   const i = raw.indexOf(':');
   if (i === -1) return { objective: raw.trim() };
@@ -231,8 +223,6 @@ function runLinearImport(existing: Map<string, ProjectDef>, opts: ImportOptions)
     console.error(chalk.red(e instanceof Error ? e.message : String(e)));
     process.exit(1);
   }
-  // No projects root configured (or unreadable) → no local matching; every def
-  // still imports, carrying its Linear link and nothing it can't prove.
   const rootAbs = getProjectRoot() ? expandLocalHome(getProjectRoot()!) : undefined;
   let localDirs: string[] = [];
   if (rootAbs) {
@@ -252,14 +242,12 @@ function runLinearImport(existing: Map<string, ProjectDef>, opts: ImportOptions)
   }, opts);
 }
 
-/** One `projects list` row, pre-render. */
 export interface ProjectListRow {
   name: string;
   path: string;
   repo: string;
 }
 
-/** Longest path a `list` row shows before it truncates. */
 const LIST_PATH_MAX = 48;
 
 /** Column widths for `projects list`, sized to the printed rows: fixed padding was the bug (home-
@@ -310,8 +298,6 @@ export function formatMilestoneLines(
   limit: number,
 ): string[] {
   if (milestones.length === 0) {
-    // `next` without a list only happens on a cached answer written before the
-    // list existed; render what we have rather than dropping the row.
     return next ? [`  ${chalk.dim('next')}     ${formatNextMilestone(next, nowMs)}`] : [];
   }
   // The next milestone always leads: Linear can flag a later-dated milestone as next while
@@ -333,11 +319,8 @@ export function formatMilestoneLines(
   return out;
 }
 
-/** The `next` card line: what this project is due to hit, and how far along it is. */
 export function formatNextMilestone(ms: LinearMilestone, nowMs: number): string {
   const parts = [chalk.bold(ms.name)];
-  // A milestone with nothing filed under it yet has no progress to report —
-  // `0/0` is noise, not information.
   if (ms.total > 0) parts.push(`${ms.done}/${ms.total}`);
   const due = ms.targetDate ? formatMilestoneDue(ms.targetDate, nowMs) : undefined;
   if (due) parts.push(due.startsWith('overdue') ? chalk.yellow(due) : chalk.dim(due));
@@ -363,7 +346,6 @@ function statusBar(r: ProjectSessionRollup): string {
   return parts.join(' · ') || chalk.gray('no live agents');
 }
 
-/** Everything a project card needs beyond the stored definition. */
 interface ProjectRenderData {
   roll: Map<string, ProjectSessionRollup>;
   remote: Map<string, ProjectRemoteSignals>;
@@ -391,7 +373,6 @@ async function enrichProjectsForRender(
   const roll = rollupSessionsByProject(all, [...local, ...(opts.extraSessions ?? [])]);
   const remote = new Map<string, ProjectRemoteSignals>();
   const linear = new Map<string, LinearProjectCounts>();
-  // Local git, no API, no rate limit — measured 0.23s over a 897-commit week.
   const focus = new Map<string, FocusArea[]>();
   await Promise.all(
     defs.map(async (d) => {
@@ -416,11 +397,8 @@ function renderCard(
   fleet?: HostWorkspaceStatus[],
   linear?: LinearProjectCounts,
   nowMs: number = Date.now(),
-  /** How many milestones to print. `status` shows the next one; `view` shows all. */
   milestoneLimit: number = 1,
-  /** Directories the window's work landed in, from local git. */
   focus: FocusArea[] = [],
-  /** `view` mode: the caller prints the stored definition in full afterwards. */
   detail: boolean = false,
   /** Workspace probe rows used only for the warnings footer: the full `--fleet` set or a local-only
    * probe, so drift is never silent by default. */
@@ -434,12 +412,8 @@ function renderCard(
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
   if (split.dead > 0) {
-    // Wreckage is worth a number of its own — 19 crashed sessions is a thing to
-    // go fix, not a throughput signal to fold into the headline.
     console.log(`  ${chalk.dim('dead')}     ${formatDeadSummary(split)}`);
   }
-  // Live only, grouped by host when machine stamps exist so "who is on which
-  // box" is visible. Flat collapse hid that when harness×status matched across hosts.
   const liveMembers = r?.members.filter((m) => !isDeadStatus(m.status)) ?? [];
   if (liveMembers.length) {
     const agentLines = formatProjectMembersByHost(liveMembers);
@@ -464,8 +438,6 @@ function renderCard(
   for (const line of formatMilestoneLines(linear?.milestones ?? [], linear?.nextMilestone, nowMs, milestoneLimit)) {
     console.log(line);
   }
-  // Informational schedule only. Warn-level verdicts land in the footer so the
-  // bottom of the card is the one place you look for "what needs attention".
   const verdict = linear?.milestones?.length ? formatVerdict(scheduleVerdict(linear.milestones, nowMs)) : undefined;
   if (verdict && !verdict.warn) {
     console.log(`  ${chalk.dim('schedule')} ${verdict.text}`);
@@ -482,9 +454,6 @@ function renderCard(
     if (table.length === 0) {
       console.log(`  ${chalk.dim('fleet')}    ${chalk.gray('no workspace paths (set root or repos[].path)')}`);
     } else {
-      // A compact health line first (scan without reading every host), then the
-      // full per-host table under it. The grouped footer carries the actionable
-      // subset; this line + the table carry the whole picture.
       [formatFleetSummary(fleet), ...table].forEach((line, i) => {
         console.log(`  ${chalk.dim((i === 0 ? 'fleet' : '').padEnd(5))}    ${line}`);
       });
@@ -497,8 +466,6 @@ function renderCard(
   const repos = [def.repo, ...(def.repos ?? []).map((x) => x.slug)].filter(Boolean) as string[];
   if (repos.length) console.log(`  ${chalk.dim('repos')}    ${[...new Set(repos)].join(' · ')}`);
 
-  // Warnings footer — critical (🔴) then continue (⚠️). Sources: repo slug
-  // mismatch, workspace drift/dirty/missing, schedule that cannot measure.
   const warnings: ProjectWarning[] = [];
   const mismatch = def.root ? checkRepoSlug(def, originSlug(expandLocalHome(def.root))) : undefined;
   if (mismatch) {
@@ -520,8 +487,6 @@ function renderCard(
   }
   for (const line of formatProjectWarnings(warnings)) console.log(line);
 
-  // `view` prints these in full (path + purpose, label + URL) right below, so
-  // the compact one-line summaries would just say the same thing twice.
   if (!detail && def.goals?.length) {
     console.log(`  ${chalk.dim('goal')}     ${def.goals.map((g) => g.objective).join(' · ')}`);
   }
@@ -534,12 +499,10 @@ function renderCard(
   if (!detail) console.log('');
 }
 
-/** Options shared by `status` and `view`. */
 type ProjectCardOpts = {
   json?: boolean;
   window?: string;
   remote?: boolean;
-  /** Scope the fleet fan-out to specific devices; undefined = the whole fleet. */
   deviceFilter?: string[];
 };
 
@@ -553,7 +516,6 @@ function resolveDeviceFilter(device?: string[], devices?: string): string[] | un
   return merged.length ? [...new Set(merged)] : undefined;
 }
 
-/** Print the YAML-side fields that sit under the shared card in `view` mode. */
 function printProjectDefinition(def: ProjectDef, name: string): void {
   console.log();
   if (def.root) console.log(`  ${chalk.dim('root')}     ${def.root}`);
@@ -576,8 +538,6 @@ function printProjectDefinition(def: ProjectDef, name: string): void {
   console.log(chalk.gray(`  ${projectDefPath(name)}`));
 }
 
-// The single-PR verbs (`prs ready/review/comment/merge`) share these flag rules.
-// Every one runs before the repo is resolved, so a bad flag never reaches GitHub.
 
 function prFail(message: string): never {
   console.error(chalk.red(message));
@@ -588,7 +548,6 @@ function prProjectOrExit(name: string): ProjectDef {
   return loadProjectDef(name) ?? prFail(`No project named "${name}". List them: agents projects list`);
 }
 
-/** The whole token must be digits: parseInt would read "12junk" as PR 12. */
 function prNumberOrExit(raw: string): number {
   const t = raw.trim();
   const number = /^\d+$/.test(t) ? Number.parseInt(t, 10) : NaN;
@@ -602,7 +561,6 @@ function prShaOrExit(raw: string): string {
   return sha;
 }
 
-/** Exactly one of --body / --body-file (`-` = stdin), and never an empty comment. */
 function prCommentBodyOrExit(body: string | undefined, bodyFile: string | undefined): string {
   if ((body === undefined) === (bodyFile === undefined)) prFail('Pass exactly one of --body <text> or --body-file <path|->.');
   let text = body;
@@ -615,6 +573,13 @@ function prCommentBodyOrExit(body: string | undefined, bodyFile: string | undefi
   }
   if (!text || !text.trim()) prFail('The comment is empty.');
   return text.trimEnd();
+}
+
+function prMethodOrExit(raw: string | undefined): MergeMethod | undefined {
+  if (raw !== undefined && !(MERGE_METHODS as readonly string[]).includes(raw)) {
+    prFail(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${raw}".`);
+  }
+  return raw as MergeMethod | undefined;
 }
 
 async function prRepoOrExit(def: ProjectDef, repo: string): Promise<string> {
@@ -663,7 +628,6 @@ export function registerProjectsCommands(program: Command): void {
     `,
   });
 
-  // ---- list ----
   projects
     .command('list')
     .description('List defined projects (definitions only by default; no session scan).')
@@ -671,9 +635,6 @@ export function registerProjectsCommands(program: Command): void {
     .option('--with-agents', 'Include local active agent counts (opt-in; never SSH)')
     .action(async (opts: { json?: boolean; withAgents?: boolean }) => {
       const defs = listProjectDefs();
-      // Definitions-only by default: zero session scan / SSH. --with-agents is
-      // an explicit opt-in for local active counts only (getActiveSessions is
-      // local; it never fans out).
       const roll = opts.withAgents
         ? rollupSessionsByProject(defs, await getActiveSessions())
         : undefined;
@@ -709,7 +670,6 @@ export function registerProjectsCommands(program: Command): void {
       }
     });
 
-  // ---- add ----
   projects
     .command('add <name>')
     .description('Define a project. Infers root and repo from the current git repo when not given.')
@@ -780,8 +740,6 @@ async function runProjectCard(
   ): Promise<void> {
     const detail = mode === 'view';
     const all = listProjectDefs();
-    // Named lookup goes through the strict single-def loader so a broken
-    // <name>.yaml surfaces its validation error instead of "No project named".
     const defs = name ? [loadProjectDef(name)].filter((d): d is ProjectDef => d !== undefined) : all;
     if (name && !defs.length) {
       console.error(
@@ -835,7 +793,6 @@ async function runProjectCard(
       extraSessions: fleetSessions,
     });
 
-    /** This def's slice of the fleet probe, in its own target order. */
     const fleetFor = (d: ProjectDef): HostWorkspaceStatus[] => {
       const targets = new Set(workspaceTargetsForDef(d));
       return fleetWs.filter((s) => targets.has(s.path));
@@ -843,9 +800,6 @@ async function runProjectCard(
 
     if (opts.json) {
       if (fleetSkipped.length > 0) process.stderr.write(formatFleetSkippedNote(fleetSkipped));
-      // `view` used to nest the def fields at the top level and omit plan /
-      // worktrees / windowDays; keep one machine shape for both verbs so a
-      // consumer that switches `status`↔`view` does not re-learn the schema.
       console.log(
         JSON.stringify(
           defs.map((d) => {
@@ -882,11 +836,7 @@ async function runProjectCard(
       return;
     }
 
-    // Compact rollup shows the next milestone; `view` shows every declared one.
     const milestoneLimit = detail ? Number.POSITIVE_INFINITY : 1;
-    // Stamp the fleet-wide rollup with when it was taken, so a scrollback isn't
-    // mistaken for a live snapshot. A single named `view` skips it (one card, and
-    // its own detail makes the freshness obvious).
     if (!detail) {
       const t = new Date(nowMs);
       const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
@@ -904,8 +854,6 @@ async function runProjectCard(
         milestoneLimit,
         focus.get(d.name) ?? [],
         detail,
-        // Always feed workspace rows into the warnings footer so behind/dirty
-        // is never silent.
         fleetFor(d),
       );
       if (detail) printProjectDefinition(d, d.name);
@@ -941,7 +889,6 @@ async function runProjectCard(
           console.log(chalk.gray(`No defined project contains ${detectDir}`));
           return;
         }
-        // Non-JSON: fall through and render the full card for the detected project.
         name = detection.name;
       }
       // Named invocation is `view` depth (all milestones + definition); unnamed stays the
@@ -958,9 +905,6 @@ async function runProjectCard(
     });
 
 
-  // ---- prs ----
-  // `list` is the default so `prs <name>` keeps its shape; a bare parent with
-  // no options of its own is what lets `prs merge` own --repo/--number/--json.
   const prsCmd = projects
     .command('prs')
     .description('A project\'s open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).');
@@ -982,8 +926,6 @@ async function runProjectCard(
           console.error(chalk.red('--number names one PR in one repo; pass --repo <owner/repo> with it.'));
           process.exit(1);
         }
-        // Require the WHOLE token to be digits — Number.parseInt would accept
-        // "12junk" / "12.9" as 12 and silently query the wrong PR.
         const raw = opts.number.trim();
         number = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : NaN;
         if (!Number.isSafeInteger(number) || number <= 0) {
@@ -995,8 +937,6 @@ async function runProjectCard(
       try {
         envelope = await buildProjectPrs(def, { repo: opts.repo, number }, undefined, listProjectDefs());
       } catch (e) {
-        // A restriction error (repo not attached) is a hard, up-front failure —
-        // distinct from a per-repo fetch failure, which rides in the envelope.
         console.error(chalk.red(e instanceof Error ? e.message : String(e)));
         process.exit(1);
       }
@@ -1038,7 +978,6 @@ async function runProjectCard(
           console.log(chalk.yellow('\nSome repositories could not be fetched — the list above is incomplete.'));
         }
       }
-      // A partial result (any repo fetch failed) is not a clean success.
       if (envelope.partial) process.exit(1);
     });
 
@@ -1049,16 +988,15 @@ async function runProjectCard(
     .requiredOption('--number <n>', 'The PR number')
     .requiredOption('--sha <head-sha>', 'The head SHA you reviewed; GitHub refuses if the branch moved since')
     .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
+    .option('--admin', 'Merge a PR branch protection blocks, as a repository admin. For a person\'s explicit confirm only; agents must never pass it')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; json?: boolean }) => {
+    .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; admin?: boolean; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const sha = prShaOrExit(opts.sha);
-      if (opts.method !== undefined && !(MERGE_METHODS as readonly string[]).includes(opts.method)) {
-        prFail(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${opts.method}".`);
-      }
+      const method = prMethodOrExit(opts.method);
       const repo = await prRepoOrExit(def, opts.repo);
-      const result = await mergeProjectPr(repo, number, sha, opts.method as MergeMethod | undefined);
+      const result = await mergeProjectPr(repo, number, sha, method, { admin: opts.admin === true });
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
       } else if (result.merged) {
@@ -1077,9 +1015,56 @@ async function runProjectCard(
     `,
     notes: `
       The merge is a single REST call pinned to --sha: if anything was pushed after
-      you read the PR, GitHub refuses and nothing merges. Branch protection, required
-      checks and reviews stay GitHub's to enforce; a refusal exits 1 with GitHub's
-      message (merged: false in --json).
+      you read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose
+      live mergeable_state is not clean/unstable/has_hooks (blocked by a pending or red
+      required check or a review, behind, conflicted, or not computed yet) is refused
+      before the call. --admin skips that refusal and lets a
+      repository admin merge past branch protection where GitHub allows it; it exists
+      for a person's explicit confirm (AGI Menu's "Confirm admin merge") and agents
+      must never pass it. To land a PR once its checks pass, use prs automerge. A
+      refusal exits 1 with GitHub's reason (merged: false in --json).
+    `,
+  });
+
+  const automergeCmd = prsCmd
+    .command('automerge <name>')
+    .description('Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--number <n>', 'The PR number')
+    .option('--sha <head-sha>', 'The head SHA you reviewed (required to turn it on); GitHub refuses if the branch moved since')
+    .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
+    .option('--off', 'Turn auto-merge off instead')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; number: string; sha?: string; method?: string; off?: boolean; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const enable = opts.off !== true;
+      if (enable && opts.sha === undefined) prFail('Pass --sha <head-sha>: auto-merge is pinned to the head you reviewed.');
+      if (!enable && opts.method !== undefined) prFail('--method only applies when turning auto-merge on.');
+      const sha = opts.sha === undefined ? undefined : prShaOrExit(opts.sha);
+      const method = prMethodOrExit(opts.method);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await setProjectPrAutoMerge(repo, number, enable && sha !== undefined ? { enable: true, sha, method } : { enable: false });
+      const ok = result.enabled === enable;
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (ok) console.log(`${chalk.green(result.message)}: ${repo}#${number}`);
+      else console.error(chalk.red(`Auto-merge not changed: ${repo}#${number}: ${result.message}`));
+      if (!ok) process.exit(1);
+    });
+
+  setHelpSections(automergeCmd, {
+    examples: `
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + merge.autoMergeAllowed
+      agents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --off --json
+    `,
+    notes: `
+      GitHub has no REST endpoint for auto-merge, so each call is one GraphQL
+      mutation (enablePullRequestAutoMerge / disablePullRequestAutoMerge) after a REST
+      read. Turning it on passes expectedHeadOid, so a branch that moved since --sha
+      is refused. The repository must allow auto-merge (merge.autoMergeAllowed in
+      prs --json), and GitHub refuses it on a PR that can already merge: use prs merge
+      for that. Exits 1 unless auto-merge ends in the requested state.
     `,
   });
 
@@ -1147,8 +1132,8 @@ async function runProjectCard(
     notes: `
       One REST call (POST pulls/{n}/reviews, event APPROVE). The live head is read
       first and a moved head is refused; the review carries commit_id = that SHA, so
-      it is recorded against the code you saw. GitHub refuses approving your own PR
-      (exit 1, submitted: false in --json).
+      it is recorded against the code you saw. On your own PR it answers at once
+      (exit 1, submitted: false) without calling GitHub, which never allows that.
     `,
   });
 
@@ -1302,7 +1287,6 @@ async function runProjectCard(
 
   registerProjectTodoCommands(projects);
 
-  // ---- edit ----
   projects
     .command('edit <name>')
     .description('Open the project YAML in $EDITOR (it is hand-editable regardless).')
@@ -1313,23 +1297,18 @@ async function runProjectCard(
         process.exit(1);
       }
       const editor = process.env.VISUAL || process.env.EDITOR || 'vi';
-      // $EDITOR commonly carries args ("code --wait") — split like monitors/routines do.
       const parts = editor.split(/\s+/).filter(Boolean);
       const res = spawnSync(parts[0], [...parts.slice(1), target], { stdio: 'inherit' });
       process.exit(res.status ?? 0);
     });
 
-  // ---- probe (hidden; the peer half of `status --fleet`) ----
   projects
     .command('probe [paths...]', { hidden: true })
     .description('Probe workspace repos (presence, branch, drift, dirtiness) and print JSON. Answers for this machine only.')
     .action((paths: string[]) => {
-      // Never fans out — the recursion guard env is set by the parent fan-out,
-      // and this command has no remote code path either way.
       console.log(JSON.stringify(probeProjectWorkspaces(paths ?? []), null, 2));
     });
 
-  // ---- pull-local (hidden; the peer half of `pull`) ----
   projects
     .command('pull-local', { hidden: true })
     .description('Fast-forward workspace repos (default-branch only) and print JSON. Answers for this machine only.')
@@ -1350,7 +1329,6 @@ async function runProjectCard(
       console.log(JSON.stringify(envelope, null, 2));
     });
 
-  // ---- pull ----
   const pullCmd = projects
     .command('pull <name>')
     .description('Fast-forward every fleet checkout of a named project to its remote default branch.')
@@ -1372,7 +1350,6 @@ async function runProjectCard(
 
       const deviceFilter = resolveDeviceFilter(rawOpts.device, rawOpts.devices);
 
-      // Pull locally first.
       const self = machineId();
       const localResults = await pullProjectTargets(targets, self);
 
@@ -1403,8 +1380,6 @@ async function runProjectCard(
         printProjectPullSummary(name, allResults, remoteRes.skipped, remoteRes.parseFailed);
       }
 
-      // A peer whose answer could not be verified already ran a real pull whose
-      // outcome we cannot see — that is a failed pull, not a quiet success.
       if (!projectPullComplete(allResults) || remoteRes.parseFailed.length > 0) {
         process.exit(1);
       }
@@ -1434,7 +1409,6 @@ async function runProjectCard(
     `,
   });
 
-  // ---- import ----
   projects
     .command('import')
     .description('Import project definitions from Linear (via the `linear` CLI).')
@@ -1457,7 +1431,6 @@ async function runProjectCard(
       for (const skip of result.skipped) console.log(chalk.gray(`  skip ${skip.name}: ${skip.reason}`));
     });
 
-  // ---- set ----
   projects
     .command('set <name>')
     .description('Change one field on a project definition, preserving everything else.')
@@ -1481,15 +1454,10 @@ async function runProjectCard(
         console.error(chalk.red('Nothing to set. Pass a field, e.g. --repo <owner/repo>.'));
         process.exit(1);
       }
-      // One --slug cannot name two directories. Refuse rather than guess which
-      // --add-dir it was meant for.
       if (opts.slug && opts.addDir.length !== 1) {
         console.error(chalk.red('--slug names a single --add-dir; pass exactly one --add-dir with it.'));
         process.exit(1);
       }
-      // Load, mutate the named fields, write back — the `link` pattern. NEVER
-      // the `add --force` pattern, which rebuilds the def from flags alone and
-      // silently drops linear/contexts/integrations that were not re-passed.
       if (opts.repo !== undefined) def.repo = opts.repo;
       if (opts.root !== undefined) def.root = opts.root;
       if (opts.description !== undefined) def.description = opts.description;
@@ -1507,8 +1475,6 @@ async function runProjectCard(
         def.defaultPath = `${base}/${opts.path.replace(/^\//, '')}`;
       }
 
-      // --rm-dir before --add-dir, so re-pointing one directory in a single
-      // command (`--rm-dir old --add-dir new`) does what it reads like.
       const removed: string[] = [];
       for (const d of opts.rmDir) {
         const target = path.resolve(expandLocalHome(d));
@@ -1550,7 +1516,6 @@ async function runProjectCard(
       for (const r of added) console.log(chalk.gray(`  + dir  ${r.path}  ·  ${r.slug}`));
     });
 
-  // ---- link ----
   projects
     .command('link <name>')
     .description('Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).')
@@ -1565,8 +1530,6 @@ async function runProjectCard(
         console.error(chalk.red('Nothing to link. Pass a tracker flag, e.g. --linear [query].'));
         process.exit(1);
       }
-      // Explicit user command — a missing/unauthenticated `linear` CLI is loud,
-      // unlike the best-effort card enrichment.
       let list: ReturnType<typeof listLinearProjects>;
       try {
         list = listLinearProjects();
@@ -1579,9 +1542,6 @@ async function runProjectCard(
       if (query) {
         pick = pickLinearProject(query, list);
       } else {
-        // Auto-suggest from the def's own identity — the primary repo slug is
-        // the sharpest key, then the def name. Only an exact normalized match
-        // writes itself; anything weaker asks the user to disambiguate.
         pick = { kind: 'none' };
         for (const hint of [def.repo, def.name].filter((h): h is string => typeof h === 'string' && h.length > 0)) {
           const d = pickLinearProject(hint, list);
@@ -1604,22 +1564,17 @@ async function runProjectCard(
         process.exit(1);
       }
       const p = pick.project;
-      // Preserve every other field — load, set linear, write back. Keep a
-      // previously linked url when the new CLI row carries none.
       if (def.linear?.projectId && def.linear.projectId !== p.id) {
         console.log(chalk.gray(`  replacing previous Linear link (${def.linear.projectId})`));
       }
       if (def.linear?.name && def.linear.name !== p.name) {
         console.log(chalk.gray(`  renaming "${def.linear.name}" → "${p.name}" (Linear is authoritative)`));
       }
-      // Assigned, not spread over `def.linear`: a spread would resurrect a url
-      // that nextLinearLink deliberately dropped. The block has no other fields.
       def.linear = nextLinearLink(def.linear, p);
       writeProjectDef(def);
       console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
     });
 
-  // ---- save ----
   projects
     .command('save')
     .description('Create or update one project from a complete ProjectDef JSON object on stdin.')
@@ -1659,7 +1614,6 @@ async function runProjectCard(
       console.log(JSON.stringify(saved, null, 2));
     });
 
-  // ---- rm ----
   projects
     .command('remove <name>')
     .alias('rm')

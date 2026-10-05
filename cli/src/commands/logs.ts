@@ -31,7 +31,6 @@ type Candidate =
   | { kind: 'task'; task: HostTask }
   | { kind: 'session'; session: SessionMeta };
 
-/** Compact one-line label used by both the picker and the non-TTY list. */
 function candidateLabel(c: Candidate): string {
   if (c.kind === 'task') {
     const t = c.task;
@@ -46,7 +45,6 @@ function candidateLabel(c: Candidate): string {
   return `${chalk.gray('sess')} ${s.shortId.padEnd(9)} ${(s.agent + ver).padEnd(14)} ${chalk.gray(s.timestamp.slice(0, 16))}  ${title.slice(0, 40)}`;
 }
 
-/** Emit a host-dispatch task's log as JSON: `{ kind, task, log }`. */
 function emitHostTaskJson(id: string): boolean {
   const hj = hostTaskLogJson(id);
   if (!hj.found) return false;
@@ -54,7 +52,6 @@ function emitHostTaskJson(id: string): boolean {
   return true;
 }
 
-/** Show a resolved session — follow (tail), concise summary, or (`full`) transcript. */
 async function showSession(session: SessionMeta, follow: boolean, full: boolean, json = false): Promise<void> {
   if (json) {
     await renderSessionLogJson(session);
@@ -84,7 +81,6 @@ async function showCandidate(c: Candidate, follow: boolean, full: boolean, json 
   await showSession(c.session, follow, full, json);
 }
 
-/** Resolve an explicit id/--session: host task first, then a session. */
 async function showById(id: string, follow: boolean, full: boolean, json = false): Promise<void> {
   if (json) {
     if (emitHostTaskJson(id)) return;
@@ -124,8 +120,6 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   const { agent, version } = parseAgentFilter(opts.agent);
   const wantVersion = opts.version ?? version;
 
-  // Host tasks carry no session-index metadata; sessions carry no host tag.
-  // So --device scopes to dispatched tasks, and --version to sessions.
   const candidates: Candidate[] = [];
 
   let tasks = listTasks();
@@ -148,7 +142,6 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
     return;
   }
 
-  // Multiple sessions matched → picker if interactive, else a list to pick from.
   if (!process.stdin.isTTY) {
     console.error(chalk.yellow(`${candidates.length} runs match. Pass an id or --session <id>:`));
     for (const c of candidates.slice(0, 30)) console.error('  ' + candidateLabel(c));
@@ -259,7 +252,6 @@ async function runStats(opts: { since?: string; json?: boolean }): Promise<void>
   console.log();
 }
 
-/** Register the top-level `agents logs` command. */
 export function registerLogsCommand(program: Command): void {
   const logsCmd = program
     .command('logs [id]')
