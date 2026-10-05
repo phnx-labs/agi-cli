@@ -1,11 +1,3 @@
-/**
- * Annotated release tags from the folded changelog, exercised by running the
- * REAL create-annotated-release-tag.sh against a REAL git repository (no mocks).
- *
- * release.sh itself cannot run hermetically (it demands live npm + GitHub);
- * extracting the tag+notes contract into create-annotated-release-tag.sh is what
- * makes this path testable — the same reason validate-bump.sh exists.
- */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';

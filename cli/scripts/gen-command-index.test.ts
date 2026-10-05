@@ -1,7 +1,3 @@
-// Exercises the real command tree (no mocks) so a Commander upgrade that renames
-// the introspection API (`registeredArguments`, `.aliases()`, `.options`) — or a
-// command that stops registering — fails here instead of silently producing an
-// empty/wrong index.
 
 import { describe, expect, it } from 'vitest';
 import { buildFullCommandTree } from '../src/cli/command-registry.js';
@@ -37,8 +33,8 @@ function find(nodes: CommandNode[], path: string): CommandNode | undefined {
 describe('command index generation', () => {
   it('builds a non-trivial tree from the real command modules', async () => {
     const nodes = await tree();
-    expect(nodes.length).toBeGreaterThan(50); // the whole tree really loaded
-    expect(countCommands(nodes)).toBeGreaterThan(nodes.length); // groups have subcommands
+    expect(nodes.length).toBeGreaterThan(50);
+    expect(countCommands(nodes)).toBeGreaterThan(nodes.length);
   });
 
   it('has descriptions for every visible command and option', async () => {
@@ -56,7 +52,6 @@ describe('command index generation', () => {
 
   it('records commander aliases without duplicating the group (devices/fleet)', async () => {
     const nodes = await tree();
-    // `fleet` is an alias of `devices`, so it must NOT appear as its own group.
     expect(nodes.filter((n) => n.name === 'fleet')).toHaveLength(0);
     expect(find(nodes, 'devices')?.aliases).toContain('fleet');
   });
@@ -90,7 +85,6 @@ describe('command index generation', () => {
     const json = JSON.parse(renderJson(nodes, undefined, AGENTS_REFERENCE)) as { tree: CommandNode[] };
     const create = find(json.tree, 'teams create');
     expect(create).toBeDefined();
-    // Every option is a {flags, description} pair, never a bare string.
     for (const opt of create!.options) {
       expect(typeof opt.flags).toBe('string');
       expect(opt.flags.length).toBeGreaterThan(0);
@@ -102,9 +96,6 @@ describe('command index generation', () => {
 
   it('captures nested option variants, choices, defaults, examples, and notes', async () => {
     const nodes = await tree();
-    // `insights query` is a nested command that redeclares its flags (unlike the
-    // opaque `browser start` passthrough, PHNX-4101), so it exercises the generator's
-    // capture of nested long options AND their defaults.
     const query = find(nodes, 'insights query');
     expect(query).toBeDefined();
     expect(query!.options.some((option) => option.long?.startsWith('--'))).toBe(true);
@@ -120,7 +111,6 @@ describe('command index generation', () => {
     expect(md).toContain('# agents CLI command reference');
     expect(md).toContain('## teams');
     expect(md).toContain('agents teams create <team>');
-    // Fenced code blocks are balanced (one open + close per group).
     expect((md.match(/^```$/gm) ?? []).length).toBe(nodes.length * 2);
   });
 
@@ -137,9 +127,7 @@ describe('command index generation', () => {
     const nodes = await tree();
     const html = renderHtml(nodes, undefined, AGENTS_REFERENCE);
     expect(html).toContain('<nav id="nav"');
-    // Every card is reachable by browsing, not only by searching.
     expect((html.match(/<li data-nav=/g) ?? []).length).toBe(countCommands(nodes));
-    // A group with subcommands is collapsible; its children nest under it.
     expect(html).toContain('<li data-nav="teams"><details><summary><a href="#teams">teams</a>');
     expect(html).toContain('<li data-nav="teams-create"><a href="#teams-create">create</a></li>');
   });
@@ -152,16 +140,11 @@ describe('command index generation', () => {
     const targets = [...html.matchAll(/<li data-nav="([^"]*)"/g)].map((m) => m[1]);
     expect(targets.length).toBeGreaterThan(0);
     for (const target of targets) expect(ids.has(target)).toBe(true);
-    // The root's path is empty; it must still be linkable rather than id="".
     expect(ids.has('agents')).toBe(true);
     expect(html).not.toContain('id=""');
   });
 
   it('keeps the reserved root anchor free of collisions', async () => {
-    // The generator hands the root the reserved id `agents` because its path is
-    // empty. That is only safe while no top-level group is named `agents` — a
-    // group by that name would mean `agents agents` and silently steal the
-    // root's anchor. Enforce the claim the comment makes instead of trusting it.
     const nodes = await tree();
     expect(nodes.map((node) => node.name)).not.toContain('agents');
     const html = renderHtml(nodes, rootNode(await buildFullCommandTree(), AGENTS_REFERENCE), AGENTS_REFERENCE);

@@ -1,19 +1,3 @@
-/**
- * stage-menubar-helper.sh — stages the PUBLISHED AGI Menu helper (PHNX-4036).
- *
- * The helper's source left this repo for phnx-labs/agi-menu, so nothing here can
- * build it; the only thing a release or a developer can do is fetch the signed
- * bundle the helper's own release published on `menubar/v<floor>` and verify it.
- * These tests EXECUTE the script (no mocks):
- *
- *  - against a real local HTTP server serving a fixture "release", so the sha256
- *    gate, the optional provenance sidecar, the 404 path, and the off-macOS
- *    refusal are all exercised offline and deterministically;
- *  - against the REAL published release at the floor in helper-versions.ts, when
- *    the network is reachable — the test that proves the address the script
- *    resolves is the one that actually serves the helper, and (on macOS) that the
- *    published bundle passes codesign + Gatekeeper + the DR-pin gate end to end.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -41,7 +25,6 @@ function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-/** A cli/-shaped dir holding only what the script reads: the two scripts + the floor table. */
 function fixture(): string {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-stage-')));
   roots.push(root);
@@ -55,7 +38,6 @@ function fixture(): string {
   return root;
 }
 
-/** Serve a directory over real HTTP (404 for anything absent) and record every request path. */
 async function serve(dir: string): Promise<{ url: string; requests: string[] }> {
   const requests: string[] = [];
   const server = http.createServer((req, res) => {
@@ -75,7 +57,6 @@ async function serve(dir: string): Promise<{ url: string; requests: string[] }> 
   return { url: `http://127.0.0.1:${port}`, requests };
 }
 
-/** A fixture "release": zip bytes, the .sha256 the publisher writes, and optionally the provenance sidecar. */
 function publish(dir: string, opts: { sidecar?: boolean; wrongSha?: boolean } = {}): { zip: Buffer } {
   fs.mkdirSync(dir, { recursive: true });
   const zip = Buffer.from(`PK fixture bundle bytes ${Math.random()}`);
@@ -91,11 +72,6 @@ function publish(dir: string, opts: { sidecar?: boolean; wrongSha?: boolean } = 
   return { zip };
 }
 
-/**
- * Run the script asynchronously. The fixture HTTP server lives in THIS process,
- * so a spawnSync here would block the event loop the server needs to answer —
- * the script's curl would wait on a socket nobody services.
- */
 function run(
   root: string,
   args: string[],
@@ -117,7 +93,6 @@ function run(
 const FLOOR = helperFloor('menubar');
 const PUBLISHED_SHA_URL = `https://github.com/phnx-labs/agi-cli/releases/download/menubar/v${FLOOR}/MenubarHelper.app.zip.sha256`;
 
-/** Real reachability of the published address; the live tests skip (never fake) without it. */
 function publishedReleaseReachable(): boolean {
   const r = spawnSync(
     'curl',
@@ -151,14 +126,13 @@ describeUnix('stage-menubar-helper.sh', () => {
     expect(info.tag).toBe(`menubar/v${FLOOR}`);
     expect(info.assetUrl).toBe(`${url}/MenubarHelper.app.zip`);
     expect(info.sha256).toBe(sha256(zip));
-    expect(info.app).toBeNull(); // --fetch-only never extracts
+    expect(info.app).toBeNull();
     expect(info.source).toEqual({
       repo: 'phnx-labs/agi-menu',
       commit: '0123456789abcdef0123456789abcdef01234567',
       tag: 'v9.9.9',
       version: '9.9.9',
     });
-    // The bytes on disk are the served bytes, at the path the JSON names.
     expect(fs.readFileSync(info.zip)).toEqual(zip);
     expect(requests).toEqual([
       '/MenubarHelper.app.zip.sha256',
@@ -186,7 +160,7 @@ describeUnix('stage-menubar-helper.sh', () => {
     expect(r.status).not.toBe(0);
     expect(r.out).toContain('sha256 mismatch');
     expect(r.out).toContain('refusing to stage the wrong bytes');
-    expect(r.stdout.trim()).toBe(''); // no JSON on failure — a caller parsing it must not see a half-record
+    expect(r.stdout.trim()).toBe('');
   });
 
   it('fails closed when the release has no assets, naming the agi-menu publish step', async () => {
@@ -202,10 +176,6 @@ describeUnix('stage-menubar-helper.sh', () => {
   });
 
   it('refuses to stage an extracted bundle off macOS, before downloading anything', async () => {
-    // A real Linux box has no codesign/spctl, so an extracted bundle could never
-    // be verified there. The script must say so up front rather than download
-    // 2 MB and then die — and must not touch bin/. `uname` is stubbed on PATH
-    // so this runs the genuine branch on a macOS test host too.
     const root = fixture();
     const release = path.join(root, 'release');
     publish(release);
@@ -233,9 +203,6 @@ describeUnix('stage-menubar-helper.sh', () => {
 });
 
 describeUnix('stage-menubar-helper.sh against the PUBLISHED release', () => {
-  // These hit https://github.com/phnx-labs/agi-cli/releases/download/menubar/v<floor>/
-  // for real. They skip — never stub — when that address is unreachable, so an
-  // offline run stays green without pretending the release was checked.
   it.skipIf(!ONLINE)(
     `downloads menubar/v${FLOOR} and its sha256 matches the published .sha256`,
     async () => {
@@ -251,7 +218,6 @@ describeUnix('stage-menubar-helper.sh against the PUBLISHED release', () => {
       const published = fs.readFileSync(path.join(dl, 'MenubarHelper.app.zip.sha256'), 'utf-8').split(/\s+/)[0];
       expect(info.sha256).toBe(published);
       expect(sha256(fs.readFileSync(info.zip))).toBe(published);
-      // A zip, not an HTML error page that happened to hash consistently.
       expect(fs.readFileSync(info.zip).subarray(0, 2).toString('latin1')).toBe('PK');
     },
     300_000,
@@ -266,10 +232,7 @@ describeUnix('stage-menubar-helper.sh against the PUBLISHED release', () => {
       const info = JSON.parse(r.stdout);
       expect(info.app).toBe(path.join(root, 'bin/MenubarHelper.app'));
       expect(fs.existsSync(path.join(info.app, 'Contents/MacOS/AGI Menu'))).toBe(true);
-      // The stapled notarization ticket verify-menubar-helper.sh requires.
       expect(fs.existsSync(path.join(info.app, 'Contents/CodeResources'))).toBe(true);
-      // Re-running replaces the bundle in place rather than nesting a second
-      // copy inside it (the "unsealed contents" corruption).
       const again = await run(root, ['--json', '--download-dir', path.join(root, 'dl')]);
       expect(again.status, again.out).toBe(0);
       expect(fs.existsSync(path.join(info.app, 'MenubarHelper.app'))).toBe(false);

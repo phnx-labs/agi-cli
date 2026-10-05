@@ -1,31 +1,4 @@
 #!/usr/bin/env bash
-#
-# Immutable helper mapping for an agents-cli release (RUSH-2666).
-#
-# Ordinary release reuses already-signed helper artifacts keyed by a digest of
-# their complete inputs. Missing or changed inputs fail closed. Rebuild and
-# notarization live outside this path.
-#
-# What counts as a helper's input differs by where its source lives:
-#   menubar       NOT source -- AGI Menu lives in phnx-labs/agi-menu (PHNX-4036)
-#                 and this repo only pins which published build it uses. Its
-#                 input is src/lib/helper-versions.ts, the file that holds the
-#                 `menubar` floor; its asset is the published MenubarHelper.app.zip
-#                 on menubar/v<floor>, staged by scripts/stage-menubar-helper.sh.
-#
-# Usage:
-#   release-manifest.sh new --cli-version VER --cli-tree TREE
-#   release-manifest.sh input-digest --repo-root DIR --helper NAME
-#   release-manifest.sh put --file MANIFEST.json --helper NAME --input-digest D \
-#                           --asset-digest D --helper-version VER [--asset-url U]
-#                           [--asset-path P] [--signer-team T] [--arch A] [--platform P]
-#                           [--source JSON]
-#   release-manifest.sh verify --file MANIFEST.json
-#   release-manifest.sh resolve --file MANIFEST.json --helper NAME
-#   release-manifest.sh reuse --file MANIFEST.json --helper NAME --input-digest D
-#   release-manifest.sh require --file MANIFEST.json --repo-root DIR [--helper NAME]
-#   release-manifest.sh copy-asset --file MANIFEST.json --helper NAME --asset-path DESTDIR
-#
 set -euo pipefail
 
 _scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
@@ -36,10 +9,6 @@ usage() {
   exit 2
 }
 
-# The computer helpers (computer-mac / computer-win) left this repo with the
-# standalone `computer` engine (PHNX-4075): that engine resolves and verifies its
-# own helper releases, so they are no longer helpers of THIS CLI and must not be
-# recorded in its manifest.
 KNOWN_HELPERS="menubar"
 
 CMD="${1:-}"
@@ -102,21 +71,11 @@ helper_paths() {
   local root="$1" name="$2"
   case "$name" in
     menubar)
-      # No source here (phnx-labs/agi-menu). The input that selects the published
-      # build is the floor table; a floor bump is the only thing that changes
-      # which MenubarHelper.app.zip the CLI installs, and it re-records from that
-      # published release -- never a rebuild.
       printf '%s\n' "$root/cli/src/lib/helper-versions.ts"
       ;;
   esac
 }
 
-# Hashes $path (a file or a directory tree) with each entry keyed by its path
-# RELATIVE to $root, never the absolute path. input_digest_of's digest is
-# recorded once (by the producer) and re-verified elsewhere (require_helpers,
-# on a different machine or a differently-pid-suffixed worktree) -- an
-# absolute path bakes in that machine/worktree's on-disk location, so the
-# recorded digest can never match a re-derivation anywhere else (RUSH-2766).
 hash_tree() {
   local root="$1" path="$2" out="" f rel
   if [[ -f "$path" ]]; then
@@ -189,10 +148,6 @@ put_helper() {
   fi
   local plat
   plat="${PLATFORM:-darwin}"
-  # Provenance of a helper published from another repo (menubar-source.txt on
-  # the release: repo/commit/tag/version). Optional -- releases cut before the
-  # sidecar existed have none -- but when given it must be a JSON object, so a
-  # reader never has to guess the shape.
   local source
   source="${SOURCE_JSON:-null}"
   jq -e 'type == "object" or . == null' <<<"$source" >/dev/null 2>&1 \
@@ -267,8 +222,6 @@ require_helpers() {
   printf '%s\n' "$FILE"
 }
 
-# Copy verified helper bytes into DEST without rebuilding. Used to stage a
-# helper asset onto v<new> for a --with-helpers release, without a rebuild.
 copy_asset() {
   [[ -n "$FILE" ]] || die "copy-asset needs --file"
   [[ -n "$HELPER" ]] || die "copy-asset needs --helper"

@@ -1,15 +1,3 @@
-# Shared helpers for the release/test scripts in cli/scripts/. Source it by path
-# relative to the caller, before any cd, so it resolves from any checkout or
-# worktree. Pure bash (no dirname), so it still loads with an empty PATH:
-#
-#   _scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
-#   source "$_scripts_dir/lib/common.sh"
-#
-# Only for scripts executed from a real checkout. A script piped over
-# `ssh … bash -s` has no file to source from and keeps its own helpers.
-#
-# die exits with $DIE_STATUS (default 1); a caller whose contract reserves a
-# different failure code sets it before sourcing (release-lease.sh uses 2).
 
 red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }

@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-#
-# Build agents-cli into ./dist.
-#
-# Usage: scripts/build.sh [<version>] [--clean] [--skip-tests] [--device <box>] [--here]
-#
-#   <version>      optional, e.g. 1.15.0 or 1.15.0-alpha.9 -- writes to package.json
-#   --clean        wipe ./dist first
-#   --skip-tests   skip the test suite
-#   --device <box> run the suite on that fleet box instead of a crabbox
-#   --here         run the suite on THIS machine (loud; never the default)
 
 set -euo pipefail
 
@@ -23,14 +13,9 @@ die() { red "  Error: $*"; exit 1; }
 
 CLEAN=false
 SKIP_TESTS=false
-# Where the suite runs; empty = scripts/test.sh's default (offload to a crabbox).
 TEST_TARGET=()
 VERSION=""
 SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)\.[0-9]+)?$'
-# A while/shift loop, not `for arg in "$@"`: the for-loop form snapshots the
-# argument list, so `shift` cannot consume a flag's VALUE and `$2` refers to the
-# script's second positional rather than the next token. That worked only while
-# every flag here was value-less; --device takes one.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=true; shift ;;
@@ -75,11 +60,6 @@ bun install --silent
 dim "  Compiling TypeScript"
 bun run build >/dev/null 2>&1
 
-# Bundle the session-tracker SessionStart hook helper into the CLI dist.
-# `agents sync` and `agents add` register hook.sh in each harness's native config;
-# that only works if the helper travels with the installed CLI tarball. Build the
-# package here rather than requiring a prior manual build — a conditional copy
-# silently shipped a CLI with the hook permanently disabled on any clean checkout.
 ST_ROOT=../packages/session-tracker
 [ -d "$ST_ROOT" ] || { echo "error: $ST_ROOT missing — monorepo layout expected" >&2; exit 1; }
 dim "  Building session-tracker hook helper"
@@ -89,10 +69,6 @@ mkdir -p dist/session-tracker/dist
 cp -R "$ST_ROOT/dist/"* dist/session-tracker/dist/
 cp "$ST_ROOT/src/hook.sh" dist/session-tracker/dist/hook.sh
 
-# TypeScript emits CLI entrypoints with mode 644. npm pack preserves the mode,
-# and npm install in newer versions does NOT auto-chmod the bin target, so
-# users see `zsh: permission denied: agents` when invoking through the global
-# shim. Set executable bits on every file declared in `package.json#bin`.
 node -e "
   const fs = require('fs');
   const bin = require('./package.json').bin || {};
@@ -106,13 +82,8 @@ node -e "
 if $SKIP_TESTS; then
   dim "  Skipping tests (--skip-tests)"
 else
-  # Offloaded by default (RUSH-3178). scripts/test.sh decides WHERE; build.sh
-  # only decides WHETHER. Pass --device <box> / --here through to choose.
   dim "  Running tests (via scripts/test.sh${TEST_TARGET[*]:+ ${TEST_TARGET[*]}})"
   TEST_LOG=$(mktemp)
-  # bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
-  # input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
-  # under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.
   if ! scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} >"$TEST_LOG" 2>&1; then
     echo
     red "  Tests failed"

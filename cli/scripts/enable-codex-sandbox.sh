@@ -1,34 +1,4 @@
 #!/usr/bin/env bash
-#
-# enable-codex-sandbox.sh -- let Codex's Linux sandbox run on this box (PHNX-3285).
-#
-# Codex >=0.146 sandboxes its `read-only` and `workspace-write` runs on Linux with
-# a bundled bubblewrap (`bwrap`) that sets up its mounts inside an unprivileged
-# user namespace (`--unshare-user`, then a write to /proc/self/uid_map). Ubuntu
-# 23.10+ ships `kernel.apparmor_restrict_unprivileged_userns=1`, which denies that
-# to an unconfined binary -- so bwrap dies with
-#
-#     bwrap: setting up uid map: Permission denied
-#
-# and a HEADLESS codex run (an `agents teams` teammate, or `agents run codex`)
-# lands zero tools: no file writes, no shell, while still reporting a completed
-# turn. This script re-enables unprivileged user namespaces so codex's
-# workspace-write sandbox works with its isolation fully intact -- it does NOT
-# weaken codex to `--dangerously-bypass-approvals-and-sandbox`.
-#
-# One-time, per box. Needs root (it writes a sysctl drop-in). Idempotent, and it
-# VERIFIES the fix actually took (re-probes userns) rather than assuming it did.
-#
-# Usage:
-#   sudo bash cli/scripts/enable-codex-sandbox.sh          # apply + verify
-#   bash cli/scripts/enable-codex-sandbox.sh --check        # report only, no writes
-#   sudo bash cli/scripts/enable-codex-sandbox.sh --check   # same (root not needed)
-#
-# Fleet-wide (from any box that can reach the workers over ssh):
-#   for b in yosemite-m0 yosemite-m1 mark-1; do
-#     agents ssh "$b" 'sudo bash -s' < cli/scripts/enable-codex-sandbox.sh
-#   done
-#
 set -euo pipefail
 
 SYSCTL_KNOB="kernel.apparmor_restrict_unprivileged_userns"
@@ -43,11 +13,9 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 0
 fi
 
-# Ground truth: can THIS box create a user namespace and map root inside it?
-# This is exactly what codex's bwrap does. 0 = works, non-zero = restricted.
 probe_userns() {
   if ! command -v unshare >/dev/null 2>&1; then
-    return 2  # can't probe
+    return 2
   fi
   unshare --user --map-root-user true >/dev/null 2>&1
 }
@@ -93,7 +61,6 @@ echo
 echo "Applying: ${SYSCTL_KNOB}=0 via ${DROPIN}"
 printf '# Managed by agents-cli enable-codex-sandbox.sh (PHNX-3285).\n# Re-enables unprivileged user namespaces so codex workspace-write sandbox works.\n%s=0\n' \
   "$SYSCTL_KNOB" > "$DROPIN"
-# Apply now (drop-in makes it persist across reboots).
 sysctl -w "${SYSCTL_KNOB}=0" >/dev/null
 
 echo "Verifying..."

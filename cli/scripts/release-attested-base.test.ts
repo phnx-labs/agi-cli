@@ -4,19 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/**
- * PHNX-3705 — the release must be able to cut from an attested ANCESTOR.
- *
- * release.sh required an attestation for origin/main's tree as of the instant it
- * ran. attest-main.yml produces that by running the full suite, so on a repo with
- * continuous merges the tip is essentially never attested and the release starved
- * (measured: six merges in ~30 minutes, tip never attested, release failed every
- * time at phase 2).
- *
- * Real git repos, real script, no network: the asset list is injected through
- * RELEASE_ATTEST_ASSETS, which is the same seam the script uses when `gh` is
- * unavailable.
- */
 const SCRIPT = path.resolve(__dirname, 'release-attested-base.sh');
 
 function git(cwd: string, ...args: string[]): string {
@@ -25,7 +12,6 @@ function git(cwd: string, ...args: string[]): string {
   return r.stdout.trim();
 }
 
-/** A repo with `origin/main` pointing at a chain of n commits. */
 function repoWithHistory(n: number): { root: string; shas: string[]; trees: string[] } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'attested-base-'));
   spawnSync('git', ['init', '-q', '-b', 'main', root], { encoding: 'utf-8' });
@@ -62,7 +48,6 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('walks back to the newest attested ANCESTOR when the tip is not attested', () => {
-    // The starvation case: main advanced twice while attest-main was still running.
     const { root, shas, trees } = repoWithHistory(4);
     const r = resolve(root, [`attest-${trees[1]}.json`]);
     expect(r.status, r.stderr).toBe(0);
@@ -77,8 +62,6 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('fails loud (non-zero, no sha) when nothing in history is attested', () => {
-    // Must NOT fall through to some unproven commit -- the caller relies on a
-    // non-zero exit to keep failing closed.
     const { root } = repoWithHistory(3);
     const r = resolve(root, ['attest-deadbeef.json']);
     expect(r.status).not.toBe(0);
@@ -86,14 +69,7 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
   });
 
   it('refuses an ATTESTED commit that is not on the branch history', () => {
-    // The security property behind release.sh's relaxed base guard: an attested
-    // tree is not by itself a licence to release from that commit. The resolver
-    // only ever walks `rev-list origin/<branch>`, so a divergent commit — even
-    // one whose tree has a published attestation asset — can never be selected.
-    // Without this, someone able to publish an asset could aim a release at a
-    // tree of their choosing.
     const { root, shas } = repoWithHistory(2);
-    // A commit off the branch history, built without touching the working tree.
     const blob = spawnSync('git', ['-C', root, 'hash-object', '-w', '--stdin'], {
       input: 'evil\n', encoding: 'utf-8',
     }).stdout.trim();
@@ -109,16 +85,11 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
 
   it('respects the lookback bound rather than walking all of history', () => {
     const { root, trees } = repoWithHistory(6);
-    // Only the OLDEST tree is attested, but we only look back 2 commits.
     const r = resolve(root, [`attest-${trees[0]}.json`], '2');
     expect(r.status).not.toBe(0);
   });
 
   it('fails closed on a blank asset list instead of returning the tip', () => {
-    // Deliberately a BLANK (whitespace) list rather than a truly empty one: the
-    // script treats an unset/empty RELEASE_ATTEST_ASSETS as "no seam supplied"
-    // and falls through to `gh`, which a test must not depend on. Whitespace
-    // exercises the parse path with nothing matchable in it.
     const { root } = repoWithHistory(2);
     const r = spawnSync('bash', [SCRIPT, root, 'main'], {
       encoding: 'utf-8',

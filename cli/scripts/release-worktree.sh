@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Run release orchestration from a fresh detached origin/<default> worktree.
 
 set -euo pipefail
 
@@ -25,18 +24,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Cut the release from the newest ATTESTED ancestor of origin/<default>, not the
-# bare tip (PHNX-3705). On a repo where agents merge continuously the tip is
-# essentially never attested -- attest-main.yml runs the full suite per push, so
-# main outruns it and the release starves at phase 2 forever. An attested
-# ancestor is an equally sound base: the tarball is still bound to a tree whose
-# suite passed, and derive's allowlist still fails closed on any code file.
-# Falls back to the tip when the resolver finds nothing, so phase 2 still fails
-# loud with its usual message rather than this script dying obscurely.
-# Absolute path: this script does not cd into cli/ until the very end, so a
-# relative `scripts/...` here resolves against the CALLER's cwd and silently
-# never runs -- which, combined with the `|| true`, would quietly fall back to
-# the tip and make this whole change a no-op.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE_BASE="$("$SCRIPT_DIR/release-attested-base.sh" "$REPO_ROOT" "$DEFAULT_BRANCH" 2>/dev/null || true)"
 if [[ -z "$RELEASE_BASE" ]]; then
@@ -57,19 +44,10 @@ if [[ -n "$missing" ]]; then
   exit 1
 fi
 
-# The attestation store lives in the CALLER's checkout (that is where
-# release-attestation-produce.sh writes it), but REPO_ROOT inside this
-# throwaway worktree resolves to the worktree — so `require` looked in an empty
-# directory and reported "missing exact attestation key" with `?` for every key
-# component, which reads like a key mismatch rather than a wrong directory.
-# Operators had to know to export RELEASE_ATTESTATION_DIR; now they do not
-# (an explicit export still wins). RUSH-2970 trap 2.
 if [[ -z "${RELEASE_ATTESTATION_DIR:-}" && -d "$REPO_ROOT/.release-attestations" ]]; then
   export RELEASE_ATTESTATION_DIR="$REPO_ROOT/.release-attestations"
 fi
 
-# apps/cli -> cli flatten (RUSH-3189 follow-up): the CLI moved up to cli/. Drive
-# off whichever layout the checked-out default branch actually has.
 CLI_SUBDIR="cli"
 [[ -d "$WORKTREE/cli" ]] || CLI_SUBDIR="apps/cli"
 cd "$WORKTREE/$CLI_SUBDIR"

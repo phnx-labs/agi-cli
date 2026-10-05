@@ -1,11 +1,3 @@
-/**
- * `agents sessions bookmark` — the non-TTY half of the bookmark hotkey.
- *
- * The `*` hotkey in the interactive browser is how a human bookmarks a session;
- * this is how a script, an agent, or a machine without a TTY does the same thing,
- * and it is what makes the feature testable end to end without driving a terminal
- * UI. Both write the one store in `lib/session/bookmarks.ts`.
- */
 
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -19,17 +11,8 @@ interface BookmarkOptions {
   list?: boolean;
 }
 
-/**
- * Resolve one user-typed id (usually the 8-char short id the listing prints) to
- * a full session id. Ambiguity is an ERROR, not a silent first-match: bookmarking
- * the wrong session is invisible until the user wonders where their bookmark went.
- */
 function resolveBookmarkTarget(idQuery: string): { id: string } | { error: string } {
   const matches = findSessionsById(idQuery);
-  // A COMPLETE id needs no index entry: the id is the key the store is built on,
-  // and requiring a transcript row would refuse exactly the newest sessions — a
-  // live one that has not been indexed yet. The browser's `*` bookmarks those
-  // from the live row, so demanding a DB hit here would make the two disagree.
   if (matches.length === 0) {
     return isCompleteSessionId(idQuery.trim())
       ? { id: idQuery.trim() }
@@ -76,13 +59,6 @@ export function registerSessionsBookmarkCommand(sessionsCmd: Command): void {
   });
 
   cmd.action((ids: string[], options: BookmarkOptions, self: Command) => {
-    // `--json` has to come from the merged view, not `options`. The parent
-    // `sessions` command declares `--json` AND takes a positional `[query]`, so
-    // commander keeps parsing parent-known options past the subcommand name and
-    // binds `--json` to the PARENT — `options.json` is silently undefined here
-    // while `--remove`/`--list` (unknown to the parent) arrive fine.
-    // `optsWithGlobals` is commander's own answer for reading an option a parent
-    // owns; it is still declared on this command so `--help` documents it.
     const json = (self.optsWithGlobals() as { json?: boolean }).json === true;
     if (options.list || ids.length === 0) {
       const bookmarked = [...listBookmarks()].sort();
@@ -107,8 +83,6 @@ export function registerSessionsBookmarkCommand(sessionsCmd: Command): void {
         results.push({ query: idQuery, error: resolved.error });
         continue;
       }
-      // Removing a bookmark that does not exist, or bookmarking it twice,
-      // is a no-op the store already short-circuits — report the resulting state.
       setBookmark(resolved.id, on);
       results.push({ query: idQuery, id: resolved.id, bookmark: isBookmarked(resolved.id) });
     }
@@ -121,8 +95,6 @@ export function registerSessionsBookmarkCommand(sessionsCmd: Command): void {
         else console.log(`${r.bookmark ? chalk.yellow('★ bookmarked') : chalk.gray('☆ unbookmarked')} ${r.id}`);
       }
     }
-    // A failed lookup is a failed command — a script must not read "bookmarked"
-    // from a zero exit when nothing was bookmarked.
     if (results.some((r) => r.error)) process.exitCode = 1;
   });
 }

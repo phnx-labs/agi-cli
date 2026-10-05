@@ -8,8 +8,6 @@ import * as path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '..');
 const tempDirs: string[] = [];
 
-// Run the REAL prepack gate against a staged tree: verify-cli-binary.sh cds to
-// its own script-dir/.., so a copy inside a temp tree verifies that tree.
 function stageTree(opts: {
   version?: string;
   binary?: string | null;
@@ -52,8 +50,6 @@ afterEach(() => {
   }
 });
 
-// bash is required (it is on every platform this runs: macOS, Linux CI, and
-// the Windows CI runners ship Git Bash on PATH).
 describe('verify-cli-binary.sh prepack gate', () => {
   it('refuses to pack when dist/bin/agents is missing', () => {
     const root = stageTree({ binary: null });
@@ -70,8 +66,6 @@ describe('verify-cli-binary.sh prepack gate', () => {
   });
 
   it('refuses a stale binary whose embedded version is not the packaged version', () => {
-    // The stale pair is self-consistent (sha matches its own pin) — only the
-    // embedded `VERSION = "…";` literal exposes it.
     const root = stageTree({
       version: '2.0.0',
       binary: 'MACHO-STAND-IN\nvar VERSION = "1.9.9";\n',
@@ -84,10 +78,6 @@ describe('verify-cli-binary.sh prepack gate', () => {
   it.runIf(process.platform !== 'darwin')(
     'passes when the bundler merged VERSION into a declaration list (comma, not semicolon)',
     () => {
-      // bun 1.3.14 merges adjacent consts: the stamped line lands in the
-      // binary as `var VERSION = "<v>", IS_DEV_BUILD = …;` — the gate must
-      // not demand a semicolon after the version literal (1.22.36 publish
-      // blocker).
       const root = stageTree({
         binary: 'MACHO-STAND-IN\nvar VERSION = "1.0.0", IS_DEV_BUILD = false;\n',
       });

@@ -12,8 +12,6 @@ import {
 } from './sessions.test-fixture.js';
 
 describe('agents sessions', () => {
-  // 90s, not the default 30s: several real `agents` CLI boots, measured 6.5s
-  // idle and 13.7s under 16 CPU-bound background processes (RUSH-2839).
   it('lists only sessions from the current directory by default and shows all with --all', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-list-'));
 
@@ -152,10 +150,6 @@ describe('agents sessions', () => {
       expect(result.status).toBe(0);
 
       const output = outputOf(result);
-      // Core intent of this test: topic rendering skips the Claude
-      // local-command preamble ("Caveat: ...") and shows the real prompt.
-      // The Msgs/Tokens column assertion was dropped when the session table
-      // was simplified to ID / agent / project / topic / when.
       const row = output.split('\n').find(line => line.includes(sessionId.slice(0, 8))) || '';
       expect(row).toContain('Inspect session stats');
       expect(row).not.toContain('Caveat:');
@@ -257,8 +251,6 @@ describe('agents sessions', () => {
       expect(result.status).toBe(0);
 
       const output = outputOf(result);
-      // Table simplification dropped the "codex@<version>" suffix from the
-      // agent column; still verify the codex session is discovered & listed.
       expect(output).toContain('codex');
       expect(output).toContain('Show codex versions in the session list');
       expect(output).toContain('abababab');
@@ -320,9 +312,6 @@ describe('agents sessions', () => {
     }
   });
 
-  // The fixture's openclaw binary is a `#!/bin/sh` script and the assertions
-  // depend on its stdout (channels status / cron list) — shebang scripts don't
-  // execute on Windows, so there's no synthetic-session data to discover there.
   it.skipIf(process.platform === 'win32')('shows OpenClaw synthetic sessions from the configured workspace without --all', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-openclaw-cwd-'));
 
@@ -334,9 +323,6 @@ describe('agents sessions', () => {
       expect(result.status).toBe(0);
 
       const output = outputOf(result);
-      // The "openclaw@<version>" suffix was dropped with the table
-      // simplification; the workspace discovery (Sergey / session id) is the
-      // actual behavior this test guards.
       expect(output).toContain('Sergey');
       expect(output).toContain('12345678');
       expect(output).not.toContain('No sessions found');

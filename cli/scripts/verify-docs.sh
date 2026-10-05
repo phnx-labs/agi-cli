@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Verify that agents-cli docs stay internally consistent.
-# Run from cli/.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,7 +12,6 @@ fail() {
   ERRORS=$((ERRORS + 1))
 }
 
-# --- 1. The compact architectural spine exists and is the documented entry point ---
 for doc in README architecture concepts resources execution sessions fleet orchestration automation interfaces secrets observability distribution specifications; do
   if [[ -f "docs/$doc.md" ]]; then
     log "✓ docs/$doc.md exists"
@@ -29,8 +26,6 @@ else
   fail "AGENTS.md should link to docs/README.md"
 fi
 
-# The normative contract is intentionally detailed. Its stable sections and evidence
-# conventions must survive documentation cleanup.
 for heading in "Coverage inventory" "Sessions" "Secrets" "Agent execution" "Scheduling & execution singularity" "Routine execution & readiness" "Watchdog"; do
   if grep -qF "## $heading" docs/specifications.md; then
     log "✓ specifications.md retains $heading"
@@ -54,8 +49,6 @@ for doc in architecture concepts resources execution sessions fleet orchestratio
   fi
 done
 
-# These entry points are outside docs/, but their specification anchors are part of
-# the contributor contract.
 for anchor in coverage-inventory sessions secrets agent-execution scheduling--execution-singularity routine-execution--readiness watchdog; do
   case "$anchor" in
     coverage-inventory) heading='Coverage inventory' ;;
@@ -71,9 +64,6 @@ for anchor in coverage-inventory sessions secrets agent-execution scheduling--ex
   fi
 done
 
-# --- 2. Authored architecture does not grow command-manual sections ---
-# Guides (docs marked `<!-- guide -->`) are how-to references and MAY use these
-# headings; the rule applies only to the top-level architecture decision docs.
 FORBIDDEN_HEADING_RE='^#{2,3} (Setup|Command [Rr]eference|Recipes|File [Mm]ap|Source [Mm]ap|Key Functions|Roadmap)$'
 while IFS= read -r file; do
   [[ "$file" == "docs/command-index.md" ]] && continue
@@ -83,7 +73,6 @@ while IFS= read -r file; do
   fi
 done < <(find docs -name '*.md')
 
-# --- 3. No broken relative markdown links in docs/*.md ---
 while IFS= read -r file; do
   while IFS= read -r match; do
     url="${match#*\(}"
