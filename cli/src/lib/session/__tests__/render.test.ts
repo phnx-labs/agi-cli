@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 
-// Mock HOME for normalizeForDedup tests
 const ORIG_HOME = process.env.HOME;
 
 import {
@@ -21,7 +20,6 @@ import {
 } from '@phnx-labs/sessions-cli/reader';
 import type { SessionEvent } from '@phnx-labs/sessions-cli/reader';
 
-// ── filterEvents ──────────────────────────────────────────────────────────────
 
 describe('filterEvents', () => {
   const events: SessionEvent[] = [
@@ -52,7 +50,6 @@ describe('filterEvents', () => {
   });
 
   it('exclude: drops listed roles, keeps non-role events', () => {
-    // error has no role, so it stays.
     const result = filterEvents(events, { exclude: ['thinking', 'tools'] });
     expect(result.some(e => e.type === 'message' && e.role === 'user')).toBe(true);
     expect(result.some(e => e.type === 'message' && e.role === 'assistant')).toBe(true);
@@ -117,7 +114,6 @@ describe('filterEvents', () => {
   });
 });
 
-// ── parseRoleList ─────────────────────────────────────────────────────────────
 
 describe('parseRoleList', () => {
   it('parses a comma-separated list', () => {
@@ -138,7 +134,6 @@ describe('parseRoleList', () => {
   });
 });
 
-// ── renderConversationMarkdown ────────────────────────────────────────────────
 
 describe('renderConversationMarkdown', () => {
   it('includes user, assistant, requested reasoning, and tool calls in event order', () => {
@@ -157,7 +152,6 @@ describe('renderConversationMarkdown', () => {
     expect(out).toContain('Reading now.');
     expect(out).toContain('### Tool: Read');
     expect(out).toContain('/x/foo.ts');
-    // Order: user before thinking before assistant before tool
     const userIdx = out.indexOf('## User');
     const thinkIdx = out.indexOf('### Reasoning');
     const asstIdx = out.indexOf('## Assistant');
@@ -235,9 +229,6 @@ describe('renderConversationMarkdown', () => {
   });
 });
 
-// ── renderJson redaction ──────────────────────────────────────────────────────
-// The JSON path is the one an agent scripts against, so it must not be the
-// output format that leaks credentials. It redacts by default.
 
 describe('renderJson redaction', () => {
   const token = 'sk-' + 'a'.repeat(40);
@@ -264,7 +255,6 @@ describe('renderJson redaction', () => {
     const out = renderJson(events);
     expect(out).not.toContain(token);
     expect(out).toContain('[REDACTED_API_KEY]');
-    // structure is preserved, only the secret substring is masked
     const parsed = JSON.parse(out);
     expect(parsed[0].args.headers.authorization).toContain('Bearer');
     expect(Array.isArray(parsed[0].args.tries)).toBe(true);
@@ -303,7 +293,6 @@ describe('renderJson redaction', () => {
   });
 });
 
-// ── unwrapCommand ─────────────────────────────────────────────────────────────
 
 describe('unwrapCommand', () => {
   it('returns bare command unchanged', () => {
@@ -315,7 +304,6 @@ describe('unwrapCommand', () => {
   });
 
   it('unwraps ssh with quoted payload plus pipe (pipe is stripped)', () => {
-    // ls is not a wrapper so recursion stops there; pipe after closing quote is stripped
     expect(unwrapCommand('ssh host "ls -la" | cat')).toBe('ls -la');
   });
 
@@ -353,7 +341,6 @@ describe('unwrapCommand', () => {
   });
 });
 
-// ── normalizeForDedup ─────────────────────────────────────────────────────────
 
 describe('normalizeForDedup', () => {
   beforeEach(() => {
@@ -392,7 +379,6 @@ describe('normalizeForDedup', () => {
   });
 
   it('replaces leading $HOME with ~ when command starts with home path', () => {
-    // The ^ anchor replaces only when the string begins with $HOME
     expect(normalizeForDedup('/home/user/.agents/run.sh')).toBe('~/.agents/run.sh');
   });
 
@@ -405,7 +391,6 @@ describe('normalizeForDedup', () => {
   });
 });
 
-// ── bucketKey ─────────────────────────────────────────────────────────────────
 
 describe('bucketKey', () => {
   it('returns two-level key for git', () => {
@@ -446,7 +431,6 @@ describe('bucketKey', () => {
   });
 
   it('canonicalizes an aliased executable to its registry name', () => {
-    // `python3` is an alias of `python`; bucketing groups them under `python`.
     expect(bucketKey('python3 bench.py')).toBe('python');
   });
 
@@ -455,7 +439,6 @@ describe('bucketKey', () => {
   });
 });
 
-// ── Category routing ──────────────────────────────────────────────────────────
 
 describe('category routing (via renderSummary commands section)', () => {
   function buildBashEvents(cmds: string[]): SessionEvent[] {
@@ -491,7 +474,6 @@ describe('category routing (via renderSummary commands section)', () => {
     const events = buildBashEvents(['ls /tmp', 'cat file.txt', 'head -n 5 file.txt']);
     const out = renderSummary(events);
     expect(out).toContain('Probes');
-    // Low signal: should show inline dash-separated list, not individual lines
     expect(out).toMatch(/Probes.*—/);
   });
 
@@ -505,12 +487,10 @@ describe('category routing (via renderSummary commands section)', () => {
     const events = buildBashEvents(['sleep 30', 'sleep 10']);
     const out = renderSummary(events);
     expect(out).toContain('Wait');
-    // Low signal — inline
     expect(out).toMatch(/Wait.*—/);
   });
 });
 
-// ── collapseRetries ───────────────────────────────────────────────────────────
 
 describe('collapseRetries', () => {
   const base = Date.now();
@@ -541,11 +521,9 @@ describe('collapseRetries', () => {
     const cmds = [
       { cmd: 'bun test', ts: base },
       { cmd: 'bun test', ts: base + 10_000 },
-      { cmd: 'bun test', ts: base + 90_000 }, // >60s gap
+      { cmd: 'bun test', ts: base + 90_000 },
     ];
     const result = collapseRetries(cmds);
-    // First two: within 60s but count=2, expanded back to 2
-    // Third: new group
     expect(result.some(r => r.count === 1)).toBe(true);
   });
 
@@ -561,7 +539,6 @@ describe('collapseRetries', () => {
   });
 });
 
-// ── relativeToCwd ─────────────────────────────────────────────────────────────
 
 describe('relativeToCwd', () => {
   beforeEach(() => { process.env.HOME = '/home/user'; });
@@ -588,7 +565,6 @@ describe('relativeToCwd', () => {
   });
 });
 
-// ── linkPath ──────────────────────────────────────────────────────────────────
 
 describe('linkPath', () => {
   it('returns plain label when stdout is not TTY', () => {
@@ -616,7 +592,6 @@ describe('linkPath', () => {
   });
 });
 
-// ── computeSummaryStats ───────────────────────────────────────────────────────
 
 describe('computeSummaryStats', () => {
   it('counts user/assistant turns, tools, errors', () => {
@@ -661,7 +636,6 @@ describe('computeSummaryStats', () => {
   });
 });
 
-// ── renderSummaryHeader ───────────────────────────────────────────────────────
 
 describe('renderSummaryHeader', () => {
   it('formats turn/tool/token/duration stats', () => {
@@ -705,7 +679,6 @@ describe('renderSummaryHeader', () => {
   });
 });
 
-// ── renderSummary integration ─────────────────────────────────────────────────
 
 describe('renderSummary', () => {
   function makeEvent(overrides: Partial<SessionEvent>): SessionEvent {
@@ -723,10 +696,7 @@ describe('renderSummary', () => {
       makeEvent({ type: 'tool_use', tool: 'Edit', args: { file_path: '/project/src/a.ts' }, path: '/project/src/a.ts' }),
     ];
     const out = renderSummary(events, '/project');
-    // a.ts should appear in Changes (modified), not in Read
     expect(out).toContain('Changes');
-    // The Read section should not appear since the only read file was also modified
-    // (and would be deduped out, leaving 0 read-only files)
     const readMatch = out.match(/Read\s+\((\d+)\)/);
     if (readMatch) {
       expect(parseInt(readMatch[1])).toBe(0);
@@ -740,20 +710,17 @@ describe('renderSummary', () => {
     ];
     const out = renderSummary(events);
     expect(out).toContain('x'.repeat(100));
-    // Should truncate at 3000
     expect(out.indexOf('...')).toBeGreaterThan(0);
     expect(out.indexOf('x'.repeat(3001))).toBe(-1);
   });
 
   it('renders prompt without 300-char cap', () => {
-    const longPrompt = 'Implement a feature that '.repeat(20); // >300 chars
+    const longPrompt = 'Implement a feature that '.repeat(20);
     const events: SessionEvent[] = [
       makeEvent({ role: 'user', content: longPrompt }),
     ];
     const out = renderSummary(events);
-    // Should not be truncated at 300 chars
     expect(out.length).toBeGreaterThan(300);
-    // Should not contain '...' from truncation
     const promptSection = out.split('\n').find(l => l.includes('Prompt:'));
     expect(promptSection).toBeTruthy();
     expect(promptSection?.endsWith('...')).toBe(false);
@@ -848,10 +815,6 @@ describe('renderSummary', () => {
     expect(out).not.toContain('/project/src/lib/render.ts');
   });
 
-  // ── Recent Activity & section ordering ──────────────────────────────────────
-  // These cover the lineage fix: temporally-near events appear in a chronological
-  // tail at the top, and Errors live above Modified/Read/Commands rather than at
-  // the bottom (where they used to look misleadingly recent).
 
   it('renders Recent Activity as the first content section', () => {
     const events: SessionEvent[] = [
@@ -877,11 +840,9 @@ describe('renderSummary', () => {
     expect(out).toContain('Recent Activity');
     expect(out).toContain('last 7 of 10');
     const recentBlock = out.slice(out.indexOf('Recent Activity'), out.indexOf('Commands'));
-    // First 3 commands shouldn't appear in the chronological tail
     expect(recentBlock).not.toContain('cmd-0');
     expect(recentBlock).not.toContain('cmd-1');
     expect(recentBlock).not.toContain('cmd-2');
-    // Last 7 should appear, in order: cmd-3 before cmd-9
     const idx3 = recentBlock.indexOf('cmd-3');
     const idx9 = recentBlock.indexOf('cmd-9');
     expect(idx3).toBeGreaterThan(-1);
@@ -930,7 +891,6 @@ describe('renderSummary', () => {
       makeEvent({ role: 'assistant', content: 'The work is complete.' }),
     ];
     const out = renderSummary(events);
-    // Final message text should appear AFTER the Commands section
     const commandsIdx = out.indexOf('Commands');
     const finalIdx = out.lastIndexOf('The work is complete.');
     expect(commandsIdx).toBeGreaterThan(-1);

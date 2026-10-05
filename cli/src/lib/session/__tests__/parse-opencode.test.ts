@@ -1,16 +1,3 @@
-/**
- * Verifies parseOpenCode reads an OpenCode session out of its SQLite database
- * (session -> message -> part) and normalizes each part into the shared
- * SessionEvent shape: text -> message, reasoning -> thinking, tool ->
- * tool_use (+ tool_result / error for completed calls).
- *
- * The fixture is built here from scratch — a tiny SQLite DB with the real
- * OpenCode `message`/`part` schema. Both the fixture writer and the parser
- * under test read/write through the node/bun SQLite wrapper (the same one
- * production uses), not the `sqlite3` CLI, so this exercises the real critical
- * path on every OS — the `sqlite3` CLI is absent on the Windows runner
- * (issue #751).
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -32,7 +19,6 @@ interface MessageRow {
   parts: PartRow[];
 }
 
-/** Create a temp OpenCode DB (session/message/part) with the given messages. */
 function buildDb(sessionId: string, messages: MessageRow[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-parse-'));
   const dbPath = path.join(dir, 'opencode.db');
@@ -105,18 +91,17 @@ describe('parseOpenCode', () => {
     expect(extractTodoProgressFromEvents(events)).toBeUndefined();
 
     expect(events.map(e => e.type)).toEqual([
-      'message', // user text
-      'thinking', // reasoning
-      'message', // assistant text
-      'tool_use', // shell call
-      'tool_result', // shell output
+      'message',
+      'thinking',
+      'message',
+      'tool_use',
+      'tool_result',
     ]);
 
     const userMsg = events[0];
     expect(userMsg.agent).toBe('opencode');
     expect(userMsg.role).toBe('user');
     expect(userMsg.content).toBe('fix the bug');
-    // Timestamp comes from the row's integer epoch-ms, not now().
     expect(userMsg.timestamp).toBe(new Date(1_700_000_000_000).toISOString());
 
     expect(events[1].content).toBe('let me look');
@@ -167,8 +152,6 @@ describe('parseOpenCode', () => {
   });
 
   test('binds the session id as a parameter (no SQL injection via quotes)', () => {
-    // A session id containing a single quote must be matched literally by the
-    // parameterized query, not interpolated into the SQL text.
     const sessionId = `ses_o'brien`;
     const dbPath = buildDb(sessionId, [
       {

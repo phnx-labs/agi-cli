@@ -18,7 +18,6 @@ let pass: typeof import('./timeline-pass.js');
 let timeline: typeof import('@phnx-labs/sessions-cli/reader');
 type ActiveSession = import('./active.js').ActiveSession;
 
-/** A live row shaped exactly as the daemon's gather produces it. */
 function row(sessionId: string, sessionFile: string, kind = 'claude'): ActiveSession {
   return { context: 'terminal', kind, sessionId, sessionFile, status: 'running', activity: 'working' } as ActiveSession;
 }
@@ -50,10 +49,8 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(stored?.timeline.steps.length).toBeGreaterThan(0);
     expect(stored?.timeline.state).toBe('ready');
     expect(stored?.request?.headline).toBeTruthy();
-    // The newest step is live because the row's activity is `working`.
     expect(stored!.timeline.steps[stored!.timeline.steps.length - 1].live).toBe(true);
 
-    // Nothing appended → no re-fold.
     expect(pass.runTimelinePassSync({ sessions: [row('live-a', file)] })).toMatchObject({ computed: 0, reused: 1 });
   });
 
@@ -66,13 +63,11 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     const afterHead = db.readSessionTimelineEntry('live-b')!;
     expect(afterHead.state.offset).toBe(Buffer.byteLength(head));
 
-    // Append the rest, exactly as a running agent would.
     fs.appendFileSync(file, `${lines.slice(150).join('\n')}\n`);
     pass.runTimelinePassSync({ sessions: [row('live-b', file)] });
     const resumed = db.readSessionTimelineEntry('live-b')!;
     expect(resumed.state.offset).toBe(fs.statSync(file).size);
 
-    // A cold session over the identical bytes must agree with the resumed one.
     const cold = path.join(tmpHome, 'cold-b.jsonl');
     fs.copyFileSync(file, cold);
     pass.runTimelinePassSync({ sessions: [row('cold-b', cold)] });
@@ -88,8 +83,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
       type: 'assistant', timestamp: '2026-09-06T00:00:00.000Z',
       message: { role: 'assistant', content: [{ type: 'text', text: 'First beat of the run.' }] },
     });
-    // A partial second record: a 200 KB line with no trailing newline yet — the
-    // shape a 973,963-byte transcript record has mid-write.
     const partial = JSON.stringify({
       type: 'assistant', timestamp: '2026-09-06T00:00:10.000Z',
       message: { role: 'assistant', content: [{ type: 'text', text: `Second beat. ${'x'.repeat(200_000)}` }] },
@@ -100,7 +93,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(stored.timeline.steps).toHaveLength(1);
     expect(stored.state.offset).toBe(Buffer.byteLength(`${complete}\n`));
 
-    // The writer finishes the record.
     fs.writeFileSync(file, `${complete}\n${partial}\n`);
     pass.runTimelinePassSync({ sessions: [row('straddle', file)] });
     stored = db.readSessionTimelineEntry('straddle')!;
@@ -110,9 +102,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
   });
 
   it('stops at the per-tick BYTE budget, so a cold cache catches up over ticks', () => {
-    // The per-session cap alone is not a bound on the tick: eight live sessions
-    // folding from offset 0 is eight whole-file parses in one 30 s deadline,
-    // which is what parked `session-state` on this fleet before this budget.
     const line = (n: number) => `${JSON.stringify({
       type: 'assistant', timestamp: '2026-09-06T00:00:00.000Z',
       message: { role: 'assistant', content: [{ type: 'text', text: `Beat ${n}. ${'x'.repeat(4000)}` }] },
@@ -123,12 +112,10 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
       return row(id, file);
     });
     const size = fs.statSync(rows[0].sessionFile!).size;
-    // A budget that admits the first session's bytes and little more.
     const result = pass.runTimelinePassSync({ sessions: rows, maxBytes: size + 10 });
     expect(result.computed).toBe(1);
     expect(db.readSessionTimelineAny('w2')).toBeUndefined();
 
-    // The next tick, with a fresh budget, picks the rest up.
     expect(pass.runTimelinePassSync({ sessions: rows }).computed).toBe(2);
     expect(db.readSessionTimelineAny('w3')).toBeDefined();
   });
@@ -148,9 +135,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
   });
 
   it('re-parses a non-resumable harness at most once a minute, never every tick', () => {
-    // Kimi/Grok expose no resume offset, so their only option is a whole-file
-    // parse — the operation that wedged the event loop in PHNX-3411. The pass
-    // rate-limits it instead of paying it on every 15 s tick.
     const dir = fs.mkdtempSync(path.join(tmpHome, 'kimi-'));
     fs.mkdirSync(path.join(dir, 'agents', 'main'), { recursive: true });
     const wire = path.join(dir, 'agents', 'main', 'wire.jsonl');
@@ -165,26 +149,16 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     const kimi = { ...row('kimi-1', state, 'kimi'), activity: 'working' } as ActiveSession;
     expect(pass.runTimelinePassSync({ sessions: [kimi], nowMs: 1_000_000 })).toMatchObject({ computed: 1 });
 
-    // A tick 15 s later with new bytes: within the interval, so the cached row
-    // stands and no parse happens.
     fs.appendFileSync(wire, line('Second beat of the kimi run.', Date.UTC(2026, 8, 6, 0, 0, 30)));
     expect(pass.runTimelinePassSync({ sessions: [kimi], nowMs: 1_015_000 }))
       .toMatchObject({ computed: 0, reused: 1, skipped: 0 });
     expect(db.readSessionTimelineAny('kimi-1')!.timeline.steps).toHaveLength(1);
 
-    // Past the interval, it re-parses and picks the new beat up.
     expect(pass.runTimelinePassSync({ sessions: [kimi], nowMs: 1_000_000 + pass.TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS + 1 }))
       .toMatchObject({ computed: 1 });
     expect(db.readSessionTimelineAny('kimi-1')!.timeline.steps).toHaveLength(2);
   });
 
-  /**
-   * Write a grok session dir carrying a REAL grok `chat_history.jsonl` of at
-   * least `atLeastBytes`, in the record shapes the live 5.9 MiB / 4.2 MiB
-   * transcripts on this fleet use. The row points at `summary.json`, exactly as
-   * the daemon's gather produces it — `toolEvidenceSourcePath` is what maps that
-   * to the sibling the parser reads.
-   */
   function writeGrokSession(id: string, atLeastBytes: number): ActiveSession {
     const dir = fs.mkdtempSync(path.join(tmpHome, `grok-${id}-`));
     const history = path.join(dir, 'chat_history.jsonl');
@@ -208,11 +182,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
   }
 
   it('folds a 4-16 MiB non-resumable transcript instead of leaving it with no row at all', () => {
-    // The dead band: whole-file eligibility used to be gated on the per-SESSION
-    // allowance, capped at 4 MiB however idle the tick was, while `unavailable`
-    // only fired above 16 MiB. Everything in between on a non-resumable harness
-    // got no row — not `ready`, not `partial`, not `unavailable` — and was
-    // counted `reused`, so the daemon log read healthy forever.
     const grok = writeGrokSession('grok-band', 5 * 1024 * 1024);
     const size = fs.statSync(path.join(path.dirname(grok.sessionFile!), 'chat_history.jsonl')).size;
     expect(size).toBeGreaterThan(pass.TIMELINE_PASS_MAX_BYTES_PER_SESSION);
@@ -226,14 +195,11 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
 
   it('says why when a transcript genuinely does not fit the tick, rather than counting it reused', () => {
     const grok = writeGrokSession('grok-tight', 5 * 1024 * 1024);
-    // A tick with almost nothing left: the fold cannot happen, and the honest
-    // answer is a `partial` row naming the budget — not silence.
     const result = pass.runTimelinePassSync({ sessions: [grok], maxBytes: 64 * 1024, nowMs: 3_000_000 });
     expect(result).toMatchObject({ computed: 1, reused: 0, skipped: 0 });
     const stored = db.readSessionTimelineAny('grok-tight')!;
     expect(stored.timeline.state).toBe('partial');
     expect(stored.timeline.reason).toMatch(/whole-file fold.*budget left/);
-    // Offset stays at 0, so a tick with real budget upgrades it to a true fold.
     expect(db.readSessionTimelineEntry('grok-tight')!.state.offset).toBe(0);
     expect(pass.runTimelinePassSync({ sessions: [grok], nowMs: 3_000_000 + pass.TIMELINE_PASS_NON_RESUMABLE_MIN_INTERVAL_MS + 1 }))
       .toMatchObject({ computed: 1 });
@@ -241,12 +207,8 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
   });
 
   it('debits the tick budget by the bytes a whole-file re-parse actually reads', () => {
-    // A warm non-resumable session re-parses the WHOLE file every time but used
-    // to be charged only its growth delta, so eight 3 MiB sessions grown by
-    // 10 KB each read 24 MiB while the accounting recorded 80 KB.
     const a = writeGrokSession('grok-debit-a', 5 * 1024 * 1024);
     const b = writeGrokSession('grok-debit-b', 5 * 1024 * 1024);
-    // 6 MiB admits the first whole-file read and cannot admit the second.
     const result = pass.runTimelinePassSync({ sessions: [a, b], maxBytes: 6 * 1024 * 1024, nowMs: 4_000_000 });
     expect(result.computed).toBe(2);
     expect(db.readSessionTimelineAny('grok-debit-a')!.timeline.state).toBe('ready');
@@ -361,8 +323,6 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
   });
 
   it('does not fold a peer mirror\'s stored projection onto a local byte offset', () => {
-    // A mirrored peer row carries a projection with an EMPTY resume state, so
-    // this box can never resume-fold a transcript it does not have.
     db.writeSessionTimeline({
       id: 'peer-1', fileMtimeMs: null, fileSize: null,
       timeline: {

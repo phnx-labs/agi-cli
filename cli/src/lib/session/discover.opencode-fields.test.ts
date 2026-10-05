@@ -3,9 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// db.ts + discover.ts capture their paths from HOME at import time, so point HOME
-// at a throwaway dir BEFORE importing. Real fs, real sqlite, a synthetic
-// opencode.db — no mocking (RUSH-2358 field parity).
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-opencode-fields-'));
@@ -14,9 +11,7 @@ process.env.USERPROFILE = tmpHome;
 
 const OPENCODE_DB = path.join(tmpHome, '.local', 'share', 'opencode', 'opencode.db');
 const SLUG = 'my-feature';
-// The session's cwd lives under a worktree so worktree_slug derives from it.
 const CWD = path.join(tmpHome, 'repo', '.agents', 'worktrees', SLUG);
-// A file the session edited — its dirname must appear in recentDirectoriesTouched.
 const EDIT_FILE = path.join(CWD, 'apps', 'cli', 'src', 'thing.ts');
 
 type Discover = typeof import('./discover.js');
@@ -28,14 +23,8 @@ let Database: Sqlite['default'];
 
 const SESSION_ID = 'ses_fields0000000000000000';
 const T0 = Date.UTC(2026, 7, 1, 0, 0, 0);
-const T1 = T0 + 5000; // duration 5000ms
+const T1 = T0 + 5000;
 
-// Session transcripts sync across the fleet, so a cwd recorded on ONE platform is
-// parsed on every other (RUSH-2358). These two rows hardcode literal separators
-// instead of going through `path.join` (which would only ever produce this host's
-// native separator), so the assertions below hold no matter which OS runs the
-// suite — a forward-slash cwd recorded on Linux/macOS, and a backslash cwd
-// recorded on Windows, both read correctly everywhere.
 const SESSION_ID_POSIX = 'ses_fieldsposix000000000000';
 const POSIX_SLUG = 'posix-feature';
 const POSIX_CWD = '/home/dev/repo/.agents/worktrees/posix-feature';
@@ -67,16 +56,12 @@ beforeAll(async () => {
   ).run(SESSION_ID, 'my session', CWD, '1.16.0', 1.23,
         JSON.stringify({ id: 'claude-x', providerID: 'anthropic' }), T0, T1);
 
-  // One assistant message carrying the per-turn token JSON the scanner aggregates.
   oc.prepare('INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)').run(
     `${SESSION_ID}-m0`, SESSION_ID,
     JSON.stringify({ role: 'assistant', tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 200, write: 5 } } }),
     T0,
   );
 
-  // A LARGE edit tool part: its full JSON exceeds the old 2000-char truncation, so
-  // the pre-fix substr() corrupted it into invalid JSON and dropped it, losing the
-  // filePath. The output-only truncation keeps state.input.filePath intact.
   const bigString = 'X'.repeat(6000);
   oc.prepare('INSERT INTO part (id, message_id, session_id, data, time_created) VALUES (?, ?, ?, ?, ?)').run(
     `${SESSION_ID}-p0`, `${SESSION_ID}-m0`, SESSION_ID,
@@ -95,8 +80,6 @@ beforeAll(async () => {
     'INSERT INTO todo (session_id, content, status, priority, position, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(SESSION_ID, 'finish the thing', 'pending', 'high', 0, T0, T1);
 
-  // Two more sessions with hardcoded, literal-separator cwds (RUSH-2358) — see
-  // the constants' comment above for why these don't go through `path.join`.
   oc.prepare(
     `INSERT INTO session (id, parent_id, title, directory, version, cost, model, time_created, time_updated)
      VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
@@ -109,10 +92,6 @@ beforeAll(async () => {
         JSON.stringify({ id: 'claude-x', providerID: 'anthropic' }), T0, T1);
   oc.close();
 
-  // account resolves from auth.json (resolveOpenCodeAccountId), NOT the
-  // control_account table above — that table exists in real installs but is
-  // permanently empty there, so a lookup against it always yields undefined
-  // (RUSH-2358). One valid provider credential proves the real path.
   const authPath = path.join(tmpHome, '.local', 'share', 'opencode', 'auth.json');
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
   fs.writeFileSync(authPath, JSON.stringify({ anthropic: { type: 'api', key: 'sk-test-key' } }));
@@ -121,7 +100,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { db.closeDB?.(); } catch { /* ignore */ }
+  try { db.closeDB?.(); } catch {  }
   if (REAL_HOME === undefined) delete process.env.HOME; else process.env.HOME = REAL_HOME;
   if (REAL_USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = REAL_USERPROFILE;
   fs.rmSync(tmpHome, { recursive: true, force: true });
@@ -131,26 +110,21 @@ describe('OpenCode field parity (RUSH-2358)', () => {
   it('populates every Tier-1 field the session table / message JSON already holds', () => {
     const s = db.getSessionById(SESSION_ID);
     expect(s).toBeTruthy();
-    // Tier 1 — tokens from the message aggregation, siblings of the pre-existing output.
     expect(s!.inputTokens).toBe(100);
     expect(s!.outputTokens).toBe(50);
     expect(s!.cacheReadTokens).toBe(200);
     expect(s!.cacheWriteTokens).toBe(5);
-    expect(s!.tokenCount).toBe(365); // 100+50+10+200+5
-    // Tier 1 — session-row columns.
+    expect(s!.tokenCount).toBe(365);
     expect(s!.costUsd).toBe(1.23);
-    expect(s!.model).toBe('claude-x'); // extracted from the JSON model blob
-    expect(s!.durationMs).toBe(5000); // time_updated - time_created
-    expect(s!.toolCallCount).toBe(2); // two tool parts
-    // account resolves from auth.json's valid credential, not control_account.
+    expect(s!.model).toBe('claude-x');
+    expect(s!.durationMs).toBe(5000);
+    expect(s!.toolCallCount).toBe(2);
     expect(s!.account).toBe('anthropic');
   });
 
   it('derives Tier-2 fields OpenCode records: recentDirectoriesTouched (survives truncation) and todos', () => {
     const s = db.getSessionById(SESSION_ID);
-    // The large edit part must not have been dropped — its filePath's dir shows up.
     expect(s!.recentDirectoriesTouched).toContain(path.dirname(EDIT_FILE));
-    // todos flows from the OpenCode todo table via the shared enrichment.
     expect(s!.todos).toBeTruthy();
     expect(s!.todos!.total).toBe(1);
   });
@@ -166,12 +140,6 @@ describe('OpenCode field parity (RUSH-2358)', () => {
     const win = db.getSessionById(SESSION_ID_WIN);
     expect(win!.worktreeSlug).toBe(WIN_SLUG);
 
-    // The slug assertions above do NOT discriminate a fixed normalizeCwd from a
-    // broken one: WORKTREE_RE matches `[\\/]` anywhere in the string, and the
-    // pre-fix `path.resolve()` only PREFIXES the reading process's cwd, leaving
-    // the `\.agents\worktrees\win-feature` substring intact for the regex to
-    // find by coincidence. The stored cwd is what actually regresses, so assert
-    // that directly — this is the assertion that fails without the fix.
     expect(win!.cwd).toBe(WIN_CWD);
     expect(win!.cwd).not.toContain(process.cwd());
     expect(posix!.cwd).toBe(POSIX_CWD);

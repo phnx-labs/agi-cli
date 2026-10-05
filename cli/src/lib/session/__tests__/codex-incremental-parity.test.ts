@@ -9,15 +9,6 @@ import {
   type CodexParserState,
 } from '../discover.js';
 
-// Differential parity harness (B-3, Codex). Proves that resuming a Codex parse
-// from a persisted continuation and folding in appended lines is BYTE-FOR-BYTE
-// identical to a full parse of the whole file, for EVERY field of
-// CodexSessionScan. Real temp files, real fs — no mocks.
-//
-// The full ground truth is computed by resuming from offset 0 over an empty
-// prior (a single incremental pass equals a full parse), so the harness needs no
-// import of the private scanCodexSession — scanCodexSessionIncremental(fp, 0,
-// fresh) IS a full parse.
 
 let dir: string;
 
@@ -32,21 +23,14 @@ function fresh(): CodexParserState {
   return serializeCodexParserState(initCodexParseState(), 0);
 }
 
-/** A full parse of the whole file = resume from offset 0 over an empty prior. */
 async function fullScan(fp: string) {
   return (await scanCodexSessionIncremental(fp, 0, fresh())).scan;
 }
 
-/** Serialize an array of JSON objects into JSONL lines (no trailing newline). */
 function jsonl(lines: object[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n');
 }
 
-/**
- * Seed the file with chunk 0, bootstrap a continuation, then APPEND each
- * subsequent chunk and resume from the persisted offset. Returns the final
- * incremental scan and the ground-truth full scan of the final file.
- */
 async function replay(chunks: string[]) {
   const fp = path.join(dir, 'rollout.jsonl');
   expect(chunks.length).toBeGreaterThan(0);
@@ -70,7 +54,6 @@ async function replay(chunks: string[]) {
   return { inc, full, offsets };
 }
 
-/** Assert two CodexSessionScan objects are equal on every field. */
 function expectScanParity(inc: any, full: any) {
   expect(inc).toEqual(full);
   const fields = [
@@ -84,8 +67,6 @@ function expectScanParity(inc: any, full: any) {
   }
 }
 
-// A representative, field-rich Codex transcript: session_meta, user + assistant
-// messages, cumulative token_count events (last wins), a PR straddle, a team.
 function richLines(): object[] {
   return [
     { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: 'sess-1', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/home/u/repo', git: { branch: 'RUSH-42-fix' }, cli_version: '0.9.0', model: 'gpt-5-codex' } },
@@ -129,7 +110,6 @@ describe('codex incremental parity — last-wins token usage across a boundary',
       { type: 'event_msg', timestamp: '2026-06-28T00:02:00.000Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 500, output_tokens: 100, reasoning_output_tokens: 20 } } } },
     ]);
     const { inc, full } = await replay([chunkA, chunkB]);
-    // LAST wins: 500 + 100 + 20 = 620 total, outputTokens = 100 + 20 = 120.
     expect(inc.tokenCount).toBe(620);
     expect(inc.outputTokens).toBe(120);
     expectScanParity(inc, full);
@@ -231,7 +211,6 @@ describe('codex incremental parity — truncation → full reparse', () => {
     const first = await scanCodexSessionIncremental(fp, 0, fresh());
     expect(first.newOffset).toBe(Buffer.byteLength(original, 'utf-8'));
 
-    // Rewrite SMALLER (a fresh, shorter session reusing the same path).
     const rewritten = jsonl([
       { type: 'session_meta', timestamp: '2026-06-29T00:00:00.000Z', payload: { id: 's2', cwd: '/y' } },
       { type: 'response_item', timestamp: '2026-06-29T00:00:30.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'brand new short session' }] } },
@@ -240,8 +219,6 @@ describe('codex incremental parity — truncation → full reparse', () => {
     const newSize = Buffer.byteLength(rewritten, 'utf-8');
     expect(newSize).toBeLessThan(first.newOffset);
 
-    // Truncation contract: on newSize < offset, discard the continuation and
-    // full-parse from scratch.
     const reparse = newSize < first.newOffset
       ? await scanCodexSessionIncremental(fp, 0, fresh())
       : await scanCodexSessionIncremental(fp, first.newOffset, first.newState);
@@ -265,11 +242,9 @@ describe('codex incremental parity — partial trailing line', () => {
     const l2partial = l2full.slice(0, Math.floor(l2full.length / 2));
     fs.appendFileSync(fp, l2partial);
     const step2 = await scanCodexSessionIncremental(fp, step1.newOffset, step1.newState);
-    // No new '\n' → offset must NOT advance; the half-line is not parsed.
     expect(step2.newOffset).toBe(step1.newOffset);
     expect(step2.scan.messageCount).toBe(0);
 
-    // Complete the record + newline.
     fs.appendFileSync(fp, l2full.slice(l2partial.length) + '\n');
     const step3 = await scanCodexSessionIncremental(fp, step2.newOffset, step2.newState);
     expect(step3.newOffset).toBe(Buffer.byteLength(fs.readFileSync(fp)));
@@ -280,10 +255,6 @@ describe('codex incremental parity — partial trailing line', () => {
   });
 
   it('a COMPLETE record missing only its trailing newline is deferred, then counted EXACTLY once', async () => {
-    // The non-atomic-append bug class prix-cloud caught for Claude: a writer
-    // appends a full, valid record and only later appends its '\n'. Codex
-    // messageCount is additive with NO dedup, so a double-apply would show up as
-    // messageCount 1→2 and contentText carrying the message twice.
     const fp = path.join(dir, 'complete-unterminated.jsonl');
     const l1 = JSON.stringify({ type: 'response_item', timestamp: '2026-06-28T00:00:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first message' }] } });
     fs.writeFileSync(fp, l1 + '\n');
@@ -292,19 +263,15 @@ describe('codex incremental parity — partial trailing line', () => {
     expect(step1.scan.contentText).toBe('first message');
     expect(step1.newOffset).toBe(Buffer.byteLength(l1 + '\n', 'utf-8'));
 
-    // Append a COMPLETE, valid second record — but WITHOUT its trailing '\n' yet.
     const l2 = JSON.stringify({ type: 'response_item', timestamp: '2026-06-28T00:01:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'second message' }] } });
     fs.appendFileSync(fp, l2);
     const step2 = await scanCodexSessionIncremental(fp, step1.newOffset, step1.newState);
-    // Deferred: offset does NOT advance, line2 NOT yet counted.
     expect(step2.newOffset).toBe(step1.newOffset);
     expect(step2.scan.messageCount).toBe(1);
     expect(step2.scan.contentText).toBe('first message');
 
-    // Writer flushes the terminating '\n'.
     fs.appendFileSync(fp, '\n');
     const step3 = await scanCodexSessionIncremental(fp, step2.newOffset, step2.newState);
-    // Counted EXACTLY once — not twice.
     expect(step3.scan.messageCount).toBe(2);
     expect(step3.scan.contentText).toBe('first message\nsecond message');
     expect(step3.newOffset).toBe(Buffer.byteLength(fs.readFileSync(fp)));

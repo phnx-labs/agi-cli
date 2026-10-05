@@ -1,12 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Count how many times `opencode.db` is OPENED. That is the cost RUSH-2210 is
-// about: the whole-DB mtime stamp re-emitted every indexed session on any DB
-// write, and upsertSessionsBatch's enrichment then re-opened this same file once
-// per re-emitted entry (via parseSession -> parseOpenCode). Wrapping the shared
-// sqlite shim is the honest way to measure it — the counter is a top-level const
-// captured by the factory closure, matching discover.dir-ledger.test.ts (Bun's
-// runner does not hoist vi.mock, so a plain const works in both runners).
 const openCounter: { match: string | null; count: number } = { match: null, count: 0 };
 
 vi.mock('../sqlite.js', async () => {
@@ -25,9 +18,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// db.ts + discover.ts resolve their paths from HOME at module-import time. Point
-// HOME at a throwaway dir BEFORE importing so the suite runs against a clean,
-// isolated sessions DB and a synthetic opencode.db (real fs, real sqlite).
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-opencode-ledger-'));
@@ -46,20 +36,10 @@ let Database: Sqlite['default'];
 
 const SESSION_COUNT = 12;
 
-/** Open the synthetic opencode.db directly (not counted — the counter is off). */
 function openFixture() {
   return new (Database as any)(OPENCODE_DB);
 }
 
-/**
- * Build an opencode.db with the tables the scanner and parser read: `session`
- * (one row per session) and `message`/`part` (the transcript parseOpenCode
- * walks). `control_account` is also created — real OpenCode installs carry it
- * — but it stays unused by design: the real account source is `auth.json`
- * (see `seedAuthJson`), which `resolveOpenCodeAccountId` reads. On a real,
- * actively-used install `control_account` is permanently empty, so reading it
- * would always yield `undefined` (RUSH-2358).
- */
 function seedFixture(): void {
   fs.mkdirSync(path.dirname(OPENCODE_DB), { recursive: true });
   const oc = openFixture();
@@ -91,18 +71,12 @@ function seedFixture(): void {
   oc.close();
 }
 
-/**
- * Write the auth.json `resolveOpenCodeAccountId` actually reads — the real
- * OpenCode account source (RUSH-2358). One valid `api`-type credential for
- * provider `anthropic`.
- */
 function seedAuthJson(): void {
   const authPath = path.join(tmpHome, '.local', 'share', 'opencode', 'auth.json');
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
   fs.writeFileSync(authPath, JSON.stringify({ anthropic: { type: 'api', key: 'sk-test-key' } }));
 }
 
-/** Append one user message + its text part to a session. */
 function addMessage(oc: any, sessionId: string, messageId: string, ts: number, text: string): void {
   oc.prepare(`INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)`)
     .run(messageId, sessionId, JSON.stringify({ role: 'user' }), ts);
@@ -110,12 +84,6 @@ function addMessage(oc: any, sessionId: string, messageId: string, ts: number, t
     .run(`${messageId}-p0`, messageId, sessionId, JSON.stringify({ type: 'text', text }), ts);
 }
 
-/**
- * Write to the shared DB the way OpenCode does: append a turn to ONE session and
- * move that row's `time_updated`. Every other session row is untouched, but the
- * DB file's own mtime/size moves — the exact shape that used to re-emit all of
- * them.
- */
 function appendTurnTo(sessionId: string, ts: number, text: string): void {
   const oc = openFixture();
   addMessage(oc, sessionId, `${sessionId}-m-${ts}`, ts, text);
@@ -124,14 +92,6 @@ function appendTurnTo(sessionId: string, ts: number, text: string): void {
   bumpDbMtime(ts);
 }
 
-/**
- * Append a PART to a session's existing message without touching `session` or
- * `message`. This is not hypothetical: on a real `opencode.db` (mac-mini,
- * 74 sessions) `ses_3955202dfffe7C4oedWxL38Lul` carried
- * `time_updated = 1771316403087` with its newest part at `1771331512162` — over
- * four hours later. A stamp built from `session.time_updated` alone would call
- * that session unchanged forever.
- */
 function appendPartTo(sessionId: string, messageId: string, ts: number, text: string): void {
   const oc = openFixture();
   oc.prepare(`INSERT INTO part (id, message_id, session_id, data, time_created) VALUES (?, ?, ?, ?, ?)`)
@@ -140,10 +100,6 @@ function appendPartTo(sessionId: string, messageId: string, ts: number, text: st
   bumpDbMtime(ts);
 }
 
-/**
- * Grow an EXISTING part's `data` in place — a streaming turn — with no new row,
- * no new id, and no timestamp anywhere moving.
- */
 function growPartInPlace(partId: string, text: string, ts: number): void {
   const oc = openFixture();
   oc.prepare(`UPDATE part SET data = ? WHERE id = ?`).run(JSON.stringify({ type: 'text', text }), partId);
@@ -151,21 +107,17 @@ function growPartInPlace(partId: string, text: string, ts: number): void {
   bumpDbMtime(ts);
 }
 
-/** Force the DB file's mtime forward so the whole-DB short-circuit sees a delta. */
 function bumpDbMtime(ts: number): void {
   const secs = Math.floor(ts / 1000);
   fs.utimesSync(OPENCODE_DB, secs, secs);
 }
 
-/** The per-session ledger row the scan wrote, read back from sessions.db. */
 function ledgerFor(sessionId: string): { file_mtime_ms: number; file_size: number } {
   return db.getDB()
     .prepare(`SELECT file_mtime_ms, file_size FROM scan_ledger WHERE file_path = ?`)
     .get(`${OPENCODE_DB}#${sessionId}`) as { file_mtime_ms: number; file_size: number };
 }
 
-// `skipExistenceCheck` because an OpenCode filePath is `opencode.db#<id>` — a
-// row address inside the shared DB, not a file `fs.existsSync` can stat.
 async function scan() {
   return discover.discoverSessions({ agent: 'opencode', all: true, skipExistenceCheck: true });
 }
@@ -174,7 +126,7 @@ beforeAll(async () => {
   Database = (await import('../sqlite.js')).default;
   db = await import('./db.js');
   discover = await import('./discover.js');
-  db.getDB(); // create schema
+  db.getDB();
   seedFixture();
   seedAuthJson();
 });
@@ -185,8 +137,6 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  // Close before removing the tree: Windows refuses to unlink an open file, so a
-  // leaked connection (plus its WAL sidecars) fails the whole suite there.
   db.closeDB();
   if (REAL_HOME === undefined) delete process.env.HOME; else process.env.HOME = REAL_HOME;
   if (REAL_USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = REAL_USERPROFILE;
@@ -198,8 +148,6 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     const sessions = await scan();
     expect(sessions.length).toBe(SESSION_COUNT);
     expect(sessions.every(s => s.agent === 'opencode')).toBe(true);
-    // account comes from auth.json's valid credential (provider ids joined),
-    // never the always-empty control_account table (RUSH-2358).
     expect(sessions.every(s => s.account === 'anthropic')).toBe(true);
   });
 
@@ -214,13 +162,8 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     openCounter.count = 0;
     const after = await scan();
 
-    // The changed row is re-parsed and its new message count lands...
     expect(after.find(s => s.id === target)!.messageCount).toBe(2);
-    // ...every other session still surfaces (skipped, not dropped)...
     expect(after.length).toBe(SESSION_COUNT);
-    // ...and the DB was opened a handful of times, not once per indexed session.
-    // Pre-fix this was 1 (the scan) + SESSION_COUNT (one enrichment parse per
-    // re-emitted entry); now it is the scan handle plus the single changed row.
     expect(openCounter.count).toBeLessThanOrEqual(3);
     expect(openCounter.count).toBeLessThan(SESSION_COUNT);
   });
@@ -230,7 +173,6 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     await scan();
     const before = ledgerFor(target);
 
-    // The real-world shape: a part lands hours after session.time_updated.
     appendPartTo(target, `${target}-m0`, Date.UTC(2026, 6, 2, 4), 'a part written much later');
 
     openCounter.match = OPENCODE_DB;
@@ -238,11 +180,8 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     await scan();
 
     const after = ledgerFor(target);
-    // The stamp moved on the part's own time and on the added bytes, so the
-    // session was re-indexed rather than skipped forever.
     expect(after.file_mtime_ms).toBeGreaterThan(before.file_mtime_ms);
     expect(after.file_size).toBeGreaterThan(before.file_size);
-    // Still only this one session was re-emitted.
     expect(openCounter.count).toBeLessThanOrEqual(3);
   });
 
@@ -256,16 +195,12 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     await scan();
 
     const after = ledgerFor(target);
-    // No timestamp anywhere changed — the byte total is what caught it.
     expect(after.file_mtime_ms).toBe(before.file_mtime_ms);
     expect(after.file_size).toBeGreaterThan(before.file_size);
   });
 
   it('stamps file_size in real bytes, which tool-index reads as a byte budget', async () => {
     await scan();
-    // `sessions.file_size` feeds ensureToolIndex's byte budget and
-    // toolCallsForBackfill's 16 MiB in-memory cap (tool-index.ts), so the value
-    // must be a genuine payload size — not a repurposed row counter.
     const row = db.getDB()
       .prepare(`SELECT file_size FROM sessions WHERE id = ?`)
       .get('ses_fixture00') as { file_size: number };
@@ -276,7 +211,7 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     ).get('ses_fixture00', 'ses_fixture00') as { n: number }).n;
     oc.close();
     expect(row.file_size).toBe(expected);
-    expect(expected).toBeGreaterThan(SESSION_COUNT); // not a count masquerading as bytes
+    expect(expected).toBeGreaterThan(SESSION_COUNT);
   });
 
   it('counts BYTES, not characters, for multi-byte content', async () => {
@@ -284,11 +219,7 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     await scan();
     const before = ledgerFor(target);
 
-    // SQLite's LENGTH() on a TEXT column returns characters: LENGTH('日本語')
-    // is 3, LENGTH(CAST('日本語' AS BLOB)) is 9. The stamp is a byte budget
-    // downstream (tool-index.ts), so a CJK transcript must not report a third
-    // of its real size.
-    const cjk = '日本語'.repeat(200); // 600 chars, 1800 UTF-8 bytes
+    const cjk = '日本語'.repeat(200);
     appendPartTo(target, `${target}-m0`, Date.UTC(2026, 6, 2, 6), cjk);
 
     await scan();
@@ -296,15 +227,12 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     const grew = ledgerFor(target).file_size - before.file_size;
     expect(grew).toBeGreaterThan(1800);
     expect(grew).toBeGreaterThan(Buffer.byteLength(cjk, 'utf8'));
-    // A character count would have grown by only ~600 plus the JSON envelope.
     expect(grew).toBeGreaterThan(cjk.length * 2);
   });
 
   it('emits nothing when the DB file changes but no session row does', async () => {
     await scan();
 
-    // A write that moves the file's stat without touching any session row —
-    // e.g. OpenCode updating its own bookkeeping tables.
     const oc = openFixture();
     oc.prepare(`UPDATE control_account SET active = 1`).run();
     oc.close();
@@ -315,8 +243,6 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     const after = await scan();
 
     expect(after.length).toBe(SESSION_COUNT);
-    // Exactly one open: the scan's own handle. No session was re-emitted, so no
-    // enrichment parse re-opened the file.
     expect(openCounter.count).toBe(1);
   });
 
@@ -344,9 +270,6 @@ describe('OpenCode first-user-message extractor invalidation (PHNX-3621)', () =>
     const target = 'ses_fixture09';
     await scan();
 
-    // Model the real merged-v2 -> fixed-v3 upgrade: #3358 already stamped the
-    // transcript and shared OpenCode DB at v2 without extracting this field.
-    // Nothing on disk changed; only the extractor version advanced.
     const stale = db.CONTENT_INDEX_VERSION - 1;
     db.getDB().prepare(`UPDATE scan_ledger SET extractor_version = ?`).run(stale);
     db.getDB().prepare(`UPDATE sessions SET first_user_message = NULL WHERE id = ?`).run(target);
@@ -360,8 +283,6 @@ describe('OpenCode first-user-message extractor invalidation (PHNX-3621)', () =>
     expect(openCounter.count).toBeGreaterThanOrEqual(1);
     expect(db.getScanStampByPath(OPENCODE_DB)?.extractorVersion).toBe(db.CONTENT_INDEX_VERSION);
 
-    // The successful scan stamps both the container and session rows current;
-    // another unchanged scan must be a zero-open warm no-op again.
     openCounter.match = OPENCODE_DB;
     openCounter.count = 0;
     await scan();

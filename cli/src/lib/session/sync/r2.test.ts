@@ -1,28 +1,3 @@
-/**
- * Opt-in end-to-end coverage for the R2/S3 backup client (RUSH-2437).
- *
- * Drives the REAL S3-compatible HTTP path — no mocking of the network client, per
- * the repo's "real services only" rule. It talks to whatever S3-compatible
- * endpoint the env points at: Cloudflare R2, MinIO, or any other. It covers the
- * verbs the backup target uses (put / get / head / list / delete) plus the
- * encrypt -> upload -> download -> decrypt round-trip that `sessions export
- * --to-r2` / `import --from-r2` rely on.
- *
- * GATED: SKIPS cleanly when AGENTS_TEST_R2_ENDPOINT is unset, so CI stays green
- * with no object store. To run it against a local MinIO:
- *
- *   docker run -d -p 9000:9000 -e MINIO_ROOT_USER=minioadmin \
- *     -e MINIO_ROOT_PASSWORD=minioadmin minio/minio server /data
- *   # create the bucket once (mc, or the console on :9001), then:
- *   AGENTS_TEST_R2_ENDPOINT=http://127.0.0.1:9000 \
- *   AGENTS_TEST_R2_BUCKET=agents-sessions-test \
- *   AGENTS_TEST_R2_ACCESS_KEY_ID=minioadmin \
- *   AGENTS_TEST_R2_SECRET_ACCESS_KEY=minioadmin \
- *   bun run test -- src/lib/session/sync/r2.test.ts
- *
- * Against real Cloudflare R2, additionally set AGENTS_TEST_R2_ACCOUNT_ID and drop
- * AGENTS_TEST_R2_ENDPOINT to use the account's default endpoint.
- */
 
 import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -51,8 +26,6 @@ const ACCESS = process.env.AGENTS_TEST_R2_ACCESS_KEY_ID ?? '';
 const SECRET = process.env.AGENTS_TEST_R2_SECRET_ACCESS_KEY ?? '';
 const ACCOUNT = process.env.AGENTS_TEST_R2_ACCOUNT_ID ?? 'test-account';
 
-// The endpoint is what makes this runnable without live R2 (MinIO/any S3). When
-// it is set (or a real account id is given), run; otherwise skip cleanly.
 const CONFIGURED = Boolean((ENDPOINT || ACCOUNT !== 'test-account') && BUCKET && ACCESS && SECRET);
 describe('decodeXml', () => {
   it('decodes each entity once, so an escaped ampersand cannot double-decode (CodeQL js/double-escaping)', () => {
@@ -73,8 +46,6 @@ function testConfig(): R2Config {
   };
 }
 
-// Unique per-run prefix so parallel/repeat runs never collide, keyed to avoid the
-// cross-run staleness trap (each object is namespaced to this run).
 const RUN = `r2test-${process.pid}-${Math.floor(Number(process.hrtime.bigint() % 1_000_000n))}`;
 const PREFIX = `sessions/${RUN}/`;
 
@@ -83,9 +54,8 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
   const written: string[] = [];
 
   afterAll(async () => {
-    // Best-effort cleanup so a shared bucket does not accumulate test objects.
     for (const key of written) {
-      try { await client.delete(key); } catch { /* already gone */ }
+      try { await client.delete(key); } catch {  }
     }
   });
 
@@ -126,7 +96,6 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
     expect(await client.get(key)).not.toBeNull();
     await client.delete(key);
     expect(await client.get(key)).toBeNull();
-    // Deleting again must not throw (404 tolerated).
     await client.delete(key);
   });
 
@@ -138,7 +107,6 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
 
     const envelope = encryptTranscript(plaintext, encKey);
     expect(isTranscriptEnvelope(envelope)).toBe(true);
-    // Ciphertext is what actually leaves the machine — never the plaintext.
     expect(envelope).not.toContain('sk-abc123');
 
     await client.put(key, envelope, 'application/json');
@@ -151,24 +119,19 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
   });
 
   it('backup wire format: export --to-r2 object round-trips through import --from-r2', async () => {
-    // Exercise the exact object format both command paths use: `export --to-r2`
-    // writes serializeBundle(header, [buildRecord(...)]) at objectKey(...); `import
-    // --from-r2` lists + gets + parseBundle + decryptTranscriptBody. Real file,
-    // real crypto, real MinIO — no command harness, no mocks.
     const encKey = Buffer.from(generateSyncEncKey(), 'base64');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'r2-backup-'));
     const abs = path.join(tmp, 'transcript.jsonl');
     const plaintext = '{"role":"user","content":"hello from RUSH-2437"}\n';
     fs.writeFileSync(abs, plaintext, 'utf-8');
 
-    const machine = RUN; // keep the object under this run's prefix for cleanup
+    const machine = RUN;
     const rec = buildRecord(
       { agent: 'claude', machine, sessionId: 'sess-wire', relKey: 'projects/p/sess-wire.jsonl', absPath: abs },
       { redact: true, encryptKey: encKey },
     );
     expect(rec.encrypted).toBe(true);
 
-    // Upload side (mirrors uploadToR2 / r2KeyForRecord).
     const spec = specForAgent(rec.agent);
     const key = objectKey(rec.machine, rec.agent, rec.sessionId, spec?.dirShaped ? rec.relKey : undefined);
     written.push(key);
@@ -178,7 +141,6 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
     });
     await client.put(key, serializeBundle(recHeader, [rec]), 'application/json');
 
-    // Download side (mirrors pullFromR2): list, get, parse, decrypt.
     const listed = await client.list(`sessions/${machine}/`);
     expect(listed).toContain(key);
     const body = await client.get(key);
@@ -186,7 +148,7 @@ suite('R2Client end-to-end (AGENTS_TEST_R2_ENDPOINT)', () => {
     const parsed = parseBundle(body!);
     expect(parsed.records).toHaveLength(1);
     const back = parsed.records[0];
-    expect(back.relKey).toBe('projects/p/sess-wire.jsonl'); // metadata preserved
+    expect(back.relKey).toBe('projects/p/sess-wire.jsonl');
     expect(decryptTranscriptBody(back.body, encKey)).toBe(plaintext);
 
     fs.rmSync(tmp, { recursive: true, force: true });

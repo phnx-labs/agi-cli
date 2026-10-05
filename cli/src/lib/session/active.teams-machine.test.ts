@@ -1,18 +1,3 @@
-/**
- * A remote teams teammate is attributed to the box it EXECUTES on, not to the
- * orchestrator that spawned it (SES-GAP-10, RUSH-2486).
- *
- * `teams add --device <peer>` runs the teammate on <peer> over SSH, but it gets
- * no host-dispatch index row, so `foldExecutionMachine` can't reach it and the
- * orchestrator's self-stamp (`commands/sessions.ts`) claimed it — listing a
- * peer's teammate under `agents sessions --active --device <orchestrator>`.
- * `listTeamsActive` now folds `AgentProcess.hostName` into `machine` /
- * `offloadedFrom`, the same shape `run --device` gets.
- *
- * Real path: seed teammate `meta.json` records on disk and drive the actual
- * `AgentManager.listRunning()` through `listTeamsActive`, no mocking. `localOnly`
- * keeps it off SSH (a remote teammate reports its last-persisted RUNNING state).
- */
 
 import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -32,7 +17,6 @@ afterAll(() => {
   delete process.env.AGENTS_SYNC_MACHINE_ID;
 });
 
-/** Write a minimal RUNNING teammate meta.json the AgentManager will load. */
 function seedTeammate(agentId: string, over: Record<string, unknown>): void {
   const dir = path.join(getTeamsAgentsDir(), agentId);
   fs.mkdirSync(dir, { recursive: true });
@@ -64,15 +48,10 @@ describe('listTeamsActive execution-host attribution', () => {
     const row = await rowFor('remote-peer');
     expect(row).toBeDefined();
     expect(row!.machine).toBe('yosemite-s0');
-    // offloadedFrom is the dispatcher (this box) so the value survives the
-    // cross-machine fan-out (parseRemoteActive keeps an offloaded row's machine)
-    // and is COMPARED to this box downstream, never merely tested.
     expect(row!.offloadedFrom).toBe('dispatcher-box');
   });
 
   it('leaves a teammate pinned to this box unattributed for the self-stamp', async () => {
-    // `--device` onto the orchestrator's own box: it executes HERE, so machine
-    // must stay unset for the self-stamp rather than reading as offloaded.
     seedTeammate('remote-self', { host_name: 'dispatcher-box', host_target: 'user@dispatcher-box' });
     const row = await rowFor('remote-self');
     expect(row).toBeDefined();

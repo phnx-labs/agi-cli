@@ -13,14 +13,9 @@ import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux source)', () => {
   const emptyHook = (): HookSessionIndex => ({ byLaunchId: new Map(), byTerminalId: new Map(), byPid: new Map() });
   const meta = (labels: Record<string, string>, extra: { source?: string; pane?: string } = {}) => ({ labels, source: extra.source ?? 'cli', pane: extra.pane });
-  // These cases exercise the meta/registry/hook precedence in isolation, so they
-  // pass a non-`ag-*` session name and an empty name map — the name-based tier is
-  // covered separately in active.tmux-identity.test.ts.
   const NO_NAMES = new Map<string, string>();
 
   it('the per-pane launch registry WINS over the session meta label (a split into an existing session)', () => {
-    // The session was originally a wrapped claude, but THIS pane hosts a gemini
-    // bare-spawned into a split — it must be attributed to its own launch.
     const id = resolvePaneIdentity(
       '%2',
       'shell',
@@ -48,9 +43,6 @@ describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux s
   });
 
   it('does NOT mis-attribute the wrapped agent to a non-origin shell split pane (no name signal)', () => {
-    // A split shell pane (%2) of a labeled session, no registry entry, and no
-    // usable ag-* name: must be skipped so the origin pane (%1) is the only one
-    // that emits the wrapped agent.
     const id = resolvePaneIdentity('%2', 'shell', meta({ agent: 'claude', sessionId: 'meta-id' }, { pane: '%1' }), undefined, emptyHook, NO_NAMES);
     expect(id).toBeUndefined();
   });
@@ -90,27 +82,21 @@ describe('resolveFallbackStatus (a LIVE process never resolves to unknown)', () 
   };
   const gonePath = (): string => {
     const p = path.join(os.tmpdir(), `agents-fallback-missing-${process.pid}-${tmp.length}.jsonl`);
-    try { fs.unlinkSync(p); } catch { /* already absent */ }
+    try { fs.unlinkSync(p); } catch {  }
     return p;
   };
 
   it('no transcript + a LIVE process ⇒ running (the honest live floor, never unknown)', () => {
-    // The blanket `unknown` for a live gemini/droid/cursor/opencode is gone: the
-    // process being alive is itself a positive signal — report `running`.
     expect(resolveFallbackStatus(undefined, true)).toBe('running');
   });
 
   it('a LIVE process is running regardless of transcript freshness — fresh, stale, or vanished', () => {
-    // Never a fabricated `idle` for a live process, even when its (opaque) file is
-    // stale or has vanished mid-read.
     expect(resolveFallbackStatus(mkfile(10_000), true)).toBe('running');
     expect(resolveFallbackStatus(mkfile(5 * 60_000), true)).toBe('running');
     expect(resolveFallbackStatus(gonePath(), true)).toBe('running');
   });
 
   it('a DEAD process with a fresh transcript ⇒ closed (not the old fabricated idle)', () => {
-    // RUSH-2066: a dead pid used to report `idle` ("done, waiting for you"), a lie.
-    // The process has exited — say so.
     expect(resolveFallbackStatus(mkfile(5 * 60_000), false)).toBe('closed');
   });
 
@@ -119,8 +105,6 @@ describe('resolveFallbackStatus (a LIVE process never resolves to unknown)', () 
   });
 
   it('a DEAD process whose transcript vanished ⇒ closed (still definitively dead)', () => {
-    // Previously `unknown`; the process being dead is knowable even when the file
-    // is gone, so `closed` is the honest answer, not `unknown`.
     expect(resolveFallbackStatus(gonePath(), false)).toBe('closed');
   });
 
@@ -129,13 +113,11 @@ describe('resolveFallbackStatus (a LIVE process never resolves to unknown)', () 
   });
 
   it('a LIVE process whose transcript is days-stale ⇒ abandoned (hung / dangling)', () => {
-    // The user's case: a session alive but making no progress for days. Even though
-    // the pid is alive, no writes for ABANDONED_STALE_MS means it is dangling.
     expect(resolveFallbackStatus(mkfile(3 * 24 * 60 * 60_000), true)).toBe('abandoned');
   });
 
   afterAll(() => {
-    for (const p of tmp) { try { fs.rmSync(path.dirname(p), { recursive: true, force: true }); } catch { /* best-effort */ } }
+    for (const p of tmp) { try { fs.rmSync(path.dirname(p), { recursive: true, force: true }); } catch {  } }
   });
 });
 
@@ -163,7 +145,6 @@ describe('lifecycleStatus (framework-computed from PID + mtime, never self-repor
 
   it('exactly at the abandoned threshold ⇒ abandoned (>= boundary is inclusive)', () => {
     expect(lifecycleStatus(true, now - ABANDONED_STALE_MS, now)).toBe('abandoned');
-    // one ms under the threshold: not yet abandoned (alive ⇒ defer)
     expect(lifecycleStatus(true, now - ABANDONED_STALE_MS + 1, now)).toBeUndefined();
   });
 });
@@ -176,8 +157,6 @@ describe('agentKindFromComm', () => {
   });
 
   it('does NOT match the Codex desktop app-server bundled inside Codex.app', () => {
-    // The desktop app ships a binary literally named `codex`; without the bundle
-    // guard its `app-server` (cwd '/') surfaces as a phantom agent session.
     expect(agentKindFromComm('/Applications/Codex.app/Contents/Resources/codex')).toBeUndefined();
   });
 
@@ -185,11 +164,6 @@ describe('agentKindFromComm', () => {
     expect(agentKindFromComm('/Applications/Claude.app/Contents/MacOS/Claude')).toBeUndefined();
   });
 
-  // Harness-parity regression guard (RUSH-2205): every SESSION_AGENTS member must
-  // resolve from at least one process comm name, so a bare-headless run of any
-  // discoverable harness (grok/kimi/antigravity/openclaw/hermes/rush) is never
-  // silently dropped by the ps-scan. Asserted off the registry-derived source so
-  // adding a SESSION_AGENT without a comm fails here instead of at runtime.
   it('resolves every SESSION_AGENTS member to its id via at least one comm', () => {
     for (const id of SESSION_AGENTS) {
       const comms = sessionAgentComms(id);
@@ -201,8 +175,6 @@ describe('agentKindFromComm', () => {
   });
 
   it('recognizes the previously-dropped headless harnesses', () => {
-    // These six were the AGENT_CLI_NAMES gap before RUSH-2205 — `if (!kind) continue`
-    // silently dropped their headless processes from --orphan/--active.
     expect(agentKindFromComm('grok')).toBe('grok');
     expect(agentKindFromComm('kimi')).toBe('kimi');
     expect(agentKindFromComm('agy')).toBe('antigravity');
@@ -232,8 +204,6 @@ describe('resolveCwds', () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const pids = Array.from({ length: 30 }, (_, i) => i + 1000);
-    // Probe outlasts the stagger so windows overlap — this is what would let an
-    // unbounded fan-out (Promise.all) pile all 30 up at once. The bound must cap it.
     const probe = async (pid: number): Promise<string | undefined> => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
@@ -244,17 +214,15 @@ describe('resolveCwds', () => {
 
     const cwds = await resolveCwds(pids, probe);
 
-    // The whole point of the mitigation: never all-at-once (unbounded => 30).
     expect(maxInFlight).toBeLessThanOrEqual(LSOF_CONCURRENCY);
-    expect(maxInFlight).toBeGreaterThan(1); // still concurrent within the bound, not serial
-    // Contract preserved: one cwd per pid, in input order.
+    expect(maxInFlight).toBeGreaterThan(1);
     expect(cwds).toEqual(pids.map(p => `/cwd/${p}`));
   });
 
   it('preserves per-pid alignment even when probes finish out of order', async () => {
     const pids = [5, 4, 3, 2, 1];
     const probe = async (pid: number): Promise<string | undefined> => {
-      await delay(pid * 3); // pid 1 finishes last though it may start first
+      await delay(pid * 3);
       return `cwd-${pid}`;
     };
     const cwds = await resolveCwds(pids, probe);
@@ -301,7 +269,6 @@ describe('matchOriginDevice (resolve an ssh client IP to the initiating device)'
   const reg: DeviceRegistry = {
     zion: device('zion', { user: 'muqsit', address: { via: 'tailscale', ip: '100.126.152.114', dnsName: 'zion.tailnet.ts.net' } }),
     'yosemite-s0': device('yosemite-s0', { address: { via: 'tailscale', ip: '100.125.135.113' } }),
-    // A manually-added device with no resolvable IP must never match.
     'no-ip': device('no-ip', { address: { via: 'manual' } }),
   };
 
@@ -318,8 +285,6 @@ describe('matchOriginDevice (resolve an ssh client IP to the initiating device)'
   });
 
   it('skips a device that has no IP address', () => {
-    // '' would falsely match a device whose address.ip is undefined if the guard
-    // were missing; assert the no-ip device is never returned.
     expect(matchOriginDevice('', reg)).toBeUndefined();
   });
 });
@@ -371,7 +336,6 @@ describe('deriveSessionRecap (headline ladder — a user-anchored NAME, never th
   it('falls back to the first-prompt topic — NOT the last agent line (PHNX-3797)', () => {
     const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
     expect(r).toMatchObject({ title: 'add a widget', recapSource: 'prompt' });
-    // The live line is still carried, just not as the headline.
     expect(r.lastAgentLine).toBe('now fixing CI');
   });
 
@@ -394,7 +358,6 @@ describe('deriveSessionRecap (headline ladder — a user-anchored NAME, never th
     }];
     foldRecap(rows);
     expect(rows[0]).toMatchObject({ title: 'Daemon titler wiring', recapSource: 'generated', lastAgentLine: 'did the thing' });
-    // The secondary line is folded on beside the headline (PHNX-3797).
     expect(rows[0].importantMessage).toEqual({ text: 'did the thing', kind: 'activity' });
   });
 });
@@ -413,7 +376,6 @@ describe('deriveImportantMessage (the ranked secondary line — PHNX-3797 owner 
   it('a plan-review / permission / input-required wait is a needs-you', () => {
     expect(deriveImportantMessage({ status: 'running', awaitingReason: 'plan_review', preview: 'drafted a plan' }))
       .toEqual({ text: 'drafted a plan', kind: 'needs_you' });
-    // No recent line to show → a spelled-out wait, never an empty secondary line.
     expect(deriveImportantMessage({ status: 'input_required' }))
       .toEqual({ text: 'Waiting for you', kind: 'needs_you' });
     expect(deriveImportantMessage({ status: 'running', awaitingReason: 'permission' }))
@@ -431,8 +393,6 @@ describe('deriveImportantMessage (the ranked secondary line — PHNX-3797 owner 
     expect(deriveImportantMessage({ status: 'running' })).toBeUndefined();
   });
 
-  // PHNX-3939: the prompt rung used to classify the already-collapsed `topic`,
-  // which `extractSessionTopic` filled from scaffolding the turn cleaner rejects.
   it('classifies the raw LATEST genuine turn, not the collapsed topic', () => {
     const r = deriveSessionRecap({
       topic: 'Set model to `Fable 5.1` and saved as your default',
@@ -560,8 +520,6 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
   });
 
   it('backfills the daemon-generated title AND re-derives the shown headline (PHNX-3797)', () => {
-    // The live row was folded with a tail already; only the index knows the
-    // title, so the backfill has to re-run the ladder or `title` never updates.
     const rows: ActiveSession[] = [
       { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', topic: 'fix the headline', tail: ['now fixing CI'] },
     ];
@@ -572,7 +530,6 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
     expect(rows[0].generatedTitle).toBe('Session headline ladder fix');
     expect(rows[0].title).toBe('Session headline ladder fix');
     expect(rows[0].recapSource).toBe('generated');
-    // The agent's live line is still on the row — just not as the headline.
     expect(rows[0].lastAgentLine).toBe('now fixing CI');
   });
 

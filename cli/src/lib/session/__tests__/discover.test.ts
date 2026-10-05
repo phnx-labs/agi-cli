@@ -180,10 +180,6 @@ describe('FTS5 session_text schema (smoke test)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Claude session titles: `/rename` (custom-title) > Claude auto (ai-title).
-// The first prompt remains the topic; both title events can repeat and last wins.
-// ---------------------------------------------------------------------------
 
 describe('scanClaudeSession title resolution', () => {
   let dir: string;
@@ -230,9 +226,6 @@ describe('scanClaudeSession title resolution', () => {
   });
 
   it('collapses an ai-title generated from a skill preamble to the skill', async () => {
-    // Claude derives its ai-title from the first turn, so a session opened with a
-    // skill got named after the injected scaffolding — and label wins on EVERY
-    // surface (picker header, --flat/--tree, the Fleet row) for the whole session.
     const fp = write([
       userMsg('Base directory for this skill: /home/u/.claude/skills/continue\n\npick up where I left off'),
       { type: 'ai-title', aiTitle: 'Base directory for this skill: /home/u/.agents/.history/versions/claude/2.1.207/home/.claude/skills/continue', sessionId: 's' },
@@ -242,7 +235,6 @@ describe('scanClaudeSession title resolution', () => {
   });
 
   it('never rewrites a user custom-title, even one naming a skills path', async () => {
-    // `/rename` is the user's own words; only the injected ai-title is scaffolding.
     const fp = write([
       userMsg('do the thing'),
       { type: 'custom-title', customTitle: 'rewrite the skills/continue docs', sessionId: 's' },
@@ -285,14 +277,11 @@ describe('scanClaudeSession title resolution', () => {
       { type: 'assistant', timestamp: '2026-06-28T02:30:00.000Z', cwd: '/x', message: { role: 'assistant', content: 'done' } },
     ]);
     const scan = await scanClaudeSession(fp);
-    expect(scan.timestamp).toBe('2026-06-28T00:00:00.000Z'); // first event = creation
-    expect(scan.lastActivity).toBe('2026-06-28T02:30:00.000Z'); // last event = activity
+    expect(scan.timestamp).toBe('2026-06-28T00:00:00.000Z');
+    expect(scan.lastActivity).toBe('2026-06-28T02:30:00.000Z');
   });
 });
 
-// ---------------------------------------------------------------------------
-// Codex titles live in session_index.jsonl (thread_name), updated out of band.
-// ---------------------------------------------------------------------------
 
 describe('parseCodexThreadNameIndex', () => {
   it('maps id -> thread_name, trims, and skips malformed/empty/id-less lines', () => {
@@ -353,11 +342,6 @@ describe('shouldDeferRecentAppend', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Grok stores one directory per session with a structured summary.json. The
-// scanner reads that (not the JSONL event streams) for metadata. Fixture shape
-// mirrors a real ~/.grok/sessions/<enc-cwd>/<uuid>/summary.json.
-// ---------------------------------------------------------------------------
 
 describe('readGrokMeta', () => {
   let dir: string;
@@ -393,21 +377,17 @@ describe('readGrokMeta', () => {
     expect(r).not.toBeNull();
     expect(r!.meta.id).toBe(uuid);
     expect(r!.meta.agent).toBe('grok');
-    expect(r!.meta.topic).toBe('Minecraft Installation and Play'); // generated_title wins over session_summary
+    expect(r!.meta.topic).toBe('Minecraft Installation and Play');
     expect(r!.meta.cwd).toBe('/Users/muqsit/src/github.com/muqsitnawaz');
     expect(r!.meta.project).toBe('muqsitnawaz');
-    expect(r!.meta.timestamp).toBe('2026-07-21T22:33:01.057529Z'); // created_at = start
-    expect(r!.meta.lastActivity).toBe('2026-07-21T22:44:05.605009Z'); // last_active_at
-    expect(r!.meta.messageCount).toBe(51); // num_chat_messages preferred over num_messages
-    expect(r!.meta.version).toBe('0.2.101'); // parsed from grok_home path
+    expect(r!.meta.timestamp).toBe('2026-07-21T22:33:01.057529Z');
+    expect(r!.meta.lastActivity).toBe('2026-07-21T22:44:05.605009Z');
+    expect(r!.meta.messageCount).toBe(51);
+    expect(r!.meta.version).toBe('0.2.101');
     expect(r!.meta.shortId).toBe(uuid.slice(0, 8));
   });
 
   it('resolves the version from a Windows (backslash) grok_home path (RUSH-2286)', () => {
-    // The Grok CLI writes grok_home in the writing host's native separators; a
-    // Windows-authored summary is backslash-separated. The summary lives in a
-    // tmp dir (no versions/grok path on disk), so grok_home is the ONLY version
-    // source — before the fix the `/`-only regex left version undefined here.
     const fp = writeSummary({
       info: { id: uuid, cwd: 'C:\\Users\\muqsit\\src' },
       generated_title: 'Windows session',
@@ -425,7 +405,7 @@ describe('readGrokMeta', () => {
       created_at: '2026-07-21T00:00:00.000Z',
     });
     const r = readGrokMeta(fp);
-    expect(r!.meta.id).toBe(uuid); // recovered from the directory name
+    expect(r!.meta.id).toBe(uuid);
     expect(r!.meta.topic).toBe('fallback topic');
   });
 
@@ -453,10 +433,6 @@ describe('isCompleteSessionId', () => {
     expect(isCompleteSessionId('019fbd2f-971a-7fb0-a213-3709a27cd12b')).toBe(true);
   });
 
-  // The prefixed shapes are the ones the index actually holds — verified against
-  // a live 12,507-row index: session_+UUID (kimi, rush) and ses_+26-char ULID
-  // (opencode). `ses_` is NOT a UUID, so it needs its own shape, and `api-`
-  // appears zero times and is deliberately not claimed.
   it('accepts session_ + UUID, the shape kimi and rush mint', () => {
     expect(isCompleteSessionId('session_933f4131-f3ed-495d-946b-71825e9f6a25')).toBe(true);
   });
@@ -493,8 +469,6 @@ describe('isCompleteSessionId', () => {
 
 describe('looksLikeSessionId', () => {
   it('accepts a bare hex short-id/prefix that isCompleteSessionId rejects', () => {
-    // The whole point of the wider test: a short id must route to id-only
-    // resolution, not content search.
     expect(looksLikeSessionId('d3470b57')).toBe(true);
     expect(looksLikeSessionId('d3470b57-2af6')).toBe(true);
     expect(isCompleteSessionId('d3470b57')).toBe(false);
@@ -512,7 +486,7 @@ describe('looksLikeSessionId', () => {
 
   it('rejects a search phrase and a too-short fragment', () => {
     expect(looksLikeSessionId('add auth middleware')).toBe(false);
-    expect(looksLikeSessionId('d347')).toBe(false); // < 6 hex chars
+    expect(looksLikeSessionId('d347')).toBe(false);
     expect(looksLikeSessionId('')).toBe(false);
   });
 });

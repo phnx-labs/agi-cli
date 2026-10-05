@@ -1,15 +1,3 @@
-/**
- * Account-root session discovery (PHNX-3940).
- *
- * A named account gets its own HOME-shaped dir under
- * `<historyDir>/accounts/<harness>/<accountId>/` (lib/accounts/slots.ts), sharing the
- * one managed install rather than owning a version home of its own. Before this
- * fix, `getAgentSessionDirs` only ever walked `versions/<agent>/<version>/home/…`
- * (plus codex's per-VERSION short-home relocation), so a transcript an account slot
- * wrote was never scanned at all — a fully registered, runnable account's history
- * read as gone. Every fixture here is a real directory tree on disk; no mocking,
- * per the repo rule.
- */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -20,7 +8,6 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-account-root
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Imported after HOME/USERPROFILE is redirected: state.ts captures HOME at load.
 const { getAgentSessionDirs, isManagedSessionFile, hydrateSessionTranscript, findLocalSessionTranscripts } = await import('./discover.js');
 
 const { upsertSession, getSessionById, closeDB } = await import('./db.js');
@@ -55,10 +42,6 @@ describe('getAgentSessionDirs — account-slot roots (PHNX-3940)', () => {
   });
 
   it('scans a claude account-slot dir even with no version home ever installed', () => {
-    // Cold account-root discovery: nothing under versions/claude/ exists at all, yet
-    // the slot's own `projects` dir must still be a scan root (getAgentSessionDirs
-    // returns the `projects` dir itself; a per-project subdir like `-p/` is walked
-    // from there, exactly like a version home's `projects` dir is).
     const dirs = getAgentSessionDirs('claude', 'projects');
     const expected = path.join(historyDir(), 'accounts', 'claude', claudeAccountId, '.claude', 'projects');
     expect(dirs).toContain(expected);
@@ -66,18 +49,11 @@ describe('getAgentSessionDirs — account-slot roots (PHNX-3940)', () => {
   });
 
   it('classifies an account-slot transcript as managed', () => {
-    // Without this, a slot's history would be silently hidden the moment ANY
-    // version anywhere is managed (scopeToManaged's default "managed only" view).
     expect(isManagedSessionFile(claudeSlotTranscript)).toBe(true);
   });
 });
 
 describe('getAgentSessionDirs — codex short account-home keys (PHNX-3940)', () => {
-  // An account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`)
-  // is never a vendor version and never appears under versions/codex/. Iterating
-  // only installed versions to derive `.codex-homes/<key>` therefore misses it
-  // entirely — this is the exact bug: "Account short keys a-... are not vendor
-  // versions."
   const shortKey = 'a-deadbeef0123';
   const codexShortTranscript = path.join(
     agentsUserDir(), '.codex-homes', shortKey, '.codex', 'sessions', 'b.jsonl',
@@ -85,8 +61,6 @@ describe('getAgentSessionDirs — codex short account-home keys (PHNX-3940)', ()
 
   beforeAll(() => {
     writeFile(codexShortTranscript);
-    // Deliberately no versions/codex/<version>/ directory anywhere — this key must
-    // be found by walking .codex-homes/ directly, not by deriving it from a version.
   });
 
   it('scans a .codex-homes/<key> dir independent of installed-version iteration', () => {
@@ -100,10 +74,6 @@ describe('getAgentSessionDirs — codex short account-home keys (PHNX-3940)', ()
 });
 
 describe('getAgentSessionDirs — symlinked account-slot dedup (PHNX-3940)', () => {
-  // resolveCodexHome (lib/codex-home.ts) relocates an overflowing origin home to
-  // `.codex-homes/<key>/.codex` and leaves the origin as a symlink onto it. A slot's
-  // `accounts/codex/<accountId>/.codex` can be exactly such an origin — both paths
-  // must resolve to the SAME scan root, not be walked (and later parsed) twice.
   const accountId = 'acct-codex-dup-0002';
   const shortKey = 'a-cafef00dfeed';
   const realShortHome = path.join(agentsUserDir(), '.codex-homes', shortKey, '.codex');
@@ -113,7 +83,6 @@ describe('getAgentSessionDirs — symlinked account-slot dedup (PHNX-3940)', () 
     fs.mkdirSync(path.join(realShortHome, 'sessions'), { recursive: true });
     fs.writeFileSync(path.join(realShortHome, 'sessions', 'c.jsonl'), '{}');
     fs.mkdirSync(path.dirname(slotOrigin), { recursive: true });
-    // Windows CI has no Developer Mode for file symlinks; a directory junction works.
     const linkType = process.platform === 'win32' ? 'junction' : undefined;
     fs.symlinkSync(realShortHome, slotOrigin, linkType);
   });
@@ -142,7 +111,7 @@ describe('hydrateSessionTranscript', () => {
     const hydrated = await hydrateSessionTranscript(source);
     expect(fs.realpathSync(hydrated.filePath)).toBe(fs.realpathSync(filePath));
     expect(hydrated.accountId).toBe('recorded-origin');
-    expect(getSessionById(id)?.filePath).toBe(oldPath); // Read-through does not compete with the index writer.
+    expect(getSessionById(id)?.filePath).toBe(oldPath);
   });
 });
 

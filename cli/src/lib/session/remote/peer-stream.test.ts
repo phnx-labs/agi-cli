@@ -34,11 +34,6 @@ function device(name = 'peer-a'): DeviceProfile {
   } as DeviceProfile;
 }
 
-/**
- * A real executable standing in for ssh. It records each invocation, writes the
- * given stderr, and exits with the given code — the shape of a peer that cannot
- * be reached.
- */
 function fakeSsh(dir: string, body: string): string {
   const bin = path.join(dir, 'fake-ssh');
   fs.writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
@@ -51,15 +46,10 @@ describe('peer subscription backoff', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map((n) => peerBackoffDelayMs(n)))
       .toEqual([2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]);
     expect(peerBackoffDelayMs(1)).toBe(PEER_BACKOFF_BASE_MS);
-    // The cap holds up to the retire threshold; past it the slow tier takes over
-    // (asserted in the retire test below).
     expect(peerBackoffDelayMs(PEER_RETIRE_AFTER_FAILURES - 1)).toBe(PEER_BACKOFF_CAP_MS);
   });
 
   it('retires a long-offline peer onto the slow cadence instead of dialing it forever', () => {
-    // The cap bounds the DELAY; without the retire tier a box off for a weekend
-    // is still dialed every 60s for two days. Past the threshold the re-dial
-    // drops to the slow cadence, which is what bounds the total work.
     expect(peerBackoffDelayMs(PEER_RETIRE_AFTER_FAILURES - 1)).toBe(PEER_BACKOFF_CAP_MS);
     expect(peerBackoffDelayMs(PEER_RETIRE_AFTER_FAILURES)).toBe(PEER_RETIRED_RECHECK_MS);
     expect(peerBackoffDelayMs(500)).toBe(PEER_RETIRED_RECHECK_MS);
@@ -80,7 +70,6 @@ describe('peer subscription backoff', () => {
       backoffCapMs: 2,
       parkAfterFailures: 2,
       retireAfterFailures: 4,
-      // Scaled down from the shipped 15min so the schedule is observable.
       retiredRecheckMs: 30,
       registryPollMs: 5,
       registryPath: path.join(dir, 'registry.json'),
@@ -93,7 +82,6 @@ describe('peer subscription backoff', () => {
     expect(reasons[2]).toContain('parked after 3 failed connections');
     expect(reasons[3]).toContain('retired after 4 failed connections');
     expect(reasons[3]).toContain('re-dialing in');
-    // A retired peer still re-dials on a device refresh, so it is never stranded.
     expect(reasons[3]).toContain('or on a device refresh');
   });
 
@@ -110,8 +98,6 @@ describe('peer subscription backoff', () => {
       signal: controller.signal,
       command: 'agents sessions watch --json --local',
       sshBin: ssh,
-      // Scaled down so the schedule is observable in a test, with the same
-      // doubling and park behaviour the shipped defaults have.
       backoffBaseMs: 20,
       backoffCapMs: 80,
       registryPollMs: 10,
@@ -119,27 +105,21 @@ describe('peer subscription backoff', () => {
       onLine: () => false,
       onUnavailable: (reason) => {
         reasons.push(reason);
-        // Three failed spawns is the park threshold; stop the loop there so the
-        // assertion is about the schedule, not the test's patience.
         if (reasons.length >= PEER_PARK_AFTER_FAILURES) controller.abort();
       },
     });
 
     const invocations = fs.readFileSync(log, 'utf-8').trim().split('\n');
     expect(invocations).toHaveLength(3);
-    // The reason carries the peer's own stderr instead of discarding it.
     expect(reasons[0]).toBe('ssh exited 255: ssh: connect to host peer-a port 22: No route to host');
     expect(reasons[1]).toBe(reasons[0]);
     expect(reasons[2]).toContain('parked after 3 failed connections');
-    // 20ms + 40ms of backoff separates the three spawns.
     expect(Date.now() - started).toBeGreaterThanOrEqual(50);
   });
 
   it('resets the backoff when a peer delivers a healthy protocol line', async () => {
     const dir = root();
     const attempts = path.join(dir, 'attempts');
-    // Fails twice, then serves one protocol line and exits; the healthy line
-    // must clear the failure streak so the peer is not parked on the next exit.
     const ssh = fakeSsh(dir, [
       `n=$(cat ${JSON.stringify(attempts)} 2>/dev/null || echo 0)`,
       `echo $((n + 1)) > ${JSON.stringify(attempts)}`,
@@ -167,8 +147,6 @@ describe('peer subscription backoff', () => {
     });
 
     expect(lines).toBeGreaterThanOrEqual(1);
-    // Two failures, then a healthy connection resets the streak — so the fourth
-    // exit is failure #1 again and reports no park.
     expect(reasons.slice(0, 2).every((reason) => !reason.includes('parked'))).toBe(true);
     expect(reasons[3]).not.toContain('parked');
   });

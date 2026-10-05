@@ -3,19 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db — db.ts captures DB_PATH at
-// module load (same pattern as the migration tests in this directory).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-mirror-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Pin this box's device id so the suite is independent of the host it runs on
-// (PHNX-3850). Otherwise machineId() resolves to the real hostname: on a box
-// literally named `yosemite-m6` it collides with the peer this file uses as a
-// remote publisher, and consumeSessionMirrorFromSharedStore skips that peer's
-// digest as "self" — the fold never runs and the placeholder-label overwrite is
-// never exercised. A fixed id that matches no peer keeps self and every peer
-// distinct on every machine.
 process.env.AGENTS_SYNC_MACHINE_ID = 'mirror-test-self';
 
 const { getSessionsDir, getUserAgentsDir } = await import('../state.js');
@@ -73,7 +64,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
 
   it('folds a PEER\'s published digests into the local index as mirror rows and previews them inline', () => {
     const root = getUserAgentsDir();
-    // A peer publishes a session that never existed on this box.
     updateFleetSharedDeviceState('yosemite-m5', {
       sessions: {
         rows: [{
@@ -113,13 +103,11 @@ describe('session mirror (real DB + real shared-state files)', () => {
     seedLocalSession({ id, topic: 'wire the session titler' });
     db.setSessionGeneratedTitle(id, 'Daemon session titler', 'key-1');
 
-    // Publish: this box's own title rides its shared-state file.
     await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root });
     const published = readFleetSharedDeviceStates(root).states
       .find((s) => s.device === self)!.sessions!.rows.find((r) => r.id === id)!;
     expect(published.title).toBe('Daemon session titler');
 
-    // Consume: a peer's title lands on the mirror row this box renders.
     const peerId = 'b2b2b2b2-0000-0000-0000-000000000012';
     updateFleetSharedDeviceState('yosemite-m3', {
       sessions: {
@@ -144,7 +132,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
 
   it('OVERWRITES a host-dispatch stub\'s [host/peer] placeholder label with the synced topic', () => {
     const root = getUserAgentsDir();
-    // A local host-dispatch stub: peer machine, empty file, placeholder label, no topic.
     db.upsertSession({
       id: 'cccccccc-0000-0000-0000-000000000003',
       shortId: 'cccccccc',
@@ -173,7 +160,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
 
     mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
     const row = rawRow('cccccccc-0000-0000-0000-000000000003');
-    // The bare [host/peer] placeholder is gone; the list now renders the topic.
     expect(row.label).toBeNull();
     expect(row.topic).toBe('land the traces insight engine');
   });
@@ -181,7 +167,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
   it('NEVER overwrites a genuine local transcript row', () => {
     const root = getUserAgentsDir();
     seedLocalSession({ id: 'dddddddd-0000-0000-0000-000000000004', topic: 'real local work' });
-    // A peer claims the same id (shouldn't happen with UUIDs, but the guard must hold).
     const wrote = db.upsertMirrorSession(
       { id: 'dddddddd-0000-0000-0000-000000000004', shortId: 'dddddddd', agent: 'claude', machine: 'evil-peer', timestamp: '2026-09-01T00:00:00.000Z', topic: 'hijacked' },
       'evil-peer',
@@ -221,12 +206,9 @@ describe('session mirror (real DB + real shared-state files)', () => {
       },
     });
 
-    // Publish: the local source query rides the summary alongside the digest.
     const source = db.queryLocalOriginSessionsForMirror(self, 200).find((s) => s.id === id)!;
     expect(source.summary?.goal).toBe('Ship the per-session summarizer');
 
-    // A peer publishes the same digest+summary; consuming it lands the summary in
-    // this box's session_summaries so the merge surfaces it with no transcript.
     updateFleetSharedDeviceState('yosemite-m2', {
       sessions: {
         rows: [{
@@ -245,8 +227,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
       },
     }, root);
     const res = mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
-    // Other tests in this describe leave peer rows in the shared store, so assert
-    // this session merged rather than an exact fleet-wide count.
     expect(res.merged).toBeGreaterThanOrEqual(1);
     const stored = db.readSessionSummaryAny('aaaaaaaa-0000-0000-0000-0000000000bb');
     expect(stored?.goal).toBe('Peer goal');
@@ -264,12 +244,10 @@ describe('session mirror (real DB + real shared-state files)', () => {
       fileSize: 222,
       summary: {
         goal: 'Bound the publish side',
-        // 70 > the 50 cap; 500-char text > the 400 cap; 47-char `at` > the 40 cap.
         checkpoints: Array.from({ length: 70 }, () => ({
           text: 'c'.repeat(500),
           at: '2026-09-05T00:00:00.000Z-overlongtimestampvalue',
         })),
-        // 130 > the 100 cap; 500-char text > the 400 cap.
         summaryChecklist: Array.from({ length: 130 }, (_, i) => ({ text: 'k'.repeat(500), done: i % 2 === 0 })),
         summaryState: 'ready',
       },
@@ -280,11 +258,8 @@ describe('session mirror (real DB + real shared-state files)', () => {
 
     const read = readFleetSharedDeviceStates(root);
     const row = read.states.find((s) => s.device === self)!.sessions!.rows.find((r) => r.id === id)!;
-    // Item-count caps match toMirrorSummary's consume-side bounds (50 / 100).
     expect(row.checkpoints!.length).toBe(50);
     expect(row.summaryChecklist!.length).toBe(100);
-    // Per-item length caps (text 400, `at` 40) — so a value that survives publish
-    // is never re-truncated differently on consume.
     expect(row.checkpoints![0].text.length).toBe(400);
     expect(row.checkpoints![0].at.length).toBe(40);
     expect(row.summaryChecklist![0].text.length).toBe(400);
@@ -313,7 +288,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
       },
     });
 
-    // Publish: the local source query rides the projection alongside the digest.
     const source = db.queryLocalOriginSessionsForMirror(self, 200).find((s) => s.id === id)!;
     expect(source.timeline?.request?.headline).toBe('Ship the sidebar timeline.');
     const res = await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root });
@@ -323,12 +297,9 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(published.request?.headline).toBe('Ship the sidebar timeline.');
     expect(published.timeline?.steps.some((step) => step.marks?.includes('PR opened'))).toBe(true);
     expect(published.files?.changes[0].path).toBe('/repo/src/timeline.ts');
-    // The per-verb breakdown the plan specifies the rendering in ("6 run ·
-    // 2 blocked") and the live marker both ride the publish.
     const publishedLive = published.timeline!.steps.find((step) => step.live)!;
     expect(publishedLive.mix).toEqual({ git: 1 });
 
-    // Consume: a peer's published projection lands in this box's cache.
     const peerId = 'bbbbbbbb-0000-0000-0000-0000000000dd';
     updateFleetSharedDeviceState('worker-9', {
       sessions: {
@@ -346,9 +317,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(stored?.request?.headline).toBe('Ship the sidebar timeline.');
     expect(stored?.timeline.steps.length).toBe(published.timeline!.steps.length);
     expect(stored?.files?.changes[0].path).toBe('/repo/src/timeline.ts');
-    // Consume must not silently drop what publish carried: a remote row that
-    // loses `mix` renders no per-verb breakdown, and one that loses `live` while
-    // keeping `now` makes the two halves disagree about what a live step is.
     const consumedLive = stored!.timeline.steps.find((step) => step.live)!;
     expect(consumedLive).toBeDefined();
     expect(consumedLive.mix).toEqual(publishedLive.mix);
@@ -393,12 +361,9 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(row.request!.text.length).toBe(mirror.SESSION_MIRROR_REQUEST_MAX);
     expect(row.request!.attachments.length).toBe(mirror.SESSION_MIRROR_MAX_FILES);
     expect(row.files!.changes.length).toBe(mirror.SESSION_MIRROR_MAX_FILES);
-    // Counters are NEVER truncated — only text is.
     expect(row.timeline!.tools).toBe(40);
     expect(row.files!.total).toBe(30);
 
-    // Consume applies the same caps to an untrusted peer, and drops a malformed
-    // timeline whole rather than trusting half of it.
     const peerId = 'cccccccc-0000-0000-0000-0000000000ee';
     updateFleetSharedDeviceState('worker-8', {
       sessions: {
@@ -413,7 +378,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
       },
     }, root);
     mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
-    // `state: 'bogus'` is not a timeline, so nothing is stored for that peer.
     expect(db.readSessionTimelineAny(peerId)).toBeUndefined();
   });
 
@@ -431,12 +395,6 @@ describe('session mirror (real DB + real shared-state files)', () => {
   });
 
   it('keeps every session_text row at its session\'s rowid across local upsert, re-upsert, mirror fold and prune (PHNX-4154)', () => {
-    // Every writer above ran in this suite: seedLocalSession (twice for one id
-    // — a rescan must replace, not duplicate), the peer fold, the placeholder
-    // overwrite, and the prune. The text row of each survivor must sit at its
-    // session's rowid, and a pruned session must leave no text row behind —
-    // a stray row is unreachable by rowid and would only ever be found by
-    // the full scan this fix removed.
     seedLocalSession({ id: 'ffffffff-0000-0000-0000-000000000006', topic: 'keep me local, rescanned' });
     const d = new Database(path.join(getSessionsDir(), 'sessions.db'));
     try {
@@ -460,7 +418,6 @@ describe('a mirror row reclaimed by a real local transcript (PHNX-3792 blocker f
   const ID = '33333333-0000-0000-0000-000000000009';
 
   it('clears the mirror stamp on a genuine local write, so prune cannot delete it and it re-publishes', () => {
-    // 1. Seed the id as a peer mirror row (empty file_path, mirror_synced_at set).
     const staleSync = Date.now() - mirror.SESSION_MIRROR_MAX_AGE_MS - 60_000;
     db.upsertMirrorSession(
       { id: ID, shortId: '33333333', agent: 'claude', machine: 'peer-b', timestamp: '2026-09-01T00:00:00.000Z', topic: 'from peer' },
@@ -471,21 +428,15 @@ describe('a mirror row reclaimed by a real local transcript (PHNX-3792 blocker f
     expect(asMirror.mirror_synced_at).toBe(staleSync);
     expect(asMirror.file_path === '' || asMirror.file_path == null).toBe(true);
 
-    // 2. The same id then gains a genuine LOCAL transcript via the ordinary scan path.
     seedLocalSession({ id: ID, topic: 'now local', firstUserMessage: 'real transcript content' });
     const asLocal = rawRow(ID);
-    expect(asLocal.mirror_synced_at).toBeNull();   // stamp cleared by the real write
+    expect(asLocal.mirror_synced_at).toBeNull();
     expect(asLocal.mirror_source).toBeNull();
     expect(asLocal.file_path).toBeTruthy();
 
-    // 3. (a) Prune with a cutoff PAST the original stale stamp — the reclaimed row
-    // survives because its stamp is now NULL, not because it is fresh. (The prune
-    // count is not asserted: this file shares one DB, so other tests' mirror rows
-    // also fall in the cutoff — what matters is that THIS real local row is spared.)
     db.pruneMirrorSessions(Date.now());
     expect(rawRow(ID)).toBeTruthy();
 
-    // 4. (b) It is re-publishable as a genuine local-origin row again.
     const publishable = db.queryLocalOriginSessionsForMirror(self, 200).map((r) => r.id);
     expect(publishable).toContain(ID);
   });

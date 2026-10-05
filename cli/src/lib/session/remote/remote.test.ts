@@ -19,28 +19,17 @@ import {
   replayRemoteCache,
 } from './remote.js';
 
-/**
- * Decode the argv the *remote* would actually receive. `buildRemoteCommand` emits
- * `bash -lc '<...>'`; ssh hands that to the remote login shell, which runs it. We
- * reproduce that exactly: an outer bash defines+exports an `agents` shim (exported
- * functions survive the nested `bash -lc` via the environment), then runs the
- * command. The shim prints each arg on its own line, so stdout == the remote argv.
- * This is the true end-to-end check of the two-layer quoting (injection-safety).
- */
 function decodeRemoteArgv(forwarded: string[]): string[] {
   const shim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; `;
   const res = spawnSync('bash', ['-c', shim + buildRemoteCommand(forwarded)], { encoding: 'utf-8' });
   expect(res.status).toBe(0);
-  return res.stdout.split('\n').slice(0, -1); // drop trailing empty from final newline
+  return res.stdout.split('\n').slice(0, -1);
 }
 
-// argv as the runtime hands it to us: [runtime, script, 'sessions', ...userArgs]
 const argv = (...userArgs: string[]) => ['/usr/bin/bun', '/path/agents', ...userArgs];
 
 describe('buildForwardedArgs', () => {
   it('drops --device and its value, keeping the rest', () => {
-    // --device merges into the device set in the handler, so its tokens must be
-    // stripped too — else the peer would try to re-fan-out to that device.
     expect(
       buildForwardedArgs(argv('sessions', 'auth bug', '--device', 'yosemite-s0', '--json'), new Set(['yosemite-s0'])),
     ).toEqual(['sessions', 'auth bug', '--json']);
@@ -65,8 +54,6 @@ describe('buildForwardedArgs', () => {
   });
 
   it('stops consuming at the first token that is not a known host', () => {
-    // The scan only swallows consecutive tokens present in the host set; a
-    // trailing non-host token ('auth') is preserved rather than over-consumed.
     expect(
       buildForwardedArgs(
         argv('sessions', '--device', 'box1', 'box2', 'auth'),
@@ -96,7 +83,6 @@ describe('shellQuote', () => {
   });
 
   it('escapes embedded single quotes (the injection-prone case)', () => {
-    // A query carrying a single quote must not break out of the quoting.
     expect(shellQuote("o'brien")).toBe("'o'\\''brien'");
   });
 });
@@ -112,7 +98,6 @@ describe('buildRemoteCommand', () => {
   });
 
   it('keeps a query with a single quote injection-safe (no early quote-break)', () => {
-    // A naive escaper lets the apostrophe close the outer quote and split the arg.
     expect(decodeRemoteArgv(['sessions', "it's broken"]))
       .toEqual(['sessions', "it's broken"]);
   });
@@ -123,8 +108,6 @@ describe('buildRemoteCommand', () => {
   });
 
   it('pins the peer local so --device does not re-sweep its fleet', () => {
-    // Without AGENTS_SESSIONS_LOCAL=1 the remote `agents sessions` fans back out
-    // to every device it knows (incl. us) and prints a spurious "unreachable".
     expect(buildRemoteCommand(['sessions', '--agent', 'codex'])).toContain('AGENTS_SESSIONS_LOCAL=1');
   });
 });
@@ -135,15 +118,13 @@ describe('classifySshFailure', () => {
   });
 
   it('maps ssh exit 255 to unreachable (connection layer, not the remote query)', () => {
-    // 255 is ssh's own code for "could not establish the session" — the cache
-    // fallback hinges on telling this apart from a forwarded non-zero.
     expect(classifySshFailure({ status: 255 })).toBe('unreachable');
   });
 
   it('maps any other non-zero to query-failed (remote agents ran and failed)', () => {
     expect(classifySshFailure({ status: 1 })).toBe('query-failed');
     expect(classifySshFailure({ status: 2 })).toBe('query-failed');
-    expect(classifySshFailure({ status: null })).toBe('query-failed'); // killed by signal
+    expect(classifySshFailure({ status: null })).toBe('query-failed');
   });
 
   it('maps a spawn error (ssh binary missing, etc.) to spawn-error', () => {
@@ -171,8 +152,6 @@ describe('remoteCachePath', () => {
   });
 
   it('keeps the host readable but filesystem-safe in the filename', () => {
-    // user@host is a valid ssh target; the path segment must not contain a
-    // separator or other unsafe char that would escape the cache dir.
     const p = remoteCachePath('deploy@staging.example.com', ['sessions']);
     const file = path.basename(p);
     expect(file.startsWith('deploy@staging.example.com__')).toBe(true);
@@ -214,13 +193,11 @@ describe('remote cache freshness (RUSH-2062 — reachable host skips SSH)', () =
     const host = `test-host-stale-${process.pid}`;
     const args = ['sessions', '--active', '--json', `stale-${Date.now()}`];
     writeRemoteCache(host, args, 'OLD_ROWS\n');
-    // Force mtime into the past by touching the file.
     const p = remoteCachePath(host, args);
     const old = (Date.now() - REMOTE_CACHE_MAX_AGE_MS - 5_000) / 1000;
     fs.utimesSync(p, old, old);
     const hit = readRemoteCache(host, args, { maxAgeMs: REMOTE_CACHE_MAX_AGE_MS, nowMs: Date.now() });
     expect(hit).toBeNull();
-    // Unreachable fallback still accepts any age.
     const anyAge = readRemoteCache(host, args);
     expect(anyAge?.output).toBe('OLD_ROWS\n');
   });

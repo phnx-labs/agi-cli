@@ -3,16 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// End-to-end parity for the LIVE Codex scan path (B-3). Proves that wiring
-// scanCodexSessionIncremental into discoverSessions produces a DB row IDENTICAL,
-// field for field, to a from-scratch FULL reparse — even when PR / ticket
-// signals STRADDLE two scans and the cumulative token_count updates across an
-// append — and that a truncation forces a full reparse. Real fs, real sqlite,
-// real discovery under a throwaway HOME. No mocks.
-//
-// The from-scratch ground truth is computed inside the SAME DB by writing the
-// final rollout content to a DIFFERENT session id (no prior ledger row → the
-// code takes the FULL path for it) and comparing its row.
 
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
@@ -32,7 +22,6 @@ function line(obj: object): string {
   return JSON.stringify(obj);
 }
 
-/** Path of a rollout file for a given session id under the live sessions dir. */
 function rolloutFile(id: string): string {
   return path.join(SESSIONS, `rollout-${id}.jsonl`);
 }
@@ -49,13 +38,11 @@ function appendRollout(id: string, events: object[]): void {
   fs.appendFileSync(rolloutFile(id), events.map(line).join('\n') + '\n', 'utf-8');
 }
 
-/** Push a file's mtime forward so an append isn't seen as a clock-rewind and the ledger stamp changes. */
 function bumpMtimeToNow(fp: string, plusSeconds: number): void {
   const t = Math.floor(Date.now() / 1000) + plusSeconds;
   fs.utimesSync(fp, t, t);
 }
 
-/** Age every ledger row past the 5s active-append debounce so a grown file re-scans this tick. */
 function agePriorScans(): void {
   db.getDB().prepare('UPDATE scan_ledger SET scanned_at = ?').run(Date.now() - 60_000);
 }
@@ -65,11 +52,6 @@ async function runScan(): Promise<void> {
   await discover.discoverSessions({ agent: 'codex', all: true });
 }
 
-// `timestamp` and `lastActivity` are excluded: Codex's timestamp is
-// max(session_meta.timestamp, file.mtime) (see pickLatestCodexTimestamp), so two
-// SEPARATE files (the incremental session vs the from-scratch ground truth)
-// carry different mtimes and can never match on those two fields. Every other
-// field is a pure function of the parsed content and must match exactly.
 const PARITY_FIELDS = [
   'agent', 'project', 'cwd', 'gitBranch', 'version',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
@@ -87,12 +69,6 @@ function assertRowParity(incId: string, fullId: string): void {
 }
 
 let groundTruthCounter = 0;
-/**
- * Compute the from-scratch ground truth for a set of events: write them to a
- * brand-new rollout file whose session_meta carries a fresh id (no prior ledger
- * continuation → FULL parse). Returns the SESSION id (from session_meta), which
- * is the DB row key — not the file name.
- */
 async function groundTruth(events: object[], sessionId: string): Promise<string> {
   const fileId = `ground-truth-${groundTruthCounter++}`;
   writeRollout(fileId, events);
@@ -111,19 +87,12 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  // Close before removing the tree: Windows refuses to unlink an open file, so
-  // a leaked connection (plus its WAL sidecars) fails the whole suite there.
   db.closeDB();
   if (REAL_HOME === undefined) delete process.env.HOME; else process.env.HOME = REAL_HOME;
   if (REAL_USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = REAL_USERPROFILE;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-/**
- * Field-rich base events. `sessionId` only sets session_meta.id (the DB row key);
- * the user text is STABLE so topic/contentText parity holds between the
- * incrementally-scanned session and a from-scratch ground truth under a different id.
- */
 function baseEvents(sessionId: string): object[] {
   return [
     { type: 'session_meta', timestamp: '2026-06-28T00:00:00.000Z', payload: { id: sessionId, timestamp: '2026-06-28T00:00:00.000Z', cwd: '/home/u/repo', git: { branch: 'RUSH-42-fix' }, cli_version: '0.9.0', model: 'gpt-5-codex' } },
@@ -153,13 +122,11 @@ describe('B-3 live incremental Codex scan parity', () => {
     await runScan();
     expect(discover.__codexScanBranchCountsForTest().incremental, 'incremental branch exercised on 2nd scan').toBeGreaterThanOrEqual(1);
 
-    // Ground truth: the FINAL content parsed from scratch under a fresh session id.
     const gtBase = baseEvents('gt-core');
     const gtId = await groundTruth([...gtBase, ...appendedEvents()], 'gt-core');
     assertRowParity(id, gtId);
 
     const inc = db.getSessionById(id)!;
-    // LAST-WINS token snapshot from the append: 400 + 80 + 10 = 490.
     expect(inc.tokenCount).toBe(490);
     expect(inc.outputTokens).toBe(90);
     expect(inc.messageCount).toBe(2);
@@ -213,9 +180,6 @@ describe('B-3 live incremental Codex scan parity', () => {
       { type: 'response_item', timestamp: '2026-06-28T02:01:00.000Z', payload: { type: 'function_call', name: 'shell', call_id: 't1', arguments: JSON.stringify({ command: 'gh issue create --title bug' }) } },
       { type: 'response_item', timestamp: '2026-06-28T02:02:00.000Z', payload: { type: 'function_call_output', call_id: 't1', output: 'https://github.com/acme/repo/issues/77' } },
     ], 'gt-ticket');
-    // createdTickets is derived by the scan (asserted at function level in the
-    // parity harness) but not a persisted DB column, so row parity is the check
-    // here: the incremental row must not diverge from the full reparse row.
     assertRowParity(id, gtId);
   });
 
@@ -244,23 +208,12 @@ describe('B-3 live incremental Codex scan parity', () => {
   });
 
   it('IN-PLACE REWRITE: replacing the path with a DIFFERENT, LARGER session forces FULL (no cross-session corruption)', async () => {
-    // The metadata-only guard (size-grew + mtime-forward) cannot tell an append
-    // from an in-place rewrite/restore that dropped a DIFFERENT, larger rollout at
-    // the same path. Resuming there would fold session B's bytes into an
-    // accumulator hydrated from session A's continuation — and because sessionId is
-    // first-wins, the corrupt row would keep A's id with B's counters folded in.
-    // The session_meta-id re-check (codexSessionIdentityAt) must catch the change
-    // and force FULL. Mirrors the Claude regression test in commit 1c8ff457.
     const idA = 'sess-inplace-A';
     const fp = writeRollout('inplace-rewrite', baseEvents(idA));
     await runScan();
     const priorOffset = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!).offset as number;
     expect(db.getSessionById(idA), 'session A indexed on first scan').not.toBeNull();
 
-    // Replace the path IN PLACE with a DIFFERENT session (distinct session_meta id
-    // AND first timestamp) whose byte length is LARGER than the stored offset and
-    // whose mtime moves forward — the exact shape metadata cannot tell from an
-    // append.
     discover.__resetCodexScanBranchCountsForTest();
     const idB = 'sess-inplace-B';
     const sessionB = [
@@ -272,8 +225,6 @@ describe('B-3 live incremental Codex scan parity', () => {
     fs.writeFileSync(fp, sessionB.map(line).join('\n') + '\n', 'utf-8');
     bumpMtimeToNow(fp, 3);
 
-    // Precondition — the trap: the new file is LARGER than the stored offset, so
-    // the size gate the metadata-only logic relied on does NOT fire.
     expect(fs.statSync(fp).size, 'rewritten file must exceed the prior offset to exercise the guard').toBeGreaterThan(priorOffset);
 
     await runScan();
@@ -281,18 +232,11 @@ describe('B-3 live incremental Codex scan parity', () => {
     expect(counts.full, 'in-place rewrite to a different session must force FULL').toBeGreaterThanOrEqual(1);
     expect(counts.incremental, 'must NOT resume incrementally across a session boundary').toBe(0);
 
-    // No cross-session corruption: the row (now under session B's id — the path's
-    // ledger row was rewritten) equals a from-scratch parse of session B, and
-    // carries B's counters, not A's continuation folded into B.
     const row = db.getSessionById(idB)!;
     expect(row, 'session B row exists after the rewrite').not.toBeNull();
     expect(row.messageCount).toBe(2);
-    // LAST-WINS token snapshot from B: 200 + 60 + 10 = 270.
     expect(row.tokenCount).toBe(270);
 
-    // Ground truth: session B's identical content under a DIFFERENT session_meta
-    // id (so it lands in its own row, not idB's), parsed from scratch. Text is
-    // stable so topic/counts/tokens parity holds.
     const gtSessionId = 'sess-inplace-gt';
     const gtId = await groundTruth(
       sessionB.map((e: any) =>
@@ -383,7 +327,7 @@ describe('B-3 live incremental Codex scan parity', () => {
     expect(row, 'ledger row exists').toBeDefined();
     expect(row!.parserState, 'parser_state persisted').not.toBeNull();
     const parsed = JSON.parse(row!.parserState!);
-    expect(parsed.v).toBe(4); // v4: persists firstUserMessage (PHNX-3621)
+    expect(parsed.v).toBe(4);
     expect(typeof parsed.offset).toBe('number');
     const offsetAfterFirst = parsed.offset;
 

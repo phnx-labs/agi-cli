@@ -1,7 +1,3 @@
-/**
- * Verifies parseKimi normalizes Kimi's internal wire.jsonl session log into the
- * shared SessionEvent shape, and detectAgent routes Kimi session paths correctly.
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -12,7 +8,6 @@ import { readKimiMeta } from '../discover.js';
 import { extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { toolCallsFromEvents } from '@phnx-labs/sessions-cli/reader';
 
-/** A Kimi session dir whose state.json omits BOTH createdAt and updatedAt. */
 function makeKimiStateNoTimestamps(): string {
   const sessionDir = path.join(
     os.tmpdir(), '.kimi-code', 'sessions', `kimi-nots-${Date.now()}-${Math.random()}`,
@@ -28,7 +23,6 @@ describe('readKimiMeta timestamp coercion', () => {
     const statePath = makeKimiStateNoTimestamps();
     const result = readKimiMeta(statePath);
     expect(result).not.toBeNull();
-    // Would be `undefined` before the fix → binds NULL into `timestamp TEXT NOT NULL`.
     expect(typeof result!.meta.timestamp).toBe('string');
     expect(result!.meta.timestamp.length).toBeGreaterThan(0);
   });
@@ -43,10 +37,6 @@ function makeKimiSession(wireContent: string): string {
     title: 'Test session',
     createdAt: '2026-06-24T00:00:00.000Z',
   }));
-  // Real Kimi wire.jsonl is newline-terminated (see testdata/kimi-tool-args.jsonl,
-  // which ends in 0x0a). Terminate the fixture too so the incremental parse's
-  // trailing-line discipline (a complete-but-unterminated tail is DEFERRED, not
-  // applied — the double-count guard) sees the final record as committed.
   const terminated = wireContent.endsWith('\n') || wireContent === '' ? wireContent : wireContent + '\n';
   fs.writeFileSync(path.join(agentsDir, 'wire.jsonl'), terminated);
   return path.join(sessionDir, 'state.json');
@@ -59,7 +49,6 @@ describe('readKimiMeta message + token counting', () => {
       { type: 'usage.record', usage: { inputOther: 100, output: 50, inputCacheRead: 200, inputCacheCreation: 10 }, time: 2 },
       { type: 'context.append_message', message: { role: 'assistant', content: [{ type: 'text', text: 'A1' }] }, time: 3 },
       { type: 'usage.record', usage: { inputOther: 5, output: 5 }, time: 4 },
-      // Non-counted events must be ignored:
       { type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: 'x' } }, time: 5 },
       { type: 'turn.prompt', time: 6 },
     ].map(o => JSON.stringify(o)).join('\n');
@@ -67,9 +56,7 @@ describe('readKimiMeta message + token counting', () => {
     const statePath = makeKimiSession(jsonl);
     const result = readKimiMeta(statePath);
     expect(result).not.toBeNull();
-    // 2 append_message events -> messageCount 2
     expect(result!.meta.messageCount).toBe(2);
-    // (100+50+200+10) + (5+5) = 370
     expect(result!.meta.tokenCount).toBe(370);
   });
 
@@ -97,7 +84,7 @@ describe('readKimiMeta message + token counting', () => {
   });
 
   test('messageCount is 0 when wire.jsonl is absent', () => {
-    const statePath = makeKimiStateNoTimestamps(); // no agents/main/wire.jsonl
+    const statePath = makeKimiStateNoTimestamps();
     const result = readKimiMeta(statePath);
     expect(result!.meta.messageCount).toBe(0);
     expect(result!.meta.tokenCount).toBeUndefined();
@@ -350,7 +337,6 @@ describe('parseKimi', () => {
     expect(() => toolCallsFromEvents(events)).not.toThrow();
   });
 
-  // Tests for the event.args shape (real Kimi wire format as of 2026-06)
   test('maps Bash tool.call with event.args shape to tool_use with command', () => {
     const statePath = makeKimiSession(JSON.stringify({
       type: 'context.append_loop_event',
@@ -452,13 +438,6 @@ describe('parseKimi', () => {
   });
 });
 
-/**
- * Kimi's checklist tool is `TodoList`, not Claude's `TodoWrite`, and its items
- * are `{title, status}` where finished is `"done"` — not `{content, status:
- * "completed"}`. Both spellings were unhandled, so a Kimi session with a live
- * checklist showed no todos in `agents sessions` at all. The wire records below
- * are verbatim shapes from a real ~/.kimi-code wire.jsonl.
- */
 describe('kimi TodoList checklist', () => {
   function todoListCall(todos: Array<{ title: string; status: string }>) {
     return JSON.stringify({
@@ -522,10 +501,6 @@ describe('kimi TodoList checklist', () => {
   });
 });
 
-/**
- * Kimi names the file argument `path` where Claude names it `file_path`, so
- * Read/Write/Edit summaries rendered as a bare "Read " with no file at all.
- */
 describe('kimi tool-call summaries carry the file path', () => {
   test('Read/Write/Edit read the `path` arg', () => {
     expect(summarizeToolUse('Read', { path: '/tmp/secrets.ts' })).toBe('Read /tmp/secrets.ts');

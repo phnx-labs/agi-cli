@@ -1,9 +1,3 @@
-/**
- * Tests for parsing a peer's `--active --json` output during cross-machine
- * fan-out. The parser must be defensive: a peer may run an older/newer agents
- * whose stdout is truncated, non-JSON, or shaped slightly differently, and one
- * bad peer must never throw and blank the whole merged view.
- */
 
 import { describe, it, expect, vi } from 'vitest';
 import { parseRemoteActive } from '../remote-active.js';
@@ -56,10 +50,6 @@ describe('parseRemoteActive viewingIn normalization', () => {
     expect(rows[0].viewingIn).toEqual({ app: 'ghostty', tab: 2 });
   });
 
-  // RUSH-2479: a peer answering the fan-out may report a THIRD box, because a
-  // host-dispatched run executes where it was sent, not where it was launched.
-  // Stamping the dialed peer over that would re-claim the session for the wrong
-  // machine and undo foldExecutionMachine's correction.
   it("keeps an OFFLOADED row's own machine — its execution host is a third box", () => {
     const stdout = JSON.stringify([
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'off', machine: 'yosemite-s0', offloadedFrom: 'zion' },
@@ -70,10 +60,6 @@ describe('parseRemoteActive viewingIn normalization', () => {
   });
 
   it('still stamps the dialed device over a peer\'s own hostname (the name we key scopes on)', () => {
-    // The peer reports machineId() (its hostname); we dial and scope by the
-    // REGISTERED device name. Stamping ours is what reconciles the two — drop it
-    // and a device whose registered name differs from its hostname answers a
-    // `--device <name>` scope with zero rows.
     const stdout = JSON.stringify([
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a', machine: 'mark.local' },
     ]);
@@ -88,13 +74,6 @@ describe('parseRemoteActive viewingIn normalization', () => {
   });
 });
 
-/**
- * RUSH-2507: a fleet-wide `--active` sweep where every peer was unreachable
- * used to print the exact same "No active agent sessions." as a genuinely
- * idle fleet — `gatherRemoteActive` dropped `skipped`/`discoveryFailed` on the
- * floor even though `gatherRemoteAgentsJson` already computed them. These pin
- * that the fields now ride through instead of being silently discarded.
- */
 describe('gatherRemoteActive — surfaces skipped/discoveryFailed instead of dropping them', () => {
   it('forwards skipped peer names and a false discoveryFailed on a partial sweep', async () => {
     vi.resetModules();

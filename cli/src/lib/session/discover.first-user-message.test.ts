@@ -14,16 +14,10 @@ import {
   readGrokMeta,
 } from './discover.js';
 
-/**
- * PHNX-3621 leftover from competing #3359: per-harness scanner coverage for
- * `SessionMeta.firstUserMessage` that #3358 did not absorb. Hits the real scan
- * path (Claude incremental parse-state + serialize/hydrate resume, Codex
- * rollout, Kimi wire stream first-wins, Grok bounded prefix read).
- */
 
 let TMP: string;
 beforeAll(() => { TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fum-')); });
-afterAll(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ } });
+afterAll(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {  } });
 
 function write(rel: string, lines: object[]): string {
   const p = path.join(TMP, rel);
@@ -37,27 +31,21 @@ const FULL_FIRST = 'Implement PHNX-3621.\n\nAdd the full first-user-turn field. 
 describe('Claude scanner captures firstUserMessage (parse-state)', () => {
   it('captures the full first genuine user turn, skipping a synthetic first message', async () => {
     const file = write('claude/session.jsonl', [
-      // A synthetic first user message (a slash-command wrapper turn) is skipped
-      // by BOTH the topic extractor and the firstUserMessage genuine-turn filter.
       { type: 'user', timestamp: '2026-08-31T00:00:00Z', message: { content: '<command-name>/continue</command-name>' } },
       { type: 'user', timestamp: '2026-08-31T00:00:01Z', message: { content: [{ type: 'text', text: FULL_FIRST }] } },
       { type: 'assistant', timestamp: '2026-08-31T00:00:02Z', message: { id: 'a1', content: [{ type: 'text', text: 'on it' }] } },
     ]);
     const scan = await scanClaudeSession(file);
     expect(scan.firstUserMessage).toBe(FULL_FIRST);
-    // Distinct from the one-line topic distilled from the same turn.
     expect(scan.topic).toBe('Implement PHNX-3621.');
   });
 
   it('survives an incremental resume — serialize + hydrate keep the first-wins turn', () => {
     const state = initClaudeParseState();
     applyClaudeLine(state, { type: 'user', timestamp: '2026-08-31T00:00:00Z', message: { content: [{ type: 'text', text: FULL_FIRST }] } });
-    // Persist a continuation (the userTexts array collapses to a joined blob on
-    // hydrate, so firstUserMessage MUST ride the serialized state to survive).
     const blob = serializeClaudeParserState(state, 100);
     expect(blob.firstUserMessage).toBe(FULL_FIRST);
     const resumed = hydrateClaudeParseState(blob);
-    // A later appended user turn must NOT overwrite the first one.
     applyClaudeLine(resumed, { type: 'user', timestamp: '2026-08-31T00:05:00Z', message: { content: [{ type: 'text', text: 'a much later turn' }] } });
     expect(finalizeClaudeScan(resumed).firstUserMessage).toBe(FULL_FIRST);
   });
@@ -87,8 +75,6 @@ describe('Kimi scanner captures firstUserMessage (wire stream, first-wins across
     const first = parseKimiWireMetricsIncremental(dir, null);
     expect(first.newState.firstUserMessage).toBe(FULL_FIRST);
 
-    // Append a later user turn and resume from the persisted offset — the first
-    // turn is in the already-consumed prefix, so it must ride the continuation.
     fs.appendFileSync(wire, JSON.stringify({ type: 'context.append_message', message: { role: 'user', content: 'a later turn' } }) + '\n');
     const resumed = parseKimiWireMetricsIncremental(dir, first.newState);
     expect(resumed.newState.firstUserMessage).toBe(FULL_FIRST);
@@ -118,15 +104,10 @@ describe('Grok scanner captures firstUserMessage (bounded chat_history read)', (
 
     const result = readGrokMeta(path.join(dir, 'summary.json'));
     expect(result?.meta.firstUserMessage).toBe(FULL_FIRST);
-    // topic still comes from the summary's generated_title, unchanged.
     expect(result?.meta.topic).toBe('PHNX-3621 work');
   });
 
   it('skips production Grok scaffolding and returns the prompt_index <user_query> turn', () => {
-    // Real chat_history.jsonl shape (measured 23/44 sessions on one box):
-    // system, then a huge <user_info>+<rules> user dump (no synthetic_reason),
-    // then a system-reminder user with synthetic_reason, then the genuine
-    // originating request at prompt_index: 0 wrapped in <user_query>.
     const genuine = '## Mission\nIndependently design the product-facing compute tier model.';
     const userInfoDump = '<user_info>\nOS Version: linux\nWorkspace Path: /repo\n<rules>never store this dump as the first user turn</rules>\n</user_info>';
     const dir = writeGrokSession('bbbbbbbb-cccc-dddd-eeee-ffffffffffff', [

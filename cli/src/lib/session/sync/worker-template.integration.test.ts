@@ -5,10 +5,6 @@ import { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderSessionsWorkerScript } from './worker-template.js';
 
-// The exact emitted module runs inside workerd against Miniflare's real R2
-// implementation and calls a real local HTTP identity service. This covers the
-// production route, bearer, ETag/CAS, cursor, and quota semantics without a Map
-// bucket or a replaced authorization hook.
 
 const USER_A = 'user-a';
 const USER_B = 'user-b';
@@ -64,11 +60,6 @@ describe('managed sessions Worker in real workerd', () => {
 
   const url = (path: string) => `https://sessions.test/${path}`;
   const auth = (token = 'token-a') => ({ authorization: `Bearer ${token}` });
-  // A well-formed ENCRYPTED bundle wire — NDJSON: a header line claiming
-  // encryption + one record whose body is an AES-256-GCM transcript envelope
-  // ({ v, alg, iv, ct, tag }). This is the exact shape the CLI uploads on the
-  // managed path; the Worker requires it and rejects a plaintext PUT 422 so
-  // readable transcript content can never land in the bucket (SES-51).
   const encBody = (marker: string) => {
     const env = JSON.stringify({ v: 1, alg: 'aes-256-gcm', iv: 'AAAAAAAAAAAAAAAA', ct: Buffer.from(marker).toString('base64'), tag: 'AAAAAAAAAAAAAAAAAAAAAA==' });
     const header = JSON.stringify({
@@ -116,12 +107,10 @@ describe('managed sessions Worker in real workerd', () => {
 
   it('rejects a plaintext (non-envelope) body with 422', async () => {
     const key = `${USER_A}/sessions/mac/claude/plain.jsonl`;
-    // Plaintext JSON that is NOT an encryption envelope, and a raw byte string.
     for (const body of ['{"env":"v1"}', 'x']) {
       const put = await mf!.dispatchFetch(url(key), { method: 'PUT', headers: auth(), body });
       expect(put.status).toBe(422);
     }
-    // Nothing was stored: the store stays empty for this owner.
     const list = await mf!.dispatchFetch(url(`${USER_A}/?list`), { headers: auth() });
     expect((await list.json() as { keys: string[] }).keys).toEqual([]);
   });
@@ -150,7 +139,6 @@ describe('managed sessions Worker in real workerd', () => {
     expect((await mf!.dispatchFetch(url(key))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(`${USER_A}/?list`))).status).toBe(401);
     expect((await mf!.dispatchFetch(url(key), { headers: auth('token-b') })).status).toBe(403);
-    // A wrong-owner write is rejected on ownership (403) before the body is read.
     expect((await mf!.dispatchFetch(url(key), {
       method: 'PUT', headers: auth('token-b'), body: encBody('x'),
     })).status).toBe(403);
@@ -196,8 +184,6 @@ describe('managed sessions Worker in real workerd', () => {
     const bucket = await mf!.getR2Bucket('BUCKET');
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toMatchObject({ bytes: charged, count: 1 });
     expect((await mf!.dispatchFetch(url(key), { method: 'DELETE', headers: auth() })).status).toBe(200);
-    // DELETE refunds the object's bytes/count via a delta CAS applied before the
-    // object is replaced by a LIST-hidden tombstone.
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text())).toMatchObject({ bytes: 0, count: 0 });
 
     await bucket.put(`__usage/${USER_A}`, JSON.stringify({ bytes: MAX_BYTES, count: 0 }));
@@ -225,7 +211,7 @@ describe('managed sessions Worker in real workerd', () => {
     };
     expect(ledger).toMatchObject({ bytes: 0, count: 0, pathCount: 3 });
     expect(Object.keys(ledger.settled)).toHaveLength(3);
-    expect((await bucket.list()).objects).toHaveLength(7); // usage + 3 leases + 3 tombstones
+    expect((await bucket.list()).objects).toHaveLength(7);
 
     await bucket.put(`__usage/${USER_A}`, JSON.stringify({
       bytes: 0, count: 0, pathCount: MAX_OBJECTS, settled: ledger.settled,
@@ -254,9 +240,6 @@ describe('managed sessions Worker in real workerd', () => {
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))
       .toMatchObject({ bytes: Buffer.byteLength(b1) + Buffer.byteLength(b2), count: 2 });
 
-    // Delete k1, then delete it again: the second DELETE finds no object
-    // (head → null) so it refunds nothing, leaving the ledger at the true
-    // remaining object (k2). Refund is applied before the object is removed.
     expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
     expect((await mf!.dispatchFetch(url(k1), { method: 'DELETE', headers: auth() })).status).toBe(200);
     expect(JSON.parse(await (await bucket.get(`__usage/${USER_A}`))!.text()))
@@ -317,7 +300,6 @@ describe('managed sessions Worker in real workerd', () => {
     const bucket = await mf!.getR2Bucket('BUCKET');
     const originalHead = await bucket.head(key);
     const staleToken = 'stale-delete-token';
-    // Model termination after the ledger refund committed but before DELETE.
     await bucket.put(`__usage/${USER_A}`, JSON.stringify({
       bytes: 0,
       count: 0,
@@ -345,9 +327,6 @@ describe('managed sessions Worker in real workerd', () => {
     });
     expect({ status: recovered.status, body: await recovered.text() }).toMatchObject({ status: 200 });
     expect(await (await bucket.get(key))!.text()).toBe(replacement);
-    // A predecessor that resumes after expiry still carries originalHead.etag.
-    // The successor's recovery fence changed that etag before replacement, so
-    // the stale conditional tombstone cannot delete the replacement.
     expect(await bucket.put(key, new Uint8Array(0), {
       customMetadata: { deleted: 'true', mutationToken: staleToken },
       onlyIf: { etagMatches: originalHead!.etag },
@@ -386,10 +365,6 @@ describe('managed sessions Worker in real workerd', () => {
     const successorBody = await successor.text();
     if (successor.status !== 200) throw new Error(`successor ${successor.status}: ${successorBody}`);
 
-    // This is the predecessor's stale ledger CAS from the review interleaving:
-    // it read before takeover and tries to append its refund afterwards. The
-    // successor wrote settled[pathId] in that same ledger, so the stale etag is
-    // fenced and the late delta cannot land.
     const late = await bucket.put(`__usage/${USER_A}`, JSON.stringify({
       bytes: 0,
       count: 0,

@@ -1,13 +1,3 @@
-/**
- * Security regressions for the session parser:
- *   1. Terminal escape sequences embedded in untrusted session content must not
- *      survive parseSession() — otherwise `agents sessions` becomes a clipboard
- *      hijack / scrollback wipe / alt-screen takeover gadget for any malicious
- *      assistant message or tool output.
- *   2. Multi-hundred-MB session blobs must trip the size cap with a clean
- *      error rather than OOMing the CLI or exceeding V8's
- *      ERR_STRING_TOO_LONG ceiling.
- */
 
 import { describe, expect, test, afterAll } from 'vitest';
 import * as fs from 'fs';
@@ -31,21 +21,21 @@ function writeTmp(name: string, content: string): string {
 
 afterAll(() => {
   for (const p of tmpFiles) {
-    try { fs.unlinkSync(p); } catch { /* noop */ }
+    try { fs.unlinkSync(p); } catch {  }
   }
 });
 
 const ESC = '\x1b';
 const BEL = '\x07';
-const CSI = '\x9b'; // 0x9b — should be stripped (C1 control)
+const CSI = '\x9b';
 
 const PAYLOADS = [
-  `${ESC}]52;c;UEhJU0hJTkc=${BEL}`,             // OSC 52 clipboard hijack
-  `${ESC}[2J${ESC}[3J${ESC}[H`,                 // wipe scrollback + home cursor
-  `${ESC}[?1049h`,                              // alt-screen takeover
-  `${ESC}[31mRED${ESC}[0m`,                     // color hijack
-  `\x07\x08`,                                   // bell + backspace
-  `${CSI}1;31m`,                                // raw C1 CSI byte
+  `${ESC}]52;c;UEhJU0hJTkc=${BEL}`,
+  `${ESC}[2J${ESC}[3J${ESC}[H`,
+  `${ESC}[?1049h`,
+  `${ESC}[31mRED${ESC}[0m`,
+  `\x07\x08`,
+  `${CSI}1;31m`,
 ];
 
 function containsTerminalEscape(s: string): boolean {
@@ -106,7 +96,6 @@ describe('parseSession sanitization chokepoint', () => {
       },
     ];
     const jsonl = lines.map((l) => JSON.stringify(l)).join('\n');
-    // Path must include /.claude/ for detectAgent to route to parseClaude.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-claude-'));
     const claudeDir = path.join(dir, '.claude', 'projects', 'p');
     fs.mkdirSync(claudeDir, { recursive: true });
@@ -129,7 +118,6 @@ describe('parseSession sanitization chokepoint', () => {
       for (const f of fields) {
         if (f) expect(containsTerminalEscape(f)).toBe(false);
       }
-      // Also walk args deeply.
       if (e.args) {
         const flat = JSON.stringify(e.args);
         expect(containsTerminalEscape(flat)).toBe(false);
@@ -159,7 +147,6 @@ describe('parseSession sanitization chokepoint', () => {
         tool_call_id: 'c1',
       },
     ].map((o) => JSON.stringify(o)).join('\n');
-    // Path must include /.rush/ for detectAgent to route to parseRush.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-rush-'));
     const rushDir = path.join(dir, '.rush', 'sessions');
     fs.mkdirSync(rushDir, { recursive: true });
@@ -182,13 +169,10 @@ describe('parseSession sanitization chokepoint', () => {
 
 describe('safeReadSessionFile size cap', () => {
   test('throws a clean error above the cap without loading the file', () => {
-    // Sparse file: 250MB on-disk size, near-zero physical bytes. Avoids
-    // actually allocating 250MB just to verify the cap check.
     const p = path.join(os.tmpdir(), `sec-large-${Date.now()}.jsonl`);
     const fd = fs.openSync(p, 'w');
     try {
-      const size = 250 * 1024 * 1024; // 250MB
-      // Truncate to size — produces a sparse file on darwin/linux.
+      const size = 250 * 1024 * 1024;
       fs.ftruncateSync(fd, size);
     } finally {
       fs.closeSync(fd);
