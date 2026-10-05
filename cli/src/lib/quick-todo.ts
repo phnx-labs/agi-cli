@@ -2,10 +2,9 @@
  * Quick to-dos for AGI Menu's Home: `agents projects todo add|list|done|undo`.
  *
  * Linear is the record; nothing is stored here. `add` turns one typed line into a
- * Linear issue with `linear create` (assignee: the API key's owner unless one is
- * named, the active cycle, status Todo, no milestone, no delegate), reading
- * `#project`, a day word (today, tomorrow, mon…sun) and `!`/`!!` from the text;
- * an explicit option beats the same field typed in the line. The issue description carries
+ * Linear issue with `linear create` (the active cycle, status Todo, no milestone, no
+ * delegate), reading `#project`, a day word and `!`/`!!` from the text unless an
+ * option names that field. The issue description carries
  * {@link QUICK_TODO_MARKER}, which is how `list` tells a quick to-do from any other
  * issue (the team has no "todo" label, and taxonomy is not ours to add). `list`
  * shows the caller's open quick to-dos plus anything assigned to them that is due
@@ -30,13 +29,10 @@ export const UNDO_CREATE_WINDOW_MS = 30_000;
 const CLOCK_SKEW_MS = 5_000;
 
 export type TodoPriority = 'urgent' | 'high';
-/** What `add --priority` takes: linear's own priority words. */
 export const ADD_PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'] as const;
 export type AddPriority = (typeof ADD_PRIORITIES)[number];
-/** Title length `add` accepts, in characters. */
 export const TITLE_MIN = 3;
 export const TITLE_MAX = 120;
-/** Description length `add` accepts, in characters. */
 export const DESCRIPTION_MAX = 10_000;
 
 /** One typed line, read. */
@@ -188,20 +184,16 @@ export interface TodoResult {
   message: string;
 }
 
-/** The fields `add` takes beside the text; each beats the same field typed in the line. */
 export interface AddOptions {
   project?: string;
   description?: string;
-  /** A person linear-cli resolves by name or email; `me` (or unset) is the API key's owner. */
   assignee?: string;
-  /** `YYYY-MM-DD`, today or later. */
   due?: string;
   priority?: AddPriority;
   defs: readonly ProjectDef[];
   now: Date;
 }
 
-/** Why `add` refuses these fields, or null when they can be sent. */
 export function addRefusal(title: string, opts: AddOptions): string | null {
   const length = [...title].length;
   if (length === 0) return 'The to-do has no words besides its #project, day and priority.';
