@@ -1,0 +1,98 @@
+/**
+ * The standalone tool releases this agents-cli is tested against. `agents setup
+ * tools` brings each one up to its floor with `npm install -g <pkg>@<floor>`; a
+ * newer install is left alone. Bump a floor here (and in the CHANGELOG) when a
+ * tool release this CLI depends on is published — never to an unpublished one.
+ */
+import { installCli, installedCliVersion, type CliManifest } from './cli-resources.js';
+import { compareVersions } from './agent-spec/primitives.js';
+
+export const STANDALONE_TOOLS = ['sessions', 'browser', 'secrets', 'computer', 'term'] as const;
+export type StandaloneTool = typeof STANDALONE_TOOLS[number];
+
+export interface StandaloneToolPin {
+  tool: StandaloneTool;
+  pkg: string;
+  floor: string;
+}
+
+export const STANDALONE_TOOL_PINS: Readonly<Record<StandaloneTool, StandaloneToolPin>> = {
+  // 0.5.0 keeps the non-strict verb parsing every `agents sessions` forwarder relies on.
+  sessions: { tool: 'sessions', pkg: '@phnx-labs/sessions-cli', floor: '0.5.0' },
+  browser: { tool: 'browser', pkg: '@phnx-labs/browser-cli', floor: '0.1.15' },
+  secrets: { tool: 'secrets', pkg: '@phnx-labs/secrets-cli', floor: '0.1.8' },
+  computer: { tool: 'computer', pkg: '@phnx-labs/computer-cli', floor: '0.1.5' },
+  term: { tool: 'term', pkg: '@phnx-labs/term-cli', floor: '0.1.0' },
+};
+
+/** `<pkg>@<floor>`, the exact spec `npm install -g` receives. */
+export function pinnedSpec(tool: StandaloneTool): string {
+  const pin = STANDALONE_TOOL_PINS[tool];
+  return `${pin.pkg}@${pin.floor}`;
+}
+
+function pinManifest(tool: StandaloneTool): CliManifest {
+  return {
+    name: tool,
+    check: { kind: 'version', cmd: tool, args: ['--version'] },
+    install: [{ npm: pinnedSpec(tool) }],
+    source: 'builtin',
+    path: '',
+  };
+}
+
+export interface ToolPinRow {
+  tool: StandaloneTool;
+  pkg: string;
+  floor: string;
+  /** Version `<tool> --version` reports, or null when the binary is absent or unreadable. */
+  installed: string | null;
+  /** ok = at or above the floor; installed/upgraded = this run fixed it; failed = still below. */
+  state: 'ok' | 'missing' | 'outdated' | 'installed' | 'upgraded' | 'failed';
+  error?: string;
+}
+
+export function meetsFloor(installed: string | null, floor: string): boolean {
+  return installed !== null && compareVersions(installed, floor) >= 0;
+}
+
+/** Read every tool's installed version against its floor. Spawns `<tool> --version` only. */
+export async function readToolPins(tools: readonly StandaloneTool[] = STANDALONE_TOOLS): Promise<ToolPinRow[]> {
+  return Promise.all(tools.map(async (tool) => {
+    const pin = STANDALONE_TOOL_PINS[tool];
+    const installed = await installedCliVersion(pinManifest(tool));
+    const state: ToolPinRow['state'] = meetsFloor(installed, pin.floor) ? 'ok' : installed === null ? 'missing' : 'outdated';
+    return { tool, pkg: pin.pkg, floor: pin.floor, installed, state };
+  }));
+}
+
+/**
+ * Install or upgrade every tool below its floor. A tool already at or above the
+ * floor is untouched. A row reports `failed` when npm failed or the binary on
+ * PATH still reads below the floor afterwards (another install shadows it).
+ */
+export async function ensureToolPins(
+  opts: { tools?: readonly StandaloneTool[]; dryRun?: boolean; logToStderr?: boolean } = {},
+): Promise<ToolPinRow[]> {
+  const before = await readToolPins(opts.tools);
+  const out: ToolPinRow[] = [];
+  for (const row of before) {
+    if (row.state === 'ok' || opts.dryRun) {
+      out.push(row);
+      continue;
+    }
+    const result = installCli(pinManifest(row.tool), { logToStderr: opts.logToStderr });
+    const installed = await installedCliVersion(pinManifest(row.tool));
+    if (result.error || !meetsFloor(installed, row.floor)) {
+      out.push({
+        ...row,
+        installed,
+        state: 'failed',
+        error: result.error ?? `\`${row.tool} --version\` reads ${installed ?? 'nothing'} after installing ${pinnedSpec(row.tool)}; another install on PATH shadows it`,
+      });
+      continue;
+    }
+    out.push({ ...row, installed, state: row.state === 'missing' ? 'installed' : 'upgraded' });
+  }
+  return out;
+}

@@ -15,8 +15,8 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { getActiveSessions, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
-import { injectIntoTerminal, resolveInjectTargetForSession, type InjectTarget } from '../lib/terminal/index.js';
+import { injectIntoTerminal, type InjectTarget } from '../lib/terminal/index.js';
+import { resolveLiveInjectTarget } from '../lib/session/inject-target.js';
 import { sshExec, shellQuote } from '../lib/ssh-exec.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
@@ -36,25 +36,6 @@ interface InjectOptions {
   enter?: boolean;
   combined?: boolean;
   json?: boolean;
-}
-
-/**
- * Whether an active session is the one `sessions inject <token>` means. Matches
- * a resolvable session id (exact or unique prefix) AND — for a tmux-hosted row
- * whose full id never resolved (`sessionId` absent) — the `ag-<agent>-<shortid>`
- * tmux name's `shortid` suffix (exact or prefix), the full tmux name, and the
- * pane id. Those are the only selectors an id-less remote tmux row exposes, so
- * without this an operator has no tool-native way to nudge it (PHNX-3688).
- */
-export function matchInjectSelector(session: ActiveSession, token: string): boolean {
-  if (!token) return false;
-  const sid = session.sessionId;
-  if (sid && (sid === token || sid.startsWith(token))) return true;
-  const short = session.tmuxName ? shortIdFromName(session.tmuxName) : undefined;
-  if (short && (short === token || short.startsWith(token))) return true;
-  if (session.tmuxName && session.tmuxName === token) return true;
-  if (session.paneId && session.paneId === token) return true;
-  return false;
 }
 
 /**
@@ -122,24 +103,6 @@ async function injectOnDevice(sessionId: string, text: string, options: InjectOp
   if (res.code !== 0) process.exit(res.code ?? 1);
 }
 
-/** Resolve a session id (short or full) to an addressable terminal target, via the
- * same resolver the watchdog uses so both agree on what is reachable. */
-async function resolveTarget(sessionId: string): Promise<{ target: InjectTarget | null; reason?: string; hint?: string }> {
-  const sessions = await getActiveSessions();
-  const match = sessions.find((s) => matchInjectSelector(s, sessionId));
-  if (!match) return { target: null, reason: `No active session matches "${sessionId}".` };
-  const resolution = resolveInjectTargetForSession(match);
-  if (!resolution.addressable) {
-    // Surface the resolver's precise reason (host/rail), not a generic "not tmux".
-    return {
-      target: null,
-      reason: `Session "${sessionId}": ${resolution.reason}`,
-      hint: resolution.hint,
-    };
-  }
-  return { target: resolution.target };
-}
-
 async function runInject(sessionId: string, text: string, options: InjectOptions): Promise<void> {
   let device: string | undefined;
   try {
@@ -163,7 +126,7 @@ async function runInject(sessionId: string, text: string, options: InjectOptions
     // inject over SSH (the same command, minus --device) — PHNX-3688.
     return injectOnDevice(sessionId, text, options, device);
   } else {
-    const resolved = await resolveTarget(sessionId);
+    const resolved = await resolveLiveInjectTarget(sessionId);
     if (!resolved.target) {
       const message = resolved.hint ? `${resolved.reason}\n${resolved.hint}` : resolved.reason;
       if (options.json) console.log(JSON.stringify({ ok: false, error: message }));

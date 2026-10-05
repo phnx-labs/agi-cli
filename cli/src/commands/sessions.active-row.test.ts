@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  renderActiveRowLines,
-  backfillActiveRowsFromMeta,
-  filterActiveSessionsByRoutine,
-} from './sessions.js';
+import { backfillActiveRowsFromMeta } from './sessions.js';
+import { renderActiveRowLines, filterActiveSessionsByRoutine } from './ps-roster.js';
 import { stringWidth } from '../lib/session/width.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';

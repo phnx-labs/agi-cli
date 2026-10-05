@@ -29,6 +29,33 @@ flowchart LR
   W --> UI[CLI, AGI EXT, menu bar]
 ```
 
+## Live roster: `agents ps`
+
+`agents ps` lists the sessions running right now on this machine and every reachable
+device, the same roster `agents sessions --active` prints. It is the home of the verbs
+that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`
+(the `sessions` spellings run the same code). Typing into a running agent is
+`agents send --channel session --to <id>`; resuming an ended one is
+`agents run --resume <id>`. Both moves are step A5 of PHNX-4227; the `sessions`
+group itself leaves agents-cli in a later release.
+
+| Flag | Effect |
+|---|---|
+| `--json` | One row per live session (the `sessions --active --json` shape) |
+| `--local` | This machine only; no SSH fan-out |
+| `-D, --device <name...>` | Only these devices. Peers answer `agents sessions --active --json`, so a peer on an older release still works |
+| `--status <state...>` | `working`, `idle`, `waiting`, `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, `unknown`; `waiting` exits 1 when any session waits |
+| `--no-interactive` | Print instead of opening the picker on a TTY |
+
+On a TTY with no `--status`, `ps` opens the session picker seeded running-only; `r`
+toggles that filter. The roster code lives in `src/commands/ps-roster.ts`
+(`gatherActiveSessions`, `renderActiveSessions`, `runLiveRoster`).
+
+The local snapshot the daemon publishes (`publishLocalActiveSessions`) stamps every
+row with this machine's id. A row without `machine` fails `isRunningLiveSession`, so
+before this the roster read empty whenever the newest snapshot came from the daemon,
+which on a box with a running daemon was nearly always.
+
 ## Two identities with different lifetimes
 
 The durable session identifier belongs to the harness transcript. The live identity

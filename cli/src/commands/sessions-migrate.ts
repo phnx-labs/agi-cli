@@ -82,7 +82,7 @@ interface MigrateOptions {
   agentWrapup?: boolean;
 }
 
-export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
+export function registerSessionsMigrateCommand(sessionsCmd: Command, group: 'sessions' | 'ps' = 'sessions'): void {
   const cmd = sessionsCmd
     .command('migrate [session-id]')
     .alias('relocate')
@@ -97,16 +97,16 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
   setHelpSections(cmd, {
     examples: `
       # Move the session in THIS pane onto the least-busy fleet worker
-      agents sessions migrate --auto
+      agents ${group} migrate --auto
 
       # Move a specific session onto a named host
-      agents sessions migrate a1b2c3d4 --device yosemite-s1
+      agents ${group} migrate a1b2c3d4 --device yosemite-s1
 
       # Spin up a fresh ephemeral box and move onto it
-      agents sessions migrate --lease
+      agents ${group} migrate --lease
 
       # Copy (don't stop the source), letting the agent wrap up its own dirty tree
-      agents sessions migrate --device box-a --keep --agent-wrapup
+      agents ${group} migrate --device box-a --keep --agent-wrapup
     `,
     notes: `
       - Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).

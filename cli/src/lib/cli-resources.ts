@@ -550,11 +550,11 @@ export function buildInstallCommand(method: InstallMethod): string {
  * For `script`, the download is staged to a temp file and then exec'd as
  * `sh <file>` so we never need a shell pipe (`curl | sh`).
  */
-function runInstallMethod(method: InstallMethod): void {
+function runInstallMethod(method: InstallMethod, stdio: 'inherit' | ['inherit', 2, 'inherit']): void {
   if ('npm' in method) {
     assertNpmPackage(method.npm);
     const invocation = execFileShellSpec('npm', ['install', '-g', method.npm]);
-    const r = spawnSync(invocation.command, invocation.args, { stdio: 'inherit', shell: invocation.shell });
+    const r = spawnSync(invocation.command, invocation.args, { stdio, shell: invocation.shell });
     if (r.status !== 0) {
       throw new Error(`npm install -g ${method.npm} exited with status ${r.status ?? 'unknown'}`);
     }
@@ -562,7 +562,7 @@ function runInstallMethod(method: InstallMethod): void {
   }
   if ('brew' in method) {
     assertBrewFormula(method.brew);
-    const r = spawnSync('brew', ['install', method.brew], { stdio: 'inherit' });
+    const r = spawnSync('brew', ['install', method.brew], { stdio });
     if (r.status !== 0) {
       throw new Error(`brew install ${method.brew} exited with status ${r.status ?? 'unknown'}`);
     }
@@ -574,16 +574,16 @@ function runInstallMethod(method: InstallMethod): void {
     try {
       let dl;
       if (hasCommand('curl')) {
-        dl = spawnSync('curl', ['-fsSL', method.script, '-o', tmp], { stdio: 'inherit' });
+        dl = spawnSync('curl', ['-fsSL', method.script, '-o', tmp], { stdio });
       } else if (hasCommand('wget')) {
-        dl = spawnSync('wget', ['-q', '-O', tmp, method.script], { stdio: 'inherit' });
+        dl = spawnSync('wget', ['-q', '-O', tmp, method.script], { stdio });
       } else {
         throw new Error('neither curl nor wget is available on PATH');
       }
       if (dl.status !== 0) {
         throw new Error(`download of install script failed (status ${dl.status ?? 'unknown'})`);
       }
-      const r = spawnSync('sh', [tmp], { stdio: 'inherit' });
+      const r = spawnSync('sh', [tmp], { stdio });
       if (r.status !== 0) {
         throw new Error(`install script exited with status ${r.status ?? 'unknown'}`);
       }
@@ -602,12 +602,12 @@ function runInstallMethod(method: InstallMethod): void {
       assertSafePathSegment(spec.extract);
       const tmp = path.join(os.tmpdir(), `agents-cli-bin-${process.pid}-${Date.now()}.tgz`);
       try {
-        const dl = spawnSync('curl', ['-fsSL', spec.url, '-o', tmp], { stdio: 'inherit' });
+        const dl = spawnSync('curl', ['-fsSL', spec.url, '-o', tmp], { stdio });
         if (dl.status !== 0) {
           throw new Error(`binary download failed (status ${dl.status ?? 'unknown'})`);
         }
         const x = spawnSync('tar', ['-xzf', tmp, '-C', binDir, spec.extract], {
-          stdio: 'inherit',
+          stdio,
         });
         if (x.status !== 0) {
           throw new Error(`tar extract failed (status ${x.status ?? 'unknown'})`);
@@ -619,7 +619,7 @@ function runInstallMethod(method: InstallMethod): void {
       const r = spawnSync(
         'curl',
         ['-fsSL', spec.url, '-o', path.join(binDir, 'agents-cli-downloaded')],
-        { stdio: 'inherit' },
+        { stdio },
       );
       if (r.status !== 0) {
         throw new Error(`binary download failed (status ${r.status ?? 'unknown'})`);
@@ -636,7 +636,7 @@ function runInstallMethod(method: InstallMethod): void {
  */
 export function installCli(
   manifest: CliManifest,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; logToStderr?: boolean } = {},
 ): InstallResult {
   const method = selectInstallMethod(manifest);
   if (!method) {
@@ -653,7 +653,7 @@ export function installCli(
   }
 
   try {
-    runInstallMethod(method);
+    runInstallMethod(method, opts.logToStderr ? ['inherit', 2, 'inherit'] : 'inherit');
   } catch (err) {
     return {
       manifest,
