@@ -26,6 +26,7 @@ function stateDir(): string {
 }
 
 async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
+  // Keep daemon dependencies off startup. Enable starts then reloads; disable reloads only if running.
   const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon/daemon.js');
   if (isDaemonRunning()) {
     signalDaemonReload();
@@ -122,6 +123,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 export function registerWatchdogCommand(program: Command): void {
+  // The daemon alone schedules automatic passes; manual runs inject only with explicit --nudge.
   const cmd = program
     .command('watchdog')
     .description('Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.')
@@ -156,6 +158,7 @@ export function registerWatchdogCommand(program: Command): void {
 
       if (!opts.watch) {
         const willInject = computeWillInject();
+        // Reuse the daemon-warmed active snapshot rather than gathering the fleet again.
         const sessions = await loadWatchdogSessions();
         const result = await tickOnce(willInject, sessions);
         if (opts.json) console.log(JSON.stringify(result, null, 2));
@@ -302,6 +305,7 @@ export function registerWatchdogCommand(program: Command): void {
     .description('Show whether the daemon watchdog pass is enabled and where state is written.')
     .option('--json', 'Emit status as JSON (for the menu-bar / scripts)')
     .action((_opts, command) => {
+      // --json may bind on a parent before dispatch, so read merged Commander options.
       const json = command.optsWithGlobals().json === true;
       const on = getConfigValue('watchdog.enabled').value === true;
       const rotate = isWatchdogRotateEnabled() ? 'on' : 'off';

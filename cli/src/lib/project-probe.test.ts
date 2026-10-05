@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { stripAnsi } from './session/width.js';
+// Probe git status at checkout roots, never project subpaths, and never fetch tracking refs.
 import {
   formatFleetSummary,
   formatFleetWorkspaces,

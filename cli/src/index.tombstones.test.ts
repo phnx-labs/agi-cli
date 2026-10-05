@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
+// Tombstone notices stay on stderr; replacements preserve flags/exits, and removed hq tolerates stale args.
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');

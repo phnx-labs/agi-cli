@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from './sqlite.js';
 
+// Use a real Bun subprocess: bun:sqlite named binds differ from the Node-hosted test runtime.
 const SCHEMA = 'CREATE TABLE t (id TEXT PRIMARY KEY, short_id TEXT NOT NULL, count INTEGER)';
 const INSERT = 'INSERT INTO t (id, short_id, count) VALUES (@id, @short_id, @count)';
 

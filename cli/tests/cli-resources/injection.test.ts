@@ -10,6 +10,7 @@ import {
   type CheckSpec,
 } from '../../src/lib/cli-resources.js';
 
+// Direct CheckSpec construction bypasses parsing, so argv execution must still never invoke a shell.
 const CANARY = path.join(os.tmpdir(), `agents-rce-test-${process.pid}`);
 
 function readCanary(): boolean {

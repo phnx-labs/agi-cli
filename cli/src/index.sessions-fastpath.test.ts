@@ -6,6 +6,8 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { runAgents, writeUpdateCache } from './commands/sessions.test-fixture.js';
 
+// Peer exit 127 falls back in-repo; only single-device reads at the supported floor use --host.
+// Lifecycle and multi-device commands never take this compatibility fast path.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 const temps: string[] = [];

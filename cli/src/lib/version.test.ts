@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { getCliVersion, installLayoutFromBin } from './version.js';
 
+// Fresh reads bypass the memo; Bun single-file paths resolve through installed launcher layouts.
 describe('version', () => {
   it('getCliVersion returns a non-empty version string', () => {
     const v = getCliVersion();

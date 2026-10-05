@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// Repair in this throwaway HOME must not adopt a config, default, shim, or PATH entry implicitly.
 
 describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/path against a planted home', () => {
   let home: string;

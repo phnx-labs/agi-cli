@@ -2,6 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import { redactSecrets, knownSecretValuesFromEnv, sanitizeForTerminal } from './redact.js';
 
+// Assemble synthetic tokens from fragments so repository scanners never see token-shaped literals.
+// Repeated unterminated OSC introducers remain adversarial linear-time inputs.
 const j = (...parts: string[]): string => parts.join('');
 const B36 = '1234567890abcdefghijklmnopqrstuvwxyz';
 

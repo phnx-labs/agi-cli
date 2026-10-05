@@ -17,8 +17,10 @@ export interface Violation {
 
 const ARTIFACTS_PREFIX = '.agents/artifacts/';
 const PRIVATE_PREFIX = '.agents/artifacts/private/';
+// Public artifacts are committed; confidential material belongs in ignored private artifacts or a private repo.
 
 const FILENAME_SIGNALS: { pattern: RegExp; label: string }[] = [
+  // Short business tokens require word boundaries to avoid noisy substring matches.
   { pattern: /\bgtm\b/, label: 'go-to-market / GTM' },
   { pattern: /monetiz/, label: 'monetization' },
   { pattern: /pricing-model/, label: 'pricing model' },
@@ -94,6 +96,7 @@ function gitDiffNameStatus(base: string, head: string, cwd: string): string[] {
     if (!trimmed) continue;
     const parts = trimmed.split('\t');
     const status = parts[0]![0]!;
+    // Added/modified public artifacts can leak; deletions cannot introduce content.
     if (status === 'D') continue;
     const path = parts[parts.length - 1];
     if (path) out.push(posix(path));
@@ -138,6 +141,7 @@ export function checkContent(text: string): string | null {
 
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
+    // Strategy context coupled to a dollar amount is conservatively sensitive.
     if (DOLLAR_FIGURE_RE.test(line) && hasStrategyContext(line)) {
       const snippet = line.replace(/\s+/g, ' ').trim();
       return `content couples strategy language with a dollar figure: "${snippet}"`;

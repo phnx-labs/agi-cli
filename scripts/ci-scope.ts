@@ -51,6 +51,7 @@ export interface ImpactProof {
 }
 
 interface OwnershipGroup {
+  // Group budgets only raise the default; the largest qualifying final-selection budget wins.
   id: string;
   when: string[];
   tests?: string[];
@@ -113,6 +114,7 @@ export function matchGlob(glob: string, file: string): boolean {
 }
 
 export function loadOwnershipManifest(path = DEFAULT_MANIFEST): OwnershipManifest {
+  // Malformed budget values fail policy loading instead of weakening the required check.
   const parsed = Bun.YAML.parse(readFileSync(path, 'utf8')) as OwnershipManifest;
   if (!parsed?.policy_version) throw new Error(`invalid ownership manifest: ${path}`);
   parsed.areas ??= [];
@@ -210,6 +212,7 @@ export function classifyPackageJsonChange(
 }
 
 export function parseRenameAwareRawDiff(z: string): string[] {
+  // Only same-content, same-mode R100 moves vanish; changed renames and mode flips select the destination.
   const tokens = z.split('\0');
   const out: string[] = [];
   let i = 0;
@@ -415,6 +418,7 @@ export function relatedTestsBySource(
 }
 
 const PATH_VARIABLE_RE = /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:path\.)?(?:resolve|join)\(\s*__dirname\s*,\s*(['"])([^'"]+)\2\s*\)/g;
+// Literal sibling reads form runtime dependency edges that imports cannot reveal.
 const RUNTIME_READ_INLINE_RE = /readFileSync\s*\(\s*(?:path\.)?(?:resolve|join)\(\s*__dirname\s*,\s*(['"])([^'"]+)\1\s*\)/g;
 const RUNTIME_READ_VAR_RE = /readFileSync\s*\(\s*(\w+)\s*[,)]/g;
 
@@ -582,6 +586,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
       continue;
     }
 
+    // Deleted/testless paths select nothing; zero-selection applies only to executable sources at head.
     if (isExecutableSource(file) && selectedForFile === 0 && !testless && existsSync(join(repoRoot, file))) {
       zeroSelection.push(file);
     }
@@ -694,6 +699,7 @@ export interface RunCommand {
 }
 
 export function commandForTestFile(file: string, repoRoot: string): RunCommand {
+  // Never place -- before Vitest filters: Vitest drops the selection and runs the full suite.
   const f = posix(file);
   if (f.endsWith('.test.sh')) {
     return { cwd: join(repoRoot, dirname(f)), cmd: ['bash', f.split('/').pop()!] };
@@ -740,6 +746,7 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
   for (const check of plan.checks) {
     switch (check) {
       case 'typecheck':
+        // CLI install already runs prepare→tsc; a separate typecheck would rebuild.
         break;
       case 'command-index':
         out.push({ cwd: cli, cmd: ['bash', 'scripts/verify-command-index.sh'] });
@@ -837,6 +844,7 @@ function parseArgs(argv: string[]): {
 }
 
 export function isVitestWorkerCrashWithZeroFailures(output: string): boolean {
+  // Ignore an orphan-worker exit only when both summaries prove zero failed tests/files.
   if (!/Worker exited unexpectedly/.test(output)) return false;
   const testFilesLine = output.match(/^\s*Test Files\s+.+$/m)?.[0] ?? '';
   const testsLine = output.match(/^\s*Tests\s+.+$/m)?.[0] ?? '';
