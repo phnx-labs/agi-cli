@@ -11771,12 +11771,55 @@
               "options": [
                 {
                   "flags": "--project <name>",
-                  "description": "Project when the text names none: an agents project or a Linear project name",
+                  "description": "Project: an agents project or a Linear project name",
                   "long": "--project",
                   "required": true,
                   "optional": false,
                   "variadic": false,
                   "negate": false
+                },
+                {
+                  "flags": "--description <text>",
+                  "description": "Description, shown above the AGI Menu marker",
+                  "long": "--description",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--assignee <name>",
+                  "description": "Assign to a person by name or email (default: you)",
+                  "long": "--assignee",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--due <date>",
+                  "description": "Due date, YYYY-MM-DD, today or later",
+                  "long": "--due",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--priority <level>",
+                  "description": "Priority",
+                  "long": "--priority",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "choices": [
+                    "urgent",
+                    "high",
+                    "medium",
+                    "low",
+                    "none"
+                  ]
                 },
                 {
                   "flags": "--json",
@@ -11798,8 +11841,8 @@
                   "negate": false
                 }
               ],
-              "examples": "agents projects todo add \"Renew npm token #AGI tomorrow !!\"\nagents projects todo add \"Draft the Q4 note fri\" --project atlas --json\nagents projects todo add --json -- \"-v flag is ignored by run\"    # text starting with \"-\"",
-              "notes": "Runs linear create: assigned to the Linear API key's owner, in the active\ncycle, status Todo, no milestone, priority none unless ! or !! is typed.\n#name is an agents project (its Linear project) or a Linear project name.\nA day word or ! / !! counts only at the end of the line (so \"Fix the today\nview\" keeps its words); #name counts anywhere. A day word is the next such\nday, today included. The description carries\n\"Created from AGI Menu\", which is how todo list finds it.",
+              "examples": "agents projects todo add \"Renew npm token #AGI tomorrow !!\"\nagents projects todo add \"Draft the Q4 note\" --project atlas --due 2026-10-09 --json\nagents projects todo add \"Rotate the share token\" --description \"Expires Oct 20\" --assignee bisma\nagents projects todo add --json -- \"-v flag is ignored by run\"    # text starting with \"-\"",
+              "notes": "Runs linear create: in the active cycle, status Todo, no milestone, no\ndelegate (any agent's queue picks it up), assigned to you unless\n--assignee names someone, priority none unless set.\n#name is an agents project (its Linear project) or a Linear project name.\nA day word or ! / !! counts only at the end of the line (so \"Fix the today\nview\" keeps its words); #name counts anywhere. A day word is the next such\nday, today included. An option beats the same field typed in the line.\nRefused without creating anything: a title under 3 or over 120\ncharacters, a due date in the past, a description over 10,000\ncharacters. The description ends with \"Created from AGI Menu\", which is how\ntodo list finds it.",
               "subcommands": []
             },
             {

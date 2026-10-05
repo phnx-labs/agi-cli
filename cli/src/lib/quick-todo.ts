@@ -2,9 +2,10 @@
  * Quick to-dos for AGI Menu's Home: `agents projects todo add|list|done|undo`.
  *
  * Linear is the record; nothing is stored here. `add` turns one typed line into a
- * Linear issue with `linear create` (assignee: the API key's owner, the active
- * cycle, status Todo, no milestone), reading `#project`, a day word (today,
- * tomorrow, mon…sun) and `!`/`!!` from the text. The issue description carries
+ * Linear issue with `linear create` (assignee: the API key's owner unless one is
+ * named, the active cycle, status Todo, no milestone, no delegate), reading
+ * `#project`, a day word (today, tomorrow, mon…sun) and `!`/`!!` from the text;
+ * an explicit option beats the same field typed in the line. The issue description carries
  * {@link QUICK_TODO_MARKER}, which is how `list` tells a quick to-do from any other
  * issue (the team has no "todo" label, and taxonomy is not ours to add). `list`
  * shows the caller's open quick to-dos plus anything assigned to them that is due
@@ -29,6 +30,14 @@ export const UNDO_CREATE_WINDOW_MS = 30_000;
 const CLOCK_SKEW_MS = 5_000;
 
 export type TodoPriority = 'urgent' | 'high';
+/** What `add --priority` takes: linear's own priority words. */
+export const ADD_PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'] as const;
+export type AddPriority = (typeof ADD_PRIORITIES)[number];
+/** Title length `add` accepts, in characters. */
+export const TITLE_MIN = 3;
+export const TITLE_MAX = 120;
+/** Description length `add` accepts, in characters. */
+export const DESCRIPTION_MAX = 10_000;
 
 /** One typed line, read. */
 export interface ParsedTodo {
@@ -179,26 +188,62 @@ export interface TodoResult {
   message: string;
 }
 
+/** The fields `add` takes beside the text; each beats the same field typed in the line. */
+export interface AddOptions {
+  project?: string;
+  description?: string;
+  /** A person linear-cli resolves by name or email; `me` (or unset) is the API key's owner. */
+  assignee?: string;
+  /** `YYYY-MM-DD`, today or later. */
+  due?: string;
+  priority?: AddPriority;
+  defs: readonly ProjectDef[];
+  now: Date;
+}
+
+/** Why `add` refuses these fields, or null when they can be sent. */
+export function addRefusal(title: string, opts: AddOptions): string | null {
+  const length = [...title].length;
+  if (length === 0) return 'The to-do has no words besides its #project, day and priority.';
+  if (length < TITLE_MIN) return `The title needs at least ${TITLE_MIN} characters.`;
+  if (length > TITLE_MAX) return `The title is ${length} characters; the limit is ${TITLE_MAX}. Put the rest in the description.`;
+  if (opts.description && [...opts.description].length > DESCRIPTION_MAX) {
+    return `The description is over ${DESCRIPTION_MAX.toLocaleString('en-US')} characters.`;
+  }
+  if (opts.due !== undefined) {
+    const m = opts.due.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const date = m && new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (!date || localDay(date) !== opts.due) return `Expected a due date like 2026-10-09, got "${opts.due}".`;
+    if (opts.due < localDay(opts.now)) return `The due date ${opts.due} is in the past.`;
+  }
+  if (opts.priority !== undefined && !ADD_PRIORITIES.includes(opts.priority)) {
+    return `Expected a priority of ${ADD_PRIORITIES.join(', ')}, got "${opts.priority}".`;
+  }
+  return null;
+}
+
 /**
- * Create a quick to-do. `project` (the `--project` flag) applies when the text
- * names none. Nothing is created from a line that is only tokens.
+ * Create a quick to-do from a typed line and the options. Nothing is created
+ * when {@link addRefusal} names a reason.
  */
-export async function addQuickTodo(
-  text: string,
-  opts: { project?: string; defs: readonly ProjectDef[]; now: Date },
-  linear: LinearExec = linearExec,
-): Promise<TodoResult> {
+export async function addQuickTodo(text: string, opts: AddOptions, linear: LinearExec = linearExec): Promise<TodoResult> {
   const parsed = parseQuickTodo(text, opts.now);
-  if (!parsed.title) return { ok: false, todo: null, message: 'The to-do has no words besides its #project, day and priority.' };
-  const token = parsed.project ?? opts.project ?? null;
-  const args = ['create', '--description', QUICK_TODO_MARKER, '--status', 'Todo', '--cycle', 'active',
-    '--skip-milestone', '--priority', parsed.priority ?? 'none'];
+  const due = opts.due ?? parsed.due;
+  const priority = opts.priority ?? parsed.priority ?? 'none';
+  const refusal = addRefusal(parsed.title, opts);
+  if (refusal) return { ok: false, todo: null, message: refusal };
+  const description = opts.description?.trim() ? `${opts.description.trim()}\n\n${QUICK_TODO_MARKER}` : QUICK_TODO_MARKER;
+  const token = opts.project ?? parsed.project ?? null;
+  const args = ['create', '--description', description, '--status', 'Todo', '--cycle', 'active',
+    '--skip-milestone', '--priority', priority];
   try {
     if (token) args.push('--project', linearProjectFor(token, opts.defs));
   } catch (err) {
     return { ok: false, todo: null, message: (err as Error).message };
   }
-  if (parsed.due) args.push('--due-date', parsed.due);
+  if (due) args.push('--due-date', due);
+  const assignee = opts.assignee?.trim();
+  if (assignee && assignee.toLowerCase() !== 'me') args.push('--assign', assignee);
   // The title goes after `--`, so one that starts with "-" is never read as a flag.
   args.push('--', parsed.title);
   let out: { stdout: string; stderr: string };
@@ -219,8 +264,8 @@ export async function addQuickTodo(
   } catch (err) {
     // The issue exists: report it created (a retry would duplicate it) with what is known.
     const todo: QuickTodo = {
-      identifier: id, url: null, title: parsed.title, project: null, due: parsed.due,
-      priority: parsed.priority === 'urgent' ? 1 : parsed.priority === 'high' ? 2 : 0, state: 'Todo', createdAt: '', quick: true,
+      identifier: id, url: null, title: parsed.title, project: null, due,
+      priority: Math.max(0, ['none', 'urgent', 'high', 'medium', 'low'].indexOf(priority)), state: 'Todo', createdAt: '', quick: true,
     };
     return { ok: true, todo, message: `Created ${id}; reading it back failed: ${linearFailure(err)}` };
   }

@@ -1788,23 +1788,33 @@ agents projects todo undo phnx-4230 --json "><div class="command-head"><h3><code
 agents projects todo list --json
 agents projects todo done PHNX-4230 --json
 agents projects todo undo PHNX-4230 --json</code></pre></article>
-<article id="projects-todo-add" data-search="add projects todo add  create a to-do in linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent). text  --project &lt;name&gt; project when the text names none: an agents project or a linear project name --json machine-readable result -h, --help show help agents projects todo add &quot;renew npm token #agi tomorrow !!&quot;
-agents projects todo add &quot;draft the q4 note fri&quot; --project atlas --json
-agents projects todo add --json -- &quot;-v flag is ignored by run&quot;    # text starting with &quot;-&quot; runs linear create: assigned to the linear api key&#39;s owner, in the active
-cycle, status todo, no milestone, priority none unless ! or !! is typed.
+<article id="projects-todo-add" data-search="add projects todo add  create a to-do in linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent). text  --project &lt;name&gt; project: an agents project or a linear project name --description &lt;text&gt; description, shown above the agi menu marker --assignee &lt;name&gt; assign to a person by name or email (default: you) --due &lt;date&gt; due date, yyyy-mm-dd, today or later --priority &lt;level&gt; priority --json machine-readable result -h, --help show help agents projects todo add &quot;renew npm token #agi tomorrow !!&quot;
+agents projects todo add &quot;draft the q4 note&quot; --project atlas --due 2026-10-09 --json
+agents projects todo add &quot;rotate the share token&quot; --description &quot;expires oct 20&quot; --assignee bisma
+agents projects todo add --json -- &quot;-v flag is ignored by run&quot;    # text starting with &quot;-&quot; runs linear create: in the active cycle, status todo, no milestone, no
+delegate (any agent&#39;s queue picks it up), assigned to you unless
+--assignee names someone, priority none unless set.
 #name is an agents project (its linear project) or a linear project name.
 a day word or ! / !! counts only at the end of the line (so &quot;fix the today
 view&quot; keeps its words); #name counts anywhere. a day word is the next such
-day, today included. the description carries
-&quot;created from agi menu&quot;, which is how todo list finds it."><div class="command-head"><h3><code>agents projects todo add &lt;text...&gt;</code></h3></div><p>Create a to-do in Linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;text...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--project &lt;name&gt;</code></td><td>Project when the text names none: an agents project or a Linear project name</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents projects todo add &quot;Renew npm token #AGI tomorrow !!&quot;
-agents projects todo add &quot;Draft the Q4 note fri&quot; --project atlas --json
-agents projects todo add --json -- &quot;-v flag is ignored by run&quot;    # text starting with &quot;-&quot;</code></pre><h4>Notes</h4><p class="notes">Runs linear create: assigned to the Linear API key&#39;s owner, in the active
-cycle, status Todo, no milestone, priority none unless ! or !! is typed.
+day, today included. an option beats the same field typed in the line.
+refused without creating anything: a title under 3 or over 120
+characters, a due date in the past, a description over 10,000
+characters. the description ends with &quot;created from agi menu&quot;, which is how
+todo list finds it."><div class="command-head"><h3><code>agents projects todo add &lt;text...&gt;</code></h3></div><p>Create a to-do in Linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;text...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--project &lt;name&gt;</code></td><td>Project: an agents project or a Linear project name</td><td></td><td></td></tr><tr><td><code>--description &lt;text&gt;</code></td><td>Description, shown above the AGI Menu marker</td><td></td><td></td></tr><tr><td><code>--assignee &lt;name&gt;</code></td><td>Assign to a person by name or email (default: you)</td><td></td><td></td></tr><tr><td><code>--due &lt;date&gt;</code></td><td>Due date, YYYY-MM-DD, today or later</td><td></td><td></td></tr><tr><td><code>--priority &lt;level&gt;</code></td><td>Priority</td><td>urgent, high, medium, low, none</td><td></td></tr><tr><td><code>--json</code></td><td>Machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents projects todo add &quot;Renew npm token #AGI tomorrow !!&quot;
+agents projects todo add &quot;Draft the Q4 note&quot; --project atlas --due 2026-10-09 --json
+agents projects todo add &quot;Rotate the share token&quot; --description &quot;Expires Oct 20&quot; --assignee bisma
+agents projects todo add --json -- &quot;-v flag is ignored by run&quot;    # text starting with &quot;-&quot;</code></pre><h4>Notes</h4><p class="notes">Runs linear create: in the active cycle, status Todo, no milestone, no
+delegate (any agent&#39;s queue picks it up), assigned to you unless
+--assignee names someone, priority none unless set.
 #name is an agents project (its Linear project) or a Linear project name.
 A day word or ! / !! counts only at the end of the line (so &quot;Fix the today
 view&quot; keeps its words); #name counts anywhere. A day word is the next such
-day, today included. The description carries
-&quot;Created from AGI Menu&quot;, which is how todo list finds it.</p></article>
+day, today included. An option beats the same field typed in the line.
+Refused without creating anything: a title under 3 or over 120
+characters, a due date in the past, a description over 10,000
+characters. The description ends with &quot;Created from AGI Menu&quot;, which is how
+todo list finds it.</p></article>
 <article id="projects-todo-done" data-search="done projects todo done  mark one issue done in linear. id  --json machine-readable result -h, --help show help  "><div class="command-head"><h3><code>agents projects todo done &lt;id&gt;</code></h3></div><p>Mark one issue Done in Linear.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;id&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="projects-todo-list" data-search="list projects todo list  your open quick to-dos and anything assigned to you due today or overdue (at most 6). --json machine-readable result -h, --help show help agents projects todo list
 agents projects todo list --json one linear tasks read of your open issues. due ones come first (earliest due),
