@@ -1,9 +1,3 @@
-/**
- * Disposable performance warehouse — SQLite under ~/.agents/.cache/perf/.
- *
- * Opened only by `agents insights perf` / `hooks profile` (read path). Writers use
- * {@link recordSample} in `./spool.ts` (NDJSON, no SQLite).
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -75,10 +69,9 @@ let _db: Database.Database | null = null;
 let _dbPath: string | null = null;
 let _disabled = false;
 
-/** Test seam — redirect the warehouse path (like AGENTS_EVENTS_PATH). */
 export function _resetPerfDbForTest(overridePath?: string | null): void {
   if (_db) {
-    try { _db.close(); } catch { /* ignore */ }
+    try { _db.close(); } catch {  }
   }
   _db = null;
   _dbPath = overridePath === undefined ? null : overridePath;
@@ -105,7 +98,7 @@ function openDb(): Database.Database | null {
   const dbPath = resolveDbPath();
   if (_db && _dbPath === dbPath) return _db;
   if (_db) {
-    try { _db.close(); } catch { /* ignore */ }
+    try { _db.close(); } catch {  }
     _db = null;
   }
   try {
@@ -130,7 +123,6 @@ function openDb(): Database.Database | null {
   }
 }
 
-/** Drain the NDJSON spool into samples. Idempotent; truncates on success. */
 export function drainSpool(db?: Database.Database): number {
   const spool = resolveSpoolPath();
   if (!fs.existsSync(spool)) return 0;
@@ -141,7 +133,7 @@ export function drainSpool(db?: Database.Database): number {
     return 0;
   }
   if (!raw.trim()) {
-    try { fs.writeFileSync(spool, ''); } catch { /* ignore */ }
+    try { fs.writeFileSync(spool, ''); } catch {  }
     return 0;
   }
   const target = db ?? openDb();
@@ -207,18 +199,9 @@ function maybeRetain(db: Database.Database): void {
     db.prepare(`DELETE FROM samples WHERE ts_ms < ?`).run(cutoff);
     db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('last_retain_ms', ?)`).run(String(now));
   } catch {
-    // ignore
   }
 }
 
-/**
- * Aggregate samples by (kind, label) with p50/p95/p99. Drains the spool first.
- *
- * `opts.project` scopes the query to samples whose recorded `cwd` resolves to
- * that project key (see project-key.ts) — resolution runs per unique cwd
- * (memoized) rather than per row, since `resolveProjectKey` does a filesystem
- * walk and a warehouse query can carry many rows sharing the same cwd.
- */
 export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[] {
   const db = openDb();
   if (!db) return [];

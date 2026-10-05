@@ -1,13 +1,3 @@
-// Interactive shim-heal for the CLI startup path + the persistent notice-state that
-// replaces the old per-PPID sentinel.
-//
-// The actual repair (regenerating shims, adopting symlink launchers, adding the
-// shims dir to PATH) lives in the unified self-heal registry — this module just
-// drives the shim-relevant checks SILENTLY on a normal `agents` invocation and then
-// decides whether to print a one-time notice about anything left. The old flow
-// re-ran its whole detect-and-nag on every new terminal (its sentinel was keyed to
-// process.ppid); the persistent signature here means an unresolved condition is
-// surfaced once, not on every shell.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,11 +9,6 @@ interface InteractiveShimHealResult {
   report: SelfHealReport;
 }
 
-/**
- * Heal the shim/shadow/PATH conditions silently, then return both the raw report
- * and the notice lines to print ONCE for whatever is left (a real-binary shadow we
- * won't move; a PATH entry that was just added / needs a reload).
- */
 export async function runInteractiveShimHeal(): Promise<InteractiveShimHealResult> {
   const { runSelfHeal } = await import('./self-heal/registry.js');
   const report = await runSelfHeal({ checks: ['shims', 'shadowing', 'path'], mode: 'safe' });
@@ -67,10 +52,6 @@ function noticeStatePath(): string {
   return path.join(getRuntimeStateDir(), 'shim-notice.json');
 }
 
-/**
- * A stable signature of the conditions worth surfacing: the sorted set of
- * real-binary shadows plus the PATH notice state. Empty string = nothing to say.
- */
 export function computeShimNoticeSignature(input: {
   shadowNotes: string[];
   pathState: PathNoticeState;
@@ -96,19 +77,12 @@ function writeLastNoticeSignature(signature: string): void {
     fs.mkdirSync(getRuntimeStateDir(), { recursive: true });
     fs.writeFileSync(noticeStatePath(), JSON.stringify({ signature }));
   } catch {
-    /* best-effort: never block a command on the marker */
   }
 }
 
-/**
- * Whether to surface the notice for the current condition. Returns false (stay
- * quiet) when the exact same signature was already surfaced, or when there's
- * nothing to say. On true it records the signature so the next shell with the same
- * state is suppressed. An empty signature clears the marker.
- */
 export function shouldSurfaceShimNotice(signature: string): boolean {
   if (!signature) {
-    try { fs.rmSync(noticeStatePath(), { force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(noticeStatePath(), { force: true }); } catch {  }
     return false;
   }
   if (readLastNoticeSignature() === signature) return false;
