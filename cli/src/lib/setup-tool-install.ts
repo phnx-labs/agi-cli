@@ -2,7 +2,7 @@ import { installCli, resolveCliManifest } from './cli-resources.js';
 import { getCachedToolSetup, refreshToolSetup, type SetupTool } from './setup-tool-status.js';
 
 const PACKAGES = {
-  browser: '@phnx-labs/browser-cli@0.1.5',
+  browser: '@phnx-labs/browser-cli@0.1.15',
   computer: '@phnx-labs/computer-cli@0.1.5',
   term: '@phnx-labs/term-cli@0.1.0',
 } as const;
