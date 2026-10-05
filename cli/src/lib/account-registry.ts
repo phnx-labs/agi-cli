@@ -81,7 +81,8 @@ function readAccountBundles(): CredentialAccount[] {
 }
 
 function migrateLegacyRegistryFile(base: string): void {
-  // Migrate every policy-never provider bundle before archiving or deleting legacy secrets.
+  // Credential accounts live in policy-never bundles; AccountRegistryDocument is only a compatibility projection.
+  // Migration writes all bundles first, skips identical retry writes, and removes legacy data only after total success.
   const file = accountRegistryPath(base);
   if (!fs.existsSync(file)) return;
   const raw = yaml.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown> | null;
@@ -180,7 +181,7 @@ export function findUnifiedAccount(
   doc?: AccountRegistryDocument,
   preferAgent?: AgentId,
 ): UnifiedAccount | null {
-  // Native matches short-circuit provider/keychain reads, avoiding biometric prompts and cross-harness ambiguity.
+  // Native matches return before bundle/keychain reads; preferAgent resolves shared labels for the launched harness.
   const needle = nameOrId.toLowerCase();
   const matches = listNativeAccounts(meta).filter(account =>
     account.id === nameOrId || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle,
@@ -438,7 +439,7 @@ export function resolveAccountSelection(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; target?: string } = {},
 ): AccountSelection | undefined {
-  // Device bindings override central bindings; only a stale default may fall back to native discovery.
+  // Device bindings override central bindings; missing explicit/bound accounts fail loud, while a stale default returns to balanced rotation.
   if (explicit) return { id: explicit, source: 'explicit' };
   const bindings = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
   const bound = opts.target ? bindings[opts.target] : undefined;
@@ -701,7 +702,7 @@ export function resolveSpawnAccount(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; provider?: string; base?: string; target?: string } = {},
 ): SpawnAccount | null {
-  // Provider-backed custom harnesses cannot consume native credentials from another harness.
+  // Any provider-backed custom harness rejects native credentials because provider auth would still be injected.
   const target = opts.target ?? (version ? `${agent}@${version}` : agent);
   const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
   if (!selection) return null;

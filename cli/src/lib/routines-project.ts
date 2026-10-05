@@ -117,7 +117,7 @@ interface SyncProjectResult {
 }
 
 export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
-  // Project YAML never auto-fires: refresh only matching materialized copies and preserve activation, device pins, and createdAt.
+  // Project YAML never auto-fires: refresh matching materialized copies, preserve createdAt, and keep the existing device pin only when YAML omits one.
   ensureAgentsDir();
   const abs = expandProjectPath(projectRoot);
   const git = readProjectGitSource(abs);
