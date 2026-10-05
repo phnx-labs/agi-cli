@@ -1107,7 +1107,7 @@ describe('--strategy available applies the same freshness rule as balanced', () 
     const result = pickAvailableCandidate([a, b], null, NOW)!;
 
     expect(result.usageUnverified).toBe(true);
-    expect(result.picked.version).toBe('2.1.181');
+    expect(result.picked.version).toBe('2.1.181'); // still the headroom sort
   });
 
   it('a verified MINORITY still wins the deterministic pick — no whole-pool relaxation here', () => {
@@ -1426,7 +1426,7 @@ describe('resolveRunVersion — never auto-pick from entirely stale usage (PHNX-
 
   it('a BLIND pool (no snapshots) still routes — the worker-box case is not "stale" (PHNX-3392)', async () => {
     const a = candidate({ version: '2.1.181' });
-    const b = candidate({ version: '2.1.207' });
+    const b = candidate({ version: '2.1.207' }); // blind — no snapshot
     const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [a, b]);
     expect(resolved.noVerifiedUsage).toBeFalsy();
     expect(['2.1.181', '2.1.207']).toContain(resolved.version);
