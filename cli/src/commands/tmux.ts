@@ -1,3 +1,25 @@
+/**
+ * `agents tmux` — terminal multiplexer integration.
+ *
+ * Why this exists: the swarmify VS Code extension was hand-rolling tmux
+ * commands with brittle shell escaping (`extension/src/vscode/tmux.ts`).
+ * Lifting the orchestration into the CLI gives one source of truth that the
+ * extension, raw shells, `agents teams`, routines, and the Swarm MCP can all
+ * call into.
+ *
+ * Surface mirrors the standalone `term` CLI's:
+ *   agents tmux check
+ *   agents tmux new <name>     [--cmd ...] [--cwd DIR] [--replace] [--attach-existing] [--source S]
+ *   agents tmux attach <name>
+ *   agents tmux list [--json]
+ *   agents tmux has <name>
+ *   agents tmux split <name> <h|v> [--cmd ...] [--cwd DIR]
+ *   agents tmux send <name>[:pane] <keys> [--no-enter] [--raw]
+ *   agents tmux capture <name>[:pane] [--lines N] [--ansi]
+ *   agents tmux info <name>    [--json]
+ *   agents tmux kill [name]    no name → picker with live pane preview
+ *   agents tmux kill-all       [--yes]
+ */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -31,6 +53,7 @@ import {
   type SessionMeta,
 } from '../lib/tmux/index.js';
 
+/** Register the `agents tmux` command tree. */
 export function registerTmuxCommands(program: Command): void {
   const tmux = program
     .command('tmux')
@@ -70,6 +93,7 @@ export function registerTmuxCommands(program: Command): void {
     `,
   });
 
+  // ─── check ──────────────────────────────────────────────────────────────────
 
   const checkCmd = tmux
     .command('check')
@@ -101,6 +125,7 @@ export function registerTmuxCommands(program: Command): void {
     }
   });
 
+  // ─── new ────────────────────────────────────────────────────────────────────
 
   const newCmd = tmux
     .command('new <name>')
@@ -151,6 +176,7 @@ export function registerTmuxCommands(program: Command): void {
     });
   });
 
+  // ─── attach ─────────────────────────────────────────────────────────────────
 
   const attachCmd = tmux
     .command('attach <name>')
@@ -168,13 +194,21 @@ export function registerTmuxCommands(program: Command): void {
         console.error(chalk.red('attach requires a TTY. Run this from an interactive shell.'));
         process.exit(1);
       }
+      // Repair a legacy/stale pane-died hook before handing the session to an
+      // attach client — the 5-min daemon reconcile that used to cover this was
+      // deleted; attach-time repair is what closes the gap now (RUSH-2435).
       await ensureSessionHookRepaired(name, socket);
       const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${name}`] });
+      // The v6 pane-died hook only detach-clients when a client is attached
+      // (so runInTmux can read the exit status). Attach verbs must kill the
+      // husk themselves — otherwise `tmux ls` still lists the session after
+      // the agent exits (PHNX-3293).
       await teardownIfAgentExited(name, socket);
       process.exit(code);
     });
   });
 
+  // ─── list ───────────────────────────────────────────────────────────────────
 
   const listCmd = tmux
     .command('list')
@@ -212,6 +246,7 @@ export function registerTmuxCommands(program: Command): void {
     });
   });
 
+  // ─── has ────────────────────────────────────────────────────────────────────
 
   tmux
     .command('has <name>')
@@ -224,6 +259,7 @@ export function registerTmuxCommands(program: Command): void {
       });
     });
 
+  // ─── split ──────────────────────────────────────────────────────────────────
 
   const splitCmd = tmux
     .command('split <name> <direction>')
@@ -264,6 +300,7 @@ export function registerTmuxCommands(program: Command): void {
     });
   });
 
+  // ─── send ───────────────────────────────────────────────────────────────────
 
   const sendCmd = tmux
     .command('send <target> <keys>')
@@ -302,6 +339,7 @@ export function registerTmuxCommands(program: Command): void {
     });
   });
 
+  // ─── capture ────────────────────────────────────────────────────────────────
 
   const captureCmd = tmux
     .command('capture <target>')
@@ -338,6 +376,7 @@ export function registerTmuxCommands(program: Command): void {
     });
   });
 
+  // ─── info ───────────────────────────────────────────────────────────────────
 
   const infoCmd = tmux
     .command('info <name>')
@@ -357,6 +396,7 @@ export function registerTmuxCommands(program: Command): void {
     printMeta(meta);
   });
 
+  // ─── kill ───────────────────────────────────────────────────────────────────
 
   const killCmd = tmux
     .command('kill [name]')
@@ -393,6 +433,7 @@ export function registerTmuxCommands(program: Command): void {
     });
   });
 
+  // ─── kill-all ───────────────────────────────────────────────────────────────
 
   const killAllCmd = tmux
     .command('kill-all')
@@ -412,7 +453,9 @@ export function registerTmuxCommands(program: Command): void {
   });
 }
 
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
+/** Wrap a command action so tmux-specific errors render cleanly instead of throwing. */
 async function guardTmux(fn: () => Promise<void>): Promise<void> {
   try {
     assertTmuxAvailable();
@@ -434,6 +477,7 @@ async function guardTmux(fn: () => Promise<void>): Promise<void> {
   }
 }
 
+/** Parse `name` or `name:pane` (pane may be `%id` or a numeric index). */
 function splitTarget(target: string): { name: string; pane?: string } {
   const idx = target.indexOf(':');
   if (idx === -1) return { name: target };
@@ -452,6 +496,7 @@ function collectLabel(value: string, acc: Record<string, string>): Record<string
   return acc;
 }
 
+/** Last useful line of a pane capture — what `tmux ls` shows so a name isn't a black box. */
 export function tmuxScreenSnippet(raw: string, max = 72): string {
   const lines = raw
     .split('\n')
@@ -464,6 +509,7 @@ export function tmuxScreenSnippet(raw: string, max = 72): string {
   return truncate(preferred ?? tail[tail.length - 1] ?? '', max);
 }
 
+/** Last non-empty lines of a pane capture, for the kill-picker preview. */
 export function tmuxScreenPreview(raw: string, maxLines = 16): string {
   return raw
     .split('\n')
