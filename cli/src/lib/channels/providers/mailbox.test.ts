@@ -3,14 +3,12 @@ import * as fs from 'fs';
 import { mailboxProvider } from './mailbox.js';
 import { mailboxDir, peek } from '../../mailbox.js';
 
-// Unique throwaway box in the real spool (repo rule: real services, no mocking).
 const BOX = `agents-send-test-${process.pid}`;
 
 afterEach(() => {
   try {
     fs.rmSync(mailboxDir(BOX), { recursive: true, force: true });
   } catch {
-    /* ignore */
   }
 });
 

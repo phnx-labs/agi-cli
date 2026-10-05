@@ -1,17 +1,3 @@
-/**
- * PHNX-3337 — the cross-harness `agents-cli` discovery skill + the repo-root
- * Claude plugin marketplace are a distribution contract: an outside agent runs
- * `claude plugin marketplace add phnx-labs/agents-cli` (reads
- * `.claude-plugin/marketplace.json`) or `npx skills add phnx-labs/agents-cli`
- * (reads `skills/**\/SKILL.md`). Both break silently if the committed files drift
- * from the schema Claude Code / skills.sh parse, or if the SKILL.md description
- * loses a trigger intent — the string the runtime matches an operator's question
- * against.
- *
- * This exercises the REAL committed files at the repo root (no fixtures, no
- * mocks) and the REAL manifest validator the CLI uses everywhere else
- * (`validateClaudePluginManifest`), so a regression to either surface fails here.
- */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -20,10 +6,8 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'yaml';
 import { validateClaudePluginManifest } from './plugin-marketplace.js';
 
-// cli/src/lib/plugins/ -> repo root is four levels up.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../');
 
-/** The exact intents PHNX-3337 requires in the skill description — the runtime match strings. */
 const TRIGGER_INTENTS = [
   'run multiple coding agents in parallel',
   'manage multiple Claude Code accounts',
@@ -56,8 +40,6 @@ describe('agents-cli discovery skill + plugin (PHNX-3337)', () => {
     expect(typeof manifest.description).toBe('string');
     expect((manifest.description as string).length).toBeGreaterThan(20);
     expect(typeof manifest.version).toBe('string');
-    // Real validator — warns on skills/commands/agents fields that would make
-    // Claude Code silently reject the plugin. A clean manifest yields [].
     expect(validateClaudePluginManifest(manifest)).toEqual([]);
   });
 
@@ -79,8 +61,6 @@ describe('agents-cli discovery skill + plugin (PHNX-3337)', () => {
       expect(typeof p.name, 'each plugin needs a name').toBe('string');
       const source = p.source;
       expect(typeof source, `plugin ${String(p.name)} needs a source path`).toBe('string');
-      // Resolve the source relative to the marketplace repo root and confirm it
-      // is a real plugin dir: a .claude-plugin/plugin.json + a skills/ dir.
       const pluginDir = path.resolve(REPO_ROOT, source as string);
       expect(fs.existsSync(path.join(pluginDir, '.claude-plugin', 'plugin.json')), `${String(source)}/.claude-plugin/plugin.json`).toBe(true);
       expect(fs.statSync(path.join(pluginDir, 'skills')).isDirectory(), `${String(source)}/skills/`).toBe(true);
@@ -100,7 +80,6 @@ describe('agents-cli discovery skill + plugin (PHNX-3337)', () => {
   it('the plugin bundles the discovery skill as a discoverable SKILL.md', () => {
     const skillMd = path.join(REPO_ROOT, 'skills', 'agents-cli', 'SKILL.md');
     expect(fs.existsSync(skillMd)).toBe(true);
-    // The plugin source root ("./") is where Claude auto-discovers skills/.
     expect(fs.statSync(path.join(REPO_ROOT, 'skills')).isDirectory()).toBe(true);
   });
 });

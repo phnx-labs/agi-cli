@@ -1,27 +1,9 @@
-/**
- * Tests for the teams live budget kill-switch (issue #399).
- *
- * Verifies the two contracts the supervisor relies on:
- *  1. `createTeamBudgetWatcher.poll()` reads new bytes from every running
- *     teammate's stdout.log, feeds real stream-json usage events into a
- *     shared `makeLiveSpendWatcher`, and calls `onBreach` when a cap is
- *     crossed by aggregated cross-teammate spend.
- *  2. `runSupervisor` — when given the watcher — stops the team via
- *     `AgentManager.stopByTask` on breach and returns `stoppedBy: 'budget'`.
- *
- * No mocking of the code under test: the watcher operates on a real
- * AgentManager backed by a temp dir, a real stdout.log with real Claude
- * stream-json shape, and the real pricing table (claude-opus-4 at $5/Mtok in).
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// HOME must be pinned BEFORE any import that reaches state.ts, so
-// getHistoryDir() (which loadLedger uses) points at our temp dir and the
-// ledger starts empty regardless of the developer's real ~/.agents.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'live-team-home-'));
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
@@ -36,15 +18,8 @@ import type { TeamBudgetWatcher } from './live-team.js';
 let tmpBase: string;
 let projectDir: string;
 let mgr: InstanceType<typeof AgentManager>;
-/** Every child we spawn — cleaned up in afterEach so a failed test can't leak processes. */
 let spawnedChildren: ChildProcess[] = [];
 
-/**
- * One Claude stream-json assistant turn that costs exactly $5 on
- * claude-opus-4 (1M input tokens @ $5/Mtok). This is the same fixture shape
- * the LOCAL exec.ts watcher reads off a headless run's stdout, so tapping
- * teammate stdout.logs with this must behave identically.
- */
 function claudeAssistantTurnJson(): string {
   return JSON.stringify({
     type: 'assistant',
@@ -60,32 +35,21 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  // Reap any live children — a supervisor breach cascade may leave them
-  // dead already; force-kill is idempotent, and unref() lets vitest exit.
   for (const c of spawnedChildren) {
-    try { if (c.pid) process.kill(-c.pid, 'SIGKILL'); } catch { /* already gone */ }
-    try { if (c.pid) process.kill(c.pid, 'SIGKILL'); } catch { /* already gone */ }
+    try { if (c.pid) process.kill(-c.pid, 'SIGKILL'); } catch {  }
+    try { if (c.pid) process.kill(c.pid, 'SIGKILL'); } catch {  }
   }
   spawnedChildren = [];
   fs.rmSync(tmpBase, { recursive: true, force: true });
   fs.rmSync(projectDir, { recursive: true, force: true });
 });
 
-/**
- * Plant a RUNNING teammate backed by a real, killable `sleep` process, so
- * `AgentProcess.isProcessAlive()` sees a live PID with a real matching
- * startTime and does NOT prematurely flip the teammate to COMPLETED via
- * `updateStatusFromProcess()`. When the supervisor's breach path calls
- * `stopByTask`, the SIGTERM/SIGKILL lands on our sleep and cleans up.
- */
 async function plantRunningTeammate(
   taskName: string,
   agentType: AgentType,
   stdoutLines: string[],
 ): Promise<InstanceType<typeof AgentProcess>> {
   const agentId = `agent-${Math.random().toString(36).slice(2, 10)}`;
-  // Detached so kill(-pid) reaches the whole group — the same pattern the
-  // teams launcher uses in production.
   const child = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
   child.unref();
   spawnedChildren.push(child);
@@ -114,8 +78,6 @@ async function plantRunningTeammate(
 
 describe('createTeamBudgetWatcher', () => {
   it('returns null when no caps are configured (feature dormant)', () => {
-    // Empty project — no agents.yaml at any parent. resolveBudgetConfig
-    // returns { on_exceed: 'block' } with zero caps → hasAnyCap = false.
     const w = createTeamBudgetWatcher({
       manager: mgr,
       team: 't1',
@@ -126,9 +88,6 @@ describe('createTeamBudgetWatcher', () => {
   });
 
   it('trips per_project when aggregated teammate spend crosses the cap', async () => {
-    // per_project = $8; two teammates each emit $5 of Claude usage → $10 > $8.
-    // This is the exact cross-vendor property the local exec watcher CANNOT
-    // enforce (each child sees only its own $5): the supervisor watcher must.
     fs.writeFileSync(
       path.join(projectDir, 'agents.yaml'),
       'budget:\n  per_project: 8\n  on_exceed: block\n',
@@ -156,7 +115,7 @@ describe('createTeamBudgetWatcher', () => {
       path.join(projectDir, 'agents.yaml'),
       'budget:\n  per_project: 20\n',
     );
-    await plantRunningTeammate('t1', 'claude', [claudeAssistantTurnJson()]); // $5
+    await plantRunningTeammate('t1', 'claude', [claudeAssistantTurnJson()]);
     const w = createTeamBudgetWatcher({
       manager: mgr,
       team: 't1',
@@ -172,7 +131,7 @@ describe('createTeamBudgetWatcher', () => {
       path.join(projectDir, 'agents.yaml'),
       'budget:\n  per_project: 8\n',
     );
-    await plantRunningTeammate('t1', 'claude', [claudeAssistantTurnJson()]); // $5
+    await plantRunningTeammate('t1', 'claude', [claudeAssistantTurnJson()]);
     const w = createTeamBudgetWatcher({
       manager: mgr,
       team: 't1',
@@ -181,7 +140,6 @@ describe('createTeamBudgetWatcher', () => {
     });
     await w!.poll();
     await w!.poll();
-    // Two polls, one $5 event → still $5, not $10. No breach against $8 cap.
     expect(w!.breached()).toBe(false);
   });
 });
@@ -192,7 +150,6 @@ describe('runSupervisor + TeamBudgetWatcher', () => {
       path.join(projectDir, 'agents.yaml'),
       'budget:\n  per_project: 3\n  on_exceed: block\n',
     );
-    // One teammate whose stdout blows the cap on its first emitted turn.
     const teammate = await plantRunningTeammate('t-kill', 'claude', [claudeAssistantTurnJson()]);
     const watcher = createTeamBudgetWatcher({
       manager: mgr,
@@ -212,23 +169,16 @@ describe('runSupervisor + TeamBudgetWatcher', () => {
       onWave: () => {},
     });
 
-    // The supervisor must recognize the breach, terminate via stopByTask,
-    // and surface it as a distinct exit reason so the CLI can map it to
-    // BUDGET_KILL_EXIT_CODE.
     expect(result.stoppedBy).toBe('budget');
     expect(onBreachSaw).not.toBeNull();
     expect(onBreachSaw!.cap).toBe('per_project');
     expect(result.budgetBreach?.cap).toBe('per_project');
 
-    // The running teammate must have been stopped by the supervisor's
-    // stopByTask call (state must be STOPPED, not RUNNING).
     const after = await mgr.get(teammate.agentId);
     expect(after?.status).toBe(AgentStatus.STOPPED);
   });
 
   it('supervisor with a null budgetWatcher behaves exactly as before', async () => {
-    // Regression guard: passing budgetWatcher: null must be a no-op — the
-    // team drains normally with no budget path exercised at all.
     fs.writeFileSync(path.join(projectDir, 'agents.yaml'), '');
     const result = await runSupervisor(mgr, {
       team: 'no-work',
@@ -256,9 +206,7 @@ describe('TeamBudgetWatcher.dispose', () => {
       onBreach: () => {},
     }) as TeamBudgetWatcher;
     w.dispose();
-    // Second dispose must not throw.
     expect(() => w.dispose()).not.toThrow();
-    // A poll after dispose is a no-op — no crash, no state change.
     await w.poll();
     expect(w.breached()).toBe(false);
   });

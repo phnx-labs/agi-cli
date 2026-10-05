@@ -141,7 +141,6 @@ describe('resolveSendEnvelope', () => {
   });
 
   it('ownerMode with full explicit flags works without notify.owner configured', () => {
-    // Regression: main allowed `notify --channel desktop --to local` with no yaml.
     const r = resolveSendEnvelope(
       { text: 'fallback', ownerMode: true, channel: 'desktop', to: 'local' },
       metaEmpty,

@@ -3,14 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// state.ts FREEZES HOME (-> getUserAgentsDir()) at first import. Under a
-// shared-process runner (e.g. `bun test`) another test file may import state.ts
-// before this one, freezing HOME at a DIFFERENT temp dir. So we (1) set HOME at
-// module TOP-LEVEL — before ANY import of ./config.js (which pulls in
-// state.ts), mirroring budget.test.ts — and (2) derive the user agents.yaml
-// path from the SAME getUserAgentsDir() the code actually reads, after import,
-// so the test writes where the resolver reads regardless of which file froze
-// HOME first. This makes the test robust under both vitest and `bun test`.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-home-'));
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
@@ -21,12 +13,6 @@ const userAgentsDir = getUserAgentsDir();
 fs.mkdirSync(userAgentsDir, { recursive: true });
 const userYaml = path.join(userAgentsDir, 'agents.yaml');
 
-// state.readMeta() memoizes the parsed user agents.yaml against its mtime
-// (ms-resolution). Successive writes within the same millisecond — common under
-// a fast shared-process runner like `bun test` — leave the mtime unchanged, so
-// the resolver returns a STALE cached budget. Bump the mtime forward
-// monotonically on every write so the cache stamp always changes and the
-// resolver re-reads. Robust under both vitest and `bun test`.
 let mtimeTick = 0;
 function writeUserYaml(body: string): void {
   fs.writeFileSync(userYaml, body);
@@ -41,7 +27,6 @@ afterAll(() => {
 let projectDir: string;
 
 beforeEach(() => {
-  // Fresh user agents.yaml each test.
   writeUserYaml('');
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-proj-'));
 });
@@ -59,9 +44,9 @@ describe('resolveBudgetConfig', () => {
     writeUserYaml('budget:\n  per_run: 5\n  per_day: 50\n  per_project: 100\n');
     fs.writeFileSync(path.join(projectDir, 'agents.yaml'), 'budget:\n  per_run: 1\n');
     const cfg = resolveBudgetConfig(projectDir);
-    expect(cfg.per_run).toBe(1);   // project wins
-    expect(cfg.per_day).toBe(50);  // inherited from user
-    expect(cfg.per_project).toBe(100); // inherited from user
+    expect(cfg.per_run).toBe(1);
+    expect(cfg.per_day).toBe(50);
+    expect(cfg.per_project).toBe(100);
   });
 
   it('nearest project agents.yaml wins over an ancestor project agents.yaml', () => {

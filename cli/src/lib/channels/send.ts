@@ -1,13 +1,3 @@
-/**
- * Delivery envelope for `agents send`.
- *
- * One primitive: resolve a destination (channel + target), compose text + urls +
- * attachments, hand off to a channel provider. `notify` is the same path with
- * destination defaulted from `humans.yaml` — owner is an address
- * alias (`--to owner`), not a separate stack.
- *
- * Agent control (`agents message`, `sessions inject`) stays outside this module.
- */
 import type { Meta } from '../types.js';
 import { getOwnerNotifyFromHumans } from '../humans.js';
 import { registerBuiltinProviders } from './providers/index.js';
@@ -16,7 +6,6 @@ import type { SendResult } from './registry.js';
 import { sendToOwner } from '../notify.js';
 import type { SinkMessageFormat } from '../sink-format.js';
 
-/** Normalized delivery request after CLI/config resolution. */
 interface SendEnvelope {
   text: string;
   channel: string;
@@ -29,31 +18,15 @@ interface SendEnvelope {
 }
 
 export interface ResolveSendInput {
-  /**
-   * Body text. Prefer `--text`; positional `[text]` is accepted for compat and
-   * folded in when `--text` is omitted.
-   */
   text?: string;
-  /** Positional `[text]` from commander (legacy). */
   positionalText?: string;
-  /**
-   * Recipient. Channel-specific id, or the alias `owner` which expands to
-   * `notify.owner.{channel,to}`.
-   */
   to?: string;
-  /** Provider/channel name. Required unless `to` is `owner` (or ownerMode). */
   channel?: string;
   thread?: string;
-  /** Local file paths. */
   attachments?: string[];
-  /** Links / remote media refs — appended to the body so every provider sees them. */
   urls?: string[];
   from?: string;
   dryRun?: boolean;
-  /**
-   * When true (a feed owner sink), missing channel/to default to `notify.owner`.
-   * Explicit flags still win.
-   */
   ownerMode?: boolean;
 }
 
@@ -63,12 +36,10 @@ type ResolveSendResult =
 
 const OWNER_ALIAS = 'owner';
 
-/** True when the destination token means “the configured owner”. */
 export function isOwnerAlias(to: string | undefined): boolean {
   return (to ?? '').trim().toLowerCase() === OWNER_ALIAS;
 }
 
-/** Compose body + optional URL lines (skip urls already present in the body). */
 export function composeSendText(text: string, urls?: string[]): string {
   const body = text.trim();
   const extra = (urls ?? [])
@@ -79,10 +50,6 @@ export function composeSendText(text: string, urls?: string[]): string {
   return body ? `${body}\n${extra.join('\n')}` : extra.join('\n');
 }
 
-/**
- * Read the owner destination. humans.yaml is canonical; notify.owner remains a
- * migration fallback for installations that have not run the schema migration.
- */
 export function readOwnerDest(meta: Meta): { channel: string; to: string } | null {
   const canonical = getOwnerNotifyFromHumans();
   if (canonical) return canonical;
@@ -91,10 +58,6 @@ export function readOwnerDest(meta: Meta): { channel: string; to: string } | nul
   return channel && to ? { channel, to } : null;
 }
 
-/**
- * Resolve CLI/config into a send envelope. Pure except for reading `meta` —
- * no I/O, no provider registration — so unit tests do not need a real PATH.
- */
 export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): ResolveSendResult {
   const positional = (input.positionalText ?? '').trim();
   const flagged = (input.text ?? '').trim();
@@ -114,8 +77,6 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
     };
   }
 
-  // Owner defaults fill only missing fields (and expand the bare "owner" alias).
-  // humans.yaml is the canonical source. Explicit --channel/--to always win.
   let channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
   const usedOwnerAlias = isOwnerAlias(to);
@@ -158,10 +119,6 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
   };
 }
 
-/**
- * Register providers, resolve transport, deliver. Used by the CLI and by any
- * internal caller that already has a resolved envelope.
- */
 export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promise<SendResult> {
   registerBuiltinProviders();
   const provider = resolveTransport(envelope.channel, meta);
@@ -175,15 +132,6 @@ export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promi
   });
 }
 
-/**
- * Resolve + deliver in one step (CLI happy path).
- *
- * `ownerCompose`, when given, shapes the body PER owner destination on the
- * policy fan-out — Slack gets `mrkdwn` labeled links, iMessage stays plain
- * (PHNX-3698). Only the owner-policy path uses it; a direct `--channel`/`--to`
- * send is delivered verbatim. The envelope's own `text` remains the plain
- * default (validation, `--json`, dry-run display).
- */
 export async function sendMessage(
   input: ResolveSendInput,
   meta: Meta,

@@ -2,11 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { makeLiveSpendWatcher, capsFromConfig, extractUsageEvents } from './enforce.js';
 import type { BreachInfo, UsageEvent } from './enforce.js';
 
-/** A usage event that costs exactly $5 on claude-opus-4 (1M input @ $5/Mtok). */
 function claudeFiveDollars(): UsageEvent {
   return { agent: 'claude', model: 'claude-opus-4', inputTokens: 1_000_000 };
 }
-/** A usage event that costs exactly $1.25 on gpt-5 (1M input @ $1.25/Mtok). */
 function codexOneTwentyFive(): UsageEvent {
   return { agent: 'codex', model: 'gpt-5', inputTokens: 1_000_000 };
 }
@@ -15,9 +13,9 @@ describe('makeLiveSpendWatcher', () => {
   it('trips per_run exactly when accumulated cost crosses the cap', () => {
     let breach: BreachInfo | null = null;
     const w = makeLiveSpendWatcher({ caps: { perRun: 7 }, onBreach: (b) => { breach = b; } });
-    w.feedUsage(claudeFiveDollars()); // $5 — under cap
+    w.feedUsage(claudeFiveDollars());
     expect(w.breached()).toBe(false);
-    w.feedUsage(claudeFiveDollars()); // $10 — over $7 cap
+    w.feedUsage(claudeFiveDollars());
     expect(w.breached()).toBe(true);
     expect(breach!.cap).toBe('per_run');
     expect(breach!.spend).toBeCloseTo(10, 6);
@@ -35,11 +33,10 @@ describe('makeLiveSpendWatcher', () => {
 
   it('aggregates spend ACROSS vendors under one per_project cap (the cross-vendor property)', () => {
     let breach: BreachInfo | null = null;
-    // per_project $5; one claude run + one codex run = $6.25 combined.
     const w = makeLiveSpendWatcher({ caps: { perProject: 5 }, onBreach: (b) => { breach = b; } });
-    w.feedUsage(claudeFiveDollars()); // project=$5, not > $5 yet
+    w.feedUsage(claudeFiveDollars());
     expect(w.breached()).toBe(false);
-    w.feedUsage(codexOneTwentyFive()); // project=$6.25 > $5 — tripped by a DIFFERENT vendor
+    w.feedUsage(codexOneTwentyFive());
     expect(w.breached()).toBe(true);
     expect(breach!.cap).toBe('per_project');
     expect(breach!.spend).toBeCloseTo(6.25, 6);
@@ -47,7 +44,6 @@ describe('makeLiveSpendWatcher', () => {
 
   it('seeds accumulators with prior ledger spend (per_day counts earlier runs)', () => {
     let breach: BreachInfo | null = null;
-    // $48 already spent today, per_day $50. One $5 run pushes to $53 > $50.
     const w = makeLiveSpendWatcher({
       caps: { perDay: 50, priorDaySpend: 48 },
       onBreach: (b) => { breach = b; },
@@ -64,9 +60,9 @@ describe('makeLiveSpendWatcher', () => {
       caps: { perAgent: { codex: 1 } },
       onBreach: (b) => { breach = b; },
     });
-    w.feedUsage(claudeFiveDollars()); // claude has no cap — ignored
+    w.feedUsage(claudeFiveDollars());
     expect(w.breached()).toBe(false);
-    w.feedUsage(codexOneTwentyFive()); // codex $1.25 > $1
+    w.feedUsage(codexOneTwentyFive());
     expect(w.breached()).toBe(true);
     expect(breach!.cap).toBe('per_agent');
     expect(breach!.agent).toBe('codex');
@@ -99,7 +95,7 @@ describe('capsFromConfig', () => {
 describe('extractUsageEvents', () => {
   it('parses Claude stream-json assistant turns and buffers a partial trailing line', () => {
     const line1 = JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-4', usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10 } } });
-    const chunk = line1 + '\n' + '{"type":"assistant","mess'; // second line is incomplete
+    const chunk = line1 + '\n' + '{"type":"assistant","mess';
     const { events, rest } = extractUsageEvents(chunk, '');
     expect(events).toHaveLength(1);
     expect(events[0].inputTokens).toBe(100);
@@ -135,9 +131,6 @@ describe('extractUsageEvents', () => {
   });
 
   it('ignores the Claude type:"result" line so its cumulative usage is not double-counted (#346)', () => {
-    // Claude emits per-turn `message.usage` AND a final `type:"result"` event
-    // with a TOP-LEVEL cumulative `usage` summing every turn. Counting both
-    // double-counts (~2x). The result line must contribute ZERO usage events.
     const resultLine = JSON.stringify({
       type: 'result',
       subtype: 'success',
@@ -148,16 +141,12 @@ describe('extractUsageEvents', () => {
   });
 
   it('a result line adds ZERO spend on top of the per-turn usage it summarizes (#346)', () => {
-    // Two assistant turns ($5 each on claude-opus-4 = $10), then a result line
-    // whose cumulative usage equals the sum. Only $10 must be counted.
     const turn = JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-4', usage: { input_tokens: 1_000_000 } } });
     const result = JSON.stringify({ type: 'result', subtype: 'success', usage: { input_tokens: 2_000_000 } });
     const stream = turn + '\n' + turn + '\n' + result + '\n';
     const { events } = extractUsageEvents(stream, '');
     const w = makeLiveSpendWatcher({ caps: {}, onBreach: () => {} });
     for (const ev of events) w.feedUsage(ev);
-    // $5/Mtok input on claude-opus-4 * 2M tokens across two turns = $10; the
-    // result line (which would add another $10) contributes nothing.
     expect(w.runSpend()).toBeCloseTo(10, 6);
   });
 });
