@@ -45,7 +45,7 @@ export function sampleWeighted(
 }
 
 export function listOnlineDeviceNames(localName: string = localMachineId()): string[] {
-  // The central pool filter narrows online candidates by device roles; it may return empty and callers must not fall back locally.
+  // Automatic placement excludes personal devices; after a worker is marked the default narrows to workers unless auto.pool=all.
   const names = new Set<string>([normalizeHost(localName)]);
   try {
     const reg = loadDevicesSync();
@@ -138,11 +138,11 @@ export async function resolveDeviceAuto(
     preferred?: ReadonlySet<string>;
   } = {},
 ): Promise<DeviceAutoPlan> {
-  // Local participates in the same health and harness-readiness probe as peers.
+  // Local receives the same health/readiness checks; implicit inclusion requires auto-pool membership.
   const local = normalizeHost(opts.localMachine ?? localMachineId());
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
   if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);
-  // An empty default pool fails loud instead of silently launching on the personal machine.
+  // An empty live-auto candidate pool fails loud.
   if (pool.length === 0) throw new Error(formatEmptyAutoPoolError());
 
   const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
