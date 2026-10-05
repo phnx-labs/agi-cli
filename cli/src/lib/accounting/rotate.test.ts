@@ -420,6 +420,7 @@ describe('runWithFallback re-dispatch on a mid-run 429 (the reused failover path
   });
 
   function fakeAmp(): { binDir: string; stateFile: string } {
+    // A stateful executable exercises the real runWithFallback child-process path.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-failover-'));
     tmpDirs.push(root);
     const binDir = path.join(root, 'bin');
@@ -458,6 +459,7 @@ process.exit(0);
     fs.writeFileSync(bin, script);
     fs.chmodSync(bin, 0o755);
     if (process.platform === 'win32') {
+      // cmd.exe cannot launch the shebang script directly; keep an adjacent shim.
       fs.writeFileSync(path.join(binDir, 'amp.js'), script);
       fs.writeFileSync(path.join(binDir, 'amp.cmd'), `@node "%~dp0amp.js" %*\r\n`);
     }

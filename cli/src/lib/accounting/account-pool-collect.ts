@@ -11,6 +11,7 @@ function localRegistryRecords(): RegistryAccountRecord[] {
       .filter((a) => hasKeychainTokenSync(a.secretRef))
       .map((a) => ({ id: a.id, name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
   } catch (err) {
+    // Only a missing secrets transport may degrade to the native-only pool.
     if (isSecretsTransportError(err)) return [];
     throw err;
   }
@@ -31,6 +32,7 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
     .filter((r) => !seen.has(r.accountKey))
     .map((r) => ({
       agent,
+      // The run version carries the executable; the provider record owns identity.
       version: runVersion,
       accountKey: r.accountKey,
       accountLabel: r.name,

@@ -24,6 +24,7 @@ function readStdin(limitBytes = REMOTE_STDOUT_MAX_BYTES): Promise<string> {
     process.stdin.on('data', (chunk: Buffer) => {
       if (settled) return;
       bytes += chunk.byteLength;
+      // Reject the bounded input before parsing or writing any peer state.
       if (bytes > limitBytes) {
         settled = true;
         process.stdin.destroy();
@@ -38,11 +39,13 @@ function readStdin(limitBytes = REMOTE_STDOUT_MAX_BYTES): Promise<string> {
 }
 
 function fromFileArg(argv: string[]): string | null {
+  // --from transfers file ownership to this process, including on Windows.
   const i = argv.indexOf('--from');
   return i !== -1 && argv[i + 1] ? argv[i + 1] : null;
 }
 
 export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Promise<number> {
+  // Stdout stays silent unless --reply requests the marker-framed exchange response.
   const reply = argv.includes('--reply');
   const fromPath = fromFileArg(argv);
   let source: string;
@@ -72,6 +75,7 @@ export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Pr
       process.stderr.write(`[agents] __usage-ingest: ${(err as Error).message}\n`);
       return 2;
     }
+    // v1 rows remain accepted while current peers exchange the full fleet state.
     if (payload.v === 1) {
       await ingestPeerClaudeUsageRows(payload.rows);
     } else {
@@ -85,6 +89,7 @@ export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Pr
       }
     }
   }
+  // Exit 2 means rejected input; reply mode reports peer errors but completes exchange.
   if (!reply) return 0;
   const published = await publishOwnFleetState();
   errors.push(...published.errors);
