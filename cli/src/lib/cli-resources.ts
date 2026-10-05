@@ -671,18 +671,10 @@ export function installCli(
   return { manifest, method, installed };
 }
 
-// ─── Version pins ────────────────────────────────────────────────────────────
-//
-// A manifest's `npm: pkg@x.y.z` is a pin, not only a first-install hint: a host
-// whose binary reports an older version is outdated, and the daemon upgrades it
-// in place. Without this, `check` passed on any version, so once a tool was on a
-// box nothing ever moved it (the fleet sat on secrets-cli 0.1.6 for a release
-// that fixed `--durable`).
 
 const EXACT_SEMVER = /^\d+\.\d+\.\d+$/;
 const FIRST_SEMVER = /\d+\.\d+\.\d+/;
 
-/** The exact npm pin a manifest declares, or null when its npm method is unpinned or a tag. */
 export function npmPin(manifest: CliManifest): { pkg: string; version: string } | null {
   const method = manifest.install.find((m): m is { npm: string } => 'npm' in m);
   if (!method) return null;
@@ -692,7 +684,6 @@ export function npmPin(manifest: CliManifest): { pkg: string; version: string } 
   return EXACT_SEMVER.test(version) ? { pkg: method.npm.slice(0, at), version } : null;
 }
 
-/** The version the host binary reports through its `version` check, or null if it reports none. */
 export async function installedCliVersion(manifest: CliManifest): Promise<string | null> {
   const c = manifest.check;
   if (c.kind !== 'version') return null;
@@ -704,7 +695,6 @@ export async function installedCliVersion(manifest: CliManifest): Promise<string
   }
 }
 
-/** Absolute, symlink-resolved path of `cmd` on PATH (POSIX), or null. */
 function resolveOnPath(cmd: string): string | null {
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
     if (!dir) continue;
@@ -713,18 +703,11 @@ function resolveOnPath(cmd: string): string | null {
       fs.accessSync(candidate, fs.constants.X_OK);
       return fs.realpathSync(candidate);
     } catch {
-      /* not in this dir */
     }
   }
   return null;
 }
 
-/**
- * The npm global prefix that owns the `cmd` PATH resolves, so an upgrade replaces
- * the copy that actually runs. `npm install -g` alone targets npm's own prefix,
- * which on a box with nvm differs from the `~/.local` install on PATH: the
- * install "succeeds" and the old binary keeps answering.
- */
 export function owningNpmPrefix(cmd: string, pkg: string): string | null {
   const real = resolveOnPath(cmd);
   if (!real) return null;
@@ -754,12 +737,6 @@ function runNpmInstall(prefix: string, spec: string, signal?: AbortSignal): Prom
   });
 }
 
-/**
- * Bring one installed, npm-pinned CLI up to its pin. Never installs a missing
- * tool (that stays an operator choice through `agents cli install`), never
- * downgrades, and reports `upgraded` only after the binary on PATH answers with
- * the pinned version. A failed install leaves the old version in place.
- */
 export async function upgradeCliToPin(
   manifest: CliManifest,
   opts: { signal?: AbortSignal; deadlineAt?: number } = {},
@@ -792,14 +769,6 @@ export async function upgradeCliToPin(
   return { name, status: 'upgraded', from, to };
 }
 
-/**
- * Upgrade every installed host CLI whose manifest pins a newer npm version.
- * Project-layer manifests are excluded: the project layer is whatever
- * `.agents/clis/` sits above the caller's cwd, and an unattended
- * `npm install -g` must not be steerable by a checkout. Only the user, system
- * and explicitly added repos drive it. An install that could not finish before
- * `deadlineAt` is deferred rather than started and then killed mid-write.
- */
 export async function upgradeOutdatedClis(
   opts: { signal?: AbortSignal; deadlineAt?: number; cwd?: string } = {},
 ): Promise<CliUpgradeResult[]> {

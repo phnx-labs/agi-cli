@@ -332,8 +332,6 @@ describe.skipIf(process.platform === 'win32')('version pins (host CLI auto-upgra
   let savedRegistry: string | undefined;
   let savedRetries: string | undefined;
 
-  // A real npm-global layout: <prefix>/bin/<cmd> -> ../lib/node_modules/<pkg>/bin/cli.js,
-  // the shape `npm install -g --prefix` leaves on every POSIX box.
   function installFake(prefix: string, pkg: string, cmd: string, version: string): void {
     const pkgDir = path.join(prefix, 'lib', 'node_modules', ...pkg.split('/'));
     fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true });
