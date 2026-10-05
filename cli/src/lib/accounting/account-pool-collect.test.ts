@@ -37,7 +37,7 @@ describe('foldRegistryCandidates', () => {
   it('appends provider accounts as candidates carrying providerAccount + the run version', () => {
     const out = foldRegistryCandidates('claude', inputs());
     const registry = out.filter((c) => c.providerAccount);
-    expect(registry.map((c) => c.providerAccount)).toEqual(['claude-setup', 'or-key']); // cursor excluded from claude
+    expect(registry.map((c) => c.providerAccount)).toEqual(['claude-setup', 'or-key']);
     for (const c of registry) {
       expect(c.version).toBe('2.1.226');
       expect(c.signedIn).toBe(true);
@@ -49,7 +49,7 @@ describe('foldRegistryCandidates', () => {
     const native = [nativeCandidate({})];
     const out = foldRegistryCandidates('claude', inputs({ native }));
     expect(out[0]).toBe(native[0]);
-    expect(out.length).toBe(1 + 2); // 1 native + 2 claude-eligible registry
+    expect(out.length).toBe(1 + 2);
   });
 
   it('skips a registry account already covered by a native login (by accountKey)', () => {
@@ -74,9 +74,6 @@ describe('foldRegistryCandidates', () => {
   });
 
   it('reports signedIn:false for a registry account whose secret is not actually present (PHNX-3502)', () => {
-    // Not hardcoded true: a caller that passes an account with no local secret
-    // (added on another device, or since revoked) must get an unlaunchable
-    // candidate back, not one balanced would happily pick and fail at spawn.
     const noSecret: RegistryAccountRecord[] = [{ name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: false }];
     const out = foldRegistryCandidates('claude', inputs({ records: noSecret }));
     const registry = out.filter((c) => c.providerAccount);

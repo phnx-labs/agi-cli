@@ -24,30 +24,19 @@ import { candidateAccountKey, type RotateCandidate } from './rotate.js';
 
 type ResolvedLaunchAccountKind = 'native' | 'provider' | 'legacy-native';
 
-/** Safe account identity that may be passed between launch consumers. */
 interface ResolvedLaunchAccount {
   kind: ResolvedLaunchAccountKind;
-  /** Stable registry id, or the durable identity key for an unmigrated login. */
   id: string;
-  /** User-facing account name, falling back to the durable identity label. */
   name: string;
-  /** Selector another device may resolve against its own registry. */
   selector: string;
-  /** Stable anti-collision/failover key; never derived from the binary label. */
   key: string;
 }
 
-/**
- * One fully-resolved spawn attempt. `env` may contain credential material and
- * `execHome` is a device-local path, so this type is confined to the local exec
- * boundary. Events and remote callers use {@link ResolvedLaunchAccount} only.
- */
 export interface ResolvedLocalAccountLaunch {
   agent: AgentId;
   executableVersion: string;
   account: ResolvedLaunchAccount | null;
   execHome?: string;
-  /** Compatibility label for an explicitly recorded, unmigrated home. */
   configVersion?: string;
   env: Record<string, string>;
   signedIn: boolean | null;
@@ -56,13 +45,9 @@ export interface ResolvedLocalAccountLaunch {
 
 interface ResolveLocalAccountLaunchOptions {
   agent: AgentId;
-  /** Selects the executable only. It never chooses account state. */
   executableVersion: string;
-  /** Exact account candidate selected by strategy/picker/readiness. */
   candidate?: RotateCandidate;
-  /** Explicit account name/id (`--account`, `#name`, or a consumer intent). */
   selector?: string;
-  /** Resolve the harness default when no explicit selector/candidate exists. */
   useDefault?: boolean;
   provider?: string;
   target?: string;
@@ -110,9 +95,6 @@ export async function resolveLocalAccountLaunch(
   const selected = options.candidate;
   const selector = options.selector ?? (selected ? candidateSelector(selected) : undefined);
 
-  // Compatibility for a candidate already discovered in an unmigrated home.
-  // The candidate is the identity decision; the label only locates that exact
-  // local config home and never participates in account comparison.
   if (selected && !selector) {
     const execHome = getVersionHomePath(options.agent, selected.version);
     if (!fs.existsSync(execHome)) {
