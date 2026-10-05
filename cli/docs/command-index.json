@@ -11807,19 +11807,12 @@
                 },
                 {
                   "flags": "--priority <level>",
-                  "description": "Priority",
+                  "description": "Priority: urgent, high, medium, low, none",
                   "long": "--priority",
                   "required": true,
                   "optional": false,
                   "variadic": false,
-                  "negate": false,
-                  "choices": [
-                    "urgent",
-                    "high",
-                    "medium",
-                    "low",
-                    "none"
-                  ]
+                  "negate": false
                 },
                 {
                   "flags": "--json",

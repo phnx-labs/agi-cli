@@ -38,4 +38,10 @@ describe('agents projects todo', () => {
     expect(code).toBe(1);
     expect(JSON.parse(stdout)).toMatchObject({ ok: false, todo: null });
   });
+
+  it('answers a bad --priority with the ok:false JSON, not commander text', () => {
+    const { code, stdout } = runTodo(['add', '--json', '--priority', 'p1', '--', 'Call back']);
+    expect(code).toBe(1);
+    expect(JSON.parse(stdout)).toEqual({ ok: false, todo: null, message: 'Expected a priority of urgent, high, medium, low, none, got "p1".' });
+  });
 });

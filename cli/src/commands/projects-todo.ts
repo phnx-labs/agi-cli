@@ -1,5 +1,5 @@
 
-import { Option, type Command } from 'commander';
+import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { listProjectDefs } from '../lib/projects.js';
@@ -52,7 +52,7 @@ export function registerProjectTodoCommands(projects: Command): void {
     .option('--description <text>', 'Description, shown above the AGI Menu marker')
     .option('--assignee <name>', 'Assign to a person by name or email (default: you)')
     .option('--due <date>', 'Due date, YYYY-MM-DD, today or later')
-    .addOption(new Option('--priority <level>', 'Priority').choices([...ADD_PRIORITIES]))
+    .option('--priority <level>', `Priority: ${ADD_PRIORITIES.join(', ')}`)
     .option('--json', 'Machine-readable result')
     .action(async (words: string[], opts: { project?: string; description?: string; assignee?: string; due?: string; priority?: AddPriority; json?: boolean }) => {
       const { json, ...fields } = opts;
