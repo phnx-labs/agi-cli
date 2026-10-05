@@ -1,3 +1,4 @@
+// Re-export canonical AgentId; resource precedence is project > user > plugin > system.
 
 import type { AgentId } from '../types.js';
 export type { AgentId };

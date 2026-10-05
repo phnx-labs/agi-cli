@@ -1,3 +1,4 @@
+// Profile token/account suites require the standalone file-backed secret store; headed macOS tests must never touch the operator keychain.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
