@@ -22,18 +22,11 @@ import { PR_STATUS_TTL_MS, readPullRequestStatus, withPullRequestStatus, type Pu
 import type { GhExec } from '../github/pr-mergeable.js';
 export { FeedWatchState, type FeedWatchEnvelope, type FeedWatchPayload } from './envelope.js';
 
-/** Reuse session ownership reconciliation for the combined operator stream. */
 export class FeedSessionProjection {
   private readonly sessions = new SessionProjection();
   private readonly observations = new Map<string, Map<string, AttentionItem>>();
   private projectedAttention = new Map<string, { scope: string; item: AttentionItem }>();
-  /**
-   * Tool rows per observing scope. A reset replaces one scope's rows and must
-   * not touch another's — the same per-scope rule the agent rows follow, and
-   * the reason a peer reconnecting cannot erase the local machine's tasks.
-   */
   private readonly toolsByScope = new Map<string, Map<string, ToolRow>>();
-  /** Whole-set per scope; see the `setup.snapshot` docblock in `envelope.ts`. */
   private readonly setupByScope = new Map<string, ToolSetupRow[]>();
   constructor(private readonly state = new FeedWatchState()) {}
 
@@ -96,8 +89,6 @@ export class FeedSessionProjection {
         result.push(this.state.emit({ type: 'agent.remove', scope: rowEvent.scope, rowKey: rowEvent.rowKey }));
       }
     }
-    // Attention has its own stable generation key, also used by feed answer.
-    // Never substitute the projected agent row key: reset consumers key by item.key.
     for (const [key, previous] of this.projectedAttention) {
       if (!next.has(key) && !resetScopes.has(previous.scope)) result.push(this.state.emit({ type: 'attention.remove', scope: previous.scope, rowKey: key }));
     }
@@ -111,23 +102,14 @@ export class FeedSessionProjection {
   }
 }
 
-/**
- * Live rows only: durable Previous rows share the operator stream for Sessions
- * history, but they are not live work and must never synthesize Needs-you
- * attention or a PR lookup.
- */
 function isLive(agent: SessionWatchRow): boolean {
   return Boolean(agent.sessionId) && !agent.previous && agent.context !== 'recent';
 }
 
-// ActiveSession.host names the terminal app; the feed contract's host is the
-// device scope. Normalize only the reconciler input so lifecycle/PR keys are
-// routable across the fleet while the projected agent row stays compatible.
 function reconcilerSession(agent: SessionWatchRow): import('../session/active.js').ActiveSession {
   return { ...agent, context: agent.context as import('../session/active.js').ActiveSession['context'], host: agent.sourceDevice, viewingIn: undefined };
 }
 
-/** One `gh pr view` (cached 45 s) feeds both the attention verdict and the row's `pr` status. */
 async function pullRequestFor(agent: SessionWatchRow, gh?: GhExec): Promise<PullRequestStatus | undefined> {
   if (!isLive(agent) || !agent.pr) return undefined;
   return readPullRequestStatus(reconcilerSession(agent), { gh });
@@ -143,7 +125,6 @@ function attentionFor(agent: SessionWatchRow, pullRequest: PullRequestStatus | u
   });
 }
 
-/** The row as the feed projects it: the session row with its PR status attached. */
 async function projectAgent(agent: SessionWatchRow, gh?: GhExec): Promise<{ agent: SessionWatchRow; attention: AttentionItem | undefined }> {
   const pullRequest = await pullRequestFor(agent, gh);
   return { agent: withPullRequestStatus(agent, pullRequest), attention: attentionFor(agent, pullRequest) };
@@ -172,30 +153,16 @@ export async function projectSessionEnvelope(event: SessionWatchEnvelope, state:
   return [state.emit({ type: 'heartbeat', capturedAt: event.capturedAt, scope: event.scope })];
 }
 
-/**
- * Watch the feed dirs that can change attention without a session event: an
- * `agents feed post --blocked` writes a block, `feed answer` writes a
- * resolution. Both are external processes, so nothing on the session stream
- * announces them — this is what lets the reconcile pass be event-driven instead
- * of a poll over every row twice a second.
- */
 function watchAttentionStores(onChange: () => void): () => void {
   const feedDir = getFeedDir();
   const watchers: fs.FSWatcher[] = [];
   for (const dir of [feedDir, path.join(feedDir, 'resolutions')]) {
     try {
-      // `resolutions` is created lazily by the first `recordResolution` call, so
-      // a fresh feed dir has no directory to watch yet. Create it up front —
-      // otherwise fs.watch throws ENOENT here, is swallowed, and never retried,
-      // silently downgrading every resolution to the 45 s PR-status fallback
-      // instead of the event-driven reconcile this function exists to provide.
       fs.mkdirSync(dir, { recursive: true });
       const watcher = fs.watch(dir, () => onChange());
-      // A directory that disappears must not take the watcher process down; the
-      // PR-status cadence below still reconciles on its own timer.
       watcher.on('error', () => watcher.close());
       watchers.push(watcher);
-    } catch { /* best-effort: the timed pass still reconciles on its own cadence */ }
+    } catch {  }
   }
   return () => { for (const watcher of watchers) watcher.close(); };
 }
@@ -204,21 +171,11 @@ interface WatchLocalFeedOptions {
   scope: string;
   signal: AbortSignal;
   emit: (event: FeedWatchEnvelope) => void;
-  /** Activity drain cadence. */
   activityPollMs?: number;
-  /** Attention reconcile cadence when nothing has announced a change. */
   reconcileMs?: number;
-  /** Session-watch inputs, forwarded verbatim to {@link watchLocalSessions}. */
   sessions?: Pick<WatchLocalOptions, 'readCache' | 'readPrevious' | 'journalPath' | 'journalPollMs' | 'heartbeatMs'>;
-  /** The `gh` runner behind PR status; a test passes a recorded table. */
   gh?: GhExec;
-  /** Tool-activity inputs, forwarded verbatim to {@link watchToolActivity}. */
   tools?: Pick<Parameters<typeof watchToolActivity>[0], 'sweepMs' | 'roots' | 'sources'>;
-  /**
-   * Tool-setup readers. The setup teammate owns DETECTION
-   * (`lib/setup-tool-status.ts`); this stream only publishes what its cache
-   * already holds, and never triggers a probe of its own.
-   */
   setup?: {
     read?: typeof getCachedToolSetup;
     subscribe?: typeof subscribeToolSetup;
@@ -227,29 +184,15 @@ interface WatchLocalFeedOptions {
 
 export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<void> {
   const state = new FeedWatchState();
-  // The stream's opening scan registers every log past its own bytes, so the
-  // cursor has to be taken *after* it: a record appended while the scan was
-  // walking the directory is unreadable from the byte cursor, and only a
-  // timestamp taken after the scan classifies it as history rather than
-  // dropping it from a window the caller believes was covered.
   const activity = new ActivityStream();
   let activityCursor = Date.now();
-  // The tool rows as this machine last projected them. Held here rather than
-  // re-collected per reset: a session-watch reconnect emits a fresh reset, and
-  // re-reading the browser tree and the ledger for it would reintroduce exactly
-  // the per-render cost `tool-activity.ts` exists to remove.
   let toolRows: ToolRow[] = collectToolRows(options.scope, options.tools?.sources).rows;
-  // Setup rows come from the setup teammate's cache, never from a probe here:
-  // `getCachedToolSetup` reads metadata plus the last EXPLICIT health check, so
-  // publishing it costs no subprocess and cannot unlock a secret store.
   const readSetup = options.setup?.read ?? getCachedToolSetup;
   let setupRows: ToolSetupRow[] = (() => {
     try { return readSetup(); } catch { return []; }
   })();
   const agents = new Map<string, SessionWatchRow>();
   const attention = new Map<string, string>();
-  // The PR status last projected onto each row, so a merge or a check verdict
-  // that lands between session events still reaches the row's consumers.
   const prStatus = new Map<string, string>();
   let pending = Promise.resolve();
   const reconcileRows = async () => {
@@ -268,10 +211,6 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
         : state.emit({ type: 'attention.remove', scope: options.scope, rowKey }));
     }
   };
-  // Attention is reconciled when something can actually have changed it — a row
-  // moved, a block/resolution file was written — or when the PR-status TTL has
-  // expired and the cached verdicts are stale. Re-running it every 500 ms cost
-  // two file reads per row per tick and changed nothing.
   const reconcileMs = options.reconcileMs ?? PR_STATUS_TTL_MS;
   let attentionDirty = true;
   let lastReconcileMs = 0;
@@ -304,9 +243,6 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
       }
     },
   });
-  // The setup cache is file-backed and notifies on change, so a Settings pane
-  // costs no polling: `subscribeToolSetup` is the invalidation the setup side
-  // publishes for exactly this consumer.
   const stopSetupWatch = (options.setup?.subscribe ?? subscribeToolSetup)((rows) => {
     const next = JSON.stringify(rows);
     if (next === JSON.stringify(setupRows)) return;
@@ -351,48 +287,14 @@ function remoteFeedWatchCommand(os: string): string {
     : `bash -lc ${shellQuote(`agents ${args.map(shellQuote).join(' ')}`)}`;
 }
 
-/**
- * The one ingress for an envelope produced by ANOTHER agents-cli.
- *
- * `tools` was added to the `reset` payload within protocol v1, so a peer on an
- * older CLI is a correct v1 producer that simply reports no tool rows — which is
- * true of it, not a data defect to paper over. Normalizing HERE, at the single
- * place a foreign envelope enters, is what keeps every consumer downstream able
- * to treat the field as present instead of each re-checking it. A mixed-version
- * fleet is the normal state during a rollout, so an absent field must not take
- * the whole fan-out down.
- */
 export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelope {
   if (event.type !== 'reset') return event;
   if (Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
   return { ...event, tools: event.tools ?? [], setup: event.setup ?? [] };
 }
 
-/**
- * The process-wide local collector, shared by refcount.
- *
- * `watchLocalFeed` is cheap per tick but NOT free to duplicate: each call builds
- * its own `ActivityStream` cursor set over the activity directory, its own
- * recursive tool watchers, its own feed/resolution watchers and its own
- * setup subscription. Two callers in one process paid all of that twice and
- * produced identical envelopes — and there are genuinely two callers on a daemon
- * box: the fleet fan-out (which watches the local scope alongside every peer)
- * and anything else that wants this machine's rows.
- *
- * One {@link FeedHub} over `watchLocalFeed` collapses them: the watcher starts on
- * the first subscriber, stops on the last, and a late subscriber is caught up
- * from held state instead of constructing a second cursor set.
- *
- * This is deliberately PROCESS-wide and not machine-wide. Making `feed watch
- * --json --local` attach to the daemon instead would be the machine-wide
- * version, and it would put a daemon dependency on the one command the fleet
- * fan-out runs over ssh on every peer — a peer with a sick daemon would drop off
- * the fleet stream entirely rather than degrade. The cross-process sharing that
- * matters is the FLEET stream, which is what the daemon hub serves.
- */
 let sharedLocal: FeedHub | null = null;
 
-/** The shared local collector, constructed on first use. Exposed for tests. */
 export function sharedLocalFeedHub(): FeedHub {
   return sharedLocal ??= new FeedHub({
     watch: (hubOptions) => watchLocalFeed({
@@ -401,16 +303,12 @@ export function sharedLocalFeedHub(): FeedHub {
   });
 }
 
-/** Reset the shared collector. Tests only — it must not leak across cases. */
 export async function resetSharedLocalFeedHub(): Promise<void> {
   const hub = sharedLocal;
   sharedLocal = null;
   await hub?.close();
 }
 
-/**
- * Subscribe to this machine's rows through the shared collector, until abort.
- */
 export function subscribeSharedLocalFeed(options: { signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void }): Promise<void> {
   const detach = sharedLocalFeedHub().subscribe(options.emit);
   return new Promise<void>((resolve) => {
@@ -443,7 +341,7 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
           if (event.v !== 1) return false;
           forward(normalizePeerEnvelope(event));
           return true;
-        } catch { return false; /* protocol only */ }
+        } catch { return false;  }
       },
       onUnavailable: (reason) => options.emit(coordinator.emit({ type: 'scope', capturedAt: Date.now(), scope, status: 'unavailable', reason })),
     });

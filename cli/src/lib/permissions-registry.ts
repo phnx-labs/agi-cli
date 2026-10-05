@@ -1,36 +1,3 @@
-/**
- * Declarative permission-target registry.
- *
- * Every allowlist-capable agent gets ONE entry (`PERMISSION_TARGETS`) describing
- * where its permissions live and how to read that file back into the canonical
- * `PermissionSet`. `agents permissions list <agent>` and the config-file import
- * behind `agents permissions add <path>` used to dispatch through hand-written
- * 3-arm switches while
- * `applyPermissionsToVersion` wrote 13 harnesses, so permissions were written
- * for cursor, antigravity, grok, kimi, droid, copilot, openclaw and
- * hermes and then reported as absent for all ten (RUSH-2676).
- *
- * The key set is pinned to `capableAgents('allowlist')` by
- * `permissions-registry.test.ts`, mirroring `SUBAGENT_TARGETS` — the pattern the
- * repo's own AGENTS.md names for cross-harness capabilities. A newly added
- * allowlist harness cannot be written-but-unreadable: it must land an entry here
- * in the same change.
- *
- * This module also OWNS the canonical<->native tool vocabularies. `permissions.ts`
- * imports them for the forward (canonical -> native) serializers, and the reverse
- * projections below are derived from the same tables, so the two directions
- * cannot drift into disagreeing about what `developer__shell` or `fs_read` means.
- *
- * ## Every reverse projection is lossy, and says how
- *
- * The forward direction discards information — several canonical tools collapse
- * onto one native id (`Read`/`Grep`/`Glob` all become a coarse capability), and
- * pattern grammars differ (`git:*` becomes `git *`). Reading back therefore
- * recovers a permission set that GRANTS THE SAME ACCESS, not the byte-identical
- * strings that were written. Each target documents its own collapse. Callers that
- * need a faithful record of what agents-cli installed should read the central
- * `~/.agents/permissions/` set, not a harness's config.
- */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -38,9 +5,7 @@ import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
 import type { AgentId, PermissionSet } from './types.js';
 
-// ── canonical <-> native tool vocabularies (single source of truth) ──────────
 
-/** Canonical tool (lowercased) -> Grok's lowercase tool vocabulary. */
 export const GROK_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
   bash: 'bash',
   read: 'read',
@@ -50,7 +15,6 @@ export const GROK_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
 };
 
 
-/** Canonical tool -> OpenClaw tool id (tool-level granularity only). */
 export const CANONICAL_TO_OPENCLAW_TOOL: Record<string, string> = {
   bash: 'exec',
   read: 'read',
@@ -60,7 +24,6 @@ export const CANONICAL_TO_OPENCLAW_TOOL: Record<string, string> = {
   websearch: 'web_search',
 };
 
-/** Canonical tool -> Antigravity's action namespace. */
 export const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
   bash: 'command',
   read: 'read_file',
@@ -68,13 +31,6 @@ export const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
   webfetch: 'read_url',
 };
 
-/**
- * Invert a forward map, keeping the FIRST canonical tool that maps to each
- * native id. Several canonical tools collapse onto one native id, so the
- * inverse must pick a representative; declaration order in the forward table is
- * that choice, which is why `read` (declared before `grep`/`glob`) represents
- * a coarser native capability.
- */
 function invertFirstWins(forward: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [canonical, native] of Object.entries(forward)) {
@@ -88,10 +44,8 @@ const CANONICAL_BY_GROK_TOOL = invertFirstWins(GROK_TOOL_BY_CANONICAL);
 const CANONICAL_BY_OPENCLAW_TOOL = invertFirstWins(CANONICAL_TO_OPENCLAW_TOOL);
 const CANONICAL_BY_ANTIGRAVITY_ACTION = invertFirstWins(ANTIGRAVITY_ACTION_BY_TOOL);
 
-/** Filename Codex stores generated deny rules under `.codex/rules/`. */
 export const CODEX_RULES_FILENAME = 'agents-deny.rules';
 
-/** Canonical TitleCase spelling for a lowercased canonical tool name. */
 const CANONICAL_TOOL_CASE: Record<string, string> = {
   bash: 'Bash',
   read: 'Read',
@@ -111,24 +65,18 @@ function titleCaseTool(lower: string): string {
   return CANONICAL_TOOL_CASE[lower] ?? lower;
 }
 
-/**
- * Inverse of the serializers' `normalizeBashPattern`: native grammars spell a
- * command's arg-glob `git *`, canonical spells it `git:*`. `*` stays `*`.
- */
 function denormalizeBashPattern(pattern: string): string {
   if (pattern === '*' || pattern === '**') return '*';
   if (pattern.endsWith(' *')) return `${pattern.slice(0, -2)}:*`;
   return pattern;
 }
 
-/** Build a canonical rule string, collapsing a blanket pattern to the tool's wildcard. */
 function canonicalRule(lowerTool: string, pattern: string | null): string {
   const tool = titleCaseTool(lowerTool);
   if (pattern === null) return lowerTool === 'bash' ? 'Bash(*)' : `${tool}(**)`;
   return `${tool}(${pattern})`;
 }
 
-/** Assemble a PermissionSet, dropping empty arrays so callers can test truthiness. */
 function permissionSet(allow: string[], deny: string[]): PermissionSet | null {
   const uniqueAllow = [...new Set(allow)];
   const uniqueDeny = [...new Set(deny)];
@@ -140,18 +88,7 @@ function permissionSet(allow: string[], deny: string[]): PermissionSet | null {
   };
 }
 
-// ── file readers ─────────────────────────────────────────────────────────────
 
-/**
- * Strip JSON comments for JSONC parsing, only OUTSIDE string literals.
- *
- * A naive `//`-to-end-of-line regex destroys
- * `"$schema": "https://opencode.ai/config.json"` — which every
- * opencode-generated config carries — so the file then fails to parse and its
- * permissions read back as absent, the very defect this registry exists to fix.
- * Exported so `permissions.ts` shares this one implementation instead of
- * keeping its own copy.
- */
 export function stripJsonComments(content: string): string {
   let result = '';
   let inString = false;
@@ -241,25 +178,14 @@ function readToml(configPath: string): Record<string, unknown> | null {
   }
 }
 
-/** `preferred` unless it is absent and `alternate` exists. */
 function existingOr(preferred: string, alternate: string): string {
   return !fs.existsSync(preferred) && fs.existsSync(alternate) ? alternate : preferred;
 }
 
-/** Every string in `value` when it is a string array, else []. */
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
-/**
- * Invert `convertDenyToCodexRules` (permissions.ts). The writer emits
- * `prefix_rule(pattern=["git", "reset"], decision="forbidden")` from a
- * canonical `Bash(git reset:*)`. Prefix-match is the native form of `:*`,
- * so the reverse always reconstructs `Bash(<parts>:*)`.
- *
- * Only `decision = "forbidden"` is a deny; anything else is skipped rather
- * than guessed into an allow (Codex grants come from sandbox_mode).
- */
 function convertCodexRulesToDeny(content: string): string[] {
   const deny: string[] = [];
   const marker = 'prefix_rule';
@@ -300,7 +226,6 @@ function convertCodexRulesToDeny(content: string): string[] {
   return deny;
 }
 
-/** Index of the closer matching `source[openIdx]`, skipping quoted strings. */
 function findMatchingCloser(source: string, openIdx: number, open: string, close: string): number {
   let depth = 0;
   let inString = false;
@@ -342,45 +267,15 @@ function readCodexDenyRules(configPath: string): string[] {
   }
 }
 
-// ── the registry ─────────────────────────────────────────────────────────────
 
-/** The complete permissions contract for one agent. */
 interface PermissionTarget {
-  /** Permissions file under a HOME root (a version home, or the real HOME). */
   home(home: string): string;
-  /** Permissions file for a project checkout, when the harness reads one. */
   project?: (cwd: string) => string;
-  /**
-   * Read `configPath` and project it to canonical form. Returns null when the
-   * file is absent, unreadable, or records no permissions — never throws.
-   */
   toCanonical(configPath: string): PermissionSet | null;
-  /** One line naming what this harness's shape loses on the way back. */
   lossyBecause: string;
-  /**
-   * Extra path suffixes this harness's config may use, for DETECTION only.
-   *
-   * `home()`/`project()` may probe the filesystem to pick between accepted
-   * spellings, which is correct when resolving a real root but meaningless for
-   * detection — `detectPermissionAgentFromPath` passes `''`, so the probe would
-   * resolve against `process.cwd()` and make the same input detect differently
-   * depending on where the CLI was run.
-   *
-   * Detection still calls `home('')`/`project('')`, since most targets are pure
-   * `path.join` and need no entry. A target whose resolver probes MUST list
-   * EVERY spelling it can return — that is what makes the probe's answer
-   * irrelevant rather than unreachable. `existingOr` (opencode) is the only
-   * probing resolver today; `permissions-registry.test.ts` pins the invariant
-   * for the whole table rather than leaving it as prose.
-   */
   altSuffixes?: string[];
 }
 
-/**
- * Single source of truth for where each allowlist-capable agent stores
- * permissions and how to read them back. Keys MUST equal
- * `capableAgents('allowlist')` — pinned by `permissions-registry.test.ts`.
- */
 export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   claude: {
     home: (h) => path.join(h, '.claude', 'settings.json'),
@@ -399,17 +294,11 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   },
 
   opencode: {
-    // OpenCode accepts either extension and `openCodeConfigPath` probes both, so
-    // an existing `opencode.json` must be found rather than shadowed by the
-    // `.jsonc` default.
     home: (h) => existingOr(
       path.join(h, '.config', 'opencode', 'opencode.jsonc'),
       path.join(h, '.config', 'opencode', 'opencode.json'),
     ),
     project: (cwd) => existingOr(path.join(cwd, 'opencode.jsonc'), path.join(cwd, 'opencode.json')),
-    // BOTH spellings, for home and project. The preferred one needs an entry
-    // too: `home('')`/`project('')` resolve it through `existingOr`, which
-    // probes, so leaving it out left `opencode.jsonc` detection cwd-dependent.
     altSuffixes: [
       path.join('.config', 'opencode', 'opencode.jsonc'),
       path.join('.config', 'opencode', 'opencode.json'),
@@ -465,7 +354,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       const perms = config?.permissions;
       if (!perms || typeof perms !== 'object' || Array.isArray(perms)) return null;
       const p = perms as Record<string, unknown>;
-      // Cursor spells Bash as Shell(...) and canonical WebSearch as WebFetch(...).
       const back = (rule: string): string =>
         rule.startsWith('Shell') ? rule.replace(/^Shell/, 'Bash') : rule;
       return permissionSet(stringList(p.allow).map(back), stringList(p.deny).map(back));
@@ -570,8 +458,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       const locations = config?.locations;
       if (!locations || typeof locations !== 'object' || Array.isArray(locations)) return null;
       const allow: string[] = [];
-      // Copilot records approvals per location; the canonical set has no location
-      // axis, so every location's approvals union into one allow list.
       for (const location of Object.values(locations as Record<string, unknown>)) {
         if (!location || typeof location !== 'object' || Array.isArray(location)) continue;
         const approvals = (location as Record<string, unknown>).tool_approvals;
@@ -590,7 +476,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
           }
         }
       }
-      // Copilot's config records approvals (grants) only — it has no deny list.
       return permissionSet(allow, []);
     },
   },
@@ -609,8 +494,6 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
           const lowerTool = CANONICAL_BY_OPENCLAW_TOOL[id];
           return lowerTool ? [canonicalRule(lowerTool, null)] : [];
         });
-      // `tools.allow` is OpenClaw's absolute allowlist and is never written by
-      // agents-cli (see convertToOpenClawFormat), so it is not read back either.
       return permissionSet(back(stringList(t.alsoAllow)), back(stringList(t.deny)));
     },
   },
@@ -632,18 +515,9 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   },
 };
 
-/**
- * Invert `kimiBashPatterns` + `canonicalToKimiRules`.
- *
- * Kimi writes a bare tool name for a blanket grant (`Bash`, `Read`), and expands
- * one canonical `cmd:*` into TWO picomatch patterns (`Bash(cmd*)` and
- * `Bash(cmd*​/**)`) so slash-bearing arguments match. Both collapse back to the
- * single canonical rule, and the caller dedupes.
- */
 function kimiPatternToCanonical(pattern: string): string | null {
   const m = pattern.match(/^([\w-]+)\((.*)\)$/);
   if (!m) {
-    // Bare tool name — a blanket grant, or an MCP tool id Kimi matches by name.
     const lower = pattern.toLowerCase();
     return lower in CANONICAL_TOOL_CASE ? canonicalRule(lower, null) : pattern;
   }
@@ -657,11 +531,6 @@ function kimiPatternToCanonical(pattern: string): string | null {
   return canonicalRule(lowerTool, arg);
 }
 
-/**
- * Read `agent`'s permissions from `home` (a version home or the real HOME) and
- * project them to canonical form. `scope: 'project'` reads the repo-local file
- * for the harnesses that have one, and returns null for those that do not.
- */
 export function readCanonicalPermissions(
   agent: AgentId,
   scope: 'user' | 'project' = 'user',
@@ -674,7 +543,5 @@ export function readCanonicalPermissions(
     if (!target.project) return null;
     return target.toCanonical(target.project(cwd ?? process.cwd()));
   }
-  // os.homedir() -- not `process.env.HOME ?? ''`, which resolved a RELATIVE
-  // path (`.grok/config.toml`) when HOME is unset, as it is on Windows.
   return target.toCanonical(target.home(home ?? os.homedir()));
 }

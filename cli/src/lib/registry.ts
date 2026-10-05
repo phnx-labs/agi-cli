@@ -1,10 +1,3 @@
-/**
- * Package registry client -- search, resolve, and install from remote registries.
- *
- * Queries the MCP registry (registry.modelcontextprotocol.io) and future skill
- * registries to find packages, then resolves them into installable entries
- * with transport, runtime, and argument metadata.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,22 +34,6 @@ export function validatedPyPISpec(spec: string): string {
   return spec;
 }
 
-/**
- * Seeded presets offered for `type`, minus any the user has removed.
- *
- * These are resolved here rather than written into agents.yaml. Seeding used to
- * happen on the state READ path and persisted the entry — but agents.yaml is
- * git-tracked in the user's DotAgents repo, so that write left the working tree
- * dirty and every `agents repo pull` aborted with "Working tree has uncommitted
- * changes", naming neither the file nor the cause. Since every `agents`
- * invocation reads state, the dirt returned the instant it was cleared, and the
- * loop could not be escaped through the CLI at all (RUSH-1925).
- *
- * `seededPresets` is the removal tombstone: a key listed there means the user
- * removed that preset, so it is not offered again. Users who were seeded under
- * the old behaviour have the key listed *and* the entry in their own
- * `registries:` block, which still wins below — so nothing disappears for them.
- */
 function offeredSeeds(type: RegistryType, meta: Meta): Record<string, RegistryConfig> {
   const removed = new Set(meta.seededPresets || []);
   const offered: Record<string, RegistryConfig> = {};
@@ -66,17 +43,14 @@ function offeredSeeds(type: RegistryType, meta: Meta): Record<string, RegistryCo
   return offered;
 }
 
-/** Get all registries of a given type, merging defaults with user overrides. */
 export function getRegistries(type: RegistryType): Record<string, RegistryConfig> {
   const meta = readMeta();
   const defaultRegs = DEFAULT_REGISTRIES[type] || {};
   const userRegs = meta.registries?.[type] || {};
 
-  // Merge defaults with user config (user overrides defaults)
   return { ...defaultRegs, ...offeredSeeds(type, meta), ...userRegs };
 }
 
-/** Get only the enabled registries of a given type. */
 export function getEnabledRegistries(type: RegistryType): Array<{ name: string; config: RegistryConfig }> {
   const registries = getRegistries(type);
   return Object.entries(registries)
@@ -84,7 +58,6 @@ export function getEnabledRegistries(type: RegistryType): Array<{ name: string; 
     .map(([name, config]) => ({ name, config }));
 }
 
-/** Add or update a registry configuration in agents.yaml. */
 export function setRegistry(
   type: RegistryType,
   name: string,
@@ -98,12 +71,6 @@ export function setRegistry(
     meta.registries[type] = {};
   }
 
-  // Seeded presets are resolved in memory and never materialized in agents.yaml
-  // (see offeredSeeds), so a partial update — `registry disable`, `enable`, or
-  // `config --api-key` — has nothing stored to merge with. Without the
-  // SEEDED_REGISTRIES fallback it would persist only the changed fields and drop
-  // `url`, and because userRegs wins over the in-memory seed in getRegistries the
-  // preset would stay broken even after re-enabling.
   const existing = meta.registries[type][name]
     || DEFAULT_REGISTRIES[type]?.[name]
     || SEEDED_REGISTRIES[type]?.[name];
@@ -111,12 +78,9 @@ export function setRegistry(
   writeMeta(meta);
 }
 
-/** Remove a user-configured or seeded registry. Returns false if it did not exist. */
 export function removeRegistry(type: RegistryType, name: string): boolean {
   const meta = readMeta();
   const inUserConfig = !!meta.registries?.[type]?.[name];
-  // A seeded preset has no entry in agents.yaml until the user edits it, so
-  // removal is recorded as a tombstone in seededPresets instead of a deletion.
   const isOfferedSeed = !!offeredSeeds(type, meta)[name];
   if (!inUserConfig && !isOfferedSeed) return false;
 
@@ -128,12 +92,6 @@ export function removeRegistry(type: RegistryType, name: string): boolean {
   return true;
 }
 
-/**
- * Cap every registry network call. Without this a slow or unreachable registry
- * hangs the calling command indefinitely (`agents add`, `agents mcp`, package
- * resolution) — and makes CI flake when the registry is unreachable. On timeout
- * the fetch aborts, callers fall back to their git/no-match path.
- */
 const REGISTRY_FETCH_TIMEOUT_MS = 8000;
 
 async function fetchMcpRegistry(
@@ -165,7 +123,6 @@ async function fetchMcpRegistry(
   return response.json() as Promise<McpRegistryResponse>;
 }
 
-/** Search MCP registries for servers matching a query string. */
 export async function searchMcpRegistries(
   query: string,
   options?: { registry?: string; limit?: number }
@@ -204,7 +161,6 @@ export async function searchMcpRegistries(
         });
       }
     } catch (err) {
-      // Log but continue with other registries
       console.error(`Failed to search ${name}: ${(err as Error).message}`);
     }
   }
@@ -212,28 +168,12 @@ export async function searchMcpRegistries(
   return results;
 }
 
-/**
- * Convert an MCP server registry entry into an install spec suitable for
- * writing into `manifest.mcp`. Returns `null` if the entry has no package we
- * know how to launch (e.g. only remote endpoints, which the current manifest
- * shape supports via `url`+`transport: 'http'` but isn't yet wired to the
- * registry's `remotes` field).
- *
- * Supported package shapes:
- *   - npm / runtime=node      → `npx -y <name>`
- *   - pypi / runtime=python   → `uvx <name>`
- *   - runtime=docker          → `docker run --rm -i <name>`
- *   - runtime=binary          → `<name>` (assumed to be on PATH)
- */
 export function mcpEntryToInstallSpec(
   entry: McpServerEntry
 ): { command?: string; url?: string; transport: 'stdio' | 'http' } | null {
   const pkg = entry.packages?.[0];
   if (!pkg) return null;
 
-  // Remote transports (sse / streamable-http) need a URL the registry doesn't
-  // currently expose in this client's type. Skip for now; caller can fall back
-  // to manual --transport http with an explicit URL.
   if (pkg.transport === 'sse' || pkg.transport === 'streamable-http') {
     return null;
   }
@@ -256,12 +196,9 @@ export function mcpEntryToInstallSpec(
   if (runtime === 'binary') {
     return { command: name, transport: 'stdio' };
   }
-  // Unknown registry/runtime — fall back to bare name so the user gets *something*
-  // to inspect via `agents mcp view`, rather than a silent miss.
   return { command: name, transport: 'stdio' };
 }
 
-/** Look up detailed info for an MCP server by exact name. */
 export async function getMcpServerInfo(
   serverName: string,
   registryName?: string
@@ -274,10 +211,8 @@ export async function getMcpServerInfo(
 
   for (const { config } of targetRegistries) {
     try {
-      // Search with exact name
       const response = await fetchMcpRegistry(config.url, serverName, 10, config.apiKey);
 
-      // Find exact match
       const match = response.servers.find(
         ({ server }) =>
           server.name === serverName ||
@@ -288,14 +223,12 @@ export async function getMcpServerInfo(
         return match.server;
       }
     } catch {
-      // Continue to next registry
     }
   }
 
   return null;
 }
 
-/** One row of a skill index document. */
 export interface SkillIndexEntry {
   name: string;
   description?: string;
@@ -307,11 +240,9 @@ export interface SkillIndexEntry {
   tags?: string[];
   author?: string;
   installs?: number;
-  /** Lowercase hex sha256 of the skill's SKILL.md supplied by the registry index. */
   sha256?: string;
 }
 
-/** Raw shape of the skill index document served by Hermes and compatible registries. */
 export interface SkillIndexDocument {
   version?: number;
   generated_at?: string;
@@ -322,7 +253,6 @@ export interface SkillIndexDocument {
 const skillIndexCache = new Map<string, { fetchedAt: number; doc: SkillIndexDocument }>();
 const SKILL_INDEX_TTL_MS = 10 * 60_000;
 
-/** Fetch and cache a flat skill-index JSON document. */
 async function fetchSkillIndex(url: string, apiKey?: string): Promise<SkillIndexDocument> {
   const cached = skillIndexCache.get(url);
   if (cached && Date.now() - cached.fetchedAt < SKILL_INDEX_TTL_MS) {
@@ -345,7 +275,6 @@ async function fetchSkillIndex(url: string, apiKey?: string): Promise<SkillIndex
   return doc;
 }
 
-/** Map a raw skill-index row into the canonical SkillEntry shape. */
 export function normalizeSkillEntry(raw: SkillIndexEntry): SkillEntry {
   return {
     name: raw.name,
@@ -362,7 +291,6 @@ export function normalizeSkillEntry(raw: SkillIndexEntry): SkillEntry {
   };
 }
 
-/** Case-insensitive substring match against the fields users expect to search. */
 function skillMatchesQuery(entry: SkillEntry, query: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
@@ -379,7 +307,6 @@ function skillMatchesQuery(entry: SkillEntry, query: string): boolean {
   return haystack.includes(q);
 }
 
-/** Search skill registries for entries matching a query string. */
 export async function searchSkillRegistries(
   query: string,
   options?: { registry?: string; limit?: number }
@@ -426,7 +353,6 @@ export async function searchSkillRegistries(
   return results;
 }
 
-/** Look up a skill by identifier (or name) across enabled skill registries. */
 export async function getSkillEntry(
   skillIdentifier: string,
   registryName?: string
@@ -444,28 +370,21 @@ export async function getSkillEntry(
       );
       if (match) return normalizeSkillEntry(match);
     } catch {
-      /* try next registry */
     }
   }
   return null;
 }
 
-/** Derive a cloneable git source from a skill entry's repo/source metadata. */
 export function skillEntryToGitSource(entry: SkillEntry): string | null {
   if (entry.repo) {
-    // Already an owner/repo; cloneRepo understands the `gh:` shorthand.
     return `gh:${entry.repo.replace(/\.git$/, '')}`;
   }
   if (entry.source === 'official') {
-    // Hermes 'official' entries live in NousResearch/hermes-agent; the path
-    // sits under optional-skills/. cloneRepo pulls the whole repo — the
-    // per-path narrowing is a follow-on improvement.
     return 'gh:NousResearch/hermes-agent';
   }
   return null;
 }
 
-/** Unified search across all enabled registries of the specified type(s). */
 export async function search(
   query: string,
   options?: { type?: RegistryType; registry?: string; limit?: number }
@@ -485,38 +404,30 @@ export async function search(
   return results;
 }
 
-/** Parse a package identifier into its type (mcp, skill, git) and name. */
 export function parsePackageIdentifier(identifier: string): {
   type: RegistryType | 'git' | 'plugin' | 'unknown';
   name: string;
 } {
-  // mcp:filesystem -> MCP registry
   if (identifier.startsWith('mcp:')) {
     return { type: 'mcp', name: identifier.slice(4) };
   }
 
-  // skill:user/repo -> skill registry (or git fallback)
   if (identifier.startsWith('skill:')) {
     return { type: 'skill', name: identifier.slice(6) };
   }
 
-  // plugin:name@source | plugin:/path | plugin:gh:user/repo — Phase 5 packaging
-  // umbrella. Spec after the prefix is the same grammar as `agents plugins install`.
   if (identifier.startsWith('plugin:')) {
     return { type: 'plugin', name: identifier.slice('plugin:'.length) };
   }
 
-  // gh:user/repo -> git source
   if (identifier.startsWith('gh:')) {
     return { type: 'git', name: identifier };
   }
 
-  // https://... or git@... -> git source
   if (identifier.startsWith('https://') || identifier.startsWith('git@')) {
     return { type: 'git', name: identifier };
   }
 
-  // Local repo/path
   if (
     identifier.startsWith('/') ||
     identifier.startsWith('./') ||
@@ -526,16 +437,13 @@ export function parsePackageIdentifier(identifier: string): {
     return { type: 'git', name: identifier };
   }
 
-  // user/repo format -> could be either, need to search
   if (identifier.includes('/') && !identifier.includes(':')) {
     return { type: 'unknown', name: identifier };
   }
 
-  // Single word -> search MCP registries first
   return { type: 'unknown', name: identifier };
 }
 
-/** Resolve a package identifier to an installable package with source metadata. */
 export async function resolvePackage(identifier: string): Promise<ResolvedPackage | null> {
   const parsed = parsePackageIdentifier(identifier);
 
@@ -572,17 +480,13 @@ export async function resolvePackage(identifier: string): Promise<ResolvedPackag
           skillEntry: entry,
         };
       }
-      // Entry found but has no installable repo (e.g. lobehub-only listings).
       return null;
     }
-    // Fall back to git shorthand when the identifier isn't in any registry.
     const gitSource = parsed.name.startsWith('gh:') ? parsed.name : `gh:${parsed.name}`;
     return { type: 'git', source: gitSource };
   }
 
-  // Unknown type - search registries
   if (parsed.type === 'unknown') {
-    // Try MCP first
     const mcpEntry = await getMcpServerInfo(parsed.name);
     if (mcpEntry) {
       return {
@@ -592,7 +496,6 @@ export async function resolvePackage(identifier: string): Promise<ResolvedPackag
       };
     }
 
-    // If it looks like a git path (user/repo), treat as git
     if (parsed.name.includes('/')) {
       return { type: 'git', source: `gh:${parsed.name}` };
     }
@@ -601,43 +504,17 @@ export async function resolvePackage(identifier: string): Promise<ResolvedPackag
   return null;
 }
 
-// ============================================================================
-// PUBLISH — generate a self-hosted skill index + verify integrity on install
-// ============================================================================
 
-/** Lowercase hex sha256 of a file's bytes. Small files only (SKILL.md). */
 export function sha256OfFile(file: string): string {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-/**
- * Parse an 'owner/repo' slug from a git remote URL (https or scp-style ssh) or
- * a filesystem-path remote whose path is slug-shaped (`…/github.com/owner/repo`).
- * Returns null if the remote is not a recognizable GitHub-style shape.
- *
- * Backslashes are folded to forward slashes first: a real git URL never
- * contains one, but a local-path remote on Windows does
- * (`C:\…\github.com\org\a.git`), and without the fold the same remote that
- * parses as `org/a` on POSIX returns null on win32 — which made the
- * projects-pull slug verification fail closed as `blocked` there (RUSH-2694).
- */
 export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
   const s = remoteUrl.trim().replace(/\\/g, '/').replace(/\.git$/, '');
-  // https://github.com/owner/repo  or  git@github.com:owner/repo
   const m = s.match(/github\.com[/:]([^/]+\/[^/]+)$/);
   return m ? m[1] : null;
 }
 
-/**
- * Walk a repo's skills/ and build a flat {@link SkillIndexDocument}. Each entry
- * carries the sha256 of its SKILL.md so install can verify integrity after
- * cloning.
- *
- * `repoSlug` is the 'owner/repo' the skills are published under, written into
- * each entry's `repo` field so {@link skillEntryToGitSource} resolves it to
- * `gh:owner/repo`. `identifier` is set to the skill's directory name so
- * `agents install skill:<name>` resolves against this index.
- */
 export function buildSkillIndex(
   repoPath: string,
   repoSlug: string,
@@ -662,13 +539,6 @@ export function buildSkillIndex(
   };
 }
 
-/**
- * Verify a cloned skill's SKILL.md against the sha256 recorded in its registry
- * entry. Returns ok when the entry carries no sha256 — indexes published before
- * integrity hashes (or by third parties) simply skip the check. Returns an
- * error when the file is missing or its hash differs, so install can abort
- * rather than silently trusting a tampered artifact.
- */
 export function verifySkillIntegrity(
   repoPath: string,
   entry: Pick<SkillEntry, 'name' | 'path' | 'sha256'>
