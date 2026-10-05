@@ -285,6 +285,7 @@ export function resolveAllowedSubagents(
   available: string[],
   allowedAgents: string[] | undefined,
 ): { allowedStems: string[]; missing: string[] } {
+  // Absent allowedAgents is unrestricted; an explicit empty list allows none.
   const stems = available.filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''));
   if (allowedAgents === undefined) {
     return { allowedStems: stems, missing: [] };
@@ -300,6 +301,7 @@ export function resolveAllowedSubagents(
 const SUBAGENT_DISPATCH_TOOL = 'Task';
 
 export function ensureSubagentDispatchTool(tools: string[], hasSubagents: boolean): string[] {
+  // Workflows with subagents retain Task or dispatch silently disappears.
   if (!hasSubagents || tools.includes(SUBAGENT_DISPATCH_TOOL)) return tools;
   return [...tools, SUBAGENT_DISPATCH_TOOL];
 }
@@ -309,6 +311,7 @@ export function pruneStaleWorkflowSubagents(
   workflowSubagentFiles: string[],
   allowedStems: string[],
 ): string[] {
+  // Prune only filenames owned by this workflow so stale scope cannot bypass restrictions and user files survive.
   if (!fs.existsSync(sharedAgentsDir)) return [];
   const allow = new Set(allowedStems);
   const pruned: string[] = [];
@@ -539,6 +542,7 @@ export function listPluginWorkflowDirs(
 }
 
 export function isBareWorkflowName(ref: string): boolean {
+  // Lookup accepts only bare non-traversal identifiers inside known search roots.
   if (!ref || ref === '.' || ref === '..') return false;
   if (ref.includes('/') || ref.includes('\\')) return false;
   if (ref.includes('..')) return false;
@@ -576,6 +580,7 @@ export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): st
   if (!parsed) return null;
 
   if (parsed.source) {
+    // Source-qualified references never fall back to another source.
     for (const dir of listPluginWorkflowDirs(cwd, parsed.source)) {
       const workflowPath = path.join(dir, parsed.name);
       if (isWorkflowDir(workflowPath)) return workflowPath;
@@ -588,6 +593,7 @@ export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): st
     return null;
   }
 
+  // Bare precedence is project → user → plugin → extra repo → system.
   const projectAgentsDir = getProjectAgentsDir(cwd);
   const searchDirs = [
     ...(projectAgentsDir ? [path.join(projectAgentsDir, 'workflows')] : []),
@@ -716,6 +722,7 @@ export function removeWorkflow(name: string): { success: boolean; error?: string
 }
 
 export function antigravityWorkflowsDir(): string {
+  // Antigravity reads this HOME-global directory, not isolated version homes.
   return path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'global_workflows');
 }
 
@@ -767,6 +774,7 @@ export function writeGooseSubrecipe(workflowPath: string, subrecipeName: string,
 }
 
 export function renderGooseRecipeYaml(workflowPath: string, name: string): string | null {
+  // Writer and drift checker share this renderer so they compare identical bytes.
   const frontmatter = parseWorkflowFrontmatter(workflowPath);
   if (!frontmatter) return null;
   const body = readWorkflowBody(workflowPath) || frontmatter.description || name;

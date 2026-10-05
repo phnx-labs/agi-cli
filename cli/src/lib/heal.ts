@@ -166,6 +166,7 @@ function healVersion(
   const home = getVersionHomePath(agent, version);
   if (!fs.existsSync(home)) return result;
 
+  // Compare live non-project homes; rules and memory intentionally share whole-memory sync.
   const diffOpts = { cwd: opts.cwd, excludeProject: true } as const;
   const report = diffVersionResources(agent, version, diffOpts);
   const selection: ResourceSelection = {};
@@ -192,6 +193,7 @@ function healVersion(
     }
   }
 
+  // Re-push changed plugins only where they are already installed.
   const pluginHealed: HealedResource[] = [];
   if (opts.changedPlugins.size > 0) {
     const synced = new Set(getActuallySyncedResources(agent, version, diffOpts).plugins);
@@ -214,6 +216,7 @@ function healVersion(
   syncResourcesToVersion(agent, version, selection, { cwd: opts.cwd });
   result.healed.push(...pluginHealed);
 
+  // Re-diff before claiming that a repair succeeded.
   const post = diffVersionResources(agent, version, diffOpts);
   const stillBad = new Set<string>();
   for (const rows of Object.values(post.kinds)) {
@@ -235,6 +238,7 @@ function healVersion(
 
 export async function heal(opts: HealOptions): Promise<HealResult> {
   const cwd = opts.cwd ?? os.homedir();
+  // Full sync may overwrite drift; unattended safe heal fills unambiguous gaps and never deletes.
   const full = opts.mode === 'full';
 
   const repairedManifests = repairCentralPluginManifests(opts.dryRun);
@@ -247,6 +251,7 @@ export async function heal(opts: HealOptions): Promise<HealResult> {
     ...refreshed.map((r) => r.plugin),
   ]);
 
+  // Sweeps exclude isolated versions; explicitly naming a version is operator consent.
   const sweep = (a: AgentId) => listInstalledVersions(a).filter((v) => !isVersionIsolated(a, v));
   const targets: Array<{ agent: AgentId; versions: string[] }> = opts.agent
     ? [{ agent: opts.agent, versions: opts.versions ?? sweep(opts.agent) }]

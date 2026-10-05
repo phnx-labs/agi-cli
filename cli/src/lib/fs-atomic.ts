@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
 
 const LOCK_STALE_MS = 5_000;
+// Acquisition must outlast the stale-break window while remaining bounded.
 const LOCK_ACQUIRE_TIMEOUT_MS = 30_000;
 const LOCK_RETRY_MIN_MS = 50;
 const LOCK_RETRY_MAX_MS = 250;
@@ -93,11 +94,13 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
     );
   }
   const lockDir = `${filePath}.lock`;
+  // CPU-bound holders heartbeat synchronously because proper-lockfile's timer cannot run while the event loop is blocked.
   const heartbeat = (): void => {
     try { const now = new Date(); fs.utimesSync(lockDir, now, now); } catch {  }
   };
   try {
     const result = fn(heartbeat);
+    // Losing exclusivity invalidates the protected result.
     if (compromised) {
       throw new Error(
         `Lock for ${filePath} was broken by another process while held: ` +
@@ -110,6 +113,7 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
   }
 }
 
+// Daemon callers use this variant so retry waits do not freeze the shared event loop.
 export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () => void) => Promise<T> | T, opts: FileLockOptions = {}): Promise<T> {
   let release: (() => Promise<void>) | null = null;
   let lastError: unknown;
