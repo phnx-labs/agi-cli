@@ -48,11 +48,6 @@ describe('feed answer claim-before-route', () => {
   it('resolves --choice approve-session on a permission item to the harness key (2), delivered via the reply rail', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-perm-'));
     const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-perm-mailbox-'));
-    // A running (not parked) agent routes the answer to its mailbox, so the
-    // delivered text is exactly the resolved deliveryKey — proving `approve-session`
-    // maps to Claude's option-2 selection token, not the label.
-    // The block carries the harness's recorded subtype and a write-time cursor
-    // the row's last transcript event precedes — a confirmed pending permission.
     const session = { context: 'terminal', kind: 'claude', host: 'worker', sessionId: 'perm', agentId: 'perm', status: 'running', activity: 'working', pidAlive: true, lastEventMs: 900 } as ActiveSession;
     const block: OpenBlock = {
       blockId: blockIdForSession('perm'), sessionId: 'perm', mailboxId: 'perm', host: 'worker', runtime: 'claude',
@@ -73,8 +68,6 @@ describe('feed answer claim-before-route', () => {
   it('refuses to answer a request it could not verify is still pending (PHNX-3999)', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-unverified-'));
     const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-unverified-mailbox-'));
-    // A cloud-shaped row: no transcript cursor to check the hook's word against,
-    // and the permission prompt is well past the trust window.
     const session = { context: 'cloud', kind: 'claude', host: 'worker', sessionId: 'stale', agentId: 'stale', status: 'running' } as ActiveSession;
     const block: OpenBlock = {
       blockId: blockIdForSession('stale'), sessionId: 'stale', mailboxId: 'stale', host: 'worker', runtime: 'claude',

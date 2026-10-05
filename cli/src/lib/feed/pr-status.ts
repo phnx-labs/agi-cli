@@ -26,15 +26,8 @@ function needsHuman(value: Omit<PullRequestStatus, 'needsHuman'>): boolean {
   return value.reviewDecision !== 'APPROVED' || (value.mergeable === 'MERGEABLE' && checksSettled);
 }
 
-/** CLI-owned bounded-TTL source shared by feed attention and PR-board consumers. */
 export const PR_STATUS_DEFAULT_TIMEOUT_MS = 15_000;
 
-/**
- * @param options.timeoutMs bound for the underlying `gh` call. An operator-facing
- *   caller working against a deadline (the feed answer path) passes its remaining
- *   budget so one unreachable PR cannot consume the whole operation; a timed-out
- *   read is negative-cached for the TTL like any other failure.
- */
 export async function readPullRequestStatus(
   session: ActiveSession,
   options: { nowMs?: number; ttlMs?: number; timeoutMs?: number; gh?: GhExec } = {},
@@ -63,11 +56,6 @@ export async function readPullRequestStatus(
 
 export function resetPullRequestStatusCache(): void { cache.clear(); }
 
-/**
- * The check rollup folded to one verdict; undefined when the PR has no checks.
- * `statusCheckRollup` mixes Checks-API runs (`conclusion` + `status`) with
- * legacy Status-API contexts (`state` only), so both shapes are read.
- */
 export function checksVerdict(rollup?: unknown[]): DetectedPr['checks'] {
   if (!rollup || rollup.length === 0) return undefined;
   let pending = false;
@@ -80,12 +68,6 @@ export function checksVerdict(rollup?: unknown[]): DetectedPr['checks'] {
   return pending ? 'pending' : 'passing';
 }
 
-/**
- * The row with its `pr` carrying the fetched status, so a consumer that only
- * sees the agent row (the menu bar, the extension) can color the chip without
- * its own `gh` call. A row without a PR, or a status that never resolved, is
- * returned as is.
- */
 export function withPullRequestStatus<T extends { pr?: DetectedPr }>(row: T, status?: PullRequestStatus): T {
   if (!row.pr || !status) return row;
   const pr: DetectedPr = {

@@ -49,12 +49,9 @@ describe('canonical tool rows', () => {
     expect(row.live).toBe(true);
     expect(row.device).toBe('zion');
     expect(row.scope).toBe('yosemite-m1');
-    // runOn is the OBSERVING host: `--device` on a later browser verb is refused,
-    // so acting on a peer's task means running the plain argv on that peer.
     expect(row.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'post'], runOn: 'yosemite-m1' });
     expect(row.owner).toEqual({ sessionId: 'sess-1', device: 'zion', label: 'ship the feed', agent: 'claude' });
     expect(row.captures.map((capture) => capture.name)).toEqual(['b.png', 'a.png']);
-    // Every capture names the host that HOLDS the file, not the driven device.
     expect(row.captures.map((capture) => capture.host)).toEqual(['yosemite-m1', 'yosemite-m1']);
     expect(row.captureCounts).toEqual({ screenshot: 2 });
     expect(row.startedAtMs).toBe(500);
@@ -65,7 +62,6 @@ describe('canonical tool rows', () => {
     const row = projectBrowserToolRow('yosemite-m1', browserRow(), undefined);
     expect(row.live).toBe(false);
     expect(row.closeCommand).toBeUndefined();
-    // Start falls back to the oldest capture when no binding recorded a time.
     expect(row.startedAtMs).toBe(1_000);
   });
 
@@ -98,7 +94,6 @@ describe('canonical tool rows', () => {
     ));
     const browser = projectBrowserToolRow('m1', browserRow({ artifacts: many, latestMtimeMs: 10_000 }));
     expect(browser.captures).toHaveLength(TOOL_CAPTURE_LIMIT);
-    // Counts still describe the WHOLE row, not the truncated window.
     expect(browser.captureCounts.screenshot).toBe(many.length);
 
     const actions = Array.from({ length: TOOL_ACTION_LIMIT + 10 }, (_, i) => (
@@ -141,21 +136,16 @@ describe('canonical tool rows', () => {
 
 describe('live task identity, tabs and commands', () => {
   it('reports a bound task as live with zero captures, and sorts it by its own start', () => {
-    // The regression: a task opened a second ago has no capture, so a
-    // capture-derived row set had nothing for it at all.
     const row = projectBrowserToolRow('m1', boundBrowserRow('fresh', { profile: 'work' }), { device: 'm1', createdAt: 5_000 });
     expect(row.live).toBe(true);
     expect(row.captures).toEqual([]);
     expect(row.captureCounts).toEqual({});
     expect(row.startedAtMs).toBe(5_000);
-    // Not 0: a brand-new live task must not sort below every historical row.
     expect(row.updatedAtMs).toBe(5_000);
     expect(row.closeCommand?.args).toEqual(['browser', 'done', '--task', 'fresh']);
   });
 
   it('collapses the capture-derived and live records for one task onto ONE row key', () => {
-    // Keyed on the task, never the profile: a live record may not know the
-    // profile, and two keys would render the same task twice.
     const fromCaptures = projectBrowserToolRow('m1', browserRow({ task: 'post', profile: 'work' }));
     const fromBinding = projectBrowserToolRow('m1', boundBrowserRow('post', {}), { device: 'm1' });
     expect(fromBinding.rowKey).toBe(fromCaptures.rowKey);
@@ -179,8 +169,6 @@ describe('live task identity, tabs and commands', () => {
   });
 
   it('omits tabs entirely when this host holds no live record, rather than claiming none', () => {
-    // A task bound to another device has its tabs on THAT box. `undefined` means
-    // "unknown here"; `[]` would be a false claim that it has none.
     const row = projectBrowserToolRow('m1', boundBrowserRow('remote', {}), { device: 'win-mini' });
     expect(row.tabs).toBeUndefined();
     expect(row.device).toBe('win-mini');
@@ -204,7 +192,6 @@ describe('computer captures come only from real producer records', () => {
   });
 
   it('reports no capture for a screenshot action that recorded no path', () => {
-    // A failed write, or a pre-capture-history producer. Never a guessed path.
     const row = projectComputerToolRow('m1', computerRow({
       actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1 }],
       counts: { screenshot: 1 },
@@ -215,24 +202,17 @@ describe('computer captures come only from real producer records', () => {
   });
 
   it('keeps a remote run\'s capture host on the INVOKING machine, not the driven one', () => {
-    // The helper RPC returns the image as base64 and the invoking process writes
-    // the file locally, so a remote-desktop screenshot still lands here. Naming
-    // the driven host would send a consumer to a machine that never had the file.
     const row = projectComputerToolRow('m1', computerRow({
       remoteHost: 'win-mini',
       actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: '/caps/w.jpg', kind: 'screenshot', name: 'w.jpg' } }],
     }));
     expect(row.captures[0]!.host).toBe('m1');
-    // The row still names the DRIVEN device — only the capture's holder differs.
     expect(row.device).toBe('win-mini');
   });
 });
 
 describe('device and owner resolve from effective identity', () => {
   it('never publishes the `unknown` machine sentinel as a device', () => {
-    // `groupIntoComputerRuns` writes 'unknown' when no record identified a
-    // machine. It is a not-identified sentinel, not a device name, and publishing
-    // it made a local action unaddressable and invisible under a device filter.
     const row = projectComputerToolRow('zion', computerRow({ machine: 'unknown' }));
     expect(row.device).toBe('zion');
   });
@@ -243,9 +223,6 @@ describe('device and owner resolve from effective identity', () => {
   });
 
   it('links the owner from the live record when the capture history has none', () => {
-    // A live task's session is in tasks.json; a task that never wrote a durable
-    // browser_sessions row has it nowhere else. Resolving the effective identity
-    // before the owner projection is what makes the link appear on both paths.
     const live = { task: 'post', sessionId: 'sess-live', launchId: 'launch-live' };
     const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), undefined, live);
     expect(row.sessionId).toBe('sess-live');
@@ -267,8 +244,6 @@ describe('device and owner resolve from effective identity', () => {
   });
 
   it('invents no owner when nothing recorded one', () => {
-    // recordBrowserSession/emit are pre-existing no-ops on some paths, so closed
-    // history genuinely lacks an owner. A fabricated link is worse than none.
     const row = projectBrowserToolRow('m1', browserRow({ sessionId: undefined, launchId: undefined, linkedSession: undefined, linkStatus: 'unlinked' }));
     expect(row.owner).toBeUndefined();
     expect(row.sessionId).toBeUndefined();

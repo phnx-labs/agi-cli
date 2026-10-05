@@ -17,16 +17,8 @@ function line(sessionId: string, detail: string, ts: string, event = 'status.pos
   return `${JSON.stringify({ v: 1, sessionId, event, ts, detail, host: 'box', runtime: 'headless' })}\n`;
 }
 
-/**
- * Wait until the filesystem's timestamp clock has advanced.
- *
- * Linux stamps ctime from a coarse clock, so two writes inside the same tick
- * share a ctime and the same-length-rewrite guard has nothing to see. That is a
- * property of the filesystem, not of the reader, so the test waits it out
- * instead of asserting through it.
- */
 async function tickFsClock(dir: string): Promise<void> {
-  const probe = path.join(dir, '.tick'); // not *.jsonl, so the stream ignores it
+  const probe = path.join(dir, '.tick');
   fs.writeFileSync(probe, 'a');
   const start = fs.statSync(probe, { bigint: true }).ctimeNs;
   const deadline = Date.now() + 5_000;
@@ -39,19 +31,16 @@ async function tickFsClock(dir: string): Promise<void> {
   fs.unlinkSync(probe);
 }
 
-/** Wait for a real fs.watch notification to land, bounded so a miss fails loud. */
 async function settle(ms = 120): Promise<void> { await new Promise((resolve) => setTimeout(resolve, ms)); }
 
 describe('incremental activity stream over real files', () => {
   it('emits exactly what readRecentActivity emits for the same appended lines', () => {
     const dir = root();
-    // History the stream must never replay: it predates the cursor.
     fs.writeFileSync(path.join(dir, 'a.jsonl'), line('a', 'old-a', '2026-09-05T00:00:00.000Z'));
     fs.writeFileSync(path.join(dir, 'b.jsonl'), line('b', 'old-b', '2026-09-05T00:00:01.000Z'));
     const sinceMs = Date.parse('2026-09-06T00:00:00.000Z');
     const stream = new ActivityStream({ root: dir, watch: false });
 
-    // Appended out of timestamp order and across files, so ordering is a real assertion.
     fs.appendFileSync(path.join(dir, 'a.jsonl'), line('a', 'a-2', '2026-09-06T00:00:02.000Z'));
     fs.appendFileSync(path.join(dir, 'b.jsonl'), line('b', 'b-1', '2026-09-06T00:00:01.000Z'));
     fs.appendFileSync(path.join(dir, 'a.jsonl'), line('a', 'a-3', '2026-09-06T00:00:03.000Z'));
@@ -73,7 +62,6 @@ describe('incremental activity stream over real files', () => {
     expect(corpusBytes).toBeGreaterThan(100_000);
 
     const stream = new ActivityStream({ root: dir, watch: false });
-    // The opening scan stats every log and opens none of them.
     expect(stream.bytesRead).toBe(0);
 
     const appended = line('s7', 'live', '2026-09-06T00:00:00.000Z');
@@ -82,7 +70,6 @@ describe('incremental activity stream over real files', () => {
     expect(events.map((event) => event.detail)).toEqual(['live']);
     expect(stream.bytesRead).toBe(Buffer.byteLength(appended));
 
-    // An idle tick over the same thousand logs reads nothing at all.
     const before = stream.bytesRead;
     expect(stream.read(Date.parse('2026-09-06T00:00:00.000Z'))).toEqual([]);
     expect(stream.bytesRead).toBe(before);
@@ -101,7 +88,6 @@ describe('incremental activity stream over real files', () => {
     expect(stream.read(sinceMs)).toEqual([]);
     fs.appendFileSync(file, record.slice(20));
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['torn']);
-    // No duplicate on the next tick.
     expect(stream.read(sinceMs)).toEqual([]);
     stream.close();
   });
@@ -115,23 +101,17 @@ describe('incremental activity stream over real files', () => {
     fs.appendFileSync(file, line('s', 'appended', '2026-09-06T00:00:00.000Z'));
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['appended']);
 
-    // Rewritten in place to a LONGER file: growth alone would read the tail as
-    // an append and parse the middle of a record. The bytes behind the cursor
-    // no longer match, so the file restarts instead.
     fs.writeFileSync(file, line('s', 'rewritten-in-place-and-longer', '2026-09-06T00:00:01.000Z'));
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['rewritten-in-place-and-longer']);
 
-    // Truncated below the cursor: the shorter file is re-read from its start.
     fs.writeFileSync(file, line('s', 'short', '2026-09-06T00:00:02.000Z'));
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['short']);
 
-    // Atomic replacement (new inode, same path).
     const staged = path.join(dir, 'staged');
     fs.writeFileSync(staged, line('s', 'replaced', '2026-09-06T00:00:03.000Z'));
     fs.renameSync(staged, file);
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['replaced']);
 
-    // A log created after the opening scan is new work, so it IS read.
     fs.writeFileSync(path.join(dir, 'new.jsonl'), line('new', 'fresh', '2026-09-06T00:00:04.000Z'));
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['fresh']);
 
@@ -143,10 +123,6 @@ describe('incremental activity stream over real files', () => {
   it('reads a same-length in-place rewrite that leaves size and mtime untouched', async () => {
     const dir = root();
     const file = path.join(dir, 's.jsonl');
-    // Two records of identical byte length, so the rewrite moves neither the
-    // size nor the 64-byte anchor behind the cursor, and both states are pinned
-    // to the SAME mtime. ctime is then the only remaining signal; without it
-    // this reader retires the file for good and never emits the rewrite.
     const before = line('s', 'aaaaaaaa', '2026-09-06T00:00:01.000Z');
     const after = line('s', 'bbbbbbbb', '2026-09-06T00:00:02.000Z');
     expect(Buffer.byteLength(after)).toBe(Buffer.byteLength(before));
@@ -179,9 +155,6 @@ describe('incremental activity stream over real files', () => {
     for (const [i, file] of files.entries()) fs.writeFileSync(file, line(`s${i}`, `seed-${i}`, '2026-09-05T00:00:00.000Z'));
     const stream = new ActivityStream({ root: dir, watch: false });
 
-    // One log is written to, the rest stay put. Cursors are kept for every log
-    // in the directory — no size cap — so a quiet log is never re-registered as
-    // new work and never replays its tail as a duplicate.
     fs.appendFileSync(files[0], line('s0', 'appended', '2026-09-06T00:00:00.000Z'));
     expect(stream.read(sinceMs).map((event) => event.detail)).toEqual(['appended']);
     for (let tick = 1; tick <= 5; tick += 1) {
@@ -201,8 +174,6 @@ describe('incremental activity stream over real files', () => {
     expect(Buffer.byteLength(burst)).toBeGreaterThan(400);
     fs.appendFileSync(file, burst);
     const details = stream.read(sinceMs).map((event) => event.detail);
-    // Bounded like readRecentActivity's tail: the newest records survive, the
-    // partial leading record is dropped rather than parsed as garbage.
     expect(details.length).toBeGreaterThan(0);
     expect(details[0]).toBe('burst-19');
     expect(stream.bytesRead).toBeLessThanOrEqual(400);
@@ -212,8 +183,6 @@ describe('incremental activity stream over real files', () => {
   it('picks up an appended log through the directory watcher without sweeping every tick', async () => {
     const dir = root();
     fs.writeFileSync(path.join(dir, 's.jsonl'), line('s', 'seed', '2026-09-05T00:00:00.000Z'));
-    // A sweep cadence far beyond the test window, so a hit here proves the
-    // watcher — not the fallback poll — delivered the change.
     const stream = new ActivityStream({ root: dir, sweepMs: 3_600_000 });
     const sinceMs = Date.parse('2026-09-06T00:00:00.000Z');
     fs.appendFileSync(path.join(dir, 's.jsonl'), line('s', 'watched', '2026-09-06T00:00:00.000Z'));

@@ -35,7 +35,6 @@ import { emit, query, _resetForTest as resetEventsForTest } from './events.js';
 import { resetActorCache } from '../actor.js';
 import { resetEventProvenanceForTest } from '../event-provenance.js';
 
-/** Minimal well-formed enriched event; override any field per test. */
 function ev(partial: Partial<EnrichedActivityEvent>): EnrichedActivityEvent {
   return {
     v: 1,
@@ -57,7 +56,6 @@ function tmpActivityDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-test-'));
 }
 
-/** Run the real embedded Python hook against one payload; return the log dir. */
 function runHook(home: string, payload: Record<string, unknown>, env: Record<string, string> = {}) {
   return spawnSync('python3', ['-c', ACTIVITY_LOG_HOOK_SCRIPT], {
     input: JSON.stringify(payload),
@@ -124,7 +122,7 @@ describe('activity log store (TS)', () => {
 
     const s1 = readSessionActivity('s1', dir);
     expect(s1.map((e) => e.event)).toEqual(['plan.created', 'pr.opened']);
-    expect(s1[0].tier).toBe('milestone'); // stamped by tierForEvent
+    expect(s1[0].tier).toBe('milestone');
 
     const recent = readRecentActivity({ root: dir });
     expect(recent.map((e) => e.event)).toEqual(['pr.opened', 'commit.created', 'plan.created']);
@@ -142,7 +140,6 @@ describe('activity log store (TS)', () => {
 
   it('applies the event filter before the limit so rare posts survive routine churn', () => {
     const dir = tmpActivityDir();
-    // A busy box: 40 routine edits newer than the one deliberate progress post.
     appendActivityEvent(
       { ts: '2026-07-29T09:00:00.000Z', event: 'status.posted', sessionId: 's1', mailboxId: 's1', host: 'h', runtime: 'headless', detail: 'PR #1690 open; watching CI' },
       dir,
@@ -153,12 +150,9 @@ describe('activity log store (TS)', () => {
         dir,
       );
     }
-    // Slicing first and filtering after is what returned an empty updates view.
     expect(readRecentActivity({ root: dir, limit: 30 }).filter((e) => e.event === 'status.posted')).toHaveLength(0);
-    // Pushing the filter into the reader makes `limit` count posts, not churn.
     const posts = readRecentActivity({ root: dir, limit: 30, events: ['status.posted'] });
     expect(posts.map((e) => e.detail)).toEqual(['PR #1690 open; watching CI']);
-    // Same defect, same fix for the milestone lane under the block view.
     expect(readRecentActivity({ root: dir, limit: 6, tier: 'milestone' }).map((e) => e.event)).toEqual(['status.posted']);
   });
 
@@ -237,8 +231,6 @@ describe('ensureActivityLogHook', () => {
     const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-padding-'));
     fs.mkdirSync(userDir, { recursive: true });
     const agentsYaml = path.join(userDir, 'agents.yaml');
-    // The committed form uses unpadded flow sequences; the emitter defaults to
-    // padded output, which used to dirty the git-backed ~/.agents tree.
     const committed = 'hooks:\n  notify-owner:\n    command: [agents, notify, "{message}"]\n    agents: [claude, codex]\n    events: [Stop]\n    script: notify.sh\n';
     fs.writeFileSync(agentsYaml, committed);
     expect(ensureActivityLogHook(userDir)).toEqual({ installed: true });
@@ -254,20 +246,15 @@ describe('ensureActivityLogHook', () => {
 
 describe('ACTIVITY_LOG_HOOK_SCRIPT generated registries (#1889)', () => {
   it('embeds rmdir and agents/linear from the TypeScript single source', () => {
-    // The hand-authored Python copy had already drifted: missing rmdir (in
-    // TOOL_REGISTRY) and missing agents/linear (in VALUE_FLAGS). Generated
-    // interpolation from bash-command.ts must carry both.
     expect(ACTIVITY_LOG_HOOK_SCRIPT).toContain('"rmdir":');
     expect(ACTIVITY_LOG_HOOK_SCRIPT).toContain('"agents":');
     expect(ACTIVITY_LOG_HOOK_SCRIPT).toMatch(/"linear":\s*set\(\)/);
-    // Sanity: still a valid dict body (no bare ${interpolation} leftovers)
     expect(ACTIVITY_LOG_HOOK_SCRIPT).not.toContain('${pythonToolRegistryLiteral');
     expect(ACTIVITY_LOG_HOOK_SCRIPT).not.toContain('${pythonValueFlagsLiteral');
   });
 });
 
 describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)', () => {
-  // win32: spawns a real Python hook with POSIX env/path assumptions (RUSH-2215 expanded).
   pythonTest('reads actor, kind, launch, and parent provenance from the child env', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-provenance-'));
     const r = runHook(home, {
@@ -387,7 +374,6 @@ describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)',
     expect(events[0].tier).toBe('milestone');
     expect(events[0].detail).toBe('plan-preview.html');
 
-    // A code Write stays a routine file.edited (collapses, not a milestone).
     runHook(home, {
       session_id: 'sess-art',
       hook_event_name: 'PostToolUse',
@@ -417,7 +403,6 @@ describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)',
 
   pythonTest('does not mistake a path for a git subcommand (tokenized classify)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-fp-'));
-    // A path containing "commit"/"push" must NOT trigger commit.created/pushed.
     runHook(home, {
       session_id: 'fp', hook_event_name: 'PostToolUse', tool_name: 'Bash',
       tool_input: { command: 'git diff -- src/commit.ts src/push.ts' }, tool_response: {},
@@ -425,7 +410,6 @@ describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)',
     const first = readSessionActivity('fp', activityDirFor(home));
     expect(first.map((e) => e.event)).toEqual(['bash.executed']);
     expect(first[0].bashTool).toBe('git');
-    // But a real `git -C <path> commit` (leading flags) is still detected.
     runHook(home, {
       session_id: 'fp', hook_event_name: 'PostToolUse', tool_name: 'Bash',
       tool_input: { command: 'git -C /repo commit -m "fix"' }, tool_response: {},
@@ -771,7 +755,6 @@ describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)',
     });
     const events = readSessionActivity(sessionId, activityDirFor(home));
     expect(events.map((e) => e.event)).toEqual(['task.completed']);
-    // 3 created, 1 deleted -> total is 2 (not 3); this completion is the 2nd of 2.
     expect(events[0].detail).toBe('A2 2/2 done');
   });
 
@@ -790,9 +773,6 @@ describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)',
   });
 });
 
-// ---------------------------------------------------------------------------
-// Fleet fan-out, enrichment, grouping (the "activity bar")
-// ---------------------------------------------------------------------------
 
 describe('projectFromCwd', () => {
   it('resolves a worktree cwd to the repo dir name', () => {
@@ -840,9 +820,6 @@ describe('enrichActivityEvents', () => {
   });
 
   it('upgrades a stale or def-skewed pre-baked stamp when a local def matches the cwd', () => {
-    // A peer whose defs haven't synced (or a feed post written before the def
-    // existed) stamps the repo key; the reader's canonical def match wins, so a
-    // multi-repo project stays one bucket and `--project` doesn't miss it.
     const canonical = (cwd?: string | null) => (cwd?.startsWith('/home/me/src/rush') ? 'rush' : undefined);
     const [out] = enrichActivityEvents(
       [ev({ sessionId: 'r', cwd: '/home/me/src/rush/apps/web', project: 'rush-web' })],
@@ -854,7 +831,7 @@ describe('enrichActivityEvents', () => {
   });
 
   it('honors the pre-baked stamp when no local def matches (foreign path)', () => {
-    const canonical = () => undefined; // different-home peer: no def matches
+    const canonical = () => undefined;
     const [out] = enrichActivityEvents(
       [ev({ sessionId: 'r', cwd: '/Users/other/src/rush', project: 'rush' })],
       [],
@@ -874,8 +851,8 @@ describe('parseActivityPayload', () => {
   it('keeps the event host and drops invalid items', () => {
     const payload = JSON.stringify([
       { v: 1, ts: '2026-08-01T00:00:00Z', event: 'pr.opened', tier: 'milestone', sessionId: 's1', host: 'zion' },
-      { event: 'file.edited' }, // missing sessionId + ts -> dropped
-      42, // not an object -> dropped
+      { event: 'file.edited' },
+      42,
     ]);
     const out = parseActivityPayload(payload, 'dialed-peer');
     expect(out).toHaveLength(1);
@@ -897,8 +874,8 @@ describe('mergeActivityEvents', () => {
     const dup = ev({ sessionId: 's', ts: '2026-08-01T10:00:00.000Z', event: 'commit.created', host: 'yosemite-s0' });
     const newer = ev({ sessionId: 't', ts: '2026-08-01T11:00:00.000Z', event: 'pr.opened', host: 'zion' });
     const merged = mergeActivityEvents([local], [dup, newer]);
-    expect(merged).toHaveLength(2); // dup collapsed
-    expect(merged[0].ts).toBe('2026-08-01T11:00:00.000Z'); // newest first
+    expect(merged).toHaveLength(2);
+    expect(merged[0].ts).toBe('2026-08-01T11:00:00.000Z');
     expect(new Set(merged.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
   });
   it('does not collapse the same session/ts/event across different hosts', () => {
@@ -930,11 +907,9 @@ describe('filterActivityByProject', () => {
     ev({ sessionId: '1', project: 'rush', event: 'pr.opened' }),
     ev({ sessionId: '2', project: 'rush', event: 'pushed' }),
     ev({ sessionId: '3', project: 'rush-infra', event: 'pushed' }),
-    ev({ sessionId: '4', event: 'plan.created' }), // no project label
+    ev({ sessionId: '4', event: 'plan.created' }),
   ];
   it('exact-matches the resolved project label — no substring bleed', () => {
-    // 'rush' must NOT pull in 'rush-infra'; a multi-repo project only matches
-    // because the resolver already collapsed it to one label upstream.
     expect(filterActivityByProject(events, 'rush').map((e) => e.sessionId)).toEqual(['1', '2']);
   });
   it('misses nothing silently — unknown or empty names', () => {
@@ -957,7 +932,7 @@ describe('activityGroupKey / groupActivity', () => {
       ev({ sessionId: '1', project: 'agents-cli' }),
       ev({ sessionId: '2', project: 'agents-cli' }),
       ev({ sessionId: '3', project: 'rush' }),
-      ev({ sessionId: '4', host: 'unknown', cwd: undefined }), // unknown project
+      ev({ sessionId: '4', host: 'unknown', cwd: undefined }),
     ], 'project');
     expect(groups.map((g) => g.label)).toEqual(['agents-cli', 'rush', 'unknown project']);
     expect(groups[0].events).toHaveLength(2);
@@ -979,8 +954,6 @@ describe('capActivityEvents', () => {
     ev({ sessionId: id, event: 'file.edited', tier: 'activity', executionHost: host });
 
   it('spends the budget on milestones, not on collapsed churn', () => {
-    // The real regression: one box editing 40 files buried every other
-    // device's PRs behind a single `file edited ×40` line.
     const stream = [...Array.from({ length: 40 }, (_, i) => routine(`edit-${i}`)), milestone('pr', 'yosemite-s0')];
     const capped = capActivityEvents(stream, 40);
     expect(capped.filter((e) => e.event === 'pr.opened')).toHaveLength(1);
@@ -1002,8 +975,6 @@ describe('capActivityEvents', () => {
     expect(capActivityEvents(stream, 10)).toHaveLength(3);
   });
 
-  // The command rejects such a limit before it gets here (`--limit must be a
-  // positive number`); this pins that the primitive never invents a window.
   it('returns nothing for a non-positive or unparsable limit', () => {
     expect(capActivityEvents([milestone('a')], 0)).toEqual([]);
     expect(capActivityEvents([milestone('a')], Number.NaN)).toEqual([]);
@@ -1060,7 +1031,6 @@ describe('formatEnrichedActivityLine', () => {
 
 describe('fleet fan-out MERGE + group (integration over per-host JSON payloads)', () => {
   it('parses each peer payload, merges host-tagged, and groups by project', () => {
-    // Two peers each answer `activity --json` for themselves.
     const s0 = JSON.stringify([
       { v: 1, ts: '2026-08-01T10:00:00.000Z', event: 'pr.opened', tier: 'milestone', sessionId: 'a', host: 'yosemite-s0', runtime: 'headless', project: 'agents-cli', ticket: 'RUSH-2100' },
     ]);
@@ -1069,20 +1039,16 @@ describe('fleet fan-out MERGE + group (integration over per-host JSON payloads)'
       { v: 1, ts: '2026-08-01T09:00:00.000Z', event: 'plan.created', tier: 'milestone', sessionId: 'c', host: 'zion', runtime: 'headless', project: 'agents-cli' },
     ]);
     const merged = mergeActivityEvents(parseActivityPayload(s0, 'yosemite-s0'), parseActivityPayload(zion, 'zion'));
-    // Newest first across the fleet.
     expect(merged.map((e) => e.ts)).toEqual([
       '2026-08-01T11:00:00.000Z',
       '2026-08-01T10:00:00.000Z',
       '2026-08-01T09:00:00.000Z',
     ]);
-    // Host tags survive the merge.
     expect(new Set(merged.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
 
     const groups = groupActivity(merged, 'project');
-    expect(groups.map((g) => g.label)).toEqual(['agents-cli', 'rush']); // agents-cli has 2, rush 1
-    // The agents-cli bucket carries one event from each machine.
+    expect(groups.map((g) => g.label)).toEqual(['agents-cli', 'rush']);
     expect(new Set(groups[0].events.map((e) => e.host))).toEqual(new Set(['yosemite-s0', 'zion']));
-    // Grouping by device buckets by the execution host of each event.
     expect(groupActivity(merged, 'device').map((g) => g.label).sort()).toEqual(['yosemite-s0', 'zion']);
   });
 });
@@ -1093,9 +1059,9 @@ describe('attachments schema (RUSH-2013)', () => {
   it('sanitizeAttachments drops entries without an href and clamps meta', () => {
     const out = sanitizeAttachments([
       { kind: 'image', href: ' cover.png ', name: 'Cover', bytes: 42, meta: { width: 800, junk: {} } },
-      { kind: 'link' }, // no href -> dropped
-      { href: 'https://x/y' }, // kind defaults to link
-      'nope', // not an object -> dropped
+      { kind: 'link' },
+      { href: 'https://x/y' },
+      'nope',
     ]);
     expect(out).toEqual([
       { kind: 'image', href: 'cover.png', name: 'Cover', bytes: 42, meta: { width: 800 } },
@@ -1180,19 +1146,10 @@ describe('factory.launch as a milestone', () => {
   it('classifies to the milestone tier so it surfaces individually in the lane', () => {
     expect(tierForEvent('factory.launch')).toBe('milestone');
     expect(MILESTONE_EVENTS).toContain('factory.launch');
-    // A routine, count-collapsed kind for contrast.
     expect(tierForEvent('file.edited')).toBe('activity');
   });
 
   it('is deliberately ABSENT from the Python hook milestone set, and nothing else is', () => {
-    // The hook script carries its own copy of MILESTONE_EVENTS, used only to
-    // tier events the hook itself writes from PreToolUse/PostToolUse. It never
-    // writes factory.launch (that arrives via `agents events emit`) or
-    // status.blocked (that arrives via `agents feed post --blocked`), so the two
-    // lists legitimately differ by exactly those out-of-process members. Pinning
-    // it here turns an invisible divergence into a deliberate, reviewed one: if
-    // someone adds a milestone the hook DOES write and forgets the Python copy,
-    // this fails.
     const block = ACTIVITY_LOG_HOOK_SCRIPT.match(/MILESTONE_EVENTS = \{([^}]*)\}/);
     expect(block).not.toBeNull();
     const pythonSet = new Set(
@@ -1202,7 +1159,6 @@ describe('factory.launch as a milestone', () => {
     const tsOnly = MILESTONE_EVENTS.filter((e) => !pythonSet.has(e));
     expect(tsOnly).toEqual(['factory.launch', 'status.blocked']);
 
-    // And the Python copy must not invent kinds the TS union does not know.
     const pythonOnly = [...pythonSet].filter((e) => !MILESTONE_EVENTS.includes(e as never));
     expect(pythonOnly).toEqual([]);
   });

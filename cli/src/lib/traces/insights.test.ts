@@ -51,11 +51,9 @@ describe('computeInsights', () => {
       makeCall('sess-rate', 1, iso(0), 'Bash', 'error', {
         error: 'API rate limit exceeded for user 111 (try again in 30s)',
       }),
-      // Same signature after normalization, 2 minutes later — a retry loop.
       makeCall('sess-rate', 2, iso(120_000), 'Bash', 'error', {
         error: 'API rate limit exceeded for user 222 (try again in 47s)',
       }),
-      // Recovers, but only after a 3-minute stall following the second failure.
       makeCall('sess-rate', 3, iso(120_000 + 180_000), 'Bash', 'ok'),
     ];
 
@@ -70,7 +68,6 @@ describe('computeInsights', () => {
     expect(pattern.occurrences).toBe(2);
     expect(pattern.sessions).toBe(1);
     expect(pattern.label).toBe('Bash: rate limit back-off loop');
-    // 120s (retry-loop gap) + 180s (stall after the second failure) = 300s.
     expect(pattern.wastedMs).toBe(300_000);
     expect(result.wastedMsTotal).toBe(300_000);
   });
@@ -78,11 +75,8 @@ describe('computeInsights', () => {
   it('ranks by wasted-time impact, not occurrence count — a rare long stall outranks a frequent short one', () => {
     const rows = [makeRow('sess-big', T0), ...Array.from({ length: 50 }, (_, i) => makeRow(`sess-freq-${i}`, T0))];
     const calls: ToolCallRow[] = [
-      // One session, one failure, an 8-hour idle before the next (unrelated) call.
-      // The failure did not cause 8h of waste — bound it to the recovery window.
       makeCall('sess-big', 1, iso(0), 'Bash', 'error', { error: 'connection refused' }),
       makeCall('sess-big', 2, iso(8 * 60 * 60 * 1000), 'Bash', 'ok'),
-      // 50 sessions, one quick failure each, no follow-up call — zero wasted time.
       ...Array.from({ length: 50 }, (_, i) =>
         makeCall(`sess-freq-${i}`, 1, iso(0), 'Read', 'error', { error: 'permission denied' }),
       ),
@@ -92,7 +86,6 @@ describe('computeInsights', () => {
     const big = result.failurePatterns.find((p) => p.signature.tool === 'Bash');
     const frequent = result.failurePatterns.find((p) => p.signature.tool === 'Read');
     expect(big?.occurrences).toBe(1);
-    // Lone stall bounded to the recovery window, not the full 8h of idle.
     expect(big?.wastedMs).toBe(30 * 60 * 1000);
     expect(frequent?.occurrences).toBe(50);
     expect(frequent?.wastedMs).toBe(0);
@@ -100,9 +93,6 @@ describe('computeInsights', () => {
   });
 
   it('bounds a lone async stall so a chat reply hours later is not booked as failure-loop waste', () => {
-    // The real PHNX-3423 case: rush-assistant in a Slack thread calls a tool that
-    // fails, then the human replies ~4.5h later (an unrelated next call). The raw
-    // >=60s rule booked the whole 4.5h against the failure; it must be bounded.
     const rows = [makeRow('sess-chat', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-chat', 1, iso(0), 'user_location', 'error', { error: 'GPS capability denied or unavailable: timeout' }),
@@ -111,14 +101,11 @@ describe('computeInsights', () => {
     const result = computeInsights(rows, calls, null);
     const pattern = result.failurePatterns.find((p) => p.signature.tool === 'user_location');
     expect(pattern?.occurrences).toBe(1);
-    expect(pattern?.wastedMs).toBe(30 * 60 * 1000); // bounded, not 4.5h
+    expect(pattern?.wastedMs).toBe(30 * 60 * 1000);
     expect(result.wastedMsTotal).toBe(30 * 60 * 1000);
   });
 
   it('sums a real active retry loop from its many short gaps — total exceeds a single-gap cap', () => {
-    // A genuine back-off loop: 6 same-signature failures 10m apart. Each inter-retry
-    // gap (10m) is under the 30m cap and counts in full, so the loop's total (50m)
-    // still exceeds one gap's cap — bounding a single gap doesn't hide a real loop.
     const rows = [makeRow('sess-loop', T0)];
     const calls: ToolCallRow[] = Array.from({ length: 6 }, (_, i) =>
       makeCall('sess-loop', i + 1, iso(i * 10 * 60 * 1000), 'Bash', 'error', {
@@ -128,13 +115,10 @@ describe('computeInsights', () => {
     const result = computeInsights(rows, calls, null);
     const pattern = result.failurePatterns[0];
     expect(pattern.occurrences).toBe(6);
-    expect(pattern.wastedMs).toBe(5 * 10 * 60 * 1000); // 5 gaps × 10m = 50m, all counted
+    expect(pattern.wastedMs).toBe(5 * 10 * 60 * 1000);
   });
 
   it('bounds a same-signature failure that recurs hours apart — a chat re-ask, not an active loop', () => {
-    // The reviewer's case: nextIsSameFailure has no temporal check, so two identical
-    // deterministic failures (GPS permanently denied) 4.5h apart would otherwise look
-    // like an "active retry loop" and absorb the whole 4.5h. The per-gap cap prevents it.
     const rows = [makeRow('sess-reask', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-reask', 1, iso(0), 'user_location', 'error', { error: 'GPS capability denied or unavailable: timeout' }),
@@ -143,7 +127,7 @@ describe('computeInsights', () => {
     const result = computeInsights(rows, calls, null);
     const pattern = result.failurePatterns[0];
     expect(pattern.occurrences).toBe(2);
-    expect(pattern.wastedMs).toBe(30 * 60 * 1000); // bounded, not 4.5h
+    expect(pattern.wastedMs).toBe(30 * 60 * 1000);
   });
 
   it('bounds the shard to the top-K patterns regardless of corpus size', () => {
@@ -167,9 +151,6 @@ describe('computeInsights', () => {
   });
 
   it('attributes a failed call\'s own blocking duration (end - start), even with no next call', () => {
-    // A user_location tool that hung ~5.5 minutes on stdin and then failed
-    // (PHNX-3407). It is the last call in the session, so the gap heuristic alone
-    // would book ~0 — the call's own end timestamp is what makes it measurable.
     const rows = [makeRow('sess-hang', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-hang', 1, iso(0), 'user_location', 'error', {
@@ -183,8 +164,6 @@ describe('computeInsights', () => {
   });
 
   it('a fail-fast call (end - start < 1s) contributes ~0 wasted time', () => {
-    // The PHNX-3407 fix: the same tool now fails in under a second instead of
-    // hanging. The failure is still clustered, but its wasted time drops to ~0.
     const rows = [makeRow('sess-fast', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-fast', 1, iso(0), 'user_location', 'error', {
@@ -198,8 +177,6 @@ describe('computeInsights', () => {
   });
 
   it('a NULL end_timestamp degrades to the bounded-gap heuristic — no crash, no NaN', () => {
-    // Old rows (pre-migration extractor) carry no end timestamp. A lone failed
-    // call with no following call and no end must contribute exactly 0, not NaN.
     const rows = [makeRow('sess-old', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-old', 1, iso(0), 'Bash', 'error', { error: 'boom' }),
@@ -211,9 +188,6 @@ describe('computeInsights', () => {
   });
 
   it('sums own blocking duration and the post-call retry gap without double-counting', () => {
-    // Call 1 blocks 30s then fails; the same failure recurs 90s after it ended
-    // (a retry loop). Own duration (30s) + gap-from-END to the retry (90s) = 120s
-    // — the gap is measured from the call's end, so the 30s blocking counted once.
     const rows = [makeRow('sess-retry', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-retry', 1, iso(0), 'Bash', 'error', {
@@ -224,14 +198,10 @@ describe('computeInsights', () => {
       }),
     ];
     const result = computeInsights(rows, calls, null);
-    // call 1: own 30s + retry gap (120s-30s = 90s) = 120s. call 2: own 30s, no
-    // next call = 30s. Total 150s.
     expect(result.failurePatterns[0].wastedMs).toBe(150_000);
   });
 
   it('bounds the own blocking duration by MAX_GAP_ATTRIBUTION_MS (30m)', () => {
-    // A corrupt/backwards end timestamp — 8 hours after the start — must not book
-    // 8 hours of waste; it is capped at the 30-minute recovery window.
     const rows = [makeRow('sess-corrupt', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-corrupt', 1, iso(0), 'Bash', 'error', {
@@ -254,9 +224,6 @@ describe('computeInsights', () => {
   });
 
   it('splits an identical (tool,cause,key) signature by phenotype, and folds same-phenotype sessions together (PHNX-3327)', () => {
-    // Three sessions, all with the SAME failure signature (Bash / real / "command failed").
-    // Two share a phenotype (false-termination) and must fold into one cluster; the
-    // third has a different phenotype (premature-completion) and is a distinct cluster.
     const rows = [makeRow('sess-ft-1', T0), makeRow('sess-ft-2', T0), makeRow('sess-pc', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-ft-1', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
@@ -270,22 +237,17 @@ describe('computeInsights', () => {
     ]);
 
     const result = computeInsights(rows, calls, null, phenotypes);
-    // Two clusters for one signature — one per phenotype — not three.
     expect(result.failurePatterns).toHaveLength(2);
     const ft = result.failurePatterns.find((p) => p.phenotype === 'false-termination');
     const pc = result.failurePatterns.find((p) => p.phenotype === 'premature-completion');
-    expect(ft?.sessions).toBe(2); // the two false-termination sessions folded together
+    expect(ft?.sessions).toBe(2);
     expect(ft?.occurrences).toBe(2);
     expect(pc?.sessions).toBe(1);
-    // Distinct, deep-linkable ids per phenotype even though (tool,cause,key) matches.
     expect(ft?.id).not.toBe(pc?.id);
-    // The signature output itself is unchanged (no phenotype leaked into it).
     expect(ft?.signature).toEqual({ tool: 'Bash', cause: 'real', key: 'command failed' });
   });
 
   it('with no phenotype map, grouping is exactly the prior (tool,cause,key) behavior', () => {
-    // A caller that passes no phenotypes map (the pre-PHNX-3327 shape) collapses the
-    // dimension to null, so two identically-signatured sessions stay one cluster.
     const rows = [makeRow('sess-a', T0), makeRow('sess-b', T0)];
     const calls: ToolCallRow[] = [
       makeCall('sess-a', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
@@ -330,14 +292,14 @@ describe('computeBehavioralPatterns', () => {
 
     const short = byBucket.get('5-15m')!;
     expect(short.signature).toEqual({ tool: 'silent-stall', cause: 'behavioral', key: '5-15m' });
-    expect(short.occurrences).toBe(3); // 2 in a, 1 in b
+    expect(short.occurrences).toBe(3);
     expect(short.sessions).toBe(2);
-    expect(short.wastedMs).toBe(3 * 10 * 60_000); // bucket midpoint * occurrences
+    expect(short.wastedMs).toBe(3 * 10 * 60_000);
     expect(short.exampleSessionIds.sort()).toEqual(['sess-a', 'sess-b']);
 
     const long = byBucket.get('1h+')!;
     expect(long.occurrences).toBe(1);
-    expect(long.wastedMs).toBe(30 * 60_000); // open bucket capped at MAX_GAP_ATTRIBUTION_MS
+    expect(long.wastedMs).toBe(30 * 60_000);
   });
 
   it('ignores non-silent-stall friction signals', () => {
@@ -372,10 +334,8 @@ describe('computeInsights with behavioral patterns', () => {
     const withBehavioral = computeInsights(rows, calls, null, undefined, behavioral);
     const withoutBehavioral = computeInsights(rows, calls, null, undefined, []);
 
-    // The behavioral pattern (30m of idle) outranks the small tool-error pattern.
     expect(withBehavioral.failurePatterns[0].signature.cause).toBe('behavioral');
     expect(withBehavioral.failurePatterns.some((p) => p.signature.cause === 'real')).toBe(true);
-    // Its wasted time is added to the corpus total, not swallowed.
     expect(withBehavioral.wastedMsTotal).toBe(withoutBehavioral.wastedMsTotal + 30 * 60_000);
   });
 });

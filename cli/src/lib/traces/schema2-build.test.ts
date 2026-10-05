@@ -94,7 +94,6 @@ describe('buildBashActions', () => {
   });
 });
 
-// ── per-tool mappers via buildSessionDetailV2 ────────────────────────────────
 
 function useEvent(partial: Partial<SessionEvent> & { tool: string; callId: string }, sec: number): SessionEvent {
   return { type: 'tool_use', agent: 'claude', timestamp: ts(sec), ...partial } as SessionEvent;
@@ -248,7 +247,6 @@ describe('buildSessionDetailV2 — thinking + hook + shape', () => {
     expect(v2.meta.agent).toBe('claude');
     expect(Array.isArray(v2.steps)).toBe(true);
     expect(Array.isArray(v2.gaps)).toBe(true);
-    // Omits category/risk/categoryMetrics — the consumer backfills them.
     expect((v2 as any).category).toBeUndefined();
     expect((v2 as any).risk).toBeUndefined();
   });
@@ -275,16 +273,13 @@ describe('buildSessionDetailV2 — hook step', () => {
       resultEvent('c1', 2),
     ];
     const { v2 } = detail(events);
-    // Bash step (startMs 0) then the hook step (startMs ~1000).
     expect(v2.steps).toHaveLength(2);
     const hook = v2.steps.find((s) => (s as any).executionType === 'hook') as HookExecution;
     expect(hook).toBeDefined();
     expect(hook.lane).toBe('hook');
     expect(hook.phase).toBe('pre');
-    // success:false → conservative 'unknown' (parse.ts loses blocked-vs-error).
     expect(hook.decision).toBe('unknown');
     expect(hook.hookName).toBe('main-branch-guard');
-    // ordinals renumbered across the merge.
     expect(v2.steps.map((s) => s.ordinal)).toEqual([1, 2]);
   });
 

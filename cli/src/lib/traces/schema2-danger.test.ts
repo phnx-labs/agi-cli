@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { classifyActionDanger } from './schema2-danger.js';
 import { tokenizeBash } from '@phnx-labs/sessions-cli/reader';
 
-/** Tokenize a single command into its first segment's argv, as the producer does. */
 function argv(cmd: string): string[] {
   const segs = tokenizeBash(cmd);
   return segs[0] ?? [];
@@ -14,7 +13,7 @@ describe('classifyActionDanger — DESTRUCTIVE', () => {
     ['rm -fr /tmp/x', 'recursive-force-delete'],
     ['rm -r build', 'recursive-delete'],
     ['rm --recursive --force node_modules', 'recursive-force-delete'],
-    ['rm -rf $DIR', 'recursive-force-delete'], // destructive regardless of expansion
+    ['rm -rf $DIR', 'recursive-force-delete'],
     ['git reset --hard', 'git-reset-hard'],
     ['git reset --hard HEAD~1', 'git-reset-hard'],
     ['git clean -fd', 'git-clean-force'],
@@ -45,7 +44,6 @@ describe('classifyActionDanger — DESTRUCTIVE', () => {
   }
 
   it('flags a redirect that overwrites a raw device', () => {
-    // The tokenizer keeps `>` and its target as separate tokens.
     const v = classifyActionDanger(['dd', 'if=/dev/zero', '>', '/dev/sda']);
     expect(v.danger).toBe('DESTRUCTIVE');
   });
@@ -60,10 +58,10 @@ describe('classifyActionDanger — DESTRUCTIVE', () => {
 describe('classifyActionDanger — potentially-destructive', () => {
   const cases: Array<[string, string]> = [
     ['rm file.txt', 'delete'],
-    ['rm -f file.txt', 'delete'], // force without recursion is still just a delete
-    ['git reset HEAD~1', 'git-reset'], // soft/mixed
+    ['rm -f file.txt', 'delete'],
+    ['git reset HEAD~1', 'git-reset'],
     ['git reset --soft HEAD~1', 'git-reset'],
-    ['git clean -n', 'git-clean'], // dry-run, no force
+    ['git clean -n', 'git-clean'],
     ['kill 1234', 'kill'],
     ['killall node', 'kill'],
     ['mv old new', 'move-overwrite'],
@@ -84,16 +82,16 @@ describe('classifyActionDanger — normal (conservative default)', () => {
     'bun test',
     'git status',
     'git commit -m "x"',
-    'git push origin feature', // no --force
+    'git push origin feature',
     'git log --oneline',
     'echo hello',
     'grep -r foo .',
     'npm install',
-    'mysql -e "DELETE FROM logs WHERE id = 1"', // scoped DELETE with WHERE
+    'mysql -e "DELETE FROM logs WHERE id = 1"',
     'psql -c "SELECT * FROM users"',
     'node build.js',
     'mkdir -p out',
-    'cp a b', // copy is not flagged
+    'cp a b',
     'sed -i s/a/b/ file',
   ];
   for (const cmd of normal) {
@@ -110,7 +108,6 @@ describe('classifyActionDanger — normal (conservative default)', () => {
   });
 
   it('does not treat an rm-looking ARGUMENT to another tool as rm', () => {
-    // `find . -name rm` — `rm` is an argument, argv[0] is find.
     const v = classifyActionDanger(['find', '.', '-name', 'rm']);
     expect(v.danger).toBe('normal');
   });
