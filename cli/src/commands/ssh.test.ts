@@ -37,8 +37,7 @@ function run(args: string[], extraEnv: Record<string, string> = {}): { stdout: s
     env: {
       ...process.env,
       HOME: testHome,
-      // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
-      // spawned CLI resolving the real profile ('agents-cli is not set up').
+      // Windows os.homedir() reads USERPROFILE; pin it so the fixture cannot escape into the real profile.
       USERPROFILE: testHome,
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_NO_USAGE_TRACK: '1',
@@ -68,8 +67,6 @@ describe('devices command', () => {
 
     const added = run(['devices', 'add', 'mac-mini', 'operator@mac-mini.internal', '--platform', 'macos'], env);
     expect(added.status).toBe(0);
-    // The discovery decision lands in this box's device doc, never the shared
-    // central agents.yaml (PHNX-3315).
     expect(doc()).toContain('mac-mini: approved');
     expect(central()).not.toContain('mac-mini: approved');
 
@@ -80,27 +77,13 @@ describe('devices command', () => {
 
     const unignored = run(['devices', 'unignore', 'mac-mini'], env);
     expect(unignored.status).toBe(0);
-    // The decision is cleared from the device doc; central was never touched.
     expect(doc()).not.toContain('mac-mini: approved');
     expect(doc()).not.toContain('mac-mini: ignored');
   });
 });
 
-// `agents ssh __askpass` now resolves the bundle through the standalone
-// `secrets` CLI process client (PHNX-3989) — there is no in-process engine
-// left to seed a fixture bundle into, so this drives the REAL standalone
-// against a throwaway file-backed home, gated on AGENTS_TEST_SECRETS_BIN (see
-// secrets-client.test.ts). The old macOS-keychain-helper skip no longer
-// applies — the bundle below is file-backed, not keychain-backed.
-//
-// This calls `readAndResolveBundleEnv` directly with the exact options
-// `runAskpass` passes (rather than spawning a full `agents ssh __askpass`
-// subprocess via this file's `bun`-based `run()`): `run()` re-execs the CLI
-// under `bun`, and the standalone's private fd3/fd4 pipe protocol does not
-// survive that nesting (`process.execPath` inside a bun-run process is the
-// bun binary, not node — a bun-vs-bun nesting artifact of this test harness,
-// not of the shipped `#!/usr/bin/env node` CLI). `runAskpass` itself is 3
-// lines of env-var plumbing around this exact call; this proves the wiring.
+// Exercise the real standalone client directly: the nested Bun runner cannot preserve
+// its private fd3/fd4 protocol, while runAskpass is only env plumbing around this call.
 const REAL_SECRETS_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
 
 describe.skipIf(!REAL_SECRETS_BIN)('ssh askpass (real standalone)', () => {
@@ -146,41 +129,26 @@ describe.skipIf(!REAL_SECRETS_BIN)('ssh askpass (real standalone)', () => {
 });
 
 describe('runFleetPing overall-deadline (RUSH-2041)', () => {
-  // Calls the real exported raceFleetPingDeadline with a genuinely hanging
-  // fanOut promise. The only test double is the fanOut (the network boundary) —
-  // the deadline logic itself is the shipped code path, not a reimplementation.
   it('exits promptly and marks all remotes failed/skipped when the overall deadline fires before probes settle', async () => {
     const OVERALL_TIMEOUT_MS = 50;
 
     const remoteTargets: FanOutDeviceTarget[] = [
-      { name: 'worker-a' },                            // probeable: hangs forever
-      { name: 'worker-b' },                            // probeable: hangs forever
-      { name: 'offline-c', skip: 'offline' as const }, // pre-skipped
+      { name: 'worker-a' },
+      { name: 'worker-b' },
+      { name: 'offline-c', skip: 'offline' as const },
     ];
 
-    // A fanOut that never settles — stands in for a hung sshExecAsync call.
-    // The per-device timeout is longer than OVERALL_TIMEOUT_MS so it can't
-    // resolve the race before the overall deadline fires.
     const hangingFanOut = new Promise<Awaited<ReturnType<typeof fanOutDevices<string[], FanOutDeviceTarget>>>>(() => {
-      /* intentionally never resolves */
     });
 
     const start = Date.now();
     const remote = await raceFleetPingDeadline(hangingFanOut, remoteTargets, OVERALL_TIMEOUT_MS);
     const elapsed = Date.now() - start;
 
-    // The bug this guards is "hangs forever", so the budget only has to sit far
-    // below a hang — not a tight fit around the timer. The old `+ 50` gave 50ms
-    // of slack around a 50ms timer, which measured machine load rather than
-    // correctness: this suite runs 12k tests across forked workers and the timer
-    // fires a few ms late (observed 104ms against a 100ms ceiling — the only red
-    // test in the suite). Scaling the caller's own value keeps the assertion
-    // tied to raceFleetPingDeadline's argument instead of a flat wall-clock
-    // number, so it still verifies the deadline it was handed; 20x is 1s here,
-    // and a real hang never settles at all.
+    // This distinguishes eventual deadline enforcement from a hang without making
+    // scheduler load part of the contract; a real hang never settles at 20x.
     expect(elapsed).toBeLessThan(OVERALL_TIMEOUT_MS * 20);
 
-    // Every remote target comes back as failed or skipped — none are missing.
     expect(remote).toHaveLength(3);
     const byName = Object.fromEntries(remote.map((r) => [r.name, r]));
 
@@ -190,7 +158,6 @@ describe('runFleetPing overall-deadline (RUSH-2041)', () => {
     expect(byName['worker-b'].status).toBe('failed');
     expect(byName['worker-b'].error).toBe('fleet ping overall deadline exceeded');
 
-    // The pre-skipped device keeps its skip status and reason, no error.
     expect(byName['offline-c'].status).toBe('skipped');
     expect(byName['offline-c'].reason).toBe('offline');
     expect(byName['offline-c'].error).toBeUndefined();
@@ -228,7 +195,7 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
     expect(flat).toContain('ephemeral · via crabbox');
     expect(flat).toContain('blue-hermit');
     expect(flat).toContain('cpu-4');
-    expect(flat).toContain('bh.ts.net'); // tailnet FQDN preferred over public IP
+    expect(flat).toContain('bh.ts.net');
     expect(flat).not.toContain('203.0.113.9');
     expect(flat).toContain('agents run --box <slug>');
     expect(flat).toContain('agents devices lease stop <slug>');
@@ -236,12 +203,8 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
 });
 
 describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => {
-  // trySshLeasedBox does not go through buildSshInvocation; it stamps via this
-  // helper. Pin the exact remote argv so a leased-box browser drive cannot
-  // skip AGENTS_FLEET_REMOTE the way the registered-device path used to.
-  // The marker leads; actor provenance tokens (PHNX-3317 ownership) ride between
-  // it and the command, so assert the marker prefix + command tail structurally
-  // (the resolved actor is environment-dependent, not byte-pinnable here).
+  // Leased boxes bypass the normal SSH builder, so this path must add its own
+  // AGENTS_FLEET_REMOTE consent marker before browser commands.
   it('stamps AGENTS_FLEET_REMOTE on agents/ag browser drives', () => {
     const a = leasedBoxRemoteCmd(['agents', 'browser', 'navigate', '--url', 'https://example.com']);
     expect(a.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
@@ -270,9 +233,7 @@ describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => 
 });
 
 describe('showLeasedBoxesSection — devices list leased-boxes gate (RUSH-2190)', () => {
-  // The section load scans the keychain for bundle credentials and can raise a
-  // Touch ID sheet after the table prints, so the default list must never reach
-  // for it. These pin the exact gate so a refactor can't silently reopen it.
+  // Loading this section can touch credential storage and raise Touch ID, so it is opt-in.
   it('is off by default and off for --json-style calls (no flags)', () => {
     expect(showLeasedBoxesSection({})).toBe(false);
     expect(showLeasedBoxesSection({ stats: true })).toBe(false);
@@ -311,8 +272,6 @@ describe('devices ignored (RUSH-3062 surface)', () => {
     expect(entries[0].ignoredOn).toBe('zion');
     expect(Number.isFinite(Date.parse(entries[0].ignoredAt))).toBe(true);
 
-    // Dismissals are per-box now (PHNX-3315): the un-ignore must run on the same
-    // box that recorded the dismissal (zion), since a box only edits its own doc.
     expect(run(['devices', 'unignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'zion' }).status).toBe(0);
     expect(run(['devices', 'ignored']).stdout).toContain('No ignored nodes');
   });
@@ -320,11 +279,8 @@ describe('devices ignored (RUSH-3062 surface)', () => {
   it('warns (never falsely succeeds) when unignore runs on a box that did not record the dismissal (PHNX-3315)', () => {
     guardedHome();
     expect(run(['devices', 'add', 'old-laptop', 'operator@old-laptop.internal', '--platform', 'linux']).status).toBe(0);
-    // Dismissed on box 'zion' only.
     expect(run(['devices', 'ignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'zion' }).status).toBe(0);
 
-    // Un-ignore from a DIFFERENT box cannot touch zion's doc; it must say so
-    // rather than print a misleading success — the node is still ignored.
     const r = run(['devices', 'unignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'other' });
     expect(r.stderr + r.stdout).toContain('still dismissed on');
     expect(r.stderr + r.stdout).toContain('zion');
@@ -334,10 +290,6 @@ describe('devices ignored (RUSH-3062 surface)', () => {
 });
 
 describe('devices auto-launch preferences (per-device doc store)', () => {
-  // tests/setup.ts pins AGENTS_DEVICES_DIR for hermeticity, and run() forwards
-  // the whole env — so the spawned CLI reads its registry from there, NOT from
-  // the fixture HOME. Pin it at the fixture's devices dir in both the seed and
-  // the child env so the test exercises one registry under either runner.
   function devicesDir(): string {
     return path.join(testHome, '.agents', '.history', 'devices');
   }
@@ -351,9 +303,6 @@ describe('devices auto-launch preferences (per-device doc store)', () => {
     return fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '';
   }
 
-  // These commands refuse a device that is not registered, so the fixture has
-  // to contain one — seeding the registry the CLI reads is the cheapest way to
-  // exercise the real command path end to end.
   function registerDevice(name: string): void {
     fs.mkdirSync(devicesDir(), { recursive: true });
     const now = new Date().toISOString();
@@ -407,12 +356,6 @@ describe('devices auto-launch preferences (per-device doc store)', () => {
   });
 });
 
-// ─── renderDeviceTable — Option B capacity columns (RUSH-3062) ──────────────
-//
-// Unit-level rendering tests over the REAL renderer: a fake registry plus real
-// DeviceStats rows. Role and description ride the tracked per-device doc, so
-// those are seeded into the fork-sandboxed HOME the config store already reads
-// (tests/setup.ts) — nothing is mocked.
 
 describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () => {
   const NOW = 1_700_000_000_000;
@@ -439,9 +382,9 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
       ncpu: 12,
       loadPercent: 35,
       memPercent: 55,
-      memTotalBytes: 64 * 1024 ** 3, // 64G
+      memTotalBytes: 64 * 1024 ** 3,
       memFreeBytes: 28 * 1024 ** 3,
-      diskTotalBytes: 1024 ** 4, // 1T
+      diskTotalBytes: 1024 ** 4,
       diskFreeBytes: 300 * 1024 ** 3,
       diskUsedPercent: 71,
       fetchedAt: NOW,
@@ -449,7 +392,6 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     };
   }
 
-  /** Seed the tracked per-device doc the config store reads (role/description). */
   function seedDeviceDoc(name: string, config: Record<string, string>): void {
     const dir = path.join(process.env.HOME!, '.agents', 'devices', name);
     fs.mkdirSync(dir, { recursive: true });
@@ -459,16 +401,15 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     fs.writeFileSync(path.join(dir, 'agents.yaml'), `config:\n${body}\n`);
   }
 
-  /** The four-device fleet the width matrix below reasons about. */
   function fleet(): { reg: DeviceRegistry; names: string[]; statsMap: Map<string, DeviceStats> } {
     const reg: DeviceRegistry = {
       'ci-runner': device('ci-runner', { platform: 'linux' }),
       'mac-mini': device('mac-mini', { platform: 'macos' }),
-      'mark-1': device('mark-1', { tailscale: { online: true, direct: false } }), // relayed
+      'mark-1': device('mark-1', { tailscale: { online: true, direct: false } }),
       zion: device('zion', { platform: 'macos' }),
     };
     const statsMap = new Map<string, DeviceStats>([
-      ['ci-runner', stats('ci-runner', { reachable: false })], // offline
+      ['ci-runner', stats('ci-runner', { reachable: false })],
       ['mac-mini', stats('mac-mini')],
       ['mark-1', stats('mark-1', { ncpu: 36, loadPercent: 1, memPercent: 6, diskUsedPercent: 8 })],
       ['zion', stats('zion', { ncpu: 16, loadPercent: 24, memPercent: 32, diskUsedPercent: 63 })],
@@ -480,28 +421,11 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     return { reg, names: Object.keys(reg).sort(), statsMap };
   }
 
-  /** Column position of the `load` cell — the first column AFTER spec, so any
-   * spec-width error shows up here as drift. Substring assertions cannot see
-   * this: a row can contain "22%" while sitting in the wrong column.
-   *
-   * Measures where the cell ENDS, not where its digits begin. `pctCell`
-   * right-aligns within a fixed width, so "35%" and " 1%" finish in the same
-   * column while starting one apart — keying on the digits would report drift
-   * that is not there. */
   function loadColumn(line: string): number {
     return line.indexOf('%');
   }
 
   it('every row lines its post-spec columns up with the header, whatever the specs measure', () => {
-    // A FIXED spec width cannot work: fmtBytes emits an optional decimal, so a
-    // real spec string runs from "8c 16G 256G" (11) to "10c 23.5G 460G" (14).
-    // A width narrower than the widest row shifts load/mem/disk/headroom out of
-    // alignment both row-to-row and against the header — the exact scannability
-    // this column exists for. Pin positions, not substrings.
-    // The shared fixture's specs all fit the old fixed width (`12c 64G 1T` is
-    // 10 chars), so it cannot exercise the overflow. Give one device a real
-    // decimal-RAM spec — `10c 23.5G 460G`, 14 chars — which is what an actual
-    // probe of a Mac produces and what the fixed width truncated.
     const { reg, names, statsMap } = fleet();
     statsMap.set('mac-mini', stats('mac-mini', {
       ncpu: 10,
@@ -515,22 +439,16 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
       if (m && names.includes(m[1])) rows[m[1]] = line;
     }
     const header = all.find((l) => /device\s+platform\s+spec\s+load/.test(l))!;
-    // Compare ENDS on both sides: the header label and the right-aligned cell
-    // both finish in the same column when the table is correct.
     const headerLoadEnd = header.indexOf('load') + 'load'.length - 1;
 
     const online = Object.entries(rows).filter(([, line]) => !line.includes('offline'));
     expect(online.length).toBeGreaterThan(1);
 
     const positions = online.map(([, line]) => loadColumn(line));
-    // Every online row agrees with every other...
     expect(new Set(positions).size).toBe(1);
-    // ...and lands under the header's own `load` label.
     expect(positions[0]).toBe(headerLoadEnd);
   });
 
-  /** Render plain-text rows keyed by device name (plus a 'head'/'footer' view). */
-  /** Index the rendered lines by device name (ansi already stripped). */
   function rowsFrom(lines: string[], names: string[]): Record<string, string> {
     const rows: Record<string, string> = {};
     for (const line of lines) {
@@ -550,17 +468,13 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     const { rows, all } = render(200);
     expect(all[0]).toMatch(/device\s+platform\s+spec\s+load\s+mem\s+disk\s+headroom/);
 
-    expect(rows['mac-mini']).toContain('12c 64G 1T'); // spec cell: cores, RAM, disk
-    expect(rows['mac-mini']).toContain('35%'); // load
-    expect(rows['mac-mini']).toContain('55%'); // mem
-    expect(rows['mac-mini']).toContain('71%'); // disk — same severity scale as load/mem
+    expect(rows['mac-mini']).toContain('12c 64G 1T');
+    expect(rows['mac-mini']).toContain('35%');
+    expect(rows['mac-mini']).toContain('55%');
+    expect(rows['mac-mini']).toContain('71%');
     expect(rows['mac-mini']).toContain('worker');
     expect(rows['mac-mini']).toContain('signing + notarize box');
 
-    // The markers survive: this-machine caret + arrow, relay. The interactive
-    // star is FOLDED into the `personal` role — a personal box is the interactive
-    // seat by definition, so the star would just repeat it (it is suppressed here
-    // and only shows for a non-personal pinned interactive host).
     expect(rows['zion']).toContain('▸');
     expect(rows['zion']).toContain('← this machine');
     expect(rows['zion']).not.toContain('★ interactive');
@@ -569,9 +483,6 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
   });
 
   it('keeps the interactive star when the pinned interactive host is NOT personal', () => {
-    // mac-mini is role=worker in the fixture. Pinning it as the interactive host
-    // (an unusual but valid config) still shows the star, because `worker` does
-    // not itself convey "the box you see things on" the way `personal` does.
     const { reg, names, statsMap } = fleet();
     const rows = rowsFrom(
       renderDeviceTable(reg, names, 'zion', statsMap, false, 'mac-mini', { width: 200, ignoredCount: 0 }).map(stripAnsi),
@@ -579,41 +490,27 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     );
     expect(rows['mac-mini']).toContain('★ interactive');
     expect(rows['mac-mini']).toContain('worker');
-    // zion is no longer the interactive host here, so it shows neither.
     expect(rows['zion']).not.toContain('★ interactive');
   });
 
   it('keeps the offline row behavior, now carrying role and description', () => {
     const { rows } = render(200);
     expect(rows['ci-runner']).toContain('offline');
-    expect(rows['ci-runner']).not.toContain('%'); // no phantom numbers for a dead box
+    expect(rows['ci-runner']).not.toContain('%');
     expect(rows['ci-runner']).toContain('worker');
     expect(rows['ci-runner']).toContain('hetzner CI runner');
   });
 
-  // RUSH-3096: an offline row rendered as a bare `ci-runner  linux  offline`,
-  // dropping cores/RAM/disk the last successful probe had already recorded.
-  // Hardware is what the box IS, so it stays legible while the box is down.
   it('renders the retained spec on an offline row, with no live numbers', () => {
     const { rows } = render(200);
-    expect(rows['ci-runner']).toContain('12c 64G 1T'); // retained by retainHardwareFacts
+    expect(rows['ci-runner']).toContain('12c 64G 1T');
     expect(rows['ci-runner']).toContain('offline');
-    // Only the STATIC facts appear. The volatile columns are absent, not stale:
-    // '%' would mean a load/mem/disk reading for a box that never answered.
     expect(rows['ci-runner']).not.toContain('%');
-    // The spec sits in the same column as every online row, which is the whole
-    // point of the cell — a fleet inventory you can scan down. Both fixtures
-    // carry the default `12c 64G 1T`, so the start index must match exactly.
     expect(rows['ci-runner'].indexOf('12c')).toBe(rows['mac-mini'].indexOf('12c'));
   });
 
-  // Caught only by running the real command: `specCell` pads to the MEASURED
-  // column width, so the fleet's WIDEST spec pads to nothing and the marker
-  // collided with it — `16c 27.3G 455Goffline`. The shared fixture's specs are
-  // all narrower than the floor, so they cannot reach this case.
   it('separates the spec from the offline marker even when the spec sets the column width', () => {
     const { reg, names, statsMap } = fleet();
-    // 14 chars — the widest real spec shape, and wider than SPEC_WIDTH_MIN.
     statsMap.set('ci-runner', stats('ci-runner', {
       reachable: false,
       ncpu: 16,
@@ -632,43 +529,33 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
 
   it('leaves the spec cell blank for an offline box no probe has ever seen', () => {
     const { reg, names, statsMap } = fleet();
-    // No retained facts: a box added to the registry and never successfully probed.
     statsMap.set('ci-runner', { host: 'ci-runner', reachable: false, fetchedAt: NOW });
     const rows = rowsFrom(
       renderDeviceTable(reg, names, 'zion', statsMap, false, 'zion', { width: 200, ignoredCount: 0 }).map(stripAnsi),
       names,
     );
     expect(rows['ci-runner']).toContain('offline');
-    expect(rows['ci-runner']).toContain('—'); // honestly unknown, not invented
+    expect(rows['ci-runner']).toContain('—');
     expect(rows['ci-runner']).not.toContain('12c');
   });
 
   it('truncates the description first at 105 columns; role and numerics intact', () => {
     const { rows } = render(105);
-    // zion's row is among the longest (self marker + role + description): its
-    // description is the first thing to give. (Width is 105, not 120 — folding
-    // the interactive star into the `personal` role freed ~15 columns, so the
-    // full row now fits at 120 and only a tighter width forces the truncation
-    // this test pins.)
     expect(rows['zion']).not.toContain('my laptop - never auto-place');
     expect(rows['zion']).toContain('…');
-    expect(rows['zion']).toContain('personal'); // role survives
+    expect(rows['zion']).toContain('personal');
     expect(rows['zion']).toContain('24%');
     expect(rows['zion']).toContain('63%');
-    // Shorter rows still fit their full description.
     expect(rows['mac-mini']).toContain('signing + notarize box');
   });
 
   it('drops the description then the role at 80 columns — numerics never truncate', () => {
     const { rows } = render(80);
-    // mac-mini: description shrinks to an ellipsis stub, role survives.
     expect(rows['mac-mini']).not.toContain('signing + notarize box');
     expect(rows['mac-mini']).toContain('worker');
     expect(rows['mac-mini']).toContain('35%');
     expect(rows['mac-mini']).toContain('71%');
     expect(rows['mac-mini']).toContain('12c 64G 1T');
-    // zion: fixed columns + markers alone exceed 80, so description is gone AND
-    // the role has dropped — but every number and marker is still there.
     expect(rows['zion']).not.toContain('my laptop');
     expect(rows['zion']).not.toContain('personal');
     expect(rows['zion']).toContain('24%');
@@ -681,14 +568,14 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
   it('full mode keeps the free/total memory detail alongside the spec cell', () => {
     const { rows, all } = render(200, true);
     expect(all[0]).toContain('free/total');
-    expect(rows['mac-mini']).toContain('12c 64G 1T'); // spec still carries cores
+    expect(rows['mac-mini']).toContain('12c 64G 1T');
     expect(rows['mac-mini']).toContain('28G/64G');
   });
 
   it('extends the Fleet capacity footer with free disk, and names ignored nodes', () => {
     const { all } = render(200, false, 2);
     const footer = all.find((l) => l.includes('Fleet capacity'));
-    expect(footer).toContain('64 cores'); // 12+36+16 — the offline box counts nothing
+    expect(footer).toContain('64 cores');
     expect(footer).toContain('disk free');
     expect(all.some((l) => l.includes("2 ignored nodes not listed — 'agents devices ignored'"))).toBe(true);
   });
