@@ -148,6 +148,11 @@ describeLive('agents ps — real CLI against a live process', () => {
 
       const help = runAgents(['ps', 'stop', '--help'], cwd, tempHome);
       expect(help.stdout).toContain('agents ps stop 4b2f1a9c');
+      for (const verb of ['focus', 'detach', 'migrate']) {
+        const verbHelp = runAgents(['ps', verb, '--help'], cwd, tempHome);
+        expect(verbHelp.status, verbHelp.stderr).toBe(0);
+        expect(verbHelp.stdout).toContain(`agents ps ${verb}`);
+      }
     } finally {
       sleeper.kill('SIGTERM');
       fs.rmSync(tempHome, { recursive: true, force: true });

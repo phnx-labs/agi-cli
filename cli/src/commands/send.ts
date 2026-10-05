@@ -140,6 +140,7 @@ const SHARED_NOTES = `
   <shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the
   live sessions on this machine; add --device <name> for a session on
   another box. --attach, --thread and --from are refused on this channel.
+  --device runs the whole send on that box, for every channel, not just session.
 `;
 
 export function registerSendCommand(program: Command): void {

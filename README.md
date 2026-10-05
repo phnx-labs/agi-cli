@@ -1273,7 +1273,7 @@ Secrets are the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). agi-cli
 # Install (pick one — no extra env vars)
 agents clis install secrets
 # or
-npm i -g @phnx-labs/secrets-cli@0.1.2
+npm i -g @phnx-labs/secrets-cli@0.1.8
 # or, after agents is installed:
 agents setup secrets
 ```
