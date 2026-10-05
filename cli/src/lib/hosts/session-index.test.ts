@@ -4,15 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import type { HostTask } from './tasks.js';
 
-// Isolate the sessions DB under a temp HOME. state.js freezes its base dir at
-// module load (state.ts:34,107 — `HOME = process.env.HOME ?? os.homedir()`,
-// then `SESSIONS_DIR = ...`), and db.js binds DB_PATH from it at db.ts:15-16,
-// both at *import* time — not lazily. Static top-level imports are hoisted, so
-// they would run the state.js/db.js module bodies BEFORE the HOME assignment
-// below and bind DB_PATH to the runner's real HOME, breaking isolation under
-// CI sharding. So set HOME with a plain statement first, then pull in the
-// modules via a top-level `await import` (which runs after it) — the same
-// hermetic pattern as session/__tests__/db.test.ts.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hostsession-'));
 process.env.HOME = TEST_HOME;
 
@@ -22,9 +13,6 @@ const { findSessionsById, querySessions, closeDB } = await import('../session/db
 const { saveTask, loadTask, localLogPath, hostsCacheDir } = await import('./tasks.js');
 const { sessionIdMarkerLine } = await import('./session-marker.js');
 
-// Close the DB singleton and tear down the temp HOME exactly once, at the end —
-// not scattered mid-file inside individual `it` blocks, which order-couples the
-// tests. Matches the single-teardown shape of db.test.ts:100-102.
 afterAll(() => {
   closeDB();
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
@@ -54,7 +42,7 @@ describe('hostSessionMeta', () => {
     expect(meta!.shortId).toBe('11111111');
     expect(meta!.agent).toBe('claude');
     expect(meta!.cwd).toBe('/home/me/proj');
-    expect(meta!.filePath).toBe(''); // sentinel: remote-only, survives the stale-file filter
+    expect(meta!.filePath).toBe('');
     expect(meta!.machine).toBe('box');
     expect(meta!.label).toBe('[host/box]');
     expect(meta!.topic).toBe('first line');
@@ -120,16 +108,12 @@ describe('registerHostSession', () => {
     expect(byId[0].filePath).toBe('');
     expect(byId[0].machine).toBe('box');
 
-    // The empty-file_path row survives the querySessions stale-file filter — a
-    // real local session with a missing file would be dropped here.
     const all = querySessions({ idPrefix: 'aaaaaaaa' });
     expect(all).toHaveLength(1);
   });
 });
 
 describe('captureRemoteSessionId', () => {
-  // The full non-Claude host path: a run that took no forced --session-id, whose
-  // remote coined its own id and printed it via --emit-session-id into the log.
   function writeLog(id: string, marker: string): void {
     fs.mkdirSync(hostsCacheDir(), { recursive: true });
     fs.writeFileSync(localLogPath(id), `booting codex...\ndid the work\n${marker}exited 0\n`);
@@ -143,10 +127,8 @@ describe('captureRemoteSessionId', () => {
     const updated = captureRemoteSessionId(t);
     expect(updated).not.toBeNull();
     expect(updated!.sessionId).toBe('codex-real-9f3a');
-    // Persisted, not just returned — so findTaskBySessionId works after this.
     expect(loadTask('feed0001')!.sessionId).toBe('codex-real-9f3a');
 
-    // And the captured id makes the run registerable + resolvable by id.
     registerHostSession(updated!, { cwd: '/home/me/proj', prompt: 'do it' });
     expect(findSessionsById('codex-real-9f3a')).toHaveLength(1);
   });
@@ -154,7 +136,6 @@ describe('captureRemoteSessionId', () => {
   it('is a no-op when the task already carries a forced id (never overwrites Claude/resume)', () => {
     const t = task({ id: 'feed0002', agent: 'claude', sessionId: 'forced-claude-id' });
     saveTask(t);
-    // Even if a stray marker sat in the log, the authoritative forced id wins.
     writeLog('feed0002', sessionIdMarkerLine('should-be-ignored'));
     expect(captureRemoteSessionId(t)).toBeNull();
     expect(loadTask('feed0002')!.sessionId).toBe('forced-claude-id');

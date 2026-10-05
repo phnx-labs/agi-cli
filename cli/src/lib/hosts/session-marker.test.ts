@@ -27,8 +27,6 @@ describe('parseSessionIdMarker', () => {
   });
 
   it('takes the LAST marker so an id echoed earlier cannot mask the real trailing one', () => {
-    // An agent that literally echoes the sentinel token in its own output must
-    // never fool the parser — the real id the run prints comes last.
     const log =
       '@@AGENTS_SESSION_ID echoed-fake@@ (agent quoted this)\n' +
       sessionIdMarkerLine('real-final-id');
@@ -36,9 +34,7 @@ describe('parseSessionIdMarker', () => {
   });
 
   it('rejects a malformed frame rather than returning a bogus id', () => {
-    // A space in the token can't be a session id — better null than a fabricated id.
     expect(parseSessionIdMarker('@@AGENTS_SESSION_ID not a real id@@\n')).toBeNull();
-    // Missing suffix → incomplete frame.
     expect(parseSessionIdMarker('@@AGENTS_SESSION_ID dangling\n')).toBeNull();
   });
 });

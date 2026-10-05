@@ -61,7 +61,7 @@ describe('splitProgressBytes', () => {
     const r = splitProgressBytes(buf(`hello world${M}0`), id)!;
     expect(r.logChunk.toString('utf8')).toBe('hello world');
     expect(r.exit.toString('utf8')).toBe('0');
-    expect(r.consumed).toBe(11); // 'hello world'
+    expect(r.consumed).toBe(11);
   });
 
   it('returns an empty exit while the job is still running', () => {
@@ -94,9 +94,7 @@ describe('splitProgressBytes', () => {
     expect(splitProgressBytes(buf(`log body${other}0`), id)).toBeNull();
   });
 
-  // The load-bearing cases: byte-exact counting across a multibyte character.
   it('counts exact wire bytes when a multibyte char precedes the marker', () => {
-    // 'héllo' is 6 UTF-8 bytes (é = 2); a string split would report 5 chars.
     const r = splitProgressBytes(buf(`héllo${M}0`), id)!;
     expect(r.consumed).toBe(6);
     expect(r.logChunk.length).toBe(6);
@@ -104,9 +102,6 @@ describe('splitProgressBytes', () => {
   });
 
   it('counts a multibyte char truncated at the buffer end by its raw bytes', () => {
-    // 'café' = 5 bytes; drop the last byte so 'é' is split mid-character. The
-    // next poll must resume exactly 4 bytes on — not skip/re-read — so consumed
-    // MUST be 4, which a re-encoded U+FFFD (3 bytes) string count would get wrong.
     const half = buf('café').subarray(0, 4);
     const combined = Buffer.concat([half, Buffer.from(M, 'utf8')]);
     const r = splitProgressBytes(combined, id)!;
@@ -117,7 +112,6 @@ describe('splitProgressBytes', () => {
 
 describe('mirrorAliasesSource', () => {
   it('flags aliasing when local and remote are the same file (localhost host)', () => {
-    // Same dev:ino → the mirror IS the tailed file → skip the append.
     expect(mirrorAliasesSource('66306:1234567', '66306:1234567')).toBe(true);
   });
 
@@ -126,7 +120,6 @@ describe('mirrorAliasesSource', () => {
   });
 
   it('does not flag when either identity is unknown', () => {
-    // Missing local (mirror not created yet) or unstattable remote → keep mirroring.
     expect(mirrorAliasesSource(null, '2049:9999999')).toBe(false);
     expect(mirrorAliasesSource('66306:1234567', null)).toBe(false);
     expect(mirrorAliasesSource(null, null)).toBe(false);

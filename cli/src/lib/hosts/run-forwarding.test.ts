@@ -1,13 +1,3 @@
-/**
- * The `agents run --device` forwarding contract (RUN_OPTION_FORWARDING).
- *
- * The real bug this guards against: a new `agents run` option silently
- * vanishing at the SSH boundary. Historically --secrets/--effort/--env/
- * --timeout/--loop were all dropped on --device runs with no error — the worst
- * being --secrets, where a user believed a Keychain bundle was injected and it
- * silently wasn't. The introspection test enumerates the REAL commander
- * definition of `run`, so adding an option without classifying it fails CI.
- */
 import { describe, expect, it } from 'vitest';
 import { Command } from 'commander';
 import { RUN_OPTION_FORWARDING, RUN_OPTION_REJECT_MESSAGES } from './remote-cmd.js';

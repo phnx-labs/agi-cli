@@ -1,28 +1,10 @@
-/**
- * Devices host provider — the Tailscale fleet in the host pool.
- *
- * The real bugs this guards against:
- *   1. A device registered only via `agents devices sync` must appear in
- *      `listAllHosts()` (so cap routing and target pickers see
- *      it) — the gap this provider exists to close.
- *   2. A password-auth device must be LISTED (`dispatchable: false`) but never
- *      resolved for dispatch (typed error) and never picked by cap routing —
- *      a BatchMode=yes ssh run against it would hang forever.
- *   3. An enrolled host must shadow a same-name device (provider order), so
- *      enrolling a device to tag it doesn't create a duplicate row.
- *   4. The `Meta.hosts` overlay (caps) must merge onto device entries so a
- *      device participates in `--device <cap>` routing.
- */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the override.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-provider-test-'));
 process.env.HOME = TEST_HOME;
-// Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
-// call time, so it survives the module-cache race a plain HOME override loses.
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 
 const { DevicesHostProvider } = await import('./devices.js');
@@ -110,14 +92,7 @@ describe('devices in the unified pool', () => {
     const all = await listAllHosts();
     const rows = all.filter((h) => h.name === 'shared-name');
     expect(rows).toHaveLength(1);
-    // `local` registers first, so the enrolled overlay is still the BASE row —
-    // it keeps provider/source/caps/addedAt.
     expect(rows[0].provider).toBe('local');
-    // …but the device owns the connection fields (RUSH-1967). This assertion used
-    // to expect the overlay's '10.0.0.9', which encoded the frozen-route bug as a
-    // contract: `agents devices sync` could move a device and the stale enrolled
-    // address would keep winning — and `resolveHostByCap` hands this very row to
-    // dispatch, so `--device <cap>` dialed the dead address.
     expect(rows[0].address).toBe('shared.tail.ts.net');
     expect(rows[0].user).toBe('device-user');
   });
@@ -129,8 +104,6 @@ describe('devices in the unified pool', () => {
       address: { via: 'tailscale', dnsName: 'gpu-dev.tail.ts.net' },
       auth: { method: 'key' },
     });
-    // An enrolled inline overlay entry for gpu-dev (--cap gpu) sources the target
-    // from the device profile — emulate the entry it writes.
     updateMeta((meta) => ({
       ...meta,
       hosts: {
