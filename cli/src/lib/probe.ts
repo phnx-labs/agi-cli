@@ -52,10 +52,12 @@ export function probeCapture(
     }
     let out = '';
     let settled = false;
+    let stdoutGrace: ReturnType<typeof setTimeout> | undefined;
     const settle = (err: Error | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (stdoutGrace) clearTimeout(stdoutGrace);
       reapGroup(child.pid);
       // win32 has no group to reap: kill the direct child so a timed-out
       // probe still dies, matching execFile's `timeout:` behavior. No-op
@@ -76,13 +78,19 @@ export function probeCapture(
       }
     });
     child.on('error', (e) => settle(e));
-    // Use 'exit', not 'close': a forked grandchild inherits the stdout pipe and 'close' waits for
-    // every holder, the very process this helper reaps. Settle when the probed binary exits; one
-    // tick's grace lets final stdout chunks land.
+    // Use 'exit', not 'close': a grandchild inherits the stdout pipe and 'close' waits for it.
+    // Wait for stdout EOF so the final chunk is kept, capped at 50ms so that grandchild cannot
+    // hang the probe. A single setImmediate settles before that chunk under suite load.
     child.on('exit', (code) => {
-      setImmediate(() =>
-        settle(code !== null && (options.acceptedExitCodes ?? [0]).includes(code) ? null : new Error(`probe exited ${code}: ${cmd} ${args.join(' ')}`)),
-      );
+      const finish = (): void =>
+        settle(code !== null && (options.acceptedExitCodes ?? [0]).includes(code) ? null : new Error(`probe exited ${code}: ${cmd} ${args.join(' ')}`));
+      const stdout = child.stdout;
+      if (!stdout || stdout.readableEnded) {
+        finish();
+        return;
+      }
+      stdoutGrace = setTimeout(finish, 50);
+      stdout.once('end', finish);
     });
   });
 }

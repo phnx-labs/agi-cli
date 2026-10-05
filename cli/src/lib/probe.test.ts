@@ -115,6 +115,26 @@ posixOnly('probeCapture (RUSH-3028: nothing a probe spawns outlives it)', () => 
     }
   });
 
+  it('captures stdout from a binary that exits immediately, even with a flooded check phase', async () => {
+    // The version-pin upgrade reads this shape (`echo 0.1.0` then exit). Settling on the next
+    // setImmediate drops that line when the check phase runs ahead of the poll that delivers it.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-echo-'));
+    let flooding = true;
+    const flood = (): void => {
+      if (flooding) setImmediate(flood);
+    };
+    flood();
+    try {
+      const script = path.join(dir, 'ver.sh');
+      fs.writeFileSync(script, '#!/bin/sh\necho 0.1.0\n', { mode: 0o755 });
+      const runs = await Promise.all(Array.from({ length: 40 }, () => probeCapture(script, [], 3000)));
+      for (const { stdout } of runs) expect(stdout).toContain('0.1.0');
+    } finally {
+      flooding = false;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reaps the grandchild when the probe times out on a hung parent', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-reap-'));
     try {
