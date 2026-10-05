@@ -6,6 +6,9 @@ import {
   sleep,
 } from '../lib/scenario-record.js';
 
+// 50 fresh-cwd cold spawns. This is the headline reliability number: does the
+// SessionStart hook land a parseable state file fast enough, every time, for a
+// brand-new agent in a directory it has never seen?
 const ITERATIONS = 50;
 const MATCH_RATE_THRESHOLD = 0.99;
 const P95_LATENCY_MS = 1000;
@@ -35,6 +38,7 @@ test(
       } finally {
         await killAndCleanup(run);
       }
+      // Don't hammer STATE_DIR / pgrep between iterations.
       await sleep(200);
     }
 
@@ -46,6 +50,8 @@ test(
 
     const failures = records.filter((r) => !r.matched);
     if (failures.length > 0) {
+      // Surface enough to debug a missed detection: ground truth vs what the
+      // tracker reported, plus the cwd/pid that produced it.
       console.error(
         `cold-spawn ${failures.length}/${records.length} mismatches:\n` +
           failures
