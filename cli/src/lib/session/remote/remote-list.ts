@@ -597,6 +597,7 @@ export function peerHopCloseNotice(
   );
 }
 
+// Do not leak AGENTS_FLEET_REMOTE into a resumed agent; remap reached-command 255 so outer SSH 255 stays transport-only.
 export async function runOnPeer(
   args: string[],
   machine: string,

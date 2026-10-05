@@ -29,6 +29,7 @@ const ENUM_SCRIPT = `tell application "Ghostty"
 end tell`;
 
 export async function enumerateGhosttyTabs(timeoutMs = 1500): Promise<GhosttySurface[]> {
+  // One bounded, nonfatal OS probe serves the whole refresh tick.
   if (process.platform !== 'darwin') return [];
   let stdout: string;
   try {
@@ -66,6 +67,7 @@ export function assignGhosttyTabs(
   sessions: ActiveSession[],
   surfaces: GhosttySurface[],
 ): Map<ActiveSession, number> {
+  // Assign only a unique cwd/title match; ambiguity is safer than a wrong tab.
   const result = new Map<ActiveSession, number>();
   if (surfaces.length === 0) return result;
 

@@ -29,6 +29,7 @@ export function shouldAttachLocalTmuxAliasBeforeFleet(
   selector: string | undefined,
   hosts: string[],
 ): selector is string {
+  // Local aliases precede fleet lookup only when the caller did not select a device.
   return !!selector && hosts.length === 0 && isAgentTmuxAlias(selector);
 }
 
@@ -61,6 +62,7 @@ type LocalAliasBySuffix =
   | { kind: 'none' };
 
 export async function resolveUniqueLocalLiveAliasBySuffix(shortId: string, socket?: string): Promise<LocalAliasBySuffix> {
+  // Suffixes consider live panes only and deliberately fail closed on collisions.
   const sock = socket ?? getDefaultSocketPath();
   if (!fs.existsSync(sock)) return { kind: 'none' };
   let sessions;
@@ -82,6 +84,7 @@ export async function resolveUniqueLocalLiveAliasBySuffix(shortId: string, socke
 }
 
 export async function attachLocalLiveSelector(selector: string | undefined, hosts: string[]): Promise<boolean> {
+  // attachLiveTmuxAlias switches the existing client when already inside tmux.
   if (shouldAttachLocalTmuxAliasBeforeFleet(selector, hosts)) {
     return attachLiveTmuxAlias(selector);
   }

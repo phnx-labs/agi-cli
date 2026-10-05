@@ -84,6 +84,7 @@ function validateCloudExecutionId(executionId: string): string {
   return executionId;
 }
 
+// Preserve session.<agent>.jsonl because downstream parser selection dispatches on this suffix.
 function cachePathForExecution(executionId: string, agent: SessionAgentId): string {
   const id = validateCloudExecutionId(executionId);
   return assertContained(path.join(id, `session.${agent}.jsonl`), CLOUD_CACHE_DIR);

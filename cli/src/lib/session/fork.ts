@@ -31,6 +31,7 @@ export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'generatedTitl
   return sessionHeadline(session) || session.shortId;
 }
 
+// Fork seeds a new same-harness sibling with bounded plain-text recap, never a transcript copy.
 export function buildForkRecap(input: ForkRecapInput): string {
   const lines: string[] = [];
   lines.push(`Continue a prior ${input.agent} session ("${input.label}"). Pick up where it left off — do not restart it.`);

@@ -166,6 +166,7 @@ export function resolveClaudeAccount(
   recordedVersion?: string | null,
   launchAccountId?: string | null,
 ): ClaudeAccountBucket {
+  // Launch-recorded identity outranks current credentials; signed-out or ambiguous homes remain unattributed.
   if (launchAccountId) {
     return index.byAccountId.get(launchAccountId) ?? unattributed(`recorded account ${launchAccountId}`);
   }

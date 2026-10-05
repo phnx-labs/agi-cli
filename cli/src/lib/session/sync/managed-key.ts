@@ -74,6 +74,7 @@ function parseEscrow(body: string, expectedUserId: string): Buffer | null {
   return null;
 }
 
+// Managed backups use a recoverable per-user 32-byte DEK; BYO is the zero-knowledge path.
 export async function resolveManagedBackupKey(
   client: ManagedSessionsBackupClient,
   userId: string,
@@ -94,6 +95,7 @@ export async function resolveManagedBackupKey(
   const cached = readCachedBackupKey(userId);
   const b64 = cached?.toString('base64') ?? generateSyncEncKey();
   const envelope: EscrowEnvelope = { v: 1, userId, dek: b64 };
+  // First use is conditional-create; losing devices reread the winner before encrypting.
   const created = await client.putIfAbsent(
     ESCROW_REL_KEY,
     JSON.stringify(envelope),
