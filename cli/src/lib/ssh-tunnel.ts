@@ -1,22 +1,3 @@
-/**
- * ssh-tunnel.ts — the generic `ssh -L localPort:127.0.0.1:remotePort -N`
- * port-forward, plus the fleet-device resolution that names its far end.
- *
- * WHY IT LIVES HERE. These primitives used to sit in `lib/computer/ssh-tunnel.ts`
- * alongside the Windows computer-helper provisioning, because `agents computer
- * --device` was their second caller after the browser CDP driver. The computer
- * engine has since moved to the standalone `computer` CLI (PHNX-4075), so a
- * generic tunnel parked in a deleted subsystem's directory would have gone with
- * it and taken `agents browser`'s remote path down. It is fleet plumbing — the
- * devices registry, the hardened ssh baseline, a local loopback port — and
- * belongs in the fleet layer, not under a feature.
- *
- * Its callers are thin: `browser/drivers/ssh.ts` holds a tunnel for one CDP
- * session, and `lib/computer/context.ts` uses `resolveRemoteDevice` alone —
- * `agents computer --device` resolves the fleet name here and forwards the
- * answer to the standalone engine, which opens and owns its own tunnel (it
- * holds the helper token that tunnel's transport needs).
- */
 
 import { spawn, type ChildProcess } from 'child_process';
 import { SSH_OPTS, assertValidSshTarget } from './ssh-exec.js';
@@ -28,11 +9,6 @@ interface StartTunnelOptions {
   extraSshArgs?: string[];
 }
 
-/** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure.
- *
- * Composes the shared hardened baseline (`SSH_OPTS`) rather than re-listing it,
- * so the tunnel inherits the same options — crucially the keepalive, which lets
- * a dropped `-N` tunnel exit instead of lingering as a zombie on the laptop. */
 export function buildTunnelArgs(
   user: string,
   host: string,
@@ -50,13 +26,6 @@ export function buildTunnelArgs(
   ];
 }
 
-/**
- * Spawn `ssh -L localPort:127.0.0.1:remotePort -N user@host`.
- *
- * stderr is captured so a tunnel that dies inside 500ms rejects with the ssh
- * error — the browser driver's original contract. The tunnel is held by this
- * process for the lifetime of the session that opened it.
- */
 export function startSSHTunnel(
   user: string,
   host: string,
@@ -65,11 +34,6 @@ export function startSSHTunnel(
   opts: StartTunnelOptions = {},
 ): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
-    // `user`/`host` can originate from a browser ssh:// profile or a device
-    // record. buildTunnelArgs places `${user}@${host}` before `-N`/SSH_OPTS, so
-    // a `-`-leading user would be parsed as an ssh option flag (option
-    // injection). Validate at the spawn sink so every caller is covered; reject
-    // (rather than throw synchronously) to keep the Promise contract.
     try {
       assertValidSshTarget(`${user}@${host}`);
     } catch (err) {
@@ -100,26 +64,14 @@ export function startSSHTunnel(
   });
 }
 
-/** One registered device, resolved to everything an ssh invocation needs. */
 interface ResolvedRemoteDevice {
   device: DeviceProfile;
   target: string;
   user: string;
   host: string;
-  /** Per-device identity flags (`-i <key> -o IdentitiesOnly=yes`), possibly empty. */
   identityArgs: string[];
 }
 
-/**
- * Resolve a registered device to its ssh pieces, or throw a clear error.
- *
- * `expectPlatform` is how a caller keeps a platform requirement it used to
- * hard-code: `agents computer --device` drives the Windows helper daemon, so it
- * passes `'windows'` and gets the same refusal as before. Callers with no
- * platform requirement (the browser driver) omit it. The gate is a parameter
- * rather than a baked-in check so this module stays fleet-generic — a
- * hard-coded `windows` here would be a feature rule in shared plumbing.
- */
 export async function resolveRemoteDevice(
   name: string,
   opts: { expectPlatform?: DeviceProfile['platform']; forWhat?: string } = {},
@@ -132,8 +84,8 @@ export async function resolveRemoteDevice(
     const what = opts.forWhat ?? `this command`;
     throw new Error(`Device '${name}' is ${device.platform}, not ${opts.expectPlatform}. ${what} needs a ${opts.expectPlatform} device.`);
   }
-  const target = sshTargetFor(device); // validates address + injection guard
-  const host = hostNameFor(device)!; // sshTargetFor already threw if absent
+  const target = sshTargetFor(device);
+  const host = hostNameFor(device)!;
   const user = device.user || process.env.USER || 'Administrator';
   return { device, target, user, host, identityArgs: deviceIdentityArgs(device) };
 }

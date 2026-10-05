@@ -1,28 +1,9 @@
-/**
- * Runtime-aware compatibility shim for SQLite.
- *
- * Picks `bun:sqlite` under Bun and `node:sqlite` under Node (>=22.5). Avoids
- * the native `better-sqlite3` addon entirely so there is no prebuild compile
- * and no Node/Bun ABI mismatch. Both runtimes are production: `dist/index.js`
- * runs under Node, while the signed standalone `dist/bin/agents` (what the
- * shims exec) embeds Bun.
- *
- * Exposes the small better-sqlite3-shaped surface area the rest of the
- * codebase already uses: `prepare/exec/pragma/transaction/close` on the DB,
- * `run/get/all` on statements.
- */
 
 import { createRequire } from 'module';
 
 const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
 const require = createRequire(import.meta.url);
 
-// node:sqlite emits a process-level ExperimentalWarning the first time it loads.
-// The packaged CLI launches Node with --no-warnings=ExperimentalWarning, but a
-// direct `node dist/...` run (and vitest's subprocesses) does not, so the warning
-// would leak onto stderr and break any command whose --json output is asserted to
-// be clean. Suppress only that single warning for the duration of the load; every
-// other warning passes through untouched.
 function loadNodeSqlite(): unknown {
   const original = process.emitWarning;
   const filtered = ((warning: string | Error, ...rest: unknown[]): void => {
@@ -43,50 +24,15 @@ function loadNodeSqlite(): unknown {
   }
 }
 
-// Keep BOTH runtimes on createRequire() so Vitest doesn't try to prebundle the
-// built-in sqlite module as a userland package during test collection.
-//
-// The Bun arm used to be `await import('bun:sqlite' as string)`, which made this
-// a TOP-LEVEL AWAIT. esbuild cannot lower top-level await to CJS, so every test
-// that spawns a subprocess through `tsx` (CJS mode) died at transform time with
-// `Top-level await is currently not supported with the "cjs" output format` --
-// 49 failures across 7 files, none of which touch sqlite. `require` is
-// synchronous, so the await disappears and with it the whole failure class.
-//
-// The specifier is held in a variable, not written inline: a literal
-// `require('bun:sqlite')` is statically analyzable, so bundlers and Vitest's
-// collector try to resolve a module that does not exist off-Bun. That
-// indirection is what the old `as string` cast was doing for the dynamic import.
 const BUN_SQLITE = 'bun:sqlite';
 const sqliteMod = isBun
   ? (require as (id: string) => unknown)(BUN_SQLITE)
   : loadNodeSqlite();
 
-// bun:sqlite exports `Database`; node:sqlite exports `DatabaseSync`.
 const NativeDatabase: new (filename: string, options?: { strict: boolean }) => NativeDb =
   (sqliteMod as { Database?: unknown; DatabaseSync?: unknown }).Database as never
   ?? (sqliteMod as { DatabaseSync?: unknown }).DatabaseSync as never;
 
-/**
- * bun:sqlite binds a named-parameter object ONLY when its keys carry the SQL
- * sigil (`{ '@id': … }` for `VALUES (@id)`); bare keys (`{ id: … }`) match
- * nothing and every parameter stays NULL, so the first NOT NULL column raises a
- * constraint error and the write is lost. node:sqlite accepts the bare keys.
- * `strict: true` makes bun accept them too, so the bare-key call shape this
- * codebase uses works on both runtimes. node:sqlite has no such option and
- * rejects a second argument that isn't an object, so the argument list is built
- * per runtime.
- *
- * The two runtimes are still not interchangeable at the edges, and only bun's
- * half is exercised by the shipped binary rather than by vitest — so keep binds
- * inside the intersection:
- *   - omit a named key: bun throws `Missing parameter "x"`, node binds NULL.
- *   - pass an extra named key: bun accepts it, node throws `Unknown named
- *     parameter`.
- *   - use sigil keys (`{'@id': …}`): node accepts them, strict bun rejects them.
- *   - a single non-plain object positional arg (e.g. `run(new Date())`) reaches
- *     the named path via bindArgs below and throws under strict bun.
- */
 const NATIVE_ARGS: [] | [{ strict: boolean }] = isBun ? [{ strict: true }] : [];
 
 interface NativeStmt {
@@ -107,9 +53,6 @@ export interface RunResult {
 }
 
 function bindArgs(params: unknown[]): unknown[] {
-  // Both bindings accept positional `(a, b, c)` and named `({ a, b, c })`
-  // forms — bun only under `strict: true` (see NATIVE_ARGS). Pass an object
-  // through unchanged so callers using named binds work.
   if (
     params.length === 1 &&
     params[0] !== null &&
@@ -153,23 +96,10 @@ class Database {
     this.inner.exec(sql);
   }
 
-  // node:sqlite has no dedicated `pragma()` and bun:sqlite's signature differs
-  // slightly from better-sqlite3. `exec('PRAGMA ...')` works on both and is
-  // sufficient for the setter pragmas (`journal_mode = WAL`) used here.
-  // Reader pragmas in this codebase use `db.prepare(...).all()`.
   pragma(stmt: string): void {
     this.inner.exec(`PRAGMA ${stmt}`);
   }
 
-  // Wrap fn in BEGIN IMMEDIATE/COMMIT, ROLLBACK on throw. Manual on both
-  // runtimes because node:sqlite has no `db.transaction(fn)`.
-  //
-  // BEGIN IMMEDIATE (not BEGIN DEFERRED) is required for write transactions in
-  // WAL mode. BEGIN DEFERRED upgrades the lock lazily on the first write; if
-  // another writer already committed since the transaction started, SQLite
-  // returns SQLITE_BUSY_SNAPSHOT (a sub-code of SQLITE_BUSY that the busy
-  // handler does NOT retry). BEGIN IMMEDIATE claims the write lock upfront so
-  // the busy handler fires correctly and respects busy_timeout.
   transaction<Args extends unknown[], R>(fn: (...args: Args) => R): (...args: Args) => R {
     return (...args: Args): R => {
       this.inner.exec('BEGIN IMMEDIATE');
@@ -178,7 +108,7 @@ class Database {
         this.inner.exec('COMMIT');
         return result;
       } catch (err) {
-        try { this.inner.exec('ROLLBACK'); } catch { /* original error wins */ }
+        try { this.inner.exec('ROLLBACK'); } catch {  }
         throw err;
       }
     };
@@ -189,8 +119,6 @@ class Database {
   }
 }
 
-// Declaration merging keeps `Database.Database` / `Database.Statement<T>`
-// type references at call sites working without rewrites.
 // eslint-disable-next-line @typescript-eslint/no-namespace
 namespace Database {
   export type Database = InstanceType<typeof DatabaseConstructor>;
