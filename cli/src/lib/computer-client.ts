@@ -1,6 +1,7 @@
 /* Thin client for the standalone computer CLI: no bundled fallback or duplicate engine. */
 /* stdio is inherited; fd3 sends one context object and fd4 receives NDJSON action events. */
 /* Anonymous one-way pipes avoid credentials in endpoint metadata and named-FIFO deadlocks. */
+/* Pass env unchanged: the engine owns the tunnel endpoint and matching auth; agents-cli must not publish a bare endpoint. */
 
 import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';

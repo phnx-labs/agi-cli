@@ -439,6 +439,7 @@ function toWritableServer(server: InstalledMcpServer): WritableMcpServer {
   };
 }
 
+// Empty files mean no recorded config; malformed/non-object files throw so writes never reset unrelated state, and JSONC stripping stays string-aware.
 function readExistingConfig(
   configPath: string,
   parse: (raw: string) => unknown,
@@ -459,7 +460,6 @@ function readExistingConfig(
   return parsed as Record<string, unknown>;
 }
 
-// JSONC parsing must preserve string semantics; writes retain unrelated top-level keys, and empty input means no recorded change.
 function parseJsonc(raw: string): unknown {
   return JSON.parse(stripJsonComments(raw));
 }

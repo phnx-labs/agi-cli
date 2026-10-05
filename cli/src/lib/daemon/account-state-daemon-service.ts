@@ -160,7 +160,7 @@ export async function publishAccountDaemonStateRows(
   });
 }
 
-// Collapse and notify by registered account id, never display email, so same-email organizations remain distinct.
+// Registered account id is stable; only unregistered legacy homes fall back to the display label, so same-email named accounts remain distinct.
 function transitionKey(row: AuthProbeRow): string {
   return `${row.agent}:${row.accountId ?? row.account ?? `version:${row.version}`}`;
 }
