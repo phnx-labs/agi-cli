@@ -15,6 +15,7 @@ export type McpFormat =
   | 'yaml'
   | 'muse-json';
 
+// Keep this table in parity with MCP capabilities; paths and schemas are native contracts.
 interface McpTarget {
   home(home: string): string;
   project(cwd: string): string;
@@ -53,6 +54,7 @@ export const MCP_TARGETS: Partial<Record<AgentId, McpTarget>> = {
     format: 'openclaw-json',
   },
   antigravity: {
+    // Antigravity intentionally owns one real global home, not an isolated version home.
     home: () => path.join(realHome(), '.gemini', 'config', 'mcp_config.json'),
     project: (cwd) => path.join(cwd, '.gemini', 'config', 'mcp_config.json'),
     format: 'antigravity-json',
@@ -92,6 +94,7 @@ export const MCP_TARGETS: Partial<Record<AgentId, McpTarget>> = {
   copilot: {
     home: (h) => path.join(h, '.copilot', 'mcp-config.json'),
     project: (cwd) => path.join(cwd, '.copilot', 'mcp-config.json'),
+    // null means the path is detectable but writes are refused until its schema is verified.
     format: null,
     unsupportedReason: 'mcp-config.json schema not verified against an installed Copilot CLI',
   },

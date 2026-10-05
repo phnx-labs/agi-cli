@@ -19,6 +19,7 @@ export interface TierResolution {
   source?: 'auto' | 'override' | 'curated';
 }
 
+// Kimi and Droid ladders encode cost policy that catalog heuristics must not override.
 const CURATED_LADDERS: Partial<Record<AgentId, Array<{ tier: ModelTier; match: RegExp }>>> = {
   kimi: [
     { tier: 'cheap', match: /highspeed/i },
@@ -85,6 +86,7 @@ interface Ranked {
 }
 
 function cleanForCompare(id: string): string {
+  // Strip dated rebuild/build suffixes before comparing a model generation.
   return id
     .replace(/-\d{8}(?=($|-))/, '')
     .replace(/-v\d+$/, '')
@@ -95,6 +97,7 @@ function versionSegments(id: string): number[] {
   return m ? m.map((n) => parseInt(n, 10)) : [];
 }
 function newer(a: string, b: string): number {
+  // Compare numeric segments, not lexical text (10 sorts after 9).
   const A = versionSegments(a);
   const B = versionSegments(b);
   for (let i = 0; i < Math.max(A.length, B.length); i++) {
@@ -139,6 +142,7 @@ function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
     return { id: rawId, baseId, rank, family, price } as Ranked & { baseId: string };
   });
 
+  // Retain the newest id within each true cost/capability family.
   const byFamily = new Map<string, Ranked>();
   for (const s of scored) {
     const prev = byFamily.get(s.family);
@@ -158,6 +162,7 @@ function bucketRungs(rungs: Array<{ id: string }>): Record<ModelTier, TierResolu
   const n = rungs.length;
   const map = {} as Record<ModelTier, TierResolution>;
   if (n === 0) {
+    // Empty catalogs fail safe to null models rather than inventing a choice.
     for (const t of MODEL_TIERS) map[t] = { tier: t, model: null };
     return map;
   }
@@ -195,6 +200,7 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
   let catalogIds: Set<string> | null;
 
   if (agent === 'droid') {
+    // Droid caps ultra at 2x; the excluded 4x model is not an automatic rung.
     base = {
       cheap: { tier: 'cheap', model: DROID_TIERS.cheap, note: 'Droid Core 0.55x', source: 'curated' },
       default: { tier: 'default', model: DROID_TIERS.default, note: 'Droid Core 0.6x', source: 'curated' },
@@ -210,6 +216,7 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
     catalogIds = catalog ? new Set(models.map((m) => m.id)) : null;
   }
 
+  // Apply overrides only through catalog-aware validation.
   const overrides = resolveTierOverride(agent, version);
   return applyTierOverrides(overrides, `${agent}@${version}`, catalogIds, base);
 }

@@ -28,6 +28,7 @@ interface SubagentMeta {
   path: string;
 }
 
+// Keep target adapters in parity with subagent capabilities and native layout contracts.
 interface SubagentTarget {
   dir(home: string): string;
   write(dir: string, sub: { name: string; path: string }): void;
@@ -232,6 +233,7 @@ function dirCopy(opts: {
       return { frontmatter, files, path: subagentDir };
     },
     matches(dir, sub) {
+      // Compare the full directory so removed source files cannot remain installed unnoticed.
       const dest = path.join(dir, sub.name);
       let sourceFiles: string[];
       try {
@@ -261,6 +263,7 @@ function dirCopy(opts: {
 }
 
 
+// Each entry owns the current versus migrated layout for that harness.
 export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   claude: flatFile({ subdir: ['.claude', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
   grok: flatFile({ subdir: ['.grok', 'agents'], ext: '.md', transform: transformSubagentForClaude }),

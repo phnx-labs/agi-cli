@@ -35,6 +35,7 @@ interface ProjectPullEnvelope {
 
 
 export function fingerprintTargets(targets: ProjectRepoTarget[]): string {
+  // Both path and expected slug define the remote wire target.
   const lines = targets
     .map((t) => `${t.path}\0${t.expectedSlug ?? ''}`)
     .sort();
@@ -43,6 +44,7 @@ export function fingerprintTargets(targets: ProjectRepoTarget[]): string {
 
 
 export function encodePullTargets(targets: ProjectRepoTarget[]): string {
+  // Preserve expectedSlug so a path cannot silently identify the wrong repository.
   return JSON.stringify(
     targets.map((t) => (t.expectedSlug === undefined ? { path: t.path } : { path: t.path, expectedSlug: t.expectedSlug })),
   );
@@ -78,6 +80,7 @@ export async function pullProjectTargets(
   targets: ProjectRepoTarget[],
   host: string = machineId(),
 ): Promise<ProjectPullResult[]> {
+  // Process sequentially because each pull mutates shared checkout/index state.
   const results: ProjectPullResult[] = [];
 
   for (const target of targets) {
@@ -134,6 +137,7 @@ export async function pullProjectTargets(
 
     let pull: Awaited<ReturnType<typeof pullRepo>>;
     try {
+      // Pull is fast-forward-only; dirty/diverged checkouts remain visible and untouched.
       pull = await pullRepo(absPath, { mode: 'default-branch-fast-forward' });
     } catch (err) {
       results.push({
@@ -196,6 +200,7 @@ export function parseProjectPullEnvelope(
   machine: string,
   opts: { expectedFingerprint?: string } = {},
 ): RemoteAgentsJsonParseResult<ProjectPullResult> {
+  // Malformed peer output fails closed and visibly; never normalize it to an empty success.
   const rejected = { items: [] as ProjectPullResult[], valid: false };
 
   let parsed: unknown;

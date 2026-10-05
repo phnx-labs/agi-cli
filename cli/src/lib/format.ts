@@ -11,6 +11,7 @@ export function formatDie(
   msg: string,
   opts: DieOptions = {},
 ): { stream: 'stdout' | 'stderr'; text: string } {
+  // Machine-readable failures belong on stdout; human failures belong on stderr.
   if (opts.json) {
     const payload: { error: string; hint?: string } = { error: msg };
     if (opts.hint) payload.hint = opts.hint;
@@ -29,6 +30,7 @@ export function die(msg: string, code = 1, opts: DieOptions = {}): never {
 }
 
 export async function runOrDie(fn: () => void | Promise<void>, opts: DieOptions = {}): Promise<void> {
+  // Use at user-actionable command boundaries, not as an internal error-swallowing wrapper.
   try {
     await fn();
   } catch (err) {
@@ -120,6 +122,7 @@ export function padVisible(s: string, width: number): string {
 }
 
 export function isJsonMode(opts: { json?: boolean }): boolean {
+  // Piped output stays human-readable unless the caller explicitly requests JSON.
   return Boolean(opts.json);
 }
 

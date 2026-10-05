@@ -30,6 +30,7 @@ export function routineFinishOwnerText(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'agent' | 'workflow' | 'command'>,
   host: string,
 ): string | null {
+  // Routine completion pages only on failure/timeout; green runs stay silent.
   if (meta.status !== 'failed' && meta.status !== 'timeout') return null;
   return `Routine failed: ${meta.jobName}\n${failureReason(meta)}\n${routineLabel(meta)} · ${host}`;
 }
@@ -52,6 +53,7 @@ function isTelegramChannel(
   meta: Meta,
   humansTransport?: string,
 ): boolean {
+  // Failure delivery never uses Telegram, including aliases and configured transports.
   if (channelId.trim().toLowerCase() === 'telegram') return true;
   if (humansTransport && TELEGRAM_TRANSPORTS.has(humansTransport.trim().toLowerCase())) {
     return true;
@@ -61,6 +63,7 @@ function isTelegramChannel(
 }
 
 export function ownerFailureDeliveryPlan(meta: Meta): OwnerDest[] {
+  // Preserve configured priority and exclude every intrusive destination.
   const plan: OwnerDest[] = [];
   const seen = new Set<string>();
   const ownerChannels = getOwnerFromHumans()?.channels ?? [];
@@ -106,6 +109,7 @@ export async function deliverOwnerFailure(text: string, meta: Meta): Promise<Own
   if (plan.length === 0) return { delivered: false, attempts };
 
   registerBuiltinProviders();
+  // Try destinations in order and stop only after confirmed delivery.
   for (const dest of plan) {
     const { provider, error } = lookupTransport(dest.channel, meta);
     if (!provider) {
@@ -127,6 +131,7 @@ export async function deliverOwnerFailure(text: string, meta: Meta): Promise<Own
   return { delivered: false, attempts };
 }
 
+// Claim before delivery to dedupe concurrency; release on failure so a later attempt may retry.
 const notifiedFailures = new Set<string>();
 const MAX_DEDUP_KEYS = 1000;
 

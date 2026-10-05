@@ -25,6 +25,7 @@ export function helperCacheDir(spec: HelperSpec, version: string): string {
   return path.join(getCacheDir(), ...spec.cacheSubdir, `v${version}`);
 }
 
+// Helpers ship independently on their own tag; never derive assets from the CLI release tag.
 export function helperAssetUrls(spec: HelperSpec, version: string): { zip: string; sha256: string } {
   const base = `https://github.com/${HELPER_RELEASE_REPO}/releases/download/${helperTag(spec.helper, version)}`;
   if (spec.assetName.includes(' ')) {
@@ -40,6 +41,7 @@ export function parseTeamId(codesignInfo: string): string | null {
   return codesignInfo.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1] ?? null;
 }
 
+// The requirement, not merely a valid signature, preserves the Accessibility identity grant.
 function readDesignatedRequirement(appPath: string): string {
   const r = spawnSync('/usr/bin/codesign', ['-d', '--requirements', '-', appPath], { encoding: 'utf8' });
   return `${r.stdout ?? ''}${r.stderr ?? ''}`;
@@ -68,6 +70,7 @@ function verifyDesignatedRequirement(appPath: string, bundleId: string, teamId: 
   if (err) throw new Error(err);
 }
 
+// Verification is signature, Developer Team, designated requirement, then Gatekeeper.
 export function verifyHelperApp(appPath: string, spec: HelperSpec): void {
   try {
     execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], { stdio: 'pipe' });
@@ -101,6 +104,7 @@ export async function downloadHelperApp(spec: HelperSpec, version: string): Prom
   const dir = helperCacheDir(spec, version);
   const cachedApp = path.join(dir, spec.appName);
   if (fs.existsSync(cachedApp)) {
+    // Re-verify cached bundles on every use; cache presence is not an integrity signal.
     verifyHelperApp(cachedApp, spec);
     return cachedApp;
   }

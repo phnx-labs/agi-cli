@@ -32,6 +32,7 @@ function fireBlockingAuthVerdict(verdict: AuthVerdict): boolean {
 }
 
 export function fireTimeAuthReadiness(agent: string, version: string): RoutineReadiness | null {
+  // Fire-time auth is cache-only and fail-open unless the last verdict proves signed-out/revoked.
   const health = readAuthHealth(machineId(), agent, version);
   if (!health || !fireBlockingAuthVerdict(health.verdict)) return null;
   const who = health.account ? ` (${health.account})` : '';
@@ -138,6 +139,7 @@ export function decideRoutineAuthReadiness(
   row: { verdict: AuthVerdict } | undefined,
   launchable: boolean,
 ): { ok: boolean; reason?: string } {
+  // Local and remote probes share absent-row semantics: launchability proves token-backed readiness.
   if (row && ROUTINE_AUTH_ACCEPTED.has(row.verdict)) return { ok: true };
   if (!row) return launchable ? { ok: true } : { ok: false, reason: 'unconfigured' };
   return { ok: false, reason: row.verdict };
@@ -147,6 +149,7 @@ export function decideHostAuthFromPing(
   stdout: string,
   agent: string,
 ): { ok: boolean; reason?: string } | null {
+  // Unparseable output is a probe failure, never evidence that a credential is absent.
   let payload: unknown;
   try { payload = JSON.parse(stdout); } catch { return null; }
   if (!payload || typeof payload !== 'object') return null;
@@ -230,6 +233,7 @@ export async function evaluateHostActivationReadiness(config: JobConfig): Promis
   }
 
   if (config.agent && !config.workflow && !config.command) {
+    // A failed live probe stays distinct from an absent auth row.
     if (config.agent === 'codex') {
       const args = ['run', 'codex', 'Reply with exactly ROUTINE_READY', '--mode', 'plan', '--timeout', '45s', '--json'];
       const command = windows

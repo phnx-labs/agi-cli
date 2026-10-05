@@ -91,6 +91,7 @@ function touchLaunchSentinel(agent: AgentId, version: string, cwd: string): void
 
 
 interface PluginScope {
+  // Scope owns both resource precedence and whether executable plugin surfaces may auto-enable.
   spec: MarketplaceSpec;
   marketplaceName: string;
   pluginsDir: string;
@@ -108,6 +109,7 @@ function makeScope(
 }
 
 function collectPluginScopes(cwd: string): PluginScope[] {
+  // Later scopes win: system < user < extra < project.
   const scopes: PluginScope[] = [];
 
   scopes.push(makeScope({ kind: 'system', root: getSystemPluginsDir() }, getSystemPluginsDir(), true, 0));
@@ -139,6 +141,7 @@ function synthesizeScopedMarketplaces(agent: AgentId, version: string, cwd: stri
   }
   if (!fs.existsSync(versionHome)) return result;
 
+  // One winning scope per plugin avoids duplicate enablement under stale marketplace names.
   const winner = new Map<string, { scope: PluginScope; plugin: DiscoveredPlugin }>();
   for (const scope of collectPluginScopes(cwd)) {
     if (!fs.existsSync(scope.pluginsDir)) continue;
@@ -203,6 +206,7 @@ function installScope(
 
   for (const plugin of plugins) {
     if (!installed.includes(plugin.name)) continue;
+    // Cloned project/extra repos are untrusted: never auto-enable MCP, hooks, or scripts from them.
     if (!scope.autoEnableExecSurfaces && hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root))) continue;
     addPluginToSettings(plugin.name, scope.marketplaceName, agent, versionHome);
   }
@@ -216,6 +220,7 @@ function pruneLosingScopeEnables(
   versionHome: string,
   winner: Map<string, { scope: PluginScope; plugin: DiscoveredPlugin }>,
 ): void {
+  // Remove prior lower-scope enables after precedence changes.
   const ourScopeNames = new Set([
     SYSTEM_MARKETPLACE_NAME,
     MARKETPLACE_NAME,
