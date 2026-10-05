@@ -656,3 +656,5 @@ sees every PR. Changed-file lists are cached per head SHA in
 `~/.agents/.cache/project-pr-files.json`; a list never changes for a given head, so only a
 new push or a newly merged PR costs a REST read. An entry is kept while its head is still
 listed as open or recently merged.
+
+<!-- merge-path probe for the AGI Menu merge work; this PR is closed unmerged -->
