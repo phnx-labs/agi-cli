@@ -1,16 +1,3 @@
-/**
- * The update transaction, exercised against a real filesystem.
- *
- * These use the strategy seam with a REAL strategy — it genuinely stages files,
- * genuinely swaps directories, and the binaries it stages are real executables
- * the launch probe really runs — so the swap, the probe gate, and the rollback
- * are the production code paths. What it avoids is a multi-hundred-megabyte
- * vendor fetch per assertion, not the logic under test.
- *
- * The behaviour that matters here is the one a broken update would cost you:
- * a release that cannot launch must never replace one that can, and a reference
- * to the installation must survive a release change.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -37,14 +24,6 @@ function versionDir(label: string): string {
 
 const IS_WIN = process.platform === 'win32';
 
-/**
- * A real, launchable stand-in for a vendor binary: prints a version and exits 0.
- *
- * Windows gets the `.cmd` wrapper alongside, because that is what the launch
- * probe actually runs there (`verifyBinaryLaunches`) — writing only the
- * extensionless file made every probe on Windows report a vacuous pass, so the
- * three tests that assert a FAILED launch never saw one.
- */
 function writeLaunchableBinary(binDir: string, release: string): void {
   fs.mkdirSync(binDir, { recursive: true });
   const file = path.join(binDir, 'claude');
@@ -53,14 +32,6 @@ function writeLaunchableBinary(binDir: string, release: string): void {
   if (IS_WIN) fs.writeFileSync(`${file}.cmd`, `@echo off\r\necho ${release}\r\n`);
 }
 
-/**
- * A release that is present but cannot start — the gutted-install case.
- *
- * POSIX: no launch target at all, which the probe reports as "binary not found".
- * Windows: the `.cmd` wrapper survives a gutted install and is what emits the
- * "is not recognized" message the probe matches, so reproduce that rather than
- * deleting the wrapper (a missing `.cmd` is treated as healthy by design).
- */
 function writeUnlaunchableBinary(binDir: string): void {
   fs.mkdirSync(binDir, { recursive: true });
   if (IS_WIN) {
@@ -71,7 +42,6 @@ function writeUnlaunchableBinary(binDir: string): void {
   }
 }
 
-/** Remove the live launch target the way a broken install would leave it. */
 function breakLiveBinary(label: string): void {
   const binDir = path.join(versionDir(label), 'node_modules', '.bin');
   fs.rmSync(path.join(binDir, 'claude'), { force: true });
@@ -79,7 +49,6 @@ function breakLiveBinary(label: string): void {
   writeUnlaunchableBinary(binDir);
 }
 
-/** Lay down an installed release the way the npm strategy's swap expects it. */
 function writeLiveRelease(label: string, release: string): void {
   const dir = versionDir(label);
   fs.mkdirSync(path.join(dir, 'home'), { recursive: true });
@@ -87,10 +56,6 @@ function writeLiveRelease(label: string, release: string): void {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'live', release }));
 }
 
-/**
- * A real npm-shaped strategy: stages into a sibling dir on disk and reuses the
- * production commit/undo, so the swap under test is the shipped one.
- */
 function fileStrategy(
   target: string,
   opts: { launchable: boolean; commit: UpdateStrategy['commit'] }
@@ -147,10 +112,8 @@ describe('updateInstallation', () => {
     expect(outcome.toRelease).toBe('2.1.220');
     expect(outcome.installation.id).toBe(before.id);
     expect(outcome.installation.label).toBe('2.0.65');
-    // The swap really happened: the live binary is the staged one.
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.1.220');
-    // Staging scratch is gone, and no rollback material is left behind.
     expect(fs.readdirSync(versionDir('2.0.65')).filter((e) => e.startsWith('.staging') || e.startsWith('.rollback')))
       .toEqual([]);
   });
@@ -206,7 +169,6 @@ describe('updateInstallation', () => {
     const { update, store, strategies, versions } = await load();
     writeLiveRelease('2.0.65', '2.0.65');
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
-    // The reference model under test: defaults are stored as the label.
     versions.setGlobalDefault('claude', '2.0.65');
 
     await update.updateInstallation(before, {
@@ -217,7 +179,6 @@ describe('updateInstallation', () => {
       }),
     });
 
-    // Unchanged pointer, still pointing at a real installation carrying the new release.
     expect(versions.getGlobalDefault('claude')).toBe('2.0.65');
     expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.1.220');
     expect(versions.getVersionDir('claude', '2.0.65')).toBe(versionDir('2.0.65'));
@@ -236,8 +197,6 @@ describe('updateInstallation', () => {
       }),
     })).rejects.toThrow(/failed to launch/);
 
-    // Nothing was swapped: the old release is still the live one, and the record
-    // still says so.
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.0.65');
     expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
@@ -251,8 +210,6 @@ describe('updateInstallation', () => {
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
 
     const realCommit = strategies.selectUpdateStrategy('claude').commit;
-    // Stage something launchable, then destroy the live binary right after the
-    // swap — the real "release installed but broken on disk" failure.
     const sabotagingCommit: UpdateStrategy['commit'] = async (ctx, staged): Promise<CommitHandles> => {
       const handles = await realCommit(ctx, staged);
       breakLiveBinary(ctx.installation.label);
@@ -264,7 +221,6 @@ describe('updateInstallation', () => {
       strategy: fileStrategy('2.1.220', { launchable: true, commit: sabotagingCommit }),
     })).rejects.toThrow(/Rolled back to 2\.0\.65/);
 
-    // The previous release is back, byte for byte, and still recorded.
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.0.65');
     expect(JSON.parse(fs.readFileSync(path.join(versionDir('2.0.65'), 'package.json'), 'utf-8')).name).toBe('live');
@@ -273,10 +229,6 @@ describe('updateInstallation', () => {
   });
 
   it('restores the version directory even when the strategy is not transactional', async () => {
-    // An installer-driven harness cannot put the VENDOR binary back, but it
-    // still displaced this installation's own tree — gating the undo on
-    // `transactional` left the broken release live and orphaned the working one
-    // in rollback material nothing ever deleted.
     const { update, store, strategies } = await load();
     writeLiveRelease('2.0.65', '2.0.65');
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
@@ -298,14 +250,10 @@ describe('updateInstallation', () => {
     expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
       .toContain('echo 2.0.65');
     expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
-    // No orphaned rollback material.
     expect(fs.readdirSync(versionDir('2.0.65')).filter((e) => e.startsWith('.rollback'))).toEqual([]);
   });
 
   it('reports no change when the installer lands on the release already installed', async () => {
-    // A self-updating binary that was already current: the strategy cannot know
-    // the release until after it runs, so the equality check has to happen after
-    // staging. Recording it would claim a change and append a bogus history row.
     const { update, store } = await load();
     writeLiveRelease('2.0.65', '2.0.65');
     const before = store.createInstallation('claude', '2.0.65', '2.0.65');
@@ -359,8 +307,6 @@ describe('updateInstallation', () => {
 
   it('records the new release on every installation that shares one global binary', async () => {
     const { update, store } = await load();
-    // Two installations of a global-binary harness point at the same file, so an
-    // update to one is an update to all — the record must not claim otherwise.
     for (const label of ['0.30.0', '0.31.0']) {
       fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'droid', label, 'home'), { recursive: true });
     }
@@ -373,7 +319,6 @@ describe('updateInstallation', () => {
       sharedBinary: true,
       async resolveTarget() { return '0.40.0'; },
       async stage(ctx) {
-        // The installer already replaced the shared binary; nothing per-install.
         const binDir = path.join(home, 'shared-bin');
         writeLaunchableBinary(binDir, '0.40.0');
         return {
@@ -386,7 +331,6 @@ describe('updateInstallation', () => {
       async commit() { return { undo: () => {}, finalize: () => {} }; },
     };
 
-    // droid's live binary is global; point the post-commit probe at a real one.
     fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
     writeLaunchableBinary(path.join(home, '.local', 'bin'), '0.40.0');
     fs.renameSync(path.join(home, '.local', 'bin', 'claude'), path.join(home, '.local', 'bin', 'droid'));
@@ -396,7 +340,6 @@ describe('updateInstallation', () => {
     expect(outcome.toRelease).toBe('0.40.0');
     expect(outcome.alsoUpdated.map((i) => i.label)).toEqual(['0.31.0']);
     expect(store.readInstallation('droid', '0.31.0')?.releaseVersion).toBe('0.40.0');
-    // Identity is still per-installation even though the binary is shared.
     expect(store.readInstallation('droid', '0.31.0')?.id)
       .not.toBe(store.readInstallation('droid', '0.30.0')?.id);
   });
@@ -406,7 +349,7 @@ describe('updateInstallation', () => {
       const { update, store, strategies, shims } = await load();
       writeLiveRelease('2.0.65', '2.0.65');
       const before = store.createInstallation('claude', '2.0.65', '2.0.65');
-      shims.recordLaunchLease('claude', '2.0.65', process.pid); // guaranteed-alive pid
+      shims.recordLaunchLease('claude', '2.0.65', process.pid);
 
       let staged = false;
       const strategy = fileStrategy('2.1.220', {
@@ -414,16 +357,13 @@ describe('updateInstallation', () => {
         commit: strategies.selectUpdateStrategy('claude').commit,
       });
 
-      // No `abortIfPinnedBeforeCommit`/`abortIfAutoDisabledBeforeCommit` set —
-      // this is exactly a manual `agents update` call. The active check must
-      // still fire: it is unconditional for a transactional strategy.
       const outcome = await update.updateInstallation(before, {
         to: '2.1.220',
         strategy: { ...strategy, async stage(ctx, target) { staged = true; return strategy.stage(ctx, target); } },
       });
 
       expect(outcome.unchanged).toBe(true);
-      expect(staged).toBe(false); // never even reached stage() — the pre-stage check fired
+      expect(staged).toBe(false);
       expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
         .toContain('echo 2.0.65');
       expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
@@ -441,8 +381,6 @@ describe('updateInstallation', () => {
         launchable: true,
         commit: async (ctx, staged) => { committed = true; return realCommit(ctx, staged); },
       });
-      // Simulates a launch starting mid-staging — the exact race the pre-stage
-      // check alone cannot close (staging a real npm package can take minutes).
       const strategyWithLateLease: UpdateStrategy = {
         ...base,
         async stage(ctx, target) {
@@ -455,16 +393,13 @@ describe('updateInstallation', () => {
       const outcome = await update.updateInstallation(before, { to: '2.1.220', strategy: strategyWithLateLease });
 
       expect(outcome.unchanged).toBe(true);
-      expect(committed).toBe(false); // staged, but never swapped in
+      expect(committed).toBe(false);
       expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
         .toContain('echo 2.0.65');
       expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
     });
 
     it('a non-transactional strategy (no reversible swap) is not gated by the active check', async () => {
-      // The active check protects a SWAP; a global-binary/install-script
-      // strategy has none, so a live lease must not block it — matching the
-      // eligibility narrowing `update-runtime.ts` already documents.
       const { update, store, shims } = await load();
       writeLiveRelease('2.0.65', '2.0.65');
       const before = store.createInstallation('claude', '2.0.65', '2.0.65');
@@ -510,7 +445,7 @@ describe('updateInstallation', () => {
         ...base,
         async stage(ctx, target) {
           const result = await base.stage(ctx, target);
-          policy.setGlobalAutoUpdateEnabled(false); // the download "just finished" when the switch flips
+          policy.setGlobalAutoUpdateEnabled(false);
           return result;
         },
       };
@@ -569,7 +504,6 @@ describe('updateInstallation', () => {
           launchable: true,
           commit: strategies.selectUpdateStrategy('claude').commit,
         }),
-        // abortIfAutoDisabledBeforeCommit deliberately unset — a manual call.
       });
 
       expect(outcome.unchanged).toBe(false);

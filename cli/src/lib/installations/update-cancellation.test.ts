@@ -1,24 +1,3 @@
-/**
- * Cross-platform cooperative cancellation for the harness auto-update pass
- * (PHNX-3940).
- *
- * The mutating pass must be stoppable from outside WITHOUT force-killing a
- * process that is mid-swap. These tests exercise the REAL mechanism — a real
- * child process, a real Node IPC channel, real signals, and real filesystem
- * "transactions" — not a mocked child or a faked FS success:
- *
- *   1. The in-process wiring (`withGuardedUpdateCancellation`): the guard is held
- *      for the pass duration and released after; an IPC cancel message and a
- *      channel disconnect each flip `cancelled()`.
- *   2. A real subprocess whose loop MIRRORS `runAutoUpdatePassUntilCancelled`
- *      (check `cancelled()` at the top, then a real stage→commit on disk): an IPC
- *      cancel after the first commit lets that commit's record finish and starts
- *      NO second transaction. A control run with no cancel commits every item, so
- *      the stop is caused by the cancel, not the harness.
- *   3. A real subprocess proving the `index.ts` SIGINT guard: while the guard is
- *      held a SIGINT does NOT tear the process down (it defers and cancels
- *      cooperatively); once released, a SIGINT exits 130 as normal.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -44,7 +23,6 @@ function tmp(prefix: string): string {
   return dir;
 }
 
-/** Write a bun-runnable fixture that imports the REAL leaf by absolute path. */
 function writeFixture(source: string): string {
   const dir = tmp('agents-cancel-fix-');
   const file = path.join(dir, 'fixture.mts');
@@ -68,8 +46,6 @@ describe('withGuardedUpdateCancellation (in-process wiring)', () => {
     });
     expect(result).toBe('done');
     expect(guardedDuringRun).toBe(true);
-    // Released even on the happy path — a leaked guard would silently disable
-    // SIGINT for the rest of the process's life.
     expect(isGuardedAutoUpdateActive()).toBe(false);
   });
 
@@ -87,8 +63,6 @@ describe('withGuardedUpdateCancellation (in-process wiring)', () => {
       return 'ok';
     });
     await tick();
-    // A message that is NOT the cancel envelope must be ignored (would otherwise
-    // let any stray IPC traffic abort a real update).
     (process as NodeJS.EventEmitter).emit('message', { type: 'something-else' });
     await tick();
     expect(cancelledObserved).toBe(false);
@@ -108,14 +82,6 @@ describe('withGuardedUpdateCancellation (in-process wiring)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Real subprocess: a loop that MIRRORS runAutoUpdatePassUntilCancelled, driven
-// over a real IPC channel. Each iteration is a real two-step transaction on
-// disk (stage -> atomic rename = "record"), and it awaits the parent between
-// iterations so the "did the loop stop after cancel?" assertion has no sleep
-// race: the parent replies with an ack to continue, or with the cancel envelope
-// to stop.
-// ---------------------------------------------------------------------------
 const LOOP_FIXTURE = `
 import * as fs from 'fs';
 import * as path from 'path';
@@ -162,8 +128,6 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
     const child = spawn(process.execPath, ['--import', TSX_URL, fixture], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     let stdout = '';
     child.stdout!.on('data', (data) => { stdout += data.toString(); });
-    // Node emits exit + stream end but can withhold close after the parent
-    // explicitly disconnects IPC. Observe both real completion signals here.
     const exit = new Promise<number | null>((resolve) => child.on('exit', resolve));
     const drained = new Promise<void>((resolve) => child.stdout!.on('end', resolve));
     child.once('message', () => child.disconnect());
@@ -179,19 +143,13 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
       child.on('close', (code, signal) => resolve({ code, signal }));
     });
     child.on('message', (m: LoopMsg) => {
-      // Deliver the cancel only AFTER the first transaction has committed. The
-      // child is blocked on nextMessage(); the cancel envelope both flips its
-      // cancelled flag and unblocks it, so the next top-of-loop check breaks.
       if (m.committed === 1) child.send(cancelMessage());
     });
     const { code, signal } = await exit;
 
-    // Real completion (the child exited on its own), never a kill.
     expect(signal).toBeNull();
     expect(code).toBe(0);
-    // The first transaction's record is fully on disk...
     expect(fs.existsSync(path.join(dir, 'committed-1'))).toBe(true);
-    // ...and no second transaction ran — not even a staged, un-committed one.
     expect(fs.existsSync(path.join(dir, 'committed-2'))).toBe(false);
     expect(fs.readdirSync(dir).filter((e) => e.startsWith('.staging-'))).toEqual([]);
     expect(fs.readdirSync(dir).filter((e) => e.startsWith('committed-'))).toEqual(['committed-1']);
@@ -204,7 +162,7 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
     const exit = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
     child.on('message', (m: LoopMsg) => {
       if (m.done) { done = true; return; }
-      if (m.committed) child.send({ ack: m.committed }); // a non-cancel reply: keep going
+      if (m.committed) child.send({ ack: m.committed });
     });
     const code = await exit;
 
@@ -215,12 +173,6 @@ describe('real subprocess: IPC cancel stops the loop at a safe boundary', () => 
   }, 30_000);
 });
 
-// ---------------------------------------------------------------------------
-// Real subprocess: the index.ts SIGINT guard. A fixture mirrors index.ts's
-// top-level SIGINT handler (reading the SAME registry symbol via the leaf
-// predicate) and holds a real guarded pass; a SIGINT while guarded must NOT
-// tear it down, and once the guard releases a SIGINT exits 130.
-// ---------------------------------------------------------------------------
 const SIGINT_FIXTURE = `
 import { withGuardedUpdateCancellation, isGuardedAutoUpdateActive } from ${JSON.stringify(LEAF_PATH)};
 
@@ -257,9 +209,6 @@ setInterval(() => {}, 1000); // keep a real handle alive for the parent's second
     await waitFor('guarded');
     expect(messages.find((m) => 'guarded' in m)?.guarded).toBe(true);
 
-    // First SIGINT: the guard must swallow the hard exit AND cancel the pass
-    // cooperatively. If the guard were absent, exit(130) would fire here and the
-    // process would never emit 'leaving'/'unguarded'.
     const releasedAndAlive = waitFor('unguarded');
     child.kill('SIGINT');
     await releasedAndAlive;
@@ -267,18 +216,14 @@ setInterval(() => {}, 1000); // keep a real handle alive for the parent's second
     expect(messages.some((m) => m.leaving === true)).toBe(true);
     expect(messages.find((m) => 'unguarded' in m)?.unguarded).toBe(true);
 
-    // Second SIGINT, guard now released: the same handler force-exits 130.
     child.kill('SIGINT');
     expect(await exit).toBe(130);
   }, 30_000);
 
   it('index.ts installs a SIGINT handler that reads the guard symbol and defers on it', () => {
-    // Pins that the SHIPPED handler defers on the same registry key the leaf sets,
-    // so the runtime proof above cannot pass while index.ts quietly stops using it.
     const src = fs.readFileSync(INDEX_SRC_PATH, 'utf-8');
     expect(src).toMatch(/process\.on\('SIGINT'/);
     expect(src).toContain("Symbol.for('agents.guardedAutoUpdateDepth')");
-    // The deferral branch: read the depth and return early before exit(130).
     expect(src).toMatch(/if \(depth > 0\) return;/);
     expect(src).toMatch(/process\.exit\(130\)/);
   });
