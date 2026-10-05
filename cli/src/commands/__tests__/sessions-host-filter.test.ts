@@ -1,6 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
-import { shouldIncludeLocal, remoteHostsToDial, hasNoBrowserDisqualifyingFlags, filterActiveSessionsByHostScope } from '../sessions.js';
+import { hasNoBrowserDisqualifyingFlags } from '../sessions.js';
+import { shouldIncludeLocal, remoteHostsToDial, filterActiveSessionsByHostScope } from '../ps-roster.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 
 describe('shouldIncludeLocal', () => {
