@@ -514,10 +514,22 @@ approximating it could let the merge loop bypass review).
 The `agents projects prs` write verbs follow the same budget rule
 ([`src/lib/github/project-prs.ts`](src/lib/github/project-prs.ts), documented in
 [`docs/projects.md`](docs/projects.md)): `merge`, `review --approve` and `comment`
-are one REST call each, and `ready` is the single exception, one GraphQL
-`markPullRequestReadyForReview` mutation, because GitHub exposes no REST way to
-leave draft. `merge` and `review` pin to the head SHA the caller saw (`review`
-reads the live head, refuses a moved one, and sends that full SHA as `commit_id`).
+are REST, and `ready` and `automerge` are the exceptions, one GraphQL mutation each
+(`markPullRequestReadyForReview`, `enable`/`disablePullRequestAutoMerge`), because
+GitHub exposes no REST way to leave draft or set auto-merge. `merge`, `review` and
+`automerge` pin to the head SHA the caller saw (`review` reads the live head,
+refuses a moved one, and sends that full SHA as `commit_id`; `automerge` passes it
+as `expectedHeadOid`). `review --approve` on the viewer's own PR answers without a
+call, since GitHub never allows it.
+
+**`prs merge --admin` is for a person's confirm click, never for an agent.**
+Without it, `merge` reads the live `mergeable_state` and refuses a `blocked` PR
+before the PUT. With it, the PUT runs and a repository admin whose protection does
+not enforce on admins merges past pending or red required checks. AGI Menu passes
+it only from its "Confirm admin merge" button. Every agent shares the owner's
+GitHub identity, so the `gh-merge-guard` rule in the system layer denies agents
+`prs merge --admin` and the raw REST/GraphQL merge calls. Agents land PRs with a
+plain `gh pr merge` after CI and a review verdict, or with `prs automerge`.
 
 `agents traces sync` publishes two redacted derived surfaces: a per-session
 `SessionDetail` at `sessions/<id>.json` (a `meta` summary —

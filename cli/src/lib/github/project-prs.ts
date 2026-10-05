@@ -33,8 +33,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ghExec, canonicalizeRepo, projectRepoSlugs, type GhExec } from './pr-mergeable.js';
-import { isRateLimitError, prHead, rollupForSha, type RollupItem } from './rest.js';
-import { fetchViewerProfile } from './viewer.js';
+import { isRateLimitError, rollupForSha, type RollupItem } from './rest.js';
+import { cachedViewer, fetchViewerProfile } from './viewer.js';
 import { repoPathClaims, type ProjectDef } from '../projects.js';
 import { getCacheDir } from '../state.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
@@ -87,6 +87,31 @@ export interface ProjectPr {
   ciState: CiState | null;
   /** Names of the head commit's failing, errored, timed-out, cancelled or action-required checks. */
   failingChecks: string[];
+  /** GitHub auto-merge on this PR (it merges itself once its checks pass); null when off. */
+  autoMerge: ProjectPrAutoMerge | null;
+}
+
+/** Who turned auto-merge on, and the method it will merge with (`rebase` | `squash` | `merge`). */
+export interface ProjectPrAutoMerge {
+  enabledBy: string;
+  method: string;
+}
+
+/**
+ * What the authenticated viewer may do to land a PR in one repository.
+ * `adminBypass` is true when the viewer is an admin and the default branch's
+ * classic protection does not enforce its rules on admins (or there is none), so
+ * an admin merge can land a PR whose required checks are pending or red.
+ * Repository rulesets are not read: their bypass list is GitHub's to apply, and
+ * a ruleset refusal comes back from the merge itself.
+ */
+export interface RepoMergeAbility {
+  viewerIsAdmin: boolean;
+  adminBypass: boolean;
+  /** The repository allows auto-merge (`allow_auto_merge`), so `prs automerge` can turn it on. */
+  autoMergeAllowed: boolean;
+  /** The merge methods the repository allows, in {@link MERGE_METHODS} order. */
+  methods: MergeMethod[];
 }
 
 /** One PR merged into the repository in the last {@link MERGED_WINDOW_DAYS} days. */
@@ -123,12 +148,14 @@ export interface ProjectRepoPrs {
   /** Other project definitions attached to this same repository. */
   sharedWith: string[];
   pullRequests: ProjectPr[];
+  /** What the viewer may do to land a PR here; null when the repository or its protection could not be read. */
+  merge: RepoMergeAbility | null;
   /** PRs merged in the last 7 days, newest first, at most 20; [] with `--number`. */
   recentlyMerged: MergedPr[];
   /** The default branch head and its CI; null with `--number` or when its read failed. */
   defaultBranch: DefaultBranchCi | null;
   /**
-   * Null when every CI and merged-PR read succeeded. Otherwise GitHub's message for
+   * Null when every CI, merged-PR and merge-settings read succeeded. Otherwise GitHub's message for
    * the failure (a rate limit when one occurred, else the first), and the fields
    * that read failed are null/empty rather than describing a repo with no checks.
    */
@@ -184,7 +211,8 @@ const PR_JQ =
   'login: (.user.login // ""), avatarUrl: (.user.avatar_url // ""), ' +
   'headRefName: (.head.ref // ""), baseRefName: (.base.ref // ""), ' +
   'headSha: (.head.sha // ""), body: (.body // ""), ' +
-  'mergeable: .mergeable, mergeableState: .mergeable_state}';
+  'mergeable: .mergeable, mergeableState: .mergeable_state, ' +
+  'autoMerge: (if .auto_merge then {enabledBy: (.auto_merge.enabled_by.login // ""), method: (.auto_merge.merge_method // "")} else null end)}';
 
 /** Parse newline-delimited JSON (gh `--jq` streams one object per line/page). */
 function parseNdjson(out: string): Array<Record<string, unknown>> {
@@ -219,6 +247,9 @@ export function rowToProjectPr(row: Record<string, unknown>): ProjectPr {
     reviewDecision: null,
     ciState: null,
     failingChecks: [],
+    autoMerge: isRecord(row.autoMerge)
+      ? { enabledBy: String(row.autoMerge.enabledBy ?? ''), method: String(row.autoMerge.method ?? '') }
+      : null,
   };
 }
 
@@ -783,11 +814,18 @@ export async function buildProjectPrs(
       const peer = shared.get(slug);
       const sharedWith = peer?.names ?? [];
       try {
+        // Settled into a value up front, so a list read that throws first never leaves it rejected unobserved.
+        const mergeRead = readRepoMergeAbility(slug, gh).then(
+          (merge) => ({ merge, error: null }),
+          (err: unknown) => ({ merge: null, error: err }),
+        );
         if (opts.number !== undefined) {
           const pr = await fetchOnePr(slug, opts.number, gh);
+          const enriched = await enrichPr(slug, pr, gh);
+          const { merge, error: mergeError } = await mergeRead;
           return {
-            slug, sharedWith, pullRequests: [await enrichPr(slug, pr, gh)],
-            recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false, release: null, releaseError: null, error: null,
+            slug, sharedWith, pullRequests: [enriched], merge,
+            recentlyMerged: [], defaultBranch: null, ciError: mergeError === null ? null : ghFailure(mergeError), truncated: false, release: null, releaseError: null, error: null,
           };
         }
         const errors = new CiErrors();
@@ -839,6 +877,8 @@ export async function buildProjectPrs(
           }),
         ]);
         pullRequests = pullRequests.map((pr, i) => ({ ...pr, ...openCi[i] }));
+        const { merge, error: mergeError } = await mergeRead;
+        if (mergeError !== null) errors.record(mergeError);
         if (mergedListed) {
           details.prune(slug, new Set(mergedListed.map((m) => String(m.pr.number))));
           // Pre-scope SHAs: every project sharing this repo keeps the same cache entries.
@@ -851,13 +891,13 @@ export async function buildProjectPrs(
           }
         }
         return {
-          slug, sharedWith, pullRequests, recentlyMerged, defaultBranch,
+          slug, sharedWith, pullRequests, merge, recentlyMerged, defaultBranch,
           ciError: errors.message, truncated: mergedRead?.truncated ?? false, release, releaseError, error: null,
         };
       } catch (err) {
         // A fetch failure is reported, never relabeled as zero open PRs.
         return {
-          slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false,
+          slug, sharedWith, pullRequests: [], merge: null, recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false,
           release: null, releaseError: null, error: err instanceof Error ? err.message : String(err),
         };
       }
@@ -887,15 +927,69 @@ export interface ProjectPrMergeResult {
   message: string;
 }
 
+/** A repository's merge settings as the viewer sees them, from one `repos/{r}` read. */
+interface RepoMergeSettings {
+  methods: MergeMethod[];
+  viewerIsAdmin: boolean;
+  autoMergeAllowed: boolean;
+  defaultBranch: string;
+}
+
+/**
+ * The repository read behind {@link defaultMergeMethod} and {@link readRepoMergeAbility}:
+ * the allowed methods, the viewer's admin permission, `allow_auto_merge`, and the
+ * default branch. gh caches the response for an hour (the cache keys on the request,
+ * not the jq), so this shares one HTTP read with the default-branch lookup.
+ */
+async function readRepoMergeSettings(repo: string, gh: GhExec): Promise<RepoMergeSettings> {
+  const row = JSON.parse((await gh([
+    'api', `repos/${repo}`, '--cache', '1h',
+    '--jq', '{rebase: .allow_rebase_merge, squash: .allow_squash_merge, merge: .allow_merge_commit, ' +
+      'admin: (.permissions.admin // false), autoMerge: (.allow_auto_merge // false), defaultBranch: (.default_branch // "")}',
+  ])).trim()) as Record<MergeMethod, boolean | undefined> & { admin?: boolean; autoMerge?: boolean; defaultBranch?: string };
+  return {
+    methods: MERGE_METHODS.filter((m) => row[m]),
+    viewerIsAdmin: row.admin === true,
+    autoMergeAllowed: row.autoMerge === true,
+    defaultBranch: row.defaultBranch ?? '',
+  };
+}
+
 /** The first of {@link MERGE_METHODS} the repository allows. */
 export async function defaultMergeMethod(repo: string, gh: GhExec = ghExec): Promise<MergeMethod> {
-  const allowed = JSON.parse((await gh([
-    'api', `repos/${repo}`, '--cache', '1h',
-    '--jq', '{rebase: .allow_rebase_merge, squash: .allow_squash_merge, merge: .allow_merge_commit}',
-  ])).trim()) as Record<MergeMethod, boolean | undefined>;
-  const method = MERGE_METHODS.find((m) => allowed[m]);
+  const method = (await readRepoMergeSettings(repo, gh)).methods[0];
   if (!method) throw new Error(`${repo} allows no merge method this token can see.`);
   return method;
+}
+
+/**
+ * What the viewer may do to land a PR in `repo` ({@link RepoMergeAbility}). One
+ * cached repository read, plus, only for an admin, the default branch's classic
+ * protection (`--cache 1h`): HTTP 404 means the branch is unprotected, so an admin
+ * merge has nothing to bypass. Only an admin can read protection at all, which is
+ * why a non-admin never pays for the call.
+ */
+export async function readRepoMergeAbility(repo: string, gh: GhExec = ghExec): Promise<RepoMergeAbility> {
+  const settings = await readRepoMergeSettings(repo, gh);
+  let adminBypass = false;
+  if (settings.viewerIsAdmin) {
+    if (!settings.defaultBranch) throw new Error(`${repo} reports no default branch`);
+    try {
+      const enforced = (await gh([
+        'api', `repos/${repo}/branches/${settings.defaultBranch}/protection`, '--cache', '1h', '--jq', '.enforce_admins.enabled',
+      ])).trim();
+      adminBypass = enforced !== 'true';
+    } catch (err) {
+      if (!/\(HTTP 404\)/.test(ghFailure(err))) throw err;
+      adminBypass = true;
+    }
+  }
+  return {
+    viewerIsAdmin: settings.viewerIsAdmin,
+    adminBypass,
+    autoMergeAllowed: settings.autoMergeAllowed,
+    methods: settings.methods,
+  };
 }
 
 /**
@@ -911,18 +1005,43 @@ export function ghFailure(err: unknown): string {
   return line.replace(/^gh:\s*/, '');
 }
 
+/** The refusal `prs merge` gives a blocked PR when `--admin` was not passed. */
+export const BLOCKED_WITHOUT_ADMIN = 'Blocked by branch protection; pass --admin to merge as an admin';
+
+/**
+ * GitHub's merge refusal in words a person can act on. A 405 naming required
+ * status checks says which ones have not passed; a 409 means the head moved since
+ * the caller looked. Anything else is GitHub's own line, unchanged.
+ */
+export function readableMergeRefusal(message: string): string {
+  const checks = /Required status checks? (.+?) (?:is|are) expected/i.exec(message);
+  if (checks && /\(HTTP 405\)/.test(message)) {
+    const names = checks[1].replace(/"/g, '');
+    const plural = names.includes(',') ? 'checks' : 'check';
+    return `Required ${plural} ${names} ${plural === 'check' ? "hasn't" : "haven't"} passed (HTTP 405)`;
+  }
+  if (/\(HTTP 409\)/.test(message)) return 'The head moved since you looked; reload the PR and try again (HTTP 409)';
+  return message;
+}
+
 /**
  * Merge one PR over REST (`PUT repos/{repo}/pulls/{n}/merge`), pinned to `sha`:
  * GitHub refuses with 409 when the head moved since the caller looked, so a push
- * that landed after the menu rendered is never merged unseen. Branch protection,
- * required checks and reviews are GitHub's to enforce; their refusal comes back
- * as `merged: false` with GitHub's own message.
+ * that landed after the menu rendered is never merged unseen.
+ *
+ * Without `admin`, the PR's live `mergeable_state` is read first and a `blocked`
+ * PR is refused before the PUT ({@link BLOCKED_WITHOUT_ADMIN}): an admin whose
+ * branch protection does not enforce on admins would otherwise merge past pending
+ * or red required checks without ever asking for it. With `admin`, the PUT runs
+ * directly and GitHub decides whether the viewer can bypass. Any refusal comes
+ * back as `merged: false` with {@link readableMergeRefusal}'s message.
  */
 export async function mergeProjectPr(
   repo: string,
   number: number,
   sha: string,
   method: MergeMethod | undefined,
+  opts: { admin?: boolean } = {},
   gh: GhExec = ghExec,
 ): Promise<ProjectPrMergeResult> {
   let chosen: MergeMethod;
@@ -931,6 +1050,15 @@ export async function mergeProjectPr(
   } catch (err) {
     return { repo, number, method: method ?? MERGE_METHODS[0], merged: false, sha: null, message: ghFailure(err) };
   }
+  if (!opts.admin) {
+    let state: string;
+    try {
+      state = (await gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '.mergeable_state // ""'])).trim();
+    } catch (err) {
+      return { repo, number, method: chosen, merged: false, sha: null, message: ghFailure(err) };
+    }
+    if (state === 'blocked') return { repo, number, method: chosen, merged: false, sha: null, message: BLOCKED_WITHOUT_ADMIN };
+  }
   let out: string;
   try {
     out = await gh([
@@ -938,7 +1066,7 @@ export async function mergeProjectPr(
       '-f', `sha=${sha}`, '-f', `merge_method=${chosen}`, '--jq', '.sha',
     ]);
   } catch (err) {
-    return { repo, number, method: chosen, merged: false, sha: null, message: ghFailure(err) };
+    return { repo, number, method: chosen, merged: false, sha: null, message: readableMergeRefusal(ghFailure(err)) };
   }
   // GitHub answers this endpoint 200 only once the PR is merged; anything else made gh exit non-zero.
   return { repo, number, method: chosen, merged: true, sha: out.trim() || null, message: 'Merged' };
@@ -954,6 +1082,82 @@ function assertHeadIs(repo: string, number: number, live: string, seen: string):
     throw new Error(`${repo}#${number} moved to ${live.slice(0, 7)} since you looked at ${seen.slice(0, 7)}; reload it and try again.`);
   }
   return live;
+}
+
+/** The result of one `projects prs automerge`. */
+export interface ProjectPrAutoMergeResult {
+  repo: string;
+  number: number;
+  /** True when auto-merge is on afterwards. */
+  enabled: boolean;
+  /** The method auto-merge will merge with; null when it is off. */
+  method: MergeMethod | null;
+  message: string;
+}
+
+/**
+ * Turn GitHub auto-merge on or off for one PR. GitHub has no REST endpoint for
+ * it, so the write is ONE GraphQL mutation after a REST read of the node id and
+ * live head (root AGENTS.md permits a single user-triggered mutation; a poll loop
+ * would not be). Turning it on passes `expectedHeadOid` set to the full live SHA
+ * the short `sha` names, so GitHub refuses if the branch moved, and the PR then
+ * merges itself once its required checks pass. Turning it off takes no SHA:
+ * cancelling never lands code. A PR that is closed, or already in the requested
+ * state when turning off, is answered without a write.
+ */
+export async function setProjectPrAutoMerge(
+  repo: string,
+  number: number,
+  opts: { enable: boolean; sha?: string; method?: MergeMethod },
+  gh: GhExec = ghExec,
+): Promise<ProjectPrAutoMergeResult> {
+  const base = { repo, number };
+  let pr: { sha: string; nodeId: string; state: string; merged: boolean; autoMethod: string | null };
+  try {
+    pr = JSON.parse((await gh([
+      'api', `repos/${repo}/pulls/${number}`, '--jq',
+      '{sha: .head.sha, nodeId: .node_id, state: .state, merged: (.merged // false), autoMethod: (.auto_merge.merge_method // null)}',
+    ])).trim()) as typeof pr;
+  } catch (err) {
+    return { ...base, enabled: false, method: null, message: ghFailure(err) };
+  }
+  const current = { enabled: pr.autoMethod !== null, method: (pr.autoMethod as MergeMethod | null) };
+  if (pr.state !== 'open') return { ...base, ...current, message: pr.merged ? 'Already merged' : 'The pull request is closed' };
+  if (!opts.enable) {
+    if (!current.enabled) return { ...base, enabled: false, method: null, message: 'Auto-merge was not on' };
+    try {
+      await gh([
+        'api', 'graphql',
+        '-f', 'query=mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { pullRequest { autoMergeRequest { mergeMethod } } } }',
+        '-f', `id=${pr.nodeId}`,
+        '--jq', '.data.disablePullRequestAutoMerge.pullRequest.autoMergeRequest',
+      ]);
+    } catch (err) {
+      return { ...base, ...current, message: ghFailure(err) };
+    }
+    return { ...base, enabled: false, method: null, message: 'Auto-merge turned off' };
+  }
+  let head: string;
+  let chosen: MergeMethod;
+  try {
+    head = assertHeadIs(repo, number, pr.sha, opts.sha ?? '');
+    chosen = opts.method ?? await defaultMergeMethod(repo, gh);
+  } catch (err) {
+    return { ...base, ...current, message: ghFailure(err) };
+  }
+  try {
+    await gh([
+      'api', 'graphql',
+      '-f', 'query=mutation($id: ID!, $method: PullRequestMergeMethod!, $head: GitObjectID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $method, expectedHeadOid: $head}) { pullRequest { autoMergeRequest { mergeMethod } } } }',
+      '-f', `id=${pr.nodeId}`,
+      '-f', `method=${chosen.toUpperCase()}`,
+      '-f', `head=${head}`,
+      '--jq', '.data.enablePullRequestAutoMerge.pullRequest.autoMergeRequest.mergeMethod',
+    ]);
+  } catch (err) {
+    return { ...base, ...current, message: ghFailure(err) };
+  }
+  return { ...base, enabled: true, method: chosen, message: `Auto-merge on (${chosen}); it merges once the required checks pass` };
 }
 
 /** The result of one `projects prs ready`. */
@@ -1009,6 +1213,9 @@ export async function markProjectPrReady(
   return { repo, number, ready: true, sha: head.sha, message: 'Marked ready for review' };
 }
 
+/** What `prs review --approve` answers on the viewer's own PR, without a call to GitHub. */
+export const OWN_PR_APPROVAL = "GitHub doesn't let you approve your own pull request";
+
 /** The result of one `projects prs review --approve`. */
 export interface ProjectPrReviewResult {
   repo: string;
@@ -1028,8 +1235,9 @@ export interface ProjectPrReviewResult {
  * accepts a review on an older commit instead of refusing it, so the live head is
  * read first and a moved head is refused; the review then carries `commit_id` set
  * to that full SHA, so a push racing the call cannot turn this into an approval
- * of code the caller never saw. Approving your own PR is GitHub's to refuse
- * (HTTP 422), reported as `submitted: false`.
+ * of code the caller never saw. GitHub never lets an author approve their own PR
+ * (HTTP 422), so when the viewer ({@link cachedViewer}, a disk record) is the PR's
+ * author it answers `submitted: false` without posting anything.
  */
 export async function approveProjectPr(
   repo: string,
@@ -1037,11 +1245,21 @@ export async function approveProjectPr(
   sha: string,
   body: string | undefined,
   gh: GhExec = ghExec,
+  viewerLogin: () => Promise<string | null> = async () => (await cachedViewer())?.login ?? null,
 ): Promise<ProjectPrReviewResult> {
   const base = { repo, number, event: 'APPROVE' as const };
   let commitId: string;
   try {
-    commitId = assertHeadIs(repo, number, (await prHead(repo, number, gh)).sha, sha);
+    const [live, viewer] = await Promise.all([
+      gh(['api', `repos/${repo}/pulls/${number}`, '--jq', '{sha: .head.sha, author: (.user.login // "")}'])
+        .then((out) => JSON.parse(out.trim()) as { sha: string; author: string }),
+      viewerLogin(),
+    ]);
+    if (viewer && live.author && viewer.toLowerCase() === live.author.toLowerCase()) {
+      return { ...base, submitted: false, sha: live.sha, id: null, url: null, message: OWN_PR_APPROVAL };
+    }
+    if (!live.sha) throw new Error(`no head SHA for ${repo}#${number}`);
+    commitId = assertHeadIs(repo, number, live.sha, sha);
   } catch (err) {
     return { ...base, submitted: false, sha: null, id: null, url: null, message: ghFailure(err) };
   }

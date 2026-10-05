@@ -90,6 +90,7 @@ import {
   markProjectPrReady,
   mergeProjectPr,
   resolveTargetSlugs,
+  setProjectPrAutoMerge,
   MERGE_METHODS,
   MERGED_WINDOW_DAYS,
   type CiState,
@@ -645,7 +646,7 @@ function printProjectDefinition(def: ProjectDef, name: string): void {
   console.log(chalk.gray(`  ${projectDefPath(name)}`));
 }
 
-// The single-PR verbs (`prs ready/review/comment/merge`) share these flag rules.
+// The single-PR verbs (`prs ready/review/comment/merge/automerge`) share these flag rules.
 // Every one runs before the repo is resolved, so a bad flag never reaches GitHub.
 
 function prFail(message: string): never {
@@ -684,6 +685,13 @@ function prCommentBodyOrExit(body: string | undefined, bodyFile: string | undefi
   }
   if (!text || !text.trim()) prFail('The comment is empty.');
   return text.trimEnd();
+}
+
+function prMethodOrExit(raw: string | undefined): MergeMethod | undefined {
+  if (raw !== undefined && !(MERGE_METHODS as readonly string[]).includes(raw)) {
+    prFail(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${raw}".`);
+  }
+  return raw as MergeMethod | undefined;
 }
 
 async function prRepoOrExit(def: ProjectDef, repo: string): Promise<string> {
@@ -1126,16 +1134,15 @@ async function runProjectCard(
     .requiredOption('--number <n>', 'The PR number')
     .requiredOption('--sha <head-sha>', 'The head SHA you reviewed; GitHub refuses if the branch moved since')
     .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
+    .option('--admin', 'Merge a PR branch protection blocks, as a repository admin. For a person\'s explicit confirm only; agents must never pass it')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; json?: boolean }) => {
+    .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; admin?: boolean; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const sha = prShaOrExit(opts.sha);
-      if (opts.method !== undefined && !(MERGE_METHODS as readonly string[]).includes(opts.method)) {
-        prFail(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${opts.method}".`);
-      }
+      const method = prMethodOrExit(opts.method);
       const repo = await prRepoOrExit(def, opts.repo);
-      const result = await mergeProjectPr(repo, number, sha, opts.method as MergeMethod | undefined);
+      const result = await mergeProjectPr(repo, number, sha, method, { admin: opts.admin === true });
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
       } else if (result.merged) {
@@ -1154,9 +1161,55 @@ async function runProjectCard(
     `,
     notes: `
       The merge is a single REST call pinned to --sha: if anything was pushed after
-      you read the PR, GitHub refuses and nothing merges. Branch protection, required
-      checks and reviews stay GitHub's to enforce; a refusal exits 1 with GitHub's
-      message (merged: false in --json).
+      you read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose
+      live mergeable_state is "blocked" (a required check pending or red, or a review
+      required) is refused before the call. --admin skips that refusal and lets a
+      repository admin merge past branch protection where GitHub allows it; it exists
+      for a person's explicit confirm (AGI Menu's "Confirm admin merge") and agents
+      must never pass it. To land a PR once its checks pass, use prs automerge. A
+      refusal exits 1 with GitHub's reason (merged: false in --json).
+    `,
+  });
+
+  const automergeCmd = prsCmd
+    .command('automerge <name>')
+    .description('Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--number <n>', 'The PR number')
+    .option('--sha <head-sha>', 'The head SHA you reviewed (required to turn it on); GitHub refuses if the branch moved since')
+    .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
+    .option('--off', 'Turn auto-merge off instead')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; number: string; sha?: string; method?: string; off?: boolean; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const enable = opts.off !== true;
+      if (enable && opts.sha === undefined) prFail('Pass --sha <head-sha>: auto-merge is pinned to the head you reviewed.');
+      if (!enable && opts.method !== undefined) prFail('--method only applies when turning auto-merge on.');
+      const sha = opts.sha === undefined ? undefined : prShaOrExit(opts.sha);
+      const method = prMethodOrExit(opts.method);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await setProjectPrAutoMerge(repo, number, { enable, sha, method });
+      const ok = result.enabled === enable;
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (ok) console.log(`${chalk.green(result.message)}: ${repo}#${number}`);
+      else console.error(chalk.red(`Auto-merge not changed: ${repo}#${number}: ${result.message}`));
+      if (!ok) process.exit(1);
+    });
+
+  setHelpSections(automergeCmd, {
+    examples: `
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + merge.autoMergeAllowed
+      agents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --off --json
+    `,
+    notes: `
+      GitHub has no REST endpoint for auto-merge, so each call is one GraphQL
+      mutation (enablePullRequestAutoMerge / disablePullRequestAutoMerge) after a REST
+      read. Turning it on passes expectedHeadOid, so a branch that moved since --sha
+      is refused. The repository must allow auto-merge (merge.autoMergeAllowed in
+      prs --json), and GitHub refuses it on a PR that can already merge: use prs merge
+      for that. Exits 1 unless auto-merge ends in the requested state.
     `,
   });
 
@@ -1224,8 +1277,8 @@ async function runProjectCard(
     notes: `
       One REST call (POST pulls/{n}/reviews, event APPROVE). The live head is read
       first and a moved head is refused; the review carries commit_id = that SHA, so
-      it is recorded against the code you saw. GitHub refuses approving your own PR
-      (exit 1, submitted: false in --json).
+      it is recorded against the code you saw. On your own PR it answers at once
+      (exit 1, submitted: false) without calling GitHub, which never allows that.
     `,
   });
 
