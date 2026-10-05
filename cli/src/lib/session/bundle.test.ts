@@ -4,10 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
-// Redirect HOME to a throwaway dir BEFORE the module graph (state.ts captures
-// HOME at first import, and mirrorPath lands files under ~/.agents/.history) so
-// placement tests never touch the real session store. The module is loaded
-// dynamically in beforeAll, after HOME is set.
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bundle-home-'));
 process.env.HOME = TMP_HOME;
 
@@ -18,7 +14,6 @@ beforeAll(async () => {
   B = await import('./bundle.js');
 });
 
-/** Write a throwaway transcript file and return its absolute path. */
 function writeFixture(dir: string, name: string, content: string): string {
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, name);
@@ -48,12 +43,11 @@ describe('bundle format', () => {
     expect(parsed.records[0].label).toBe('greeting');
     expect(parsed.records[0].encrypted).toBe(false);
     expect(parsed.records[0].body).toBe(fs.readFileSync(abs, 'utf-8'));
-    // hash is over plaintext body
     expect(parsed.records[0].hash).toBe(crypto.createHash('sha256').update(parsed.records[0].body).digest('hex'));
   });
 
   it('redaction scrubs secrets from the stored body before hashing', () => {
-    const secret = 'AKIA' + 'A'.repeat(16); // AWS key shape
+    const secret = 'AKIA' + 'A'.repeat(16);
     const abs = writeFixture(SRC, 'claude-secret.jsonl', `{"text":"key ${secret} here"}\n`);
     const rec = B.buildRecord(
       { agent: 'claude', machine: 'boxA', sessionId: 'sess-secret', relKey: 'sess-secret.jsonl', absPath: abs },
@@ -61,13 +55,10 @@ describe('bundle format', () => {
     );
     expect(rec.body).not.toContain(secret);
     expect(rec.body).toContain('[REDACTED_AWS_KEY]');
-    // hash matches the redacted body actually stored
     expect(rec.hash).toBe(crypto.createHash('sha256').update(rec.body).digest('hex'));
   });
 
   it('value-aware redaction masks a known secret value verbatim (any format)', () => {
-    // A credential whose shape matches no built-in pattern still leaks unless we
-    // mask its exact value (RUSH-1761).
     const secret = 'zZ9-opaque-bundle-value-1761';
     const abs = writeFixture(SRC, 'claude-known.jsonl', `{"text":"used ${secret} in a url"}\n`);
     const rec = B.buildRecord(
@@ -91,10 +82,8 @@ describe('bundle format', () => {
     const out = path.join(SRC, 'out.bundle');
     B.writeBundleFile(out, wire);
     expect(fs.readFileSync(out, 'utf-8')).toBe(wire);
-    // POSIX-only: Windows (NTFS) has no 0600 bit; Node reports 0o666 regardless.
     if (process.platform !== 'win32') expect(fs.statSync(out).mode & 0o777).toBe(0o600);
 
-    // Overwriting a pre-existing looser file still clamps to 0600.
     fs.writeFileSync(out, 'stale', { mode: 0o644 });
     fs.chmodSync(out, 0o644);
     B.writeBundleFile(out, wire);
@@ -111,8 +100,7 @@ describe('bundle format', () => {
       { redact: false, encryptKey: key },
     );
     expect(rec.encrypted).toBe(true);
-    expect(rec.body).not.toContain('secret conversation'); // ciphertext, not plaintext
-    // hash is still over PLAINTEXT so dedup is encryption-agnostic
+    expect(rec.body).not.toContain('secret conversation');
     expect(rec.hash).toBe(crypto.createHash('sha256').update(plaintext).digest('hex'));
 
     const wire = B.serializeBundle(
@@ -125,7 +113,6 @@ describe('bundle format', () => {
 
     const res = B.writeImport(plan, { overwrite: false, decryptKey: key });
     expect(res.placed).toBe(1);
-    // the placed file is the decrypted plaintext, byte-exact
     expect(fs.readFileSync(plan[0].targetPath, 'utf-8')).toBe(plaintext);
   });
 
@@ -149,7 +136,6 @@ describe('import placement + dedup', () => {
       [rec],
     ));
 
-    // first import: new
     const plan1 = B.planImport(parsed, { decryptKey: null });
     expect(plan1[0].status).toBe('new');
     expect(plan1[0].targetPath).toContain(path.join('backups', 'claude', 'peerbox'));
@@ -157,7 +143,6 @@ describe('import placement + dedup', () => {
     expect(res1.placed).toBe(1);
     expect(fs.existsSync(plan1[0].targetPath)).toBe(true);
 
-    // second import of the identical bundle: dedup, no write
     const plan2 = B.planImport(parsed, { decryptKey: null });
     expect(plan2[0].status).toBe('dup');
     const res2 = B.writeImport(plan2, { overwrite: false, decryptKey: null });
@@ -180,21 +165,18 @@ describe('import placement + dedup', () => {
     };
     void abs;
 
-    // place v1
     const v1 = mk('{"v":1}\n');
     B.writeImport(B.planImport(v1, { decryptKey: null }), { overwrite: false, decryptKey: null });
     const target = B.planImport(v1, { decryptKey: null })[0].targetPath;
     expect(fs.readFileSync(target, 'utf-8')).toBe('{"v":1}\n');
 
-    // v2 conflicts; default keeps local
     const v2 = mk('{"v":2}\n');
     const planNoOw = B.planImport(v2, { decryptKey: null });
     expect(planNoOw[0].status).toBe('conflict');
     const keep = B.writeImport(planNoOw, { overwrite: false, decryptKey: null });
     expect(keep.conflicts).toBe(1);
-    expect(fs.readFileSync(target, 'utf-8')).toBe('{"v":1}\n'); // unchanged
+    expect(fs.readFileSync(target, 'utf-8')).toBe('{"v":1}\n');
 
-    // v2 with --overwrite replaces
     const ow = B.writeImport(B.planImport(v2, { decryptKey: null }), { overwrite: true, decryptKey: null });
     expect(ow.overwritten).toBe(1);
     expect(fs.readFileSync(target, 'utf-8')).toBe('{"v":2}\n');
@@ -215,7 +197,7 @@ describe('import placement + dedup', () => {
       recs,
     ));
     expect(parsed.header.count).toBe(2);
-    expect(parsed.header.sessions).toBe(1); // both files are one session
+    expect(parsed.header.sessions).toBe(1);
 
     const plan = B.planImport(parsed, { decryptKey: null });
     expect(plan.every(p => p.status === 'new')).toBe(true);
@@ -231,11 +213,10 @@ describe('import placement + dedup', () => {
     const rec = (machine: string, sessionId: string, relKey: string): import('./bundle.js').BundleRecord => ({
       agent: 'claude', machine, sessionId, relKey, size: 1, hash: 'h', encrypted: false, body: 'x',
     });
-    // hostA and hostB both return session s1 (same origin machineX) + each a unique one.
     const fromA = [rec('machineX', 's1', 's1.jsonl'), rec('machineX', 's2', 's2.jsonl')];
     const fromB = [rec('machineX', 's1', 's1.jsonl'), rec('machineY', 's3', 's3.jsonl')];
     const merged = B.mergeRecords([fromA, fromB]);
-    expect(merged.length).toBe(3); // s1 deduped, s2, s3 kept
+    expect(merged.length).toBe(3);
     const keys = merged.map(r => `${r.machine}:${r.sessionId}`).sort();
     expect(keys).toEqual(['machineX:s1', 'machineX:s2', 'machineY:s3']);
   });

@@ -1,8 +1,3 @@
-/**
- * RUSH-2384: a live agent can advertise `--session-id` on argv while the
- * by-pid registry is empty. The active scan and `agents message` must still
- * treat that process as reachable.
- */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -28,21 +23,18 @@ let tmpDirs: string[] = [];
 afterEach(() => {
   for (const c of children) {
     if (c.pid) {
-      try { process.kill(c.pid, 'SIGKILL'); } catch { /* gone */ }
+      try { process.kill(c.pid, 'SIGKILL'); } catch {  }
     }
   }
   children = [];
   for (const d of tmpDirs) {
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {  }
   }
   tmpDirs = [];
   clearActiveScanCachesForTest();
 });
 
 function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?: string } = {}): ChildProcess {
-  // Materialize a hardlink (or copy) of the node binary named `claude` so
-  // `ps -o comm=` reports `claude` and agentKindFromComm attributes it. A
-  // shebang wrapper would re-exec as `node`/`sh` and drop out of the agent scan.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-2384-'));
   tmpDirs.push(dir);
   const binName = opts.binName ?? 'claude';
@@ -66,15 +58,6 @@ function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?
   return child;
 }
 
-/**
- * Poll until the holder process is observable, instead of sleeping a fixed
- * interval and asserting once. `spawn` returns a pid before the child has been
- * scheduled and exec'd, so on a loaded machine `ps` reports it later than the
- * ~100ms these tests used to wait — the scan then legitimately sees nothing and
- * the assertion fails on timing, not behavior. Measured on `ubuntu-latest, 24`
- * in the release CI matrix: two consecutive runs failed with an EMPTY row set,
- * while the same commit passed ubuntu-22, macOS, and Windows.
- */
 async function waitFor<T>(probe: () => T | Promise<T>, timeoutMs = 10_000): Promise<T | undefined> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -104,7 +87,6 @@ describe('isSessionIdLiveOnProcessTable', () => {
         sessionIdOf: () => UUID_B,
       }),
     ).toBe(false);
-    // Rows without an agent kind are ignored (ordinary non-agent processes).
     expect(
       await isSessionIdLiveOnProcessTable(UUID, {
         readTable: async () => [{ pid: 9 }],
@@ -119,15 +101,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const child = spawnHoldingSessionId(UUID);
     const pid = child.pid!;
 
-    /**
-     * Read the holder's argv the way the OS exposes it, INDEPENDENTLY of the
-     * code under test: `/proc/<pid>/cmdline` on linux, `ps -ww -o args=` on
-     * darwin -- the two channels readProcessArgv itself uses
-     * (pid-registry.ts:108-132). Deliberately not a call into
-     * readProcessArgv(): probing with the function under test would make a
-     * break in that function look like an absent process and skip the case
-     * that exists to catch it.
-     */
     const holderArgv = (): string | undefined => {
       try {
         if (process.platform === 'linux') {
@@ -145,27 +118,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
       }
     };
 
-    // RUSH-2508: the only condition this case genuinely cannot judge is a
-    // holder the OS will not show us at all -- measured on mac-mini during a
-    // full-suite release-attestation run, where `ps` reported the holder as
-    // unreadable for the whole 10s window and the recovery path therefore had
-    // no argv to parse. That is an environment limit, not a regression.
-    //
-    // The gate is the OS-visible argv, NOT `ps -o comm=`. comm is the sibling
-    // case's signal because listUnattributedActive classifies rows by comm;
-    // this case never looks at comm, and on linux `ps -o comm=` reports the
-    // THREAD name, which node renames to `MainThread` a beat after boot (see
-    // the sibling's note below). Gating this case on comm would make every
-    // real regression skip green on linux/node-24 -- verified: sabotaging
-    // sessionIdFromLivePid to return undefined under a comm gate produced
-    // "1 passed | 2 skipped" instead of a failure.
-    //
-    // So: if the OS showed us an argv that CARRIES this session id and the
-    // recovery path still came back empty, the parse owed us that id and the
-    // failure is real.
-    // Reaching the skip below means every attempt returned falsy, so
-    // `missedWhileVisible` false is exactly "no attempt ever saw the id in the
-    // OS-visible argv" -- there is no third state to report.
     let missedWhileVisible = false;
     const hit = await waitFor(() => {
       const argv = holderArgv();
@@ -182,8 +134,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
   });
 
   posixOnly('listUnattributedActive attributes a worktree-cwd process by its live --session-id', async (ctx) => {
-    // Recreate the incident shape: cwd is a path under .agents/worktrees/<slug>,
-    // by-pid is empty, and the process is a bare headless agent.
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-2384-repo-'));
     tmpDirs.push(repo);
     const wt = path.join(repo, '.agents', 'worktrees', 'teams-reliability-recovered');
@@ -205,31 +155,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const classifiable = (comm: string | undefined): boolean =>
       !!comm && /^claude/.test(path.basename(comm));
 
-    // RUSH-2508: sample the holder's comm in LOCKSTEP with each scan attempt, and
-    // only skip when no attempt ever ran against a classifiable holder.
-    //
-    // `ps -o comm=` on Linux reports the THREAD name, and node renames its main
-    // thread a beat after boot — measured on Node 24 it flips to `MainThread`
-    // within a second, while Node 22 keeps `claude`. That rules out both simpler
-    // gates: sampling BEFORE the scan proves nothing (the value can flip before
-    // the scan reads it), and sampling AFTER `waitFor` exhausts its deadline
-    // proves less than nothing — the poll always burns its full 10s on a miss, by
-    // which point comm has flipped whatever the cause, so a REAL regression in the
-    // RUSH-2384 recovery path would report `skipped` instead of failing. A test
-    // that cannot fail is worse than a deleted one.
-    //
-    // Bracketing each attempt is what recovers the distinction WHERE COMM STAYS
-    // USABLE: if the holder was classifiable both immediately before and
-    // immediately after a scan that still missed it, the scan owed us that row
-    // and the failure is real. Verified by sabotaging the row predicate — Node 22
-    // fails, as it must.
-    //
-    // It does NOT recover the distinction on Node 24, where comm has already
-    // flipped before any scan can run: a correct implementation and a completely
-    // broken one both produce `1 skipped` there, byte-identical. So this case
-    // carries real Node-24 coverage only once RUSH-2508 gives the holder a name
-    // the scan can rely on; until then it is honest about skipping rather than
-    // failing a leg it cannot judge.
     let rows: Awaited<ReturnType<typeof listUnattributedActive>> = [];
     let lastComm: string | undefined;
     let missedWhileClassifiable = false;
@@ -249,7 +174,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     }
     expect(hit, `expected active row for ${UUID} / pid ${pid}; got ${rows.map((r) => `${r.pid}:${r.sessionId}`).join(', ')}`).toBeDefined();
     expect(hit!.sessionId).toBe(UUID);
-    // cwd should be the worktree path (lsof) when recoverable.
     if (hit!.cwd) {
       expect(hit!.cwd).toContain('teams-reliability-recovered');
     }

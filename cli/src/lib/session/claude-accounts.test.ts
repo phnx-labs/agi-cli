@@ -1,28 +1,17 @@
-/**
- * Account attribution over a real on-disk version layout.
- *
- * Every fixture is a real directory tree with real `.claude.json` files — no mocking,
- * per the repo rule. The first test is the regression guard for the bug this module
- * exists to fix: one process-global email stamped onto every Claude session.
- */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Full suite is path-portable (path.join + real fs). No file-wide win32 skip
-// (RUSH-2215 review). os.homedir() on Windows reads USERPROFILE, not HOME.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-accounts-test-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 process.env.AGENTS_DIR = path.join(TEST_HOME, '.agents');
 
-// Imported after HOME/USERPROFILE is redirected: the module captures os.homedir() at load.
 const { buildClaudeAccountIndex, resolveClaudeAccount } =
   await import('./claude-accounts.js');
 
-/** Two orgs deliberately share an email — the trap this module must not fall into. */
 const MODSQUAD = { org: 'org-modsquad', email: 'dev@modsquad.example', name: 'ModSquad', type: 'claude_team' };
 const TURING_TEAM = { org: 'org-turing-team', email: 'dev@turing.example', name: 'Turing Labs', type: 'claude_team' };
 const TURING_MAX = { org: 'org-turing-personal', email: 'dev@turing.example', name: "dev's Organization", type: 'claude_max' };
@@ -46,7 +35,6 @@ function writeHome(home: string, acct: Acct | null): void {
         organizationType: acct.type,
       },
     }
-    // Signed out: a config with no oauthAccount at all.
     : { numStartups: 3 };
   fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify(config));
 }
@@ -55,7 +43,6 @@ function versionHome(version: string): string {
   return path.join(historyDir(), 'versions', 'claude', version, 'home');
 }
 
-/** An account-slot home (PHNX-3940): `<historyDir>/accounts/claude/<accountId>/`. */
 function slotHome(accountId: string): string {
   return path.join(historyDir(), 'accounts', 'claude', accountId);
 }
@@ -64,7 +51,6 @@ function trashHome(version: string, stamp: string): string {
   return path.join(historyDir(), 'trash', 'versions', 'claude', version, stamp, 'home');
 }
 
-/** A transcript path inside a home's config dir. */
 function transcript(home: string, name: string): string {
   return path.join(home, '.claude', 'projects', '-some-project', `${name}.jsonl`);
 }
@@ -73,19 +59,15 @@ beforeAll(() => {
   writeHome(versionHome('2.1.219'), MODSQUAD);
   writeHome(versionHome('2.1.220'), TURING_TEAM);
   writeHome(versionHome('2.1.218'), TURING_MAX);
-  writeHome(versionHome('2.1.170'), null);            // signed out
-  writeHome(trashHome('2.1.183', '2026-07-01T00-00-00Z'), TURING_TEAM);  // retired, still identifiable
+  writeHome(versionHome('2.1.170'), null);
+  writeHome(trashHome('2.1.183', '2026-07-01T00-00-00Z'), TURING_TEAM);
   writeHome(trashHome('2.1.200', '2026-07-21T00-00-00Z'), MODSQUAD);
-  // One version with two retired snapshots that disagree — must not be guessed.
   writeHome(trashHome('2.1.215', '2026-07-01T00-00-00Z'), MODSQUAD);
   writeHome(trashHome('2.1.215', '2026-07-27T00-00-00Z'), TURING_TEAM);
 
-  // The live symlink, pointing at the ModSquad home like the real layout does.
-  // Windows CI has no Developer Mode for file symlinks; a directory junction works.
   const linkType = process.platform === 'win32' ? 'junction' : undefined;
   fs.symlinkSync(path.join(versionHome('2.1.219'), '.claude'), path.join(TEST_HOME, '.claude'), linkType);
 
-  // An account slot (PHNX-3940): its own single-tenant home, sharing no version.
   writeHome(slotHome('acct-river-0001'), RIVER);
 });
 
@@ -99,8 +81,8 @@ describe('buildClaudeAccountIndex', () => {
     const team = resolveClaudeAccount(index, transcript(versionHome('2.1.220'), 'a'));
     const max = resolveClaudeAccount(index, transcript(versionHome('2.1.218'), 'b'));
 
-    expect(team.email).toBe(max.email);          // same email…
-    expect(team.key).not.toBe(max.key);          // …different quota bucket
+    expect(team.email).toBe(max.email);
+    expect(team.key).not.toBe(max.key);
     expect(team.key).toContain('org-turing-team');
     expect(max.key).toContain('org-turing-personal');
     expect(team.plan).toBe('Team');
@@ -121,8 +103,6 @@ describe('buildClaudeAccountIndex', () => {
 
 describe('resolveClaudeAccount', () => {
   it('attributes each version home to its own account, not one global email', () => {
-    // The regression guard. Before this module the scanner resolved a single email
-    // and stamped it on every Claude session, so all three of these came back equal.
     const index = buildClaudeAccountIndex();
     const buckets = ['2.1.219', '2.1.220', '2.1.218'].map((v) =>
       resolveClaudeAccount(index, transcript(versionHome(v), 'x')),
@@ -135,16 +115,12 @@ describe('resolveClaudeAccount', () => {
     const index = buildClaudeAccountIndex();
     const underSymlink = path.join(TEST_HOME, '.claude', 'projects', '-p', 'y.jsonl');
 
-    // The symlink points at 2.1.219 (ModSquad), but this row was written by 2.1.220.
     const byVersion = resolveClaudeAccount(index, underSymlink, '2.1.220');
     expect(byVersion.orgName).toBe('Turing Labs');
     expect(byVersion.evidence).toBe('recorded-version');
 
-    // A retired-only version still resolves, from its trash snapshot.
     expect(resolveClaudeAccount(index, underSymlink, '2.1.200').orgName).toBe('ModSquad');
 
-    // With no recorded version the current target is the only evidence available,
-    // and the weaker tier is reported as such.
     const fallback = resolveClaudeAccount(index, underSymlink, null);
     expect(fallback.orgName).toBe('ModSquad');
     expect(fallback.evidence).toBe('symlink-target');
@@ -174,14 +150,12 @@ describe('resolveClaudeAccount', () => {
     const unknown = resolveClaudeAccount(index, '');
     const signedOut = resolveClaudeAccount(index, transcript(versionHome('2.1.170'), 'z'));
 
-    expect(backup.key).toBe('unattributed:backup mirror');   // no recorded version
+    expect(backup.key).toBe('unattributed:backup mirror');
     expect(unknown.key).toBe('unattributed:unknown home');
     expect(new Set([backup.key, unknown.key, signedOut.key]).size).toBe(3);
   });
 
   it('attributes a routine archive outside every home by its recorded version', () => {
-    // readRoutineArchiveMeta feeds paths under <historyDir>/runs through the same
-    // resolver. They match no home prefix, so only the recorded version can place them.
     const index = buildClaudeAccountIndex();
     const archive = path.join(historyDir(), 'runs', 'job-1', 'transcript.jsonl');
     const bucket = resolveClaudeAccount(index, archive, '2.1.220');
@@ -191,9 +165,6 @@ describe('resolveClaudeAccount', () => {
   });
 
   it('prefers a signed-out home over the recorded version, since location is proof', () => {
-    // The file lives in 2.1.170's signed-out home but records version 2.1.220, which IS
-    // signed in. The location proves which config dir Claude used, so this stays dark
-    // rather than borrowing another version's account.
     const index = buildClaudeAccountIndex();
     const bucket = resolveClaudeAccount(index, transcript(versionHome('2.1.170'), 'q'), '2.1.220');
     expect(bucket.attributed).toBe(false);
@@ -201,9 +172,6 @@ describe('resolveClaudeAccount', () => {
   });
 
   it('stays dark when a recorded version names no home, instead of using the symlink', () => {
-    // Regression guard: an uninstalled version whose trash snapshot was pruned must NOT
-    // fall through to whatever ~/.claude points at now. That would silently move those
-    // rows onto the current default account — the inference tier 2 exists to prevent.
     const index = buildClaudeAccountIndex();
     const underSymlink = path.join(TEST_HOME, '.claude', 'projects', '-p', 'gone.jsonl');
     const bucket = resolveClaudeAccount(index, underSymlink, '9.9.999');
@@ -212,8 +180,6 @@ describe('resolveClaudeAccount', () => {
   });
 
   it('resolves a backup mirror by its recorded version, dark only without one', () => {
-    // A mirror has no .claude.json of its own, but the recorded version still names
-    // the home that wrote it.
     const index = buildClaudeAccountIndex();
     const mirror = path.join(historyDir(), 'backups', 'claude', '2026-07-01', 'projects', '-p', 'm.jsonl');
     expect(resolveClaudeAccount(index, mirror, '2.1.220').orgName).toBe('Turing Labs');
@@ -232,14 +198,11 @@ describe('resolveClaudeAccount', () => {
 
 describe('account slots (PHNX-3940)', () => {
   it('proves a slot-launched transcript by canonical account-root ownership (tier 1)', () => {
-    // Before this fix, buildClaudeAccountIndex only ever walked versions/claude/ and
-    // its trash — an account-slot home was never indexed, so this transcript existed
-    // (fully registered, runnable account) yet resolved as if the history had vanished.
     const index = buildClaudeAccountIndex();
     const bucket = resolveClaudeAccount(index, transcript(slotHome('acct-river-0001'), 'r'));
     expect(bucket.attributed).toBe(true);
     expect(bucket.orgName).toBe('River Co');
-    expect(bucket.evidence).toBe('version-home'); // same direct-ownership tier as a version home
+    expect(bucket.evidence).toBe('version-home');
   });
 
   it('exposes the slot by its account id for launch-recorded resolution', () => {
@@ -251,19 +214,12 @@ describe('account slots (PHNX-3940)', () => {
   it('never folds an unconfigured (never signed-in) slot into a real account', () => {
     const index = buildClaudeAccountIndex();
     expect(index.byAccountId.has('acct-never-configured')).toBe(false);
-    // And it must not appear as a dark home either — an empty slot owns no
-    // transcript yet, so there is nothing on disk to misattribute.
     const emptySlot = slotHome('acct-never-configured');
     expect(index.darkHomes.some((d) => d.prefix.startsWith(emptySlot))).toBe(false);
   });
 
   it('accepts a launch-recorded account id (tier 1c) for a row outside every home, '
     + 'truthfully preferring it over the CURRENT login of a shared legacy home', () => {
-    // Simulates the exact "current login in legacy home does not prove history" bug:
-    // 2.1.219's live home reports ModSquad TODAY, but this particular row was actually
-    // launched under the River account slot (recorded at launch time, e.g. an older
-    // in-place rotation through that shared home before slots existed). A recorded
-    // launch id must not be silently outranked by "whichever login is there now".
     const index = buildClaudeAccountIndex();
     const outsideEveryHome = path.join(historyDir(), 'runs', 'job-legacy', 'transcript.jsonl');
 

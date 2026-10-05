@@ -92,9 +92,7 @@ describe('resolveSessionRecoveryFromCandidates', () => {
       const result = resolveSessionRecoveryFromCandidates(
         source,
         [
-          // Origin login (native, same version) is rate-limited...
           candidate('2.1.187', { usageStatus: 'rate_limited', nativeAccountId: 'origin-account', slotDir: home }),
-          // ...but a healthy provider account of the SAME harness is injectable.
           candidate('2.1.187', {
             accountKey: 'provider:tech',
             accountLabel: 'tech',
@@ -133,8 +131,6 @@ describe('resolveSessionRecoveryFromCandidates', () => {
       const result = resolveSessionRecoveryFromCandidates(
         source,
         [
-          // Origin login limited, and the only healthy sibling is a NATIVE login
-          // in another version home (no provider account to inject) → /continue.
           candidate('2.1.187', { usageStatus: 'rate_limited', nativeAccountId: 'origin-account' }),
           candidate('2.1.218'),
         ],
@@ -158,11 +154,6 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 
   it('does NOT native-rotate a signed-out origin, even with a healthy provider account (needs a login, not a rotation)', () => {
-    // Native-rotate is gated on a usage/rate LIMIT, not signed_out/revoked
-    // (SES-39): a signed-out origin has no credential to resume under and must
-    // take the /continue path. The continue pick of the healthy provider still
-    // carries RecoveryAccount so exec injects it instead of launching the
-    // signed-out native login.
     const result = resolveSessionRecoveryFromCandidates(
       session(),
       [
@@ -186,11 +177,6 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 
   it('does not launch the exhausted native login when origin is limited, transcript is outside the origin home, and a healthy provider is available', () => {
-    // PHNX-3674: native-rotate does not fire when inspection.available is false
-    // (trash/backup/reinstall, or a local /continue fallback from an unreachable
-    // peer). The continue pick of the healthy provider must carry RecoveryAccount
-    // so exec injects it — a credentialless continue on 2.1.187 would spawn as
-    // the rate-limited origin login.
     const result = resolveSessionRecoveryFromCandidates(
       session({ accountId: 'origin-account' }),
       [
@@ -260,10 +246,6 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 
   it('rotates to a healthy sibling account when the origin version is rate-limited (balanced)', () => {
-    // Origin 2.1.187 is throttled → the balanced picker selects a DIFFERENT
-    // healthy account of the SAME harness. It resumes via /continue there (a
-    // different isolated home does not own the origin transcript for native
-    // resume), continuing the same session on the rotated account (PHNX-3626).
     const result = resolveSessionRecoveryFromCandidates(
       session({ accountId: 'origin-account' }),
       [candidate('2.1.187', { usageStatus: 'rate_limited', nativeAccountId: 'origin-account' }), candidate('2.1.218')],
@@ -274,9 +256,6 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 
   it('falls back to a healthy version when the origin version was not recorded', () => {
-    // The observed codex bug: no recorded origin version → cannot native-resume a
-    // specific home, so balanced picks a healthy same-harness version and the log
-    // names why (Validation: missing recorded version → healthy-latest, logged).
     const result = resolveSessionRecoveryFromCandidates(
       session({ version: undefined }),
       [candidate('2.1.218')],
@@ -317,9 +296,6 @@ describe('resolveSessionRecoveryFromCandidates — account disambiguation (PHNX-
     try {
       const a = nativeHomeFixture(path.join(root, 'a'), session().id);
       const b = nativeHomeFixture(path.join(root, 'b'), session().id);
-      // Both accounts run claude@2.1.187 (one managed binary) but only 'b' has
-      // the transcript. The sidecar accountId names 'b' directly — matching
-      // must not fall back to whichever same-version candidate appears first.
       const source = session({ filePath: b.filePath, cwd: b.cwd, accountId: 'acct-b' });
       const slotA = path.join(root, 'slots', 'acct-a');
       const slotB = path.join(root, 'slots', 'acct-b');
@@ -377,8 +353,6 @@ describe('resolveSessionRecoveryFromCandidates — account disambiguation (PHNX-
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-relabel-'));
     try {
       const home = nativeHomeFixture(root, session().id);
-      // The transcript was recorded under 2.1.187, but the vendor relabeled the
-      // installed binary to 2.1.220 — only the persisted accountId proves origin.
       const source = session({ filePath: home.filePath, cwd: home.cwd, version: '2.1.187', accountId: 'acct-relabel' });
       const slot = path.join(root, 'slots', 'acct-relabel');
       fs.mkdirSync(path.dirname(slot), { recursive: true });
@@ -487,9 +461,6 @@ describe('resolveSessionRecoveryFromCandidates — account disambiguation (PHNX-
         inspectNativeResumeSession(source, home.home),
         { account: 'tech' },
       );
-      // The provider account is healthy and requested, but it is never the
-      // proven origin — it authenticates the existing origin context via
-      // rotation, never masquerades as having produced the transcript itself.
       expect(result.mode).toBe('continue');
       expect(result.candidate.providerAccount).toBe('tech');
     } finally {
@@ -502,7 +473,6 @@ describe('resolveSessionRecoveryFromCandidates — account disambiguation (PHNX-
     try {
       const home = nativeHomeFixture(root, session().id);
       const source = session({ filePath: home.filePath, cwd: home.cwd });
-      // No fromSlot/slotDir — a pre-migration install, identified only by version.
       const result = resolveSessionRecoveryFromCandidates(
         source,
         [candidate('2.1.187', { slotDir: home.home })],

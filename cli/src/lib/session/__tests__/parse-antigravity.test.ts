@@ -1,18 +1,3 @@
-/**
- * Verifies parseAntigravity decodes Antigravity's protobuf-in-SQLite step
- * payloads into the shared SessionEvent shape, normalizes tool names onto the
- * existing vocabulary (run_command -> Bash, view_file -> Read, ...), dedupes the
- * request + completion steps that share a call id, and that detectAgent routes
- * antigravity-cli conversation DBs to this parser.
- *
- * The fixture is built here from scratch — a tiny SQLite `steps` table whose
- * `step_payload` BLOBs are hand-encoded protobuf messages (deterministic,
- * synthetic, no private conversation content). Both the fixture writer and the
- * parser under test read/write through the node/bun SQLite wrapper (the same
- * one production uses), so this exercises the real critical path (real SQLite
- * BLOB round-trip, real protobuf decode) on every OS — the `sqlite3` CLI is
- * absent on the Windows runner.
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -22,9 +7,7 @@ import Database from '../../sqlite.js';
 import { parseAntigravity, detectAgent, parseSession } from '@phnx-labs/sessions-cli/reader';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 
-// ── Minimal protobuf wire encoder (mirror of the decoder under test) ────────
 
-/** Encode a non-negative integer as a base-128 varint. */
 function varint(n: number): number[] {
   const out: number[] = [];
   let v = n;
@@ -36,18 +19,11 @@ function varint(n: number): number[] {
   return out;
 }
 
-/** Encode a length-delimited string field: tag (field<<3|2) + len + utf8 bytes. */
 function strField(field: number, s: string): number[] {
   const bytes = Array.from(Buffer.from(s, 'utf-8'));
   return [...varint((field << 3) | 2), ...varint(bytes.length), ...bytes];
 }
 
-/**
- * Build a step_payload for a tool call. Fields mirror the reverse-engineered
- * layout: f1 = call id, f2 = tool name, f3 = JSON args (must contain
- * "toolAction" for the decoder's JSON sniff). Optionally nests the tool-call
- * message one level deep to exercise the recursive descent.
- */
 function toolStep(opts: {
   id: string;
   name: string;
@@ -60,12 +36,9 @@ function toolStep(opts: {
     ...strField(3, JSON.stringify(opts.args)),
   ];
   if (!opts.nested) return Buffer.from(inner);
-  // Wrap `inner` as a sub-message under an arbitrary field number (7) so the
-  // parser has to recurse to find the tool-call node.
   return Buffer.from([...varint((7 << 3) | 2), ...varint(inner.length), ...inner]);
 }
 
-/** Create a temp Antigravity conversation DB with the given step payloads. */
 function buildDb(steps: Array<{ stepType: number; payload: Buffer }>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-parse-'));
   const conv = path.join(dir, '.gemini', 'antigravity-cli', 'conversations');
@@ -86,8 +59,6 @@ function buildDb(steps: Array<{ stepType: number; payload: Buffer }>): string {
 
 describe('parseAntigravity', () => {
   test('decodes protobuf steps, normalizes tool names, dedupes by call id', () => {
-    // Three raw steps -> two unique tools. The run_command appears twice (a
-    // request step + a completion step sharing call id "aaaa1111").
     const dbPath = buildDb([
       {
         stepType: 15,
@@ -98,7 +69,7 @@ describe('parseAntigravity', () => {
         }),
       },
       {
-        stepType: 21, // completion — same id, must be deduped away
+        stepType: 21,
         payload: toolStep({
           id: 'aaaa1111',
           name: 'run_command',
@@ -111,7 +82,7 @@ describe('parseAntigravity', () => {
           id: 'bbbb2222',
           name: 'view_file',
           args: { AbsolutePath: '/tmp/x', toolAction: 'Viewing x', toolSummary: 'View x' },
-          nested: true, // force recursive descent for this one
+          nested: true,
         }),
       },
     ]);
@@ -119,7 +90,6 @@ describe('parseAntigravity', () => {
     const events = parseAntigravity(dbPath);
     expect(extractTodoProgressFromEvents(events)).toBeUndefined();
 
-    // Deduped: 3 steps -> 2 events.
     expect(events).toHaveLength(2);
 
     const bash = events[0];
@@ -154,7 +124,6 @@ describe('parseAntigravity', () => {
     expect(events[1].path).toBe('/g');
     expect(events[2].path).toBe('/e');
     expect(events[3].path).toBe('/w');
-    // Unknown tool passes through with its raw args preserved.
     expect(events[4].tool).toBe('some_future_tool');
     expect(events[4].args?.Foo).toBe('bar');
 
@@ -166,8 +135,6 @@ describe('parseAntigravity', () => {
       { stepType: 15, payload: toolStep({ id: 'd1', name: 'run_command', args: { CommandLine: 'ls', toolAction: 'x', toolSummary: 'List dir' } }) },
     ]);
 
-    // The path is under ~/.gemini/antigravity-cli/conversations/ (also matches
-    // /.gemini/), so this asserts antigravity wins over the gemini fallback.
     expect(detectAgent(dbPath)).toBe('antigravity');
 
     const events = parseSession(dbPath);

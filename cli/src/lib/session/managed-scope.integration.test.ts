@@ -4,13 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// `agents sessions` scans the union of the user's own `~/.<agent>` and every managed
-// version home. Once agents-cli manages an agent, listing an UNMANAGED install's
-// history by default is a surprise — most visibly after `agents add --isolated`,
-// where keeping the two apart was the entire point.
-//
-// Scoping happens at query time, so the index stays complete and `--unmanaged` needs
-// no re-scan. Nothing is dropped silently: every render path prints what it hid.
 describe.skipIf(process.platform === 'win32')('agents sessions — managed-only scope', () => {
   let home: string;
 
@@ -18,7 +11,6 @@ describe.skipIf(process.platform === 'win32')('agents sessions — managed-only 
     path.join(home, '.agents', '.history', 'versions', 'codex', v, 'home', '.codex', 'sessions', '2026', '07', '30');
   const unmanagedSessions = () => path.join(home, '.codex', 'sessions', '2026', '07', '30');
 
-  /** A rollout the codex discoverer will actually parse. */
   function writeRollout(dir: string, id: string, cwd: string) {
     fs.mkdirSync(dir, { recursive: true });
     const meta = {
@@ -50,9 +42,6 @@ describe.skipIf(process.platform === 'win32')('agents sessions — managed-only 
 
   function run(...args: string[]): string {
     try {
-      // `node --import tsx`, matching tests/non-interactive.test.ts. Running the TS
-      // source under bun does not discover sessions against a sandbox HOME (the
-      // compiled dist and tsx both do), so bun would make this test assert nothing.
       return execFileSync('node', ['--import', 'tsx', path.resolve(process.cwd(), 'src/index.ts'), 'sessions', ...args], {
         cwd: process.cwd(),
         env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home, SHELL: '/bin/bash', AGENTS_NO_NUDGE: '1', FORCE_COLOR: '0' },
@@ -111,9 +100,6 @@ describe.skipIf(process.platform === 'win32')('agents sessions — managed-only 
     plantManagedVersion('0.146.0');
     writeRollout(managedSessions('0.146.0'), MANAGED, home);
 
-    // --flat and --tree render through printSessionTable; the bare listing renders
-    // through printSessionOverview. A footer wired into only one of them is a hidden
-    // default that stays silent, which is the thing this guards against.
     for (const mode of [['--flat'], ['--tree'], []]) {
       const out = run('--all', '-n', '10', ...mode);
       expect(out, `mode: ${mode[0] ?? 'overview'}`).toContain('unmanaged installs hidden');
@@ -121,13 +107,6 @@ describe.skipIf(process.platform === 'win32')('agents sessions — managed-only 
   }, 180_000);
 
   it("counts codex's RELOCATED short home as managed, not as the user's own", () => {
-    // On macOS the versioned home overflows SUN_LEN for codex's control socket, so
-    // the shim relocates it to `<agentsUserDir>/.codex-homes/<version>/.codex` and
-    // symlinks the versioned path at it. Transcripts then live outside `versions/`.
-    // The first cut classified that root under getAgentsDir() (~/.agents/.system)
-    // instead of getUserAgentsDir() (~/.agents), so a relocated install's own
-    // sessions were filed as the user's — the exact case this scoping exists for.
-    // Planted directly (no symlink) so the classifier is what is under test.
     plantManagedVersion('0.146.0');
     fs.writeFileSync(path.join(home, '.agents', '.history', 'versions', 'codex', '0.146.0', '.isolated'), 'x\n');
     const relocated = path.join(home, '.agents', '.codex-homes', '0.146.0', '.codex', 'sessions', '2026', '07', '30');

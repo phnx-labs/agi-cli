@@ -1,13 +1,3 @@
-/**
- * Regression: prior-session search only indexed what the USER asked, never
- * what the agent ANSWERED. `session_text` pushed only `role === 'user'` text
- * (`ClaudeParseState.userTexts`); an assistant-only phrase was unsearchable —
- * `agents sessions "<phrase>"` returned 0 results even though the transcript
- * on disk clearly contained it.
- *
- * Real fs + real sqlite + the real Claude incremental scan (discoverSessions),
- * under a throwaway HOME. No mocking.
- */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -66,8 +56,6 @@ afterAll(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-// A phrase that appears ONLY in the assistant's reply — never in anything the
-// user typed — so a hit proves the `assistant` FTS column, not `content`.
 const ASSISTANT_ONLY_PHRASE = 'grombulator flux capacitor overheated';
 
 function transcriptWithAssistantOnlyAnswer(id: string): object[] {
@@ -103,8 +91,6 @@ describe('assistant-answer text is indexed for search (PHNX content-search)', ()
     const row = db.getSessionById(id);
     expect(row, 'session indexed').not.toBeNull();
 
-    // The regression this reproduces: before indexing assistant text, this
-    // returned zero hits even though the transcript on disk clearly has it.
     const hits = db.ftsSearch(ASSISTANT_ONLY_PHRASE);
     expect(hits.some(h => h.sessionId === id)).toBe(true);
   });
@@ -201,13 +187,8 @@ describe('CONTENT_INDEX_VERSION forces re-extraction of an unchanged file (mtime
     ]);
     await runScan();
 
-    // Sanity: the real first scan already indexed it (this PR's fix).
     expect(db.ftsSearch(phrase).some(h => h.sessionId === id)).toBe(true);
 
-    // Simulate a row written by an OLDER build that predates assistant-text
-    // extraction: its ledger stamp carries a stale extractor_version, and its
-    // FTS row has no assistant content, even though the file on disk is
-    // unchanged (same mtime/size as when that older build scanned it).
     const fp = sessionFile(id);
     const before = fs.statSync(fp);
     const canonical = fs.realpathSync(fp);
@@ -215,14 +196,12 @@ describe('CONTENT_INDEX_VERSION forces re-extraction of an unchanged file (mtime
     db.getDB().prepare(`UPDATE session_text SET assistant = '' WHERE session_id = ?`).run(id);
     expect(db.ftsSearch(phrase).some(h => h.sessionId === id)).toBe(false);
 
-    // Re-scan with NO change to the file at all.
     await runScan();
 
     const after = fs.statSync(fp);
     expect(after.mtimeMs, 'file mtime unchanged').toBe(before.mtimeMs);
     expect(after.size, 'file size unchanged').toBe(before.size);
 
-    // The version lever, not a file change, is what forced the re-extract.
     expect(db.ftsSearch(phrase).some(h => h.sessionId === id)).toBe(true);
 
     const ledgerRow = db.getDB()

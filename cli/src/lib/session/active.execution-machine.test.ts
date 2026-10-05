@@ -1,18 +1,3 @@
-/**
- * Tests for {@link foldExecutionMachine} — the attribution that decides WHICH
- * BOX a live session runs on (RUSH-2479).
- *
- * The bug this pins: `agents run --device <peer>` leaves a live shim process on
- * the DISPATCHING box carrying the remote run's session id. Nothing on that
- * local process knows the agent is elsewhere, so the row was tagged with the
- * dispatcher — `--device <dispatcher>` claimed a session that was not running
- * there, and its preview dead-ended at "full transcript not indexed here"
- * because the transcript lives on the peer. The dispatch already recorded the
- * truth in the session index (`hosts/session-index.ts` writes
- * `machine: normalizeHost(task.host)`); this folds it back onto the live row.
- *
- * Pure — the index lookup is injected, so no SQLite and no live process table.
- */
 
 import { describe, it, expect } from 'vitest';
 import { foldExecutionMachine, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from './active.js';
@@ -23,7 +8,6 @@ function row(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...over } as ActiveSession;
 }
 
-/** An index that reports `machine` for the ids it knows, nothing for the rest. */
 const index = (m: Record<string, string>) => (id: string) => m[id];
 
 describe('foldExecutionMachine', () => {
@@ -55,8 +39,6 @@ describe('foldExecutionMachine', () => {
   });
 
   it("never overrides a peer's own self-report from the fan-out", () => {
-    // The row already came back from yosemite-s1 saying it runs there. This
-    // box's index copy is hearsay by comparison and must not win.
     const rows = [row({ sessionId: 'peer', machine: 'yosemite-s1' })];
     foldExecutionMachine(rows, index({ peer: 'yosemite-s0' }), self);
     expect(rows[0].machine).toBe('yosemite-s1');
@@ -81,12 +63,6 @@ describe('foldExecutionMachine', () => {
   });
 });
 
-/**
- * `machine` says WHERE THE AGENT EXECUTES. `sessionProcessIsLocal` says where the
- * PROCESS is. For an offloaded run those differ, and conflating them is what made
- * `agents go`/`focus` send a LOCAL tmux pane id to a peer's tmux server — pane ids
- * are small per-server integers, so that can attach an unrelated session.
- */
 describe('sessionProcessIsLocal', () => {
   it('calls an offloaded run LOCAL — its shim, pane and window are on this box', () => {
     expect(sessionProcessIsLocal({ machine: 'yosemite-s0', offloadedFrom: 'zion' }, 'zion')).toBe(true);
@@ -103,16 +79,10 @@ describe('sessionProcessIsLocal', () => {
 
   it('disagrees with a bare machine comparison exactly on the offloaded row', () => {
     const row = { machine: 'yosemite-s0', offloadedFrom: 'zion' };
-    // The predicate every caller used before this fix, and the bug it caused.
     expect(row.machine !== 'zion').toBe(true);
     expect(sessionProcessIsLocal(row, 'zion')).toBe(true);
   });
 
-  // The three-box case. These rows travel: `--active --json` spreads them and the
-  // fan-out preserves their foreign `machine`, so a box that is NEITHER the
-  // dispatcher nor the executor sees them. Answering "local" there sent the
-  // caller down the local-tmux path with another box's pane id — the same
-  // attach-an-unrelated-pane hazard, one machine over.
   it('calls A-dispatched-to-B REMOTE when asked on a third box C', () => {
     expect(sessionProcessIsLocal({ machine: 'B', offloadedFrom: 'A' }, 'C')).toBe(false);
   });
@@ -126,8 +96,6 @@ describe('sessionProcessHost', () => {
   });
 
   it('points at the DISPATCHER for an offloaded row seen from a third box, not the executor', () => {
-    // Correcting only the predicate would send C to B carrying A's pane id —
-    // the hazard relocated rather than fixed. The process is on A.
     expect(sessionProcessHost({ machine: 'B', offloadedFrom: 'A' }, 'C')).toBe('A');
   });
 

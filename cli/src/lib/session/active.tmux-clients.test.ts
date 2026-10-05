@@ -1,13 +1,3 @@
-/**
- * Integration test for the attached-client signal behind the `orphaned` status.
- *
- * Spawns a REAL tmux server on a temp socket — no mocks — because the bug this
- * pins is a property of tmux itself: it sanitizes non-printable characters out
- * of `-F` format output (3.6a rewrites a literal tab to `_`), so a tab-separated
- * format comes back as one unsplittable field. Nothing short of a real tmux
- * shows that, and a mocked `runTmux` would have happily "passed" while the
- * feature was dead on every machine running a recent tmux.
- */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import * as fs from 'fs';
@@ -52,16 +42,10 @@ describe.skipIf(skipReason)('tmux attached-client fold', () => {
     const pane = await firstPane();
     const rows = [row(pane)];
     await foldTmuxClients(rows);
-    // `new-session -d` leaves nobody attached, which is exactly the state a
-    // crashed editor window leaves behind.
     expect(rows[0].tmuxClients).toBe(0);
   });
 
   it('survives tmux sanitizing the format separator (the tab bug)', async () => {
-    // A tab-separated format is mangled by tmux into a single field; the
-    // separator the code uses must come back splittable. If this ever regresses,
-    // every pane silently reports an unknown client count and `orphaned` never
-    // fires again.
     const tabbed = await runTmux({
       socket,
       args: ['list-panes', '-a', '-F', '#{pane_id}\t#{session_attached}'],
@@ -73,8 +57,6 @@ describe.skipIf(skipReason)('tmux attached-client fold', () => {
       throwOnError: false,
     });
     expect(printable.stdout.split('\n')[0].split(':')).toHaveLength(2);
-    // Document the actual tmux behavior this separator choice exists for: on a
-    // tmux that sanitizes the tab, the tab-split yields one field, not two.
     const tabFields = tabbed.stdout.split('\n')[0].split('\t').length;
     if (tabFields === 1) expect(tabbed.stdout).not.toContain('\t');
   });
@@ -97,12 +79,6 @@ describe.skipIf(skipReason)('tmux attached-client fold', () => {
   });
 });
 
-/**
- * The separator has to be one tmux cannot emit inside a field, or the tab bug
- * comes back with a lower probability. tmux replaces `:` and `.` in a session
- * name with `_`, which is what makes `:` provably safe for the fields ahead of
- * the path — and a session name is the one free-text field that is not last.
- */
 describe.skipIf(skipReason)('tmux format separator safety', () => {
   it('cannot appear in a session name — tmux rewrites it', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-sep-'));
@@ -113,7 +89,6 @@ describe.skipIf(skipReason)('tmux format separator safety', () => {
       const name = res.stdout.trim();
       expect(name).not.toContain(':');
       expect(name).toBe('has_colon_dot');
-      // So a 4-field query still splits into exactly 4 leading fields.
       const panes = await runTmux({
         socket: sock,
         args: ['list-panes', '-a', '-F', '#{pane_id}:#{session_name}:#{pane_pid}:#{pane_current_path}'],

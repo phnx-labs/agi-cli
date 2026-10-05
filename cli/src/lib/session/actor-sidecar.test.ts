@@ -14,13 +14,6 @@ type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 const FILES = path.join(TEST_HOME, 'files');
 fs.mkdirSync(FILES, { recursive: true });
 
-/**
- * RUSH-2019 (P3): the durable sessionId -> actor sidecar makes the session
- * scanner able to attribute a transcript to a person after the launching process
- * is gone. Two things must hold: the record round-trips on disk, and the DB
- * upsert JOINS it to fill the write-once actor column when the scanned meta
- * carries none.
- */
 describe('session actor sidecar (RUSH-2019)', () => {
   it('round-trips a written record and skips one with no session id', () => {
     writeSessionActorRecord({ sessionId: 'sid-1', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada', startedAtMs: 1 });
@@ -28,19 +21,15 @@ describe('session actor sidecar (RUSH-2019)', () => {
     expect(got?.actor).toBe('ada@example.com');
     expect(got?.initiatedBy).toBe('human');
     expect(got?.phoenixId).toBe('phx_ada');
-    // No id -> no file written, and a read of an absent id is undefined.
     writeSessionActorRecord({ sessionId: '', actor: 'x', initiatedBy: 'human', startedAtMs: 1 });
     expect(readSessionActorRecord('missing')).toBeUndefined();
   });
 
   it('resolveOwner falls back to the sidecar when the pid entry has no actor (RUSH-2018 --active fix)', () => {
     writeSessionActorRecord({ sessionId: 'own-1', actor: 'ada@example.com', initiatedBy: 'human', startedAtMs: 1 });
-    // pid entry carried the actor -> use it directly.
     expect(resolveOwner('pid@example.com', 'own-1')).toBe('pid@example.com');
-    // pid entry actor-less (the SessionStart-hook clobber case) -> sidecar wins.
     expect(resolveOwner(undefined, 'own-1')).toBe('ada@example.com');
     expect(resolveOwner(null, 'own-1')).toBe('ada@example.com');
-    // no pid actor and no sidecar -> honestly undefined.
     expect(resolveOwner(undefined, 'own-absent')).toBeUndefined();
     expect(resolveOwner(undefined, undefined)).toBeUndefined();
   });
@@ -77,8 +66,6 @@ describe('session actor sidecar (RUSH-2019)', () => {
   });
 
   it('refuses a session id with path separators (no write outside by-session/)', () => {
-    // A caller-supplied `--session-id '../../evil'` must not escape the dir via
-    // path.join; the write is dropped and the read finds nothing.
     writeSessionActorRecord({ sessionId: '../../evil', actor: 'mallory@x.io', initiatedBy: 'human', startedAtMs: 1 });
     expect(readSessionActorRecord('../../evil')).toBeUndefined();
     const escaped = path.join(TEST_HOME, '.agents', '.history', 'evil.json');
@@ -86,15 +73,10 @@ describe('session actor sidecar (RUSH-2019)', () => {
   });
 });
 
-/**
- * The DB join is the whole point: a scan builds a SessionMeta with NO actor (the
- * transcript can't carry one), upsertSession reads the sidecar and fills the
- * column — so `agents sessions` attributes historical sessions to a person.
- */
 describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   beforeAll(() => {
     fs.mkdirSync(FILES, { recursive: true });
-    getDB(); // migrate a fresh home
+    getDB();
   });
   afterAll(() => {
     closeDB();
@@ -104,7 +86,6 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   function scanMeta(id: string): SessionMeta {
     const filePath = path.join(FILES, `${id}.jsonl`);
     fs.writeFileSync(filePath, '');
-    // No actor field — exactly what the transcript scanner produces.
     return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp: '2026-08-01T10:00:00.000Z', filePath };
   }
 
@@ -140,14 +121,10 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   });
 
   it('fills the origin version from the sidecar and preserves it across a version-less rescan (PHNX-3626)', () => {
-    // A codex-style transcript whose scan derives no version: the launch-time
-    // sidecar is the only source, and native resume needs it pinned.
     writeSessionActorRecord({ sessionId: 'joined-version', version: '0.146.0', startedAtMs: 1 });
     upsertSession(scanMeta('joined-version'), '');
     expect(getSessionById('joined-version')?.version).toBe('0.146.0');
 
-    // Sidecar gone + a rescan that still can't derive a version must NOT erase the
-    // recorded origin (COALESCE), else resume would relapse to /continue.
     fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'joined-version.json'), { force: true });
     upsertSession({ ...scanMeta('joined-version'), topic: 'rescanned' }, '');
     expect(getSessionById('joined-version')?.version).toBe('0.146.0');
@@ -164,27 +141,22 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   });
 
   it('round-trips phoenixId from a sidecar record all the way to the sessions --json output (PHNX-3798)', () => {
-    // The acceptance path: a human whose `actors:` entry carries a phoenixId
-    // launches a session -> the sidecar records it -> the scan-join fills the
-    // write-once phoenix_id column -> `agents sessions --json` surfaces it.
     writeSessionActorRecord({ sessionId: 'phx-1', actor: 'linus@example.com', initiatedBy: 'human', phoenixId: 'phx_linus', startedAtMs: 1 });
     upsertSession(scanMeta('phx-1'), '');
     const meta = getSessionById('phx-1');
     expect(meta).toBeTruthy();
     expect(meta?.phoenixId).toBe('phx_linus');
-    // serializeSessionsJson is the single seam the `--json` listing emits through.
     const json = JSON.parse(serializeSessionsJson([meta!])) as Array<{ id: string; phoenixId?: string }>;
     expect(json[0].id).toBe('phx-1');
     expect(json[0].phoenixId).toBe('phx_linus');
   });
 
   it('BACKFILLS a null-first phoenix_id once the sidecar lands, and preserves it across a phoenixId-less rescan', () => {
-    upsertSession(scanMeta('phx-backfill'), ''); // null-first: no sidecar yet
+    upsertSession(scanMeta('phx-backfill'), '');
     expect(getSessionById('phx-backfill')?.phoenixId).toBeUndefined();
     writeSessionActorRecord({ sessionId: 'phx-backfill', actor: 'ada@example.com', initiatedBy: 'human', phoenixId: 'phx_ada', startedAtMs: 1 });
     upsertSession(scanMeta('phx-backfill'), '');
     expect(getSessionById('phx-backfill')?.phoenixId).toBe('phx_ada');
-    // Sidecar gone + a rescan carrying no phoenixId must NOT erase the recorded id.
     fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'phx-backfill.json'), { force: true });
     upsertSession({ ...scanMeta('phx-backfill'), topic: 'rescanned' }, '');
     expect(getSessionById('phx-backfill')?.phoenixId).toBe('phx_ada');
@@ -217,13 +189,8 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   });
 
   it('BACKFILLS a null-first row once the sidecar lands (RUSH-2018/2019 fix)', () => {
-    // The bug: a scanner (an older build, or any scan that ran before the actor
-    // sidecar was written) inserts the row with actor NULL. The write-once
-    // ON CONFLICT then locked it to NULL forever, so the sidecar-join could never
-    // attribute it. COALESCE(existing, incoming) must let the join fill a NULL.
-    upsertSession(scanMeta('backfill-1'), ''); // null-first: no sidecar yet
+    upsertSession(scanMeta('backfill-1'), '');
     expect(getSessionById('backfill-1')?.actor).toBeUndefined();
-    // Sidecar appears (the run had stamped it), a later rescan runs the join:
     writeSessionActorRecord({ sessionId: 'backfill-1', actor: 'ada@example.com', initiatedBy: 'human', startedAtMs: 1 });
     upsertSession(scanMeta('backfill-1'), '');
     expect(getSessionById('backfill-1')?.actor).toBe('ada@example.com');
@@ -238,11 +205,10 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   });
 
   it('the batch scanner path joins the sidecar too (the real discover.ts flow)', () => {
-    // upsertSessionsBatch is what every harness scanner in discover.ts calls.
     writeSessionActorRecord({ sessionId: 'batch-1', actor: 'linus@example.com', initiatedBy: 'human', startedAtMs: 1 });
     upsertSessionsBatch([
-      { meta: scanMeta('batch-1'), content: '' }, // has a sidecar -> filled
-      { meta: scanMeta('batch-2'), content: '' }, // no sidecar -> stays null
+      { meta: scanMeta('batch-1'), content: '' },
+      { meta: scanMeta('batch-2'), content: '' },
     ]);
     expect(getSessionById('batch-1')?.actor).toBe('linus@example.com');
     expect(getSessionById('batch-2')?.actor).toBeUndefined();
@@ -251,8 +217,6 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   it('a rescan through the batch path does not clobber a stored owner', () => {
     writeSessionActorRecord({ sessionId: 'batch-3', actor: 'grace@example.com', initiatedBy: 'human', startedAtMs: 1 });
     upsertSessionsBatch([{ meta: scanMeta('batch-3'), content: '' }]);
-    // Rescan: same id, new content, sidecar removed — the stored owner must persist
-    // (ON CONFLICT excludes actor/initiated_by).
     fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'batch-3.json'), { force: true });
     upsertSessionsBatch([{ meta: { ...scanMeta('batch-3'), topic: 'rescanned' }, content: '' }]);
     const meta = getSessionById('batch-3');

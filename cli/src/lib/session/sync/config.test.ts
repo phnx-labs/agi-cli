@@ -7,19 +7,6 @@ import {
   SYNC_BUNDLE,
 } from './config.js';
 
-/**
- * Guards the session-transport secret read CACHE + DEGRADE behavior — the two
- * things `config.ts` itself owns. Bundle policy enforcement, ACL, and the
- * exact prompt/unlock semantics now live entirely in the standalone `secrets`
- * engine (PHNX-3989); those are covered by that repo's own suite, reached only
- * through the process client. Here the client call
- * (`readAndResolveBundleEnvSync`) is the seam under test: spying on it proves
- * (1) the resolution cache stops the daemon's ~90s cycle from re-invoking the
- * client every tick, and (2) SEC-13 — any throw the client raises (a locked
- * bundle, an absent one) degrades `isSyncConfigured` to `false` with no
- * exception ever escaping to a background caller, while `loadR2Config` still
- * surfaces the real error for a caller that wants it.
- */
 const VALID_ENV = {
   R2_ACCOUNT_ID: 'acct123',
   R2_BUCKET_NAME: 'agents-sessions',
@@ -54,7 +41,7 @@ describe('R2 config resolution cache', () => {
     const c = loadR2Config();
     expect(a.bucket).toBe('agents-sessions');
     expect(a.endpoint).toBe('https://acct123.r2.cloudflarestorage.com');
-    expect(b).toBe(a); // memoized: same object
+    expect(b).toBe(a);
     expect(c).toBe(a);
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -77,12 +64,10 @@ describe('R2 config resolution cache', () => {
   });
 
   it('re-checks an ABSENT bundle every cycle (never prompts, fast pickup)', () => {
-    // No bundle configured → the client throws "not found" → must keep polling
-    // so a later `agents secrets add` is picked up promptly. Never cached.
     throwsWith(`Bundle '${SYNC_BUNDLE}' not found.`);
     expect(isSyncConfigured(1_000)).toBe(false);
     expect(isSyncConfigured(2_000)).toBe(false);
-    expect(spy).toHaveBeenCalledTimes(2); // re-invoked each call, no backoff
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -102,9 +87,8 @@ describe('session-sync SEC-13: any client throw degrades, never propagates throu
   it('is re-checked each cycle (no cooldown) and recovers once the client resolves', () => {
     throwsWith('locked');
     expect(isSyncConfigured(1_000)).toBe(false);
-    expect(isSyncConfigured(2_000)).toBe(false); // no backoff — re-checked
+    expect(isSyncConfigured(2_000)).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
-    // The bundle becomes readable (e.g. `agents secrets policy r2.backups never`).
     resolvesWith(VALID_ENV);
     expect(isSyncConfigured(3_000)).toBe(true);
     expect(loadR2Config().bucket).toBe('agents-sessions');
@@ -115,7 +99,6 @@ describe('session-sync SEC-13: any client throw degrades, never propagates throu
     throwsWith('not found');
     expect(isSyncConfigured(t0)).toBe(false);
     resolvesWith(VALID_ENV);
-    // The unreadable path does not back off, so the very next check resolves.
     expect(isSyncConfigured(t0 + 1)).toBe(true);
     expect(loadR2Config().bucket).toBe('agents-sessions');
   });

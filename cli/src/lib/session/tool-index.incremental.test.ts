@@ -1,13 +1,3 @@
-/**
- * The tool index reads a growing transcript incrementally (RUSH-2208).
- *
- * A live session's transcript only ever gets longer, but every scan used to
- * re-read it from byte 0 and delete + reinsert the whole session's evidence, so
- * indexing a session that was scanned N times cost N full parses of an
- * ever-larger file. These tests pin the resume path: which bytes are actually
- * read, that the calls already stored survive, and the cases that must still
- * fall back to a full re-read.
- */
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -25,7 +15,6 @@ afterAll(() => {
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-/** One completed Claude tool call: the tool_use and its tool_result. */
 function callRecords(id: string, command: string, result: string): string {
   return [
     { type: 'assistant', timestamp: '2026-08-03T00:00:00Z', message: { content: [
@@ -67,13 +56,6 @@ function storedCalls(sessionId: string) {
   `).all(sessionId) as Array<{ ordinal: number; source_call_id: string; input: string; rowid: number }>;
 }
 
-/**
- * Overwrite text in the already-parsed prefix, in place and at the same byte
- * length so later offsets still line up. Nothing writes a transcript this way —
- * it is a probe. A scan that re-read the prefix picks the new text up; a scan
- * that resumed past it cannot, which is what makes "only the tail was read" an
- * observable fact rather than an inference from row counts.
- */
 function mutatePrefix(session: SessionMeta, from: string, to: string): void {
   expect(Buffer.byteLength(to)).toBe(Buffer.byteLength(from));
   const body = fs.readFileSync(session.filePath, 'utf8');
@@ -97,14 +79,11 @@ describe('incremental tool index', () => {
     fs.appendFileSync(session.filePath, callRecords('second-call', 'gh pr view', 'open'));
     await ensureToolIndex([session], { verifySourceStamps: true });
 
-    // The whole point: the second scan started past everything it had already
-    // parsed, so the doctored prefix never reached it.
     expect(storedCalls(session.id)[0].input).toContain('git status');
     expect(storedCalls(session.id).map((row) => [row.ordinal, row.source_call_id])).toEqual([
       [0, 'first-call'],
       [1, 'second-call'],
     ]);
-    // The first call's row was never deleted and reinserted.
     expect(storedCalls(session.id)[0]).toEqual(before[0]);
     const afterSecond = ledger(session.id);
     expect(afterSecond.call_count).toBe(2);
@@ -112,12 +91,6 @@ describe('incremental tool index', () => {
   });
 
   it('accounts for every byte of a transcript larger than one read chunk', async () => {
-    // The stream reads in 64 KiB chunks, so records straddle chunk boundaries.
-    // Counting only the bytes a record contributed to the chunk that ENDED it
-    // silently loses the part carried in from the previous chunk: measured, a
-    // 4.8 MB transcript came up 22,888 bytes short, and the resume point then
-    // re-read (and re-derived) the tail of every split record on the next scan.
-    // A single-chunk fixture cannot catch this — hence the size here.
     const body = Array.from({ length: 400 }, (_, i) =>
       callRecords(`bulk-${i}`, `git log --oneline -${i} # ${'x'.repeat(400)}`, `ok ${'y'.repeat(400)}`)).join('');
     const session = claudeSession('multi-chunk', body);
@@ -139,8 +112,6 @@ describe('incremental tool index', () => {
     await ensureToolIndex([session], { verifySourceStamps: true });
     expect(storedCalls(session.id).map((row) => row.ordinal)).toEqual([0]);
 
-    // The result arrives in the appended bytes. Only the resumed collector's
-    // restored pending map can pair it with the call from the earlier chunk.
     fs.appendFileSync(session.filePath, JSON.stringify({
       type: 'user', timestamp: '2026-08-03T00:00:31Z', message: { content: [
         { type: 'tool_result', tool_use_id: 'pending-call', content: 'slept' },
@@ -163,8 +134,6 @@ describe('incremental tool index', () => {
     await ensureToolIndex([session], { verifySourceStamps: true });
     expect(ledger(session.id).call_count).toBe(2);
 
-    // Shorter means the stored prefix no longer describes this file, so the
-    // resume point must be refused rather than applied to different bytes.
     fs.writeFileSync(session.filePath, callRecords('c-call', 'ls', 'ok'));
     await ensureToolIndex([session], { verifySourceStamps: true });
 
@@ -181,8 +150,6 @@ describe('incremental tool index', () => {
     fs.appendFileSync(session.filePath, callRecords('new-call', 'gh pr view', 'open'));
     await ensureToolIndex([session], { verifySourceStamps: true });
 
-    // A resume point written by a different extractor is refused, so the whole
-    // file is re-read -- and the doctored prefix proves it was.
     expect(storedCalls(session.id)[0].input).toContain('git st4tus');
     expect(storedCalls(session.id).map((row) => row.source_call_id)).toEqual(['old-call', 'new-call']);
   });
@@ -197,12 +164,9 @@ describe('incremental tool index', () => {
     const prefixSize = Buffer.byteLength(callRecords('head-call', 'ls', 'ok'));
 
     await ensureToolIndex([session], { verifySourceStamps: true });
-    // The half-written record is indexed, but the resume point stops before it.
     expect(storedCalls(session.id).map((row) => row.source_call_id)).toEqual(['head-call', 'tail-call']);
     expect(ledger(session.id).parsed_offset).toBe(prefixSize);
 
-    // Completing that record and appending another must not mint a second
-    // ordinal for the record the previous scan already indexed.
     fs.appendFileSync(session.filePath, '\n' + callRecords('after-call', 'gh pr view', 'open'));
     await ensureToolIndex([session], { verifySourceStamps: true });
 

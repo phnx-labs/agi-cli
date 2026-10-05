@@ -1,9 +1,3 @@
-/**
- * Verifies parseCodex recovers the two event kinds that were silently dropped
- * before: apply_patch edits (response_item / custom_tool_call, NOT function_call)
- * and web searches (event_msg / web_search_end). Also checks the update_plan and
- * apply_patch summaries render cleanly. Fixtures are synthetic — no user data.
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -20,7 +14,6 @@ describe('parseCodex apply_patch (custom_tool_call)', () => {
   test('recovers apply_patch as an Edit tool_use with the patched path', () => {
     const events = parseCodex(fixture);
     const edits = events.filter((e) => e.type === 'tool_use' && e.tool === 'Edit');
-    // One Update File + one Add File apply_patch in the fixture.
     expect(edits).toHaveLength(2);
     expect(edits[0]).toMatchObject({ tool: 'Edit', path: '/tmp/proj/src/foo.ts' });
     expect(edits[0].args?.file_path).toBe('/tmp/proj/src/foo.ts');
@@ -35,7 +28,6 @@ describe('parseCodex apply_patch (custom_tool_call)', () => {
     expect(results[0].output).toContain('Updated the following files');
   });
 
-  // RUSH-1410: a single apply_patch body may touch many files — each must surface.
   test('multi-file apply_patch emits one Edit tool_use per file path', () => {
     const patch = [
       '*** Begin Patch',
@@ -77,25 +69,15 @@ describe('parseCodex apply_patch (custom_tool_call)', () => {
 });
 
 describe('newer Codex exec cell (custom_tool_call name=exec)', () => {
-  // gpt-5.6-sol wraps every shell command in a JS cell: name="exec",
-  // input=`await tools.exec_command({cmd:"…"})`. Without unwrapping, the whole
-  // trajectory reads as an opaque wall of "exec" (the bug this fixes).
-  // The canonical acorn-based extractor (shared with the tool-call index) is what
-  // parse.ts reuses — it walks the whole AST, so it captures EVERY command in a
-  // multi-exec cell and never mistakes a comment/string for an invocation.
   test('commandsFromCodexExec captures every command, including parallel ones, and ignores comments', () => {
     expect(commandsFromCodexExec('const r = await tools.exec_command({cmd:"git status --short","workdir":"/x"});'))
       .toEqual(['git status --short']);
-    // Nested escaped quotes (codex quotes ssh payloads) survive.
     expect(commandsFromCodexExec('await tools.exec_command({cmd:"agents ssh zion \\"hostname\\""})'))
       .toEqual(['agents ssh zion "hostname"']);
-    // Promise.all of several exec calls — ALL commands, not just the first (~1.6% of real cells).
     expect(commandsFromCodexExec('await Promise.all([tools.exec_command({cmd:"bun test a"}), tools.exec_command({cmd:"bun test b"})]);'))
       .toEqual(['bun test a', 'bun test b']);
-    // A shell-shaped string only in a comment is NOT an invocation.
     expect(commandsFromCodexExec('// call tools.exec_command({cmd:"rm -rf /"}) if needed\nconst x = 1;'))
       .toEqual([]);
-    // Non-shell cells (image view, raw JS computation) yield no shell command.
     expect(commandsFromCodexExec('const r = await tools.view_image({path:"/tmp/a.png"});')).toEqual([]);
     expect(commandsFromCodexExec('const meta = ALL_TOOLS.filter(x => x.name);')).toEqual([]);
     expect(commandsFromCodexExec('')).toEqual([]);
@@ -147,7 +129,6 @@ describe('newer Codex exec cell (custom_tool_call name=exec)', () => {
   test('summarizeToolUse labels an exec cell by its unwrapped command', () => {
     expect(summarizeToolUse('exec', { command: 'git push origin head', input: 'await tools.exec_command({cmd:"git push origin head"})' }))
       .toBe('Bash: git push origin head');
-    // Falls back to extracting from raw input when command was not pre-set.
     expect(summarizeToolUse('exec', { input: 'await tools.exec_command({cmd:"ls -la"})' })).toBe('Bash: ls -la');
   });
 });
@@ -156,7 +137,6 @@ describe('parseCodex web search (event_msg / web_search_end)', () => {
   test('recovers exactly one WebSearch per search, carrying the query', () => {
     const events = parseCodex(fixture);
     const searches = events.filter((e) => e.type === 'tool_use' && e.tool === 'WebSearch');
-    // web_search_call is ignored; only web_search_end emits (one per search).
     expect(searches).toHaveLength(1);
     expect(searches[0].args?.query).toBe('how to parse codex sessions 2026');
   });
@@ -190,7 +170,6 @@ describe('summarizeToolUse Codex additions', () => {
         ],
       }),
     ).toBe('Plan 1/3: Shipping it');
-    // No in-progress item ⇒ bare progress fraction.
     expect(
       summarizeToolUse('TodoWrite', {
         todos: [

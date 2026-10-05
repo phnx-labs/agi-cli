@@ -1,10 +1,3 @@
-/**
- * RUSH-2682: the live-registry → SessionMeta bridge. A running session the live
- * registry already knows about must become a resolvable SessionMeta candidate so
- * `preview` / `resume` / `focus` render it instead of "No session matching",
- * even before its transcript reaches the lazy index. Pure — deterministic given
- * `self` + `nowMs`, so it needs no DB or process table.
- */
 import { describe, it, expect } from 'vitest';
 import {
   activeSessionToSessionMeta,
@@ -53,8 +46,6 @@ describe('activeSessionToSessionMeta', () => {
     expect(meta!.shortId).toBe('b947a623');
     expect(meta!.agent).toBe('claude');
     expect(meta!.harness).toBeUndefined();
-    // The transcript path rides across, so buildPreview parses the real digest
-    // when the file is on disk.
     expect(meta!.filePath).toBe('/home/me/.claude/projects/p/b947a623.jsonl');
     expect(meta!.cwd).toBe('/home/me/repo');
     expect(meta!.project).toBe('repo');
@@ -148,8 +139,8 @@ describe('liveSessionMetas', () => {
     const rows = liveSessionMetas(
       [
         active({ sessionId: 'aaaa0001-0000-0000-0000-000000000000', kind: 'claude' }),
-        active({ sessionId: undefined }),                       // dropped: no id
-        active({ sessionId: 'aaaa0002-0000-0000-0000-000000000000', kind: 'cloud' }), // dropped: not an agent
+        active({ sessionId: undefined }),
+        active({ sessionId: 'aaaa0002-0000-0000-0000-000000000000', kind: 'cloud' }),
         active({ sessionId: 'aaaa0003-0000-0000-0000-000000000000', kind: 'codex' }),
       ],
       self,
@@ -162,13 +153,6 @@ describe('liveSessionMetas', () => {
   });
 });
 
-/**
- * PHNX-3890: a dispatcher's launcher-shim row (no transcript, `machine`
- * self-defaulted) must be re-attributed to the box the AGENT runs on, so a read
- * follows the transcript owner instead of dead-ending here. These cover the
- * pure branch matrix directly; the resolver-level behavior is driven end to end
- * in `commands/sessions.remote-preview-attribution.test.ts`.
- */
 describe('fleetExecutionMachineById', () => {
   it('keys the agent machine by lowercased id', () => {
     const map = fleetExecutionMachineById([
@@ -210,10 +194,6 @@ describe('reconcileLiveMetaMachine', () => {
   });
 
   it('does NOT treat a snapshot entry naming THIS box as confirmation', () => {
-    // The snapshot is a merge that includes this box's own rows, so for the very
-    // shape being corrected here a `self` entry may just echo the self-default —
-    // recorded while the owning peer had not reported yet. Trusting it would skip
-    // the fan-out and dead-end on the local stub (the PHNX-3890 bug itself).
     const [row] = reconcileLiveMetaMachine([meta()], new Map([[id, self]]), self);
     expect(row.machine).toBe(self);
     expect(row._remote).toBeFalsy();

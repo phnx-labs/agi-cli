@@ -4,11 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { pickSessionFile, pickClaudeSessionFileAcrossRoots } from './active.js';
 
-// Regression for the "every co-located session shows the same preview" bug: when a
-// concrete session id was requested but its transcript file was absent,
-// findClaudeSessionFile fell through to the NEWEST .jsonl in the cwd, so N distinct
-// sessions collapsed onto one file's preview + topic (they looked like duplicate
-// cards). A supplied-but-missing id must resolve to undefined, never a sibling.
 
 let dir: string;
 
@@ -17,11 +12,11 @@ beforeAll(() => {
   fs.writeFileSync(path.join(dir, 'a.jsonl'), '{"a":1}\n');
   fs.writeFileSync(path.join(dir, 'b.jsonl'), '{"b":1}\n');
   const old = new Date(Date.now() - 60_000);
-  fs.utimesSync(path.join(dir, 'a.jsonl'), old, old); // make `b` the mtime winner
+  fs.utimesSync(path.join(dir, 'a.jsonl'), old, old);
 });
 
 afterAll(() => {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
 });
 
 describe('pickSessionFile', () => {
@@ -31,8 +26,6 @@ describe('pickSessionFile', () => {
   });
 
   it('a supplied-but-missing id returns undefined — NOT the newest sibling', () => {
-    // The fix: pre-fix this returned b.jsonl (the newest), so every co-located
-    // session with an unresolved id shared b.jsonl's preview + topic.
     expect(pickSessionFile(dir, 'does-not-exist')).toBeUndefined();
   });
 
@@ -50,21 +43,12 @@ describe('pickSessionFile', () => {
   });
 });
 
-// Regression for the "watchdog / sessions goes blind after an upgrade" bug: a
-// session launched under an EARLIER agent version keeps its transcript under that
-// version's home, not the live `~/.claude` symlink (which repoints to the newest
-// installed version). Resolving only the live root dropped every still-running
-// older-version session — no sessionFile → no timestamp → `unknown` state and a
-// watchdog "no activity timestamp" skip. The resolver must search ALL roots.
 describe('pickClaudeSessionFileAcrossRoots', () => {
   let base: string;
   const cwd = '/work/proj';
-  const enc = cwd.replace(/[/.]/g, '-'); // mirrors claudeProjectDirName
+  const enc = cwd.replace(/[/.]/g, '-');
   const sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
-  // `projectRoots` are the `projects`-level dirs (e.g. ~/.claude/projects); the
-  // resolver appends the cwd-encoded subdir itself. liveRoot mirrors the current
-  // ~/.claude/projects; oldRoot mirrors an earlier version home's projects dir.
   const projectsRoot = (name: string) => path.join(base, name);
   const projDir = (name: string) => path.join(projectsRoot(name), enc);
   const roots = () => [projectsRoot('live'), projectsRoot('old')];
@@ -76,11 +60,10 @@ describe('pickClaudeSessionFileAcrossRoots', () => {
   });
 
   afterAll(() => {
-    try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(base, { recursive: true, force: true }); } catch {  }
   });
 
   it('finds a session whose transcript lives ONLY in an older version home', () => {
-    // The bug: the file is absent from the live root but present in the old one.
     fs.writeFileSync(path.join(projDir('old'), `${sid}.jsonl`), '{"x":1}\n');
     expect(pickClaudeSessionFileAcrossRoots(roots(), cwd, sid)).toBe(
       path.join(projDir('old'), `${sid}.jsonl`),
@@ -92,7 +75,7 @@ describe('pickClaudeSessionFileAcrossRoots', () => {
     const oldHit = path.join(projDir('old'), `${sid}.jsonl`);
     fs.writeFileSync(liveHit, '{"x":2}\n');
     const stale = new Date(Date.now() - 120_000);
-    fs.utimesSync(oldHit, stale, stale); // make the live copy the newer write
+    fs.utimesSync(oldHit, stale, stale);
     expect(pickClaudeSessionFileAcrossRoots(roots(), cwd, sid)).toBe(liveHit);
   });
 
