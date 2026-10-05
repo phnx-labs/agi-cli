@@ -42,8 +42,6 @@ describe('native account capability registry', () => {
   });
 
   it('records Antigravity / Droid / OpenCode as device-scoped opaque but UNSUPPORTED', () => {
-    // No device-id discriminator in NativeAccount → an opaque/singleton identity
-    // cannot be proven unique across synced metadata, so naming is refused.
     for (const id of ['antigravity', 'droid', 'opencode'] as const) {
       expect(NATIVE_ACCOUNT_CAPABILITIES[id]).toEqual({ inspection: 'opaque', scope: 'device', status: 'unsupported' });
       expect(nativeAccountNameable(id)).toBe(false);
@@ -58,8 +56,8 @@ describe('native account capability registry', () => {
 
   it('exposes nameability for the supported + conditional set only', () => {
     expect(nativeAccountNameable('claude')).toBe(true);
-    expect(nativeAccountNameable('muse')).toBe(true); // conditional
-    expect(nativeAccountNameable('copilot')).toBe(false); // unsupported
+    expect(nativeAccountNameable('muse')).toBe(true);
+    expect(nativeAccountNameable('copilot')).toBe(false);
   });
 
   it('names the supported native set', () => {
@@ -75,9 +73,6 @@ describe('native account capability registry', () => {
   });
 
   it('stores Muse (email-inspection) as accountKey, never the bare email', () => {
-    // getAccountInfo('muse') sets accountKey to muse:email=<addr>. If name
-    // stored the bare email, run/view would compare liveKey !== identityKey
-    // and reject a correctly signed-in install.
     const muse = NATIVE_ACCOUNT_CAPABILITIES.muse;
     expect(nativeIdentityKey(
       { signedIn: true, email: 'user@x.com', accountKey: 'muse:email=user@x.com' },

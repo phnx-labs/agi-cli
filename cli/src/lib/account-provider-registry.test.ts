@@ -16,7 +16,6 @@ describe('account provider adapters', () => {
     expect(getAccountProvider('openrouter').baseUrlEnvFor('claude')).toBe('ANTHROPIC_BASE_URL');
     expect(getAccountProvider('openrouter').baseUrlEnvFor('codex')).toBe('OPENAI_BASE_URL');
     expect(getAccountProvider('deepinfra').baseUrlEnvFor('codex')).toBe('OPENAI_BASE_URL');
-    // A provider with no endpoint env on that host has nothing to override.
     expect(getAccountProvider('cursor').baseUrlEnvFor('cursor')).toBeNull();
   });
 
