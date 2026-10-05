@@ -219,7 +219,7 @@ export function symlinkAllowedDirs(overlayHome: string, dirs: string[]): void {
   for (const dir of dirs) {
     const expanded = dir.replace(/^~/, realHome);
 
-    // Resolve traversal and symlinks before accepting anything outside HOME.
+    // Resolve traversal and symlinks before rejecting every path outside HOME.
     let realPath: string;
     try {
       realPath = fs.realpathSync(expanded);
