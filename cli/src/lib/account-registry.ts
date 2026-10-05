@@ -155,6 +155,7 @@ export function findNativeAccountByIdentity(
   agent: AgentId,
   info: { accountKey?: string | null; email?: string | null } | null | undefined,
 ): NativeAccount | null {
+  // Stable accountKey must win; normalized email is only the key-less fallback shared by view, inventory, and statusline.
   const identityKey = info?.accountKey ?? info?.email?.toLowerCase();
   if (!identityKey) return null;
   return listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey) ?? null;
@@ -439,6 +440,7 @@ export function setAccountSecret(name: string, secret: string, base = getUserAge
   getAccountProvider(account.provider).validate(account.auth, secret);
   const record: AccountSchemaRecord = { id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl };
   const { bundle, items } = buildAccountBundle(record, secret);
+  // Secret rotation changes the value, not the bundle's creation provenance.
   bundle.created_at = readBundleSync(account.name).created_at;
   writeBundleWithItemsSync(bundle, items);
 }
