@@ -1,3 +1,4 @@
+// Generated ignores live in .git/info/exclude, are root-anchored, reject escaping paths, preserve other blocks and hand-written text, and never edit tracked .gitignore.
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';

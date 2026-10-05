@@ -1,3 +1,5 @@
+// Probe 429 is probe throttling, never account rate_limited; preserve fresh prior evidence or report unverified.
+// Cache by host/agent/version and slot:<accountId>; only local fresh usage proves auth, stable identities probe once, and workers do not publish no_evidence.
 import * as fs from 'fs';
 import * as path from 'path';
 

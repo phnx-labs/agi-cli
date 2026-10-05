@@ -1,3 +1,5 @@
+// This runs before test imports so module-level paths capture a fork-private HOME/USERPROFILE and AGENTS_REAL_HOME; broker, event, device, hook, state, and opener paths cannot reach operator state.
+// Do not globally set AGENTS_DAEMON_DIR: real daemon subprocess tests need unique HOME-derived directories.
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

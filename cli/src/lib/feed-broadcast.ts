@@ -1,3 +1,5 @@
+// Sink commands are direct argv and unresolved placeholders fail closed; declared config wins, absent config sends important posts to owner and keeps milestones record-only.
+// Owner fan-out rerenders per format; --notify adds sinks, invalid channels do not stop fan-out, and session links require full native ids.
 import { spawnSync } from 'child_process';
 import type { Meta } from './types.js';
 import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } from './channels/send.js';

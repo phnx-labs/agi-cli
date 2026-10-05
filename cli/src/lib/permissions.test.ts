@@ -1,3 +1,4 @@
+// Baseline writable roots include tool caches but never credentials; Kimi * does not cross /, so translated Bash grants use the slash-crossing form.
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';

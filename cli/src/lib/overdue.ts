@@ -1,3 +1,4 @@
+// Compare aligned occurrences to recorded starts with 60-second tolerance; floor by creation/mtime and exclude one-shots, ended, trigger-only, other-device, and pre-creation fires.
 
 import * as fs from 'fs';
 import { Cron } from 'croner';

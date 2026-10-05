@@ -1,3 +1,4 @@
+// Phoenix session state is replaced atomically with mode 0600.
 
 import * as fs from 'fs';
 import * as path from 'path';

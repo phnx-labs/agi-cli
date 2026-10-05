@@ -1,3 +1,4 @@
+// Project MCP/plugin execution surfaces are excluded from launch auto-enable.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

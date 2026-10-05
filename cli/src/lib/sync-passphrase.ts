@@ -1,3 +1,4 @@
+// Sync transport passphrases are distinct from the file-store master key; the latter is deprecated fallback only.
 /**
  * The passphrase that seals a bundle for TRANSPORT — `secrets push`/`pull` and
  * the portable `export --to-file` / `import --from-file` envelope.

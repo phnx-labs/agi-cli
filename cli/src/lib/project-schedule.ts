@@ -1,3 +1,4 @@
+// Report only stored schedule facts: declared human health wins, then overdue, due-soon, untracked, no-dates, scheduled.
 
 import type { LinearMilestone } from './linear-project-counts.js';
 
