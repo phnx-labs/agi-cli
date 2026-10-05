@@ -171,10 +171,7 @@ export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string
     const ck = `${cacheKey ?? `email:${trimmed}`}\0${key}`;
     const cached = setupTokenCache.get(ck);
     if (cached && Date.now() - cached.readAt < SETUP_TOKEN_MEMO_TTL_MS) return cached.token;
-    // SEC-GAP-3: a keychain/vault-backed `auth` used to return null here, so
-    // usage/probe fell through to the interactive login (Touch ID) with no
-    // hint that the seeded setup-token was being ignored. readReservedAuthBundle
-    // throws ReservedBundleWrongBackendError instead, which propagates.
+    // Wrong reserved-bundle backends must propagate instead of silently falling through to interactive credentials.
     const resolved = readReservedAuthBundle('usage');
     const v = (resolved?.env[key] ?? '').trim();
     const token = v.length > 0 && isValidClaudeSetupToken(v) ? v : null;
@@ -186,23 +183,7 @@ export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string
   }
 }
 
-/**
- * Seed a keychain-less Linux worker's Claude version-home identity so an account's
- * fleet-synced setup-token resolves for it. A worker home never had an interactive
- * browser login, so its `.claude.json` carries no `oauthAccount.emailAddress` and
- * the account reads "signed out" even though its non-rotating setup-token is present
- * in the `auth` bundle. This writes ONLY the descriptive identity (the email), merged
- * into both `.claude.json` locations Claude Code reads, preserving every other field.
- * It never copies a rotating OAuth credential (`.credentials.json`) — the setup-token
- * stays the credential of record.
- */
-/**
- * Write a Claude worker slot's `.oauth_token` (0600) from a durable setup-token,
- * the way the pre-slot worker home was provisioned. Refuses a malformed token so
- * a corrupt bundle entry can never reach the auth header (see {@link SETUP_TOKEN_RE}).
- * `home` is the slot dir; the claude adapter shim reads `$CLAUDE_CONFIG_DIR/.oauth_token`
- * where `CLAUDE_CONFIG_DIR` is `<home>/.claude`. Returns the written path.
- */
+// Materialize only a validated durable setup-token in the worker slot; rotating OAuth credentials never copy here.
 export function writeClaudeWorkerOauthToken(home: string, token: string): string {
   if (!isValidClaudeSetupToken(token)) {
     throw new Error('Refusing to write a malformed Claude setup-token to a worker slot.');
@@ -213,18 +194,7 @@ export function writeClaudeWorkerOauthToken(home: string, token: string): string
   return tokenPath;
 }
 
-/**
- * Read one non-rotating credential value from a reserved store by its storage
- * key. Returns null when the bundle or key is absent. Used to materialize a
- * worker slot from a synced durable credential (setup-token / API key).
- *
- * A reserved `__<harness>__` store is file-backed by design (headless, fleet-
- * shareable) and its item is read directly, symmetric with how it is written —
- * `readAndResolveBundleEnv`'s name validation does not yet accept a reserved
- * name on the READ path (a secrets-track seam; see the PR body). A non-reserved
- * bundle (the legacy `auth` alias, a provider bundle) goes through the normal
- * resolver so refs/expiry/lease gates still apply.
- */
+// Reserved stores read their file item directly; ordinary bundles retain ref, expiry, and lease resolution.
 export function readReservedCredential(bundle: string, key: string): string | null {
   try {
     if (isReservedStoreName(bundle) && bundle.startsWith('__')) {
@@ -247,23 +217,7 @@ export function readReservedCredential(bundle: string, key: string): string | nu
   }
 }
 
-/**
- * Materialize a worker slot for a portable account from its synced durable
- * credential (PHNX-3940 T6 — the generalization of the pre-slot Claude worker-home
- * provisioning). Creates the HOME-shaped slot dir (T1 `ensureSlot`), then, for a
- * durable harness, writes the credential into it the way the Claude worker home is
- * provisioned today: for `claude`, the setup-token → `.oauth_token` (0600) + the
- * seeded identity email (the read-side join in agent-spec then completes the uuids
- * from the registry row). API-key harnesses need no file — the key is injected at
- * spawn from the reserved store (T5) — so their slot is created and recorded
- * `durable` with no write. A per-device harness (`worker: 'none'`) gets a
- * `per-device` slot and no credential — it logs in per box.
- *
- * This is worker-side reconciliation: it runs on the box where the key landed and
- * NEVER transports anything (the SSH push that delivered the key is the daemon's
- * job — invariant 1). Fails loud when a durable claude account has no resolvable
- * token on this device rather than recording a slot that cannot authenticate.
- */
+// Reconcile locally without transporting credentials; a durable Claude account fails loud if its synced token is absent.
 export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccountSlot {
   const harness = account.agent;
   const durable = harnessWorkerKinds(harness).some(
@@ -282,8 +236,6 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
     const cred = account.workerCredential;
     const token = cred
       ? readReservedCredential(cred.bundle, cred.key)
-      // Claude row predating T1 (no workerCredential): the legacy `auth` bundle
-      // keys the token by the account email.
       : account.identityLabel
         ? resolveClaudeSetupTokenForEmail(account.identityLabel, slot.slotDir)
         : null;
@@ -297,19 +249,13 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
     writeClaudeWorkerOauthToken(slot.slotDir, token);
     if (account.identityLabel) seedClaudeWorkerHomeIdentity(slot.slotDir, account.identityLabel);
   }
-  // API-key harnesses: the key rides the reserved store and is injected at spawn
-  // (T5); nothing is written into the slot here.
 
   const record: DeviceAccountSlot = { ...slot, authMode: 'durable', verdict: 'unverified', checkedAt };
   recordSlot(account.id, record);
   return record;
 }
 
-/**
- * True when a claude worker slot carries everything provisioning seeds: the
- * identity email AND the completed-onboarding flag. A slot provisioned before
- * onboarding was seeded answers false, so the daemon's reconcile re-seeds it.
- */
+// Provisioning is complete only when both the identity email and onboarding flag are present.
 export function isClaudeWorkerHomeSeeded(home: string): boolean {
   for (const p of [path.join(home, '.claude', '.claude.json'), path.join(home, '.claude.json')]) {
     try {
@@ -339,7 +285,6 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string
     try {
       if (fs.lstatSync(p).isSymbolicLink()) target = path.resolve(path.dirname(p), fs.readlinkSync(p));
     } catch {
-      // Missing: written fresh below.
     }
     targets.add(target);
   }
@@ -348,9 +293,7 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string
     try {
       doc = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
     } catch (err) {
-      // Missing file → write a fresh minimal document. A file that EXISTS but
-      // does not parse is being concurrently rewritten by Claude Code itself —
-      // skip it rather than overwrite a live config with the minimal doc.
+      // Create a missing document, but never overwrite a malformed file that Claude may be rewriting concurrently.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') continue;
     }
     const existing = (doc.oauthAccount && typeof doc.oauthAccount === 'object'
@@ -360,13 +303,13 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string
     if (trimmed) doc.oauthAccount = { ...existing, emailAddress: trimmed };
     doc.hasCompletedOnboarding = true;
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    // Temp-write + rename: a reader mid-write never sees a truncated doc.
+    // Atomic rename prevents readers from observing a truncated identity document.
     const tmp = `${p}.agents-${process.pid}.tmp`;
     try {
       fs.writeFileSync(tmp, JSON.stringify(doc));
       fs.renameSync(tmp, p);
     } catch {
-      try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+      try { fs.rmSync(tmp, { force: true }); } catch {  }
     }
   }
 }

@@ -27,20 +27,7 @@ interface UpdateOptions {
   auto?: boolean;
 }
 
-/**
- * Split `<agent>[@<selector>]`. The selector names an INSTALLATION — its frozen
- * label, or the release it currently carries — never a release to install; that
- * is `--to`. Keeping them separate is what lets `agents update claude@2.0.65
- * --to 2.0.71` read unambiguously.
- */
-/**
- * `<agent>[@<installed-version>][#<account>]`. The `#<account>` form is the
- * same selector `agents run claude#work` takes: accounts run on the harness's
- * one managed installation (PHNX-3940), so it names WHICH login the user means
- * and resolves to that installation. Refusing it as "Unknown agent
- * 'claude#work'" sent operators hunting for a per-account install that does
- * not exist.
- */
+// `@selector` names an installed copy, `#account` its login, and only `--to` the release to install.
 export function parseTarget(raw: string): { agent: AgentId; selector?: string; account?: string } {
   const hash = raw.indexOf('#');
   const spec = hash === -1 ? raw : raw.slice(0, hash);
@@ -68,14 +55,7 @@ export function parseTarget(raw: string): { agent: AgentId; selector?: string; a
   return { agent, selector, account };
 }
 
-/**
- * One line naming the installations a bare `agents update <agent>` did NOT
- * touch — isolated (`--isolated`) copies and legacy pre-v2 per-version homes —
- * or `null` when the managed install is the only one. Bare `<agent>` moves only
- * the single managed install, so leaving these silent would let a user believe
- * every copy is current (PHNX-3940). Pure over the installation store so the
- * naming logic is unit-testable without running a real update.
- */
+// A bare update moves only the managed install; report untouched isolated and legacy copies.
 export function describeSkippedInstallations(agent: AgentId, managedId: string): string | null {
   const skipped = listInstallations(agent).filter((i) => i.id !== managedId);
   if (skipped.length === 0) return null;
@@ -140,12 +120,6 @@ function printInstallations(agent: AgentId, json: boolean): void {
   }
 }
 
-/**
- * Surface a failure as one red line, not a stack trace. Everything this command
- * can fail on — an unknown agent, an ambiguous selector, an unpinnable harness,
- * a release that would not launch — is a message the user acts on, and a
- * commander async action rejection otherwise reaches the user as a raw Node dump.
- */
 function fail(err: unknown): void {
   console.error(chalk.red((err as Error).message));
   process.exitCode = 1;
@@ -167,7 +141,6 @@ function serializePlanEntry(entry: AutoUpdatePlanEntry) {
   };
 }
 
-/** `--check`'s dry-run output: eligibility/current/target/policy/deferral, machine-readable with `--json`. */
 function printPlan(plan: AutoUpdatePlanEntry[], json: boolean): void {
   const rows = plan.map(serializePlanEntry);
   if (json) {
@@ -192,12 +165,7 @@ function printPlan(plan: AutoUpdatePlanEntry[], json: boolean): void {
   }
 }
 
-/**
- * `--to` also decides the installation's update policy going forward: a
- * concrete release is a manual pin (excluded from the automatic pass until
- * explicitly unpinned), `latest` (the default) unpins it. Returns `null` when
- * `--to` was not passed at all, meaning: don't touch the stored policy.
- */
+// A concrete `--to` pins, `latest` unpins, and omission preserves the stored policy.
 function policyForTo(to: string | undefined): 'latest' | 'pinned' | null {
   if (to === undefined) return null;
   return to === 'latest' ? 'latest' : 'pinned';
@@ -292,8 +260,6 @@ export function registerUpdateCommand(program: Command): void {
         }
 
         if (options.to && options.to !== 'latest' && !supportsPinnedUpdate(agent)) {
-          // Fail loud at the boundary rather than installing the current release
-          // and reporting it as the pin that was asked for.
           throw new Error(
             `${agent} is a single self-updating binary with no pinnable releases — drop --to, or pass --to latest.`
           );
@@ -306,10 +272,6 @@ export function registerUpdateCommand(program: Command): void {
           return;
         }
 
-        // Bare `<agent>`, no `@label`: update the harness's ONE managed
-        // installation (PHNX-3940). The `@<label>` selector above remains for
-        // legacy multi-install layouts and isolated copies; the automatic pass
-        // (`--auto`, the daemon) still sweeps every installation by policy.
         const managed = resolveManagedInstallation(agent);
         if (!managed) {
           throw new Error(`No managed ${AGENTS[agent].name} installation. Install one with: agents add ${agent}`);
@@ -329,11 +291,9 @@ export function registerUpdateCommand(program: Command): void {
     .command('list <agent>')
     .description('Show every frozen installation of an agent and the release each carries')
     .option('--json', 'Machine-readable listing')
-    // `--json` is declared on both `update` and `update list`, and commander
-    // binds a flag the parent also declares to the PARENT's option store — so
-    // reading this subcommand's own opts alone silently drops it. Merge them.
     .action((rawAgent: string, _options: { json?: boolean }, command: Command) => {
       try {
+        // Commander stores the duplicated --json flag on the parent, so merge both option stores.
         const agent = resolveAgentName(rawAgent);
         if (!agent) throw new Error(formatAgentError(rawAgent));
         printInstallations(agent, !!command.optsWithGlobals().json);

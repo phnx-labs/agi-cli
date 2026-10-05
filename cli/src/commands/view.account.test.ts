@@ -90,7 +90,6 @@ describe('account-first view — name and usage, nothing ceremonial', () => {
     expect(out).not.toMatch(/ACCOUNT|IDENTITY|STATE|WHERE|USAGE|FIX/);
     expect(out).toContain('work');
     expect(out).toContain('legacy-openrouter-work');
-    // The identity the old IDENTITY column carried is gone from the row.
     expect(out).not.toContain('w@example.com');
     expect(out).not.toContain('openrouter\n');
     expect(out).not.toContain('claude');
@@ -154,7 +153,6 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
     expect(rateLimited.indexOf('8h ago')).toBe(healthy.indexOf('2m ago'));
     expect(rateLimited).not.toContain('auth');
     expect(healthy).not.toContain('auth');
-    // Both rows stay within a sane terminal width after the overview meter cap.
     expect(stringWidth(rateLimited)).toBeLessThanOrEqual(120);
     expect(stringWidth(healthy)).toBe(stringWidth(rateLimited));
   });
@@ -228,10 +226,6 @@ describe('viewUsageSummaryOptions — truthful unavailable states', () => {
   });
 
   it('renders the cached plan for a meterless harness instead of "usage unavailable"', () => {
-    // Drives the REAL read path the plain, non-refreshing `agents view` uses:
-    // the row `--refresh` wrote goes through readClaudeUsageCache and into the
-    // renderer. Before the deserializer kept plan-only rows this read returned
-    // null and the row rendered "usage unavailable" — the reported bug.
     const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-view-planonly-'));
     const prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
     try {
@@ -393,10 +387,8 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     ...o,
   });
 
+  // Identity evidence outranks a newer directory label, or pruning can trash the working login.
   it('keeps the identity-captured home and retires the higher-numbered NO-ID re-login duplicate', () => {
-    // The exact fleet bug: the real login lives in the OLDER home (accountKey +
-    // usage captured) while a freshly re-logged-in NEWER home has only an email.
-    // Blind highest-semver would trash the working login; we must keep it.
     const out = planDuplicatePrune([
       home({ version: '2.1.222', release: '2.1.263', email: 'a@x.com', accountKey: 'claude:account=acc-1:org=org-1' }),
       home({ version: '2.1.257', release: '2.1.263', email: 'a@x.com', accountKey: null }),
@@ -442,10 +434,8 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     expect(out).toEqual([{ version: '2.1.100', email: 'a@x.com', keeper: '2.1.110' }]);
   });
 
+  // An identity-less re-login cannot be assigned when two organizations share its email.
   it('never folds an identity-less home when two orgs share the email (prunes nothing)', () => {
-    // Personal + Team on one email, plus a fresh re-login of the Team org that has
-    // not captured its identity yet. Folding it into whichever org sorted first
-    // would trash the working Team re-login. It must stay ungrouped instead.
     const out = planDuplicatePrune([
       home({ version: '2.1.100', email: 'a@x.com', accountKey: 'org-1', signedIn: true }),
       home({ version: '2.1.150', email: 'a@x.com', accountKey: 'org-2', signedIn: false }),
@@ -454,9 +444,8 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
     expect(out).toEqual([]);
   });
 
+  // Within one group, signed-in beats release and label when selecting the keeper.
   it('breaks a same-group keeper tie on signed-in before release/label', () => {
-    // Two equally-bare homes on one email, same running release: the signed-in one
-    // must win keeper even though it has the LOWER dir label.
     const out = planDuplicatePrune([
       home({ version: '2.1.110', release: '2.1.263', email: 'a@x.com', accountKey: null, signedIn: false }),
       home({ version: '2.1.100', release: '2.1.263', email: 'a@x.com', accountKey: null, signedIn: true }),
@@ -465,14 +454,13 @@ describe('planDuplicatePrune — collapse to one home per account', () => {
   });
 });
 
+// Device role alone never authorizes interactive credentials for piped or JSON output.
 describe('allowInteractiveUsageLogin — the USAGE-READ-2 role + foreground gate', () => {
   it('allows the interactive login only for a personal device at a human TTY', () => {
     expect(allowInteractiveUsageLogin('personal', true)).toBe(true);
   });
 
   it('rejects a personal device when output is not a TTY (piped/scripted reader)', () => {
-    // A --json or piped run must never silently acquire the interactive credential,
-    // even on the user's own box — role alone is not sufficient (USAGE-READ-2).
     expect(allowInteractiveUsageLogin('personal', false)).toBe(false);
   });
 
@@ -508,13 +496,8 @@ describe('executePrunePlan — repoint default to keeper before retiring the dup
     return binary;
   }
 
+  // Retiring a default duplicate must repoint to that account's keeper, never another account's newer home.
   it('keeps the account keeper as default when the retired duplicate was the default (not another account\'s home)', () => {
-    // Real disk + real HOME-derived state in a subprocess (view.ts derives its
-    // paths from HOME at import). Three claude homes: account A's keeper (2.1.100)
-    // + A's duplicate (2.1.200, the global default), and account B's home (2.1.300,
-    // the highest label). Retiring the default duplicate must repoint the default
-    // onto A's keeper — NOT let removeVersion fall back to the newest survivor
-    // (B's 2.1.300), and NOT leave the duplicate pinned.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-prune-'));
     tempHomes.push(home);
     const viewUrl = pathToFileURL(path.resolve('src/commands/view.ts')).href;
@@ -546,10 +529,10 @@ describe('executePrunePlan — repoint default to keeper before retiring the dup
 
     expect(child.status, child.stderr).toBe(0);
     const out = JSON.parse(child.stdout.trim().split('\n').pop() as string);
-    expect(out.def).toBe('2.1.100');    // repointed to A's keeper, not B's 2.1.300
-    expect(out.dupExists).toBe(false);  // duplicate soft-deleted
+    expect(out.def).toBe('2.1.100');
+    expect(out.dupExists).toBe(false);
     expect(out.keeperExists).toBe(true);
-    expect(out.bExists).toBe(true);     // the other account's home untouched
+    expect(out.bExists).toBe(true);
   });
 });
 
@@ -596,7 +579,6 @@ describe('account rows render per-window usage bars (PHNX-3940 regression)', () 
     expect(out).toContain('58%');
     expect(out).toContain('W:');
     expect(out).toContain('41%');
-    // Must not collapse to the old single-percent bar form without labels.
     expect(out).not.toMatch(/█{1,5}░{1,5}\s+83%\*/);
   });
 
@@ -618,18 +600,13 @@ describe('account rows render per-window usage bars (PHNX-3940 regression)', () 
     };
     const overview = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion' }));
     const single = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion', harness: 'droid' }));
-    // Overview (no harness filter, no explicit cap) should cap at 2: shows S + W, hides M behind +1
     expect(overview).toContain('S:');
     expect(overview).toContain('W:');
-    // Overview should not show all three windows; the third is hidden (either omitted or via +1 hint)
     const overviewHasM = overview.includes('M:');
     const overviewHasPlusOne = overview.includes('+1');
     expect(overviewHasM || overviewHasPlusOne).toBe(true);
-    // But if it shows M, it must show +1? Actually with cap 2, it shows S and W then +1 (hidden count), not M.
-    // So assert M is NOT shown in overview when capped, but +1 is.
     expect(overviewHasM).toBe(false);
     expect(overviewHasPlusOne).toBe(true);
-    // Single-harness view (harness filter, no cap) shows all three
     expect(single).toContain('S:');
     expect(single).toContain('W:');
     expect(single).toContain('M:');
@@ -652,7 +629,6 @@ describe('account rows render per-window usage bars (PHNX-3940 regression)', () 
     }];
     const out = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, providers, harness: 'claude', localDevice: 'zion' }));
     expect(out).toContain('my-openrouter');
-    // Provider usage cell is empty — no S:/W: there
     const providerLine = out.split('\n').find((l) => l.includes('my-openrouter')) ?? '';
     expect(providerLine).not.toContain('S:');
     expect(providerLine).not.toContain('W:');

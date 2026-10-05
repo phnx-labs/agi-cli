@@ -222,6 +222,7 @@ function metadataBlob(name: string): string {
   return storeGetSync(bundle.backend ?? 'keychain', `agents-cli.bundles.${name}`);
 }
 
+// Bundles are canonical and secret-free in metadata; provider spawns resolve env while native lookup stays harness-scoped.
 describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', () => {
   let root: string;
   useFreshSecretsHome();
@@ -234,17 +235,16 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
 
   it('stores the account as a never-policy bundle with the secret out of the metadata', async () => {
     addAccount('work', 'openrouter', 'api-key', 'sk-or-secret', root);
-    // No accounts.yaml is written — the bundle is the canonical store.
     expect(fs.existsSync(path.join(root, 'accounts.yaml'))).toBe(false);
     expect(await listKeychainItems('agents-cli.bundles.')).toEqual(['agents-cli.bundles.work']);
     const blob = metadataBlob('work');
     const meta = JSON.parse(blob);
-    expect(meta.tier).toBe('none'); // policy 'never' → no biometry ACL → syncs without Touch ID
+    expect(meta.tier).toBe('none');
     expect(meta.vars.PROVIDER).toBe('openrouter');
     expect(meta.vars.AUTH_TYPE).toBe('api-key');
     expect(meta.vars.API_KEY).toBe('keychain:API_KEY');
     expect(typeof meta.vars.ACCOUNT_ID).toBe('string');
-    expect(blob).not.toContain('sk-or-secret'); // secret bytes never in metadata
+    expect(blob).not.toContain('sk-or-secret');
     expect(hasKeychainTokenSync(secretsKeychainItem('work', 'API_KEY'))).toBe(true);
   });
 
@@ -299,8 +299,6 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
   });
 
   it('fails loud when a host cannot apply the stored BASE_URL override', () => {
-    // antigravity is the one host the google adapter authenticates, and it has
-    // no base-URL env — so the override, not the credential, is what fails.
     addAccount('google-proxy', 'google', 'api-key', 'secret', root, { baseUrl: 'https://gateway.internal/v1' });
     expect(() => resolveCredentialAccount('google-proxy', 'antigravity', undefined, root)).toThrow(
       "provider 'google' cannot apply it to the antigravity harness",
@@ -331,13 +329,10 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
 
   it('resolveSpawnAccount classifies provider (with env) vs native (no keychain read), following bindings', () => {
     addAccount('prov', 'cursor', 'api-key', 'device-key', root);
-    // Provider selection resolves the injected env at spawn time.
     const provider = resolveSpawnAccount('prov', 'cursor', '1.0.0', { accounts: {} }, { base: root });
     expect(provider).toMatchObject({ kind: 'provider', name: 'prov' });
     expect(provider?.kind === 'provider' && provider.env).toEqual({ CURSOR_API_KEY: 'device-key' });
 
-    // An exact agent@version binding selects a native account, classified from
-    // meta alone — no provider bundle / keychain read (base is a temp home).
     const meta = {
       accounts: {
         native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } },
@@ -346,7 +341,6 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
     };
     const native = resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root });
     expect(native).toMatchObject({ kind: 'native', name: 'work', agent: 'claude', identityKey: 'claude:user=1', scope: 'version' });
-    // A different version is not covered by the exact binding → nothing selected.
     expect(resolveSpawnAccount(undefined, 'claude', '2.1.225', meta, { base: root })).toBeNull();
   });
 
@@ -354,25 +348,18 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
     addAccount('or', 'openrouter', 'api-key', 'sk-or', root);
     const doc = readAccountRegistry(root);
     const account = doc.accounts[Object.keys(doc.accounts)[0]];
-    // A profile named 'deepseek' running on the claude host, bound by profile name.
     const meta = { accounts: { bindings: { deepseek: account.id } } };
-    // With the profile target, the deepseek binding is found...
     const viaProfile = resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root, target: 'deepseek' });
     expect(viaProfile).toMatchObject({ kind: 'provider', name: 'or' });
-    // ...while the same run keyed on agent@version (no profile) sees no binding.
     expect(resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root })).toBeNull();
   });
 
   it('resolveSpawnAccount refuses a native account on a provider-backed harness (explicit --account override)', () => {
-    // `agents run deepseek --account work`: deepseek hosts on claude with an
-    // OpenRouter provider, so a native claude login must be rejected before spawn
-    // — otherwise the provider env would still be injected under a native claim.
     const meta = {
       accounts: { native: { n1: { id: 'n1', name: 'work', agent: 'claude' as const, identityKey: 'claude:user=1', scope: 'version' as const } } },
     };
     expect(() => resolveSpawnAccount('work', 'claude', '2.1.220', meta, { base: root, provider: 'openrouter' }))
       .toThrow('cannot run under a provider-backed harness (openrouter)');
-    // Without a provider (a bare native run) the same account resolves fine.
     expect(resolveSpawnAccount('work', 'claude', '2.1.220', meta, { base: root })).toMatchObject({ kind: 'native', name: 'work' });
   });
 
@@ -388,10 +375,6 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
   });
 
   it('findUnifiedAccount without preferAgent still returns the first match (management lookups unchanged)', () => {
-    // Identity-label collisions still fall through to store order: rename/remove/view
-    // refuse an ambiguous *name* before calling findUnifiedAccount, but an email
-    // that several harnesses share is a legitimate un-scoped lookup. That path
-    // must behave exactly as it did before preferAgent existed.
     const meta = {
       accounts: {
         native: {
@@ -401,15 +384,10 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
       },
     };
     expect(findUnifiedAccount('muqsitnawaz@gmail.com', meta)).toMatchObject({ name: 'personal', agent: 'codex' });
-    // ...and naming either row explicitly is unaffected by the collision.
     expect(findUnifiedAccount('gmail', meta)).toMatchObject({ name: 'gmail', agent: 'claude' });
   });
 
   it('resolveSpawnAccount picks the launched harness when one identity selector matches several logins', () => {
-    // `identityLabel` defaults to the login's email, so the SAME selector matches a
-    // codex login and a claude login. `agents run claude#muqsitnawaz@gmail.com` used
-    // to resolve whichever row the store ordered first and die with "is a codex
-    // login and cannot authenticate the claude harness".
     const meta = {
       accounts: {
         native: {
@@ -420,15 +398,11 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
     };
     expect(resolveSpawnAccount('muqsitnawaz@gmail.com', 'claude', '2.1.226', meta, { base: root }))
       .toMatchObject({ kind: 'native', agent: 'claude', name: 'gmail' });
-    // The same selector on the other harness still resolves to that harness's login.
     expect(resolveSpawnAccount('muqsitnawaz@gmail.com', 'codex', '0.146.0', meta, { base: root }))
       .toMatchObject({ kind: 'native', agent: 'codex', name: 'personal' });
   });
 
   it('resolveSpawnAccount still refuses when the identity has no login for the launched harness', () => {
-    // Scoping must not soften the cross-harness guard: with only a codex login for
-    // this identity, a claude run has nothing to authenticate with and must fail loud
-    // rather than silently borrowing the codex row.
     const meta = {
       accounts: {
         native: { c1: { id: 'c1', name: 'personal', agent: 'codex' as const, identityKey: 'codex:user=1', identityLabel: 'solo@example.com', scope: 'version' as const } },
@@ -493,7 +467,7 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
     renameAccount('work', 'company', root);
     expect(fs.readFileSync(path.join(root, 'profiles', 'deepseek.yml'), 'utf8')).toContain('account: company');
     const renamed = inspectAccount('company', root);
-    expect(renamed.id).toBe(before.id); // ACCOUNT_ID survives the rename
+    expect(renamed.id).toBe(before.id);
     expect(resolveCredentialAccount('company', 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe('secret');
     expect(() => removeAccount('company', root)).toThrow('used by harness: deepseek');
   });
@@ -722,6 +696,7 @@ describe('native account device-scoping (PHNX-3315)', () => {
   });
 });
 
+// Legacy Claude homes without registry rows remain discoverable by identity; other harnesses do not use this fallback.
 describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () => {
   const testVersionLabel = `test-unregistered-${process.pid}`;
   let versionHome: string;
@@ -730,7 +705,6 @@ describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () 
   beforeEach(() => {
     const versionDir = path.join(getVersionsDir(), 'claude', testVersionLabel);
     versionHome = path.join(versionDir, 'home');
-    // Plant a .claude.json identity in the version home.
     fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(versionHome, '.claude', '.claude.json'), JSON.stringify({
       oauthAccount: {
@@ -739,7 +713,6 @@ describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () 
         organizationUuid: 'org-uuid-test',
       },
     }));
-    // Plant a minimal npm package so isVersionInstalled recognises this version.
     const pkgDir = path.join(versionDir, 'node_modules', '@anthropic-ai', 'claude-code');
     fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true });
     fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: { claude: 'bin/claude.js' } }));
@@ -756,7 +729,6 @@ describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () 
   });
 
   it('discovers an unregistered native account when the email matches a version home identity', () => {
-    // Empty native registry — the pre-fix code would throw "Unknown account".
     const meta = { accounts: { native: {} } };
     const result = resolveSpawnAccount('test-discover@example.com', 'claude', '2.1.260', meta, { base: root });
     expect(result).toMatchObject({ kind: 'native', name: 'test-discover@example.com', agent: 'claude' });
@@ -775,7 +747,6 @@ describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () 
   });
 
   it('returns null for a non-claude agent even when the email would match', () => {
-    // discoverUnregisteredNativeAccount only supports claude.
     const meta = { accounts: { native: {} } };
     expect(() => resolveSpawnAccount('test-discover@example.com', 'codex', '0.146.0', meta, { base: root }))
       .toThrow("Unknown account 'test-discover@example.com'");

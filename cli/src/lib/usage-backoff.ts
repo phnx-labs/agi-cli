@@ -85,31 +85,17 @@ export function parseRetryAfterMs(header: string | null | undefined, now: number
   return ms > 0 ? Math.min(ms, MAX_BACKOFF_MS) : null;
 }
 
-/**
- * File-name scope for a penalty. Provider-wide penalties are `<agent>`;
- * account-scoped ones are `<agent>@<slug>` (RUSH-3036), where the slug is the
- * account's usage key with path separators neutralized (usage keys carry `:`,
- * `=`, `.` and `@` freely — all filename-safe on the platforms we run on).
- * `@` cannot collide with the provider scope because provider files are always
- * `<agent>.<digits>` and agent ids never contain `@`.
- */
+// Provider penalties use `<agent>`; account penalties add an escaped slug and must match only a pure-digit deadline suffix.
 function backoffScope(agent: AgentId, account?: string | null): string {
   if (!account) return agent;
   return `${agent}@${account.replace(/[/\\]/g, '_')}`;
 }
 
-/**
- * Every recorded deadline for `scope`. A file belongs to the scope only when
- * everything after `<scope>.` is pure digits — account slugs contain dots
- * (emails inside usage keys), so a bare prefix match would let scope
- * `claude@a` swallow `claude@a.b`'s files.
- */
 function deadlinesFor(scope: string): number[] {
   let names: string[];
   try {
     names = fs.readdirSync(backoffDir());
   } catch {
-    // No directory yet: nothing is throttled.
     return [];
   }
   const prefix = `${scope}.`;
