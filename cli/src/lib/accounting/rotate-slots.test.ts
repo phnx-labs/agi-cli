@@ -36,7 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const n of names) {
-    try { removeAccount(n); } catch { /* already gone */ }
+    try { removeAccount(n); } catch {  }
   }
   names.length = 0;
   for (const p of planted) fs.rmSync(p, { recursive: true, force: true });

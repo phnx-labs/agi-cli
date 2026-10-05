@@ -16,13 +16,6 @@ import {
   type FleetStateExchangePayload,
 } from './usage-sync.js';
 
-// Real end-to-end of the `agents __usage-ingest` verb (PHNX-3392, PHNX-4116):
-// spawn the actual CLI with an isolated HOME, pipe an envelope, and assert the
-// rows landed in that HOME's real claude-usage.json, the peer's file was stored,
-// and `--reply` prints this box's own envelope. Exercises the index.ts
-// pre-bootstrap interception + stdin read + newest-wins merge, no mocks. The
-// exchange test injects ONLY the ssh boundary: a dial that runs the local binary
-// as the peer, exactly as `ssh <peer> agents __usage-ingest --reply` would.
 
 function run(home: string, input: string, args: string[] = [], machineId = 'ingest-e2e-self') {
   return spawnSync('bun', ['src/index.ts', '__usage-ingest', ...args], {
@@ -110,12 +103,9 @@ describe('agents __usage-ingest (real CLI verb)', () => {
     expect(res.stdout).toContain(`${FLEET_STATE_REPLY_MARKER}\n`);
     const reply = parseFleetStateReply(res.stdout);
     expect(reply.state.device).toBe('peer-b');
-    // An unmarked box is worker-equivalent: it publishes no usage of its own.
     expect(reply.state.usage).toBeUndefined();
-    // The reserved-auth verdict rides the reply (no `auth` bundle in a fresh HOME → missing).
     expect(reply.state.auth).toEqual({ status: 'missing' });
     expect(Array.isArray(reply.state.sessions?.rows)).toBe(true);
-    // The pushed envelope still landed locally.
     expect(fs.existsSync(path.join(home, '.agents', 'devices', 'zion', 'daemon-state.json'))).toBe(true);
     expect(JSON.parse(fs.readFileSync(cachePath, 'utf-8'))['claude:org=alpha'].windows[0].usedPercent).toBe(58);
   });
@@ -141,8 +131,6 @@ describe('agents __usage-ingest (real CLI verb)', () => {
   });
 
   it('rejects an ARRAY-shaped rows payload (typeof [] === object) — exit 2, writes nothing', () => {
-    // Regression: `typeof payload.rows !== 'object'` alone accepts an array and
-    // would write a bogus "0"-keyed row. The Array.isArray guard rejects it.
     const res = run(home, JSON.stringify({ v: 1, rows: [{ capturedAt: null, windows: [] }] }));
     expect(res.status).toBe(2);
     expect(fs.existsSync(cachePath)).toBe(false);
@@ -159,13 +147,10 @@ describe('agents __usage-ingest (real CLI verb)', () => {
   });
 
   it('refuses a stdin payload over REMOTE_STDOUT_MAX_BYTES: exit 2, one typed stderr line, cache untouched; a normal payload still merges', () => {
-    // Seed the cache so "unchanged" is a real byte comparison, not "still absent".
     expect(run(home, legacyPayload(41)).status).toBe(0);
     const before = fs.readFileSync(cachePath, 'utf-8');
     expect(JSON.parse(before)['claude:org=alpha'].windows[0].usedPercent).toBe(41);
 
-    // A v1 envelope that WOULD merge (the parser tolerates extra keys) if the
-    // cap were missing — 16 MiB of padding pushes it over the dialer's ceiling.
     const oversized = JSON.stringify({
       v: 1,
       rows: { 'claude:org=alpha': usageRow(99, '2026-08-29T12:00:00.000Z') },
@@ -180,7 +165,6 @@ describe('agents __usage-ingest (real CLI verb)', () => {
     expect(lines[0]).toMatch(/^\[agents\] __usage-ingest: UsageIngestInputTooLargeError: stdin payload exceeds 16777216 bytes \(16 MiB\); refusing it unread$/);
     expect(fs.readFileSync(cachePath, 'utf-8')).toBe(before);
 
-    // The same row without the padding is under the cap and merges newest-wins.
     const merged = run(home, legacyPayload(99, '2026-08-29T12:00:00.000Z'));
     expect(merged.status).toBe(0);
     expect(JSON.parse(fs.readFileSync(cachePath, 'utf-8'))['claude:org=alpha'].windows[0].usedPercent).toBe(99);
@@ -226,7 +210,6 @@ describe('usage-sync exchange: headed box dials peers over ssh, each answered by
       if (peer.name === 'peer-liar') {
         return { code: 0, stdout: formatFleetStateReply({ v: 2, state: { version: 1, device: 'somebody-else' } }), stderr: '', timedOut: false };
       }
-      // The live peer: the local binary standing in for `ssh peer-b agents __usage-ingest --reply`.
       const res = run(peerHome, input, ['--reply'], 'peer-b');
       return { code: res.status, stdout: res.stdout, stderr: res.stderr, timedOut: false };
     };
@@ -251,25 +234,20 @@ describe('usage-sync exchange: headed box dials peers over ssh, each answered by
     expect(byDevice['peer-old'].error).toMatch(/exited 2: .*unrecognized usage-sync payload shape/);
     expect(byDevice['peer-liar'].error).toBe("reply names device 'somebody-else', expected 'peer-liar'");
 
-    // The worker holds the headed box's rows (sync provenance) and its envelope.
     const peerCache = JSON.parse(fs.readFileSync(path.join(peerHome, '.agents', '.cache', 'claude-usage.json'), 'utf-8'));
     expect(peerCache['claude:org=alpha']).toMatchObject({ freshnessSource: 'sync', pollerDevice: 'headed-a' });
     expect(peerCache['claude:org=alpha'].windows[0].usedPercent).toBe(72);
-    // (`--reply` also refreshed the peer's OWN file, which carries no receivedAt.)
     const onPeer = readFleetSharedDeviceStates(path.join(peerHome, '.agents')).states;
     expect(onPeer.map((s) => s.device)).toEqual(['headed-a', 'peer-b']);
     expect(onPeer[0].usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(72);
     expect(onPeer[0].receivedAt).toBeGreaterThanOrEqual(before);
     expect(onPeer[1].receivedAt).toBeUndefined();
 
-    // The headed box holds ONLY the live peer's envelope — nothing was written for
-    // the timed-out, old, or mis-named peers — stamped with when it arrived.
     const onHeaded = readFleetSharedDeviceStates(headedRoot).states;
     expect(onHeaded.map((s) => s.device)).toEqual(['headed-a', 'peer-b']);
     const peerB = onHeaded.find((s) => s.device === 'peer-b')!;
     expect(peerB.auth).toEqual({ status: 'missing' });
     expect(peerB.receivedAt).toBe(byDevice['peer-b'].receivedAt);
-    // The headed box's own file never carries a receivedAt.
     expect(onHeaded.find((s) => s.device === 'headed-a')!.receivedAt).toBeUndefined();
   });
 
@@ -291,9 +269,6 @@ describe('usage-sync exchange: headed box dials peers over ssh, each answered by
   });
 
   it('the __usage-ingest verb stamps receivedAt on the stored peer envelope', () => {
-    // Per-peer `receivedAt` is what auth-sync now reads first-hand (PHNX-4116 PR 5,
-    // replacing the fleet-wide freshness gate); the ingest verb is what stamps it,
-    // pinned here through the real HOME switch the verb writes under.
     const peerHome = home('usage-exchange-marker-');
     expect(run(peerHome, JSON.stringify(envelope('zion', 12)), [], 'peer-b').status).toBe(0);
     const stamped = readFleetSharedDeviceStates(path.join(peerHome, '.agents')).states[0].receivedAt;
