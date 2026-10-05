@@ -1,19 +1,3 @@
-/**
- * End-to-end tests for `agents routines webhook`.
- *
- * The webhook receiver logic (`matchJobsToWebhook` / `fireWebhookJobs` in
- * `../lib/triggers/webhook.ts`) is unit-tested in isolation, but until this
- * command existed nothing CALLED it — a `--on-registered` (trigger) routine had
- * no reachable local entrypoint. These tests drive the REAL CLI as a subprocess
- * against an isolated HOME, so they exercise the full path a user hits:
- *
- *   payload (--file) -> listJobs() (real disk read) -> matchJobsToWebhook
- *     -> executeJobDetached (the same dispatch cron uses)
- *
- * Nothing here is mocked: the matcher, the job loader, and the dispatch path all
- * run for real. Before the `webhook` subcommand is registered these fail with
- * commander's "unknown command" (non-zero exit, no run dirs created).
- */
 import { describe, it, expect } from 'vitest';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -21,10 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-// src/commands/ -> repo root is two levels up.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** A realistic GitHub `pull_request` delivery body for repo owner/name @ base. */
 function pullRequestPayload(fullName: string, baseRef = 'main'): Record<string, unknown> {
   return {
     action: 'opened',
@@ -73,7 +55,6 @@ function makeHome(jobs: Record<string, unknown>[]): string {
   return home;
 }
 
-/** Run the real CLI (`agents routines webhook ...`) against an isolated HOME. */
 function runWebhook(home: string, args: string[]): ReturnType<typeof spawnSync> {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'routines', 'webhook', ...args], {
     cwd: REPO_ROOT,
@@ -93,11 +74,10 @@ const matchingJob = {
   agent: 'claude',
   mode: 'plan',
   prompt: 'review the PR',
-  sandbox: false, // keep the detached dispatch a plain spawn (no overlay-home setup)
+  sandbox: false,
   trigger: { type: 'github_event', event: 'pull_request', repo: 'octo/repo' },
 };
 
-// A schedule-only routine: it has no trigger, so no webhook must ever fire it.
 const nonMatchingJob = {
   name: 'nightly',
   agent: 'claude',
@@ -142,8 +122,6 @@ describe('agents routines webhook', () => {
     const home = makeHome([matchingJob, nonMatchingJob]);
     const daemon = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
     try {
-      // Pre-seed a real daemon command identity so the command sees the
-      // scheduler as already running and does NOT spawn a real daemon.
       const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
       fs.mkdirSync(daemonDir, { recursive: true });
       fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(daemon.pid));
@@ -151,10 +129,6 @@ describe('agents routines webhook', () => {
       const payloadPath = path.join(home, 'pr.json');
       fs.writeFileSync(payloadPath, JSON.stringify(pullRequestPayload('octo/repo')));
 
-      // No --dry-run: fireWebhookJobs -> executeJobDetached actually runs.
-      // executeJobDetached writes the run's meta.json synchronously, then spawns
-      // the (absent-in-test) agent binary detached — so exit code is irrelevant;
-      // the run directory is the observable proof the routine was dispatched.
       runWebhook(home, ['--event', 'pull_request', '--file', payloadPath]);
 
       const runsDir = path.join(home, '.agents', '.history', 'runs');
