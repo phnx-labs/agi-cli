@@ -4,8 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Repair in this throwaway HOME must not adopt a config, default, shim, or PATH entry implicitly.
-
+// Normal safe repair fixes shims/shadowing/PATH once, then becomes idempotent.
 describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/path against a planted home', () => {
   let home: string;
   let binDir: string;
@@ -70,6 +69,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/p
   });
 });
 
+// Isolated installs may receive versioned aliases but never a bare shim or shared PATH adoption.
 describe.skipIf(process.platform === 'win32')('runSelfHeal — isolated-only installs', () => {
   let home: string;
 
