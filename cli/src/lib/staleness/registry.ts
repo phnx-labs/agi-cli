@@ -1,20 +1,3 @@
-/**
- * Writer + detector registry for resource sync.
- *
- * Two parallel maps keyed by (ResourceKind, AgentId). At module import time
- * (which fires once when the CLI boots) we verify that EVERY supported
- * (agent, kind) pair has both a writer and a detector. Missing entries
- * throw immediately — silent-skip bugs become startup errors.
- *
- *   - Adding a new agent? Either declare every supported kind with a writer
- *     here OR mark the kind `false` in `AgentConfig.capabilities`.
- *   - Adding a new kind? Declare it on every agent's capabilities and add a
- *     writer module.
- *
- * The capability matrix in `lib/agents.ts:AGENTS` is the single source of
- * truth for "is this (agent, kind) supported?". The assertion below maps the
- * matrix to required registry entries.
- */
 import { AGENTS } from '../agents.js';
 import { supports } from '../capabilities.js';
 import type { AgentId } from '../types.js';
@@ -54,7 +37,6 @@ export type { ResourceWriter, WriteArgs, WriteResult, RemoveArgs, RemoveResult }
 export type { ResourceDetector, DetectArgs } from './detectors/types.js';
 export type { RulesSelection } from './writers/rules.js';
 
-/** Per-kind selection payload. Most kinds are string[]; rules is special. */
 type SelectionFor<K extends ResourceKind> =
   K extends 'rules' ? RulesSelection : string[];
 
@@ -84,28 +66,17 @@ export const DETECTORS: Record<ResourceKind, Partial<Record<AgentId, ResourceDet
   workflows:   workflowsDetectors,
 };
 
-/**
- * Kinds excluded from the assertion. Skills + native-skills-dir agents are
- * the only legitimate gap — Gemini reads `~/.agents/skills/` natively, so
- * it deliberately has no per-version writer/detector. The orchestrator
- * handles that case by clearing the version-home skills dir before launch.
- * Anywhere else, a missing entry is a real bug.
- */
 function isExempt(agent: AgentId, kind: ResourceKind): boolean {
+  // Native agent skills are managed outside this registry; no other capability is exempt.
   if (kind === 'skills' && AGENTS[agent].nativeAgentsSkillsDir) return true;
   return false;
 }
 
 let assertionFired = false;
 
-/**
- * Verify every supported (agent, kind) pair has both a writer and a
- * detector. Deferred from module-import time to the first `getWriter` /
- * `getDetector` call to dodge the agents.ts ↔ versions.ts ↔ registry.ts
- * import cycle (the same one the lazy writer/detector maps work around).
- * Idempotent — runs at most once per process.
- */
 export function assertRegistryComplete(): void {
+  // Validate lazily and once to avoid the agents.ts ↔ versions.ts ↔ registry.ts import cycle.
+  // Every advertised capability must bind both writer and detector or fail startup loudly.
   if (assertionFired) return;
   assertionFired = true;
   const missing: { kind: ResourceKind; agent: AgentId; missing: ('writer' | 'detector')[] }[] = [];
@@ -132,7 +103,6 @@ export function assertRegistryComplete(): void {
   }
 }
 
-/** Return the writer for (kind, agent), or undefined if unsupported. */
 export function getWriter<K extends ResourceKind>(
   kind: K,
   agent: AgentId
@@ -141,7 +111,6 @@ export function getWriter<K extends ResourceKind>(
   return WRITERS[kind][agent] as ResourceWriter<SelectionFor<K>> | undefined;
 }
 
-/** Return the detector for (kind, agent), or undefined if unsupported. */
 export function getDetector(kind: ResourceKind, agent: AgentId): ResourceDetector | undefined {
   assertRegistryComplete();
   return DETECTORS[kind][agent];

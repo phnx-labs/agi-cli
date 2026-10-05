@@ -56,8 +56,6 @@ describe('staleness e2e: commands', () => {
   it('content changed (sha256 catches it even when mtime stays) -> stale', () => {
     writeFile(fx, 'user', 'commands/foo.md', 'original content');
     build(fx);
-    // Same file, different content. Size differs so even mtime-equal would
-    // detect; the production sha256 layer is the real guarantee.
     writeFile(fx, 'user', 'commands/foo.md', 'changed content longer');
     expect(isStale(fx)).toBe(true);
   });
@@ -66,8 +64,6 @@ describe('staleness e2e: commands', () => {
     writeFile(fx, 'user', 'commands/foo.md', 'same content');
     build(fx);
     tickMtime();
-    // Re-write the same bytes — mtime will differ, but sha256 matches, so
-    // the two-tier check should reach the second tier and return clean.
     writeFile(fx, 'user', 'commands/foo.md', 'same content');
     expect(isStale(fx)).toBe(false);
   });

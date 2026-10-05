@@ -23,8 +23,6 @@ describe('staleness e2e: subagents', () => {
   });
 
   it('PROJECT subagents are listed (regression test for the v1 bug)', () => {
-    // Pre-fix bug: listInstalledSubagents() only walked user+system, so a
-    // project subagent broke the name-set diff. This test guards that.
     writeSubagent(fx, 'project', 'proj-only');
     writeSubagent(fx, 'user',    'usr');
     writeSubagent(fx, 'system',  'sys');

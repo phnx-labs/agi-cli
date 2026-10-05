@@ -1,7 +1,3 @@
-/**
- * MCP detector — parses the agent's canonical MCP config in the version home
- * and returns server names. Mirrors versions.ts:432-443.
- */
 import * as fs from 'fs';
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';

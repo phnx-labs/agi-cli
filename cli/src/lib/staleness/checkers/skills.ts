@@ -1,7 +1,3 @@
-/**
- * Skills staleness — one directory per skill (must contain SKILL.md),
- * first-wins across project > user > system > extras.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';

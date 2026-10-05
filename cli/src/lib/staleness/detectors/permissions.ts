@@ -1,15 +1,3 @@
-/**
- * Permissions detector — inspects the agent's native permission storage and
- * reports the permission GROUP names that have been applied.
- *
- * For claude/opencode the detector intersects with discovered groups (a group
- * is "applied" if any of its allow/deny rules are present). For Codex /
- * Antigravity / Grok the on-disk format is lossy — once any group has been
- * applied the storage doesn't carry per-group provenance back, so we report
- * "all known groups applied" when any permission artifact is present. This
- * matches the existing behavior in versions.ts:445-518 (extended to the
- * agents that were previously silent-skipped).
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from 'smol-toml';
@@ -37,11 +25,11 @@ function buildClaudeDetector(): ResourceDetector {
         const denyRules: string[] = settings.permissions?.deny || [];
         if (allowRules.length === 0 && denyRules.length === 0) return [];
 
+        // Claude retains concrete rules, so provenance can be reconstructed by intersection.
         const groups = discoverPermissionGroups();
         const applied: string[] = [];
         for (const group of groups) {
           const built = buildPermissionsFromGroups([group.name]);
-          // Empty groups (header files) count as synced when anything is applied.
           if (built.allow.length === 0 && (!built.deny || built.deny.length === 0)) {
             applied.push(group.name);
             continue;
@@ -59,6 +47,8 @@ function buildClaudeDetector(): ResourceDetector {
 }
 
 function buildCodexDetector(): ResourceDetector {
+  // Native formats below lose group identity; once an artifact exists they must
+  // report all known groups rather than invent lossy per-group provenance.
   return {
     kind: 'permissions',
     agent: 'codex',
@@ -77,7 +67,7 @@ function buildCodexDetector(): ResourceDetector {
         if (hasPermKeys || hasRules) {
           return discoverPermissionGroups().map(g => g.name);
         }
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -97,7 +87,7 @@ function buildOpenCodeDetector(): ResourceDetector {
         if (config.permission && Object.keys(config.permission.bash || {}).length > 0) {
           return discoverPermissionGroups().map(g => g.name);
         }
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -118,7 +108,7 @@ function buildAntigravityDetector(): ResourceDetector {
         if (hasAllow || hasDeny) {
           return discoverPermissionGroups().map(g => g.name);
         }
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -137,7 +127,7 @@ function buildGrokDetector(): ResourceDetector {
         if (perm && Array.isArray(perm.rules) && perm.rules.length > 0) {
           return discoverPermissionGroups().map(g => g.name);
         }
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -157,7 +147,7 @@ function buildKimiDetector(): ResourceDetector {
         if (perm && Array.isArray(perm.rules) && perm.rules.length > 0) {
           return discoverPermissionGroups().map(g => g.name);
         }
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -177,7 +167,7 @@ function buildCursorDetector(): ResourceDetector {
         const allow = config.permissions?.allow?.length ?? 0;
         const deny = config.permissions?.deny?.length ?? 0;
         if (allow + deny > 0) return discoverPermissionGroups().map(g => g.name);
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -195,7 +185,7 @@ function buildDroidDetector(): ResourceDetector {
         const hasAllow = Array.isArray(settings.commandAllowlist) && settings.commandAllowlist.length > 0;
         const hasDeny = Array.isArray(settings.commandDenylist) && settings.commandDenylist.length > 0;
         if (hasAllow || hasDeny) return discoverPermissionGroups().map(g => g.name);
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -218,7 +208,7 @@ function buildOpenClawDetector(): ResourceDetector {
         if (hasAllow || hasDeny) {
           return discoverPermissionGroups().map(g => g.name);
         }
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -242,7 +232,7 @@ function buildCopilotDetector(): ResourceDetector {
         const hasApprovals = Array.isArray(location?.tool_approvals) && location.tool_approvals.length > 0;
         const hasDirectories = Array.isArray(location?.allowed_directories) && location.allowed_directories.length > 0;
         if (hasApprovals || hasDirectories) return discoverPermissionGroups().map(g => g.name);
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };
@@ -263,7 +253,7 @@ function buildHermesDetector(): ResourceDetector {
         const hasAllow = Array.isArray(config?.command_allowlist) && config.command_allowlist.length > 0;
         const hasDeny = Array.isArray(config?.approvals?.deny) && config.approvals.deny.length > 0;
         if (hasAllow || hasDeny) return discoverPermissionGroups().map(g => g.name);
-      } catch { /* parse fail */ }
+      } catch {  }
       return [];
     },
   };

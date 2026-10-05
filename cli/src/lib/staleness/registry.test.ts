@@ -1,14 +1,3 @@
-/**
- * Registry coverage test — the assertion that would have caught the grok
- * silent-skip class. For every (agent, kind) pair where the capability
- * matrix says "supported," both a writer and a detector must exist in the
- * registry, OR the pair must be on the `isExempt` allow-list inside
- * registry.ts.
- *
- * Also exercises the registry's lazy assertion entry point so that any
- * regression that breaks the cycle protection surfaces here, not on a
- * production CLI launch.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -60,9 +49,6 @@ describe('staleness/registry', () => {
   });
 
   it('grok has a commands writer for native command files', () => {
-    // grok.capabilities.commands === true and commandsSubdir points at the
-    // cross-agent ~/.agents/commands/ dir, so the writer/detector register for
-    // native command files, not the commands-as-skills fallback.
     expect(AGENTS.grok.capabilities.commands).toBe(true);
     expect(AGENTS.grok.commandsSubdir).toBe(path.join('..', '.agents', 'commands'));
     expect(WRITERS.commands.grok).toBeDefined();
@@ -70,12 +56,6 @@ describe('staleness/registry', () => {
   });
 
   it('kimi has a commands writer + detector for commands-as-skills', () => {
-    // kimi.capabilities.commands === false with an empty commandsSubdir, like
-    // grok — but it has no native command runtime, so commands must convert to
-    // skills. Registration is driven by nativeCommandRuntime, not an agent-id
-    // allowlist; this is the assertion that would have caught the kimi
-    // silent-skip (the "every supported (agent, kind)" check skips kimi because
-    // supports('kimi','commands') is false).
     expect(WRITERS.commands.kimi).toBeDefined();
     expect(DETECTORS.commands.kimi).toBeDefined();
   });
@@ -87,8 +67,6 @@ describe('staleness/registry', () => {
   });
 
   it('openclaw opts OUT of commands-as-skills (native command runtime)', () => {
-    // openclaw resolves slash commands through its Gateway runtime, so it
-    // declares nativeCommandRuntime and must NOT be registered for commands.
     expect(AGENTS.openclaw.nativeCommandRuntime).toBe(true);
     expect(WRITERS.commands.openclaw).toBeUndefined();
     expect(DETECTORS.commands.openclaw).toBeUndefined();
@@ -146,8 +124,6 @@ describe('staleness/registry', () => {
   it('goose has workflows writers + detectors, and no permissions ones', () => {
     expect(WRITERS.workflows.goose).toBeDefined();
     expect(DETECTORS.workflows.goose).toBeDefined();
-    // Permissions support was removed — the registry must not offer a writer
-    // for a capability the table reports as unsupported.
     expect(WRITERS.permissions.goose).toBeUndefined();
     expect(DETECTORS.permissions.goose).toBeUndefined();
   });

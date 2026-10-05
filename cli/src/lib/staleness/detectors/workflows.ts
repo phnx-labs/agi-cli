@@ -1,11 +1,3 @@
-/**
- * Workflows detector — lists the workflows agents-cli has synced into a
- * version home, in that harness's native layout (Claude WORKFLOW.md trees,
- * Kimi flow skills, Antigravity global_workflows, Goose recipes, OpenClaw
- * Lobster, Grok Rhai). The layout is not repeated here: the detector reads the
- * same `WORKFLOW_TARGETS` entry the writer materializes through, so the two
- * can never disagree about what counts as synced.
- */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import { workflowTarget } from '../../workflows-registry.js';

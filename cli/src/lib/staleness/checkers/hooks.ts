@@ -1,13 +1,3 @@
-/**
- * Hooks staleness — one executable file per hook. Project layer is EXCLUDED
- * by design: a cloned public repo with `.agents/hooks/foo` must not plant a
- * hook that fires next time the user runs an agent inside it (see
- * `src/lib/installations/versions.ts:1832-1836`). Only user + system + extras count.
- *
- * Auxiliary files (README.md, promptcuts.yaml) live in hooks/ but are not
- * hooks — the executable bit on the source distinguishes them. This matches
- * the filter in `getAvailableResources`.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,13 +6,11 @@ import { fingerprintFile, isFileStale } from '../fingerprint.js';
 import type { FileEntry } from '../types.js';
 import type { TypedResourceChecker } from './types.js';
 
-/** Extensions that are NEVER hooks — docs, configuration, plain data. */
 const NON_SCRIPT_EXTENSIONS = new Set([
   '.md', '.markdown', '.rst', '.txt',
   '.yaml', '.yml', '.json', '.toml', '.ini', '.conf',
 ]);
 
-/** Extensions that explicitly mark a file as a script regardless of exec bit. */
 const SCRIPT_EXTENSIONS = new Set([
   '.sh', '.bash', '.zsh',
   '.py', '.js', '.ts', '.mjs', '.cjs',
@@ -30,14 +18,13 @@ const SCRIPT_EXTENSIONS = new Set([
 ]);
 
 function isHookScript(full: string): boolean {
+  // Known script extensions override mode. Extensionless hooks need +x, while known
+  // data extensions stay non-runnable because older syncs over-set execute bits.
   try {
     const stat = fs.statSync(full);
     if (!stat.isFile()) return false;
     const ext = path.extname(full).toLowerCase();
     if (SCRIPT_EXTENSIONS.has(ext)) return true;
-    // Otherwise require exec bit AND a non-data extension. Older sync runs
-    // chmod 0o755'd everything including `promptcuts.yaml` / `README.md`,
-    // so exec bit alone can't be trusted.
     if ((stat.mode & 0o111) === 0) return false;
     return !NON_SCRIPT_EXTENSIONS.has(ext);
   } catch { return false; }

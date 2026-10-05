@@ -1,7 +1,3 @@
-/**
- * Skills detector — names of skill directories materialized in the version
- * home that match the central source content. Mirrors versions.ts:359-389.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
@@ -13,8 +9,9 @@ import { lazyAgentMap } from '../writers/lazy-map.js';
 
 const SKILL_COPY_IGNORE = new Set(['.DS_Store', '.git', '.gitignore', '.venv', '__pycache__', 'node_modules']);
 
-/** Exported for unit tests (RUSH-2320 #2). Production callers: list() below. */
 export function skillDirsMatch(src: string, dest: string): boolean {
+  // These are different trees: equal mtimes prove nothing, and byte comparison
+  // must support binary assets as well as text.
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
@@ -25,11 +22,6 @@ export function skillDirsMatch(src: string, dest: string): boolean {
       if (!fs.existsSync(destPath)) return false;
       if (!skillDirsMatch(srcPath, destPath)) return false;
     } else {
-      // Stat-first (RUSH-2320 #2): size mismatch is a definitive miss with no
-      // content reads. Do NOT treat equal mtimes as equal content — src and
-      // dest are different trees (version home vs source), and copyFileSync
-      // does not preserve mtime, so mtime equality is accidental and unsafe.
-      // Content compare only when sizes match.
       let srcStat: fs.Stats;
       let destStat: fs.Stats;
       try {
@@ -39,7 +31,6 @@ export function skillDirsMatch(src: string, dest: string): boolean {
         return false;
       }
       if (srcStat.size !== destStat.size) return false;
-      // Raw bytes: decoding a binary asset (an image, a dataset) to a string costs far more than comparing it.
       if (!fs.readFileSync(srcPath).equals(fs.readFileSync(destPath))) return false;
     }
   }
@@ -60,8 +51,8 @@ function buildSkillsDetector(agent: AgentId): ResourceDetector {
       const synced: string[] = [];
       for (const name of installed) {
         const src = resolveSkillSource(name);
+        // Keep source-less installed names visible so ownership-aware pruning can see orphans.
         if (!src) {
-          // True orphan — no source. Still count so cleanup knows it's accounted for.
           synced.push(name);
           continue;
         }

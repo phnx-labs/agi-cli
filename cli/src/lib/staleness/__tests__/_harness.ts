@@ -1,23 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Test harness for the staleness library. End-to-end test files spawn this
- * with a custom `$HOME` env var, so the library resolves real user/system
- * paths into a temp tree instead of the developer's home directory. This
- * sidesteps the need for any module mocking — every call is real I/O
- * against a real filesystem.
- *
- * Protocol:
- *   bun _harness.ts '<json-op>'
- *   stdout: '<json-result>'
- *
- * Operations:
- *   { cmd: 'build',   agent, version, cwd }
- *     → builds + saves manifest. Result: { manifest }
- *   { cmd: 'isStale', agent, version, cwd }
- *     → loads manifest, returns staleness. Result: { stale, exists }
- *   { cmd: 'list',    type,   cwd }
- *     → returns names from one checker. Result: { names }
- */
 
 import type { AgentId } from '../../types.js';
 import {
@@ -60,8 +41,6 @@ function run(op: Op): unknown {
     saveManifest(op.agent, op.version, m);
     return { manifest: m };
   }
-  // RUSH-2320 #3: rebuild with the previous manifest as a carry-forward seed.
-  // Returns which skill entries kept object identity (still-fresh, no re-hash).
   if (op.cmd === 'buildCarry') {
     const prev = loadManifest(op.agent, op.version);
     const m = buildManifest(op.agent, op.version, op.cwd, prev);

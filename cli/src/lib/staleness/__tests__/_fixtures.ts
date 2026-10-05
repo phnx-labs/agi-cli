@@ -1,13 +1,3 @@
-/**
- * End-to-end fixture helpers for the staleness library.
- *
- * Each test gets a temp directory acting as $HOME, with `.agents/` (user),
- * `.agents/.system/` (system), and `project/.agents/` (project). The
- * `harness()` function spawns a Bun subprocess with HOME=<tmpdir> so the
- * library resolves paths into that temp tree — no module mocking, no
- * `vi.resetModules`, just real filesystem isolation. Works under both
- * `bun test` and `vitest`.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -71,7 +61,7 @@ export function writeExecFile(fx: Fixture, layer: Layer, rel: string, content: s
 }
 
 export function removeFile(fx: Fixture, layer: Layer, rel: string): void {
-  try { fs.unlinkSync(path.join(layerBase(fx, layer), rel)); } catch { /* ignore */ }
+  try { fs.unlinkSync(path.join(layerBase(fx, layer), rel)); } catch {  }
 }
 
 export function rmDir(fx: Fixture, layer: Layer, rel: string): void {
@@ -85,7 +75,6 @@ export function readFile(fx: Fixture, layer: Layer, rel: string): string {
 export const AGENT = 'claude';
 export const VERSION = '0.0.0-test';
 
-// ─── Harness — spawns the staleness library with HOME=fx.home ────────────────
 
 interface HarnessResult {
   manifest?: SyncManifest;
@@ -125,8 +114,7 @@ export function list(fx: Fixture, type: string, cwd?: string): string[] {
   return result.names ?? [];
 }
 
-/** Sleep just long enough that mtime moves forward (1ms granularity). */
 export function tickMtime(): void {
   const end = Date.now() + 15;
-  while (Date.now() < end) { /* spin briefly */ }
+  while (Date.now() < end) {  }
 }

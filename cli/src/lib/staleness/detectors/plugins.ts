@@ -1,8 +1,3 @@
-/**
- * Plugins detector — for each discovered plugin, ask `isPluginSynced` whether
- * its expected artifacts are present in the version home. Mirrors
- * versions.ts:541-549.
- */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import { discoverPlugins, isPluginSynced } from '../../plugins/plugins.js';

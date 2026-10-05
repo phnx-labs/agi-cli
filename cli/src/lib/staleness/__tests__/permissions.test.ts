@@ -10,9 +10,6 @@ import * as path from 'path';
 
 const HARNESS = path.join(__dirname, '_harness.ts');
 
-// Permissions checker isn't a standard ResourceChecker (no `listNames`), so
-// broad coverage goes through build + isStale; detector-specific regressions use
-// a harness op that still runs in an isolated HOME.
 
 function buildRaw(fx: Fixture, env: Record<string, string> = {}): { permissions: { groups: Record<string, unknown>; permissionPreset: string | null } } {
   const out = execFileSync('bun', [HARNESS, JSON.stringify({
@@ -63,10 +60,8 @@ describe('staleness e2e: permissions', () => {
     writeFile(fx, 'system', 'permissions/groups/shared.yaml', yaml(['Bash(sys)']));
     writeFile(fx, 'user',   'permissions/groups/shared.yaml', yaml(['Bash(user)']));
     build(fx);
-    // Mutate the SYSTEM one — should NOT trigger stale, user wins.
     writeFile(fx, 'system', 'permissions/groups/shared.yaml', yaml(['Bash(sys-v2)']));
     expect(isStale(fx)).toBe(false);
-    // Mutate the USER one — should trigger stale.
     writeFile(fx, 'user',   'permissions/groups/shared.yaml', yaml(['Bash(user-v2)']));
     expect(isStale(fx)).toBe(true);
   });
@@ -88,7 +83,6 @@ describe('staleness e2e: permissions', () => {
 
   it('AGENTS_PERMISSION_PRESET env change -> stale (preset selection changes which groups apply)', () => {
     writeFile(fx, 'system', 'permissions/groups/a.yaml', yaml(['Bash(ls)']));
-    // Build with no preset set.
     build(fx);
     expect(isStaleEnv(fx, { AGENTS_PERMISSION_PRESET: 'strict' })).toBe(true);
   });

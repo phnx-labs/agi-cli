@@ -1,10 +1,3 @@
-/**
- * Workflows staleness — one directory per workflow (must contain
- * WORKFLOW.md), first-wins across project > user > system > extras.
- *
- * Not tracked in v1 manifests; treated as a new section that's empty on old
- * files, which causes one re-sync (filling the field) and then steady-state.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
