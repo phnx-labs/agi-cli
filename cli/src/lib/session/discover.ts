@@ -1,11 +1,3 @@
-/**
- * Session discovery across Claude, Codex, Gemini, OpenCode, and OpenClaw.
- *
- * Performs incremental scans: each agent's session files are stat'd and compared
- * to a scan-stamp ledger in SQLite. Only files whose mtime or size changed since
- * the last run are re-parsed. All metadata is upserted into the sessions DB so
- * subsequent queries are served entirely from the cache.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -78,36 +70,22 @@ import {
 import { purgeMissingToolCallsInDirectory } from './tool-store.js';
 
 const HOME = os.homedir();
-// Versions can live under either repo: the user repo (current canonical
-// location, ~/.agents/.history/versions/) or the system repo (legacy / npm-shipped,
-// ~/.agents-system/versions/). Both must be scanned — sessions written by
-// any installed version end up in that version's projects/ dir, and the user
-// can be running one repo's version while another repo holds older versions
-// whose JSONLs the user still wants to search.
 const VERSIONS_ROOTS = [getHistoryDir(), getAgentsDir()];
 const RUSH_SESSIONS_DIR = path.join(HOME, '.rush', 'sessions');
 const HERMES_SESSIONS_DIR = path.join(HOME, '.hermes', 'sessions');
-/** Muse Code sessions: ~/.local/share/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl */
 const MUSE_SESSIONS_DIR = path.join(HOME, '.local', 'share', 'muse', 'sessions');
 
-/** How long OpenClaw channel/cron snapshots stay valid before we re-shell-out. */
 const OPENCLAW_TTL_MS = 60_000;
 const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
-/** One JSONL record may not force an unbounded string allocation. */
 const SESSION_JSONL_LINE_MAX_BYTES = 1024 * 1024;
 
-/**
- * Stream one appended JSONL range, applying only newline-terminated records.
- * Memory is bounded to one record. An ordinary unterminated tail remains for the
- * next scan. Once a record exceeds the cap, its consumed offset and a one-bit
- * dropping state advance together so later scans never reread the growing tail.
- */
 async function applyJsonlAppend(
   filePath: string,
   fromOffset: number,
   wasDroppingOversizedLine: boolean,
   apply: (parsed: any) => void,
 ): Promise<{ consumedBytes: number; droppingOversizedLine: boolean; skippedOversizedLine: boolean }> {
+  // Advance only through complete records; an unterminated tail belongs to the next scan.
   let pending = Buffer.alloc(0);
   let droppingOversizedLine = wasDroppingOversizedLine;
   let bytesBeforeChunk = 0;
@@ -143,7 +121,6 @@ async function applyJsonlAppend(
               try {
                 apply(JSON.parse(line));
               } catch {
-                // One malformed line never aborts the session scan.
               }
             }
           } else {
@@ -163,18 +140,8 @@ async function applyJsonlAppend(
   return { consumedBytes, droppingOversizedLine, skippedOversizedLine };
 }
 
-/**
- * How recently a file must have been scanned to be treated as "hot" — a
- * candidate for an in-place append even when its parent dir's mtime hasn't
- * moved. A dir-ledger match lets us skip the per-file stat of everything in a
- * leaf dir EXCEPT its hot set; a file is hot if it lives under the agent's live
- * `~/.<agent>` root (the only tree an agent appends to live) or was scanned
- * within this window. 10 minutes comfortably covers a session that paused
- * between `agents sessions` calls but is still being written to.
- */
 const HOT_FILE_WINDOW_MS = 600_000;
 
-/** Emergency kill-switch for the directory-ledger optimization. */
 function dirLedgerDisabled(): boolean {
   const v = process.env.AGENTS_SESSIONS_NO_DIR_LEDGER;
   return v === '1' || v === 'true';
@@ -182,55 +149,32 @@ function dirLedgerDisabled(): boolean {
 
 let cachedOpenClawWorkspaces: Map<string, string> | null = null;
 
-/** Options controlling which sessions to discover and how to report progress. */
 export interface DiscoverOptions {
   agent?: SessionAgentId;
-  /**
-   * Include sessions from the user's own (unmanaged) `~/.<agent>` alongside managed
-   * version homes. Defaults to true only when the agent has no managed versions, so
-   * a user who has never run `agents add` sees exactly what they see today.
-   */
   includeUnmanaged?: boolean;
-  /** Called with how many rows the managed-only default hid, so callers can say so. */
   onHiddenUnmanaged?: (count: number) => void;
   version?: string;
   project?: string;
   all?: boolean;
   cwd?: string;
-  /** Match any session whose cwd equals this or is a descendant. Overrides `cwd`. */
   cwdPrefix?: string;
   limit?: number;
-  /** Internal indexed-query path: return every row in scope instead of the default page. */
   unbounded?: boolean;
-  /** Filter sessions newer than this (ISO timestamp or "7d", "30d", "90d") */
   since?: string;
-  /** Filter sessions older than this (ISO timestamp) */
   until?: string;
-  /** Drop team-spawned sessions at the DB level, before LIMIT. */
   excludeTeamOrigin?: boolean;
-  /** Keep only team-spawned sessions (used for hidden-count queries). */
   onlyTeamOrigin?: boolean;
-  /** Keep only sessions from this source. */
   origin?: 'cli' | 'routine';
-  /** Column to order results by (all descending): 'timestamp' (default), 'cost', or 'duration'. */
   sortBy?: 'timestamp' | 'cost' | 'duration';
-  /** Trust scan-ledger rows without stat'ing every returned transcript. */
   skipExistenceCheck?: boolean;
-  /** Called as each agent makes parsing progress. Totals count only files that need re-parsing (cache misses). */
   onProgress?: (progress: ScanProgress) => void;
-  /** Only sessions that invoked this skill (#12) — see QueryOptions.skill in session/db.ts. */
   skill?: string;
-  /** Only sessions that used a skill/command owned by this plugin (#12) — see QueryOptions.plugin. */
   plugin?: string;
-  /** Exact session id — a targeted indexed lookup with no scan (RUSH-2477). */
   idExact?: string;
-  /** Session id prefix — a targeted indexed lookup with no scan (RUSH-2477). */
   idPrefix?: string;
-  /** On a cold miss, briefly await the scan already holding the single-flight claim. */
   waitForScan?: boolean;
 }
 
-/** Max time a `waitForScan` repair waits for a concurrent scan to settle. */
 const WAIT_FOR_SCAN_TIMEOUT_MS = 2_000;
 const WAIT_FOR_SCAN_POLL_MS = 100;
 
@@ -238,14 +182,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Progress report emitted during incremental scanning. */
 export interface ScanProgress {
   agent: SessionAgentId;
   parsed: number;
   total: number;
 }
 
-/** Lightweight metadata extracted from a Claude JSONL file during incremental scan. */
 interface ClaudeSessionScan {
   timestamp?: string;
   cwd?: string;
@@ -254,57 +196,36 @@ interface ClaudeSessionScan {
   model?: string;
   topic?: string;
   firstUserMessage?: string;
-  /** Harness-owned session name (`/rename` or Claude's generated `ai-title`). */
   label?: string;
   messageCount: number;
   tokenCount?: number;
-  /** Real generated (output) tokens, excluding cache-read/-write context. */
   outputTokens?: number;
-  /** Burn split — uncached input / cache-read / cache-write tokens (RUSH-2287). */
   inputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
-  /** Total USD cost accumulated from per-(model, direction) token usage. */
   costUsd?: number;
-  /** USD cost with cache read/write repriced at the input rate (RUSH-2287). */
   costUsdNoCache?: number;
-  /** Wall-clock duration in ms between the first and last timestamped event. */
   durationMs?: number;
-  /** ISO time of the last timestamped event — the session's last activity. */
   lastActivity?: string;
   toolCallCount?: number;
-  /**
-   * Value of the JSONL `entrypoint` field on the first event that carries it.
-   * 'cli' for real interactive sessions, 'sdk-cli' for team-spawned ones.
-   */
   entrypoint?: string;
-  /** Concatenated user message text, ready to hand to FTS5. */
   contentText?: string;
-  /** Concatenated assistant-answer text, ready to hand to FTS5's `assistant` column. */
   assistantText?: string;
-  /** Durable state signals persisted to the index by the session-state engine. */
   prUrl?: string;
   prNumber?: number;
   worktreeSlug?: string;
   ticketId?: string;
-  /** Tracker refs the session CREATED (Linear create_issue / gh issue create). */
   createdTickets?: string[];
-  /** Team name this session SPAWNED via `agents teams create/add` (not team-of-origin). */
   spawnedTeam?: string;
-  /** Plan markdown from the last ExitPlanMode tool call (Claude sessions only). */
   plan?: string;
   todos?: TodoProgress;
   recentDirectoriesTouched?: string[];
-  /** Skills invoked (#12) — see SessionMeta.skillsUsed. */
   skillsUsed?: Array<{ name: string; count: number }>;
-  /** Fan-out left behind (RUSH-3091/3095) — see SessionMeta.subAgentCount. */
   subAgentCount?: number;
   backgroundShellCount?: number;
-  /** Slash commands invoked (#12) — see SessionMeta.slashCommandsUsed. */
   slashCommandsUsed?: Array<{ name: string; count: number }>;
 }
 
-/** Lightweight metadata extracted from a Codex JSONL file during incremental scan. */
 interface CodexSessionScan {
   sessionId?: string;
   timestamp?: string;
@@ -316,14 +237,11 @@ interface CodexSessionScan {
   firstUserMessage?: string;
   messageCount: number;
   tokenCount?: number;
-  /** Real generated (output) tokens, excluding cache-read/-write context. */
   outputTokens?: number;
-  /** Burn split — uncached input / cache-read tokens (Codex has no cache-write) (RUSH-2287). */
   inputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   costUsd?: number;
-  /** USD cost with cache read repriced at the input rate (RUSH-2287). */
   costUsdNoCache?: number;
   durationMs?: number;
   lastActivity?: string;
@@ -341,38 +259,18 @@ interface CodexSessionScan {
 
 const cachedAgentVersions = new Map<SessionAgentId, Promise<string | undefined>>();
 
-/** A session ready for batch upsert: metadata, searchable text, and file stamp. */
 interface ScanEntry {
   meta: SessionMeta;
   content: string;
-  /** Assistant-answer text — see `upsertSessionsBatch`'s `assistantContent`. */
   assistantContent?: string;
   scan: ScanStamp;
-  /** Normalized events already produced while scanning; avoids reopening the transcript in the DB sink. */
   events?: SessionEvent[];
-  /**
-   * Serialized {@link ClaudeParserState} continuation to persist in
-   * scan_ledger.parser_state (Claude only). Carries the offset + accumulator so
-   * the NEXT scan of this file resumes from where this parse stopped. Absent for
-   * non-Claude scanners, which leave the column NULL.
-   */
   parserState?: string;
-  /** Accumulated user doc to persist in scan_ledger.content_text for the next hydrate (Claude only). */
   contentText?: string;
   toolCalls?: IndexedToolCall[];
   toolIndexMode?: 'replace' | 'append';
 }
 
-/**
- * Discover sessions. Scans only files whose (mtime, size) have changed since
- * the last run; everything else is served from the SQLite cache.
- *
- * Only one process runs the incremental scan at a time. When many agents boot
- * simultaneously (e.g. after a restart), the first to claim the scan slot does
- * the work; the rest skip parsing entirely and serve from the DB. The claim is
- * stored in the `meta` table — crash-safe via dead-PID detection and a 2-min
- * TTL, no external lock files needed.
- */
 export async function discoverSessions(options?: DiscoverOptions): Promise<SessionMeta[]> {
   const { claimed } = await scanSessionsIncremental({
     agent: options?.agent,
@@ -380,10 +278,6 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   });
 
   if (!claimed && options?.waitForScan) {
-    // Lost the single-flight claim to another live process (a foreground
-    // `agents sessions*` or the daemon's index warm). Rather than return the
-    // pre-scan snapshot that just missed, wait (bounded) for that scan to finish
-    // so the read below reflects what it wrote (RUSH-2682 cold-miss repair).
     await waitForScanToSettle();
   }
 
@@ -392,7 +286,6 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   });
 }
 
-/** Read only matching Claude/Codex transcripts on a cold ID lookup; indexing stays with the daemon. */
 export async function findLocalSessionTranscripts(selector: string, agent?: SessionAgentId): Promise<SessionMeta[]> {
   const matches = new Map<string, SessionMeta>();
   const seen = new Set<string>();
@@ -426,14 +319,13 @@ export async function findLocalSessionTranscripts(selector: string, agent?: Sess
   return [...matches.values()];
 }
 
-/** Repair local metadata before deciding that a conversation has no context. */
 export async function hydrateSessionTranscript(session: SessionMeta): Promise<SessionMeta> {
   const accountId = session.accountId ?? readSessionActorRecord(session.id)?.accountId;
   if (accountId && !session.accountId) session = { ...session, accountId };
   const file = splitSessionFilePath(session.filePath).container;
   try {
     if (file && fs.statSync(file).isFile() && fs.statSync(file).size > 0) return session;
-  } catch { /* A moved account home needs a canonical rescan. */ }
+  } catch {  }
   if (session.machine && !isSelfHost(session.machine)) return session;
   if (session.agent === 'claude' || session.agent === 'codex') {
     const local = (await findLocalSessionTranscripts(session.id, session.agent)).find(row => row.id === session.id);
@@ -449,20 +341,15 @@ export async function hydrateSessionTranscript(session: SessionMeta): Promise<Se
   return indexed ? { ...session, ...indexed, accountId: session.accountId ?? indexed.accountId } : session;
 }
 
-/** What one incremental scan actually did. */
 interface IncrementalScanResult {
-  /** True when this process won the single-flight claim and ran the scan. */
   claimed: boolean;
-  /** Changed transcripts parsed; zero with `claimed: true` is a successful no-op scan. */
   scanned: number;
 }
 
-/** Separate write half so daemon warming does not pay for listing or external enrichment. */
 export async function scanSessionsIncremental(options?: {
   agent?: SessionAgentId;
   onProgress?: (p: ScanProgress) => void;
 }): Promise<IncrementalScanResult> {
-  // Touch the DB so the schema is ready and connection is cached for this run.
   getDB();
 
   const agents = options?.agent ? [options.agent] : SESSION_AGENTS;
@@ -470,9 +357,6 @@ export async function scanSessionsIncremental(options?: {
 
   if (!tryClaimScan(process.pid)) return { claimed: false, scanned: 0 };
 
-  // `parsed` climbs monotonically within one scanner run, so the last value per
-  // (phase, agent) is that scanner's total. Phase-keyed because the dotfile scan
-  // and the routine-archive scan both report under the same agent id.
   const parsedByPhaseAgent = new Map<string, number>();
   const track = (phase: string) => (p: ScanProgress) => {
     parsedByPhaseAgent.set(`${phase}\0${p.agent}`, p.parsed);
@@ -480,16 +364,8 @@ export async function scanSessionsIncremental(options?: {
   };
 
   try {
-    // Bounded + staggered instead of a single Promise.all: scanning every
-    // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
-    // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
-    // file-enumeration sweep. Same dirs, same results — just not all at once.
     await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, track('dotfiles')));
     await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, track('routines')));
-    // Seed labels from `agents run --name` handles onto the freshly-scanned
-    // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
-    // titles via syncLabels), so a real title always wins and the seed only
-    // backfills sessions that would otherwise be unnamed.
     seedLabelsFromNames(buildRunNameMap());
   } finally {
     releaseScan(process.pid);
@@ -500,7 +376,6 @@ export async function scanSessionsIncremental(options?: {
   return { claimed: true, scanned };
 }
 
-/** Bounded wait so a wedged scan cannot hang a foreground cold-miss repair. */
 export async function waitForScanToSettle(
   timeoutMs: number = WAIT_FOR_SCAN_TIMEOUT_MS,
   pollMs: number = WAIT_FOR_SCAN_POLL_MS,
@@ -513,7 +388,6 @@ export async function waitForScanToSettle(
   return true;
 }
 
-/** Read the current SQLite snapshot without scanning or parsing transcript files. */
 export async function queryIndexedSessions(
   options?: DiscoverOptions,
   indexedOptions: { resolveLinear?: boolean; skipExistenceCheck?: boolean } = {},
@@ -527,24 +401,11 @@ export async function queryIndexedSessions(
   ));
   if (indexedOptions.resolveLinear !== false) await resolveLinearProjects(sessions);
   for (const s of sessions) {
-    // A non-empty transcript path is authoritative for origin (a live-home file
-    // is this box; `backups/<agent>/<machine>/…` names that peer), so derive
-    // there. An EMPTY file_path carries no such signal — `machineForSessionFile`
-    // falls back to THIS box — so keep the machine the row was recorded with
-    // instead: a host dispatch stamps the EXECUTION host on its empty-file index
-    // row (`registerHostSession`), and re-deriving re-attributed the dispatcher's
-    // own pool row to itself, splitting it from the executing peer's fan-out row
-    // and making resume-by-id read as "ambiguous (2 sessions)" (RUSH-2486 /
-    // RUSH-2479 criterion 2). A recorded-less empty-file row still falls back.
     if (s.filePath || !s.machine?.trim()) s.machine = machineForSessionFile(s.filePath, s.agent);
   }
   return scopeToManaged(sessions, agents, options);
 }
 
-/**
- * Resolve locally without scanning or fleet I/O, keeping concurrent crash recovery lock-light.
- * The existence check preserves archived content while rejecting transcriptless phantoms.
- */
 export async function resolveIndexedSessionById(idQuery: string): Promise<SessionMeta[]> {
   const q = idQuery.trim();
   if (!q) return [];
@@ -594,16 +455,6 @@ async function resolveLinearProjects(sessions: SessionMeta[]): Promise<void> {
   }));
 }
 
-/**
- * Drop unmanaged rows for agents that HAVE managed versions.
- *
- * Scoping happens here, at query time, rather than by narrowing the scan: the index
- * stays complete, so `--unmanaged` needs no re-scan and every other consumer of the
- * DB (watchdog, the Factory watcher, `--roots`) is unaffected.
- *
- * An agent with no managed versions is left alone entirely — someone who has never
- * run `agents add` sees exactly what they saw before.
- */
 export function scopeToManaged(
   sessions: SessionMeta[],
   agents: readonly SessionAgentId[],
@@ -618,12 +469,6 @@ export function scopeToManaged(
   return kept;
 }
 
-/**
- * True once agents-cli manages ANY agent version. Until then it manages nothing, so
- * scoping to "managed only" would leave the listing empty for a user who has never
- * run `agents add` — the browser is most of the tool's value before you install
- * anything through it.
- */
 function anyManagedVersions(): boolean {
   for (const root of VERSIONS_ROOTS) {
     const base = path.join(root, 'versions');
@@ -635,21 +480,15 @@ function anyManagedVersions(): boolean {
       if (!a.isDirectory()) continue;
       try {
         if (fs.readdirSync(path.join(base, a.name), { withFileTypes: true }).some((e) => e.isDirectory())) return true;
-      } catch { /* unreadable */ }
+      } catch {  }
     }
   }
   return false;
 }
 
-/**
- * How many agents' dotfile dirs we scan at once, and the minimum spacing between
- * successive scan starts. A small bound + stagger turns a simultaneous bulk
- * multi-dotfile sweep (a behavioral-EDR file-enumeration trigger) into a trickle.
- */
 export const DOTFILE_SCAN_CONCURRENCY = 2;
 const DOTFILE_SCAN_STAGGER_MS = 15;
 
-/** Run each agent's incremental scan, bounded + staggered. Order is irrelevant (each scan writes its own rows). */
 export function scanAgentsBounded<T>(
   items: readonly T[],
   run: (item: T) => Promise<void>,
@@ -660,7 +499,6 @@ export function scanAgentsBounded<T>(
   });
 }
 
-/** Dispatch a single agent's incremental dotfile scan. */
 function dispatchAgentScan(
   agent: SessionAgentId,
   onProgress?: (p: ScanProgress) => void,
@@ -683,62 +521,19 @@ function dispatchAgentScan(
 }
 
 
-/**
- * The machine a discovered session originated on. Cross-machine sync mirrors a
- * remote transcript to backups/<agent>/<machine>/<subdir>/… (see mirrorPath in
- * sync/agents.ts); every other transcript is a live-home file on this box. So:
- * when the path sits under the agent's backups root, the first segment below it
- * is the origin machine id; otherwise it's the local machine.
- */
-/**
- * True when this transcript belongs to a version agents-cli manages — i.e. it lives
- * under a version home (or a backup mirror of one) rather than in the user's own
- * `~/.<agent>`.
- *
- * `agents sessions` scans both, which is right for indexing: the DB stays a complete
- * picture and `--unmanaged` can surface everything without a re-scan. But listing
- * *by default* is a different question. Once you have managed versions, an unmanaged
- * install's history is not really agents-cli's to show — most visibly after
- * `agents add --isolated`, where the whole point was to keep the two apart.
- */
 export function isManagedSessionFile(filePath: string): boolean {
-  // Synthetic rows (OpenClaw workspace sessions, cloud/remote entries) have no local
-  // transcript to classify. They are produced BY agents-cli rather than read out of
-  // someone's dotfile dir, so scoping must not silently swallow them.
   if (!filePath || !path.isAbsolute(filePath)) return true;
 
-  // A composite file_path (`<container>#<id>`) names a row inside a single shared
-  // DB the scanner reads from one fixed location (OpenCode's `opencode.db`) — that
-  // store is never a per-install dotfile under a version home, so the managed-vs-
-  // unmanaged split does not apply: there is exactly one store, not a "your own"
-  // copy to hide. Classifying it as unmanaged hid every OpenCode row from default
-  // listings once any agent was managed (RUSH-2357). Keyed off the composite FORM,
-  // so any future single-DB harness inherits this.
   if (splitSessionFilePath(filePath).fragment !== undefined) return true;
 
   const roots = [
     ...VERSIONS_ROOTS.map((root) => path.join(root, 'versions')),
     path.join(getHistoryDir(), 'backups'),
-    // Codex's managed home is not always under versions/. On macOS the versioned path
-    // overflows SUN_LEN for codex's control socket, so the shim relocates it to
-    // `<agentsUserDir>/.codex-homes/<key>/` (lib/codex-home.ts) — keyed by version OR
-    // by account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`).
     path.join(getUserAgentsDir(), '.codex-homes'),
-    // Account slots (PHNX-3940): a named account's HOME-shaped dir under
-    // `<historyDir>/accounts/<agent>/<accountId>/` (lib/accounts/slots.ts
-    // `slotDir`), sharing the one managed install rather than owning a version
-    // home of its own. Without this root, every account-slot transcript read as
-    // unmanaged the moment any version was managed, hiding a fully registered,
-    // runnable account's entire history from the default listing.
     path.join(getHistoryDir(), 'accounts'),
-    // Routine archives are agents-cli's OWN run output — managed by definition.
     getRunsDir(),
   ];
 
-  // Compare realpaths as well as the literal roots. A transcript's stored path is
-  // resolved, so on macOS (`/var` -> `/private/var`) a temp-dir HOME yields
-  // `/private/var/...` for the file and `/var/...` for the root, and a plain prefix
-  // test silently classifies every managed session as the user's own.
   const real = safeRealpathSync(filePath) || filePath;
   return roots.some((root) => {
     if (filePath.startsWith(root + path.sep)) return true;
@@ -749,17 +544,11 @@ export function isManagedSessionFile(filePath: string): boolean {
 
 
 
-/**
- * Count sessions in scope without running an incremental scan. Assumes the DB
- * is already fresh (typically true because `discoverSessions` ran first this
- * turn). Uses the exact same filter shape as the discover query.
- */
 export function countSessionsInScope(options: DiscoverOptions): number {
   const agents = options.agent ? [options.agent] : SESSION_AGENTS;
   return countSessions(buildQueryOptions(options, agents, { includeLimit: false }));
 }
 
-/** Translate DiscoverOptions into the QueryOptions shape expected by the DB layer. */
 function buildQueryOptions(
   options: DiscoverOptions | undefined,
   agents: SessionAgentId[],
@@ -774,8 +563,6 @@ function buildQueryOptions(
   if (options?.cwdPrefix) {
     cwdPrefixFilter = normalizeCwd(options.cwdPrefix);
   } else if (!options?.all && !projectQuery && options?.agent !== 'rush' && options?.agent !== 'hermes') {
-    // Rush and Hermes sessions are cloud/gateway-bound and have no cwd — skip
-    // cwd filtering when the user explicitly asked for them.
     cwdFilter = normalizeCwd(options?.cwd || process.cwd());
   }
 
@@ -801,48 +588,15 @@ function buildQueryOptions(
   };
 }
 
-/**
- * Canonicalize a working directory path (follows symlinks when it is local).
- *
- * Most callers pass a cwd RECORDED in a transcript, which may name a directory
- * on another machine — a POSIX path read on a Windows host, say. `path.resolve()`
- * rebases such a path onto the current drive (`/Users/me` -> `D:\Users\me`),
- * inventing a location that never existed. So an absolute path is normalized but
- * never rebased; only a genuinely relative one resolves against the process cwd.
- *
- * `path.normalize()` still runs on every branch: it collapses `.`, `..`, and
- * duplicate separators, and folds separators on Windows. Both sides of the cwd
- * filter in `db.ts` (`cwd = ?` and `cwd LIKE ? || path.sep || '%'`) come through
- * here, so dropping that would leave a trailing slash or a `..` segment in one
- * side and match nothing.
- *
- * Realpath is attempted only for a path that is absolute in THIS platform's
- * terms. A POSIX-rooted path on Windows is drive-relative to `fs.realpathSync`,
- * which would resolve `/Users/me` against the current drive and reintroduce the
- * graft for any path that happens to exist locally.
- */
 export function _normalizeCwdForTest(cwd?: string): string {
   return normalizeCwd(cwd);
 }
 
 function normalizeCwd(cwd?: string): string {
   if (!cwd) return '';
-  // A POSIX-rooted path on Windows belongs to another machine. Normalize it with
-  // POSIX rules so its separators survive — path.win32.normalize would fold them
-  // to backslashes, mangling the very path we are trying to preserve — and never
-  // realpath it, since fs.realpathSync would resolve it against the current drive.
   if (process.platform === 'win32' && /^\//.test(cwd) && !/^[a-zA-Z]:/.test(cwd)) {
     return stripTrailingSep(path.posix.normalize(cwd));
   }
-  // The mirror case (RUSH-2358): a Windows-rooted path (`C:\...`, `C:/...`, or a
-  // UNC `\\server\share\...`) read on POSIX belongs to another machine too, but
-  // `path.isAbsolute()` here uses POSIX rules and doesn't recognize a drive
-  // letter — without this branch such a cwd falls into the `path.resolve()` arm
-  // below and gets silently prefixed with THIS process's own cwd, corrupting the
-  // path (and, via WORKTREE_RE, can misattribute the worktree slug to whatever
-  // worktree the reading process happens to be running in). Normalize with
-  // win32 rules so separators survive; never realpath it, for the same
-  // cross-drive reason as the mirror branch above.
   if (process.platform !== 'win32' && /^([a-zA-Z]:[\\/]|\\\\)/.test(cwd)) {
     return stripTrailingSep(path.win32.normalize(cwd));
   }
@@ -850,65 +604,25 @@ function normalizeCwd(cwd?: string): string {
   return safeRealpathSync(normalized) || normalized;
 }
 
-/** Drop a trailing separator so `cwd = ?` and the `cwd LIKE ? + sep` subdir
- *  wildcard agree; a root path (`/`, `C:\`) keeps its separator. */
 function stripTrailingSep(p: string): string {
   const stripped = p.replace(/[\\/]+$/, '');
   return stripped.length > 0 && !/^[a-zA-Z]:$/.test(stripped) ? stripped : p;
 }
 
-/** Canonical 8-4-4-4-12 hex UUID (covers both v4 and the v7 ids newer harnesses mint). */
 const UUID_36 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** kimi and rush mint `session_` + a UUID. */
 const SESSION_UUID_PREFIX = /^session_/;
-/** opencode mints `ses_` + a 26-char ULID — NOT a UUID, so it needs its own shape. */
 const SES_ULID = /^ses_[0-9a-z]{26}$/;
 
-/**
- * Whether a query is a session id in full, rather than an id prefix or a search
- * phrase.
- *
- * Callers use this to decide that an id lookup is the ONLY admissible
- * interpretation: a complete id is unique, so when it misses there is nothing
- * left to widen to. Without the check, `sessions <uuid>` fell through to the
- * FTS content search, which tokenizes the UUID and matches every transcript that
- * merely mentions it — surfacing unrelated sessions as if they were id matches.
- *
- * The accepted shapes are the ones the index actually holds, measured over a
- * 12,507-row index: a bare UUID (11,116 rows), `session_` + UUID (1,360 — kimi
- * and rush), and `ses_` + ULID (15 — opencode). Deliberately NOT covered, so a
- * miss keeps today's search behavior rather than gaining a wrong error: routine
- * run ids (ISO timestamps, matched via `routineRunId` below) and cloud execution
- * ids, whose charset is too permissive to distinguish from a search phrase.
- */
 export function isCompleteSessionId(query: string): boolean {
   const q = query.trim().toLowerCase();
   return UUID_36.test(q.replace(SESSION_UUID_PREFIX, '')) || SES_ULID.test(q);
 }
 
-/**
- * Whether a query should be treated as a session id rather than a search phrase
- * — the one canonical id-shaped test, shared by every session-id resolver.
- *
- * True for a complete id (`isCompleteSessionId`) AND for a bare hex short-id or
- * prefix (`d3470b57`), which the complete-id check rejects. Any id-shaped query
- * resolves by id ONLY (exact -> prefix -> `findSessionsById` index) and must
- * never fall back to fuzzy content search: a short id like `d3470b57` otherwise
- * surfaces every transcript that merely MENTIONS the string (a resume prompt
- * echoes the parent id into the body of many later sessions). The hex test
- * catches the bare short-id/prefix; `isCompleteSessionId` additionally catches
- * the prefixed whole ids (`session_…`, `ses_…`) that the hex test rejects.
- */
 export function looksLikeSessionId(query: string): boolean {
   const trimmed = query.trim();
   return /^[0-9a-f-]{6,}$/i.test(trimmed) || isCompleteSessionId(trimmed);
 }
 
-/**
- * Resolve a session by full or short ID. Accepts a pre-loaded session list
- * (fast path from discoverSessions) and falls back to a DB lookup for the
- * "I only know the id" case.
- */
 export function resolveSessionById(sessions: SessionMeta[], idQuery: string): SessionMeta[] {
   const query = idQuery.toLowerCase();
   const exact = sessions.filter(s =>
@@ -924,21 +638,7 @@ export function resolveSessionById(sessions: SessionMeta[], idQuery: string): Se
   );
 }
 
-// ---------------------------------------------------------------------------
-// Content-index search (FTS5-backed)
-// ---------------------------------------------------------------------------
 
-/**
- * Run an FTS5 search over the DB and union hits with the given session list.
- *
- * The listing pool is a minority of the index — cwd-scoped, default-capped at
- * 50, and skipping whole classes of indexed transcript — so intersecting FTS
- * hits with it dropped grep-visible sessions that the index already found
- * (PHNX-2767: `agents sessions "tmux pane"` returned 0 while the project
- * transcripts matched). Hits already in the pool keep the caller's SessionMeta;
- * hits the pool missed are hydrated from the index so a content query returns
- * the transcript FTS matched.
- */
 export function searchContentIndex(
   sessions: SessionMeta[],
   query: string,
@@ -962,19 +662,7 @@ export function searchContentIndex(
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Incremental scan orchestration
-// ---------------------------------------------------------------------------
 
-/**
- * For a list of files, stat each, compare to the DB ledger, and return only
- * the ones that need rescanning. One bulk DB query for the whole list.
- *
- * Actively running agents append to their JSONL every few seconds. Without a
- * small debounce, repeated `agents sessions` invocations stream-parse the same
- * growing transcript over and over. The cached row is good enough for a few
- * seconds; once writes settle or the debounce expires, the file is parsed once.
- */
 export function filterChangedFiles(
   filePaths: string[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
@@ -987,26 +675,12 @@ export function filterChangedFiles(
   return filterChangedEntries(entries);
 }
 
-/** A path already stat'd by the walk — mtime is the raw (unfloored) fs value. */
 interface PreStatEntry {
   filePath: string;
   fileMtimeMs: number;
   fileSize: number;
 }
 
-/**
- * Ledger-compare pre-stat'd entries (from the walk's own stat) without a second
- * stat. Same debounce and change-detection as filterChangedFiles; the raw
- * mtime is floored here so warm files match the ledger exactly as the stat path
- * does (Math.floor(stat.mtimeMs)).
- *
- * A file is also treated as "changed" — independent of (mtime, size) — when
- * its ledger row's `extractor_version` is behind {@link CONTENT_INDEX_VERSION}.
- * This is the lever that backfills a content-extractor improvement (e.g.
- * indexing assistant answers, not just user prompts) into every already-scanned
- * session on its next pass, without a `DELETE FROM scan_ledger` that would also
- * discard the Claude/Codex resumable parser_state.
- */
 export function filterChangedEntries(
   entries: PreStatEntry[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
@@ -1043,56 +717,17 @@ export function shouldDeferRecentAppend(
   return nowMs - prev.scannedAt < debounceMs;
 }
 
-// ---------------------------------------------------------------------------
-// Directory-ledger short-circuit (A-2)
-// ---------------------------------------------------------------------------
 
-/** One leaf directory of transcripts to change-detect, plus its live-root flag. */
 interface LeafDir {
-  /** Absolute path to the directory that directly holds transcript files. */
   dirPath: string;
-  /**
-   * True if this dir is under the agent's LIVE `~/.<agent>` root — the only tree
-   * an agent process appends to live. Every file in such a dir is treated as
-   * hot (always re-stat'd), so an in-place append is never missed there.
-   */
   isLiveRoot: boolean;
 }
 
-/** The changed files a leaf-dir walk surfaced, ready to parse + upsert. */
 interface LeafDirScan {
-  /** Files whose (mtime, size) changed vs the ledger — the parse set. */
   changed: Array<{ filePath: string; scan: ScanStamp }>;
-  /**
-   * Every transcript file seen across all leaf dirs (changed or not), in
-   * live-root-first order, each tagged with whether its dir is a live root.
-   * Lets a caller restore cross-root, session-id precedence (prefer the live
-   * copy of a session over a frozen backup copy) independent of which copy
-   * happened to be flagged "changed" this run.
-   */
   allFiles: Array<{ filePath: string; isLiveRoot: boolean }>;
 }
 
-/**
- * Walk a set of leaf transcript directories and return the files that changed,
- * skipping the per-file `stat` of directories whose (mtime, entry_count) matches
- * the dir_ledger.
- *
- * Per leaf dir:
- *   - `stat` the dir once and `readdir` it (one cheap syscall) to get the entry
- *     count and the file list.
- *   - If the dir matches the dir_ledger (floored mtime AND entry_count), no file
- *     was created / deleted / renamed since we last walked it. We then stat ONLY
- *     the hot files (live-root files, or files scanned within HOT_FILE_WINDOW_MS)
- *     and run just those through the ledger compare — so an in-place append to a
- *     still-live session is still caught, while immutable backup/version dirs
- *     collapse to a single dir stat and zero per-file stats.
- *   - Else (changed dir, or no ledger row) we stat every file (today's full
- *     walk) and record the fresh dir stamp so the next run can short-circuit.
- *
- * The kill-switch (`AGENTS_SESSIONS_NO_DIR_LEDGER=1`) forces the full-walk branch
- * for every dir and never consults or records the dir_ledger.
- */
 function collectChangedFilesInLeafDirs(
   leafDirs: LeafDir[],
   ext: string,
@@ -1101,7 +736,6 @@ function collectChangedFilesInLeafDirs(
   const dirStamps = disabled ? new Map<string, DirStamp>() : getDirLedgerForPaths(leafDirs.map(d => d.dirPath));
   const now = Date.now();
 
-  // Files whose per-file stat we still need to ledger-compare this run.
   const toCompare: PreStatEntry[] = [];
   const allFiles: Array<{ filePath: string; isLiveRoot: boolean }> = [];
   const dirScansToRecord: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }> = [];
@@ -1126,16 +760,6 @@ function collectChangedFilesInLeafDirs(
       !disabled && prevDir !== undefined && prevDir.dirMtimeMs === dirMtimeMs && prevDir.entryCount === entryCount;
 
     if (dirUnchanged) {
-      // Contents did not change (no create/delete/rename). Stat only the hot
-      // files; the rest are served from the DB with no stat. An immutable backup
-      // dir (not a live root, nothing recently scanned) does zero per-file stats.
-      //
-      // A live-root dir treats every file as hot — that is the tree an agent
-      // appends to live, and an append does NOT bump the parent-dir mtime, so
-      // without this a growing session would be silently skipped. A non-live
-      // file is hot only if it was scanned within HOT_FILE_WINDOW_MS (bulk ledger
-      // lookup), covering a session under a version/backup path that is somehow
-      // still being written.
       const stamps = isLiveRoot ? null : getScanStampsForPaths(files);
       for (const filePath of files) {
         let hot = isLiveRoot;
@@ -1149,9 +773,7 @@ function collectChangedFilesInLeafDirs(
         if (!stat) continue;
         toCompare.push({ filePath, fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
       }
-      // No dir stamp to record — nothing about the dir changed.
     } else {
-      // Changed dir (or cold ledger): full per-file stat, exactly as today.
       for (const filePath of files) {
         const stat = safeStatSync(filePath);
         if (!stat) continue;
@@ -1167,14 +789,7 @@ function collectChangedFilesInLeafDirs(
   return { changed, allFiles };
 }
 
-// ---------------------------------------------------------------------------
-// Multi-version directory scanning
-// ---------------------------------------------------------------------------
 
-/**
- * Collect all directories to scan for an agent's sessions. Deduplicates by
- * realpath to avoid double-counting symlinked version homes.
- */
 export function getAgentSessionDirs(agent: string, subdir: string): string[] {
   const resolved = new Set<string>();
   const dirs: string[] = [];
@@ -1188,9 +803,6 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
     dirs.push(dir);
   }
 
-  // Config-dir name relative to home — handles nested layouts (antigravity →
-  // .gemini/antigravity-cli) and ~/.config agents (amp, goose) as well as kimi
-  // (.kimi-code). Falls back to `.${agent}` for ids not in the registry.
   const configDirName = agent in AGENTS ? agentConfigDirName(agent as AgentId) : `.${agent}`;
 
   addDir(path.join(HOME, configDirName, subdir));
@@ -1202,45 +814,24 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
       for (const version of fs.readdirSync(versionsBase)) {
         addDir(path.join(versionsBase, version, 'home', configDirName, subdir));
       }
-    } catch { /* dir unreadable */ }
+    } catch {  }
   }
 
-  // Codex's managed home is not always where the version layout says. On macOS
-  // the versioned path overflows SUN_LEN (104 bytes) for codex's control socket,
-  // so the shim relocates the home to `<agentsUserDir>/.codex-homes/<key>/.codex`
-  // (lib/codex-home.ts) — `<key>` is the version for a version home, or
-  // `a-<accountId prefix>` (`codexShortKey`) for an account slot under
-  // `<historyDir>/accounts/codex/`. Walking `.codex-homes/` directly — rather
-  // than deriving keys from the installed-version list — is what catches BOTH:
-  // an account short key is not a vendor version and never appears in
-  // `versions/codex/`, so iterating only installed versions silently dropped
-  // every transcript a codex account slot wrote. addDir skips what does not
-  // exist, so this is inert on Linux and for homes that never needed relocating.
   if (agent === 'codex') {
     const codexHomesBase = path.join(getUserAgentsDir(), '.codex-homes');
     try {
       for (const key of fs.readdirSync(codexHomesBase)) {
         addDir(path.join(codexHomesBase, key, '.codex', subdir));
       }
-    } catch { /* dir absent or unreadable */ }
+    } catch {  }
   }
 
-  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir
-  // under `<historyDir>/accounts/<agent>/<accountId>/`, sharing the one managed
-  // binary install rather than owning a version home of its own
-  // (lib/accounts/slots.ts `slotDir`). A slot-launched transcript lives ONLY
-  // there — never under `versions/` — so without this root it is fully
-  // discoverable by the account machinery (the account is registered and
-  // runnable) yet invisible to `agents sessions`, reading as if the history had
-  // vanished. `addDir` follows the realpath, so a codex slot whose `.codex` is a
-  // symlink onto its `.codex-homes/<key>` short home (SUN_LEN relocation, above)
-  // is deduplicated against that same target rather than double-counted.
   const accountsBase = path.join(getHistoryDir(), 'accounts', agent);
   try {
     for (const accountId of fs.readdirSync(accountsBase)) {
       addDir(path.join(accountsBase, accountId, configDirName, subdir));
     }
-  } catch { /* dir absent or unreadable */ }
+  } catch {  }
 
   const backupsBase = path.join(getHistoryDir(), 'backups', agent);
   if (fs.existsSync(backupsBase)) {
@@ -1248,20 +839,12 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
       for (const ts of fs.readdirSync(backupsBase)) {
         addDir(path.join(backupsBase, ts, subdir));
       }
-    } catch { /* dir unreadable */ }
+    } catch {  }
   }
 
   return dirs;
 }
 
-/**
- * The (agent, subdir) pairs `discoverSessions` walks for JSONL transcripts —
- * the single source of truth for which directories hold live session files.
- * `getSessionRoots` expands each pair to its concrete directories so a consumer
- * (AGI EXT's fs.watch, see issue #741) can configure its watcher
- * from the CLI instead of hardcoding `~/.claude|.codex|.gemini`. Adding a new
- * on-disk agent here makes every consumer watch it automatically.
- */
 const SESSION_ROOT_SPECS: ReadonlyArray<{ agent: SessionAgentId; subdir: string }> = [
   { agent: 'claude', subdir: 'projects' },
   { agent: 'codex', subdir: 'sessions' },
@@ -1276,19 +859,11 @@ function sessionRootSubdir(agent: SessionAgentId): string | null {
   return SESSION_ROOT_SPECS.find((spec) => spec.agent === agent)?.subdir ?? null;
 }
 
-/** A session-agent's on-disk watch roots (every version home + backup mirror). */
 interface SessionRoots {
   agent: SessionAgentId;
-  /** Absolute directories that hold this agent's transcripts, existing right now. */
   dirs: string[];
 }
 
-/**
- * The directories `agents sessions` scans for each on-disk session agent,
- * resolved to what exists on this machine. Emitted by `agents sessions --roots
- * --json` so external watchers stay in lockstep with the CLI's discovery paths.
- * Agents with no directories present are omitted.
- */
 export function getSessionRoots(): SessionRoots[] {
   const out: SessionRoots[] = [];
   for (const { agent, subdir } of SESSION_ROOT_SPECS) {
@@ -1368,9 +943,6 @@ async function readRoutineArchiveMeta(
 
   if (agent === 'claude') {
     const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
-    // Routine archives are finalized, immutable transcripts — no live append, so
-    // no continuation to resume. A FULL parse (undefined prior) is correct here;
-    // the returned continuation is unused by this archive path.
     const stat = safeStatSync(filePath);
     if (!stat) return null;
     const scanStamp: ScanStamp = { fileMtimeMs: Math.floor(stat.mtimeMs), fileSize: stat.size };
@@ -1384,8 +956,6 @@ async function readRoutineArchiveMeta(
   }
 
   if (agent === 'cursor') {
-    // PR #1723 archives Cursor routine transcripts; preserve version resolution
-    // when this reader consumes those archives.
     const currentVersion = await getCurrentAgentVersion('cursor');
     const result = readCursorMeta(filePath, currentVersion);
     return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
@@ -1441,37 +1011,15 @@ async function scanRoutineArchivesIncremental(
   recordScans(touched);
 }
 
-// ---------------------------------------------------------------------------
-// Claude account info
-// ---------------------------------------------------------------------------
 
 let cachedClaudeAccountIndex: ClaudeAccountIndex | undefined;
 
-/**
- * The account-attribution index, built at most once per scan pass.
- *
- * Rebuilt when `refresh` is set — `scanClaudeIncremental` does that at the start of
- * each pass so a long-lived process (the daemon) picks up an `agents use` switch or a
- * fresh login instead of attributing later sessions to a stale set of homes. Per-file
- * resolution then reads the cached index, because rebuilding it per transcript would
- * re-read every home's `.claude.json` thousands of times.
- */
 function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
   if (refresh || !cachedClaudeAccountIndex) cachedClaudeAccountIndex = buildClaudeAccountIndex();
   return cachedClaudeAccountIndex;
 }
 
-// ---------------------------------------------------------------------------
-// Claude
-// ---------------------------------------------------------------------------
 
-/**
- * Build a map of Claude sessionId -> user-given label from ~/.claude/sessions/*.json.
- * Each JSON has shape { pid, sessionId, cwd, startedAt, name?, ... }. The
- * `name` field only exists if the user ran /rename in that session.
- * For sessionId collisions (re-resume of the same session), prefer the most
- * recent startedAt.
- */
 export function buildClaudeLabelMap(): Map<string, string | null> {
   const map = new Map<string, { label: string | null; startedAt: number }>();
   const dir = path.join(HOME, '.claude', 'sessions');
@@ -1494,7 +1042,7 @@ export function buildClaudeLabelMap(): Map<string, string | null> {
       if (!existing || startedAt > existing.startedAt) {
         map.set(data.sessionId, { label: name, startedAt });
       }
-    } catch { /* unreadable session metadata file */ }
+    } catch {  }
   }
 
   const out = new Map<string, string | null>();
@@ -1502,17 +1050,10 @@ export function buildClaudeLabelMap(): Map<string, string | null> {
   return out;
 }
 
-/** Incrementally re-scan changed Claude session files and upsert into the DB. */
 async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  // Rebuild once per pass; readClaudeMeta resolves each transcript against it.
   claudeAccountIndex(true);
   const labelMap = buildClaudeLabelMap();
 
-  // Enumerate every leaf project dir across all Claude roots. The FIRST root
-  // returned by getAgentSessionDirs is the agent's live `~/.claude/projects` —
-  // the only tree Claude appends to in place, so its project dirs are live roots
-  // (every file hot). Version-home + backup roots are immutable: their dirs
-  // short-circuit to a single dir stat when unchanged.
   const roots = getAgentSessionDirs('claude', 'projects');
   const leafDirs: LeafDir[] = [];
   const seenLeaf = new Set<string>();
@@ -1534,37 +1075,18 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   });
 
   const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
-  // Restore the pre-A-2 cross-root precedence: a session id present in multiple
-  // roots is ALWAYS served from its live path, never a frozen backup/version
-  // copy. Pre-A-2, dedup happened at enumeration time via a live-first `seen`
-  // set, so a non-live copy was never even stat'd when a live copy existed. This
-  // PR must not regress that to "whichever copy changed this run wins" — a cold
-  // (unchanged) live copy paired with a freshly-written backup snapshot would
-  // otherwise flip the row's file_path to the backup path.
-  //
-  // allFiles is every transcript file across all roots in live-first order, so
-  // the FIRST occurrence of each session id is its live (or highest-precedence)
-  // path — the durable winner, independent of which copy was flagged changed.
   const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
   const winnerBySession = new Map<string, string>();
+  // Live-root precedence is independent of whichever duplicate changed this scan.
   for (const { filePath } of allFiles) {
     const id = sessionIdOf(filePath);
     if (!winnerBySession.has(id)) winnerBySession.set(id, filePath);
   }
-  // Keep a changed entry only if it is its session's winner. A changed non-live
-  // copy is dropped whenever a live copy exists anywhere; the winning path is
-  // parsed only when it itself changed (a cold winner needs no re-parse — its DB
-  // row already points at the live path).
   const changed = changedAll.filter(e => winnerBySession.get(sessionIdOf(e.filePath)) === e.filePath);
 
   if (changed.length > 0) {
     onProgress?.({ agent: 'claude', parsed: 0, total: changed.length });
 
-    // Bulk-fetch each changed file's prior resumable continuation. A file with a
-    // usable prior state + growth goes incremental (re-parse only the appended
-    // bytes); everything else does a FULL from-offset-0 parse. The decision + the
-    // parse both live in scanClaudeSessionResumable so full and incremental share
-    // one reducer and produce identical rows.
     const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
 
     const entries: ScanEntry[] = [];
@@ -1601,18 +1123,9 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
     recordScans(touched);
   }
 
-  // Pick up /rename changes on sessions whose JSONL didn't change.
-  // Only bother for sessions we actually have a Claude row for.
   if (labelMap.size > 0) syncLabels(labelMap);
 }
 
-/**
- * Stream-parse a single Claude JSONL file to extract session metadata, resuming
- * from the persisted continuation when the file merely grew (see
- * {@link scanClaudeSessionResumable}). Returns the row's meta + FTS content plus
- * the serialized continuation (parser_state + content_text) to persist for the
- * next scan.
- */
 async function readClaudeMeta(
   filePath: string,
   sessionId: string,
@@ -1628,11 +1141,6 @@ async function readClaudeMeta(
   toolCalls?: IndexedToolCall[];
   toolIndexMode: 'replace' | 'append';
 } | null> {
-  // A prior continuation extracted at an older CONTENT_INDEX_VERSION is missing
-  // whatever the current extractor adds (e.g. assistant-answer text) — resuming
-  // from it would fold only the NEWLY appended lines into that gap, never
-  // backfilling the file's earlier assistant text. Treat it as absent so the
-  // file gets one full from-offset-0 reparse instead.
   const prior = priorRow?.extractorVersion === CONTENT_INDEX_VERSION ? parsePriorClaudeState(priorRow) : null;
   const { scan, newState, toolCalls, mode } = await scanClaudeSessionResumable(
     filePath,
@@ -1644,9 +1152,6 @@ async function readClaudeMeta(
   if (mode === 'incremental') claudeIncrementalScanCount++;
   else claudeFullScanCount++;
   const isTeamOrigin = scan.entrypoint === 'sdk-cli';
-  // Which account produced this transcript. Resolved from the path plus the version
-  // recorded inside the file, so rows under the mutable ~/.claude symlink are
-  // attributed to the version that actually wrote them. See claude-accounts.ts.
   const acct = resolveClaudeAccount(claudeAccountIndex(), filePath, scan.version, readSessionActorRecord(sessionId)?.accountId);
 
   let meta: SessionMeta;
@@ -1669,8 +1174,6 @@ async function readClaudeMeta(
       accountOrg: acct.orgName ?? undefined,
       topic: scan.topic,
       firstUserMessage: scan.firstUserMessage,
-      // The live sessions metadata file contains only user `/rename` values;
-      // prefer it when present, then fall back to the title parsed from JSONL.
       label: label || scan.label,
       messageCount: scan.messageCount,
       toolCallCount: scan.toolCallCount,
@@ -1710,8 +1213,6 @@ async function readClaudeMeta(
       accountKey: acct.key,
       accountOrg: acct.orgName ?? undefined,
       model: scan.model,
-      // Keep parsed ai-title/custom-title values even when the transcript has
-      // no timestamp and therefore takes this stat-backed fallback path.
       label: label || scan.label,
       messageCount: scan.messageCount,
       toolCallCount: scan.toolCallCount,
@@ -1746,9 +1247,6 @@ async function readClaudeMeta(
     meta,
     content: scan.contentText || '',
     assistantContent: scan.assistantText || '',
-    // Persist the continuation so the next scan of this file can resume from the
-    // offset instead of a full reparse. content_text is the same accumulated user
-    // doc, cached so the resume can hydrate userTexts without re-reading the file.
     parserState: JSON.stringify(newState),
     contentText: newState.contentText,
     toolCalls,
@@ -1756,20 +1254,11 @@ async function readClaudeMeta(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Codex account info
-// ---------------------------------------------------------------------------
 
 let cachedCodexAccount: string | undefined;
 
-/** Number of times the auth.json JWT was actually base64-decoded. Test seam for the lazy-decode contract. */
 let codexAccountResolveCount = 0;
 
-/**
- * Base64url-decode a JWT and return its `email` claim, if present. Split out so
- * the decode is a single, testable step — and so it only runs when someone
- * actually reads the Codex account (see the lazy resolution below).
- */
 export function decodeJwtEmail(idToken: string): string | undefined {
   const parts = idToken.split('.');
   if (parts.length < 2) return undefined;
@@ -1777,18 +1266,11 @@ export function decodeJwtEmail(idToken: string): string | undefined {
     const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
     return typeof payload.email === 'string' ? payload.email : undefined;
   } catch {
-    return undefined; // malformed JWT
+    return undefined;
   }
 }
 
-/**
- * Extract the Codex account email from the JWT id_token in auth.json.
- *
- * Memoized and resolved LAZILY: the credential-harvesting-shaped JWT decode
- * (base64-decoding ~/.codex/auth.json) only runs when the account is actually
- * needed to build a session's metadata — never eagerly during the bulk scan.
- * A scan with no changed Codex files never touches the auth file.
- */
+// Resolve credential-shaped auth data lazily so a no-op bulk scan never touches it.
 function getCodexAccount(): string | undefined {
   if (cachedCodexAccount !== undefined) return cachedCodexAccount || undefined;
   codexAccountResolveCount++;
@@ -1802,7 +1284,7 @@ function getCodexAccount(): string | undefined {
       for (const version of fs.readdirSync(versionsBase)) {
         candidates.push(path.join(versionsBase, version, 'home', '.codex', 'auth.json'));
       }
-    } catch { /* versions dir unreadable */ }
+    } catch {  }
   }
 
   for (const candidate of candidates) {
@@ -1817,39 +1299,28 @@ function getCodexAccount(): string | undefined {
           return email;
         }
       }
-    } catch { /* auth file malformed */ }
+    } catch {  }
   }
 
   cachedCodexAccount = '';
   return undefined;
 }
 
-/** Test seam: how many times getCodexAccount has actually resolved (decoded) since the last reset. */
 export function __codexAccountResolveCountForTest(): number {
   return codexAccountResolveCount;
 }
 
-/** Test seam: clear the memoized account + resolve counter so laziness can be observed from a clean slate. */
 export function __resetCodexAccountCacheForTest(): void {
   cachedCodexAccount = undefined;
   codexAccountResolveCount = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Codex
-// ---------------------------------------------------------------------------
 
-/** Incrementally re-scan changed Codex session files and upsert into the DB. */
 async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  // Lazy: getCodexAccount (the auth.json JWT decode) is only resolved by
-  // readCodexMeta when a changed session actually needs it — never eagerly here,
-  // so a no-op scan (changed.length === 0) never touches the credential file.
   const currentVersion = await getCurrentAgentVersion('codex');
 
   const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
-    // High limit: the walk stats each file once here; parsing is gated by the
-    // ledger match below, which reuses that stat instead of re-stat'ing.
     for (const f of walkForFilesWithStat(sessionsDir, '.jsonl', 100_000)) {
       prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
     }
@@ -1857,11 +1328,6 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   const changed = filterChangedEntries(prestat);
 
-  // Codex keeps human-readable titles (`thread_name`) in `session_index.jsonl`,
-  // which updates independently of the rollout files. Stat each index against the
-  // ledger *without reading it*; only read + re-apply titles when the index (or a
-  // rollout) actually changed. On a fully unchanged scan this collapses to a
-  // couple of stat() calls instead of a full read + a `syncTopics` DB pass.
   const titleIndex = diffCodexTitleIndexes();
 
   if (changed.length === 0 && !titleIndex.changed) return;
@@ -1869,7 +1335,6 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
   const titles = readCodexThreadNames();
 
   if (changed.length === 0) {
-    // No rollouts changed, but the title index did — apply the new titles.
     syncTopics(titles);
     recordScans(titleIndex.stamps);
     return;
@@ -1877,11 +1342,6 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   onProgress?.({ agent: 'codex', parsed: 0, total: changed.length });
 
-  // Bulk-fetch each changed rollout's prior resumable continuation. A file with
-  // a usable prior state + growth goes incremental (re-parse only the appended
-  // bytes); everything else does a FULL from-offset-0 parse. The decision + the
-  // parse both live in scanCodexSessionResumable so full and incremental share
-  // one reducer and produce identical rows.
   const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
 
   const entries: ScanEntry[] = [];
@@ -1894,7 +1354,6 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
       const result = await readCodexMeta(filePath, getCodexAccount, currentVersion, scan, priorRow);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        // Prefer the Codex-generated title over the first-prompt fallback.
         const title = titles.get(result.meta.id);
         if (title) result.meta.topic = title;
         entries.push({
@@ -1919,14 +1378,10 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   upsertSessionsBatch(entries);
   recordScans(touched);
-  // Only when the title index changed can an *unchanged* rollout have gained a
-  // title since the last scan; the inline titles applied above already cover
-  // every changed session, so skip the extra sync when the index is untouched.
   if (titleIndex.changed) syncTopics(titles);
   recordScans(titleIndex.stamps);
 }
 
-/** Parse the lines of a Codex `session_index.jsonl` into a session id -> title map. */
 export function parseCodexThreadNameIndex(raw: string): Map<string, string> {
   const titles = new Map<string, string>();
   for (const line of raw.split('\n')) {
@@ -1937,21 +1392,11 @@ export function parseCodexThreadNameIndex(raw: string): Map<string, string> {
       const name = typeof entry.thread_name === 'string' ? entry.thread_name.trim() : '';
       if (id && name) titles.set(id, name);
     } catch {
-      // skip malformed line
     }
   }
   return titles;
 }
 
-/**
- * Stat every Codex `session_index.jsonl` and diff it against the scan ledger
- * *without reading it*. Returns the fresh stamps (persisted only after a
- * successful title sync) and whether any index changed since the last scan — the
- * signal that lets a no-op scan skip the file read + `syncTopics` entirely.
- *
- * The index path is a sibling of `sessions/` (never inside it), so it is never
- * walked as a rollout and its ledger row can't collide with a transcript's.
- */
 function diffCodexTitleIndexes(): {
   stamps: Array<{ filePath: string; scan: ScanStamp }>;
   changed: boolean;
@@ -1961,7 +1406,7 @@ function diffCodexTitleIndexes(): {
   for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
     const indexPath = path.join(path.dirname(sessionsDir), 'session_index.jsonl');
     const stat = safeStatSync(indexPath);
-    if (!stat) continue; // no index in this home
+    if (!stat) continue;
     const scan: ScanStamp = { fileMtimeMs: Math.floor(stat.mtimeMs), fileSize: stat.size };
     const prev = getScanStampByPath(indexPath);
     if (!prev || prev.fileMtimeMs !== scan.fileMtimeMs || prev.fileSize !== scan.fileSize) {
@@ -1972,10 +1417,6 @@ function diffCodexTitleIndexes(): {
   return { stamps, changed };
 }
 
-/**
- * Read Codex session titles across every Codex home (live + versioned). The
- * `session_index.jsonl` file sits beside each `sessions/` rollout tree.
- */
 function readCodexThreadNames(): Map<string, string> {
   const titles = new Map<string, string>();
   for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
@@ -1984,20 +1425,13 @@ function readCodexThreadNames(): Map<string, string> {
     try {
       raw = fs.readFileSync(indexPath, 'utf-8');
     } catch {
-      continue; // no index in this home
+      continue;
     }
     for (const [id, name] of parseCodexThreadNameIndex(raw)) titles.set(id, name);
   }
   return titles;
 }
 
-/**
- * Stream-parse a single Codex JSONL file to extract session metadata.
- *
- * `resolveAccount` is a lazy thunk (not a resolved string): the JWT decode it
- * performs is deferred until we know this file is a real session worth building
- * metadata for, and only then — never during the file walk / stat phase.
- */
 export async function readCodexMeta(
   filePath: string,
   resolveAccount?: () => string | undefined,
@@ -2013,20 +1447,12 @@ export async function readCodexMeta(
   toolCalls?: IndexedToolCall[];
   toolIndexMode: 'replace' | 'append';
 } | null> {
-  // Resume from the persisted continuation when the file merely grew; otherwise
-  // full-parse from byte 0. Both branches share one reducer, so an append yields
-  // a row identical to a from-scratch reparse. When no stamp is supplied (a
-  // caller outside the live scan path), fall back to a plain full parse with no
-  // continuation to persist.
   let scan: CodexSessionScan;
   let newState: CodexParserState | undefined;
   let newOffset = 0;
   let toolCalls: IndexedToolCall[] | undefined;
   let toolIndexMode: 'replace' | 'append' = 'replace';
   if (scanStamp) {
-    // See readClaudeMeta: a prior continuation from an older content extractor
-    // is missing what the current extractor adds, so it must not be resumed
-    // from — treat it as absent and force one full reparse.
     const prior = priorRow?.extractorVersion === CONTENT_INDEX_VERSION ? parsePriorCodexState(priorRow) : null;
     const result = await scanCodexSessionResumable(
       filePath,
@@ -2054,8 +1480,6 @@ export async function readCodexMeta(
     id: sessionId,
     shortId: deriveShortId(sessionId),
     agent: 'codex',
-    // Codex `session_meta` only carries the start time; use file mtime when
-    // it's newer so long-running sessions register as recently active.
     timestamp: pickLatestCodexTimestamp(scan.timestamp, filePath),
     lastActivity: scan.lastActivity,
     project: cwd ? path.basename(cwd) : undefined,
@@ -2089,9 +1513,6 @@ export async function readCodexMeta(
     meta,
     content: scan.contentText || '',
     assistantContent: scan.assistantText || '',
-    // Persist the continuation so the next scan of this rollout resumes from the
-    // offset instead of a full reparse; content_text caches the accumulated user
-    // doc for the resume's hydrate. Absent when no stamp was supplied.
     parserState: newState ? JSON.stringify(newState) : undefined,
     contentText: newState?.contentText,
     toolCalls,
@@ -2099,19 +1520,12 @@ export async function readCodexMeta(
   };
 }
 
-/**
- * Codex writes `session_meta` (with the start timestamp) on the first line of a
- * rollout and never updates it. For long-running sessions that's stale by
- * hours — `--since 2h` would drop a session still being actively written.
- * Compare against the file's mtime and use whichever is newer.
- */
 function pickLatestCodexTimestamp(metaTimestamp: string | undefined, filePath: string): string {
   const fallback = new Date().toISOString();
   let mtimeIso: string | null = null;
   try {
     mtimeIso = fs.statSync(filePath).mtime.toISOString();
   } catch {
-    /* file vanished between scan and stat */
   }
 
   const candidates = [metaTimestamp, mtimeIso].filter((v): v is string => !!v);
@@ -2120,18 +1534,7 @@ function pickLatestCodexTimestamp(metaTimestamp: string | undefined, filePath: s
   return candidates.reduce((best, cur) => (cur > best ? cur : best));
 }
 
-// ---------------------------------------------------------------------------
-// Antigravity
-//
-// Antigravity stores one SQLite DB per conversation at
-// ~/.gemini/antigravity-cli/conversations/<trajectory-uuid>.db. The filename
-// (minus .db) is the canonical session id. Each DB is stat'd against the ledger;
-// only changed DBs are re-parsed (via parseAntigravity, which shells out to
-// sqlite3). Tool count doubles as the message count; the toolSummary of the
-// first tool call becomes the topic, and any run_command's Cwd fills in cwd.
-// ---------------------------------------------------------------------------
 
-/** Incrementally re-scan changed Antigravity conversation DBs and upsert into the DB. */
 async function scanAntigravityIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('antigravity');
 
@@ -2181,7 +1584,6 @@ async function scanAntigravityIncremental(onProgress?: (p: ScanProgress) => void
   recordScans(touched);
 }
 
-/** Parse a single Antigravity conversation DB to extract session metadata. */
 function readAntigravityMeta(
   filePath: string,
   currentVersion?: string,
@@ -2191,7 +1593,6 @@ function readAntigravityMeta(
 
   const events = parseAntigravity(filePath);
 
-  // cwd: first run_command carries the working directory in its Cwd arg.
   let cwd: string | undefined;
   const contentParts: string[] = [];
   for (const e of events) {
@@ -2200,7 +1601,6 @@ function readAntigravityMeta(
   }
   const normalizedCwd = cwd ? normalizeCwd(cwd) : undefined;
 
-  // Topic: the first tool's human summary is a decent one-line label.
   const topic = events.find(e => e.content)?.content;
 
   const stat = safeStatSync(filePath);
@@ -2219,80 +1619,22 @@ function readAntigravityMeta(
   return { meta, content: contentParts.join('\n'), events };
 }
 
-// ---------------------------------------------------------------------------
-// OpenCode
-// ---------------------------------------------------------------------------
 
 const OPENCODE_DB = path.join(HOME, '.local', 'share', 'opencode', 'opencode.db');
 
 let cachedOpenCodeAccount: string | undefined;
 
-/**
- * The active OpenCode account: the provider ids with a valid credential in
- * `auth.json`, joined (e.g. `"anthropic+muse-spark"`) — see
- * `resolveOpenCodeAccountId` in `../agents.js`, the single source of truth
- * `agents view`/`agents doctor` also read.
- *
- * OpenCode's `opencode.db` also carries `account`/`account_state`/
- * `control_account` tables that look like the obvious source, but on a real,
- * actively-used install (yosemite-s1, 1.16.0, 35 applied migrations) all
- * three are permanently empty — no migration populates them and no session
- * has ever written a row. Querying them (the pre-fix behavior here) always
- * returned undefined, credential or not; `auth.json` is what OpenCode
- * actually reads at runtime.
- */
 function getOpenCodeAccount(): string | undefined {
   if (cachedOpenCodeAccount !== undefined) return cachedOpenCodeAccount || undefined;
   cachedOpenCodeAccount = resolveOpenCodeAccountId(HOME) ?? '';
   return cachedOpenCodeAccount || undefined;
 }
 
-/**
- * The per-session ledger stamp for an OpenCode row: the newest write time across
- * the session's own row, its messages, and its parts, paired with the total byte
- * length of that session's message + part payloads.
- *
- * OpenCode keeps every session in ONE shared SQLite file, so that file's
- * mtime/size changes whenever *any* session is written. Stamping each session
- * with the whole-DB stat therefore invalidated every indexed session on every
- * scan: up to `LIMIT 1000` sessions were re-emitted into `upsertSessionsBatch`,
- * and its enrichment step re-opened `opencode.db` once per re-emitted entry via
- * `parseSession` (RUSH-2210).
- *
- * `s.time_updated` alone is NOT that session's change signal, which is the trap
- * this shape exists to avoid. On a real database, parts land long after the
- * session row was last touched — e.g. `ses_3955202dfffe…` carried
- * `time_updated = 1771316403087` with its newest part at `1771331512162`, over
- * four hours later. So the stamp maxes `time_updated` with the newest message
- * and part times, and pairs it with a byte total that also moves when an
- * existing part's `data` is rewritten in place (a streaming turn) without any
- * new row or timestamp.
- *
- * The byte total is a REAL size, not a repurposed counter, because
- * `sessions.file_size` is read back as bytes elsewhere: `ensureToolIndex` uses
- * it as the tool-backfill byte budget and `toolCallsForBackfill` as the 16 MiB
- * in-memory parser cap (`tool-index.ts`). A message/part byte total is the
- * honest cost of parsing that session — strictly better than the whole-DB size
- * this column used to hold for every OpenCode row.
- *
- * The size is `LENGTH(CAST(data AS BLOB))`, not `LENGTH(data)`: SQLite's
- * `LENGTH()` on a TEXT column counts CHARACTERS, so a CJK/emoji-heavy transcript
- * would under-report its real size by up to 4x — and this number is a byte
- * budget downstream.
- *
- * A degenerate row — nothing but zeros/NaN for every time AND no payload at all
- * — falls back to the whole-DB stat, keeping the pre-RUSH-2210 always-rescan
- * behavior for exactly those rows rather than pinning them to a stamp that never
- * changes.
- */
 function openCodeSessionStamp(
   times: { timeUpdated: number; timeCreated: number; lastMessageAt: number; lastPartAt: number },
   bytes: { messageBytes: number; partBytes: number },
   dbScan: ScanStamp,
 ): ScanStamp {
-  // A positive time, not merely a finite one: the SQL COALESCEs the aggregates
-  // to 0, so `Number.isFinite` alone would accept a row that told us nothing and
-  // this branch could never fire.
   const known = [times.timeUpdated, times.lastMessageAt, times.lastPartAt, times.timeCreated]
     .filter(t => Number.isFinite(t) && t > 0);
   const size = (Number.isFinite(bytes.messageBytes) ? bytes.messageBytes : 0)
@@ -2301,24 +1643,18 @@ function openCodeSessionStamp(
   return { fileMtimeMs: known.length === 0 ? 0 : Math.floor(Math.max(...known)), fileSize: size };
 }
 
-/** Scan OpenCode sessions from its SQLite database when the DB file has changed. */
 async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   if (!fs.existsSync(OPENCODE_DB)) return;
 
   const stat = safeStatSync(OPENCODE_DB);
   if (!stat) return;
 
-  // OpenCode is one big DB. Its mtime/size is the cheap "did ANYTHING change"
-  // short-circuit for the whole harness — not the per-session stamp, which each
-  // row carries itself (see openCodeSessionStamp, RUSH-2210).
   const currentScan: ScanStamp = {
     fileMtimeMs: Math.floor(stat.mtimeMs),
     fileSize: stat.size,
   };
   const prev = getScanStampByPath(OPENCODE_DB);
   const extractorUpgrade = prev != null && prev.extractorVersion !== CONTENT_INDEX_VERSION;
-  // OpenCode has a shared database rather than one transcript file per session,
-  // so this container-level gate must honor extractor-version invalidation too.
   if (
     prev &&
     prev.fileMtimeMs === currentScan.fileMtimeMs &&
@@ -2330,26 +1666,15 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
 
   const currentVersion = await getCurrentAgentVersion('opencode');
 
-  // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
-  // works on every OS — the CLI is absent on Windows.
   let db: Database.Database | undefined;
   try {
     db = new Database(OPENCODE_DB);
-    // OpenCode's `session` schema varies by version: `cost` and `model` are newer
-    // columns. Probe once and select NULL where absent, so an older opencode.db
-    // still scans instead of throwing "no such column" and dropping every session.
     const sessionCols = new Set(
       (db.prepare('PRAGMA table_info(session);').all() as Array<{ name?: unknown }>)
         .map(c => (typeof c.name === 'string' ? c.name : '')),
     );
     const costExpr = sessionCols.has('cost') ? 's.cost' : 'NULL';
     const modelExpr = sessionCols.has('model') ? 's.model' : 'NULL';
-    // Every `json_extract` / `json_type` below is guarded by `json_valid`.
-    // SQLite raises "malformed JSON" on a non-JSON value, and that aborts the
-    // WHOLE query — so a single unparseable `part`/`message` row anywhere in the
-    // shared DB would drop EVERY OpenCode session from the index, silently in a
-    // non-TTY run (the handler below only prints when stderr is a TTY). A
-    // poisoned row must cost that row, not the harness.
     const query = `
       SELECT
         s.id AS id,
@@ -2432,10 +1757,6 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
       has_token_data: unknown;
     }>;
 
-    // Two passes. First derive each row's identity + per-session stamp, then
-    // bulk-load the prior stamps in ONE query and keep only the rows that
-    // actually changed. Skipped rows never reach upsertSessionsBatch, so they
-    // never pay its per-entry `parseSession` re-open of this same DB.
     const asInt = (v: unknown): number =>
       typeof v === 'number' ? v : parseInt(String(v), 10);
     const candidates = rows.flatMap(row => {
@@ -2467,8 +1788,6 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
         || prevStamp.extractorVersion !== CONTENT_INDEX_VERSION;
     });
 
-    // Role lives on the message row and the genuine user text lives on its
-    // ordered text parts. Poisoned JSON is ignored per row, never per database.
     const firstUserStmt = db.prepare(`
       SELECT json_extract(p.data, '$.text') AS text
       FROM part p
@@ -2504,33 +1823,22 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
       const hasTokenData = asInt(row.has_token_data) === 1;
       const toolCallCount = asInt(row.tool_call_count);
       const timestamp = isNaN(timeCreated) ? new Date().toISOString() : new Date(timeCreated).toISOString();
-      // OpenCode is one shared DB, not one file per session — its row carries a
-      // per-session updated time. Set lastActivity explicitly (falling back to
-      // creation, never the whole-DB mtime the ScanStamp would otherwise supply).
       const lastActivity = Number.isNaN(timeUpdated) ? timestamp : new Date(timeUpdated).toISOString();
       const topic = title || undefined;
 
-      // Duration is the session-row span; a missing/degenerate pair yields no value
-      // rather than a negative or NaN.
       const durationMs =
         Number.isFinite(timeCreated) && Number.isFinite(timeUpdated) && timeUpdated > timeCreated
           ? timeUpdated - timeCreated
           : undefined;
-      // OpenCode stores the model as JSON (`{"id":"…","providerID":"…"}`); the
-      // index tracks the model id.
       let model: string | undefined;
       if (typeof row.model === 'string' && row.model.trim()) {
         try {
           const parsed = JSON.parse(row.model) as { id?: unknown };
           if (typeof parsed?.id === 'string' && parsed.id.trim()) model = parsed.id;
-        } catch { /* non-JSON model string — leave unset */ }
+        } catch {  }
       }
-      // `cost` is a REAL rollup OpenCode maintains on the session row (0 for a
-      // zero-priced provider, which is a real value, not "unknown").
       const costUsd = typeof row.cost === 'number' ? row.cost : undefined;
 
-      // Worktree slug is a pure function of cwd (`.agents/worktrees/<slug>/`),
-      // so it derives for OpenCode exactly as it does for every other harness.
       const cwd = directory ? normalizeCwd(directory) : undefined;
       const worktreeSlug = detectWorktree(cwd)?.slug;
 
@@ -2564,37 +1872,21 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     }
 
     upsertSessionsBatch(entries);
-    // Report what this scan indexed. OpenCode is one SQLite DB rather than N
-    // transcript files, so the whole batch lands as a single progress emit —
-    // enough for the daemon's warm tick to count it (RUSH-2691); without it a
-    // tick whose only changed sessions were OpenCode's reported 0 and logged
-    // nothing, the same silent-success class this tick exists to remove.
     onProgress?.({ agent: 'opencode', parsed: entries.length, total: entries.length });
-    // Stamp the OpenCode DB itself so we can short-circuit on the next run.
     recordScans([{ filePath: OPENCODE_DB, scan: currentScan }]);
   } catch (err: any) {
     if (process.stderr.isTTY) {
       console.error(`Warning: Could not query OpenCode sessions: ${err.message}`);
     }
   } finally {
-    try { db?.close(); } catch { /* best-effort close */ }
+    try { db?.close(); } catch {  }
   }
 }
 
-// ---------------------------------------------------------------------------
-// OpenClaw
-// ---------------------------------------------------------------------------
 
-/** Scan active OpenClaw channels and cron jobs via the openclaw CLI. */
 async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  // Check if openclaw is installed — silently skip if not. `which` is POSIX-only
-  // (Windows resolves PATH with `where`), so a bare `which` throws ENOENT on every
-  // Windows run and silently disabled the entire OpenClaw scan there — its sessions
-  // never reached the index (RUSH-2286). hasCommand() probes cross-platform.
   if (!hasCommand('openclaw')) return;
 
-  // TTL cache: skip subprocess calls if we scanned recently. Stored in the
-  // meta table so we skip even when no channels/cron exist to produce rows.
   const db = getDB();
   const row = db.prepare(`SELECT value FROM meta WHERE key = 'openclaw_last_scan_ms'`).get() as { value: string } | undefined;
   const lastScanMs = row ? parseInt(row.value, 10) : 0;
@@ -2608,9 +1900,6 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
   const entries: ScanEntry[] = [];
 
   try {
-    // On Windows `openclaw` resolves to a .cmd/.ps1 shim that execFile can't launch
-    // directly; execFileShellSpec composes a shell-safe invocation there and is a
-    // no-op passthrough on POSIX (RUSH-2286).
     const channelsSpec = execFileShellSpec('openclaw', ['channels', 'status']);
     const { stdout: output } = await execFileAsync(channelsSpec.command, channelsSpec.args, {
       encoding: 'utf-8',
@@ -2639,7 +1928,6 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
       });
     }
   } catch {
-    /* channels command failed */
   }
 
   try {
@@ -2679,30 +1967,12 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
       });
     }
   } catch {
-    /* cron command failed */
   }
 
   upsertSessionsBatch(entries);
-  // Deliberately NO onProgress emit, unlike every other scanner (RUSH-2691).
-  // This one cannot report a delta: its gate is a 60s TTL (not a store stamp),
-  // `scan` above stamps a fresh `now` on every entry every run, and `entries` is
-  // the CURRENT INVENTORY — running channels plus cron jobs — rebuilt from
-  // scratch each pass. Emitting entries.length would report "how many openclaw
-  // things exist", re-counted every 60s forever, which is a worse lie than
-  // silence: the warm tick's number means "transcripts parsed this scan". Giving
-  // OpenClaw a real per-entry stamp is tracked separately; until then it
-  // contributes 0 and the docblock on IncrementalScanResult says so.
   db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('openclaw_last_scan_ms', ?)`).run(String(Date.now()));
 }
 
-// ---------------------------------------------------------------------------
-// Rush
-//
-// Rush sessions live at ~/.rush/sessions/<session-id>/messages.jsonl.
-// Each line is { id, session_id, agent_id, role, type, content, created_at, ... }.
-// The directory name is the canonical session id. Rush sessions are cloud-bound
-// (not tied to a local cwd), so cwd is left unset.
-// ---------------------------------------------------------------------------
 
 interface RushSessionScan {
   timestamp?: string;
@@ -2714,7 +1984,6 @@ interface RushSessionScan {
   assistantText?: string;
 }
 
-/** Incrementally re-scan changed Rush session files and upsert into the DB. */
 async function scanRushIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   if (!fs.existsSync(RUSH_SESSIONS_DIR)) return;
 
@@ -2763,7 +2032,6 @@ async function scanRushIncremental(onProgress?: (p: ScanProgress) => void): Prom
   recordScans(touched);
 }
 
-/** Stream-parse a single Rush messages.jsonl file to extract session metadata. */
 async function readRushMeta(
   filePath: string,
   sessionId: string,
@@ -2791,7 +2059,6 @@ async function readRushMeta(
   return { meta, content: scan.contentText || '', assistantContent: scan.assistantText || '' };
 }
 
-/** Stream a Rush messages.jsonl file and extract scan-level metadata. */
 async function scanRushSession(filePath: string): Promise<RushSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -2858,18 +2125,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Hermes
-//
-// Hermes sessions live at ~/.hermes/sessions/session_<id>.json (one JSON
-// file per session). Shape:
-//   { session_id, model, platform, session_start, last_updated,
-//     system_prompt, message_count, messages: [{role, content}, ...] }
-// request_dump_*.json files in the same dir are per-turn debug dumps — skip.
-// Hermes is a gateway/API agent, so cwd is left unset.
-// ---------------------------------------------------------------------------
 
-/** Incrementally re-scan changed Hermes session files and upsert into the DB. */
 async function scanHermesIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   if (!fs.existsSync(HERMES_SESSIONS_DIR)) return;
 
@@ -2915,7 +2171,6 @@ async function scanHermesIncremental(onProgress?: (p: ScanProgress) => void): Pr
   recordScans(touched);
 }
 
-/** Parse a single Hermes session JSON file to extract session metadata. */
 function readHermesMeta(filePath: string): { meta: SessionMeta; content: string; assistantContent: string } | null {
   let session: any;
   try {
@@ -2974,14 +2229,6 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
   return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
 }
 
-/**
- * Muse Code stores one session per directory under
- * ~/.local/share/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl (event-sourced
- * JSONL). Walk the tree for session.jsonl files and index each one.
- *
- * Also scan version homes (`versions/muse/<v>/home/.local/share/muse/sessions`)
- * so managed/isolated runs that rewrite HOME still show up in `agents sessions`.
- */
 function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const roots: string[] = [];
   if (fs.existsSync(MUSE_SESSIONS_DIR)) roots.push(MUSE_SESSIONS_DIR);
@@ -2994,7 +2241,6 @@ function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<vo
         if (fs.existsSync(dir)) roots.push(dir);
       }
     } catch {
-      /* unreadable */
     }
   }
   if (roots.length === 0) return Promise.resolve();
@@ -3010,7 +2256,6 @@ function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<vo
     for (const ent of entries) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        // Skip subagent child sessions — nested under subagent/<id>/
         if (ent.name === 'subagent') continue;
         walk(full);
       } else if (ent.name === 'session.jsonl') {
@@ -3050,9 +2295,7 @@ function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<vo
   return Promise.resolve();
 }
 
-/** Parse a Muse session.jsonl for session metadata + first user prompt text. */
 function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; assistantContent: string } | null {
-  // Path shape: .../sessions/YYYY/MM/DD/<uuid>/session.jsonl
   const sessionId = path.basename(path.dirname(filePath));
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
 
@@ -3084,7 +2327,6 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
 
     if (typeof raw.recorded_at === 'number') {
       const v = raw.recorded_at as number;
-      // Muse logs use microseconds; values < 1e14 are treated as milliseconds.
       const ms = v > 1e14 ? Math.floor(v / 1000) : v;
       const ts = new Date(ms).toISOString();
       if (!firstTs) firstTs = ts;
@@ -3143,7 +2385,6 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
   return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
 }
 
-/** Extract plain text from a Hermes message content field (string or list of parts). */
 function extractHermesMessageText(content: any): string {
   if (typeof content === 'string') return content.trim();
   if (!Array.isArray(content)) return '';
@@ -3157,11 +2398,7 @@ function extractHermesMessageText(content: any): string {
     .trim();
 }
 
-// ---------------------------------------------------------------------------
-// Droid (Factory)
-// ---------------------------------------------------------------------------
 
-/** Lightweight metadata extracted from a Droid JSONL file during incremental scan. */
 interface DroidSessionScan {
   sessionId?: string;
   timestamp?: string;
@@ -3176,19 +2413,11 @@ interface DroidSessionScan {
   assistantText?: string;
 }
 
-/**
- * Incrementally re-scan changed Droid (Factory) session files and upsert into
- * the DB. Droid writes one `<uuid>.jsonl` transcript plus a sibling
- * `<uuid>.settings.json` (model + token usage) under
- * `~/.factory/sessions/<encoded-cwd>/`.
- */
 async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('droid');
 
   const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getAgentSessionDirs('droid', 'sessions')) {
-    // High limit: the walk stats each file once here; parsing is gated by the
-    // ledger match below, which reuses that stat instead of re-stat'ing.
     for (const f of walkForFilesWithStat(sessionsDir, '.jsonl', 100_000)) {
       prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
     }
@@ -3223,22 +2452,17 @@ async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Pro
   recordScans(touched);
 }
 
-/** Stream-parse a single Droid JSONL file (+ sibling settings) into session metadata. */
 async function readDroidMeta(
   filePath: string,
   currentVersion?: string,
 ): Promise<{ meta: SessionMeta; content: string; assistantContent: string } | null> {
   const scan = await scanDroidSession(filePath);
-  // The filename is the canonical session id; fall back to the session_start id.
   const sessionId = path.basename(filePath).replace(/\.jsonl$/, '') || scan.sessionId || '';
   if (!sessionId) return null;
 
-  // Token usage and cost live only in the sibling `<uuid>.settings.json`.
   const settings = readDroidSettings(filePath.replace(/\.jsonl$/, '.settings.json'));
   const model = settings.model || scan.model;
   const tokenCount = settings.tokenCount;
-  // Droid records a full split (input / cache-read / cache-write / output) in its
-  // settings sidecar, so both the actual and no-cache cost are derivable (RUSH-2287).
   const usageForCost = model && settings.usage
     ? {
         model,
@@ -3279,7 +2503,6 @@ async function readDroidMeta(
   return { meta, content: scan.contentText || '', assistantContent: scan.assistantText || '' };
 }
 
-/** Read model + token usage from a Droid `<uuid>.settings.json` sidecar. */
 function readDroidSettings(settingsPath: string): {
   model?: string;
   tokenCount?: number;
@@ -3308,7 +2531,6 @@ function readDroidSettings(settingsPath: string): {
   }
 }
 
-/** Stream a Droid JSONL file and extract scan-level metadata (id, cwd, topic, model, duration). */
 async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -3341,7 +2563,6 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
       if (parsed.type === 'session_start') {
         sessionId = typeof parsed.id === 'string' ? parsed.id : sessionId;
         cwd = typeof parsed.cwd === 'string' ? parsed.cwd : cwd;
-        // Droid auto-generates `sessionTitle`; `title` is the raw first prompt.
         if (typeof parsed.sessionTitle === 'string' && parsed.sessionTitle.trim()) {
           sessionTitle = parsed.sessionTitle.trim();
         }
@@ -3353,7 +2574,6 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
 
       if (parsed.type !== 'message') continue;
 
-      // Track duration across every timestamped message.
       if (typeof parsed.timestamp === 'string') {
         const ms = new Date(parsed.timestamp).getTime();
         if (!Number.isNaN(ms)) {
@@ -3391,8 +2611,6 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
     sessionId,
     timestamp,
     cwd,
-    // Prefer Droid's auto-title, then the raw first-prompt title, then the
-    // derived first-user-message topic.
     topic: sessionTitle || title || firstUserTopic,
     firstUserMessage,
     model,
@@ -3404,26 +2622,16 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
   };
 }
 
-/** Extract plain text from a Droid message content field (Anthropic-shaped blocks). */
 function extractDroidMessageText(content: any): string {
   if (typeof content === 'string') return content.trim();
   if (!Array.isArray(content)) return '';
   return content
     .map((part: any) => (typeof part?.text === 'string' && part.type === 'text' ? part.text : ''))
-    // Droid front-loads injected context (date, skills list) as <system-reminder>
-    // text blocks on the first user turn — drop them so topic/content stay clean.
     .filter((text: string) => text.trim() && !text.trim().startsWith('<system-reminder>'))
     .join('\n')
     .trim();
 }
 
-/**
- * Mutable accumulator for the Claude transcript reducer. One field per local
- * that {@link scanClaudeSession} previously declared inline — the reducer
- * mutates `state.*` instead of closure locals so the exact same logic can drive
- * both a full parse and a resumable incremental parse (see
- * {@link scanClaudeSessionIncremental}).
- */
 interface ClaudeParseState {
   timestamp?: string;
   cwd?: string;
@@ -3432,8 +2640,6 @@ interface ClaudeParseState {
   model?: string;
   topic?: string;
   firstUserMessage?: string;
-  // Explicit session titles: `/rename` writes a `custom-title` event; Claude
-  // auto-generates an `ai-title`. Both can repeat across the file — last wins.
   customTitle?: string;
   aiTitle?: string;
   entrypoint?: string;
@@ -3441,58 +2647,34 @@ interface ClaudeParseState {
   toolCallCount: number;
   tokenCount: number;
   outputTokens: number;
-  // Burn split accumulators (RUSH-2287): uncached input / cache-read / cache-write.
   inputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
   sawTokenCount: boolean;
   costUsd: number;
-  // Same session cost with cache read/write repriced at the input rate.
   costUsdNoCache: number;
   sawCost: boolean;
-  // Track the first and last timestamped event to derive wall-clock duration.
   firstTsMs?: number;
   lastTsMs?: number;
   seenAssistantIds: Set<string>;
   userTexts: string[];
-  /** Assistant-answer text (#PHNX content-search), accumulated the same way as
-   *  `userTexts` but indexed into session_text's own lower-weighted `assistant`
-   *  column instead of `content` — see BM25_WEIGHTS. */
   assistantTexts: string[];
-  // Durable PR signal: set only when an actual `gh pr create` Bash *command*
-  // runs (structural — the command field, not any prose mentioning it), then
-  // capture the pull URL from a later tool_result's output.
   sawPrCreate: boolean;
   prUrl?: string;
   prNumber?: number;
-  // Artifacts the session PRODUCED: tracker refs it created and any team it spawned.
-  // Ticket creation spans two events — a create_issue tool_use, then the tool_result
-  // carrying the new id — so we hold the pending tool_use ids until their result lands.
   createdTickets: Set<string>;
   pendingTicketTools: Set<string>;
   spawnedTeam?: string;
-  // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
-  // recent plan, matching the semantic the extension's re-parser relied on.
   plan?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
   toolCollector: ToolCallCollector;
-  /** Skill-invocation tool_use events, held for extractSkills() at finalize (#12). */
   skillEvents: SessionEvent[];
-  /** Slash-command events (user-typed <command-name> wrapper OR a SlashCommand
-   *  tool_use), held for extractSlashCommands() at finalize (#12). */
   slashCommandEvents: SessionEvent[];
-  /**
-   * Fan-out tallies (RUSH-3091/3095). Counted as we stream rather than held as
-   * events — unlike skills we need only the count, and a busy session can spawn
-   * hundreds. `backgroundShells` stays undefined for a harness with no
-   * background-shell concept, which must render as absence, never as 0.
-   */
   subAgents: number;
   backgroundShells: number | undefined;
 }
 
-/** Zero-value accumulator for a fresh (from-byte-0) Claude parse. */
 export function initClaudeParseState(): ClaudeParseState {
   return {
     subAgents: 0,
@@ -3554,12 +2736,7 @@ function foldDerivedToolState(
   event: SessionEvent,
 ): void {
   if (CHECKLIST_TOOLS.has(event.tool ?? '')) state.checklistEvents.push(event);
-  // #12: skill/slash-command usage, held here instead of re-parsed later — the
-  // same reason checklistEvents is folded incrementally rather than recomputed
-  // from a full re-parse (see session/db.ts's writeResourceUsage doc comment).
   if (isSkillInvocation(event)) state.skillEvents.push(event);
-  // Fan-out tallies (RUSH-3091/3095): counted, not held — we need the number,
-  // and a heavy orchestrator session can spawn hundreds of each.
   if (state.subAgents !== undefined && isSubAgentTool(event.tool ?? '', event.command ?? '')) {
     state.subAgents += 1;
   }
@@ -3580,24 +2757,12 @@ function foldDerivedToolState(
   if (state.recentDirectoriesTouched.length > 10) state.recentDirectoriesTouched.splice(0, state.recentDirectoriesTouched.length - 10);
 }
 
-/**
- * Fold one parsed transcript line into the accumulator. This is the exact loop
- * body {@link scanClaudeSession} used to run inline — extracted verbatim,
- * mutating `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
- * malformed-line skip happens in the caller, as before).
- */
 export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   collectClaudeToolCalls(state.toolCollector, parsed);
-  // entrypoint ships on the first envelope event (attachment/user/assistant)
-  // and is the clean structural signal for "was this a team spawn?"
   if (!state.entrypoint && typeof parsed.entrypoint === 'string') {
     state.entrypoint = parsed.entrypoint;
   }
 
-  // Produced-artifact signals, structurally (independent of the PR gate below):
-  //   - a Bash `agents teams create/add` command → the team it spawned
-  //   - a Linear create_issue / `gh issue create` tool_use → its result carries
-  //     the new ticket ref, read from the matching tool_result.
   if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
     for (const b of parsed.message.content) {
       if (b?.type !== 'tool_use') continue;
@@ -3609,8 +2774,6 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
       if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
         state.pendingTicketTools.add(b.id);
       }
-      // ExitPlanMode plan markdown — last one wins so a re-planned session
-      // reports its most recent plan.
       if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
         const p = b.input.plan.trim();
         if (p) state.plan = b.input.plan;
@@ -3634,8 +2797,6 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     }
   }
 
-  // PR signal, structurally: a Bash tool_use whose command is `gh pr create`
-  // marks intent; the pull URL is then read from a tool_result's output.
   if (!state.prUrl) {
     if (!state.sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
       for (const b of parsed.message.content) {
@@ -3656,7 +2817,6 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     }
   }
 
-  // Track duration across every timestamped event, not just the first.
   if (typeof parsed.timestamp === 'string') {
     const ms = new Date(parsed.timestamp).getTime();
     if (!Number.isNaN(ms)) {
@@ -3690,9 +2850,6 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
       state.messageCount++;
       state.userTexts.push(text);
       if (!state.topic) state.topic = extractSessionTopic(text);
-      // #12: the USER typing a slash command — Claude injects a <command-name>
-      // wrapper as the message content (extractClaudeUserText returns it
-      // un-stripped; isLocalCommandMessage only filters bash-echo wrappers).
       const slashCommand = extractSlashCommandName(text);
       if (slashCommand) {
         state.slashCommandEvents.push({
@@ -3726,15 +2883,11 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     state.sawTokenCount = true;
   }
   if (typeof usageObj?.output_tokens === 'number') state.outputTokens += usageObj.output_tokens;
-  // Burn split (RUSH-2287): accumulate the raw directional counts so `agents
-  // output` can report uncached-input / cache-read / cache-write separately.
   if (usageObj && typeof usageObj === 'object') {
     if (typeof usageObj.input_tokens === 'number') state.inputTokens += usageObj.input_tokens;
     if (typeof usageObj.cache_read_input_tokens === 'number') state.cacheReadTokens += usageObj.cache_read_input_tokens;
     if (typeof usageObj.cache_creation_input_tokens === 'number') state.cacheWriteTokens += usageObj.cache_creation_input_tokens;
   }
-  // Per-assistant-message cost: each event carries its own model, so we
-  // multiply that event's raw token directions by that model's price.
   const model = parsed.message?.model;
   if (typeof model === 'string' && model) state.model = model;
   if (model && usageObj && typeof usageObj === 'object') {
@@ -3748,29 +2901,18 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     const eventCost = costOfUsage(usageForCost);
     if (eventCost > 0) {
       state.costUsd += eventCost;
-      // No-cache scenario: reprice this same event's cache tokens at the input rate.
       state.costUsdNoCache += costOfUsageNoCache(usageForCost);
       state.sawCost = true;
     }
   }
 }
 
-/**
- * Build the {@link ClaudeSessionScan} return object from an accumulator. This is
- * the exact return-building {@link scanClaudeSession} used to run inline.
- */
 export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string): ClaudeSessionScan {
   const durationMs =
     state.firstTsMs !== undefined && state.lastTsMs !== undefined && state.lastTsMs > state.firstTsMs
       ? state.lastTsMs - state.firstTsMs
       : undefined;
 
-  // A topic is the first meaningful prompt. Harness-owned names travel in the
-  // separate label field so consumers can replace an early topic once Claude's
-  // generated title (or a later `/rename`) arrives.
-  // Generated titles (Claude `ai-title`, Cursor `chatMeta.title`) go through
-  // one shared cleaner so a skill-preamble echo collapses to `/<skill>`. A
-  // `/rename` (`custom-title`) is the user's own words and is never rewritten.
   const label = state.customTitle || cleanGeneratedSessionLabel(state.aiTitle);
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
@@ -3814,7 +2956,6 @@ export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string
   };
 }
 
-/** Stream a Claude JSONL file and extract scan-level metadata (timestamp, cwd, topic, tokens). */
 export async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -3842,34 +2983,8 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
   return finalizeClaudeScan(state, filePath);
 }
 
-/**
- * SERIALIZED continuation blob persisted in `scan_ledger.parser_state`. Carries
- * everything {@link hydrateClaudeParseState} needs to resume a parse from
- * `offset` such that resuming + applying the appended lines is byte-for-byte
- * identical to a full parse of the whole file.
- *
- * `seenAssistantIds` is persisted as a size counter plus a bounded FIFO window
- * of the most-recent ids: the fallback logical id `${ts}:${seenAssistantIds.size}`
- * (see {@link applyClaudeLine}) depends on the set's *size*, so the size must be
- * exact even when the recent window is smaller than the true count.
- */
 export interface ClaudeParserState {
-  // v3 (RUSH-2287): added the burn-split accumulators + no-cache cost. A stale v2
-  // blob is rejected by the `!== 3` guard and the session is re-parsed from byte 0,
-  // which populates the new split correctly rather than resuming without it.
-  // v5: added `assistantContentText` (assistant-answer accumulator, alongside
-  // `contentText`). A stale v4 blob is rejected the same way, forcing one full
-  // reparse that backfills the new assistant text — belt-and-suspenders with
-  // scan_ledger.extractor_version, which gates resuming from it in the first
-  // place (see readClaudeMeta).
   v: 6;
-  /**
-   * Fan-out tallies carried across a RESUMED parse (RUSH-3091/3095). They must
-   * live in the durable blob: the resumable parser reads only new bytes, so
-   * re-initialising them on hydrate would report a session's tail, not its
-   * total. Adding them is why `v` moved 3 -> 4 — an older blob is rejected and
-   * the session re-parses from byte 0 with correct totals.
-   */
   subAgents: number;
   backgroundShells: number | undefined;
   offset: number;
@@ -3912,19 +3027,12 @@ export interface ClaudeParserState {
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
   toolCalls: ToolCallCollectorSnapshot;
-  /** #12: see ClaudeParseState.skillEvents/slashCommandEvents. */
   skillEvents: SessionEvent[];
   slashCommandEvents: SessionEvent[];
 }
 
-/** Cap on the FIFO window of recent assistant ids persisted in the continuation. */
 const SEEN_IDS_RECENT_CAP = 256;
 
-/**
- * Snapshot a live {@link ClaudeParseState} into its serializable form at
- * `offset` bytes consumed. Round-trips through {@link hydrateClaudeParseState}
- * so incremental replay equals a full parse.
- */
 export function serializeClaudeParserState(
   state: ClaudeParseState,
   offset: number,
@@ -3973,10 +3081,6 @@ export function serializeClaudeParserState(
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
     spawnedTeam: state.spawnedTeam,
-    // ticketId is derived at finalize time; persist it (and content_text) so a
-    // consumer (B-2) can rebuild the row + FTS doc on append without re-reading
-    // the whole file. worktreeSlug is re-derived from cwd/gitBranch, so it need
-    // not be persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
     assistantContentText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
@@ -3988,26 +3092,8 @@ export function serializeClaudeParserState(
   };
 }
 
-/**
- * Rebuild a live {@link ClaudeParseState} from a persisted continuation so that
- * applying the appended lines yields the same accumulator a full parse would.
- *
- * `seenAssistantIds` is rehydrated from the recent-id FIFO window, then padded
- * with unique sentinel entries so its `.size` matches the true prior count
- * (`seenIdsSize`) — the fallback id `${ts}:${size}` must line up with the full
- * parse even when the window dropped older ids. Padding sentinels can never
- * collide with a real logical id (real ids are message ids/uuids or
- * `${ts}:${n}`; the sentinel prefix is not JSON-line-derived).
- *
- * `userTexts` is rehydrated as a single joined blob from `contentText`: only
- * `userTexts.join('\n')` (detectTicket + contentText) and `userTexts.length > 0`
- * are ever read downstream, and both are preserved by a one-element array
- * holding the joined content.
- */
 export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseState {
   const seen = new Set<string>(prior.seenIdsRecent);
-  // Pad to the true prior size so `seenAssistantIds.size` (which feeds the
-  // fallback logical id) is exact even when older ids fell out of the window.
   let pad = 0;
   while (seen.size < prior.seenIdsSize) {
     seen.add(` pad:${pad++}`);
@@ -4058,17 +3144,6 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
   };
 }
 
-/**
- * Resume a Claude parse from `fromOffset` bytes into the file, folding only the
- * newly-appended lines into `prior`. Returns the finalized scan, the next
- * serialized continuation, and the byte offset to resume from next time —
- * `newOffset` stops at the last `'\n'` seen so a half-written trailing record is
- * re-read (not lost) on the next append.
- *
- * NOT wired into the live scan path yet (that is B-2); {@link scanClaudeSession}
- * remains the only caller-facing entry point. This exists so the parity harness
- * can prove full === hydrate(state@k) + apply(k+1..n).
- */
 export async function scanClaudeSessionIncremental(
   filePath: string,
   fromOffset: number,
@@ -4076,17 +3151,6 @@ export async function scanClaudeSessionIncremental(
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[] }> {
   const state = hydrateClaudeParseState(prior);
 
-  // Read the appended byte range and apply ONLY newline-terminated lines. The
-  // applied lines and `newOffset` MUST stay consistent: readline (like the full
-  // parse) would emit a trailing UNTERMINATED final line at EOF, but `newOffset`
-  // stops before it — so the next pass, after that record's '\n' is flushed,
-  // would re-read and re-apply the same line and double-count it (user events
-  // have no dedup, unlike assistant `seenAssistantIds`). A record written
-  // non-atomically — bytes first, then '\n' in a second write — is exactly this
-  // case. So we slice at the last '\n' ourselves: everything up to and including
-  // it is a run of complete lines we apply and commit. An ordinary tail after
-  // it is deferred until its '\n' lands; after a tail exceeds 1 MiB, its offset
-  // advances with a persisted discard-until-newline bit.
   const append = await applyJsonlAppend(
     filePath,
     fromOffset,
@@ -4106,27 +3170,10 @@ export async function scanClaudeSessionIncremental(
   };
 }
 
-/** Serialized zero-value continuation: a fresh accumulator at offset 0, used to drive a FULL parse from the start through the same resumable path. */
 function freshClaudeParserState(): ClaudeParserState {
   return serializeClaudeParserState(initClaudeParseState(), 0);
 }
 
-/**
- * Decide full-vs-incremental for one Claude file and parse it uniformly, always
- * returning a finalized scan plus the continuation to persist. Both branches run
- * through the SAME reducer (via {@link scanClaudeSessionIncremental}), so the row
- * an append produces is identical to a from-scratch full reparse by construction
- * (the B-1 parity harness proves this at the function level).
- *
- * INCREMENTAL when a prior continuation exists AND the file grew past the
- * persisted offset AND its mtime did not go backwards — an in-place append.
- * FULL (from byte 0, fresh state) otherwise: cold start (no prior), truncation /
- * rewrite (size shrank to at or below the offset), or a clock rewind / restore
- * (mtime older than the last parse). A FULL parse still produces a continuation,
- * so the file's very next append can go incremental.
- *
- * `mode` is returned so the caller (and tests) can confirm which branch ran.
- */
 export async function scanClaudeSessionResumable(
   filePath: string,
   prior: ClaudeParserState | null,
@@ -4134,18 +3181,7 @@ export async function scanClaudeSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: ClaudeSessionScan; newState: ClaudeParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
-  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
-  // restore that dropped DIFFERENT, larger content at the same path: both grow
-  // the file and move mtime forward. Resuming from the stored offset across that
-  // boundary would fold the new file's bytes into an accumulator hydrated from
-  // the OLD session, so the persisted row silently diverges from a full reparse.
-  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
-  // offset we re-read the transcript's first user/assistant timestamp and require
-  // it to still match the prior continuation's. An append keeps that identity
-  // byte-for-byte; a rewrite/restore of a different session changes it. A
-  // mismatch — or an identity we cannot derive — falls back to a FULL parse,
-  // which is always correct. (A shrink is already handled: currentFileSize is not
-  // > prior.offset, so it takes the FULL branch.)
+  // Never fold saved parser state into a replacement transcript at the same path.
   let canIncrement = false;
   if (
     prior !== null &&
@@ -4165,14 +3201,6 @@ export async function scanClaudeSessionResumable(
   return { ...result, mode: 'full' };
 }
 
-/**
- * Cheaply derive a Claude transcript's session identity — the first
- * user/assistant event `timestamp` — by streaming only the START of the file
- * (at most `maxBytes`) and stopping at the first such event. Used by
- * {@link scanClaudeSessionResumable} to confirm a grown file is still the SAME
- * session before resuming from a stored parse offset. Returns undefined when no
- * user/assistant event appears within the budget, which forces a FULL parse.
- */
 async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
   const state = initClaudeParseState();
   const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
@@ -4196,12 +3224,6 @@ async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): 
   return state.timestamp;
 }
 
-/**
- * Parse the prior continuation blob for a changed file into a usable
- * {@link ClaudeParserState}, or null when there is none / it is unusable. A blob
- * from a different serialization version is treated as absent so the file falls
- * back to a clean FULL parse rather than resuming against a stale shape.
- */
 function parsePriorClaudeState(row: { parserState: string | null } | undefined): ClaudeParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -4213,30 +3235,19 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   }
 }
 
-/** Test seam: how many times the incremental (append-resume) branch was taken since the last reset. */
 let claudeIncrementalScanCount = 0;
-/** Test seam: how many times a full (from-offset-0) Claude parse ran since the last reset. */
 let claudeFullScanCount = 0;
 
-/** Test seam: read the (incremental, full) Claude parse counters. */
 export function __claudeScanBranchCountsForTest(): { incremental: number; full: number } {
   return { incremental: claudeIncrementalScanCount, full: claudeFullScanCount };
 }
 
-/** Test seam: reset the Claude parse-branch counters to observe a scan from a clean slate. */
 export function __resetClaudeScanBranchCountsForTest(): void {
   claudeIncrementalScanCount = 0;
   claudeFullScanCount = 0;
 }
 
-/**
- * Live (in-memory) accumulator for a Codex parse — the mutable state
- * {@link scanCodexSession} used to hold in local `let`s, extracted so the same
- * fold ({@link applyCodexLine}) runs for both a full parse and an incremental
- * resume. Mirrors {@link ClaudeParseState}.
- */
 interface CodexParseState {
-  // First-wins session_meta fields.
   sessionId?: string;
   timestamp?: string;
   cwd?: string;
@@ -4245,39 +3256,26 @@ interface CodexParseState {
   model?: string;
   topic?: string;
   firstUserMessage?: string;
-  // Additive across every counted message (user + assistant).
   messageCount: number;
-  // LAST-WINS cumulative token snapshots: Codex's token_count events carry a
-  // running total, so the final one wins (not a sum).
   tokenCount?: number;
   lastTotalTokenUsage?: any;
-  // Duration bounds across every timestamped event.
   firstTsMs?: number;
   lastTsMs?: number;
   userTexts: string[];
-  /** See ClaudeParseState.assistantTexts — same accumulate-and-lower-weight FTS treatment. */
   assistantTexts: string[];
-  // Straddle state: a `gh pr create` function_call marks intent; the pull URL
-  // arrives in a later function_call_output.
   sawPrCreate: boolean;
   prUrl?: string;
   prNumber?: number;
-  // Ticket creation straddles a create_issue function_call and its output ref.
   createdTickets: Set<string>;
   pendingTicketTools: Set<string>;
   spawnedTeam?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
   toolCollector: ToolCallCollector;
-  /** #12: see ClaudeParseState.skillEvents. Empty in practice today — no
-   *  verified Codex skill-invocation tool name — but wired for parity so a
-   *  future confirmed tool name (or a literal 'SlashCommand' function_call)
-   *  is picked up with no further plumbing. */
   skillEvents: SessionEvent[];
   slashCommandEvents: SessionEvent[];
 }
 
-/** Zero-value accumulator for a fresh (from-byte-0) Codex parse. */
 export function initCodexParseState(): CodexParseState {
   return {
     sessionId: undefined,
@@ -4309,16 +3307,8 @@ export function initCodexParseState(): CodexParseState {
   };
 }
 
-/**
- * Fold one parsed Codex line into the accumulator — the exact loop body
- * {@link scanCodexSession} used to run inline, extracted verbatim and mutating
- * `state.*` in place. `parsed` is the already-`JSON.parse`d line (the
- * malformed-line skip happens in the caller, as before).
- */
 function applyCodexLine(state: CodexParseState, parsed: any): void {
   collectCodexToolCalls(state.toolCollector, parsed);
-  // PR signal, structurally: a Codex `function_call` whose command is
-  // `gh pr create`, then the pull URL from a `function_call_output`.
   if (parsed.type === 'response_item') {
     const p = parsed.payload || {};
     if (p.type === 'function_call') {
@@ -4327,7 +3317,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
       try {
         args = typeof p.arguments === 'string' ? JSON.parse(p.arguments) : (p.arguments || {});
         cmd = String(args.command || args.cmd || '');
-      } catch { /* non-JSON args */ }
+      } catch {  }
       foldDerivedToolState(state, {
         type: 'tool_use', agent: 'codex', timestamp: parsed.timestamp || '', tool: p.name, args,
         path: args.file_path || args.path, command: cmd || undefined,
@@ -4354,7 +3344,6 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
     }
   }
 
-  // Track duration across every timestamped event.
   if (typeof parsed.timestamp === 'string') {
     const ms = new Date(parsed.timestamp).getTime();
     if (!Number.isNaN(ms)) {
@@ -4365,8 +3354,6 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
 
   if (parsed.type === 'session_meta') {
     const payload = parsed.payload || {};
-    // Native forks prepend child ownership before inherited parent metadata.
-    // The first valid identity owns this file in both full and resumed scans.
     if (state.sessionId || typeof payload.id !== 'string' || !payload.id.trim()) return;
     state.sessionId = payload.id;
     state.timestamp = payload.timestamp || parsed.timestamp || state.timestamp;
@@ -4377,10 +3364,6 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
     return;
   }
 
-  // Codex rollouts put per-turn metadata (including the model) on
-  // `turn_context` events. Use them as a fallback when session_meta itself
-  // does not carry the field, otherwise `agents sessions` shows blank model
-  // info for Codex.
   if (parsed.type === 'turn_context') {
     const payload = parsed.payload || {};
     if (!state.model && typeof payload.model === 'string') state.model = payload.model;
@@ -4400,9 +3383,6 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
       const genuine = cleanFirstUserMessage(text);
       if (!genuine) return;
       state.userTexts.push(genuine);
-      // Codex records developer instructions as response_item messages too.
-      // They remain searchable for compatibility, but only an actual user role
-      // may become the session's first request.
       if (payloadRole === 'user' && !state.firstUserMessage) state.firstUserMessage = genuine;
       if (!state.topic) state.topic = extractSessionTopic(genuine);
     } else {
@@ -4415,23 +3395,12 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
     const totalUsage = parsed.payload.info?.total_token_usage;
     const total = getCodexTokenCount(totalUsage);
     if (total !== null) state.tokenCount = total;
-    // token_count is cumulative — keep the latest snapshot and price it once
-    // after the stream, so we don't double-count across intermediate events.
     if (totalUsage && typeof totalUsage === 'object') state.lastTotalTokenUsage = totalUsage;
-    // Codex also stamps the model on the rate_limits/token_count payload on
-    // some versions; prefer session_meta but fall back to it.
     if (!state.model && typeof parsed.payload.info?.model === 'string') state.model = parsed.payload.info.model;
   }
 }
 
-/**
- * Build the {@link CodexSessionScan} return object from an accumulator — the
- * exact return-building {@link scanCodexSession} used to run inline.
- */
 function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
-  // Codex reports one cumulative snapshot: uncached input, cached (cache-read)
-  // input, and output+reasoning. It has no cache-write bucket. Derive the burn
-  // split and both costs (actual + no-cache) from that final snapshot (RUSH-2287).
   const snap = state.lastTotalTokenUsage;
   const outputTokens = snap
     ? (snap.output_tokens ?? 0) + (snap.reasoning_output_tokens ?? 0)
@@ -4444,7 +3413,6 @@ function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     inputTokens = typeof snap.input_tokens === 'number' ? snap.input_tokens : undefined;
     cacheReadTokens = typeof snap.cached_input_tokens === 'number' ? snap.cached_input_tokens : undefined;
   }
-  // Price the final cumulative token snapshot once, against the session model.
   if (state.model && snap) {
     const usage = {
       model: state.model,
@@ -4499,7 +3467,6 @@ function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
   };
 }
 
-/** Stream a Codex JSONL file and extract scan-level metadata (session ID, cwd, topic, tokens). */
 async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -4527,20 +3494,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
   return finalizeCodexScan(state);
 }
 
-/**
- * SERIALIZED continuation blob persisted in `scan_ledger.parser_state` for a
- * Codex rollout. Carries everything {@link hydrateCodexParseState} needs to
- * resume a parse from `offset` such that resuming + applying the appended lines
- * is byte-for-byte identical to a full parse of the whole file.
- *
- * Unlike Claude, Codex has NO per-message dedup set, so `messageCount` is a
- * plain additive base with no recent-id window to persist. The `lastTotalTokenUsage`
- * object is round-tripped whole so the last-wins cost/output-token pricing at
- * finalize is identical after a resume.
- */
 export interface CodexParserState {
-  // v3: added `assistantContentText` (assistant-answer accumulator). A stale v2
-  // blob is rejected, forcing one full reparse — see ClaudeParserState's v5 note.
   v: 4;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
@@ -4571,11 +3525,6 @@ export interface CodexParserState {
   toolCalls: ToolCallCollectorSnapshot;
 }
 
-/**
- * Snapshot a live {@link CodexParseState} into its serializable form at `offset`
- * bytes consumed. Round-trips through {@link hydrateCodexParseState} so
- * incremental replay equals a full parse.
- */
 export function serializeCodexParserState(
   state: CodexParseState,
   offset: number,
@@ -4605,10 +3554,6 @@ export function serializeCodexParserState(
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
     spawnedTeam: state.spawnedTeam,
-    // ticketId is derived at finalize time; persist it (and content_text) so a
-    // consumer can rebuild the row + FTS doc on append without re-reading the
-    // whole file. worktreeSlug is re-derived from cwd/gitBranch, so it need not
-    // be persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
     assistantContentText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
@@ -4618,16 +3563,6 @@ export function serializeCodexParserState(
   };
 }
 
-/**
- * Rebuild a live {@link CodexParseState} from a persisted continuation so that
- * applying the appended lines yields the same accumulator a full parse would.
- *
- * `userTexts` is rehydrated as a single joined blob from `contentText`: only
- * `userTexts.join('\n')` (detectTicket + contentText) and `userTexts.length > 0`
- * are ever read downstream, and both are preserved by a one-element array
- * holding the joined content. Topic is first-wins and already persisted, so a
- * collapsed userTexts never changes it.
- */
 function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
   return {
     sessionId: prior.sessionId,
@@ -4656,27 +3591,11 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
     checklistEvents: prior.checklistEvents ?? [],
     recentDirectoriesTouched: prior.recentDirectoriesTouched ?? [],
     toolCollector: new ToolCallCollector(prior.toolCalls),
-    // Not persisted in CodexParserState (always empty for Codex today — see
-    // CodexParseState.skillEvents) — a resume starts fresh rather than
-    // round-tripping an always-empty array through the continuation blob.
     skillEvents: [],
     slashCommandEvents: [],
   };
 }
 
-/**
- * Resume a Codex parse from `fromOffset` bytes into the file, folding only the
- * newly-appended lines into `prior`. Returns the finalized scan, the next
- * serialized continuation, and the byte offset to resume from next time.
- *
- * Same trailing-line discipline as {@link scanClaudeSessionIncremental}: apply
- * ONLY the run of newline-terminated lines (slice at the last `'\n'`), and set
- * `newOffset = fromOffset + consumedBytes`. An ordinary tail after the last
- * `'\n'` is deferred; an oversized one advances under a persisted discard bit.
- * Codex `messageCount` is additive with
- * NO dedup, so re-reading a still-unterminated complete line would double-count
- * it; deferring prevents that (the bug class prix-cloud caught for Claude).
- */
 export async function scanCodexSessionIncremental(
   filePath: string,
   fromOffset: number,
@@ -4703,21 +3622,10 @@ export async function scanCodexSessionIncremental(
   };
 }
 
-/** Serialized zero-value continuation: a fresh accumulator at offset 0, used to drive a FULL parse from the start through the same resumable path. */
 function freshCodexParserState(): CodexParserState {
   return serializeCodexParserState(initCodexParseState(), 0);
 }
 
-/**
- * Cheaply derive a Codex rollout's session identity — the `session_meta` id — by
- * streaming only the START of the file (at most `maxBytes`) and stopping once the
- * id is known. Mirrors {@link claudeSessionIdentityAt}: used by
- * {@link scanCodexSessionResumable} to confirm a grown file is still the SAME
- * session before resuming from a stored parse offset. Codex writes `session_meta`
- * (carrying the durable session UUID) on the first line of every rollout, so the
- * id is reached almost immediately. Returns undefined when no id appears within
- * the budget, which forces a FULL parse.
- */
 async function codexSessionIdentityAt(filePath: string, maxBytes = 1_048_576): Promise<string | undefined> {
   const state = initCodexParseState();
   const stream = fs.createReadStream(filePath, { start: 0, end: maxBytes - 1, encoding: 'utf-8' });
@@ -4741,15 +3649,6 @@ async function codexSessionIdentityAt(filePath: string, maxBytes = 1_048_576): P
   return state.sessionId;
 }
 
-/**
- * Decide full-vs-incremental for one Codex rollout and parse it uniformly,
- * always returning a finalized scan plus the continuation to persist. Both
- * branches run through the SAME reducer (via {@link scanCodexSessionIncremental}),
- * so an append produces a row identical to a from-scratch full reparse by
- * construction. INCREMENTAL when a prior continuation exists AND the file grew
- * past the persisted offset AND its mtime did not go backwards; FULL (from byte
- * 0, fresh state) otherwise (cold start, truncation/rewrite, clock rewind).
- */
 export async function scanCodexSessionResumable(
   filePath: string,
   prior: CodexParserState | null,
@@ -4757,17 +3656,7 @@ export async function scanCodexSessionResumable(
   currentFileSize: number,
   priorFileMtimeMs?: number,
 ): Promise<{ scan: CodexSessionScan; newState: CodexParserState; newOffset: number; toolCalls: IndexedToolCall[]; mode: 'full' | 'incremental' }> {
-  // File size + mtime cannot distinguish an APPEND from an in-place rewrite or a
-  // restore that dropped a DIFFERENT, larger rollout at the same path: both grow
-  // the file and move mtime forward. Resuming from the stored offset across that
-  // boundary would fold the new session's bytes into an accumulator hydrated from
-  // the OLD session, so the persisted row silently diverges from a full reparse.
-  // So the metadata gate below only makes a file ELIGIBLE; before trusting the
-  // offset we re-read the rollout's `session_meta` id and require it to still
-  // match the prior continuation's. An append keeps that id; a rewrite/restore of
-  // a different session changes it. A mismatch — or an id we cannot derive —
-  // falls back to a FULL parse, which is always correct. (A shrink is already
-  // handled: currentFileSize is not > prior.offset, so it takes the FULL branch.)
+  // Never fold saved parser state into a replacement rollout at the same path.
   let canIncrement = false;
   if (
     prior !== null &&
@@ -4787,12 +3676,6 @@ export async function scanCodexSessionResumable(
   return { ...result, mode: 'full' };
 }
 
-/**
- * Parse the prior continuation blob for a changed Codex file into a usable
- * {@link CodexParserState}, or null when there is none / it is unusable. A blob
- * from a different serialization version is treated as absent so the file falls
- * back to a clean FULL parse rather than resuming against a stale shape.
- */
 function parsePriorCodexState(row: { parserState: string | null } | undefined): CodexParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -4804,23 +3687,18 @@ function parsePriorCodexState(row: { parserState: string | null } | undefined): 
   }
 }
 
-/** Test seam: how many times the incremental (append-resume) branch was taken since the last reset. */
 let codexIncrementalScanCount = 0;
-/** Test seam: how many times a full (from-offset-0) Codex parse ran since the last reset. */
 let codexFullScanCount = 0;
 
-/** Test seam: read the (incremental, full) Codex parse counters. */
 export function __codexScanBranchCountsForTest(): { incremental: number; full: number } {
   return { incremental: codexIncrementalScanCount, full: codexFullScanCount };
 }
 
-/** Test seam: reset the Codex parse-branch counters to observe a scan from a clean slate. */
 export function __resetCodexScanBranchCountsForTest(): void {
   codexIncrementalScanCount = 0;
   codexFullScanCount = 0;
 }
 
-/** Resolve the working directory for an OpenClaw agent from its workspace config. */
 function getOpenClawSessionCwd(agentId?: string): string {
   const workspace = agentId ? getOpenClawWorkspaceMap().get(agentId) : undefined;
   if (workspace) return workspace;
@@ -4829,7 +3707,6 @@ function getOpenClawSessionCwd(agentId?: string): string {
   return safeRealpathSync(configDir) || configDir;
 }
 
-/** Build a cached map of OpenClaw agent ID to workspace path from openclaw.json. */
 function getOpenClawWorkspaceMap(): Map<string, string> {
   if (cachedOpenClawWorkspaces) return cachedOpenClawWorkspaces;
 
@@ -4850,23 +3727,17 @@ function getOpenClawWorkspaceMap(): Map<string, string> {
       workspaces.set(agent.id, safeRealpathSync(agent.workspace) || agent.workspace);
     }
   } catch {
-    // Ignore invalid OpenClaw config and fall back to ~/.openclaw.
   }
 
   cachedOpenClawWorkspaces = workspaces;
   return workspaces;
 }
 
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
 
-/** Compute the SHA-256 hex digest of a string. */
 function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-/** Stat a path, returning null on any error. */
 function safeStatSync(p: string): fs.Stats | null {
   try {
     return fs.statSync(p);
@@ -4875,7 +3746,6 @@ function safeStatSync(p: string): fs.Stats | null {
   }
 }
 
-/** Resolve a path to its real path, returning null on any error. */
 function safeRealpathSync(p: string): string | null {
   try {
     return fs.realpathSync(p);
@@ -4884,7 +3754,6 @@ function safeRealpathSync(p: string): string | null {
   }
 }
 
-/** Extract meaningful user text from a Claude JSONL user event, skipping meta and local-command messages. */
 function extractClaudeUserText(parsed: any): string | undefined {
   if (parsed.isMeta === true) return undefined;
 
@@ -4905,19 +3774,10 @@ function extractClaudeUserText(parsed: any): string | undefined {
   return text;
 }
 
-/** Check whether a message is a local-command wrapper rather than real user input. */
 function isLocalCommandMessage(text: string): boolean {
   return /<local-command-caveat>|<bash-(input|stdout|stderr)>/i.test(text);
 }
 
-/**
- * Extract the assistant's own answer text from a Claude JSONL assistant event —
- * the reply text blocks, skipping tool_use/tool_result blocks and an
- * interrupted turn, mirroring {@link extractClaudeUserText}'s filters. Unlike
- * the user side (which keeps only the first text block), a single assistant
- * turn can legitimately carry multiple text blocks around tool calls, so every
- * one is joined.
- */
 function extractClaudeAssistantText(parsed: any): string | undefined {
   const content = parsed.message?.content;
   if (typeof content === 'string') {
@@ -4935,7 +3795,6 @@ function extractClaudeAssistantText(parsed: any): string | undefined {
   return text || undefined;
 }
 
-/** Sum all token usage fields from a Claude assistant message's usage object. */
 function getClaudeUsageTotal(usage: any): number | null {
   if (!usage || typeof usage !== 'object') return null;
   return sumKnownNumbers([
@@ -4946,7 +3805,6 @@ function getClaudeUsageTotal(usage: any): number | null {
   ]);
 }
 
-/** Extract text from Codex message content blocks; the caller classifies user scaffolding. */
 function extractCodexMessageText(contentBlocks: any, role: 'user' | 'assistant'): string | undefined {
   if (!Array.isArray(contentBlocks)) return undefined;
 
@@ -4961,23 +3819,16 @@ function extractCodexMessageText(contentBlocks: any, role: 'user' | 'assistant')
   return text || undefined;
 }
 
-/** Trim and normalize a version string, returning undefined for empty values. */
 function normalizeVersion(version?: string | null): string | undefined {
   const trimmed = version?.trim();
   return trimmed ? trimmed : undefined;
 }
 
-/** Extract the version number from a managed versions/<agent>/<version>/... path under either repo. */
 export function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?: string): string | undefined {
   if (!sourcePath) return undefined;
 
   const candidates = [sourcePath, safeRealpathSync(sourcePath) || ''];
   const markers = [`/.agents/versions/${agent}/`, `/.agents-system/versions/${agent}/`];
-  // Codex is relocated by CODEX_HOME to `~/.agents/.codex-homes/<version>/`
-  // (shims.ts `codexHomeShimBash`), NOT the `versions/<agent>/<version>/home/…`
-  // layout every other isolated agent uses — so its rollout transcripts live
-  // under `.codex-homes/<version>/sessions/…` and the markers above never match,
-  // leaving `version` NULL and native resume degraded to `/continue` (PHNX-3626).
   if (agent === 'codex') markers.push('/.agents/.codex-homes/');
 
   for (const candidate of candidates) {
@@ -4994,7 +3845,6 @@ export function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?
   return undefined;
 }
 
-/** Resolve the current version of an agent CLI (symlink version or live CLI output, cached). */
 async function getCurrentAgentVersion(agent: SessionAgentId): Promise<string | undefined> {
   const cached = cachedAgentVersions.get(agent);
   if (cached) return cached;
@@ -5009,7 +3859,6 @@ async function getCurrentAgentVersion(agent: SessionAgentId): Promise<string | u
   return promise;
 }
 
-/** Resolve a session's version: embedded in file > extracted from managed path > current CLI version. */
 function resolveSessionVersion(
   agent: SessionAgentId,
   sourcePath: string | undefined,
@@ -5021,7 +3870,6 @@ function resolveSessionVersion(
     || normalizeVersion(currentVersion);
 }
 
-/** Sum all token usage fields from a Codex total_token_usage object. */
 function getCodexTokenCount(totalTokenUsage: any): number | null {
   if (!totalTokenUsage || typeof totalTokenUsage !== 'object') return null;
   return sumKnownNumbers([
@@ -5032,7 +3880,6 @@ function getCodexTokenCount(totalTokenUsage: any): number | null {
   ]);
 }
 
-/** Sum all numeric values in an array, returning null if none are valid numbers. */
 function sumKnownNumbers(values: unknown[]): number | null {
   let total = 0;
   let found = false;
@@ -5046,22 +3893,8 @@ function sumKnownNumbers(values: unknown[]): number | null {
   return found ? total : null;
 }
 
-// ---------------------------------------------------------------------------
-// Time range parsing
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Cursor
-// ---------------------------------------------------------------------------
-// Cursor writes the conversation to
-// projects/<encoded-cwd>/agent-transcripts/<uuid>/<uuid>.jsonl and metadata to
-// chats/<workspace-hash>/<uuid>/meta.json. Discovery deliberately starts from
-// transcripts, then joins metadata by UUID: chat directories with no transcript
-// are empty or abandoned sessions and must not become broken zero-event rows.
-// Routine archives may contain only the transcript; those remain browsable with
-// file timestamps and without guessed cwd/title metadata.
 
-/** Incrementally re-scan changed Cursor transcript files and upsert into the DB. */
 async function scanCursorIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('cursor');
   const prestat: PreStatEntry[] = [];
@@ -5133,13 +3966,11 @@ function readCursorChatMeta(filePath: string, sessionId: string): any | undefine
     try {
       return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
     } catch {
-      // This workspace hash does not own the session, or its metadata is unreadable.
     }
   }
   return undefined;
 }
 
-/** Parse one Cursor transcript and enrich it with the matching chat meta.json. */
 export function readCursorMeta(
   filePath: string,
   currentVersion?: string,
@@ -5191,14 +4022,7 @@ export function readCursorMeta(
   return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n'), events };
 }
 
-// ---------------------------------------------------------------------------
-// Kimi
-// ---------------------------------------------------------------------------
-// Kimi stores sessions under ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/.
-// Each session has state.json (metadata) and agents/main/wire.jsonl (conversation).
-// A session_index.jsonl at ~/.kimi-code/ maps session IDs to directories.
 
-/** Incrementally re-scan changed Kimi session state.json files and upsert into the DB. */
 async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const filePaths: string[] = [];
   for (const sessionsDir of getAgentSessionDirs('kimi', 'sessions')) {
@@ -5233,9 +4057,6 @@ async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Prom
 
   onProgress?.({ agent: 'kimi', parsed: 0, total: changed.length });
 
-  // Bulk-fetch each changed session's prior wire-parse continuation (offset +
-  // counter bases). A session whose wire.jsonl grew resumes from the offset;
-  // everything else (cold start, truncation) full-parses from byte 0.
   const priorStates = getParserStatesForPaths(changed.map(c => c.filePath));
 
   const scanEntries: ScanEntry[] = [];
@@ -5262,7 +4083,6 @@ async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Prom
   recordScans(touched);
 }
 
-/** Parse a single Kimi session state.json file to extract session metadata. */
 export function readKimiMeta(
   filePath: string,
   priorRow?: { parserState: string | null },
@@ -5284,19 +4104,12 @@ export function readKimiMeta(
 
   const createdAt = typeof state.createdAt === 'string' ? state.createdAt : undefined;
   const updatedAt = typeof state.updatedAt === 'string' ? state.updatedAt : undefined;
-  // Coerce to never-null, the same way every other parser does (Rush/Hermes/Droid/…):
-  // a real createdAt/updatedAt still wins; otherwise fall back to the state.json mtime.
-  // Kimi was the lone parser that could yield `undefined`, which binds NULL into
-  // `timestamp TEXT NOT NULL` and aborts the whole batch index. mtime also matches how
-  // the listing already ranks Kimi (last_activity resolves to the file mtime).
   const stat = safeStatSync(filePath);
   const timestamp = updatedAt || createdAt
     || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
   const shortId = deriveShortId(sessionId, /^session_/);
 
-  // Try to infer project from session directory path
-  // ~/.kimi-code/sessions/<workdir_hash>/session_<uuid>/
   const workDirName = path.basename(path.dirname(sessionDir));
   let project: string | undefined;
   if (workDirName.startsWith('wd_')) {
@@ -5306,9 +4119,6 @@ export function readKimiMeta(
     }
   }
 
-  // Parse wire.jsonl incrementally: resume from the persisted offset + counter
-  // bases when the wire grew, else full-parse from byte 0. The continuation is
-  // persisted on this session's state.json ledger row.
   const prior = parsePriorKimiState(priorRow);
   const { messageCount, tokenCount, outputTokens, newState } = parseKimiWireMetricsIncremental(sessionDir, prior);
 
@@ -5329,12 +4139,6 @@ export function readKimiMeta(
   return { meta, content: lastPrompt || '', parserState: JSON.stringify(newState) };
 }
 
-/**
- * Kimi wire metrics are pure additive counters (messageCount, tokenCount,
- * outputTokens) with NO straddle/dedup state, so the continuation is just those
- * three bases plus the byte `offset` already consumed from wire.jsonl. Resuming
- * from `offset` + adding the appended tail's deltas equals a full parse.
- */
 export interface KimiParserState {
   v: 2;
   offset: number;
@@ -5355,7 +4159,6 @@ function kimiWireUserText(event: any): string | undefined {
   return cleanFirstUserMessage(raw);
 }
 
-/** Fold one parsed Kimi wire event into the additive counters, in place. */
 function applyKimiWireEvent(
   acc: { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string },
   event: any,
@@ -5364,28 +4167,12 @@ function applyKimiWireEvent(
     acc.messageCount++;
     if (!acc.firstUserMessage) acc.firstUserMessage = kimiWireUserText(event);
   } else if (event.type === 'usage.record' && event.usage) {
-    // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
     const u = event.usage;
     acc.tokenCount += (u.inputOther || 0) + (u.output || 0) + (u.inputCacheRead || 0) + (u.inputCacheCreation || 0);
     acc.outputTokens += (u.output || 0);
   }
 }
 
-/**
- * Incrementally parse Kimi's wire.jsonl for message-count and token counters,
- * resuming from a persisted continuation instead of re-reading from byte 0 every
- * scan. Returns the finalized counters and the next {@link KimiParserState} to
- * persist (offset + the three counter bases).
- *
- * Same trailing-line discipline as {@link scanClaudeSessionIncremental}: read
- * only the appended byte range from `prior.offset`, apply ONLY the run of
- * newline-terminated lines (slice at the last `'\n'`), and advance the offset to
- * `prior.offset + consumedBytes`. A complete-but-not-yet-terminated last record
- * is DEFERRED to the next pass; because these counters are additive with no
- * dedup, re-reading such a line would double-count it. FULL parse from byte 0
- * (fresh counters) when there is no prior OR the file shrank below the stored
- * offset (truncation/rewrite).
- */
 export function parseKimiWireMetricsIncremental(
   sessionDir: string,
   prior: KimiParserState | null,
@@ -5394,25 +4181,9 @@ export function parseKimiWireMetricsIncremental(
 
   const stat = safeStatSync(wirePath);
   if (!stat) {
-    // No wire.jsonl (yet): zero counters, offset 0 so a later append is a clean
-    // full parse.
     return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 2, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
   }
 
-  // INCREMENTAL only when a usable prior exists AND the file grew past its
-  // offset; otherwise FULL from byte 0 with fresh counters (cold start OR the
-  // file shrank to/below the offset — a truncation/rewrite).
-  //
-  // No session-identity re-check is needed here (unlike Claude's
-  // claudeSessionIdentityAt / Codex's codexSessionIdentityAt, which guard against
-  // an in-place rewrite dropping a DIFFERENT session at the same path). A Kimi
-  // wire.jsonl is uniquely keyed by its session dir — `.../session_<uuid>/agents/
-  // main/wire.jsonl` (see readKimiMeta: sessionId is `session_<uuid>` and must
-  // start with `session_`) — and Kimi only ever APPENDS to that per-session log.
-  // The path therefore cannot host a different session's transcript, so a
-  // size-grew wire.jsonl is always the same session's append. (A truncation/
-  // rewrite — the only way its bytes could diverge — already shrinks it to/below
-  // the offset and takes the FULL branch above.)
   const canIncrement = prior !== null && stat.size > prior.offset;
   const fromOffset = canIncrement ? prior!.offset : 0;
   const acc = canIncrement
@@ -5422,12 +4193,6 @@ export function parseKimiWireMetricsIncremental(
   let consumedBytes = 0;
   let fd: number | undefined;
   try {
-    // Read ONLY the appended byte range [fromOffset, stat.size) — not the whole
-    // file. readSync from an explicit position keeps this function synchronous
-    // (its callers are sync) while making the disk read + allocation scale with
-    // the appended delta, not total file size, matching scanCodexSessionIncremental
-    // / scanClaudeSessionIncremental. Bytes past the stat'd size are a concurrent
-    // append and are deferred to the next scan.
     const bytesToRead = Math.max(0, stat.size - fromOffset);
     const appended = Buffer.allocUnsafe(bytesToRead);
     if (bytesToRead > 0) {
@@ -5439,7 +4204,6 @@ export function parseKimiWireMetricsIncremental(
         read += n;
       }
       const chunk = read === bytesToRead ? appended : appended.subarray(0, read);
-      // Bytes up to AND INCLUDING the last '\n' are the committed, complete-line run.
       const lastNl = chunk.lastIndexOf(0x0a);
       consumedBytes = lastNl === -1 ? 0 : lastNl + 1;
       if (consumedBytes > 0) {
@@ -5448,17 +4212,14 @@ export function parseKimiWireMetricsIncremental(
           try {
             applyKimiWireEvent(acc, JSON.parse(line));
           } catch {
-            // Malformed line, skip
           }
         }
       }
     }
   } catch {
-    // If wire.jsonl can't be read, keep the accumulated counters (0s on a cold
-    // parse) — graceful degradation, matching the pre-incremental behavior.
   } finally {
     if (fd !== undefined) {
-      try { fs.closeSync(fd); } catch { /* already closed / gone */ }
+      try { fs.closeSync(fd); } catch {  }
     }
   }
 
@@ -5470,12 +4231,6 @@ export function parseKimiWireMetricsIncremental(
   };
 }
 
-/**
- * Parse the prior continuation blob for a changed Kimi session into a usable
- * {@link KimiParserState}, or null when there is none / it is unusable. A blob
- * from a different serialization version is treated as absent so the wire parse
- * falls back to a clean FULL parse rather than resuming against a stale shape.
- */
 function parsePriorKimiState(row: { parserState: string | null } | undefined): KimiParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -5487,14 +4242,6 @@ function parsePriorKimiState(row: { parserState: string | null } | undefined): K
   }
 }
 
-/**
- * Scan Grok sessions. Grok stores one directory per session under
- * ~/.grok/sessions/<url-encoded-cwd>/<uuid>/, each holding a summary.json with
- * structured metadata (id, cwd, title, timestamps, message count). Same
- * dir-per-session (L3) shape as Kimi, so it walks two levels and gates the
- * summary.json read through the scan ledger. Before this, Grok had a type slot
- * and a placeholder parser but no scanner, so `agents sessions` never indexed it.
- */
 async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   const currentVersion = await getCurrentAgentVersion('grok');
 
@@ -5554,18 +4301,6 @@ async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Prom
   recordScans(touched);
 }
 
-/**
- * Bounded read of a Grok `chat_history.jsonl` for the genuine full first user
- * turn (PHNX-3621 leftover from #3359). Grok's cheap scan reads only
- * `summary.json` (a LARGE-transcript harness whose full message log is
- * deliberately not parsed on the hot tick), but the first turn is at the START
- * of the log, so a bounded prefix read recovers it without paying the full-file
- * cost. Production logs lead with a `type:system` record, then a huge
- * `<user_info>` user dump (no `synthetic_reason`), then a `synthetic_reason`
- * reminder, then the originating turn at `prompt_index: 0` wrapped in
- * `<user_query>`. Skip that scaffolding and prefer `prompt_index` when present.
- * Returns undefined when no genuine user turn appears within the budget.
- */
 function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): string | undefined {
   const historyPath = path.join(sessionDir, 'chat_history.jsonl');
   let fd: number | undefined;
@@ -5583,7 +4318,6 @@ function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): strin
       read += n;
     }
     const chunk = buf.subarray(0, read).toString('utf-8');
-    // Drop a trailing partial line so we never parse half a JSON record.
     const lastNl = chunk.lastIndexOf('\n');
     const complete = lastNl === -1 ? chunk : chunk.slice(0, lastNl);
     let firstGenuine: string | undefined;
@@ -5608,11 +4342,10 @@ function readGrokFirstUserMessage(sessionDir: string, maxBytes = 262_144): strin
   } catch {
     return undefined;
   } finally {
-    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already closed / gone */ } }
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch {  } }
   }
 }
 
-/** Parse a single Grok session summary.json into session metadata. */
 export function readGrokMeta(
   filePath: string,
   currentVersion?: string,
@@ -5625,7 +4358,6 @@ export function readGrokMeta(
   }
 
   const sessionDir = path.dirname(filePath);
-  // The uuid directory name is the canonical id; summary.info.id mirrors it.
   const sessionId =
     (typeof summary?.info?.id === 'string' && summary.info.id) || path.basename(sessionDir);
   if (!sessionId) return null;
@@ -5636,9 +4368,6 @@ export function readGrokMeta(
     (typeof summary?.session_summary === 'string' && summary.session_summary.trim()) ||
     undefined;
 
-  // created_at is the session start; last_active_at/updated_at is the latest
-  // activity. Coerce timestamp to never-null (NOT NULL column) via the file mtime,
-  // matching how the other dir-per-session parsers (Kimi) fall back.
   const createdAt = typeof summary?.created_at === 'string' ? summary.created_at : undefined;
   const lastActivity =
     (typeof summary?.last_active_at === 'string' && summary.last_active_at) ||
@@ -5655,11 +4384,6 @@ export function readGrokMeta(
         ? summary.num_messages
         : undefined;
 
-  // Grok records its managed home in summary.grok_home
-  // (…/versions/grok/<version>/home/.grok) — recover the version from it. The
-  // value is written by the Grok CLI in the writing host's native separators, so
-  // a Windows-authored summary is backslash-separated; normalize to `/` before
-  // matching or the version never resolves on Windows (RUSH-2286).
   let embeddedVersion: string | undefined;
   if (typeof summary?.grok_home === 'string') {
     embeddedVersion = summary.grok_home.replace(/\\/g, '/').match(/versions\/grok\/([^/]+)\//)?.[1];
@@ -5683,9 +4407,4 @@ export function readGrokMeta(
   return { meta, content: topic || '' };
 }
 
-// parseTimeFilter moved to ./relative-time.js — a leaf module — so a caller that
-// only needs the duration parser does not pull this file's `../sqlite.js` import
-// (and Node's SQLite ExperimentalWarning on stderr) into its module graph.
-// Re-exported so every existing importer keeps working unchanged. Imported too,
-// because a bare re-export does not bind the name for this file's own callers.
 export { parseTimeFilter } from './relative-time.js';

@@ -1,11 +1,3 @@
-/**
- * SQLite-backed session index and full-text search.
- *
- * Stores session metadata and user-prompt text in a WAL-mode SQLite database
- * at ~/.agents/.history/sessions/sessions.db. Provides incremental upsert, scan-stamp
- * ledger (mtime/size tracking to skip unchanged files), FTS5 search with
- * BM25 ranking, and label-first search for /rename'd sessions.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,52 +30,12 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-/** Current schema version; bumped when migrations are added. Exported so tests
- * assert against the constant instead of hardcoding a number that every bump
- * then has to chase (docs/sessions.md calls the constant the source of truth). */
 export const SCHEMA_VERSION = 51;
 
-/**
- * Bump to force the content extractor (assistant-answer text, alongside the
- * user-prompt text every harness already accumulates) to re-derive on every
- * session's next scan. Unlike RESOURCE_INDEX_VERSION this is read by the
- * change-detector itself (`filterChangedEntries`, discover.ts) via
- * `scan_ledger.extractor_version` — a stored version below this one is treated
- * as "changed" even when the file's (mtime, size) are unchanged, so bumping it
- * here backfills every existing session's assistant text on its next scan
- * without a `DELETE FROM scan_ledger` (which would also throw away the
- * resumable parser_state/content_text for Claude/Codex).
- *
- * v3 (PHNX-3621) invalidates OpenCode rows that merged v2 stamped before its
- * genuine first-user-turn extractor was added.
- * v4 (PHNX-3621 leftover) invalidates Grok rows stamped before the bounded
- * chat_history.jsonl prefix read filled firstUserMessage.
- * v5 (PHNX-3939) restores first-meta Codex fork ownership, including cold files.
- * v6 (PHNX-3999) invalidates rows whose stored `label` is harness scaffolding — a
- * `<bash-input>` shell echo, a `<command-name>` wrapper, a bare `/clear` — which
- * `cleanGeneratedSessionLabel` now rejects. The label is written at index time, so
- * without this bump every already-indexed session keeps showing the junk title
- * until its transcript happens to change.
- */
 export const CONTENT_INDEX_VERSION = 6;
 
-/**
- * Bump to force `agents sessions backfill resources` to re-derive every
- * session's skill/slash-command tallies on its next run (resource_scan_ledger
- * rows with a lower version are treated as stale — the same mechanism
- * TOOL_INDEX_VERSION gives the tool backfill).
- */
 const RESOURCE_INDEX_VERSION = 1;
 
-/**
- * Canonicalize a file path for use as a scan_ledger key. The same physical
- * session file is reachable via multiple aliases — `~/.claude/projects/x.jsonl`
- * (when `~/.claude` is a symlink to a versioned home) and
- * `~/.agents/versions/claude/<v>/home/.claude/projects/x.jsonl`. Keying the
- * ledger by the raw path means switching between these aliases (e.g. via
- * `agents use`) misses the cache and forces a full re-parse. Realpath collapses
- * all aliases to one stable key.
- */
 function canonicalLedgerKey(filePath: string): string {
   if (!filePath) return filePath;
   try {
@@ -93,17 +45,8 @@ function canonicalLedgerKey(filePath: string): string {
   }
 }
 
-// BM25 column weights for session_text: label > topic > project > content >
-// assistant. Higher weights make matches in that column rank higher.
-// `assistant` (the agent's own answers) is weighted BELOW `content` (the
-// user's prompts): a user's own words are a stronger signal of "this is the
-// session I meant" than the agent echoing/paraphrasing them back, so an
-// assistant-only match still surfaces but ranks behind an equivalent
-// user-prompt match.
-/** BM25 column weights for FTS5: label > topic > project > content > assistant. */
 const BM25_WEIGHTS = [5.0, 2.0, 1.5, 1.0, 0.5] as const;
 
-/** DDL for the sessions database (tables, indexes, FTS5 virtual table). */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -578,31 +521,16 @@ CREATE TABLE IF NOT EXISTS session_remote_preview_cache (
 CREATE INDEX IF NOT EXISTS idx_remote_preview_cache_fetched ON session_remote_preview_cache(fetched_at DESC);
 `;
 
-/**
- * Bumping this invalidates every cached facet row without touching the schema
- * version, so a change to the extraction logic (a new metric, a corrected bucket)
- * re-derives on the next `agents insights` instead of silently reporting stale
- * numbers alongside fresh ones. Same role as RESOURCE_INDEX_VERSION.
- */
-/** Bump when facet extraction changes so cached rows recompute (shell-command-by-binary v7). */
 export const INSIGHTS_EXTRACTOR_VERSION = 7;
-/** Bump when classifyTopic's output changes so cached topics recompute (human task taxonomy v2). */
 export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
-// Bumped to 2 (PHNX-2973): the digest now carries `changedFiles` (per-file
-// paths). Bumping invalidates v1 cache rows so a fresh recompute populates the
-// new field instead of serving a stale digest that predates it.
 const PREVIEW_EXTRACTOR_VERSION = 3;
-/** Bump when classifyPhenotype's output changes so cached phenotypes recompute (PHNX-3327 v1). */
 export const SESSION_PHENOTYPE_EXTRACTOR_VERSION = 1;
-/** Bump when the summarizer output shape changes so cached summaries recompute (PHNX-3939 v1). */
 export const SESSION_SUMMARY_EXTRACTOR_VERSION = 1;
 
-/** Raw row shape returned from the sessions table. */
 interface SessionRow {
   id: string;
   short_id: string;
   agent: string;
-  /** Custom harness/profile name; NULL for a native host run (PHNX-2935). */
   harness: string | null;
   origin: string | null;
   routine_name: string | null;
@@ -643,12 +571,6 @@ interface SessionRow {
   worktree_slug: string | null;
   ticket_id: string | null;
   spawned_team: string | null;
-  /**
-   * Fan-out the session left behind. NULL is load-bearing and distinct from 0:
-   * NULL means "this row predates the column / the harness cannot report it",
-   * 0 means "scanned, found none". Renders omit the segment for both, so
-   * neither can be mistaken for a truthful "nothing is running".
-   */
   sub_agent_count: number | null;
   background_shell_count: number | null;
   plan: string | null;
@@ -659,109 +581,54 @@ interface SessionRow {
   linear_project_url: string | null;
   actor: string | null;
   initiated_by: string | null;
-  /** Phoenix id of the actor, joined write-once from the actor sidecar (PHNX-3798). */
   phoenix_id: string | null;
-  /** NULL means "not yet computed" (a row scanned before this field existed) — see rowToMeta. */
   used_browser: number | null;
   used_computer: number | null;
-  /**
-   * Epoch ms the transcript file was first confirmed gone while content survived
-   * (RUSH-2436); NULL = live/never archived. Optional because the scanner upsert
-   * write-payload never sets it — the INSERT column list omits it, so a rescan
-   * preserves the sticky stamp; it is written only by querySessions.
-   */
   archived_at?: number | null;
-  /** Epoch ms last written from a peer's fleet session mirror (PHNX-3792); NULL for a local row. */
   mirror_synced_at?: number | null;
   mirror_source?: string | null;
-  /**
-   * Daemon-generated title (PHNX-3797) and the {@link sessionTitleSourceKey} of
-   * the user text it was derived from. Optional for the same reason as
-   * `archived_at`: the scanner's upsert payload never names these columns, so a
-   * rescan preserves them and only the titler writes them.
-   */
   generated_title?: string | null;
   generated_title_key?: string | null;
   generated_title_at?: number | null;
 }
 
-/** File stat snapshot used to detect changes between scan runs. */
 export interface ScanStamp {
   fileMtimeMs: number;
   fileSize: number;
   scannedAt?: number;
-  /**
-   * `scan_ledger.extractor_version` as of the last scan, when read from the
-   * ledger (undefined for a freshly-computed stamp that hasn't been persisted
-   * yet). Compared against {@link CONTENT_INDEX_VERSION} by
-   * `filterChangedEntries` (discover.ts) to force a re-extract independent of
-   * (mtime, size).
-   */
   extractorVersion?: number | null;
 }
 
-/** Filter and pagination options for querying the sessions table. */
 export interface QueryOptions {
   agent?: SessionAgentId;
   agents?: SessionAgentId[];
   origin?: 'cli' | 'routine';
   version?: string;
   cwd?: string;
-  /** Match any session whose cwd equals this or is a descendant of it. */
   cwdPrefix?: string;
   project?: string;
-  /** Only sessions recorded on this machine (host), case-insensitive. */
   machine?: string;
-  /** Match the full session id or short id, case-insensitively (exact). */
   idExact?: string;
-  /** Match sessions whose id or short id begins with this (case-insensitive prefix). */
   idPrefix?: string;
   sinceMs?: number;
   untilMs?: number;
   limit?: number;
-  /** Drop rows flagged as team-origin before LIMIT is applied. */
   excludeTeamOrigin?: boolean;
-  /** Keep only team-origin rows (for hidden-count queries). */
   onlyTeamOrigin?: boolean;
-  /**
-   * Column to order by, all descending. 'timestamp' (default) sorts newest
-   * first; 'cost' and 'duration' put the priciest / longest sessions on top,
-   * with NULLs sorted last so unpriced rows never crowd out real data.
-   */
   sortBy?: 'timestamp' | 'cost' | 'duration';
-  /** Internal warm-cache path; callers must validate the small final result set. */
   skipExistenceCheck?: boolean;
-  /**
-   * Only sessions that invoked this skill (#12), joined against
-   * session_resource_usage.kind='skill'. Matches either the full stored name
-   * (bare, or `plugin:name` for a plugin skill) or just the short name after
-   * the colon — `--skill design` finds a session that used `rush:design`.
-   */
   skill?: string;
-  /**
-   * Only sessions that used a skill or slash-command owned by this plugin
-   * (#12), joined against session_resource_usage.plugin.
-   */
   plugin?: string;
 }
 
 let dbInstance: Database.Database | null = null;
 
-/**
- * Apply schema migrations from `fromVersion` → SCHEMA_VERSION. The new
- * `CREATE IF NOT EXISTS` at SCHEMA doesn't help when column sets or FTS
- * column definitions change — those need explicit migration here.
- */
 function migrateSchema(db: Database.Database, fromVersion: number): void {
   if (fromVersion < 2) {
-    // v1 → v2: add `label` column to sessions and switch session_text from
-    // single `content` column to multi-column (label, topic, project, content).
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'label')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN label TEXT`);
     }
-    // FTS5 virtual tables can't be ALTERed — drop and recreate. Scan ledger
-    // is cleared so every file gets re-parsed on next run, repopulating FTS5.
     db.exec(`
       DROP TABLE IF EXISTS session_text;
       CREATE VIRTUAL TABLE session_text USING fts5(
@@ -776,15 +643,9 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
   if (fromVersion < 3) {
-    // v2 → v3: topic extraction now strips team-spawn wrapper prompts
-    // (HEADLESS PLAN MODE prefix + summary suffix). Force a rescan so cached
-    // topics like "You are running in HEADLESS PLAN MODE..." get re-extracted.
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 4) {
-    // v3 → v4: team-origin is now captured structurally from the JSONL
-    // `entrypoint` field at scan time. Add the column and force a rescan so
-    // every existing Claude session gets its flag populated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'is_team_origin')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN is_team_origin INTEGER DEFAULT 0`);
@@ -792,16 +653,9 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 5) {
-    // v4 → v5: ledger is now keyed by realpath instead of the as-discovered
-    // path, so symlink/version-relative aliases for the same physical file
-    // collapse to one row. Old aliased rows are dropped — next scan will
-    // repopulate under canonical keys.
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 6) {
-    // v5 → v6: cost ($) and wall-clock duration are now computed at scan time
-    // from raw per-model token usage. Add the columns and force a full rescan
-    // so every existing session gets its cost_usd / duration_ms populated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'cost_usd')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN cost_usd REAL`);
@@ -812,9 +666,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 7) {
-    // v6 → v7: the session-state engine now persists durable signals (PR opened,
-    // worktree, tracker ticket) at scan time. Add the columns and force a full
-    // rescan so every existing session gets them populated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'pr_url')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_url TEXT`);
     if (!cols.some(c => c.name === 'pr_number')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_number INTEGER`);
@@ -823,30 +674,16 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 8) {
-    // v7 → v8: the listing now sorts and labels by last-activity (last message
-    // time) instead of creation time. Add the column, seed it to `timestamp` so
-    // no row sorts as NULL before the rescan lands, then force a full rescan so
-    // every session gets its true last_activity (from lastTsMs) repopulated.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'last_activity')) db.exec(`ALTER TABLE sessions ADD COLUMN last_activity TEXT`);
     db.exec(`UPDATE sessions SET last_activity = timestamp WHERE last_activity IS NULL`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
   if (fromVersion < 9) {
-    // v8 → v9: `agents run --name <slug>` gives a run a durable launch handle,
-    // resolvable via `agents sessions <name>`. Additive column; NO rescan — the
-    // name is set at run time (host sidecar / run-name sidecar), not parsed from
-    // transcripts, so existing rows stay valid with a NULL name.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'name')) db.exec(`ALTER TABLE sessions ADD COLUMN name TEXT`);
   }
   if (fromVersion < 10) {
-    // v9 → v10: `name` and `label` unify into a single `label`. `--name` now
-    // SEEDS the label at launch (refined later by an agent-generated title)
-    // instead of living in a separate immutable `name` column. Fold any existing
-    // name into label where the label is empty, mirror it into the FTS row, then
-    // drop the redundant column. Seeds re-apply from the run-name sidecars every
-    // scan (seedLabelsFromNames), so no rescan is required.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (cols.some(c => c.name === 'name')) {
       db.exec(`UPDATE sessions SET label = name
@@ -857,29 +694,18 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     }
   }
   if (fromVersion < 11) {
-    // v10 → v11: the Claude scanner now captures the ExitPlanMode plan markdown
-    // at scan time so `agents sessions --json` can surface it without forcing
-    // consumers (the Factory NEEDS-YOU panel) to re-read raw JSONL. Additive
-    // column; rescan to backfill.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'plan')) db.exec(`ALTER TABLE sessions ADD COLUMN plan TEXT`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
 
   if (fromVersion < 12) {
-    // v11 → v12: `output_tokens` — the real generated-token count, kept separate
-    // from `token_count` (which sums cache-read/-write and so is dominated by
-    // cheap re-counted context). This is the honest "output" metric powering
-    // `agents insights output`. Additive column; rescan to backfill from transcripts.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'output_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
 
   if (fromVersion < 13) {
-    // v12 → v13: routine runs archive their sandboxed transcript into the run
-    // directory and get indexed as origin='routine', linked by routine_name and
-    // routine_run_id. Existing rows are normal CLI-origin sessions.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'origin')) db.exec(`ALTER TABLE sessions ADD COLUMN origin TEXT DEFAULT 'cli'`);
     if (!cols.some(c => c.name === 'routine_name')) db.exec(`ALTER TABLE sessions ADD COLUMN routine_name TEXT`);
@@ -889,12 +715,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 14) {
-    // v13 → v14: the discovery scan now short-circuits the readdir + per-file
-    // stat of leaf transcript dirs whose (mtime, entry_count) is unchanged,
-    // caching that snapshot in the new `dir_ledger` table. Create it, and clear
-    // scan_ledger so the first post-upgrade scan does a clean full walk — that
-    // walk seeds BOTH ledgers correctly, so a cold/empty dir_ledger degrades to
-    // today's full behavior.
     db.exec(`
       CREATE TABLE IF NOT EXISTS dir_ledger (
         dir_path TEXT PRIMARY KEY,
@@ -907,11 +727,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 15) {
-    // v14 → v15: the Claude scan becomes resumable (B-1). scan_ledger gains a
-    // `parser_state` continuation blob (offset + accumulator snapshot) and a
-    // `content_text` cache of the accumulated user doc. Add both columns, then
-    // clear scan_ledger so the first post-upgrade scan does a clean full walk
-    // that reseeds the cursor from byte 0.
     const cols = db.prepare(`PRAGMA table_info(scan_ledger)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'parser_state')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN parser_state TEXT`);
     if (!cols.some(c => c.name === 'content_text')) db.exec(`ALTER TABLE scan_ledger ADD COLUMN content_text TEXT`);
@@ -919,21 +734,10 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 16) {
-    // v15 → v16: repair rows poisoned by the empty-shortId bug (now fixed at the
-    // source in deriveShortId). A session id that was only a known prefix — a bare
-    // `session_` dir, an id of exactly `api-` or `ses_` — derived to '' via
-    // `id.replace(prefix, '').slice(0, 8)`, passed the `short_id TEXT NOT NULL`
-    // column (empty string is not NULL), yet matched nothing in the
-    // `short_id LIKE ?` picker lookups. The parser no longer produces '', but
-    // existing rows don't self-heal: an empty short_id is not re-parsed unless its
-    // file changes, and an orphaned row (file gone) never re-parses at all. Repair
-    // in place — `substr(id, 1, 8)` is non-empty because `id` is the non-empty
-    // primary key — so every corrupt row becomes addressable. No rescan needed.
     db.exec(`UPDATE sessions SET short_id = substr(id, 1, 8) WHERE short_id IS NULL OR short_id = ''`);
   }
 
   if (fromVersion < 17) {
-    // v16 → v17 (main): todos / recent dirs / linear project metadata.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'todos')) db.exec(`ALTER TABLE sessions ADD COLUMN todos TEXT`);
     if (!cols.some(c => c.name === 'recent_directories_touched')) db.exec(`ALTER TABLE sessions ADD COLUMN recent_directories_touched TEXT`);
@@ -943,7 +747,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 18) {
-    // v17 → v18: persist origin machine for smart-launch affinity GROUP BY machine.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'machine')) {
       db.exec(`ALTER TABLE sessions ADD COLUMN machine TEXT`);
@@ -956,70 +759,42 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
       .all() as Array<{ id: string; agent: string; file_path: string }>;
     const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
-    // migrateSchema runs inside getDB's schema transaction, so these writes
-    // deliberately share that transaction instead of opening a nested one.
     for (const row of rows) {
       upd.run(machineForSessionFile(row.file_path, row.agent), row.id);
     }
   }
 
   if (fromVersion < 19) {
-    // v18 → v19: actor provenance (RUSH-2018) — who initiated the session and
-    // the actor's kind. Populated at write time from the resolved actor (the
-    // pid-registry/spawn path), not derivable from the transcript, so there is
-    // no ledger wipe here: a rescan can't backfill these, and forcing a full
-    // re-parse would be pure churn. Existing rows stay NULL until re-created.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'actor')) db.exec(`ALTER TABLE sessions ADD COLUMN actor TEXT`);
     if (!cols.some(c => c.name === 'initiated_by')) db.exec(`ALTER TABLE sessions ADD COLUMN initiated_by TEXT`);
   }
 
   if (fromVersion < 20) {
-    // v19 → v20: persist the transcript's model for the static session list.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'model')) db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 
   if (fromVersion < 21) {
-    // v20 → v21: persist the team a session SPAWNED (`agents teams create/add`).
-    // The value was already derived at scan time (discover.ts detectSpawnedTeam)
-    // and set on SessionMeta, but had no column — so it was dropped at the write
-    // and no consumer ever saw it. Wipe BOTH ledgers, not just scan_ledger: with
-    // dir_ledger intact, collectChangedFilesInLeafDirs treats every non-live-root
-    // dir as unchanged and derives its hot set from the scan stamps just deleted,
-    // so archived dirs would never be re-parsed and would stay NULL forever.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'spawned_team')) db.exec(`ALTER TABLE sessions ADD COLUMN spawned_team TEXT`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 
   if (fromVersion < 22) {
-    // v21 → v22: persist the transcript's aggregate tool-call count.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'tool_call_count')) db.exec(`ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 
   if (fromVersion < 23) {
-    // v22 → v23: persist usedBrowser/usedComputer (#11) so the sessions picker
-    // preview can trust a positive detection instead of re-deriving it from a
-    // transcript regex on every render. Computed from a sessionId-scoped read
-    // of the events log (see detectToolUsage), not from the parsed transcript,
-    // so no ledger wipe is needed here — a rescan re-derives them regardless.
-    //
-    // Deliberately NO DEFAULT (NULL on ALTER, for every pre-existing row):
-    // NULL means "not yet computed by this scanner" (a legacy row), distinct
-    // from a real, computed 0/false.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'used_browser')) db.exec(`ALTER TABLE sessions ADD COLUMN used_browser INTEGER`);
     if (!cols.some(c => c.name === 'used_computer')) db.exec(`ALTER TABLE sessions ADD COLUMN used_computer INTEGER`);
   }
 
   if (fromVersion < 24) {
-    // v23 → v24: session_resource_usage (#12) — skill/slash-command usage per
-    // session, joined against the currently-installed resource/plugin for
-    // provenance. No ledger wipe: writeResourceUsage() owns this table.
     db.exec(`
       CREATE TABLE IF NOT EXISTS session_resource_usage (
         session_id TEXT NOT NULL,
@@ -1038,9 +813,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 25) {
-    // v24 → v25: tool-call evidence uses an independent ledger. Do not clear
-    // scan_ledger or dir_ledger: normal session listing stays warm, while tool
-    // history is filled once on demand.
     db.exec(`
       CREATE TABLE IF NOT EXISTS tool_calls (
         call_key TEXT PRIMARY KEY,
@@ -1090,8 +862,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 26) {
-    // v25 → v26: make append accounting O(changed calls), including empty
-    // deltas, instead of reading every historical evidence row per append.
     const callCols = db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>;
     if (!callCols.some((column) => column.name === 'evidence_bytes')) {
       db.exec(`ALTER TABLE tool_calls ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
@@ -1100,16 +870,10 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!ledgerCols.some((column) => column.name === 'evidence_bytes')) {
       db.exec(`ALTER TABLE tool_scan_ledger ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
     }
-    // The first tool schema existed only in prerelease development builds. Force its tool
-    // evidence through one bounded rebuild rather than trusting zeroed totals.
     db.exec(`DELETE FROM tool_scan_ledger`);
   }
 
   if (fromVersion < 27) {
-    // v26 → v27: the original unicode word tokenizer could not prefilter the
-    // substring semantics promised by input/output/error queries. Rebuild only
-    // the derived FTS table from already-redacted call rows; transcripts and
-    // both scan ledgers remain warm.
     db.exec(`
       DROP TABLE IF EXISTS tool_call_text;
       CREATE VIRTUAL TABLE tool_call_text USING fts5(
@@ -1127,9 +891,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 28) {
-    // v27 → v28: retain every static program occurrence instead of only the
-    // distinct program set. The source transcript is rebuilt only by the
-    // explicit tools backfill; normal session and directory ledgers stay warm.
     db.exec(`
       CREATE TABLE IF NOT EXISTS tool_program_occurrences (
         call_key TEXT NOT NULL,
@@ -1145,9 +906,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 29) {
-    // v28 → v29: coverage and query planning address the independent tool
-    // ledger by session id. Rebuild only this derived ledger so a tool query
-    // never has to resolve or stat transcript paths.
     db.exec(`
       DROP TABLE tool_scan_ledger;
       CREATE TABLE tool_scan_ledger (
@@ -1164,9 +922,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 30) {
-    // v29 → v30: prerelease tool-index builds temporarily used schema versions
-    // later owned by independent main migrations. Repair from the physical
-    // schema because a v29 marker alone cannot prove these columns are present.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
     );
@@ -1182,10 +937,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 31) {
-    // v30 → v31: independent ledger for the explicit resource-usage backfill
-    // (agents sessions backfill resources). Do NOT wipe scan_ledger — normal
-    // session listing stays warm; historical resource rows are filled once on
-    // demand, exactly like the tool-index ledger (v25).
     db.exec(`
       CREATE TABLE IF NOT EXISTS resource_scan_ledger (
         session_id TEXT PRIMARY KEY,
@@ -1200,9 +951,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 32) {
-    // v31 → v32: persist the effective managed launch mode so resume can
-    // restore the same permission boundary instead of falling back to a CLI
-    // default that may be more or less permissive.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
     );
@@ -1210,17 +958,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 33) {
-    // v32 → v33: attribute each Claude session to the account that produced it.
-    // Until now `account` held ONE email resolved process-globally and stamped on
-    // every row of a scan, so a machine with several signed-in accounts reported all
-    // of its history under whichever resolved first.
-    //
-    // Do NOT wipe scan_ledger. Attribution is a pure function of (file_path,
-    // version) — both already stored — so existing rows are repaired in place with
-    // no transcript re-parsed. Adding `DELETE FROM scan_ledger` here to match the
-    // other migrations would force a full re-parse of every indexed transcript to
-    // recompute something derivable from two columns. The v31 migration sets the
-    // same precedent.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
     );
@@ -1231,26 +968,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 34) {
-    // v33 -> v34: claude-opus-5 and claude-sonnet-5 were missing from the pricing
-    // table. `getModelPricing` matches on a dash-bounded prefix, so neither could fall
-    // back to its Claude 4 entry: both resolved to null and every session using them
-    // priced to $0 -- silently, because an unpriced model contributes nothing rather
-    // than raising. On one real index that was 526 sessions, 478 of them the current
-    // default model.
-    //
-    // Adding the prices alone fixes nothing already indexed: cost_usd is computed at
-    // scan time, and the scanner skips any transcript whose (file_mtime_ms, file_size)
-    // is unchanged. Nor can those rows be repaired in place -- the row stores
-    // token_count and output_tokens, not the uncached-input / cache-read / cache-write
-    // split the price table needs -- so the figure has to come from re-reading the
-    // transcript.
-    //
-    // Flush ONLY the affected transcripts, not the whole ledger. A blanket
-    // `DELETE FROM scan_ledger` (what v5 -> v6 did when cost was introduced) would
-    // re-parse every session on the next scan and break the contract the other
-    // migrations here are tested against: adding a column must not invalidate warm
-    // session ledgers. Scoping it to the rows that actually mispriced keeps every
-    // other ledger entry warm and still guarantees the numbers correct themselves.
     db.exec(`
       DELETE FROM scan_ledger
       WHERE file_path IN (
@@ -1263,36 +980,10 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 35) {
-    // v34 -> v35: the default listing sort was `ORDER BY IFNULL(last_activity,
-    // timestamp) DESC` — wrapping the column in IFNULL() makes SQLite unable to
-    // satisfy it from idx_sessions_last_activity, so every list/resume query did
-    // a full table sort instead of an index walk (RUSH-2211). Every upsert path
-    // already writes a non-NULL last_activity (resolveLastActivity falls back to
-    // `timestamp`, itself NOT NULL) — the only rows that can still be NULL here
-    // are ones written before the v8 migration that somehow slipped the backfill,
-    // or seeded directly by a test. Backfill them so the column is unconditionally
-    // NOT NULL, then querySessions can sort on the bare column and use the index.
     db.exec(`UPDATE sessions SET last_activity = timestamp WHERE last_activity IS NULL`);
   }
 
   if (fromVersion < 36) {
-    // v35 -> v36: make the tool index incremental, and stop paying a full FTS
-    // scan per deleted call.
-    //
-    // (a) tool_scan_ledger gains a resume point (parser_state + parsed_offset).
-    //     Existing rows get NULLs, which read as "no resume point": the next
-    //     scan of each session re-reads it once from byte 0 and records a resume
-    //     point, so every scan after that is incremental. No ledger is wiped.
-    //
-    // (b) tool_call_text is rebuilt so its rowid mirrors tool_calls.rowid. The
-    //     old rows were inserted with FTS5-assigned rowids and are only
-    //     addressable by the UNINDEXED call_key, i.e. a full index scan per
-    //     delete. There is no ALTER for that, and the rowids cannot be repaired
-    //     in place, so the table is dropped and repopulated from tool_calls --
-    //     the same non-destructive derived-table rebuild v27 did (the source of
-    //     truth is tool_calls, which is untouched). The rebuild also lands the
-    //     content as one merged segment, which is the compaction
-    //     optimizeSessionSearchIndex would otherwise have to do afterwards.
     const ledgerCols = new Set(
       (db.prepare(`PRAGMA table_info(tool_scan_ledger)`).all() as Array<{ name: string }>)
         .map((column) => column.name),
@@ -1316,14 +1007,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 37) {
-    // v36 -> v37: persist the burn SPLIT (uncached input / cache-read /
-    // cache-write) and a second "no-cache" cost per session, so `agents insights output`
-    // can report the token split and a --pricing no-cache scenario (RUSH-2287).
-    // These are new nullable columns — do NOT flush scan_ledger (adding a column
-    // must keep warm session ledgers warm, the contract the v33->v34 note above
-    // states). Pre-upgrade rows stay NULL for the split until their transcript is
-    // re-scanned; `agents insights output` reports the split only where it is present, so
-    // an absent split reads as "not available for this session", never as zero.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1334,23 +1017,11 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 38) {
-    // v37 -> v38: archived_at (RUSH-2436). Makes the local DB authoritative for
-    // content: a session whose transcript file is gone but whose user turns still
-    // live in session_text is kept (flagged archived) instead of dropped from
-    // listings. New nullable column, so no ledger flush — it is populated lazily
-    // by querySessions the first time it confirms a scanned file is gone.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === 'archived_at')) db.exec(`ALTER TABLE sessions ADD COLUMN archived_at INTEGER`);
   }
 
   if (fromVersion < 39) {
-    // v38 -> v39: durable tool-session metadata (RUSH-2549). Browser task identity
-    // lived only in the daemon's tasks.json, which is rewritten from the live task
-    // map -- so stopping a task erased the link to the agent session that drove it
-    // and every finished task listed as "unlinked". Computer-use had the identity
-    // right but wrote it to the 7-day event ledger, so its history expired instead.
-    // Both now persist metadata here. Pure additions, so no ledger flush: nothing
-    // already indexed is invalidated, and the tables populate going forward.
     db.exec(`
       CREATE TABLE IF NOT EXISTS browser_sessions (
         task TEXT NOT NULL,
@@ -1389,19 +1060,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 40) {
-    // v39 -> v40: persist the fan-out a session left behind — sub-agents spawned
-    // and shells backgrounded (RUSH-3091/3095). Both were recomputed per render
-    // from the transcript, so a REMOTE or unindexed row (rendered from
-    // SessionMeta alone by sessions-picker's formatMetaOnlyBody, which has no
-    // events to derive from) showed neither. Columns are what make them
-    // renderable there.
-    //
-    // New nullable columns, so no ledger flush — the v33->v34 contract that
-    // adding a column keeps warm session ledgers warm. Pre-upgrade rows stay
-    // NULL until re-scanned, and NULL is deliberately distinct from 0: NULL is
-    // "not computed / harness cannot report it", 0 is "scanned, none found".
-    // The renders omit the segment for both, so neither can be misread as a
-    // positive "nothing is running" claim.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1412,13 +1070,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 41) {
-    // v40 -> v41: persist the custom-harness / profile name a run was launched
-    // as (PHNX-2935). Transcript discovery still keys `agent` on the HOST
-    // (the file lives under the host's session dir), so without this column
-    // `agents sessions` cannot tell `agents run deepseek` from a native claude
-    // run. Additive, no ledger flush — the name is launch metadata joined from
-    // the actor sidecar, not parsed from the transcript. Pre-upgrade rows stay
-    // NULL (native / unknown) until a sidecar-backed rescan fills them.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1426,20 +1077,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 42) {
-    // v41 -> v42: index the agent's ANSWERS, not just the user's prompts.
-    // session_text gains an `assistant` column (own FTS5 column, own lower
-    // BM25 weight — see BM25_WEIGHTS) and scan_ledger gains `extractor_version`
-    // so the change-detector can force a re-extract independent of
-    // (mtime, size). FTS5 can't ALTER a virtual table's column set, but unlike
-    // v1->v2 (which dropped the table and forced a blind full rescan of
-    // everything), the existing label/topic/project/content in every row is
-    // still exactly right — only `assistant` is missing. Rename the old table
-    // out of the way, create the new 6-column one, and copy the old rows back
-    // in (assistant defaults to '' until the extractor_version lever backfills
-    // it on that row's next scan) — search over label/topic/project/content
-    // never blacks out for the transient window it takes existing sessions to
-    // get rescanned, which can be a long time for a session whose transcript
-    // is otherwise cold.
     db.exec(`ALTER TABLE session_text RENAME TO session_text_v41`);
     db.exec(`
       CREATE VIRTUAL TABLE session_text USING fts5(
@@ -1462,32 +1099,9 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!ledgerCols.some(c => c.name === 'extractor_version')) {
       db.exec(`ALTER TABLE scan_ledger ADD COLUMN extractor_version INTEGER`);
     }
-    // No `DELETE FROM scan_ledger` — the new column is NULL on every existing
-    // row, which already never equals CONTENT_INDEX_VERSION, so every session
-    // re-extracts on its next scan while parser_state/content_text (the
-    // Claude/Codex resumable continuation) stay intact for rows that don't
-    // need a full reparse for any OTHER reason.
   }
 
   if (fromVersion < 43) {
-    // v42 -> v43: persist a per-tool-call END timestamp (PHNX-3437). The traces
-    // insight engine could only book a failed call's wasted time from the
-    // bounded gap to the NEXT call — so a call that BLOCKED for minutes and was
-    // the last in its session (or was followed quickly by an unrelated call)
-    // registered as ~0 waste. The call's result record already carried its own
-    // timestamp at ingestion; this column persists it so `end_timestamp -
-    // timestamp` (the call's own blocking duration) becomes the primary
-    // attribution, with the gap heuristic kept as the fallback for NULL rows.
-    //
-    // Additive, nullable column — no ledger flush (the v33->v34 contract that
-    // adding a column keeps warm session ledgers warm). Pre-upgrade rows stay
-    // NULL until re-indexed, and `insights.ts` degrades a NULL end back to the
-    // bounded-gap behavior, so nothing crashes or yields NaN. The paired
-    // TOOL_INDEX_VERSION bump (7 -> 8) is what re-derives it on a re-index; the
-    // tool index is deliberately independent of SCHEMA_VERSION and is never
-    // force-rescanned by a migration (only by the explicit tool backfill or a
-    // normal incremental append), so a bare ALTER here would otherwise leave
-    // existing rows dark forever.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1495,24 +1109,10 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 44) {
-    // v43 -> v44: backfill duration_ms for sessions whose harness scan extractor
-    // never derived it (PHNX-3457). rush/grok/kimi/cursor/muse/antigravity/hermes/
-    // openclaw left duration_ms NULL — 52% of the corpus, 100% of rush — so the
-    // console median was computed over only the ~48% that carried it, skewing it
-    // short. Going forward resolveDurationMs() populates it at every upsert; this
-    // repairs already-indexed rows in place from the timestamps they already store
-    // (last_activity, itself resolved from the last-message time else file mtime,
-    // minus the creation timestamp), so no transcript is re-parsed. julianday is
-    // avoided because it does not accept a trailing 'Z'; the arithmetic is done in
-    // JS with the exact Date.parse resolveDurationMs uses, keeping the backfill and
-    // the live path consistent. Only rows with a positive span are touched; a NULL
-    // that cannot be resolved stays NULL rather than becoming a fabricated 0.
     const nullDurationRows = db.prepare(
       `SELECT id, timestamp, last_activity FROM sessions
        WHERE duration_ms IS NULL AND last_activity IS NOT NULL`,
     ).all() as Array<{ id: string; timestamp: string; last_activity: string }>;
-    // Runs inside migrateSchema's own transaction (db.ts:1468), so no nested
-    // db.transaction() here — that would raise "transaction within a transaction".
     const update = db.prepare(`UPDATE sessions SET duration_ms = ? WHERE id = ?`);
     for (const row of nullDurationRows) {
       const startMs = Date.parse(row.timestamp);
@@ -1524,10 +1124,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 45) {
-    // v44 -> v45: retain the full first genuine user turn separately from the
-    // one-line topic. The CONTENT_INDEX_VERSION bump re-parses every transcript
-    // through its normal incremental scan path so existing rows backfill without
-    // a second consumer-side transcript reader.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1535,25 +1131,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 46) {
-    // v45 -> v46: mirror provenance for fleet-synced peer session digests
-    // (PHNX-3792). Additive columns, no ledger wipe: they are written only by the
-    // session-mirror consume path (never a transcript scan), so re-parsing every
-    // indexed transcript would be pure churn — a genuine local row keeps them NULL.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
     if (!cols.has('mirror_synced_at')) db.exec(`ALTER TABLE sessions ADD COLUMN mirror_synced_at INTEGER`);
     if (!cols.has('mirror_source')) db.exec(`ALTER TABLE sessions ADD COLUMN mirror_source TEXT`);
-    // The idx_sessions_mirror_synced index is created unconditionally after this
-    // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
   }
 
   if (fromVersion < 47) {
-    // v46 -> v47: carry the actor's Phoenix id (PHNX-3798). Additive, write-once
-    // launch metadata joined from the actor sidecar — never transcript-derived,
-    // exactly like actor/initiated_by (v19) — so there is no ledger wipe: a rescan
-    // can't backfill it and forcing a full re-parse would be pure churn. Existing
-    // rows stay NULL until the sidecar-join fills them (the ON CONFLICT COALESCEs).
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1561,20 +1146,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 48) {
-    // v47 -> v48: retain the LATEST genuine user turn beside the first
-    // (PHNX-3939). For a /continue, a redirect, or an interrupted-and-restated
-    // session the operative request is the last thing the user said, and the row
-    // title / sidebar Request card show that.
-    //
-    // Deliberately WITHOUT a CONTENT_INDEX_VERSION bump, unlike the v45
-    // first_user_message column. That bump forces a re-parse of every indexed
-    // transcript on the next scan; measured on this fleet it pinned the daemon
-    // long enough to blow the session-index and session-state tick deadlines and
-    // park both services. It also buys nothing here: the value can only CHANGE
-    // when the transcript changes, so the ordinary incremental scan fills it in
-    // for exactly the sessions where it matters, and the sidebar's request comes
-    // from the daemon-folded `session_timelines` projection rather than this
-    // column. An old row simply keeps NULL until its next write.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1582,7 +1153,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 49) {
-    // v48 -> v49: account-first storage (PHNX-3940).
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name),
     );
@@ -1590,12 +1160,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 50) {
-    // v49 -> v50: the daemon-generated session title (PHNX-3797). Additive
-    // columns, no ledger wipe: nothing in a transcript produces them — the
-    // session-title service writes them and the scanner's upsert never names
-    // them — so re-parsing every indexed transcript would be pure churn. Rows
-    // stay NULL until the titler reaches them, which the recap ladder handles by
-    // falling back to the user's own first message.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
@@ -1605,18 +1169,6 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 51) {
-    // v50 -> v51: session_text rows move to the rowid of the sessions row they
-    // describe (PHNX-4154), the repair v36 made to tool_call_text. The only key
-    // was the UNINDEXED session_id, so every delete and content read was a full
-    // scan of the FTS content — 669 MB and 0.2-0.5 s per statement on a real
-    // box — and the mirror ingest issues one per mirrored row (2,298 there)
-    // inside a daemon tick: the event loop froze for minutes, every service
-    // blew its deadline, and browser verbs timed out behind it.
-    //
-    // Same shape as v42: rename, recreate, copy back keyed by sessions.rowid,
-    // drop — search never blacks out. OR REPLACE keeps the newest of any
-    // duplicate session_id rows. A text row whose session is gone has no rowid
-    // to sit at and is dropped; nothing could reach it anyway.
     db.exec(`ALTER TABLE session_text RENAME TO session_text_v50`);
     db.exec(`
       CREATE VIRTUAL TABLE session_text USING fts5(
@@ -1640,20 +1192,10 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
 
 }
 
-/**
- * Stamp `account_key` / `account_org` / `account` on every Claude row from its
- * `file_path` and recorded `version`. Used by the v33 migration; idempotent, so it is
- * safe to re-run.
- */
 function backfillClaudeAccounts(
   db: Database.Database,
   scope: 'all' | 'unresolved' = 'all',
 ): void {
-  // 'unresolved' exists so the getDB repair touches ONLY rows that are actually
-  // broken. Re-resolving every Claude row on an unrelated trigger would silently
-  // downgrade a correct row whose version home has since been uninstalled and its
-  // trash snapshot pruned — the row would go from attributed to dark for no reason
-  // the user caused. The migration wants 'all'; the repair does not.
   const where = scope === 'all'
     ? `agent = 'claude'`
     : `agent = 'claude' AND (account_key IS NULL
@@ -1664,11 +1206,6 @@ function backfillClaudeAccounts(
   ).all() as Array<{ id: string; file_path: string; version: string | null }>;
   if (rows.length === 0) return;
 
-  // `account` is overwritten, not COALESCEd. Every pre-v33 row carries the wrong
-  // globally-resolved email; keeping it on a row we could not attribute would leave a
-  // known-false address on display (commands/sessions.ts prints it, and its fuzzy
-  // matcher scores on it) and would disagree with the scan path, which writes
-  // `account = excluded.account` unconditionally. A dark row reads NULL.
   const update = db.prepare(
     `UPDATE sessions SET account_key = ?, account_org = ?, account = ? WHERE id = ?`,
   );
@@ -1678,33 +1215,18 @@ function backfillClaudeAccounts(
   }
 }
 
-/** Open (or return the cached) sessions database, applying migrations as needed. */
 export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   if (dbInstance) return dbInstance;
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   const db = new Database(DB_PATH);
-  // Wait up to 30s instead of failing immediately on SQLITE_BUSY. Install the
-  // handler before journal_mode: concurrent first opens can race for its schema
-  // lock, before a later busy_timeout would have a chance to wait. Multiple
-  // agents (CLIs, skills, hooks) open this DB concurrently. The first scan of
-  // a new version home can take longer than 10s; concurrent callers need enough
-  // headroom to wait. The ledger-recheck in upsertSessionsBatch makes
-  // subsequent writers near-instant, so 30s is a rarely-reached safety net.
   try {
+    // Concurrent first opens need the wait policy before WAL negotiation.
     db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(initialBusyTimeoutMs))}`);
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.exec(SCHEMA);
 
-    // `session_remote_preview_cache` is a lazy cache table (like the others
-    // below), independent of SCHEMA_VERSION — but it shipped once already
-    // without `last_caller_revision` before this column was added, so a DB
-    // that already ran that earlier version has the table WITHOUT the column,
-    // and `CREATE TABLE IF NOT EXISTS` above is a no-op against it. Guard with
-    // the same PRAGMA-table_info pattern the versioned `sessions` migrations
-    // use, so an existing cache DB gains the column instead of every read/write
-    // throwing "no such column".
     const remotePreviewCacheCols = db.prepare(`PRAGMA table_info(session_remote_preview_cache)`).all() as Array<{ name: string }>;
     if (!remotePreviewCacheCols.some(c => c.name === 'last_caller_revision')) {
       db.exec(`ALTER TABLE session_remote_preview_cache ADD COLUMN last_caller_revision TEXT`);
@@ -1719,9 +1241,8 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
     if (currentVersion === undefined) {
       db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
     } else if (currentVersion < SCHEMA_VERSION) {
-      // Re-read after BEGIN IMMEDIATE acquires the writer lock. A second process
-      // may have completed the migration while this connection was waiting.
       const migrate = db.transaction(() => {
+        // Another opener may have migrated before this writer acquired the lock.
         const lockedVersion = readSchemaVersion();
         if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
         migrateSchema(db, lockedVersion);
@@ -1730,21 +1251,13 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       migrate();
     }
 
-    // Index last_activity only after the column is guaranteed to exist — fresh DBs
-    // get it from CREATE TABLE above, existing pre-v8 DBs from the migration just
-    // run. It must NOT live in SCHEMA (executed before migration) or an existing
-    // DB would fail the index build on a column it doesn't have yet.
+    // Column-dependent indexes must follow migrations for older databases.
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
-    // Same fresh-vs-migrated rule: the column is guaranteed above (fresh from
-    // CREATE TABLE, existing from migration v46), so index the mirror pruner's
-    // scan column here rather than in SCHEMA (PHNX-3792).
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
     const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
     if (['account_id', 'phoenix_id'].some(name => !sessionColumns.some(column => column.name === name))) {
-      // Partial upgrades can stamp the current version before every column exists.
-      // Recheck under the writer lock so concurrent openers cannot add it twice.
       db.transaction(() => {
         const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
         if (!columns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
@@ -1752,18 +1265,7 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       })();
     }
 
-    // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
-    // an older CLI (whose INSERT does not name the column) writes NULL, and a DB
-    // migrated by a build that predates the "clear the stale email on a dark row" fix
-    // keeps a known-wrong address. The v33 migration cannot fix either — it never runs
-    // again. Cheap guard first so the common case is one indexed lookup, then repair.
-    // Same shape as the `machine` repair below, for the same reason.
     {
-      // Column guard FIRST, like the `machine` repair below. schema_version can be
-      // stamped at SCHEMA_VERSION without the column existing — getDB writes the marker
-      // for any DB whose meta has no row (a hand-built or partially-created index), and
-      // migrateSchema never runs in that path. Querying account_key unguarded would
-      // then throw "no such column" and take down every command that opens the index.
       const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
       if (cols.some((c) => c.name === 'account_key') && cols.some((c) => c.name === 'account_org')) {
         const needsRepair = db.prepare(`
@@ -1777,9 +1279,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       }
     }
 
-    // machine column + indexes: only after the column is guaranteed present.
-    // Fresh SCHEMA (v17) includes the column; older DBs get it from migrate v17.
-    // If a partial upgrade left schema_version ahead of the column, repair here.
     {
       const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
       if (!cols.some((c) => c.name === 'machine')) {
@@ -1799,15 +1298,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_agent_ts ON sessions(agent, timestamp DESC)`);
     }
 
-    // harness column: only after the column is guaranteed present.
-    // Fresh SCHEMA (v41) includes the column; older DBs get it from migrate v41.
-    // schema_version can be stamped at SCHEMA_VERSION without the column existing
-    // — getDB writes the marker for any DB whose meta has no row (a hand-built
-    // or partially-created index), and migrateSchema never runs in that path
-    // (`currentVersion === undefined`). If a partial upgrade left schema_version
-    // ahead of the column, repair here so the next upsertSession INSERT naming
-    // `harness` does not throw (PHNX-2935). Same shape as the `machine` repair
-    // above, for the same reason.
     {
       const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
       if (!cols.some((c) => c.name === 'harness')) {
@@ -1815,8 +1305,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
       }
     }
 
-    // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
-    // them anymore. Guarded by a meta flag so we only try once.
     const cleaned = db.prepare(`SELECT value FROM meta WHERE key = 'legacy_indexes_removed'`).get() as { value: string } | undefined;
     if (!cleaned) {
       for (const p of [
@@ -1824,7 +1312,7 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
         path.join(SESSIONS_DIR, 'content_index.jsonl'),
         path.join(SESSIONS_DIR, 'index.jsonl.bak'),
       ]) {
-        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {  }
       }
       db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('legacy_indexes_removed', '1')`).run();
     }
@@ -1838,7 +1326,6 @@ export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   }
 }
 
-/** Bound synchronous cache contention without changing other database callers. */
 export function withSessionDBTimeout<T>(timeoutMs: number, operation: () => T): T {
   const db = getDB(timeoutMs);
   const previous = (db.prepare('PRAGMA busy_timeout').get() as { timeout: number }).timeout;
@@ -1847,16 +1334,11 @@ export function withSessionDBTimeout<T>(timeoutMs: number, operation: () => T): 
   finally { db.pragma(`busy_timeout = ${previous}`); }
 }
 
-/** Close the cached database connection. */
 export function closeDB(): void {
   clearSessionExistenceCache();
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
-    // Closing the connection finalizes every prepared statement it owns. Drop
-    // the cached upsert/FTS statements too, so the next getDB() rebuilds them
-    // against the fresh connection instead of re-running a finalized statement
-    // (which throws "statement has been finalized" on the first upsert).
     cachedStmts = {};
   }
 }
@@ -1867,22 +1349,8 @@ interface FtsOptimizeResult {
   segmentsAfter: number;
 }
 
-/**
- * Compact the session + tool-call full-text-search indexes.
- *
- * FTS5 appends a new segment on every insert and leaves a tombstone on every
- * delete. The scanner delete+inserts a session's docs on each rescan (and on
- * every extractor-version bump), and FTS5 never merges those segments on its
- * own — so `tool_call_text_data` / `session_text_data` accumulate hundreds of
- * thousands of unmerged segments, gigabytes of index for tens of MB of content,
- * and `agents sessions` queries slow to a crawl. The FTS5 `'optimize'` command
- * merges every segment into one and purges tombstones. Non-destructive: no
- * searchable content is lost. Reclaimed space becomes reusable free pages inside
- * the DB file; run VACUUM (with the daemon stopped) to return it to the OS.
- */
 export function optimizeSessionSearchIndex(): FtsOptimizeResult[] {
   const db = getDB();
-  // Hardcoded literals — never interpolate caller input into an identifier.
   const tables = ['tool_call_text', 'session_text'];
   const segments = (table: string): number =>
     (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
@@ -1893,42 +1361,16 @@ export function optimizeSessionSearchIndex(): FtsOptimizeResult[] {
   });
 }
 
-/**
- * Segment count above which a scan pays for a slice of merge work. Below it the
- * index is small enough that querying it is not the bottleneck and merging is
- * pure overhead on every scan.
- */
 const FTS_MAINTENANCE_SEGMENT_THRESHOLD = 512;
 
-/**
- * Page budget for one incremental merge. FTS5's `'merge'` command does at most
- * this much work and returns — it is not `'optimize'`, which merges the whole
- * index in one unbounded pass. That bound is why this can run on the scan path:
- * the cost per scan is fixed, and repeated scans converge the index instead of
- * one scan stalling on a multi-gigabyte compaction.
- */
 const FTS_MAINTENANCE_MERGE_PAGES = 64;
 
-/**
- * Keep the FTS indexes from degrading on the normal scan path.
- *
- * `optimizeSessionSearchIndex` is the full, unbounded compaction behind
- * `agents sessions optimize`. Leaving it as the ONLY compaction meant the index
- * degraded until a human happened to run that command, which is how
- * `tool_call_text_data` reached gigabytes for tens of MB of content. This is the
- * automatic counterpart: bounded, threshold-gated, and safe to call after every
- * batch of writes. Non-destructive — merging never changes what is searchable.
- *
- * Returns one result per table it actually merged (empty when every table is
- * under the threshold, which is the common case on a warm index).
- */
 export function maintainSessionSearchIndex(
   db: Database.Database = getDB(),
   options: { segmentThreshold?: number; mergePages?: number } = {},
 ): FtsOptimizeResult[] {
   const threshold = options.segmentThreshold ?? FTS_MAINTENANCE_SEGMENT_THRESHOLD;
   const pages = options.mergePages ?? FTS_MAINTENANCE_MERGE_PAGES;
-  // Hardcoded literals — never interpolate caller input into an identifier.
   const tables = ['tool_call_text', 'session_text'];
   const segments = (table: string): number =>
     (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
@@ -1942,12 +1384,8 @@ export function maintainSessionSearchIndex(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// Scan coordinator — prevents concurrent full scans across processes
-// ---------------------------------------------------------------------------
 
-/** How long a scan claim is trusted before it's considered stale (ms). */
-const SCAN_CLAIM_TTL_MS = 120_000; // 2 minutes
+const SCAN_CLAIM_TTL_MS = 120_000;
 
 function isProcessAlive(pid: number): boolean {
   if (!pid || isNaN(pid)) return false;
@@ -1959,18 +1397,6 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-/**
- * Try to claim the right to run the incremental scan. Returns true if this
- * process should proceed with scanning, false if another live process is
- * already scanning (caller should skip the scan and serve from the DB).
- *
- * Uses the `meta` table so it survives crashes — dead PIDs are detected via
- * process.kill(pid, 0), stale entries via TTL. No external lock files needed.
- *
- * Wrapped in db.transaction() (BEGIN IMMEDIATE) so the read-then-write is
- * atomic and busy_timeout retries correctly — bare auto-commit DML in WAL
- * mode can return SQLITE_BUSY_SNAPSHOT which bypasses the busy handler.
- */
 export function tryClaimScan(pid: number): boolean {
   const db = getDB();
 
@@ -1985,9 +1411,8 @@ export function tryClaimScan(pid: number): boolean {
       const existingTs = parseInt(parts[1], 10);
       const ageMs = Date.now() - existingTs;
       if (isProcessAlive(existingPid) && ageMs < SCAN_CLAIM_TTL_MS) {
-        return false; // another live process is scanning — skip
+        return false;
       }
-      // Dead PID or expired TTL — take over below
     }
 
     db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('scan_in_progress', ?)`)
@@ -1998,13 +1423,6 @@ export function tryClaimScan(pid: number): boolean {
   return txn();
 }
 
-/**
- * Read-only probe: is a scan in progress right now, held by a LIVE process
- * within the TTL? (RUSH-2682). Unlike {@link tryClaimScan} it never writes, so a
- * caller that lost the claim can wait for the in-flight scan to finish rather
- * than returning the pre-scan DB snapshot as if it were the answer. Returns
- * false for a dead-PID or expired claim — that scan is not actually running.
- */
 export function scanInProgressByLivePid(): boolean {
   const db = getDB();
   const existing = db
@@ -2017,10 +1435,6 @@ export function scanInProgressByLivePid(): boolean {
   return isProcessAlive(pid) && Date.now() - ts < SCAN_CLAIM_TTL_MS;
 }
 
-/**
- * Release the scan claim written by tryClaimScan. Only deletes the entry
- * if it still belongs to this process (guards against TTL takeovers).
- */
 export function releaseScan(pid: number): void {
   const db = getDB();
   const txn = db.transaction((): void => {
@@ -2036,15 +1450,10 @@ export function releaseScan(pid: number): void {
   txn();
 }
 
-/** Return the absolute path to the sessions database file. */
 export function getDBPath(): string {
   return DB_PATH;
 }
 
-/**
- * Look up the file stat stamp we stored the last time we scanned a given file path.
- * Callers compare this to the current fs.stat to decide whether to rescan.
- */
 export function getScanStampByPath(filePath: string): ScanStamp | null {
   const db = getDB();
   const row = db
@@ -2055,19 +1464,11 @@ export function getScanStampByPath(filePath: string): ScanStamp | null {
     : null;
 }
 
-/**
- * Bulk-load the stamp ledger for a set of file paths in a single SQL query.
- * This is the fast path used by the incremental scanner — avoids N+1 queries.
- */
 export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStamp> {
   const result = new Map<string, ScanStamp>();
   if (filePaths.length === 0) return result;
   const db = getDB();
 
-  // Multiple input paths can resolve to the same canonical key (e.g. the same
-  // session JSONL reachable via `~/.claude/...` and `~/.agents/versions/...`).
-  // We query DB by canonical key, then fan results back out to every original
-  // alias so callers can `.get(filePath)` with the path they passed in.
   const canonicalToOriginals = new Map<string, string[]>();
   for (const fp of filePaths) {
     const canonical = canonicalLedgerKey(fp);
@@ -2078,7 +1479,6 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
 
   const canonicalKeys = [...canonicalToOriginals.keys()];
 
-  // SQLite parameter limit is typically 999 / 32766 — chunk defensively.
   const CHUNK = 500;
   for (let i = 0; i < canonicalKeys.length; i += CHUNK) {
     const chunk = canonicalKeys.slice(i, i + CHUNK);
@@ -2112,33 +1512,15 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
   return result;
 }
 
-/**
- * A file's persisted resumable-parse continuation, read back from scan_ledger.
- * `parserState` is the serialized {@link ClaudeParserState} JSON blob (offset +
- * accumulator snapshot); `contentText` is the accumulated user doc. Both are
- * written by the Claude scan (B-2) and consumed on the next scan to decide
- * full-vs-incremental and to hydrate the resume.
- */
 interface ParserStateRow {
   parserState: string | null;
   contentText: string | null;
   fileMtimeMs: number;
   fileSize: number;
   scannedAt: number;
-  /** See {@link ScanStamp.extractorVersion}. A mismatch vs CONTENT_INDEX_VERSION
-   *  means this continuation predates the current content extractor and MUST
-   *  be treated as absent (forcing a full re-parse) rather than resumed from. */
   extractorVersion: number | null;
 }
 
-/**
- * Bulk-load the resumable-parse continuation (parser_state + content_text) plus
- * the stamp for a set of file paths in a single chunked query. Mirrors
- * {@link getScanStampsForPaths}: keys by canonical path and fans results back to
- * every original alias so callers can `.get(filePath)` with the path they passed.
- * The Claude incremental scan uses this to fetch each changed file's prior
- * continuation without an N+1 of {@link getScanStampByPath}.
- */
 export function getParserStatesForPaths(filePaths: string[]): Map<string, ParserStateRow> {
   const result = new Map<string, ParserStateRow>();
   if (filePaths.length === 0) return result;
@@ -2190,10 +1572,6 @@ export function getParserStatesForPaths(filePaths: string[]): Map<string, Parser
   return result;
 }
 
-/**
- * Record scan stamps for files we've looked at. Covers both files that produced
- * a session and files we looked at but chose not to index (e.g. malformed).
- */
 export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }>): void {
   if (entries.length === 0) return;
   const db = getDB();
@@ -2209,30 +1587,17 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
   const now = Date.now();
   const txn = db.transaction((items: typeof entries) => {
     for (const { filePath, scan } of items) {
-      // Stamped at the CURRENT content extractor version even for a file that
-      // yielded no session (malformed / no id): we ran today's extractor over
-      // it and it produced nothing, so it is current, not stale — otherwise a
-      // permanently-unparseable file would re-trigger "changed" on every scan
-      // forever once CONTENT_INDEX_VERSION is bumped.
       stmt.run(canonicalLedgerKey(filePath), scan.fileMtimeMs, scan.fileSize, now, CONTENT_INDEX_VERSION);
     }
   });
   txn(entries);
 }
 
-/** Snapshot of a leaf transcript directory used to detect create/delete/rename. */
 export interface DirStamp {
   dirMtimeMs: number;
   entryCount: number;
 }
 
-/**
- * Bulk-load the dir ledger for a set of leaf directories in a single SQL query.
- * Mirrors {@link getScanStampsForPaths}: keys by canonical path (so a dir
- * reachable via a symlinked version home and its realpath collapse to one row)
- * and fans the result back out to every original alias so callers can
- * `.get(dirPath)` with the path they passed in.
- */
 export function getDirLedgerForPaths(dirs: string[]): Map<string, DirStamp> {
   const result = new Map<string, DirStamp>();
   if (dirs.length === 0) return result;
@@ -2269,11 +1634,6 @@ export function getDirLedgerForPaths(dirs: string[]): Map<string, DirStamp> {
   return result;
 }
 
-/**
- * Upsert dir-scan stamps. Recorded after a full readdir of a leaf transcript
- * dir so the next scan can skip that dir when its (mtime, entry_count) is
- * unchanged. Mirrors {@link recordScans}.
- */
 export function recordDirScans(
   entries: Array<{ dirPath: string; dirMtimeMs: number; entryCount: number }>,
 ): void {
@@ -2431,19 +1791,6 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     END
 `);
 
-/**
- * Did this session emit at least one browser/computer-automation event?
- * A scoped, sessionId-filtered read of the events log — NOT a re-scan of the
- * (potentially huge) transcript — since browser.navigate / browser.screenshot
- * / computer.action are recorded there via events.ts's emit(), keyed by the
- * same session id that is this row's `meta.id` (the provenance floor stamps
- * AGENT_SESSION_ID/AGENTS_SESSION_ID on every such event at emit time).
- *
- * Called independently of {@link enrichCachedSessionMeta} (which SKIPS
- * claude/codex entries in the batch path because their caller already parsed
- * the transcript for todos/recentDirectoriesTouched) — this never touches the
- * transcript, so it must run for every agent, every time.
- */
 function detectToolUsage(sessionId: string): { usedBrowser: boolean; usedComputer: boolean } {
   const usedBrowser = queryEvents({ sessionId, eventTypes: ['browser.navigate', 'browser.screenshot'], limit: 1 }).length > 0;
   const usedComputer = queryEvents({ sessionId, eventTypes: ['computer.action'], limit: 1 }).length > 0;
@@ -2452,12 +1799,6 @@ function detectToolUsage(sessionId: string): { usedBrowser: boolean; usedCompute
 
 const deleteResourceUsageStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_resource_usage WHERE session_id = ?`);
-/**
- * Named-bind shape for {@link insertResourceUsageStmt}. Declared so the two call sites
- * are type-checked: bun binds named parameters in strict mode where a MISSING key
- * throws (node binds NULL), and both call sites sit outside any per-row guard, so a
- * dropped key would abort the whole batch on the runtime the shipped binary embeds.
- */
 interface ResourceUsageBind {
   session_id: string;
   kind: 'skill' | 'command';
@@ -2474,17 +1815,6 @@ const insertResourceUsageStmt = (db: Database.Database) => db.prepare(`
   VALUES (@session_id, @kind, @name, @plugin, @source, @repo_root, @snapshot_sha, @count)
 `);
 
-/**
- * Resolve a skill/slash-command's provenance for `session_resource_usage`
- * (#12). A flat (non-namespaced) resource resolves via resolveResource()'s
- * project/user/system/extra-repo scan. A namespaced one (`plugin:name`, e.g.
- * `rush:design` — the shape both a plugin skill's `args.skill` and a plugin
- * command's SessionEvent.slashCommand carry) is plugin-owned and lives under
- * the plugin's own directory, invisible to resolveResource()'s flat scan —
- * resolved instead against the already-discovered plugin list. Neither found
- * (renamed or uninstalled since the session ran) returns all-undefined
- * rather than a stale guess.
- */
 function resolveResourceProvenance(
   kind: 'skills' | 'commands',
   name: string,
@@ -2507,28 +1837,6 @@ function resolveResourceProvenance(
   return { plugin: plugin.name, source: plugin.marketplace, repoRoot: plugin.repoRoot, snapshotSha: plugin.snapshotSha };
 }
 
-/**
- * Persist already-computed skill/slash-command tallies for a session (#12)
- * into `session_resource_usage`, replacing any prior rows for it (a rescan's
- * usage supersedes the old — same replace-on-upsert shape as the FTS text
- * below). `discoverPlugins()` (real I/O: manifest + directory reads) only
- * runs when there is actually a skill/command to resolve, so a session with
- * neither pays nothing beyond the DELETE.
- *
- * Split from {@link writeResourceUsage} so a caller that already has the
- * tallies (claude/codex's incremental accumulator — see
- * ClaudeParseState.skillEvents/slashCommandEvents, threaded onto
- * SessionMeta.skillsUsed/slashCommandsUsed) can write without re-parsing the
- * transcript to re-derive them.
- *
- * Deliberately NOT wrapped in its own `db.transaction()`: better-sqlite3
- * (this repo's wrapper included) does not support nested transactions, and
- * `upsertSessionsBatch` calls this from INSIDE its own outer transaction. A
- * standalone caller (enrichCachedSessionMeta, outside any transaction) still
- * gets each statement committed individually — a crash between the DELETE
- * and an INSERT self-heals on the next rescan, the same risk profile as any
- * other un-batched write in this file.
- */
 function writeResourceUsageFromTallies(
   sessionId: string,
   skills: Array<{ name: string; count: number }>,
@@ -2562,27 +1870,10 @@ function writeResourceUsageFromTallies(
   }
 }
 
-/**
- * Persist skill/slash-command usage for a session (#12) by deriving the
- * tallies from a full parsed transcript. Used by {@link enrichCachedSessionMeta}
- * (every `upsertSession()` call, and `upsertSessionsBatch` for every harness
- * EXCEPT claude/codex, which pre-compute skillsUsed/slashCommandsUsed via
- * their incremental accumulator instead — see writeResourceUsageFromTallies
- * and the call site in upsertSessionsBatch).
- */
 function writeResourceUsage(sessionId: string, events: SessionEvent[], cwd: string | undefined): void {
   writeResourceUsageFromTallies(sessionId, extractSkills(events), extractSlashCommands(events), cwd);
 }
 
-/**
- * Fan-out the session left behind, from an ALREADY-parsed transcript (never a
- * re-parse — every caller here has `events` in hand).
- *
- * `backgroundShellCount` is `undefined`, not 0, for a harness that cannot report
- * backgrounded shells. That distinction is the whole point: 0 asserts "none were
- * started", while undefined says "this harness does not record it" — and the
- * renders omit the segment for both, so neither can read as "nothing is running".
- */
 function fanOutCounts(
   events: SessionEvent[],
   agent: SessionAgentId,
@@ -2602,7 +1893,6 @@ function fanOutCounts(
   };
 }
 
-/** Fold transcript-derived metadata that every parser can supply uniformly. */
 function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): SessionMeta {
   return {
     ...meta,
@@ -2621,26 +1911,16 @@ function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
     writeResourceUsage(meta.id, events, meta.cwd);
     return enrichMetaFromEvents(meta, events);
   } catch {
-    // Synthetic/cloud rows can intentionally name a transcript that is not local.
     return meta;
   }
 }
 
-/**
- * The one way to address a session's FTS row: its rowid is the sessions rowid
- * (schema comment on session_text). A `session_id = ?` predicate scans the whole
- * index instead — the PHNX-4154 daemon freeze.
- */
 const SESSION_TEXT_ROWID = `(SELECT rowid FROM sessions WHERE id = ?)`;
 
 const deleteTextStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
-// Binds the session id twice: once for the rowid lookup, once for the column.
 const insertTextStmt = (db: Database.Database) =>
   db.prepare(`INSERT INTO session_text (rowid, session_id, label, topic, project, content, assistant) VALUES (${SESSION_TEXT_ROWID}, ?, ?, ?, ?, ?, ?)`);
-// Read back the label the upsert actually stored (which may be the preserved
-// one, not the incoming blank) so the FTS label column stays consistent with
-// sessions.label after a bare rescan.
 const readLabelStmt = (db: Database.Database) =>
   db.prepare(`SELECT label FROM sessions WHERE id = ?`);
 
@@ -2663,34 +1943,18 @@ function stmts(db: Database.Database) {
   return cachedStmts as Required<typeof cachedStmts>;
 }
 
-/**
- * Return the label stored for a session, as text for the FTS index (never NULL).
- * Called inside the upsert transaction, AFTER the row upsert, so it reflects the
- * preserve-non-empty-label rule in the ON CONFLICT clause rather than the raw
- * incoming label.
- */
 function storedFtsLabel(readLabel: Database.Statement<unknown[]>, id: string): string {
   const row = readLabel.get(id) as { label: string | null } | undefined;
   return row?.label ?? '';
 }
 
-/** Resolve origin machine for a row: prefer caller-stamped meta, else path. */
 function resolveMachine(meta: SessionMeta): string {
   if (meta.machine && meta.machine.trim()) return meta.machine.trim();
   return machineForSessionFile(meta.filePath, meta.agent);
 }
 
-/**
- * Upsert a session row and replace its FTS5 content in a single transaction.
- * `content` is the tokenizable user-prompt text; pass '' to leave the row unsearchable.
- */
 export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp, assistantContent = ''): void {
   meta = enrichCachedSessionMeta(meta);
-  // Join the durable sessionId -> actor sidecar (RUSH-2019) when the caller
-  // didn't already carry an actor, so a scanned transcript still attributes to a
-  // person. The ON CONFLICT COALESCEs actor/initiated_by, so this fills a fresh
-  // row AND backfills one indexed null-first (before its sidecar existed), while a
-  // rescan carrying no actor still keeps the stored owner.
   const actorRec = meta.actor && meta.accountId ? undefined : readSessionActorRecord(meta.id);
   const toolUsage = detectToolUsage(meta.id);
   const db = getDB();
@@ -2703,10 +1967,6 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     origin: meta.origin ?? 'cli',
     routine_name: meta.routineName ?? null,
     routine_run_id: meta.routineRunId ?? null,
-    // Backfill the origin version from the launch-time sidecar when the transcript
-    // scan couldn't derive one (codex's `.codex-homes/<version>/` home) — the same
-    // write-once join as mode/harness, so native resume stops falling back to
-    // `/continue` for a missing recorded version (PHNX-3626).
     version: meta.version ?? actorRec?.version ?? null,
     account: meta.account ?? null,
     account_key: meta.accountKey ?? null,
@@ -2764,8 +2024,6 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     insText.run(
       meta.id,
       meta.id,
-      // Use the label the upsert actually stored (preserve-non-empty rule),
-      // not the raw incoming one, so FTS label ranking survives a bare rescan.
       storedFtsLabel(readLabel, meta.id),
       meta.topic ?? '',
       meta.project ?? '',
@@ -2776,10 +2034,6 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
   txn();
 }
 
-/** A verified Codex rollout has one native owner. An older last-meta scan may
- * have indexed its child bytes under the parent id. Reconcile only paths that
- * were successfully written, after the whole batch, so a real parent rollout
- * repaired in the same transaction keeps its own row regardless of scan order. */
 function reconcileCodexFileOwners(db: Database.Database, metas: SessionMeta[]): void {
   const owners = new Map(metas.filter(meta => meta.agent === 'codex' && meta.filePath).map(meta => [meta.filePath, meta.id]));
   const paths = [...owners.keys()];
@@ -2789,27 +2043,20 @@ function reconcileCodexFileOwners(db: Database.Database, metas: SessionMeta[]): 
       .all(...chunk) as Array<{ id: string; file_path: string }>;
     for (const row of rows) {
       if (owners.get(row.file_path) === row.id) continue;
-      // The text row is keyed by the sessions rowid, so it goes before the row.
       db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`).run(row.id);
       db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
       for (const table of ['session_preview_cache', 'session_summaries', 'session_insights', 'session_topics', 'session_phenotypes', 'session_resource_usage', 'resource_scan_ledger']) {
         db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(row.id);
       }
-      // The tool ledger has a unique file path too; release the wrong binding
-      // before the child evidence is persisted below. Transcript files stay put.
       purgeToolCalls(db, row.id);
     }
   }
 }
 
-/** Batch-upsert sessions with their FTS5 content and scan stamps in a single transaction. */
 export function upsertSessionsBatch(
   entries: Array<{
     meta: SessionMeta;
     content: string;
-    /** Assistant-answer text, accumulated the same way as `content` (the
-     *  user-prompt text) but stored in session_text's own `assistant` column
-     *  with a lower BM25 weight — see BM25_WEIGHTS. */
     assistantContent?: string;
     scan?: ScanStamp;
     parserState?: string;
@@ -2818,12 +2065,6 @@ export function upsertSessionsBatch(
     toolCalls?: IndexedToolCall[];
     toolScan?: ScanStamp;
     toolIndexMode?: 'replace' | 'append';
-    /**
-     * Where the NEXT scan of this full-file-harness session may resume its tool
-     * index (PHNX-3411). Computed internally in the enrichment map below; not
-     * supplied by callers. Persisted alongside the tool ledger so an active
-     * session re-derives only its newly appended tool calls next tick.
-     */
     toolResume?: ToolScanResumePoint | null;
   }>,
 ): void {
@@ -2831,20 +2072,7 @@ export function upsertSessionsBatch(
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
   const now = Date.now();
-  // One directory read for the whole batch: join the durable sessionId -> actor
-  // sidecar (RUSH-2019) so scanned transcripts attribute to a person. Only used
-  // for entries whose meta carries no actor; the ON CONFLICT COALESCEs the column,
-  // so this fills fresh rows AND backfills null-first ones, never clobbering a
-  // stored owner on rescan.
   const actorIndex = loadSessionActorIndex();
-  // Persist the Claude resumable-parse continuation (parser_state + content_text)
-  // alongside the stamp, plus the CURRENT content extractor version — a caller
-  // that reached this batch write ran today's extractor over the file, so the
-  // ledger row is current regardless of which branch (full/incremental)
-  // produced it. On a full/incremental Claude parse the caller passes the
-  // serialized newState + accumulated user doc so the NEXT scan can resume from
-  // the persisted offset (B-2). Other scanners pass neither, leaving both columns
-  // NULL exactly as before — their ledger rows are unaffected.
   const ledger = db.prepare(`
     INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text, extractor_version)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -2857,12 +2085,6 @@ export function upsertSessionsBatch(
       extractor_version = excluded.extractor_version
   `);
 
-  // Build a lookup from canonical file path → entry, used inside the write
-  // transaction to re-check the ledger AFTER acquiring the lock. When a
-  // concurrent process already committed the same files between our
-  // filterChangedFiles call and now, the ledger will have matching (mtime, size)
-  // rows — we skip those entries, making the second writer's transaction a
-  // near-instant no-op rather than redundant work.
   const byPath = new Map(
     entries
       .filter(e => e.scan && e.meta.filePath)
@@ -2870,32 +2092,14 @@ export function upsertSessionsBatch(
   );
   const enrichedEntries = entries.map(entry => {
     if (entry.meta.agent === 'claude' || entry.meta.agent === 'codex' || !entry.meta.filePath) {
-      // claude/codex keep their resumable-parse optimization (no transcript read
-      // here). When their scanner already handed us normalized events, the counts
-      // are free — take them. Otherwise leave them undefined, which persists NULL
-      // and means "not computed yet", and the next scan that carries events fills
-      // it. Never collapse that to 0: see fanOutCounts.
       return entry.events
         ? { ...entry, meta: enrichMetaFromEvents(entry.meta, entry.events) }
         : entry;
     }
-    // Harnesses whose scanners produce no events AND whose parseSession reads a
-    // potentially large flat transcript file (not a compact SQLite DB). Calling
-    // parseSession on the warm tick for an active large session wedges the Node
-    // event loop for seconds, making browser IPC miss its connection window
-    // (PHNX-3411). Defer their tool-call indexing to runDeferredToolIndex, which
-    // uses ensureToolIndex with tool_scan_ledger stamps and byte/file budget caps.
-    // NOT opencode — parseOpenCode issues a targeted SQLite query, so it is fast
-    // even for large sessions and its results populate recentDirectoriesTouched.
     const LARGE_TRANSCRIPT_AGENTS: ReadonlySet<string> = new Set(['kimi', 'grok']);
     if (!entry.events && LARGE_TRANSCRIPT_AGENTS.has(entry.meta.agent)) {
       return entry;
     }
-    // Enrich the entry. When the scanner already provided events, use them
-    // directly (no transcript re-read). When it didn't — e.g. OpenCode whose
-    // scanner produces only metadata but whose parseOpenCode is a fast SQLite
-    // query — fall back to parseSession. Agents that would call an expensive
-    // flat-file parse already returned above.
     try {
       const toolSourcePath = toolEvidenceSourcePath(entry.meta.filePath, entry.meta.agent);
       const toolScan = toolSourcePath === entry.meta.filePath
@@ -2906,17 +2110,6 @@ export function upsertSessionsBatch(
           })();
       const events = entry.events ?? parseSession(entry.meta.filePath, entry.meta.agent);
       writeResourceUsage(entry.meta.id, events, entry.meta.cwd);
-      // Resume the tool index from the last scan of this append-only stream when
-      // it is safe to (PHNX-3411). A live session's transcript grows every tick,
-      // so a full re-derive re-sanitizes its ENTIRE tool history each time — the
-      // synchronous O(session) work that wedged the daemon event loop for the
-      // 11 non-streaming harnesses. `planEventToolResume` returns the prior
-      // snapshot only when the file is still an append of what was scanned
-      // before; otherwise `prior` is null and this is a full replace from
-      // event 0 (identical index, just re-derived).
-      // No tool stamp (a scanner that carried no scan record) means the resume
-      // point cannot be size-guarded, so full-scan rather than trust a stale
-      // offset. persistToolCalls below also skips a resume-less write.
       const prior = toolScan
         ? planEventToolResume(db, entry.meta.id, toolSourcePath, toolScan, events.length)
         : null;
@@ -2924,13 +2117,9 @@ export function upsertSessionsBatch(
       return {
         ...entry,
         meta: enrichMetaFromEvents(entry.meta, events),
-        // The CHANGED calls only. On a resume these are the newly appended tail
-        // (append-safe upsert); on a full scan they are the whole history.
         toolCalls: scanned.calls,
         toolScan,
         toolIndexMode: (prior ? 'append' : 'replace') as 'replace' | 'append',
-        // Persist where the NEXT scan resumes: the collector snapshot + how many
-        // events this scan folded.
         toolResume: { parserState: JSON.stringify(scanned.snapshot), parsedOffset: scanned.eventCount },
       };
     } catch {
@@ -2939,19 +2128,12 @@ export function upsertSessionsBatch(
   });
   const writtenEntries: typeof enrichedEntries = [];
 
-  // Pre-compute browser/computer usage for all sessions outside the write
-  // transaction. detectToolUsage scans all event log files (O(files) I/O
-  // per call) and holding the SQLite write lock during that scan is what
-  // causes the "DB locked" errors (RUSH-2006). One pass for the whole batch
-  // costs O(files) total instead of O(N × files) inside the lock.
   const toolUsageBySession = queryToolUsageForSessions(
     new Set(enrichedEntries.map(e => e.meta.id)),
   );
 
   const txn = db.transaction((items: typeof entries) => {
-    // Re-read the ledger now that we hold the write lock. Any file committed
-    // by a concurrent process since our pre-scan is visible here.
-    const CHUNK = 500; // stay under SQLite's 999-variable limit
+    const CHUNK = 500;
     const alreadyIndexed = new Set<string>();
     const paths = [...byPath.keys()];
     for (let i = 0; i < paths.length; i += CHUNK) {
@@ -2962,12 +2144,6 @@ export function upsertSessionsBatch(
         .all(...chunk) as Array<{ file_path: string; file_mtime_ms: number; file_size: number; extractor_version: number | null }>;
       for (const row of rows) {
         const entry = byPath.get(row.file_path);
-        // A concurrent writer's row only makes THIS entry redundant when it is
-        // current at CONTENT_INDEX_VERSION too — otherwise a (mtime, size) match
-        // alone would make the version lever a no-op: the very reason this batch
-        // was scheduled (a stale extractor_version) would be silently skipped as
-        // "someone else already indexed it", when what they indexed predates the
-        // current extractor.
         if (
           entry &&
           row.file_mtime_ms === entry.scan!.fileMtimeMs &&
@@ -2982,28 +2158,11 @@ export function upsertSessionsBatch(
     for (const entry of items) {
       const { meta, content, assistantContent, scan, parserState, contentText } = entry;
       if (alreadyIndexed.has(meta.id)) continue;
-      // Per-row guard: one malformed session (e.g. a required field that resolves to
-      // NULL) must not abort the whole batch and take down the entire `agents sessions`
-      // listing. A constraint error uses SQLite's ABORT resolution — it reverts only the
-      // failing statement, not the transaction — and the db.transaction wrapper only rolls
-      // back when the error escapes `fn`, so catching + skipping here leaves the txn valid
-      // and committable. We deliberately do NOT stamp the ledger for a skipped row, so the
-      // next scan re-tries it (self-healing once the underlying parser is fixed).
       const toolUsage = toolUsageBySession.get(meta.id) ?? { usedBrowser: false, usedComputer: false };
-      // claude/codex skip enrichCachedSessionMeta above (preserving their
-      // resumable-parse optimization) — write their pre-computed
-      // skillsUsed/slashCommandsUsed (folded incrementally by discover.ts's
-      // accumulator) here instead. Every other harness already got this
-      // write from enrichCachedSessionMeta() in the .map() above.
       if (meta.agent === 'claude' || meta.agent === 'codex') {
         writeResourceUsageFromTallies(meta.id, meta.skillsUsed ?? [], meta.slashCommandsUsed ?? [], meta.cwd);
       }
       try {
-      // Typed, not a bare literal: bun binds named parameters in strict mode, where a
-      // MISSING key throws (node binds NULL instead). A silently dropped key therefore
-      // breaks only the shipped binary's runtime, and the per-row catch below swallows
-      // it — the exact shape of the bug that shipped account_key unbound. Annotating
-      // against SessionRow makes tsc reject the next omission.
       const row: SessionRow = {
         id: meta.id,
         short_id: meta.shortId,
@@ -3012,8 +2171,6 @@ export function upsertSessionsBatch(
         origin: meta.origin ?? 'cli',
         routine_name: meta.routineName ?? null,
         routine_run_id: meta.routineRunId ?? null,
-        // Backfill the origin version from the launch-time sidecar when the scan
-        // couldn't derive one — see the single-row upsert above (PHNX-3626).
         version: meta.version ?? actorIndex.get(meta.id)?.version ?? null,
         account: meta.account ?? null,
         account_key: meta.accountKey ?? null,
@@ -3069,8 +2226,6 @@ export function upsertSessionsBatch(
       insText.run(
         meta.id,
         meta.id,
-        // Mirror upsertSession: index the label the upsert actually stored
-        // (preserve-non-empty rule), not the raw incoming one.
         storedFtsLabel(readLabel, meta.id),
         meta.topic ?? '',
         meta.project ?? '',
@@ -3098,37 +2253,20 @@ export function upsertSessionsBatch(
     reconcileCodexFileOwners(db, writtenEntries.map(entry => entry.meta));
   });
   txn(enrichedEntries);
-  // Tool evidence shares the transcript parse above but owns an independent
-  // transaction/ledger. If this write fails, the normal session row remains
-  // valid and ensureToolIndex retries from the missing tool ledger later.
   for (const entry of writtenEntries) {
     const toolScan = entry.toolScan ?? entry.scan;
     if (!toolScan || !entry.toolCalls) continue;
     try {
-      // `resume` is set only by the full-file harness path above; claude/codex
-      // pass none, so their tool ledger keeps carrying no event-offset resume
-      // point (their resume rides the content-scan ledger instead) — unchanged.
       persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, {
         mode: entry.toolIndexMode ?? 'replace',
         resume: entry.toolResume,
       });
     } catch {
-      // Boundary is intentionally retryable via tool_scan_ledger.
     }
   }
-  // Every batch appends FTS segments (session_text always, tool_call_text for the
-  // harnesses indexed above). Pay a bounded slice of the merge here so the
-  // scan path keeps its own index healthy instead of leaving all compaction to
-  // the manual `agents sessions optimize` (RUSH-2208). Threshold-gated, so a
-  // small index costs two counts and nothing else.
   maintainSessionSearchIndex(db);
 }
 
-/**
- * Sync labels for a set of sessions. For each id in the map, if the stored
- * label differs, update both `sessions.label` and the FTS5 label column.
- * Leaves FTS5 content/topic/project untouched — cheap to call every run.
- */
 export function syncLabels(labelMap: Map<string, string | null>): number {
   if (labelMap.size === 0) return 0;
   const db = getDB();
@@ -3144,8 +2282,6 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
       .all(...chunk) as Array<{ id: string; label: string | null }>;
     for (const row of rows) {
       const live = labelMap.get(row.id)?.trim() || null;
-      // A missing/empty live label means "no refinement yet", not "erase the
-      // generated title or launch handle already stored for this session".
       if (live && live !== (row.label ?? '')) {
         updates.push({ id: row.id, label: live });
       }
@@ -3166,23 +2302,6 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
   return updates.length;
 }
 
-/**
- * Seed session labels from `agents run --name` handles, keyed by session id.
- *
- * `--name` is the universal launch-time way to set a session's label — the same
- * field an agent later refines with a generated title (`syncLabels`) or the user
- * with `/rename`. The seed's source of truth lives outside the transcript (host
- * task sidecars, run-name sidecars written at launch), so it is re-applied by id
- * every scan rather than parsed per-file. It only fills a label that is still
- * EMPTY — an agent-generated title always wins over the seed, so a Claude run's
- * `--name` shows until Claude titles it, and a non-Claude run keeps its `--name`
- * as the label. Writes both `sessions.label` and the FTS5 label column so a
- * seeded name is fuzzy-searchable. Cheap to call every run; returns rows updated.
- *
- * Ordering matters: this runs AFTER the per-agent scans (which apply
- * agent-generated titles via {@link syncLabels}), so it never overwrites a real
- * title — it only backfills the gap the seed was meant to cover.
- */
 export function seedLabelsFromNames(nameMap: Map<string, string | null>): number {
   if (nameMap.size === 0) return 0;
   const db = getDB();
@@ -3198,7 +2317,6 @@ export function seedLabelsFromNames(nameMap: Map<string, string | null>): number
       .all(...chunk) as Array<{ id: string; label: string | null }>;
     for (const row of rows) {
       const seed = nameMap.get(row.id);
-      // Only fill an empty label; a real agent title (non-empty) always wins.
       if (seed && !(row.label ?? '').trim()) {
         updates.push({ id: row.id, label: seed });
       }
@@ -3218,15 +2336,6 @@ export function seedLabelsFromNames(nameMap: Map<string, string | null>): number
   return updates.length;
 }
 
-/**
- * Sync topics (session titles) for a set of sessions, keyed by id. For agents
- * whose human-readable title lives in a side index that updates independently
- * of the transcript (Codex `session_index.jsonl`), the per-file scan can't see
- * a title that lands later. This applies those titles by id, updating both
- * `sessions.topic` and the FTS5 topic column. Only ever sets a non-empty title
- * and only when it differs from the stored value — cheap to call every run.
- * Returns the number of rows updated.
- */
 export function syncTopics(topicMap: Map<string, string>): number {
   if (topicMap.size === 0) return 0;
   const db = getDB();
@@ -3262,7 +2371,6 @@ export function syncTopics(topicMap: Map<string, string>): number {
   return updates.length;
 }
 
-/** Convert a raw database row into a SessionMeta object. */
 function rowToMeta(row: SessionRow): SessionMeta {
   return {
     id: row.id,
@@ -3315,18 +2423,10 @@ function rowToMeta(row: SessionRow): SessionMeta {
     linearProjectUrl: row.linear_project_url ?? undefined,
     machine: row.machine ?? undefined,
     actor: row.actor ?? undefined,
-    // Narrow the free-text column to the known kinds; an unexpected value maps
-    // to undefined rather than being asserted as a valid kind.
     initiatedBy: row.initiated_by === 'human' || row.initiated_by === 'agent' ? row.initiated_by : undefined,
     phoenixId: row.phoenix_id ?? undefined,
-    // NULL = never computed by this scanner (legacy row) — leave undefined so
-    // the sessions picker knows to fall back to the transcript-regex detection
-    // instead of trusting a false "never used browser/computer".
     usedBrowser: row.used_browser === null ? undefined : row.used_browser === 1,
     usedComputer: row.used_computer === null ? undefined : row.used_computer === 1,
-    // A stamped archived_at means the transcript file is gone but the session's
-    // user turns still live in session_text — the row is served from the DB and
-    // flagged, never dropped (RUSH-2436). NULL leaves both undefined (live row).
     archivedAt: row.archived_at ?? undefined,
     archived: row.archived_at != null ? true : undefined,
     mirrorSyncedAt: row.mirror_synced_at ?? undefined,
@@ -3343,40 +2443,12 @@ function parseJsonColumn<T>(value: string | null): T | undefined {
   try { return JSON.parse(value) as T; } catch { return undefined; }
 }
 
-/**
- * The recency signal used to sort and label the listing: last-message time when
- * a parser computed it (`meta.lastActivity` from `lastTsMs`), else the file's
- * mtime (its last write), else creation time. Guarded on `filePath` so synthetic
- * / cloud rows (no local file) fall to their creation timestamp rather than a
- * bogus scan-time mtime. Always an ISO string, so it sorts lexicographically
- * against `timestamp` and feeds `formatRelativeTime` unchanged.
- */
 function resolveLastActivity(meta: SessionMeta, scan?: ScanStamp): string {
   if (meta.lastActivity) return meta.lastActivity;
   if (scan?.fileMtimeMs && meta.filePath) return new Date(scan.fileMtimeMs).toISOString();
   return meta.timestamp;
 }
 
-/**
- * The persisted wall-clock span for a session (PHNX-3457).
- *
- * `durationMs` is canonically `lastTs − firstTs`. Some harness scan extractors
- * derive it themselves from per-event timestamps (claude/codex/droid/gemini/
- * opencode set `meta.durationMs`); the rest (rush/grok/kimi/cursor/muse/
- * antigravity/hermes/openclaw) never did, so `duration_ms` landed NULL for them —
- * 52% of the corpus, including 100% of the dominant `rush` usage — and the
- * console median was computed over only the ~48% that happened to carry it,
- * skewing it short and misleading.
- *
- * This closes the gap at the single write boundary every harness funnels
- * through, so parity is automatic rather than per-extractor: when the extractor
- * already computed a precise span, keep it; otherwise derive it from the same
- * `timestamp` (creation) and `resolveLastActivity` (last event, itself resolved
- * from the harness's last-message time, else file mtime) that the row already
- * stores. Returns null only when no positive span can be established (a single
- * timestamped event, or a clock that runs backwards), which reads as NULL rather
- * than a fabricated 0.
- */
 function resolveDurationMs(meta: SessionMeta, scan?: ScanStamp): number | null {
   if (meta.durationMs != null) return meta.durationMs;
   const startMs = Date.parse(meta.timestamp);
@@ -3397,22 +2469,15 @@ export function isSessionActivityFresh(
   return activityMs != null && nowMs - activityMs <= maxAgeMs;
 }
 
-/** Persist a lazily resolved Linear project without reparsing the transcript. */
 export function cacheLinearProject(sessionId: string, project: string, projectUrl: string): void {
   getDB().prepare(`UPDATE sessions SET linear_project = ?, linear_project_url = ? WHERE id = ?`)
     .run(project, projectUrl, sessionId);
 }
 
-/**
- * Newest indexed session file for an agent working in `cwd`. Lets the live
- * `--active` scanner locate a Codex transcript (whose files are date-partitioned,
- * not cwd-keyed like Claude's) by reusing the index. Returns undefined if the
- * session hasn't been scanned yet — the caller degrades to no live state.
- */
 export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string, options?: { maxAgeMs?: number; nowMs?: number }): string | undefined {
   if (!cwd) return undefined;
   let normalized = cwd;
-  try { normalized = fs.realpathSync(cwd); } catch { /* use as-is */ }
+  try { normalized = fs.realpathSync(cwd); } catch {  }
   const db = getDB();
   const row = db
     .prepare(`SELECT file_path, last_activity, timestamp, file_mtime_ms
@@ -3428,7 +2493,6 @@ export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string, opti
   return row.file_path;
 }
 
-/** Build a parameterized WHERE clause from query options. */
 function buildSessionWhere(options: QueryOptions): { clause: string; params: any[] } {
   const where: string[] = [];
   const params: any[] = [];
@@ -3457,12 +2521,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   }
 
   if (options.cwdPrefix) {
-    // A LOCAL stored cwd uses the host path separator (normalizeCwd runs
-    // path.normalize on it), so the subdir wildcard must too — a hardcoded '/'
-    // never matches a Windows `C:\a\b` subpath and the listing comes back empty.
-    // A cwd recorded on another machine keeps its own separators, so this
-    // wildcard does not match foreign subpaths; both sides go through
-    // normalizeCwd, so the exact `cwd = ?` comparison still holds for them.
     where.push('(cwd = ? OR cwd LIKE ?)');
     params.push(options.cwdPrefix, options.cwdPrefix + path.sep + '%');
   }
@@ -3477,10 +2535,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     params.push(options.machine);
   }
 
-  // id lookup. SQLite's LIKE is case-insensitive for ASCII, so a lowercased
-  // pattern matches mixed-case ids; the `=` exact compare adds COLLATE NOCASE
-  // for the same reason. short_id carries its own index (idx_sessions_short_id);
-  // id is the PRIMARY KEY.
   if (options.idExact) {
     where.push('(id = ? COLLATE NOCASE OR short_id = ? COLLATE NOCASE OR routine_run_id = ? COLLATE NOCASE)');
     params.push(options.idExact, options.idExact, options.idExact);
@@ -3491,7 +2545,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   }
 
   if (typeof options.sinceMs === 'number') {
-    // Compare as strings; ISO 8601 timestamps sort lexicographically.
     where.push('timestamp >= ?');
     params.push(new Date(options.sinceMs).toISOString());
   }
@@ -3508,10 +2561,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     where.push('IFNULL(is_team_origin, 0) = 1');
   }
 
-  // #12: join against session_resource_usage. A subquery IN, not a real JOIN
-  // on the base SELECT, keeps `SELECT * FROM sessions` untouched for every
-  // other caller of buildSessionWhere() (countSessions, the usage rollup, …)
-  // that never wants a skill/plugin filter.
   if (options.skill) {
     where.push(`id IN (
       SELECT session_id FROM session_resource_usage
@@ -3528,19 +2577,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   return { clause, params };
 }
 
-/**
- * Resolve which of the given file paths no longer exist, batching the check
- * per directory instead of one `fs.existsSync` stat syscall per file.
- * Transcript trees put many sessions in the same directory (one Claude
- * `~/.claude/projects/<slug>/` holds every session for that project), so
- * `readdirSync` once per directory and a Set membership test collapses what
- * used to be N stat syscalls into (number of distinct directories) readdir
- * syscalls — the same existence answer, far fewer syscalls on a large index
- * (RUSH-2211). Each directory membership set is cached by directory mtime+size,
- * so filesystem-only creates and deletes invalidate it without a SQLite write
- * (RUSH-2318). Falls back to per-file existsSync when a directory cannot be
- * listed.
- */
 interface DirectoryMembershipCacheEntry {
   mtimeMs: number;
   size: number;
@@ -3552,25 +2588,16 @@ const directoryMembershipCache = new Map<string, DirectoryMembershipCacheEntry>(
 let directoryMembershipSweepCount = 0;
 const DIRECTORY_MTIME_SETTLE_MS = 2_000;
 
-/** Process-local diagnostics for the real-filesystem existence-cache tests. */
 export function getSessionExistenceCacheStats(): { sweeps: number } {
   return { sweeps: directoryMembershipSweepCount };
 }
 
-/** Clear process-local directory membership state when the session DB closes. */
 function clearSessionExistenceCache(): void {
   directoryMembershipCache.clear();
   directoryMembershipSweepCount = 0;
 }
 
 function findMissingFilePaths(filePaths: string[]): Set<string> {
-  // Existence is decided on the CONTAINER file, never the raw stored path. A
-  // composite `file_path` (`<container>#<id>`, e.g. OpenCode's `opencode.db#ses_…`)
-  // names a row INSIDE a shared file — its basename is never a directory entry,
-  // so a dirname/basename membership check on the composite string classified
-  // every such row as deleted and pruned it (RUSH-2357). Group the original
-  // paths under the container we actually stat, and map the verdict back so the
-  // returned set still holds the original `file_path` strings the caller keys on.
   const byDir = new Map<string, Map<string, string[]>>();
   for (const p of filePaths) {
     const container = sessionFilePathContainer(p);
@@ -3610,9 +2637,6 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
       }
     } catch {
       directoryMembershipCache.delete(dir);
-      // Directory itself is gone (or unreadable) — every file in it is missing.
-      // Also covers the race where readdir loses to a concurrent delete: fall
-      // back to a direct stat rather than assuming existence.
       for (const [base, originals] of bases) {
         const filePath = path.join(dir, base);
         if (!fs.existsSync(filePath)) markMissing(originals);
@@ -3626,25 +2650,12 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
   return missing;
 }
 
-/** Query sessions from the database, applying filters and ordering by last-activity descending (default). */
 export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const db = getDB();
   const { clause, params } = buildSessionWhere(options);
-  // When a LIMIT is in play, we still need to filter stale rows AFTER the query,
-  // so over-fetch a small buffer. Without this, a page of 50 rows where the first
-  // 5 are stale would return only 45 to the caller even when there are more.
   const limitClause = options.limit
     ? `LIMIT ${Math.max(1, Math.floor(options.limit)) + 16}`
     : '';
-  // NULLs last so unpriced / duration-less rows never crowd out real data when
-  // sorting by cost or duration. timestamp is never null (NOT NULL column).
-  // Default sort is the bare `last_activity` column, not `IFNULL(last_activity,
-  // timestamp)` — the v35 migration backfills every row so last_activity is
-  // never NULL, and every upsert path (resolveLastActivity) keeps it that way
-  // going forward. Wrapping the column in IFNULL() defeats
-  // idx_sessions_last_activity (SQLite can't use an index on an expression that
-  // isn't the bare column); the bare column lets the planner walk the index
-  // instead of sorting the whole result set (RUSH-2211).
   const orderClause =
     options.sortBy === 'cost'
       ? 'ORDER BY cost_usd IS NULL, cost_usd DESC, timestamp DESC'
@@ -3657,19 +2668,6 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
     const trimmed = options.limit ? rows.slice(0, options.limit) : rows;
     return trimmed.map(rowToMeta);
   }
-  // A row whose transcript file is gone from disk is one of two things, and the
-  // local DB is now authoritative for telling them apart (RUSH-2436):
-  //   - ARCHIVED — its user turns still live in session_text. The session is
-  //     real; the file was just removed (agents remove trash, a manual rm, a
-  //     .history rotation, a box reimage). Keep it, stamped `archived`, so it
-  //     still lists and renders from the DB instead of silently vanishing.
-  //   - PHANTOM — a stale/moved file_path with NO cached content (#136), e.g. a
-  //     path a scan forgot to rewrite. There is nothing durable to serve, so it
-  //     stays suppressed exactly as before.
-  // We NO LONGER purge tool-call evidence here: merely listing a file-gone
-  // session used to DELETE its redacted tool calls (purgeToolCalls), destroying
-  // durable data on a read. Synthetic rows (OpenClaw channels/cron — see
-  // scanOpenClawIncremental) carry an empty file_path and are exempt.
   const missingPaths = findMissingFilePaths(rows.map(r => r.file_path).filter((p): p is string => !!p));
   const missing = rows.filter(r => r.file_path && missingPaths.has(r.file_path));
   const missingIds = new Set(missing.map(r => r.id));
@@ -3682,8 +2680,6 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
       for (const row of missing) {
         const content = (readContent.get(row.id) as { content: string } | undefined)?.content;
         if (content && content.trim() !== '') {
-          // Genuine archived session: stamp archived_at the first time we confirm
-          // the file is gone, and reflect it on the in-memory row we return.
           if (row.archived_at == null) {
             markArchived.run(now, row.id);
             row.archived_at = now;
@@ -3695,10 +2691,6 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
     });
     classify();
   }
-  // Un-archive a row whose file came back (a recoverable-trash restore, a re-sync):
-  // it is present on disk now, so it must not keep reporting `archived` to a
-  // machine consumer reading the --json listing. Rare, so the write only fires when
-  // such a row actually exists (RUSH-2436).
   const resurrected = rows.filter(r => r.archived_at != null && !missingIds.has(r.id));
   if (resurrected.length > 0) {
     const clearArchived = db.prepare(`UPDATE sessions SET archived_at = NULL WHERE id = ?`);
@@ -3715,15 +2707,6 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   return trimmed.map(rowToMeta);
 }
 
-/**
- * Cheap query for the daemon's deferred tool-index pass (PHNX-3411).
- *
- * Returns the most-recently-active sessions whose parseSession reads a large
- * flat transcript (kimi: wire.jsonl, grok: chat_history.jsonl). Their scanners
- * produce no events, so upsertSessionsBatch skips them in the warm tick to
- * avoid wedging the event loop. ensureToolIndex uses tool_scan_ledger stamps
- * to skip already-current rows and applies byte/file budget caps.
- */
 export function querySessionsForDeferredToolIndex(limit: number): SessionMeta[] {
   const db = getDB();
   const rows = db.prepare(`
@@ -3736,7 +2719,6 @@ export function querySessionsForDeferredToolIndex(limit: number): SessionMeta[] 
   return rows.map(rowToMeta);
 }
 
-/** Count sessions matching the given filter options. */
 export function countSessions(options: QueryOptions = {}): number {
   const db = getDB();
   const { clause, params } = buildSessionWhere(options);
@@ -3745,53 +2727,25 @@ export function countSessions(options: QueryOptions = {}): number {
   return row ? row.n : 0;
 }
 
-/** One grouped row in a cost/duration rollup. */
 interface UsageRollupRow {
-  /**
-   * Grouping key value: the agent id, project name, shortened model id,
-   * ISO date (YYYY-MM-DD), or account identity
-   * (`claude:org=<uuid>` / `unattributed:<reason>`).
-   */
   key: string;
-  /**
-   * Human label for the key when it is not itself readable — an org uuid is an
-   * identity, not something to show a user. Absent when `key` reads fine on its own.
-   */
   label?: string;
   costUsd: number;
-  /**
-   * USD cost priced as if caching were off (cache read/write at the input rate),
-   * summed from `cost_usd_nocache`. Backs `agents insights output --pricing no-cache`.
-   * Equals `costUsd` for rows whose sessions record no cache split (RUSH-2287).
-   */
   costUsdNoCache: number;
   durationMs: number;
   sessionCount: number;
   tokenCount: number;
-  /** Real generated (output) tokens — excludes cache-read/-write context. */
   outputTokens: number;
-  /** Uncached input tokens summed across the group (0 where no harness recorded a split). */
   inputTokens: number;
-  /** Cache-read tokens summed across the group. */
   cacheReadTokens: number;
-  /** Cache-write (cache-creation) tokens summed across the group. */
   cacheWriteTokens: number;
 }
 
-/** What to group a usage rollup by. */
-/**
- * Read cached facets for the given sessions, dropping any row that is stale.
- *
- * Staleness is decided in SQL against the session's own `file_mtime_ms` / `file_size`,
- * the same pair the scanner maintains — so the cache cannot disagree with the index,
- * `IS` rather than `=` so a source with no statable file — NULL on both sides — is a
- * cache HIT rather than a permanent miss that re-parses it on every run.
- */
 export function readSessionInsights<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
   if (ids.length === 0) return out;
-  const CHUNK = 400; // chunk.length + 1 binds, well under SQLite's 999-variable limit
+  const CHUNK = 400;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const phs = chunk.map(() => '?').join(',');
@@ -3808,23 +2762,12 @@ export function readSessionInsights<T>(ids: string[]): Map<string, T> {
       try {
         out.set(row.id, JSON.parse(row.facets) as T);
       } catch {
-        // A corrupt cache row is not a reason to fail the report; recompute it.
       }
     }
   }
   return out;
 }
 
-/**
- * Persist freshly computed facets against the stamp of the bytes actually parsed.
- *
- * The caller passes the stat it observed when it read the file. Re-reading the stamp
- * from the sessions table inside this INSERT would race: a concurrent rescan between
- * the parse and the write (the cold path flushes in batches, so the window is minutes
- * wide, and this module treats concurrent access as a design assumption) stamps NEW
- * bytes onto OLD facets — a permanent false cache hit until the file changes again.
- * tool-index.ts sets the precedent: stat at parse time, carry the stamp into the write.
- */
 export function writeSessionInsights<T>(
   entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; facets: T }>,
 ): void {
@@ -3849,12 +2792,10 @@ export function writeSessionInsights<T>(
   })();
 }
 
-/** Drop every cached facet row. Backs `agents insights --refresh`. */
 export function clearSessionInsights(): void {
   getDB().exec(`DELETE FROM session_insights`);
 }
 
-/** Read cached trace topics only when their transcript byte stamps still match. */
 export function readSessionTopics<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
@@ -3876,14 +2817,12 @@ export function readSessionTopics<T>(ids: string[]): Map<string, T> {
       try {
         out.set(row.id, JSON.parse(row.topicJson) as T);
       } catch {
-        // Invalid derived cache data is a miss and self-heals on the next write.
       }
     }
   }
   return out;
 }
 
-/** Persist trace topics against the exact transcript bytes used to classify them. */
 export function writeSessionTopics<T>(
   entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; topic: T }>,
 ): void {
@@ -3915,7 +2854,6 @@ export function writeSessionTopics<T>(
   })();
 }
 
-/** Read cached failure phenotypes only when their transcript byte stamps still match. */
 export function readSessionPhenotypes<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
@@ -3937,14 +2875,12 @@ export function readSessionPhenotypes<T>(ids: string[]): Map<string, T> {
       try {
         out.set(row.id, JSON.parse(row.phenotypeJson) as T);
       } catch {
-        // Invalid derived cache data is a miss and self-heals on the next write.
       }
     }
   }
   return out;
 }
 
-/** Persist failure phenotypes against the exact transcript bytes used to classify them. */
 export function writeSessionPhenotypes<T>(
   entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; phenotype: T }>,
 ): void {
@@ -3976,7 +2912,6 @@ export function writeSessionPhenotypes<T>(
   })();
 }
 
-/** Read one derived preview only when it matches the transcript bytes on disk. */
 export function readSessionPreviewCache<T>(
   id: string,
   sourceStamp: { fileMtimeMs: number | null; fileSize: number | null },
@@ -4002,7 +2937,6 @@ export function readSessionPreviewCache<T>(
   }
 }
 
-/** Persist normalized preview data against the exact transcript bytes parsed. */
 export function writeSessionPreviewCache<T>(entry: {
   id: string;
   fileMtimeMs: number | null;
@@ -4029,57 +2963,24 @@ export function writeSessionPreviewCache<T>(entry: {
   );
 }
 
-/** Bump when the cached remote preview envelope shape changes so cached rows recompute (PHNX-3999 v1). */
 export const REMOTE_PREVIEW_SCHEMA_VERSION = 1;
 
-/** Cap on distinct (device, sessionId) rows this cache holds — a requester box
- * previews many peers' sessions over a long uptime, so this bounds growth the
- * same way the fleet session mirror bounds itself to 200 rows (db.ts, PHNX-3792):
- * oldest-by-last-fetch is evicted first. Row count alone is not a real bound —
- * every field the cached envelope carries is already bounded (digest fields,
- * `detail.messages` <= 8 x 4000 chars, `detail.timeline` <= 8 steps, etc.), but
- * 500 rows x an unbounded per-row size is still unbounded storage, so this is
- * paired with a total-byte budget below. */
 const REMOTE_PREVIEW_CACHE_MAX_ROWS = 500;
 
-/**
- * Total on-disk budget for `envelope_json` across every cached row, enforced
- * ALONGSIDE the row cap (whichever evicts more aggressively wins). At the
- * 500-row cap this is a ~32 KiB/row average, which comfortably fits the
- * bounded envelope shape above — a single row is refused entry above
- * {@link REMOTE_PREVIEW_ENVELOPE_MAX_BYTES} rather than being allowed to
- * consume the whole budget by itself.
- */
 const REMOTE_PREVIEW_CACHE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 
-/**
- * Per-envelope cache-write cap. The bounded fields above make a well-formed
- * envelope small; this exists to refuse an outlier (a version-skewed peer, or
- * a future field that forgets to bound itself) rather than let ONE session
- * blow the total budget. A refused write is NOT an error — the caller still
- * gets the live envelope for this call, it simply is not persisted, so the
- * next call re-fetches instead of silently caching a giant blob.
- */
 export const REMOTE_PREVIEW_ENVELOPE_MAX_BYTES = 512 * 1024;
 
 export interface RemotePreviewCacheRow {
-  /** When the envelope currently stored here (if `ok`) was fetched. */
   fetchedAt: number;
-  /** Whether `envelope` is a real, successfully-fetched payload. */
   ok: boolean;
   envelope?: unknown;
   failureReason?: string;
   consecutiveFailures: number;
-  /** Epoch ms before which a fresh fetch attempt should be skipped (negative backoff). */
   nextAttemptAt: number;
-  /** The caller's own last-observed `--revision` cursor, or undefined if no
-   * caller has ever supplied one for this (device, sessionId) pair. */
   lastCallerRevision?: string;
 }
 
-/** Read the durable cached remote preview row for one (device, sessionId) pair,
- * regardless of whether it currently holds a successful envelope. Undefined
- * means this box has never attempted (or recorded) a fetch for that pair. */
 export function readRemotePreviewCache(device: string, sessionId: string): RemotePreviewCacheRow | undefined {
   const row = getDB().prepare(`
     SELECT fetched_at AS fetchedAt, ok, envelope_json AS envelopeJson, failure_reason AS failureReason,
@@ -4102,7 +3003,6 @@ export function readRemotePreviewCache(device: string, sessionId: string): Remot
     try {
       envelope = JSON.parse(row.envelopeJson);
     } catch {
-      // Corrupt cache row: treat as no payload rather than throwing.
     }
   }
   return {
@@ -4116,14 +3016,6 @@ export function readRemotePreviewCache(device: string, sessionId: string): Remot
   };
 }
 
-/**
- * Record the caller's own `--revision` cursor for one (device, sessionId)
- * pair, independent of any fetch. A no-op if no row exists yet (nothing to
- * compare against on a session this box has never fetched). This is what lets
- * "same revision as last time" serve the durable cache with zero SSH
- * indefinitely — the comparison is against THIS value, never against the
- * envelope's own `details.sourceRevision` (which may be a different format).
- */
 export function writeRemotePreviewCallerRevision(device: string, sessionId: string, revision: string): void {
   getDB().prepare(`
     UPDATE session_remote_preview_cache
@@ -4140,8 +3032,6 @@ function pruneRemotePreviewCache(maxRows: number = REMOTE_PREVIEW_CACHE_MAX_ROWS
       SELECT rowid FROM session_remote_preview_cache ORDER BY fetched_at DESC LIMIT ?
     )
   `).run(maxRows);
-  // Total-byte budget, independent of row count: walk newest-first, keep
-  // rows until the running total would exceed the budget, drop the rest.
   const rows = db.prepare(`
     SELECT rowid AS rowid,
            envelope_bytes + length(CAST(COALESCE(failure_reason, '') AS BLOB))
@@ -4161,13 +3051,6 @@ function pruneRemotePreviewCache(maxRows: number = REMOTE_PREVIEW_CACHE_MAX_ROWS
   }
 }
 
-/**
- * Record a successful remote fetch: replaces the payload and resets backoff.
- * An envelope over {@link REMOTE_PREVIEW_ENVELOPE_MAX_BYTES} is refused —
- * this is a write-path bound, not a request failure: the caller already has
- * the live envelope for this call from the fetch that produced it, this only
- * decides whether it is worth persisting.
- */
 export function writeRemotePreviewCacheSuccess(
   device: string,
   sessionId: string,
@@ -4199,10 +3082,6 @@ export function writeRemotePreviewCacheSuccess(
   write();
 }
 
-/** Cap on a stored `failure_reason` string. Some reasons interpolate
- * peer-controlled content (`validateEnvelope`'s mismatched-id message
- * embeds the peer's own claimed session id) — bound it so a misbehaving or
- * malicious peer can't inflate a cache row's stored text unboundedly. */
 const REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS = 300;
 
 function boundFailureReason(reason: string): string {
@@ -4211,13 +3090,6 @@ function boundFailureReason(reason: string): string {
     : reason;
 }
 
-/**
- * Record a failed remote fetch attempt with exponential backoff, WITHOUT
- * discarding a prior good envelope — a session that answered once and is now
- * offline still degrades to that last-good payload (read back via
- * {@link readRemotePreviewCache}'s `ok`/`envelope`), annotated stale by the
- * caller, rather than losing it the moment one attempt fails.
- */
 export function writeRemotePreviewCacheFailure(
   device: string,
   sessionId: string,
@@ -4257,24 +3129,11 @@ export function writeRemotePreviewCacheFailure(
       consecutiveFailures,
       nextAttemptAt,
     );
-    // A failure-only row still occupies a slot in the row/byte-bounded cache —
-    // it must be pruned like any other write, or a persistently-offline peer's
-    // failure rows accumulate without bound (they were previously exempt from
-    // this call entirely).
     pruneRemotePreviewCache();
   });
   write();
 }
 
-/**
- * The session's durable user-turn text, as stored in the `session_text` FTS
- * `content` column at scan time (all harnesses, keyed by session_id). This is
- * the content that survives the transcript file being deleted (RUSH-2436): the
- * render path reads it so a file-gone session still shows its user prompts, and
- * querySessions uses its presence to tell a genuine archived session (has
- * content) from a phantom (a stale/moved file_path with none). Returns undefined
- * when no row exists; an empty string when a row exists but carried no content.
- */
 export function readSessionContent(id: string): string | undefined {
   const row = getDB().prepare(
     `SELECT content FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`,
@@ -4282,15 +3141,6 @@ export function readSessionContent(id: string): string | undefined {
   return row?.content;
 }
 
-/**
- * Read the last-computed preview digest for a session by id, validated against
- * the session row's OWN stored file stamp rather than a live `fs.stat` — the
- * transcript file is gone, so there is nothing on disk to stat, but the preview
- * cache was written with the same `file_mtime_ms`/`file_size` the sessions row
- * still records, so the join re-establishes that stamp. Backs the file-gone
- * render/preview path (RUSH-2436). Returns undefined when no cached digest
- * survives for this session.
- */
 export function readArchivedSessionPreview<T>(id: string): T | undefined {
   const row = getDB().prepare(`
     SELECT pc.preview_json AS previewJson
@@ -4309,7 +3159,6 @@ export function readArchivedSessionPreview<T>(id: string): T | undefined {
   }
 }
 
-/** The daemon-computed summary stored in `session_summaries` (PHNX-3939). */
 export interface SessionSummaryEntry {
   goal?: string;
   checkpoints?: SessionCheckpoint[];
@@ -4317,11 +3166,6 @@ export interface SessionSummaryEntry {
   summaryState: SummaryState;
 }
 
-/**
- * Read one summary only when it matches the transcript bytes on disk (the
- * reuse-or-recompute stamp the SessionSummarizerService gates on). Mirrors
- * {@link readSessionPreviewCache}.
- */
 export function readSessionSummary(
   id: string,
   sourceStamp: { fileMtimeMs: number | null; fileSize: number | null },
@@ -4347,14 +3191,6 @@ export function readSessionSummary(
   }
 }
 
-/**
- * Read the latest stored summary by session id, regardless of the transcript
- * stamp — the low-cost merge read used by the display path (a live row through
- * {@link applyImmutableMemo} or a history/mirror row) to surface the
- * last-computed summary without a model call. A slightly-stale summary is the
- * best available until the service recomputes; the SERVICE uses the stamped
- * {@link readSessionSummary} to decide whether to recompute.
- */
 export function readSessionSummaryAny(id: string): SessionSummaryEntry | undefined {
   const row = getDB().prepare(`
     SELECT summary_json AS summaryJson
@@ -4369,7 +3205,6 @@ export function readSessionSummaryAny(id: string): SessionSummaryEntry | undefin
   }
 }
 
-/** Persist a computed summary against the exact transcript bytes it was derived from. */
 export function writeSessionSummary(entry: {
   id: string;
   fileMtimeMs: number | null;
@@ -4396,11 +3231,6 @@ export function writeSessionSummary(entry: {
   );
 }
 
-/**
- * The daemon-computed timeline stored in `session_timelines` (PHNX-3939): the
- * bounded projection a row merges, plus the request and files derived in the
- * same fold.
- */
 export interface SessionTimelineProjection extends SessionGlance {
   subagents?: SessionSubagent[];
   timeline: SessionTimeline;
@@ -4408,14 +3238,11 @@ export interface SessionTimelineProjection extends SessionGlance {
   files?: SessionFiles;
 }
 
-/** One folded timeline, as the pass produces it for writing. */
 export interface SessionTimelineEntry extends SessionTimelineProjection {
   state: TimelineState;
 }
 
-/** One cached row as READ back: the folded entry plus when it was folded. */
 export interface SessionTimelineCacheRow extends SessionTimelineEntry {
-  /** Epoch ms this row was folded — the pass's re-parse rate limit reads it. */
   computedAt: number;
 }
 
@@ -4427,11 +3254,6 @@ function parseTimelineProjection(json: string): SessionTimelineProjection | unde
   }
 }
 
-/**
- * Read the projection AND the resume state for one session, whatever the
- * transcript stamp — the daemon pass's read, which needs the state to continue
- * from and re-stats the file itself.
- */
 export function readSessionTimelineEntry(id: string): SessionTimelineCacheRow | undefined {
   const row = getDB().prepare(`
     SELECT projection_json AS projectionJson, state_json AS stateJson, computed_at AS computedAt
@@ -4449,11 +3271,6 @@ export function readSessionTimelineEntry(id: string): SessionTimelineCacheRow | 
   }
 }
 
-/**
- * Read only the bounded projection for one session — the display merge, on the
- * read path. Deliberately does NOT parse the resume state: a live row needs the
- * 8 steps and the request, never the fold's bookkeeping.
- */
 export function readSessionTimelineAny(
   id: string,
   stamp?: { fileMtimeMs: number; fileSize: number },
@@ -4469,13 +3286,11 @@ export function readSessionTimelineAny(
   return parseTimelineProjection(row.projectionJson);
 }
 
-/** Persist a folded timeline against the exact transcript bytes it was folded to. */
 export function writeSessionTimeline(entry: {
   id: string;
   fileMtimeMs: number | null;
   fileSize: number | null;
   timeline: SessionTimelineEntry;
-  /** Fold time. Injected by the pass so its re-parse interval is testable without the wall clock. */
   computedAtMs?: number;
 }): void {
   const { state, ...projection } = entry.timeline;
@@ -4501,7 +3316,6 @@ export function writeSessionTimeline(entry: {
   );
 }
 
-/** A local-origin session, projected to the compact fields the fleet mirror publishes. */
 export interface LocalMirrorSource {
   id: string;
   shortId: string;
@@ -4512,25 +3326,15 @@ export interface LocalMirrorSource {
   topic: string | null;
   firstUserMessage: string | null;
   label: string | null;
-  /** The daemon-generated headline (PHNX-3797), so a peer row shows the same title. */
   generatedTitle: string | null;
   lastActivity: string | null;
   timestamp: string;
   ticketId: string | null;
   prUrl: string | null;
-  /** Daemon-computed summary (PHNX-3939), so peers carry it without a transcript. */
   summary: SessionSummaryEntry | null;
-  /** Daemon-folded request/timeline/files (PHNX-3939), same reason as {@link summary}. */
   timeline: SessionTimelineProjection | null;
 }
 
-/**
- * The most-recently-active sessions whose transcript is genuinely local to this
- * box — a real `file_path`, not a peer mirror — for publishing to the fleet
- * session mirror (PHNX-3792). Bounded and team-origin-excluded so the published
- * payload stays the size a picker would show. Never returns a row this box is
- * itself mirroring from a peer (`mirror_synced_at IS NULL`).
- */
 export function queryLocalOriginSessionsForMirror(self: string, limit: number): LocalMirrorSource[] {
   const rows = getDB().prepare(`
     SELECT id, short_id, agent, version, machine, cwd, topic, first_user_message,
@@ -4554,14 +3358,11 @@ export function queryLocalOriginSessionsForMirror(self: string, limit: number): 
     cwd: r.cwd, topic: r.topic, firstUserMessage: r.first_user_message, label: r.label,
     generatedTitle: r.generated_title,
     lastActivity: r.last_activity, timestamp: r.timestamp, ticketId: r.ticket_id, prUrl: r.pr_url,
-    // Ride the daemon-computed summary alongside the digest so a peer renders it
-    // without a transcript (PHNX-3939); only a summarized session carries one.
     summary: readSessionSummaryAny(r.id) ?? null,
     timeline: readSessionTimelineAny(r.id) ?? null,
   }));
 }
 
-/** One peer session digest to write into this box's local mirror. */
 export interface MirrorSessionUpsert {
   id: string;
   shortId: string;
@@ -4572,29 +3373,16 @@ export interface MirrorSessionUpsert {
   topic?: string | null;
   firstUser?: string | null;
   label?: string | null;
-  /** The publisher's daemon-generated headline (PHNX-3797); undefined when it has none yet. */
   generatedTitle?: string | null;
   lastActivity?: string | null;
   timestamp: string;
   ticketId?: string | null;
   prUrl?: string | null;
-  /** Daemon-computed summary carried from the publishing peer (PHNX-3939). */
   summary?: SessionSummaryEntry | null;
-  /** Daemon-folded request/timeline/files carried from the publishing peer (PHNX-3939). */
   timeline?: SessionTimelineProjection | null;
 }
 
-/**
- * Write one peer session's digest into the local `sessions` index as a mirror
- * row (PHNX-3792), so the picker/list/focus render its topic/preview inline
- * with no per-row SSH. The upsert is GUARDED: it never overwrites a genuine
- * local transcript row (`file_path` non-empty and not itself a mirror), so a
- * mirror can only create a new peer-only row or enrich an existing empty-file
- * host-dispatch stub / older mirror. Returns true when a row was written (the
- * caller then persists the matching preview digest); false when a real row was
- * protected. `machine` carries the publisher's recorded execution host so the
- * row collapses with the live fan-out row under the same `machine:id` key.
- */
+// A peer digest may refresh mirror/stub rows, never overwrite genuine local transcript data.
 export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, syncedAt: number): boolean {
   const db = getDB();
   const lastActivity = row.lastActivity ?? row.timestamp;
@@ -4655,24 +3443,14 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
     source,
   });
   if (result.changes === 0) return false;
-  // Keep the mirror row searchable by topic + first user turn, like a local row.
   db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`).run(row.id);
   db.prepare(`
     INSERT INTO session_text (rowid, session_id, label, topic, project, content, assistant)
     VALUES (${SESSION_TEXT_ROWID}, ?, ?, ?, '', ?, '')
   `).run(row.id, row.id, row.label ?? '', row.topic ?? '', row.firstUser ?? '');
-  // Carry the peer's daemon-computed summary into the same session_summaries
-  // cache the local merge reads (PHNX-3939), so a peer session renders its
-  // goal/checkpoints/checklist inline with no transcript. Stamp is null: the
-  // display merge reads by id (readSessionSummaryAny), and this box's own
-  // summarizer service only ever recomputes LOCAL live sessions, never a peer's.
   if (row.summary) {
     writeSessionSummary({ id: row.id, fileMtimeMs: null, fileSize: null, summary: row.summary });
   }
-  // Same for the peer's folded timeline (PHNX-3939): the projection is what a row
-  // renders, and the resume state is deliberately EMPTY — this box never folds a
-  // peer's transcript (it does not have one), so storing a foreign byte offset
-  // would be a resume point into a file that is not here.
   if (row.timeline) {
     writeSessionTimeline({
       id: row.id,
@@ -4684,7 +3462,6 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
   return true;
 }
 
-/** One indexed session the daemon titler may generate a headline for (PHNX-3797). */
 export interface SessionTitleCandidateRow {
   id: string;
   agent: string;
@@ -4699,19 +3476,6 @@ export interface SessionTitleCandidateRow {
   generatedTitleKey: string | null;
 }
 
-/**
- * The most-recently-active LOCAL sessions the titler may consider (PHNX-3797).
- *
- * Deliberately not "every untitled row": the caller decides which of these still
- * needs work by comparing each row's stored `generatedTitleKey` against the key
- * of its current user text, so a first-user-message change re-titles without a
- * second stored copy of that text. Rows excluded here can never be titled:
- *  - a peer MIRROR row — its owning box generates its title and publishes it;
- *  - a row with no user text at all — there is nothing user-anchored to title;
- *  - a row that already carries a `/rename`-style `label`, which outranks a
- *    generated title in the ladder, so generating one would buy nothing.
- * `sinceMs` bounds the work to sessions recent enough to still be shown.
- */
 export function querySessionTitleCandidates(
   limit: number,
   opts: { sinceMs?: number; id?: string } = {},
@@ -4725,8 +3489,6 @@ export function querySessionTitleCandidates(
     clauses.push(`(id = ? OR short_id = ?)`);
     params.push(opts.id, opts.id);
   } else {
-    // An explicitly requested session is titled even when it carries a label or
-    // is older than the window; the periodic sweep honours both bounds.
     clauses.push(`(label IS NULL OR trim(label) = '')`);
     if (opts.sinceMs != null) {
       clauses.push(`COALESCE(last_activity, timestamp) >= ?`);
@@ -4761,13 +3523,6 @@ export function querySessionTitleCandidates(
   }));
 }
 
-/**
- * Persist one generated title against the source key it was derived from
- * (PHNX-3797). `sourceKey` is what makes generation once-per-session: the next
- * sweep sees a stored key equal to the row's current user text and skips it,
- * and regenerates only when that text changed. Never touches a mirror row —
- * the publishing box owns its own sessions' titles.
- */
 export function setSessionGeneratedTitle(
   id: string,
   title: string,
@@ -4782,12 +3537,7 @@ export function setSessionGeneratedTitle(
   return result.changes > 0;
 }
 
-/**
- * Drop peer mirror rows (and their cached digests) whose last sync predates the
- * cutoff — the size ceiling / staleness pruner for the fleet session mirror
- * (PHNX-3792). Only ever touches mirror rows (`mirror_synced_at IS NOT NULL`),
- * never a genuine local or host-dispatch row. Returns the number of rows pruned.
- */
+// Only stamped mirror rows are eligible; local sessions and their derived data are never pruned.
 export function pruneMirrorSessions(cutoffMs: number): number {
   const db = getDB();
   const stale = db.prepare(
@@ -4801,7 +3551,6 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   const delTimeline = db.prepare(`DELETE FROM session_timelines WHERE session_id = ?`);
   const txn = db.transaction(() => {
     for (const { id } of stale) {
-      // Text first: its rowid lookup needs the sessions row still present.
       delText.run(id);
       delRow.run(id);
       delPreview.run(id);
@@ -4813,7 +3562,6 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   return stale.length;
 }
 
-/** Plugin provenance already indexed for resources used by one session. */
 export function getSessionPlugins(id: string): string[] {
   const rows = getDB().prepare(`
     SELECT DISTINCT plugin
@@ -4826,23 +3574,9 @@ export function getSessionPlugins(id: string): string[] {
 
 export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'model' | 'account';
 
-/**
- * Smart-launch affinity priors: group sessions by origin machine, harness, or
- * joint (machine + agent). Ordered by launch count desc.
- *
- * SQL shape (device example):
- *   SELECT machine, COUNT(*) launches, SUM(duration_ms), SUM(token_count)
- *   FROM sessions
- *   WHERE timestamp >= ? AND origin = 'cli' AND is_team_origin = 0
- *   GROUP BY machine ORDER BY launches DESC
- *
- * Account rotation is NOT done here — that stays on live rate-limit windows
- * via `--strategy balanced` / rotate.ts.
- */
 type AffinityGroup = 'machine' | 'agent' | 'machine_agent';
 
 export interface AffinityRow {
-  /** Group key: machine name, agent id, or "machine\\tagent". */
   key: string;
   machine?: string;
   agent?: string;
@@ -4854,13 +3588,9 @@ export interface AffinityRow {
 
 export function queryAffinityRollup(options: {
   groupBy: AffinityGroup;
-  /** ISO cutoff or ms; defaults to 14 days ago when omitted. */
   sinceMs?: number;
-  /** Restrict to these harnesses (e.g. claude/codex/kimi). */
   agents?: SessionAgentId[];
-  /** Default true: only origin=cli rows. */
   onlyCli?: boolean;
-  /** Default true: drop team-spawned sessions. */
   excludeTeamOrigin?: boolean;
   project?: string;
 }): AffinityRow[] {
@@ -4869,7 +3599,6 @@ export function queryAffinityRollup(options: {
   const params: unknown[] = [];
 
   const sinceMs = options.sinceMs ?? (Date.now() - 14 * 24 * 60 * 60 * 1000);
-  // ISO timestamps sort lexicographically; compare as string prefix of datetime.
   where.push(`timestamp >= ?`);
   params.push(new Date(sinceMs).toISOString());
 
@@ -4917,13 +3646,6 @@ export function queryAffinityRollup(options: {
   return db.prepare(sql).all(...params) as AffinityRow[];
 }
 
-/**
- * Aggregate cost / duration / tokens across sessions, grouped by agent,
- * project, shortened model id, account, or calendar day. Honors the same
- * filter shape as querySessions (agent, since/until, team-origin) so
- * `agents insights cost --since 7d --by day` lines up with what
- * `agents sessions` would list. Ordered by cost desc.
- */
 export function queryUsageRollup(
   options: QueryOptions & { groupBy: UsageRollupGroup },
 ): UsageRollupRow[] {
@@ -4935,8 +3657,6 @@ export function queryUsageRollup(
       : options.groupBy === 'project'
         ? `IFNULL(NULLIF(project, ''), '(no project)')`
         : options.groupBy === 'model'
-          // Match shortenModel(): remove Claude's redundant harness prefix and
-          // an optional eight-digit release-date suffix before grouping.
           ? `IFNULL(NULLIF(CASE
               WHEN substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -9, 1) = '-'
                 AND length(substr(CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END, -8)) = 8
@@ -4946,20 +3666,13 @@ export function queryUsageRollup(
               ELSE CASE WHEN model LIKE 'claude-%' THEN substr(model, 8) ELSE model END
             END, ''), '(unknown)')`
         : options.groupBy === 'account'
-          // A NULL account_key means this harness has no account attribution yet —
-          // the mechanism is Claude-only today (see lib/session/claude-accounts.ts).
-          // Bucket per agent so the rows are named honestly instead of being called
-          // "not indexed", which they are not, and instead of joining a real account.
           ? `IFNULL(NULLIF(account_key, ''), 'unattributed:' || agent)`
-          // ISO timestamps are lexicographically date-sortable; the date is the
-          // first 10 chars (YYYY-MM-DD).
           : `substr(timestamp, 1, 10)`;
 
   const sql = `
     SELECT
       ${keyExpr} AS key,
       ${options.groupBy === 'account'
-        // One label per account_key by construction, so MAX just picks it out.
         ? `MAX(CASE WHEN account_org IS NOT NULL AND account IS NOT NULL
                     THEN account_org || ' <' || account || '>' END) AS label,`
         : ''}
@@ -4983,43 +3696,15 @@ export function queryUsageRollup(
   return db.prepare(sql).all(...params) as UsageRollupRow[];
 }
 
-/** One aggregated resource (skill or slash-command) in a usage-stats rollup. */
 export interface ResourceStatRow {
-  /** 'skill' or 'command' (singular, as stored in session_resource_usage.kind). */
   kind: string;
-  /** Stored resource name — bare, or `plugin:short` for a plugin-owned resource. */
   name: string;
-  /** Owning plugin, or null for a flat (non-namespaced) resource. */
   plugin: string | null;
-  /** DotAgents layer or plugin marketplace the resource resolved to at write time. */
   source: string | null;
-  /** Distinct sessions that invoked this resource within the filter window. */
   sessions: number;
-  /** Total invocations (sum of per-session counts) within the window. */
   invocations: number;
 }
 
-/**
- * Roll up skill / slash-command usage from session_resource_usage, joined to
- * `sessions` for attribution so the same filter shape as querySessions
- * (agent / project / since / machine) narrows WHICH sessions count. Grouped by
- * resource identity (kind + name + plugin + source) and ordered by invocation
- * volume — the read side of "which skills/commands do I actually use, and which
- * are dead weight". `order: 'bottom'` ranks least-used first (the one-time
- * skills); `limit` caps the returned rows.
- *
- * The signal only captures EXPLICIT invocations (slash commands and `Skill`
- * tool calls). An auto-triggered skill (loaded by description match) emits no
- * event, so it reads as zero here — a 0 means "never explicitly invoked", not
- * "never loaded". Skill invocations are recorded for Claude and Kimi (the
- * `Skill`-tool harnesses); slash-commands are Claude-only.
- *
- * `kind` / `pluginFilter` filter the RESOURCE rows directly (r.kind / r.plugin),
- * distinct from QueryOptions.skill / QueryOptions.plugin, which filter SESSIONS
- * — deliberately not routed through buildSessionWhere so `--plugin rush` shows
- * only rush's resources rather than every resource used by a rush-touching
- * session.
- */
 export function queryResourceUsageStats(
   options: QueryOptions & {
     kind?: 'skill' | 'command';
@@ -5030,10 +3715,6 @@ export function queryResourceUsageStats(
 ): ResourceStatRow[] {
   const db = getDB();
   const { clause, params } = buildSessionWhere(options);
-  // buildSessionWhere emits bare column names (agent, timestamp, machine, …) and
-  // `id IN (…)` subqueries; in this join they resolve unambiguously to `sessions`
-  // (session_resource_usage carries none of those columns, and its key is
-  // session_id, not id). Strip the leading WHERE so resource predicates append.
   const base = clause.replace(/^WHERE\s+/, '');
   const preds: string[] = base ? [base] : [];
   const allParams: any[] = [...params];
@@ -5048,15 +3729,6 @@ export function queryResourceUsageStats(
   const whereClause = preds.length ? `WHERE ${preds.join(' AND ')}` : '';
   const direction = options.order === 'bottom' ? 'ASC' : 'DESC';
   const limitClause = options.limit ? `LIMIT ${Math.max(1, Math.floor(options.limit))}` : '';
-  // Group by resource IDENTITY = (kind, name) only, per SES-IF-4b. name already
-  // embeds the `plugin:short` prefix for a plugin resource, so (kind, name) is
-  // the true identity. plugin and source are PROVENANCE, not identity, and drift
-  // per session — the same `rush:design` resolves plugin='rush' in a session
-  // whose cwd discovered the plugin and plugin=NULL in one that didn't, and the
-  // layer a flat resource resolved to varies (user vs system). Grouping on either
-  // would split one resource into fractional rows. Aggregate both with MAX so the
-  // row carries a representative (non-NULL when any session resolved it) label
-  // while the counts stay whole.
   const sql = `
     SELECT
       r.kind AS kind,
@@ -5075,36 +3747,9 @@ export function queryResourceUsageStats(
   return db.prepare(sql).all(...allParams) as ResourceStatRow[];
 }
 
-/**
- * Coverage of the resource-usage signal, as three honest facts:
- *
- * - `scanned`  — sessions the resource extractor has actually processed, i.e.
- *   those carrying a `resource_scan_ledger` row at the current
- *   `RESOURCE_INDEX_VERSION`. This is the true "has the historical backfill run"
- *   signal: the ledger is stamped for EVERY scanned session, including ones that
- *   invoked nothing (`resource_count = 0`), so `scanned/total` rises to ~1 after
- *   `agents sessions backfill resources` regardless of how sparse explicit
- *   invocations are.
- * - `covered`  — distinct sessions that carry AT LEAST ONE row in
- *   `session_resource_usage`, i.e. that actually recorded an explicit invocation.
- *   This is an ABSOLUTE signal count, not a coverage ratio: it stays small even
- *   at full scan coverage because most sessions invoke no skill/command, and a
- *   non-recording harness contributes none by construction.
- * - `total`    — sessions indexed.
- *
- * The two were previously conflated: `covered/total` was framed as coverage and
- * read ~1.2% even after a full backfill (most sessions genuinely invoke nothing),
- * so the "run the backfill" hint never cleared. Keying the hint on `scanned/total`
- * fixes that — see `commands/sessions-stats.ts` (PHNX-2301).
- */
 export function resourceUsageCoverage(): { covered: number; scanned: number; total: number } {
   const db = getDB();
   const covered = (db.prepare(`SELECT COUNT(DISTINCT session_id) AS n FROM session_resource_usage`).get() as { n: number }).n;
-  // JOIN sessions so a ledger row for a since-vanished transcript (dropped from
-  // `sessions` but not yet from the ledger) can't inflate scan coverage past the
-  // indexed set. Only rows at the current extractor version count as scanned —
-  // a stale-version row is re-derived on the next backfill, so it is not yet
-  // "covered" for this extractor.
   const scanned = (db.prepare(`
     SELECT COUNT(*) AS n
     FROM resource_scan_ledger l
@@ -5115,7 +3760,6 @@ export function resourceUsageCoverage(): { covered: number; scanned: number; tot
   return { covered, scanned, total };
 }
 
-/** Has this session's resource usage been derived at the current extractor version for this exact file? */
 function needsResourceIndex(
   db: Database.Database,
   sessionId: string,
@@ -5130,7 +3774,6 @@ function needsResourceIndex(
     || row.extractor_version !== RESOURCE_INDEX_VERSION;
 }
 
-/** Record that a session's resource usage is current at RESOURCE_INDEX_VERSION for this file stamp. */
 function stampResourceLedger(
   db: Database.Database,
   sessionId: string,
@@ -5152,42 +3795,19 @@ function stampResourceLedger(
   `).run(sessionId, filePath, stamp.fileMtimeMs, stamp.fileSize, RESOURCE_INDEX_VERSION, Date.now(), resourceCount);
 }
 
-/** Outcome of a resource-usage backfill run. */
 interface ResourceBackfillResult {
-  /** Sessions considered (matched the filter, had a real transcript). */
   scanned: number;
-  /** Sessions (re)parsed and written this run. */
   updated: number;
-  /** Sessions already current at this extractor version, skipped. */
   skipped: number;
-  /** Sessions whose transcript could not be stat'd or parsed. */
   failed: number;
-  /** Total session_resource_usage rows written across updated sessions. */
   resourceRows: number;
 }
 
-/**
- * One-shot historical backfill of session_resource_usage (#12). The normal
- * incremental scan writes resource usage only for sessions whose transcript it
- * (re)parses; a session indexed before this feature shipped keeps a fresh
- * scan_ledger row and is never re-derived, so its skill/slash-command tallies
- * were never recorded. This walks the session index, re-parses each transcript
- * FROM BYTE 0 (parseSession fully materializes — no resumable cursor, so
- * claude/codex re-derive their tallies from scratch), writes the usage, and
- * stamps resource_scan_ledger so reruns skip completed transcripts — the same
- * independent-ledger shape `agents sessions backfill tools` uses.
- *
- * Harness-agnostic: parseSession + extractSkills/extractSlashCommands cover
- * every agent uniformly, so there is no per-harness branch to keep in parity.
- * Synthetic rows without a transcript (OpenClaw channels/cron) are skipped.
- */
 export function backfillResourceUsage(
   filter: QueryOptions = {},
   onProgress?: (done: number, total: number) => void,
 ): ResourceBackfillResult {
   const db = getDB();
-  // No LIMIT: the backfill covers the whole matching history. skipExistenceCheck
-  // stays off so vanished transcripts are dropped, matching querySessions.
   const sessions = querySessions({ ...filter, limit: undefined });
   const result: ResourceBackfillResult = { scanned: 0, updated: 0, skipped: 0, failed: 0, resourceRows: 0 };
   let done = 0;
@@ -5196,8 +3816,6 @@ export function backfillResourceUsage(
     result.scanned++;
     let stamp: { fileMtimeMs: number; fileSize: number };
     try {
-      // Composite rows (`<container>#<id>`) stat their container file — the
-      // per-session bytes/mtime stamp is derived during discovery, not here.
       const st = fs.statSync(sessionFilePathContainer(meta.filePath));
       stamp = { fileMtimeMs: st.mtimeMs, fileSize: st.size };
     } catch {
@@ -5212,14 +3830,6 @@ export function backfillResourceUsage(
     }
     try {
       const events = parseSession(meta.filePath, meta.agent);
-      // Fail loud on a bad read. writeResourceUsage DELETEs the session's rows
-      // before it re-inserts, so a transcript that parses to ZERO events (a
-      // truncated / mid-sync / corrupt file — parseSession returns [] instead of
-      // throwing) would silently wipe real historical usage and then stamp the
-      // ledger "current", masking the loss. A completed historical transcript
-      // always has turns, so an empty parse is never a legitimate "this session
-      // used nothing" — it is an unreadable file. Skip it (count as failed, leave
-      // the ledger unstamped) so a later good read retries.
       if (events.length === 0) {
         result.failed++;
         done++; onProgress?.(done, sessions.length);
@@ -5238,22 +3848,12 @@ export function backfillResourceUsage(
   return result;
 }
 
-/** Who spawned a team: the orchestrator session, from its transcript. */
 export interface TeamSpawner {
   sessionId: string;
   shortId: string;
-  /** The human the orchestrator ran as, when the row carries actor provenance. */
   actor?: string;
 }
 
-/**
- * Map every team name to the session that ran `agents teams create/add` for it.
- *
- * One scan over the rows that carry a `spawned_team`, rather than a query per
- * team — `agents teams list` needs the whole map at once, and the column has no
- * index. When two sessions spawned the same team name (a team re-created after a
- * disband), the most recent wins, which is the one whose work the name refers to.
- */
 export function teamSpawners(): Map<string, TeamSpawner> {
   const db = getDB();
   const rows = db
@@ -5271,18 +3871,12 @@ export function teamSpawners(): Map<string, TeamSpawner> {
   return out;
 }
 
-/** A session with its cost, for the top-N-by-cost listing. */
 interface TopCostSession {
   meta: SessionMeta;
   costUsd: number;
   durationMs: number;
 }
 
-/**
- * Return the N most expensive sessions (cost_usd DESC, NULLs excluded),
- * honoring the same filter shape as querySessions. Drops rows whose JSONL
- * vanished, mirroring querySessions' liveness filter.
- */
 export function topSessionsByCost(
   n: number,
   options: QueryOptions = {},
@@ -5291,16 +3885,8 @@ export function topSessionsByCost(
   const { clause, params } = buildSessionWhere(options);
   const whereCost = clause ? `${clause} AND cost_usd IS NOT NULL` : 'WHERE cost_usd IS NOT NULL';
   const limit = Math.max(1, Math.floor(n));
-  // Over-fetch a small buffer to survive the on-disk liveness filter below.
   const sql = `SELECT * FROM sessions ${whereCost} ORDER BY cost_usd DESC, timestamp DESC LIMIT ${limit + 16}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
-  // Keep a row whose file is present OR whose transcript is already archived
-  // (file gone but user turns still in session_text) — an expensive, real
-  // session must not drop out of the cost rollup just because its file was
-  // removed (RUSH-2436). A file-gone row with no durable content (a phantom) is
-  // still excluded. archived_at is the persisted signal; stamp it here too (once)
-  // so a session first surfaced through the cost rollup reports `archived`
-  // consistently with the listing path.
   const readContent = db.prepare(`SELECT content FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
   const markArchived = db.prepare(`UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL`);
   const now = Date.now();
@@ -5325,17 +3911,13 @@ export function topSessionsByCost(
   }));
 }
 
-/**
- * Read machine attribution in batches without materializing full sessions.
- * Failure is best-effort so the live view can still render local attribution.
- */
 export function findSessionMachinesByIds(ids: string[]): Map<string, string> {
   const out = new Map<string, string>();
   const uniq = [...new Set(ids.filter(Boolean))];
   if (uniq.length === 0) return out;
   try {
     const db = getDB();
-    const CHUNK = 500; // stay well under SQLite's default 999-variable limit
+    const CHUNK = 500;
     for (let i = 0; i < uniq.length; i += CHUNK) {
       const batch = uniq.slice(i, i + CHUNK);
       const placeholders = batch.map(() => '?').join(',');
@@ -5345,7 +3927,6 @@ export function findSessionMachinesByIds(ids: string[]): Map<string, string> {
       for (const r of rows) if (r.machine) out.set(r.id, r.machine);
     }
   } catch {
-    /* index read is best-effort — an unavailable DB leaves rows un-attributed */
   }
   return out;
 }
@@ -5356,7 +3937,6 @@ export function getSessionById(id: string): SessionMeta | null {
   return row ? rowToMeta(row) : null;
 }
 
-/** Exact ids win over prefixes; the normal existence check preserves archived content but excludes phantoms. */
 export function findSessionsById(
   idQuery: string,
   scope: Pick<QueryOptions, 'agent' | 'version' | 'cwd' | 'project'> = {},
@@ -5368,33 +3948,23 @@ export function findSessionsById(
   return querySessions({ ...scope, idPrefix: q });
 }
 
-/**
- * Upgrade a session-id crumb to the full indexed id. The 8-char hex `short_id`
- * a "Sent from …" footer shows would 404 as a `…/console/sessions/<id>` URL, so
- * an owner ping resolves it through the index first (PHNX-3698). A value that is
- * already a full id (or any non-crumb shape, e.g. a native `ses_…` id), or a
- * crumb the index cannot resolve, is returned unchanged — the caller keeps
- * exactly what it had rather than getting a fabricated id.
- */
 export function resolveFullSessionId(idOrCrumb: string | undefined): string | undefined {
   const id = idOrCrumb?.trim();
   if (!id) return undefined;
-  if (!/^[0-9a-f]{8}$/i.test(id)) return id; // already a full id (or non-hex shape) — nothing to resolve
+  if (!/^[0-9a-f]{8}$/i.test(id)) return id;
   const hit = findSessionsByShortIds([id]).get(id.toLowerCase());
   return hit?.id ?? id;
 }
 
-/** Batch-resolve pane short ids; on collision the most recently active session wins. */
 export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionMeta> {
   const out = new Map<string, SessionMeta>();
   const uniq = [...new Set(shortIds.map((s) => s.trim().toLowerCase()).filter(Boolean))];
   if (uniq.length === 0) return out;
   const db = getDB();
-  const CHUNK = 500; // stay well under SQLite's default 999-variable limit
+  const CHUNK = 500;
   for (let i = 0; i < uniq.length; i += CHUNK) {
     const batch = uniq.slice(i, i + CHUNK);
     const placeholders = batch.map(() => '?').join(',');
-    // timestamp ASC so a later (newer) row overwrites an earlier one per short_id.
     const rows = db
       .prepare(`SELECT * FROM sessions WHERE short_id IN (${placeholders}) ORDER BY timestamp ASC`)
       .all(...batch) as SessionRow[];
@@ -5406,25 +3976,13 @@ export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionM
   return out;
 }
 
-/** A single full-text search result with ranking score. */
 interface FtsHit {
   sessionId: string;
   score: number;
   matchedTerms: string[];
-  /**
-   * A short bm25 `snippet()` excerpt around the best-matching column (label,
-   * topic, project, user content, or assistant answer), with the matched
-   * term(s) wrapped in `**…**`. Absent for a handle/label-tier hit (tiers 1-3
-   * below), which has no excerpt to show — the label itself IS the match.
-   */
   snippet?: string;
 }
 
-/**
- * Escape a raw user query into a safe FTS5 MATCH expression.
- * Splits on non-word characters, keeps tokens >= 2 chars, and OR-joins
- * them with a prefix wildcard so partial typing ('rush dep') matches.
- */
 export function buildFtsQuery(input: string): { expr: string; terms: string[] } {
   const terms = input.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 2);
   if (terms.length === 0) return { expr: '', terms: [] };
@@ -5432,34 +3990,12 @@ export function buildFtsQuery(input: string): { expr: string; terms: string[] } 
   return { expr, terms };
 }
 
-/**
- * Build a `label:(...)` FTS5 column-filter MATCH expression for the label
- * tier. Unlike `buildFtsQuery` (2-char floor, tuned for full-content search),
- * this allows 1-char terms: label search is the interactive type-ahead path —
- * the query grows one keystroke at a time, so a single character has to be
- * indexable too. Terms are filtered to `[a-z0-9]` before being embedded in the
- * expression string, so there's no FTS5 syntax injection from user input.
- */
 function buildLabelFtsQuery(input: string): string {
   const terms = input.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 1);
   if (terms.length === 0) return '';
   return `label:(${terms.map(t => `${t}*`).join(' OR ')})`;
 }
 
-/**
- * Label-first search. Sessions whose custom label substring-matches the query
- * always rank ahead of FTS5 hits — this gives predictable behavior when a user
- * types the exact name they gave a session via /rename.
- *
- * Tiers (highest → lowest):
- *   1. Exact label match (case-insensitive): score 1_000_000
- *   2. Label prefix match:                   score   900_000
- *   3. Label contains query:                 score   800_000
- *   4. FTS5 BM25 hits:                       score   1..1000 (scaled)
- *
- * Note: FTS5's bm25() returns negative numbers; we flip the sign for tier 4
- * so "higher = better" is consistent across all tiers.
- */
 export function ftsSearch(input: string, limit = 200): FtsHit[] {
   const db = getDB();
   const trimmed = input.trim();
@@ -5470,28 +4006,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   const seen = new Set<string>();
   const hits: FtsHit[] = [];
 
-  // Tier 1-3: handle-based matches, ordered by exactness. A session's handle is
-  // its `label` — set by an agent title / `/rename`, or seeded at launch from
-  // `agents run --name`. Typing it resolves the session ahead of any FTS content
-  // hit.
-  //
-  // Candidates come from the FTS5 `label` column, not a raw `LOWER(label) LIKE
-  // '%q%'` scan of `sessions`: a leading wildcard can't use any index, so on a
-  // large session table that was a full-table scan on every keystroke of
-  // interactive search (RUSH-2211). `session_text.label` is kept 1:1 with
-  // `sessions.label` by every upsert path (storedFtsLabel), so this is the
-  // same data, indexed. Token-prefix matching seeks the FTS index instead of
-  // scanning every row, at the cost of only matching at token boundaries — a
-  // substring inside a single token (e.g. "ckf" inside "quickfix") no longer
-  // matches, since FTS5 only indexes prefixes of whole tokens, not arbitrary
-  // interior slices. (A slice spanning a token boundary, like "ix-b" inside
-  // "fix-bug", still matches: "ix-b" tokenizes to "ix" + "b", and "b" is a
-  // valid prefix of the "bug" token.) That's the accepted trade-off for an
-  // indexable interactive path; the exact/prefix/contains scoring below still
-  // runs in JS over the FTS candidate set, so ranking among real matches is
-  // unchanged. Only a query with no indexable token (rare — e.g.
-  // punctuation-only input) falls back to the direct scan rather than
-  // silently dropping the tier.
   const labelMatchExpr = buildLabelFtsQuery(input);
   const labelRows = labelMatchExpr
     ? (db.prepare(`
@@ -5505,7 +4019,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
 
   let hasExactLabelMatch = false;
   for (const row of labelRows) {
-    // Score the label by match quality (exact > prefix > contains).
     let score = 0;
     const handle = row.label;
     if (handle) {
@@ -5522,24 +4035,15 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
       }
     }
     if (score === 0) continue;
-    // matchedTerms is empty for handle hits — the picker can render the handle
-    // itself as the highlight, no badge needed.
     hits.push({ sessionId: row.id, score, matchedTerms: [] });
     seen.add(row.id);
   }
 
-  // If the query exactly names a labeled session, don't dilute the result
-  // with FTS5 content hits — the user typed a specific thing, show just it.
   if (hasExactLabelMatch) {
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, limit);
   }
 
-  // Tier 4: FTS5 content match, skipping anything already surfaced via label.
-  // `snippet(session_text, -1, ...)` lets FTS5 pick the best-matching column
-  // itself (label/topic/project/content/assistant) rather than us guessing —
-  // a query that only matched in `assistant` (an agent-only answer) still gets
-  // an excerpt from the right column instead of an empty content snippet.
   if (expr) {
     try {
       const rows = db
@@ -5564,7 +4068,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
         seen.add(r.session_id);
       }
     } catch {
-      /* invalid MATCH expression — tier 4 just yields nothing */
     }
   }
 
@@ -5572,18 +4075,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   return hits.slice(0, limit);
 }
 
-/**
- * Rewrite file_path for sessions whose path starts with any of `moves.from`,
- * replacing that prefix with `moves.to` and clearing the matching scan_ledger
- * entries so the next scan re-indexes from the new location.
- *
- * One transaction for the whole batch (PHNX-3940 T7): a migration that moves
- * several homes into slots and several version dirs into trash must not leave
- * the index half-rewritten. Longest `from` wins when prefixes nest, and each
- * session row is rewritten at most once.
- *
- * Returns the number of session rows updated.
- */
 export function reindexMovedSessionPaths(moves: ReadonlyArray<{ from: string; to: string }>): number {
   const usable = moves.filter((m) => m.from && m.from !== m.to);
   if (usable.length === 0) return 0;
@@ -5611,20 +4102,10 @@ export function reindexMovedSessionPaths(moves: ReadonlyArray<{ from: string; to
   })();
 }
 
-/**
- * Rewrite file_path for all sessions whose path starts with oldPrefix, replacing
- * it with newPrefix + the unchanged suffix. Also clears the matching scan_ledger
- * entries so they are re-indexed from the new location on the next scan.
- *
- * Used by removeVersion after soft-deleting a version directory to trash, so
- * that session reads (transcript view, /continue) still work from the trash path.
- * Returns the number of session rows updated.
- */
 export function updateSessionFilePaths(oldPrefix: string, newPrefix: string): number {
   return reindexMovedSessionPaths([{ from: oldPrefix, to: newPrefix }]);
 }
 
-/** Count indexed sessions whose transcript path sits under `prefix`. */
 export function countSessionsWithFilePrefix(prefix: string): number {
   if (!prefix) return 0;
   const row = getDB()
@@ -5633,9 +4114,7 @@ export function countSessionsWithFilePrefix(prefix: string): number {
   return row.c;
 }
 
-// ─── Tool sessions: durable browser / computer-use metadata (RUSH-2549) ──────
 
-/** Per-kind capture tallies for a browser task. Counts only -- never the bytes. */
 interface BrowserCaptureCounts {
   screenshot: number;
   pdf: number;
@@ -5643,7 +4122,6 @@ interface BrowserCaptureCounts {
   download: number;
 }
 
-/** One durable browser-task row. `machine` defaults to this device. */
 interface BrowserSessionRecord {
   task: string;
   profile: string;
@@ -5658,7 +4136,6 @@ interface BrowserSessionRecord {
   capturesRemote?: string;
 }
 
-/** One durable computer-use invocation row. `machine` defaults to this device. */
 interface ComputerSessionRecord {
   invocationId: string;
   sessionId?: string;
@@ -5671,24 +4148,6 @@ interface ComputerSessionRecord {
   taskPreview?: string;
 }
 
-/**
- * Upsert one browser task's durable metadata.
- *
- * Called at task START. This executes INSIDE the browser daemon (daemon.ts
- * constructs BrowserService; ipc.ts dispatches `start` to it), which makes the
- * shared daemon a writer of this DB — but the identity it writes is RESOLVED IN
- * THE CALLING CLI PROCESS and forwarded over IPC, never resolved here. That
- * distinction is the whole fix: resolving it daemon-side would attribute every
- * task to the daemon's own actor (the RUSH-2020 bug).
- *
- * `agents browser stop` deliberately does NOT delete this row: the whole point
- * is that the link outlives the task.
- *
- * Identity fields are only ever widened, never blanked. A later capture-count
- * update carries no session id, and `COALESCE(excluded.…, browser_sessions.…)`
- * keeps the one recorded at start rather than overwriting it with NULL --
- * otherwise the second write would undo exactly what the first was for.
- */
 export function recordBrowserSession(record: BrowserSessionRecord): void {
   const db = getDB();
   const now = Date.now();
@@ -5728,13 +4187,6 @@ export function recordBrowserSession(record: BrowserSessionRecord): void {
   );
 }
 
-/**
- * Upsert one computer-use invocation's durable metadata.
- *
- * `action_count` accumulates: a `computer run` loop emits many actions under one
- * invocation id, and each arrives as its own call, so the count is incremented
- * rather than replaced. Identity is widened-only, for the same reason as above.
- */
 export function recordComputerSession(record: ComputerSessionRecord): void {
   const db = getDB();
   const now = Date.now();
@@ -5763,7 +4215,6 @@ export function recordComputerSession(record: ComputerSessionRecord): void {
   );
 }
 
-/** A stored browser row as read back, with counts rehydrated. */
 interface StoredBrowserSession extends Required<Pick<BrowserSessionRecord, 'task' | 'profile'>> {
   sessionId?: string;
   launchId?: string;
@@ -5814,17 +4265,6 @@ function toStoredBrowserSession(row: BrowserSessionRow): StoredBrowserSession {
   };
 }
 
-/**
- * Stored browser tasks, newest first; optionally scoped to one profile.
- *
- * A PROFILE-SCOPED read is deliberately unbounded. These rows are the identity
- * for capture dirs that still exist on disk, and dropping the oldest ones would
- * silently regress exactly those tasks to `unlinked` — the symptom this whole
- * change removes, reappearing at a higher threshold. The row count is already
- * bounded by the tasks that profile has ever run, and each row is a short
- * metadata record. Only the unscoped read (every profile, used for overviews)
- * takes a ceiling, since that one has no natural bound.
- */
 export function listBrowserSessionRecords(
   profile?: string,
   opts: { limit?: number } = {},
@@ -5837,7 +4277,6 @@ export function listBrowserSessionRecords(
   return rows.map(toStoredBrowserSession);
 }
 
-/** One stored browser task by its (profile, task) key, or null. */
 export function getBrowserSessionRecord(profile: string, task: string): StoredBrowserSession | null {
   const db = getDB();
   const row = db
@@ -5846,7 +4285,6 @@ export function getBrowserSessionRecord(profile: string, task: string): StoredBr
   return row ? toStoredBrowserSession(row) : null;
 }
 
-/** A stored computer-use invocation as read back. */
 interface StoredComputerSession {
   invocationId: string;
   sessionId?: string;
@@ -5871,37 +4309,13 @@ interface ComputerSessionRow {
   task_preview: string | null;
 }
 
-/**
- * Retention for the tool-session tables.
- *
- * These are the durable answer to a ledger that prunes at 7 days, so they are
- * deliberately long-lived — but "durable" is not "unbounded". `computer_sessions`
- * takes one row per `agents computer` CLI PROCESS (`COMPUTER_INVOCATION_ID` is
- * minted per process), and an agent driving a desktop invokes that hundreds of
- * times a day, so an unbounded table would grow without limit and be read in
- * full on every listing.
- */
 const TOOL_SESSION_MAX_AGE_DAYS = 365;
-/** Default ceiling on rows one listing will read. */
 const TOOL_SESSION_LIST_LIMIT = 2000;
 
-/**
- * Drop tool-session rows past {@link TOOL_SESSION_MAX_AGE_DAYS}.
- *
- * Called from the listing path, never from the write hot path: an
- * `agents computer` action must not pay for a table sweep (see the fail-soft
- * note on `recordComputerSession`'s caller). Returns rows deleted.
- */
 export function pruneToolSessions(maxAgeDays: number = TOOL_SESSION_MAX_AGE_DAYS): number {
   const db = getDB();
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
 
-  // Cheap indexed guard first, so the common case is one lookup rather than a
-  // write transaction (the same shape as the account repair below). Every
-  // listing calls this, and on any table younger than the retention window
-  // there is nothing to delete — but a bare DELETE still opens a write
-  // transaction, which under `busy_timeout = 30000` can make a read-only
-  // listing wait on the session indexer for no reason at all.
   const stale = db.prepare(`
     SELECT 1 FROM computer_sessions WHERE started_at < ?
     UNION ALL
@@ -5915,24 +4329,11 @@ export function pruneToolSessions(maxAgeDays: number = TOOL_SESSION_MAX_AGE_DAYS
   return Number(computer.changes ?? 0) + Number(browser.changes ?? 0);
 }
 
-/**
- * Stored computer-use invocations, newest first, bounded.
- *
- * The limit is a real ceiling, not a nicety: `--json` serializes whatever this
- * returns, so an unbounded read would dump the entire table on every call.
- */
 export function listComputerSessionRecords(
   opts: { limit?: number; startedBeforeMs?: number } = {},
 ): StoredComputerSession[] {
   const db = getDB();
   const limit = opts.limit ?? TOOL_SESSION_LIST_LIMIT;
-  // `startedBeforeMs` selects the COMPLEMENT of the caller's other source
-  // rather than the newest N. The caller that recovers pruned runs already
-  // holds every recent invocation from the event ledger and discards any row
-  // it has seen — so a bare newest-N read hands it 2000 rows it is guaranteed
-  // to throw away, and returns nothing at all once the table passes that size.
-  // Bounding by "older than the ledger reaches" truncates the TAIL of
-  // recoverable history instead of deleting all of it.
   const rows = (opts.startedBeforeMs === undefined
     ? db
       .prepare(`SELECT * FROM computer_sessions ORDER BY started_at DESC LIMIT ?`)
