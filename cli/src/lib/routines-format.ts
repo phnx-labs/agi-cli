@@ -1,7 +1,21 @@
+/**
+ * Pure display helpers for `agents routines list`.
+ *
+ * No external dependencies. All functions are pure (no I/O, no side effects).
+ */
 
+// ---------------------------------------------------------------------------
+// humanizeCron
+// ---------------------------------------------------------------------------
 
 const DAY_NAMES = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
 
+/**
+ * Convert a cron expression to a human-readable phrase.
+ *
+ * Handles the common patterns. For anything unrecognized, returns the raw
+ * expression so the user still sees something useful. NEVER throws.
+ */
 export function humanizeCron(expr: string, _tz?: string): string {
   try {
     const parts = expr.trim().split(/\s+/);
@@ -9,22 +23,26 @@ export function humanizeCron(expr: string, _tz?: string): string {
 
     const [minute, hour, dom, month, dow] = parts;
 
+    // every minute: * * * * *
     if (minute === '*' && hour === '*' && dom === '*' && month === '*' && dow === '*') {
       return 'every minute';
     }
 
+    // every N minutes: */N * * * *
     const everyMinMatch = minute.match(/^\*\/(\d+)$/);
     if (everyMinMatch && hour === '*' && dom === '*' && month === '*' && dow === '*') {
       const n = parseInt(everyMinMatch[1], 10);
       return `every ${n} minute${n === 1 ? '' : 's'}`;
     }
 
+    // every N hours: 0 */N * * *
     const everyHourMatch = hour.match(/^\*\/(\d+)$/);
     if (everyHourMatch && minute === '0' && dom === '*' && month === '*' && dow === '*') {
       const n = parseInt(everyHourMatch[1], 10);
       return `every ${n} hour${n === 1 ? '' : 's'}`;
     }
 
+    // Only proceed with time-of-day patterns when hour and minute are fixed integers
     const hourNum = /^\d+$/.test(hour) ? parseInt(hour, 10) : null;
     const minNum = /^\d+$/.test(minute) ? parseInt(minute, 10) : null;
 
@@ -32,14 +50,17 @@ export function humanizeCron(expr: string, _tz?: string): string {
 
     const timeStr = formatTime12(hourNum, minNum);
 
+    // daily at HH:MM: M H * * *
     if (dom === '*' && month === '*' && dow === '*') {
       return `daily at ${timeStr}`;
     }
 
+    // weekdays: M H * * 1-5
     if (dom === '*' && month === '*' && dow === '1-5') {
       return `weekdays at ${timeStr}`;
     }
 
+    // specific day of week: M H * * D  (single digit 0-6)
     if (dom === '*' && month === '*' && /^\d$/.test(dow)) {
       const dayIdx = parseInt(dow, 10);
       if (dayIdx >= 0 && dayIdx <= 6) {
@@ -47,11 +68,13 @@ export function humanizeCron(expr: string, _tz?: string): string {
       }
     }
 
+    // specific day of month: M H D * *
     if (/^\d+$/.test(dom) && month === '*' && dow === '*') {
       const d = parseInt(dom, 10);
       return `monthly on day ${d} at ${timeStr}`;
     }
 
+    // every N hours with fixed minute: M */N * * *  (already handled above for M=0; catch M != 0)
     if (everyHourMatch && dom === '*' && month === '*' && dow === '*') {
       const n = parseInt(everyHourMatch[1], 10);
       return `every ${n} hour${n === 1 ? '' : 's'} at :${String(minNum).padStart(2, '0')}`;
@@ -63,6 +86,7 @@ export function humanizeCron(expr: string, _tz?: string): string {
   }
 }
 
+/** Format an hour (0-23) + minute (0-59) as "H:MM AM/PM". */
 function formatTime12(hour: number, minute: number): string {
   const period = hour < 12 ? 'AM' : 'PM';
   const h = hour % 12 === 0 ? 12 : hour % 12;
@@ -70,10 +94,22 @@ function formatTime12(hour: number, minute: number): string {
   return `${h}:${m} ${period}`;
 }
 
+// ---------------------------------------------------------------------------
+// humanizeNextRun
+// ---------------------------------------------------------------------------
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/**
+ * Convert a next-run Date into a human phrase relative to `now`.
+ *
+ * - null            → '-'
+ * - same calendar day  → 'today 9:00 AM'
+ * - next calendar day  → 'tomorrow 9:00 AM'
+ * - within 7 days   → 'Mon 9:00 AM'
+ * - further out      → 'Jun 15, 9:00 AM'
+ */
 export function humanizeNextRun(date: Date | null, now: Date, tz?: string): string {
   if (!date) return '-';
 

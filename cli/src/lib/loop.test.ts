@@ -61,6 +61,7 @@ describe('runLoop — termination by max_iterations', () => {
     expect(result.iterations).toBe(3);
     expect(result.stoppedBy).toBe('max');
     expect(rec.calls.length).toBe(3);
+    // A checkpoint after every iteration.
     expect(checkpoints.length).toBe(3);
     expect(checkpoints[checkpoints.length - 1].iteration).toBe(3);
   });
@@ -75,9 +76,14 @@ describe('runLoop — termination by max_iterations', () => {
     });
     const ids = rec.calls.map((c) => c.sessionId);
     const prompts = rec.calls.map((c) => c.prompt);
+    // `--session-id` CREATES a session — re-passing one errors "already in use".
+    // So every iteration must pin a UNIQUE id.
     expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
     expect(new Set(ids).size).toBe(3);
+    // Iteration 1 gets the bare entrypoint.
     expect(prompts[0]).toBe('iterate');
+    // Iterations 2+ thread the PRIOR iteration's session via /continue, then
+    // re-append the entrypoint. The id referenced must be the previous turn's.
     expect(prompts[1]).toBe(`/continue ${ids[0]}\n\niterate`);
     expect(prompts[2]).toBe(`/continue ${ids[1]}\n\niterate`);
   });
@@ -91,6 +97,7 @@ describe('runLoop — termination by max_iterations', () => {
       baseCtx(runDir, { agent: 'codex' }),
       { runIteration: rec.fn, sleep: noSleep, writeCheckpoint: () => {} },
     );
+    // Every iteration re-injects the bare entrypoint — no /continue handoff.
     expect(rec.calls.every((c) => c.prompt === 'iterate')).toBe(true);
   });
 });
@@ -102,6 +109,7 @@ describe('runLoop — until=signal', () => {
     const result = await runLoop(baseExec, { until: 'signal', maxIterations: 10, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => {
         iter++;
+        // The "agent" writes the signal AFTER iteration 1 saying "stop".
         if (iter === 1) {
           fs.writeFileSync(loopSignalPath(runDir), JSON.stringify({ continue: false, reason: 'goal reached' }), 'utf-8');
         }
@@ -121,7 +129,7 @@ describe('runLoop — until=signal', () => {
     const result = await runLoop(baseExec, { until: 'signal', maxIterations: 10, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => {
         iter++;
-        const cont = iter < 3;
+        const cont = iter < 3; // stop on the 3rd
         fs.writeFileSync(loopSignalPath(runDir), JSON.stringify({ continue: cont }), 'utf-8');
         return { exitCode: 0, tokens: 0 };
       },
@@ -134,6 +142,7 @@ describe('runLoop — until=signal', () => {
 
   it('fail-closed: an absent signal file stops with condition-met', async () => {
     const runDir = tmpRunDir();
+    // run-fn never writes loop-signal.json — absence must be treated as stop.
     const result = await runLoop(baseExec, { until: 'signal', maxIterations: 10, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => ({ exitCode: 0, tokens: 0 }),
       sleep: noSleep,
@@ -151,6 +160,7 @@ describe('runLoop — until=signal', () => {
     await runLoop(baseExec, { until: 'signal', maxIterations: 3, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => {
         iter++;
+        // Record whether a stale signal survived into this iteration's start.
         seenSignalBeforeRun.push(fs.existsSync(loopSignalPath(runDir)));
         fs.writeFileSync(loopSignalPath(runDir), JSON.stringify({ continue: iter < 3 }), 'utf-8');
         return { exitCode: 0, tokens: 0 };
@@ -158,6 +168,8 @@ describe('runLoop — until=signal', () => {
       sleep: noSleep,
       writeCheckpoint: () => {},
     });
+    // The driver clears the signal after reading it, so no iteration ever begins
+    // with a leftover signal file present.
     expect(seenSignalBeforeRun).toEqual([false, false, false]);
   });
 });
@@ -165,6 +177,7 @@ describe('runLoop — until=signal', () => {
 describe('runLoop — budget (token cap)', () => {
   it('stops with budget once cumulative tokens reach the cap', async () => {
     const runDir = tmpRunDir();
+    // 400 tokens/iter, cap 1000 → stops after iter 3 (1200 >= 1000).
     const result = await runLoop(baseExec, { budget: 1000, maxIterations: 100, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => ({ exitCode: 0, tokens: 400 }),
       sleep: noSleep,
@@ -216,6 +229,9 @@ describe('runLoop — error handling', () => {
 describe('runLoop — signal classification (FIX 2)', () => {
   it('classifies a non-zero exit AFTER SIGINT as signal, not error', async () => {
     const runDir = tmpRunDir();
+    // Ctrl-C kills the child mid-iteration: the iteration returns a non-zero
+    // exit, but a SIGINT arrived first. That must be 'signal' (exit 130), not
+    // 'error'. Emit SIGINT during the iteration, then return exit 130.
     const result = await runLoop(baseExec, { maxIterations: 5, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => {
         process.emit('SIGINT' as any);
@@ -229,6 +245,8 @@ describe('runLoop — signal classification (FIX 2)', () => {
 
   it('classifies a throw AFTER SIGINT as signal, not error', async () => {
     const runDir = tmpRunDir();
+    // A SIGINT that kills the child can surface as a spawn rejection rather than
+    // a clean non-zero exit. With the stop flag set, that is still a signal.
     const result = await runLoop(baseExec, { maxIterations: 5, interval: '0' }, baseCtx(runDir), {
       runIteration: async () => {
         process.emit('SIGINT' as any);
@@ -290,6 +308,8 @@ describe('parseLoopInterval (FIX 3)', () => {
   });
 
   it('THROWS on unparseable input instead of silently coalescing to 0', () => {
+    // The bug: "30s" / "5" / "abc" parsed to null then coalesced to 0ms, so a
+    // typo ran the loop full-speed. Each must now throw.
     expect(() => parseLoopInterval('30s')).toThrow(/Invalid loop interval/);
     expect(() => parseLoopInterval('5')).toThrow(/Invalid loop interval/);
     expect(() => parseLoopInterval('abc')).toThrow(/Invalid loop interval/);
@@ -301,6 +321,8 @@ describe('runLoop — resume from checkpoint', () => {
     const runDir = tmpRunDir();
     const rec = recordingRun(100);
     const checkpoints: Checkpoint[] = [];
+    // Simulate a run that already completed 2 iterations (300 tokens), resuming
+    // at iteration 3 with maxIterations 4 → runs iterations 3 and 4 only.
     const result = await runLoop(baseExec, { maxIterations: 4, interval: '0' }, baseCtx(runDir, {
       startIteration: 3,
       startTokens: 300,
@@ -310,14 +332,22 @@ describe('runLoop — resume from checkpoint', () => {
       sleep: noSleep,
       writeCheckpoint: (c) => checkpoints.push({ ...c }),
     });
+    // Only 2 NEW iterations executed (3 and 4).
     expect(rec.calls.length).toBe(2);
     expect(result.iterations).toBe(2);
     expect(result.stoppedBy).toBe('max');
+    // Token count continued from 300: 300 + 2*100 = 500.
     expect(result.tokens).toBe(500);
+    // The FIRST resumed iteration continues the killed run's conversation via
+    // /continue <carried id>; it pins its own fresh session id (not the carried
+    // one — re-passing would error "already in use").
     expect(rec.calls[0].prompt).toBe('/continue resumed-session-id\n\niterate');
     expect(rec.calls[0].sessionId).not.toBe('resumed-session-id');
+    // The second resumed iteration continues from the first resumed iteration.
     expect(rec.calls[1].prompt).toBe(`/continue ${rec.calls[0].sessionId}\n\niterate`);
     expect(rec.calls[1].sessionId).not.toBe(rec.calls[0].sessionId);
+    // The final checkpoint records the real iteration number and the LAST
+    // iteration's session id (what a future resume continues from).
     expect(checkpoints[checkpoints.length - 1].iteration).toBe(4);
     expect(checkpoints[checkpoints.length - 1].cumulativeTokens).toBe(500);
     expect(checkpoints[checkpoints.length - 1].sessionId).toBe(rec.calls[1].sessionId);
@@ -330,8 +360,8 @@ describe('loop-signal helpers', () => {
     expect(readLoopSignal(runDir)).toBeNull();
     fs.writeFileSync(loopSignalPath(runDir), JSON.stringify({ continue: 'yes', reason: 5 }), 'utf-8');
     const sig = readLoopSignal(runDir)!;
-    expect(sig.continue).toBe(false);
-    expect(sig.reason).toBeUndefined();
+    expect(sig.continue).toBe(false); // non-boolean true coerced to false (fail-closed)
+    expect(sig.reason).toBeUndefined(); // non-string reason dropped
   });
 
   it('clearLoopSignal removes the file and is a no-op when already absent', () => {

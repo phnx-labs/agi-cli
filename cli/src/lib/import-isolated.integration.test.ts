@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// `agents import` adopts: it MOVES ~/.<agent> into a version home, symlinks the
+// original away, sets the global default and creates a shim. That is the opposite of
+// isolation, so with the boundary in place it is refused for an isolated-only agent —
+// and there was no way to bring an existing setup into a sandbox at all. A new
+// isolated copy started empty.
+//
+// `--isolated` copies instead: settings in, original untouched, nothing adopted.
 describe.skipIf(process.platform === 'win32')('agents import --isolated', () => {
   let home: string;
 

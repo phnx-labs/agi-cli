@@ -1,3 +1,17 @@
+/**
+ * `agents events --limit` truncation tests. Drive the REAL CLI entry (via tsx)
+ * against a temp HOME seeded with a real events.jsonl, then assert on the
+ * records it returns.
+ *
+ * The bug these cover: `--limit` defaulted to 50 and was applied silently, with
+ * `--limit 0` collapsing to 50 (`0 || 50`), so there was no way to read the
+ * whole stream. Any aggregation over `--json` therefore ranked the newest 50
+ * records and reported a confidently wrong answer — measured on a real 7-day
+ * friction corpus (2135 events, 9 classes): 8 of 9 ranks wrong, counts off by
+ * ~100x, no warning.
+ *
+ * No mocking — the same code path a real invocation takes.
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -24,6 +38,11 @@ function makeTempHome(): string {
   return home;
 }
 
+/**
+ * Seed `alpha` (older, more numerous) and `beta` (newest) so the two answers
+ * disagree: over the full set alpha wins 55-45; over the newest 50 beta wins
+ * 45-5. That inversion is exactly what a silent cap produces.
+ */
 const ALPHA = 55;
 const BETA = 45;
 
@@ -57,6 +76,7 @@ function runEvents(home: string, args: string[]) {
   });
 }
 
+/** Parse `--json` stdout into records, ignoring the CLI's own audit rows. */
 function seededRecords(stdout: string): Array<Record<string, unknown>> {
   const start = stdout.indexOf('[');
   const parsed = JSON.parse(stdout.slice(start)) as Array<Record<string, unknown>>;
@@ -74,6 +94,7 @@ afterEach(() => {
     try {
       fs.rmSync(h, { recursive: true, force: true });
     } catch {
+      /* best-effort */
     }
   }
 });
@@ -88,7 +109,9 @@ describe('agents events --limit', () => {
     const records = seededRecords(res.stdout);
 
     expect(records).toHaveLength(ALPHA + BETA);
+    // The true answer: alpha is the more frequent module.
     expect(winner(records)).toBe('alpha');
+    // Nothing was capped, so nothing is announced.
     expect(res.stderr).not.toContain('--limit 0 for all');
   });
 
@@ -101,6 +124,8 @@ describe('agents events --limit', () => {
     const records = seededRecords(res.stdout);
 
     expect(records.length).toBeLessThan(ALPHA + BETA);
+    // The clipped slice yields the WRONG winner — which is why the cap must be
+    // announced rather than left for the caller to discover.
     expect(winner(records)).toBe('beta');
     expect(res.stderr).toContain('Showing the newest 50');
     expect(res.stderr).toContain('--limit 0 for all');
@@ -111,6 +136,7 @@ describe('agents events --limit', () => {
     seedEvents(home);
 
     const res = runEvents(home, ['--event', 'pr.opened', '--json']);
+    // The notice must not contaminate the pipe: stdout parses on its own.
     expect(() => JSON.parse(res.stdout.slice(res.stdout.indexOf('[')))).not.toThrow();
   });
 
@@ -132,6 +158,10 @@ describe('agents events --limit', () => {
     expect(res.stderr).toContain('Invalid --limit');
   });
 
+  // `Number('')` and `Number('   ')` are both 0, which the cap resolver reads as
+  // "no cap". An unset shell variable — `agents events --limit "$LIMIT"` — would
+  // therefore return the entire unbounded stream with exit 0 and no notice: the
+  // same silent-wrong-answer this ticket exists to remove, in the other direction.
   it.each([['empty', ''], ['whitespace', '   ']])(
     'rejects an %s --limit instead of reading the whole stream unannounced',
     (_label, value) => {

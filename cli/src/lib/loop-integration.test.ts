@@ -1,3 +1,13 @@
+/**
+ * Integration test for the loop driver (issue #332).
+ *
+ * Unlike loop.test.ts (which injects a fake run-fn), this exercises the REAL
+ * defaultRunIteration — actual child_process.spawn, actual stdout stream-json
+ * parsing, actual token accumulation — against a fake `claude` binary on PATH
+ * that emits real Claude-shaped stream-json and writes loop-signal.json. This
+ * proves the spawn + parse + signal + checkpoint + resume wiring end-to-end
+ * without paying for a real model.
+ */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -11,6 +21,17 @@ let runDir: string;
 let origPath: string | undefined;
 let origHome: string | undefined;
 
+/**
+ * A fake `claude` that:
+ *  - emits one Claude stream-json assistant turn carrying message.usage tokens
+ *  - reads a control file (FAKE_CLAUDE_SIGNAL_DIR) to decide what loop-signal to
+ *    write into the run dir (so the test can script continue/stop per iteration)
+ *
+ * Written as a Node script (not bash) so the same fake runs on Windows, where
+ * the loop spawns the bare `claude` through cmd.exe — there a `.cmd` companion
+ * forwards to `node`. Only stdout (the stream-json) and the signal file matter
+ * here; argv is not asserted, so cmd's argv re-parsing is irrelevant.
+ */
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
@@ -39,12 +60,15 @@ beforeAll(() => {
   fs.mkdirSync(runDir, { recursive: true });
   const fakeClaude = path.join(binDir, 'claude');
   fs.writeFileSync(fakeClaude, FAKE_CLAUDE, { mode: 0o755 });
+  // Windows cmd.exe can't run the extensionless Node script directly; drop a
+  // `.cmd` companion that forwards to node so `claude` resolves via PATHEXT.
   if (process.platform === 'win32') {
     fs.writeFileSync(fakeClaude + '.cmd', `@echo off\r\nnode "${fakeClaude}" %*\r\n`);
   }
   origPath = process.env.PATH;
   origHome = process.env.HOME;
   process.env.PATH = `${binDir}${path.delimiter}${origPath}`;
+  // HOME pinned so checkpointPath() (via getRunsDir) resolves into a temp tree.
   process.env.HOME = home;
 });
 afterAll(() => {
@@ -63,6 +87,8 @@ describe('loop driver — real spawn + token parse', () => {
   it('defaultRunIteration spawns the agent and sums tokens off the real stream-json', async () => {
     const res = await defaultRunIteration(exec);
     expect(res.exitCode).toBe(0);
+    // 100 input + 50 output + 10 cache-read = 160 from the single assistant turn
+    // (the result line is intentionally skipped by extractUsageEvents).
     expect(res.tokens).toBe(160);
   });
 
@@ -74,11 +100,12 @@ describe('loop driver — real spawn + token parse', () => {
     });
     expect(res.iterations).toBe(3);
     expect(res.stoppedBy).toBe('max');
-    expect(res.tokens).toBe(480);
+    expect(res.tokens).toBe(480); // 3 * 160
   });
 
   it('until=signal stops with condition-met when the fake agent writes continue:false', async () => {
     const signalRunDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-loop-int-sig-'));
+    // counter=2 → iter1 writes continue:true, iter2 writes continue:false.
     fs.writeFileSync(path.join(signalRunDir, 'counter'), '2', 'utf-8');
     const res = await runLoop(
       { ...exec, env: { FAKE_CLAUDE_SIGNAL_DIR: signalRunDir } },
@@ -94,6 +121,8 @@ describe('loop driver — real spawn + token parse', () => {
 
 describe('loop driver — checkpoint write + resume continuity', () => {
   it('writes a checkpoint at the real run path and resume continues from it', async () => {
+    // Phase 1: run 2 iterations of a 4-iteration loop, then simulate a kill by
+    // only running to maxIterations:2 — the checkpoint captures iteration 2.
     const phase1 = await runLoop(exec, { maxIterations: 2, interval: '0' }, {
       runId: 'int-resume',
       runDir,
@@ -105,9 +134,11 @@ describe('loop driver — checkpoint write + resume continuity', () => {
     const cp = readCheckpoint(cpFile);
     expect(cp).not.toBeNull();
     expect(cp!.iteration).toBe(2);
-    expect(cp!.cumulativeTokens).toBe(320);
+    expect(cp!.cumulativeTokens).toBe(320); // 2 * 160
     expect(typeof cp!.sessionId).toBe('string');
 
+    // Phase 2: resume from the checkpoint — continue from iteration 3 with the
+    // same session id and carried token count, running up to maxIterations 4.
     const phase2 = await runLoop(exec, { maxIterations: 4, interval: '0' }, {
       runId: cp!.id,
       runDir,
@@ -116,13 +147,17 @@ describe('loop driver — checkpoint write + resume continuity', () => {
       startTokens: cp!.cumulativeTokens ?? 0,
       sessionId: cp!.sessionId,
     });
-    expect(phase2.iterations).toBe(2);
+    expect(phase2.iterations).toBe(2); // iterations 3 and 4
     expect(phase2.stoppedBy).toBe('max');
-    expect(phase2.tokens).toBe(640);
+    expect(phase2.tokens).toBe(640); // 320 carried + 2*160
 
     const finalCp = readCheckpoint(cpFile)!;
     expect(finalCp.iteration).toBe(4);
     expect(finalCp.cumulativeTokens).toBe(640);
+    // Each iteration pins a DISTINCT session id (`--session-id` CREATES a
+    // session; re-passing one errors "already in use"). Continuity is threaded
+    // via /continue, not a shared id — so the final checkpoint records the LAST
+    // iteration's fresh id, which differs from the resumed-from id.
     expect(typeof finalCp.sessionId).toBe('string');
     expect(finalCp.sessionId).not.toBe(cp!.sessionId);
   });

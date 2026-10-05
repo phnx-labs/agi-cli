@@ -1,3 +1,9 @@
+/**
+ * agents.yaml manifest reading, writing, and serialization.
+ *
+ * The manifest file (agents.yaml) is the central configuration for version defaults,
+ * repository overrides, dependencies, and MCP server declarations.
+ */
 import * as fs from 'fs';
 import * as yaml from 'yaml';
 import { stringifyDoc } from './yaml-io.js';
@@ -89,6 +95,7 @@ function withManifestLock<T>(filePath: string, fn: () => T): T {
       manifestLockDepth.set(filePath, depth);
     }
   }
+  // Project manifests are shared (no restricted dir mode unlike ~/.agents).
   ensureLockTarget(filePath);
   return withFileLock(filePath, () => {
     manifestLockDepth.set(filePath, 1);
@@ -100,6 +107,7 @@ function withManifestLock<T>(filePath: string, fn: () => T): T {
   });
 }
 
+/** Write a Manifest object to agents.yaml in the given directory. */
 export function writeManifest(repoPath: string, manifest: Manifest): void {
   const manifestPath = safeJoin(repoPath, MANIFEST_FILENAME);
   withManifestLock(manifestPath, () => {
@@ -107,14 +115,19 @@ export function writeManifest(repoPath: string, manifest: Manifest): void {
     try {
       existing = fs.readFileSync(manifestPath, 'utf-8');
     } catch {
+      /* first write — no file yet (or empty lock target) */
     }
+    // ensureLockTarget may have created an empty file for the lock path.
     if (existing !== null && existing.trim() === '') existing = null;
     const content = serializeManifest(manifest, existing);
+    // Skip the atomic rewrite when nothing changed so comments stay byte-stable
+    // and concurrent readers never see a no-op churn.
     if (existing !== null && content === existing) return;
     atomicWriteFileSync(manifestPath, content);
   });
 }
 
+/** Create a Manifest with sensible defaults for a fresh agents repo. */
 export function createDefaultManifest(): Manifest {
   return {
     agents: {},

@@ -13,6 +13,10 @@ import {
   projectsEnv,
 } from './routines.test-fixture.js';
 
+// `routines list`/`runs` output-surface slice of the routines.*.test.ts suite
+// (RUSH-2819) — split off the original 2,249-line routines.test.ts (measured
+// ~194s of test time) so vitest can parallelize the file across worker
+// forks. Shared fixtures: routines.test-fixture.ts.
 
 describeRoutines('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
@@ -79,6 +83,7 @@ describeRoutines('routines list --json has devices+runsHere, no device', () => {
 
       const viewRes = run(home, ['view', 'test-job'], { AGENTS_SYNC_MACHINE_ID: 'zion' }, projectDir);
       expect(viewRes.status).toBe(0);
+      // Strip ANSI (FORCE_COLOR / chalk.bold on the Job: header) before YAML parse.
       const viewPlain = viewRes.stdout.replace(/\x1b\[[0-9;]*m/g, '');
       const viewDoc = yaml.parse(viewPlain.replace(/^Job: test-job\s*/m, ''));
       expect(viewDoc.prompt).toBe('project noop');
@@ -134,6 +139,8 @@ describeRoutines('routines list --json has devices+runsHere, no device', () => {
 
   it('can report overdue independently of a completed zero-exit latest run', () => {
     const home = makeHome({
+      // createdAt predates the run below, so the routine is old enough for a
+      // missed occurrence to count (overdue is floored at routine creation).
       jobs: [{ ...baseJob, schedule: '* * * * *', createdAt: '2026-07-01T00:00:00.000Z' }],
       registry,
     });
@@ -164,6 +171,10 @@ describeRoutines('routines list --json has devices+runsHere, no device', () => {
     }
   });
 
+  // A routine re-pinned to other devices leaves its old run records behind on
+  // the machine that used to fire it. Reporting those as the routine's status
+  // painted a peer's healthy routine red in `list` and in the menu bar (which
+  // reads this JSON) — the record describes this device, not the owner.
   it('reports no status for a routine pinned away from this device', () => {
     const home = makeHome({
       jobs: [
@@ -199,6 +210,7 @@ describeRoutines('routines list --json has devices+runsHere, no device', () => {
       expect(elsewhere.lastRunStartedAt).toBeNull();
       expect(elsewhere.lastRunCompletedAt).toBeNull();
 
+      // The same record on a routine this device does fire is still reported.
       const here = parsed.find((j: Record<string, unknown>) => j.name === 'pinned-here');
       expect(here.runsHere).toBe(true);
       expect(here.lastStatus).toBe('failed');
@@ -372,8 +384,18 @@ describeRoutines('routines list grouped by device', () => {
     }
   });
 
+  // One routine pinned to two devices renders a row under each. Only the row
+  // under THIS machine may carry Last Status — the peer's row previously
+  // repeated our local record, which is how a green routine showed up red.
   it('shows Last Status only under this machine, not under a peer device', () => {
     const home = makeHome({
+      // Deliberately a two-device pin: the point here is that the listing still
+      // renders a row under EACH device group, and only the This-machine row
+      // carries a status. (Ownership means only zion fires it; the peer row
+      // existing is what this test is about.)
+      // zion must be the OWNER (lowest normalized name) so its row carries a
+      // status, while a second device still renders a peer group — that peer
+      // row having no status is what this test asserts.
       jobs: [{ ...baseJob, name: 'two-device-job' }],
       registry: { ...registry, 'zulu-box': { name: 'zulu-box', platform: 'linux' } },
       deviceRoutines: { zion: ['two-device-job'], 'zulu-box': ['two-device-job'] },
@@ -419,9 +441,12 @@ describeRoutines('routines list grouped by device', () => {
       expect(byProject.status).toBe(0);
       expect(byDevice.status).toBe(0);
       expect(flat.status).toBe(0);
+      // Default (project): job has no projects, lands in Operations section
       expect(byProject.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('Operations');
       expect(byProject.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('This machine (zion)');
+      // Explicit device grouping: shows device sections
       expect(byDevice.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('This machine (zion)');
+      // Flat: no section headers
       expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('This machine (zion)');
       expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('Operations');
     } finally {

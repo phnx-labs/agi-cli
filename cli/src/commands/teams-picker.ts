@@ -1,3 +1,11 @@
+/**
+ * Interactive team picker and table renderer.
+ *
+ * Provides the fuzzy-searchable team list for `agents teams list` in a TTY,
+ * and the non-interactive table fallback when output is piped. Builds rich
+ * preview panels showing teammate composition, status breakdown, and last
+ * activity for each team.
+ */
 import chalk from 'chalk';
 import { relTime, truncate, humanDuration } from '../lib/format.js';
 import { itemPicker } from '../lib/picker.js';
@@ -8,6 +16,7 @@ export interface TeamRow {
   team: TaskInfo;
   agents: AgentStatusDetail[];
   description?: string;
+  /** Short id of the session that spawned this team, when the index knows it. */
   spawnedBy?: string;
 }
 
@@ -37,6 +46,8 @@ function statusColor(status: string): (s: string) => string {
 }
 
 function firstLine(s: string): string {
+  // Collapse to the first non-empty line so multi-line messages (markdown,
+  // code blocks) render cleanly inside a one-line preview slot.
   for (const line of s.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (trimmed) return trimmed;
@@ -65,6 +76,8 @@ function displayAgent(agent: string, version?: string | null): string {
   return version ? `${label}@${version}` : label;
 }
 
+// Aggregated status cell: a single colored label when the team is uniform
+// (everyone done / everyone working), or a dotted breakdown when mixed.
 function statusCell(t: TaskInfo): string {
   if (t.agent_count === 0) return chalk.gray('empty');
   const done = Math.max(0, t.completed - (t.stranded ?? 0));
@@ -96,6 +109,8 @@ function statusSummaryParts(t: TaskInfo): string[] {
   return parts;
 }
 
+// "claude×4" for a homogeneous team; "claude×2 codex" when mixed. Counts only
+// show when > 1 — "codex" alone is cleaner than "codex×1".
 function formatComposition(agents: AgentStatusDetail[]): string {
   if (agents.length === 0) return '';
   const counts = new Map<string, number>();
@@ -117,6 +132,9 @@ function runtimeSpan(t: TaskInfo): string {
   return humanDuration(ms);
 }
 
+// Prefer "files modified" as the work signal — it answers "what did this cost
+// me in change footprint". Fall back to tool count for read-only teams so the
+// column never disappears silently.
 function workCell(agents: AgentStatusDetail[]): string {
   const files = agents.reduce((n, a) => n + a.files_modified.length, 0);
   if (files > 0) return `${files} file${files === 1 ? '' : 's'}`;
@@ -125,6 +143,7 @@ function workCell(agents: AgentStatusDetail[]): string {
   return '';
 }
 
+/** Format a single team as a one-line row for the list table or picker label. */
 function formatTeamRow(row: TeamRow, nameWidth: number, compositionWidth: number): string {
   const t = row.team;
   const name = chalk.cyan(t.task_name.padEnd(nameWidth));
@@ -152,6 +171,7 @@ function displayHandle(a: AgentStatusDetail): string {
   return a.name || a.session_label || a.agent_id.slice(0, 8);
 }
 
+/** Build a multi-line preview string for the picker's detail pane. */
 function buildTeamPreview(row: TeamRow): string {
   const t = row.team;
   const lines: string[] = [];
@@ -178,6 +198,7 @@ function buildTeamPreview(row: TeamRow): string {
 
   lines.push('');
 
+  // Column widths
   const nameW = Math.max(6, ...row.agents.map((a) => displayHandle(a).length));
   const agentW = Math.max(8, ...row.agents.map((a) => displayAgent(a.agent_type, a.version).length));
 
@@ -232,6 +253,7 @@ function buildTeamPreview(row: TeamRow): string {
   return lines.join('\n');
 }
 
+/** Print a non-interactive team table to stdout (used when output is piped). */
 export function printTeamTable(rows: TeamRow[]): void {
   if (rows.length === 0) return;
   const nameWidth = Math.max(12, ...rows.map((r) => r.team.task_name.length));
@@ -245,6 +267,9 @@ export function printTeamTable(rows: TeamRow[]): void {
   console.log(chalk.gray(`\n${rows.length} team${rows.length === 1 ? '' : 's'}.`));
 }
 
+// Build a searchable blob from every field that would help a user find a team:
+// name, description, each teammate's agent type, version, and handle. Lowercased
+// once so the per-keystroke filter is a straight `includes` per term.
 function searchHaystack(row: TeamRow): string {
   const parts: string[] = [row.team.task_name];
   if (row.description) parts.push(row.description);
@@ -252,8 +277,13 @@ function searchHaystack(row: TeamRow): string {
     parts.push(a.agent_type);
     if (a.version) parts.push(a.version);
     if (a.name) parts.push(a.name);
+    // Include each teammate's live status so "failed", "working", "stopped"
+    // are searchable.
     parts.push(a.status);
   }
+  // Also include team-level status words exposed in the row ("done",
+  // "working", "pending", "stranded", "failed", "stopped", "empty") so the
+  // search matches what the user sees on screen.
   const t = row.team;
   if (t.agent_count === 0) parts.push('empty');
   if (t.pending) parts.push('pending');
@@ -265,6 +295,7 @@ function searchHaystack(row: TeamRow): string {
   return parts.join(' ').toLowerCase();
 }
 
+/** Show an interactive team picker with fuzzy search and return the selected team name. */
 export async function teamPicker(rows: TeamRow[], initialSearch?: string): Promise<PickedTeam | null> {
   const nameWidth = Math.max(12, ...rows.map((r) => r.team.task_name.length));
   const compositionWidth = Math.max(
