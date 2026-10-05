@@ -1,6 +1,6 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { indexActiveBySessionId, liveGlyphAndPreview, formatActiveRowDescription } from '../sessions.js';
+import { indexActiveBySessionId, liveGlyphAndPreview, formatActiveRowDescription } from '../ps-roster.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 
 function mk(overrides: Partial<ActiveSession>): ActiveSession {
