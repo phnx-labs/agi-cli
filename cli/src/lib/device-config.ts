@@ -221,7 +221,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description:
       'Whether the daemon may run on this device at all (browser IPC, watchdog, and the ' +
       'routines scheduler). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
-      'is set, including `routines add`/`routines start`/`routines catchup`/`monitors add`/webhook triggers. ' +
+      'is set, including `routines add`/`routines start`/`routines catchup`/webhook triggers. ' +
       '`agents daemon start` still starts it explicitly.',
   },
   {

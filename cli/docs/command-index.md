@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_66 command groups · 486 commands._
+_65 command groups · 474 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -396,23 +396,6 @@ agents models tier set <selector> <tier> <model>  Pin a tier to a model. selecto
 
 ```
 agents modes [agentSpec]  Show which permission modes (--mode plan|edit|auto|skip) a harness supports for agents run / teams add
-```
-
-## monitors: Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add unless daemon.enabled is false.
-
-```
-agents monitors                   Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add unless daemon.enabled is false.
-agents monitors add [nameOrPath]  Create a monitor from inline flags or a YAML file. Auto-starts the daemon unless daemon.enabled is false.
-agents monitors device [name]     View or (re)pin the OWNER device — the single machine that evaluates + fires (exactly-once).
-agents monitors edit [name]       Open a monitor’s YAML in $EDITOR.
-agents monitors list              See all monitors across the fleet: source, condition, action, owner, last fire, and the box each lives on.
-agents monitors logs [name]       Show the latest action run’s status + report. --run for a specific run, --full for raw stdout.
-agents monitors pause [name]      Temporarily disable a monitor. Stops watching until resumed.
-agents monitors remove [name]     Delete a monitor. Stops watching; past fire history remains on disk.
-agents monitors resume [name]     Re-enable a paused monitor so the daemon watches it again.
-agents monitors runs [name]       See a monitor’s fire history: when it fired, the action, and the outcome.
-agents monitors test [name]       DRY-RUN: evaluate the source once and print the emitted event + whether it would fire. No action is taken.
-agents monitors view [name]       Show a monitor’s full YAML config plus its current watched-state and recent fires.
 ```
 
 ## packages: Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home

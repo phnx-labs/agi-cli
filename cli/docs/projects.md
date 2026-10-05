@@ -18,7 +18,7 @@ noise; what matters is the **project**. This subsystem fills both gaps.
 
 ## The definition — `~/.agents/projects/<name>.yaml`
 
-One hand-editable YAML file per project, beside `routines/` and `monitors/` in the
+One hand-editable YAML file per project, beside `routines/` and `teams/` in the
 user repo. Paths are stored home-relative (`~/…`) so a definition re-roots on any
 machine.
 

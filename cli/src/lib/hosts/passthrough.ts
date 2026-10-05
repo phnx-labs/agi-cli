@@ -114,7 +114,6 @@ export const OWN_HOST_COMMANDS = new Set([
   'devices',
   'fleet',
   'apply',
-  'monitors',
 ]);
 
 const STRIP_SPECS: StripSpec[] = [

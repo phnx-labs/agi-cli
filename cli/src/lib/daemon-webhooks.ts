@@ -136,7 +136,7 @@ function reconcileFunnel(publicPort: FunnelPort, localPort: number, log: Logger)
  * `server.listen()` surfaces EADDRINUSE as an `'error'` event, so a `try/catch`
  * around the start call never sees it and the event reaches the process-level
  * `uncaughtException` handler (`index.ts`), which exits 1 for the supervisor to
- * restart — a crash loop that would take the scheduler, monitors, browser IPC,
+ * restart — a crash loop that would take the scheduler, browser IPC,
  * and self-heal down with it. `waitForListening` is what turns that into one
  * skipped receiver.
  */

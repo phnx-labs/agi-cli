@@ -25,6 +25,7 @@ describe('orphaned open-PR warn classifier', () => {
     expect(text).toContain('#2334');
     expect(text).toMatch(/gh pr checks --watch/);
     expect(text).not.toMatch(/agents pr land/);
+    expect(text).not.toMatch(/agents monitors/);
   });
 });
 

@@ -2,7 +2,7 @@ const LOADED_COMMAND_NAMES = [
   'accounts', 'auth', 'view', 'inspect', 'feedback', 'commands', 'hooks', 'skills', 'rules', 'memory',
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use',
   'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install', 'packages',
-  'routines', 'monitors', 'projects', 'run', '_callback', 'open', 'fork', 'config',
+  'routines', 'projects', 'run', '_callback', 'open', 'fork', 'config',
   'models', 'modes', 'trash', 'restore', 'doctor',
   'route', 'routes', 'harness', 'harnesses', 'secrets', 'menubar', 'sync',
   'refresh-rules', 'factory', 'insights', 'trace', 'reminders',

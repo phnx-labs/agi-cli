@@ -166,7 +166,7 @@ describe('getJobHomePath — routine-name path containment (C4)', () => {
   });
 });
 
-describe('prepareJobHome — monitor/routine agent auth', () => {
+describe('prepareJobHome — routine agent auth', () => {
   it('links the selected Codex auth without importing hook-bearing settings', () => {
     const version = `99.0.0-phnx3406-${process.pid}`;
     const name = `phnx3406-${process.pid}`;

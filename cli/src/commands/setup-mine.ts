@@ -14,7 +14,6 @@ const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'computer', hint: 'drive native desktop apps' },
   { name: 'secrets', hint: 'keychain-backed env bundles' },
   { name: 'routines', hint: 'run agents on a cron schedule' },
-  { name: 'monitors', hint: 'event-triggered watchers' },
 ];
 
 async function runMineWizard(): Promise<boolean> {

@@ -62,12 +62,11 @@ can instantiate work. A subagent is a portable role definition that a capable ha
 can invoke. Separating them prevents declarative resources from becoming process
 supervisors and keeps every launched agent on the same execution path.
 
-## Routines, monitors, and watchdog
+## Routines and watchdog
 
-A routine starts work on a schedule. A monitor starts work when an observed condition
-changes. The watchdog advances unfinished sessions that have stopped progressing. All
-three are daemon-owned decision loops and submit work through the ordinary execution
-engine. Their triggers differ; their scheduler and executor ownership does not.
+A routine starts work on a schedule. The watchdog advances unfinished sessions that have
+stopped progressing. Both are daemon-owned decision loops and submit work through the ordinary
+execution engine. Their triggers differ; their scheduler and executor ownership does not.
 
 ## Owners and projections
 

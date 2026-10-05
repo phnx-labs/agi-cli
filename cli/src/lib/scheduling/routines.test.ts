@@ -577,7 +577,7 @@ describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () 
     const file = path.join(getRoutinesDir(), `${name}.yml`);
     try {
       fs.writeFileSync(file, yaml.stringify({
-        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', dispatchedBy: 'monitor',
+        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', dispatchedBy: 'webhook',
       }));
       expect(readJob(name)).toBeNull();
     } finally {
@@ -593,7 +593,7 @@ describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () 
       writeJob({
         name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi',
         mode: 'auto', effort: 'auto', timeout: '10m', enabled: true,
-        dispatchedBy: 'monitor',
+        dispatchedBy: 'webhook',
       } as JobConfig);
       expect(fs.readFileSync(file, 'utf-8')).not.toContain('dispatchedBy');
       expect(readJob(name)?.prompt).toBe('hi');

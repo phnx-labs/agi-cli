@@ -48,7 +48,6 @@ const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
 const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
 const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
-const SYSTEM_MONITORS_DIR = path.join(SYSTEM_AGENTS_DIR, 'monitors');
 const SYSTEM_WEBHOOKS_DIR = path.join(SYSTEM_AGENTS_DIR, 'webhooks');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
@@ -61,7 +60,6 @@ const CACHE_DIR = path.join(USER_AGENTS_DIR, '.cache');
 
 const ROUTINES_DIR = path.join(USER_AGENTS_DIR, 'routines');
 const WEBHOOKS_DIR = path.join(USER_AGENTS_DIR, 'webhooks');
-const MONITORS_DIR = path.join(USER_AGENTS_DIR, 'monitors');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
 const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 const DAEMON_CONFIG_DIR = path.join(USER_AGENTS_DIR, 'daemon');
@@ -71,7 +69,6 @@ const SESSIONS_DB_PATH = path.join(SESSIONS_DIR, 'sessions.db');
 const ANALYTICS_DIR = path.join(HISTORY_DIR, 'analytics');
 const VERSIONS_DIR = path.join(HISTORY_DIR, 'versions');
 const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
-const MONITORS_HISTORY_DIR = path.join(HISTORY_DIR, 'monitors');
 const TEAMS_AGENTS_DIR = path.join(HISTORY_DIR, 'teams', 'agents');
 const BACKUPS_DIR = path.join(HISTORY_DIR, 'backups');
 const TRASH_DIR = path.join(HISTORY_DIR, 'trash');
@@ -339,11 +336,8 @@ export function getProjectWebhooksDir(cwd: string = process.cwd()): string | nul
 
 export function getRunsDir(): string { return RUNS_DIR; }
 
-export function getMonitorsDir(): string { return process.env.AGENTS_MONITORS_DIR ?? MONITORS_DIR; }
 
-export function getSystemMonitorsDir(): string { return process.env.AGENTS_SYSTEM_MONITORS_DIR ?? SYSTEM_MONITORS_DIR; }
 
-export function getMonitorsHistoryDir(): string { return MONITORS_HISTORY_DIR; }
 
 export function getMailboxRootDir(): string { return MAILBOX_DIR; }
 

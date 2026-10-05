@@ -227,7 +227,7 @@ describe('ServiceSupervisor', () => {
   it('health() returns a record for every registered service', async () => {
     const supervisor = new ServiceSupervisor();
     const a = new HealthyService('scheduler');
-    const b = new HealthyService('monitors');
+    const b = new HealthyService('watchdog');
     const c = new HealthyService('self-heal');
     supervisor.register(a);
     supervisor.register(b);
@@ -237,8 +237,8 @@ describe('ServiceSupervisor', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     const health = supervisor.health();
-    expect(Object.keys(health).sort()).toEqual(['monitors', 'scheduler', 'self-heal']);
-    for (const id of ['scheduler', 'monitors', 'self-heal'] as const) {
+    expect(Object.keys(health).sort()).toEqual(['scheduler', 'self-heal', 'watchdog']);
+    for (const id of ['scheduler', 'watchdog', 'self-heal'] as const) {
       expect(health[id].state).toBe('running');
       expect(health[id].consecutiveFailures).toBe(0);
     }

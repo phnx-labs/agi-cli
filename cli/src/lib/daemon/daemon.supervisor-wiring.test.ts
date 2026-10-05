@@ -106,7 +106,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   ] as const;
 
   const ALL_SUPERVISED_SERVICE_IDS = [
-    'session-state', 'monitors', 'account-state',
+    'session-state', 'account-state',
     'account-auth', 'catchup', 'session-index', 'watchdog',
     'device-probe', 'self-heal', 'self-update', 'auth-sync',
     'usage-sync', 'webhook-receiver', 'daemon-heartbeat', 'tmux-reap',

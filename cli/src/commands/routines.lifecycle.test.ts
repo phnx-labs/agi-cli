@@ -173,7 +173,7 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
 
       const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8')) as Record<string, { state?: string }>;
       expect(health['session-index']?.state).toBe('running');
-      expect(health['monitors']?.state).toBe('running');
+      expect(health['monitors']).toBeUndefined();
       expect(health['usage-sync']?.state).toBe('running');
 
       const deviceDir = path.join(home, '.agents', 'devices', 'routine-lifecycle');
