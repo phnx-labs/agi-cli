@@ -69,6 +69,7 @@ export class ServiceSupervisor {
     });
   }
 
+  // Resolve idle waiters in the same step that clears inFlight, so reload cannot race the active tick.
   private clearInFlight(entry: RegisteredService): void {
     entry.inFlight = false;
     const waiters = entry.idleWaiters;
@@ -179,6 +180,7 @@ export class ServiceSupervisor {
     }
   }
 
+  // Clear deadline timers before abort: a hung tick must not turn deliberate shutdown into an OS restart.
   private async stopOne(id: DaemonServiceId, force: boolean): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) return;
@@ -220,6 +222,7 @@ export class ServiceSupervisor {
     entry.timer = setInterval(() => { void this.runTick(id); }, entry.service.intervalMs);
   }
 
+  // Thrown ticks retry; a deadline may never settle, so record it durably and exit 70 for supervised restart instead of parking.
   private async runTick(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     const ctx = this.ctx;

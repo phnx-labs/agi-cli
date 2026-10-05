@@ -218,6 +218,7 @@ export interface UsageSnapshot {
   sourceLabel: string;
   capturedAt: Date | null;
   windows: UsageWindow[];
+  // View-only: routing and readiness consume windows; the union is persisted only so reads can re-partition freshness.
   staleWindows?: UsageWindow[];
   plan?: string | null;
   refreshHint?: string | null;
@@ -879,6 +880,7 @@ async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   }
 }
 
+// Usage probes never refresh credentials or fall into interactive OAuth; foreground headed reads must opt in explicitly.
 export function claudeUsageAccessTokenNoRefresh(
   oauth: Pick<ClaudeOauthCredentials, 'accessToken' | 'expiresAt'>,
 ): string | null {
@@ -1602,6 +1604,7 @@ export function getClaudeKeychainService(home?: string): string {
   return `${CLAUDE_KEYCHAIN_SERVICE}-${hash}`;
 }
 
+// Organization identity guards attribution because different accounts can share email and home labels.
 export function isClaudeUsageOrgMatch(
   requestedOrgId: string | null | undefined,
   liveOrgId: string | null | undefined
@@ -2401,6 +2404,7 @@ function sameHomePath(a: string, b: string): boolean {
   return (safeRealpathSync(a) ?? path.resolve(a)) === (safeRealpathSync(b) ?? path.resolve(b));
 }
 
+// A real-HOME Grok billing log serves a version home only when payload/auth identities match; unknown identity belongs only to real HOME.
 function sharedGrokLogAppliesToHome(home: string | undefined, match: GrokBillingMatch): boolean {
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
   const requestedHome = home || os.homedir();

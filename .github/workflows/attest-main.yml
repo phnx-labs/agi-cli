@@ -1,5 +1,6 @@
 name: Attest main
 
+# Releases consume proof for the exact origin/main tree without rebuilding; a missing proof fails closed but never gates merge.
 
 on:
   push:
@@ -8,6 +9,7 @@ on:
       - 'cli/**'
       - '.github/workflows/attest-main.yml'
 
+# Older main trees remain releasable, so serialize publication without cancelling an in-flight proof.
 concurrency:
   group: attest-main
   cancel-in-progress: false
@@ -39,6 +41,7 @@ jobs:
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
           echo "Attesting commit ${{ github.sha }} (tree $tree)"
 
+      # Reuse only attest-$tree.json; a miss or download error runs the fail-closed producer.
       - name: Short-circuit if the tree is already attested
         id: existing
         run: |

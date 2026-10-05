@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 
-
-
-
-
-
+# The origin ref is a distributed CAS mutex: never age-reclaim a provably-live holder, and re-verify ownership before irreversible work.
 set -euo pipefail
 
 LEASE_REF="${RELEASE_LEASE_REF:-refs/release-lock/held}"
@@ -31,6 +27,7 @@ holder_desc() {
 }
 
 token_path()   { printf '%s/release-lease.token' "$(git rev-parse --git-common-dir)"; }
+# Renew may push before token write; full SHA history recognizes this run during that window.
 history_path() { printf '%s/release-lease.history' "$(git rev-parse --git-common-dir)"; }
 read_token()   { cat "$(token_path)" 2>/dev/null || true; }
 write_token()  { printf '%s\n' "$1" >> "$(history_path)"; printf '%s\n' "$1" > "$(token_path)"; }
@@ -110,6 +107,7 @@ describe_lease() {
 make_lease_commit() {
   local tree msg pid claim_id
   tree="$(git hash-object -t tree /dev/null)"
+# Random claim-id prevents byte-identical same-second commits from hiding a lost CAS.
   claim_id="$(local_host)-$$-$RANDOM"
   msg="release lease
 

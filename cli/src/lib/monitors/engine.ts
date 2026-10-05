@@ -53,6 +53,7 @@ function buildEvent(monitor: MonitorConfig, summary: string, payload: Record<str
   return { monitorName: monitor.name, firedAt: new Date().toISOString(), summary, payload };
 }
 
+// Failed or empty polls never fire or move change state; the first valid on-change observation establishes a silent baseline.
 export function decideFire(monitor: MonitorConfig, observation: Observation): FireDecision {
   const cond = monitor.condition;
   const raw = observation.raw;
@@ -212,6 +213,7 @@ export class MonitorEngine {
     this.afterCheck(monitor, checkedAt, checkError);
   }
 
+  // Liveness is independent of change state: every poll updates it and recovery resets the drought.
   private afterCheck(monitor: MonitorConfig, checkedAt: string, error?: string): void {
     const liveness = recordCheck(monitor.name, checkedAt, error);
     if (error && shouldEscalateDrought(liveness)) {

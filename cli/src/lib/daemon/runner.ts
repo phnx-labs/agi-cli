@@ -111,6 +111,7 @@ export class RoutineAlreadyRunningError extends Error {
 const ROUTINE_LAUNCH_LOCK_STALE_MS = 30_000;
 const ROUTINE_LAUNCH_LOCK_WAIT_MS = 10_000;
 
+// Only status=running holds the active slot; every terminal record releases it.
 function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta | null {
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
   const now = Date.now();
@@ -139,6 +140,7 @@ export function activeRunSkipStreak(runs: RunMeta[]): number {
 
 const SKIP_STREAK_ALERT_THRESHOLD = 3;
 
+// The long-lived daemon never records its own pid as a provisional child claim.
 export function launcherClaimPid(): number | null {
   try {
     const daemonPid = parseInt(fs.readFileSync(path.join(getDaemonDir(), 'daemon.pid'), 'utf-8').trim(), 10);
@@ -247,6 +249,7 @@ function writeActiveClaim(config: JobConfig, attempt: RoutineAttempt): RunMeta {
   return meta;
 }
 
+// Schedule and catchup deliveries atomically claim the same (routine, UTC slot).
 function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): AttemptAllocation {
   const scheduledForIso = trigger.scheduledFor
     ? (typeof trigger.scheduledFor === 'string' ? trigger.scheduledFor : trigger.scheduledFor.toISOString())
@@ -391,6 +394,7 @@ async function runWithAttempt<T>(
   }
 }
 
+// Never signal this process; detached groups and pids are killed only for a birth-time-verified child.
 function terminateRoutineTree(pid: number | null): void {
   if (!pid) return;
   if (pid === process.pid) return;
@@ -502,6 +506,7 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     appendModelAndReasoning(cmd, config);
   }
 
+  // A leading dash would turn a YAML directory into an injected harness flag.
   if (config.allow?.dirs?.length && agent !== 'codex') {
     for (const dir of config.allow.dirs) {
       if (dir.startsWith('-')) {
@@ -572,6 +577,7 @@ function transcriptBasePath(runDir: string): string {
   return path.join(runDir, '.transcript-base.json');
 }
 
+// Shared version homes contain sibling transcripts, so snapshot before spawn and archive only newly-created files.
 export function snapshotRoutineTranscriptBase(
   meta: Pick<RunMeta, 'jobName' | 'agent' | 'version'>,
   runDir: string,
@@ -645,6 +651,7 @@ function buildShellCommand(command: string): string[] {
     : ['/bin/sh', '-c', command];
 }
 
+// Command routines intentionally keep real HOME/PATH; only agent routines receive overlay/version-home isolation.
 function commandSpawnEnv(config: JobConfig): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   if (config.timezone) env.TZ = config.timezone;
@@ -661,6 +668,7 @@ function shSingleQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+// Bind bare `agents` inside a command routine to the exact binary running this daemon.
 function agentsShellFunction(): string {
   const launch = getCliLaunch(['__ac_placeholder__']);
   const parts: string[] = [launch.command];

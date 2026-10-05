@@ -117,6 +117,7 @@ export function parseInterval(interval: string): number | null {
   return ms > 0 ? ms : null;
 }
 
+// Unpinned system/shared-input monitors require one resolved owner; no owner means fire nowhere.
 export function requiresSingleOwner(
   config: Pick<MonitorConfig, 'device' | 'devices' | 'scope' | 'sharedInput'>,
 ): boolean {
@@ -154,6 +155,7 @@ export function monitorSharedInputOwner(): string | undefined {
   );
 }
 
+// Explicit device/device lists remain the executor choice and bypass shared-input owner inference.
 export function monitorRunsOnThisDevice(
   config: Pick<MonitorConfig, 'device' | 'devices' | 'scope' | 'sharedInput'>,
   ownerHost?: string,

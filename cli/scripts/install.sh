@@ -105,6 +105,7 @@ mkdir -p "$LINK_DIR"
 
 DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
 
+# Remove only links or wrappers demonstrably owned by this dev prefix; production installs are untouchable.
 cleanup_legacy_shadow() {
   local path="$1" raw
   if [[ -L "$path" ]]; then
@@ -131,6 +132,7 @@ for bin in "${PRODUCTION_BINS[@]}"; do
   done
 done
 
+# The shared production daemon is never restarted unless the caller explicitly passes --bounce-daemon.
 for manifest in \
   "$HOME/.config/systemd/user/agents-daemon.service" \
   "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"

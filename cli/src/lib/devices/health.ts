@@ -7,6 +7,7 @@ export const PROBE_TIMEOUT_MS = 2_500;
 
 export const RELAYED_PROBE_TIMEOUT_MS = 8_000;
 
+// Only measured relayed peers receive the wider budget; unknown/manual peers are not assumed relayed.
 export function probeBudgetMs(device: DeviceProfile): number {
   if (device.shell === 'powershell') return WIN_PROBE_TIMEOUT_MS;
   return device.tailscale && device.tailscale.direct === false
@@ -215,6 +216,7 @@ export function headroom(stats: DeviceStats | undefined): Headroom {
   return 'loaded';
 }
 
+// Stats probes are agentOnly so listing devices never opens credential UI; a timeout means slow, not conclusively unreachable.
 export function probeDeviceStats(
   device: DeviceProfile,
   opts: { timeoutMs?: number; now?: number } = {},

@@ -18,6 +18,7 @@ if [ -z "$AGENT" ]; then
   exit 0
 fi
 
+# Stdout enters model context: stay silent, and read hook payload only from non-TTY stdin.
 STDIN_JSON=""
 if [ ! -t 0 ]; then
   STDIN_JSON="$(cat || true)"
@@ -71,6 +72,7 @@ if [ -z "$SID" ]; then
   exit 0
 fi
 
+# Reject path-bearing ids; state filenames are atomic replacements keyed only by the harness's real id.
 case "$SID" in
   *'/'*|*'\'*|'.'|'..') exit 0 ;;
 esac

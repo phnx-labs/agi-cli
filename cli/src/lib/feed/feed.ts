@@ -734,6 +734,7 @@ def main():
                 existing = json.load(existing_file)
             answered = os.path.exists(os.path.join(answered_dir, f"{block_id}.json"))
 
+            # Ordinary lifecycle hooks cannot clear a declared block before it is answered.
             if existing.get("kind") == "declared" and not answered:
                 return
         except Exception:

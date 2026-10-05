@@ -50,6 +50,7 @@ function dependencySessionsBin(): string | null {
   return realpathSync(abs);
 }
 
+// Skip the legacy agents shim to avoid recursive sessions passthrough.
 export function resolveSessionsBin(): string {
   if (cachedBin) return cachedBin;
   const raw = process.env.SESSIONS_BIN;
@@ -124,6 +125,7 @@ function probeSessionsVersion(bin: string): string | null {
   return cachedProbedVersion;
 }
 
+// Failed or old version probes stay in the in-repo engine because an old CLI may treat unknown flags as FTS terms.
 export function sessionsBinSupports(bin: string, minVersion: string): boolean {
   const version = probeSessionsVersion(bin);
   return version !== null && compareVersions(version, minVersion) >= 0;
@@ -233,6 +235,7 @@ function scanDeviceFlag(args: string[]): { count: number; value?: string; valueE
   return { count, value, valueEndIndex };
 }
 
+// Collapse --device to --host only for one unambiguous read; multi/fleet/lifecycle queries remain on in-repo fan-out.
 export function planDeviceHostRead(
   args: string[],
   opts: { filters?: boolean } = {},

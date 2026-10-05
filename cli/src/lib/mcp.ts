@@ -181,6 +181,7 @@ export function untrustProjectMcp(cwd: string = process.cwd()): boolean {
   return true;
 }
 
+// Project MCP is untrusted until root-keyed user trust; drop it before name dedup so it cannot shadow a trusted server.
 export function listMcpServerConfigs(
   cwd: string = process.cwd(),
   options: { enforceProjectTrust?: boolean } = {}
@@ -458,6 +459,7 @@ function readExistingConfig(
   return parsed as Record<string, unknown>;
 }
 
+// JSONC parsing must preserve string semantics; writes retain unrelated top-level keys, and empty input means no recorded change.
 function parseJsonc(raw: string): unknown {
   return JSON.parse(stripJsonComments(raw));
 }

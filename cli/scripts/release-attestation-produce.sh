@@ -117,6 +117,7 @@ suite_green_despite_worker_crash() {
   grep -qE '(^|[^[:alnum:]])passed([^[:alnum:]]|$)' <<<"$tests_line"
 }
 SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
+# Inheritance reuses test metadata only; build and pack still operate on this exact tree.
 if [[ -n "$INHERIT_BASE" ]]; then
   green "Inheriting the suite result from $(basename "$INHERIT_BASE") (skipping the full suite)."
   rm -f "$SUITE_LOG"
@@ -131,6 +132,7 @@ else
   die "suite failed for ${SHA:0:12} -- refusing to attest a red tree (log: $SUITE_LOG)"
 fi
 
+# Ordinary CLI attestations never sign; signing is confined to the explicit helper path.
 if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary..."

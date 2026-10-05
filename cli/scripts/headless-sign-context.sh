@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Source only inside the home-base subprocess: credentials stay process-local and are never copied or persisted.
 set -euo pipefail
 
 _RUSH_SUPPORT="$HOME/Library/Application Support/rush"

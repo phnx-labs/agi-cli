@@ -139,6 +139,7 @@ export function recordCheck(
   return liveness;
 }
 
+// Notify once per drought; a subsequent successful recordCheck clears this marker.
 export function markDroughtNotified(name: string, at: string): void {
   const prev = readLiveness(name);
   if (!prev) return;
@@ -248,6 +249,7 @@ function persistPostcondition(fire: FireRecord, result: { ok: boolean; error?: s
   });
 }
 
+// Fire-time success is provisional: re-read the run, require any postcondition, and persist that result once.
 export function resolveFireOutcome(jobName: string, fire: FireRecord): ReconciledFireOutcome {
   if (!fire.runId) return { ok: fire.ok !== false };
   const run = readRunMeta(jobName, fire.runId);

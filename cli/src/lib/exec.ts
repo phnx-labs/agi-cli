@@ -312,6 +312,7 @@ export function resolveLaunchId(envLaunchId: string | undefined): string {
   return inbound ? inbound : randomUUID();
 }
 
+// Child runs shed parent session/mailbox/account/exec-home identity; lineage is reintroduced only through explicit parent fields.
 export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = { ...sanitizeProcessEnv(process.env) };
 
@@ -348,6 +349,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
   }
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
+  // Bind the standalone secrets client to the same store agents-cli resolved.
   result.SECRETS_HOME = result.SECRETS_HOME ?? getUserAgentsDir();
   result.AGENTS_RUN_MODE = resolveHeadlessMode(
     options.agent,
@@ -964,6 +966,7 @@ export function isHarnessKnownSessionId(
   return agent === 'claude';
 }
 
+// Resolved env values never enter tmux argv/metadata; source an exclusive 0600 file, unlink it, and abort if sourcing fails.
 export function buildTmuxAgentCommand(
   executable: string,
   args: string[],
@@ -1169,6 +1172,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   return resolveAfterAttach(pane);
 }
 
+// Publish only a session id supplied by the harness or joined through the shared launch id.
 function emitResolvedSessionId(options: ExecOptions, launchId: string, childPid: number | undefined): void {
   let sessionId = options.sessionId;
   if (!sessionId) {
@@ -1338,6 +1342,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
     }
   }
 
+  // Headed Claude uses native OAuth only; workers require the selected slot's durable setup token and never open interactive login.
   if (options.agent === 'claude') {
     const { versionHome } = resolveExecConfigHome(options);
     const hasWorkerCredential =
@@ -1360,6 +1365,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
   }
 
   const cwd = options.cwd || process.cwd();
+  // One launch id joins SSH, tmux, hook, and tracker observations into the same run.
   const launchId = resolveLaunchId(options.env?.AGENT_LAUNCH_ID);
   const runId = launchId;
   options = { ...options, env: { ...options.env, AGENT_LAUNCH_ID: launchId } };
@@ -1808,6 +1814,7 @@ export function buildFallbackPrompt(
   return lines.join('\n');
 }
 
+// Fallback preserves an explicit mode; only an implicit mode is re-resolved for the next harness.
 export async function runWithFallback(options: FallbackOptions): Promise<number> {
   const chain: FallbackEntry[] = [
     { agent: options.agent, version: options.version },
@@ -1840,6 +1847,7 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     const pinnedSessionId = agent === 'claude' ? randomUUID() : undefined;
 
     const prev = i > 0 ? chain[i - 1] : undefined;
+    // Same-agent entries are account/model retries, not cross-harness transcript handoff.
     const sameHostRetry = !!prev && prev.agent === agent && prev.version === version;
     const prompt = prevAgent && !sameHostRetry
       ? buildFallbackPrompt(prevAgent, prevSessionId, agent, options.prompt)
@@ -1904,6 +1912,7 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     const isLast = i === chain.length - 1;
     if (isLast) return result.exitCode || 1;
 
+    // Authentication and ordinary failures never trigger provider fallback; only explicit capacity signals do.
     if (!sessionLimitReset && !modelLimited && !detectRateLimit(result.stderr) && !detectRateLimit(result.stdout)) {
       return result.exitCode;
     }
