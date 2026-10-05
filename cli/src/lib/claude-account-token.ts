@@ -150,7 +150,7 @@ function discoverEmailUncached(home: string, tokenPath: string): string | null {
 }
 
 function emailFromTokenKey(key: string): string | null {
-  // Only a canonical per-email token key may reach an Authorization header.
+  // Trust only an unambiguous, losslessly round-tripping token-key slug for identity recovery; underscore ambiguity returns null.
   const prefix = 'CLAUDE_CODE_OAUTH_TOKEN_';
   if (!key.startsWith(prefix)) return null;
   const slug = key.slice(prefix.length);

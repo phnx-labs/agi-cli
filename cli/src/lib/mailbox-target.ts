@@ -9,7 +9,7 @@ type MessageResolution =
   | { kind: 'ambiguous'; candidates: Array<{ id: string; label: string }> };
 
 export function mailboxIdForActiveSession(s: ActiveSession): string | undefined {
-  // Detached remote tasks use their captured remote identity, not the local dispatch id.
+  // Teams use durable agentId; bare runs use sessionId; spawn-time AGENTS_MAILBOX_DIR must use this same canonical ID.
   return s.agentId ?? s.sessionId;
 }
 

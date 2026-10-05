@@ -342,7 +342,7 @@ export interface AdoptLegacyReservedItemsResult {
 export function adoptLegacyReservedStoreItems(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
 ): AdoptLegacyReservedItemsResult {
-  // Adopt without overwriting a different auth kind; partial failures remain visible.
+  // Local and idempotent: skip present keys, adopt legacy bare items into the file bundle, never contact peers, and report per-key failures.
   const result: AdoptLegacyReservedItemsResult = { adopted: [], errors: [] };
   for (const account of listNativeAccounts(meta)) {
     const cred = account.workerCredential;
