@@ -147,7 +147,7 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
 
   const hookRewire = rewireUnwiredHooks(opts.agent, opts.versions);
 
-  // Runtime repair is bounded by the requested agent/version filter.
+  // One requested version is scoped exactly; multiple versions use one harness-wide repair pass.
   const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({
     filter: runtimeRepairFilter(opts.agent, opts.versions),
   });
