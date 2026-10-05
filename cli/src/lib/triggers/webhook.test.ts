@@ -31,7 +31,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Build a JobConfig with sensible defaults for tests. */
 function job(partial: Partial<JobConfig> & Pick<JobConfig, 'name'>): JobConfig {
   return {
     agent: 'claude',
@@ -44,7 +43,6 @@ function job(partial: Partial<JobConfig> & Pick<JobConfig, 'name'>): JobConfig {
   } as JobConfig;
 }
 
-/** A realistic `pull_request` webhook for repo x/y targeting branch main. */
 function pullRequestWebhook(repoFullName: string, baseRef = 'main', headRef = 'feature'): IncomingWebhook {
   return {
     source: 'github',
@@ -74,7 +72,6 @@ function labeledPullRequestWebhook(repoFullName: string, label: string, action =
   };
 }
 
-/** A `push` webhook for repo x/y on branch main. */
 function pushWebhook(repoFullName: string, ref = 'refs/heads/main'): IncomingWebhook {
   return {
     source: 'github',
@@ -94,8 +91,6 @@ function linearIssueWebhook(labels: string[] = ['agent']): IncomingWebhook {
       data: {
         identifier: 'RUSH-1459',
         state: { name: 'Plan' },
-        // Real Linear webhook shape: `data.labels` is a flat array of label
-        // objects, NOT the `{ nodes: [...] }` GraphQL connection.
         labels: labels.map((name) => ({ id: `lbl-${name}`, name })),
       },
       updatedFrom: {
@@ -128,8 +123,6 @@ describe('matchJobsToWebhook', () => {
 
   it('leaves a time-based (schedule-only) job unaffected by any webhook', () => {
     const cronJob = job({ name: 'nightly', schedule: '0 3 * * *' });
-    // A schedule-only job has no trigger, so it is never selected — not by the
-    // matching event, not by a mismatching one.
     expect(matchJobsToWebhook([cronJob], pullRequestWebhook('x/y'))).toEqual([]);
     expect(matchJobsToWebhook([cronJob], pushWebhook('x/y'))).toEqual([]);
   });
@@ -145,7 +138,6 @@ describe('matchJobsToWebhook', () => {
       trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' },
     });
     expect(jobMatchesWebhook(mainOnly, pullRequestWebhook('x/y', 'main', 'topic'))).toBe(true);
-    // base=develop head=topic → neither is main
     expect(jobMatchesWebhook(mainOnly, pullRequestWebhook('x/y', 'develop', 'topic'))).toBe(false);
   });
 
@@ -208,26 +200,19 @@ describe('matchJobsToWebhook', () => {
       name: 'linear-plan',
       trigger: { type: 'linear_event', event: 'Issue', action: 'update', stateTo: 'Plan' },
     });
-    // A real transition into Plan (updatedFrom carries the prior state) matches.
     expect(jobMatchesWebhook(linear, linearIssueWebhook(['agent']))).toBe(true);
-    // Linear's scalar updatedFrom.stateId also counts as a transition.
     const viaStateId = linearIssueWebhook(['agent']);
     viaStateId.payload.updatedFrom = { stateId: 'old-state-id' };
     expect(jobMatchesWebhook(linear, viaStateId)).toBe(true);
-    // A non-state edit while the issue still sits in Plan must NOT match.
     const nonState = linearIssueWebhook(['agent']);
     nonState.payload.updatedFrom = { labelIds: ['x'] };
     expect(jobMatchesWebhook(linear, nonState)).toBe(false);
-    // No updatedFrom at all must NOT match.
     const noUpdatedFrom = linearIssueWebhook(['agent']);
     delete (noUpdatedFrom.payload as Record<string, unknown>).updatedFrom;
     expect(jobMatchesWebhook(linear, noUpdatedFrom)).toBe(false);
   });
 
   it('reads labels from the flat webhook array, not a {nodes} connection', () => {
-    // Regression: Linear webhook bodies send `data.labels` as a flat array.
-    // Reading `.nodes` (the GraphQL connection shape) made every --label filter
-    // match nothing. Lock the flat-array read and prove the stale shape fails.
     const linear = job({
       name: 'linear-agent',
       trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
@@ -263,9 +248,6 @@ describe('matchJobsToWebhook', () => {
         devices: ['mac-mini', 'zion'],
         trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y' },
       });
-      // 'multi' pins [mac-mini, zion]; mac-mini owns it (lowest normalized
-      // name), so a webhook on zion no longer fires it. A routine fires on
-      // exactly one device, on the trigger path as on the cron path.
       expect(matchJobsToWebhook([foreign, local, multi], pullRequestWebhook('x/y')).map((j) => j.name)).toEqual(['local']);
     } finally {
       if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
@@ -366,17 +348,10 @@ describe('webhook signature verification', () => {
   });
 });
 
-/**
- * The receiver acks 202 BEFORE dispatching (RUSH-2548), so a test that asserts
- * on dispatch must wait for the settle callback rather than the HTTP response.
- * `hit` is wired to both onDelivery and onDeliveryError so a failed settle
- * releases the waiter too — otherwise a regression hangs instead of failing.
- */
 function settleWaiter() {
   let settled = 0;
   let waiters: { target: number; release: () => void }[] = [];
   return {
-    /** Wire to onDelivery AND onDeliveryError. */
     hit: () => {
       settled += 1;
       waiters = waiters.filter((w) => {
@@ -385,7 +360,6 @@ function settleWaiter() {
         return false;
       });
     },
-    /** Resolve once `target` deliveries have settled (already-past targets resolve now). */
     until: (target: number): Promise<void> => (settled >= target
       ? Promise.resolve()
       : new Promise<void>((release) => { waiters.push({ target, release }); })),
@@ -407,9 +381,8 @@ describe('slack signature verification', () => {
 
   it('fails closed on a stale timestamp (replay guard) and on missing/malformed headers', () => {
     const now = 1_700_000_000_000;
-    const staleTs = String(Math.floor(now / 1000) - 600); // 10 minutes old
+    const staleTs = String(Math.floor(now / 1000) - 600);
     const body = Buffer.from('x');
-    // Correctly signed for the stale ts, but too old → still rejected.
     expect(verifySlackSignature({ 'x-slack-request-timestamp': staleTs, 'x-slack-signature': sign(staleTs, 'x') }, body, secret, now)).toBe(false);
     expect(verifySlackSignature({}, body, secret, now)).toBe(false);
     expect(verifySlackSignature({ 'x-slack-request-timestamp': 'abc', 'x-slack-signature': 'v0=x' }, body, secret, now)).toBe(false);
@@ -497,8 +470,6 @@ describe('startWebhookServer — slack', () => {
     }
   });
 
-  // A slash command carries no thread_ts, so the reply lands in the channel, not
-  // a thread — the ephemeral ack Slack renders to the caller must say so.
   it('acks a signed slash command with an ephemeral ack naming the channel', async () => {
     const server = startWebhookServer({ secrets: { slack: secret }, fire: { jobs: [] } });
     await new Promise<void>((r) => server.once('listening', r));
@@ -537,10 +508,6 @@ describe('startWebhookServer', () => {
         trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
       }),
     ];
-    // A dispatch that only completes when the test says so — standing in for the
-    // real 15-20s agent run that used to hold the HTTP socket open past Linear's
-    // delivery timeout. If the ack still waited on dispatch, the request below
-    // would never return and this test would time out rather than pass.
     let signalDispatchStarted!: () => void;
     const dispatchStarted = new Promise<void>((resolve) => { signalDispatchStarted = resolve; });
     let releaseDispatch!: () => void;
@@ -599,22 +566,16 @@ describe('startWebhookServer', () => {
 
       const response = await send();
 
-      // The ack arrived while dispatch is provably still in flight.
       await dispatchStarted;
       expect(response.status).toBe(202);
       expect(JSON.parse(response.body)).toMatchObject({ ok: true, accepted: true, deliveryId: 'linear:delivery-async' });
 
-      // The async window is exactly where dedup can regress: `deliveryStore.seen`
-      // reports only COMPLETED deliveries, so between the ack and the settle it
-      // says false and only the in-flight set stops a retry re-firing the job.
-      // Retry the SAME delivery id here, while dispatch is still held open.
       const midFlightRetry = await send();
       expect(midFlightRetry.status).toBe(200);
       expect(JSON.parse(midFlightRetry.body)).toMatchObject({ ok: true, duplicate: true });
 
       releaseDispatch();
       await waiter.until(1);
-      // One dispatch, not two — the retry above was absorbed, not queued behind it.
       expect(dispatches).toBe(1);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -676,8 +637,6 @@ describe('startWebhookServer', () => {
 
       expect((await send({})).status).toBe(401);
       expect((await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' })).status).toBe(202);
-      // The delivery is only "seen" once it settles, so wait for that before
-      // asserting that a retry of the same id is a duplicate.
       await waiter.until(1);
       const duplicate = await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' });
       expect(duplicate.status).toBe(200);
@@ -892,10 +851,6 @@ describe('startWebhookServer', () => {
         req.end(payload);
       });
 
-      // The failing dispatch no longer surfaces as a 4xx — the delivery was
-      // already acked. What still holds is the LEDGER: the delivery is not
-      // marked complete, so a retry of the same id re-runs only the match that
-      // failed, and the one after that is a plain duplicate.
       expect((await send()).status).toBe(202);
       await waiter.until(1);
       const retry = await send();
@@ -934,8 +889,6 @@ describe('startWebhookServer', () => {
         req.on('error', reject);
         req.end(payload);
       });
-      // Bad signatures: first two clear the per-IP gate then fail HMAC (401);
-      // the third is shed by the per-IP limiter BEFORE the body read (429).
       expect(await send()).toBe(401);
       expect(await send()).toBe(401);
       expect(await send()).toBe(429);
@@ -995,7 +948,6 @@ describe('startWebhookServer', () => {
       let settledHandlers: Array<{ handlerName: string; exitCode?: number; output?: string }> = [];
       const server = startWebhookServer({
         secrets: { linear: secret },
-        // Handler results ride the settle callback now, not the HTTP body.
         onDelivery: (_webhook, _fired, handlers) => {
           settledHandlers = handlers as typeof settledHandlers;
           waiter.hit();
@@ -1049,12 +1001,6 @@ describe('startWebhookServer', () => {
     }
   });
 
-  // RUSH-2722: a `run.command` handler shells out via `exec()`, which only
-  // resolves once the child process exits. Before this fix, the "fired" log
-  // rode `onDelivery` — settled only after that exit — so verifying a delivery
-  // fired meant waiting out however long the shelled-out command (a real agent
-  // run in production) took to finish. `onMatch` must fire immediately after
-  // the ack, well before the slow command settles.
   it.skipIf(process.platform === 'win32')('reports onMatch immediately, before a slow run.command handler settles', async () => {
     const secret = 'linear-secret';
     const webhookDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-onmatch-'));
@@ -1116,9 +1062,7 @@ describe('startWebhookServer', () => {
         await waiter.until(1);
         expect(matchedAt).not.toBeNull();
         expect(settledAt).not.toBeNull();
-        // onMatch trails the ack by a scheduling tick, not the 300ms sleep.
         expect(matchedAt! - ackedAt).toBeLessThan(150);
-        // onDelivery only fires once the shelled-out `sleep 0.3` has exited.
         expect(settledAt! - matchedAt!).toBeGreaterThanOrEqual(250);
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1141,7 +1085,6 @@ describe('createFileDeliveryStore', () => {
       first.mark('github:delivery-1');
       expect(first.seen('github:delivery-1')).toBe(true);
 
-      // Simulate a receiver restart: a brand-new store loads the persisted file.
       const restarted = createFileDeliveryStore(file);
       expect(restarted.seen('github:delivery-1')).toBe(true);
       expect([...restarted.completedJobs('github:delivery-1')]).toEqual(['job-a']);
@@ -1154,12 +1097,10 @@ describe('createFileDeliveryStore', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-deliveries-'));
     const file = path.join(dir, 'deliveries.json');
     try {
-      // A persisted entry stamped well beyond the retention window is pruned on
-      // load — an ancient captured delivery cannot be replayed as a duplicate.
       fs.writeFileSync(file, JSON.stringify({
         'github:ancient': { complete: true, jobs: [], updatedAt: Date.now() - 10 * 60_000 },
       }));
-      const store = createFileDeliveryStore(file, 60_000); // 1-minute retention
+      const store = createFileDeliveryStore(file, 60_000);
       expect(store.seen('github:ancient')).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

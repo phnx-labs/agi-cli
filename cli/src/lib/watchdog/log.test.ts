@@ -1,12 +1,3 @@
-/**
- * Tests for the canonical watchdog.log writer (watchdog-brain-v2).
- *
- * The Fleet card reads this JSONL feed with the parser in
- * apps/ext/src/core/watchdogLog.ts. No cross-app import is allowed, so these
- * tests pin the SHAPE that reader consumes: one JSON object per line, a numeric
- * `ts`, a known `kind`, a string `message`, and the optional context fields —
- * plus the line-cap trim so the file never grows unbounded.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -22,7 +13,7 @@ beforeEach(() => {
   logPath = path.join(dir, 'watchdog.log');
 });
 afterEach(() => {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
 });
 
 function readLines(): Record<string, unknown>[] {
@@ -47,7 +38,6 @@ describe('appendWatchdogEvents', () => {
       expect(KNOWN_KINDS.has(row.kind as string)).toBe(true);
       expect(typeof row.message).toBe('string');
     }
-    // Context fields survive the round-trip so the card can render them.
     expect(lines[0]).toMatchObject({ kind: 'decision', terminalId: 'CC-1', stalledForMs: 360_000, nudgeText: 'Finish it.' });
     expect((lines[0].tailLines as string[])[0]).toBe('{"a":1}');
     expect(lines[1]).toMatchObject({ kind: 'nudge', terminalId: 'CC-1' });
@@ -58,7 +48,6 @@ describe('appendWatchdogEvents', () => {
     appendWatchdogEvents(many, { logPath, maxLines: 4 });
     const lines = readLines();
     expect(lines).toHaveLength(4);
-    // The most-recent events are kept.
     expect(lines.map((l) => l.message)).toEqual(['t6', 't7', 't8', 't9']);
   });
 

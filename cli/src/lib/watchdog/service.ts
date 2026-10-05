@@ -32,11 +32,9 @@ function runWatchdogMailboxGc(sessions: ActiveSession[]): void {
   try {
     gcMailbox(activeBoxIds);
   } catch {
-    // Housekeeping is retried by the next daemon tick.
   }
 }
 
-/** Execute one watchdog pass from the daemon or the explicit CLI command. */
 export async function runWatchdogPass(opts: WatchdogPassOptions): Promise<WatchdogTickResult> {
   const sessions = opts.sessions ?? await loadWatchdogSessions();
   const result = await runWatchdogTick({

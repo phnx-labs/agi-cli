@@ -14,7 +14,6 @@ describe('handler config layer', () => {
   let handlerMod: typeof import('./handlers.js');
 
   async function loadModule() {
-    // Re-import after setting HOME so state.ts resolves the temp dirs.
     handlerMod = await import('./handlers.js');
   }
 
@@ -166,7 +165,6 @@ describe('handler config layer', () => {
     });
 
     it('does not re-fire a stateTo handler on a later non-state update (RUSH-2539)', () => {
-      // The live `linear` handler: fire when an issue MOVES to Plan, no stateFrom.
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'plan-handler',
         source: 'linear',
@@ -175,15 +173,9 @@ describe('handler config layer', () => {
         stateTo: 'Plan',
         run: { agent: 'claude' },
       };
-      // A real transition INTO Plan — updatedFrom carries the prior state — matches.
       expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook())).toBe(true);
-      // Linear's scalar shape (updatedFrom.stateId) also counts as a transition.
       expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook({ updatedFrom: { stateId: 'old-state-id' } }))).toBe(true);
-      // Issue still sits in Plan but THIS delivery changed something else (a label,
-      // a description): updatedFrom carries no state — must NOT match, or the planner
-      // re-fires on every later edit (RUSH-1459 accumulated 11 duplicate comments).
       expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook({ updatedFrom: { labelIds: ['x'] } }))).toBe(false);
-      // An update with no changed-field record at all — must NOT match.
       expect(handlerMod.handlerMatchesWebhook(handler, linearWebhook({ updatedFrom: undefined }))).toBe(false);
     });
 
@@ -346,11 +338,6 @@ describe('handler config layer', () => {
       }
     });
 
-    // A handler is not a routine, so its name can never be a member of this
-    // device's routine activation manifest. Without the marker the gate answered
-    // "not activated here" and executeJobDetached recorded `skipped` with an empty
-    // allowlist ("can only run on: "), while the receiver logged the delivery as
-    // `fired` — a live Slack slash command reached the box and no agent ever ran.
     it('marks an agent handler webhook-dispatched so the routine activation gate cannot skip it', async () => {
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'slack-agent',
@@ -370,9 +357,6 @@ describe('handler config layer', () => {
       });
       expect(dispatched[0].dispatchedBy).toBe('webhook');
 
-      // Materialize a device activation manifest that does NOT list the handler —
-      // the state this box was in when a real signed slash command was skipped.
-      // Without the marker the gate reads false here and the run never starts.
       const { replaceEnabledRoutines } = await import('../routine-activation.js');
       const { jobRunsOnThisDevice } = await import('../scheduling/routines.js');
       replaceEnabledRoutines(['some-other-routine']);
@@ -453,7 +437,6 @@ describe('handler config layer', () => {
       };
       const result = await handlerMod.executeHandler(handler, linearWebhook(), {
         execCommand: async (command) => {
-          // Substituted values are shell-quoted; the operator's template is not.
           expect(command).toBe("echo 'RUSH-1459'");
           return { exitCode: 0, output: 'RUSH-1459\n' };
         },
@@ -463,7 +446,6 @@ describe('handler config layer', () => {
     });
 
     it.skipIf(process.platform === 'win32')('neutralizes shell metacharacters coming from the webhook payload', async () => {
-      // `title` is free text an outside contributor controls on a public tracker.
       const hostile = "x'; touch /tmp/pwned; echo '";
       const handler: import('./handlers.js').WebhookHandler = {
         name: 'cmd-handler',
@@ -481,11 +463,8 @@ describe('handler config layer', () => {
           },
         },
       );
-      // The payload stays one inert argument: no unquoted ; that sh would run.
       expect(seen).toBe(`echo 'x'\\''; touch /tmp/pwned; echo '\\'''`);
       expect(seen.startsWith('echo ')).toBe(true);
-      // Everything after the template is inside quotes — verified by actually
-      // running it through the real shell and checking the side effect never fired.
       const { execFileSync } = await import('child_process');
       const printed = execFileSync('/bin/sh', ['-c', seen], { encoding: 'utf-8' });
       expect(printed.trim()).toBe(hostile);
@@ -496,7 +475,6 @@ describe('handler config layer', () => {
       expect(() => assertShellSubstitutionSupported('echo {{issue.title}}', 'win32')).toThrow(
         /not supported on Windows/,
       );
-      // No placeholders means nothing untrusted is interpolated — allowed.
       expect(() => assertShellSubstitutionSupported('echo hello', 'win32')).not.toThrow();
       expect(() => assertShellSubstitutionSupported('echo {{issue.title}}', 'darwin')).not.toThrow();
     });
@@ -721,7 +699,6 @@ describe('handler config layer', () => {
       process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
       writeDeviceRegistry({});
       try {
-        // No registry / nothing online still falls back to self, which is local.
         expect(handlerMod.resolveHandlerHost('fleet')).toEqual({});
         expect(() => handlerMod.resolveHandlerHost('fleet/linux')).toThrow(/no eligible online fleet device/);
       } finally {
@@ -761,11 +738,6 @@ describe('handler config layer', () => {
       });
     });
 
-    // response_url is Slack's own reply channel for a slash command: it takes a
-    // POST for 30 minutes with no token and no channel membership, so it is the
-    // only reply that works before the app has been invited anywhere. It was
-    // parsed off the wire but never reached the {{slack.*}} namespace, so a
-    // handler prompt could not use it.
     it('exposes {{slack.response_url}} so a slash-command reply needs no token or channel membership', () => {
       const webhook: IncomingWebhook = {
         source: 'slack', event: '/agents',
@@ -776,7 +748,6 @@ describe('handler config layer', () => {
       };
       const ctx = handlerMod.buildWebhookContext(webhook) as { slack: import('./handlers.js').SlackMessageContext };
       expect(ctx.slack.response_url).toBe('https://hooks.slack.com/commands/T1/123/abc');
-      // An event delivery carries none — the field is present and empty, never undefined.
       const mention = handlerMod.buildWebhookContext(slackWebhook()) as { slack: import('./handlers.js').SlackMessageContext };
       expect(mention.slack.response_url).toBe('');
     });
@@ -796,7 +767,6 @@ describe('handler config layer', () => {
         payload: { type: 'slash_command', command: '/agents', channel: 'C0AGI', text: 'AGI: go' },
       };
       expect(handlerMod.handlerMatchesWebhook(handler, slash)).toBe(true);
-      // Wrong command, wrong channel, and wrong source each fail closed.
       expect(handlerMod.handlerMatchesWebhook(handler, { ...slash, payload: { ...slash.payload, command: '/other' } })).toBe(false);
       expect(handlerMod.handlerMatchesWebhook(handler, { ...slash, payload: { ...slash.payload, channel: 'C0OTHER' } })).toBe(false);
       expect(handlerMod.handlerMatchesWebhook({ ...handler, source: 'github' }, slash)).toBe(false);
@@ -820,8 +790,6 @@ describe('handler config layer', () => {
         dispatchAgent: async (config) => { dispatched.push(config); return meta; },
       });
       expect(result.runId).toBe('run-slack');
-      // The per-message project routed into the run — this is what makes "give it
-      // a project name" work; a static handler.project would have ignored it.
       expect(dispatched[0].project).toBe('AGI');
       expect(dispatched[0].prompt).toContain('rebase my open PR and check CI');
       expect(dispatched[0].prompt).toContain('--to C0AGI --thread 1712345678.000100');
@@ -839,7 +807,6 @@ describe('handler config layer', () => {
           return { jobName: handler.name, runId: 'r', agent: 'claude', pid: 1, status: 'running', startedAt: new Date().toISOString(), completedAt: null, exitCode: null };
         },
       });
-      // Empty substitution omits the field entirely (falls back to $HOME), not an empty-string project.
       expect(dispatched[0].project).toBeUndefined();
     });
   });

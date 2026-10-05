@@ -1,15 +1,3 @@
-/**
- * Tests for the watchdog runner (RUSH-1415) — the CONSUMER tick.
- *
- * Drives real synthetic ActiveSession inputs through runWatchdogTick with the I/O
- * seams supplied (sessions, clock, tail, policy, the decider) and dryRun injection,
- * so no live terminal and no real `agents run` are needed. The pure logic
- * (classifyTerminal / resolveInjectTargetForSession) runs for real — nothing is
- * mocked. The decision itself comes from an injected `smartDecider` (production runs
- * the batched agent; watchdog-agent.test.ts covers that path). Each case asserts the
- * exact tick behavior: a nudge is delivered + booked only when CONFIRMED and
- * addressable; it SKIPS within cooldown / when un-addressable; handsoff never injects.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -28,12 +16,6 @@ import {
   type SmartDecider,
 } from './runner.js';
 
-/**
- * Every tick is run through this wrapper so no test touches real state: it pins
- * the log to the tmp state dir (the writer would otherwise append to the real
- * ~/.agents/.cache/logs/watchdog.log) and stubs the feed block reader off disk.
- * Individual tests still override any field.
- */
 function run(opts: WatchdogTickOptions) {
   return runWatchdogTick({
     logPath: path.join(stateDir, 'watchdog.log'),
@@ -43,9 +25,8 @@ function run(opts: WatchdogTickOptions) {
 }
 
 const NOW = 1_700_000_000_000;
-const STALE_AGO = NOW - 6 * 60_000; // 6m ago: past the 5m stall, before the 1h dormant window.
+const STALE_AGO = NOW - 6 * 60_000;
 
-/** A tmux-addressable session (highest-precedence rail) whose activity is `stale`. */
 function tmuxSession(over: Partial<ActiveSession> & { mux?: MuxLocation } = {}): ActiveSession {
   const provenance: SessionProvenance = {
     host: 'zion',
@@ -59,13 +40,12 @@ function tmuxSession(over: Partial<ActiveSession> & { mux?: MuxLocation } = {}):
     host: over.host ?? 'iterm',
     sessionId: over.sessionId ?? 'sess-tmux',
     status: 'idle',
-    startedAtMs: over.startedAtMs ?? STALE_AGO, // defaultLastActivity falls back to this (no transcript file)
+    startedAtMs: over.startedAtMs ?? STALE_AGO,
     provenance,
     ...over,
   };
 }
 
-/** A Ghostty session with NO tmux — the resolver reports it un-addressable. */
 function ghosttySession(over: Partial<ActiveSession> = {}): ActiveSession {
   return {
     context: 'terminal',
@@ -79,30 +59,22 @@ function ghosttySession(over: Partial<ActiveSession> = {}): ActiveSession {
   };
 }
 
-// A Claude assistant turn that ANNOUNCES an action with no tool call after it —
-// the idle-but-unfinished case the agent nudges.
 const PROMISE_TAIL = [
   '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"add the flag"}]}}',
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me run the tests now."}]}}',
 ];
-// A completed turn — the agent judges this idle-and-done.
 const DONE_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The feature is finished and pushed."}]}}',
 ];
-// The agent asked a needless permission question — the parked-on-question case.
 const ASK_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Should I proceed with running the tests?"}]}}',
 ];
-// A stall with no promise, no completion, no waiting hint — ambiguous.
 const AMBIGUOUS_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The config has three sections."}]}}',
 ];
 
-// Shared synthetic deciders (the agent is injected in tests). A NUDGE verdict for
-// idle-but-unfinished; a DONE skip (needsHuman:false, never poked) for finished work.
 const nudgeDecider: SmartDecider = async () => ({ nudge: true, reason: 'idle but unfinished — drive it to finish' });
 const doneDecider: SmartDecider = async () => ({ nudge: false, reason: 'task complete', needsHuman: false });
-/** An injectFn stub reporting a CONFIRMED delivery on the target's backend. */
 function confirmingInject(captured?: { target?: InjectTarget }) {
   return async (target: InjectTarget, _text: string, _o: { dryRun?: boolean }) => {
     if (captured) captured.target = target;
@@ -110,7 +82,6 @@ function confirmingInject(captured?: { target?: InjectTarget }) {
   };
 }
 
-/** A VS Codium (IDE) session parked on a question — the vscodium inject rail. */
 function vscodiumSession(over: Partial<ActiveSession> = {}): ActiveSession {
   return {
     context: 'terminal',
@@ -132,7 +103,7 @@ beforeEach(() => {
   stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-runner-'));
 });
 afterEach(() => {
-  try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch {  }
 });
 
 function readLedger(): Record<string, number> {
@@ -158,7 +129,6 @@ describe('runWatchdogTick — nudge fires', () => {
     expect(o.injected).toBe(true);
     expect(o.nudgeText).toBe('Continue.');
     expect(result.counts.nudged).toBe(1);
-    // Cooldown ledger updated so the next tick within cooldownMs is rate-limited.
     expect(readLedger()['sess-tmux']).toBe(NOW);
   });
 
@@ -173,8 +143,6 @@ describe('runWatchdogTick — nudge fires', () => {
 });
 
 describe('runWatchdogTick — parked-on-question escalates to the brain', () => {
-  // A session parked on a question is no longer HARD-SKIPPED (the old v1 behavior).
-  // It ESCALATES to the smart brain, which classifies drive-forward vs leave-for-human.
   const parked = () => tmuxSession({ activity: 'waiting_input', awaitingReason: 'question' });
 
   it('escalates a waiting_input session and DRIVES FORWARD when the brain says nudge', async () => {
@@ -187,7 +155,6 @@ describe('runWatchdogTick — parked-on-question escalates to the brain', () => 
       sessions: [parked()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
       tailFor: () => ASK_TAIL, smartDecider,
     });
-    // The brain was consulted (not dropped deterministically).
     expect(sawEscalation).not.toBeNull();
     const o = result.outcomes[0];
     expect(o.decision).toBe('nudge');
@@ -207,7 +174,6 @@ describe('runWatchdogTick — parked-on-question escalates to the brain', () => 
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
     expect(o.reason).toMatch(/human/i);
-    // Brain said "needs human" → reminder is injected → cooldown is recorded.
     expect(readLedger()['sess-tmux']).toBe(NOW);
   });
 
@@ -233,14 +199,10 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
     expect(result.counts.nudged).toBe(0);
-    // A done skip (needsHuman:false) is never poked and never booked.
     expect(readLedger()['sess-tmux']).toBeUndefined();
   });
 
   it('SKIPS and FLAGS an un-addressable NUDGE-WORTHY stall (ghostty, no tmux) — flag only, NEVER pages the owner', async () => {
-    // The agent judges it idle-but-unfinished (a drive-forward poke, NOT needsHuman).
-    // An un-addressable poke must NOT page Muqsit's phone — it flags for the tray
-    // only. No block published, no cooldown recorded.
     const blocks: OpenBlock[] = [];
     const result = await run({
       sessions: [ghosttySession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
@@ -254,17 +216,14 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(o.reason).toContain('agents sessions resume sess-gho');
     expect(o.reason).not.toContain('<id>');
     expect(result.counts.unaddressable).toBe(1);
-    // Flagged for the menu-bar to surface.
     const flags = readFlags();
     expect(flags['sess-ghostty']).toBeDefined();
     expect(flags['sess-ghostty'].host).toBe('ghostty');
-    // A drive-forward poke is NOT a page: no block, no cooldown write.
     expect(blocks).toHaveLength(0);
     expect(readLedger()['sess-ghostty']).toBeUndefined();
   });
 
   it('SKIPS within cooldown (rate-limited by a recent nudge)', async () => {
-    // Seed a nudge 1 minute ago — inside the 20m default cooldown.
     fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-tmux': NOW - 60_000 }));
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
@@ -274,14 +233,10 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(o.stall).toBe('rate_limited');
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
-    // The seeded timestamp is untouched (no re-nudge).
     expect(readLedger()['sess-tmux']).toBe(NOW - 60_000);
   });
 
   it('handsoff policy: detects + flags a nudge-worthy stall but NEVER injects or pages', async () => {
-    // The agent judges it idle-but-unfinished (drive-forward poke, NOT needsHuman).
-    // Hands-off means "don't nudge it forward" — it must NOT page Muqsit for a poke.
-    // Flag only: no block published, no cooldown recorded.
     const policyFor = (): WatchdogPolicy => 'handsoff';
     const blocks: OpenBlock[] = [];
     const result = await run({
@@ -290,14 +245,12 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     });
     const o = result.outcomes[0];
     expect(o.policy).toBe('handsoff');
-    expect(o.decision).toBe('nudge');       // it WOULD nudge...
+    expect(o.decision).toBe('nudge');
     expect(o.addressable).toBe(true);
-    expect(o.injected).toBe(false);          // ...but never does
+    expect(o.injected).toBe(false);
     expect(o.reason).toMatch(/handsoff/i);
-    // A drive-forward poke under hands-off is NOT a page: no block, no cooldown write.
     expect(blocks).toHaveLength(0);
     expect(readLedger()['sess-tmux']).toBeUndefined();
-    // Flagged for the tray to surface "would-nudge but hands-off".
     const flags = readFlags();
     expect(flags['sess-tmux']).toBeDefined();
     expect(flags['sess-tmux'].reason).toMatch(/hands-off/i);
@@ -334,7 +287,7 @@ describe('runWatchdogTick — dry run (default, no --nudge)', () => {
 
 describe('runWatchdogTick — active / not-yet-stalled', () => {
   it('SKIPS an active session (recent activity)', async () => {
-    const s = tmuxSession({ startedAtMs: NOW - 5_000 }); // 5s ago — well under the stall threshold
+    const s = tmuxSession({ startedAtMs: NOW - 5_000 });
     const result = await run({
       sessions: [s], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
       tailFor: () => PROMISE_TAIL,
@@ -343,7 +296,6 @@ describe('runWatchdogTick — active / not-yet-stalled', () => {
     expect(o.stall).toBe('active');
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
-    // Sanity: the default stall threshold is 5m, so 5s is active.
     expect(DEFAULT_THRESHOLDS.stallMs).toBe(300_000);
   });
 
@@ -391,12 +343,7 @@ describe('runWatchdogTick — active / not-yet-stalled', () => {
 
 describe('runWatchdogTick — delivery routing (answer-router + vscodium)', () => {
   it('routes an IDE (VS Codium) parked session to the vscodium inject rail, targeting the EXACT terminal', async () => {
-    // answer-router's own resolver cannot build a vscodium target; the tick must
-    // pre-resolve via resolveInjectTargetForSession (vscodium-aware) and inject
-    // into the precise integrated terminal keyed by the session id.
     const captured: { target?: InjectTarget } = {};
-    // Brain drives the parked question forward; the stub reports a CONFIRMED delivery
-    // so this test isolates target RESOLUTION from the confirmation behavior.
     const smartDecider: SmartDecider = async () => ({ nudge: true, reason: 'proceed', text: 'Finish it; use the sensible default.' });
     const result = await run({
       sessions: [vscodiumSession()], nowMs: NOW, nudge: true, stateDir,
@@ -415,10 +362,6 @@ describe('runWatchdogTick — delivery routing (answer-router + vscodium)', () =
 
 describe('runWatchdogTick — confirmed vs unconfirmed delivery', () => {
   it('an UNCONFIRMED delivery (vscodium fire-and-forget) is recorded undelivered, NOT a nudge', async () => {
-    // The real defect: `codium --open-url` exits 0 but the ext may no-op the verb.
-    // injectFn reports ok:true, confirmed:false — the tick must NOT count it as a
-    // landed nudge (decision skip, injected false), while still starting the
-    // cooldown so a possibly-working ext session is not re-hit every tick.
     const unconfirmedInject = async (target: InjectTarget) =>
       ({ ok: true as const, confirmed: false as const, backend: target.backend, writes: 2 });
     const smartDecider: SmartDecider = async () => ({ nudge: true, reason: 'proceed' });
@@ -431,7 +374,6 @@ describe('runWatchdogTick — confirmed vs unconfirmed delivery', () => {
     expect(o.injected).toBe(false);
     expect(o.reason).toMatch(/unconfirmed/i);
     expect(result.counts.nudged).toBe(0);
-    // Cooldown IS started (avoid every-tick spam) even though it wasn't confirmed.
     expect(readLedger()['sess-codium']).toBe(NOW);
   });
 
@@ -452,7 +394,7 @@ describe('runWatchdogTick — the agent decides only when something is idle', ()
   it('does NOT consult the decider when the only session is active', async () => {
     let called = false;
     const spyDecider: SmartDecider = async () => { called = true; return { nudge: false, reason: 'x' }; };
-    const s = tmuxSession({ startedAtMs: NOW - 5_000 }); // active, under the stall threshold
+    const s = tmuxSession({ startedAtMs: NOW - 5_000 });
     await run({
       sessions: [s], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
       tailFor: () => PROMISE_TAIL, smartDecider: spyDecider,
@@ -481,16 +423,13 @@ describe('runWatchdogTick — the batched agent decider (production path)', () =
       sessions: [a, b], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
       tailFor: () => PROMISE_TAIL, agentDecider,
     });
-    expect(calls).toBe(1);          // ONE call for both idle sessions
+    expect(calls).toBe(1);
     expect(sawCount).toBe(2);
     expect(result.outcomes.every((o) => o.decision === 'nudge')).toBe(true);
     expect(result.counts.nudged).toBe(2);
   });
 
   it('a session with NO verdict is a neutral safe-skip — not marked done, not booked, retried next tick', async () => {
-    // A decider outage (empty map while idle sessions exist) must NOT abandon the
-    // session as "done" (the bug: needsHuman:false). It skips, books nothing (so the
-    // next tick re-evaluates), and logs an outage error so the no-op is visible.
     const emptyDecider: WatchdogAgentDecider = async () => new Map();
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
@@ -499,18 +438,13 @@ describe('runWatchdogTick — the batched agent decider (production path)', () =
     const o = result.outcomes[0];
     expect(o.decision).toBe('skip');
     expect(o.reason).toMatch(/no verdict/i);
-    // Nothing booked → retried next tick (not silently abandoned as done).
     expect(readLedger()['sess-tmux']).toBeUndefined();
-    // The outage is surfaced, not an invisible no-op tick.
     expect(readLog().some((e) => e.kind === 'error' && /no verdicts/i.test(e.message))).toBe(true);
   });
 });
 
 describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost updates)', () => {
   it('two concurrent ticks nudging different sessions both persist their timestamps', async () => {
-    // Reproduces the lost-update race: the OLD unlocked read-at-start/write-at-end
-    // let two interleaved ticks each write only their own session, dropping the
-    // other. The locked fresh-read + merge keeps both.
     const a = tmuxSession({ sessionId: 'sess-a' });
     const b = tmuxSession({ sessionId: 'sess-b' });
     const shared = fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-lock-'));
@@ -531,17 +465,6 @@ describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost up
 });
 
 describe('runWatchdogTick — brain says needs-human → wires the owner feed', () => {
-  // The brain marks a session "leave for human" (decision.nudge === false →
-  // needsHuman === true). The watchdog must surface that signal on the owner's feed —
-  // not drop it silently in a menubar-only flag. Two paths depending on addressability:
-  //   A. Addressable (tmux): inject a self-file reminder into the agent's terminal.
-  //   B. Un-addressable (ghostty, no tmux): file a declared block on the agent's behalf.
-  // Both paths are gated by the same cooldown ledger as a nudge (at most once per
-  // cooldown window) and are no-ops when a block already exists for the session.
-  //
-  // Owner-paging fires ONLY on this confirmed-needsHuman path. A nudge-worthy
-  // drive-forward poke (decision.nudge === true) that is un-addressable or under a
-  // hands-off policy is NEVER paged — see section C, which pins that no-page.
 
   const needsHumanDecider: SmartDecider = async () => ({ nudge: false, reason: 'credentials required — needs the human' });
 
@@ -560,11 +483,9 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       const o = result.outcomes[0];
       expect(o.decision).toBe('skip');
       expect(o.reason).toMatch(/credentials/i);
-      // The reminder text must mention agents feed post --blocked.
       expect(capturedText).not.toBeNull();
       expect(capturedText).toMatch(/agents feed post/i);
       expect(capturedText).toMatch(/--blocked/i);
-      // Cooldown is recorded so the next tick within cooldownMs is rate-limited.
       expect(readLedger()['sess-tmux']).toBe(NOW);
     });
 
@@ -582,7 +503,6 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
     });
 
     it('does NOT inject a second time within the cooldown window', async () => {
-      // Seed a ledger entry 1 minute ago — inside the default 20m cooldown.
       fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-tmux': NOW - 60_000 }));
       let injected = false;
       const injectFn = async () => { injected = true; return { ok: true as const, confirmed: true as const, backend: 'tmux' as const, writes: 2 }; };
@@ -591,18 +511,12 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
         tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
         openBlockFor: () => null,
       });
-      // Reminder is suppressed by the cooldown — no inject, timestamp untouched.
       expect(injected).toBe(false);
       expect(readLedger()['sess-tmux']).toBe(NOW - 60_000);
     });
   });
 
   describe('B. un-addressable session (ghostty, no tmux) — file a declared block', () => {
-    // The MOST important case: the session genuinely needs the human AND the watchdog
-    // cannot even reach its terminal to remind it. It must NOT silently vanish — the
-    // only way to reach Muqsit is to file a declared block on the agent's behalf.
-    // A waiting_input ghostty session deterministically escalates to the brain, which
-    // returns nudge:false (needsHuman), and the resolver reports it un-addressable.
     const unaddressableNeedsHuman = () => ghosttySession({ activity: 'waiting_input', awaitingReason: 'question' });
 
     it('publishes a declared block and records the cooldown', async () => {
@@ -615,13 +529,11 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       });
       const o = result.outcomes[0];
       expect(o.decision).toBe('skip');
-      // One block published with the session's id, phone-urgent.
       expect(published).toHaveLength(1);
       expect(published[0].sessionId).toBe('sess-ghostty');
       expect(published[0].costOfDelay).toBe('high');
       expect(published[0].questions[0].text).toContain('agents sessions resume sess-gho');
       expect(published[0].questions[0].text).not.toContain('<id>');
-      // Cooldown is recorded.
       expect(readLedger()['sess-ghostty']).toBe(NOW);
     });
 
@@ -653,13 +565,8 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
   });
 
   describe('C. a nudge-worthy (NOT needsHuman) session is NEVER paged', () => {
-    // The over-paging guard: the refuse and handsoff branches are reached only for a
-    // drive-forward poke (decision.nudge === true), which is NEVER needsHuman. Those
-    // sessions "just need a poke" — they must not text Muqsit's phone. This pins the
-    // fix: neither an un-addressable poke nor a hands-off poke publishes a block.
 
     it('un-addressable NUDGE-worthy poke → flag only, no block, no cooldown write', async () => {
-      // The agent judges it idle-but-unfinished (drive-forward, NOT needsHuman).
       const published: OpenBlock[] = [];
       const result = await run({
         sessions: [ghosttySession()], nowMs: NOW, nudge: true, stateDir,
@@ -671,7 +578,6 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       expect(o.addressable).toBe(false);
       expect(o.reason).toContain('agents sessions resume sess-gho');
       expect(o.reason).not.toContain('<id>');
-      // Flagged for the tray, but the owner is NOT paged.
       expect(readFlags()['sess-ghostty']).toBeDefined();
       expect(published).toHaveLength(0);
       expect(readLedger()['sess-ghostty']).toBeUndefined();
@@ -688,9 +594,8 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       });
       const o = result.outcomes[0];
       expect(o.policy).toBe('handsoff');
-      expect(o.injected).toBe(false);  // handsoff never injects
+      expect(o.injected).toBe(false);
       expect(injected).toBe(false);
-      // Flagged for the tray, but the owner is NOT paged for a poke.
       expect(readFlags()['sess-tmux']).toBeDefined();
       expect(published).toHaveLength(0);
       expect(readLedger()['sess-tmux']).toBeUndefined();

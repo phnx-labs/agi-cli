@@ -104,7 +104,6 @@ describe('composePromptWithPlaybook', () => {
     expect(out.startsWith(WATCHDOG_SYSTEM_PROMPT + '\n\n## House Rules')).toBe(true);
     expect(out).toContain('TEST_MARKER');
     expect(out).toContain('Skip in plan mode');
-    // trailing whitespace stripped
     expect(out.endsWith('\n')).toBe(false);
   });
 });
@@ -125,7 +124,6 @@ describe('renderWatchdogPrompt', () => {
     );
     expect(out).toContain('## House Rules');
     expect(out).toContain('TEST_MARKER');
-    // House Rules must be ABOVE the idle-sessions payload, not after it.
     const houseIdx = out.indexOf('## House Rules');
     const idleIdx = out.indexOf('IDLE SESSIONS:');
     expect(houseIdx).toBeGreaterThan(-1);
@@ -247,32 +245,25 @@ describe('parseWatchdogResponse', () => {
 describe('WATCHDOG_SYSTEM_PROMPT — idle-vs-unfinished judgment', () => {
   it('instructs NUDGE on needless questions and SKIP on genuine human-only cases', () => {
     const p = WATCHDOG_SYSTEM_PROMPT;
-    // Drive-forward framing.
     expect(p).toMatch(/NUDGE/);
     expect(p).toMatch(/best judgment/i);
     expect(p).toMatch(/should I proceed/i);
     expect(p).toMatch(/end-to-end/i);
-    // Leave-for-human framing.
     expect(p).toMatch(/SKIP/);
     expect(p).toMatch(/credentials|2fa|biometric/i);
     expect(p).toMatch(/publish\/release|force-push|irreversible/i);
-    // The verdict shape parseWatchdogResponse consumes is still specified.
     expect(p).toContain('"action":"nudge"|"skip"');
   });
 
   it('encodes the idle-to-completion strategy: read-first, context, split, point-at-tool', () => {
     const p = WATCHDOG_SYSTEM_PROMPT;
-    // Idle is the target, and the brain reads before it judges.
     expect(p).toMatch(/idle/i);
     expect(p).toMatch(/read (each|the) transcript/i);
     expect(p).toMatch(/already reached|already decided/i);
-    // Nudge carries context and names a concrete next step.
     expect(p).toMatch(/restate the goal/i);
     expect(p).toMatch(/concrete next step/i);
-    // Point the agent at a tool it forgot it has.
     expect(p).toMatch(/agents computer/);
     expect(p).toMatch(/agents browser/);
-    // Split the ask: drive the reversible part, flag only the disruptive one.
     expect(p).toMatch(/split the ask/i);
   });
 });

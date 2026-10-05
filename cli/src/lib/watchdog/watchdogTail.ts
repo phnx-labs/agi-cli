@@ -1,7 +1,3 @@
-// Watchdog tail summarization: pull the most recent user / assistant message
-// out of the session JSONL window the watchdog read this tick. Pure functions —
-// the watchdog runtime hands us tailLines + agentType and we read no files.
-// Ported from Swarmify (extension/src/core/watchdogTail.ts) — behavior verbatim.
 
 interface TailSummary {
   lastUserMessage?: string;
@@ -82,9 +78,6 @@ function pickContentText(content: unknown): string | null {
   return parts.length ? parts.join('\n') : null;
 }
 
-// Mirrors the synthetic-tag filter in the session readers so a "User: …"
-// surfaced in the watchdog UI never shows a <local-command-stdout>,
-// <system-reminder>, or similar harness chunk that Claude wraps tool output in.
 const SYNTHETIC_TAG_PREFIXES = [
   '<local-command-caveat',
   '<local-command-stdout',
