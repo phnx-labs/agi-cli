@@ -22,25 +22,9 @@ import {
 } from './cli.js';
 import type { SecretsBundle } from '../secrets-types.js';
 
-// Suites that stand up a fake `crabbox` on PATH are POSIX-only: the fake is a
-// `#!/bin/sh` script with no .cmd/.exe extension, which Windows can neither
-// resolve nor execute, so findCrabbox (cli.ts:74) throws "crabbox is not
-// installed or not on PATH" before the behavior under test runs. The
-// pure-function suites in this file still run everywhere.
 const describePosix = describe.skipIf(process.platform === 'win32');
-// Same POSIX-only guard for a single test that stands up a fake `crabbox` on PATH.
 const itPosix = it.skipIf(process.platform === 'win32');
 
-/**
- * Hermetic lease-bundle resolution for suites that call crabboxList / crabboxWarmup
- * / crabboxEnv but do not care about secrets. Without this, crabboxEnv auto-detects
- * the DEVELOPER's real provider-token bundle (e.g. a locked `hetzner.com`), and the
- * agentOnly read throws "not unlocked" (SEC-13) — a dev-machine-only failure that
- * has nothing to do with the box parsing / warmup argv under test. Pinning readMeta
- * → {} and the process client's listBundlesSync → [] makes resolveLeaseBundle find
- * nothing, so crabboxEnv injects no lease token (and never spawns the standalone);
- * resetting the memos keeps it isolated per test.
- */
 function installHermeticLease(): void {
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
@@ -106,21 +90,6 @@ describe('pickTailscaleBundleFromList', () => {
 
 const REAL_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
 
-/**
- * crabbox's lease + tailscale secrets reads now resolve through the standalone
- * `secrets` process client (PHNX-3989), so these exercise the REAL standalone
- * `secrets __serve` — no mocks (repo rule) — gated on AGENTS_TEST_SECRETS_BIN
- * exactly like secrets-client.test.ts; with it unset the block skips cleanly, so
- * CI (which has no standalone checkout) stays green.
- *
- * A spawn-counting wrapper on $SECRETS_BIN is the seam that proves crabbox's
- * process-lifetime memo: `crabboxEnv` runs on every crabboxWaitReady poll, so the
- * token must resolve ONCE and be served from the memo after — otherwise a lease
- * spends a `secrets __serve` spawn per poll (the per-poll storm the memo kills, now
- * a process spawn per read, not merely a keychain hit). The wrapper appends a line
- * per invocation, then execs the real bin, so the spawn count must not climb across
- * the repeated crabboxEnv calls.
- */
 describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client', () => {
   const ENV_KEYS = [
     'AGENTS_LEASE_SECRETS_BUNDLE',
@@ -138,7 +107,6 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
   let wrapperDir: string;
   let spawnLog: string;
 
-  /** How many times the standalone `secrets` binary has been spawned so far. */
   const spawns = (): number => {
     try {
       return fs.readFileSync(spawnLog, 'utf-8').split('\n').filter(Boolean).length;
@@ -147,7 +115,6 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
     }
   };
 
-  /** Write a real file-backend bundle + its items through the standalone client. */
   async function seedFileBundle(name: string, vars: Record<string, string>): Promise<void> {
     const bundle = {
       name,
@@ -156,8 +123,6 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
     } as SecretsBundle;
     const items = new Map(Object.entries(vars).map(([k, v]) => [`agents-cli.secrets.${name}.${k}`, v]));
     await secretsClient.writeBundleWithItems(bundle, items);
-    // Seeding used the client (and its memos); start the crabbox read memos fresh so
-    // the spawn count reflects only the crabboxEnv reads under test.
     resetCrabboxSecretsMemosForTest();
     fs.writeFileSync(spawnLog, '', 'utf-8');
   }
@@ -169,8 +134,6 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
     wrapperDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-secrets-wrap-'));
     spawnLog = path.join(wrapperDir, 'spawns.log');
     fs.writeFileSync(spawnLog, '', 'utf-8');
-    // A counting wrapper that records each spawn, then execs the real standalone —
-    // the real dependency still runs, we just observe how often it is invoked.
     const wrapper = path.join(wrapperDir, 'secrets');
     fs.writeFileSync(
       wrapper,
@@ -188,13 +151,12 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
     process.env.SECRETS_BIN = wrapper;
     process.env.SECRETS_REAL_BIN = REAL_BIN!;
     process.env.SECRETS_SPAWN_LOG = spawnLog;
-    process.env.HOME = home; // the standalone file store lives under $HOME/.agents/.cache/secrets
+    process.env.HOME = home;
     process.env.SECRETS_HOME = path.join(home, '.agents');
-    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase'; // file-backend key, bridged to SECRETS_PASSPHRASE
-    process.env.SECRETS_NO_AGENT = '1'; // no broker in the test env
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase';
+    process.env.SECRETS_NO_AGENT = '1';
     secretsClient._resetSecretsClientForTest();
     resetCrabboxSecretsMemosForTest();
-    // No configured lease.secretsBundle from a developer agents.yaml.
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
   });
 
@@ -221,10 +183,7 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
     expect(env1.HCLOUD_TOKEN).toBe('tok-once');
     expect(env2.HCLOUD_TOKEN).toBe('tok-once');
     expect(env3.HCLOUD_TOKEN).toBe('tok-once');
-    // The real read went over the wire to the standalone...
     expect(afterFirst).toBeGreaterThan(0);
-    // ...and it resolved ONCE: the loop-repeated crabboxEnv calls serve the memo, so
-    // the spawn count does not climb across env2/env3.
     expect(spawns()).toBe(afterFirst);
   });
 
@@ -240,29 +199,20 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
     expect(env2.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
     expect(env3.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
     expect(afterFirst).toBeGreaterThan(0);
-    expect(spawns()).toBe(afterFirst); // the memo serves the repeats — no re-spawn
+    expect(spawns()).toBe(afterFirst);
   });
 
   it('wraps a failed lease read in the actionable crabbox message, memoizes it, and re-raises without re-reading', () => {
-    // No bundle seeded: the standalone fails the read, crabbox wraps + memoizes it.
-    // SEC-13 agentOnly enforcement now lives in the standalone; crabbox's contract
-    // here is to fail loud with the "unset lease.secretsBundle" hint and NOT re-read.
     expect(() => crabboxEnv({ secretsBundle: 'no-such-bundle' })).toThrow(
       /Could not load secrets bundle "no-such-bundle" for crabbox/,
     );
     const afterFirst = spawns();
-    // The memoized error re-raises on repeat calls WITHOUT re-issuing the read, so a
-    // poll loop cannot re-storm it.
     expect(() => crabboxEnv({ secretsBundle: 'no-such-bundle' })).toThrow(/for crabbox/);
     expect(() => crabboxEnv({ secretsBundle: 'no-such-bundle' })).toThrow(/for crabbox/);
     expect(spawns()).toBe(afterFirst);
   });
 
   itPosix('a failed lease read propagates out of crabboxWaitReady before the poll loop runs', async () => {
-    // crabboxWaitReady's first action is crabboxFind -> crabboxList -> crabboxEnv,
-    // which throws synchronously for an unresolvable bundle. A fake `crabbox` on PATH
-    // makes findCrabbox() pass so crabboxEnv is the thing that throws. The injected
-    // `sleep` records any poll iteration; assert it is NEVER called.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-lease-fail-'));
     fs.writeFileSync(
       path.join(dir, 'crabbox'),
@@ -278,7 +228,7 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
       await expect(
         crabboxWaitReady('some-slug', { secretsBundle: 'no-such-bundle', timeoutMs: 60_000, intervalMs: 5_000, sleep }),
       ).rejects.toThrow(/Could not load secrets bundle "no-such-bundle" for crabbox/);
-      expect(polls).toBe(0); // never entered the poll/sleep loop
+      expect(polls).toBe(0);
     } finally {
       process.env.PATH = oldPath;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -286,7 +236,7 @@ describe.skipIf(!REAL_BIN)('crabboxEnv secrets reads via the standalone client',
   });
 });
 
-const NOW = 1_800_000_000; // fixed "now" in unix seconds
+const NOW = 1_800_000_000;
 
 function box(over: Partial<CrabboxBox> = {}): CrabboxBox {
   return {
@@ -298,8 +248,8 @@ function box(over: Partial<CrabboxBox> = {}): CrabboxBox {
     ready: true,
     keep: true,
     createdAt: NOW - 10_000,
-    expiresAt: NOW - 8_000, // expired by default
-    lastTouchedAt: NOW - REAP_MIN_IDLE_SECS - 100, // stale by default
+    expiresAt: NOW - 8_000,
+    lastTouchedAt: NOW - REAP_MIN_IDLE_SECS - 100,
     idleTimeoutSecs: 1800,
     ...over,
   };
@@ -311,7 +261,6 @@ describe('isReapSafe', () => {
   });
 
   it('never reaps a box touched within the safety window (TOCTOU guard)', () => {
-    // Expired lease, but touched 1 minute ago → a concurrent run may be using it.
     expect(isReapSafe(box({ lastTouchedAt: NOW - 60 }), NOW)).toBe(false);
   });
 
@@ -320,10 +269,8 @@ describe('isReapSafe', () => {
   });
 
   it('honors max(2×idleTimeout, 1h): a long idle-timeout widens the window', () => {
-    // idleTimeout 40m → window = 80m. Touched 70m ago is still inside it.
     const b = box({ idleTimeoutSecs: 2400, lastTouchedAt: NOW - 70 * 60 });
     expect(isReapSafe(b, NOW)).toBe(false);
-    // Touched 90m ago is outside the 80m window.
     expect(isReapSafe(box({ idleTimeoutSecs: 2400, lastTouchedAt: NOW - 90 * 60 }), NOW)).toBe(true);
   });
 
@@ -335,12 +282,12 @@ describe('isReapSafe', () => {
 
 describe('reapSafeOrphans', () => {
   it('filters to orphans and sorts most-stale first', () => {
-    const fresh = box({ slug: 'fresh', lastTouchedAt: NOW - 30 });          // in use
-    const active = box({ slug: 'active', expiresAt: NOW + 500 });           // lease live
+    const fresh = box({ slug: 'fresh', lastTouchedAt: NOW - 30 });
+    const active = box({ slug: 'active', expiresAt: NOW + 500 });
     const oldOrphan = box({ slug: 'old', lastTouchedAt: NOW - 100_000 });
     const newOrphan = box({ slug: 'new', lastTouchedAt: NOW - REAP_MIN_IDLE_SECS - 10 });
     const out = reapSafeOrphans([fresh, active, newOrphan, oldOrphan], NOW);
-    expect(out.map((b) => b.slug)).toEqual(['old', 'new']); // oldest touch first, in-use/active excluded
+    expect(out.map((b) => b.slug)).toEqual(['old', 'new']);
   });
 
   it('returns empty when nothing is reap-safe', () => {
@@ -349,7 +296,6 @@ describe('reapSafeOrphans', () => {
 });
 
 describe('poolReusableBoxes', () => {
-  // A pool-eligible baseline: running, unexpired, public net, no profile label.
   const warm = (over: Partial<CrabboxBox> = {}): CrabboxBox =>
     box({ expiresAt: NOW + 3_600, lastTouchedAt: NOW - 60, ...over });
 
@@ -362,13 +308,10 @@ describe('poolReusableBoxes', () => {
   });
 
   it('normalizes an unset profile to default on BOTH sides (sandbox.sh parity)', () => {
-    // A run with no .crabbox.yaml profile matches a box with no profile label…
     expect(poolReusableBoxes([warm({ slug: 'a' })], { nowSecs: NOW })).toHaveLength(1);
-    // …and a box crabbox explicitly labeled 'default'.
     expect(
       poolReusableBoxes([warm({ slug: 'b', profile: 'default' })], { nowSecs: NOW }),
     ).toHaveLength(1);
-    // A box labeled 'default' does NOT match a named-profile run.
     expect(
       poolReusableBoxes([warm({ slug: 'c', profile: 'default' })], { profile: 'agents-cli', nowSecs: NOW }),
     ).toHaveLength(0);
@@ -391,13 +334,10 @@ describe('poolReusableBoxes', () => {
   it('skips non-running and expired boxes', () => {
     expect(poolReusableBoxes([warm({ status: 'off' })], { nowSecs: NOW })).toEqual([]);
     expect(poolReusableBoxes([warm({ expiresAt: NOW - 1 })], { nowSecs: NOW })).toEqual([]);
-    // An unknown expiry is treated as live (same as reusableBoxes).
     expect(poolReusableBoxes([warm({ expiresAt: null })], { nowSecs: NOW })).toHaveLength(1);
   });
 
   it('does not gate on the list `state` label — sshd readiness is the caller’s check', () => {
-    // sandbox.sh's running_slugs_for_profile filters on status only; a box whose
-    // state label lags is still a candidate, gated later by crabboxStatusReady.
     const out = poolReusableBoxes([warm({ state: 'booting', ready: false })], { nowSecs: NOW });
     expect(out).toHaveLength(1);
   });
@@ -520,10 +460,6 @@ describePosix('normalizeBox tailscale fields (via crabboxList)', () => {
 describePosix('crabboxList timeout — a slow provider never hangs an ambient command', () => {
   installHermeticLease();
   it('throws (does not hang) when `crabbox list` exceeds timeoutMs', () => {
-    // Fake crabbox: --help is instant (findCrabbox passes), `list` blocks 30s.
-    // With timeoutMs=400 the spawn is killed and we throw a clear message fast —
-    // this is what keeps `agents devices` / `agents ssh <typo>` from blocking on
-    // a slow/unreachable provider API.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-slow-'));
     fs.writeFileSync(
       path.join(dir, 'crabbox'),
@@ -536,7 +472,7 @@ describePosix('crabboxList timeout — a slow provider never hangs an ambient co
     const startedAt = Date.now();
     try {
       expect(() => crabboxList({ timeoutMs: 400 })).toThrow(/timed out/);
-      expect(Date.now() - startedAt).toBeLessThan(5000); // killed near the bound, not after 30s
+      expect(Date.now() - startedAt).toBeLessThan(5000);
     } finally {
       process.env.PATH = oldPath;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -546,7 +482,6 @@ describePosix('crabboxList timeout — a slow provider never hangs an ambient co
 
 describePosix('crabboxWarmup netMode', () => {
   installHermeticLease();
-  // A fake crabbox that records argv for `warmup` and returns a fresh box on `list`.
   function withRecordingCrabbox(fn: (log: string) => Promise<void>): Promise<void> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-warm-'));
     const log = path.join(dir, 'crabbox.log');
@@ -560,7 +495,6 @@ describePosix('crabboxWarmup netMode', () => {
       ]),
       'utf-8',
     );
-    // list returns `before` until warmup runs (which flips a marker file), then `after`.
     fs.writeFileSync(
       path.join(dir, 'crabbox'),
       [

@@ -14,10 +14,6 @@ describe('Bug Fix: Path traversal in sandbox.ts', () => {
   let originalUserProfile: string | undefined;
 
   beforeEach(() => {
-    // Point HOME at an isolated tmpdir so the test never touches the real home.
-    // sandbox.ts resolves the user's home via os.homedir(), which consults $HOME
-    // on POSIX but USERPROFILE on Windows — set both so the temp home takes
-    // effect cross-platform.
     originalHome = process.env.HOME;
     originalUserProfile = process.env.USERPROFILE;
     fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-fakehome-')));

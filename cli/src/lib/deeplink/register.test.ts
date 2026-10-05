@@ -27,15 +27,12 @@ describe('content generators', () => {
     const src = macAppleScriptSource(`'/usr/local/bin/agents'`);
     expect(src).toContain('on open location this_URL');
     expect(src).toContain('quoted form of this_URL');
-    // The handler invokes the machine-only `_callback` verb, not the old `open`.
     expect(src).toContain(`'/usr/local/bin/agents' _callback `);
-    // The URL is never concatenated raw — it is always passed via `quoted form`.
     expect(src).not.toContain('& this_URL');
   });
 
   it('macOS AppleScript escapes a quote/backslash in the install path', () => {
     const src = macAppleScriptSource(`'/weird"path\\bin/agents'`);
-    // The double-quote is escaped so it cannot terminate the AppleScript literal.
     expect(src).toContain('\\"path');
     expect(src).toContain('\\\\bin');
   });
@@ -72,7 +69,6 @@ describe('register/unregister on linux (real filesystem)', () => {
     expect(fs.existsSync(linuxDesktopPath(home))).toBe(true);
     expect(fs.readFileSync(linuxDesktopPath(home), 'utf8')).toContain('x-scheme-handler/agents');
 
-    // ifMissing short-circuits without rewriting.
     const second = registerAgentsUrlScheme({ platform: 'linux', home, ifMissing: true });
     expect(second.registered).toBe(true);
 

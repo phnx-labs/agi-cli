@@ -44,9 +44,6 @@ describe('resolveWorkflowRef', () => {
   });
 });
 
-// Fail-closed subagent scoping (issue #324). The security-critical edge is that
-// an EXPLICIT empty `allowedAgents: []` must copy ZERO subagents — never widen
-// to "allow all", which is what the old `allowedAgents.length > 0` check did.
 describe('resolveAllowedSubagents (fail-closed allowedAgents)', () => {
   const files = ['security.md', 'reviewer.md', 'planner.md'];
 

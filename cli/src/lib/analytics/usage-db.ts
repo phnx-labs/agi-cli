@@ -84,7 +84,7 @@ function open(): Database.Database | null {
   const dbPath = getUsageDbPath();
   if (cached && cached.path === dbPath) return cached.db;
   if (cached) {
-    try { cached.db.close(); } catch { /* ignore */ }
+    try { cached.db.close(); } catch {  }
     cached = null;
   }
   try {
@@ -97,7 +97,7 @@ function open(): Database.Database | null {
       db.prepare(`DELETE FROM usage_events WHERE ts < ?`).run(
         new Date(Date.now() - EVENT_RETENTION_MS).toISOString(),
       );
-    } catch { /* prune best-effort */ }
+    } catch {  }
     migrateSecretsUsageOnce(db);
     cached = { path: dbPath, db };
     return db;
@@ -140,12 +140,11 @@ function migrateSecretsUsageOnce(db: Database.Database): void {
         });
         txn(rows);
       } finally {
-        try { legacy.close(); } catch { /* ignore */ }
+        try { legacy.close(); } catch {  }
       }
     }
     db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('migrate_secrets_v1', '1')`).run();
   } catch {
-    /* migrate is best-effort */
   }
 }
 
@@ -172,7 +171,6 @@ export function recordUsage(p: RecordUsageParams): void {
       p.meta != null ? JSON.stringify(p.meta) : null,
     );
   } catch {
-    /* telemetry must never break callers */
   }
 }
 
@@ -276,7 +274,7 @@ export function kindMix(sinceIso: string): KindCountRow[] {
 
 export function closeUsageDb(): void {
   if (cached) {
-    try { cached.db.close(); } catch { /* ignore */ }
+    try { cached.db.close(); } catch {  }
     cached = null;
   }
 }

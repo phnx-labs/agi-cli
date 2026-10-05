@@ -69,7 +69,6 @@ describe('validateJob hostStrategy', () => {
   });
 
   it('accepts bare host: as back-compat host strategy', () => {
-    // No hostStrategy field — host: alone is valid (inferred host strategy).
     expect(validateJob(base({ host: 'gpu-box', devices: ['zion'] }))).toEqual([]);
   });
 

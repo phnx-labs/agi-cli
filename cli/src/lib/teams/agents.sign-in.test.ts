@@ -4,10 +4,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { checkCliSignedIn, resolveSignInAdvisory } from './agents.js';
 
-// The advisory sign-in status shown by `teams doctor`. The load-bearing rule:
-// a RUNNING teammate is live proof the agent works, so it overrides a
-// (frequently false-negative) sign-in probe — doctor must never report a
-// working agent as logged out.
 describe('resolveSignInAdvisory', () => {
   it('running overrides a negative probe (never show a working agent as logged out)', () => {
     expect(resolveSignInAdvisory(true, true, false)).toEqual({ signedIn: true, running: true });
@@ -26,8 +22,6 @@ describe('resolveSignInAdvisory', () => {
   });
 });
 
-// checkCliSignedIn is advisory and must NEVER throw — a probe failure returns
-// false so callers warn-and-proceed instead of crashing the team.
 describe('checkCliSignedIn', () => {
   let tmpHome: string;
   let realHome: string;
@@ -41,9 +35,6 @@ describe('checkCliSignedIn', () => {
     origKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'signin-home-'));
     realHome = fs.mkdtempSync(path.join(os.tmpdir(), 'signin-real-'));
-    // Sign-in is account-global: getAccountInfo falls back from the base home to
-    // the active config under AGENTS_REAL_HOME. Pin both to empty dirs so the
-    // "signed out" assertion doesn't leak into the developer's real login.
     process.env.HOME = tmpHome;
     process.env.AGENTS_REAL_HOME = realHome;
     process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';

@@ -1,25 +1,10 @@
-/**
- * Agent event stream parsers.
- *
- * Normalizes the heterogeneous JSON event formats emitted by each agent CLI
- * (Claude, Codex, Cursor, OpenCode, Grok, Antigravity, Kimi) into a unified
- * event schema with consistent types: init, message, tool_use, bash,
- * file_read, file_write, file_create, file_delete, result, error, and others.
- */
 import { extractFileOpsFromBash } from './file_ops.js';
 
-/** Supported agent CLI types for team spawning. */
 export type AgentType = 'codex' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity' | 'kimi' | 'droid' | 'warp';
 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
 const droidToolUseMap = new Map<string, { tool: string; args: Record<string, any> }>();
 
-/**
- * Registry-dispatch table: each teams `AgentType` to its live team-event
- * normalizer. Replaces the per-type name-chain — the harness axis of Move 3.
- * warp (and any unlisted type) is absent, so it falls through to the generic
- * unknown-event shape below, exactly as the old `else` did.
- */
 const TEAM_EVENT_NORMALIZERS: Partial<Record<AgentType, (raw: any) => any[]>> = {
   codex: normalizeCodex,
   cursor: normalizeCursor,
@@ -31,7 +16,6 @@ const TEAM_EVENT_NORMALIZERS: Partial<Record<AgentType, (raw: any) => any[]>> = 
   droid: normalizeDroid,
 };
 
-/** Normalize a raw JSON event from any agent type into an array of unified event objects. */
 export function normalizeEvents(agentType: AgentType, raw: any): any[] {
   const normalizer = TEAM_EVENT_NORMALIZERS[agentType];
   if (normalizer) {
@@ -47,7 +31,6 @@ export function normalizeEvents(agentType: AgentType, raw: any): any[] {
   }];
 }
 
-/** Normalize a raw JSON event, returning only the first unified event (convenience wrapper). */
 export function normalizeEvent(agentType: AgentType, raw: any): any {
   const events = normalizeEvents(agentType, raw);
   if (events.length > 0) {
@@ -586,8 +569,6 @@ function normalizeClaude(raw: any): any[] {
   }];
 }
 
-// --- OpenCode parsing ---
-// OpenCode outputs JSON events with step_start, tool_use, text, step_finish types
 
 function normalizeOpencode(raw: any): any[] {
   if (!raw || typeof raw !== 'object') {
@@ -722,23 +703,6 @@ function normalizeOpencode(raw: any): any[] {
   }];
 }
 
-// --- Grok parsing ---
-// Grok's streaming-json mode emits one JSON object per token, with three event
-// types:
-//   {"type":"thought","data":"<chunk>"}   — reasoning tokens (many, small)
-//   {"type":"text","data":"<chunk>"}      — visible response tokens (many, small)
-//   {"type":"end","stopReason":"EndTurn","sessionId":"<uuid>","requestId":"<uuid>"}
-//
-// Tool calls are NOT exposed as separate events in this format; they appear
-// inside the `thought` text as XML-like markup. Extracting them reliably would
-// require running a streaming XML/markup parser over concatenated thought
-// chunks, which is out of scope for v1. The teams summary will show grok
-// teammates' bash/file ops as empty — known limitation, fixable later by
-// switching to grok's `agent` subcommand (richer event stream) once stable.
-//
-// Tokens are emitted as `message` events with `complete: false` so the
-// summarizer can concatenate them into a final message; `thinking` events are
-// already collapsed by the summarizer's groupAndFlattenEvents pathway.
 function normalizeGrok(raw: any): any[] {
   if (!raw || typeof raw !== 'object') {
     return [{
@@ -798,22 +762,6 @@ function normalizeGrok(raw: any): any[] {
   }];
 }
 
-// --- Kimi parsing ---
-// Kimi's `--output-format stream-json` emits one JSON object per line with a
-// simple `role`-based schema:
-//   - {"role":"assistant","content":"..."}                          → final message
-//   - {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"<json>"}}]} → tool use
-//   - {"role":"tool","tool_call_id":"...","content":"..."}            → tool result
-//   - {"role":"meta","type":"session.resume_hint","session_id":"..."} → terminal/result
-// Kimi emits NO dedicated result/turn-complete event and NO init event. The
-// `session.resume_hint` meta is its terminal marker: emitted exactly once, as
-// the LAST line, on clean completion (it carries the `kimi -r <id>` resume
-// command). We map it to a success `result` so the team runner resolves status
-// from the stream; the run's exit code remains the safety net for crashes that
-// never reach the hint. Tool arguments are JSON-stringified inside
-// `function.arguments` and must be parsed before extracting paths/commands.
-// Verified against live `kimi` runs (no-tool and tool-using) — see
-// __tests__/testdata/kimi-stream-*.jsonl.
 function normalizeKimi(raw: any): any[] {
   const timestamp = new Date().toISOString();
 
@@ -828,7 +776,6 @@ function normalizeKimi(raw: any): any[] {
 
   const role = typeof raw.role === 'string' ? raw.role : '';
 
-  // Assistant message (final answer or tool-call request).
   if (role === 'assistant') {
     const events: any[] = [];
 
@@ -860,9 +807,6 @@ function normalizeKimi(raw: any): any[] {
       const filePath = toolArgs?.path || toolArgs?.file_path || '';
       const command = toolArgs?.command || '';
 
-      // Map known tools to structured events. If a known tool is missing the
-      // fields we need (e.g. unparseable arguments), fall back to tool_use so
-      // the event is still visible in summaries rather than dropped.
       let normalized: any[] | null = null;
       if (toolName === 'Bash' && command) {
         const bashEvents: any[] = [{
@@ -925,7 +869,6 @@ function normalizeKimi(raw: any): any[] {
     return events.length > 0 ? events : [];
   }
 
-  // Tool result (response to an assistant tool_call).
   if (role === 'tool') {
     const content = typeof raw.content === 'string' ? raw.content : '';
     const success = raw.isError !== true && !(content && content.startsWith('Error:'));
@@ -939,14 +882,9 @@ function normalizeKimi(raw: any): any[] {
     }];
   }
 
-  // Meta events (session lifecycle).
   if (role === 'meta') {
     const metaType = typeof raw.type === 'string' ? raw.type : '';
     if (metaType === 'session.resume_hint') {
-      // Kimi's terminal marker (see header). Emit a success `result` so the
-      // team runner's terminal-event detection resolves the teammate to
-      // COMPLETED from the stream. session_id is preserved for cross-
-      // referencing — readNewEvents() captures it off any event.
       return [{
         type: 'result',
         agent: 'kimi',
@@ -972,11 +910,6 @@ function normalizeKimi(raw: any): any[] {
   }];
 }
 
-// --- Droid parsing ---
-// Droid's `droid exec -o stream-json` stream mirrors the Factory session JSONL
-// envelope: session_start records plus Anthropic-shaped message content blocks.
-// Tool blocks carry the actionable file path / command in `input`; result blocks
-// only carry `tool_use_id`, so keep a small id map just like normalizeClaude.
 function normalizeDroid(raw: any): any[] {
   const timestamp = typeof raw?.timestamp === 'string' ? raw.timestamp : new Date().toISOString();
 
@@ -1199,20 +1132,6 @@ function extractDroidToolResultContent(content: any): string {
   return '';
 }
 
-// --- Antigravity parsing ---
-// Intentionally conservative. Antigravity's `agy` binary advertises an
-// `--output-format json` flag in its docs, but the released binary errors with
-// `flags provided but not defined: -output-format` (tracked upstream as
-// google-antigravity/antigravity-cli#7, open as of May 2026). Until JSON
-// streaming stabilizes, this parser treats agy output as a black box:
-//   - non-object input (a plain string line, or null/number) becomes a single
-//     `message` event with the full content and complete:true so the
-//     summarizer captures it without token-level concatenation
-//   - objects with a recognizable `type` field (e.g. `init`, `message`,
-//     `result`) get a minimal shape-preserving normalization
-//   - everything else falls through to the generic unknown-event shape
-// Once agy ships stable streaming JSON, replace this with proper event
-// mapping mirroring normalizeGrok / normalizeClaude.
 function normalizeAntigravity(raw: any): any[] {
   const timestamp = new Date().toISOString();
 
@@ -1277,7 +1196,6 @@ function normalizeAntigravity(raw: any): any[] {
   }];
 }
 
-/** Parse a single JSONL line into normalized events. Returns null if the line is not valid JSON. */
 export function parseEvent(agentType: AgentType, line: string): any[] | null {
   try {
     const raw = JSON.parse(line);

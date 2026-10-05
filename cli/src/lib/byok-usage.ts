@@ -1,12 +1,3 @@
-/**
- * BYOK (Bring Your Own Key) budget fetcher.
- *
- * For custom harnesses that use a provider's API key stored in the keychain
- * (e.g. OpenRouter), this module fetches the account's credit/usage data so
- * `agents view` can show a budget bar alongside the harness detail row — the
- * same bar style the native usage system uses, just sourced from the provider
- * API rather than the CLI's own usage tracking.
- */
 
 import type { Profile } from './profiles.js';
 import { getKeychainTokenSync, hasKeychainTokenSync } from './secrets-client.js';
@@ -34,7 +25,6 @@ export interface ByokUsageResult {
   error: string | null;
 }
 
-// ─── Injectable fetch seam (tests only) ──────────────────────────────────────
 
 let _fetch: typeof globalThis.fetch = globalThis.fetch;
 
@@ -42,7 +32,6 @@ export function setByokFetchForTest(fn: typeof globalThis.fetch): void {
   _fetch = fn;
 }
 
-// ─── Shared device cache ────────────────────────────────────────────────────
 
 interface CacheEntry {
   result: ByokUsageResult;
@@ -83,10 +72,9 @@ export function setByokCachePathForTest(value: string | null): string | null {
 }
 
 export function resetByokCacheForTest(): void {
-  try { fs.unlinkSync(cachePath()); } catch { /* absent */ }
+  try { fs.unlinkSync(cachePath()); } catch {  }
 }
 
-// ─── Provider registry ───────────────────────────────────────────────────────
 
 interface ByokProviderEntry {
   fetch(token: string): Promise<ByokUsageResult>;
@@ -177,7 +165,6 @@ export function hasByokProvider(provider: string): boolean {
   return Object.prototype.hasOwnProperty.call(BYOK_REGISTRY, provider);
 }
 
-// ─── Bar renderer ─────────────────────────────────────────────────────────────
 
 export function renderByokBar(result: ByokUsageResult): string {
   if (!result.budget) return '';
@@ -195,18 +182,7 @@ export function renderByokBar(result: ByokUsageResult): string {
   return `$: ${bar} ${color(`${Math.round(pct)}%`)} (${remaining} left of ${limit})`;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Fetch the BYOK budget for a harness.
- *
- * Returns `null` when the harness has no registered BYOK provider or no auth.
- * Returns a `ByokUsageResult` with `budget: null` when the token is absent
- * from the keychain (so the caller can skip rendering a bar without error).
- *
- * Ordinary reads are cache-only. Explicit refreshes are serialized per provider
- * credential across every agents-cli process on the device.
- */
 export async function getByokUsageForHarness(
   profile: Profile,
   opts?: { forceRefresh?: boolean },
@@ -233,7 +209,6 @@ export async function getByokUsageForHarness(
   }).then((entry) => entry.result);
 }
 
-/** Refresh each configured BYOK credential when its daemon-owned snapshot is due. */
 export async function refreshDueByokUsage(
   profiles: Profile[],
   now = Date.now(),

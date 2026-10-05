@@ -1,11 +1,3 @@
-/**
- * Placement cascade — the create→pin→pool→local rules a user reasons about.
- * Pure functions, no I/O: exercises resolvePlacement + pickLeastLoaded directly.
- *
- * machineId() reads the real hostname; these tests use device names that are
- * definitely NOT the local machine (`box-a`/`box-b`/`box-c`) so the local-device
- * short-circuit never fires, keeping assertions host-independent.
- */
 import { describe, it, expect } from 'vitest';
 import {
   resolvePlacement,
@@ -24,7 +16,6 @@ import { machineId } from '../machine-id.js';
 const running = (hostName: string | null): RosterEntry => ({ hostName, status: 'running' });
 const done = (hostName: string | null): RosterEntry => ({ hostName, status: 'completed' });
 
-/** Build a signals map from a plain object of device → partial signal. */
 const sig = (m: Record<string, DevicePlacementSignal>): Map<string, DevicePlacementSignal> =>
   new Map(Object.entries(m));
 
@@ -47,7 +38,6 @@ describe('resolvePlacement cascade', () => {
   });
 
   it('3. pool of many → least-loaded pick', () => {
-    // box-a already has a running teammate, box-b is idle → pick box-b.
     const roster = [running('box-a')];
     expect(resolvePlacement({ devices: ['box-a', 'box-b'] }, null, roster)).toEqual({ device: 'box-b' });
   });
@@ -60,7 +50,6 @@ describe('pickLeastLoaded', () => {
   });
 
   it('ignores non-running teammates when counting load', () => {
-    // box-a has 2 COMPLETED (not load) and box-b has 1 RUNNING → box-a is least-loaded.
     const roster = [done('box-a'), done('box-a'), running('box-b')];
     expect(pickLeastLoaded(['box-a', 'box-b'], roster)).toBe('box-a');
   });
@@ -71,7 +60,6 @@ describe('pickLeastLoaded', () => {
   });
 
   it('ignores roster entries for devices outside the pool', () => {
-    // A teammate on some retired host must not skew the pool's load counts.
     const roster = [running('retired-host'), running('box-a')];
     expect(pickLeastLoaded(['box-a', 'box-b'], roster)).toBe('box-b');
   });
@@ -83,7 +71,6 @@ describe('pickLeastLoaded', () => {
 
 describe('agents.max-concurrent caps (auto-pick only)', () => {
   it('excludes a device at its cap from the least-loaded pick', () => {
-    // box-a is at its cap (2/2 running) → box-b wins despite ties-by-order.
     const roster = [running('box-a'), running('box-a')];
     expect(pickLeastLoaded(['box-a', 'box-b'], roster, { 'box-a': 2 })).toBe('box-b');
   });
@@ -91,8 +78,6 @@ describe('agents.max-concurrent caps (auto-pick only)', () => {
   it('keeps a device under its cap eligible', () => {
     const roster = [running('box-a')];
     expect(pickLeastLoaded(['box-a', 'box-b'], roster, { 'box-a': 2 })).toBe('box-b');
-    // box-a 1/2 is NOT capped, but box-b at 0 is still less loaded — prove the
-    // cap didn't exclude box-a by making box-b busier:
     const busier = [running('box-a'), running('box-b'), running('box-b')];
     expect(pickLeastLoaded(['box-a', 'box-b'], busier, { 'box-a': 2 })).toBe('box-a');
   });
@@ -117,7 +102,6 @@ describe('agents.max-concurrent caps (auto-pick only)', () => {
 
   it('cappedDevices reports the exclusion reason with live counts', () => {
     const roster = [running('box-a'), running('box-a'), done('box-b')];
-    // box-b's COMPLETED teammate is not load — a 1-cap box-b is not capped.
     expect(cappedDevices(['box-a', 'box-b'], roster, { 'box-a': 2, 'box-b': 1 })).toEqual([
       { device: 'box-a', running: 2, cap: 2 },
     ]);
@@ -154,7 +138,6 @@ describe('local teammates count against the local pool member', () => {
 
   it('mixed local + remote pool counts both sides', () => {
     const self = machineId();
-    // self: 1 local running, box-b: 2 remote running → self is least-loaded.
     const roster = [running(null), running('box-b'), running('box-b')];
     expect(pickLeastLoaded([self, 'box-b'], roster)).toBe(self);
     expect(cappedDevices([self, 'box-b'], roster, { [self]: 1 })).toEqual([
@@ -169,7 +152,6 @@ describe('local teammates count against the local pool member', () => {
   });
 
   it('ignores a local teammate when this machine is not in the pool', () => {
-    // Today’s behavior preserved: roster entries outside the pool never skew it.
     const roster = [running(null), running('box-b')];
     expect(pickLeastLoaded(['box-a', 'box-b'], roster)).toBe('box-a');
   });
@@ -212,7 +194,7 @@ describe('classifyExclusions — health/harness filters (RUSH-2002)', () => {
 
   it('a device with no signal is neither excluded nor filtered', () => {
     const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
-      signals: sig({ 'box-a': { reachable: false } }), // box-b has no signal
+      signals: sig({ 'box-a': { reachable: false } }),
     });
     expect(eligible).toEqual(['box-b']);
     expect(excluded).toEqual([{ device: 'box-a', reason: 'unreachable' }]);
@@ -244,8 +226,6 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
   });
 
   it('a preferred device outranks a less-loaded non-preferred one', () => {
-    // `agents devices prefer box-a` boosts it above box-b even though box-b is
-    // idle and box-a is busy — the operator boost overrides load-based order.
     const signals = sig({
       'box-a': { headroom: 'busy' },
       'box-b': { headroom: 'idle' },
@@ -255,8 +235,6 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
   });
 
   it('a signed-out preferred device does NOT jump ahead of a signed-in one', () => {
-    // Preference boosts within the health tier, not over it — a box that can't
-    // run the agent stays behind one that can, boosted or not.
     const signals = sig({
       'box-a': { installed: true, signedIn: false, headroom: 'idle' },
       'box-b': { installed: true, signedIn: true, headroom: 'idle' },
@@ -269,13 +247,10 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
       'box-a': { headroom: 'busy' },
       'box-b': { headroom: 'idle' },
     });
-    // Both boosted → the boost cancels and lower load wins.
     expect(pickBestDevice(['box-a', 'box-b'], [], { signals, preferred: new Set(['box-a', 'box-b']) })).toBe('box-b');
   });
 
   it('load tier outranks teammate count', () => {
-    // box-a is idle but already has a teammate; box-b is busy and empty.
-    // Lower load (tier) wins over fewer teammates per the ranking order.
     const roster = [running('box-a')];
     const signals = sig({
       'box-a': { headroom: 'idle' },
@@ -302,9 +277,9 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
   });
 
   it('an unprobed box ranks between light and busy', () => {
-    const signals = sig({ 'box-a': { headroom: 'busy' } }); // box-b unknown
+    const signals = sig({ 'box-a': { headroom: 'busy' } });
     expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
-    const signals2 = sig({ 'box-a': { headroom: 'light' } }); // box-b unknown
+    const signals2 = sig({ 'box-a': { headroom: 'light' } });
     expect(pickBestDevice(['box-a', 'box-b'], [], { signals: signals2 })).toBe('box-a');
   });
 
@@ -330,12 +305,8 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
   });
 
   it('an ALL-UNREACHABLE pool degrades (does not throw) — a probe miss, not proof', () => {
-    // Every device unreachable is a transient SSH blip, not proof the agent
-    // can't run there. Degrade to a best-effort roster-count pick so the wave
-    // retries and the real error surfaces at SSH dispatch.
     const roster = [running('box-a')];
     const signals = sig({ 'box-a': { reachable: false }, 'box-b': { reachable: false } });
-    // box-a has a teammate, box-b is idle → the roster-count fallback picks box-b.
     expect(pickBestDevice(['box-a', 'box-b'], roster, { signals, agentLabel: 'claude' })).toBe(
       'box-b',
     );
@@ -393,8 +364,6 @@ describe('resolvePlacement with live signals (RUSH-2002)', () => {
   });
 
   it('pool of one is respected for load/reachability (only harness fails it)', () => {
-    // box-a is overloaded but it is the sole pool device and the agent is
-    // installed → respect the user's choice, do not second-guess load.
     const signals = sig({ 'box-a': { installed: true, headroom: 'loaded' } });
     expect(resolvePlacement({ devices: ['box-a'] }, null, [], { signals })).toEqual({
       device: 'box-a',
@@ -414,8 +383,6 @@ describe('resolvePlacement with live signals (RUSH-2002)', () => {
       signals,
       agentLabel: 'claude@2.1.112',
     });
-    // A device was still chosen (SSH dispatch will surface the real error) —
-    // never a silent local (null) fallback.
     expect(device).not.toBeNull();
     expect(['box-a', 'box-b']).toContain(device);
   });
@@ -437,7 +404,6 @@ describe('classifyExclusions separates a timeout from an outage (PHNX-3682)', ()
         ['m2', { reachable: false }],
       ]),
     });
-    // Both are still excluded — an unresponsive box is never placeable.
     expect(eligible).toEqual([]);
     expect(excluded).toContainEqual({ device: 'm1', reason: 'probe-timed-out' });
     expect(excluded).toContainEqual({ device: 'm2', reason: 'unreachable' });

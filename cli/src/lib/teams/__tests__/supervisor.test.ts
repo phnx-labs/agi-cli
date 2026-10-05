@@ -24,10 +24,6 @@ afterEach(() => {
   fs.rmSync(tmpBase, { recursive: true, force: true });
 });
 
-/**
- * Plant a fully-formed teammate without invoking the CLI. Used to set up
- * DAG shapes we then drive the supervisor through.
- */
 async function plantAgent(
   taskName: string,
   overrides: Partial<{
@@ -88,8 +84,6 @@ describe('runSupervisor', () => {
   });
 
   it('picks up a teammate added mid-flight', async () => {
-    // Simulate a worker filing a task with an invalid dependency. The next
-    // wave must observe it and terminalize it truthfully instead of spinning.
     let added = false;
     let wavesSeen = 0;
     const waveSnaps: Array<{ pending: number; running: number; completed: number }> = [];
@@ -141,12 +135,7 @@ describe('runSupervisor', () => {
   });
 
   it('rescans disk so teammates created by a sibling process get picked up', async () => {
-    // Simulate a sibling process writing a meta.json directly to the
-    // agents dir. Without rescan, the supervisor would never see it
-    // because its in-memory cache wouldn't update.
     let waveCount = 0;
-    // Pre-seed a running teammate so the DAG starts live and the
-    // supervisor runs multiple waves.
     await plantAgent('cross-proc', {
       name: 'seed',
       status: AgentStatus.RUNNING,
@@ -163,7 +152,6 @@ describe('runSupervisor', () => {
           if (a.name) seenNames.add(a.name);
         }
         if (waveCount === 1) {
-          // Sibling-process simulation: write meta.json directly.
           const newId = 'cross-proc-alien';
           const dir = path.join(tmpBase, newId);
           fs.mkdirSync(dir, { recursive: true });
@@ -180,7 +168,6 @@ describe('runSupervisor', () => {
           }));
         }
         if (waveCount === 2) {
-          // Release the seed so the DAG can drain.
           const all = await mgr.listByTask('cross-proc');
           for (const a of all) {
             if (a.name === 'seed') {
@@ -198,9 +185,6 @@ describe('runSupervisor', () => {
   });
 
   it('reports failed count on drain: a failed teammate drains with failed >= 1', async () => {
-    // A "drained" DAG only means nothing is pending/running — a failed teammate
-    // still drains. The result must surface that so callers (e.g. the star
-    // nudge) can distinguish a clean drain from a failed one.
     await plantAgent('mixed', { name: 'ok', status: AgentStatus.COMPLETED, taskType: 'implement' });
     await plantAgent('mixed', { name: 'boom', status: AgentStatus.FAILED, taskType: 'implement' });
     const result = await runSupervisor(mgr, {

@@ -1375,7 +1375,6 @@ function museAuthHasToken(value: unknown, depth = 0): boolean {
   return false;
 }
 
-/** Best-effort email from a Muse auth.json (providers.meta.user_email, etc.). */
 function museAuthEmail(value: unknown, depth = 0): string | null {
   if (depth > 4) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

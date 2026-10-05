@@ -23,7 +23,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Pure command-construction / mode resolution — runs on every platform (RUSH-2215 review).
 const describeExec = describe;
 
 function opts(overrides: Partial<ExecOptions>): ExecOptions {
@@ -38,14 +37,9 @@ function opts(overrides: Partial<ExecOptions>): ExecOptions {
 
 const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
 
-// Mirror the source's home resolution (src/lib/state.ts: `process.env.HOME ?? os.homedir()`).
-// On Windows process.env.HOME is unset, so a bare `process.env.HOME!` is undefined and
-// `path.join(undefined, …)` throws — these assertions must resolve home the same way the
-// version-home builder does so the expected path matches on every OS.
 const HOME = process.env.HOME ?? os.homedir();
 
 describeExec('buildExecCommand', () => {
-  // --- Mode flags per agent ---
 
   describe('mode flags', () => {
     it('claude plan produces --permission-mode plan', () => {
@@ -95,9 +89,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
-    // Regression: codex had no `auto`, so resolveMode silently degraded it to
-    // `edit` — and `edit` is `on-request`, which is exactly the approval prompt
-    // an --mode auto caller (AGI EXT, teams, routines) asked not to get.
     it('codex auto keeps the workspace sandbox but never prompts', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'auto' }));
       expect(cmd).toContain('approval_policy="never"');
@@ -114,13 +105,10 @@ describeExec('buildExecCommand', () => {
     });
 
     it('antigravity plan degrades to edit (no read-only mode)', () => {
-      // A prompt is present (opts default), so both runs resolve headless and emit --print.
       const planCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'plan' }));
       const editCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' }));
-      // plan and edit must build the same argv once plan degrades.
       expect(planCmd).toEqual(editCmd);
       expect(planCmd).toEqual(['agy', '--print', 'do the thing']);
-      // skip would add --dangerously-skip-permissions — plan must not.
       expect(planCmd).not.toContain('--dangerously-skip-permissions');
     });
 
@@ -132,7 +120,6 @@ describeExec('buildExecCommand', () => {
 
     it('cursor headless plan runs read-only ask mode in a trusted workspace', () => {
       const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan', headless: true }));
-      // --plan answers through the createPlan tool, which -p text output never prints.
       expect(cmd).toEqual(expect.arrayContaining(['--trust', '--mode', 'ask']));
       expect(cmd).not.toContain('--plan');
       expect(cmd).not.toContain('-f');
@@ -221,8 +208,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('grok plan (interactive TUI) produces --permission-mode plan', () => {
-      // grok's --permission-mode plan works interactively; headless it stalls, so
-      // this pins the interactive mapping (headless downgrade tested below).
       const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'plan', prompt: undefined, interactive: true }));
       expect(cmd).toContain('--permission-mode');
       expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('plan');
@@ -234,9 +219,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).toContain('--always-approve');
     });
 
-    // kimi's startup-mode flags are valid only for the interactive TUI. In
-    // headless (`-p`) runs kimi rejects them (see the "kimi headless" block
-    // below), so these interactive assertions pin the TUI flag mapping.
     it('kimi plan (interactive TUI) produces --plan', () => {
       const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'plan', prompt: undefined, interactive: true }));
       expect(cmd).toContain('--plan');
@@ -259,10 +241,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--yolo');
     });
 
-    // Regression: `agents teams` launches kimi headless with `-p`. Emitting any
-    // startup-mode flag alongside `-p` made kimi abort with
-    // "Cannot combine --prompt with --<flag>" — so skip/auto teammates failed at
-    // spawn. Headless write-modes must omit the flag; plan must fail closed.
     describe('kimi headless -p cannot carry startup-mode flags', () => {
       it('headless skip omits --yolo (kimi -p already auto-approves)', () => {
         const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip' }));
@@ -283,8 +261,6 @@ describeExec('buildExecCommand', () => {
       });
 
       it('headless plan downgrades to auto — no throw, no --plan (RUSH-1810)', () => {
-        // kimi's headlessPlan:false: a headless plan request degrades to auto, which
-        // for kimi -p carries no flag. Must not throw and must not emit --plan.
         let cmd: string[] = [];
         expect(() => {
           cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'plan' }));
@@ -295,9 +271,6 @@ describeExec('buildExecCommand', () => {
       });
     });
 
-    // Regression: grok launched headless with `-p` under --mode plan pushed
-    // `--permission-mode plan`, which silently stalls at grok's ExitPlanMode gate
-    // (no TTY to approve). Headless plan must degrade to auto→edit (no flag).
     describe('grok headless -p cannot carry --permission-mode plan (RUSH-1810)', () => {
       it('headless plan downgrades to edit — no --permission-mode', () => {
         let cmd: string[] = [];
@@ -309,8 +282,6 @@ describeExec('buildExecCommand', () => {
       });
     });
 
-    // The write-capable agents keep read-only plan headless — the downgrade is
-    // scoped to headlessPlan:false agents only.
     it.each(['claude', 'codex', 'droid', 'opencode'] as const)(
       '%s headless plan is unchanged (read-only preserved)',
       (agent) => {
@@ -323,8 +294,6 @@ describeExec('buildExecCommand', () => {
         } else if (agent === 'opencode') {
           expect(cmd[cmd.indexOf('--agent') + 1]).toBe('plan');
         }
-        // droid plan carries no flag (its exec default is read-only) — the
-        // assertion is simply that the build did not throw or downgrade.
       },
     );
 
@@ -397,8 +366,6 @@ describeExec('buildExecCommand', () => {
           resume: true,
           sessionId: 'dbb09ec7-85fd-44bb-905a-95b9c39bb5b6',
         }));
-        // Order is load-bearing: `muse resume <uuid> …flags`, never
-        // `muse resume --disable-write <uuid>`.
         expect(interactive.slice(0, 3)).toEqual([
           'muse',
           'resume',
@@ -406,7 +373,6 @@ describeExec('buildExecCommand', () => {
         ]);
         expect(interactive).not.toContain('exec');
         expect(interactive).not.toContain('--session-id');
-        // Mode flags come AFTER the session id.
         const idIdx = interactive.indexOf('dbb09ec7-85fd-44bb-905a-95b9c39bb5b6');
         const flagIdx = interactive.indexOf('--disable-write');
         expect(flagIdx).toBeGreaterThan(idIdx);
@@ -458,7 +424,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Print / headless ---
 
   describe('print/headless flags', () => {
     it('claude headless adds --print', () => {
@@ -472,10 +437,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('antigravity infers headless from a prompt alone (adds --print, no explicit --headless)', () => {
-      // Regression: --headless defaults to false at the CLI layer, so a bare
-      // `agents run antigravity "..."` must still emit --print via the resolved
-      // headless state — otherwise `agy <prompt>` opens the TUI and dies on
-      // /dev/tty in a non-terminal shell.
       const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' }));
       expect(cmd).toEqual(['agy', '--print', 'do the thing']);
     });
@@ -491,7 +452,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Interactive mode ---
 
   describe('interactive mode', () => {
     it('prompt + interactive: true does not add --print', () => {
@@ -510,7 +470,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('prompt without interactive behaves as headless (adds --print)', () => {
-      // No explicit --headless: headless is inferred purely from prompt presence.
       const cmd = buildExecCommand(opts({ agent: 'claude', prompt: 'fix auth' }));
       expect(cmd).toContain('--print');
     });
@@ -559,7 +518,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Passthrough args (everything after --) ---
 
   describe('passthrough args', () => {
     it('forwards arbitrary flags after -- for kimi', () => {
@@ -592,14 +550,12 @@ describeExec('buildExecCommand', () => {
     });
 
     it('combines interactive --mode mapping and passthrough args for kimi', () => {
-      // Interactive: the --yolo startup flag is valid alongside passthrough args.
       const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip', prompt: undefined, interactive: true, passthroughArgs: ['--extra'] }));
       expect(cmd).toContain('--yolo');
       expect(cmd[cmd.length - 1]).toBe('--extra');
     });
   });
 
-  // --- resolveInteractive precedence ---
 
   describe('resolveInteractive precedence', () => {
     it('no flags + no prompt -> interactive', () => {
@@ -631,7 +587,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Session ID ---
 
   describe('session ID', () => {
     it('claude with sessionId adds --session-id', () => {
@@ -652,7 +607,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Verbose ---
 
   describe('verbose flag', () => {
     it('claude verbose adds --verbose', () => {
@@ -677,7 +631,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- JSON flags ---
 
   describe('JSON flags', () => {
     it('claude json adds --output-format stream-json --verbose', () => {
@@ -699,7 +652,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Model selection ---
 
   describe('model selection', () => {
     it('explicit model is forwarded via --model', () => {
@@ -714,8 +666,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('no --model flag for codex when neither --model nor a configured model exists', () => {
-      // Point config resolution at an empty home so the result is deterministic
-      // regardless of the CI box's real ~/.codex/config.toml.
       const prev = process.env.AGENTS_REAL_HOME;
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-exec-empty-'));
       try {
@@ -730,9 +680,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('codex forwards the model configured in ~/.codex/config.toml when no explicit --model', () => {
-      // Codex runs under a per-version CODEX_HOME that may lack the user's model,
-      // so buildExecCommand falls back to the active ~/.codex/config.toml model —
-      // otherwise Codex defaults to gpt-5.3-codex and 400s on a ChatGPT account.
       const prev = process.env.AGENTS_REAL_HOME;
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-exec-model-'));
       try {
@@ -751,8 +698,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('opencode custom-harness pin in OPENCODE_MODEL is forwarded as --model (PHNX-2577)', () => {
-      // OpenCode does not read OPENCODE_MODEL. A custom harness stores its pin
-      // there; buildExecCommand must emit --model or the host uses its default.
       const cmd = buildExecCommand(opts({
         agent: 'opencode',
         env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
@@ -779,7 +724,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Reasoning effort flags ---
 
   describe('reasoning effort', () => {
     it('claude effort=high adds --effort high', () => {
@@ -818,7 +762,6 @@ describeExec('buildExecCommand', () => {
 
   });
 
-  // --- Prompt positioning ---
 
   describe('prompt positioning', () => {
     it('claude uses -p flag for prompt', () => {
@@ -836,7 +779,6 @@ describeExec('buildExecCommand', () => {
 
   });
 
-  // --- Add dirs ---
 
   describe('add dirs', () => {
     it('claude addDirs adds --add-dir for each directory', () => {
@@ -848,10 +790,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('expands a ~ grant, because no shell will (claude)', () => {
-      // A grant forwarded to a host crosses SSH single-quoted, so the remote
-      // login shell never expands `~` — claude would then resolve it as a
-      // directory literally named `~` and the grant would be a silent no-op.
-      // Expansion has to happen on the side that runs the harness.
       const home = process.env.HOME ?? os.homedir();
       const cmd = buildExecCommand(opts({ agent: 'claude', addDirs: ['~/.agents/.system'] }));
       const i = cmd.indexOf('--add-dir');
@@ -863,9 +801,6 @@ describeExec('buildExecCommand', () => {
     it('expands a ~ grant for codex workspace roots too', () => {
       const home = process.env.HOME ?? os.homedir();
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: ['~/.agents/.system'] }));
-      // Codex folds addDirs into a TOML workspace_roots map; Windows paths are
-      // written with doubled backslashes (TOML string escapes). Match the form
-      // actually emitted rather than the raw path.join string.
       const expanded = path.join(home, '.agents/.system');
       const inToml = process.platform === 'win32' ? expanded.replace(/\\/g, '\\\\') : expanded;
       expect(cmd.join(' ')).toContain(`"${inToml}" = true`);
@@ -922,12 +857,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Codex sandbox: implicit ~/.agents writable root ---
-  //
-  // Codex's workspace-write sandbox blocks $HOME, so `agents ...` the model
-  // shells out to can't write ~/.agents (askpass shim, secrets, sessions),
-  // which broke remote `agents run codex`. A fresh edit run gets ~/.agents via
-  // the named edit profile for both fresh and resumed runs.
   describe('codex ~/.agents writable root', () => {
     const AGENTS_DIR = path.join(HOME, '.agents');
 
@@ -939,8 +868,6 @@ describeExec('buildExecCommand', () => {
     it('dedupes ~/.agents when the user also passes it explicitly', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: [AGENTS_DIR, '/x'] }));
       const rendered = cmd.join(' ');
-      // Match the TOML fragment the same way the implicit-grant test does
-      // (JSON.stringify path), so Windows backslashes do not break the regex.
       const grant = `${JSON.stringify(AGENTS_DIR)} = true`;
       const escaped = grant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       expect(rendered.match(new RegExp(escaped, 'g'))).toHaveLength(1);
@@ -984,21 +911,11 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // WORKFLOW.md frontmatter tools/mcpServers → Claude headless capability flags
-  // (issue #324). buildExecCommand is pure: the command layer resolves the
-  // registry / writes the mcp-config file and gates on `allowlist`; here we
-  // assert the string-building and the Claude-only guard. These assertions
-  // encode the SECURITY-correct flags verified against `claude --help`:
-  //   - `--tools <names...>` restricts the AVAILABLE tool set (the boundary);
-  //     `--allowedTools` only auto-approves and is emitted alongside.
-  //   - `--strict-mcp-config` makes the run use ONLY the named MCP servers.
-  //   - `--agents` is NOT emitted (it defines agents, doesn't restrict dispatch).
   describe('workflow capability scoping', () => {
     it('claude toolsRestrict emits --tools as SEPARATE variadic tokens (the restriction)', () => {
       const cmd = buildExecCommand(opts({ agent: 'claude', toolsRestrict: ['Read', 'Grep'] }));
       const i = cmd.indexOf('--tools');
       expect(i).toBeGreaterThan(-1);
-      // Separate argv tokens, NOT a single "Read Grep" string.
       expect(cmd[i + 1]).toBe('Read');
       expect(cmd[i + 2]).toBe('Grep');
       expect(cmd).not.toContain('Read Grep');
@@ -1036,9 +953,6 @@ describeExec('buildExecCommand', () => {
 
     it('--tools is emitted after the positional prompt so the variadic never swallows it', () => {
       const cmd = buildExecCommand(opts({ agent: 'claude', prompt: 'write a file', headless: true, toolsRestrict: ['Read', 'Grep'] }));
-      // The prompt is a positional appended before the scoping flags; --tools
-      // must come strictly after it (verified against claude --help: a trailing
-      // variadic --tools would otherwise consume the positional prompt).
       const promptIdx = cmd.indexOf('write a file');
       const toolsIdx = cmd.indexOf('--tools');
       expect(promptIdx).toBeGreaterThan(-1);
@@ -1058,19 +972,11 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--agents');
     });
 
-    // Fail-closed mcpServers (issue #324): when a workflow DECLARES `mcpServers:`
-    // but none of the names resolve to installed servers, the run must STILL be
-    // locked down to an EMPTY config — never fall through to the user's ambient
-    // MCP set (which would be MORE access than declared). This composes the real
-    // command-layer steps: resolve names -> [], build the empty map, write it,
-    // feed the path to buildExecCommand, and assert both scoping flags fire.
     it('declared-but-all-unresolved mcpServers => empty {} map + --mcp-config + --strict-mcp-config (no ambient)', () => {
-      // No installed server matches these names, so resolution yields zero.
       const servers = getMcpServersByName(['__definitely_missing_a__', '__definitely_missing_b__']);
       expect(servers).toEqual([]);
 
       const mcpConfig = buildWorkflowMcpConfig(servers);
-      // The locked-down payload: NO servers, not the ambient set.
       expect(JSON.parse(mcpConfig)).toEqual({ mcpServers: {} });
 
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-failclosed-mcp-'));
@@ -1080,8 +986,6 @@ describeExec('buildExecCommand', () => {
         const cmd = buildExecCommand(opts({ agent: 'claude', mcpConfigPath: configPath }));
         expect(cmd).toContain('--mcp-config');
         expect(cmd[cmd.indexOf('--mcp-config') + 1]).toBe(configPath);
-        // --strict-mcp-config is what makes the empty map mean "ONLY these (none)"
-        // rather than "these PLUS ambient".
         expect(cmd).toContain('--strict-mcp-config');
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -1126,8 +1030,6 @@ describeExec('buildExecCommand', () => {
 
     it('injects Claude config dir for pinned Claude versions', () => {
       const env = buildExecEnv(opts({ agent: 'claude', version: '2.1.98' }));
-      // path.join (not a forward-slash template) so the separator matches the
-      // source on every OS — buildExecEnv builds this with path.join too.
       expect(env.CLAUDE_CONFIG_DIR).toBe(
         path.join(HOME, '.agents', '.history', 'versions', 'claude', '2.1.98', 'home', '.claude')
       );
@@ -1165,9 +1067,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('injects XDG config/data homes for pinned Muse versions', () => {
-      // Muse has no MUSE_CONFIG_DIR; isolation is XDG (Claude/Codex pattern).
-      // Without this, adopt leaves ~/.config/muse as a symlink and Muse dies
-      // with SymlinkOrReparse.
       const env = buildExecEnv(opts({ agent: 'muse', version: '0.1.0' }));
       const versionHome = path.join(HOME, '.agents', '.history', 'versions', 'muse', '0.1.0', 'home');
       expect(env.XDG_CONFIG_HOME).toBe(path.join(versionHome, '.config'));
@@ -1192,7 +1091,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Version pinning ---
 
   describe('version pinning', () => {
     it('appends @version to base command when version is set', () => {
@@ -1212,8 +1110,6 @@ describeExec('buildExecCommand', () => {
     });
 
     it('resolves to absolute shim path when the shim exists on disk (closes #196)', async () => {
-      // Linux installs without ~/.agents/.cache/shims on PATH would otherwise
-      // spawn the bare versioned name and fail with ENOENT.
       const fs = await import('fs');
       const path = await import('path');
       const { getShimsDir } = await import('../state.js');
@@ -1232,7 +1128,6 @@ describeExec('buildExecCommand', () => {
     });
   });
 
-  // --- Snapshot: agent-runner.sh patterns ---
 
   describe('agent-runner.sh compatibility', () => {
     it('produces claude command matching agent-runner pattern', () => {
@@ -1354,7 +1249,6 @@ describeExec('buildFallbackPrompt', () => {
   });
 
   it('/continue branch requires a session ID (not just Claude as next)', () => {
-    // No session ID + Claude-as-next must fall through to the plain-text form.
     const prompt = buildFallbackPrompt('codex', undefined, 'claude', 'deploy');
     expect(prompt).not.toMatch(/^\/continue/);
     expect(prompt).toContain('Original request: deploy');
@@ -1367,9 +1261,9 @@ describeExec('normalizeMode', () => {
     ['edit', 'edit'],
     ['auto', 'auto'],
     ['skip', 'skip'],
-    ['full', 'skip'],          // canonical alias
-    ['FULL', 'skip'],          // case insensitive
-    [' Skip ', 'skip'],        // whitespace tolerant
+    ['full', 'skip'],
+    ['FULL', 'skip'],
+    [' Skip ', 'skip'],
   ])("maps '%s' → %s", (input, expected) => {
     expect(normalizeMode(input)).toBe(expected);
   });
@@ -1389,7 +1283,6 @@ describeExec('resolveMode', () => {
   });
 
   it("degrades 'auto' to 'edit' for agents without smart-classifier support", () => {
-    // cursor has no auto in its capabilities.modes — should silently degrade.
     expect(AGENTS.cursor.capabilities.modes).not.toContain('auto');
     expect(resolveMode('cursor', 'auto')).toBe('edit');
   });
@@ -1397,8 +1290,6 @@ describeExec('resolveMode', () => {
   it("keeps 'auto' for agents that natively support it (claude, copilot, codex)", () => {
     expect(resolveMode('claude', 'auto')).toBe('auto');
     expect(resolveMode('copilot', 'auto')).toBe('auto');
-    // codex's auto is approval_policy=never over the same sandbox as edit; it
-    // must not fall back to edit, which prompts.
     expect(resolveMode('codex', 'auto')).toBe('auto');
   });
 
@@ -1408,7 +1299,6 @@ describeExec('resolveMode', () => {
   });
 
   it("degrades 'plan' to the agent's safest mode when plan is unsupported", () => {
-    // antigravity has no read-only mode — modes[0] is edit.
     expect(AGENTS.antigravity.capabilities.modes).not.toContain('plan');
     expect(resolveMode('antigravity', 'plan')).toBe('edit');
   });
@@ -1431,9 +1321,6 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
   });
 
   it('warns for every agent in a fallback chain sharing one warning state', () => {
-    // runWithFallback spreads one state object across every attempt. Each agent
-    // degrades independently and the agent that actually runs is usually not the
-    // first, so a single latch silently dropped the warning that mattered.
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const shared = {};
     buildExecCommand(opts({ agent: 'goose', mode: 'plan', modeWarningState: shared }));
@@ -1490,7 +1377,6 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
 
   it('downgrades headless plan to edit for grok (auto→edit via resolveMode)', () => {
     expect(AGENTS.grok.capabilities.headlessPlan).toBe(false);
-    // grok has no native auto; the auto downgrade resolves onward to edit.
     expect(resolveHeadlessMode('grok', 'plan', false)).toBe('edit');
   });
 
@@ -1514,11 +1400,8 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
 
 describeExec('defaultModeFor', () => {
   it('returns the first listed mode for each agent', () => {
-    // Antigravity: ['edit', 'skip'] — no plan, so default must be edit.
     expect(defaultModeFor('antigravity')).toBe('edit');
-    // Cursor: ['plan', 'edit', 'skip'] — plan is the read-only default.
     expect(defaultModeFor('cursor')).toBe('plan');
-    // Claude: ['plan', 'edit', 'auto', 'skip'] — plan is safest.
     expect(defaultModeFor('claude')).toBe('plan');
   });
 
@@ -1538,8 +1421,6 @@ describeExec('implicitModeFor', () => {
 });
 
 describeExec('headlessPlanStallCommand', () => {
-  // The footgun: `ag run claude "/code:commit"` with no --mode defaults to
-  // read-only plan, then hangs forever at ExitPlanMode in a headless run.
   it('blocks a slash command run headless under implicit-default plan', () => {
     expect(
       headlessPlanStallCommand({ prompt: '/code:commit', interactive: undefined, mode: 'plan', modeIsDefault: true })

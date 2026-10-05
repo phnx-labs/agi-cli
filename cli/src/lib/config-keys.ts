@@ -1,26 +1,11 @@
-/**
- * Unified config key grammar for `agents config`.
- *
- * Translates user-facing dotted keys like `run.claude@*.tier.best` into the
- * existing storage locations (run.defaults, model.tiers, config.*,
- * defaultBrowserProfile, deviceConfig.*) so the new command barrel can sit on
- * top of the current YAML schema without a migration.
- */
 
 import { AGENTS } from './agents.js';
 import type { AgentId } from './types.js';
 import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
-/** The top-level scope of a unified config key. */
 export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates' | 'menubar';
 
-/**
- * The AGI Menu preference leaf names under `menubar.menu.*` (PHNX-3999). The
- * types, defaults, and enum validation for each live in `device-config.ts`'s
- * CONFIG_KEYS (user scope); this list is only the parser's allow-set so an
- * unknown `menubar.menu.<x>` fails loud here instead of at the store.
- */
 export const MENUBAR_MENU_PROPERTIES = [
   'defaultProject',
   'workingRowsShown',
@@ -48,7 +33,6 @@ export const MENUBAR_MENU_PROPERTIES = [
   'prGroupMerged',
 ] as const;
 
-/** A run-time default key: model, mode, effort, or tier override. */
 export interface ParsedRunConfigKey {
   scope: 'run';
   agent: AgentId;
@@ -57,21 +41,16 @@ export interface ParsedRunConfigKey {
   tier?: ModelTier;
 }
 
-/** The interactive host pin. */
 export interface ParsedInteractiveConfigKey {
   scope: 'interactive';
   property: 'host';
 }
 
-/** Which devices automatic placement (`--device auto`) may pick. */
 export interface ParsedAutoConfigKey {
   scope: 'auto';
   property: 'pool';
 }
 
-/** A browser key: the profile agents drive or the browser that shows the user a
- *  page (both device-scope, self or peer), or `device` — the user-scope fleet
- *  hub every box drives by default, which is central and never peer-targeted. */
 export interface ParsedBrowserConfigKey {
   scope: 'browser';
   property: 'profile' | 'viewer' | 'device';
@@ -83,33 +62,25 @@ export interface ParsedProjectConfigKey {
   property: 'root';
 }
 
-/** A per-device configuration key. */
 export interface ParsedDeviceConfigKey {
   scope: 'device';
   device: string;
   property: DeviceConfigProperty;
 }
 
-/** The daemon session-summarizer keys (PHNX-3939). */
 export interface ParsedSummarizerConfigKey {
   scope: 'summarizer';
   property: 'enabled' | 'baseUrl' | 'model';
 }
 
-/**
- * The managed-harness auto-update switch (PHNX-3940): `updates.auto` (global)
- * or `updates.<agent>.auto` (one harness — `agent` is set).
- */
 export interface ParsedUpdatesConfigKey {
   scope: 'updates';
   property: 'auto';
   agent?: AgentId;
 }
 
-/** An AGI Menu preference key: `menubar.menu.<property>` (user-scope, PHNX-3999). */
 export interface ParsedMenubarConfigKey {
   scope: 'menubar';
-  /** Leaf name under `menubar.menu.` — one of {@link MENUBAR_MENU_PROPERTIES}. */
   property: string;
 }
 
@@ -155,7 +126,6 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'formFactor',
 ];
 
-/** Split an agent@version token into its parts. Accepts both `@` and `:`. */
 function parseAgentVersion(token: string): { agent: AgentId; version: string } {
   const sep = token.includes('@') ? '@' : ':';
   const [agentPart, versionPart = '*'] = token.split(sep);
@@ -173,34 +143,10 @@ function parseAgentVersion(token: string): { agent: AgentId; version: string } {
   return { agent: agent as AgentId, version: versionPart };
 }
 
-/** Normalize agent@version to use `@` consistently. */
 export function formatAgentVersion(agent: AgentId, version: string): string {
   return `${agent}@${version}`;
 }
 
-/**
- * Parse a unified config key into its structured representation.
- *
- * Supported forms:
- *   run.<agent@version>.model
- *   run.<agent@version>.mode
- *   run.<agent@version>.effort
- *   run.<agent@version>.tier.<cheap|default|best|ultra>
- *   interactive.host
- *   auto.pool
- *   browser.profile
- *   project.root
- *   devices.<name>.role
- *   devices.<name>.max-agents
- *   devices.<name>.scheduler
- *   devices.<name>.daemon
- *   devices.<name>.watchdog
- *   devices.<name>.tmux
- *   devices.<name>.browser.remote-control
- *   devices.<name>.browser.task-idle-minutes
- *   devices.<name>.notes
- *   devices.<name>.browser.profile
- */
 export function parseConfigKey(key: string): ParsedConfigKey {
   const raw = key.trim();
   if (!raw) throw new Error('Config key is required.');
@@ -281,7 +227,6 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     };
   }
 
-  // Provide helpful errors for common mistakes.
   if (raw.startsWith('run.')) {
     throw new Error(
       `Invalid run config key '${key}'. Expected run.<agent@version>.<model|mode|effort> or run.<agent@version>.tier.<cheap|default|best|ultra>.`,
@@ -321,7 +266,6 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   );
 }
 
-/** Render a parsed key back to its canonical dotted string. */
 export function formatConfigKey(parsed: ParsedConfigKey): string {
   switch (parsed.scope) {
     case 'run':
@@ -350,7 +294,6 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
   }
 }
 
-/** List every canonical key the command documents, with wildcards expanded to a concrete example. */
 export function listKnownConfigKeys(): string[] {
   const keys: string[] = [];
   keys.push(
@@ -383,11 +326,6 @@ export function listKnownConfigKeys(): string[] {
   return keys;
 }
 
-/**
- * Map a parsed device property to the internal device-config key name.
- * This is the bridge between the friendly `agents config` surface and the
- * existing CONFIG_KEYS registry in lib/device-config.ts.
- */
 export function devicePropertyToConfigName(property: DeviceConfigProperty): string {
   switch (property) {
     case 'role':
@@ -419,10 +357,6 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
   }
 }
 
-/**
- * Map a parsed key to the human-readable "where is this stored" note.
- * Useful for `agents config list --source` output.
- */
 export function configKeyStorageHint(parsed: ParsedConfigKey): string {
   switch (parsed.scope) {
     case 'run':
@@ -436,7 +370,6 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return 'config.autoPool';
     case 'browser': {
       if (parsed.property === 'device') {
-        // User scope: one value in the central agents.yaml that syncs fleet-wide.
         return 'config.defaultBrowserDevice (central agents.yaml; syncs fleet-wide)';
       }
       const yamlKey = parsed.property === 'viewer' ? 'browserViewer' : 'defaultBrowserProfile';

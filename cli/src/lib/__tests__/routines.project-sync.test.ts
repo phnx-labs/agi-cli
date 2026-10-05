@@ -63,7 +63,6 @@ beforeEach(() => {
   vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(userAgentsDir);
   vi.spyOn(state, 'ensureAgentsDir').mockImplementation(() => {});
 
-  // Route meta read/write through the temp agents.yaml.
   const metaPath = path.join(userAgentsDir, 'agents.yaml');
   vi.spyOn(state, 'readMeta').mockImplementation(() => {
     try {
@@ -117,7 +116,7 @@ describe('enable = materialise + device flag (one flag, no allowlist)', () => {
       schedule: '0 9 * * *',
       agent: 'claude',
       prompt: 'review the project',
-      enabled: true, // attacker/author-declared — must be ignored for firing
+      enabled: true,
     });
     const res = materialiseProjectRoutine(projectDir, 'daily');
     expect('job' in res).toBe(true);
@@ -127,7 +126,6 @@ describe('enable = materialise + device flag (one flag, no allowlist)', () => {
     expect(job!.prompt).toBe('review the project');
     expect(job!.source?.kind).toBe('project');
     expect(job!.source?.projectPath).toBe(expandProjectPath(projectDir));
-    // The project YAML said enabled:true, but materialise never turns firing on.
     expect(job!.enabled).toBe(false);
   });
 
@@ -136,7 +134,6 @@ describe('enable = materialise + device flag (one flag, no allowlist)', () => {
       schedule: '0 9 * * *', agent: 'claude', prompt: 'p', enabled: true,
     });
     materialiseProjectRoutine(projectDir, 'daily');
-    // Daemon path (listJobs, no cwd) sees the materialised copy but as disabled.
     const job = listJobs().find((j) => j.name === 'daily');
     expect(job).toBeDefined();
     expect(job!.enabled).toBe(false);
@@ -207,12 +204,10 @@ describe('sync = definition-only refresh (never changes enablement)', () => {
       schedule: '0 9 * * *', agent: 'claude', prompt: 'v1', enabled: true,
     });
     materialiseProjectRoutine(projectDir, 'daily');
-    // Never enabled -> disabled, even though the YAML says enabled: true.
     expect(readJob('daily')!.enabled).toBe(false);
     syncProjectRoutines(projectDir);
     expect(readJob('daily')!.enabled).toBe(false);
 
-    // Now enable it, then refresh: enablement is preserved by the device flag.
     setJobEnabled('daily', true);
     syncProjectRoutines(projectDir);
     expect(readJob('daily')!.enabled).toBe(true);
@@ -251,7 +246,6 @@ describe('sync = definition-only refresh (never changes enablement)', () => {
     writeRoutine(projectRoutinesDir, 'daily', {
       schedule: '0 9 * * *', agent: 'claude', prompt: 'p',
     });
-    // Nothing materialised yet -> no roots.
     expect(materialisedProjectRoots()).toEqual([]);
     expect(syncAllProjectRoutines().projects).toEqual([]);
 
@@ -274,7 +268,6 @@ describe('discoverProjectRoutines (from registered projects)', () => {
     expect(discovered.map((d) => d.name)).toContain('available');
     expect(discovered.find((d) => d.name === 'available')!.config.enabled).toBe(false);
 
-    // Once materialised, it is no longer "discoverable" (the user copy is live).
     materialiseProjectRoutine(projectDir, 'available');
     expect(discoverProjectRoutines().map((d) => d.name)).not.toContain('available');
   });
@@ -315,8 +308,6 @@ describe('placement resolution', () => {
   });
 
   it('fleet falls back to self when the device registry is empty', () => {
-    // pickFleetDevice with empty/missing registry returns machineId().
-    // devices pin is fire-only and must not collapse the execution pool.
     const picked = pickFleetDevice({ devices: ['some-other-box'] });
     expect(typeof picked).toBe('string');
     expect(picked!.length).toBeGreaterThan(0);
@@ -362,8 +353,6 @@ describe('placement resolution', () => {
   it('fleet with a self fire-pin still resolves (devices is not the execution pool)', async () => {
     const { machineId } = await import('../machine-id.js');
     const self = machineId();
-    // Even when devices pins firing to self, fleet may place on any online
-    // device — resolvePlacementTarget must not throw and may return local or host.
     const t = await resolvePlacementTarget({
       name: 'fleet-pin', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'p',
       agent: 'claude',
@@ -381,7 +370,6 @@ describe('listJobs still excludes un-materialised project routines from daemon p
       agent: 'claude',
       prompt: 'project',
     });
-    // Not materialised — daemon path must not load it.
     const names = listJobs().map((j) => j.name);
     expect(names).not.toContain('project-only');
   });

@@ -1,16 +1,5 @@
-/**
- * Capability gate for agent features.
- *
- * Every install path that touches an agent-version (hooks, plugins, MCP,
- * skills, commands) calls `supports(agent, cap, version?)` before writing to
- * the version's config dir. When the capability is unsupported or the version
- * is below `since`, the install path skips the write and surfaces a clear
- * reason instead of silently corrupting an older binary's settings file.
- */
 
 import { AGENTS, MANAGED_AGENT_IDS } from './agents.js';
-// agent-spec/primitives is a leaf module — importing it creates no cycle, and it
-// is the only compareVersions that honors OpenClaw's `-N` rebuild suffix.
 import { compareVersions } from './agent-spec/primitives.js';
 import { installedReleaseFor } from './installations/store.js';
 import type {
@@ -22,30 +11,17 @@ import type {
 } from './types.js';
 
 function getCapability(agent: AgentId, cap: CapabilityName): Capability | RulesCapability | undefined {
-  // Guard against unknown agent ids (e.g. a caller passing "claude@2.1.168"
-  // instead of "claude"). Without this, AGENTS[agent] is undefined and the
-  // property access throws an opaque TypeError instead of reporting false.
   const def = AGENTS[agent];
   if (!def) return false;
   return def.capabilities[cap];
 }
 
-/**
- * True when the agent supports the capability on at least some version.
- * Useful for filtering UI lists; does not check installed version.
- */
 export function isCapable(agent: AgentId, cap: CapabilityName): boolean {
   if (AGENTS[agent]?.deprecated?.hard) return false;
   const c = getCapability(agent, cap);
   return c !== false;
 }
 
-/**
- * Check whether the given agent (optionally pinned to a specific installed
- * version) supports `cap`. Pass `version` whenever you know it -- omitting it
- * only checks the agent-level flag, which is fine for "is this agent ever
- * capable" filters but NOT for install-time gating.
- */
 export function supports(
   agent: AgentId,
   cap: CapabilityName,
@@ -69,10 +45,6 @@ export function supports(
   return { ok: true };
 }
 
-/**
- * Human-readable explanation for skipping an install. Stable shape so callers
- * can either log it or push it onto an `errors[]` collector.
- */
 export function explainSkip(
   agent: AgentId,
   cap: CapabilityName,
@@ -85,7 +57,6 @@ export function explainSkip(
   return `${tag}: ${cap} requires ${result.need}`;
 }
 
-/** All agents whose `capabilities[cap]` is anything other than `false`. */
 export function capableAgents(cap: CapabilityName): AgentId[] {
   return MANAGED_AGENT_IDS.filter((id) => isCapable(id, cap));
 }

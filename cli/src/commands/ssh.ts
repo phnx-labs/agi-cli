@@ -1,14 +1,3 @@
-/**
- * `agents devices` (registry) + `agents ssh` (smart wrapper).
- *
- * `agents devices` keeps a registry of SSH device profiles — platform, login
- * user, address, and auth — self-populated from `tailscale status --json`.
- * `agents ssh <name>` then connects through one hardened path: preflight
- * (offline → fail fast instead of a 2-minute hang), platform-aware exec
- * (PowerShell on Windows), and password-from-bundle auth via an askpass shim.
- * Rendering the registry to an ssh_config include also lets plain ssh / scp /
- * rsync / `agents sessions --device` resolve the same logical names.
- */
 
 import type { Command } from 'commander';
 import { spawnSync } from 'child_process';
@@ -169,9 +158,6 @@ import {
   type DeviceHeld,
 } from '../lib/worktree/held.js';
 
-/** One-line summary of a device for `list`. `isSelf` marks the machine this
- * command is running on so it stands out from the rest of the tailnet.
- * `isInteractive` marks the configured interactive host (`devices config <name> interactive.host`). */
 function deviceSummary(
   d: DeviceProfile,
   isSelf = false,
@@ -181,8 +167,6 @@ function deviceSummary(
 ): string {
   d = resolveDeviceProfile(d);
   const addr = hostNameFor(d) ?? chalk.gray('no address');
-  // Prefer a fresh live verdict (this run's probe, else the written-back
-  // reachability) over the stale tailscale.online snapshot (RUSH-1965).
   const state = deviceOnlineState(d, stats);
   const online =
     state === 'online'
@@ -194,19 +178,12 @@ function deviceSummary(
   const marker = isSelf ? chalk.cyan('▸ ') : '  ';
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
-  // `roles` defaults to a single-device roster so a fleet-wide `role` default
-  // still reaches this device even when it has no per-device doc of its own.
   const roleMap = roles ?? listConfiguredDeviceRoles([d.name]);
-  // `personal` already means "the interactive box you sit at", so the star would
-  // just repeat it — show it only when the interactive host is NOT a personal box
-  // (e.g. an unmarked or worker box deliberately pinned as the artifact target).
   const interactive = isInteractive && roleMap[d.name] !== 'personal' ? chalk.yellow('  ★ interactive') : '';
   const role = roleTag(d.name, roleMap);
   return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}${interactive}${role}`;
 }
 
-/** The fleet-wide role mark, rendered for a device row. Empty when unmarked —
- * an unmarked device is the common case and must not add a column of noise. */
 function roleTag(name: string, roles: Record<string, ConfiguredDeviceRole>): string {
   const role = roles[name];
   if (!role) return '';
@@ -224,7 +201,6 @@ const HEADROOM_BADGE: Record<Headroom, string> = {
   unknown: chalk.gray('· —'),
 };
 
-/** A right-aligned percentage cell, colored by severity (green/yellow/red). */
 function pctCell(v: number | undefined, width: number): string {
   if (v === undefined) return chalk.gray('—'.padStart(width));
   const s = `${Math.round(v)}%`.padStart(width);
@@ -233,48 +209,22 @@ function pctCell(v: number | undefined, width: number): string {
   return chalk.red(s);
 }
 
-/** Floor for the `spec` column; the real width is measured from the rows.
- *
- * A fixed width cannot work here: `fmtBytes` emits an optional decimal, so a
- * spec string runs from `8c 16G 256G` (11) to `10c 23.5G 460G` (14) depending
- * purely on the hardware behind it. Anything narrower than the widest row
- * pushes load/mem/disk/headroom out of alignment row-to-row AND against the
- * header — which defeats the scannability this column exists for. */
 const SPEC_WIDTH_MIN = 12;
 
-/** The static hardware as one compact cell — `12c 64G 1T`: cores, total RAM,
- * total root disk via fmtBytes. `—` covers two cases: no probe has ever seen
- * the box, or the probe answered but yielded no usable core count (`parseNcpu`
- * finding none, or the Windows `ncpu` group failing the finite-and-positive
- * check) — the cell is keyed on `ncpu` because a spec string without it would
- * read as a machine with zero cores.
- *
- * Deliberately NOT gated on `reachable`: hardware does not change while a
- * machine is down, so an offline device keeps rendering the spec from its last
- * successful probe (`retainHardwareFacts`, RUSH-3096) rather than blanking a
- * fact that is still true. The volatile columns beside it — load, mem, disk
- * used — stay `—`, and `fleetCapacity` still counts only reachable boxes, so
- * a down machine never contributes to usable capacity.
- *
- * Unpadded; {@link renderDeviceTable} pads to the measured column width. */
 function specText(stats: DeviceStats | undefined): string {
   if (!stats?.ncpu) return '—';
   return `${stats.ncpu}c ${fmtBytes(stats.memTotalBytes)} ${fmtBytes(stats.diskTotalBytes)}`;
 }
 
-/** The widest spec string across the rows actually being rendered, floored at
- * SPEC_WIDTH_MIN so a short fleet still lines up with the header. */
 function specColumnWidth(names: string[], statsMap: Map<string, DeviceStats>): number {
   return Math.max(SPEC_WIDTH_MIN, ...names.map((n) => stringWidth(specText(statsMap.get(n)))));
 }
 
-/** Colour + pad one spec cell to the measured column width. */
 function specCell(stats: DeviceStats | undefined, width: number): string {
   const text = specText(stats);
   return (text === '—' ? chalk.gray : chalk.greenBright)(text.padEnd(width));
 }
 
-/** The one-line `description` config value per device (absent when unset). */
 function listDeviceDescriptions(names: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const n of names) {
@@ -284,37 +234,19 @@ function listDeviceDescriptions(names: string[]): Record<string, string> {
   return out;
 }
 
-/**
- * Fit a device row to the terminal width. The description is the FIRST thing
- * to truncate, then the role tag; the fixed columns (device, platform, spec,
- * load/mem/disk numbers, headroom, and the ▸/★/←/relay markers) never
- * truncate. `role` and `desc` arrive fully rendered (ansi + leading gap).
- */
 function fitDeviceRow(fixed: string, role: string, desc: string, width: number): string {
   const w = (s: string) => stringWidth(stripAnsi(s));
   let over = w(fixed) + w(role) + w(desc) - width;
   if (over > 0 && desc) {
-    // `desc` is '  ' + gray(text) — truncate the text, keep the gap.
     const text = stripAnsi(desc).slice(2);
     const budget = w(text) - over;
     desc = budget > 0 ? '  ' + chalk.gray(truncateToWidth(text, budget)) : '';
     over = w(fixed) + w(role) + w(desc) - width;
   }
-  // A partial role word ("work…") reads as a bug — when it can't fit whole,
-  // it drops entirely. The numbers are never touched.
   if (over > 0 && role) role = '';
   return fixed + role + desc;
 }
 
-/**
- * Render the device list. When `statsMap` is provided, resource columns are
- * appended — a `spec` cell (cores / total RAM / total disk), normalized load,
- * memory and disk-used percentages, a headroom badge, and (in `full` mode)
- * free/total memory — with the per-device role and `description` riding the
- * tail, so it's obvious which boxes have room and what each box is for.
- * Without it (probe skipped) the classic reachability line is used. A fleet
- * capacity summary is appended whenever stats were gathered.
- */
 export function renderDeviceTable(
   reg: DeviceRegistry,
   names: string[],
@@ -353,8 +285,6 @@ export function renderDeviceTable(
   lines.push(head);
 
   for (const name of names) {
-    // Effective profile: the operator's central config (ssh.*/platform/user)
-    // overlays the discovery record, so the table shows what would be dialed.
     const d = resolveDeviceProfile(reg[name]);
     const isSelf = name === self;
     const marker = isSelf ? chalk.cyan('▸ ') : '  ';
@@ -363,21 +293,8 @@ export function renderDeviceTable(
     const stats = statsMap.get(name);
     const role = roleTag(name, deviceRoles);
     const desc = descriptions[name] ? '  ' + chalk.gray(descriptions[name]) : '';
-    // Prefer this run's live probe, then the written-back verdict, over the
-    // stale tailscale.online snapshot — so a reachable box never renders
-    // "offline" while its live load/mem sit one column over (RUSH-1965).
     const offline = deviceOnlineState(d, stats) === 'offline';
     if (offline) {
-      // The spec cell rides the offline row: hardware is what the box IS, not
-      // what it is doing, so it stays legible while the machine is down
-      // (RUSH-3096). The live columns are omitted rather than dashed — there is
-      // no current load/mem/disk to report for a box that did not answer.
-      //
-      // The explicit gap is load-bearing: `specCell` pads to the MEASURED
-      // column width, so the widest spec on the fleet pads to nothing and the
-      // marker would collide with it ("455Goffline"). An online row gets its
-      // separation for free from `pctCell`'s right-alignment; this one has no
-      // numeric cell to lean on.
       lines.push(
         fitDeviceRow(
           `${marker}${label}${plat} ${specCell(stats, specWidth)}  ${chalk.gray('offline')}`,
@@ -400,8 +317,6 @@ export function renderDeviceTable(
       : '';
     const badge = HEADROOM_BADGE[headroom(stats)];
     const here = isSelf ? chalk.cyan('  ← this machine') : '';
-    // A `personal` role already conveys "your interactive seat"; don't double-
-    // render the star on it. Keep it for a non-personal pinned interactive host.
     const interactive = name === interactiveHost && deviceRoles[name] !== 'personal' ? chalk.yellow('  ★ interactive') : '';
     lines.push(
       fitDeviceRow(
@@ -413,8 +328,6 @@ export function renderDeviceTable(
     );
   }
 
-  // Fleet capacity summary — total cores, how much RAM is free right now, and
-  // total free root disk across the reachable fleet.
   const cap = fleetCapacity(statsMap.values());
   if (cap.reachable > 0) {
     const freePct = cap.memTotalBytes > 0 ? Math.round((cap.memFreeBytes / cap.memTotalBytes) * 100) : 0;
@@ -436,13 +349,6 @@ export function renderDeviceTable(
   return lines;
 }
 
-/**
- * Live "Leased boxes" section for `agents devices` (F4, RUSH-1923), computed
- * from `crabboxList()` — these are ephemeral crabbox leases, NEVER written into
- * the device registry. Returns [] when crabbox is unavailable / has no creds /
- * reports no boxes, so the section is simply omitted. `nowSecs` is injected so
- * the row formatting is deterministic in tests.
- */
 export function renderLeasedBoxesSection(boxes: CrabboxBox[], nowSecs: number): string[] {
   if (boxes.length === 0) return [];
   const lines: string[] = [];
@@ -473,40 +379,25 @@ export function renderLeasedBoxesSection(boxes: CrabboxBox[], nowSecs: number): 
   return lines;
 }
 
-/** The leased-box rows for the devices list, or [] when crabbox can't be read. */
 function loadLeasedBoxesSection(): string[] {
   try {
     const boxes = crabboxList({ secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE, timeoutMs: 5000 });
     return renderLeasedBoxesSection(boxes, Math.floor(Date.now() / 1000));
   } catch {
-    return []; // crabbox not installed / no provider creds — omit the section
+    return [];
   }
 }
 
-/**
- * Whether `agents devices list` shows the "Leased boxes" section (RUSH-2190).
- * Opt-in via --all only: loading it scans the keychain for bundle credentials
- * and can raise a Touch ID sheet after the table has printed, so the default
- * list must never reach for it. --no-stats stays the hard "instant, no provider
- * calls" opt-out even when --all is passed.
- */
 export function showLeasedBoxesSection(opts: { all?: boolean; stats?: boolean }): boolean {
   return opts.all === true && opts.stats !== false;
 }
 
-/**
- * `agents ssh <slug>` targeting a leased crabbox box. crabbox provisions a
- * per-lease identity key, so we ssh via crabbox's OWN emitted invocation
- * (`crabboxSshArgv`) — a raw `ssh crabbox@ip` fails publickey. Returns false when
- * `name` is not a known crabbox slug so the caller can fall through to the normal
- * "Unknown device" error.
- */
 function trySshLeasedBox(name: string, cmd: string[]): boolean {
   let box: CrabboxBox | null;
   try {
     box = crabboxFind(name, { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE, timeoutMs: 5000 });
   } catch {
-    return false; // crabbox unavailable — not a leased-box target
+    return false;
   }
   if (!box) return false;
   const sshArgv = crabboxSshArgv(name, { secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE, timeoutMs: 8000 });
@@ -514,24 +405,16 @@ function trySshLeasedBox(name: string, cmd: string[]): boolean {
     console.error(chalk.red(`Leased box '${name}' is not reachable yet (status: ${boxStatus(box)}).`));
     process.exit(1);
   }
-  // Crabbox ssh does not go through buildSshInvocation; stamp the same
-  // consent marker so a browser drive on a leased box is gated too.
   const remoteCmd = leasedBoxRemoteCmd(cmd);
   const res = spawnSync(sshArgv[0], [...sshArgv.slice(1), ...remoteCmd], { stdio: 'inherit' });
   process.exit(res.status ?? 1);
 }
 
-/**
- * Remote argv for `agents ssh <slug>` into a leased crabbox. Crabbox ssh does
- * not go through {@link buildSshInvocation}, so this stamps the same
- * AGENTS_FLEET_REMOTE consent marker a registered-device ssh would (PHNX-3065).
- * Exported so the branch is unit-testable without a live crabbox.
- */
 export function leasedBoxRemoteCmd(cmd: string[]): string[] {
+  // Browser driving on a lease carries the fleet-remote consent marker.
   return isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
 }
 
-/** Resolve a device or exit with a clear error. */
 async function mustGetDevice(name: string): Promise<DeviceProfile> {
   const d = await getDevice(name);
   if (!d) {
@@ -541,14 +424,6 @@ async function mustGetDevice(name: string): Promise<DeviceProfile> {
   return d;
 }
 
-/**
- * Interactive `agents devices sync`: discover tailscale nodes, present a
- * checkbox pre-checked with what's already registered, and reconcile the
- * choice. Checked = registered (and un-ignored). Unchecked = removed from the
- * registry AND added to the ignore-list, so auto-discovery never re-suggests
- * it — this is the "click to register/unregister" surface, with dismissals that
- * stick.
- */
 async function runInteractiveDeviceSync(): Promise<void> {
   const spinner = ora('Reading tailscale status...').start();
   let nodes;
@@ -571,12 +446,6 @@ async function runInteractiveDeviceSync(): Promise<void> {
   let selected: string[];
   try {
     selected = await checkbox({
-      // Everything not already dismissed starts checked, so pressing Enter keeps
-      // the fleet as-is (matching what auto-sync would register). Unchecking a
-      // device removes it AND dismisses it so auto-sync never re-adds it.
-      // Sharee nodes (shared in by another user) start unchecked unless already
-      // registered — registering one must be a deliberate check, never the
-      // default Enter.
       message: 'Your fleet — uncheck a device to remove and stop suggesting it:',
       pageSize: Math.min(nodes.length, 20),
       choices: nodes.map((n) => {
@@ -617,16 +486,6 @@ async function runInteractiveDeviceSync(): Promise<void> {
   console.log(parts.join(chalk.gray(' · ')));
 }
 
-/**
- * Print a per-device result table for fleet update/run.
- *
- * `verifications` is supplied only by the rollout (`agents fleet update`), which
- * re-probes what `agents` resolves to on each upgraded box. A box that upgraded
- * with `exit 0` but still resolves to another copy — the dev-install shadow of
- * RUSH-2446 — is rendered `stale` / `unverified`, counted as **not upgraded**,
- * and makes the command exit non-zero. An `exit 0` alone never reads as `ok` on
- * a rollout again.
- */
 function printFleetResults(
   results: FleetRunResult[],
   verifications?: Map<string, RolloutVerification>,
@@ -679,16 +538,10 @@ interface RemoteDoctorJson {
 
 interface FleetStatusTarget extends FanOutDeviceTarget {
   platform?: string;
-  /**
-   * The address to hand `ssh` — the registry's drift-proof Tailscale dnsName/IP
-   * (via {@link fleetDialTarget}), NOT the bare device name. Dialing the bare
-   * name lets ssh resolve it through the user's ~/.ssh/config, where a stale
-   * hand-written `Host <name>` block with a drifted LAN IP silently shadows the
-   * correct entry and makes a reachable box look dead (the 60s fleet-status hang).
-   */
   dialTarget: string;
   extraSshArgs?: string[];
 }
+// Fleet calls use the live Tailscale dial target, not drift-prone bare ssh aliases.
 
 async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetHealthRow> {
   return {
@@ -699,16 +552,10 @@ async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetH
     clis: checkAllClis(),
     sync: checkSyncStatus(process.cwd()),
     orphans: countOrphans(),
-    // Local baseline inventory for cross-device divergence (RUSH-2027) — the
-    // yardstick every remote box is compared against.
     inventory: await collectLocalFleetInventory(process.cwd()),
   };
 }
 
-/** SSH into a host and read its already-computed fleet-status row (a cheap
- *  `fleet status --local --json` on the peer — NOT a fresh remote resource probe;
- *  the peer's daemon keeps that row warm). Bounded + reaped via sshExecAsync's
- *  timeout (RUSH-2114). */
 async function probeRemoteFleetStatus(target: FleetStatusTarget): Promise<import('../lib/fleet-status.js').FleetStatusRow> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
@@ -738,24 +585,14 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
     clis: parsed.clis ?? {},
     sync: parsed.sync ?? [],
     orphans: parsed.orphans ?? [],
-    // The remote self-reports its own cached auth rollup (fresh via its daemon),
-    // so the Auth column is current without a prior fleet-wide `fleet ping`.
-    // Older remotes that don't emit it fall back to this host's cache below.
     auth: parsed.auth,
-    // Harness inventory (resources / agent versions / repo state) for
-    // cross-device divergence detection (RUSH-2027). Undefined on an older CLI
-    // that doesn't emit the `fleet` field — the comparator skips it.
     inventory: parsed.fleet,
   };
 }
 
-/** Device-layer config only (not fleet defaults), keyed by the canonical YAML key. */
 function deviceConfigJson(name: string): Record<string, unknown> | undefined {
   const config: Record<string, unknown> = {};
   for (const entry of listConfig({ device: name })) {
-    // The device's OWN layer only — a fleet-default value is not this
-    // device's setting (the effective profile fields already carry the
-    // merged view via resolveDeviceProfile).
     if (entry.source !== 'device') continue;
     config[entry.spec.yamlKey] = entry.value;
   }
@@ -767,10 +604,6 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   const self = machineId();
   const forceRefresh = Boolean(opts.refresh || opts.live);
 
-  // `--local`: the publish endpoint the read-union reads over ssh. Probe THIS
-  // host only (resource stats + live-agent workload, no ssh) and print its row.
-  // Publishes into the local mirror as a side effect so a same-host reader is
-  // instantly warm too.
   if (opts.local) {
     const { publishLocalFleetStatus } = await import('../lib/fleet-status.js');
     const row = await publishLocalFleetStatus(self);
@@ -780,15 +613,10 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
   }
   const planned = planFleetTargets(reg);
   const probeable = planned.filter((t) => !t.skip).map((t) => t.device);
-  // Cache-first: serve remote stats from the daemon-warmed cache (instant),
-  // probe this machine locally, and only ssh out for missing/forced rows.
   const statsMap = opts.stats === false
     ? new Map<string, DeviceStats>()
     : (await loadFleetStats(probeable, { forceRefresh, selfName: self })).stats;
 
-  // Persist the live probe's reachability verdict so the online/offline word is
-  // read from a fresh probe, not a stale tailscale snapshot (RUSH-1965).
-  // Best-effort: a registry write must never break the status render.
   await writeReachability(collectReachabilityWriteBacks(reg, statsMap)).catch(() => {});
 
   const rows: FleetHealthRow[] = [await localHealthRow(self, statsMap.get(self))];
@@ -796,12 +624,6 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     .map((t) => ({
       name: t.device.name,
       platform: resolveDeviceProfile(t.device).platform,
-      // Fail fast: gate the expensive version+doctor dials on the reachability
-      // verdict the cheap stats probe already computed one step earlier. A box
-      // it found unreachable skips straight to an `unreachable` row instead of
-      // burning 15s+30s per box — so one genuinely-offline device can't stall
-      // the matrix for ~60s (RUSH-1964). See {@link fleetHealthSkip} for why
-      // this is trusted on the default path, not just under `--refresh`.
       skip: fleetHealthSkip(t.skip, statsMap.get(t.device.name)),
       dialTarget: fleetDialTarget(t.device),
       extraSshArgs: deviceIdentityArgs(t.device),
@@ -830,16 +652,9 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     }
   }
 
-  // Auth column: remote rows already carry the host's self-reported rollup from
-  // its `doctor --json`. Fill the rest (this machine; older remotes that don't
-  // emit it) from this host's local cache — written by `agents fleet ping` and
-  // the daemon's local refresh. A never-probed host rolls up to "—". No network.
   const authCache = readAuthHealthCache();
   for (const row of rows) {
     if (!row.auth) row.auth = summarizeHostAuth(authCache, row.name);
-    // Resolve the online/offline verdict and last-seen once (RUSH-1966) so the
-    // summary view reads one truth — the same `deviceOnlineState` ordering the
-    // registry write-back uses — instead of re-deriving it from error/skipped.
     const profile = reg[row.name];
     if (profile) {
       row.online = deviceOnlineState(profile, statsMap.get(row.name));
@@ -847,13 +662,6 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
     }
   }
 
-  // Live-agent workload (RUSH-2061): publish THIS host's row, then union peers'
-  // rows cache-first. The daemon no longer probes the fleet (publish-own /
-  // read-union), so cross-host counts are gathered HERE, on demand — a mirror row
-  // younger than the freshness window is served without ssh; a missing/stale one
-  // is read over ssh via `fleet status --local --json` (bounded + kill-on-timeout
-  // through sshExecAsync/fanOutDevices, RUSH-2114). Best-effort: agent counts are
-  // additive, so a failed gather never breaks the status render.
   try {
     const { publishLocalFleetStatus, readFleetStatus, writeFleetStatusRows } = await import('../lib/fleet-status.js');
     const selfRow = await publishLocalFleetStatus(self);
@@ -880,7 +688,6 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       if (r) row.agents = r.agents;
     }
   } catch {
-    // best-effort — agent counts are additive to the health view
   }
 
   const report = buildFleetHealthReport(rows, new Date(), { self });
@@ -900,12 +707,10 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       }),
     }, null, 2));
   } else if (opts.verbose) {
-    // Full grid: the auth/CLI/sync/version columns and the warnings rollup.
     for (const line of renderFleetWarnings(report)) console.log(line);
     console.log();
     for (const line of renderFleetMatrix(report)) console.log(line);
   } else {
-    // Default: rollup + NEEDS ATTENTION + OS-grouped quiet rows + footer.
     for (const line of renderFleetSummary(report, { self })) console.log(line);
   }
   if (opts.strict && report.hasWarnings) process.exitCode = 1;
@@ -918,7 +723,6 @@ interface FleetPingHostResult {
   skipped?: string;
 }
 
-/** SSH into a host and run its local auth probe, returning its rows. */
 async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[]> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
@@ -931,17 +735,6 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   return parsed.rows ?? [];
 }
 
-/**
- * Race `fanOut` against an overall wall-clock deadline (RUSH-2041).
- *
- * If `fanOut` settles first the result passes through unchanged. If the
- * deadline fires first every pending remote target is mapped to `failed` (or
- * `skipped` for pre-skipped targets), so callers always get a complete result
- * array and the command exits promptly rather than hanging.
- *
- * Exported so the unit test can exercise the real path with a hanging probe
- * instead of reimplementing the logic.
- */
 export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget>(
   fanOut: Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]>,
   remoteTargets: Target[],
@@ -953,10 +746,6 @@ export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget
   try {
     return await Promise.race([fanOut, overallDeadline]);
   } catch (err) {
-    // Overall deadline hit before all devices settled — mark every pending
-    // device as failed so the command exits promptly. Individual probes that
-    // already settled are not retrievable (Promise.all internals), so we
-    // record all remote targets as timed out / skipped.
     const errMsg = err instanceof Error ? err.message : String(err);
     return remoteTargets.map((t) => ({
       name: t.name,
@@ -971,20 +760,9 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const self = machineId();
   const { refreshLocalFleetAuthState } = await import('../lib/daemon-ticks.js');
 
-  // --local: probe just this host. Used both directly and as the fan-out worker.
-  // force: this command promises "a real request for every account" (--strict
-  // gates on it), so it must never reuse the periodic tick's rate-limit-throttled
-  // cached verdict (RUSH-2998).
   if (opts.local) {
     const { authRows: rows } = await refreshLocalFleetAuthState({ force: true });
     if (opts.json) {
-      // Per-agent launchability from the SAME run-router path the local readiness
-      // check uses (`collectRunCandidates`/`isLaunchableSignedIn`), so a consumer
-      // can tell a box that simply could not probe — a worker's setup-token box,
-      // or a headed box that spent its usage-endpoint budget, both DROP their
-      // `no_evidence` row — from a box with no credential at all. From `rows`
-      // alone the two are indistinguishable, which broke `--host` routine
-      // readiness on every worker (PHNX-4116).
       const { collectRunCandidates } = await import('../lib/accounting/rotate.js');
       const launchable = (await Promise.all(ALL_AGENT_IDS.map(async (agent) =>
         (await collectRunCandidates(agent)).some((candidate) => candidate.signedIn) ? agent : null,
@@ -999,16 +777,10 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
     return;
   }
 
-  // Origin: probe locally, then fan out to the rest of the fleet in parallel.
   const reg = await loadDevices();
   const planned = planFleetTargets(reg);
   const results: FleetPingHostResult[] = [];
 
-  // force: same as the --local worker below — this command promises a real
-  // request for every account and --strict gates on it, so the self row must
-  // never reuse the periodic tick's rate-limit-throttled cached verdict. Each
-  // remote peer is force-probed via its own `devices ping --local` worker (see
-  // probeRemoteAuth); the self row must match (RUSH-2998).
   const { authRows: localRows } = await refreshLocalFleetAuthState({ force: true });
   results.push({ host: self, rows: localRows });
 
@@ -1023,10 +795,6 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const spinner = isInteractiveTerminal() && !opts.json
     ? ora(`Pinging ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
     : undefined;
-  // Per-device: 15 s (matches the version probe budget; enough for the ~8 s
-  // provider-fetch inside the remote local auth probe, with headroom).
-  // Overall: 30 s hard cap so the command can never outlast a reasonable
-  // budget when several devices are simultaneously unreachable (RUSH-2041).
   const FLEET_PING_DEVICE_TIMEOUT_MS = 15_000;
   const FLEET_PING_OVERALL_TIMEOUT_MS = 30_000;
   let remote: Awaited<ReturnType<typeof fanOutDevices<AuthProbeRow[], FleetStatusTarget>>>;
@@ -1060,15 +828,6 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   if (opts.strict && anyBad) process.exitCode = 1;
 }
 
-// ---------------------------------------------------------------------------
-// `agents devices harnesses` / `agents devices accounts` (RUSH-2003)
-//
-// Both render the same per-device inventory — every installed (agent, version)
-// with its account, sign-in, quota, and a single "ready" verdict — through two
-// lenses: `harnesses` groups by install, `accounts` collapses installs that
-// share one account. The fan-out mirrors `runFleetPing`: probe THIS host in
-// process, then SSH each peer's `devices harnesses --local --json` worker.
-// ---------------------------------------------------------------------------
 
 export interface HarnessInventoryOpts {
   agents?: AgentId[];
@@ -1078,7 +837,6 @@ export interface HarnessInventoryOpts {
   local?: boolean;
 }
 
-/** SSH into a host and read its raw harness rows (the `--local --json` worker). */
 async function probeRemoteHarnesses(
   target: FleetStatusTarget,
   refresh: boolean,
@@ -1096,13 +854,6 @@ async function probeRemoteHarnesses(
   return parsed.rows ?? [];
 }
 
-/**
- * Gather harness rows across the fleet: THIS host in process, every reachable
- * peer over SSH. Shared by both `harnesses` and `accounts` (they differ only in
- * how the rows are rendered). Honors an optional `--device` allowlist on both
- * the local and remote rows. Bounded by the same per-device + overall deadlines
- * as `fleet ping`, so one unreachable box can never stall the glance.
- */
 export async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise<HostHarnessResult[]> {
   const self = machineId();
   const want = opts.devices?.length ? new Set(opts.devices) : null;
@@ -1197,7 +948,6 @@ export async function runDevicesAccounts(opts: HarnessInventoryOpts): Promise<vo
   }
 }
 
-/** Resolve an {@link AuthCellColor} to a chalk painter. Single map for cells + labels. */
 const CELL_PAINT: Record<AuthCellColor, (s: string) => string> = {
   green: chalk.green,
   yellow: chalk.yellow,
@@ -1206,14 +956,6 @@ const CELL_PAINT: Record<AuthCellColor, (s: string) => string> = {
   dim: chalk.dim,
 };
 
-/**
- * Color a per-host×agent cell. The numerator counts accounts that are usable
- * right now — live-verified PLUS signed-in-but-unverifiable (codex/grok) — over
- * the total, so a logged-in codex fleet reads "1/1", not a scary "0/1". Color is
- * the shared {@link authCellColor}: red only for revoked (re-login), yellow for
- * soft/expired (self-refreshes), gray for present-but-unverifiable, green when
- * all live.
- */
 function authCell(summary: VerdictSummary, width: number): string {
   if (summary.total === 0) return chalk.dim('·'.padEnd(width));
   const ok = summary.live + summary.present;
@@ -1221,13 +963,11 @@ function authCell(summary: VerdictSummary, width: number): string {
   return CELL_PAINT[authCellColor(summary)](padded);
 }
 
-/** Render the fleet auth matrix (device rows × agent columns) plus an optional per-account breakdown. */
 function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boolean }): string[] {
-  // Only show agent columns that appear somewhere in the results.
   const present = new Set<string>();
   for (const r of results) for (const row of r.rows) present.add(row.agent);
   const agents = ALL_AGENT_IDS.filter((a) => present.has(a));
-  const cellW = 6; // 6 disambiguates opencode/openclaw (both 'openc' at 5)
+  const cellW = 6;
   const nameW = Math.max(6, ...results.map((r) => r.host.length));
 
   const lines: string[] = [chalk.bold('Fleet auth')];
@@ -1272,7 +1012,6 @@ function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boo
   return lines;
 }
 
-/** Register the `agents devices` command tree (also aliased as `fleet`). */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
     .command('devices')
@@ -1345,10 +1084,8 @@ function registerDevicesCommands(program: Command): void {
       }
     });
 
-  // `agents fleet capture` — snapshot live state into agents.yaml fleet:.
   registerFleetCaptureCommand(devicesCmd);
 
-  // `agents fleet apply` — canonical fleet reconcile (top-level apply is retired).
   registerFleetApplyAlias(devicesCmd);
 
   devicesCmd
@@ -1362,14 +1099,11 @@ function registerDevicesCommands(program: Command): void {
           console.error(chalk.red(`'${name}' is not a current tailscale node. See 'agents devices sync'.`));
           process.exit(1);
         }
-        await removeIgnored(name); // clear THIS box's dismissal, if any
+        await removeIgnored(name);
         const d = await upsertDevice(name, nodeToDeviceInput(node));
         setDeviceDiscoveryStatus(name, 'approved');
-        clearPendingSentinel(name); // drop the notification immediately
+        clearPendingSentinel(name);
         console.log(chalk.green(`Registered '${name}'`) + chalk.gray(` (${d.platform})`));
-        // A dismissal on another box still wins the union (ignored beats
-        // approved), so approving here does not un-dismiss it fleet-wide — say so
-        // rather than imply the node is now discoverable everywhere (PHNX-3315).
         const otherDismissals = loadIgnoredEntries().filter((e) => e.name === name);
         if (otherDismissals.length > 0 || getDeviceDiscoveryStatus(name) === 'ignored') {
           const boxes = [...new Set(otherDismissals.map((e) => e.ignoredOn))].sort().join(', ') || 'another box';
@@ -1392,7 +1126,7 @@ function registerDevicesCommands(program: Command): void {
         await removeDevice(name);
         await addIgnored(name);
         setDeviceDiscoveryStatus(name, 'ignored');
-        clearPendingSentinel(name); // drop the notification immediately
+        clearPendingSentinel(name);
         console.log(chalk.green(`Ignored '${name}'`) + chalk.gray(" — it won't be suggested again. Undo with `agents devices unignore`."));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1406,13 +1140,8 @@ function registerDevicesCommands(program: Command): void {
     .action(async (name: string) => {
       const wasIgnored =
         getDeviceDiscoveryStatus(name) === 'ignored' || loadIgnoredEntries().some((e) => e.name === name);
-      // A box can edit only its OWN device doc (PHNX-3315), so this clears just
-      // this box's dismissal/approval decision.
       await removeIgnored(name);
       setDeviceDiscoveryStatus(name, undefined);
-      // Re-evaluate the cross-box union AFTER clearing our slice: another box's
-      // dismissal keeps the node ignored fleet-wide (ignored beats approved), so
-      // never report a false "no longer ignoring" — name the box(es) to clear.
       const remaining = loadIgnoredEntries().filter((e) => e.name === name);
       if (remaining.length > 0 || getDeviceDiscoveryStatus(name) === 'ignored') {
         const boxes = [...new Set(remaining.map((e) => e.ignoredOn))].sort().join(', ') || 'another box';
@@ -1472,14 +1201,7 @@ function registerDevicesCommands(program: Command): void {
     `,
   });
 
-  // ─── devices config (unified settings surface) ────────────────────────────
-  //
-  // ONE command for every per-device setting: `agents devices config <name>
-  // [key] [value] [--unset] [--json]`. configure, note, set-interactive, set,
-  // prefer, and unprefer are deleted (PHNX-4051) — use this command directly.
-  // enable/disable stay as first-class sugar over auto-launch.enabled.
 
-  /** Parse a raw CLI string into a config key's typed value (bool/int pass validation, strings verbatim). */
   const parseConfigValueInput = (spec: ConfigKeySpec, raw: string): unknown => {
     switch (spec.type) {
       case 'int': {
@@ -1501,18 +1223,15 @@ function registerDevicesCommands(program: Command): void {
     process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   };
 
-  /** The device-scope config entries for `name` (what the config surface edits). */
   const deviceConfigEntries = (name: string) =>
     listConfig({ device: name }).filter((e) => e.spec.scope === 'device');
 
-  /** Render one entry's effective value with its layer tag. */
   const entryValueText = (e: ConfigEntry): string => {
     if (e.source === 'default') return chalk.gray('— (default)');
     const tag = e.source === 'fleet' ? chalk.yellow('  (fleet default)') : e.source === 'user' ? chalk.gray('  (user scope)') : '';
     return chalk.cyan(JSON.stringify(e.value)) + tag;
   };
 
-  /** Print the full resolved config for a device (bare invocation, non-menu). */
   const printDevicesConfig = (name: string, json: boolean): void => {
     const entries = deviceConfigEntries(name);
     if (json) {
@@ -1527,7 +1246,6 @@ function registerDevicesCommands(program: Command): void {
     }
   };
 
-  /** Print the fleet-wide defaults layer (`config --fleet`, bare). */
   const printFleetConfig = (json: boolean): void => {
     const entries = listConfig({ fleet: true }).filter((e) => e.spec.scope === 'device');
     if (json) {
@@ -1543,22 +1261,14 @@ function registerDevicesCommands(program: Command): void {
     }
   };
 
-  /**
-   * The `devices config` engine — shared by the config command's action and
-   * every tombstone. `quiet` performs the write with no output (a tombstone
-   * that prints its own legacy shape). `fleet` targets the fleet-wide defaults
-   * layer instead of a device (`name` is then unused). Throws on a bad
-   * key/value; callers map that to exit 1.
-   */
   const runDevicesConfig = async (
     name: string | undefined,
     key: string | undefined,
     valueParts: string[],
     opts: { unset?: boolean; json?: boolean; quiet?: boolean; fleet?: boolean },
   ): Promise<void> => {
-    const spec = key ? configKeySpec(key) : undefined; // unknown key → throw listing the valid keys
+    const spec = key ? configKeySpec(key) : undefined;
 
-    // ── Fleet-defaults layer (`--fleet`): no device involved.
     if (opts.fleet) {
       if (spec && spec.scope === 'user') {
         throw new Error(`Config key '${spec.name}' is user-scope (already fleet-wide) — --fleet does not apply.`);
@@ -1596,8 +1306,6 @@ function registerDevicesCommands(program: Command): void {
       return;
     }
 
-    // User-scope keys (interactive.host) are stored centrally — the device name
-    // is syntax only, so an unregistered name is not an error for them.
     if (!spec || spec.scope === 'device') await mustGetDevice(name!);
 
     if (opts.unset) {
@@ -1612,7 +1320,6 @@ function registerDevicesCommands(program: Command): void {
     if (spec && valueParts.length > 0) {
       let value: unknown;
       if (spec.type === 'string-list') {
-        // List keys (notes) APPEND — one entry per invocation.
         const existing = (getConfigValue(spec.name, { device: name }).value as string[] | undefined) ?? [];
         value = [...existing, valueParts.join(' ')];
       } else {
@@ -1636,7 +1343,6 @@ function registerDevicesCommands(program: Command): void {
       return;
     }
 
-    // Bare: TTY → the interactive settings menu; piped/--json → print.
     if (opts.json || !isInteractiveTerminal()) {
       printDevicesConfig(name!, Boolean(opts.json));
       return;
@@ -1644,14 +1350,6 @@ function registerDevicesCommands(program: Command): void {
     await runDevicesConfigMenu(name!);
   };
 
-  /**
-   * The `devices role` engine — read or write the fleet-wide role mark, and say
-   * what it does to automatic placement.
-   *
-   * A role written here lands in that device's tracked per-device doc
-   * (`devices/<name>/agents.yaml` `config.role`) and syncs with repo
-   * push/pull. The vocabulary is `worker | personal | desktop`.
-   */
   const runDevicesRole = async (
     name: string | undefined,
     role: string | undefined,
@@ -1660,9 +1358,6 @@ function registerDevicesCommands(program: Command): void {
     if (!name) {
       if (role) throw new Error('Name a device: agents devices role <name> <worker|personal|desktop>');
       const reg = await loadDevices();
-      // The full registered roster, not just online — a fleet-wide `role`
-      // default must reach a registered device even when it has no per-device
-      // doc of its own, or it silently falls out of the worker allowlist.
       const roles = listConfiguredDeviceRoles(Object.keys(reg));
       const mode = autoPoolMode();
       const online = Object.entries(reg)
@@ -1704,13 +1399,7 @@ function registerDevicesCommands(program: Command): void {
       return;
     }
 
-    // configuredDeviceRole's key spec validates the value; a bad one throws with
-    // the accepted list, which the command's catch turns into exit 1.
     setConfiguredDeviceRole(name, role as ConfiguredDeviceRole);
-    // Full registered roster, mirroring the bare-listing branch above — a
-    // fleet-wide `role` default must reach a doc-less registered device here
-    // too, or `autoPoolWorkers` under-reports the allowlist right after this
-    // write changed it.
     const roles = listConfiguredDeviceRoles(Object.keys(await loadDevices()));
     if (opts.json) {
       writeJson({ device: name, role, autoPoolWorkers: listWorkerDevices({ roles }) });
@@ -1726,9 +1415,6 @@ function registerDevicesCommands(program: Command): void {
     console.log(chalk.gray('Sync it to the fleet with `agents repo push`.'));
   };
 
-  /** The interactive settings menu: pick a key, edit it, repeat. TTY-only.
-   * Shows EFFECTIVE values (with a fleet tag when inherited); edits always
-   * write the device layer. */
   const runDevicesConfigMenu = async (name: string): Promise<void> => {
     const { select, input, confirm } = await import('@inquirer/prompts');
     const DONE = '__done__';
@@ -1783,7 +1469,7 @@ function registerDevicesCommands(program: Command): void {
         }
       }
     } catch (err) {
-      if (isPromptCancelled(err)) return; // ctrl-c / esc — leave the menu quietly
+      if (isPromptCancelled(err)) return;
       throw err;
     }
   };
@@ -1802,7 +1488,6 @@ function registerDevicesCommands(program: Command): void {
     .action(async (name: string | undefined, key: string | undefined, valueParts: string[] | undefined, opts: { fleet?: boolean; unset?: boolean; json?: boolean }) => {
       try {
         if (opts.fleet) {
-          // Positionals shift left: the first one is the key, the rest the value.
           const fleetValue = [key, ...(valueParts ?? [])].filter((v): v is string => v !== undefined);
           await runDevicesConfig(undefined, name, fleetValue, opts);
           return;
@@ -1926,8 +1611,6 @@ function registerDevicesCommands(program: Command): void {
     .option('--json', 'output machine-readable JSON')
     .action(async (name: string, textParts: string[] | undefined, opts: { unset?: boolean; json?: boolean }) => {
       try {
-        // Thin sugar over the 'description' config key — the same engine that
-        // backs `agents devices config <name> description`, not a second path.
         await runDevicesConfig(name, 'description', textParts ?? [], opts);
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -1970,13 +1653,9 @@ function registerDevicesCommands(program: Command): void {
     let statsMap: Map<string, DeviceStats> | undefined;
     let freshness: { oldestFetchedAt: number | null; servedFromCache: boolean } | undefined;
     if (opts.stats !== false) {
-      // Cache-first: serve remote devices from the daemon-warmed cache
-      // (instant), probe this machine locally, and only ssh out for missing or
-      // forced (--refresh/--live) rows — so a warm read never hangs on a box.
       const probeable = planFleetTargets(reg)
         .filter((t) => !t.skip)
         .map((t) => t.device);
-      // Only spin when we'll actually ssh (forced, or a cold/partial cache).
       const cache = readStatsCache();
       const willSsh = forceRefresh || probeable.some((d) => d.name !== self && (!cache[d.name] || !isFreshDeviceStats(cache[d.name])));
       const spinner = willSsh && isInteractiveTerminal()
@@ -1989,8 +1668,6 @@ function registerDevicesCommands(program: Command): void {
       } finally {
         spinner?.stop();
       }
-      // Write the live verdict back so this and every other consumer read one
-      // reachability truth instead of the stale tailscale snapshot (RUSH-1965).
       if (statsMap) await writeReachability(collectReachabilityWriteBacks(reg, statsMap)).catch(() => {});
     }
 
@@ -2004,9 +1681,6 @@ function registerDevicesCommands(program: Command): void {
         return {
           ...resolveDeviceProfile(reg[name]),
           interactive: name === interactiveHost,
-          // Roles as machine-readable fields: `role` is what the operator
-          // marked (absent when unmarked), `autoPool` is the answer that
-          // matters to a caller — may `--device auto` pick this box.
           ...(jsonRoles[name] ? { role: jsonRoles[name] } : {}),
           ...(typeof description === 'string' && description ? { description } : {}),
           autoPool: autoPool.has(name),
@@ -2018,20 +1692,11 @@ function registerDevicesCommands(program: Command): void {
     }
 
     console.log(chalk.bold(`Devices (${names.length})`));
-    // Dismissed nodes are not devices (never in the registry) — surface their
-    // count under the table so a "missing" node is explainable from the list.
     const ignoredCount = loadIgnoredEntries().length;
     for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full, interactiveHost, { ignoredCount })) console.log(line);
     if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
       console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
     }
-    // Ephemeral crabbox leases live alongside the registered fleet but are never
-    // written into the registry — surface them as their own live section, but only
-    // behind --all (RUSH-2190). Reading them routes through crabboxEnv, whose
-    // bundle auto-detect scans the keychain and can raise a Touch ID sheet AFTER
-    // the table has printed — unacceptable for the default list, which hooks and
-    // other non-interactive callers rely on. The predicate is exported so the
-    // gate itself is unit-tested; keep it the ONLY condition guarding this call.
     if (showLeasedBoxesSection(opts)) {
       for (const line of loadLeasedBoxesSection()) console.log(line);
     }
@@ -2090,10 +1755,6 @@ function registerDevicesCommands(program: Command): void {
     .option('--local', "this machine only: print THIS host's status row (resource stats + live-agent workload). The publish endpoint the fleet-status read-union reads over ssh.")
     .option('--verbose', 'show the full per-device auth/CLI/sync/version grid instead of the summary')
     .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; local?: boolean; verbose?: boolean }, cmd: Command) => {
-      // The root program also defines a global `--verbose`; commander binds a
-      // shared long flag to the program, not the leaf. Read the effective value
-      // from the merged globals so `fleet status --verbose` works at either level
-      // (same pattern as `fleet ping --verbose`).
       const verbose = opts.verbose ?? Boolean(cmd.optsWithGlobals().verbose);
       await runFleetStatus({ ...opts, verbose });
     });
@@ -2106,11 +1767,6 @@ function registerDevicesCommands(program: Command): void {
     .option('--verbose', 'show a per-account breakdown, not just the per-host rollup')
     .option('--strict', 'exit non-zero when any account is revoked (expired is soft — it self-refreshes)')
     .action(async (opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }, cmd: Command) => {
-      // The root program also defines a global `--verbose` (startup self-heal
-      // detail), and commander binds a shared long flag to the program, not the
-      // leaf — so `fleet ping --verbose` never set opts.verbose and the
-      // per-account breakdown was silently unreachable. Read the effective value
-      // from the merged globals so the flag works at either level.
       const verbose = opts.verbose ?? Boolean(cmd.optsWithGlobals().verbose);
       await runFleetPing({ ...opts, verbose });
     });
@@ -2129,8 +1785,6 @@ function registerDevicesCommands(program: Command): void {
       try {
         plan = await resolveWorkerDevice({ platforms: csvList(opts.platform) });
       } catch (err) {
-        // Fail loud with the resolver's own message. Never print a device name
-        // we did not actually pick: a caller reading stdout would ship a tree to it.
         console.error(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
         return;
@@ -2139,8 +1793,6 @@ function registerDevicesCommands(program: Command): void {
         console.log(JSON.stringify(plan, null, 2));
         return;
       }
-      // stdout is the name alone (`box="$(agents devices pick)"`); the human
-      // detail goes to stderr so it never pollutes that capture.
       const detail = plan.candidates
         .map((c) => `${c.device}:${c.loadPercent === undefined ? '?' : `${Math.round(c.loadPercent)}%`}`)
         .join(' ');
@@ -2224,9 +1876,6 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     .option('--platform <platform>', 'windows | linux | macos')
     .action(async (name: string, target: string, opts: { platform?: string }) => {
       try {
-        // The one place a device name is CHOSEN rather than observed, so the one
-        // place the reserved-sentinel policy belongs. upsertDevice itself stays
-        // shape-only — `devices sync` feeds it tailnet node names in a loop.
         assertRegistrableDeviceName(name);
         const { host, user } = splitUserHost(target);
         const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
@@ -2322,9 +1971,6 @@ is reported \`failed\` (exit non-zero), never a stranded \`ok\`.
       console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
       const self = machineId();
       const results = runFleet(targets, cmd, { self });
-      // `exit 0` from the upgrade only proves the npm global moved. Ask each box
-      // what `agents` actually resolves to before calling the rollout a success
-      // (RUSH-2446) — a dev install shadowing the global keeps running old code.
       const verifications = verifyFleetRollout(targets, results, version, { self });
       printFleetResults(results, verifications);
     });
@@ -2426,13 +2072,6 @@ function fmtWtSize(n: number): string {
   return `${v.toFixed(v < 10 ? 1 : 0)}${units[i]}`;
 }
 
-/**
- * `agents fleet worktrees` — surface the held set the sweep only counts. Never
- * removes anything; `--push` publishes on-no-remote stranded branches. This is
- * the CLI-native surfacing half of PHNX-3520 (the sweep itself lives in
- * phnx-labs/.agents; it still emits a bare count until a sibling change teaches
- * it to consume this).
- */
 async function runWorktreesHeld(opts: WorktreesHeldOptions): Promise<void> {
   if (opts.bucket && !isHeldBucket(opts.bucket)) {
     console.error(chalk.red(`Unknown bucket '${opts.bucket}'. Use one of: ${BUCKET_ORDER.join(', ')}`));
@@ -2500,7 +2139,6 @@ async function runWorktreesHeld(opts: WorktreesHeldOptions): Promise<void> {
   }
 }
 
-/** `--push`: publish every on-no-remote stranded branch. Never deletes. */
 async function runWorktreesPush(held: HeldWorktree[], opts: WorktreesHeldOptions): Promise<void> {
   const candidates = held.filter((w) => w.bucket === 'unmerged-commits' && !w.hasRemoteBranch && w.branch);
   if (candidates.length === 0) {
@@ -2530,7 +2168,6 @@ async function runWorktreesPush(held: HeldWorktree[], opts: WorktreesHeldOptions
   console.log('\n' + chalk.green(`Published ${pushed}/${candidates.length} stranded branch${candidates.length === 1 ? '' : 'es'}.`));
 }
 
-/** `--fleet`: run this same read-only surface on every online device, aggregate. */
 async function runWorktreesHeldFleet(opts: WorktreesHeldOptions): Promise<void> {
   const reg = await loadDevices();
   const targets = planFleetTargets(reg);
@@ -2559,10 +2196,6 @@ async function runWorktreesHeldFleet(opts: WorktreesHeldOptions): Promise<void> 
     }
   }
 
-  // Apply the bucket filter to the per-device inputs BEFORE aggregating, so
-  // `total`, per-`devices` totals, and `buckets` all describe the same filtered
-  // set — zeroing buckets after the sum leaves `total` counting rows the output
-  // no longer lists.
   const scoped = opts.bucket
     ? perDevice.map((d) => ({ device: d.device, held: d.held.filter((w) => w.bucket === opts.bucket) }))
     : perDevice;
@@ -2587,12 +2220,6 @@ async function runWorktreesHeldFleet(opts: WorktreesHeldOptions): Promise<void> 
   }
 }
 
-/**
- * `agents devices ps` — list tasks dispatched to devices (`agents run --device
- * <name> --no-follow`). Heals any 'running' record whose local follower died
- * (dropped connection, laptop sleep) against the remote `.exit` before listing,
- * so a finished run never shows stuck at 'running'.
- */
 async function doDeviceTaskPs(json: boolean): Promise<void> {
   const tasks = reconcileRunningTasks(listTasks());
   if (json) {
@@ -2613,9 +2240,7 @@ async function doDeviceTaskPs(json: boolean): Promise<void> {
   }
 }
 
-/** `agents devices stop <id>` — terminate a running dispatched task from the origin machine. */
 async function doDeviceTaskStop(ref: string): Promise<void> {
-  // Heal first so we don't try to kill a process that already exited.
   const current = resolveTaskRef(ref);
   if (!current) {
     console.log(chalk.red(`Unknown task "${ref}".`));
@@ -2649,11 +2274,6 @@ async function doDeviceTaskStop(ref: string): Promise<void> {
   }
 }
 
-/**
- * Parse `--argv`'s JSON array, or report exactly what was wrong and return
- * undefined. Fails loud rather than coercing: a caller that meant to pass argv
- * and typo'd the JSON must not silently get shell-string semantics instead.
- */
 export function parseArgvJson(raw: string, log: (line: string) => void = (line) => console.error(line)): string[] | undefined {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch (error) {
@@ -2674,7 +2294,6 @@ export function parseArgvJson(raw: string, log: (line: string) => void = (line) 
   return parsed as string[];
 }
 
-/** Register the `agents ssh` smart wrapper. */
 function registerSshWrapper(program: Command): void {
   const sshCmd = program
     .command('ssh <name> [cmd...]')
@@ -2711,8 +2330,6 @@ arrives intact. The positional form keeps its existing semantics — the remote
 shell parses it — so the two are mutually exclusive rather than interchangeable.
 `)
     .action(async (name: string, cmd: string[], opts: { argv?: string }) => {
-      // `--argv` is a DIFFERENT delivery contract, not a spelling of the
-      // positional form, so accepting both would have to silently pick one.
       if (opts.argv !== undefined && cmd.length > 0) {
         console.error(chalk.red('Pass either --argv <json> or a positional command, not both.'));
         console.error(chalk.gray('--argv delivers exact tokens; the positional form is parsed by the remote shell.'));
@@ -2728,20 +2345,10 @@ shell parses it — so the two are mutually exclusive rather than interchangeabl
         }
         cmd = argvTokens;
       }
-      // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.
       if (name === '__askpass') {
         await runAskpass();
         return;
       }
-      // `auto` is the same affinity sentinel `agents run --device auto` resolves
-      // (RUSH-2185) — pick the concrete device up front via the SAME engine
-      // (resolveDeviceAffinity), rather than leaning on matchHost's generic
-      // self-resolution (../lib/hosts/registry.js): `agents ssh` connects OUT to
-      // a remote device, so a pick that lands on THIS machine is refused with a
-      // clear message instead of self-SSHing — which also holds when this
-      // machine was never itself enrolled as a device (matchHost would have
-      // nothing to resolve "self" to, and mis-report the pick as "Unknown
-      // device").
       let target = name;
       if (isDeviceInteractive(name)) {
         const pinned = resolveInteractiveDevice();
@@ -2761,24 +2368,14 @@ shell parses it — so the two are mutually exclusive rather than interchangeabl
         process.stderr.write(chalk.gray(`[agents] device=auto → ${plan.host}\n`));
         target = plan.host;
       }
-      // Accept the full fleet target grammar: a registered `name`, a
-      // `user@device` (same device, login user overridden — dialed via its
-      // Tailscale route, not LAN DNS), or an ad-hoc `user@host`/`host` literal.
-      // A bare unregistered alias still errors as "Unknown device".
       const resolvedTarget = await resolveDeviceTarget(target);
       if (!resolvedTarget) {
-        // Not a registered device — it may be a leased crabbox box slug. ssh into
-        // it directly (crabbox@<tailnet|ip>:2222) before giving up.
-        trySshLeasedBox(target, cmd); // exits the process on a match
+        trySshLeasedBox(target, cmd);
         console.error(chalk.red(`Unknown device '${target}'. See 'agents devices list'.`));
         process.exit(1);
       }
-      // The effective profile: central config (ssh.*/platform/user) overlaid on
-      // the discovery record.
       const device = resolveDeviceProfile(resolvedTarget);
 
-      // Preflight: a device Tailscale last saw offline would otherwise hang
-      // for the full ConnectTimeout. Fail fast with a clear message instead.
       if (device.tailscale && !device.tailscale.online) {
         console.error(chalk.red(`Device '${device.name}' is offline (Tailscale last saw it ${device.tailscale.lastSeen ?? 'a while ago'}).`));
         console.error(chalk.gray("Run 'agents devices sync' to refresh reachability."));
@@ -2790,23 +2387,13 @@ shell parses it — so the two are mutually exclusive rather than interchangeabl
 
       try {
         const shim = writeAskpassShim();
-        // Pin the host key on first connect and verify strictly thereafter: the
-        // managed known_hosts store must exist before ssh writes the learned key
-        // into it, and a host already recorded there is checked with
-        // StrictHostKeyChecking=yes (RUSH-1767).
         ensureManagedKnownHostsDir();
         const addr = hostNameFor(device);
         const pinned = addr ? isHostPinned(addr) : false;
-        // Interactive login (no cmd): mirror the caller's project directory on
-        // the target when the same home-relative checkout exists there, matching
-        // `agents run --device` (deriveMirroredCwd). Best-effort — a missing dir
-        // falls back to the remote home. An explicit `cmd` keeps its cwd (RUSH-2412).
+        // First contact may pin once; subsequent calls stay strict-known-hosts.
         const mirrorCwd = cmd.length === 0 ? deriveMirroredCwd(process.cwd()) : undefined;
         const { args, env } = buildSshInvocation(device, cmd, shim, { pinned }, { interactiveCwd: mirrorCwd, ...(argvTokens ? { argv: true } : {}) });
 
-        // Interactive login: make the local terminal's terminfo (e.g.
-        // xterm-ghostty) available on the remote so backspace/colors/clear work.
-        // Best-effort + cached per host — never blocks the login (see terminfo.ts).
         if (cmd.length === 0 && shouldSyncTerminfo({ term: process.env.TERM, shell: device.shell, interactive: process.stdout.isTTY ?? false })) {
           const { args: tinfoArgs, env: tinfoEnv } = buildSshInvocation(device, ['tic', '-x', '-'], shim, { pinned });
           syncTerminfoToDevice({ device, host: terminfoHostKey(device, addr), term: process.env.TERM, sshArgs: tinfoArgs, sshEnv: tinfoEnv });
@@ -2823,16 +2410,9 @@ shell parses it — so the two are mutually exclusive rather than interchangeabl
       }
     });
 
-  // Keep the hidden askpass invocation out of help.
   void sshCmd;
 }
 
-/**
- * The askpass side of password auth. Invoked by the shim (which ssh execs with
- * SSH_ASKPASS): read the target bundle/key from the environment the wrapper
- * set, resolve it through the existing Keychain path, and print the password
- * to stdout for ssh to consume.
- */
 async function runAskpass(): Promise<void> {
   const bundle = process.env[ASKPASS_BUNDLE_ENV];
   const key = process.env[ASKPASS_KEY_ENV] ?? 'password';
@@ -2840,9 +2420,6 @@ async function runAskpass(): Promise<void> {
     console.error(`askpass: ${ASKPASS_BUNDLE_ENV} not set`);
     process.exit(1);
   }
-  // A read-only stats probe sets ASKPASS_AGENT_ONLY_ENV to force a broker-only
-  // resolve even under a TTY — so `agents devices` never pops Touch ID just to
-  // render load/mem for an uncached password-auth device (RUSH-1970).
   const agentOnly = true;
   try {
     const { env } = await readAndResolveBundleEnv(bundle, { caller: 'agents ssh', keys: [key], keyMode: 'storage', agentOnly });
@@ -2858,7 +2435,6 @@ async function runAskpass(): Promise<void> {
   }
 }
 
-/** Register both `agents ssh` and `agents devices`. */
 export function registerSshCommands(program: Command): void {
   registerSshWrapper(program);
   registerDevicesCommands(program);

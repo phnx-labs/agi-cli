@@ -9,7 +9,6 @@ function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'app-bundle-install-'));
 }
 
-/** A stand-in for a `.app` bundle: a directory tree with nested files. */
 function makeBundle(root: string, marker: string): string {
   const app = path.join(root, 'Helper.app');
   fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
@@ -55,10 +54,6 @@ describe('copyAppBundle: atomic install', () => {
   });
 
   it('a failed copy leaves the existing installed bundle intact (never rm-then-cp)', () => {
-    // The core regression: the old code did `rm -rf dest` BEFORE the slow `cp`,
-    // so any failure (or a concurrent reader) saw a missing/partial bundle —
-    // macOS "is damaged and can't be opened". The staged copy must never touch
-    // the live bundle until it is complete.
     const dir = tmpDir();
     const dest = path.join(dir, 'installed', 'Helper.app');
     copyAppBundle(makeBundle(path.join(dir, 'good'), 'v1'), dest);
@@ -67,7 +62,6 @@ describe('copyAppBundle: atomic install', () => {
     const missingSrc = path.join(dir, 'does-not-exist', 'Helper.app');
     expect(() => copyAppBundle(missingSrc, dest)).toThrow();
 
-    // The live bundle is untouched and still complete.
     expect(fs.existsSync(dest)).toBe(true);
     expect(readMarker(dest)).toBe('v1');
     expect(leftovers(dest)).toEqual([]);
@@ -79,8 +73,6 @@ describe('copyAppBundle: atomic install', () => {
     copyAppBundle(makeBundle(path.join(dir, 'good'), 'v1'), dest);
     expect(readMarker(dest)).toBe('v1');
 
-    // Force ONLY the staging->dest rename to fail; the dest->backup move and the
-    // backup->dest restore still succeed, exercising the rollback branch.
     const failingRename = (from: string, to: string): void => {
       if (from.includes('.installing')) throw new Error('injected: swap failed');
       fs.renameSync(from, to);
@@ -89,7 +81,6 @@ describe('copyAppBundle: atomic install', () => {
       copyAppBundle(makeBundle(path.join(dir, 'new'), 'v2'), dest, { renameSync: failingRename }),
     ).toThrow(/injected/);
 
-    // Rolled back: the original v1 bundle is restored intact, nothing left behind.
     expect(fs.existsSync(dest)).toBe(true);
     expect(readMarker(dest)).toBe('v1');
     expect(leftovers(dest)).toEqual([]);
@@ -103,7 +94,6 @@ describe('withInstallLock: serialization', () => {
     let ran = 0;
     withInstallLock(dest, () => {
       ran += 1;
-      // proper-lockfile holds `<lockTarget>.lock` while the body runs.
       expect(fs.existsSync(`${dest}.install-lock.lock`)).toBe(true);
     });
     expect(ran).toBe(1);

@@ -1,7 +1,3 @@
-/**
- * Testable API handlers for `agents teams`.
- * These functions can be called directly in tests with a custom AgentManager.
- */
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
@@ -13,18 +9,12 @@ import { buildClaudeLabelMap } from '../session/discover.js';
 import { resolveTeammateDelivery } from './delivery.js';
 import { hasUncommittedChanges } from './worktree.js';
 
-/**
- * Truncate a bash command for status output.
- * Handles heredocs specially - shows the redirect target instead of contents.
- */
 function truncateBashCommand(cmd: string, maxLen: number = 120): string {
-  // Detect heredoc patterns: cat <<'EOF' > path or cat << EOF > path
   const heredocMatch = cmd.match(/cat\s+<<['"]?(\w+)['"]?\s*>\s*([^\s]+)/);
   if (heredocMatch) {
     return `cat <<${heredocMatch[1]} > ${heredocMatch[2]}`;
   }
 
-  // For regular commands, just truncate
   if (cmd.length <= maxLen) return cmd;
   return cmd.substring(0, maxLen - 3) + '...';
 }
@@ -70,7 +60,6 @@ function recentToolCalls(events: any[], max = 10): ToolCallDetail[] {
     }));
 }
 
-/** Result returned after spawning a new teammate. */
 export interface SpawnResult {
   task_name: string;
   agent_id: string;
@@ -85,13 +74,10 @@ export interface SpawnResult {
   task_type?: TaskType | null;
   cloud_provider?: string | null;
   cloud_session_id?: string | null;
-  /** Device name the teammate runs on for a distributed (--on) teammate; null for local. */
   host?: string | null;
-  /** Sanitized evidence observed at the lifecycle boundary that failed. */
   failure?: TeammateFailure | null;
 }
 
-/** Detailed status of a single teammate, including file ops, commands, and a cursor for delta polling. */
 export interface AgentStatusDetail {
   agent_id: string;
   agent_type: string;
@@ -109,16 +95,11 @@ export interface AgentStatusDetail {
   last_messages: string[];
   tool_count: number;
   has_errors: boolean;
-  cursor: string;  // ISO timestamp - send back in next request for delta
+  cursor: string;
   mode?: string;
   cloud_session_id?: string | null;
   cloud_provider?: string | null;
   pr_url?: string | null;
-  /**
-   * Delivery postcondition (RUSH-2380), distinct from process `status`.
-   * `pr_open` when the process completed but left an unmerged PR — orchestrators
-   * must not treat that as "work landed on main".
-   */
   delivery?: string;
   version?: string | null;
   remote_session_id?: string | null;
@@ -126,66 +107,42 @@ export interface AgentStatusDetail {
   name?: string | null;
   after?: string[];
   task_type?: TaskType | null;
-  /** Device name the teammate runs on for a distributed (--on) teammate; null for local. */
   host?: string | null;
-  /** Absolute path to the teammate's worktree, when known. */
   workspace_dir?: string | null;
-  /** Sanitized evidence observed at the lifecycle boundary that failed. */
   failure?: TeammateFailure | null;
 }
 
-/** Aggregated status of all teammates in a task, with per-status counts and a global cursor. */
 export interface TaskStatusResult {
   task_name: string;
   agents: AgentStatusDetail[];
   summary: { pending: number; running: number; completed: number; stranded: number; failed: number; stopped: number };
-  cursor: string;  // ISO timestamp - max across all agents
+  cursor: string;
 }
 
-/**
- * Compact per-teammate snapshot for the default `teams status` view.
- *
- * The detail shape (`AgentStatusDetail`) carries the full prompt (often many
- * KB), every absolute path the agent has touched, and uncapped message
- * bodies. That's the right shape for programmatic consumers, but it makes
- * `teams status` unreadable for orchestrators who only need: what state are
- * you in, what did you just do, what files have you touched.
- *
- * Use {@link toAgentStatusSummary} to derive this from a detail record.
- */
 export interface AgentStatusSummary {
   agent_id: string;
   name: string | null;
   agent_type: string;
   status: string;
-  /** Delivery postcondition — see {@link AgentStatusDetail.delivery}. */
   delivery?: string;
   duration: string | null;
   tool_count: number;
   has_errors: boolean;
   pr_url: string | null;
   files: {
-    /** Count of files modified since the cursor (delta), plus basenames. */
     modified: { count: number; names: string[] };
     created:  { count: number; names: string[] };
     deleted:  { count: number; names: string[] };
-    /** Read is noisy (per-Read events fire constantly); only emit a count. */
     read:     { count: number };
   };
-  /** Already capped at 15 × 120 chars by the detail builder. */
   bash_commands: string[];
-  /** Last 3 messages, each body trimmed to ~400 chars. */
   last_messages: string[];
-  /** Device name for a distributed (--on) teammate; null for local. */
   host: string | null;
   failure: TeammateFailure | null;
-  /** Absolute path to the teammate's worktree, when known. */
   workspace_dir?: string | null;
-  /** ISO timestamp — feed back via --since for delta polling. */
   cursor: string;
 }
 
-/** Compact aggregated result; mirrors {@link TaskStatusResult} but agents[] is the summary shape. */
 export interface TaskStatusSummaryResult {
   task_name: string;
   agents: AgentStatusSummary[];
@@ -193,35 +150,21 @@ export interface TaskStatusSummaryResult {
   cursor: string;
 }
 
-/** Max files to name per category in the summary. Counts are always exact. */
 const SUMMARY_MAX_FILE_NAMES = 6;
-/** Max messages in the summary. */
 const SUMMARY_MAX_MESSAGES = 3;
-/** Max chars per message body in the summary. */
 const SUMMARY_MESSAGE_MAX_CHARS = 400;
 
-/**
- * Reduce a file path to just its basename for compact rendering. Keeps the
- * orchestrator oriented ("you touched types.ts") without dumping the full
- * absolute path every time. The full paths are still in `AgentStatusDetail`
- * for the verbose path.
- */
 function basenameOf(p: string): string {
   const ix = p.lastIndexOf('/');
   return ix < 0 ? p : p.slice(ix + 1);
 }
 
-/**
- * Trim long assistant messages to a fixed budget. We collapse leading
- * whitespace so the budget covers actual content, not indent.
- */
 function trimMessage(msg: string, max = SUMMARY_MESSAGE_MAX_CHARS): string {
   const s = msg.replace(/^\s+/, '');
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + '…';
 }
 
-/** Pull at most `max` basenames out of a path list, preserving order. */
 function compactFileList(paths: string[], max = SUMMARY_MAX_FILE_NAMES): { count: number; names: string[] } {
   const seen = new Set<string>();
   const names: string[] = [];
@@ -235,11 +178,6 @@ function compactFileList(paths: string[], max = SUMMARY_MAX_FILE_NAMES): { count
   return { count: paths.length, names };
 }
 
-/**
- * Project a full AgentStatusDetail down to a compact AgentStatusSummary.
- * Drops `prompt` entirely (caller knows what they queued), folds file lists
- * to basenames + counts, caps `last_messages` to 3 × {@link SUMMARY_MESSAGE_MAX_CHARS}.
- */
 export function toAgentStatusSummary(detail: AgentStatusDetail): AgentStatusSummary {
   return {
     agent_id: detail.agent_id,
@@ -270,7 +208,6 @@ export function toAgentStatusSummary(detail: AgentStatusDetail): AgentStatusSumm
   };
 }
 
-/** Project a full TaskStatusResult down to the compact summary shape. */
 export function toTaskStatusSummary(result: TaskStatusResult): TaskStatusSummaryResult {
   return {
     task_name: result.task_name,
@@ -280,7 +217,6 @@ export function toTaskStatusSummary(result: TaskStatusResult): TaskStatusSummary
   };
 }
 
-/** Result of stopping one or more teammates. */
 export interface StopResult {
   task_name: string;
   stopped: string[];
@@ -288,28 +224,24 @@ export interface StopResult {
   not_found: string[];
 }
 
-/** Summary metadata for a single task (team), including agent counts by status and timestamps. */
 export interface TaskInfo {
   task_name: string;
   agent_count: number;
   pending: number;
   running: number;
   completed: number;
-  /** Completed teammates with uncommitted work and no PR (PHNX-2951). */
   stranded: number;
   failed: number;
   stopped: number;
   workspace_dir: string | null;
-  created_at: string;   // Earliest agent start time
-  modified_at: string;  // Latest agent activity (completion or current time if running)
+  created_at: string;
+  modified_at: string;
 }
 
-/** Paginated list of tasks sorted by most recent activity. */
 export interface TasksResult {
   tasks: TaskInfo[];
 }
 
-/** Spawn a new teammate in a task and return its initial metadata. */
 export async function handleSpawn(
   manager: AgentManager,
   taskName: string,
@@ -336,7 +268,6 @@ export async function handleSpawn(
   hostName: string | null = null,
   hostTarget: string | null = null,
   repoPath: string | null = null,
-  /** The team's `--project`; grants resolve from it at launch. */
   project: string | null = null,
 ): Promise<SpawnResult> {
   const defaultMode = manager.getDefaultMode();
@@ -347,11 +278,6 @@ export async function handleSpawn(
     `[spawn] Spawning ${agentType} agent for task "${taskName}" [${resolvedMode}] effort=${resolvedEffort}${profileName ? ` profile=${profileName}` : ''}...`
   );
 
-  // Budget pre-flight gate (issue #346). Teammates inherit the project's caps:
-  // before launching one, project its estimated cost onto current spend and
-  // refuse when on_exceed:block would be breached. Cross-vendor by construction
-  // — a Claude teammate and a Codex teammate draw down the same per_project /
-  // per_day pool. Dormant (no-op) when no caps are configured.
   {
     const gateCwd = cwd || workspaceDir || worktreePath || process.cwd();
     const { runPreflightGate } = await import('../budget/preflight.js');
@@ -416,15 +342,13 @@ export async function handleSpawn(
   };
 }
 
-/** Retrieve the current status of all teammates in a task, with optional timestamp-based delta filtering. */
 export async function handleStatus(
   manager: AgentManager,
   taskName: string | null | undefined,
   filter?: string,
-  since?: string,  // Optional ISO timestamp - return only events after this time
+  since?: string,
   parentSessionId?: string | null
 ): Promise<TaskStatusResult> {
-  // Default to 'all' so callers see completed/failed agents unless they opt to filter
   const effectiveFilter = filter || 'all';
   const normalizedTaskName = taskName?.trim() || '';
   const normalizedParentSessionId = parentSessionId?.trim() || '';
@@ -443,7 +367,6 @@ export async function handleStatus(
     ? await manager.listByParentSession(normalizedParentSessionId)
     : await manager.listByTask(normalizedTaskName);
 
-  // Filter agents by status ('all' shows everything)
   const agents = effectiveFilter === 'all'
     ? allAgents
     : allAgents.filter((a) => a.status === effectiveFilter);
@@ -451,7 +374,6 @@ export async function handleStatus(
   const agentStatuses: AgentStatusDetail[] = [];
   const counts = { pending: 0, running: 0, completed: 0, stranded: 0, failed: 0, stopped: 0 };
 
-  // Count ALL agents for summary (not just filtered)
   for (const agent of allAgents) {
     if (agent.status === AgentStatus.PENDING) counts.pending++;
     else if (agent.status === AgentStatus.RUNNING) counts.running++;
@@ -460,10 +382,6 @@ export async function handleStatus(
     else if (agent.status === AgentStatus.STOPPED) counts.stopped++;
   }
 
-  // Stranded count is computed over ALL agents, not the filter-narrowed view,
-  // so a `--filter running` status still reports teammates that completed dirty.
-  // Cache the probe result so we can reuse it when building details for the
-  // filtered subset without probing the worktree twice.
   const uncommittedCache = new Map<string, boolean>();
   for (const agent of allAgents) {
     if (agent.status !== AgentStatus.COMPLETED) continue;
@@ -486,8 +404,7 @@ export async function handleStatus(
     }
   }
 
-  // Build details only for filtered agents
-  let maxTimestamp = since || new Date(0).toISOString();  // Track max timestamp for cursor
+  let maxTimestamp = since || new Date(0).toISOString();
   const claudeLabels = allAgents.some((agent) => agent.agentType === 'claude')
     ? buildClaudeLabelMap()
     : new Map<string, string | null>();
@@ -496,7 +413,6 @@ export async function handleStatus(
     await agent.readNewEvents();
     const events = agent.events;
 
-    // Use getDelta to filter events by timestamp (or get all if no since)
     const delta = getDelta(
       agent.agentId,
       agent.agentType,
@@ -505,7 +421,6 @@ export async function handleStatus(
       since
     );
 
-    // Find latest timestamp from this agent's events
     const latestEvent = events[events.length - 1];
     const agentTimestamp = latestEvent?.timestamp || new Date().toISOString();
     if (agentTimestamp > maxTimestamp) {
@@ -565,11 +480,10 @@ export async function handleStatus(
     task_name: normalizedTaskName,
     agents: agentStatuses,
     summary: counts,
-    cursor: maxTimestamp,  // Max timestamp across all agents
+    cursor: maxTimestamp,
   };
 }
 
-/** List all known tasks grouped by task name, sorted by most recent activity. */
 export async function handleTasks(
   manager: AgentManager,
   limit: number = 10
@@ -578,7 +492,6 @@ export async function handleTasks(
 
   const allAgents = await manager.listAll();
 
-  // Group agents by taskName
   const taskMap = new Map<string, typeof allAgents>();
   for (const agent of allAgents) {
     const existing = taskMap.get(agent.taskName) || [];
@@ -595,16 +508,12 @@ export async function handleTasks(
     let workspaceDir: string | null = null;
 
     for (const agent of agents) {
-      // Count by status
       if (agent.status === AgentStatus.PENDING) pending++;
       else if (agent.status === AgentStatus.RUNNING) running++;
       else if (agent.status === AgentStatus.COMPLETED) completed++;
       else if (agent.status === AgentStatus.FAILED) failed++;
       else if (agent.status === AgentStatus.STOPPED) stopped++;
 
-      // Stranded = completed, no PR, local worktree still dirty. Probes the real
-      // worktree so `teams tasks` and `teams list --status` don't classify lost
-      // work as done (PHNX-2951).
       if (agent.status === AgentStatus.COMPLETED && !agent.prUrl?.trim() && !agent.hostName && agent.workspaceDir) {
         const delivery = resolveTeammateDelivery({
           status: agent.status,
@@ -616,13 +525,10 @@ export async function handleTasks(
         }
       }
 
-      // Track earliest start (created_at)
       if (!earliestStart || agent.startedAt < earliestStart) {
         earliestStart = agent.startedAt;
       }
 
-      // Track latest activity (modified_at)
-      // For running agents, use current time; for others use completedAt or startedAt
       const activityTime = agent.status === AgentStatus.RUNNING
         ? new Date()
         : (agent.completedAt || agent.startedAt);
@@ -630,7 +536,6 @@ export async function handleTasks(
         latestActivity = activityTime;
       }
 
-      // Use first non-null workspaceDir found
       if (!workspaceDir && agent.workspaceDir) {
         workspaceDir = agent.workspaceDir;
       }
@@ -651,10 +556,8 @@ export async function handleTasks(
     });
   }
 
-  // Sort by modified_at descending (most recent first)
   tasks.sort((a, b) => new Date(b.modified_at).getTime() - new Date(a.modified_at).getTime());
 
-  // Apply limit
   const limitedTasks = tasks.slice(0, limit);
 
   debug(`[tasks] Returning ${limitedTasks.length}/${tasks.length} tasks`);
@@ -662,7 +565,6 @@ export async function handleTasks(
   return { tasks: limitedTasks };
 }
 
-/** Stop a specific teammate or all teammates in a task. */
 export async function handleStop(
   manager: AgentManager,
   taskName: string,

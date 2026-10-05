@@ -1,9 +1,3 @@
-/**
- * Distributed-team fields must round-trip through meta.json. A silent drop here
- * is exactly the bug that made a finished remote teammate look stuck/failed in
- * e2e (host + remote handles lost on reload). Real disk I/O, no mocking:
- * saveMeta() writes, loadFromDisk() reads back, fields must match.
- */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -24,7 +18,6 @@ describe('remote-teammate meta round-trip', () => {
       id, 'dist-team', 'claude', 'do a thing',
       null, 'plan', null, AgentStatus.RUNNING, new Date(), null, base,
     );
-    // Set the distributed fields the way launch/add do (post-construction).
     a.hostName = 'yosemite-s0';
     a.hostTarget = 'yosemite-s0.tail1a85a1.ts.net';
     a.repoPath = '/home/muqsit/.agents/repos/dist-team';

@@ -1,10 +1,3 @@
-/**
- * Droid (`droid exec -o stream-json`) parser tests.
- *
- * Droid emits Factory session-style JSONL: `session_start` plus `message`
- * envelopes whose content blocks are Anthropic-shaped. The teams parser must
- * preserve file/tool/final-message activity for collect/status summaries.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';

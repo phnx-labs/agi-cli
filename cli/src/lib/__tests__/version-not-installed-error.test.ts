@@ -1,11 +1,3 @@
-/**
- * Tests for VersionNotInstalledError + selector consistency between
- * resolveAgentVersionTargets and resolveInstalledAgentTargets.
- *
- * Before this work, resolveInstalledAgentTargets was missing the `@all`
- * branch and threw a bare Error (the auto-install wrapper could not catch
- * it by type, only by string match). Both gaps are closed here.
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -96,7 +88,6 @@ describe('VersionNotInstalledError + resolveInstalledAgentTargets @all parity', 
   it('resolveInstalledAgentTargets expands literal `all` across capable agents (skipping uninstalled)', async () => {
     makeFakeInstall('claude', '2.1.141');
     makeFakeInstall('codex', '0.116.0');
-    // gemini intentionally not installed
 
     const { resolveInstalledAgentTargets } = await loadLib();
     const result = resolveInstalledAgentTargets('all', ['claude', 'codex', 'gemini']);

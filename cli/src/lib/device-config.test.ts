@@ -3,10 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// state.ts resolves HOME and the device id at import time, so we point both at a
-// throwaway temp dir and re-import the modules fresh for each test — the REAL
-// three-layer read/write path against real files, no mocks (mirrors
-// state.test.ts).
 let TMP = '';
 
 async function freshModules() {
@@ -44,7 +40,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete process.env.AGENTS_SYNC_MACHINE_ID;
-  try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {  }
 });
 
 describe('user-scope keys (interactive.host)', () => {
@@ -98,7 +94,6 @@ describe('device-scope keys (per-device doc config:)', () => {
 
     unsetConfigValue('agents.max-concurrent');
     expect(getConfigValue('agents.max-concurrent').value).toBeUndefined();
-    // The other device-scope keys survive an unset of a sibling key.
     expect(getConfigValue('scheduler.enabled').value).toBe(false);
     expect(readDoc()).not.toContain('maxAgents');
   });
@@ -117,9 +112,7 @@ describe('device-scope keys (per-device doc config:)', () => {
 
     unsetConfigValue('agents.max-concurrent', { device: 'mac-mini' });
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBeUndefined();
-    // Unsetting the last key removes the doc entirely (no empty tracked file).
     expect(fs.existsSync(deviceDocPath('mac-mini'))).toBe(false);
-    // Unsetting a key that was never set is a no-op — no doc created.
     unsetConfigValue('watchdog.enabled', { device: 'ghost' });
     expect(fs.existsSync(deviceDocPath('ghost'))).toBe(false);
   });
@@ -200,8 +193,6 @@ describe('fleet-defaults layer (central fleet.defaults.config)', () => {
     expect(central).toContain('fleet:');
     expect(central).toContain('defaults:');
     expect(central).toContain('schedulerEnabled: false');
-    // The fleet write materializes devices as an explicit EMPTY map (never
-    // 'all') so `agents apply` targets nothing until a roster is declared.
     const { readMeta } = await freshModules();
     expect(readMeta().fleet?.devices).toEqual({});
 
@@ -209,27 +200,21 @@ describe('fleet-defaults layer (central fleet.defaults.config)', () => {
 
     unsetConfigValue('scheduler.enabled', { fleet: true });
     expect(getConfigValue('scheduler.enabled', { fleet: true }).value).toBeUndefined();
-    // The emptied block goes away entirely.
     expect(readCentral()).not.toContain('fleet:');
   });
 
   it('layering: built-in default < fleet default < device value', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
-    // Unset everywhere → built-in default.
     expect(getConfigValue('watchdog.enabled')).toMatchObject({ value: undefined, source: 'default' });
 
-    // Fleet default applies to every device.
     setConfigValue('watchdog.enabled', false, { fleet: true });
     expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
 
-    // A device value wins over the fleet default.
     setConfigValue('watchdog.enabled', true, { device: 'mac-mini' });
     expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: true, source: 'device' });
-    // …only on that device.
     expect(getConfigValue('watchdog.enabled', { device: 'zion' })).toMatchObject({ value: false, source: 'fleet' });
 
-    // Unsetting the device key falls back to the fleet default.
     unsetConfigValue('watchdog.enabled', { device: 'mac-mini' });
     expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
   });
@@ -362,8 +347,6 @@ describe('validation', () => {
 
   it('validates the AGI Menu Headless-runs preferences against real agent ids and device names (PHNX-3999)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
-    // A harness the fleet actually has, and a typo that must never be stored:
-    // the Menu reads this value back as the agent it dispatches.
     setConfigValue('menubar.menu.headlessAgent', 'claude');
     expect(getConfigValue('menubar.menu.headlessAgent').value).toBe('claude');
     expect(() => setConfigValue('menubar.menu.headlessAgent', 'cladue')).toThrow(/must be an agent id/);
@@ -376,7 +359,6 @@ describe('validation', () => {
       expect(getConfigValue('menubar.menu.headlessPlacement').value).toBe(placement);
     }
     expect(() => setConfigValue('menubar.menu.headlessPlacement', 'the fastest box')).toThrow(/auto \| local \| interactive/);
-    // Unset placement still reads as automatic placement.
     const { unsetConfigValue } = await import('./device-config.js');
     unsetConfigValue('menubar.menu.headlessPlacement');
     expect(getConfigValue('menubar.menu.headlessPlacement').spec.defaultValue).toBe('auto');
@@ -598,14 +580,14 @@ describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () =
 describe('readMaxConcurrentCaps', () => {
   it('reads caps from device docs + the fleet default, omitting uncapped devices', async () => {
     const { readMaxConcurrentCaps, setConfigValue } = await freshModules();
-    setConfigValue('agents.max-concurrent', 4);                            // self (testbox)
-    setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' });    // peer doc
-    setConfigValue('agents.max-concurrent', 6, { fleet: true });           // fleet default
+    setConfigValue('agents.max-concurrent', 4);
+    setConfigValue('agents.max-concurrent', 2, { device: 'mac-mini' });
+    setConfigValue('agents.max-concurrent', 6, { fleet: true });
 
     expect(readMaxConcurrentCaps(['testbox', 'mac-mini', 'zion'])).toEqual({
       testbox: 4,
       'mac-mini': 2,
-      zion: 6, // fleet default applies to a device with no own cap
+      zion: 6,
     });
   });
 
@@ -657,7 +639,6 @@ describe('auto-launch accessors', () => {
       'mac-mini': { preferred: true },
     });
 
-    // Back to the default removes the key.
     setAutoLaunchEnabled('zion', true);
     setAutoLaunchPreferred('mac-mini', false);
     expect(loadAutoLaunchPreferences()).toEqual({});
@@ -668,17 +649,15 @@ describe('auto-launch accessors', () => {
     const { setConfigValue, loadAutoLaunchPreferences } = await freshModules();
 
     setConfigValue('auto-launch.preferred', true, { fleet: true });
-    // A doc-less device only appears when the caller passes the roster.
     expect(loadAutoLaunchPreferences()).toEqual({});
     expect(loadAutoLaunchPreferences(['zion'])).toEqual({ zion: { preferred: true } });
 
-    // A device entry wins over the fleet default.
     setConfigValue('auto-launch.enabled', false, { fleet: true });
     setConfigValue('auto-launch.enabled', true, { device: 'mac-mini' });
     const prefs = loadAutoLaunchPreferences(['zion', 'mac-mini']);
     expect(prefs.zion).toEqual({ preferred: true, enabled: false });
-    expect(prefs['mac-mini'].enabled).toBeUndefined(); // explicit device true wins → not disabled
-    expect(prefs['mac-mini'].preferred).toBe(true); // fleet default still inherits
+    expect(prefs['mac-mini'].enabled).toBeUndefined();
+    expect(prefs['mac-mini'].preferred).toBe(true);
   });
 });
 
@@ -688,14 +667,9 @@ describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
 
     setConfigValue('role', 'worker', { fleet: true });
 
-    // 'zion' has never had a per-device doc written — the bare, doc-scan-only
-    // call (no roster) must not see it. This is the gap #2622's non-author
-    // review flagged: a fleet-wide `role` default silently dropped a doc-less
-    // device from the `--device auto` worker allowlist.
     expect(listConfiguredDeviceRoles()).toEqual({});
     expect(listConfiguredDeviceRoles(['zion'])).toEqual({ zion: 'worker' });
 
-    // A device's own mark still wins over the fleet default, roster or not.
     setConfigValue('role', 'personal', { device: 'mac-mini' });
     expect(listConfiguredDeviceRoles(['zion', 'mac-mini'])).toEqual({
       zion: 'worker',
@@ -705,11 +679,6 @@ describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
 });
 
 describe('devicesPinningBrowserProfile', () => {
-  // These pins cannot be written through setConfigValue from here — the browser
-  // keys are machine-local, so only the owning device can set them (it errors
-  // with "can only be read or set on the device itself"). They reach this
-  // machine by SYNC, as a device doc. So the fixture writes the doc, which is
-  // the real-world shape.
   function writeDeviceDoc(device: string, body: string): void {
     const dir = path.join(TMP, '.agents', 'devices', device);
     fs.mkdirSync(dir, { recursive: true });
@@ -717,9 +686,6 @@ describe('devicesPinningBrowserProfile', () => {
   }
 
   it('reports WHICH key each device pinned, not just that it matched', async () => {
-    // A caller telling the user to fix `browser.profile` on a device that
-    // actually pinned `browser.viewer` leaves the real pin broken AND sets a
-    // second key nobody asked for. `profiles rename` prints these verbatim.
     writeDeviceDoc('peerbox', 'config:\n  defaultBrowserProfile: demo\n');
     writeDeviceDoc('otherbox', 'config:\n  browserViewer: demo\n');
     writeDeviceDoc('bothbox', 'config:\n  defaultBrowserProfile: demo\n  browserViewer: demo\n');

@@ -20,11 +20,9 @@ describe('createSpinner', () => {
       const s = fakeStream(true);
       const spin = createSpinner({ stream: s, intervalMs: 100 });
       spin.start('warming');
-      const afterStart = s.writes.length; // one initial frame
-      // A flood of updates between ticks must NOT write anything on its own.
+      const afterStart = s.writes.length;
       for (let i = 0; i < 100_000; i++) spin.update(`line ${i}`);
       expect(s.writes.length).toBe(afterStart);
-      // Only the timer produces writes — one per interval.
       vi.advanceTimersByTime(350);
       expect(s.writes.length - afterStart).toBe(3);
       spin.stopAndPersist('✔', 'done');
@@ -152,7 +150,6 @@ describe('createLeaseOutputRouter phase steps', () => {
     ]);
     expect(steps.map((s) => s.name)).toEqual(['sync', 'install', 'runtime']);
     expect(captured).toEqual(steps);
-    // Real setup output survives; sentinel lines never leak into setup noise.
     expect(setup).toEqual(['installing node...']);
     expect(setup.join('\n')).not.toContain('___PHASE_');
   });
@@ -170,7 +167,6 @@ describe('createLeaseOutputRouter phase steps', () => {
   });
 
   it('attaches elapsedMs from an injected clock, and omits it without one', () => {
-    // Clock reads: creation=1000, sync=1200, install=1700 → elapsed 200, then 500.
     const ticks = [1000, 1200, 1700];
     let i = 0;
     const { steps } = runSteps(
@@ -179,7 +175,6 @@ describe('createLeaseOutputRouter phase steps', () => {
     );
     expect(steps.map((s) => s.elapsedMs)).toEqual([200, 500]);
 
-    // No clock → no timing.
     const { steps: noClock } = runSteps([`${leasePhaseSentinel('sync')}\n`]);
     expect(noClock[0].elapsedMs).toBeUndefined();
   });

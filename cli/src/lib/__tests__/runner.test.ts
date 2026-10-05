@@ -111,14 +111,10 @@ describe('buildJobCommand', () => {
       '<wake prompt>',
     );
     expect(argv).toEqual(['agents', 'run', 'claude', '--resume', 'sess-abc123', '<wake prompt>', '--mode', 'skip']);
-    // Resume takes precedence over the fresh-agent template — none of its flags leak in.
     expect(argv).not.toContain('--permission-mode');
     expect(argv).not.toContain('--dangerously-skip-permissions');
   });
 
-  // Regression: kimi daemon jobs run headless via `--prompt`, which cannot be
-  // combined with --plan/--auto/--yolo (kimi aborts "Cannot combine --prompt
-  // with --X"). Write-modes must omit the flag; plan must fail closed.
   it('kimi skip mode omits --yolo (incompatible with headless --prompt)', () => {
     const argv = buildJobCommand(baseJob({ agent: 'kimi', mode: 'skip' }), 'Do the task.');
     expect(argv).toContain('--prompt');
@@ -131,8 +127,6 @@ describe('buildJobCommand', () => {
   });
 
   it('kimi plan mode downgrades to auto — no throw, no --plan (RUSH-1810)', () => {
-    // Routines run headless; kimi's headlessPlan:false makes a plan request degrade
-    // to auto (kimi -p auto-runs, carrying no startup-mode flag). Must not throw.
     let argv: string[] = [];
     expect(() => {
       argv = buildJobCommand(baseJob({ agent: 'kimi', mode: 'plan' }), 'Do the task.');
@@ -176,9 +170,6 @@ describe('cursor loop routine mode warning', () => {
 });
 
 describe('dispatchesViaAgentsRun — pin exclusion for `agents run` commands', () => {
-  // Regression: resume commands start with 'agents' (the dispatcher), so binary-pinning
-  // them rewrites cmd[0] -> the agent binary and yields a broken `<binary> run …`.
-  // executeJob/executeJobDetached must skip pinning for these, exactly like workflow jobs.
   it('is true for resume and workflow jobs, false for a plain agent job', () => {
     expect(dispatchesViaAgentsRun(baseJob({ agent: 'claude', resume: 'sess-1' }))).toBe(true);
     expect(dispatchesViaAgentsRun(baseJob({ workflow: 'autodev', agent: undefined as unknown as 'claude' }))).toBe(true);
@@ -187,11 +178,8 @@ describe('dispatchesViaAgentsRun — pin exclusion for `agents run` commands', (
   });
 
   it('pinJobBinary would corrupt a resume command — proving why it must be excluded', () => {
-    // A resume command: cmd[0] is the 'agents' dispatcher, not the agent binary.
     const resumeCmd = buildJobCommand(baseJob({ agent: 'claude', mode: 'skip', resume: 'sess-1' }), '<p>');
     expect(resumeCmd[0]).toBe('agents');
-    // If pinJobBinary DID run on it and the version were installed, it would clobber
-    // cmd[0] to the binary → `<binary> run claude …`. The guard is what prevents this.
     expect(dispatchesViaAgentsRun({ resume: 'sess-1' })).toBe(true);
   });
 });
@@ -206,13 +194,10 @@ describe('executeJobDetached — spawn error handling', () => {
   });
 
   it('marks run failed in meta.json on spawn error without throwing', async () => {
-    // Seed an "installed" version whose binary path is a directory — pinJobBinary
-    // rewrites to that absolute path, and spawn then fails with EISDIR/ENOENT so
-    // the error handler rewrites meta. Guaranteed even when a real `codex` is on PATH.
     const version = '0.0.1-enoent-test';
     const versionDir = getVersionDir('codex', version);
     const binPath = getBinaryPath('codex', version);
-    fs.mkdirSync(binPath, { recursive: true }); // directory where a file should be
+    fs.mkdirSync(binPath, { recursive: true });
 
     const config: JobConfig = {
       name: '__runner-test-enoent__',
@@ -224,7 +209,7 @@ describe('executeJobDetached — spawn error handling', () => {
       timeout: '10m',
       enabled: true,
       prompt: 'test prompt',
-      cwd: '~', // agent routines now need an execution anchor; home is a valid one
+      cwd: '~',
       sandbox: false,
     };
 
@@ -234,9 +219,6 @@ describe('executeJobDetached — spawn error handling', () => {
       const meta = await executeJobDetached(config);
       expect(meta.status).toBe('running');
 
-      // The spawn error event is async and rewrites meta.json off the event
-      // loop. A fixed sleep flakes on slow Windows CI (the event lands after
-      // the window); poll for the terminal state up to 10s instead.
       let updated = readRunMeta(config.name, meta.runId);
       const deadline = Date.now() + 10_000;
       while ((updated?.status ?? 'running') === 'running' && Date.now() < deadline) {
@@ -442,10 +424,6 @@ describe('buildRoutineSpawnEnv', () => {
     expect(env.HOME).toBe('/tmp/overlay');
   });
 
-  // The daemon holds no Claude token, so buildRoutineSpawnEnv does no claude-token
-  // manipulation at all — it neither injects a per-account/ambient token nor drops
-  // one. A routine authenticates through the pinned account's own CLAUDE_CONFIG_DIR
-  // login, identical to interactive `agents run`.
   it('adds no CLAUDE_CODE_OAUTH_TOKEN — routines use the per-account CLAUDE_CONFIG_DIR login', () => {
     const env = buildRoutineSpawnEnv(
       { HOME: '/tmp/overlay', PATH: '/usr/bin' },
@@ -456,18 +434,12 @@ describe('buildRoutineSpawnEnv', () => {
     expect(env.CLAUDE_CONFIG_DIR).toContain(path.join('claude', '2.1.0'));
   });
 
-  // The above passed everywhere a token was absent — which is every CI runner,
-  // and why this shipped. On a provisioned box the daemon's own environment
-  // carries CLAUDE_CODE_OAUTH_TOKEN, buildExecEnv spreads ambient process.env,
-  // and every routine silently ran on that one shared rotating token instead of
-  // the host's login. Set it for real so the assertion means something.
   it('drops an AMBIENT CLAUDE_CODE_OAUTH_TOKEN — the host login wins, not a shared token', () => {
     const prev = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-ambient-must-not-leak';
     try {
       const env = buildRoutineSpawnEnv({ HOME: '/tmp/overlay', PATH: '/usr/bin' }, 'claude', '2.1.0');
       expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-      // and the routine still authenticates — via this box's own version home
       expect(env.CLAUDE_CONFIG_DIR).toContain(path.join('claude', '2.1.0'));
     } finally {
       if (prev === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -514,7 +486,6 @@ describe('credit/rate-limit detect + failover chain composition (RUSH-1016)', ()
     };
     const chain = rotationFailoverChain(rotation, '2.1.143');
     expect(chain.map((e) => e.version)).toEqual(['2.1.142', '2.1.141']);
-    // Primary + failover is what resolveRoutineLaunch returns as chain.
     const full = [{ agent: 'claude' as const, version: '2.1.143' }, ...chain];
     expect(full[0].version).toBe('2.1.143');
     expect(full).toHaveLength(3);

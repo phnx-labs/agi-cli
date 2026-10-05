@@ -1,8 +1,3 @@
-/**
- * Promptcuts paths must resolve inside the hooks/ subdirectory of each repo,
- * not at the repo root. Promptcuts are data for the expand-promptcuts hook,
- * not a top-level resource type — co-located with the hook that consumes them.
- */
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';
@@ -28,9 +23,6 @@ describe('promptcuts path resolution', () => {
   });
 
   it('legacy getPromptcutsPath returns the system path (back-compat)', () => {
-    // Old callers relied on a single getPromptcutsPath() returning the
-    // canonical location. After the refactor, the canonical location is the
-    // system file inside hooks/.
     expect(getPromptcutsPath()).toBe(getSystemPromptcutsPath());
   });
 

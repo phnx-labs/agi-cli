@@ -1,11 +1,3 @@
-/**
- * Grok streaming-json parser tests.
- *
- * Grok's `--output-format streaming-json` emits token-level JSON objects with
- * three event types: `thought`, `text`, and `end`. These tests pin the
- * normalization contract so the team runner can reconstruct readable summaries
- * from token streams.
- */
 import { describe, expect, it } from 'vitest';
 import { normalizeEvents } from '../parsers.js';
 import { summarizeEvents } from '../summarizer.js';
@@ -78,9 +70,6 @@ describe('normalizeEvents(grok)', () => {
 
 describe('summarizeEvents with grok streaming tokens', () => {
   it('reassembles token-level message events into one finalMessage', () => {
-    // Simulates the actual stream captured from grok -p "say hi briefly":
-    //   thought... thought... text("Hi") text("!") text(" How") text(" can") ...
-    //   end
     const tokens = ['Hi', '!', ' How', ' can', ' I', ' help', '?'];
     const events: any[] = [];
     for (const t of tokens) {
@@ -97,8 +86,6 @@ describe('summarizeEvents with grok streaming tokens', () => {
   });
 
   it('does not corrupt finalMessage for non-streaming agents (claude)', () => {
-    // Whole-turn messages keep last-wins semantics: regression guard for the
-    // summarizer change that introduced complete:false accumulation.
     const events = [
       { type: 'message', agent: 'claude', content: 'first turn', complete: true },
       { type: 'message', agent: 'claude', content: 'second turn', complete: true },

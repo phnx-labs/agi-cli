@@ -68,7 +68,6 @@ describe('listInstalledMcpsWithScope copilot — round-trip via real fixture', (
     try {
       const copilotDir = path.join(tempHome, '.copilot');
       fs.mkdirSync(copilotDir, { recursive: true });
-      // Pre-fix behavior wrote/read here. Make sure we don't read this anymore.
       fs.writeFileSync(
         path.join(copilotDir, 'settings.json'),
         JSON.stringify({

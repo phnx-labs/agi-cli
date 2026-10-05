@@ -153,8 +153,6 @@ describe('config-keys', () => {
     });
 
     it('every parser-accepted AGI Menu key has a registered store spec', () => {
-      // The allow-set and the store are two files; a key in one and not the other
-      // is either a settable value nothing reads, or a read that can never be set.
       for (const prop of MENUBAR_MENU_PROPERTIES) {
         expect(() => configKeySpec(`menubar.menu.${prop}`)).not.toThrow();
         expect(configKeySpec(`menubar.menu.${prop}`).scope).toBe('user');

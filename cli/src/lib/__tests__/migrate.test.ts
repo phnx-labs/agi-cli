@@ -33,7 +33,6 @@ function runRealMigration(): void {
   );
 }
 
-/** Path to this machine's pins file after the split migration (runtime JSON, untracked). */
 function devicePinsFile(): string {
   return path.join(userDir, '.history', 'devices', 'pins-testdev.json');
 }
@@ -80,12 +79,9 @@ describe('runMigration', () => {
 
     runRealMigration();
 
-    // The legacy pin was moved from system -> user central, then split out to
-    // this machine's per-device file.
     expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('claude');
     expect(fs.existsSync(path.join(systemDir, 'agents.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(systemDir, 'prompts.json'))).toBe(false);
-    // Legacy ~/.agents-system/config.json (old teams agent registry) is just deleted.
     expect(fs.existsSync(path.join(systemDir, 'config.json'))).toBe(false);
     expect(fs.existsSync(path.join(userDir, 'teams', 'config.json'))).toBe(false);
     expect(fs.readFileSync(path.join(systemDir, 'hooks', 'promptcuts.yaml'), 'utf-8')).toBe('system: true\n');
@@ -102,19 +98,14 @@ describe('runMigration', () => {
     runRealMigration();
 
     expect(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8')).toBe('user agents');
-    // migrateAgentsYaml intentionally deletes the system copy when the user copy already exists.
     expect(fs.existsSync(path.join(systemDir, 'agents.yaml'))).toBe(false);
   });
 
   it('moves ~/.agents-system/versions/<agent>/<ver>/ into ~/.agents/versions/ and merges overlap', () => {
-    // System-side version with no user-side equivalent: must move outright.
     const orphanSys = path.join(systemDir, 'versions', 'claude', '2.0.99', 'home', '.claude');
     fs.mkdirSync(orphanSys, { recursive: true });
     fs.writeFileSync(path.join(orphanSys, '.credentials.json'), '{"oauth":{"email":"test@example.com"}}');
 
-    // Overlap version: both paths have a home dir. Sync-managed file (skills) lives in user;
-    // operational state (history.jsonl) lives only in system. Merge step must preserve user file
-    // and copy missing system files into user.
     const userOverlap = path.join(userDir, 'versions', 'claude', '2.0.50', 'home', '.claude');
     fs.mkdirSync(path.join(userOverlap, 'skills', 'mq'), { recursive: true });
     fs.writeFileSync(path.join(userOverlap, 'skills', 'mq', 'SKILL.md'), 'fresh-from-sync');
@@ -123,30 +114,24 @@ describe('runMigration', () => {
     fs.writeFileSync(path.join(sysOverlap, 'history.jsonl'), 'legacy-history');
     fs.writeFileSync(path.join(sysOverlap, 'skills-stale.md'), 'stale');
 
-    // Pre-create the symlink that the migrator should re-point. Use the legacy system target.
     fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: 2.0.50\n');
     const symlinkPath = path.join(testHome, '.claude');
     fs.symlinkSync(sysOverlap, symlinkPath);
 
     runRealMigration();
 
-    // Post-bucket-refactor paths.
     const historyDir = path.join(userDir, '.history');
     const newUserOverlap = path.join(historyDir, 'versions', 'claude', '2.0.50', 'home', '.claude');
 
-    // Orphan system-side version moved into the history bucket.
     expect(fs.existsSync(path.join(historyDir, 'versions', 'claude', '2.0.99', 'home', '.claude', '.credentials.json'))).toBe(true);
     expect(fs.existsSync(path.join(systemDir, 'versions', 'claude', '2.0.99'))).toBe(false);
 
-    // Overlap merged into user (then moved into .history/): fresh skill preserved, history copied in.
     expect(fs.readFileSync(path.join(newUserOverlap, 'skills', 'mq', 'SKILL.md'), 'utf-8')).toBe('fresh-from-sync');
     expect(fs.readFileSync(path.join(newUserOverlap, 'history.jsonl'), 'utf-8')).toBe('legacy-history');
 
-    // Legacy system overlap moved into trash, which now lives under .history/.
     const trashRoot = path.join(historyDir, 'trash', 'versions', 'claude', '2.0.50');
     expect(fs.existsSync(trashRoot)).toBe(true);
 
-    // Symlink re-pointed to the post-bucket-refactor target.
     const newTarget = fs.readlinkSync(symlinkPath);
     expect(path.resolve(path.dirname(symlinkPath), newTarget)).toBe(path.resolve(newUserOverlap));
   });
@@ -242,8 +227,6 @@ describe('runMigration', () => {
       fs.mkdirSync(path.join(runsDir, 'old-job'), { recursive: true });
       fs.writeFileSync(path.join(runsDir, 'old-job', 'meta.json'), '{}');
       runRealMigration();
-      // migrateRunsIntoRoutines moves runs/ into routines/runs/, then
-      // migrateRuntimeToHistory hoists routines/runs/ into the .history/ bucket.
       expect(fs.existsSync(path.join(userDir, '.history', 'runs', 'old-job', 'meta.json'))).toBe(true);
       expect(fs.existsSync(runsDir)).toBe(false);
     });
@@ -288,7 +271,6 @@ describe('runMigration', () => {
       expect(meta).toContain('hooks:');
       expect(meta).toContain('capture-session');
       expect(meta).toContain('script: capture.sh');
-      // The pin was split out to the per-device file; central keeps hooks:.
       expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toMatch(/"agents":\s*\{[^}]*"claude"/);
     });
 
@@ -332,7 +314,6 @@ describe('runMigration', () => {
       runRealMigration();
       runRealMigration();
 
-      // Pin split to the per-device file on the first run; second run is a no-op.
       expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('"claude": "2.1.0"');
     });
   });
@@ -347,11 +328,10 @@ describe('runMigration', () => {
     g('init', '-q');
     g('add', 'agents.yaml');
     g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
-    g('update-index', '--skip-worktree', 'agents.yaml'); // the old machine-local hack
+    g('update-index', '--skip-worktree', 'agents.yaml');
 
     runRealMigration();
 
-    // Central -> portable only; pins -> per-device file; versions -> history JSON.
     const central = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8');
     expect(central).not.toMatch(/^agents:/m);
     expect(central).not.toMatch(/^versions:/m);
@@ -362,7 +342,6 @@ describe('runMigration', () => {
     );
     expect(history.claude['2.1.0'].rulesPreset).toBe('default');
 
-    // The skip-worktree bit is cleared (git ls-files -v no longer shows 'S ').
     expect(g('ls-files', '-v', 'agents.yaml').startsWith('S ')).toBe(false);
   });
 
@@ -378,7 +357,6 @@ describe('runMigration', () => {
 
     runRealMigration();
 
-    // Nothing to split: central portable content preserved, no device file, bit cleared.
     expect(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8')).toContain('strategy: balanced');
     expect(fs.existsSync(devicePinsFile())).toBe(false);
     expect(g('ls-files', '-v', 'agents.yaml').startsWith('S ')).toBe(false);
@@ -490,7 +468,6 @@ describe('runMigration', () => {
     it('moves system cloud/tasks.db wholesale when user-side dest is missing', () => {
       const sysCloud = path.join(systemDir, 'cloud');
       fs.mkdirSync(sysCloud, { recursive: true });
-      // Non-zero contents simulate a real DB. mergeSqliteDb falls back to rename when dest is missing.
       fs.writeFileSync(path.join(sysCloud, 'tasks.db'), 'fake-sqlite-bytes');
 
       runRealMigration();
@@ -500,12 +477,10 @@ describe('runMigration', () => {
     });
 
     it('warns about unexpected leftover dirs in system repo', () => {
-      // Create an unrecognized subdirectory that the orphan detector should call out.
       fs.mkdirSync(path.join(systemDir, 'mystery-leftover'), { recursive: true });
       fs.writeFileSync(path.join(systemDir, 'mystery-leftover', 'data.txt'), 'unknown');
 
       const modulePath = path.resolve(process.cwd(), 'src/lib/installations/migrate.ts');
-      // Migration diagnostics go to stderr; capture it via spawnSync.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { spawnSync } = require('child_process') as typeof import('child_process');
       const proc = spawnSync(
@@ -554,10 +529,8 @@ describe('runMigration', () => {
 
       runRealMigration();
 
-      // User-root copy is untouched.
       expect(fs.readFileSync(path.join(userPlugin, 'SKILL.md'), 'utf-8')).toBe('user-version');
       expect(fs.existsSync(path.join(userPlugin, 'OLD.md'))).toBe(false);
-      // Cache copy is left intact so the user can recover anything they missed.
       expect(fs.readFileSync(path.join(cachedPlugin, 'SKILL.md'), 'utf-8')).toBe('cached-version');
       expect(fs.readFileSync(path.join(cachedPlugin, 'OLD.md'), 'utf-8')).toBe('cached-only');
     });
@@ -565,8 +538,6 @@ describe('runMigration', () => {
 
   describe('migrateHumans', () => {
     it('migrates owner.md with metadata-only fields (no name, no notify.owner) into humans.yaml', () => {
-      // A metadata-only owner.md: timezone + quiet_hours + default_severity, but no name and no
-      // agents.yaml notify.owner. Previously the two-field guard silently skipped this case.
       const ownerMd = [
         '---',
         'timezone: America/New_York',
@@ -584,14 +555,12 @@ describe('runMigration', () => {
       expect(fs.existsSync(humansPath)).toBe(true);
 
       const raw = fs.readFileSync(humansPath, 'utf-8');
-      // Must carry the three metadata fields.
       expect(raw).toContain('America/New_York');
       expect(raw).toContain('22:00-08:00');
       expect(raw).toContain('low');
     });
 
     it('does not write humans.yaml when owner.md has no owner fields', () => {
-      // owner.md with prose-only body and no YAML frontmatter at all.
       fs.writeFileSync(path.join(userDir, 'owner.md'), 'no frontmatter here\n');
 
       runRealMigration();

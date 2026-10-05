@@ -1,7 +1,3 @@
-/**
- * Pins AGENT_CLI_COMMANDS to AGENTS[*].cliCommand so brand reserved-name checks
- * cannot drift from the harness registry (RUSH-2331).
- */
 import { describe, expect, it } from 'vitest';
 import { AGENT_CLI_COMMANDS } from './agent-cli-commands.js';
 import { AGENTS, ALL_AGENT_IDS } from './agents.js';

@@ -14,8 +14,6 @@ describe('supports() capability gate', () => {
     });
 
     it('returns ok for object-form caps when version omitted', () => {
-      // codex.hooks is { since: '0.116.0' }; with no version the agent-level
-      // check returns ok -- callers must pass a version to actually gate.
       expect(supports('codex', 'hooks')).toEqual({ ok: true });
     });
 
@@ -81,9 +79,6 @@ describe('supports() capability gate', () => {
 describe('goose workflows support', () => {
   it('passes the workflow capability check and reports no allowlist', () => {
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
-    // Goose permissions are not supported: its permission.yaml gates whole
-    // tools, so canonical rules could not be expressed faithfully. The
-    // capability table must say so rather than let a write path assume it.
     expect(supports('goose', 'allowlist')).toEqual({ ok: false, reason: 'unsupported' });
     expect(capableAgents('allowlist')).not.toContain('goose');
   });
@@ -160,7 +155,6 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('kimi', 'mcpHeaders').ok).toBe(false);
     expect(supports('droid', 'mcpHeaders').ok).toBe(false);
     expect(supports('hermes', 'mcpHeaders').ok).toBe(false);
-    // Oz reads the Claude .mcp.json schema (url + headers) from ~/.warp/.mcp.json.
     expect(supports('warp', 'mcpHeaders').ok).toBe(true);
   });
 
@@ -182,7 +176,7 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
 describe('isCapable()', () => {
   it('reports true for any non-false capability', () => {
     expect(isCapable('claude', 'hooks')).toBe(true);
-    expect(isCapable('codex', 'hooks')).toBe(true); // object form counts
+    expect(isCapable('codex', 'hooks')).toBe(true);
   });
 
   it('reports false for explicit false', () => {
@@ -191,9 +185,6 @@ describe('isCapable()', () => {
   });
 
   it('reports false for an unknown agent id instead of throwing (RUSH-1153)', () => {
-    // A caller passing "claude@2.1.168" (the agent@version form) instead of a
-    // bare "claude" must not crash with "Cannot read properties of undefined
-    // (reading 'capabilities')". getCapability() guards the unknown id.
     expect(() => isCapable('claude@2.1.168' as never, 'plugins')).not.toThrow();
     expect(isCapable('claude@2.1.168' as never, 'plugins')).toBe(false);
     expect(supports('not-an-agent' as never, 'plugins')).toEqual({ ok: false, reason: 'unsupported' });
@@ -205,9 +196,6 @@ describe('capableAgents()', () => {
     const agents = capableAgents('hooks');
     expect(agents).toContain('claude');
     expect(agents).toContain('codex');
-    // OpenClaw only exposes fixed internal hooks (e.g. boot-md), not a
-    // general event->shell-command registration surface, and
-    // registerHooksToSettings has no 'openclaw' branch — RUSH-2122.
     expect(agents).not.toContain('openclaw');
     expect(agents).not.toContain('gemini');
   });
@@ -328,8 +316,6 @@ describe('antigravity subagents version gate', () => {
 
 describe('cursor subagents version gate', () => {
   it('gates pre-2.4 cursor-agent (CalVer) builds as too_old', () => {
-    // cursor-agent reports CalVer build tags, e.g. 2025.11.25-<hash>; compareVersions
-    // parses each dot-segment as an int so 2025.11.25 < 2026.1.22 (Cursor 2.4).
     const result = supports('cursor', 'subagents', '2025.11.25');
     expect(result.ok).toBe(false);
     if (!result.ok) {

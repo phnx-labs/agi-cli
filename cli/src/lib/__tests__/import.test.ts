@@ -1,13 +1,3 @@
-/**
- * Tests for the lib/import helpers backing the `agents import` command.
- *
- * - resolvePackageDirFromBinary is pure (filesystem reads only, no state).
- * - importAgentBinary is exercised with the optional versionDirOverride
- *   parameter pointing at a temp dir, so we never touch the real
- *   ~/.agents/.history/versions/. This avoids needing vi.mock on
- *   state.ts / versions.ts — bun's vi.mock isn't file-scoped and would
- *   leak failures into hooks/versions tests.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,7 +34,6 @@ function makeFakeNpmPkg(
   fs.writeFileSync(binarySource, '#!/usr/bin/env node\nconsole.log("fake");\n');
   fs.chmodSync(binarySource, 0o755);
 
-  // Mirror the homebrew layout: /opt/homebrew/bin/<cmd> -> ../lib/node_modules/<pkg>/dist/index.js
   const binDir = path.join(root, 'fake-global', 'bin');
   fs.mkdirSync(binDir, { recursive: true });
   fs.symlinkSync(binarySource, path.join(binDir, cliCommand));
@@ -68,16 +57,10 @@ describe('resolvePackageDirFromBinary', () => {
     const binaryPath = path.join(binDir, 'openclaw');
 
     const resolved = resolvePackageDirFromBinary(binaryPath);
-    // resolvePackageDirFromBinary uses realpathSync internally — match on
-    // both sides so macOS /var → /private/var doesn't trip the assertion.
     expect(resolved).toBe(fs.realpathSync(pkgDir));
   });
 
   it('returns null for a binary that has no package.json on the walk-up', () => {
-    // Nest deep enough that resolvePackageDirFromBinary's bounded 6-level walk-up
-    // stays INSIDE this clean temp tree and never reaches os.tmpdir()'s ancestors.
-    // Some fleet workers set TMPDIR under a dir tree with a package.json within 6
-    // levels, which made this flake by resolving to that ambient package (PHNX-3434).
     const bareDir = path.join(tmp, 'l1', 'l2', 'l3', 'l4', 'l5');
     fs.mkdirSync(bareDir, { recursive: true });
     const binaryPath = path.join(bareDir, 'standalone');
@@ -100,7 +83,6 @@ describe('importAgentBinary', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-import-binary-'));
-    // Point the import at a tmp version dir instead of ~/.agents/.history/versions/...
     versionDir = path.join(tmp, '.agents', '.history', 'versions', 'openclaw', '2026.3.8');
   });
 
@@ -119,19 +101,16 @@ describe('importAgentBinary', () => {
     const managedPkg = path.join(versionDir, 'node_modules', 'openclaw');
     const marker = path.join(versionDir, 'package.json');
 
-    // All targets are symlinks pointing at the original install — nothing copied.
     expect(fs.lstatSync(managedBinary).isSymbolicLink()).toBe(true);
     expect(fs.realpathSync(managedBinary)).toBe(fs.realpathSync(binarySource));
     expect(fs.lstatSync(managedPkg).isSymbolicLink()).toBe(true);
     expect(fs.realpathSync(managedPkg)).toBe(fs.realpathSync(pkgDir));
 
-    // Marker package.json records provenance and is marked private.
     const markerJson = JSON.parse(fs.readFileSync(marker, 'utf8'));
     expect(markerJson.imported).toBe(true);
     expect(markerJson.from).toBe(pkgDir);
     expect(markerJson.private).toBe(true);
 
-    // Empty home dir is created for the isolated $HOME.
     expect(fs.existsSync(path.join(versionDir, 'home'))).toBe(true);
   });
 
@@ -164,8 +143,6 @@ describe('importAgentBinary', () => {
   });
 
   it('fails strictly when bin object is missing the cliCommand key (no fallback)', () => {
-    // Multi-bin packages must NOT silently get a wrong bin chosen by
-    // Object.values()[0] ordering. Require an exact match on cliCommand.
     const { pkgDir } = makeFakeNpmPkg(tmp, 'openclaw', '2026.3.8', 'openclaw', {
       binEntry: { 'something-else': 'dist/other.js', 'helper': 'dist/helper.js' },
     });
@@ -210,7 +187,6 @@ describe('importInstallScriptBinary', () => {
   const ANTIGRAVITY_SPEC = { agentId: 'antigravity', npmPackage: '', cliCommand: 'agy' };
 
   function makeFakeInstallScriptBinary(): string {
-    // Mirror `curl ... install.sh` landing the binary at ~/.local/bin/agy.
     const localBin = path.join(tmp, '.local', 'bin');
     fs.mkdirSync(localBin, { recursive: true });
     const binaryPath = path.join(localBin, 'agy');
@@ -230,13 +206,11 @@ describe('importInstallScriptBinary', () => {
     expect(fs.lstatSync(managedBinary).isSymbolicLink()).toBe(true);
     expect(fs.realpathSync(managedBinary)).toBe(fs.realpathSync(binaryPath));
 
-    // Marker package.json records provenance + installScript origin.
     const marker = JSON.parse(fs.readFileSync(path.join(versionDir, 'package.json'), 'utf8'));
     expect(marker.imported).toBe(true);
     expect(marker.installScriptBased).toBe(true);
     expect(marker.from).toBe(fs.realpathSync(binaryPath));
 
-    // Isolated home is created.
     expect(fs.existsSync(path.join(versionDir, 'home'))).toBe(true);
   });
 

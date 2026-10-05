@@ -1,22 +1,3 @@
-/**
- * DAG supervisor — the continuous dispatch loop that makes the Factory
- * dynamic.
- *
- * `teams start --watch` and `factory run` both use this. Each wave:
- *   1. call startReady(team) to fire any now-ready teammates
- *   2. listByTask(team) to count pending / running / done / failed
- *   3. emit one status event (via the caller's callback)
- *   4. exit when pending + running == 0 (DAG drained)
- *
- * Why a shared function:
- *  - the loop is the orchestration, the thing that lets any worker add
- *    tasks mid-flight via `agents teams add` and have them picked up
- *  - `factory run` is just `teams start --watch` with factory-flavored
- *    presentation; keeping them in sync avoids drift
- *
- * The caller supplies a presenter callback so the same loop can drive
- * terminal output, json-per-wave output, or a TUI.
- */
 import type { AgentManager, AgentProcess } from './agents.js';
 import type { TeamBudgetWatcher } from '../budget/live-team.js';
 import type { BreachInfo } from '../budget/enforce.js';
@@ -37,16 +18,8 @@ interface SupervisorOptions {
   team: string;
   intervalMs?: number;
   maxWaves?: number;
-  /** Called once per wave. Return false to stop the loop gracefully. */
   onWave: (summary: WaveSummary) => void | Promise<void> | boolean | Promise<boolean>;
-  /**
-   * Optional live-spend watcher (issue #399). Polled once per wave; on first
-   * breach the supervisor calls `manager.stopByTask(team)` and exits with
-   * `stoppedBy: 'budget'`. Dormant when null — supervisor behavior is unchanged
-   * for teams that never opt into budget enforcement.
-   */
   budgetWatcher?: TeamBudgetWatcher | null;
-  /** Called with the breach details when the budget watcher trips. */
   onBudgetBreach?: (breach: BreachInfo) => void;
 }
 
@@ -54,21 +27,10 @@ interface SupervisorResult {
   waves: number;
   stoppedBy: 'drained' | 'max-waves' | 'signal' | 'callback' | 'budget';
   elapsed_ms: number;
-  /**
-   * Number of teammates in the `failed` state when the team drained. Only set
-   * for `stoppedBy === 'drained'`. A drained DAG means nothing is pending or
-   * running — NOT that everything succeeded — so callers that treat "drained"
-   * as success (e.g. a completion nudge) must check `failed === 0` first.
-   */
   failed?: number;
-  /** Set when `stoppedBy === 'budget'` — the breach that terminated the team. */
   budgetBreach?: BreachInfo;
 }
 
-/**
- * Run the continuous DAG dispatcher until the team drains, the caller
- * returns false from onWave, or SIGINT/SIGTERM arrives.
- */
 export async function runSupervisor(
   mgr: AgentManager,
   opts: SupervisorOptions
@@ -85,16 +47,8 @@ export async function runSupervisor(
 
   try {
     for (let wave = 1; wave <= maxWaves; wave++) {
-      // Pick up teammates added by other processes (e.g. the Planner's
-      // `agents teams add` calls). Without this the supervisor only ever
-      // sees teammates it created itself.
+      // Rescan external additions, then prefetch remote state once before per-agent reads.
       await mgr.rescanFromDisk();
-      // Distributed teammates: one ssh-per-host liveness/exit pre-pass BEFORE any
-      // polling this wave, so every subsequent per-teammate status read
-      // (startReady's roster scan + listByTask below) consumes a cached snapshot
-      // instead of each opening its own SSH handshake — no N-round-trips-per-wave
-      // blowup at 10+ remote teammates. No-op for all-local teams. Reads the
-      // in-memory roster directly, so it doesn't itself trigger a poll.
       await mgr.prefetchRemoteStatus(team);
       const launched = await mgr.startReady(team);
       const all = await mgr.listByTask(team);
@@ -122,10 +76,8 @@ export async function runSupervisor(
         return { waves: wave, stoppedBy: 'callback', elapsed_ms: Date.now() - startedAt };
       }
 
-      // Live budget kill (issue #399). Poll AFTER the wave's callback so the
-      // most recent teammate stdout is already flushed to disk. On breach we
-      // stop every RUNNING teammate — the DAG effectively drains this wave.
       if (opts.budgetWatcher) {
+        // Poll after output/callbacks, then rescan again before declaring the DAG drained.
         await opts.budgetWatcher.poll();
         if (opts.budgetWatcher.breached()) {
           const breach = opts.budgetWatcher.breach();
@@ -141,11 +93,6 @@ export async function runSupervisor(
         }
       }
 
-      // Re-check drain AFTER the callback. The callback may have added new
-      // teammates mid-flight (that's the whole point of the dynamic DAG), so
-      // trusting the pre-callback snapshot would drain prematurely. Rescan
-      // too, because the callback could have triggered a sibling process
-      // that wrote a fresh meta.json.
       await mgr.rescanFromDisk();
       const afterCallback = await mgr.listByTask(team);
       const stillLive = afterCallback.some(

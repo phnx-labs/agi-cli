@@ -1,13 +1,3 @@
-/**
- * Kimi (`kimi --output-format stream-json`) parser tests.
- *
- * Kimi's stream-json mode emits a simple role-based JSONL schema:
- *   - assistant messages and tool_calls
- *   - tool results
- *   - meta events (e.g. session.resume_hint)
- * These tests pin the normalization contract so the team runner can produce
- * structured summaries for Kimi teammates.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -297,9 +287,6 @@ describe('normalizeEvents(kimi)', () => {
   });
 });
 
-// Captured from live `kimi` runs via `agents teams` (no-tool and tool-using).
-// Confirms session.resume_hint is the LAST event and the only terminal event —
-// so a real kimi stream resolves to exactly one success result.
 describe('normalizeEvents(kimi) — real captured streams', () => {
   for (const fixture of ['kimi-stream-notool.jsonl', 'kimi-stream-tool.jsonl']) {
     it(`${fixture}: emits exactly one terminal result (success), and it is last`, () => {
@@ -310,9 +297,7 @@ describe('normalizeEvents(kimi) — real captured streams', () => {
       expect(results).toHaveLength(1);
       expect(results[0]).toMatchObject({ agent: 'kimi', status: 'success' });
 
-      // The terminal result must be the final normalized event of the stream.
       expect(events[events.length - 1].type).toBe('result');
-      // And there is no `init` event — kimi emits none.
       expect(events.some((e) => e.type === 'init')).toBe(false);
     });
   }

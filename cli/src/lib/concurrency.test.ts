@@ -6,7 +6,6 @@ const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 describe('mapBounded', () => {
   it('preserves input order regardless of completion order', async () => {
     const items = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    // Earlier items finish later, so completion order != input order.
     const out = await mapBounded(
       items,
       async n => { await delay((items.length - n) * 2); return n * 10; },
@@ -30,7 +29,7 @@ describe('mapBounded', () => {
       { concurrency: 3 },
     );
     expect(maxInFlight).toBeLessThanOrEqual(3);
-    expect(maxInFlight).toBeGreaterThan(1); // actually parallel, not accidentally serial
+    expect(maxInFlight).toBeGreaterThan(1);
   });
 
   it('spaces successive starts by at least staggerMs (no simultaneous burst)', async () => {
@@ -40,12 +39,10 @@ describe('mapBounded', () => {
     await mapBounded(
       items,
       async () => { starts.push(performance.now() - t0); },
-      { concurrency: 10, staggerMs: 20 }, // concurrency >= n, so only the gate spreads starts
+      { concurrency: 10, staggerMs: 20 },
     );
     const elapsed = performance.now() - t0;
-    // 5 starts spaced >= 20ms apart => the last starts no earlier than ~80ms in.
     expect(elapsed).toBeGreaterThanOrEqual(70);
-    // Starts must be monotonically non-decreasing and spread, not all at t~0.
     expect(Math.max(...starts)).toBeGreaterThanOrEqual(70);
   });
 

@@ -1,9 +1,3 @@
-/**
- * macOS integration coverage for provider-account custody. This drives the real
- * standalone `secrets` CLI against the real signed helper and data-protection
- * Keychain: no backend seam, no mock. The unique bundle is deleted in finally so
- * the user's keychain is left clean.
- */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -24,17 +18,8 @@ describe.skipIf(process.platform !== 'darwin' || !realHome)('provider accounts (
 
     try {
       addAccount(name, 'openrouter', 'api-key', secret, root);
-      // 'headless' is the AGENTS_RUNTIME value the standalone's headless detector
-      // matches (a made-up value never entered the headless path, so the old
-      // form of this test passed with OR without the biometry-ACL fix and
-      // reproduced nothing — PHNX-3352). The client inherits the env into
-      // `secrets __serve`, so the resolve below genuinely runs headless.
       process.env.AGENTS_RUNTIME = 'headless';
 
-      // Without the fix, the headless keychain guard rejects this policy-`never`,
-      // no-ACL item as if it required Touch ID before the helper ever reads it,
-      // and this resolve throws. The fix routes through the bundle path that
-      // attests `silentNoAcl`, so it resolves prompt-free (PHNX-2939).
       expect(resolveCredentialAccount(name, 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe(secret);
     } finally {
       if (previousRuntime === undefined) delete process.env.AGENTS_RUNTIME;

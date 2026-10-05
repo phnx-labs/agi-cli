@@ -15,10 +15,8 @@ import {
 } from './log.js';
 import { query, _resetForTest as resetEvents } from '../feed/events.js';
 
-/** Absolute path to the log module under test — imported by the spawned workers. */
 const LOG_MODULE = fileURLToPath(new URL('./log.ts', import.meta.url));
 
-/** Resolve a `bun` executable: the runtime that runs the real suite (setup-bun in CI). */
 function bunBin(): string {
   const candidates = [
     process.env.BUN_INSTALL ? path.join(process.env.BUN_INSTALL, 'bin', 'bun') : '',
@@ -27,7 +25,7 @@ function bunBin(): string {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
-  return 'bun'; // fall back to PATH (CI: oven-sh/setup-bun)
+  return 'bun';
 }
 
 function tmpLog(): string {
@@ -54,8 +52,6 @@ describe('recordDispatchedRun → unified events stream', () => {
     const eventsPath = path.join(dir, 'events.jsonl');
     resetEvents(eventsPath);
     const legacy = path.join(dir, 'legacy-audit.jsonl');
-    // Pointing getAuditLogPath is hard without env — just assert events got the row
-    // and that emit is the write path for new runs.
     recordDispatchedRun({
       agent: 'claude',
       version: '2.1.220',
@@ -83,7 +79,6 @@ describe('audit hash chain (legacy file still verifies)', () => {
     const r1 = appendAuditRecord(entry({ mode: 'edit', exit: 0 }), log);
     const r2 = appendAuditRecord(entry({ mode: 'skip', outcome: 'fail', exit: 1 }), log);
 
-    // The chain is anchored at GENESIS and each record points at the prior hash.
     expect(r0.prevHash).toBe(GENESIS_HASH);
     expect(r1.prevHash).toBe(r0.hash);
     expect(r2.prevHash).toBe(r1.hash);
@@ -95,15 +90,11 @@ describe('audit hash chain (legacy file still verifies)', () => {
   it('detects a tampered middle record at its index', () => {
     const log = tmpLog();
     appendAuditRecord(entry({ mode: 'plan' }), log);
-    appendAuditRecord(entry({ mode: 'edit', outcome: 'ok', exit: 0 }), log); // index 1 — victim
+    appendAuditRecord(entry({ mode: 'edit', outcome: 'ok', exit: 0 }), log);
     appendAuditRecord(entry({ mode: 'skip', outcome: 'fail', exit: 1 }), log);
 
-    // Sanity: intact before tampering.
     expect(verifyAuditChain(log)).toEqual({ ok: true });
 
-    // Tamper the MIDDLE record on disk: flip its outcome 'ok' -> 'fail' and exit
-    // 0 -> 1, leaving its stored `hash` untouched. The recomputed hash no longer
-    // matches, so the chain must fail exactly at index 1.
     const lines = fs.readFileSync(log, 'utf-8').split('\n').filter(Boolean);
     const middle = JSON.parse(lines[1]);
     middle.outcome = 'fail';
@@ -121,22 +112,13 @@ describe('audit hash chain (legacy file still verifies)', () => {
   });
 
   it('stores the log under .history (machine-local, gitignored, never synced)', () => {
-    // The default path must sit in the durable-runtime bucket, NOT a top-level
-    // ~/.agents/ path that `agents repo push` tracks — the token-bearing `repo`
-    // field must never reach a version-controlled DotAgents repo (issue #347).
     const p = getAuditLogPath();
     expect(p).toContain(`${path.sep}.history${path.sep}audit${path.sep}`);
     expect(p.endsWith(`${path.sep}log.jsonl`)).toBe(true);
-    // Must not sit directly under a synced top-level ~/.agents/audit/ path.
     expect(p).not.toMatch(new RegExp(`\\.agents\\${path.sep}audit\\${path.sep}`));
   });
 
   it('serializes concurrent appends so the chain never forks', async () => {
-    // The real race: N `agents run` processes (parallel teams/routines dispatch)
-    // append at once. Without the advisory lock each reads the same last hash
-    // and writes prevHash=H, forking the chain into a false "tampered" verdict.
-    // Exercise it with REAL OS-level concurrency — one bun subprocess per writer,
-    // each importing the actual appendAuditRecord (no mocking of code under test).
     const log = tmpLog();
     const worker = path.join(path.dirname(log), 'worker.ts');
     fs.writeFileSync(
@@ -151,9 +133,6 @@ describe('audit hash chain (legacy file still verifies)', () => {
       `}, logPath);\n`,
     );
 
-    // Prove serialization under real concurrency. 12 is enough to surface a
-    // lock race; 30 concurrent bun spawns on Windows GHA occasionally drop a
-    // writer under process pressure even when each exits 0 (flake, not a fork).
     const N = process.platform === 'win32' ? 12 : 30;
     const bun = bunBin();
     await Promise.all(
@@ -166,16 +145,11 @@ describe('audit hash chain (legacy file still verifies)', () => {
       })),
     );
 
-    // Every writer's record landed, and the chain reproduces end-to-end.
     expect(readAuditLog(log)).toHaveLength(N);
     expect(verifyAuditChain(log)).toEqual({ ok: true });
   }, 60_000);
 
   it('two interleaved appends still chain and verify', async () => {
-    // Two writers whose critical sections deliberately overlap in wall-clock:
-    // both launch together, each does read-last-hash + append under the lock.
-    // The lock forces a total order, so record 1 links off record 0's hash
-    // rather than both linking off GENESIS.
     const log = tmpLog();
     const worker = path.join(path.dirname(log), 'worker2.ts');
     fs.writeFileSync(
@@ -195,7 +169,7 @@ describe('audit hash chain (legacy file still verifies)', () => {
     const records = readAuditLog(log);
     expect(records).toHaveLength(2);
     expect(records[0].prevHash).toBe(GENESIS_HASH);
-    expect(records[1].prevHash).toBe(records[0].hash); // chained, not both off GENESIS
+    expect(records[1].prevHash).toBe(records[0].hash);
     expect(verifyAuditChain(log)).toEqual({ ok: true });
   }, 30000);
 });

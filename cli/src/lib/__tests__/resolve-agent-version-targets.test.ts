@@ -1,14 +1,3 @@
-/**
- * Tests for the @all and literal `all` syntax in resolveAgentVersionTargets.
- *
- * `claude@all` -> every installed claude version.
- * `all`        -> every available agent's installed versions.
- * Mixed       -> e.g. `claude@all,codex@default`.
- *
- * Uses a real tmpdir for the versions tree; only the agents-cli "default
- * version" lookup is stubbed (it lives in a JSON file we don't want to
- * synthesize here).
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,15 +16,11 @@ vi.mock('../state.js', async (importOriginal) => {
   };
 });
 
-// Lazy import so the mock above is registered first.
 async function loadResolver() {
   const mod = await import('../installations/versions.js');
   return mod.resolveAgentVersionTargets;
 }
 
-// Each installed agent version needs a directory + a "binary" file (because
-// listInstalledVersions filters by existsSync(getBinaryPath)).
-// getBinaryPath returns: <versions>/<agent>/<version>/node_modules/.bin/<cliCommand>
 const CLI_COMMAND: Record<string, string> = {
   claude: 'claude',
   codex: 'codex',
@@ -82,7 +67,6 @@ describe('resolveAgentVersionTargets — @all and literal `all`', () => {
     makeFakeInstall('claude', '2.1.141');
     makeFakeInstall('claude', '2.1.158');
     makeFakeInstall('codex', '0.116.0');
-    // gemini intentionally not installed
 
     const resolveAgentVersionTargets = await loadResolver();
     const { selectedAgents, versionSelections } = resolveAgentVersionTargets('all', AVAILABLE as any);

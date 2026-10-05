@@ -1,19 +1,3 @@
-/**
- * Regression tests for resource sync from an enabled extras repo
- * (`agents repo add <source>` → `~/.agents-<alias>/`).
- *
- * Two historically-reported gaps these lock down:
- *   - A top-level `commands/<name>.md` shipped by an extras repo must be
- *     written into the agent's version home on `agents sync` (not silently
- *     dropped while every other resource kind syncs).
- *   - Plugins shipped by an extras repo under `plugins/<name>/` must be
- *     synthesized into a registered `agents-<alias>` marketplace on launch
- *     so their slash-commands actually appear in the agent.
- *
- * Both run the REAL code path (no mocking) in an isolated `$HOME` via
- * `bun --eval`, mirroring the harness in
- * src/lib/staleness/writers/commands.test.ts.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -23,7 +7,6 @@ import { fileURLToPath } from 'url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** Run `scriptBody` under a throwaway $HOME; returns the parsed last JSON line. */
 function runInTempHome(scriptBody: string): Record<string, unknown> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'extras-sync-'));
   try {
@@ -84,7 +67,7 @@ describe('extras repo resource sync', () => {
       console.log(JSON.stringify({ files }));
     `) as { files: string[] };
 
-    expect(result.files).toContain('browser.md'); // the extras command — historically dropped
+    expect(result.files).toContain('browser.md');
     expect(result.files).toContain('plan.md');
   });
 
@@ -109,7 +92,6 @@ describe('extras repo resource sync', () => {
       console.log(JSON.stringify({ marketplaces: r.marketplaces, onDisk }));
     `) as { marketplaces: Record<string, string[]>; onDisk: string[] };
 
-    // Extras plugins land in their own agents-extras marketplace (per-repo model).
     expect(result.marketplaces['agents-extras']).toEqual(['code', 'git']);
     expect(result.onDisk).toEqual(['code', 'git']);
   });

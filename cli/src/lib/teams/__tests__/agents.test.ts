@@ -1,11 +1,3 @@
-/**
- * Lifecycle tests for the team runner.
- *
- * The plan/edit/full read-only contract that used to live here moved with the
- * per-agent argv assembly. The team runner now delegates spawning to `agents
- * run`, so the contract is enforced (and tested) in src/lib/__tests__/exec.test.ts
- * under the `describe('buildExecCommand') > describe('mode flags')` blocks.
- */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';

@@ -7,7 +7,6 @@ import { closeUsageDb, recordUsage } from './usage-db.js';
 import { buildMixDashboard } from './dashboard.js';
 import { recipeHarnessMix, recipeToolsPerSession, analyticsWindow } from './recipes.js';
 
-// win32: better-sqlite3 + vitest hooks hang/timeout at 10s in CI (RUSH-2215).
 const describeDash = process.platform === 'win32' ? describe.skip : describe;
 
 const tmpDirs: string[] = [];
@@ -56,9 +55,6 @@ function pin(): { usage: string; sessions: string } {
   insert.run('s1', 's1', 'claude', now, 'claude-opus-4', 1000, 200, 60000, 'box-a', 12, '/tmp/a.jsonl');
   insert.run('s2', 's2', 'claude', now, 'claude-sonnet-4', 800, 100, 30000, 'box-a', 4, '/tmp/b.jsonl');
   insert.run('s3', 's3', 'codex', now, 'gpt-5', 500, 50, 120000, 'box-b', null, '/tmp/c.jsonl');
-  // The tool indexer's ledger — the real per-session call counts. s3 carries a
-  // NULL sessions.tool_call_count (nothing but the teams summarizer writes that
-  // column), so it is the regression case: the old recipe dropped it entirely.
   const ledger = db.prepare(
     `INSERT INTO tool_scan_ledger (session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count, evidence_bytes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -88,7 +84,7 @@ afterEach(() => {
   if (prevSessionsDb === undefined) delete process.env.AGENTS_SESSIONS_DB;
   else process.env.AGENTS_SESSIONS_DB = prevSessionsDb;
   for (const d of tmpDirs) {
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {  }
   }
   tmpDirs.length = 0;
 });
@@ -104,8 +100,6 @@ describeDash('insights mix recipes + dashboard', () => {
     const tools = recipeToolsPerSession(win);
     expect(tools.empty).toBe(false);
     const all = tools.rows.find((r) => r.scope === '(all)');
-    // Every scanned session counts — 12, 4, 30 — not just the ones the teams
-    // summarizer happened to stamp a tool_call_count on.
     expect(all?.n).toBe(3);
     expect(all?.avg).toBe(15);
     expect(all?.p50).toBe(12);
@@ -113,8 +107,6 @@ describeDash('insights mix recipes + dashboard', () => {
 
   it('counts sessions the teams summarizer never stamped (sessions.tool_call_count IS NULL)', () => {
     const tools = recipeToolsPerSession(analyticsWindow(7));
-    // s3 is codex with a NULL tool_call_count but 30 indexed calls. Reading the
-    // column dropped it and pinned the fleet-wide p50 at 0; the ledger has it.
     const codex = tools.rows.find((r) => r.scope === 'codex');
     expect(codex?.n).toBe(1);
     expect(codex?.avg).toBe(30);

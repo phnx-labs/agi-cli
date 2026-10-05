@@ -69,9 +69,6 @@ describe('matchOptionIndex / keystrokesForAnswer', () => {
   });
 
   it('delivers a real Escape byte (no trailing Enter) for the esc cancel token', () => {
-    // A deny / send-back choice carries deliveryKey 'esc'. It must dismiss the
-    // prompt with an actual Escape keystroke, not type the letters e-s-c which a
-    // trailing Enter would then submit — potentially confirming the default.
     expect(keystrokesForAnswer('esc')).toEqual({ payload: '\u001b', matched: 'other', enter: false });
     expect(keystrokesForAnswer('Escape')).toEqual({ payload: '\u001b', matched: 'other', enter: false });
   });
@@ -140,7 +137,6 @@ describe('resolveAnswerRoute', () => {
     expect(r.kind).toBe('tmux');
     expect(r.payload).toBe('1');
     expect(r.inject).toEqual({ backend: 'tmux', pane: '%3', socket: '/tmp/tmux-1' });
-    // A normal selection keeps the default Enter (omitted).
     expect(r.enter).toBeUndefined();
   });
 

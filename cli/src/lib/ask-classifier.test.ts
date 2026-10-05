@@ -76,7 +76,6 @@ describe('filterBlocksForFeed', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-class-'));
     const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-class-mailbox-'));
     const stall = makeBlock('stall-1', 'Should I keep going on this?');
-    // Use a valid mailbox id (session id shape)
     publishBlock(stall, dir);
     expect(listBlocks(dir)).toHaveLength(1);
 

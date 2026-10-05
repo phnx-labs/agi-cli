@@ -8,9 +8,6 @@ import {
 import { ALL_AGENT_IDS } from '../agents.js';
 import type { AgentId } from '../types.js';
 
-// The env var each isolation-capable agent's versioned alias must export to
-// redirect the copy's config away from the user's real ~/.<agent>. This is the
-// contract that makes `agents add --isolated` safe for these agents.
 const CONFIG_ENV_BY_AGENT: Record<(typeof CONFIG_ENV_ISOLATED_AGENTS)[number], string> = {
   claude: 'CLAUDE_CONFIG_DIR',
   codex: 'CODEX_HOME',
@@ -18,16 +15,11 @@ const CONFIG_ENV_BY_AGENT: Record<(typeof CONFIG_ENV_ISOLATED_AGENTS)[number], s
   grok: 'GROK_HOME',
   kimi: 'KIMI_CODE_HOME',
   opencode: 'OPENCODE_CONFIG_DIR',
-  // Muse has no dedicated config env; isolation is XDG (proved: empty
-  // XDG_CONFIG_HOME works; adopt symlink at ~/.config/muse fails SymlinkOrReparse).
   muse: 'XDG_CONFIG_HOME',
-  // Cursor's file-store selector is its isolation control. The generated alias
-  // swaps HOME, so the selected version reads its own ~/.cursor/auth.json.
   cursor: 'AGENT_CLI_CREDENTIAL_STORE',
 };
 const ALL_CONFIG_ENVS = Object.values(CONFIG_ENV_BY_AGENT);
 
-// A version string that passes assertSafeVersion.
 const V = '1.0.0';
 
 describe('isolated-install capability', () => {
@@ -49,11 +41,6 @@ describe('isolated-install capability', () => {
     expect(script).toContain('export AGENT_CLI_CREDENTIAL_STORE="file"');
   });
 
-  // The load-bearing coupling test: if someone adds (or removes) a config-dir
-  // env var in generateVersionedAliasScript without updating the capability
-  // list, the two drift and --isolated would either over- or under-promise.
-  // This locks them together: an agent emits a config-dir env export IFF it is
-  // declared isolation-capable.
   it('the alias generator and the capability list stay in sync', () => {
     for (const agent of ALL_AGENT_IDS) {
       const script = generateVersionedAliasScript(agent, V);

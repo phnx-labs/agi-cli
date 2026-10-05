@@ -1,8 +1,3 @@
-/**
- * Pins the compact summary contract that the default `agents teams status`
- * relies on. If this test breaks, double-check that orchestrators don't
- * depend on field names being present.
- */
 import { describe, expect, it } from 'vitest';
 import {
   toAgentStatusSummary,
@@ -11,7 +6,7 @@ import {
   type TaskStatusResult,
 } from '../api.js';
 
-const longPrompt = 'PROMPT '.repeat(500); // ~3.5 KB synthetic brief
+const longPrompt = 'PROMPT '.repeat(500);
 
 const fakeDetail = (overrides: Partial<AgentStatusDetail> = {}): AgentStatusDetail => ({
   agent_id: '11111111-2222-3333-4444-555555555555',
@@ -32,7 +27,7 @@ const fakeDetail = (overrides: Partial<AgentStatusDetail> = {}): AgentStatusDeta
     '/Users/me/repo/src/y/m4.ts',
     '/Users/me/repo/src/z/m5.ts',
     '/Users/me/repo/src/z/m6.ts',
-    '/Users/me/repo/src/z/m7.ts',     // 7th — beyond the cap
+    '/Users/me/repo/src/z/m7.ts',
   ],
   files_read: Array.from({ length: 47 }, (_, i) => `/Users/me/repo/src/r${i}.ts`),
   files_deleted: [],
@@ -43,7 +38,7 @@ const fakeDetail = (overrides: Partial<AgentStatusDetail> = {}): AgentStatusDeta
     'msg2 short',
     'msg3 short',
     'msg4 short',
-    'msg5: ' + 'X'.repeat(800),       // beyond per-msg cap
+    'msg5: ' + 'X'.repeat(800),
   ],
   tool_count: 42,
   has_errors: false,
@@ -59,8 +54,6 @@ describe('toAgentStatusSummary', () => {
   it('drops the prompt entirely', () => {
     const summary = toAgentStatusSummary(fakeDetail());
     expect(summary).not.toHaveProperty('prompt');
-    // Cheap upper-bound size check — if we accidentally re-attach the brief,
-    // this assertion blows the budget.
     expect(JSON.stringify(summary).length).toBeLessThan(2000);
   });
 
@@ -77,7 +70,6 @@ describe('toAgentStatusSummary', () => {
   it('reports files_read as a count only', () => {
     const summary = toAgentStatusSummary(fakeDetail());
     expect(summary.files.read).toEqual({ count: 47 });
-    // Field shape must not leak names — orchestrators rely on this for budget.
     expect(summary.files.read).not.toHaveProperty('names');
   });
 
@@ -86,7 +78,6 @@ describe('toAgentStatusSummary', () => {
     expect(summary.last_messages).toHaveLength(3);
     expect(summary.last_messages[0]).toBe('msg3 short');
     expect(summary.last_messages[1]).toBe('msg4 short');
-    // 5th original msg was 'msg5: ' + 800 Xs → trimmed to 400 chars with ellipsis.
     expect(summary.last_messages[2].length).toBeLessThanOrEqual(400);
     expect(summary.last_messages[2].endsWith('…')).toBe(true);
   });
@@ -101,7 +92,6 @@ describe('toAgentStatusSummary', () => {
     expect(summary.tool_count).toBe(42);
     expect(summary.has_errors).toBe(false);
     expect(summary.pr_url).toBe('https://github.com/example/repo/pull/1');
-    // Running + PR URL is still in_progress delivery (RUSH-2380).
     expect(summary.delivery).toBe('in_progress');
   });
 
@@ -126,8 +116,6 @@ describe('toAgentStatusSummary', () => {
     const summary = toAgentStatusSummary(detail);
     const detailBytes = JSON.stringify(detail).length;
     const summaryBytes = JSON.stringify(summary).length;
-    // Real-world prompts run 5-20 KB; this fixture's 3.5 KB prompt yields
-    // roughly 7x. The 5x floor is a regression guard, not a goal.
     expect(summaryBytes * 5).toBeLessThan(detailBytes);
   });
 });
@@ -146,7 +134,6 @@ describe('toTaskStatusSummary', () => {
     expect(compact.cursor).toBe(result.cursor);
     expect(compact.agents).toHaveLength(2);
     expect(compact.agents.map((a) => a.name)).toEqual(['alice', 'bob']);
-    // Total envelope must stay small even with several teammates.
     expect(JSON.stringify(compact).length).toBeLessThan(5000);
   });
 

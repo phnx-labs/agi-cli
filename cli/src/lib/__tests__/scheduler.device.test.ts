@@ -1,12 +1,3 @@
-/**
- * Device-affinity coverage for the scheduler and overdue detector.
- *
- * No mocks, no spies, no fake service seams: every test spawns the real CLI
- * (`node --import tsx src/index.ts routines ...`) against an isolated mkdtemp
- * HOME. Scheduling is observed through `routines list --json` (nextRun is
- * present only when this machine's scheduler loads the job); overdue detection
- * is observed through the same JSON (`overdue` flag).
- */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -17,7 +8,6 @@ import { fileURLToPath } from 'url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** Provision an isolated HOME with routines and optional run metadata. */
 function makeHome(opts: {
   jobs?: Record<string, unknown>[];
   enabled?: Record<string, string[]>;
@@ -51,7 +41,6 @@ function makeHome(opts: {
   return home;
 }
 
-/** Run `agents routines <args>` against an isolated HOME. */
 function run(home: string, args: string[], extraEnv: Record<string, string> = {}): ReturnType<typeof spawnSync> {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'routines', ...args], {
     cwd: REPO_ROOT,
@@ -123,8 +112,6 @@ describe('JobScheduler device activation', () => {
 describe('detectOverdueJobs device activation', () => {
   it('never flags a routine enabled only on another device as overdue here', () => {
     const pastRun = { status: 'completed', exitCode: 0, startedAt: '2020-01-01T00:00:00Z', completedAt: '2020-01-01T00:01:00Z' };
-    // createdAt predates the missed occurrences: overdue is floored at routine
-    // creation, and these fixtures are written to disk during the test.
     const born = { createdAt: '2020-01-01T00:00:00.000Z' };
     const home = makeHome({
       jobs: [

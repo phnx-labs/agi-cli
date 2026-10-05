@@ -1,15 +1,3 @@
-/**
- * Fold N per-account installations into 1 harness install + N credential slots
- * (PHNX-3940 T7).
- *
- * Homes are moved, never copied. Empty logged-out homes and duplicate identities
- * go to `agents trash` (restore reverses). Session transcript paths are re-indexed
- * in the same transaction as the moves. A running/leased home is deferred, never
- * moved. `--apply` is explicit; dry-run (and the upgrade hook) touch nothing.
- *
- * Native OAuth files stay inside the moved home on this device. Nothing here
- * reads or writes a reserved store, a setup-token, or a worker bundle.
- */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ALL_AGENT_IDS, credentialPresence, getAccountInfo, type AccountInfo } from '../agents.js';
@@ -76,7 +64,6 @@ interface MigrationAction {
   identityKey?: string | null;
   email?: string | null;
   sessionCount: number;
-  /** Planned filesystem remap for sessions.db (from prefix → to prefix). */
   pathMoves: Array<{ from: string; to: string }>;
 }
 
@@ -101,9 +88,7 @@ interface AccountMigrationManifest {
   schema: number;
   at: string;
   dryRun: boolean;
-  /** `planned` until every irreversible step finishes; `complete` is last. */
   status: AccountMigrationManifestStatus;
-  /** Full plan, written before the first move so a crash still names the intent. */
   plan: AccountMigrationPlan;
   harnesses: Record<string, {
     canonical: string | null;
@@ -111,7 +96,6 @@ interface AccountMigrationManifest {
     trashed: Array<{ label: string; reason: string; trashPath: string }>;
     deferred: Array<{ label: string; reason: string }>;
   }>;
-  /** old `agent@label` → new slot dir (or trash path). */
   map: Record<string, string>;
 }
 
@@ -274,13 +258,6 @@ function plannedTrashPath(agent: AgentId, label: string): string {
   return path.join(getHistoryDir(), 'trash', 'versions', agent, label, '<stamp>');
 }
 
-/**
- * Where a canonical install's stale `home/` goes when its account already holds
- * a slot: the binary and the (recreated, empty) home stay under `versions/`, so
- * the old home cannot use the versions trash — `agents trash restore` would put a
- * whole install back over a live one. Restoring is a plain move back; the
- * migration manifest records the path under `<agent>@<label>#home`.
- */
 function homeTrashDir(agent: AgentId, label: string): string {
   return path.join(getHistoryDir(), 'trash', 'homes', agent, label);
 }
@@ -419,14 +396,6 @@ async function planHarness(
       continue;
     }
     if (item.hasCredential && item.accountId && provisionedSlotExists(agent, item.accountId)) {
-      // The account already owns a populated slot on this device, so this
-      // per-version home is a stale copy of a credential the slot now carries.
-      // Routing it to `slot` would only trip `assertSlotAbsent` and abort the
-      // whole apply with nothing done — the state every auth-synced worker was
-      // in. Trash it instead (`agents trash restore` reverses). The canonical
-      // install keeps its binary and ends up with an empty home, exactly as it
-      // does when its home is the one that moves into the slot: two on-disk
-      // copies of one credential is not an end state the migration leaves.
       if (canonical && item.label === canonical.label) {
         actions.push({
           kind: 'canonical',
@@ -498,8 +467,6 @@ async function planHarness(
 
   const counts = {
     installations: inventory.length,
-    // A busy canonical is still the kept install — we did not move it, we
-    // deferred the fold. Counting it as 0 install is a lie.
     keep: actions.filter((a) =>
       a.kind === 'canonical'
       || ((a.kind === 'slot' || a.kind === 'defer') && a.label === canonical?.label)
@@ -517,6 +484,8 @@ export async function planAccountMigration(
   agents: AgentId[] = [...ALL_AGENT_IDS],
   deps: AccountMigrateDeps = {},
 ): Promise<AccountMigrationPlan> {
+  // Move rather than copy credential-bearing homes, defer running/leased homes,
+  // and keep planning/upgrade probes free of migration side effects.
   const harnesses: HarnessMigrationPlan[] = [];
   for (const agent of agents) {
     const plan = await planHarness(agent, deps);
@@ -595,8 +564,6 @@ function rewriteBindings(
     if (!row) {
       throw new Error(`Cannot rewrite binding '${target}': account '${accountId}' is missing.`);
     }
-    // Keep the per-target key (`agent@label` → account id). Collapsing every
-    // label onto one bare-agent binding would drop every account after the first.
     bindAccount(row.id, target, agent);
   }
 }
@@ -665,6 +632,7 @@ export async function applyAccountMigration(
   agents: AgentId[] = [...ALL_AGENT_IDS],
   deps: AccountMigrateDeps = {},
 ): Promise<ApplyMigrationResult> {
+  // Apply only an explicit plan; transcript-bearing homes must retain one owner.
   const plan = await planAccountMigration(agents, deps);
   const now = deps.now ?? (() => new Date());
   const at = now();
@@ -740,9 +708,6 @@ export async function applyAccountMigration(
     }
 
     for (const action of h.actions.filter((a) => a.kind === 'canonical' && a.accountId)) {
-      // Canonical install whose account already holds a slot: hand the stale
-      // home off to the homes trash and leave an empty home behind, mirroring
-      // the slot branch's end state for a canonical home.
       const item = byLabel.get(action.label);
       if (!item) throw new Error(`Plan named ${h.agent}@${action.label} but inventory has no such install.`);
       const trashPath = trashHome(h.agent, item);
@@ -763,9 +728,6 @@ export async function applyAccountMigration(
       remaps.push({ from: item.dir, to: trashPath });
       stillPresent.delete(item.label);
       if (action.accountId) {
-        // A home trashed because its account already holds a slot: anything
-        // bound to this version label follows the account, and the stale
-        // home record clears so spawn resolves through the slot alone.
         labelToAccount.set(item.label, action.accountId);
         movedAccountIds.push(action.accountId);
       }
@@ -787,11 +749,6 @@ export async function applyAccountMigration(
   return { plan, manifest, manifestPath, sessionsReindexed };
 }
 
-/**
- * Upgrade hook: print a dry-run report when leftover per-account installations
- * exist. Never applies. `--apply` stays an explicit `agents accounts migrate`
- * flag this release.
- */
 export async function reportAccountSlotMigrationOnUpgrade(): Promise<void> {
   const plan = await planAccountMigration();
   const work = plan.totals.slots + plan.totals.trash + plan.totals.deferred;

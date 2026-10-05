@@ -17,13 +17,8 @@ import type { Profile } from './profiles.js';
 import * as state from './state.js';
 import { addAccount } from './account-registry.js';
 
-// Keychain item for 'openrouter' provider: agents-cli.openrouter.token
 const KEYCHAIN_ITEM = profileKeychainItem('openrouter');
 
-// Profile tokens and account bundles are keychain items, so on a headed macOS
-// box the real standalone would reach the operator's login keychain; the
-// credential-backed cases run where keychain items are file-backed (headless
-// Linux/Windows, CI). Every test gets its own empty standalone store.
 const fileBacked = await standaloneKeychainIsFileBacked();
 useFreshSecretsHome();
 
@@ -206,7 +201,6 @@ describe.skipIf(!fileBacked)('getByokUsageForHarness with a credential in the st
     });
     await getByokUsageForHarness(makeProfile(), { forceRefresh: true });
     expect(calls).toBe(1);
-    // Second call (fresh): still 1.
     await getByokUsageForHarness(makeProfile());
     expect(calls).toBe(1);
   });

@@ -1,12 +1,3 @@
-/**
- * Teammate resume argv + guard. `teams resume`/`teams message` re-enter a
- * stopped teammate's own session by delegating to `agents run --resume <id> --
- * <message>`. These assert the argv the team runner builds and the guard that
- * refuses to resume a non-Claude teammate whose session id was never captured.
- *
- * Real objects, no mocking: buildRunArgv/buildCommand are the production argv
- * builders; resumeTeammate drives a real AgentProcess loaded from disk.
- */
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -28,8 +19,6 @@ function tmpBase(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resume-test-'));
 }
 
-// buildRunArgv is private; reach it through a cast — testing the real builder,
-// not a re-implementation.
 function argv(opts: {
   agentType?: string;
   prompt?: string;
@@ -58,7 +47,6 @@ describe('buildRunArgv — resume', () => {
     const a = argv({ agentType: 'claude', resume: { id: 'sess-123', message: 'merge the PR now' } });
     expect(a[0]).toBe('run');
     expect(a[1]).toBe('claude');
-    // The message is the first positional (the prompt slot), + the summary nudge.
     expect(a[2].startsWith('merge the PR now')).toBe(true);
     const ri = a.indexOf('--resume');
     expect(ri).toBeGreaterThan(-1);
@@ -100,10 +88,8 @@ describe('buildCommand — resume omits --session-id', () => {
       'claude', 'brief', 'edit', null, '/tmp/x', 'agent-uuid', 'medium', null, null,
       { id: 'agent-uuid', message: 'go' },
     );
-    // --session-id CREATES a session; `agents run` rejects it with --resume.
     expect(resumed).not.toContain('--session-id');
     expect(resumed).toContain('--resume');
-    // Working-directory access is still granted on resume.
     expect(resumed).toContain('--add-dir');
   });
 });
@@ -114,9 +100,6 @@ describe('resumeTeammate — resume-id guard', () => {
     const id = 'codex-agent-1';
     fs.mkdirSync(path.join(base, id), { recursive: true });
 
-    // A codex teammate that finished (or failed) before its stream ever emitted a
-    // session/thread id — remoteSessionId stays null, so there is no resumable
-    // handle (the agent_id is only Claude's session id, not codex's).
     const a = new AgentProcess(
       id, 'guard-team', 'codex', 'do a thing',
       null, 'edit', null, AgentStatus.COMPLETED, new Date(), new Date(), base,
@@ -158,9 +141,6 @@ describe('resumeTeammate — resume-id guard', () => {
     a.remoteSessionId = 'codex-thread-xyz';
     await a.saveMeta();
 
-    // Past the guard, resumeTeammate would spawn a real `agents run` child. We
-    // only need to prove the guard passes — assert the persisted resume handle
-    // is the captured thread id, which is what buildRunArgv receives.
     const mgr = new AgentManager(50, base);
     const loaded = await mgr.get(id);
     expect(loaded!.remoteSessionId).toBe('codex-thread-xyz');
@@ -192,10 +172,6 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — successful launch state', () => 
 
     const mgr = new AgentManager(50, base);
     try {
-      // Exercise the production resume + local spawn path. The harness may
-      // reject this synthetic session after launch; the invariant under test is
-      // the durable state written atomically when the replacement process has
-      // successfully spawned.
       const resumed = await mgr.resumeTeammate(id, 'Continue the task');
       expect(resumed.status).toBe(AgentStatus.RUNNING);
       expect(resumed.failure).toBeNull();
@@ -216,12 +192,6 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
     const id = 'claude-agent-relaunch-failure';
     const dir = path.join(base, id);
     const marker = `resume-transaction-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    // Recent, not a hardcoded calendar date: the manager's cleanupAgeDays (7)
-    // sweep deletes any teammate dir older than the cutoff during init, so a
-    // fixed past date turns this into a time bomb that starts failing exactly 7
-    // days after it was written (the teammate is reaped before resumeTeammate can
-    // find it → "No teammate with id"). Anchor to `now` so it stays in-window;
-    // the exact values are still asserted for preservation below.
     const startedAt = new Date(Date.now() - 60 * 60 * 1000);
     const completedAt = new Date(Date.now() - 30 * 60 * 1000);
     fs.mkdirSync(dir, { recursive: true });
@@ -245,30 +215,12 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
 
     const mgr = new AgentManager(50, base);
     try {
-      // Poison the CACHED AgentProcess's envOverrides with a circular value.
-      // saveMeta() now writes via tmp-file + rename (RUSH-2429), so the old
-      // "chmod a read-only symlink at meta.json" trick no longer fails the
-      // write: rename(2) replaces a symlink's directory entry outright and
-      // never even looks at — let alone respects the permissions of — the
-      // file it points to. A circular value survives everywhere ELSE on this
-      // path (a plain object spread in buildTeammateSpawnEnv, and a bare
-      // string-coercion when node builds the child's real env) but makes
-      // JSON.stringify() inside saveMeta() throw synchronously, before
-      // atomicWriteJson ever touches the filesystem — so it fails BOTH the
-      // launch save (after the real child is spawned) and the restore save
-      // that follows it, exactly like the write failure this test exercises.
       const preloaded = await mgr.get(id);
       expect(preloaded).not.toBeNull();
       const poison: Record<string, unknown> = {};
       poison.self = poison;
       (preloaded as unknown as { envOverrides: unknown }).envOverrides = { POISON: poison };
 
-      // The real local launcher reaches spawn, then saveMeta hits the poisoned
-      // envOverrides and fails. The transactional catch must terminate the
-      // detached process before resumeTeammate restores the original lifecycle.
-      // The restore's own saveMeta ALSO fails (same poisoned object), so the
-      // wrapper must preserve the ORIGINAL launch error via `{ cause }` — a
-      // bare restore-write error would erase the informative failure.
       const rejection = await mgr.resumeTeammate(id, marker).then(
         () => { throw new Error('expected resumeTeammate to reject'); },
         (e: unknown) => e as Error,
@@ -276,9 +228,6 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(rejection.message).toMatch(/restoring stopped state also failed/);
       const originalErr = rejection.cause as Error | undefined;
       expect(originalErr).toBeDefined();
-      // The original launch failure was the poisoned-envOverrides saveMeta
-      // write, not the restore write — its message must survive on the cause
-      // chain.
       expect(originalErr!.message).not.toMatch(/restoring stopped state also failed/);
 
       const retained = (mgr as any).agents.get(id) as AgentProcess | undefined;
@@ -291,9 +240,6 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(retained!.failure).toEqual(agent.failure);
       expect(fs.readFileSync(path.join(dir, 'prior-turn.log'), 'utf-8')).toBe('preserve me');
       expect(fs.readFileSync(stdoutPath, 'utf-8')).toBe('prior stdout');
-      // Neither the launch nor the restore write ever reached the filesystem
-      // (JSON.stringify threw before atomicWriteJson's first fs call), so the
-      // on-disk record is still exactly the original save from above.
       const restored = await AgentProcess.loadFromDisk(id, base);
       expect(restored).not.toBeNull();
       expect(restored!.status).toBe(AgentStatus.COMPLETED);
@@ -343,24 +289,15 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(isAlive(-wrapperPid)).toBe(false);
       expect(isAlive(childPid)).toBe(false);
     } finally {
-      try { process.kill(-wrapperPid, 'SIGKILL'); } catch { /* group gone */ }
+      try { process.kill(-wrapperPid, 'SIGKILL'); } catch {  }
       if (childPid > 0) {
-        try { process.kill(childPid, 'SIGKILL'); } catch { /* child gone */ }
+        try { process.kill(childPid, 'SIGKILL'); } catch {  }
       }
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
 });
 
-/**
- * The resume hazard: the status reader re-reads the whole stdout.log from byte 0
- * every poll and marks terminal status from the last `result` event it sees, with
- * NO liveness guard. If a resumed turn were APPENDED after the prior turn's
- * `result:success`, that stale event would report a still-running teammate as
- * COMPLETED (and a second follow-up would fork a session instead of steering).
- * That is exactly why launchProcess TRUNCATES the log on resume. These tests pin
- * both halves: the hazard exists, and a truncated (current-turn-only) log is safe.
- */
 describe.skipIf(IS_WINDOWS)('resume log-truncation hazard', () => {
   function spawnAlive(agent: AgentProcess, dir: string): ChildProcess {
     const fd = fs.openSync(path.join(dir, 'stdout.log'), 'a');
@@ -380,15 +317,13 @@ describe.skipIf(IS_WINDOWS)('resume log-truncation hazard', () => {
     const agent = new AgentProcess(id, 't', 'claude', 'x', null, 'edit', null, AgentStatus.RUNNING, new Date(), null, base);
     const child = spawnAlive(agent, dir);
     try {
-      // Simulate an APPEND resume: prior turn's terminal event still in the log.
       fs.writeFileSync(path.join(dir, 'stdout.log'), JSON.stringify({ type: 'result', subtype: 'success', session_id: 's' }) + '\n');
       expect(agent.isProcessAlive()).toBe(true);
       await agent.updateStatusFromProcess();
-      // The bug the truncation prevents: alive, yet reported COMPLETED.
       expect(agent.status).toBe(AgentStatus.COMPLETED);
     } finally {
-      try { process.kill(-(child.pid as number)); } catch { /* group gone */ }
-      try { process.kill(child.pid as number); } catch { /* gone */ }
+      try { process.kill(-(child.pid as number)); } catch {  }
+      try { process.kill(child.pid as number); } catch {  }
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
@@ -401,14 +336,13 @@ describe.skipIf(IS_WINDOWS)('resume log-truncation hazard', () => {
     const agent = new AgentProcess(id, 't', 'claude', 'x', null, 'edit', null, AgentStatus.RUNNING, new Date(), null, base);
     const child = spawnAlive(agent, dir);
     try {
-      // Truncated on resume: only the new turn's non-terminal events are present.
       fs.writeFileSync(path.join(dir, 'stdout.log'), JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\n');
       expect(agent.isProcessAlive()).toBe(true);
       await agent.updateStatusFromProcess();
       expect(agent.status).toBe(AgentStatus.RUNNING);
     } finally {
-      try { process.kill(-(child.pid as number)); } catch { /* group gone */ }
-      try { process.kill(child.pid as number); } catch { /* gone */ }
+      try { process.kill(-(child.pid as number)); } catch {  }
+      try { process.kill(child.pid as number); } catch {  }
       fs.rmSync(base, { recursive: true, force: true });
     }
   });

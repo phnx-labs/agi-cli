@@ -1,11 +1,5 @@
-/**
- * Public library surface for the teams subsystem.
- *
- * Consumers import from '@phnx-labs/agents-cli/teams'
- * to reuse the same agent lifecycle, parsing, summarization, and persistence
- * layer that powers the `agents teams` CLI.
- */
 
+/** Public API imported from '@phnx-labs/agents-cli/teams'. */
 export {
   AgentManager,
   AgentProcess,

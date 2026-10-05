@@ -1,11 +1,3 @@
-/**
- * The pure half of the fd-3 / fd-4 contract with the standalone `browser` engine
- * (PHNX-4101): bin resolution, how a bin is invoked, and the NDJSON framing rules.
- *
- * The wiring half — real pipes, real fds, real exit codes — is exercised by the
- * real `browser` binary at runtime; there is deliberately no stand-in engine
- * fixture, which would only prove the client agrees with itself.
- */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -42,7 +34,6 @@ describe('resolveBrowserBin', () => {
       const next = path.join(root, 'next');
       const dist = path.join(root, 'agents-cli', 'dist');
       for (const dir of [next, dist]) fs.mkdirSync(dir, { recursive: true });
-      // A `dist/browser.js` explicit bin is rejected (it is agents-cli's own).
       const legacy = path.join(dist, 'browser.js');
       fs.writeFileSync(legacy, '', { mode: 0o755 });
       fs.writeFileSync(path.join(next, 'browser'), '', { mode: 0o755 });
@@ -93,8 +84,6 @@ describe('invocation', () => {
 
 describe('the fd numbers the engine is told to use', () => {
   it('are 3 for the context and 4 for the events', () => {
-    // The launcher reads these by number out of BROWSER_CONTEXT_FD /
-    // BROWSER_EVENTS_FD, so changing either is a wire-protocol break.
     expect(BROWSER_CONTEXT_FD).toBe(3);
     expect(BROWSER_EVENTS_FD).toBe(4);
   });

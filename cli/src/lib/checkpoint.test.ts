@@ -64,7 +64,6 @@ describe('atomic write', () => {
     writeCheckpoint(sample({ iteration: 2 }), file);
     const back = readCheckpoint(file)!;
     expect(back.iteration).toBe(2);
-    // A single valid JSON object — not two concatenated writes.
     expect(() => JSON.parse(fs.readFileSync(file, 'utf-8'))).not.toThrow();
   });
 });

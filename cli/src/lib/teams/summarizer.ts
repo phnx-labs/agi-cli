@@ -1,11 +1,3 @@
-/**
- * Event summarization and status reporting.
- *
- * Provides functions to collapse, group, and summarize normalized agent events
- * into concise status reports, deltas, quick-status snapshots, and
- * human-readable summaries used by the teams status/list commands and the
- * MCP status handler.
- */
 import { AgentType } from './parsers.js';
 import { extractFileOpsFromBash } from './file_ops.js';
 
@@ -31,7 +23,6 @@ function extractErrorFromRawEvents(events: any[], maxChars: number = 500): strin
   return null;
 }
 
-/** Event type priority tiers for filtering. Higher tiers surface more important events. */
 export const PRIORITY: Record<string, string[]> = {
   critical: [
     'error',
@@ -57,10 +48,6 @@ export const PRIORITY: Record<string, string[]> = {
   ],
 };
 
-/**
- * Collapse sequential events of the same type into summary entries.
- * Returns a cleaner list of events suitable for output.
- */
 export function collapseEvents(events: any[], maxEvents: number = 20): any[] {
   if (events.length === 0) return [];
 
@@ -71,7 +58,6 @@ export function collapseEvents(events: any[], maxEvents: number = 20): any[] {
     const event = events[i];
     const eventType = event.type || 'unknown';
 
-    // For thinking events, collapse sequential ones
     if (eventType === 'thinking') {
       let count = 1;
       let lastContent = event.content || '';
@@ -99,7 +85,6 @@ export function collapseEvents(events: any[], maxEvents: number = 20): any[] {
       continue;
     }
 
-    // For message events, keep the last content
     if (eventType === 'message') {
       collapsed.push({
         type: 'message',
@@ -111,7 +96,6 @@ export function collapseEvents(events: any[], maxEvents: number = 20): any[] {
       continue;
     }
 
-    // Keep tool events as-is but truncate large content
     if (['bash', 'file_write', 'file_read', 'file_create', 'file_delete', 'tool_use'].includes(eventType)) {
       const cleaned = { ...event };
       if (cleaned.command && cleaned.command.length > 200) {
@@ -122,18 +106,15 @@ export function collapseEvents(events: any[], maxEvents: number = 20): any[] {
       continue;
     }
 
-    // Keep errors and results
     if (['error', 'result'].includes(eventType)) {
       collapsed.push(event);
       i++;
       continue;
     }
 
-    // Skip other event types
     i++;
   }
 
-  // Return only the last N events
   if (collapsed.length > maxEvents) {
     return collapsed.slice(-maxEvents);
   }
@@ -141,9 +122,6 @@ export function collapseEvents(events: any[], maxEvents: number = 20): any[] {
   return collapsed;
 }
 
-/**
- * Get a breakdown of tool calls by type.
- */
 export function getToolBreakdown(events: any[]): Record<string, number> {
   const breakdown: Record<string, number> = {};
 
@@ -169,7 +147,6 @@ export function getToolBreakdown(events: any[]): Record<string, number> {
   return breakdown;
 }
 
-/** Group consecutive events of the same type into combined entries with counts and truncated content. */
 export function groupAndFlattenEvents(events: any[]): any[] {
   if (events.length === 0) return [];
 
@@ -183,9 +160,6 @@ export function groupAndFlattenEvents(events: any[]): any[] {
     if (eventType === 'message' || eventType === 'thinking') {
       let count = 1;
       let combinedContent = event.content || '';
-      // Streaming token events (complete:false) get concatenated without a
-      // separator so tokens reassemble into readable prose. Whole-turn events
-      // get joined with newlines so distinct turns/thoughts stay separated.
       const isStreaming = event.complete === false;
       let j = i + 1;
 
@@ -299,7 +273,6 @@ export function groupAndFlattenEvents(events: any[]): any[] {
   return grouped;
 }
 
-/** Accumulated summary of an agent's activity: files touched, tools used, errors, and final message. */
 export class AgentSummary {
   agentId: string;
   agentType: string;
@@ -393,7 +366,6 @@ export class AgentSummary {
   }
 }
 
-/** Build an AgentSummary by walking all events and accumulating file ops, tool calls, errors, and messages. */
 export function summarizeEvents(
   agentId: string,
   agentType: string,
@@ -461,10 +433,6 @@ export function summarizeEvents(
     } else if (eventType === 'message') {
       const content = event.content || '';
       if (content) {
-        // Streaming token-by-token messages (e.g., grok) arrive as many small
-        // `message` events with complete:false; concatenate them so the final
-        // turn reads as one message. Whole-turn messages (claude, codex,
-        // gemini) keep their complete:true semantics — last one wins.
         if (event.complete === false) {
           summary.finalMessage = (summary.finalMessage || '') + content;
         } else {
@@ -536,30 +504,22 @@ export function summarizeEvents(
   return summary;
 }
 
-/**
- * Compute the delta of new activity since a given point in time (ISO timestamp)
- * or event index. Used for incremental status polling.
- */
 export function getDelta(
   agentId: string,
   agentType: string,
   status: string,
   events: any[],
-  since?: string | number  // Optional: ISO timestamp (string) or event index (number)
+  since?: string | number
 ): any {
-  // Filter events by timestamp (string) or index (number)
   let newEvents: any[];
   let sinceEvent = 0;
 
   if (since === undefined || since === null) {
-    // No filter - return all events
     newEvents = events;
   } else if (typeof since === 'number') {
-    // Backward compatibility: event index
     sinceEvent = since;
     newEvents = events.slice(sinceEvent);
   } else if (typeof since === 'string') {
-    // New behavior: timestamp filtering
     const sinceDate = new Date(since);
     newEvents = events.filter((e: any) => {
       if (!e.timestamp) return false;
@@ -574,7 +534,7 @@ export function getDelta(
     return {
       agent_id: agentId,
       status: status,
-      since_event: sinceEvent,  // For backward compatibility
+      since_event: sinceEvent,
       new_events_count: 0,
       has_changes: false,
       new_files_created: [],
@@ -594,9 +554,9 @@ export function getDelta(
     agent_id: agentId,
     agent_type: agentType,
     status: status,
-    since_event: sinceEvent,  // For backward compatibility
+    since_event: sinceEvent,
     new_events_count: newEvents.length,
-    current_event_count: sinceEvent + newEvents.length,  // For backward compatibility
+    current_event_count: sinceEvent + newEvents.length,
     has_changes: true,
     new_files_created: Array.from(summary.filesCreated),
     new_files_modified: Array.from(summary.filesModified),
@@ -605,16 +565,15 @@ export function getDelta(
     new_bash_commands: summary.bashCommands.slice(-15),
     new_messages: getLastMessages(newEvents, 5),
     new_tool_count: summary.toolCallCount,
-    new_tool_calls: newEvents  // For backward compatibility
+    new_tool_calls: newEvents
       .filter((e: any) => ['tool_use', 'bash', 'file_write'].includes(e.type))
       .slice(-5)
       .map((e: any) => `${e.tool || 'unknown'}: ${e.command || e.path || ''}`),
-    latest_message: summary.finalMessage,  // For backward compatibility
+    latest_message: summary.finalMessage,
     new_errors: summary.errors,
   };
 }
 
-/** Filter events to only those in the specified priority tiers (defaults to critical + important). */
 export function filterEventsByPriority(
   events: any[],
   includeLevels: string[] | null = null
@@ -634,7 +593,6 @@ export function filterEventsByPriority(
   return events.filter(e => allowedTypes.has(e.type));
 }
 
-/** Return the event type of the last tool-related or significant event, or null. */
 export function getLastTool(events: any[]): string | null {
   if (events.length === 0) return null;
 
@@ -649,7 +607,6 @@ export function getLastTool(events: any[]): string | null {
   return null;
 }
 
-/** Lightweight status snapshot with counts, recent commands, and error flag. */
 export interface QuickStatus {
   agent_id: string;
   agent_type: string;
@@ -664,7 +621,6 @@ export interface QuickStatus {
   last_message: string | null;
 }
 
-/** Extract all tool_use events as {tool, args} pairs. */
 export function getToolUses(events: any[]): Array<{tool: string, args: any}> {
   const toolUses: Array<{tool: string, args: any}> = [];
   
@@ -679,7 +635,6 @@ export function getToolUses(events: any[]): Array<{tool: string, args: any}> {
   return toolUses;
 }
 
-/** Extract the last N complete messages from the event stream, joining streaming deltas. */
 export function getLastMessages(events: any[], count: number = 3): string[] {
   const messages: string[] = [];
   let currentBuffer = '';
@@ -688,12 +643,9 @@ export function getLastMessages(events: any[], count: number = 3): string[] {
   for (const event of events) {
     if (event.type === 'message') {
       const content = event.content || '';
-      // For streaming events (delta=true), content fragments should be joined.
-      // We don't add newlines because these are likely parts of the same sentence/block.
       currentBuffer += content;
       isCollecting = true;
       
-      // If we hit an explicitly complete message, treat it as a boundary
       if (event.complete) {
         if (currentBuffer.trim()) {
           messages.push(currentBuffer);
@@ -702,7 +654,6 @@ export function getLastMessages(events: any[], count: number = 3): string[] {
         isCollecting = false;
       }
     } else {
-      // Any non-message event breaks the message stream
       if (isCollecting) {
         if (currentBuffer.trim()) {
           messages.push(currentBuffer);
@@ -713,15 +664,13 @@ export function getLastMessages(events: any[], count: number = 3): string[] {
     }
   }
 
-  // Handle any remaining buffer at the end
   if (isCollecting && currentBuffer.trim()) {
     messages.push(currentBuffer);
   }
-  
+
   return messages.slice(-count);
 }
 
-/** Build a lightweight QuickStatus snapshot from agent events. */
 export function getQuickStatus(
   agentId: string,
   agentType: string,
@@ -809,7 +758,6 @@ export function getQuickStatus(
   };
 }
 
-/** Produce a one-line human-readable status summary string (e.g. "Running, modified 3 files, used bash 5 times"). */
 export function getStatusSummary(
   agentId: string,
   agentType: string,

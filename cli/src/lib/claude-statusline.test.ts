@@ -65,7 +65,6 @@ describe('Claude native status line', () => {
   });
 
   it('formats the account from the identity of the home Claude is actually running with', () => {
-    // The shim's version home: CLAUDE_CONFIG_DIR/.claude.json is the file Claude uses.
     const versionHome = tempHome();
     fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(versionHome, '.claude', '.claude.json'), JSON.stringify({
@@ -78,10 +77,8 @@ describe('Claude native status line', () => {
       },
     }));
     expect(claudeHomeFromEnv({ CLAUDE_CONFIG_DIR: path.join(versionHome, '.claude') })).toBe(versionHome);
-    // A personal plan shows the bare email — the auto-generated org name is not identity.
     expect(formatAccountPart(readClaudeIdentity(versionHome), null)).toBe('person@example.com');
 
-    // A multi-seat Team seat carries its org name, the same label `agents view` renders.
     const teamHome = tempHome();
     fs.writeFileSync(path.join(teamHome, '.claude.json'), JSON.stringify({
       oauthAccount: {
@@ -94,7 +91,6 @@ describe('Claude native status line', () => {
     }));
     expect(formatAccountPart(readClaudeIdentity(teamHome), null)).toBe('seat@example.com (Example Labs)');
 
-    // No CLAUDE_CONFIG_DIR → Claude reads $HOME/.claude.json; a never-signed-in home renders nothing.
     expect(claudeHomeFromEnv({})).toBe(os.homedir());
     expect(formatAccountPart(readClaudeIdentity(tempHome()), null)).toBe('');
   });
@@ -105,7 +101,6 @@ describe('Claude native status line', () => {
       oauthAccount: { emailAddress: 'person@example.com', accountUuid: 'account-1', organizationUuid: 'org-1' },
     }));
     const identity = readClaudeIdentity(home);
-    // The same registry row `agents accounts` lists as `claude  work  person@example.com`.
     const meta = {
       accounts: {
         native: {
@@ -123,9 +118,7 @@ describe('Claude native status line', () => {
     const named = findNativeAccountByIdentity(meta, 'claude', identity);
     expect(named?.name).toBe('work');
     expect(formatAccountPart(identity, named)).toBe('work');
-    // A different harness's row for the same human never names a Claude login.
     expect(findNativeAccountByIdentity(meta, 'codex', identity)).toBeNull();
-    // Unnamed login: nothing registered for this identity → the email label.
     expect(findNativeAccountByIdentity({ accounts: {} }, 'claude', identity)).toBeNull();
     expect(formatAccountPart(identity, null)).toBe('person@example.com');
     expect(findNativeAccountByIdentity(meta, 'claude', null)).toBeNull();
@@ -154,16 +147,12 @@ describe('Claude native status line', () => {
     const remFile = path.join(remDir, 'reminders.yaml');
     const prior = setRemindersFilePathForTest(remFile);
     try {
-      // Valid file → a dimmed reminder part on the real (default-path) code path.
       fs.writeFileSync(remFile, ['reminders:', '  - short: "Only one"'].join('\n'));
       expect(resolveReminderPart('sess-x')).toBe('\x1b[2m◆ Only one\x1b[22m');
 
-      // Malformed file → swallowed to '' so the prompt is never broken (the
-      // feature's central safety claim, exercised on the real path).
       fs.writeFileSync(remFile, 'not-a-reminders-doc: true');
       expect(resolveReminderPart('sess-x')).toBe('');
 
-      // Missing file → not opted in → ''.
       fs.rmSync(remFile);
       expect(resolveReminderPart('sess-x')).toBe('');
     } finally {
@@ -257,24 +246,17 @@ describe('Claude native status line', () => {
   });
 
   it('recognizes our own subcommand under any binary name as a self-reference', () => {
-    // The exact production command, and the fork-bomb seeds: the same private
-    // subcommand under a different binary name or an absolute path.
     expect(isStatusLineSelfReference(CLAUDE_STATUSLINE_COMMAND)).toBe(true);
     expect(isStatusLineSelfReference('agents-dev __claude-statusline')).toBe(true);
     expect(isStatusLineSelfReference('ag __claude-statusline')).toBe(true);
     expect(isStatusLineSelfReference('/Users/me/.local/bin/agents-dev __claude-statusline')).toBe(true);
     expect(isStatusLineSelfReference('  agents   __claude-statusline  ')).toBe(true);
-    // A genuine third-party producer is NOT a self-reference.
     expect(isStatusLineSelfReference('/home/me/statusline.sh')).toBe(false);
     expect(isStatusLineSelfReference('starship prompt')).toBe(false);
     expect(isStatusLineSelfReference('')).toBe(false);
   });
 
   it('never saves our own command (under a dev binary name) as a delegate — the fork bomb', () => {
-    // Reproduces the seed of the fork bomb: settings.json points the status line
-    // at `agents-dev __claude-statusline`. installClaudeStatusLine must NOT
-    // preserve that as a delegate, or every render would spawn a copy that reads
-    // the same delegate and spawns another, without bound.
     const home = tempHome();
     const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
     const settingsPath = path.join(home, '.claude', 'settings.json');
@@ -284,16 +266,12 @@ describe('Claude native status line', () => {
     }));
 
     expect(installClaudeStatusLine(home)).toEqual({ changed: true });
-    // No recursive delegate was written.
     expect(fs.existsSync(delegate)).toBe(false);
-    // The command was canonicalized to the production entrypoint.
     expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8')).statusLine.command)
       .toBe(CLAUDE_STATUSLINE_COMMAND);
   });
 
   it('deletes a pre-existing recursive delegate on re-install', () => {
-    // A box already poisoned by the bomb: the delegate file itself holds our own
-    // subcommand. Re-installing must remove it, not leave it to keep recursing.
     const home = tempHome();
     const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
     const settingsPath = path.join(home, '.claude', 'settings.json');
@@ -321,10 +299,6 @@ describe('Claude native status line', () => {
     const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
     const sentinel = path.join(home, 'delegate-was-spawned');
     fs.mkdirSync(path.dirname(delegate), { recursive: true });
-    // A command that (a) IS a self-reference — it ends in our private subcommand
-    // — and (b) would create a sentinel file if it were ever executed. With the
-    // pre-fix exact-string guard this `agents-dev`-shaped command was spawned and
-    // recursed; the fix must return '' WITHOUT running it.
     fs.writeFileSync(delegate, `sh -c 'touch "${sentinel}"' __claude-statusline\n`);
     expect(renderDelegate('', home)).toBe('');
     expect(fs.existsSync(sentinel)).toBe(false);
@@ -334,8 +308,6 @@ describe('Claude native status line', () => {
     const home = tempHome();
     const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
     fs.mkdirSync(path.dirname(delegate), { recursive: true });
-    // A perfectly valid external producer — but the env marker says we are
-    // ourselves a delegate, so it must NOT be spawned (hard depth-1 cap).
     fs.writeFileSync(delegate, 'printf should-not-run\n');
     const prior = process.env.AGENTS_CLAUDE_STATUSLINE_DELEGATED;
     process.env.AGENTS_CLAUDE_STATUSLINE_DELEGATED = '1';

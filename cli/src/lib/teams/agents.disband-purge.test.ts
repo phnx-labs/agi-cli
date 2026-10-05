@@ -1,18 +1,3 @@
-/**
- * RUSH-2450: teams disband must be terminal.
- *
- * Disband used to delete log dirs + the registry entry but left the
- * AgentManager in-memory cache intact. A concurrent `teams start --watch`
- * supervisor then re-persisted those records via saveMeta, so a second
- * disband still found N logs to clear and `teams start` could re-launch
- * PENDING work that had already merged.
- *
- * Exercises the real AgentManager/AgentProcess/registry path against a temp
- * HOME + meta dir. No mocking.
- *
- * HOME is pinned BEFORE the dynamic import so state.ts's module-level paths
- * resolve under the temp home (same pattern as registry.test.ts).
- */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -75,19 +60,18 @@ async function makePending(
 }
 
 afterEach(async () => {
-  // Reset registry between tests under the pinned HOME.
   const reg = path.join(TEST_HOME, '.agents', '.history', 'teams', 'registry.json');
   const disbanded = path.join(TEST_HOME, '.agents', '.history', 'teams', 'disbanded');
-  try { fs.rmSync(reg, { force: true }); } catch { /* */ }
-  try { fs.rmSync(`${reg}.lock`, { recursive: true, force: true }); } catch { /* */ }
-  try { fs.rmSync(disbanded, { recursive: true, force: true }); } catch { /* */ }
+  try { fs.rmSync(reg, { force: true }); } catch {  }
+  try { fs.rmSync(`${reg}.lock`, { recursive: true, force: true }); } catch {  }
+  try { fs.rmSync(disbanded, { recursive: true, force: true }); } catch {  }
   for (const d of bases.splice(0)) {
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* */ }
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {  }
   }
 });
 
 afterAll(() => {
-  try { fs.rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* */ }
+  try { fs.rmSync(TEST_HOME, { recursive: true, force: true }); } catch {  }
 });
 
 describe('disband is terminal (RUSH-2450)', () => {
@@ -101,7 +85,6 @@ describe('disband is terminal (RUSH-2450)', () => {
     const mgr = new AgentManager(50, base);
     expect(await mgr.listByTask('daemon-reliability')).toHaveLength(2);
 
-    // Mirror the disband order: registry first (tombstone), then purge.
     const existed = await removeTeam('daemon-reliability');
     expect(existed).toBe(true);
     expect(await teamExists('daemon-reliability')).toBe(false);
@@ -115,17 +98,13 @@ describe('disband is terminal (RUSH-2450)', () => {
     expect(await mgr.listByTask('daemon-reliability')).toHaveLength(0);
     expect(fs.readdirSync(base)).toEqual([]);
 
-    // Second purge (second disband) finds nothing.
     const purgedAgain = await mgr.purgeByTask('daemon-reliability');
     expect(purgedAgain).toEqual([]);
 
-    // Supervisor still holds the old AgentProcess objects and tries to save —
-    // must not recreate meta.json once the team is disbanded.
     await a.saveMeta();
     await b.saveMeta();
     expect(fs.readdirSync(base)).toEqual([]);
 
-    // A fresh manager agrees: roster is empty.
     const fresh = new AgentManager(50, base);
     expect(await fresh.listByTask('daemon-reliability')).toHaveLength(0);
   });

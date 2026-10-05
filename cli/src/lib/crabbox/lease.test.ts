@@ -25,7 +25,7 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain('npm install -g @phnx-labs/agents-cli');
     expect(script).toContain("agents add 'claude'");
     expect(script).toContain("agents run 'claude' 'print hostname' --quiet");
-    expect(script).toContain('rm -f "$HOME/.claude.json"'); // shred
+    expect(script).toContain('rm -f "$HOME/.claude.json"');
     expect(script).toContain('exit $rc');
   });
 
@@ -34,7 +34,6 @@ describe('buildBootstrapScript', () => {
     const markerAt = script.indexOf(`echo '${LEASE_AGENT_MARKER}'`);
     const runAt = script.indexOf("agents run 'claude' 'hi' --quiet");
     expect(markerAt).toBeGreaterThan(-1);
-    // Marker is emitted after credential setup and directly before the agent run.
     expect(markerAt).toBeLessThan(runAt);
     expect(script.slice(markerAt, runAt).trim()).toBe(`echo '${LEASE_AGENT_MARKER}'`);
   });
@@ -46,23 +45,15 @@ describe('buildBootstrapScript', () => {
       runtimes: ['claude'],
       detected,
     });
-    // Fresh crabbox images ship without node; everything must land in ~/.local.
     expect(script).toContain('export PATH="$HOME/.local/bin:$PATH"');
     expect(script).toContain('command -v node');
     expect(script).toContain('nodejs.org/dist/latest-v22.x');
     expect(script).toContain('npm config set prefix "$HOME/.local"');
-    // A missing CLI must abort with a diagnostic, not run into `agents: command not found`.
     expect(script).toContain('exit 96');
-    // First-run setup is gated on the SAME postcondition the run-side gate checks
-    // (~/.agents/.system is a git repo, ensureInitialized in commands/setup.ts), and
-    // a setup that leaves it absent aborts the bootstrap instead of being swallowed.
-    // `-e` matches isGitRepo's existsSync (a gitfile counts too).
     expect(script).toContain('if [ ! -e "$HOME/.agents/.system/.git" ]; then');
     expect(script).toContain('setup_out=$(agents setup 2>&1)');
     expect(script).toContain(`exit ${LEASE_BOOTSTRAP_FAILED_CODE}`);
-    // The old swallow (`agents setup >/dev/null 2>&1 || true`) is gone.
     expect(script).not.toContain('agents setup >/dev/null 2>&1 || true');
-    // Node bootstrap runs before the credential write — never after.
     expect(script.indexOf('command -v node')).toBeLessThan(script.indexOf("agents run 'claude'"));
   });
 
@@ -75,8 +66,6 @@ describe('buildBootstrapScript', () => {
         detected,
         keep,
       });
-      // Both the config AND the token file are removed post-run (shred is in the
-      // box body, not teardown — a kept box still loses the token).
       expect(script).toContain('rm -f "$HOME/.claude.json"');
       expect(script).toContain('rm -f "$HOME/.claude/.credentials.json"');
     }
@@ -137,10 +126,6 @@ describe('buildBootstrapScript', () => {
   });
 
   it('REFUSES to copy a base runtime native credential (SING-1b) — the profile auth is portable, the native login is not', () => {
-    // A profile-dispatch run carries its own portable auth (ANTHROPIC_BASE_URL /
-    // AUTH_TOKEN), which is fine. But `credentialRuntimes: ['claude']` ALSO asks
-    // to copy the native Claude OAuth login to the leased box — that is the
-    // forbidden transfer, so the bootstrap must refuse rather than serialize it.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-profile-'));
     const credPath = path.join(tmpDir, 'claude.json');
     fs.writeFileSync(credPath, '{"oauthAccount":{"emailAddress":"a@b.com"}}');
@@ -187,9 +172,7 @@ describe('buildBootstrapScript', () => {
       script.indexOf(`echo '${leasePhaseSentinel(n)}'`),
     );
     for (const at of order) expect(at).toBeGreaterThan(-1);
-    // Strictly increasing — sentinels appear in block order.
     for (let i = 1; i < order.length; i++) expect(order[i]).toBeGreaterThan(order[i - 1]);
-    // install sentinel precedes the node bootstrap; creds precedes the marker.
     expect(script.indexOf(`echo '${leasePhaseSentinel('install')}'`)).toBeLessThan(script.indexOf('command -v node'));
     expect(script.indexOf(`echo '${leasePhaseSentinel('copy-setup')}'`)).toBeLessThan(
       script.indexOf(`echo '${LEASE_AGENT_MARKER}'`),
@@ -199,21 +182,15 @@ describe('buildBootstrapScript', () => {
   it('omits the copy-setup sentinel when copySetup is false (--bare)', () => {
     const script = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected, copySetup: false });
     expect(script).not.toContain(`echo '${leasePhaseSentinel('copy-setup')}'`);
-    // The other sentinels still fire.
     expect(script).toContain(`echo '${leasePhaseSentinel('sync')}'`);
     expect(script).toContain(`echo '${leasePhaseSentinel('creds')}'`);
   });
 
   it('materializes the pushed config with `agents sync --local` at the copy-setup step (F1 wiring)', () => {
-    // The host rsyncs ~/.agents before the box run (leaseAndRun); the box then
-    // reconciles it into the runtime home — but only after the install step has
-    // put agents-cli on PATH, and only when copySetup is on.
     const on = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected });
     expect(on).toContain('agents sync --local');
-    // Sync runs after the runtime install (agents-cli present) and before the agent marker.
     expect(on.indexOf('agents sync --local')).toBeGreaterThan(on.indexOf(`echo '${leasePhaseSentinel('install')}'`));
     expect(on.indexOf('agents sync --local')).toBeLessThan(on.indexOf(LEASE_AGENT_MARKER));
-    // --bare drops the sync with the sentinel.
     const bare = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected, copySetup: false });
     expect(bare).not.toContain('agents sync --local');
   });
@@ -223,7 +200,6 @@ describe('buildBootstrapScript', () => {
     expect(pub).not.toContain(`echo '${leasePhaseSentinel('joined-tailnet')}'`);
     const ts = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected, netMode: 'tailscale' });
     expect(ts).toContain(`echo '${leasePhaseSentinel('joined-tailnet')}'`);
-    // It sits before the install block (the box joined during warmup).
     expect(ts.indexOf(`echo '${leasePhaseSentinel('joined-tailnet')}'`)).toBeLessThan(
       ts.indexOf(`echo '${leasePhaseSentinel('install')}'`),
     );
@@ -236,7 +212,6 @@ describe('buildBootstrapScript', () => {
       runtimes: [],
       detected,
     });
-    // The dangerous prompt is fully contained in a single-quoted argument.
     expect(script).toContain("'don'\\''t break; rm -rf /'");
   });
 
@@ -259,11 +234,6 @@ describe('buildBootstrapScript', () => {
 
 describe('leaseAndRun — refuses a native OAuth copy BEFORE leasing a box (SING-1b, no leak)', () => {
   it('rejects a signed-in native runtime before any crabbox interaction', async () => {
-    // credPath is SET, so `assertNoNativeOAuthTransfer` at the very top of
-    // leaseAndRun throws — before crabboxFind / crabboxWarmup ever runs, so no box
-    // is leased (nothing to pay for or leak). If the refusal lived only inside
-    // buildBootstrapScript (post-warmup), this call would instead reach the crabbox
-    // layer and fail with a different error (or hang on a real lease).
     const signedIn: DetectedRuntime[] = [
       { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: '/tmp/claude-signedin.json' },
     ];
@@ -282,14 +252,7 @@ describe('leaseWorkspaceId', () => {
   });
 });
 
-// POSIX-only: stands up a `#!/bin/sh` fake crabbox on PATH, which Windows can
-// neither resolve nor execute (see crabbox/cli.test.ts for the same pattern).
 describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes', () => {
-  // Hermetic lease-bundle resolution: leaseAndRun → crabboxFind → crabboxEnv would
-  // otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a locked
-  // `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
-  // dev-machine-only failure unrelated to the reuse/bootstrap flow under test. Pin
-  // readMeta → {} and the process client's listBundlesSync → [] so no lease bundle is found.
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
@@ -373,10 +336,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes'
         runtimes: ['claude'],
         detected,
         reuseBox: 'warm-one',
-        // This test exercises box-reuse + bootstrap-script generation, NOT the
-        // push-from-local copy (covered by the buildBootstrapScript F1 test). Keep
-        // it off so leaseAndRun never spawns a real `rsync -e ssh` to the fake
-        // TEST-NET box address — that would hang on ConnectTimeout in CI.
         copySetup: false,
         onData: (chunk) => { output += chunk; },
         onPhase: (phase) => { phases.push(phase.kind); },
@@ -406,13 +365,11 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes'
   });
 });
 
-// POSIX-only fake crabbox, same seam as the reuse suite above.
 describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reuse (reuse-first --lease)', () => {
   const detected: DetectedRuntime[] = [
     { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: null },
   ];
 
-  /** A `crabbox list --json` entry. `profile` undefined → no profile label. */
   function poolBoxJson(
     slug: string,
     over: { profile?: string; tailscale?: boolean; state?: string; expiresAt?: string } = {},
@@ -436,25 +393,17 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     };
   }
 
-  /**
-   * A fake crabbox with a pool: `list` serves `boxes` until a `warmup` flips the
-   * warmed marker, then serves `boxes + warmedBoxes`; `status --id <slug>`
-   * reports ready=true only for `readySlugs`. Every invocation is logged.
-   */
   function setupPoolFake(opts: {
     boxes: unknown[];
     readySlugs: string[];
     warmedBoxes?: unknown[];
     runExit?: number;
-    /** false = the box-side script exits BEFORE the agent marker (a pre-agent bootstrap abort). */
     runEmitsMarker?: boolean;
   }) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-pool-'));
     const log = path.join(dir, 'crabbox.log');
     const script = path.join(dir, 'remote.sh');
     const runExit = opts.runExit ?? 7;
-    // A real bootstrap abort exits BEFORE echoing LEASE_AGENT_MARKER; a run that
-    // reached the agent echoes it first. `runEmitsMarker` picks which the fake models.
     const runBody = opts.runEmitsMarker === false
       ? `printf "bootstrap aborted\\n" >&2; exit ${runExit}`
       : `printf "%s\\nagent ok\\n" "${LEASE_AGENT_MARKER}"; exit ${runExit}`;
@@ -508,7 +457,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
         runtimes: ['claude'],
         detected,
         profile: 'agents-cli',
-        // copy-setup is covered elsewhere; keep it off so no real rsync/ssh spawns.
         copySetup: false,
         onPhase: (phase) => { phases.push(phase.kind); },
         ...runOpts,
@@ -530,7 +478,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
 
     expect(result.box.slug).toBe('warm-one');
     expect(result.exitCode).toBe(7);
-    // Teardown is skipped for a pool-reused box (same semantics as --box).
     expect(result.toreDown).toBe(false);
     expect(phases).toEqual(['reuse', 'ready']);
     expect(calls).toContain('list --json');
@@ -551,8 +498,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
   });
 
   it('skips a pool box that is not SSH-ready, then warms and keeps a replacement pool box', async () => {
-    // status=running but `crabbox status` says ready=false (bootstrap dud) —
-    // the sandbox.sh box_ready gate. The dud is left alone, never stopped.
     const fake = setupPoolFake({ boxes: [poolBoxJson('dud-one', { profile: 'agents-cli' })], readySlugs: [] });
     const { result, phases, calls } = await runWithPool(fake);
 
@@ -570,7 +515,7 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     const { result, calls } = await runWithPool(fake);
 
     expect(result.box.slug).toBe('fresh-one');
-    expect(calls).not.toContain('status --id other-one'); // filtered before the status gate
+    expect(calls).not.toContain('status --id other-one');
     expect(calls.some((l) => l.startsWith('warmup'))).toBe(true);
   });
 
@@ -579,7 +524,7 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
       boxes: [poolBoxJson('tailnet-one', { profile: 'agents-cli', tailscale: true })],
       readySlugs: ['tailnet-one'],
     });
-    const { result, calls } = await runWithPool(fake); // netMode defaults to public
+    const { result, calls } = await runWithPool(fake);
 
     expect(result.box.slug).toBe('fresh-one');
     expect(calls).not.toContain('status --id tailnet-one');
@@ -616,15 +561,11 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(result.box.slug).toBe('fresh-one');
     expect(result.toreDown).toBe(true);
     expect(phases).toEqual(['warmup', 'ready', 'teardown']);
-    expect(calls.some((l) => l.startsWith('status'))).toBe(false); // pool never consulted
+    expect(calls.some((l) => l.startsWith('status'))).toBe(false);
     expect(calls).toContain('stop fresh-one');
   });
 
   it('stops a box THIS run provisioned when its bootstrap failed — even without --fresh or --keep-box', async () => {
-    // Empty pool → warmup a fresh box; the box-side bootstrap exits
-    // LEASE_BOOTSTRAP_FAILED_CODE BEFORE the agent marker (agents setup did not
-    // complete). A newly created, unusable box is pure cost, so it is torn down
-    // despite a normal (non --fresh) lease.
     const fake = setupPoolFake({ boxes: [], readySlugs: [], runExit: LEASE_BOOTSTRAP_FAILED_CODE, runEmitsMarker: false });
     const { result, phases, calls } = await runWithPool(fake);
 
@@ -636,9 +577,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
   });
 
   it('KEEPS a provisioned box when the AGENT (not the bootstrap) exits with the same code', async () => {
-    // The agent ran (marker emitted) and merely happened to exit 97 — not a
-    // bootstrap abort. Teardown is gated on the marker never being seen, so the
-    // box is kept: an arbitrary agent exit code must not destroy a warm box.
     const fake = setupPoolFake({ boxes: [], readySlugs: [], runExit: LEASE_BOOTSTRAP_FAILED_CODE, runEmitsMarker: true });
     const { result, phases, calls } = await runWithPool(fake);
 
@@ -650,8 +588,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
   });
 
   it('never stops a REUSED box even when its bootstrap aborts', async () => {
-    // A reused pool box may be shared by a concurrent run — a failed run on it never
-    // tears it down (only a box this run provisioned is auto-stopped on failure).
     const fake = setupPoolFake({
       boxes: [poolBoxJson('warm-one', { profile: 'agents-cli' })],
       readySlugs: ['warm-one'],
@@ -679,8 +615,8 @@ describe('isExpiredPoolStray — the on-lease expired-stray sweep', () => {
     ready: true,
     keep: true,
     createdAt: NOW - 10_000,
-    expiresAt: NOW - 100, // expired
-    lastTouchedAt: NOW - STRAY_GRACE_SECS - 10, // idle past the grace window
+    expiresAt: NOW - 100,
+    lastTouchedAt: NOW - STRAY_GRACE_SECS - 10,
     idleTimeoutSecs: 1800,
     profile: 'default',
     ...over,

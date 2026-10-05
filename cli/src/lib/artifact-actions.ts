@@ -1,12 +1,4 @@
-/**
- * Artifact action types and validation.
- * Ported from the legacy agent CLI config helpers.
- *
- * Artifact actions map tool invocations to artifact labels, allowing agents to
- * trigger tools automatically when specific artifacts are produced.
- */
 
-/** A single action that binds a tool invocation to matching artifact labels. */
 export interface ArtifactAction {
   tool: string;
   label: string;
@@ -14,13 +6,6 @@ export interface ArtifactAction {
   input?: Record<string, string>;
 }
 
-/**
- * Validate artifact actions configuration.
- * @param actions - List of artifact actions to validate
- * @param httpToolNames - Set of tool names defined in http_tools section
- * @param applicationTools - Set of valid application tool names
- * @returns Array of validation errors (empty if valid)
- */
 export function validateArtifactActions(
   actions: ArtifactAction[],
   httpToolNames: Set<string>,
@@ -59,10 +44,6 @@ export function validateArtifactActions(
   return errors;
 }
 
-/**
- * Validate template string uses only allowed patterns.
- * Only allows {{artifact.X}} and {{preflight.X}} patterns.
- */
 function validateTemplate(tmpl: string): string | null {
   const re = /\{\{(\w+)\.(\w+)\}\}/g;
   let match;

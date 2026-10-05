@@ -19,9 +19,6 @@ describe('writeManifest concurrent safety', () => {
   }
 
   function spawnWriteManifest(repoPath: string, agentKey: string, version: string): Promise<void> {
-    // Each process: read existing manifest, stall 200ms to force overlap, then write.
-    // The lock+atomic-rename in writeManifest ensures the file is never left corrupt,
-    // even though last-writer-wins means only one agent key may survive.
     const script = `
       const { readManifest, writeManifest } = await import(${JSON.stringify(manifestPath)});
       const existing = readManifest(${JSON.stringify(repoPath)}) ?? {};
@@ -63,14 +60,12 @@ describe('writeManifest concurrent safety', () => {
       spawnWriteManifest(testDir, 'codex', '2.0.0'),
     ]);
 
-    // File must be parseable YAML — the primary guarantee of atomic rename.
     runManifestScript(testDir, `
       const { readManifest } = await import(${JSON.stringify(manifestPath)});
       const m = readManifest(${JSON.stringify(testDir)});
       if (!m || typeof m !== 'object') throw new Error('not an object: ' + JSON.stringify(m));
     `);
 
-    // No leftover tmp files.
     expect(fs.readdirSync(testDir).filter((e) => e.includes('.tmp-'))).toEqual([]);
   });
 
@@ -85,11 +80,6 @@ describe('writeManifest concurrent safety', () => {
   });
 });
 
-/**
- * RUSH-2090: writeManifest used plain yaml.stringify and stripped every comment
- * from agents.yaml. The mcp-add path is read → mutate mcp → writeManifest; it
- * must keep hand-written annotations (matching serializeCentral in state.ts).
- */
 describe('writeManifest comment preservation (RUSH-2090)', () => {
   let testDir: string;
 
@@ -126,7 +116,6 @@ describe('writeManifest comment preservation (RUSH-2090)', () => {
       'utf-8',
     );
 
-    // Same shape as commands/mcp.ts mcp-add: read → set mcp[name] → writeManifest.
     const out = run(`
       import * as fs from 'fs';
       const { readManifest, writeManifest } = await import(${JSON.stringify(manifestPath)});

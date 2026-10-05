@@ -1,10 +1,3 @@
-/**
- * End-to-end wiring: a real kimi stream (terminating in session.resume_hint)
- * must resolve a teammate to COMPLETED via the stream path, and capture the
- * session id. Against the old parser (resume_hint -> init) the stream produced
- * no terminal event, so status stayed RUNNING and only the exit code could
- * resolve it — this test would fail there.
- */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -30,7 +23,6 @@ describe('kimi teammate status from a real stream', () => {
       null, AgentStatus.RUNNING, new Date(), null, base,
     );
 
-    // Write the captured kimi stream exactly as it lands in the teammate log.
     fs.writeFileSync(path.join(base, id, 'stdout.log'), fixture('kimi-stream-tool.jsonl'));
 
     await agent.readNewEvents();
