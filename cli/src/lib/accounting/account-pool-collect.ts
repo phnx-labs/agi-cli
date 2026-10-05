@@ -11,7 +11,7 @@ function localRegistryRecords(): RegistryAccountRecord[] {
       .filter((a) => hasKeychainTokenSync(a.secretRef))
       .map((a) => ({ id: a.id, name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
   } catch (err) {
-    // Only a missing secrets transport may degrade to the native-only pool.
+    // Only secrets-transport failures may degrade to native-only; data/policy errors still throw.
     if (isSecretsTransportError(err)) return [];
     throw err;
   }

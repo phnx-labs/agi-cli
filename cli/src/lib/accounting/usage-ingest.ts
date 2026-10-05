@@ -39,7 +39,7 @@ function readStdin(limitBytes = REMOTE_STDOUT_MAX_BYTES): Promise<string> {
 }
 
 function fromFileArg(argv: string[]): string | null {
-  // --from transfers file ownership to this process, including on Windows.
+  // --from reads the caller-owned temp file used when Windows cannot forward SSH stdin.
   const i = argv.indexOf('--from');
   return i !== -1 && argv[i + 1] ? argv[i + 1] : null;
 }
