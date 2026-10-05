@@ -475,6 +475,7 @@ export class SelfUpdateService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+    const deadlineAt = Date.now() + this.deadlineMs;
     const outcome = await attemptSelfUpdateAndExit(ctx, signal);
     if (outcome.updated) {
       scheduleSelfUpdateExit();
@@ -488,7 +489,7 @@ export class SelfUpdateService extends BasePeriodicService {
           'process upgrades the install (`agents doctor` lists the shadow copy)',
       );
     }
-    await upgradeHostClis(ctx, signal);
+    await upgradeHostClis(ctx, signal, deadlineAt);
   }
 }
 
@@ -499,10 +500,10 @@ export class SelfUpdateService extends BasePeriodicService {
  * box kept whatever version it first installed (R5). A failure leaves that
  * tool on its old version and is retried next tick.
  */
-async function upgradeHostClis(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+export async function upgradeHostClis(ctx: DaemonContext, signal: AbortSignal, deadlineAt: number, cwd?: string): Promise<void> {
   let results: CliUpgradeResult[];
   try {
-    results = await upgradeOutdatedClis(signal);
+    results = await upgradeOutdatedClis({ signal, deadlineAt, cwd });
   } catch (err) {
     ctx.log('WARN', `host-cli upgrade: could not read CLI manifests: ${(err as Error).message}`);
     return;

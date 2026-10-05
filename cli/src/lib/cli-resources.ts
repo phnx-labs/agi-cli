@@ -738,7 +738,7 @@ export type CliUpgradeResult =
   | { name: string; status: 'upgraded'; from: string; to: string }
   | { name: string; status: 'skipped' | 'failed'; reason: string };
 
-const UPGRADE_TIMEOUT_MS = 5 * 60_000;
+export const UPGRADE_TIMEOUT_MS = 5 * 60_000;
 
 function runNpmInstall(prefix: string, spec: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -760,7 +760,11 @@ function runNpmInstall(prefix: string, spec: string, signal?: AbortSignal): Prom
  * downgrades, and reports `upgraded` only after the binary on PATH answers with
  * the pinned version. A failed install leaves the old version in place.
  */
-export async function upgradeCliToPin(manifest: CliManifest, signal?: AbortSignal): Promise<CliUpgradeResult> {
+export async function upgradeCliToPin(
+  manifest: CliManifest,
+  opts: { signal?: AbortSignal; deadlineAt?: number } = {},
+): Promise<CliUpgradeResult> {
+  const { signal, deadlineAt } = opts;
   const name = manifest.name;
   const pin = npmPin(manifest);
   if (!pin) return { name, status: 'skipped', reason: 'no exact npm pin' };
@@ -772,6 +776,9 @@ export async function upgradeCliToPin(manifest: CliManifest, signal?: AbortSigna
   const prefix = owningNpmPrefix(manifest.check.cmd, pin.pkg);
   if (!prefix) {
     return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}) but ${manifest.check.cmd} on PATH is not an npm install of ${pin.pkg}` };
+  }
+  if (deadlineAt !== undefined && Date.now() + UPGRADE_TIMEOUT_MS > deadlineAt) {
+    return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}); deferred, not enough time left in this tick` };
   }
   try {
     await runNpmInstall(prefix, `${pin.pkg}@${pin.version}`, signal);
@@ -785,13 +792,23 @@ export async function upgradeCliToPin(manifest: CliManifest, signal?: AbortSigna
   return { name, status: 'upgraded', from, to };
 }
 
-/** Upgrade every installed host CLI whose manifest pins a newer npm version. */
-export async function upgradeOutdatedClis(signal?: AbortSignal, cwd?: string): Promise<CliUpgradeResult[]> {
-  const { manifests } = listCliManifests(cwd);
+/**
+ * Upgrade every installed host CLI whose manifest pins a newer npm version.
+ * Project-layer manifests are excluded: the project layer is whatever
+ * `.agents/clis/` sits above the caller's cwd, and an unattended
+ * `npm install -g` must not be steerable by a checkout. Only the user, system
+ * and explicitly added repos drive it. An install that could not finish before
+ * `deadlineAt` is deferred rather than started and then killed mid-write.
+ */
+export async function upgradeOutdatedClis(
+  opts: { signal?: AbortSignal; deadlineAt?: number; cwd?: string } = {},
+): Promise<CliUpgradeResult[]> {
+  const { manifests } = listCliManifests(opts.cwd);
   const results: CliUpgradeResult[] = [];
   for (const manifest of manifests) {
-    if (signal?.aborted) break;
-    results.push(await upgradeCliToPin(manifest, signal));
+    if (opts.signal?.aborted) break;
+    if (manifest.source === 'project') continue;
+    results.push(await upgradeCliToPin(manifest, opts));
   }
   return results;
 }

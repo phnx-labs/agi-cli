@@ -113,8 +113,13 @@ record of `null` for it.
   on an nvm box), then re-probed; `upgraded` is logged only when the binary on
   PATH answers with the pin. It never installs a missing tool, never downgrades,
   skips a binary that is not an npm install of the pinned package (logged), and
-  leaves the old version in place on a failed install. Async throughout, so the
-  event loop is never parked on `npm install`.
+  leaves the old version in place on a failed install. Project-layer manifests
+  never drive it: the project layer is whatever `.agents/clis/` sits above the
+  daemon's cwd, and an unattended `npm install -g` must not be steerable by a
+  checkout, so only the user, system and explicitly added repos count. An install
+  that could not finish inside the tick's remaining deadline is deferred to the
+  next tick instead of being started and killed mid-write. Async throughout, so
+  the event loop is never parked on `npm install`.
   Each implements the
   `DaemonService` contract (`service.ts`) — `id`,
   `start`/`stop`/`restart`/`health()`, plus `intervalMs`/`deadlineMs`/`tick()`
