@@ -408,6 +408,27 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.merge).toEqual({ viewerIsAdmin: false, adminBypass: false, autoMergeAllowed: false, methods: ['squash', 'merge'] });
   });
 
+  it('a failed merge-settings read leaves merge null and names itself in ciError, on both paths', async () => {
+    const failing = (args: string[]) => {
+      if (args.some((a) => a.includes('allow_rebase_merge'))) throw ghError('gh: Server Error (HTTP 502)\n');
+      return repoRead(args);
+    };
+    const detail = recordedGh({
+      'repos/acme/mono': failing,
+      'user': '{"login":"octocat"}\n',
+      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: null, headRefOid: 'o1' }),
+      'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
+      'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],
+    });
+    const [one] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, detail.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(one).toMatchObject({ merge: null, ciError: 'Server Error (HTTP 502)', error: null });
+    const list = recordedGh({ ...soloRoutes(), 'repos/acme/mono': failing });
+    const [all] = (await buildProjectPrs(solo, {}, list.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(all).toMatchObject({ merge: null, ciError: 'Server Error (HTTP 502)', error: null });
+    expect(all.pullRequests.length).toBe(3);
+  });
+
   it('reads the REST rollup with GitHub\'s precedence, and tells a finished rollup from a passing one', () => {
     expect(ciFromRollupItems([])).toEqual({ ciState: null, failingChecks: [] });
     expect(ciFromRollupItems([{ name: 'a', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'b', state: 'SUCCESS' }]))
@@ -454,6 +475,20 @@ describe('mergeProjectPr', () => {
     const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
     expect(result).toEqual({ repo: 'acme/mono', number: 7, method: 'rebase', merged: false, sha: null, message: BLOCKED_WITHOUT_ADMIN });
     expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+  });
+
+  it('fails closed on a state GitHub has not computed yet, or a branch behind its base', async () => {
+    for (const [state, message] of [
+      ['', 'GitHub is still computing mergeability; try again in a moment'],
+      ['unknown', 'GitHub is still computing mergeability; try again in a moment'],
+      ['behind', 'The branch is behind its base; update it, or pass --admin to merge as an admin'],
+      ['dirty', 'Has merge conflicts'],
+    ] as const) {
+      const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': `${state}\n` });
+      const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
+      expect(result).toMatchObject({ merged: false, message });
+      expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+    }
   });
 
   it('--admin puts the pinned merge without reading mergeable_state', async () => {

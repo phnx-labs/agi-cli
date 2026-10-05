@@ -1,6 +1,7 @@
 - **Merge a blocked PR as an admin, or let it merge itself once checks pass.**
-  `agents projects prs merge` now refuses a PR whose `mergeable_state` is `blocked`
-  unless `--admin` is passed; `--admin` lets a repository admin merge past branch
+  `agents projects prs merge` now refuses a PR that is not mergeable as-is (blocked by
+  branch protection, behind, or a state GitHub has not computed yet) unless `--admin`
+  is passed; `--admin` lets a repository admin merge past branch
   protection where GitHub allows it, and is meant only for a person's explicit
   confirm (AGI Menu's "Confirm admin merge"). The fleet's `gh-merge-guard` denies it
   to agents. Refusals now read plainly: "Required check test hasn't passed", "The
