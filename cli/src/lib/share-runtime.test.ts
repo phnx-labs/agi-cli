@@ -3,9 +3,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// `state.js` resolves `getUserAgentsDir()` from `process.env.HOME` at its first
-// import, so set HOME to a throwaway dir at module load, BEFORE the dynamic
-// imports inside the tests pull state.js in. agents.yaml is cleared per test.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-runtime-'));
 const prevHome = process.env.HOME;
 process.env.HOME = HOME;
@@ -33,8 +30,6 @@ describe('shareRuntimeEnv', () => {
   });
 
   it('an injected SHARE_WRITE_TOKEN is not injected without a configured endpoint', async () => {
-    // The endpoint gate comes first: no `agents.yaml` share config means no
-    // injection, even with the env var set (the token would have no backend).
     process.env.SHARE_WRITE_TOKEN = 'env-token';
     const { shareRuntimeEnv } = await import('./share-runtime.js');
     expect(shareRuntimeEnv()).toBeUndefined();
@@ -45,8 +40,6 @@ describe('shareRuntimeEnv', () => {
     updateMeta((meta) => ({ ...meta, share: { baseUrl: 'https://share.example.com' } }));
     process.env.SHARE_WRITE_TOKEN = 'env-token';
     const { shareRuntimeEnv } = await import('./share-runtime.js');
-    // The env branch returns before ever touching the `share` secrets bundle,
-    // so this exercises the real injection path with no secrets backend.
     expect(shareRuntimeEnv()).toEqual({ SHARE_WRITE_TOKEN: 'env-token' });
   });
 });

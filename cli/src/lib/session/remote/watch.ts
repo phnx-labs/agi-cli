@@ -313,7 +313,7 @@ export class SessionWatchState {
     return events;
   }
 
-  // Unavailable changes only scope status; rows survive until a reconnect reset so loss never looks like deletion.
+
   scope(scope: string, status: SessionWatchScopeStatus, reason?: string): SessionWatchEnvelope {
     return { ...this.base('scope'), scope, status, ...(reason ? { reason } : {}) };
   }
@@ -350,7 +350,6 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   }
 }
 
-// Seed once, register the journal watcher, then reread to close the startup offset race; partial lines are not state.
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;

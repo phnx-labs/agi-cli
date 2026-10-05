@@ -1,4 +1,3 @@
-/** Dead managed tmux session and orphan-helper cleanup under supervision. */
 
 import type { DaemonServiceId } from '../daemon-services.js';
 import { getDefaultSocketPath } from '../tmux/paths.js';

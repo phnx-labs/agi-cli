@@ -58,9 +58,6 @@ describe('toSessionWatchRow resumable gating (reap dead crash-orphans)', () => {
 });
 
 describe('SessionWatchRow carries the join keys the extension needs', () => {
-  // Golden row: a dropped identity field breaks the extension's terminal->session
-  // join (and re-strands remote/non-claude tabs on "tracking session"), so guard
-  // that launchId + terminalId survive onto the streamed row alongside sessionId.
   it('projects launchId and terminalId from the ActiveSession onto the row', () => {
     const r = toSessionWatchRow('yosemite-s1', {
       context: 'terminal', kind: 'codex', status: 'running', pidAlive: true, cwd: '/repo',

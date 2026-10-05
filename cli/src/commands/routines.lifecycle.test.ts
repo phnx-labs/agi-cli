@@ -1,8 +1,3 @@
-/**
- * PHNX-3605 scheduler lifecycle integration. Drives the real routines CLI
- * against a real compiled daemon and proves stop/start are SIGHUP service
- * transitions, not aliases for whole-daemon teardown.
- */
 
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -34,7 +29,6 @@ function envFor(home: string): NodeJS.ProcessEnv {
     AGENTS_DAEMON_TEST_HOME: home,
     AGENTS_DAEMON_DIR: path.join(home, '.agents', '.cache', 'helpers', 'daemon'),
     AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME: '1',
-    // W4: this suite deliberately runs daemon lifecycles in a sandbox HOME.
     AGENTS_ALLOW_TEST_DAEMON: '1',
     AGENTS_SYNC_MACHINE_ID: 'routine-lifecycle',
   };
@@ -54,7 +48,7 @@ function alive(pid: number): boolean {
 }
 
 async function killAndWait(pid: number): Promise<void> {
-  try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  try { process.kill(pid, 'SIGKILL'); } catch {  }
   for (let i = 0; i < 100 && alive(pid); i++) await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
@@ -182,9 +176,6 @@ describePosix('routines lifecycle stays scheduler-scoped (integration: real daem
       expect(health['monitors']?.state).toBe('running');
       expect(health['usage-sync']?.state).toBe('running');
 
-      // The device-level scheduler gate is independent of the daemon-service
-      // toggle. Status must report the effective service as stopped while the
-      // shared daemon and scheduler service configuration remain up.
       const deviceDir = path.join(home, '.agents', 'devices', 'routine-lifecycle');
       fs.mkdirSync(deviceDir, { recursive: true });
       fs.writeFileSync(

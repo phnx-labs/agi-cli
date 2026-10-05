@@ -19,7 +19,7 @@ function writeMetaFile(yamlText: string) {
   fs.writeFileSync(metaPath(), yamlText);
 }
 
-// Seed presets resolve in memory: reads never write agents.yaml. Tombstones persist, partial updates merge from seed so URLs survive.
+
 describe('seeded registry presets', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-registry-seeds-'));

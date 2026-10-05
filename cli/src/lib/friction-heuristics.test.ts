@@ -49,10 +49,8 @@ describe('detectRepeatedGuardBlocks', () => {
       friction({ session: 's1', surface: 'guard', failureId: 'git.reset-hard' }),
       friction({ session: 's1', surface: 'guard', failureId: 'git.reset-hard' }),
       friction({ session: 's1', surface: 'guard', failureId: 'git.reset-hard' }),
-      // Different session, same failure — separate bucket, not enough to flag alone.
       friction({ session: 's2', surface: 'guard', failureId: 'git.reset-hard' }),
       friction({ session: 's2', surface: 'guard', failureId: 'git.reset-hard' }),
-      // Same session, different failure id — separate bucket.
       friction({ session: 's1', surface: 'guard', failureId: 'rm.recursive-force' }),
     ];
     const findings = detectRepeatedGuardBlocks(events);

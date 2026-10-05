@@ -4,7 +4,6 @@ import type { ActiveSession } from './active.js';
 import type { TmuxClient } from '../tmux/session.js';
 import type { GhosttySurface } from './ghostty-tabs.js';
 
-/** A tmux-hosted active session whose pane maps to session `ag-claude-1`. */
 function tmuxSession(over: Partial<ActiveSession> = {}): ActiveSession {
   return {
     context: 'terminal',
@@ -23,7 +22,6 @@ function tmuxSession(over: Partial<ActiveSession> = {}): ActiveSession {
   };
 }
 
-/** pane %3 belongs to session `ag-claude-1`, window 0, pane 0. */
 const paneToTarget = new Map<string, string>([['%3', 'ag-claude-1:0.0']]);
 
 function client(over: Partial<TmuxClient> = {}): TmuxClient {
@@ -38,7 +36,6 @@ describe('resolveViewingIn', () => {
 
   it('returns undefined (detached) when no client is attached to the session', async () => {
     const s = tmuxSession();
-    // A client attached to a DIFFERENT session must not count as viewing this one.
     const other = client({ target: 'ag-codex-9:0.0' });
     expect(await resolveViewingIn(s, [other], { paneToTarget })).toBeUndefined();
   });
@@ -47,7 +44,7 @@ describe('resolveViewingIn', () => {
     const deps: ViewingInDeps = {
       paneToTarget,
       resolveApp: async () => 'iterm',
-      readClientEnv: async () => ({}), // no ITERM_SESSION_ID -> no tab
+      readClientEnv: async () => ({}),
     };
     const v = await resolveViewingIn(tmuxSession(), [client()], deps);
     expect(v).toEqual({ app: 'iterm', tab: undefined });
@@ -60,7 +57,6 @@ describe('resolveViewingIn', () => {
       readClientEnv: async () => ({ ITERM_SESSION_ID: 'w0t2p0:UUID-XYZ' }),
     };
     const v = await resolveViewingIn(tmuxSession(), [client()], deps);
-    // t2 is iTerm's 0-based tab index -> presented 1-based as tab 3.
     expect(v).toEqual({ app: 'iterm', tab: 3 });
   });
 
@@ -121,9 +117,6 @@ describe('viewingInLabel', () => {
   });
 
   it('says nothing when the pane could not be located — absence of evidence is not detached', () => {
-    // resolveViewingIn answers undefined for BOTH "no client" and "could not
-    // locate the pane"; without a resolved tmuxTarget we have not proven anyone
-    // left, and Factory pre-ticks every detached row for rescue.
     expect(viewingInLabel(tmuxSession())).toBeUndefined();
   });
 

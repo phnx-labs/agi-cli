@@ -3,7 +3,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Preserve execFile's promisify.custom stdout/stderr contract so failures exercise install logic.
 
 const tempDirs: string[] = [];
 

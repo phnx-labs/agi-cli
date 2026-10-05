@@ -118,15 +118,11 @@ describe('validateRouter', () => {
   });
 
   it('rejects an unverifiable concrete model id for a harness with no installed catalog', () => {
-    // No claude version is installed in this sandboxed test HOME, so a concrete
-    // (non-tier) model id for it cannot be verified and must fail loud.
     const router: Router = { name: 'research', harnesses: { claude: { models: ['made-up-model-xyz'] } } };
     expect(() => validateRouter(router)).toThrow(/unknown model 'made-up-model-xyz' for harness 'claude'/);
   });
 
   it('accepts a concrete id that matches a curated tier rung with zero install (Droid)', () => {
-    // Droid's tier map is a fixed, install-independent curated ladder
-    // (model-tiers.ts DROID_TIERS) -- 'claude-opus-5' is its best/ultra rung.
     const router: Router = { name: 'research', harnesses: { droid: { models: ['claude-opus-5'] } } };
     expect(() => validateRouter(router)).not.toThrow();
   });

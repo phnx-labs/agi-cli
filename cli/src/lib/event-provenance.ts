@@ -29,17 +29,12 @@ interface AuditOrigin {
 let cachedOrigin: AuditOrigin | undefined;
 let cachedDeviceId: string | undefined;
 
-/**
- * Stamp the shared identity floor used by both operational and activity events.
- * Explicit event payload fields may override these defaults at the call site.
- */
 export function stampProvenance(env: NodeJS.ProcessEnv = process.env): EventProvenance {
   if (!cachedOrigin) {
     let osUser = 'unknown';
     try {
       osUser = os.userInfo().username;
     } catch {
-      // A uid without a passwd entry has no attributable OS user.
     }
     const ssh = env.SSH_CONNECTION ? parseSshConnection(env.SSH_CONNECTION) : undefined;
     const actor = resolveActor();

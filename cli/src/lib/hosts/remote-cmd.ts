@@ -149,7 +149,7 @@ export function buildRemoteAgentsInvocation(
 const EXPAND_KEYS = new Set(['PATH']);
 
 export function posixEnvExports(env?: Record<string, string>): string {
-  // Only trusted-static PATH may expand remotely; provenance and every other value are literals.
+
   if (!env || Object.keys(env).length === 0) return '';
   return Object.entries(env)
     .map(([k, v]) =>
@@ -197,7 +197,7 @@ export function stripClixml(stdout: string): string {
 }
 
 export function windowsAgentsInvocation(args: string[], binName: 'agents' | 'ag' = 'agents'): string {
-  // PowerShell 5.1 loses native argv through npm shims; resolve the declared JS bin and fail loud.
+
   const escaped = pwshLiteral(args.map(quoteWin32ExecArg).join(' '));
   return [
     `$ErrorActionPreference = 'Stop'`,
@@ -246,7 +246,7 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
 }
 
 export function renderPowershellCommand(script: string): string {
-  // The variable-free bootstrap survives cmd or PowerShell as OpenSSH's shell; compress only if shorter.
+
   const plain = `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
   const packed = zlib.deflateRawSync(Buffer.from(script, 'utf-8'), { level: 9 }).toString('base64');
   const bootstrap = 'iex ([IO.StreamReader]::new([IO.Compression.DeflateStream]::new('
@@ -261,7 +261,7 @@ export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
 }
 
 export function buildWindowsStdinAgentsCommand(args: string[]): string {
-  // Create stdin payloads inside try and always remove the possibly secret-bearing file in finally.
+
   const forwarded = args.map(powershellQuote).join(' ');
   const script = [
     POWERSHELL_PROGRESS_SILENCE,

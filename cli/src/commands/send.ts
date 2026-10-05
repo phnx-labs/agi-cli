@@ -1,23 +1,3 @@
-/**
- * `agents send` — deliver a message over any registered channel provider.
- *
- * Envelope (flag-first, industry-shaped):
- *   agents send --to <dest> --text "…" [--channel <name>] [--attach …] [--url …]
- *
- * Destination:
- *   --to owner          expands to notify.owner.{channel,to} in agents.yaml
- *   --to <id>           channel-specific recipient (requires --channel)
- *
- * Compat: positional text still works (`agents send "hi" --channel … --to …`).
- *
- * `send --to owner` is the owner-delivery path; `agents feed post --level
- * important` records a milestone and broadcasts it through the same sink.
- * Not a second stack. The `session` channel types into a running agent's
- * terminal (`--to <session-id>`), the home of `agents sessions inject`.
- *
- * Feed / activity are a different plane (record + read); feed.broadcast may
- * call this command as a forward sink.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die } from '../lib/format.js';
@@ -77,7 +57,6 @@ async function runSend(
     const raw = flagged || positional;
     const bothDiffer = flagged !== '' && positional !== '' && flagged !== positional;
     if (raw && !bothDiffer) {
-      // Owner sends share the important-feed composer; trace sync makes its console link resolvable, while dry-run stays inert.
       ownerCompose = ownerMessageComposer(raw);
       input = { ...input, text: ownerCompose('plain'), positionalText: undefined };
       fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });

@@ -10,7 +10,6 @@ import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installatio
 
 const LAUNCH_GATE_ACQUIRE_TIMEOUT_MS = 3 * 60_000;
 
-// Launch shares update's lock and fails closed rather than entering a half-swapped tree.
 export async function withLaunchGate<T>(agent: AgentId, label: string, fn: () => T): Promise<T> {
   if (!Object.hasOwn(AGENTS, agent) || !VERSION_RE.test(label)) throw new Error('Invalid managed installation.');
   if (!fs.existsSync(installationDir(agent, label))) throw new Error(`No installation directory for ${agent}@${label}.`);

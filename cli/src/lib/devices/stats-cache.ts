@@ -17,7 +17,7 @@ export function retainHardwareFacts(
   probed: DeviceStats,
   prior: DeviceStats | undefined,
 ): DeviceStats {
-  // Offline probes retain durable totals only, never stale load, free-memory, or free-disk readings.
+
   if (probed.reachable || !prior) return probed;
   const ncpu = probed.ncpu ?? prior.ncpu;
   const memTotalBytes = probed.memTotalBytes ?? prior.memTotalBytes;
@@ -118,7 +118,7 @@ export async function loadFleetStats(
   let servedFromCache = false;
 
   for (const d of devices) {
-    // Self is always measured locally; stale remote rows are refreshed through the fleet probe.
+
     if (d.name === self) {
       toProbe.push(d);
       continue;

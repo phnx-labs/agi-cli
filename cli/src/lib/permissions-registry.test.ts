@@ -1,4 +1,4 @@
-// Round trips use real writers/readers; allow and deny never cross, Codex deny remains readable without grants, and harness detection is cwd-independent.
+
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';

@@ -16,8 +16,8 @@ afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-// Run a script under an isolated HOME so state.ts derives ~/.agents inside it.
-// Real fs, no mocking (repo convention). Returns the parsed last JSON line.
+
+
 function runInHome(body: string): Record<string, unknown> {
   const script = String.raw`
     import * as fs from 'fs';
@@ -28,12 +28,12 @@ function runInHome(body: string): Record<string, unknown> {
     const versionsRoot = path.join(userDir, '.history', 'versions');
     const backupsRoot = path.join(userDir, '.history', 'backups');
     const shimsDir = path.join(userDir, '.cache', 'shims');
-    // Minimal ~/.agents so planUninstall sees an install.
+
     fs.mkdirSync(shimsDir, { recursive: true });
 
-    // Helper: adopt <agent> — a ~/.<agent> link into a version home. Uses the SAME
-    // link type production does (switchConfigSymlink: 'junction' on win32), which on
-    // Windows also sidesteps the elevated-privilege requirement of directory symlinks.
+
+
+
     function adopt(agent, configDirName, version, managedContent) {
       const versionHome = path.join(versionsRoot, agent, version, 'home', configDirName);
       fs.mkdirSync(versionHome, { recursive: true });
@@ -47,9 +47,9 @@ function runInHome(body: string): Record<string, unknown> {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'marker'), originalContent);
     }
-    // Helper: mimic real adoption's resource sync — a managed resource lives in
-    // ~/.agents and is symlinked INTO the version home. These links dangle after
-    // ~/.agents is disposed unless the restore strips them.
+
+
+
     function syncResource(agent, configDirName, version, kind, name, content) {
       const central = path.join(userDir, kind, name);
       fs.mkdirSync(central, { recursive: true });
@@ -61,10 +61,10 @@ function runInHome(body: string): Record<string, unknown> {
     }
     ${body}
   `;
-  // Pin BOTH HOME and AGENTS_REAL_HOME to the test dir. state.ts derives
-  // ~/.agents from HOME while getAgentConfigPath honors AGENTS_REAL_HOME; if a
-  // stale AGENTS_REAL_HOME leaks in from the outer env the two diverge and the
-  // test breaks. Setting both keeps this subprocess hermetic regardless.
+
+
+
+
   const out = execFileSync('bun', ['--eval', script], {
     cwd: repoRoot,
     env: { ...process.env, HOME: home, AGENTS_REAL_HOME: home },
@@ -79,11 +79,11 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
       adopt('claude', '.claude', '1.0.0', 'MANAGED');
       backup('claude', 1700000000000, 'ORIGINAL_CLAUDE');
 
-      // A real ~/.codex that agents-cli never adopted.
+
       fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
       fs.writeFileSync(path.join(home, '.codex', 'config.toml'), 'ORIGINAL_CODEX');
 
-      // An rc file carrying the shim PATH line.
+
       const rc = path.join(home, '.zshrc');
       fs.writeFileSync(rc, '# agents-cli: version-managed agent CLIs\nexport PATH="' + shimsDir + ':$PATH"\nexport KEEP=1\n');
 
@@ -105,7 +105,7 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
     `);
 
     expect(result.claudeKind).toBe('restore-backup');
-    // The un-adopted real dir must be classified untouchable and left as-is.
+
     expect(result.codexKind).toBe('leave-real');
     expect(result.claudeIsRealDir).toBe(true);
     expect(result.claudeContent).toBe('ORIGINAL_CLAUDE');
@@ -117,9 +117,9 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
 
   it('restores from the version home when there is no backup (importAgent case), stripping resource symlinks so nothing dangles', () => {
     const result = runInHome(String.raw`
-      adopt('claude', '.claude', '2.0.0', 'IMPORTED_ORIGINAL');   // no backup() call
-      // Real adoption syncs a managed skill INTO the version home as a symlink
-      // into ~/.agents. It must NOT survive as a dangling link post-uninstall.
+      adopt('claude', '.claude', '2.0.0', 'IMPORTED_ORIGINAL');
+
+
       syncResource('claude', '.claude', '2.0.0', 'skills', 'my-skill', 'SKILL_BODY');
       const plan = planUninstall();
       const res = executeUninstall(plan, { purge: false, timestamp: 7 });
@@ -141,17 +141,17 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
     expect(result.kind).toBe('restore-version-home');
     expect(result.isRealDir).toBe(true);
     expect(result.content).toBe('IMPORTED_ORIGINAL');
-    // The ~/.agents-pointing symlink is stripped — never left dangling.
+
     expect(result.skillState).toBe('absent');
     expect(result.errors).toEqual([]);
   });
 
   it('downgrades --purge to a recoverable move-aside when a restore step errors (no sole-copy loss)', () => {
     const result = runInHome(String.raw`
-      adopt('claude', '.claude', '2.0.0', 'IMPORTED_ORIGINAL');   // restore-version-home, sole copy
+      adopt('claude', '.claude', '2.0.0', 'IMPORTED_ORIGINAL');
       const plan = planUninstall();
-      // Simulate a restore failure: remove the source between plan and execute so
-      // the copy throws. The swallowed error must force move-aside, not hard-delete.
+
+
       fs.rmSync(plan.configs.find(c => c.agent === 'claude').source, { recursive: true, force: true });
       const res = executeUninstall(plan, { purge: true, timestamp: 99 });
       console.log(JSON.stringify({
@@ -169,7 +169,7 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
 
   it('leaves a foreign symlink (not into our versions dir) untouched', () => {
     const result = runInHome(String.raw`
-      // A ~/.claude symlink the user made to somewhere outside ~/.agents.
+
       const foreign = path.join(home, 'my-real-claude');
       fs.mkdirSync(foreign, { recursive: true });
       fs.writeFileSync(path.join(foreign, 'marker'), 'USER_OWNED');
@@ -195,8 +195,8 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
     const result = runInHome(String.raw`
       adopt('claude', '.claude', '1.0.0', 'MANAGED');
       backup('claude', 1700000000000, 'ORIGINAL_CLAUDE');
-      // Plant the legacy back-compat link exactly as foldLegacySystemRepo does:
-      // ~/.agents-system -> the system repo dir, as a junction on win32.
+
+
       const sysTarget = path.join(userDir, '.system');
       fs.mkdirSync(sysTarget, { recursive: true });
       fs.writeFileSync(path.join(sysTarget, 'marker'), 'SYSTEM');
@@ -215,7 +215,7 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
     expect(result.plannedLegacy).toContain('.agents-system');
     expect(result.legacyRemoved).toBe(true);
     expect(result.legacyGone).toBe(true);
-    // The critical regression guard: no EFAULT (or any) error on the legacy junction.
+
     expect(result.errors).toEqual([]);
   });
 
@@ -225,7 +225,7 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
       backup('claude', 1700000000000, 'ORIGINAL_CLAUDE');
       const plan1 = planUninstall();
       executeUninstall(plan1, { purge: false, timestamp: 1 });
-      // Second pass: nothing left to do.
+
       const plan2 = planUninstall();
       const res2 = executeUninstall(plan2, { purge: false, timestamp: 2 });
       const claudePath = path.join(home, '.claude');
@@ -247,7 +247,7 @@ describe('uninstall restores adopted configs and never touches un-adopted ones',
       adopt('claude', '.claude', '1.0.0', 'MANAGED');
       backup('claude', 1700000000000, 'ORIGINAL');
       const before = fs.lstatSync(path.join(home, '.claude')).isSymbolicLink();
-      const plan = planUninstall();   // must not touch disk
+      const plan = planUninstall();
       console.log(JSON.stringify({
         stillSymlink: fs.lstatSync(path.join(home, '.claude')).isSymbolicLink(),
         wasSymlink: before,

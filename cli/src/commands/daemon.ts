@@ -72,8 +72,8 @@ interface DaemonProcess {
 }
 
 function entryAbsent(p: string): boolean | null {
-  // Only ENOENT proves an entry is gone; an unreadable shared-user path must
-  // never become advice to kill a healthy process.
+
+
   try {
     return fs.statSync(p, { throwIfNoEntry: false }) === undefined;
   } catch {
@@ -90,8 +90,8 @@ function staleDaemons(
   ownerPid: number | null,
   registered: Set<number>,
 ): { actionable: DaemonProcess[]; visible: DaemonProcess[] } {
-  // Kill/restart advice is limited to this device's registry. Same-uid ghosts
-  // may be shown for diagnosis, but are not actionable.
+
+
   const isOurs = (p: DaemonProcess) => p.pid === ownerPid || registered.has(p.pid);
   const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
   const gone = processes.filter(entryIsGone);
@@ -533,7 +533,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   }
 
   for (const p of staleDaemons(healthProcesses, status.pid, new Set(findSurvivingStateDirDaemons(new Set()))).actionable) {
-    // `actionable` is registry-scoped; never recommend killing a raw ps match.
+
     const own = status.pid !== null && p.pid === status.pid;
     problems.push(
       `Daemon pid ${p.pid} runs code deleted from disk (${p.entry}). ` +

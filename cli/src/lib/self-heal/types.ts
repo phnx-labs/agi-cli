@@ -12,7 +12,6 @@ export type HealCheckId =
 export type HealCadence = 'startup' | 'frequent' | 'periodic';
 
 export interface HealCtx {
-  // safe is daemon-low-risk, full is agents sync, and dryRun detects only.
   mode: 'safe' | 'full';
   dryRun: boolean;
 }
@@ -24,7 +23,7 @@ export interface CheckResult {
 }
 
 export interface HealCheck {
-  // Checks are headless/idempotent; the registry isolates throws so later checks continue.
+
   id: HealCheckId;
   title: string;
   platforms?: NodeJS.Platform[];

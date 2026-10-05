@@ -3,13 +3,10 @@ import type { Command } from 'commander';
 
 import { resolveSurface } from './utils.js';
 
-// A minimal stand-in for the parts of Command resolveSurface reads.
 function fakeCmd(opts: Record<string, unknown>): Command {
   return { optsWithGlobals: () => opts } as unknown as Command;
 }
 
-// resolveSurface folds in the real terminal state via isInteractiveTerminal(),
-// which reads process.std*.isTTY — drive those directly (no service mocking).
 const origIn = process.stdin.isTTY;
 const origOut = process.stdout.isTTY;
 function setTty(v: boolean): void {
@@ -57,6 +54,6 @@ describe('resolveSurface', () => {
     expect(s.json).toBe(false);
     expect(s.quiet).toBe(false);
     expect(s.interactive).toBe(false);
-    expect(s.assumeYes).toBe(true); // non-TTY ⇒ assume yes
+    expect(s.assumeYes).toBe(true);
   });
 });

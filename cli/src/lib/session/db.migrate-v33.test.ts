@@ -3,23 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db so the sessions DB path they capture
-// at import time points at our temp dir. Real sqlite, real .claude.json files, no
-// mocking.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv33-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v32 -> v33: attribute each Claude session to the account that produced it.
- *
- * Two properties are load-bearing and both are asserted here:
- *   1. Rows spanning several version homes get DISTINCT account_key values. Before
- *      v33 a single email was resolved once and stamped on every row.
- *   2. scan_ledger is NOT wiped. Attribution derives from (file_path, version), which
- *      are already stored, so no transcript needs re-parsing — unlike most migrations
- *      in this file, which flush the ledger on purpose.
- */
 const HISTORY = path.join(TEST_HOME, '.agents', '.history');
 
 interface Acct { org: string; email: string; name: string; type: string }
@@ -55,8 +42,7 @@ function transcript(home: string, name: string): string {
 writeHome(vHome('2.1.219'), MODSQUAD);
 writeHome(vHome('2.1.220'), TURING);
 writeHome(vHome('2.1.218'), PERSONAL);
-writeHome(vHome('2.1.170'), null);   // signed out — must stay dark
-// ~/.claude points at the ModSquad home, as the real layout does.
+writeHome(vHome('2.1.170'), null);
 fs.symlinkSync(path.join(vHome('2.1.219'), '.claude'), path.join(TEST_HOME, '.claude'));
 
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
@@ -64,13 +50,10 @@ fs.mkdirSync(getSessionsDir(), { recursive: true });
 
 const Database = (await import('../sqlite.js')).default;
 
-/** Rows the migration must repair, keyed by the account each one truly belongs to. */
 const SEED: Array<{ id: string; file_path: string; version: string | null; expectOrg: string | null }> = [
   { id: 'ms-1', file_path: transcript(vHome('2.1.219'), 'a'), version: '2.1.219', expectOrg: 'ModSquad' },
   { id: 'tl-1', file_path: transcript(vHome('2.1.220'), 'b'), version: '2.1.220', expectOrg: 'Turing Labs' },
   { id: 'pe-1', file_path: transcript(vHome('2.1.218'), 'c'), version: '2.1.218', expectOrg: "dev's Org" },
-  // Under the mutable symlink, but written by the Turing version: the recorded
-  // version must win over the symlink's current ModSquad target.
   { id: 'sym-1', file_path: path.join(TEST_HOME, '.claude', 'projects', '-proj', 'd.jsonl'), version: '2.1.220', expectOrg: 'Turing Labs' },
   { id: 'out-1', file_path: transcript(vHome('2.1.170'), 'e'), version: '2.1.170', expectOrg: null },
 ];
@@ -113,10 +96,8 @@ const SEED: Array<{ id: string; file_path: string; version: string | null; expec
   const ins = seed.prepare(`INSERT INTO sessions (id, short_id, agent, version, account, timestamp, file_path)
                             VALUES (?, ?, 'claude', ?, 'stale@wrong.example', '2026-07-01T00:00:00Z', ?)`);
   for (const row of SEED) ins.run(row.id, row.id, row.version, row.file_path);
-  // A non-Claude row: must be left alone entirely.
   seed.prepare(`INSERT INTO sessions (id, short_id, agent, timestamp, file_path)
                 VALUES ('cx-1', 'cx-1', 'codex', '2026-07-01T00:00:00Z', '/x/rollout.jsonl')`).run();
-  // Warm ledger entries: the migration must preserve every one of them.
   const led = seed.prepare(`INSERT INTO scan_ledger VALUES (?, 1, 2, 3, NULL, NULL)`);
   for (const row of SEED) led.run(row.file_path);
   seed.close();
@@ -149,8 +130,6 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
       expect(row.account_org, `${seed.id} org`).toBe(seed.expectOrg);
       if (seed.expectOrg === null) {
         expect(row.account_key, `${seed.id} dark`).toContain('unattributed:');
-        // The pre-v33 email was resolved globally and is known-wrong. A row we could
-        // not attribute must not keep displaying it.
         expect(row.account, `${seed.id} stale email cleared`).toBeNull();
       } else {
         expect(row.account_key, `${seed.id} key`).toContain('claude:org=');
@@ -163,7 +142,6 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const keys = (db.prepare(
       `SELECT DISTINCT account_key FROM sessions WHERE agent='claude' AND account_key LIKE 'claude:org=%'`,
     ).all() as Array<{ account_key: string }>).map((r) => r.account_key);
-    // Three real orgs among the seeded rows; the pre-v33 code produced exactly one.
     expect(keys).toHaveLength(3);
   });
 
@@ -172,8 +150,8 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const rows = db.prepare(
       `SELECT id, account, account_key FROM sessions WHERE id IN ('tl-1','pe-1')`,
     ).all() as Array<{ id: string; account: string; account_key: string }>;
-    expect(rows[0].account).toBe(rows[1].account);            // same email…
-    expect(rows[0].account_key).not.toBe(rows[1].account_key); // …separate quota bucket
+    expect(rows[0].account).toBe(rows[1].account);
+    expect(rows[0].account_key).not.toBe(rows[1].account_key);
   });
 
   it('does NOT wipe scan_ledger — attribution needs no re-parse', () => {
@@ -193,10 +171,7 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
   it('rolls up by account, naming un-indexed rows instead of merging them', () => {
     const rows = queryUsageRollup({ groupBy: 'account' });
     const keys = rows.map((r) => r.key);
-    // The codex row has no account_key. Attribution is Claude-only today, so it is
-    // named after its harness — calling it "not indexed" would be false.
     expect(keys).toContain('unattributed:codex');
-    // Every seeded Claude row is accounted for exactly once.
     const total = rows.reduce((s, r) => s + r.sessionCount, 0);
     expect(total).toBe(SEED.length + 1);
   });
@@ -206,7 +181,6 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const org = rows.find((r) => r.key.startsWith('claude:org='))!;
     expect(org.label).toMatch(/^.+ <.+@.+>$/);
 
-    // Dark buckets already read as prose, so they carry no separate label.
     const dark = rows.find((r) => r.key === 'unattributed:codex')!;
     expect(dark.label ?? null).toBeNull();
   });
@@ -220,15 +194,10 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
 
 describe('v33 self-healing repair on an already-migrated DB', () => {
   it('clears a stale email left on a dark row and fills a NULL account_key', () => {
-    // Two ways a v33 DB still goes wrong: an older CLI writes NULL (its INSERT does
-    // not name the column), and a DB migrated by a build predating the "clear the
-    // stale email" fix keeps a known-wrong address. The migration cannot fix either —
-    // it never runs again — so getDB() repairs on open.
     const db = getDB();
     db.prepare(`UPDATE sessions SET account = 'stale@wrong.example' WHERE id = 'out-1'`).run();
     db.prepare(`UPDATE sessions SET account_key = NULL, account_org = NULL WHERE id = 'ms-1'`).run();
 
-    // Force a fresh open so the repair guard runs.
     closeDB();
     const repaired = getDB();
 
@@ -245,25 +214,14 @@ describe('v33 self-healing repair on an already-migrated DB', () => {
 });
 
 describe('v33 repair safety', () => {
-  // NOTE: the missing-column guard that lived here was removed. It set
-  // AGENTS_SESSIONS_DB mid-file and called getDB(), but db.ts:29 captures DB_PATH at
-  // module load, so it opened the file-level fixture and `not.toThrow()` could never
-  // fail. Exercising that path needs its own test file with HOME set before import,
-  // the pattern every other migration test here uses. A test that cannot fail is worse
-  // than no test, so it is gone rather than left as false assurance.
 
   it('repairs only broken rows, leaving an attributed row untouched', () => {
-    // Re-resolving every Claude row on an unrelated trigger would downgrade a correct
-    // row whose version home has since been uninstalled. Scope the repair.
     closeDB();
     const db = getDB();
-    // A row attributed to a version that no longer resolves. A full re-resolve would
-    // turn this dark; the scoped repair must not touch it.
     db.prepare(
       `UPDATE sessions SET account_key='claude:org=org-gone', account_org='Gone Inc',
        account='was@here.example', version='9.9.999' WHERE id='tl-1'`,
     ).run();
-    // And one genuinely broken row to make the repair actually run.
     db.prepare(`UPDATE sessions SET account_key=NULL, account_org=NULL WHERE id='pe-1'`).run();
 
     closeDB();

@@ -24,7 +24,6 @@ export class SessionsHttpClient implements ManagedSessionsBackupClient {
     this.token = opts.token;
   }
 
-  // Prefix with the verified owner and reject empty/dot segments so keys cannot escape that namespace.
   private objUrl(key: string): string {
     const rel = safeObjectKey(key).map(encodeURIComponent).join('/');
     return `${this.base}/${encodeURIComponent(this.userId)}/${rel}`;

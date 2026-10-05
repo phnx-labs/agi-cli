@@ -18,8 +18,8 @@ const SCRIPT_EXTENSIONS = new Set([
 ]);
 
 function isHookScript(full: string): boolean {
-  // Known script extensions override mode. Extensionless hooks need +x, while known
-  // data extensions stay non-runnable because older syncs over-set execute bits.
+
+
   try {
     const stat = fs.statSync(full);
     if (!stat.isFile()) return false;

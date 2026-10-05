@@ -256,7 +256,6 @@ export function buildNativeCatalog(
     groups.set(key, group);
   }
 
-  // Keep registered identities with no local home visible so operators can reconnect them.
   for (const account of registered) {
     const key = keyOf(account.agent, account.identityKey);
     if (!groups.has(key)) {
@@ -271,7 +270,6 @@ export function buildNativeCatalog(
     const homes = [...group.homes].sort((a, b) => a.label.localeCompare(b.label));
     const signedIn = homes.some(h => h.signedIn);
 
-    // Any explicit account default, including stale/provider refs, suppresses global-home fallback.
     const defaultRef = defaults[group.agent];
     let isDefault: boolean;
     if (defaultRef !== undefined) {
@@ -281,7 +279,6 @@ export function buildNativeCatalog(
       isDefault = !!gd && homes.some(h => h.label === gd);
     }
 
-    // A recorded home is usable only when that installation exists on this host.
     const recordedHome = account ? (meta.deviceAccounts?.homes?.[account.id] ?? null) : null;
     const home = (recordedHome && homes.some(h => h.label === recordedHome))
       ? recordedHome
@@ -431,7 +428,6 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
       verdict: observation.verdict,
       ...(observation.checkedAt ? { checkedAt: observation.checkedAt } : {}),
     };
-    // Registered fleet observations join only by stable ID; email labels are not unique.
     const fromFleet = row.id
       ? (shared.get(`${row.agent}:${row.id}`) ?? [])
       : (shared.get(`label:${row.agent}:${row.identityLabel}`) ?? []);
@@ -445,7 +441,6 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     const inv = localHome ? inventoryByHome.get(`${row.agent}:${localHome.label}`) : undefined;
     row.usageSnapshot = inv?.snapshot ?? null;
     row.usageError = inv?.usageError ?? null;
-    // Slot accounts read token facts from the slot directory; version homes are only the non-slot fallback.
     const credentialDir = slot?.slotDir ?? (localHome ? getVersionHomePath(row.agent, localHome.label) : null);
     row.token = readTokenFact(row.agent, credentialDir);
     row.lastAuth = formatAuthFact((cached as AuthHealth | undefined) ?? null);
@@ -768,7 +763,6 @@ function normalizeAuthVerdict(
   verdict: AuthVerdict | undefined,
   signedIn: boolean,
 ): AccountDeviceVerdict['verdict'] {
-  // unconfigured is ensureSlot's default, not probe evidence.
   if (verdict === 'unconfigured') return signedIn ? 'no_evidence' : 'missing';
   if (verdict === 'error') return signedIn ? 'no_evidence' : 'missing';
   return verdict ?? (signedIn ? 'no_evidence' : 'missing');
@@ -819,8 +813,6 @@ export function aggregateAccountVerdict(
   const verdicts = devices.map((row) => row.verdict);
   if (verdicts.includes('revoked')) return 'revoked';
   if (verdicts.includes('expired')) return 'expired';
-  // A usable local usage snapshot owns quota state; remote 429 stands only without it.
-  // applyUsageHonesty applies the local quota-derived state after this aggregation.
   const hasLocalSnapshot = !!localQuota && localQuota.usedPercent !== null && localQuota.usedPercent !== undefined;
   if (!hasLocalSnapshot && verdicts.includes('rate_limited')) return 'rate_limited';
   if (verdicts.includes('live')) return 'live';

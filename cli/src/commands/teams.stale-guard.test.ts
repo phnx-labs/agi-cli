@@ -1,11 +1,3 @@
-/**
- * The `teams add` stale-repo guard refuses to point a team at a checkout behind
- * origin/main unless --confirm. `staleRepoError` is the blocking message; pin its
- * guidance (mirrors `remoteCwdOnAddError`) so it can't regress into a bare error:
- * it must name how far behind, tell the caller to sync with remote main, and offer
- * --confirm as the override. The behind-count computation itself (fetch-first) is
- * covered against real git in `lib/teams/worktree.test.ts`.
- */
 import { describe, it, expect } from 'vitest';
 import { staleRepoError } from './teams.js';
 

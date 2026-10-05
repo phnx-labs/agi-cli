@@ -64,6 +64,5 @@ export async function warnOrphanedOpenPr(cwd: string = process.cwd()): Promise<v
     if (!shouldWarnOrphanedOpenPr(pr)) return;
     process.stderr.write(formatOrphanedOpenPrWarning(pr as BranchOpenPr));
   } catch {
-    // Advisory only — never break the run's exit.
   }
 }

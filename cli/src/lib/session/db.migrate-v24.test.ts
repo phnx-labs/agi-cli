@@ -3,19 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db so the sessions DB path they
-// capture at import time points at our temp dir. Real sqlite, no mocking.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv23-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Build a v23-shaped DB (tool_call_count + used_browser/used_computer
-// present, no session_resource_usage table), then let db.js's getDB()
-// upgrade it to v24 (#12) on first open. No ledger wipe: session_resource_usage
-// is populated by writeResourceUsage() at upsert time, independent of
-// scan_ledger/dir_ledger. Seeded at v23 (not v21/v22) so this test exercises
-// ONLY the migration under test, not also the earlier v21->v22 (tool_call_count)
-// step, which DOES wipe the ledger.
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 

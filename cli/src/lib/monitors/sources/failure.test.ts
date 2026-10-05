@@ -8,8 +8,6 @@ describe('classifyPollFailure (PHNX-3510)', () => {
   });
 
   it('flags the gh GraphQL rate-limit text even on exit 0 (the `gh … | jq` case)', () => {
-    // The exact string from the ticket. gh piped into jq exits 0 (jq's status),
-    // so the exit code alone can't catch it — the text shape must.
     const text = 'GraphQL: API rate limit already exceeded for user ID 13007401.';
     expect(classifyPollFailure({ exitCode: 0, text })).not.toBeNull();
     expect(matchFailureText(text)).toBe('API rate limit exceeded');

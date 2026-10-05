@@ -36,7 +36,7 @@ export function setDeviceDiscoveryStatus(name: string, status: DeviceDiscoverySt
 }
 
 export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus> {
-  // Corruption is fatal: silently dropping one document could re-enroll an intentionally ignored peer.
+
   const policies = new Map<string, DeviceDiscoveryStatus>();
   const apply = (rec: Record<string, unknown> | undefined) => {
     for (const [name, status] of Object.entries(rec ?? {})) {

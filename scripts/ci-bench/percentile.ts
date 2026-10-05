@@ -1,6 +1,5 @@
 import type { GatedPercentile } from './types';
 
-/** p=99.99 → 9999. Integer tenths-of-a-basis-point, so 99.9 is not 0.998999… */
 export function percentileUnits(p: number): number {
   if (!Number.isFinite(p) || p < 0 || p > 100) {
     throw new RangeError(`percentile must be in [0, 100], got ${p}`);
@@ -8,11 +7,6 @@ export function percentileUnits(p: number): number {
   return Math.round(p * 100);
 }
 
-/**
- * Minimum observations so percentile `p` is an actual sample, not a
- * fabricated interpolation. P99 needs 100, P99.9 needs 1_000, P99.99
- * needs 10_000. That is `ceil(1 / (1 - p/100))` in integer 1e-4 units.
- */
 export function minSamplesForPercentile(p: number): number {
   const units = percentileUnits(p);
   if (units === 0 || units === 10_000) return 1;
@@ -26,11 +20,6 @@ export function nearestRank(n: number, p: number): number {
   return Math.ceil((units * n) / 10_000);
 }
 
-/**
- * Nearest-rank percentile of a sorted-ascending array.
- * rank = ceil(p/100 * n); value = sorted[rank - 1].
- * This returns an observed sample. It never interpolates.
- */
 export function exactPercentile(sortedAscending: readonly number[], p: number): number {
   if (sortedAscending.length === 0) {
     throw new RangeError('exactPercentile requires at least one sample');

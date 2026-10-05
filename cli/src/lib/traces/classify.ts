@@ -56,7 +56,7 @@ interface TopicRule {
 }
 
 const TOPIC_RULES: readonly TopicRule[] = [
-  // First match wins; keep more-specific rules before broad vocabulary.
+
   { group: 'review', key: 'code-review', label: 'Code review',
     text: /\b(review|audit|pr[-_/ ]?review|code[-_/ ]?review)\b/, tool: /review|comment/ },
   { group: 'ops', key: 'release', label: 'Release',
@@ -78,7 +78,7 @@ const TOPIC_RULES: readonly TopicRule[] = [
 ];
 
 export function classifyTopic(input: TopicEvidence): ClassifiedTopic {
-  // Classification reads selected metadata/tool aggregates, never the full transcript or tool input.
+
   const text = normalizedEvidence(input);
   const tools = Object.keys(input.toolMix ?? {}).map((tool) => tool.toLowerCase());
   for (const rule of TOPIC_RULES) {
@@ -90,7 +90,7 @@ export function classifyTopic(input: TopicEvidence): ClassifiedTopic {
 }
 
 export function classifyCause(call: ToolCallFailure): TraceFailureCause {
-  // Cause classification reads error metadata, never raw transcript or tool input.
+
   const evidence = [call.error_code, call.error, call.parse_error]
     .filter((value): value is string => typeof value === 'string')
     .join(' ')

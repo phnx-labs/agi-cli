@@ -142,22 +142,16 @@ phoneNotifyThreshold: high
 
   it('keeps a pending, unconfirmed answer actionable — a claim never silences escalation', () => {
     const dir = tmpDir();
-    // An operator answered but delivery is unconfirmed: recordAnswer(pending)
-    // sets block.answer while state stays 'open'. Openness must come from
-    // deriveBlockState, not raw block.answer, or the alert and the timeout
-    // escalation go silent while the answer may never reach the agent.
     publishBlock(makeBlock('p', { blockClass: 'decision', costOfDelay: 'high', ts: '2026-01-01T00:00:00.000Z' }), dir);
     const pending = recordAnswer(blockIdForSession('p'), { answeredFrom: 'feed' }, dir, { pending: true });
     expect(pending.ok).toBe(true);
 
     const block = readBlock(blockIdForSession('p'), dir)!;
-    expect(block.answer).toBeTruthy();            // the pending claim set answer
-    expect(deriveBlockState(block)).toBe('open'); // yet the block is still open
+    expect(block.answer).toBeTruthy();
+    expect(deriveBlockState(block)).toBe('open');
 
-    // The phone alert still fires for an unconfirmed high-cost ask.
     expect(isPhoneUrgent(block, DEFAULT_POLICY)).toBe(true);
 
-    // A timed-out pending decision still hard-parks rather than no-oping.
     const now = new Date('2026-01-01T01:05:00.000Z');
     expect(applyPolicyToBlock(block, DEFAULT_POLICY, now, dir).action).toBe('parked');
   });

@@ -411,7 +411,7 @@ function trySshLeasedBox(name: string, cmd: string[]): boolean {
 }
 
 export function leasedBoxRemoteCmd(cmd: string[]): string[] {
-  // Browser driving on a lease carries the fleet-remote consent marker.
+
   return isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
 }
 
@@ -541,7 +541,7 @@ interface FleetStatusTarget extends FanOutDeviceTarget {
   dialTarget: string;
   extraSshArgs?: string[];
 }
-// Fleet calls use the live Tailscale dial target, not drift-prone bare ssh aliases.
+
 
 async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetHealthRow> {
   return {
@@ -2390,7 +2390,6 @@ shell parses it — so the two are mutually exclusive rather than interchangeabl
         ensureManagedKnownHostsDir();
         const addr = hostNameFor(device);
         const pinned = addr ? isHostPinned(addr) : false;
-        // First contact may pin once; subsequent calls stay strict-known-hosts.
         const mirrorCwd = cmd.length === 0 ? deriveMirroredCwd(process.cwd()) : undefined;
         const { args, env } = buildSshInvocation(device, cmd, shim, { pinned }, { interactiveCwd: mirrorCwd, ...(argvTokens ? { argv: true } : {}) });
 

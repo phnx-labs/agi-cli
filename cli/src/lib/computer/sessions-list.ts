@@ -134,7 +134,6 @@ export function standaloneComputerActionsDir(): string {
   return path.join(getCacheDir(), 'computer', 'actions');
 }
 
-// Direct engine invocations exist only in its standalone ledger.
 function standaloneLineToAction(line: string, observer: string): ComputerAction | null {
   let parsed: unknown;
   try { parsed = JSON.parse(line); } catch { return null; }
@@ -192,7 +191,6 @@ export function listStandaloneComputerActions(opts: { limit?: number; dir?: stri
   return out;
 }
 
-// Deduplicate ledgers only by the engine-minted invocation ID, never PID or timestamp.
 export function mergeComputerActionSources(standalone: ComputerAction[], legacy: ComputerAction[]): ComputerAction[] {
   const standaloneRuns = new Set<string>();
   for (const action of standalone) if (action.invocationId) standaloneRuns.add(action.invocationId);
@@ -244,7 +242,6 @@ export function groupIntoComputerRuns(
 ): ComputerRunRow[] {
   const byInvocation = new Map<string, ComputerAction[]>();
   for (const [index, a] of actions.entries()) {
-    // Legacy rows stay distinct because PIDs recycle and carry no stable run identity.
     const key = a.invocationId ?? `legacy:${a.pid}:${a.tsMs}:${index}`;
     const list = byInvocation.get(key) ?? [];
     list.push(a);
@@ -296,7 +293,6 @@ export function groupIntoComputerRuns(
   return rows;
 }
 
-// Recover only history older than the retained ledger; preserve ID dedupe and aggregate detail.
 function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
   const seen = new Set(rows.map((r) => r.invocationId));
   const startedBeforeMs = rows.length > 0

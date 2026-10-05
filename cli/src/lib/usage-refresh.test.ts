@@ -68,7 +68,6 @@ describe('computeNextRefreshDelayMs — fixed 5-minute production cadence', () =
   });
 
   it('still supports a wider clamp when a test/caller passes min/max', () => {
-    // minutesToLimit / K with an explicit wide range: 20/4 = 5min.
     const near = computeNextRefreshDelayMs(20, {
       minMs: 90_000,
       maxMs: 15 * 60_000,
@@ -116,10 +115,8 @@ describe('nextHeadroomEntry — projects, schedules, and records the call', () =
       status: 'available', minutesToLimit: null, sessionUsedPercent: 50, capturedAt: NOW - 10 * 60_000,
       nextRefreshAt: NOW - 1, callTimestamps: [], computedAt: NOW - 10 * 60_000,
     };
-    // 50 -> 70 over 10min = 2%/min; 30% left => 15min to cap (projection still computed).
     const entry = nextHeadroomEntry(prev, sessionSnap(70, NOW), NOW);
     expect(entry.minutesToLimit).toBeCloseTo(15, 5);
-    // Production cadence is fixed 5 minutes (floor = ceiling = REFRESH_INTERVAL_MS).
     expect(entry.nextRefreshAt - NOW).toBe(REFRESH_INTERVAL_MS);
     expect(entry.sessionUsedPercent).toBe(70);
     expect(entry.callTimestamps).toContain(NOW);
@@ -155,9 +152,7 @@ describe('runUsageRefresh — refreshes only due, uncapped, un-backed-off local 
     });
 
     expect(result.refreshed).toBe(1);
-    // The live snapshot landed in the usage cache (the readOnly hot path reads this).
     expect(readClaudeUsageCache(key)?.windows[0]?.usedPercent).toBe(70);
-    // And a headroom entry was published + scheduled.
     const entry = readHeadroomEntry(key);
     expect(entry?.sessionUsedPercent).toBe(70);
     expect(entry?.nextRefreshAt).toBeGreaterThan(NOW);
@@ -213,7 +208,7 @@ describe('runUsageRefresh — refreshes only due, uncapped, un-backed-off local 
         { usageKey: 'claude:org=x', agentId: 'claude', fetch: async () => { called = true; return { snapshot: sessionSnap(10, NOW), error: null }; } },
       ],
       writeUsageCache: writeClaudeUsageCache,
-      backoffUntil: () => NOW + 30 * 60_000, // backed off 30 min
+      backoffUntil: () => NOW + 30 * 60_000,
     });
     expect(called).toBe(false);
     expect(result.skippedBackoff).toBe(1);
@@ -299,7 +294,6 @@ describe('runUsageRefresh — refreshes only due, uncapped, un-backed-off local 
   });
 
   it('does not lose concurrent cache writes for different accounts (lock merge)', async () => {
-    // Two serial writeClaudeUsageCache calls under lock must both land.
     writeClaudeUsageCache('claude:org=a', sessionSnap(10, NOW));
     writeClaudeUsageCache('claude:org=b', sessionSnap(20, NOW));
     expect(readClaudeUsageCache('claude:org=a')?.windows[0]?.usedPercent).toBe(10);
@@ -348,7 +342,6 @@ describe('providerRecentCalls — aggregate rolling-hour spend per network provi
     const accounts = [
       { usageKey: 'claude:org=a', agentId: 'claude' as const, fetch: async () => ({ snapshot: null, error: null }) },
       { usageKey: 'claude:org=b', agentId: 'claude' as const, fetch: async () => ({ snapshot: null, error: null }) },
-      // grok is network:false — no rate-limited endpoint, excluded from the budget.
       { usageKey: 'grok:user=g', agentId: 'grok' as const, fetch: async () => ({ snapshot: null, error: null }) },
     ];
     const cache: Record<string, HeadroomEntry> = {
@@ -357,7 +350,6 @@ describe('providerRecentCalls — aggregate rolling-hour spend per network provi
       'grok:user=g': { ...baseEntry, callTimestamps: [NOW - 1_000, NOW - 2_000] },
     };
     const counts = providerRecentCalls(accounts, cache, NOW);
-    // claude: 2 recent from a (the 90-min-old one is pruned) + 1 from b = 3.
     expect(counts.get('claude')).toBe(3);
     expect(counts.has('grok')).toBe(false);
   });
@@ -438,7 +430,6 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
     });
-    // Spacing caps a single tick at the catch-up ceiling — never the full due set.
     expect(result.refreshed).toBe(PROVIDER_CATCHUP_MAX);
     expect(result.skippedBudget).toBe(accounts.length - PROVIDER_CATCHUP_MAX);
   });
@@ -446,7 +437,7 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
   it('holds the aggregate at the hourly budget across a full hour of ticks', async () => {
     const accounts = claudeAccounts(PROVIDER_HOURLY_BUDGET + 12);
     let fetches = 0;
-    const ticksPerHour = (60 * 60 * 1000) / USAGE_REFRESH_TICK_MS; // 60
+    const ticksPerHour = (60 * 60 * 1000) / USAGE_REFRESH_TICK_MS;
     for (let tick = 0; tick < ticksPerHour; tick += 1) {
       const r = await runUsageRefresh({
         now: NOW + tick * USAGE_REFRESH_TICK_MS,
@@ -456,22 +447,18 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       });
       fetches += r.refreshed;
     }
-    // Smooth pacing lands exactly on the budget — one fetch every other tick.
     expect(fetches).toBe(PROVIDER_HOURLY_BUDGET);
   });
 
   it('serves the STALEST account first when spacing frees a token', async () => {
     const fetched: string[] = [];
     const accounts = claudeAccounts(4, (key) => fetched.push(key));
-    // Seed staggered capture times: acct-3 stalest, acct-0 freshest. All due.
-    // A recent provider call means spacing grants no token this tick...
     const seed: Record<string, HeadroomEntry> = {};
     accounts.forEach((a, i) => {
       seed[a.usageKey] = {
         ...baseEntry,
         capturedAt: NOW - (i + 1) * 60_000,
         nextRefreshAt: NOW - 1,
-        // last provider call one full spacing ago ⇒ exactly one token this tick.
         callTimestamps: i === 0 ? [NOW - PROVIDER_MIN_REFRESH_SPACING_MS] : [],
       };
     });
@@ -484,7 +471,6 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       backoffUntil: () => null,
     });
     expect(result.refreshed).toBe(1);
-    // The one token went to the stalest account (acct-3), not the freshest.
     expect(fetched).toEqual(['claude:org=acct-3']);
   });
 
@@ -509,11 +495,9 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
   it('does not API-refresh an account a statusline ingest just captured, and re-derives its headroom', async () => {
     let fetched = false;
     const key = 'claude:org=statusline-fresh';
-    // Prior sample so the burn projection has something to compute minutesToLimit from.
     writeHeadroomEntries({
       [key]: { ...baseEntry, capturedAt: NOW - 10 * 60_000, sessionUsedPercent: 50, nextRefreshAt: NOW - 1, callTimestamps: [] },
     });
-    // The statusline wrote a fresh row 1 minute ago: 70% used (up from 50%).
     const fresh = { ...sessionSnap(70, NOW - 60_000) };
     const result = await runUsageRefresh({
       now: NOW,
@@ -528,15 +512,10 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
     expect(result.skippedFresh).toBe(1);
     expect(result.refreshed).toBe(0);
     const entry = readHeadroomEntry(key);
-    // Headroom is RE-DERIVED from the fresh statusline row, not frozen at the old sample.
     expect(entry?.sessionUsedPercent).toBe(70);
     expect(entry?.status).not.toBeNull();
-    // Prev sample (50% @ NOW-10m) → fresh (70% @ NOW-1m): 20% over 9 min = 2.22%/min,
-    // 30% left ⇒ 13.5 min to cap — computed from the REAL fresh capture time, not frozen.
     expect(entry?.minutesToLimit).toBeCloseTo(13.5, 5);
-    // No API call recorded (statusline is free) ⇒ no call timestamp consumed budget.
     expect(entry?.callTimestamps).toEqual([]);
-    // Rescheduled one interval past the free capture.
     expect(entry?.nextRefreshAt).toBe(NOW - 60_000 + REFRESH_INTERVAL_MS);
   });
 
@@ -558,8 +537,6 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
 
   it('does NOT apply the statusline-fresh skip to a network:false provider (grok refreshes)', async () => {
     let fetched = false;
-    // grok's cache is always its own last local-log write, so a "recent" capture
-    // must NOT suppress its refresh — only network providers get the skip.
     const result = await runUsageRefresh({
       now: NOW,
       listAccounts: async () => [
@@ -567,7 +544,7 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       ],
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
-      readCachedSnapshot: () => sessionSnap(10, NOW - 1_000), // 1s ago
+      readCachedSnapshot: () => sessionSnap(10, NOW - 1_000),
     });
     expect(fetched).toBe(true);
     expect(result.refreshed).toBe(1);
@@ -592,9 +569,6 @@ describe('BLOCKER reconciliation — a budget-paced fleet never collapses to NO_
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
-  // Build the router's freshness view of a provider straight from the usage cache
-  // the daemon just wrote, then apply the REAL rotate gates. This is the seam the
-  // reviewer's blocker lives on: budget-paced cadence vs the routing window.
   const noVerifiedUsage = (keys: string[], now: number): { refuse: boolean; maxAgeMs: number; verified: number } => {
     const pool = keys.map((usageKey) => {
       const snap = readClaudeUsageCache(usageKey);
@@ -636,8 +610,6 @@ describe('BLOCKER reconciliation — a budget-paced fleet never collapses to NO_
         backoffUntil: () => null,
       });
       totalFetches += r.refreshed;
-      // Once every account has a snapshot, the fleet is warm; from then on the
-      // refusal must NEVER fire.
       if (!allWarm) allWarm = keys.every((k) => readClaudeUsageCache(k) !== null);
       if (allWarm) {
         const v = noVerifiedUsage(keys, now);
@@ -651,12 +623,8 @@ describe('BLOCKER reconciliation — a budget-paced fleet never collapses to NO_
   it('8-account idle fleet: refusal never fires, every account stays under the routing window, load ~budget/hr', async () => {
     const { totalFetches, everRefused, worstAgeMs, ticks } = await runFleet(8, 3);
     expect(everRefused).toBe(false);
-    // No account ever reads as genuinely stale (the refusal bar)...
     expect(worstAgeMs).toBeLessThan(USAGE_STALE_REFUSAL_MAX_AGE_MS);
-    // ...and the worst-case cadence tracks round-robin N × spacing (~16 min for 8
-    // accounts), not the unbounded 40-min stall a plain rolling cap produced.
     expect(worstAgeMs).toBeLessThan(9 * PROVIDER_MIN_REFRESH_SPACING_MS);
-    // Aggregate endpoint load holds at ~budget/hr (NOT 8×12=96/hr).
     const perHour = totalFetches / (ticks / ((60 * 60 * 1000) / USAGE_REFRESH_TICK_MS));
     expect(perHour).toBeLessThanOrEqual(PROVIDER_HOURLY_BUDGET + PROVIDER_CATCHUP_MAX);
   });

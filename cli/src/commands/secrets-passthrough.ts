@@ -1,28 +1,3 @@
-/**
- * `agents secrets` — thin passthrough to the standalone `secrets` CLI
- * (PHNX-3989, DIST-1). Every bundle/keychain/vault operation now lives in
- * `@phnx-labs/secrets-cli`, not in this repo; this command re-declares no
- * subcommand or flag of its own. `agents secrets <anything>` execs the
- * installed executable with the same argv, `SECRETS_HOME` defaulted to this
- * box's existing store (`buildServeEnv`, matching the process client's own
- * default so an interactive `secrets list` and an injected `readBundle` see
- * the same store), and `SECRETS_SCOPE`/`SECRETS_CONTEXT` passed through
- * unmodified from the ambient environment — this is the operator's own
- * terminal, not an injected agent exec, so there is no separate scope to
- * compute here (that stays in `lib/exec.ts` for the run/inject path).
- *
- * A missing executable fails loud with install guidance — no fallback to the
- * retired in-repo engine (`commands/secrets.ts` and its siblings), which stays
- * in the tree, unregistered, until every consumer has moved off it (tasks.md
- * item 7).
- *
- * `secrets` is listed in {@link import('../lib/hosts/passthrough.js').OWN_HOST_COMMANDS}
- * so `--device` never routes through the generic SSH passthrough — the engine
- * has no fleet registry of its own (PHNX-4090), so a `--device <name>` here is
- * rewritten to `--host ssh://user@host` before exec, exactly like
- * `agents computer`'s equivalent rewrite. An explicit `--host` on the command
- * line is left untouched.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawnSync } from 'node:child_process';
@@ -32,12 +7,6 @@ import { stripRoutingFlags } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
 import { SECRETS_CLI_INSTALL_HINT } from '../lib/secrets-cli.js';
 
-/**
- * Rewrite a `--device <name>` (or `-D`) on the forwarded argv to
- * `--host ssh://user@host`, the address grammar `secrets` speaks (PHNX-4090).
- * A `--host` the caller already typed wins — `--device` is left in place so
- * the standalone binary reports the same "both given" ambiguity it always has.
- */
 export async function rewriteDeviceToHost(argv: string[]): Promise<string[]> {
   if (flagValue(argv, 'host', 'H') !== undefined) return argv;
   const device = flagValue(argv, 'device', 'D');
@@ -53,8 +22,6 @@ export function registerSecretsCommands(program: Command): void {
     .description('Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.')
     .allowUnknownOption()
     .allowExcessArguments()
-    // Hand `-h`/`--help` through too — the real subcommand help lives in the
-    // installed `secrets` binary, not in this passthrough.
     .helpOption(false)
     .action(async () => {
       let bin: string;
@@ -69,8 +36,6 @@ export function registerSecretsCommands(program: Command): void {
         }
         throw err;
       }
-      // Everything after the literal `secrets` token on the real argv — the
-      // subcommand + its own flags, verbatim, never re-parsed by commander.
       const secretsIndex = process.argv.indexOf('secrets');
       const forwarded = await rewriteDeviceToHost(secretsIndex >= 0 ? process.argv.slice(secretsIndex + 1) : []);
       const { command, prefix } = invocation(bin);

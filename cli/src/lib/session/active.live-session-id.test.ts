@@ -34,7 +34,7 @@ afterEach(() => {
   clearActiveScanCachesForTest();
 });
 
-// Use a hardlink/copy named claude: a shebang would re-exec as node/sh and stop testing process-name discovery.
+
 function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?: string } = {}): ChildProcess {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-2384-'));
   tmpDirs.push(dir);
@@ -102,7 +102,6 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const child = spawnHoldingSessionId(UUID);
     const pid = child.pid!;
 
-    // Probe OS argv independently of the function under test so a real miss cannot skip green.
     const holderArgv = (): string | undefined => {
       try {
         if (process.platform === 'linux') {
@@ -144,7 +143,7 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     const child = spawnHoldingSessionId(UUID, { cwd: wt });
     const pid = child.pid!;
 
-    // Sample comm around the scan because Node 24 may rename the process to MainThread.
+
     const commOf = (): string | undefined => {
       try {
         return execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {

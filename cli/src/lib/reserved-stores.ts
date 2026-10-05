@@ -22,7 +22,6 @@ import { AGENT_IDS, type AgentId } from './types.js';
 
 export const AUTH_STORE_ALIAS = 'auth';
 
-// Reserved auth is file-backed so headless workers can share it; fail loud on any other backend.
 export const AUTH_BUNDLE_BACKEND: SecretsBackend = 'file';
 
 export const RESERVED_BUNDLE_NAMES = new Set([AUTH_STORE_ALIAS]);

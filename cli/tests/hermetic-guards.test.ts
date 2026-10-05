@@ -1,8 +1,3 @@
-/**
- * RUSH-3007: pins the exact gating decision that split "the CI hookTimeout
- * test profile" from "the leak tripwires that watch the REAL ~/.agents" —
- * see hermetic-guards.ts for the full incident writeup.
- */
 import { describe, it, expect } from 'vitest';
 import { shouldArmHermeticGuards, shouldEnableCiTestProfile } from './hermetic-guards';
 
@@ -34,10 +29,6 @@ describe('shouldArmHermeticGuards', () => {
   });
 
   it('does NOT arm for the attestation producer, even if CI=true leaked into its env — the RUSH-3007 incident', () => {
-    // This is exactly what happened cutting 1.22.44: the operator exported
-    // CI=true by hand on mac-mini (a box with a live daemon + real sessions)
-    // to get the vitest timeout profile, which also armed these guards
-    // against the real ~/.agents and false-failed 129/129 test files.
     expect(shouldArmHermeticGuards({ CI: 'true', AGENTS_ATTEST_PRODUCER: '1' })).toBe(false);
   });
 

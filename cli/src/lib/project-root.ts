@@ -25,7 +25,7 @@ export function expandLocalHome(p: string): string {
 }
 
 export function toRemotePortable(p: string): string {
-  // Re-root home-relative paths on the remote host instead of copying the controller's home.
+
   if (p.startsWith('~') || p.startsWith('$HOME')) return p;
   if (path.isAbsolute(p)) return toHomeRelative(p);
   return p;
@@ -39,13 +39,13 @@ export function homeRemainder(p: string): string | null {
 }
 
 export function deriveMirroredCwd(localCwd: string): string | undefined {
-  // Mirroring is available only for paths portable relative to HOME.
+
   const portable = toRemotePortable(localCwd);
   return homeRemainder(portable) === null ? undefined : portable;
 }
 
 export function remoteCdPrefix(remoteCwd?: string, opts: { mirror?: boolean } = {}): string {
-  // Mirrored cwd may fall back to remote HOME; an explicit cwd must fail if mistyped.
+
   if (!remoteCwd) return '';
   const rest = homeRemainder(remoteCwd);
   if (rest === '') return 'cd "$HOME" && ';

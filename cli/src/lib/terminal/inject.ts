@@ -35,7 +35,7 @@ export interface InjectResult {
 }
 
 function backendConfirmsDelivery(backend: InjectBackend): boolean {
-  // Opening an editor URI is not delivery proof until the extension provides an acknowledgment channel.
+
   return backend !== 'vscodium';
 }
 
@@ -45,7 +45,7 @@ export const BRACKETED_PASTE_START = '\u001b[200~';
 export const BRACKETED_PASTE_END = '\u001b[201~';
 
 export function backendCarriesPaste(backend: InjectBackend): boolean {
-  // Only tmux send-keys preserves bracketed-paste bytes without GUI keyboard interpretation.
+
   return backend === 'tmux';
 }
 
@@ -68,7 +68,7 @@ export function tmuxInjectSpecs(
   text: string,
   o: { enter: boolean; combined: boolean; socket?: string },
 ): LaunchSpec[] {
-  // Ink requires text and Enter as distinct writes; a fused submission may be swallowed.
+
   const socket = o.socket ?? target.socket;
   if (o.enter && o.combined) {
     return [{ argv: tmuxSendKeysArgv(target.pane, text + CR, { literal: true, socket }) }];
@@ -80,7 +80,6 @@ export function tmuxInjectSpecs(
 
 
 export function itermInjectScript(text: string, opts: { session?: string; enter: boolean; combined?: boolean }): string {
-  // Ink requires text and Enter as distinct writes; a fused submission may be swallowed.
   const body: string[] =
     opts.enter && opts.combined
       ? [`write text ${appleScriptStr(text)}`]
@@ -204,7 +203,7 @@ export async function injectIntoTerminal(
         error: `injection ran out of budget after ${sent} of ${specs.length} write(s)`,
       };
     }
-    // Count launch before awaiting it: a timeout may follow a spec that already delivered bytes.
+
     started += 1;
     const res = await runSpec(spec, opts.host, opts.resolveHost, remaining);
     if (!res.ok) {

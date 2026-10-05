@@ -19,8 +19,6 @@ function runCli(args: string[]): string {
 
 describe('prune command', () => {
   it('surfaces prune in the complete help, pointed to from the curated root help', () => {
-    // The root --help is a curated front-door list; it points to --help-all for the
-    // full command set, where prune (a non-front-door command) is listed.
     const rootHelp = runCli(['--help']);
     expect(rootHelp).toContain('--help-all');
 

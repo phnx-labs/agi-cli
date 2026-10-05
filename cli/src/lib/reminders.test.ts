@@ -73,7 +73,6 @@ describe('pickReminderForSession', () => {
       const pick = pickReminderForSession(reminders, `session-${i}`);
       if (pick) seen.add(pick.short);
     }
-    // With 60 distinct ids over 3 reminders, every reminder should appear.
     expect(seen).toEqual(new Set(['a', 'b', 'c']));
   });
 

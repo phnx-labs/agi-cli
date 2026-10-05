@@ -1,10 +1,3 @@
-/**
- * Tests for `agents repo` extras — multi-repo DotAgent support.
- *
- * These tests verify that `listInstalledSkills` merges skills from the primary
- * ~/.agents/ repo with any extras registered via `agents repo add`, and that
- * primary always wins on name collisions.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -15,8 +8,6 @@ let PRIMARY_AGENTS_DIR: string;
 let EXTRA_ROOT: string;
 let ENABLED_EXTRAS: Array<{ alias: string; dir: string; url: string }>;
 
-// Mock state.js so listInstalledSkills reads from our fixture dirs instead of
-// the real ~/.agents/. We control both getSkillsDir() and getEnabledExtraRepos().
 vi.mock('../src/lib/state.js', () => {
   return {
     get getAgentsDir() { return () => PRIMARY_AGENTS_DIR; },
@@ -31,8 +22,6 @@ vi.mock('../src/lib/state.js', () => {
   };
 });
 
-// listInstalledSkills pulls from these transitive deps via re-export chains.
-// Stub them minimally so the import graph resolves.
 vi.mock('../src/lib/agents.js', () => ({
   AGENTS: {},
   SKILLS_CAPABLE_AGENTS: [],

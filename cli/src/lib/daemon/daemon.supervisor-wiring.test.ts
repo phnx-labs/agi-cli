@@ -1,13 +1,3 @@
-/**
- * runDaemon() migration wiring (RUSH-3193 P1/P3): the session-index warm
- * service (P1) and watchdog/device-probe/self-heal/state-dir-check (P3) are
- * all registered on `ServiceSupervisor` (each gated by its own `isEnabled()`
- * toggle) instead of a bare `setInterval`, and the supervisor is torn down on
- * shutdown. Drives the REAL compiled daemon as a subprocess, like the other
- * `daemon.*.test.ts` integration slices — the wiring lives inside
- * `runDaemon()`, which cannot be unit-tested in isolation (single-instance
- * guard, subsystem boot order, an infinite `await new Promise(() => {})`).
- */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -33,7 +23,7 @@ function killAndWait(pid: number): Promise<void> {
   try {
     if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
     else process.kill(pid, 'SIGKILL');
-  } catch { /* already gone */ }
+  } catch {  }
   return (async () => {
     for (let i = 0; i < 100 && alive(); i++) await new Promise((r) => setTimeout(r, 50));
   })();
@@ -53,16 +43,13 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     expect(pid).toBeTruthy();
 
     try {
-      // The supervisor fires an immediate tick right after start() (mirrors the
-      // old code's `void runSessionIndexWarm()`), so its first health record
-      // lands well before the 20s interval — no need to wait a full tick cycle.
       let record: { subsystem?: string; consecutiveFailures?: number } | undefined;
       for (let i = 0; i < 100 && !record; i++) {
         if (fs.existsSync(healthPath)) {
           try {
             const all = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
             if (all['session-index']) record = all['session-index'];
-          } catch { /* file mid-write — retry */ }
+          } catch {  }
         }
         if (!record) await new Promise((r) => setTimeout(r, 100));
       }
@@ -79,9 +66,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
 
     const tmpHome = freshHome();
-    // Disable it via the same services.yaml the `isEnabled()` gate reads —
-    // ~/.agents/daemon/, distinct from the ~/.agents/.cache/helpers/daemon/
-    // dir that holds the log + health file (getDaemonConfigDir() vs getDaemonDir()).
     const servicesConfigDir = path.join(tmpHome, '.agents', 'daemon');
     fs.mkdirSync(servicesConfigDir, { recursive: true });
     fs.writeFileSync(path.join(servicesConfigDir, 'services.yaml'), 'services:\n  session-index: false\n', 'utf-8');
@@ -106,8 +90,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
       }
       expect(sawDisabledLog).toBe(true);
 
-      // Give a would-be tick a moment to fire if the gate were broken, then
-      // confirm no health record was ever written for it.
       await new Promise((r) => setTimeout(r, 500));
       const all = fs.existsSync(healthPath) ? JSON.parse(fs.readFileSync(healthPath, 'utf-8')) : {};
       expect(all['session-index']).toBeUndefined();
@@ -117,23 +99,12 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     }
   }, 20_000);
 
-  // RUSH-3193 P3 + PHNX-3265: every periodic daemon-owned maintenance loop
-  // migrated out of runDaemon() and onto the same supervisor. One real boot
-  // checks the composed set rather than isolated wrapper stand-ins.
   const PERIODIC_SERVICE_IDS = [
     'watchdog', 'device-probe', 'self-heal', 'state-dir-check',
     'session-state', 'daemon-heartbeat', 'tmux-reap',
-    // PHNX-3608: catch-up recovery is a supervised service now. Its first tick
-    // fires during startAll and reads `scheduler`; a real boot here is what
-    // catches a TDZ/ordering regression that unit-testing the class can't.
     'catchup',
   ] as const;
 
-  // PHNX-3373 / PHNX-3941: registration is a separate invariant from a clean
-  // first tick. Socket/lifecycle services can legitimately report a failure in
-  // a bare HOME (for example auth-sync with no configured account), but every
-  // enabled service must still publish a supervisor-owned health record on a
-  // real daemon boot.
   const ALL_SUPERVISED_SERVICE_IDS = [
     'session-state', 'monitors', 'account-state',
     'account-auth', 'catchup', 'session-index', 'watchdog',
@@ -247,8 +218,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
       }
       expect(sawAll).toBe(true);
 
-      // Give a would-be tick a moment to fire if a gate were broken, then
-      // confirm no health record was ever written for any of the five.
       await new Promise((r) => setTimeout(r, 500));
       const all = fs.existsSync(healthPath) ? JSON.parse(fs.readFileSync(healthPath, 'utf-8')) : {};
       for (const id of PERIODIC_SERVICE_IDS) expect(all[id]).toBeUndefined();

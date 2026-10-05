@@ -179,7 +179,6 @@ async function promptConflictStrategy(
   return strategy;
 }
 
-// Bump when generated behavior changes; mixed-version fleets never downgrade a newer shim.
 export const SHIM_SCHEMA_VERSION = 33;
 
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -748,7 +747,6 @@ export function removeShim(agent: AgentId): boolean {
   return removed;
 }
 
-// Versioned aliases use the same monotonic regeneration contract as shared shims.
 export const VERSIONED_ALIAS_SCHEMA_VERSION = 21;
 
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';

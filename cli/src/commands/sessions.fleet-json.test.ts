@@ -4,23 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 
-/**
- * PHNX-2673: a HISTORICAL `agents sessions --device all/fleet --json` query must
- * fan out to the fleet and merge peer rows — not silently return local rows only.
- *
- * The transport boundary (and only that) is stubbed: a fake `ssh` on the run's
- * PATH answers every dial with the peer's `sessions --json` array, exactly as a
- * real remote CLI would over SSH. Everything above it — the sentinel routing in
- * `runSessions`, `gatherRemoteList`'s registry discovery, the merge, and the
- * `--json` serializer — is the real code path.
- */
 
 const SELF = 'fleet-json-self';
 const PEER = 'fleet-json-peer';
 const PEER_SESSION_ID = '11111111-2222-4333-8444-555555555555';
 
-/** Register `PEER` as an automatic (dialable, non-self) session peer so the
- * `--device all` sweep discovers it through `loadDevices()`. */
 function registerPeer(devicesDir: string): void {
   fs.mkdirSync(devicesDir, { recursive: true });
   const now = new Date().toISOString();
@@ -39,8 +27,6 @@ function registerPeer(devicesDir: string): void {
   fs.writeFileSync(path.join(devicesDir, 'registry.json'), JSON.stringify(reg));
 }
 
-/** A fake `ssh` that ignores its args and prints the peer's session array, the
- * shape a real `agents sessions --json` peer would return over the wire. */
 function installFakeSsh(home: string): void {
   const binDir = path.join(home, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -90,7 +76,6 @@ describe.skipIf(process.platform === 'win32')('sessions --device all/fleet --jso
       registerPeer(path.join(tempHome, '.agents', '.history', 'devices'));
       installFakeSsh(tempHome);
 
-      // BEFORE-equivalent control: the default (no --device) stays local-only.
       const localOnly = runAgents(['sessions', '--json', '--no-interactive'], cwd, tempHome, env(tempHome));
       expect(localOnly.status, localOnly.stderr).toBe(0);
       const localRows = JSON.parse(localOnly.stdout) as Array<{ id: string }>;
@@ -98,14 +83,12 @@ describe.skipIf(process.platform === 'win32')('sessions --device all/fleet --jso
       expect(localIds).toContain(localId);
       expect(localIds).not.toContain(PEER_SESSION_ID);
 
-      // AFTER: the fleet sentinel fans out and the peer's row is merged in.
       const fleet = runAgents(['sessions', flag, sentinel, '--json', '--no-interactive'], cwd, tempHome, env(tempHome));
       expect(fleet.status, fleet.stderr).toBe(0);
       const fleetRows = JSON.parse(fleet.stdout) as Array<{ id: string; machine?: string }>;
       const fleetIds = fleetRows.map((r) => r.id);
       expect(fleetIds).toContain(localId);
       expect(fleetIds).toContain(PEER_SESSION_ID);
-      // The merged peer row is tagged with the machine it was dialed on.
       expect(fleetRows.find((r) => r.id === PEER_SESSION_ID)?.machine).toBe(PEER);
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });

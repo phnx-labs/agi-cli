@@ -58,7 +58,7 @@ export const desktopProvider: ChannelProvider = {
     }
 
     if (opts.dryRun) {
-      // Dry-run validates shape only; it does not prove notifier reachability or delivery.
+
       return { ok: true, channel: NAME, id };
     }
 
@@ -67,7 +67,7 @@ export const desktopProvider: ChannelProvider = {
       return { ok: false, channel: NAME, id, error: deliverable.reason };
     }
 
-    // Desktop notification APIs are fire-and-forget, so success is enqueueing, not confirmation.
+
     notifyDesktop({ title, body });
     return { ok: true, channel: NAME, id };
   },

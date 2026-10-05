@@ -84,7 +84,7 @@ export function linearTeamKey(payload: Record<string, unknown>): string | null {
 
 export function linearLabels(payload: Record<string, unknown>): string[] {
   const data = payload.data as Record<string, unknown> | undefined;
-  // Linear webhook labels are a flat array, unlike the GraphQL connection shape.
+
   const labels = Array.isArray(data?.labels) ? (data?.labels as unknown[]) : [];
   return labels
     .map((n) => (n as { name?: unknown }).name)
@@ -152,7 +152,7 @@ function linearTriggerMatches(trigger: LinearJobTrigger, webhook: IncomingWebhoo
     if (!linearLabels(webhook.payload).some((name) => name.toLowerCase() === expected)) return false;
   }
   if (trigger.stateTo) {
-    // Require updatedFrom so later edits cannot retrigger an already-entered state.
+
     const data = webhook.payload.data as Record<string, unknown> | undefined;
     const current = (data?.state as Record<string, unknown> | undefined)?.name;
     if (current !== trigger.stateTo) return false;
@@ -278,13 +278,12 @@ export function verifySlackSignature(
   now: number = Date.now(),
   toleranceSec = 300,
 ): boolean {
-  // HMAC authenticity alone permits replay; reject signatures outside Slack's bounded window.
+
   const ts = header(headers, 'x-slack-request-timestamp');
   if (!ts || !/^\d+$/.test(ts)) return false;
   if (Math.abs(Math.floor(now / 1000) - Number(ts)) > toleranceSec) return false;
   const received = header(headers, 'x-slack-signature');
   const signature = received?.startsWith('v0=') ? received.slice('v0='.length) : undefined;
-  // Slack signs raw bytes; decoding first changes the HMAC for non-ASCII payloads.
   const base = Buffer.concat([Buffer.from(`v0:${ts}:`, 'utf-8'), rawBody]);
   const expected = crypto.createHmac('sha256', secret).update(base).digest('hex');
   return timingSafeHexEqual(signature, expected);
@@ -403,7 +402,7 @@ export function createFileDeliveryStore(
   filePath: string,
   retentionMs = 14 * 24 * 60 * 60 * 1000,
 ): DeliveryStore {
-  // Persist age-bounded per-job progress so restarts resume partial delivery without refiring work.
+
   const seen = new Map<string, { complete: boolean; jobs: Set<string>; updatedAt: number }>();
 
   try {
@@ -517,7 +516,7 @@ async function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise
 }
 
 export function waitForListening(server: http.Server): Promise<void> {
-  // Observe asynchronous bind errors such as EADDRINUSE instead of crashing after startup returns.
+
   if (server.listening) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -563,7 +562,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
 
       const matchedJobs = matchJobsToWebhook(fireOptions.jobs ?? listJobs(), webhook);
       const matchedHandlers = listHandlers().filter((handler) => handlerMatchesWebhook(handler, webhook));
-      // Report accepted matches before slow dispatch; delivery callbacks describe final settlement.
+
       options.onMatch?.(webhook, matchedJobs.map((job) => job.name), matchedHandlers.map((handler) => handler.name));
 
       const firedJobs = await fireWebhookJobs(webhook, {
@@ -573,7 +572,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         skipJobNames: deliveryStore.completedJobs(id),
         onJobFired: (job, firedJob) => {
           emit('webhook.fired', { source, event: webhookEvent, deliveryId: id, jobName: job.name, runId: firedJob.runId });
-          // Routine-job completion survives a partial delivery so retries skip successful jobs.
+
           deliveryStore.markJob(id, job.name);
           fireOptions.onJobFired?.(job, firedJob);
         },
@@ -595,7 +594,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         }),
       );
 
-      // Handler failures are reported after acknowledgement, then this delivery id becomes complete.
+
       deliveryStore.mark(id);
       for (const failure of handlerErrors) {
         emit('webhook.failed', { source, event: webhookEvent, deliveryId: id, handlerName: failure.handlerName, error: failure.error });
@@ -632,7 +631,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
       }
 
       const ip = req.socket.remoteAddress ?? 'unknown';
-      // Shed invalid traffic and oversized declarations before allocating or authenticating a body.
+
       if (!ipRateLimiter.take(ip)) {
         emit('webhook.rejected', { source, reason: 'ip rate limit exceeded' });
         res.writeHead(429, { 'content-type': 'application/json' });
@@ -672,7 +671,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           const slackId = `slack:${slack.event_id ?? crypto.createHash('sha256').update(rawBody).digest('hex')}`;
           emit('webhook.received', { source, event: slackEvent, deliveryId: slackId });
 
-          // Suppress retries both after durable completion and while this process is still dispatching.
+
           if (deliveryStore.seen(slackId) || inFlight.has(slackId)) {
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ ok: true, duplicate: true }));
@@ -688,7 +687,6 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           const slackWebhook: IncomingWebhook = { source, event: slackEvent, payload: slack };
           emit('webhook.authorized', { source, event: slackEvent, deliveryId: slackId });
 
-          // Slack must be acknowledged before slow dispatch or it retries the accepted delivery.
           inFlight.add(slackId);
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(
@@ -704,7 +702,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         const event = source === 'github' ? (header(req.headers, 'x-github-event') ?? '') : '';
         emit('webhook.received', { source, event, deliveryId: id });
 
-        // The in-flight guard closes the window before durable completion is recorded.
+
         if (deliveryStore.seen(id) || inFlight.has(id)) {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: true, duplicate: true, fired: [] }));
@@ -734,7 +732,6 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         };
         emit('webhook.authorized', { source, event: webhookEvent, deliveryId: id });
 
-        // Acknowledge providers before slow work; settleDelivery records durable completion later.
         inFlight.add(id);
         res.writeHead(202, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, accepted: true, deliveryId: id }));
@@ -747,7 +744,6 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
     })();
   });
 
-  // Bound descriptors and aggregate request-buffer memory at the public ingress.
   server.maxConnections = options.maxConnections ?? 256;
 
   server.listen(options.port ?? 0, options.host ?? '127.0.0.1');

@@ -697,7 +697,7 @@ function parseCanonicalPreserveCase(perm: string): { tool: string; pattern: stri
 function kimiBashPatterns(pattern: string): string[] {
   if (pattern === '*' || pattern === '**') return ['*'];
   if (pattern.endsWith(':*')) {
-    // Kimi globstar does not match zero separators, so emit both flat and slash-crossing forms.
+
     const prefix = pattern.slice(0, -2);
     return [`${prefix}*`, `${prefix}*/**`];
   }
@@ -771,7 +771,7 @@ export function codexDefaultWritableRoots(
   home: string = HOME,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
-  // Include regenerable tool caches only; credential/config directories stay outside the sandbox.
+
   const shared = ['.cargo', '.rustup', '.npm', '.bun', 'go', '.deno', '.gradle', '.m2', '.gem'];
   const roots = shared.map((d) => path.join(home, d));
   if (platform === 'darwin') {
@@ -786,7 +786,7 @@ function mergeCodexSandboxWrite(
   existing: Record<string, unknown> | undefined,
   incoming: NonNullable<CodexPermissions['sandbox_workspace_write']>,
 ): Record<string, unknown> {
-  // Managed defaults extend, rather than replace, user-authored writable roots.
+
   const existingRoots = Array.isArray(existing?.writable_roots)
     ? (existing!.writable_roots as string[])
     : [];
@@ -1640,7 +1640,6 @@ export function saveDefaultPermissionSet(set: PermissionSet): { success: boolean
 }
 
 
-// Re-derive drift only where canonical rules have a faithful native representation.
 export const PERMISSIONS_REPRESENTABLE: ReadonlySet<AgentId> = new Set<AgentId>([
   'claude',
   'opencode',

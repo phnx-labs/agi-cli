@@ -7,8 +7,6 @@ import { serviceManagerRegistrationAllowed } from '../../service-manifest.js';
 import { startDaemon, stopDaemon } from '../daemon.js';
 import { getDaemonDir, getTerminalsDir, getCacheDir } from '../../state.js';
 
-// Tripwire precedes ALL lifecycle calls. Some older Bun versions return HOME
-// from os.userInfo(), which would incorrectly allow the real service manager.
 assert.equal(serviceManagerRegistrationAllowed().allowed, false, 'isolated fixture must never access the production service manager');
 const cold = process.argv[3] === 'cold';
 const child = cold ? spawn('bun', [process.argv[4], '__daemon-run'], { stdio: 'ignore', env: process.env }) : undefined;
@@ -18,9 +16,6 @@ assert.ok(started.pid);
 fs.writeFileSync(path.join(process.env.HOME!, 'test-child.pid'), String(started.pid));
 try {
   if (!cold) assert.ok(fs.existsSync(path.join(getDaemonDir(), 'health.json')), 'ordinary launcher publishes health before daemon starts');
-  // Daemon-liveness socket: the browser IPC socket left with the standalone
-  // browser CLI (PHNX-4101), so this waits on the feed-stream hub socket the
-  // daemon binds unconditionally on boot.
   const socket = path.join(getCacheDir(), 'helpers', 'feed', 'feed-stream.sock');
   let ready = false;
   for (let i = 0; i < 80 && !ready; i++) {

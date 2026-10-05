@@ -25,7 +25,6 @@ function loadNodeSqlite(): unknown {
   }
 }
 
-// Keep bun:sqlite variable-bound so Node never statically resolves the Bun-only module.
 const BUN_SQLITE = 'bun:sqlite';
 const sqliteMod = isBun
   ? (require as (id: string) => unknown)(BUN_SQLITE)
@@ -55,7 +54,6 @@ export interface RunResult {
 }
 
 function bindArgs(params: unknown[]): unknown[] {
-  // Strict bare named binds accept one object intact; positional binds remain variadic.
   if (
     params.length === 1 &&
     params[0] !== null &&

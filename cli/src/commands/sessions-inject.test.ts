@@ -1,18 +1,3 @@
-/**
- * Tests for `agents sessions inject` selector + device handling (PHNX-3688).
- *
- * Two bugs the command shipped with, both exercised on the real path:
- *   1. A live tmux session whose id column shows `-` (only a tmux label like
- *      `ag-claude-214edaae:0.0`, no resolvable session id) could not be targeted
- *      at all — `matchInjectSelector` now matches the `<shortid>` suffix, proved
- *      here end-to-end against a real tmux server (discover the id-less row, match
- *      it, resolve its pane, inject, read the bytes back).
- *   2. `--device` arrived as an array under `optsWithGlobals()` (the parent
- *      `sessions` command's variadic `-D, --device <target...>` shadows this
- *      subcommand's scalar one), and the array flowed into `sshExec` and crashed
- *      on `host.startsWith` — `normalizeInjectDevice` coerces it and fails loud on
- *      more than one.
- */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
@@ -27,7 +12,6 @@ import { isTmuxInstalled } from '../lib/tmux/binary.js';
 import { createSession, capturePane, killAll } from '../lib/tmux/session.js';
 import * as tmuxPaths from '../lib/tmux/paths.js';
 
-/** A minimal ActiveSession for the pure matcher tests. */
 function row(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...over } as ActiveSession;
 }
@@ -41,13 +25,11 @@ describe('matchInjectSelector', () => {
   });
 
   it('matches the tmux <shortid> suffix when the row has NO session id (Bug 1)', () => {
-    // The exact id-less shape listTmuxAgentSessions emits for a born-unidentified
-    // pane: sessionId absent, only the tmux name + pane id known.
     const s = row({ sessionId: undefined, host: 'tmux', tmuxName: 'ag-claude-214edaae', paneId: '%122' });
-    expect(matchInjectSelector(s, '214edaae')).toBe(true); // the tmux-name suffix
-    expect(matchInjectSelector(s, '214e')).toBe(true); // a prefix of it
-    expect(matchInjectSelector(s, 'ag-claude-214edaae')).toBe(true); // the full name
-    expect(matchInjectSelector(s, '%122')).toBe(true); // the pane id
+    expect(matchInjectSelector(s, '214edaae')).toBe(true);
+    expect(matchInjectSelector(s, '214e')).toBe(true);
+    expect(matchInjectSelector(s, 'ag-claude-214edaae')).toBe(true);
+    expect(matchInjectSelector(s, '%122')).toBe(true);
     expect(matchInjectSelector(s, 'deadbeef')).toBe(false);
   });
 
@@ -59,8 +41,6 @@ describe('matchInjectSelector', () => {
 
 describe('normalizeInjectDevice', () => {
   it('coerces the single-element array optsWithGlobals delivers to a string (Bug 2)', () => {
-    // The parent `sessions` variadic `-D, --device <target...>` shadows the
-    // scalar one, so a single `--device box` arrives as `['box']`.
     expect(normalizeInjectDevice(['yosemite-s0'])).toBe('yosemite-s0');
     expect(normalizeInjectDevice('yosemite-s0')).toBe('yosemite-s0');
   });
@@ -101,8 +81,6 @@ describe('buildRemoteInjectArgv', () => {
 const tmuxSkip = isTmuxInstalled() ? null : 'tmux not installed';
 
 describe.skipIf(tmuxSkip)('sessions inject — id-less tmux session, real round-trip (Bug 1)', () => {
-  // A short id chosen so it cannot resolve to a real transcript in sessions.db,
-  // so the discovered row stays id-less — exactly the failing case.
   const SHORT = 'deadbe12';
   const SESS = `ag-claude-${SHORT}`;
   let tempDir: string;
@@ -112,33 +90,28 @@ describe.skipIf(tmuxSkip)('sessions inject — id-less tmux session, real round-
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-inject-idless-'));
     socket = path.join(tempDir, 'server.sock');
-    // Point discovery at our throwaway server, never the fleet socket.
     socketSpy = vi.spyOn(tmuxPaths, 'getDefaultSocketPath').mockReturnValue(socket);
   });
 
   afterEach(async () => {
     socketSpy?.mockRestore();
-    try { await killAll(socket); } catch { /* best-effort */ }
-    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* gone */ }
+    try { await killAll(socket); } catch {  }
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {  }
   });
 
   it('discovers the row id-less, matches its <shortid>, and injects into its pane', async () => {
-    // `cat` echoes stdin, so an injected line is visible in the pane capture.
     await createSession({ name: SESS, cmd: 'cat', socket, cwd: tempDir });
 
     const rows = await listTmuxAgentSessions();
     const mine = rows.find((r) => r.tmuxName === SESS);
     expect(mine, `expected an ${SESS} row; got ${JSON.stringify(rows.map((r) => ({ kind: r.kind, tmuxName: r.tmuxName, sessionId: r.sessionId })))}`).toBeDefined();
 
-    // The failing shape: the row carries the tmux label but no session id.
     expect(mine!.sessionId).toBeUndefined();
     expect(mine!.host).toBe('tmux');
     expect(mine!.tmuxName).toBe(SESS);
 
-    // The fix: the operator can target it by the tmux-name suffix.
     expect(matchInjectSelector(mine!, SHORT)).toBe(true);
 
-    // And that match resolves to the exact tmux pane the send-keys goes to.
     const resolution = resolveInjectTargetForSession(mine!);
     expect(resolution.addressable).toBe(true);
     if (!resolution.addressable) throw new Error(resolution.reason);

@@ -39,7 +39,6 @@ export function validateRouterName(name: string): void {
   }
 }
 
-// Reads resolve project → user → extra/system; mutations own only the user layer.
 export function routerExists(name: string, cwd?: string): boolean {
   validateRouterName(name);
   return resolveResource('routers', name, cwd) !== null;
@@ -102,7 +101,7 @@ export function renameRouter(oldName: string, newName: string): void {
       `or create a user-layer router under a different name.`,
     );
   }
-  // Refuse destination collisions; a shadowed copy would not change the effective router.
+
   if (routerExists(newName)) {
     throw new Error(`Router '${newName}' already exists; remove it first.`);
   }
@@ -112,7 +111,6 @@ export function renameRouter(oldName: string, newName: string): void {
   deleteRouter(oldName);
 }
 
-// Validate registered harnesses and verifiable tier/model tokens before writing.
 export function validateRouter(router: Router): void {
   for (const [harness, allowlist] of Object.entries(router.harnesses)) {
     if (!(ALL_AGENT_IDS as string[]).includes(harness)) {

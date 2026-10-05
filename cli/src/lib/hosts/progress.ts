@@ -9,13 +9,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 export const REMOTE_MIRROR_MAX_BYTES = 512 * 1024;
-// Consumers cap distributed local mirrors at this tail window; the complete log remains remote.
+
 
 export function pullRemoteLogDelta(
   target: string,
   opts: { remoteLog: string; offset: number; extraSshArgs?: string[] },
 ): { bytes: Buffer; newOffset: number } | null {
-  // Offsets advance by raw bytes, never decoded characters, so split UTF-8 cannot drift.
   const remote = `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null`;
   const res = sshExecRaw(target, remote, { timeoutMs: 20000, multiplex: true, extraSshArgs: opts.extraSshArgs });
   if (res.code === null) return null;
@@ -45,7 +44,6 @@ export function splitProgressBytes(
   taskId: string,
 ): { logChunk: Buffer; exit: Buffer; consumed: number } | null {
   const marker = Buffer.from(exitMarker(taskId), 'utf8');
-  // The last task-specific marker separates arbitrary log bytes from terminal state.
   const idx = buf.lastIndexOf(marker);
   if (idx === -1) return null;
   return {
@@ -142,7 +140,6 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
   let offset = 0;
   let waitMs = fastMs;
 
-  // Never append back into the same inode being tailed or the log amplifies itself.
   let mirror = true;
   try {
     const s = fs.statSync(local);

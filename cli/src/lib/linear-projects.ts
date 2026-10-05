@@ -31,7 +31,7 @@ function checkoutMatchKey(s: string): string {
 }
 
 export function matchLocalCheckoutExact(name: string, dirNames: string[]): string | undefined {
-  // Write paths require one exact normalized key; containment is suggestion-only and '/' in display names is punctuation.
+
   const key = checkoutMatchKey(name);
   if (!key) return undefined;
   const hits = dirNames.filter((d) => checkoutMatchKey(d) === key);
@@ -97,7 +97,7 @@ export function nextLinearLink(
   prior: { projectId?: string; url?: string; name?: string } | undefined,
   project: LinearProjectLite,
 ): { projectId: string; url?: string; name: string } {
-  // Refresh the name; preserve a stored URL only while the project ID is unchanged.
+
   const next: { projectId: string; url?: string; name: string } = { projectId: project.id, name: project.name };
   const url = project.url ?? (prior?.projectId === project.id ? prior?.url : undefined);
   if (url) next.url = url;

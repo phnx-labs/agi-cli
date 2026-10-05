@@ -14,7 +14,7 @@ export function pickFleetDevice(
   _config?: Pick<JobConfig, 'devices'>,
   platform?: DevicePlatform,
 ): string | null {
-  // Scheduler ownership is separate from execution placement; prefer local safely and fail a platform mismatch loud.
+
   let reg: ReturnType<typeof loadDevicesSync>;
   try {
     reg = loadDevicesSync();
@@ -38,7 +38,7 @@ export async function resolvePlacementTarget(
   config: JobConfig,
   deps: { resolveDeviceAuto?: (agent?: string) => Promise<{ pickedDeviceKey: string }> } = {},
 ): Promise<PlacementTarget> {
-  // Fleet, host, and cloud placement still require one firing owner; config.devices is a firing allowlist, not an execution pool.
+
   const strategy: HostStrategy = resolveHostStrategy(config);
   switch (strategy) {
     case 'local':

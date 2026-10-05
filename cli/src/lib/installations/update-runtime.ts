@@ -54,11 +54,10 @@ function autoUpdateStrategyFor(agent: AgentId): UpdateStrategy | null {
   } catch {
     return null;
   }
-  // Unattended updates are limited to reversible, per-install npm swaps.
+
   return strategy.id === 'npm-package' && strategy.transactional ? strategy : null;
 }
 
-// Planning uses an ephemeral record and must not adopt or mutate a legacy installation.
 function ephemeralInstallationSnapshot(agent: AgentId, label: string): Installation | null {
   const dir = installationDir(agent, label);
   let createdAt: string;
@@ -221,7 +220,6 @@ async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, canc
         INSTALLATION_LOCK_OPTIONS,
       );
 
-      // Refresh agents-cli-owned launchers only; never adopt a user's launcher in background work.
       refreshOwnedLaunchers(entry.agent, installation.label);
 
       const outcome = await updateInstallation(installation, {

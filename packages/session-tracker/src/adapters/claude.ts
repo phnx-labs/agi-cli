@@ -4,7 +4,6 @@ import * as path from 'path';
 
 export const CLAUDE_PROJECTS_ROOT = path.join(os.homedir(), '.claude', 'projects');
 
-// Mirrors swarmify's workspaceToClaudeFolder: replace / and . with -
 export function claudeWorkspaceFolder(cwd: string): string {
   return cwd.replace(/[\/.]/g, '-');
 }
@@ -49,7 +48,6 @@ export async function awaitNewSession(
         };
       }
     } catch {
-      /* dir may not exist yet */
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }

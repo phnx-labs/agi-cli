@@ -47,7 +47,6 @@ describe('FairScheduler', () => {
     const b2 = run('b2', 'beta', 1);
     sched.enqueue(b2);
     sched.complete('a1');
-    // alpha has 0 running, beta has 1 — alpha is served first even though beta queued earlier.
     expect(sched.nextEligible()?.runId).toBe('a2');
   });
 

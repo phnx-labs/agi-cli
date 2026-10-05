@@ -37,7 +37,6 @@ function makeKimiSession(wireContent: string): string {
     title: 'Test session',
     createdAt: '2026-06-24T00:00:00.000Z',
   }));
-  // Ordinary fixtures end in newline because the incremental reader deliberately defers unterminated records.
   const terminated = wireContent.endsWith('\n') || wireContent === '' ? wireContent : wireContent + '\n';
   fs.writeFileSync(path.join(agentsDir, 'wire.jsonl'), terminated);
   return path.join(sessionDir, 'state.json');

@@ -72,12 +72,6 @@ describe('upsertSessionsBatch scanner event reuse', () => {
   });
 
   it('skips parseSession for kimi/grok large-transcript entries with no events (PHNX-3411)', () => {
-    // Kimi reads wire.jsonl and Grok reads chat_history.jsonl — potentially
-    // large flat files. Their scanners produce only metadata, no events.
-    // The warm tick must NOT open the transcript file for these agents —
-    // tool indexing is deferred to runDeferredToolIndex. Verify by pointing
-    // filePath at a non-existent file: if parseSession were called it would
-    // throw and the upsert would fail.
     const deferredAgents: Array<SessionMeta['agent']> = ['kimi', 'grok'];
     for (const agent of deferredAgents) {
       const missingTranscript = path.join(testHome, `.${agent}`, 'no-events.jsonl');
@@ -90,17 +84,13 @@ describe('upsertSessionsBatch scanner event reuse', () => {
         filePath: missingTranscript,
         messageCount: 5,
       };
-      // No events — scanner produced only metadata.
       db.upsertSessionsBatch([{
         meta,
         content: 'no events',
         scan: { fileMtimeMs: 1, fileSize: 1 },
       }]);
-      // Transcript file must not have been created or opened.
       expect(fs.existsSync(missingTranscript)).toBe(false);
-      // Session row inserted with metadata intact.
       expect(db.getSessionById(meta.id)?.agent).toBe(agent);
-      // No tool_calls written — deferred to runDeferredToolIndex.
       expect((db.getDB().prepare(
         'SELECT count(*) AS count FROM tool_calls WHERE session_id = ?',
       ).get(meta.id) as { count: number }).count).toBe(0);

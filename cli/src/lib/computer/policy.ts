@@ -55,7 +55,6 @@ export function loadComputerAllowList(): string[] {
   return [...allowed].sort();
 }
 
-// Trust concrete realpaths: legitimate launchers differ, but arbitrary same-team processes stay excluded.
 export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] {
   const out = new Set<string>();
   const add = (p: string) => {

@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 import type { ExecutorRequest } from './types';
 
-/** Directory contract from the RUSH-2666 plan. */
 export const DEFAULT_CI_ROOT = '/srv/ci';
 
 export interface CiLayout {

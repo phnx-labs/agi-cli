@@ -1,13 +1,3 @@
-/**
- * Tests for the double-trigger guard.
- *
- * The bug: a monitor's NAME is not its identity. `writeMonitor` overwrites by
- * name and nothing compares arguments, so two watchers can poll the same source
- * and fire the same action under different names — one trigger, fired twice.
- * Observed on one box: `open-pr-watch`, `pr-ci-fail`, three stale `pr2222-*`
- * watchers and an agent-added lander, all polling the same PR queue, added
- * without a single warning.
- */
 
 import { describe, it, expect } from 'vitest';
 import { monitorFingerprint, findDuplicateMonitor } from './fingerprint.js';
@@ -65,9 +55,6 @@ describe('monitorFingerprint', () => {
       .not.toBe(monitorFingerprint(watcher({ condition: { mode: 'match', match: 'fail' } as any })));
   });
 
-  // Placement is WHO executes, not WHAT runs. If it were hashed, the same
-  // watcher could be re-added N times by varying only --device, which is
-  // precisely the duplication this guards.
   it('treats placement as not part of identity', () => {
     const pinned = { ...watcher(), device: 'zion' } as Ident;
     const unpinned = watcher();
@@ -87,7 +74,6 @@ describe('findDuplicateMonitor', () => {
   });
 
   it('catches a user monitor duplicating a shipped built-in', () => {
-    // listMonitors() unions user over system, so the built-in is in `existing`.
     const builtIn = watcher({
       name: 'pr-merge-on-green',
       source: { type: 'poll', command: 'gh pr list --author @me', interval: '5m' } as any,
@@ -111,8 +97,6 @@ describe('findDuplicateMonitor', () => {
     expect(findDuplicateMonitor(watcher(), [])).toBeNull();
   });
 
-  // The real incident, reduced: a lander added beside watchers already polling
-  // the same repo. Pre-fix this returned nothing and the monitor was written.
   it('reproduces the observed pile-up', () => {
     const cmd = 'gh pr list -R phnx-labs/agents-cli --state open --json number,statusCheckRollup';
     const existing = [
@@ -124,18 +108,12 @@ describe('findDuplicateMonitor', () => {
   });
 });
 
-/**
- * A monitor can arrive from arbitrary YAML (`agents monitors add ./watcher.yml`).
- * `validateMonitor` checks named fields; the fingerprint walks the whole object
- * graph — so a recursive anchor is valid to one and cyclic to the other.
- */
 describe('hostile input from a YAML file', () => {
   it('does not blow the stack on a recursive anchor', () => {
     const source: any = { type: 'poll', command: 'x', interval: '2m' };
     source.self = source;
     const cyclic = { name: 'c', source, condition: { mode: 'on-change' }, action: { type: 'notify' } } as any;
     expect(() => monitorFingerprint(cyclic)).not.toThrow();
-    // And it is still deterministic, not just non-throwing.
     expect(monitorFingerprint(cyclic)).toBe(monitorFingerprint(cyclic));
   });
 

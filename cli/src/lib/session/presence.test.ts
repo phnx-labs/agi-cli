@@ -38,14 +38,14 @@ describe('reconcilePresence (RUSH-2007 Layer C state machine)', () => {
     const { next, transitions } = reconcilePresence({}, [obs({ sessionId: 'a' })], 5_000);
     expect(next.a.status).toBe('connected');
     expect(next.a.lastSeenMs).toBe(5_000);
-    expect(transitions).toHaveLength(0); // first sighting is not a transition
+    expect(transitions).toHaveLength(0);
   });
 
   it('flips a tracked-but-absent session to disconnected and emits the transition', () => {
     const prev = { a: rec({ sessionId: 'a', lastSeenMs: 4_000, status: 'connected' }) };
     const { next, transitions } = reconcilePresence(prev, [], 5_000);
     expect(next.a.status).toBe('disconnected');
-    expect(next.a.lastSeenMs).toBe(4_000); // last-seen preserved, not bumped
+    expect(next.a.lastSeenMs).toBe(4_000);
     expect(transitions).toEqual([
       expect.objectContaining({ from: 'connected', to: 'disconnected', action: 'reconnect-nudge' }),
     ]);
@@ -55,7 +55,7 @@ describe('reconcilePresence (RUSH-2007 Layer C state machine)', () => {
     const prev = { a: rec({ sessionId: 'a', lastSeenMs: 4_000, status: 'disconnected' }) };
     const { next, transitions } = reconcilePresence(prev, [], 5_000);
     expect(next.a.status).toBe('disconnected');
-    expect(transitions).toHaveLength(0); // only the connected->disconnected FLIP fires
+    expect(transitions).toHaveLength(0);
   });
 
   it('interactive drop -> reconnect-nudge; headless remote drop -> keep-alive; local headless -> none', () => {
@@ -83,7 +83,7 @@ describe('reconcilePresence (RUSH-2007 Layer C state machine)', () => {
     const prev = { a: rec({ sessionId: 'a', lastSeenMs: 1_000, status: 'disconnected' }) };
     const now = 1_000 + PRESENCE_TTL_MS + 1;
     const { next, transitions } = reconcilePresence(prev, [], now);
-    expect(next.a).toBeUndefined(); // gone for good
+    expect(next.a).toBeUndefined();
     expect(transitions).toHaveLength(0);
   });
 
@@ -137,7 +137,7 @@ describe('observedFromActive (ActiveSession -> ObservedSession adapter)', () => 
 
 describe('presence store (real filesystem round-trip)', () => {
   afterEach(() => {
-    try { fs.unlinkSync(presenceFilePath()); } catch { /* absent */ }
+    try { fs.unlinkSync(presenceFilePath()); } catch {  }
   });
 
   it('round-trips a record through save/load', () => {
@@ -153,7 +153,7 @@ describe('presence store (real filesystem round-trip)', () => {
   });
 
   it('returns an empty store when the file is absent', () => {
-    try { fs.unlinkSync(presenceFilePath()); } catch { /* absent */ }
+    try { fs.unlinkSync(presenceFilePath()); } catch {  }
     expect(loadPresence()).toEqual({});
   });
 });

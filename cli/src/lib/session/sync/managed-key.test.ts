@@ -14,9 +14,6 @@ import {
   resolveManagedBackupKey,
 } from './managed-key.js';
 
-// The DEK lifecycle runs through a real HTTP Phoenix verifier, the emitted
-// Worker in workerd, and Miniflare's real R2 binding. No in-memory transport or
-// fake bucket can hide namespace, conditional-create, or escrow wire defects.
 
 const PREV_STATE = process.env.AGENTS_STATE_DIR;
 

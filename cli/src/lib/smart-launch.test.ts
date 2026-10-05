@@ -162,7 +162,7 @@ describe('resolveDeviceAffinity', () => {
   });
 });
 
-// Auto placement fails loud with visible remote reasons; defaults never implicitly fall back to the personal local device, and preferences outrank load.
+
 describe('resolveDeviceAuto', () => {
   it('picks the least-loaded reachable device with the requested agent installed', async () => {
     const plan = await resolveDeviceAuto('codex', {

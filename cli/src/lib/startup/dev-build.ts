@@ -7,7 +7,7 @@ export function isDevVersionStamp(version: string): boolean {
 }
 
 export function detectDevBuild(argv1: string, version: string): boolean {
-  // Realpath + exact package identity + bounded ancestry avoids classifying nested installs as dev.
+
   if (isDevVersionStamp(version)) return true;
   try {
     const cliPath = fs.realpathSync(argv1 || '');

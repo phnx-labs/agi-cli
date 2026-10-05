@@ -3,23 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db. db.ts captures DB_PATH at module
-// load, so redirecting it after the import silently opens the wrong database.
-// Every migration test in this directory uses this pattern.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv44-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v43 -> v44: backfill duration_ms for harnesses whose scan extractor never
- * derived it (PHNX-3457). rush/grok/kimi/cursor/muse/antigravity left it NULL, so
- * the console median was computed over only the ~48% that carried it. The
- * migration repairs already-indexed rows in place from last_activity − timestamp,
- * no reparse. We seed a pre-v44 `sessions` table with three rows — a NULL-duration
- * row with a real span, a NULL-duration row whose activity == creation (no
- * positive span), and a row that already has a precise duration — stamp the
- * version to 43, then let getDB replay migrateSchema(43).
- */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -27,10 +14,6 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // The full sessions table (id..archived_at) is created by getDB's SCHEMA via
-  // CREATE TABLE IF NOT EXISTS, so a partial pre-seed here would block it and then
-  // fail getDB's post-migration index/repair steps that reference other columns.
-  // Seed the full shape — an authentic pre-v44 DB carries every column through v43.
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (
@@ -78,7 +61,6 @@ describe('schema migration v43 -> v44 (duration_ms backfill, PHNX-3457)', () => 
   });
 
   it('backfills a NULL duration from last_activity − timestamp', () => {
-    // 20:12:08 − 20:00:08 = 12 minutes.
     expect(durationOf('rush-span')).toBe(12 * 60_000);
   });
 

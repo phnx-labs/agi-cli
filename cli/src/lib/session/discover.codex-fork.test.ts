@@ -46,7 +46,6 @@ it('repairs unchanged poisoned parent and child rows even in a cold backup direc
   await discover.discoverSessions({ agent: 'codex', all: true });
   expect(db.getSessionById(child)?.filePath).toBe(childPath);
   const before = fs.statSync(childPath);
-  // The old last-meta scanner indexed the child's bytes under its parent id.
   db.getDB().prepare('UPDATE sessions SET file_path = ?, cwd = ? WHERE id = ?').run(childPath, '/workspace/poisoned', parent);
   db.getDB().prepare('DELETE FROM sessions WHERE id = ?').run(child);
   db.getDB().prepare('UPDATE scan_ledger SET extractor_version = ?, scanned_at = ?').run(db.CONTENT_INDEX_VERSION - 1, 1);

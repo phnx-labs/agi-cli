@@ -1,15 +1,3 @@
-/**
- * Tests for the fleet-wide half of the duplicate guard.
- *
- * The local check catches "I already have this watcher". It cannot catch the
- * case that actually bites a fleet: two agents, on two different machines,
- * creating a watcher for the same work item with the same arguments. Neither box
- * can see the other's monitors dir, so the claim has to be asked of the fleet.
- *
- * Parsing is the part that must be defensive — a peer on an older CLI can emit a
- * different shape or no JSON at all, and one bad peer must never blank the guard
- * for the rest of the fleet (which would silently allow a duplicate).
- */
 
 import { describe, it, expect } from 'vitest';
 import { parseRemoteMonitors, gatherFleetMonitors } from './remote.js';
@@ -34,8 +22,6 @@ describe('parseRemoteMonitors', () => {
   });
 
   it('captures the peer display view (enabled/owner/scope/liveness) for `list`', () => {
-    // PHNX-2506 item 3: the fleet-aware list shows every peer's monitors with
-    // enough to render them — not just the fingerprint identity.
     const row = watcher({
       name: 'pr-merge-on-green',
       enabled: false,
@@ -61,8 +47,6 @@ describe('parseRemoteMonitors', () => {
   });
 
   it('a version-skewed peer that omits the display fields degrades to undefined, not garbage', () => {
-    // Older CLI emits only identity — the display view must be all-undefined, and
-    // an invalid scope value is dropped rather than trusted.
     const [out] = parseRemoteMonitors(JSON.stringify([watcher({ scope: 'bogus' })]), 'zion');
     expect(out.display).toEqual({
       enabled: undefined,
@@ -97,20 +81,9 @@ describe('parseRemoteMonitors', () => {
   });
 });
 
-/**
- * THE test this file exists for. The first version of these tests fabricated a
- * peer payload with a full `action`, while `monitors list --json` actually
- * emitted `action: { type }` only — so the fingerprint could never match a
- * `--run` monitor, the fleet check was inert for the exact case it was built
- * for, and every test passed anyway.
- *
- * So the fixture is now built by the SAME projection `list --json` performs.
- * If that projection ever drops a field the fingerprint needs, this fails.
- */
 describe('against the real `monitors list --json` projection', () => {
   type Ident = Pick<MonitorConfig, 'name' | 'source' | 'condition' | 'action'>;
 
-  /** Mirrors the payload built in commands/monitors.ts `list --json`. */
   const asListJson = (m: any) =>
     JSON.stringify([
       {
@@ -143,7 +116,6 @@ describe('against the real `monitors list --json` projection', () => {
   });
 
   it('would NOT match if the projection dropped the action payload', () => {
-    // Reproduces the exact regression: action: { type } only.
     const typeOnly = JSON.stringify([
       { name: 'land-2517', enabled: true, source: runMonitor().source, condition: runMonitor().condition, action: { type: 'run' } },
     ]);
@@ -168,9 +140,6 @@ describe('against the real `monitors list --json` projection', () => {
   });
 
   it('a local monitor named `<machine>:<name>` cannot dodge the check', () => {
-    // The first implementation renamed the remote row to `${machine}:${name}` to
-    // dodge findDuplicateMonitor's same-name skip, which a local monitor
-    // literally named `zion:foo` could then defeat. Fingerprints have no names.
     const remote = parseRemoteMonitors(asListJson(runMonitor({ name: 'foo' })), 'zion');
     const mine = runMonitor({ name: 'zion:foo' }) as unknown as Ident;
     expect(remote.find((r) => monitorFingerprint(r.monitor) === monitorFingerprint(mine))?.machine).toBe('zion');

@@ -50,7 +50,6 @@ const base: BrowserFilter = {
 
 describe('browserFilterToArgv — the human↔agent contract', () => {
   it('an empty repo-scoped filter is just `sessions`', () => {
-    // projectScope 'repo' is the default view, so it emits no flag.
     expect(browserFilterToArgv(base)).toEqual(['sessions']);
   });
 
@@ -256,11 +255,10 @@ describe('cycle — [none, ...options] wrapping for A/D hotkeys', () => {
     const opts = ['claude', 'codex', 'droid'];
     expect(cycle(undefined, opts)).toBe('claude');
     expect(cycle('claude', opts)).toBe('codex');
-    expect(cycle('droid', opts)).toBeUndefined(); // wraps back to "all"
+    expect(cycle('droid', opts)).toBeUndefined();
   });
 
   it('a value no longer in the pool restarts at the first option', () => {
-    // findIndex returns -1 → (-1 + 1) % len === 0 → first entry (undefined).
     expect(cycle('gone', ['claude'])).toBeUndefined();
   });
 
@@ -280,8 +278,6 @@ describe('cycleWindow — W hotkey', () => {
 
 describe('activeBrowserSeed — the --active call-site filter (fleet-wide)', () => {
   it('is fleet-wide (projectScope all), not repo-scoped', () => {
-    // The static --active is fleet-wide; the interactive one must match, else
-    // `sessions --active` silently narrows to the current directory.
     expect(activeBrowserSeed({}).projectScope).toBe('all');
   });
 
@@ -324,22 +320,18 @@ describe('bareBrowserSeed — the bare-listing call-site filter', () => {
   it('defaults the window to 30d, but --all widens it to all-time (undefined)', () => {
     expect(bareBrowserSeed({}).window).toBe('30d');
     expect(bareBrowserSeed({ all: true }).window).toBeUndefined();
-    // an explicit --since still wins over --all's all-time default
     expect(bareBrowserSeed({ all: true, since: '7d' }).window).toBe('7d');
   });
 });
 
 describe('bareBrowserSeed — an explicit --device scope', () => {
   it('forces all-dirs scope so a peer\'s rows are not filtered away', () => {
-    // Every fetched row is the peer's, and no peer cwd sits under OUR
-    // process.cwd() — with the default 'repo' scope the browser renders empty.
     expect(bareBrowserSeed({ host: ['zion'] }).projectScope).toBe('all');
     expect(bareBrowserSeed({ host: ['zion', 'mac-mini'] }).projectScope).toBe('all');
   });
 
   it('seeds the device chip only when the scope names exactly one host', () => {
     expect(bareBrowserSeed({ host: ['user@Zion.local'] }).device).toBe('zion');
-    // Two hosts: seeding the first would narrow the view to it and hide the other.
     expect(bareBrowserSeed({ host: ['zion', 'mac-mini'] }).device).toBeUndefined();
     expect(bareBrowserSeed({}).device).toBeUndefined();
   });
@@ -361,10 +353,6 @@ describe('bareBrowserSeed — an explicit --device scope', () => {
   });
 
   it('widens scope and window for --in-team, since a team outlives both defaults', () => {
-    // The browser is the path a human actually reaches, so seeding the filter
-    // without widening left the interactive default hiding exactly the rows the
-    // flag exists to surface: teammates run in their own worktrees (a different
-    // cwd), and the team itself is often older than the 30-day window.
     const seed = bareBrowserSeed({ inTeam: 'redesign' });
     expect(seed.projectScope).toBe('all');
     expect(seed.window).toBeUndefined();
@@ -376,10 +364,6 @@ describe('bareBrowserSeed — an explicit --device scope', () => {
 });
 
 describe('buildInitialFilter — the seed must survive into the live filter', () => {
-  // The seed is copied field-by-field, and every field is optional, so a dropped
-  // one is invisible to the compiler and silent at runtime: `team` was omitted
-  // here, which made --in-team a no-op interactively while the scope half of the
-  // same seed still applied — the browser opened wide and looked filtered.
   it('carries every seeded field through, not just the ones with defaults', () => {
     const seed = bareBrowserSeed({ inTeam: 'redesign', agent: 'codex', host: ['zion'] });
     const filter = buildInitialFilter(seed);
@@ -392,8 +376,6 @@ describe('buildInitialFilter — the seed must survive into the live filter', ()
   });
 
   it('loses no key of the seed', () => {
-    // Guards the next filter field someone adds: if the seed sets it and the
-    // filter doesn't carry it, this fails without anyone having to remember.
     const seed = bareBrowserSeed({ inTeam: 'redesign', agent: 'codex', host: ['zion'], teams: true });
     const filter = buildInitialFilter(seed) as Record<string, unknown>;
     for (const [key, value] of Object.entries(seed)) {
@@ -430,9 +412,9 @@ describe('sessionMatchesQuery — the S search predicate (cheap, not FTS)', () =
   });
 
   it('matches case-insensitively across topic / project / id', () => {
-    expect(sessionMatchesQuery(row(), 'taylor')).toBe(true); // topic
-    expect(sessionMatchesQuery(row(), 'MY-APP')).toBe(true); // project
-    expect(sessionMatchesQuery(row(), 'a1b2')).toBe(true); // shortId prefix
+    expect(sessionMatchesQuery(row(), 'taylor')).toBe(true);
+    expect(sessionMatchesQuery(row(), 'MY-APP')).toBe(true);
+    expect(sessionMatchesQuery(row(), 'a1b2')).toBe(true);
   });
 
   it('requires every whitespace-separated term (AND)', () => {
@@ -449,13 +431,6 @@ describe('sessionMatchesQuery — the S search predicate (cheap, not FTS)', () =
   });
 });
 
-/**
- * The running filter used to be a pure intersection with the transcript pool
- * (`pool.filter(r => live.has(r.id))`) fed by a LOCAL-ONLY live scan. Both
- * halves hid real sessions: `agents sessions --active --json` listed 32 live
- * sessions across 7 machines while the browser showed 4. These pin the union
- * semantics that replaced it.
- */
 const live = (over: Partial<ActiveSession> = {}): ActiveSession =>
   ({
     context: 'terminal',
@@ -501,13 +476,10 @@ describe('mergeLiveIntoPool — running is a SOURCE of rows, not an intersection
     const rows = [row({ id: 'aaaaaaaa-1111-2222-3333-444444444444' })];
     const merged = mergeLiveIntoPool(rows, indexLiveRows([live()], 'zion'), 'zion');
     expect(merged).toHaveLength(1);
-    // The pool row wins — it carries the indexed transcript metadata.
     expect(merged[0].filePath).toBe('/tmp/x.jsonl');
   });
 
   it('names an id-less process row by a pid short enough for the id column', () => {
-    // 9 chars max: `p:` + a 7-digit Linux pid. The old `pid:` prefix overflowed
-    // the 10-wide id column and cost the real pid its last digits.
     const meta = liveSessionToMeta(live({ sessionId: undefined, pid: 2813139 }), 'zion');
     expect(meta.shortId).toBe('p:2813139');
     expect(meta.shortId.length).toBeLessThanOrEqual(9);
@@ -608,8 +580,6 @@ describe('shouldShowHostColumn — live-only, gated on the filter not the cache'
   });
 
   it('drops the column when running is toggled back off, even though liveCache survives', () => {
-    // Regression: gating on `!!live` alone kept the column after the `r` hotkey
-    // turned running off, widening a plain listing with no live rows to explain it.
     expect(shouldShowHostColumn({ ...base, running: false }, index, rows)).toBe(false);
   });
 
@@ -627,12 +597,6 @@ describe('shouldShowHostColumn — live-only, gated on the filter not the cache'
   });
 });
 
-/**
- * `buildInitialFilter` copies the seed field by field, and an omitted field is
- * SILENT — the field is optional, so the compiler says nothing and the browser
- * just opens without that filter. `team` was lost exactly this way. So each new
- * field earns an assertion that it survives the copy, in both directions.
- */
 describe('bookmarks survives the seed → filter copy', () => {
   it('carries a seeded bookmarks flag into the live filter', () => {
     expect(buildInitialFilter({ bookmarks: true }).bookmarks).toBe(true);

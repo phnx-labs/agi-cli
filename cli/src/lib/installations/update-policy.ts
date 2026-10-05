@@ -40,7 +40,7 @@ export function unsetAgentAutoUpdateEnabled(agent: AgentId): void {
 }
 
 export function isAutoUpdateEnabledForAgent(agent: AgentId): boolean {
-  // The global switch is an emergency stop that no per-agent setting may override.
+
   if (!isGlobalAutoUpdateEnabled()) return false;
   const perAgent = rawAgentAutoUpdateSetting(agent);
   return perAgent !== false;

@@ -22,8 +22,8 @@ describe('followFile', () => {
       fs.rmSync(f, { force: true });
     }
     const all = chunks.join('');
-    expect(all).toContain('line1'); // pre-existing content
-    expect(all).toContain('line2'); // appended after follow started
+    expect(all).toContain('line1');
+    expect(all).toContain('line2');
   });
 
   it('with fromEnd, skips existing content and only emits new appends', async () => {

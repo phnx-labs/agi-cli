@@ -98,7 +98,7 @@ describe('routineStartFailedOwnerText — always a failure', () => {
   });
 });
 
-// Automatic owner failures exclude Telegram and intrusive channels even if primary. Try fallbacks in order; release failed claims and retain successful ones.
+
 describe('ownerFailureDeliveryPlan — primary + fallbacks, no Telegram', () => {
   let humansFile: string;
   beforeEach(() => {
@@ -234,7 +234,7 @@ describe('deliverOwnerFailure — real registry, fallback on primary failure', (
   });
 });
 
-// Every start gets one finish, including pre-spawn failures; green runs stay silent.
+
 describe('notifyOwnerRoutineFinish — dedup per job+runId, green stays silent', () => {
   let humansFile: string;
   beforeEach(() => {

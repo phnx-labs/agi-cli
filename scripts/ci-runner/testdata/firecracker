@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Test stand-in for the Firecracker binary. Production resolveFirecrackerBin()
-# requires this path via FIRECRACKER_BIN or a real `firecracker` on PATH.
-# It never executes the guest on the unrestricted host: it reads the
-# controller config and runs the command only after checking mounts.
 set -euo pipefail
 
 config=""

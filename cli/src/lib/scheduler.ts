@@ -25,7 +25,7 @@ interface TriggerContext {
 }
 
 export function fireSlot(cron: Cron): Date {
-  // Claims key on the aligned occurrence boundary, never Croner's jittered currentRun, or catch-up deliveries double-fire.
+
   const fire = cron.currentRun() ?? new Date();
   return alignedSlotForFire(cron, fire) ?? fire;
 }
@@ -41,7 +41,6 @@ export class JobScheduler {
   loadAll(): void {
     const configs = listJobs();
     for (const config of configs) {
-      // Schedule-less jobs are trigger-only; other-device pins stay out, and ambiguous pins execute only on the owner.
       if (!config.enabled || !config.schedule) continue;
       if (hasAmbiguousDevicePin(config)) {
         const owner = routineOwnerDevice(config);
@@ -69,12 +68,10 @@ export class JobScheduler {
     }
     if (isPastOneShotRoutine(config)) return;
 
-    // catch:true keeps one callback failure from terminating the cron loop.
     const cronOptions: Record<string, unknown> = { catch: true };
     if (config.timezone) cronOptions.timezone = config.timezone;
 
     const cron = new Cron(config.schedule, cronOptions, async (self: Cron) => {
-      // Persist endAt disablement; remove one-shots after their first execution below.
       if (isPastEndAt(config)) {
         this.unschedule(config.name);
         try {

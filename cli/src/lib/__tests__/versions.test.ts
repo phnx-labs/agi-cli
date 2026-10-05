@@ -57,10 +57,10 @@ describe('getProjectVersion', () => {
   });
 
   it('ignores ~/.agents-system/ root when walking up', () => {
-    // getProjectAgentsDir must skip both the system root (~/.agents-system/) and the
-    // user root (~/.agents/) so they are never returned as project-scoped dirs.
-    // We cannot mutate os.homedir(), but we CAN verify that starting the search
-    // from inside ~/.agents-system/ returns null (no project version).
+
+
+
+
     const systemAgentsYaml = path.join(os.homedir(), '.agents-system', 'agents.yaml');
     if (fs.existsSync(systemAgentsYaml)) {
       const result = getProjectVersion('claude', path.dirname(systemAgentsYaml));
@@ -87,13 +87,13 @@ describe('getProjectVersion', () => {
   });
 });
 
-// Scenario: the user uninstalls an agent version. Their conversation history,
-// which lives at .../versions/<agent>/<version>/home/, must survive — now
-// inside the trash directory because removeVersion is a soft-delete: the
-// entire version dir (including home/) is renamed to
-// ~/.agents-system/trash/versions/<agent>/<version>/<timestamp>/.
-// Verified for every AgentId since removeVersion is parametrised on agent and
-// the layout is shared across all agents.
+
+
+
+
+
+
+
 describe('removeVersion soft-deletes the entire version dir to trash', () => {
   const cases: { agent: AgentId; historyDir: string; binaryName: string }[] = [
     { agent: 'claude',   historyDir: path.join('home', '.claude',   'projects'), binaryName: 'claude' },
@@ -122,10 +122,10 @@ describe('removeVersion soft-deletes the entire version dir to trash', () => {
 
         expect(removeVersion(agent, testVersion)).toBe(true);
 
-        // Original location is gone — soft-delete renamed it.
+
         expect(fs.existsSync(versionDir)).toBe(false);
 
-        // Trash now contains exactly one timestamped copy with everything.
+
         const stamps = fs.readdirSync(trashAgentDir);
         expect(stamps.length).toBe(1);
         const trashed = path.join(trashAgentDir, stamps[0]);
@@ -145,11 +145,11 @@ describe('removeVersion soft-deletes the entire version dir to trash', () => {
   }
 });
 
-// Regression: for a commands-as-skills agent (kimi: commands:false, skills:true,
-// no native command runtime), the commands writer materializes each command as a
-// skill dir under skills/. The skills orphan-sweep that runs afterward in a full
-// (no-selection) sync must NOT delete those converted command-skills — that bug
-// silently dropped every command (e.g. /recap) from kimi/grok.
+
+
+
+
+
 describe('syncResourcesToVersion preserves command-skills through the skills orphan-sweep', () => {
   it('[kimi] keeps converted command-skills AND real skills after a full sync', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdskill-sweep-'));
@@ -169,7 +169,7 @@ describe('syncResourcesToVersion preserves command-skills through the skills orp
           fs.mkdirSync(path.dirname(p), { recursive: true });
           fs.writeFileSync(p, content);
         };
-        // A top-level command (converts to a command-skill) and a real skill.
+
         write('commands/recap.md', ['---','description: Recap','---','','recap body'].join('\n'));
         write('skills/realskill/SKILL.md', ['---','name: realskill','description: a real skill','---','','body'].join('\n'));
 
@@ -180,7 +180,7 @@ describe('syncResourcesToVersion preserves command-skills through the skills orp
         fs.writeFileSync(fakeBin, '#!/usr/bin/env sh\nexit 0\n');
         fs.chmodSync(fakeBin, 0o755);
 
-        // Full sync: no selection -> orphan sweep runs.
+
         syncResourcesToVersion(agent, version, undefined, { cwd: projectRoot, force: true });
 
         const skillsDir = path.join(getVersionHomePath(agent, version), '.kimi-code', 'skills');
@@ -256,9 +256,9 @@ describe('syncResourcesToVersion respects version-gated subagent capabilities', 
   });
 });
 
-// When a version is removed, the command handler calls removeVersion then
-// updateSessionFilePaths so session reads still work from the new trash location.
-// This test verifies both pieces independently and together.
+
+
+
 describe('updateSessionFilePaths rewrites file_path after soft-delete to trash', () => {
   const testVersion = `0.0.0-dbtest-${crypto.randomBytes(4).toString('hex')}`;
   const testSessionId = `test-session-${crypto.randomBytes(8).toString('hex')}`;
@@ -266,14 +266,14 @@ describe('updateSessionFilePaths rewrites file_path after soft-delete to trash',
   const binaryName = 'claude';
 
   afterEach(() => {
-    // Clean up the test session row from the real DB
+
     try {
       const db = getDB();
       db.prepare(`DELETE FROM session_text WHERE session_id = ?`).run(testSessionId);
       db.prepare(`DELETE FROM sessions WHERE id = ?`).run(testSessionId);
-    } catch { /* ignore */ }
+    } catch {              }
 
-    // Clean up any leftover version or trash dirs
+
     const versionDir = path.join(getVersionsDir(), agent, testVersion);
     const trashAgentDir = path.join(getTrashVersionsDir(), agent, testVersion);
     if (fs.existsSync(versionDir)) fs.rmSync(versionDir, { recursive: true, force: true });
@@ -284,7 +284,7 @@ describe('updateSessionFilePaths rewrites file_path after soft-delete to trash',
     const versionDir = path.join(getVersionsDir(), agent, testVersion);
     const sessionJsonl = path.join(versionDir, 'home', '.claude', 'projects', 'test', `${testSessionId}.jsonl`);
 
-    // Set up a minimal version dir so removeVersion has something to soft-delete
+
     fs.mkdirSync(path.join(versionDir, 'node_modules', '.bin'), { recursive: true });
     fs.writeFileSync(path.join(versionDir, 'node_modules', '.bin', binaryName), '#!/bin/sh\n');
     fs.writeFileSync(path.join(versionDir, 'package.json'), '{}');
@@ -292,7 +292,7 @@ describe('updateSessionFilePaths rewrites file_path after soft-delete to trash',
     fs.mkdirSync(path.dirname(sessionJsonl), { recursive: true });
     fs.writeFileSync(sessionJsonl, '{"type":"user"}\n');
 
-    // Insert a session row pointing at the version-dir path
+
     const db = getDB();
     db.prepare(`
       INSERT OR REPLACE INTO sessions
@@ -300,33 +300,33 @@ describe('updateSessionFilePaths rewrites file_path after soft-delete to trash',
       VALUES (?, ?, ?, ?, ?, 0)
     `).run(testSessionId, testSessionId.slice(0, 8), 'claude', new Date().toISOString(), sessionJsonl);
 
-    // Soft-delete the version (mirrors what the command handler does)
+
     expect(removeVersion(agent, testVersion)).toBe(true);
 
-    // The trash dir now holds a timestamped copy
+
     const trashAgentDir = path.join(getTrashVersionsDir(), agent, testVersion);
     const stamps = fs.readdirSync(trashAgentDir).sort().reverse();
     expect(stamps.length).toBeGreaterThan(0);
     const trashVersionDir = path.join(trashAgentDir, stamps[0]);
 
-    // Simulate what the command handler does: rewrite file_paths to trash location
+
     const updated = updateSessionFilePaths(versionDir, trashVersionDir);
     expect(updated).toBe(1);
 
-    // DB file_path must now point into the trash location
+
     const row = db.prepare(`SELECT file_path FROM sessions WHERE id = ?`).get(testSessionId) as { file_path: string } | undefined;
     expect(row).toBeDefined();
     expect(row!.file_path.startsWith(trashVersionDir)).toBe(true);
 
-    // The file must actually exist at the new path
+
     expect(fs.existsSync(row!.file_path)).toBe(true);
   });
 });
 
-// An isolated install (`agents add --isolated`) is tagged with a `.isolated`
-// sentinel at the version-dir root. The marker is what keeps every "adopting"
-// code path away from the copy, so the roundtrip and the unmarked-default case
-// must both be exact.
+
+
+
+
 describe('isolated install markers', () => {
   it('marks a version isolated, reads it back, and leaves other versions unmarked', () => {
     const agent: AgentId = 'claude';
@@ -339,17 +339,17 @@ describe('isolated install markers', () => {
       fs.mkdirSync(isoDir, { recursive: true });
       fs.mkdirSync(normalDir, { recursive: true });
 
-      // Absent marker -> not isolated.
+
       expect(isVersionIsolated(agent, isoVersion)).toBe(false);
 
       markVersionIsolated(agent, isoVersion);
 
       expect(isVersionIsolated(agent, isoVersion)).toBe(true);
-      // A sibling version is unaffected.
+
       expect(isVersionIsolated(agent, normalVersion)).toBe(false);
 
-      // The marker sits at the version-dir root so it travels to trash with the
-      // whole dir on soft-delete (and is restored intact).
+
+
       expect(fs.existsSync(path.join(isoDir, '.isolated'))).toBe(true);
     } finally {
       fs.rmSync(isoDir, { recursive: true, force: true });
@@ -358,14 +358,14 @@ describe('isolated install markers', () => {
   });
 });
 
-// Regression guard: removing the global default must NEVER auto-promote an
-// isolated install to be the new default (that would silently make `<agent>`
-// resolve to the isolated copy and let a later `use` adopt its home into
-// ~/.<agent>). Run in a subprocess with an isolated HOME so the real
-// ~/.agents/agents.yaml default pointer is never touched.
+
+
+
+
+
 describe('removeVersion never promotes an isolated install to the global default', () => {
-  // Shared preamble: fake a claude install whose real bin target exists, so
-  // isVersionInstalled/listInstalledVersions recognise it without hitting npm.
+
+
   const preamble = String.raw`
     import * as fs from 'fs';
     import * as path from 'path';
@@ -387,8 +387,8 @@ describe('removeVersion never promotes an isolated install to the global default
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-default-clear-'));
     try {
       const script = preamble + String.raw`
-        fakeInstall('claude', '1.0.0');   // normal default
-        fakeInstall('claude', '2.0.0');    // isolated survivor
+        fakeInstall('claude', '1.0.0');
+        fakeInstall('claude', '2.0.0');
         markVersionIsolated('claude', '2.0.0');
         setGlobalDefault('claude', '1.0.0');
 
@@ -402,7 +402,7 @@ describe('removeVersion never promotes an isolated install to the global default
         encoding: 'utf-8',
       });
       const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { afterDefault: string | null };
-      // NOT '2.0.0' — the isolated survivor must not be adopted as the default.
+
       expect(result.afterDefault).toBeNull();
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -413,9 +413,9 @@ describe('removeVersion never promotes an isolated install to the global default
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-default-skip-'));
     try {
       const script = preamble + String.raw`
-        fakeInstall('claude', '1.0.0');   // normal default (to be removed)
-        fakeInstall('claude', '1.5.0');    // normal survivor
-        fakeInstall('claude', '2.0.0');    // isolated survivor (newer)
+        fakeInstall('claude', '1.0.0');
+        fakeInstall('claude', '1.5.0');
+        fakeInstall('claude', '2.0.0');
         markVersionIsolated('claude', '2.0.0');
         setGlobalDefault('claude', '1.0.0');
 
@@ -429,7 +429,7 @@ describe('removeVersion never promotes an isolated install to the global default
         encoding: 'utf-8',
       });
       const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { afterDefault: string | null };
-      // The newer 2.0.0 is isolated, so the newest promotable version is 1.5.0.
+
       expect(result.afterDefault).toBe('1.5.0');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });

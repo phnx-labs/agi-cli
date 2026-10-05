@@ -1,5 +1,3 @@
-# A real tab shell with zero or more live processes, including a wrapper hop.
-# The test supplies a copy of sleep named claude so ps sees the agent executable.
 for ((i = 0; i < $2; i++)); do
   bash -c '
     if [[ "$2" == nested ]]; then echo "$$"; fi

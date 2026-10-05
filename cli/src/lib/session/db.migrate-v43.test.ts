@@ -3,28 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db. db.ts captures DB_PATH at module
-// load, so redirecting it after the import silently opens the wrong database.
-// Every migration test in this directory uses this pattern.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv43-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v42 -> v43: persist a per-tool-call END timestamp (PHNX-3437).
- *
- * The migration ALTERs `tool_calls` to add a nullable `end_timestamp` column,
- * which `db.exec(SCHEMA)`'s `CREATE TABLE IF NOT EXISTS` cannot express on an
- * existing table. So we hand-seed the PRE-v43 `tool_calls` shape (no
- * `end_timestamp`) with a row and stamp the recorded version to 42, then let
- * `getDB` replay exactly what a real pre-v43 machine replays: `db.exec(SCHEMA)`
- * (a no-op on the existing table) followed by `migrateSchema(42)`.
- *
- * What must be true afterwards: the column exists, is NULL on the pre-upgrade
- * row (which `insights.ts` degrades to the bounded-gap heuristic), the row and
- * its evidence survive, the new version is stamped, and the altered table
- * accepts a write that carries an end timestamp and reads it back.
- */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -32,7 +14,6 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // The pre-v43 tool_calls shape — identical to today's minus end_timestamp.
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE tool_calls (
@@ -51,7 +32,6 @@ const Database = (await import('../sqlite.js')).default;
 
 const { getDB, SCHEMA_VERSION } = await import('./db.js');
 
-/** The recorded schema version, read the same way db.ts records it. */
 function recordedVersion(): string | undefined {
   const row = getDB()
     .prepare(`SELECT value FROM meta WHERE key = 'schema_version'`)

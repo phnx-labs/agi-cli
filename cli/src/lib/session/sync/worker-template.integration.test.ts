@@ -60,7 +60,6 @@ describe('managed sessions Worker in real workerd', () => {
 
   const url = (path: string) => `https://sessions.test/${path}`;
   const auth = (token = 'token-a') => ({ authorization: `Bearer ${token}` });
-  // Exact encrypted NDJSON wire ensures the Worker never stores readable transcript bodies.
   const encBody = (marker: string) => {
     const env = JSON.stringify({ v: 1, alg: 'aes-256-gcm', iv: 'AAAAAAAAAAAAAAAA', ct: Buffer.from(marker).toString('base64'), tag: 'AAAAAAAAAAAAAAAAAAAAAA==' });
     const header = JSON.stringify({
@@ -292,7 +291,7 @@ describe('managed sessions Worker in real workerd', () => {
     });
   });
 
-  // Model termination after quota refund but before replacing the object.
+
   it('reclaims an expired lease and reconciles an interrupted refund before PUT', async () => {
     const key = `${USER_A}/sessions/mac/claude/recover.jsonl`;
     const original = encBody('recover-original-body');
@@ -339,7 +338,7 @@ describe('managed sessions Worker in real workerd', () => {
     });
   });
 
-  // Terminal generation fences both stale object mutation and stale quota CAS.
+
   it('persists a terminal generation so a predecessor cannot CAS a late quota delta', async () => {
     const key = `${USER_A}/sessions/mac/claude/late.jsonl`;
     const original = encBody('late-original');

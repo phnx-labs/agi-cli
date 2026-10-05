@@ -1,6 +1,3 @@
-/**
- * Tests for humans.ts — humans.yaml read/write.
- */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -18,7 +15,7 @@ function makeTempHome(): string {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
 });
 

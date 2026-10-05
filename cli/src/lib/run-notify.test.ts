@@ -19,8 +19,6 @@ describe('run finish notification', () => {
   });
 
   it('carries the harness through to the companion argv as the right-hand avatar', () => {
-    // The title is the --name slug, which says nothing about which harness ran —
-    // the avatar is what identifies it, so `agent` must survive to the one-shot.
     const n = buildRunFinishNotification(
       { agent: 'codex', name: 'it-seems-like-the-to', prompt: 'p' },
       0,

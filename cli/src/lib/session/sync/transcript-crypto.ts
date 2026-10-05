@@ -40,7 +40,6 @@ interface TranscriptEnvelope {
   tag: string;
 }
 
-// A present key must decode to exactly 32 bytes; malformed configuration fails instead of falling back.
 export function resolveSyncEncKey(cfg: Pick<R2Config, 'syncEncKey'>): Buffer | null {
   const raw = cfg.syncEncKey?.trim();
   if (!raw) return null;
@@ -80,7 +79,6 @@ export function encryptTranscript(plaintext: string, key: Buffer): string {
   return JSON.stringify(envelope);
 }
 
-// Parse the whole body to distinguish one encryption envelope from legacy NDJSON.
 export function parseEnvelope(body: string): TranscriptEnvelope | null {
   const trimmed = body.trimStart();
   if (!trimmed.startsWith('{')) return null;
@@ -123,7 +121,6 @@ export function decryptEnvelope(envelope: TranscriptEnvelope, key: Buffer): stri
   }
 }
 
-// Legacy plaintext remains readable; encrypted data without its key fails closed rather than merging ciphertext.
 export function decryptTranscriptBody(body: string, key: Buffer | null): string {
   const envelope = parseEnvelope(body);
   if (!envelope) return body;

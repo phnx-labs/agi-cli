@@ -1,12 +1,3 @@
-/**
- * `agents add` under the one-managed-installation model (PHNX-3940): the plan
- * function decides reuse vs pin vs install, and the command-level tests drive
- * the real argv path for the two branches that need no network — the bare-add
- * reuse and the unpinnable-harness refusal.
- *
- * Real filesystem, real records — HOME is redirected to a temp dir so
- * `state.ts` resolves the versions dir there.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -26,7 +17,6 @@ async function program(): Promise<Command> {
   return p;
 }
 
-/** Run the command exactly as argv would reach it, capturing what the user sees. */
 async function run(args: string[]): Promise<{ out: string; err: string; exitCode: number | undefined }> {
   const out: string[] = [];
   const err: string[] = [];
@@ -85,7 +75,6 @@ describe('agents add — managed-installation branches', () => {
     expect(result.out).toContain('already installed');
     expect(result.out).toContain('agents update claude');
     expect(result.err).toBe('');
-    // No second version dir appeared next to main.
     expect(fs.readdirSync(path.join(home, '.agents', '.history', 'versions', 'claude'))).toEqual(['main']);
   });
 
@@ -98,7 +87,6 @@ describe('agents add — managed-installation branches', () => {
     const result = await run(['add', 'droid@1.2.3']);
     expect(result.out).toContain('no pinnable releases');
     expect(result.exitCode).toBe(1);
-    // The managed install was not touched: still the only dir, still its release.
     expect(fs.readdirSync(path.join(home, '.agents', '.history', 'versions', 'droid'))).toEqual(['main']);
   });
 

@@ -247,7 +247,6 @@ export function resolvePlacement(
   roster: RosterEntry[],
   opts?: PlacementOptions,
 ): { device: string | null } {
-  // An assigned remote pool is a hard boundary; exhaustion never falls back local.
   if (explicitDevice) {
     return { device: isLocalDevice(explicitDevice) ? null : explicitDevice };
   }

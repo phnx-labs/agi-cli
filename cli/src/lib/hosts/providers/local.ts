@@ -6,12 +6,12 @@ import type { Host, HostProvider, HostProviderCapabilities } from '../types.js';
 import { listSshConfigHosts, isSshConfigHost } from '../ssh-config.js';
 
 function entries(): Record<string, HostEntry> {
-  // Reads union legacy central registrations with every device-owned document.
+
   return { ...readMeta().hosts, ...unionDeviceHosts() };
 }
 
 function ownEntries(meta = readMeta()): Record<string, HostEntry> {
-  // Mutations are confined to this device's document; never rewrite a peer's registration.
+
   return meta.deviceHosts ?? {};
 }
 

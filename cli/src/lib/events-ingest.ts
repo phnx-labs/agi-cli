@@ -1,4 +1,3 @@
-// Preserve only envelope keys outside payload; milestones require a filename-safe session id and route to activity, while other events route operationally; reject bad lines independently.
 import {
   emit,
   isEventType,

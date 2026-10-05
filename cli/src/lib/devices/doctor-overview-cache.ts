@@ -85,7 +85,7 @@ export async function enterDoctorOverviewGate(
   const fast = serveFresh();
   if (fast !== null) return { cached: fast };
 
-  // The lock makes fleet collection singleflight; the winner's cache is checked again after waiting.
+
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   } catch {
@@ -103,7 +103,6 @@ export async function enterDoctorOverviewGate(
       onCompromised: () => {},
     });
   } catch {
-    // If locking fails, stale data is safer than launching another fleet-wide collection.
     const c = readDoctorOverviewCache({ dir });
     if (c) return { cached: JSON.stringify(c.payload, null, 2) };
     return { cached: null, release: () => {} };
@@ -117,7 +116,7 @@ export async function enterDoctorOverviewGate(
 
   const rel = release;
   let released = false;
-  // The collecting caller owns this release and may call it defensively more than once.
+
   return {
     cached: null,
     release: () => {

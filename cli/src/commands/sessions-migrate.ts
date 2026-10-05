@@ -1,27 +1,3 @@
-/**
- * `agents sessions migrate` (alias `relocate`) — relocate a RUNNING agent session
- * from this machine onto another (a fleet worker, a registered device, or a warm
- * ephemeral crabbox box), then stop the source so the interactive machine
- * reclaims its compute (RUSH-1977).
- *
- * This is orchestration glue over primitives that already exist — it does not
- * reinvent transport, resume, or scoring:
- *   - resolve the source session from the current tmux pane via `getActiveSessions()`
- *     (`provenance.mux.pane` matched against $TMUX_PANE);
- *   - pick / verify the target with the pure scorer in
- *     `lib/session/migrate-targets.ts` + `readyProbe()` / `bootstrapAgentsCli()`;
- *   - wrap up a dirty working tree (mechanical WIP-PR by default, or delegate a
- *     wrap-up turn to the running agent with --agent-wrapup);
- *   - ship the transcript with the SAME bundle pipeline as
- *     `sessions export --stdout | sessions import -`, over `sshExec`;
- *   - resume on the target through the SAME `openSurfaces({ backend:'tmux', host })`
- *     path `sessions resume --device` uses;
- *   - only AFTER the target's prompt is confirmed live, kill the source tmux
- *     session (`killSession`). --keep skips the kill (copy, not move).
- *
- * INVARIANT: the source is never killed before the transcript + branch are
- * confirmed on the target.
- */
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -70,7 +46,6 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { recordMigration, readMigrations, type MigrationRecord } from '../lib/session/migrations.js';
 
-/** Agents whose sessions cannot be faithfully --resume'd (buildResumeCommand → null). */
 type MigrateMode = 'resume' | 'rehydrate';
 
 interface MigrateOptions {
@@ -130,11 +105,6 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/**
- * Resolve the session to migrate. With an explicit id, resolve it from the
- * on-disk index. Without one, match the current tmux pane ($TMUX_PANE) against a
- * live session's `provenance.mux.pane` and resolve that id to its SessionMeta.
- */
 async function resolveSourceSession(
   sessionId: string | undefined,
 ): Promise<{ meta: SessionMeta; active?: ActiveSession }> {
@@ -164,13 +134,11 @@ async function resolveSourceSession(
   return { meta: matches[0], active };
 }
 
-/** Live headroom for the scorer: prefer the disk stats-cache (fast, no ssh). */
 function statsByName(): Map<string, DeviceStats> {
   const cache = readStatsCache();
   return new Map(Object.entries(cache));
 }
 
-/** Enumerate + rank targets, honoring --device / --auto / --lease. */
 async function resolveTarget(
   options: MigrateOptions,
   source: SessionMeta,
@@ -187,17 +155,16 @@ async function resolveTarget(
   }
 
   const hosts = await listAllHosts();
-  await loadDevices(); // ensure device registry is warmed (listAllHosts folds it in)
+  await loadDevices();
   let warm: CrabboxBox[] = [];
   try {
     warm = reusableBoxes(crabboxList(), Math.floor(Date.now() / 1000));
   } catch {
-    warm = []; // crabbox not configured — fleet-only targets
+    warm = [];
   }
   const stats = statsByName();
 
   if (options.device) {
-    // Explicit target: a fleet host/device, or a warm box slug.
     const box = warm.find((b) => b.slug === options.device);
     if (box) {
       return { name: box.slug, kind: 'ephemeral', os: 'linux', headroom: 'unknown', box };
@@ -219,7 +186,6 @@ async function resolveTarget(
     return best;
   }
 
-  // Interactive: rank the candidates and let the user pick.
   if (!isInteractiveTerminal()) {
     fail('Pass --auto, --device <name>, or --lease to choose a target (no interactive picker without a tty).');
   }
@@ -244,7 +210,6 @@ async function resolveTarget(
   }
 }
 
-/** Provision a fresh ephemeral crabbox box (tailnet) and wait for it to be ready. */
 async function provisionEphemeralTarget(): Promise<MigrateTarget> {
   console.log(chalk.gray('Provisioning a fresh ephemeral box (crabbox)…'));
   const leased = await crabboxWarmup({ netMode: 'tailscale' });
@@ -253,7 +218,6 @@ async function provisionEphemeralTarget(): Promise<MigrateTarget> {
   return { name: ready.slug, kind: 'ephemeral', os: 'linux', headroom: 'idle', box: ready };
 }
 
-/** Resolve the SSH target string for a migrate target (host alias or box address). */
 function sshTargetForTarget(target: MigrateTarget): string {
   if (target.kind === 'fleet' && target.host) return sshTargetFor(target.host);
   if (target.kind === 'ephemeral' && target.box) {
@@ -264,33 +228,18 @@ function sshTargetForTarget(target: MigrateTarget): string {
   fail(`Cannot resolve an SSH target for ${target.name}.`);
 }
 
-/**
- * Harness-parity gate (pure, testable). `buildResumeCommand` returns null for the
- * non-resumable agents (gemini, antigravity, openclaw, rush, hermes, grok, kimi,
- * droid) — for those a faithful --resume is impossible, so a requested `resume`
- * transparently becomes `rehydrate`. A resumable agent honors the request.
- * Returns the effective mode plus whether it was downgraded, so the caller can
- * print the notice.
- */
 export function effectiveMode(source: SessionMeta, requested: MigrateMode): { mode: MigrateMode; downgraded: boolean } {
   const resumable = buildResumeCommand(source) !== null;
   if (!resumable && requested === 'resume') return { mode: 'rehydrate', downgraded: true };
   return { mode: requested, downgraded: false };
 }
 
-/**
- * Verify the target can run the session's agent+version. Returns the effective
- * mode: a non-resumable agent (buildResumeCommand → null) forces rehydrate; a
- * missing agents-cli triggers a bootstrap; a missing agent (in rehydrate) is a
- * printed notice, not a failure.
- */
 function ensureTargetReady(
   target: MigrateTarget,
   sshTarget: string,
   source: SessionMeta,
   requested: MigrateMode,
 ): MigrateMode {
-  // buildResumeCommand gates faithful resume: null → only rehydrate is possible.
   const gated = effectiveMode(source, requested);
   let mode = gated.mode;
   if (gated.downgraded) {
@@ -320,12 +269,6 @@ function ensureTargetReady(
   return mode;
 }
 
-/**
- * Wrap up the working tree so no local edits are stranded when the source stops.
- * Dirty → commit to a fresh branch + push + open a draft (WIP) PR. Clean-but-ahead
- * → push. --agent-wrapup instead injects a wrap-up turn into the running agent.
- * Returns the branch name to check out on an ephemeral target (or undefined).
- */
 async function wrapUpWorkingTree(
   source: SessionMeta,
   active: ActiveSession | undefined,
@@ -347,7 +290,6 @@ async function wrapUpWorkingTree(
 
   if (options.agentWrapup) {
     await delegateWrapupToAgent(source, active);
-    // The agent handles the commit/push; report its current branch for checkout.
     const after = await git.status();
     return after.current || undefined;
   }
@@ -356,7 +298,6 @@ async function wrapUpWorkingTree(
     const branch = status.current && status.current !== 'main' && status.current !== 'master'
       ? status.current
       : `migrate/${source.shortId}`;
-    // Only create the branch when we're on the default branch (don't strand edits on main).
     if (status.current === 'main' || status.current === 'master') {
       console.log(chalk.gray(`  Working tree dirty on ${status.current} — committing to a new branch ${branch}.`));
       await git.checkoutLocalBranch(branch);
@@ -372,13 +313,11 @@ async function wrapUpWorkingTree(
     return branch;
   }
 
-  // Clean but ahead — push what's committed.
   console.log(chalk.gray(`  ${ahead} local commit(s) ahead — pushing before migrate.`));
   await git.push().catch((e) => console.log(chalk.yellow(`  push failed: ${(e as Error).message}`)));
   return status.current || undefined;
 }
 
-/** Open a draft (WIP) PR for the wrap-up branch. Best-effort; a failure is a notice. */
 function openWipPr(cwd: string, branch: string): void {
   const r = spawnSync(
     'gh',
@@ -393,7 +332,6 @@ function openWipPr(cwd: string, branch: string): void {
   }
 }
 
-/** --agent-wrapup: inject a wrap-up turn into the running agent's tmux pane. */
 async function delegateWrapupToAgent(source: SessionMeta, active: ActiveSession | undefined): Promise<void> {
   const rail = active?.provenance?.reply;
   if (!rail) {
@@ -415,17 +353,6 @@ async function delegateWrapupToAgent(source: SessionMeta, active: ActiveSession 
   }
 }
 
-/**
- * Ship the transcript to the target so `<agent> --resume` can find it there.
- *
- * The live transcript (`SessionMeta.filePath`) is copied to the SAME absolute
- * path on the target: claude/codex/opencode resolve a resumable session by the
- * cwd-derived project dir under $HOME, which is identical across the shared fleet
- * home, so a same-path copy is exactly what `--resume` reads. (`sessions import`
- * deliberately lands bundles in the browsable history mirror, not the agent's
- * live dir — right for reading a transcript on another box, wrong for resuming
- * it.) Reuses the same `sshExec` transport, streaming the file over stdin.
- */
 function shipTranscript(sshTarget: string, source: SessionMeta): void {
   const file = source.filePath;
   if (!file || !fs.existsSync(file)) {
@@ -441,7 +368,6 @@ function shipTranscript(sshTarget: string, source: SessionMeta): void {
   console.log(chalk.green(`  Transcript shipped to the target (${file}).`));
 }
 
-/** Git-clone + checkout the (WIP) branch on an ephemeral box so the cwd resolves. */
 function prepareEphemeralCwd(sshTarget: string, source: SessionMeta, branch: string | undefined): string | undefined {
   const remote = spawnSync('git', ['-C', source.cwd || '.', 'remote', 'get-url', 'origin'], { encoding: 'utf-8' });
   const url = (remote.stdout || '').trim();
@@ -460,23 +386,6 @@ function prepareEphemeralCwd(sshTarget: string, source: SessionMeta, branch: str
   return dir;
 }
 
-/**
- * Pure. The remote shell commands that create the target's tmux session on the
- * SAME socket its reaper queries, and that probe its liveness afterward.
- *
- * `homeRelSocketPath` is `getDefaultSocketPath()` expressed relative to the
- * LOCAL home dir (`path.relative(os.homedir(), getDefaultSocketPath())`) — a
- * portable suffix, not a resolved absolute path, because the local and remote
- * HOME can differ (different user, different OS). It is spliced in after a
- * literal, unquoted `$HOME/` so the REMOTE shell resolves it; `$HOME` MUST
- * NEVER be resolved locally (see AGENTS.md's remote-path guidance).
- *
- * Extracted as a pure function so the "does the migrated session land on the
- * agents socket, not tmux's bare default socket" invariant is unit-testable
- * without an SSH round-trip (RUSH-2521 review — a bare `tmux` here made the
- * migrated agent's helpers invisible to `readAllPaneOwners`, so the reaper's
- * next tick killed the still-live, just-migrated agent as `tmux-session-gone`).
- */
 export function buildMigrateResumeCommands(opts: {
   sessionName: string;
   homeRelSocketPath: string;
@@ -488,25 +397,14 @@ export function buildMigrateResumeCommands(opts: {
   const argv = ['set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', opts.sessionName];
   if (opts.cwd && opts.cwd !== '~') argv.push('-c', opts.cwd);
   argv.push(opts.inner);
-  // Mirror createSession's second half: keep remain-on-exit on THIS pane (the
-  // liveness probe below reads `pane_dead`), then put the server-wide default
-  // back to off. Leaving `-g on` set made every later pane on the target — user
-  // splits included — retain a corpse when its command finished.
   argv.push(';', 'set-option', '-t', opts.sessionName, '-p', 'remain-on-exit', 'on');
   argv.push(';', 'set-option', '-g', 'remain-on-exit', 'off');
-  // Unlike tmux's own scratch dir (auto-created under /tmp), the agents socket's
-  // parent may not exist yet on a fresh worker or ephemeral box that never ran a
-  // tmux-backed `agents` command — `mkdir -p` it before tmux tries to bind there.
   const launchCmd = `mkdir -p "$HOME/${socketDirRelToHome}" && tmux ${socketFlag} ` + argv.map(shellQuote).join(' ');
   const q = shellQuote(opts.sessionName);
   const probeCmd = `sleep 3; tmux ${socketFlag} has-session -t ${q} 2>/dev/null || exit 3; test "$(tmux ${socketFlag} list-panes -t ${q} -F '#{pane_dead}' 2>/dev/null | head -n1)" = 0 || exit 4`;
   return { launchCmd, probeCmd, socketFlag };
 }
 
-/**
- * Resume the session on the target through the SAME host path as
- * `sessions resume --device` (tmux backend). Returns true when the resume launched.
- */
 async function resumeOnTarget(
   sshTarget: string,
   source: SessionMeta,
@@ -517,23 +415,6 @@ async function resumeOnTarget(
   if (!command) {
     fail(`Cannot build a resume command for ${source.agent} (mode ${mode}).`);
   }
-  // Start a DETACHED tmux session on the target. The generic engine tmux backend
-  // uses `new-window`, which needs a live server — a fresh worker or ephemeral
-  // box has none ("no server running"), so we create the session (and thus the
-  // server) directly with `new-session -d`, mirroring the local `createSession`
-  // helper (remain-on-exit keeps the pane inspectable if the agent exits), over
-  // the same SSH transport as `sessions resume --device`.
-  //
-  // Each argv element is quoted BEFORE the zsh -ilc wrapper so a command that
-  // carries spaces or backticks (the rehydrate prompt) reaches the agent as one
-  // clean argument — an unquoted join would let the target shell split it and
-  // run its backticks.
-  //
-  // The pane exports AGENT_TMUX_SESSION_NAME the way a local `createSession`
-  // pane does, so the target's reaper can attribute the helpers this agent
-  // spawns and collect them when it exits (RUSH-2521, `lib/tmux/orphan-reap.ts`)
-  // — see {@link buildMigrateResumeCommands} for why the session MUST land on
-  // the agents socket rather than tmux's bare default socket.
   const sessionName = `migrate-${source.shortId}`;
   const homeRelSocketPath = path.relative(os.homedir(), getDefaultSocketPath());
   const inner = iLoginShell(`export AGENT_TMUX_SESSION_NAME=${sessionName}; exec ${command!.map(quoteArg).join(' ')}`);
@@ -544,9 +425,6 @@ async function resumeOnTarget(
     console.log(chalk.red(`  Resume on ${sshTarget} failed: ${launch.stderr.trim().split('\n').pop() || `tmux exited ${launch.code}`}`));
     return false;
   }
-  // Liveness gate for the invariant: give the agent a moment to boot, then require
-  // the pane to be ALIVE (not merely the session to exist) before the caller may
-  // stop the source. An agent that dies on launch → we refuse to move.
   const check = sshExec(sshTarget, probeCmd, { timeoutMs: 30000 });
   if (check.code !== 0) {
     const why = check.code === 4 ? 'the agent exited immediately on the target'
@@ -559,14 +437,7 @@ async function resumeOnTarget(
   return true;
 }
 
-/**
- * Rehydrate command: launch a fresh agent that reads the transcript. For a
- * non-resumable agent there is no faithful --resume, so we start the agent with
- * a prompt pointing it at the imported transcript path.
- */
 export function rehydrateCommand(source: SessionMeta): string[] {
-  // Resolve the real executable — the session-agent id is not always the binary
-  // name (antigravity → `agy`), matching versionedAliasIfPresent/buildFallbackCommand.
   const cli = AGENTS[source.agent as AgentId]?.cliCommand ?? source.agent;
   const origin = source.machine ? ` from ${source.machine}` : '';
   const prompt = [
@@ -584,33 +455,23 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
     fail(`--mode must be 'resume' or 'rehydrate' (got "${options.mode}").`);
   }
 
-  // 1. Resolve the source session (current-pane unless an id is given).
   const { meta: source, active } = await resolveSourceSession(sessionId);
   console.log(chalk.bold(`Migrating ${source.agent} session ${source.shortId}`) + chalk.gray(` (${source.cwd ?? 'no cwd'})`));
 
-  // 2. Resolve the target host.
   const target = await resolveTarget(options, source);
   const sshTarget = sshTargetForTarget(target);
 
-  // 3. Verify the target can run the agent+version (bootstrap if missing); resolve the mode.
   const mode = ensureTargetReady(target, sshTarget, source, options.mode ?? 'resume');
 
-  // 4. Wrap up the working dir (WIP PR by default, or delegate to the agent).
   const branch = await wrapUpWorkingTree(source, active, options);
 
-  // 5. Transport the transcript to the target's live agent dir (same path) so
-  //    `<agent> --resume` finds it.
   shipTranscript(sshTarget, source);
 
-  // 6. For an ephemeral box, clone + checkout the branch so the cwd resolves.
   const remoteCwd =
     target.kind === 'ephemeral' ? prepareEphemeralCwd(sshTarget, source, branch) : source.cwd;
 
-  // 7. Resume on the target.
   const resumed = await resumeOnTarget(sshTarget, source, remoteCwd, mode);
 
-  // Ledger stub shared by the success and failure records (RUSH-1977). `at` is
-  // stamped from the CLI's real clock.
   const base: Omit<MigrationRecord, 'status' | 'error'> = {
     sessionId: source.id,
     shortId: source.shortId,
@@ -628,15 +489,12 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
     fail('Resume on the target did not launch — the source is left running (nothing was stopped).');
   }
 
-  // 8. INVARIANT: only now that the transcript is on the target and the session
-  //    is confirmed live, stop the source. --keep skips this (copy, not move).
   if (options.keep) {
     console.log(chalk.gray('--keep: the source session is left running (copy, not move).'));
   } else {
     await stopSource(source, active);
   }
 
-  // 9. Record the handoff so the session stays trackable (agents sessions migrations).
   recordMigration({ ...base, status: 'completed' });
   console.log(
     chalk.green(`\nMigrated ${source.shortId} to ${target.name}${options.keep ? ' (copy)' : ''}.`) +
@@ -644,13 +502,8 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
   );
 }
 
-/** Stop the source tmux session (kill its tmux session by name via its socket). */
 async function stopSource(source: SessionMeta, active: ActiveSession | undefined): Promise<void> {
   const mux = active?.provenance?.mux;
-  // Fail closed: only the SOURCE's own pane, from its active-session provenance.
-  // Never fall back to $TMUX_PANE — that is the invoking shell's pane, so a
-  // migrate run by explicit id from a different pane (where `active` didn't
-  // resolve) would otherwise kill the user's OWN session, not the source.
   const pane = mux?.pane;
   const socket = mux?.socket;
   if (!pane) {
@@ -667,10 +520,6 @@ async function stopSource(source: SessionMeta, active: ActiveSession | undefined
   else console.log(chalk.yellow(`  Source tmux session ${name} was already gone.`));
 }
 
-/**
- * `agents sessions migrations` — the border tracker: the append-only ledger of
- * every session handed off to/from another machine (RUSH-1977).
- */
 export function registerSessionsMigrationsCommand(sessionsCmd: Command): void {
   sessionsCmd
     .command('migrations')
@@ -688,7 +537,6 @@ export function registerSessionsMigrationsCommand(sessionsCmd: Command): void {
         console.log(chalk.gray('No migrations recorded yet. Move one: agents sessions migrate --auto'));
         return;
       }
-      // Newest first — the most recent hop of a session is what you usually want.
       recs.reverse();
       console.log(
         chalk.bold('WHEN'.padEnd(18)) + chalk.bold('SESSION'.padEnd(11)) + chalk.bold('AGENT'.padEnd(9)) +
@@ -708,7 +556,6 @@ export function registerSessionsMigrationsCommand(sessionsCmd: Command): void {
     });
 }
 
-/** Map a tmux pane id to its session name via the same tmux binary the engine uses. */
 function resolveSessionNameForPane(pane: string, socket?: string): string | undefined {
   const args = socket ? ['-S', socket] : [];
   const r = spawnSync('tmux', [...args, 'display-message', '-pt', pane, '-p', '#{session_name}'], { encoding: 'utf-8' });

@@ -31,7 +31,7 @@ export function durableSlotEnv(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   deps: { selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole> } = {},
 ): Record<string, string> {
-  // Durable keys are worker-only; headed devices must use native login despite stale slots.
+
   if (resolved.slot?.authMode !== 'durable') return {};
   if (isHeadedDeviceRole((deps.selfRole ?? selfConfiguredDeviceRole)())) return {};
   const envName = workerApiKeyEnv(agent);
@@ -122,7 +122,7 @@ function isProvisionableWorker(account: NativeAccount): boolean {
     return readReservedCredential(account.workerCredential.bundle, account.workerCredential.key) != null;
   }
   if (account.agent === 'claude' && account.identityLabel) {
-    // Pre-registry Claude rows keyed setup tokens by identityLabel in the legacy auth bundle.
+
     return readReservedCredential(AUTH_BUNDLE, claudeAccountTokenKey(account.identityLabel)) != null;
   }
   return false;
@@ -168,7 +168,7 @@ export async function resolveNativeSpawnHome(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'> = { accounts: undefined, deviceAccounts: undefined },
   options: { readOnly?: boolean } = {},
 ): Promise<NativeSpawnHome> {
-  // Resolve slot → provisioned worker → recorded legacy home → credential identity; never guess HOME.
+
   const slot = readSlots(meta)[account.id];
   if (slot && fs.existsSync(slot.slotDir)) {
     return { execHome: slot.slotDir, source: 'slot', slot };

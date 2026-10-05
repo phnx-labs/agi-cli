@@ -24,7 +24,7 @@ export interface PermEntry {
 export type PluginEntry = DirEntry;
 
 export interface SyncManifest {
-  // workflows/plugins stay optional for old v1 manifests; only missing writtenTargets signals migration.
+
   v:          typeof MANIFEST_VERSION;
   syncedAt:   string;
   commands:   Record<string, FileEntry>;

@@ -17,7 +17,6 @@ import {
 } from '../src/lib/registry.js';
 import { DEFAULT_REGISTRIES } from '../src/lib/types.js';
 
-// Test fixtures directory
 const FIXTURES_DIR = join(tmpdir(), 'agents-cli-test-fixtures');
 
 describe('parsePackageIdentifier', () => {
@@ -95,8 +94,6 @@ describe('getRegistries', () => {
 
   it('returns registries for skill type (includes seeded hermes registry)', () => {
     const registries = getRegistries('skill');
-    // DEFAULT_REGISTRIES.skill is empty, but SEEDED_REGISTRIES seeds hermes into agents.yaml
-    // on first run — so getRegistries returns whatever is in the live config.
     expect(typeof registries).toBe('object');
     for (const [, config] of Object.entries(registries)) {
       expect(config).toHaveProperty('url');
@@ -114,7 +111,6 @@ describe('getEnabledRegistries', () => {
 
   it('returns array of enabled skill registries (hermes seeded on first run)', () => {
     const enabled = getEnabledRegistries('skill');
-    // After seeding, hermes is present and enabled; each entry must have name + config.
     expect(Array.isArray(enabled)).toBe(true);
     expect(enabled.every((r) => r.config.enabled)).toBe(true);
   });
@@ -124,7 +120,6 @@ describe.skipIf(!LIVE)('MCP Registry API (live)', () => {
   it('searches for servers', async () => {
     const results = await searchMcpRegistries('github', { limit: 5 });
     expect(Array.isArray(results)).toBe(true);
-    // Should find at least one GitHub-related MCP server
     if (results.length > 0) {
       expect(results[0]).toHaveProperty('name');
       expect(results[0]).toHaveProperty('type', 'mcp');

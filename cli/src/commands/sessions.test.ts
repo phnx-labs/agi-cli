@@ -6,12 +6,6 @@ import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/inde
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 
-// Pure unit tests for src/commands/sessions.ts exports. The subprocess-heavy
-// behavior tests live in the sessions.*.test.ts slices next to this file
-// (cli-list, cli-live, cli-tools, computer, render, resolve, resolve-errors,
-// ssh-peer), split so vitest can parallelize them across worker forks
-// (RUSH-2819) — this file was one 2,600-line suite measured at 172s, the
-// single slowest file in CI. Shared fixtures: sessions.test-fixture.ts.
 
 describe('session harness name resolution', () => {
   it('shares canonical aliases and typo correction with focus selectors', () => {
@@ -86,7 +80,6 @@ describe('routine drilldown — run history + linked sessions (RUSH-2409)', () =
     expect(out).toContain('wrong owner');
     expect(out).toContain('command · local');
     expect(out).toContain('completed');
-    // No fake session row — command runs never manufacture a SessionMeta line.
     expect(out).not.toContain('no agent session archived for this run');
   });
 
@@ -132,7 +125,6 @@ describe('routine drilldown — run history + linked sessions (RUSH-2409)', () =
     expect(out).toContain('auth_failed: login required');
     expect(out).toContain('blocked');
     expect(out).toContain('dead_auth: account signed out');
-    // An agent run that produced no session says so explicitly, never fakes one.
     expect(out).toContain('no agent session archived for this run');
   });
 
@@ -328,17 +320,12 @@ describe('buildResumeCommand version-pinned resume', () => {
     expect(buildResumeCommand(baseSession({ agent: 'openclaw', version: '1.0.0' }))).toBeNull();
   });
 
-  // Regression: resumeSessionInPlace must spawn the resume launcher through the
-  // shell on Windows. The launcher is a bare command / `.cmd` shim
-  // (`claude@2.1.138`, `codex`), which `spawn` can't exec directly on win32 —
-  // a `shell:false` spawn there threw `EFTYPE` and surfaced as a misleading
-  // "Failed to discover sessions" error. Off Windows it must stay a direct exec.
   it('resume launcher requires a shell on win32 and not on posix', () => {
     for (const session of [
-      baseSession({ version: '2.1.138' }),                       // claude@2.1.138
-      baseSession({ version: undefined }),                       // bare claude
-      baseSession({ agent: 'codex', version: '0.116.0' }),       // codex@0.116.0
-      baseSession({ agent: 'opencode', version: '0.5.0' }),      // opencode
+      baseSession({ version: '2.1.138' }),
+      baseSession({ version: undefined }),
+      baseSession({ agent: 'codex', version: '0.116.0' }),
+      baseSession({ agent: 'opencode', version: '0.5.0' }),
     ]) {
       const launcher = buildResumeCommand(session)![0];
       expect(needsWindowsShell(launcher, 'win32')).toBe(true);
@@ -346,10 +333,6 @@ describe('buildResumeCommand version-pinned resume', () => {
     }
   });
 
-  // RUSH-1753: session.id comes from the JSONL filename with no char validation.
-  // spawn(cmd[0], cmd.slice(1), { shell: true }) on win32 concatenates args into
-  // the cmd.exe line unescaped — so id `x&calc.exe&` injects. resumeSpawnInvocation
-  // must compose a quoted line + empty argv when the shell is needed.
   it('quotes shell metacharacters in session id on win32 resume spawn (RUSH-1753)', () => {
     const evilId = 'x&calc.exe&';
     const cmd = buildResumeCommand(baseSession({ id: evilId }))!;
@@ -358,11 +341,9 @@ describe('buildResumeCommand version-pinned resume', () => {
     const inv = resumeSpawnInvocation(cmd, 'win32');
     expect(inv.shell).toBe(true);
     expect(inv.args).toEqual([]);
-    // Full line is the sole command; & | etc. sit inside quotes (not bare).
     expect(inv.command).toBe(composeWin32CommandLine(cmd[0], cmd.slice(1)));
     expect(inv.command).toBe('claude --resume "x&calc.exe&"');
 
-    // Posix path stays a direct exec (no shell, raw argv).
     const posix = resumeSpawnInvocation(cmd, 'linux');
     expect(posix).toEqual({ command: 'claude', args: ['--resume', evilId], shell: false });
   });
@@ -391,14 +372,6 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
     ...over,
   });
 
-  // The session the user actually asked for is absent from the pool (it lives on
-  // another machine); the pool holds an unrelated session whose topic merely
-  // quotes that id — the exact shape that made `sessions <uuid>` render the wrong
-  // transcript and advise "Pass a longer ID" for an already-complete id.
-  // Synthetic id that cannot exist in any real session DB: a complete id absent
-  // from the pool now also consults the on-disk index (findSessionsById), so a
-  // REAL id here would resolve from the developer's own history and make these
-  // tests machine-specific (they'd fail wherever that session exists).
   const wanted = '00000000-0000-4000-8000-000000000042';
   const decoy = meta({
     id: 'ffa1f432-1a9e-4a81-8e93-e70aa8df1c95',
@@ -434,9 +407,6 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
     expect(r.completeId).toBe(false);
   });
 
-  // isCompleteSessionId trims but resolveSessionById does not, so without a
-  // single normalization point a pasted, padded id classified as complete and
-  // then missed the lookup — reporting a session that IS here as absent.
   it('resolves a padded id instead of declaring it missing', () => {
     const real = meta({ id: wanted, topic: 'Improve session display' });
     const r = resolveSessionQuery([decoy, real], `  ${wanted} `);
@@ -444,9 +414,6 @@ describe('resolveSessionQuery id-vs-search resolution', () => {
     expect(r.completeId).toBe(true);
   });
 
-  // Synthetic ids, so these assert the resolver and never the developer's own
-  // session index (a complete id that MISSES the pool now also consults the DB,
-  // so a real id here would resolve from disk and make the test machine-specific).
   it('resolves a session_-prefixed complete id by id, not by content', () => {
     const prefixed = 'session_00000000-0000-4000-8000-000000000001';
     const mentions = meta({ id: 'aaaa1111-2222-4333-8444-555566667777', topic: `see ${prefixed}` });
@@ -481,7 +448,7 @@ describe('buildSessionDescription — team lineage', () => {
       context: 'teams', kind: 'claude', status: 'working',
       teamName: 't', orchestratorSessionId: 'abcd1234efgh',
     } as any);
-    expect(desc).toContain('by abcd1234'); // first 8 chars
+    expect(desc).toContain('by abcd1234');
   });
 
   it('omits the "by" clause when there is no orchestrator link', () => {
@@ -551,10 +518,6 @@ describe('RUSH-2203 definitive-match fleet resolve', () => {
       expect(isDefinitiveMatch(base, 'abcd12')).toBe(false);
     });
 
-    // PHNX-3292: `agents tmux ls` prints `ag-<agent>-<8hex>` names and the bare
-    // 8-hex suffix — both name at most one session per answering peer, so the
-    // first reachable hit is enough (same trade `isUniqueEnoughSelector`
-    // already makes post-sweep for SES-9a, now applied in-flight too).
     it('IS definitive for an exact 8-hex short id (the shortId column width)', () => {
       expect(isDefinitiveMatch(base, base.shortId)).toBe(true);
       expect(isDefinitiveMatch(base, base.shortId.toUpperCase())).toBe(true);

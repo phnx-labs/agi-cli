@@ -76,7 +76,7 @@ export function hostProcessView(): HostProcessView | undefined {
 }
 
 export function writerProcessView(): HostProcessView | undefined {
-  // Namespace enrollment is writer-only and serialized; nested namespaces may not adopt existing host state.
+
   const view = currentProcessView();
   if (!view || process.platform !== 'linux') return view;
   const file = path.join(getTerminalsDir(), 'process-view.json');
@@ -99,7 +99,6 @@ export function writerProcessView(): HostProcessView | undefined {
   } catch { return undefined; }
 }
 
-// Daemon mutation requires measured process-view ownership; names, sockets, and numeric PIDs grant no authority.
 export function daemonProcessViewAllowed(): boolean {
   const view = currentProcessView();
   if (!view) return false;
@@ -115,7 +114,7 @@ export function daemonProcessViewAllowed(): boolean {
 }
 
 export function recordDaemonProcessView(): void {
-  // A new daemon may replace ownership only across boots and from a verified canonical namespace.
+
   const view = currentProcessView();
   if (!view) throw new Error('Cannot record daemon ownership from an incoherent process namespace');
   if (process.platform !== 'linux') return;

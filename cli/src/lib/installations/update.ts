@@ -166,7 +166,6 @@ async function runUpdateInstallation(
       };
     }
 
-    // Activity can appear while staging, so check it again before commit.
     const lateActivity = strategy.transactional ? await describeInstallationActivity(installation) : null;
     if (options.shouldCancel?.() || lateActivity?.active) {
       options.onProgress?.(
@@ -219,7 +218,7 @@ async function runUpdateInstallation(
             + `binary it manages globally — repair it with: agents add ${agent}@latest`
       );
     }
-    // Persist the new release before finalize discards the only rollback material.
+
     handles.finalize();
 
     const alsoUpdated = strategy.sharedBinary

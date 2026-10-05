@@ -27,7 +27,6 @@ interface UpdateOptions {
   auto?: boolean;
 }
 
-// `@selector` names an installed copy, `#account` its login, and only `--to` the release to install.
 export function parseTarget(raw: string): { agent: AgentId; selector?: string; account?: string } {
   const hash = raw.indexOf('#');
   const spec = hash === -1 ? raw : raw.slice(0, hash);
@@ -55,7 +54,6 @@ export function parseTarget(raw: string): { agent: AgentId; selector?: string; a
   return { agent, selector, account };
 }
 
-// A bare update moves only the managed install; report untouched isolated and legacy copies.
 export function describeSkippedInstallations(agent: AgentId, managedId: string): string | null {
   const skipped = listInstallations(agent).filter((i) => i.id !== managedId);
   if (skipped.length === 0) return null;
@@ -165,7 +163,6 @@ function printPlan(plan: AutoUpdatePlanEntry[], json: boolean): void {
   }
 }
 
-// A concrete `--to` pins, `latest` unpins, and omission preserves the stored policy.
 function policyForTo(to: string | undefined): 'latest' | 'pinned' | null {
   if (to === undefined) return null;
   return to === 'latest' ? 'latest' : 'pinned';
@@ -293,7 +290,7 @@ export function registerUpdateCommand(program: Command): void {
     .option('--json', 'Machine-readable listing')
     .action((rawAgent: string, _options: { json?: boolean }, command: Command) => {
       try {
-        // Commander stores the duplicated --json flag on the parent, so merge both option stores.
+
         const agent = resolveAgentName(rawAgent);
         if (!agent) throw new Error(formatAgentError(rawAgent));
         printInstallations(agent, !!command.optsWithGlobals().json);

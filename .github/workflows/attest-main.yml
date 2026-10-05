@@ -1,22 +1,13 @@
 name: Attest main
 
-# release.sh consumes a passing proof for the exact origin/main tree and never
-# rebuilds it. This additive producer publishes tree-keyed proofs; failure or a
-# missing asset leaves release.sh in its existing fail-safe polling path and
-# never gates a merge.
 
 on:
   push:
     branches: ['main']
-    # Keep this list aligned with every input to the attestation key. cli/** is
-    # covered as one tree digest; over-triggering is safe because consumers ask
-    # only for the exact tree they release.
     paths:
       - 'cli/**'
       - '.github/workflows/attest-main.yml'
 
-# An older tree can still be released, so serialize publication but never cancel
-# an in-flight producer for a previous, still-valid tree.
 concurrency:
   group: attest-main
   cancel-in-progress: false
@@ -48,8 +39,6 @@ jobs:
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
           echo "Attesting commit ${{ github.sha }} (tree $tree)"
 
-      # Reuse only a proof named for this exact tree. A miss or gh error falls
-      # through to the full fail-closed producer.
       - name: Short-circuit if the tree is already attested
         id: existing
         run: |

@@ -36,8 +36,6 @@ describe('buildArtifactsShareArgs', () => {
   const file = '/tmp/x/session-a1b2c3d4.html';
 
   it('is unlisted unless --public — the one default that must not silently invert', () => {
-    // `artifacts share` defaults to PUBLIC; a session transcript must not, so the
-    // command passes --visibility explicitly. A mapping bug here leaks a transcript.
     expect(buildArtifactsShareArgs(meta(), {}, file)).toContain('unlisted');
     expect(buildArtifactsShareArgs(meta(), {}, file)).not.toContain('public');
     expect(buildArtifactsShareArgs(meta(), { public: false }, file)).toContain('unlisted');
@@ -62,7 +60,7 @@ describe('buildArtifactsShareArgs', () => {
 
   it('passes the optional flags through only when set, without inventing values', () => {
     const bare = buildArtifactsShareArgs(meta(), {}, file);
-    expect(bare).not.toContain('--expire'); // artifacts share applies the 30d default
+    expect(bare).not.toContain('--expire');
     expect(bare).not.toContain('--force');
     expect(bare).not.toContain('--no-cover');
     expect(bare).not.toContain('--label');
@@ -82,12 +80,9 @@ describe('buildArtifactsShareArgs', () => {
 
 describe('email masking runs on the artifact the scanner scans', () => {
   it('catches an address Markdown escaping hid from a Markdown-stage mask', () => {
-    // `foo\@example.com` does not match the email pattern in Markdown (the
-    // backslash breaks the local part), but marked drops the backslash, so the
-    // published HTML carries a live address `artifacts share`'s scan would refuse.
     const markdown = 'contact foo\\@example.com for context';
     const page = renderSessionHtmlDocument(meta(), markdown);
-    expect(page).toContain('foo@example.com'); // survived the Markdown stage
+    expect(page).toContain('foo@example.com');
 
     const masked = redactEmails(page);
     expect(masked).not.toContain('foo@example.com');

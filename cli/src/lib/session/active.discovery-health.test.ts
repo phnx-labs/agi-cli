@@ -11,14 +11,6 @@ import {
 import { isTmuxInstalled } from '../tmux/binary.js';
 import * as tmuxPaths from '../tmux/paths.js';
 
-/**
- * RUSH-2507: a live fleet sweep found ~41 running agents while `agents
- * sessions --active` reported "No active agent sessions" — the tmux source
- * silently collapsed "socket unreadable" into the same `[]` a genuinely idle
- * socket returns. These pin the fix: a missing socket (nothing has ever run)
- * stays a clean empty, while a present-but-unreachable socket (tmux truth
- * exists but couldn't be read) is reported as DEGRADED, not empty.
- */
 const tmuxSkip = isTmuxInstalled() ? null : 'tmux not installed';
 
 describe('listTmuxAgentSessions / describeActiveDiscoveryHealth — degraded vs genuinely empty', () => {
@@ -44,9 +36,6 @@ describe('listTmuxAgentSessions / describeActiveDiscoveryHealth — degraded vs 
   });
 
   it.skipIf(tmuxSkip)('a present socket that is not a real tmux server throws TmuxDiscoveryDegradedError', async () => {
-    // A plain file at the socket path: fs.existsSync sees it (so the "never
-    // ran" early return does not fire), but tmux -S <path> list-panes -a fails
-    // against it — the exact "tmux truth exists but couldn't be read" case.
     const socket = path.join(tempDir, 'stale.sock');
     fs.writeFileSync(socket, '', 'utf-8');
     socketSpy = vi.spyOn(tmuxPaths, 'getDefaultSocketPath').mockReturnValue(socket);
@@ -64,9 +53,6 @@ describe('listTmuxAgentSessions / describeActiveDiscoveryHealth — degraded vs 
   });
 
   it.skipIf(tmuxSkip)('getActiveSessions still swallows the degraded tmux source to a plain array', async () => {
-    // getActiveSessions' return type is a bare ActiveSession[] for every existing
-    // caller — it must never throw just because one source degraded; only the
-    // dedicated health probe (above) surfaces that as a signal.
     const socket = path.join(tempDir, 'stale.sock');
     fs.writeFileSync(socket, '', 'utf-8');
     socketSpy = vi.spyOn(tmuxPaths, 'getDefaultSocketPath').mockReturnValue(socket);

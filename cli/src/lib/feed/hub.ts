@@ -115,7 +115,7 @@ export class FeedHub {
   subscribe(emit: (event: FeedWatchEnvelope) => void): () => void {
     const subscriber: Subscriber = { emit, state: new FeedWatchState() };
     this.subscribers.add(subscriber);
-    // Catch-up is synchronous so one ordered writer emits it before live events.
+
     for (const event of this.held.snapshot(subscriber.state)) emit(event);
     this.start();
     let detached = false;
@@ -141,7 +141,7 @@ export class FeedHub {
 
   private start(): void {
     if (this.controller) return;
-    // Generation fences stop a stale collector from publishing after restart.
+
     const generation = ++this.generation;
     this.lastFailure = null;
     const controller = new AbortController();

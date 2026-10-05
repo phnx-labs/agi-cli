@@ -11,7 +11,6 @@ interface AuthorCommits {
   commits: number;
 }
 
-// Carry SHAs so multi-clone/host aggregation unions duplicates rather than summing them.
 interface GitOutputSummary {
   reposScanned: number;
   commits: number;
@@ -36,7 +35,6 @@ interface GitOutputOptions {
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.agents', '.worktrees', 'dist', 'build', '.next', '.cache']);
 
-// Stop descent once a repository is found to avoid counting nested worktrees or submodules twice.
 export function findGitRepos(root: string, maxDepth = 4): string[] {
   const repos: string[] = [];
   const walk = (dir: string, depth: number): void => {
@@ -84,7 +82,6 @@ async function repoLog(repoDir: string, sinceIso: string): Promise<CommitRef[]> 
   }
 }
 
-// Discover every local/global author email, not only the active gh identity.
 async function discoverAuthorEmails(repos: string[]): Promise<string[]> {
   const emails = new Set<string>();
   try {
@@ -106,7 +103,6 @@ async function discoverAuthorEmails(repos: string[]): Promise<string[]> {
   return [...emails];
 }
 
-// Deduplicate by SHA before computing per-author totals.
 export async function collectCommits(
   repos: string[],
   sinceIso: string,
@@ -199,7 +195,7 @@ export async function collectGitOutput(options: GitOutputOptions): Promise<GitOu
 
   let prsOpened = 0;
   let prsMerged = 0;
-  // false means PR zeroes are unavailable, not measured zero.
+
   let ghAvailable = false;
   let logins = options.logins ?? [];
   if (options.includePrs !== false) {

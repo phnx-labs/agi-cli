@@ -1,9 +1,3 @@
-/**
- * Tests for the headless-exit orphaned-open-PR warning (RUSH-2394).
- *
- * Real path: the pure classifier + formatter, plus `getBranchOpenPr` against a
- * real child process standing in for `gh`. No network — no GitHub calls.
- */
 import { describe, it, expect } from 'vitest';
 import {
   shouldWarnOrphanedOpenPr,
@@ -30,8 +24,6 @@ describe('orphaned open-PR warn classifier', () => {
     expect(text).toContain('https://github.com/phnx-labs/agents-cli/pull/2334');
     expect(text).toContain('#2334');
     expect(text).toMatch(/gh pr checks --watch/);
-    // The `agents pr` group was removed in RUSH-2472 — the warning must never
-    // tell the user to run a command that no longer exists.
     expect(text).not.toMatch(/agents pr land/);
   });
 });

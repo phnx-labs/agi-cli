@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { planUmbrellaStages } from './sync-umbrella.js';
 
-/**
- * The flag matrix for the umbrella `agents sync` verb. This is the bug-prone
- * part (which stages run for which flags); the I/O executor wraps existing
- * tested library functions.
- */
 describe('planUmbrellaStages', () => {
   it('bare: fetch repos only, then reconcile (secrets are opt-in)', () => {
     expect(planUmbrellaStages({})).toEqual({

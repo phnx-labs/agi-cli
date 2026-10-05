@@ -1,13 +1,3 @@
-/**
- * PHNX-2767: content search must return an FTS hit even when that session is
- * absent from the in-memory listing pool.
- *
- * The listing pool is cwd-scoped and default-capped (50), so intersecting FTS
- * hits with it dropped grep-visible transcripts — `agents sessions "tmux pane"`
- * returned 0 while the project JSONLs matched. No mocking: real SQLite FTS via
- * upsertSession, then searchContentIndex / filterSessionsByQuery against a
- * truncated pool.
- */
 
 import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -115,8 +105,6 @@ describe('filterSessionsByQuery surfaces out-of-pool content hits (PHNX-2767)', 
     const rows = filterSessionsByQuery([inPool], QUERY);
     expect(rows.map(s => s.id)).toContain(OUT_OF_POOL_ID);
     expect(rows.map(s => s.id)).not.toContain(IN_POOL_ID);
-    // Unscoped content search is global — a matching transcript in another
-    // project is a real FTS hit, not a pool-cap miss to ignore.
     expect(rows.map(s => s.id)).toContain(OTHER_PROJECT_HIT_ID);
   });
 

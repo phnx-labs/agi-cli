@@ -58,7 +58,7 @@ export function updateTask(id: string, patch: Partial<HostTask>): HostTask | nul
 }
 
 export function terminalPatch(code: number): Partial<HostTask> {
-  // Persist terminal truth only from a confirmed remote exit code.
+
   return {
     status: code === 0 ? 'completed' : 'failed',
     exitCode: code,

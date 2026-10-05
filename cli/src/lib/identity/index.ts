@@ -1,4 +1,3 @@
-// Profile refresh rereads session state after network I/O and merges only when token and user identity are unchanged.
 
 import { phoenixRequest, PhoenixApiError, readSession, writeSession, type PhoenixSession } from './client.js';
 

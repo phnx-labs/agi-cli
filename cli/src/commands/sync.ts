@@ -88,8 +88,6 @@ function emitJson(payload: unknown): void {
   console.log(JSON.stringify(payload));
 }
 
-// Verify only full reconciles. Residual drift is ok:false, but peer commands
-// still exit zero so fleet passthrough does not discard their JSON.
 function verifyReconciled(
   pairs: Array<{ agent: AgentId; version: string }>,
   cwd: string,
@@ -115,8 +113,8 @@ function printResidual(residual: ResidualDrift[], errLog: (msg: string) => void)
 }
 
 function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
-  // Bare singular/plural flags mean all, arrays mean named resources;
-  // rule(s)/memory always recompiles the full composed memory.
+
+
   function resolve(singular: string[] | true | undefined, plural: string[] | true | undefined): string[] | 'all' | undefined {
     const val = singular ?? plural;
     if (val === undefined) return undefined;
@@ -217,7 +215,7 @@ export function registerSyncCommand(program: Command): void {
 }
 
 function resolveRepoGitTarget(repo: string): { dir: string; push: boolean } | null {
-  // System is pull-only; user/extras push. Project is never independently git-synced.
+
   if (repo === 'system') return { dir: getSystemAgentsDir(), push: false };
   if (repo === 'user') return { dir: getUserAgentsDir(), push: true };
   const extra = getEnabledExtraRepos().find((e) => e.alias === repo);
@@ -252,7 +250,7 @@ async function runRepoGitSync(
   if (!quiet && !json) outLog(chalk.bold(`Syncing ${repo} repo…`) + chalk.gray(` (${target.dir})`));
 
   if (repo === 'user') {
-    // Adopt partial user repos in place and persist their remote before JSON return.
+
     const adopted = await adoptUserRepoIfNeeded(target.dir);
     if (adopted && !adopted.success) {
       const hint = adopted.needsUrl
@@ -426,7 +424,6 @@ async function runUmbrella(
   errLog: (msg: string) => void,
   json = false,
 ): Promise<void> {
-  // Umbrella dry-run must fail before mutation; stale-CLI pruning is explicit.
   if (opts.dryRun) {
     const installed = MANAGED_AGENT_IDS.filter((id) => listInstalledVersions(id).length > 0);
     const example = installed[0] ?? 'claude';
@@ -446,8 +443,6 @@ async function runUmbrella(
     return;
   }
 
-  // Kind-only umbrella requests stay local unless fetch was explicit; browser
-  // setup remains owned by the standalone browser CLI.
   const kindSelection = parseKindSelection(opts);
   const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.cloud || opts.local || kindSelection);
   if (!quiet && !json && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
@@ -539,8 +534,8 @@ async function runUmbrella(
 }
 
 async function runSync(agentSpec: string | undefined, repoArg: string | undefined, opts: SyncOpts): Promise<void> {
-  // --json is noninteractive fleet fan-out and emits exactly one JSON object.
-  // Preserve explicit @selectors before parseAgentSpec defaults bare agents.
+
+
   const json = !!opts.json;
   const quiet = !!opts.quiet || json;
   const errLog = (msg: string) => { if (!quiet) console.error(msg); };
@@ -791,14 +786,14 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   if (opts.launch) {
-    // Shim hot path: project-only work, no version-home reconcile; keep steady state sub-50ms.
+
     runLaunchMode(agentId, version, cwd, quiet, json);
     return;
   }
 
   const kindFilter = parseKindSelection(opts);
   if (repoScope || kindFilter) {
-    // After an actual targeted reconcile, skip full-tree verification and repair generated shims.
+
     const scoped = buildSelection(repoScope ? [`${repoScope}:*`] : [], kindFilter ?? undefined, cwd);
     if (Object.keys(scoped).length === 0) {
       if (json) {
@@ -869,7 +864,6 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         }
         selection = userSelection;
       } else if (!force) {
-        // Even a no-drift path repairs generated shims before returning.
         const repair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
         if (repairChangedAnything(repair)) {
           renderRepairAfterSync(repair, outLog);
@@ -963,7 +957,7 @@ function agentSyncJson(
   result: SyncResult,
   repo?: string,
 ): Record<string, unknown> {
-  // Machine success must include declines, residual drift, and repair failures at the caller.
+
   return {
     ok: result.declined.length === 0,
     mode: 'agent',
@@ -992,7 +986,6 @@ function anyResources(r: AvailableResources): boolean {
 }
 
 function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cwd: string): void {
-  // Human output re-reads installed truth and reports both pruned and declined resources.
   const synced = getActuallySyncedResources(agent, version, { cwd });
 
   type Line = { kind: string; items: string[] };

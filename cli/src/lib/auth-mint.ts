@@ -205,7 +205,6 @@ export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMi
   return { accountName, email };
 }
 
-// The reserved auth bundle must be file-backed; a wrong backend fails loud instead of silently hiding a seeded token.
 export function seedReservedAuthToken(email: string, token: string): { key: string } {
   const cleaned = assertValidSetupToken(token);
   const key = claudeAccountTokenKey(email);
@@ -244,7 +243,6 @@ export function seedReservedAuthToken(email: string, token: string): { key: stri
   return { key };
 }
 
-// Return the portable worker credential env; harnesses with per-device login deliberately throw.
 export function workerCredentialEnv(harness: AgentId): string {
   if (harness === 'claude') return 'CLAUDE_CODE_OAUTH_TOKEN';
   const flow = MINT_FLOWS[harness];
@@ -584,7 +582,6 @@ export async function resolveSyncTargets(fleet: boolean, devices: string[]): Pro
   const registry = await loadDevices();
   const known = Object.keys(registry);
   if (named.length) {
-    // Explicit self targets are skipped; unknown device names are operator errors.
     const unknown = named.filter((d) => !known.includes(d) && !isSelfHost(d));
     if (unknown.length) {
       throw new Error(

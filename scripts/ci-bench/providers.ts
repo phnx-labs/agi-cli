@@ -45,11 +45,6 @@ export function groupByProvider(times: readonly PhaseTimes[]): Map<Provider, Pha
   return groups;
 }
 
-/**
- * Compare two providers on one phase/percentile. Both sides must clear the
- * sample-count gate or the comparison is `insufficient-sample` and carries
- * no delta — a thin sample must not claim a winner.
- */
 export function compareProviders(
   leftTimes: readonly PhaseTimes[],
   rightTimes: readonly PhaseTimes[],

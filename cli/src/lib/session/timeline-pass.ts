@@ -22,7 +22,6 @@ const TIMELINE_PASS_MAX_PER_TICK = 8;
 
 export const TIMELINE_PASS_MAX_BYTES_PER_SESSION = 4 * 1024 * 1024;
 
-// Bound bytes actually read by the whole tick so cold/full-file folds cannot stall the daemon.
 const TIMELINE_PASS_MAX_BYTES_PER_TICK = 8 * 1024 * 1024;
 
 export const TIMELINE_PASS_MAX_WHOLE_FILE_BYTES = 16 * 1024 * 1024;
@@ -66,7 +65,6 @@ function utf8Cut(buffer: Buffer, length: number): number {
   return length - i < need ? i : length;
 }
 
-// Advance offsets only through newline-terminated records; short EOF tails remain unread.
 function readCompleteLines(
   filePath: string,
   start: number,
@@ -108,7 +106,6 @@ interface PartialResume {
   discarded?: boolean;
 }
 
-// Carry oversized records across reads while eliding inline image bytes from cached state.
 function resumePartialLine(
   prior: PartialResume | undefined,
   chunk: string,
@@ -203,7 +200,6 @@ function isImageData(before: string): boolean {
   return before.slice(-180).includes('base64');
 }
 
-// Codex folds item_completed only; including response_item would double-count each turn.
 function eventsForChunk(agent: SessionAgentId, text: string): SessionEvent[] {
   if (agent === 'claude') {
     return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
@@ -227,7 +223,6 @@ function mib(bytes: number): number {
   return Math.round((bytes / (1024 * 1024)) * 10) / 10;
 }
 
-// Non-resumable harnesses reparse a fresh whole file, rate-limited and bounded, charging actual bytes read.
 function foldSessionTimeline(
   session: ActiveSession,
   filePath: string,
@@ -351,7 +346,6 @@ export async function runTimelinePass(opts: TimelinePassOptions = {}): Promise<T
   return runTimelinePassSync({ ...opts, sessions });
 }
 
-// Stamp the source the parser reads, not the wrapper path, so split-file growth cannot appear unchanged.
 export function runTimelinePassSync(
   opts: TimelinePassOptions & { sessions: ActiveSession[] },
 ): TimelinePassResult {

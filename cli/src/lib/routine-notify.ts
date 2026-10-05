@@ -7,23 +7,12 @@ import { notifyDesktop, type DesktopNotification } from './menubar/notify-deskto
 
 type RoutineKind = 'agent' | 'workflow' | 'command';
 
-/** Which flavor of routine a config/meta describes — drives the notify threshold. */
 export function routineKind(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): RoutineKind {
   if (r.command) return 'command';
   if (r.workflow) return 'workflow';
   return 'agent';
 }
 
-/**
- * The harness a routine runs on, for the notification's right-hand avatar, or
- * undefined when none owns it. A command routine is deterministic housekeeping
- * with no agent, so it gets no avatar. An agent routine names its own harness.
- * A workflow routine has no `agent` field (the schema omits it — routines.ts
- * `JobConfig.agent` and the validation that rejects setting both), and it runs
- * via `agents run <workflow>`, which delegates to claude under the hood — so its
- * avatar is the Claude mark, matching `effectiveAgent` on the finish path
- * (runner.ts). Start and finish banners therefore show the same avatar.
- */
 export function routineAgent(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string | undefined {
   const kind = routineKind(r);
   if (kind === 'command') return undefined;
@@ -31,14 +20,12 @@ export function routineAgent(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'
   return r.agent?.trim() || undefined;
 }
 
-/** Human label for the routine body ("agent claude", "workflow deploy", "command"). */
 function routineLabel(r: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): string {
   if (r.command) return 'command';
   if (r.workflow) return `workflow ${r.workflow}`;
   return `agent ${r.agent ?? 'unknown'}`;
 }
 
-/** "1m 20s" / "45s" / "2h 3m" from a millisecond duration, or null when unknown. */
 export function formatDuration(ms: number | undefined): string | null {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return null;
   const totalSec = Math.round(ms / 1000);
@@ -61,16 +48,10 @@ export function notableSnippet(report: string | null | undefined, maxLen = 140):
   return firstLine.length > maxLen ? `${firstLine.slice(0, maxLen - 1).trimEnd()}…` : firstLine;
 }
 
-/** Encode a click action that opens a file (report/log) in the default app. */
 function openAction(filePath: string | null | undefined): string | undefined {
   return filePath ? `open:${filePath}` : undefined;
 }
 
-/**
- * Notification for a routine START, or null when the threshold suppresses it
- * (command-mode housekeeping). Clicking opens the runs folder
- * (~/.agents/.history/runs).
- */
 export function routineStartNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
 ): DesktopNotification | null {
@@ -88,7 +69,7 @@ export function routineStartFailedNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
   error: string,
 ): DesktopNotification {
-  // Pre-spawn failure needs its own finish signal because no run record will emit one later.
+
   return {
     title: 'Routine failed',
     subtitle: config.name,
@@ -102,7 +83,7 @@ export function routineFinishNotification(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'duration' | 'agent' | 'workflow' | 'command'>,
   opts: { report?: string | null; artifactPath?: string | null } = {},
 ): DesktopNotification | null {
-  // Agent/workflow runs get one start and finish; successful command housekeeping is quiet, but failures always report.
+
   const kind = routineKind(meta);
   const ok = meta.status === 'completed';
   if (kind === 'command' && ok) return null;

@@ -26,17 +26,10 @@ export {
 } from './reader.js';
 
 export interface TrackSpawnOptions {
-  /** Max time to wait for the SessionStart hook to land the state file. Default 5000ms. */
   timeoutMs?: number;
-  /** Poll interval. Default 50ms. */
   pollIntervalMs?: number;
 }
 
-/**
- * Wait for the polyglot SessionStart hook (src/hook.sh) to drop a state file
- * at stateFilePath(input.agentPid). Resolves as soon as it appears.
- * Returns confidence='low' / sessionId=null on timeout.
- */
 export async function trackSpawn(
   input: TrackSpawnInput,
   opts: TrackSpawnOptions = {},

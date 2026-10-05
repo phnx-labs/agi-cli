@@ -60,7 +60,6 @@ export function makeLiveSpendWatcher(args: {
 }): LiveSpendWatcher {
   const { caps, onBreach } = args;
   let run = 0;
-  // Persisted ledger spend seeds shared day/project/agent caps; only run spend starts at zero.
   let day = caps.priorDaySpend ?? 0;
   let project = caps.priorProjectSpend ?? 0;
   const agentDay: Record<string, number> = {};
@@ -105,7 +104,7 @@ export function makeLiveSpendWatcher(args: {
       project += usd;
       if (agent) agentDay[agent] = (agentDay[agent] ?? 0) + usd;
 
-      // Keep accounting after the first breach, but invoke the destructive callback only once.
+
       if (didBreach) return;
       const breach = checkBreach(agent);
       if (breach) {
@@ -127,7 +126,7 @@ export function extractUsageEvents(
   fallbackModel?: string,
   fallbackAgent?: string,
 ): { events: UsageEvent[]; rest: string } {
-  // stdout chunks may split a JSON record; retain the incomplete final line for the next feed.
+
   const combined = pending + chunk;
   const lines = combined.split('\n');
   const rest = lines.pop() ?? '';
@@ -148,7 +147,6 @@ export function extractUsageEvents(
 }
 
 function usageFromObject(obj: any, fallbackModel?: string, fallbackAgent?: string): UsageEvent | null {
-  // Claude result events repeat message usage, so charging them would double-count the run.
   if (obj?.type === 'result') return null;
 
   const mu = obj?.message?.usage;

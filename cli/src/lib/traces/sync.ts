@@ -39,7 +39,7 @@ export function buildSessionShard(
   events: SessionEvent[],
   knownSecrets: readonly string[] | undefined,
 ): ReturnType<typeof buildSessionDetailV2> {
-  // Commands, queries, results, paths, and metadata are scrubbed at projection.
+
   return buildSessionDetailV2(traj, events, { redact: true, knownSecrets });
 }
 
@@ -62,7 +62,7 @@ export interface SyncResult {
 }
 
 export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
-  // Dry-run is local-only: no auth, network, watermark, or failure-ledger mutation.
+
   const dryRun = opts.dryRun === true;
   const outDir = opts.outDir;
   if (dryRun && !outDir) {
@@ -75,14 +75,13 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
   const device = localDevice();
 
   const sinceMtime = dryRun ? 0 : (ledger.lastSyncMtime ?? 0);
-  // A mirrored database may contain peers; only local-device rows may upload.
+
   const watermarkRows = db
     .prepare(
       'SELECT * FROM sessions WHERE (machine = ? OR machine IS NULL) AND file_mtime_ms > ? ORDER BY file_mtime_ms ASC',
     )
     .all(device, sinceMtime) as SyncRow[];
 
-  // Retry IDs are unioned independently of the advancing success watermark.
   const retryIds = dryRun
     ? []
     : (ledger.failures ?? [])
@@ -214,7 +213,6 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
         ),
     );
     writeSyncLedger({ lastSyncMtime: maxSuccessMtime, failures: persistedFailures });
-    // Prix receives only a managed Phoenix bearer, never the BYO static write token.
     if (backend && backend.userId !== 'byo') {
       fetch('https://api.prix.dev/api/v1/traces/link', {
         method: 'POST',

@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Fresh HOME before importing state/db (db.ts captures DB_PATH at module load).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-summaries-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -26,7 +25,6 @@ describe('session_summaries cache (mtime/size reuse)', () => {
     writeSessionSummary({ id, fileMtimeMs: 100, fileSize: 200, summary: ENTRY });
 
     expect(readSessionSummary(id, { fileMtimeMs: 100, fileSize: 200 })).toEqual(ENTRY);
-    // A changed mtime or size invalidates the stamped read — the recompute trigger.
     expect(readSessionSummary(id, { fileMtimeMs: 101, fileSize: 200 })).toBeUndefined();
     expect(readSessionSummary(id, { fileMtimeMs: 100, fileSize: 201 })).toBeUndefined();
   });
@@ -36,11 +34,9 @@ describe('session_summaries cache (mtime/size reuse)', () => {
     writeSessionSummary({ id, fileMtimeMs: 10, fileSize: 20, summary: ENTRY });
     expect(readSessionSummaryAny(id)).toEqual(ENTRY);
 
-    // Recompute against new bytes overwrites the single row (PK = session_id).
     const next = { ...ENTRY, goal: 'Ship it, refined' };
     writeSessionSummary({ id, fileMtimeMs: 11, fileSize: 25, summary: next });
     expect(readSessionSummaryAny(id)).toEqual(next);
-    // The old stamp no longer validates — only the new bytes do.
     expect(readSessionSummary(id, { fileMtimeMs: 10, fileSize: 20 })).toBeUndefined();
     expect(readSessionSummary(id, { fileMtimeMs: 11, fileSize: 25 })).toEqual(next);
   });

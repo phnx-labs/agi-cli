@@ -3,22 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db. db.ts captures DB_PATH at module
-// load, so redirecting AGENTS_SESSIONS_DB after the import silently opens the wrong
-// database. Every migration test in this directory uses this pattern for that reason.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv35-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v34 -> v35 (RUSH-2211): the default listing sort was `ORDER BY IFNULL(last_activity,
- * timestamp) DESC` — wrapping the column in IFNULL() makes SQLite unable to use
- * idx_sessions_last_activity, so every list/resume query did a full sort instead of an
- * index walk. Every upsert already writes a non-NULL last_activity, so the only rows
- * that can still be NULL are legacy ones from before the v8 migration (or seeded
- * directly by a test, as here). v35 backfills them so the column is unconditionally
- * NOT NULL and querySessions can sort on the bare column.
- */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -52,8 +40,6 @@ const Database = (await import('../sqlite.js')).default;
   `);
   const ins = seed.prepare(`INSERT INTO sessions (id, short_id, agent, timestamp, last_activity, file_path)
                             VALUES (?, ?, 'claude', ?, ?, ?)`);
-  // A pre-v8-style legacy row with a NULL last_activity, plus a normal row that
-  // already carries one — the migration must fix only the NULL row.
   ins.run('legacy-null', 'legacynul', '2026-01-01T00:00:00Z', null, '/w/legacy.jsonl');
   ins.run('has-activity', 'hasactivi', '2026-02-01T00:00:00Z', '2026-03-01T00:00:00Z', '/w/has.jsonl');
   seed.close();

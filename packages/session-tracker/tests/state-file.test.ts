@@ -49,8 +49,6 @@ describe('parseState', () => {
   });
 
   it('parses the legacy 04-capture hook schema (no agent, no method)', () => {
-    // This is the literal shape ~/.agents/.system/hooks/04-capture-session-start-metadata.sh
-    // writes — kept around for backward compat with already-installed agent versions.
     const raw = '{"session_id": "df106759-aaaa", "cwd": "/x", "pid": 35013, "ts": 1780964717}';
     const s = parseState(raw);
     expect(s).not.toBeNull();
@@ -81,7 +79,6 @@ describe('writeStateAtomic', () => {
       expect(fs.existsSync(final)).toBe(true);
       expect(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
 
-      // A second write for the same pid should overwrite cleanly.
       await writeStateAtomic({ ...state, ts: state.ts + 1 }, dir);
       const files = fs.readdirSync(dir);
       expect(files.filter((f) => f === `${process.pid}.json`)).toHaveLength(1);
@@ -106,20 +103,15 @@ describe('cleanupOrphanedStateFiles', () => {
 
     const dead = await deadPid();
 
-    // Live-pid record must survive.
     const liveState = makeState(process.pid);
     await writeStateAtomic(liveState, dir);
 
-    // Dead-pid record must be removed.
     fs.writeFileSync(path.join(dir, `${dead}.json`), JSON.stringify(makeState(dead)), 'utf8');
 
-    // Zero-byte JSON file must be removed.
     fs.writeFileSync(path.join(dir, '999999.json'), '', 'utf8');
 
-    // Orphaned temp file for a dead pid must be removed.
     fs.writeFileSync(path.join(dir, `.${dead}.abcdef`), 'orphan', 'utf8');
 
-    // Orphaned temp file for the live pid can stay (it may be in use).
     fs.writeFileSync(path.join(dir, `.${process.pid}.uvwxyz`), 'in-flight', 'utf8');
 
     const removed = await cleanupOrphanedStateFiles(dir);

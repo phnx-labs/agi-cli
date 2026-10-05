@@ -1,4 +1,4 @@
-// Owner notification uses non-exiting lookup, composes per destination, and only Rush-family transports may hop to a capable peer.
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';

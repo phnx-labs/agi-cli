@@ -35,8 +35,6 @@ describe('projectKeyFromCwd', () => {
     expect(projectKeyFromCwd('/.agents/worktrees/slug')).toBe('slug');
   });
 
-  // The whole point of the shared module: sessions and activity must bucket the
-  // same cwd identically, or one view says `agents-cli` and the other `fix-thing`.
   it('agrees across the sessions overview and the activity timeline', () => {
     for (const cwd of [
       '/Users/m/src/agents-cli/.agents/worktrees/fix-thing',
@@ -51,7 +49,6 @@ describe('projectKeyFromCwd', () => {
 
 describe('repoAgentsDirForCwd (pure worktree fold — no filesystem)', () => {
   it('folds a worktree cwd to the PRIMARY repo .agents that holds the worktrees', () => {
-    // path.join so the expected separator matches the platform (backslash on Windows).
     expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing'))
       .toBe(path.join('/Users/m/src/agents-cli', '.agents'));
   });
@@ -68,7 +65,6 @@ describe('repoAgentsDirForCwd (pure worktree fold — no filesystem)', () => {
   });
 });
 
-// Real directories, real `.git` entries — no mocked filesystem.
 describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
   let tmp: string;
   let home: string;
@@ -80,12 +76,10 @@ describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
     repo = path.join(home, 'src', 'agents-cli');
     fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
     fs.mkdirSync(path.join(repo, 'apps', 'cli', 'src'), { recursive: true });
-    // A linked worktree: `.git` is a FILE pointing at the primary repo's gitdir.
     const wt = path.join(repo, '.agents', 'worktrees', 'fix-thing', 'apps');
     fs.mkdirSync(wt, { recursive: true });
     fs.writeFileSync(path.join(repo, '.agents', 'worktrees', 'fix-thing', '.git'),
       `gitdir: ${path.join(repo, '.git', 'worktrees', 'fix-thing')}\n`);
-    // A plain directory that belongs to no repo at all.
     fs.mkdirSync(path.join(home, 'src', 'github.com', 'someone'), { recursive: true });
   });
 
@@ -96,7 +90,6 @@ describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
   });
 
   it('files a monorepo subdirectory under the REPO, not the leaf dir', () => {
-    // The bug this fixes: `<repo>/cli` used to group as `cli`.
     expect(resolveProjectKey(path.join(repo, 'apps', 'cli'), home)).toBe('agents-cli');
     expect(projectKeyFromCwd(path.join(repo, 'apps', 'cli'))).toBe('cli');
   });
@@ -119,7 +112,6 @@ describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
       const loose = path.join(home, 'src', 'github.com', 'someone');
       expect(repoRootForCwd(loose, home)).toBeUndefined();
       expect(resolveProjectKey(loose, home)).toBe('someone');
-      // A real repo below home is still found.
       expect(resolveProjectKey(path.join(repo, 'apps'), home)).toBe('agents-cli');
     } finally {
       fs.rmSync(dotfiles, { recursive: true, force: true });
@@ -138,7 +130,6 @@ describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
 
   it('resolves nothing for a path that does not exist here (another machine)', () => {
     expect(repoRootForCwd('/definitely/not/here/agents-cli', home)).toBeUndefined();
-    // ...and still yields a usable key from the pure fold.
     expect(resolveProjectKey('/definitely/not/here/agents-cli', home)).toBe('agents-cli');
   });
 

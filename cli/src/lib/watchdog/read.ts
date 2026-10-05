@@ -14,7 +14,6 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 const WATCHDOG_WALK_CAP = 100_000;
 
-// Session roots span version homes and deep harness partitions; discovery must remain recursive.
 const WATCHDOG_SESSION_LAYOUT: Record<string, { subdir: string; ext: string }> = {
   claude: { subdir: 'projects', ext: '.jsonl' },
   codex: { subdir: 'sessions', ext: '.jsonl' },
@@ -73,7 +72,7 @@ export function findSessionJsonlIn(
     return name.includes(sessionId) || (UUID_RE.test(sessionId) && stem.includes(sessionId));
   };
 
-  // Duplicate ids can survive upgrades, so prefer the newest match across all roots.
+
   let best: { file: string; mtime: number } | undefined;
   for (const dir of dirs) {
     for (const file of walkForFiles(dir, ext, WATCHDOG_WALK_CAP)) {

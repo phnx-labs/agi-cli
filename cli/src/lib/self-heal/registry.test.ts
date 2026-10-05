@@ -6,8 +6,6 @@ import {
 } from './registry.js';
 import type { SelfHealReport } from './types.js';
 
-// Pure aggregation logic — no filesystem, no home. The runner's integration
-// against a real planted home is exercised in self-heal.integration.test.ts.
 
 function report(checks: SelfHealReport['checks']): SelfHealReport {
   return { checks };
@@ -48,7 +46,7 @@ describe('self-heal report aggregation', () => {
     expect(s).toContain('shims: 2 fixed');
     expect(s).toContain('shadowing: 0 fixed, 1 to review');
     expect(s).toContain('resources: error (boom)');
-    expect(s).not.toContain('path:'); // an all-ok check is omitted
+    expect(s).not.toContain('path:');
   });
 
   it('empty / all-ok report summarizes as nothing to heal', () => {

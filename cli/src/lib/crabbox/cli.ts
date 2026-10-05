@@ -102,7 +102,7 @@ interface ResolvedLeaseBundle {
 }
 
 export function resolveLeaseBundle(): ResolvedLeaseBundle | undefined {
-  // Auto-detection exposes only recognized provider-token keys, never the rest of a bundle.
+
   const env = process.env.AGENTS_LEASE_SECRETS_BUNDLE;
   if (env) return { name: env };
   try {
@@ -139,7 +139,6 @@ function resolveLeaseEnvMemo(explicitBundle?: string): NodeJS.ProcessEnv | undef
       leaseEnvMemo = {};
     } else {
       try {
-        // Lease setup is unattended: broker-held values only, never a Touch ID prompt.
         const { env } = readAndResolveBundleEnvSync(resolved.name, {
           caller: 'agents run --lease (crabbox)',
           keys: resolved.keys,
@@ -173,7 +172,7 @@ export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
   if (leaseEnv) Object.assign(out, leaseEnv);
 
   if (!out.CRABBOX_TAILSCALE_AUTH_KEY) {
-    // Tailnet attachment is best-effort and cannot block paid-lease cleanup.
+
     const ts = resolveTailscaleBundleMemo();
     if (ts) {
       const value = resolveTailscaleKeyValueMemo(ts);

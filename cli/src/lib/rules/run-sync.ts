@@ -39,7 +39,7 @@ export function applyActiveRulesPresetAtRun(
   version: string,
   versionHome: string,
 ): boolean {
-  // Version-home sync excludes cwd so project rules never contaminate every run of a version.
+
   const cap = AGENTS[agent].capabilities.rules;
   if (cap === false) return false;
   const rulesWriter = getWriter('rules', agent);
@@ -48,7 +48,7 @@ export function applyActiveRulesPresetAtRun(
   const preset = getActiveRulesPreset(agent, version);
   const current = buildRules(agent, version, '');
 
-  // Preset identity is part of freshness even when two presets fingerprint the same files.
+
   const stored = loadSentinel(agent, version);
   if (stored && stored.preset === preset && !isRulesStale(stored.entry, agent, version, '')) {
     return false;
@@ -57,7 +57,7 @@ export function applyActiveRulesPresetAtRun(
   try {
     rulesWriter.write({ version, versionHome, selection: { preset }, cwd: '' });
   } catch {
-    // Launch must remain available when optional rule synchronization cannot be written.
+
     return false;
   }
 

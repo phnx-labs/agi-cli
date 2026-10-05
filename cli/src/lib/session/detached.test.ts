@@ -4,8 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 
-// Sandbox the store under a temp HOME BEFORE importing the module (state.ts
-// captures HOME at load). Dynamic import below evaluates it under the temp home.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'detach-store-'));
 const savedHome = process.env.HOME;
 process.env.HOME = TMP;
@@ -23,7 +21,6 @@ const { captureProcessStartTime } = await import('../platform/process.js');
 
 const children: ChildProcess[] = [];
 function longRunningChild(): ChildProcess {
-  // A real process we can check liveness against — no mocks.
   const child = spawn('sleep', ['30'], { stdio: 'ignore' });
   children.push(child);
   return child;
@@ -37,7 +34,6 @@ afterAll(() => {
     try {
       if (c.pid) process.kill(c.pid, 'SIGKILL');
     } catch {
-      /* gone */
     }
   }
   if (savedHome === undefined) delete process.env.HOME;
@@ -93,8 +89,6 @@ describe('isHeadlessAlive', () => {
     const child = longRunningChild();
     const pid = child.pid!;
     const start = captureProcessStartTime(pid);
-    // Await 'exit' so the child is reaped — otherwise it lingers as a zombie
-    // and kill(pid, 0) still succeeds.
     await new Promise<void>((resolve) => {
       child.once('exit', () => resolve());
       child.kill('SIGKILL');
@@ -104,7 +98,6 @@ describe('isHeadlessAlive', () => {
 
   it('is false when the start-time fingerprint no longer matches (PID reuse)', () => {
     const child = longRunningChild();
-    // Live pid, but a stale fingerprint — this is not the process we launched.
     expect(
       isHeadlessAlive({ sessionId: 'reused', agent: 'claude', headlessPid: child.pid!, headlessStartTime: 'stale-fingerprint', detachedAtMs: 0 }),
     ).toBe(false);

@@ -67,7 +67,6 @@ export class AntigravityCloudProvider implements CloudProvider {
   private async resolveApiKey(): Promise<string> {
     if (this.secretsBundle) {
       try {
-        // Unattended dispatch is broker-only: a locked bundle must fail, never open biometric UI or fall back.
         const { env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: true });
         for (const k of KEY_NAMES) {
           if (env[k]) return env[k];

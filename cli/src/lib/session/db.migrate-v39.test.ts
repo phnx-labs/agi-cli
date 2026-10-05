@@ -3,33 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db. db.ts captures DB_PATH at module
-// load (db.ts:30), so redirecting it after the import silently opens the wrong
-// database. Every migration test in this directory uses this pattern.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv39-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v38 -> v39: durable tool-session metadata (RUSH-2549).
- *
- * The upgrade is driven the way production drives it, not by hand-writing an
- * older schema: open the DB (current schema), drop the two new tables, stamp
- * the recorded version back to 38, close, reopen. `getDB` then replays what a real
- * pre-v39 machine replays — `db.exec(SCHEMA)` followed by `migrateSchema(38)`.
- *
- * What this can and cannot prove, stated honestly. `getDB` runs
- * `db.exec(SCHEMA)` UNCONDITIONALLY (db.ts:1221) before it reads the recorded
- * version, and v39 adds only new tables — so `SCHEMA` has already created them
- * by the time `migrateSchema` runs, and the v39 block's `CREATE TABLE IF NOT
- * EXISTS` is an idempotent backstop rather than the thing that does the work.
- * That makes a fresh-vs-upgraded COLUMN comparison tautological here (both
- * sides are `SCHEMA`'s output), unlike v36/v38 where the block does an
- * `ALTER TABLE` / rebuild that `SCHEMA` cannot express — so no such assertion
- * is made. What IS asserted is real: upgrading a v38 database yields both
- * tables and their indexes, stamps the new version, preserves existing rows,
- * and produces tables that actually accept a write.
- */
 const { getSessionsDir } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -44,8 +21,6 @@ const {
 
 const TOOL_TABLES = ['browser_sessions', 'computer_sessions'] as const;
 
-// Seed a session row on the fully-migrated database, so the rewind below has
-// pre-existing data whose survival the migration must not disturb.
 const transcript = path.join(TEST_HOME, 'pre-v39.jsonl');
 fs.writeFileSync(transcript, '');
 upsertSession(
@@ -58,11 +33,6 @@ upsertSession(
   } as unknown as Parameters<typeof upsertSession>[0],
   'a session indexed before v39 shipped',
 );
-// Rewind to v38: drop what v39 adds, stamp the old version, reopen.
-// The version lives in the `meta` table (db.ts:1224 reads
-// `SELECT value FROM meta WHERE key = 'schema_version'`), NOT the sqlite
-// user_version pragma — stamping the pragma leaves the recorded version
-// untouched, so `migrateSchema` never runs and the test silently proves nothing.
 {
   const db = getDB();
   for (const t of TOOL_TABLES) db.exec(`DROP TABLE IF EXISTS ${t}`);
@@ -70,7 +40,6 @@ upsertSession(
 }
 closeDB();
 
-/** The recorded schema version, read the same way db.ts records it. */
 function recordedVersion(): string | undefined {
   const row = getDB()
     .prepare(`SELECT value FROM meta WHERE key = 'schema_version'`)

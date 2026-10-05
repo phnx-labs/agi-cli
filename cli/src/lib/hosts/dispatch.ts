@@ -47,7 +47,7 @@ function logForwardedArgs(
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
 
 export function withActorEnv(env?: Record<string, string>): Record<string, string> {
-  // Provenance crosses the hop, with explicit caller overrides winning.
+
   return { ...actorEnv(resolveActor()), ...launchIdentityEnv(), ...(env ?? {}) };
 }
 
@@ -57,13 +57,13 @@ export function remoteRunShellPrelude(agent: string, extra: Record<string, strin
 }
 
 export function remoteRunEnv(agent: string, extra: Record<string, string> = {}): Record<string, string> {
-  // The remote CLI process receives the run-auto chain-hop guard before it launches an agent.
+
   const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
   return withActorEnv({ ...guard, ...extra });
 }
 
 export function buildDetachedLaunchCommand(inner: string): string {
-  // The detached process-group leader is the stable handle used to stop the whole tree.
+
   const nodeScript = [
     "const { spawn } = require('node:child_process');",
     `const child = spawn('/bin/bash', ['-lc', ${JSON.stringify(inner)}], { detached: true, stdio: 'ignore' });`,
@@ -136,7 +136,7 @@ export function terminateDispatchedTask(task: HostTask): void {
 }
 
 export function buildStopRemoteCommand(pid: number, remoteExit: string): string {
-  // Preserve an existing real exit code; write 143 only when the run has no terminal result.
+
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new Error(`Invalid remote task pid: ${pid}`);
   }
@@ -219,7 +219,6 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     inner = wrapHostCommandWithCredentials(inner, opts.copyCreds);
   }
 
-  // Credential hops require strict checking on a fresh connection; an accept-new control socket is unsafe.
   const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
 
   const launch = remoteShell === 'powershell'
@@ -262,7 +261,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   try {
     saveTask(task);
   } catch (err) {
-    // A remote launch without its local task record is unmanageable, so roll it back immediately.
+
     try {
       terminateRemoteLaunch(task);
     } catch (cleanupErr) {
@@ -287,7 +286,6 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     extraSshArgs: hostIdentityArgs(host),
     remoteShell,
   });
-  // -1 means only that the follow window closed; the detached run remains active.
   const finished = exitCode === -1 ? task : (updateTask(id, terminalPatch(exitCode)) ?? task);
   return { task: finished, exitCode };
 }
@@ -460,7 +458,6 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   const remoteCmd = buildInteractiveRemoteCommand(remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)), opts);
-  // Never reuse a multiplexed connection for a credential-carrying interactive hop.
   const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
   return sshStream(target, remoteCmd, {
     tty: process.stdin.isTTY,

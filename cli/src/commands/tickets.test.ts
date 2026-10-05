@@ -1,7 +1,3 @@
-/**
- * RUSH-2932 — top-level `agents tickets` is gone. Ticket reads go through
- * `linear` / `gh`. Pins that the name is unregistered and cannot auto-correct.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';

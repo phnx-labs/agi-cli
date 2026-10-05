@@ -11,8 +11,6 @@ import * as activation from '../routine-activation.js';
 
 const describeSpawn = process.platform === 'win32' ? describe.skip : describe;
 
-// Exercise definition eligibility directly rather than inheriting this host's
-// real device manifest (same seam as runner.test.ts).
 beforeEach(() => {
   vi.spyOn(activation, 'routineEnabledOnThisDevice').mockReturnValue(null);
 });
@@ -60,7 +58,7 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
       try {
         const m = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as RunMeta;
         if (m.status !== 'running') return m;
-      } catch { /* not written yet */ }
+      } catch {  }
       await new Promise((r) => setTimeout(r, 40));
     }
     return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as RunMeta;
@@ -71,29 +69,23 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
     const scheduledFor = new Date('2026-08-07T10:00:00.000Z');
     const first = await executeJobDetached(cfg, undefined, { kind: 'schedule', scheduledFor });
     await waitTerminal(cfg.name, first.runId);
-    // Same slot again — resolves to the SAME run, launches nothing new.
     const second = await executeJobDetached(cfg, undefined, { kind: 'schedule', scheduledFor });
     expect(second.runId).toBe(first.runId);
     expect(first.runId).toBe(slotRunId(scheduledFor));
     expect(first.scheduledFor).toBe(scheduledFor.toISOString());
     expect(first.triggerKind).toBe('schedule');
-    // Exactly one run directory exists for this routine.
     const dirs = fs.readdirSync(getJobRunsDir(cfg.name)).filter((d) => !d.startsWith('.'));
     expect(dirs).toEqual([first.runId]);
   });
 
   it('a scheduler-derived aligned slot dispatches once and dedups a duplicate delivery (SING-15)', async () => {
     const cfg = commandConfig('slot-derived', 'exit 0');
-    // Drive the slot through the REAL forward-timer derivation, not a hand-injected
-    // clean Date: fireSlot floors croner's jittered currentRun() to the aligned
-    // boundary. A prior bug keyed on the jittered instant, so two deliveries of one
-    // occurrence minted distinct ids and both launched.
     const cron = new Cron(cfg.schedule, { paused: true });
     const boundary = new Date('2026-08-07T03:00:00.000Z');
     vi.spyOn(cron, 'currentRun').mockReturnValue(new Date(boundary.getTime() + 7));
     const slot = fireSlot(cron);
     expect(slot.getMilliseconds()).toBe(0);
-    expect(slotRunId(slot)).toBe(missedRunId(boundary)); // collides with catch-up
+    expect(slotRunId(slot)).toBe(missedRunId(boundary));
 
     const first = await executeJobDetached(cfg, undefined, { kind: 'schedule', scheduledFor: slot });
     await waitTerminal(cfg.name, first.runId);
@@ -111,7 +103,6 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
       kind: 'schedule', scheduledFor: new Date('2026-08-07T11:00:00.000Z'),
     });
     expect(first.status).toBe('running');
-    // A different slot fires while the first is live.
     const later = await executeJobDetached(cfg, undefined, {
       kind: 'schedule', scheduledFor: new Date('2026-08-07T11:05:00.000Z'),
     });
@@ -167,11 +158,6 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
       pid: process.pid,
       spawnedAt: Date.now() - process.uptime() * 1000,
       status: 'running',
-      // Started well past the 60s timeout below. A run cannot legitimately outlive
-      // its deadline, so it no longer holds the slot even though its recorded pid
-      // is still alive — the month-old `running` records that wedged sandbox-tests
-      // and triage-tickets were exactly this shape (RUSH-2640). A live launcher
-      // WITHIN its window still holds the slot (see the foreground-overlap test).
       startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
       completedAt: null,
       exitCode: null,
@@ -193,7 +179,6 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
     expect(meta.status).toBe('blocked');
     expect(meta.pid).toBeNull();
     expect(meta.readiness?.code).toBe('execution_context_missing');
-    // The blocked attempt is a persisted, visible record.
     const persisted = readRunMeta(cfg.name, meta.runId);
     expect(persisted?.status).toBe('blocked');
   });

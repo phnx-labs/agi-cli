@@ -65,7 +65,7 @@ export interface HostPromptRun {
 }
 
 export function resolveHostSessionId(agent: string, resume?: string, sessionId?: string): string | undefined {
-  // Claude may adopt a forced id; other harnesses report the id coined by the remote runtime.
+
   if (resume) return undefined;
   if (agent === 'claude') return sessionId ?? randomUUID();
   if (agent === 'auto') return sessionId;
@@ -110,7 +110,6 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     passthroughArgs: opts.passthroughArgs,
     copyCreds: opts.copyCreds,
   });
-  // Auto retains a supplied id; without one it captures the peer-emitted runtime id.
   const task = emitSessionId ? captureRemoteSessionId(result.task) ?? result.task : result.task;
   registerHostSession(task, { cwd: opts.cwd ?? process.cwd(), prompt: opts.prompt });
   return { ...result, task };

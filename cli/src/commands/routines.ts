@@ -489,8 +489,8 @@ async function pickJob(
 }
 
 async function enableRoutineAction(name: string | undefined): Promise<void> {
-  // Project YAML is untrusted and display-only until this explicit materialize/
-  // enable action re-runs readiness in the trusted user store.
+
+
   if (!name) {
     name = await pickJob('Select routine to enable', (job) => !job.enabled, ['agents routines enable <name>']) ?? undefined;
     if (!name) {
@@ -1609,8 +1609,8 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('run [name]')
-    // Run, webhook, and ordinary mutations resolve trusted user/system jobs only;
-    // reviewed enable/materialize above is the sole project-routine exception.
+
+
     .description('Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.')
     .option('--json', 'Emit machine-readable JSON with the run id and status')
     .action(async (name: string | undefined, options: { json?: boolean }) => {

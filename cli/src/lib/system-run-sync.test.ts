@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate HOME before any module that captures path constants at import time.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-system-run-sync-'));
 process.env.HOME = TEST_HOME;
 
@@ -30,7 +29,7 @@ function installedSubagent(name: string): string {
 
 function sleepPastMtimeGranularity(): void {
   const target = Date.now() + 25;
-  while (Date.now() < target) { /* spin */ }
+  while (Date.now() < target) {  }
 }
 
 afterAll(() => {
@@ -103,7 +102,6 @@ describe('applySystemResourcesAtRun', () => {
     writeFile('.agents/.system/subagents/broken/AGENT.md', 'no frontmatter at all\n');
     const first = applySystemResourcesAtRun(AGENT, VERSION, home);
     expect(first.subagents).not.toContain('broken');
-    // Nothing changed in the source since, yet the kind is attempted again.
     const second = applySystemResourcesAtRun(AGENT, VERSION, home);
     expect(second.subagents.length).toBeGreaterThan(0);
     expect(second.skills).toEqual([]);

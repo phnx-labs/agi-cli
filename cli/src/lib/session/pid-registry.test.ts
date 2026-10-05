@@ -20,11 +20,8 @@ import {
   processStartTimesMatch,
 } from './pid-registry.js';
 
-// A pid far above any real process on this box, so the test never clobbers a
-// live `ag run` entry and never collides with a real process's registry file.
 const FAKE_PID = 999_000_001;
 
-// tests/setup.ts pins HOME before imports; never prune shared host state.
 afterEach(() => {
   fs.rmSync(path.join(getTerminalsDir(), 'by-pid'), { recursive: true, force: true });
   fs.rmSync(path.join(getTerminalsDir(), 'by-pid-ownership'), { recursive: true, force: true });
@@ -88,8 +85,6 @@ describe('pid session registry', () => {
     expect(!!hostProcessView()).toBe(initialHost);
     expect(fs.existsSync(claim)).toBe(false);
     if (initialHost) {
-      // The initial namespace has affirmative kernel authority; a merely
-      // visible numeric PID in an arbitrary container does not.
       expect(() => recordDaemonProcessView()).not.toThrow();
     } else {
       expect(() => recordDaemonProcessView()).toThrow('verified live canonical daemon');
@@ -115,12 +110,9 @@ describe('pid session registry', () => {
     expect(got?.sessionId).toBe('abc-123-uuid');
     expect(got?.agent).toBe('claude');
     expect(got?.cwd).toBe('/home/x/repo');
-    // The join keys must survive the round-trip — active.ts reconciles the hook's
-    // authoritative id to this entry via launchId (and terminalId).
     expect(got?.launchId).toBe('launch-abc');
     expect(got?.terminalId).toBe('CL-1700000000000-1');
     expect(got?.tmuxPane).toBe('%18');
-    // The actor stamped at spawn rides back so --active can show an owner (RUSH-2018).
     expect(got?.actor).toBe('ada@example.com');
     expect(got?.initiatedBy).toBe('human');
   });
@@ -150,7 +142,6 @@ describe('pid session registry', () => {
   it('prune removes entries whose pid is dead, keeps live ones', () => {
     writePidSessionEntry({ pid: FAKE_PID, agent: 'claude', sessionId: 's', startedAtMs: 1 });
     expect(readPidSessionEntry(FAKE_PID)).toBeDefined();
-    // Everything dead → our entry is removed.
     prunePidSessionRegistry(() => false);
     expect(readPidSessionEntry(FAKE_PID)).toBeUndefined();
   });
@@ -278,14 +269,9 @@ describe('sessionIdFromLivePid (RUSH-2384)', () => {
   const UUID = 'f0f6cb6b-3887-4f96-927e-8a929f3da418';
   const posixOnly = process.platform === 'win32' ? it.skip : it;
 
-  // Spawn a long-lived child whose argv carries --session-id <uuid>, then
-  // recover the id from /proc (or ps) — the exact recovery path when by-pid
-  // is empty and getActiveSessions must still attribute the process.
   posixOnly('reads --session-id from a live process argv with an empty by-pid registry', async () => {
     let child: ChildProcess | undefined;
     try {
-      // node -e '…' -- --session-id <uuid> keeps the flag as a real argv token
-      // after the script (not an option to node itself).
       child = spawn(
         process.execPath,
         ['-e', 'setInterval(() => {}, 60_000)', '--', '--session-id', UUID],
@@ -293,17 +279,15 @@ describe('sessionIdFromLivePid (RUSH-2384)', () => {
       );
       const pid = child.pid;
       expect(pid).toBeTruthy();
-      // Brief settle so the process is fully exec'd and /proc is populated.
       await new Promise((r) => setTimeout(r, 50));
       expect(readProcessArgv(pid!)).toEqual(
         expect.arrayContaining(['--session-id', UUID]),
       );
       expect(sessionIdFromLivePid(pid!)).toBe(UUID);
-      // Confirm we did NOT lean on the by-pid registry for this recovery.
       expect(readPidSessionEntry(pid!)).toBeUndefined();
     } finally {
       if (child?.pid) {
-        try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+        try { process.kill(child.pid, 'SIGKILL'); } catch {  }
       }
     }
   });

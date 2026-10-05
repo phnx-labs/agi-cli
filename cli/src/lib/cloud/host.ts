@@ -19,7 +19,7 @@ import { listAllHosts } from '../hosts/registry.js';
 import { terminateDispatchedTask } from '../hosts/dispatch.js';
 
 function toCloudStatus(status: HostTask['status']): CloudTaskStatus {
-  // Unknown or unreachable is still running; only the remote exit file proves terminal state.
+
   switch (status) {
     case 'completed': return 'completed';
     case 'failed': return 'failed';
@@ -113,7 +113,7 @@ export class HostCloudProvider implements CloudProvider {
 
   private reconcileMemoized(task: HostTask): HostTask {
     if (task.status !== 'running') return task;
-    // Probe each target once per provider instance; many tasks on one offline host share the timeout.
+
     if (!this.reachable.has(task.target)) {
       this.reachable.set(task.target, sshReachable(task.target, 6000));
     }

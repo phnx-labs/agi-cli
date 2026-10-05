@@ -1,11 +1,3 @@
-/**
- * The persisted `duration_ms` (PHNX-3457) against a REAL SQLite index. Harness
- * scan extractors that never derived a span (rush/grok/kimi/cursor/muse/
- * antigravity) left `duration_ms` NULL — 52% of the corpus, 100% of rush — so the
- * console median was computed over only the ~48% that carried it. The fix computes
- * it at the single upsert boundary from the timestamps the row already stores, so
- * every harness gets a span. This exercises that write path end to end.
- */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -21,8 +13,6 @@ type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 type ScanStamp = import('./db.js').ScanStamp;
 
 function rushMeta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
-  // Exactly the shape discover.ts's readRushMeta builds: a start timestamp, no
-  // durationMs, no lastActivity.
   return {
     id,
     shortId: id.slice(0, 8),
@@ -50,7 +40,6 @@ describe('duration_ms is populated for a harness whose extractor never derived i
   });
 
   it('stays NULL (never a fabricated 0) when no positive span can be established', () => {
-    // No lastActivity, no scan → resolveLastActivity returns timestamp → span 0 → NULL.
     upsertSession(rushMeta('rush-null'), '');
     expect(durationOf('rush-null')).toBeNull();
   });

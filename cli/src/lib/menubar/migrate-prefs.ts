@@ -12,7 +12,6 @@ function sentinelPath(): string {
   return path.join(getRuntimeStateDir(), 'menubar-prefs-migrated');
 }
 
-// Import only known keys that remain unset; synced device config always wins.
 export function planMenubarPrefMigration(
   userDefaults: Record<string, unknown>,
   isUnset: (fullName: string) => boolean,
@@ -65,7 +64,6 @@ function readUserDefaultsDomain(): { ok: boolean; values: Record<string, unknown
   }
 }
 
-// The production defaults domain migrates once; failed reads must not write the sentinel.
 export function migrateMenubarPreferencesFromUserDefaults(): void {
   if (process.platform !== 'darwin') return;
   const sentinel = sentinelPath();

@@ -7,7 +7,6 @@ export const resourcesCheck: HealCheck = {
   title: 'Resource sync (commands, skills, hooks, rules, plugins)',
   cadence: 'periodic',
   async run(ctx: HealCtx): Promise<CheckResult> {
-    // Defer the heavy heal graph so startup only pays for it when this check runs.
     const { heal } = await import('../../heal.js');
     const result = await heal({ mode: ctx.mode, dryRun: ctx.dryRun });
 

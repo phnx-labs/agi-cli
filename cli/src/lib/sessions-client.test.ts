@@ -44,7 +44,6 @@ describe('isReadQuery', () => {
   });
 
   it('routes the 0.2.0 filter flags only when the binary supports them', () => {
-    // Conservative default (filters:false) — an old/absent binary keeps them in-repo.
     expect(isReadQuery(['--project', 'agents-cli'])).toBe(false);
     expect(isReadQuery(['--since', '7d', '--json'])).toBe(false);
     expect(isReadQuery(['--sort', 'cost'])).toBe(false);
@@ -52,7 +51,6 @@ describe('isReadQuery', () => {
     expect(isReadQuery(['-p', 'agents-cli'])).toBe(false);
     expect(isReadQuery(['-a', 'claude@2.1.181'])).toBe(false);
 
-    // filters:true (binary >= 0.2.0) — they route to the standalone.
     expect(isReadQuery(['--project', 'agents-cli'], { filters: true })).toBe(true);
     expect(isReadQuery(['--since', '7d', '--json'], { filters: true })).toBe(true);
     expect(isReadQuery(['--until', '1d'], { filters: true })).toBe(true);
@@ -71,21 +69,16 @@ describe('isReadQuery', () => {
   });
 
   it('routes the 0.2.1 `--host` flag only when the binary supports it', () => {
-    // Conservative default (host:false) — an old/absent binary keeps `--host` in-repo.
     expect(isReadQuery(['auth', '--host', 'box'])).toBe(false);
     expect(isReadQuery(['auth', '--host=box'])).toBe(false);
-    // filters:true but host:false — a 0.2.0 binary takes filters, NOT `--host`.
     expect(isReadQuery(['auth', '--host', 'box'], { filters: true })).toBe(false);
 
-    // host:true (binary >= 0.2.1) — the query routes to the standalone.
     expect(isReadQuery(['auth', '--host', 'box'], { host: true })).toBe(true);
     expect(isReadQuery(['auth', '--host=box', '--json'], { host: true })).toBe(true);
     expect(isReadQuery(['a1b2c3d4', '--host', 'box'], { host: true })).toBe(true);
-    // `--host` composes with the filter flags when both are enabled.
     expect(
       isReadQuery(['--project', 'agents-cli', '--host', 'box'], { filters: true, host: true }),
     ).toBe(true);
-    // Lifecycle verbs still stay in-repo even with `--host` recognized.
     expect(isReadQuery(['resume', 'a1b2c3d4', '--host', 'box'], { host: true })).toBe(false);
   });
 });
@@ -110,7 +103,7 @@ describe('usesFilterFlags', () => {
       ['--agent', 'claude'],
       ['auth', 'middleware'],
       ['a1b2c3d4'],
-      ['--host', 'box'], // `--host` is NOT a filter flag — it has its own predicate/floor
+      ['--host', 'box'],
       [],
     ]) {
       expect(usesFilterFlags(args)).toBe(false);
@@ -124,12 +117,10 @@ describe('planDeviceHostRead', () => {
       device: 'box',
       readArgs: ['auth', '--json'],
     });
-    // -D short form, and the device value positioned last.
     expect(planDeviceHostRead(['a1b2c3d4', '-D', 'box'])).toEqual({
       device: 'box',
       readArgs: ['a1b2c3d4'],
     });
-    // --device=value and -Dvalue glued forms.
     expect(planDeviceHostRead(['auth', '--device=box', '--json'])).toEqual({
       device: 'box',
       readArgs: ['auth', '--json'],
@@ -141,10 +132,7 @@ describe('planDeviceHostRead', () => {
   });
 
   it('routes the 0.2.0 filter flags alongside --device only when filters are supported', () => {
-    // filters:false (old/absent binary) — a device query using a 0.2.0 filter is
-    // NOT a standalone read; it stays on the in-repo engine.
     expect(planDeviceHostRead(['--since', '7d', '--device', 'box'])).toBeNull();
-    // filters:true — the stripped read is recognized, so it plans the rewrite.
     expect(planDeviceHostRead(['--since', '7d', '--device', 'box'], { filters: true })).toEqual({
       device: 'box',
       readArgs: ['--since', '7d'],
@@ -168,25 +156,20 @@ describe('planDeviceHostRead', () => {
   });
 
   it('never collapses a MULTI-device query — --host is point-to-one (stays on the in-repo fan-out)', () => {
-    // A trailing bare token is commander's variadic second device.
     expect(planDeviceHostRead(['auth', '--device', 'box', 'mac-mini', '--json'])).toBeNull();
     expect(planDeviceHostRead(['auth', '--device=box', 'mac-mini'])).toBeNull();
     expect(planDeviceHostRead(['auth', '-D', 'box', 'mac-mini'])).toBeNull();
-    // The flag repeated is multi-device too.
     expect(planDeviceHostRead(['auth', '--device', 'box', '--device', 'mac-mini'])).toBeNull();
     expect(planDeviceHostRead(['auth', '-D', 'box', '-D', 'mac-mini'])).toBeNull();
-    // Fan-out sentinels, case-insensitive.
     expect(planDeviceHostRead(['auth', '--device', 'all'])).toBeNull();
     expect(planDeviceHostRead(['auth', '--device', 'fleet', '--json'])).toBeNull();
     expect(planDeviceHostRead(['auth', '--device', 'ALL'])).toBeNull();
     expect(planDeviceHostRead(['auth', '--device=Fleet'])).toBeNull();
-    // A missing / flag-shaped value is not a device.
     expect(planDeviceHostRead(['auth', '--device'])).toBeNull();
     expect(planDeviceHostRead(['auth', '--device', '--json'])).toBeNull();
   });
 
   it('still collapses the clean single-device forms (one occurrence, one value, no trailing bare token)', () => {
-    // A following FLAG (not a bare token) is fine — variadic stops at the flag.
     expect(planDeviceHostRead(['auth', '--device', 'box', '--json'])).toEqual({
       device: 'box',
       readArgs: ['auth', '--json'],
@@ -281,8 +264,6 @@ describe.skipIf(process.platform === 'win32')('sessionsBinSupportsHost', () => {
   });
 
   it('is false below the host floor even when filters are supported (0.2.0)', () => {
-    // The load-bearing safety case: a 0.2.0 binary takes the filters but must NOT
-    // receive a `--host` query.
     _resetSessionsClientForTest();
     const bin = fakeSessions('0.2.0');
     expect(sessionsBinSupportsHost(bin)).toBe(false);

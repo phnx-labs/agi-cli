@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { runFailureReason } from './routines.js';
 import type { RunMeta } from '../lib/scheduling/routines.js';
 
-/** Minimal RunMeta with the fields runFailureReason reads; the rest are inert. */
 function meta(over: Partial<RunMeta>): RunMeta {
   return {
     jobName: 'r',
@@ -27,7 +26,6 @@ describe('runFailureReason', () => {
   });
 
   it('names an active-run overlap skip as blocked on the live run + when it started (PHNX-4116)', () => {
-    // The live run id is a timestamp-shaped run id, so "active since" reverses it.
     const r = runFailureReason(meta({
       status: 'skipped', skipReason: 'active_run', exitCode: null,
       activeRunId: '2026-08-08T21-24-00-005Z',
@@ -43,7 +41,6 @@ describe('runFailureReason', () => {
   });
 
   it('names an active_run skip in human terms, not the removed "wedged" wording', () => {
-    // No structured activeRunId and no errorMessage: the skipReason is the only signal.
     const r = runFailureReason(meta({ status: 'skipped', skipReason: 'active_run', exitCode: null }));
     expect(r).toBe('blocked: a prior run is still active');
   });
@@ -65,9 +62,7 @@ describe('runFailureReason', () => {
   });
 
   it('falls back to the exit code for a plain nonzero failure (no errorMessage)', () => {
-    // The most common shape: a command body exits 2, cause is in stdout.
     expect(runFailureReason(meta({ status: 'failed', errorMessage: undefined, exitCode: 2 }))).toBe('exit 2');
-    // ...but a failure with no exit code at all still yields no fabricated reason.
     expect(runFailureReason(meta({ status: 'failed', errorMessage: undefined, exitCode: null }))).toBeNull();
   });
 

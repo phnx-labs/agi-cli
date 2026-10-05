@@ -77,7 +77,6 @@ function snippet(value: string | null | undefined, max = SESSION_MIRROR_SNIPPET_
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
-// Shared mirrors carry bounded digests, never transcripts; workers publish local state but do not consume shared state.
 export async function publishSessionMirrorToSharedStore(
   options: PublishSessionMirrorOptions = {},
 ): Promise<PublishSessionMirrorResult> {
@@ -335,7 +334,6 @@ function toMirrorSummary(r: Record<string, unknown>): import('./db.js').SessionS
   };
 }
 
-  // Peer rows are untrusted: bound/validate projections, drop malformed timelines as one unit, and sanitize only at render.
 export function consumeSessionMirrorFromSharedStore(
   options: ConsumeSessionMirrorOptions = {},
 ): ConsumeSessionMirrorResult {

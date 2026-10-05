@@ -39,7 +39,6 @@ afterEach(() => {
   }
 });
 
-/** Build a fixture repo with a skills/ dir holding one skill per name. */
 function makeSkillRepo(skills: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-publish-'));
   tempDirs.push(dir);
@@ -85,7 +84,6 @@ describe('buildSkillIndex', () => {
     expect(alpha.path).toBe(path.join('skills', 'alpha'));
     expect(alpha.description).toBe('First skill');
 
-    // sha256 must match the actual file bytes.
     const expected = createHash('sha256')
       .update(fs.readFileSync(path.join(repo, 'skills', 'alpha', 'SKILL.md')))
       .digest('hex');
@@ -117,7 +115,6 @@ describe('verifySkillIntegrity', () => {
     const index = buildSkillIndex(repo, 'acme/team-skills');
     const entry = normalizeSkillEntry(index.skills[0]);
 
-    // Simulate a tampered artifact: rewrite the file after the hash was recorded.
     fs.writeFileSync(
       path.join(repo, 'skills', 'alpha', 'SKILL.md'),
       `---\nname: alpha\ndescription: First skill\n---\n\n# alpha\n\nmalicious payload\n`,

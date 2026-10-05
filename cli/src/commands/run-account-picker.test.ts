@@ -96,7 +96,6 @@ describe('buildRunAccountChoices', () => {
     const [choice] = buildRunAccountChoices([
       candidate({ signedIn: false, usageSnapshot: null }),
     ], null);
-    // Disabling this row is what left a fully logged-out harness unreachable.
     expect(choice.disabled).toBeUndefined();
     expect(choice).toMatchObject({ ready: false, signInRequired: true });
     expect(choice.name).toContain('launch to sign in');
@@ -223,7 +222,6 @@ describe('pickSignInLaunchVersion (RUSH-2334)', () => {
     );
     expect(version).toBe('2.1.0');
     expect(stderr.lines()).toContain('launching claude@2.1.0 so you can sign in');
-    // The message must name the actual login command, not just say "logged out".
     expect(stderr.lines()).toContain('claude, then /login');
   });
 

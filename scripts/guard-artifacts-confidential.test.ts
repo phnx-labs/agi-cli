@@ -69,7 +69,7 @@ describe('checkFilename', () => {
     ['plan-architecture.md', false],
     ['report-sessions-bug.md', false],
     ['dataviz-token-usage.svg', false],
-    ['array-buffer-fix.md', false], // "arr" inside a word must not match
+    ['array-buffer-fix.md', false],
   ])('%s filename flagged? %s', (name, flagged) => {
     const result = checkFilename(name);
     if (flagged) {
@@ -173,7 +173,6 @@ describe('end-to-end git diff guard', () => {
     git(tmp, 'init', '--quiet');
     git(tmp, 'config', 'user.email', 'guard-test@example.invalid');
     git(tmp, 'config', 'user.name', 'Guard Test');
-    // Initial commit on main.
     writeFixture(tmp, 'README.md', '# repo\n');
     git(tmp, 'add', '.');
     git(tmp, 'commit', '--quiet', '-m', 'init');

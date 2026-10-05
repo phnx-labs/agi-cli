@@ -189,29 +189,15 @@ interface ResourceBackfillEnvelope {
   kind: 'resources-backfill';
   generatedAt: string;
   machine: string;
-  /** Sessions considered (matched the filter, had a real transcript). */
   scanned: number;
-  /** Sessions (re)parsed and written this run. */
   updated: number;
-  /** Sessions already current at this extractor version, skipped. */
   skipped: number;
-  /** Sessions whose transcript could not be stat'd or parsed. */
   failed: number;
-  /** Total session_resource_usage rows written across updated sessions. */
   resourceRows: number;
 }
 
-/**
- * Populate session_resource_usage for historical sessions on THIS machine.
- * Local-only by design: the resource signal is derived from each machine's own
- * transcripts, and the index is machine-local, so there is no cross-machine
- * merge to do — run it on each box (or over `agents ssh`). Ensures the session
- * index is complete first (discoverSessions), then re-derives usage gated by the
- * resource_scan_ledger so reruns skip completed transcripts.
- */
 async function runResourceBackfill(options: ResourceBackfillOptions): Promise<ResourceBackfillEnvelope> {
   const { agent, version } = parseAgent(options.agent);
-  // Make sure every matching transcript is indexed before we re-derive usage.
   await discoverSessions({
     agent,
     version,
@@ -244,7 +230,6 @@ interface TitleBackfillOptions {
   limit?: string;
   refresh?: boolean;
   json?: boolean;
-  /** The injectable model call (`SessionTitleRunner`); not a CLI flag — tests pass it. */
   run?: SessionTitleRunner;
 }
 
@@ -260,12 +245,6 @@ export interface TitleBackfillEnvelope {
   titles: Array<{ id: string; title: string }>;
 }
 
-/**
- * Generate session headlines NOW instead of waiting for the daemon's sweep — the
- * explicit-refresh half of PHNX-3797. Same code path the `session-title` service
- * ticks, so there is one generator: this only changes when it runs, how many it
- * does, and (with `--refresh`) whether an already-current title is regenerated.
- */
 export async function runTitlesBackfill(options: TitleBackfillOptions): Promise<TitleBackfillEnvelope> {
   const parsedLimit = options.limit ? Number.parseInt(options.limit, 10) : undefined;
   if (options.limit !== undefined && (!Number.isFinite(parsedLimit) || (parsedLimit as number) < 1)) {

@@ -85,7 +85,6 @@ export function parseRetryAfterMs(header: string | null | undefined, now: number
   return ms > 0 ? Math.min(ms, MAX_BACKOFF_MS) : null;
 }
 
-// Provider penalties use `<agent>`; account penalties add an escaped slug and must match only a pure-digit deadline suffix.
 function backoffScope(agent: AgentId, account?: string | null): string {
   if (!account) return agent;
   return `${agent}@${account.replace(/[/\\]/g, '_')}`;
@@ -132,7 +131,6 @@ export function usageRateLimitedUntil(
   now: number = Date.now(),
   account?: string | null,
 ): number | null {
-  // Read the maximum applicable deadline; account penalties must not starve sibling accounts.
   const scopes = account ? [backoffScope(agent, null), backoffScope(agent, account)] : [backoffScope(agent, null)];
   let latest: number | null = null;
   for (const scope of scopes) {

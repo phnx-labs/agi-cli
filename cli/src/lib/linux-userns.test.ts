@@ -57,7 +57,6 @@ describe('interpretUsernsInputs', () => {
 describe('real host probes (no mocks)', () => {
   it('readApparmorRestrict returns the raw sysctl value or null', () => {
     const value = readApparmorRestrict();
-    // Either the file is absent (null) or it is a trimmed scalar like "0"/"1".
     expect(value === null || /^\d+$/.test(value)).toBe(true);
   });
 
@@ -68,10 +67,6 @@ describe('real host probes (no mocks)', () => {
       expect(['ok', 'denied', 'no-tool']).toContain(probe);
 
       const restrict = readApparmorRestrict();
-      // When AppArmor restricts unprivileged userns and `unshare` is present, the
-      // probe must observe the denial — this is the exact PHNX-3285 condition and
-      // the whole reason the preflight exists. (Guard on 'no-tool' so a box without
-      // util-linux doesn't fail the assertion.)
       if (restrict === '1' && probe !== 'no-tool') {
         expect(probe).toBe('denied');
       }
@@ -81,7 +76,6 @@ describe('real host probes (no mocks)', () => {
   it('probeUnprivilegedUserns yields a coherent, cached status', () => {
     const first = probeUnprivilegedUserns();
     expect(['ok', 'blocked', 'unknown']).toContain(first.state);
-    // Cached: a second call returns the same object identity on Linux.
     if (process.platform === 'linux') {
       expect(probeUnprivilegedUserns()).toBe(first);
     } else {

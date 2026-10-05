@@ -24,12 +24,10 @@ afterEach(() => {
   try {
     fs.rmSync(getMonitorHistoryDir(NAME), { recursive: true, force: true });
   } catch {
-    /* ignore */
   }
   try {
     fs.rmSync(getJobRunsDir(NAME), { recursive: true, force: true });
   } catch {
-    /* ignore */
   }
 });
 
@@ -70,10 +68,8 @@ describe('hasChanged', () => {
   });
 
   it('dedupes on the matched token when a dedupeKey is given', () => {
-    // Two different full outputs whose dedupeKey match is identical → no change.
     writeState(NAME, 'status: issued at 10:00', 'status: (\\w+)');
     expect(hasChanged(NAME, 'status: issued at 11:59', 'status: (\\w+)')).toBe(false);
-    // A different matched token → change.
     expect(hasChanged(NAME, 'status: pending at 12:00', 'status: (\\w+)')).toBe(true);
   });
 });
@@ -97,8 +93,7 @@ describe('recordFireTime', () => {
   it('appends and prunes to the window', () => {
     const now = 1_000_000;
     writeState(NAME, 'v', undefined, { fireTimes: [now - 120_000, now - 10_000] });
-    const times = recordFireTime(NAME, now, 60_000); // 60s window
-    // The 120s-old entry is pruned; the 10s-old one and now remain.
+    const times = recordFireTime(NAME, now, 60_000);
     expect(times).toEqual([now - 10_000, now]);
   });
 });
@@ -124,8 +119,6 @@ describe('liveness heartbeat (RUSH-2485)', () => {
 
   it('does NOT write change-detection state — a polled-but-never-matched monitor still has no state.json', () => {
     recordCheck(NAME, '2026-03-01T00:00:00.000Z');
-    // This is the core bug: heartbeat present, but the monitor never fired, so
-    // change-detection state must remain absent (not conflated with the poll).
     expect(readLiveness(NAME)).not.toBeNull();
     expect(readState(NAME)).toBeNull();
   });
@@ -137,11 +130,11 @@ describe('liveness heartbeat (RUSH-2485)', () => {
     expect(live!.consecutiveErrors).toBe(2);
     expect(live!.lastError).toBe('boom');
 
-    recordCheck(NAME, '2026-03-01T00:02:00.000Z'); // success
+    recordCheck(NAME, '2026-03-01T00:02:00.000Z');
     live = readLiveness(NAME);
     expect(live!.consecutiveErrors).toBe(0);
     expect(live!.lastError).toBeUndefined();
-    expect(live!.checkCount).toBe(3); // count still advances
+    expect(live!.checkCount).toBe(3);
   });
 
   it('keeps the drought marker across failures and drops it on recovery', () => {
@@ -149,11 +142,9 @@ describe('liveness heartbeat (RUSH-2485)', () => {
     markDroughtNotified(NAME, '2026-03-01T00:00:05.000Z');
     expect(readLiveness(NAME)!.droughtNotifiedAt).toBe('2026-03-01T00:00:05.000Z');
 
-    // Another failure preserves the marker (so we don't re-notify).
     recordCheck(NAME, '2026-03-01T00:01:00.000Z', 'boom');
     expect(readLiveness(NAME)!.droughtNotifiedAt).toBe('2026-03-01T00:00:05.000Z');
 
-    // A good poll clears it, so a fresh drought can escalate again.
     recordCheck(NAME, '2026-03-01T00:02:00.000Z');
     expect(readLiveness(NAME)!.droughtNotifiedAt).toBeUndefined();
   });
@@ -178,22 +169,6 @@ describe('fire history', () => {
   });
 });
 
-/**
- * RUSH-2690: a `run` action fires, `dispatchAction` (lib/monitors/dispatch.ts)
- * records `ok: true` from a SYNCHRONOUS 'running' snapshot, and then the
- * dispatched process spawns, fails, and exits with no output — asynchronously,
- * after the fire record is already frozen on disk. `agents monitors runs`
- * showed a healthy `ok` forever because nothing ever revisited it, while
- * `agents monitors logs` (which reads the run record fresh) already told the
- * truth. `resolveFireOutcome` is the render-time fix: it re-reads the run's
- * CURRENT status by runId on every call, so the displayed outcome tracks
- * reality even though the on-disk fire record never changes.
- *
- * Real disk I/O, no mocking: writes an actual RunMeta via `writeRunMeta`
- * (the same writer `settle()` in lib/daemon/runner.ts uses) and an actual fire
- * record via `writeFireRecord`, then reads both back through the real
- * `resolveFireOutcome`.
- */
 describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the run\'s real status)', () => {
   function baseMeta(runId: string, status: RunMeta['status']): RunMeta {
     return {
@@ -219,13 +194,7 @@ describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the 
 
   it('the async-race case: fire recorded ok:true off a "running" snapshot, run later failed with no output — reconciled read says failed', () => {
     const runId = 'run-async-fail';
-    // The fire, as `writeFireRecord` persisted it at dispatch time: ok:true,
-    // because `runMeta.status` was 'running' (not yet in dispatchAction's
-    // skipped/blocked/failed negative list) when dispatchAction returned.
     const fire = { ...event, runId, action: 'run', ok: true, runStatusAtFire: 'running' as const };
-    // The run then finished asynchronously — no output, exit code 1 — a few
-    // ms later, exactly like the ticket's reproduction (fire ok, run skipped
-    // 3ms later). `failed` stands in for that class of async-settled outcome.
     writeRunMeta(baseMeta(runId, 'failed'));
 
     const outcome = resolveFireOutcome(NAME, fire);
@@ -274,19 +243,8 @@ describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the 
   });
 });
 
-/**
- * PHNX-2842: a `run` action that exits 0 is not success. The motivating
- * incident: merge-on-green fired, `agents monitors runs` showed `ok`, and the
- * PR stayed OPEN — the agent completed without merging. `completed` used to
- * sit in OK_RUN_STATUSES next to `running`. A declared postcondition is what
- * distinguishes "ran" from "the intended effect happened".
- *
- * Real disk I/O + a real shell: the postcondition is `/bin/sh -c` (or `cmd /c`)
- * via `evaluatePostcondition`, the same seam command sources use. No mocks.
- */
 describe('resolveFireOutcome (PHNX-2842 — completed is not ok unless the postcondition holds)', () => {
   function nodeExit(code: number): string {
-    // evaluatePostcondition wraps this in /bin/sh -c or cmd /c.
     return process.platform === 'win32'
       ? `"${process.execPath}" -e "process.exit(${code})"`
       : `${JSON.stringify(process.execPath)} -e 'process.exit(${code})'`;
@@ -333,11 +291,9 @@ describe('resolveFireOutcome (PHNX-2842 — completed is not ok unless the postc
     expect(outcome.effect).toBe('none');
     expect(outcome.error).toMatch(/postcondition not met/);
 
-    // Persisted so a later listing does not re-exec the command.
     const persisted = listFires(NAME)[0]!;
     expect(persisted.postconditionOk).toBe(false);
     expect(persisted.postconditionError).toMatch(/postcondition not met/);
-    // Frozen fire-time ok is left as the snapshot; display reads the reconciled field.
     expect(persisted.ok).toBe(true);
   });
 

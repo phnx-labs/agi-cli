@@ -35,7 +35,7 @@ export function validatedPyPISpec(spec: string): string {
 }
 
 function offeredSeeds(type: RegistryType, meta: Meta): Record<string, RegistryConfig> {
-  // Seeds are offered in memory; reads never dirty the tracked DotAgents repo.
+
   const removed = new Set(meta.seededPresets || []);
   const offered: Record<string, RegistryConfig> = {};
   for (const [name, config] of Object.entries(SEEDED_REGISTRIES[type] || {})) {
@@ -86,7 +86,7 @@ export function removeRegistry(type: RegistryType, name: string): boolean {
   if (!inUserConfig && !isOfferedSeed) return false;
 
   if (inUserConfig) delete meta.registries![type][name];
-  // Tombstone removed seeds so a future read cannot resurrect them.
+
   if (SEEDED_REGISTRIES[type]?.[name]) {
     meta.seededPresets = [...new Set([...(meta.seededPresets || []), `${type}.${name}`])];
   }
@@ -512,7 +512,7 @@ export function sha256OfFile(file: string): string {
 }
 
 export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
-  // Normalize Windows separators as well as HTTPS/SSH remote forms.
+
   const s = remoteUrl.trim().replace(/\\/g, '/').replace(/\.git$/, '');
   const m = s.match(/github\.com[/:]([^/]+\/[^/]+)$/);
   return m ? m[1] : null;
@@ -546,7 +546,7 @@ export function verifySkillIntegrity(
   repoPath: string,
   entry: Pick<SkillEntry, 'name' | 'path' | 'sha256'>
 ): { ok: boolean; error?: string } {
-  // Old unhashed indexes remain compatible; when a hash exists it is mandatory.
+
   if (!entry.sha256) return { ok: true };
 
   const rel = entry.path || path.join('skills', entry.name);

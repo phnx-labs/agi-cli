@@ -71,14 +71,10 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     devices: names,
     defaults,
     agentsByDevice: opts.fromPins ? agentsFromPins(names) : undefined,
-    // Browser endpoints can contain user@host and already sync in `browser:`;
-    // never copy them into the fleet profile.
     secretsBundles: await captureSecretsBundleNames(),
     routines: listJobs().map((j) => j.name),
   };
 
-  // Discovery decisions remain device-scoped; capture must not recreate the
-  // former shared map and its cross-device rewrite conflict.
   const next = captureFleet(meta.fleet, inputs);
 
   if (opts.dryRun) {

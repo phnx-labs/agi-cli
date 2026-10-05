@@ -1,12 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { classifyConnectionOutput } from './harness-connection-test.js';
 
-/**
- * The connection-test classifier is the pure core of RUSH-2221 — it maps a
- * finished `agents run` smoke test (exit code + combined stdout/stderr) onto
- * pass / auth-fail / endpoint-fail / model-fail / unknown. These assert the
- * mapping against the real error shapes providers emit, no spawn or mock.
- */
 describe('classifyConnectionOutput — exit code + stderr → classified outcome', () => {
   it('treats exit 0 as a pass regardless of output', () => {
     const r = classifyConnectionOutput(0, 'alive');

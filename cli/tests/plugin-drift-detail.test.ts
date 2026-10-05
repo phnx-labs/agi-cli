@@ -1,13 +1,3 @@
-/**
- * Tests for the content-aware plugin diff detail (`describePluginDrift` in
- * doctor-diff.ts) — what makes `agents doctor` report exactly how a version's
- * marketplace MIRROR of a plugin diverges from its central source, instead of a
- * useless presence-only "ok".
- *
- * The cases that matter: a stale mirror version, a Claude-invalid manifest, and
- * the plugin's bundled skills/commands that never reached the mirror (the
- * system-repo content the user cares about). A faithful mirror returns null.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,7 +9,6 @@ let TMP: string;
 let centralRoot: string;
 let mirrorDir: string;
 
-// describePluginDrift only reads `.root` and `.manifest.version` off the plugin.
 function plugin(version: string): DiscoveredPlugin {
   return { name: 'code', root: centralRoot, manifest: { version } } as unknown as DiscoveredPlugin;
 }
@@ -27,7 +16,7 @@ function plugin(version: string): DiscoveredPlugin {
 function writePluginTree(root: string, version: string, skills: string[], commands: string[], opts: { badSkillsField?: boolean } = {}): void {
   fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
   const manifest: Record<string, unknown> = { name: 'code', version };
-  if (opts.badSkillsField) manifest.skills = skills; // bare names → Claude-invalid
+  if (opts.badSkillsField) manifest.skills = skills;
   fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify(manifest, null, 2));
   for (const s of skills) {
     fs.mkdirSync(path.join(root, 'skills', s), { recursive: true });

@@ -461,8 +461,6 @@ export interface DeviceRepoStatus {
   rows?: RepoRow[];
 }
 
-// The recursion guard is an environment variable so older peers ignore it;
-// a new CLI flag would fail on mixed-version fleets before stopping fan-out.
 export const NO_REPO_FANOUT_ENV = 'AGENTS_REPO_LOCAL';
 
 export function parseRemoteRepoRows(stdout: string, machine: string): DeviceRepoStatus[] {
@@ -1016,8 +1014,6 @@ export function registerRepoCommands(program: Command): void {
         }
       }
 
-      // Pull may replace routine device pins. Reload the daemon so its frozen
-      // scheduler state cannot keep firing a job that moved to another host.
       if (anyPulled) {
         const { isDaemonRunning, signalDaemonReload } = await import('../lib/daemon/daemon.js');
         if (isDaemonRunning() && signalDaemonReload()) {

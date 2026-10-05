@@ -772,7 +772,6 @@ export function readableMergeRefusal(message: string): string {
   return message;
 }
 
-// The reviewed SHA is sent to GitHub so a moved head fails instead of merging unseen code.
 export async function mergeProjectPr(
   repo: string,
   number: number,
@@ -809,7 +808,6 @@ export async function mergeProjectPr(
   return { repo, number, method: chosen, merged: true, sha: out.trim() || null, message: 'Merged' };
 }
 
-// Re-read and pin the live head for every mutation that depends on review.
 function assertHeadIs(repo: string, number: number, live: string, seen: string): string {
   if (!live.toLowerCase().startsWith(seen.toLowerCase())) {
     throw new Error(`${repo}#${number} moved to ${live.slice(0, 7)} since you looked at ${seen.slice(0, 7)}; reload it and try again.`);
@@ -959,7 +957,7 @@ export async function approveProjectPr(
   } catch (err) {
     return { ...base, submitted: false, sha: null, id: null, url: null, message: ghFailure(err) };
   }
-  // Attach approval to the exact reviewed commit, not whichever head wins a race.
+
   const args = ['api', '-X', 'POST', `repos/${repo}/pulls/${number}/reviews`, '-f', 'event=APPROVE', '-f', `commit_id=${commitId}`];
   if (body) args.push('-f', `body=${body}`);
   let posted: { id?: number; url?: string };

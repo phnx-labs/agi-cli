@@ -20,7 +20,6 @@ import { machineId } from '../machine-id.js';
 import { getMonitorsDir, getSystemMonitorsDir } from '../state.js';
 import * as state from '../state.js';
 
-/** Minimal valid monitor: poll a command, on-change, notify. */
 function base(partial: Partial<MonitorConfig> = {}): Partial<MonitorConfig> {
   return {
     name: 'm',
@@ -188,20 +187,11 @@ describe('monitorRunsOnThisDevice — owner semantics', () => {
     expect(monitorRunsOnThisDevice({ devices: ['other-a', 'other-b'] })).toBe(false);
   });
 
-  // ─── SING-9: an unpinned shared-input built-in must NOT fire on every box ──────
-  // The exact double-fire bug class the repo AGENTS.md names as blocking (the
-  // 2026-08-03 incident): a system built-in that polls a fleet-shared queue (a PR
-  // list, a tracker) ships enabled with no device pin, so without this guard every
-  // daemon fires it and races on the shared queue. `ownerHost` is passed
-  // explicitly so the placement rule is asserted without a live tailnet.
   const OTHER_BOX = 'some-other-box-xyz';
 
   it('an unpinned SYSTEM built-in does NOT fire on a non-owner box', () => {
-    // pr-merge-on-green shape: system scope, no device pin, mode `every`.
     const builtin = { scope: 'system' as const };
-    // Owner is another box → this daemon must stay inert (no double-fire).
     expect(monitorRunsOnThisDevice(builtin, OTHER_BOX)).toBe(false);
-    // Explicitly-declared shared-input, same result.
     expect(monitorRunsOnThisDevice({ scope: 'system', sharedInput: true }, OTHER_BOX)).toBe(false);
   });
 
@@ -210,14 +200,10 @@ describe('monitorRunsOnThisDevice — owner semantics', () => {
   });
 
   it('an unpinned SYSTEM built-in fires NOWHERE when no owner resolves (fail safe)', () => {
-    // Multi-box fleet, no interactive host pinned → no safe single owner. Firing
-    // nowhere (a silent no-op) beats a fleet-wide double-fire.
     expect(monitorRunsOnThisDevice({ scope: 'system' }, '')).toBe(false);
   });
 
   it('a device-local built-in (sharedInput: false) still fires fleet-wide', () => {
-    // Input is the firing box's own state — every daemon may fire it, so the
-    // owner override never applies (ownerHost is irrelevant here).
     expect(monitorRunsOnThisDevice({ scope: 'system', sharedInput: false }, OTHER_BOX)).toBe(true);
   });
 
@@ -227,11 +213,8 @@ describe('monitorRunsOnThisDevice — owner semantics', () => {
   });
 
   it('a USER monitor keeps its fleet-wide default; opts IN to owner-only with sharedInput', () => {
-    // Unpinned user monitor unchanged — fires everywhere (the operator owns
-    // single-executor discipline per SING-9).
     expect(monitorRunsOnThisDevice({ scope: 'user' }, OTHER_BOX)).toBe(true);
     expect(monitorRunsOnThisDevice({}, OTHER_BOX)).toBe(true);
-    // Explicit opt-in makes a user monitor owner-restricted too.
     expect(monitorRunsOnThisDevice({ scope: 'user', sharedInput: true }, OTHER_BOX)).toBe(false);
   });
 
@@ -240,7 +223,6 @@ describe('monitorRunsOnThisDevice — owner semantics', () => {
     expect(requiresSingleOwner({ scope: 'system', sharedInput: false })).toBe(false);
     expect(requiresSingleOwner({ scope: 'user' })).toBe(false);
     expect(requiresSingleOwner({ scope: 'user', sharedInput: true })).toBe(true);
-    // A pin is an explicit executor choice — never owner-overridden.
     expect(requiresSingleOwner({ scope: 'system', device: 'box' })).toBe(false);
     expect(requiresSingleOwner({ scope: 'system', devices: ['box'] })).toBe(false);
   });
@@ -296,10 +278,6 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
   const prevUser = process.env.AGENTS_MONITORS_DIR;
   const prevSys = process.env.AGENTS_SYSTEM_MONITORS_DIR;
 
-  /**
-   * A full valid monitor YAML: a poll source + on-change condition + a notify
-   * action on the given channel. `header` prepends name/enabled lines per test.
-   */
   function monitorYaml(header: string, notifyChannel = 'telegram'): string {
     return (
       header +
@@ -337,9 +315,6 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
     expect(found).toBeDefined();
     expect(found!.enabled).toBe(true);
     expect(readMonitor('built-in')?.source.type).toBe('poll');
-    // getMonitorPath is user-layer only (its caller writes), so a system-only
-    // built-in returns null — `edit` materializes a user copy rather than
-    // opening the pull-only mirror.
     expect(getMonitorPath('built-in')).toBeNull();
   });
 
@@ -347,65 +322,48 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
     fs.writeFileSync(path.join(sysDir, 'dupe.yml'), monitorYaml('name: dupe\nenabled: true\n', 'telegram'));
     fs.writeFileSync(path.join(userDir, 'dupe.yml'), monitorYaml('name: dupe\nenabled: true\n', 'desktop'));
 
-    // Exactly one entry for the name, and it is the user copy.
     const matches = listMonitors().filter((m) => m.name === 'dupe');
     expect(matches.length).toBe(1);
     expect(matches[0].action.notifyChannel).toBe('desktop');
     expect(readMonitor('dupe')?.action.notifyChannel).toBe('desktop');
-    // getMonitorPath returns the user copy, not the system one.
     expect(getMonitorPath('dupe')).toBe(path.join(userDir, 'dupe.yml'));
   });
 
   it('(c) a system built-in with no enabled: field is ENABLED by default (PHNX-2506)', () => {
-    // The bug: monitors were the lone system-layer resource that shipped
-    // disabled+invisible. A built-in must now be on by default like rules,
-    // hooks, commands, and skills — visible and firing on every install.
     fs.writeFileSync(path.join(sysDir, 'builtin.yml'), monitorYaml('name: builtin\n'));
 
     expect(readMonitor('builtin')?.enabled).toBe(true);
     expect(listMonitors().find((m) => m.name === 'builtin')?.enabled).toBe(true);
-    // It is tagged as coming from the system layer so `list`/`view` can mark it.
     expect(readMonitor('builtin')?.scope).toBe('system');
 
-    // A user monitor with no enabled: field still defaults to enabled too, and is
-    // tagged `user` — same enabled default, distinct scope.
     fs.writeFileSync(path.join(userDir, 'userdefault.yml'), monitorYaml('name: userdefault\n'));
     expect(readMonitor('userdefault')?.enabled).toBe(true);
     expect(readMonitor('userdefault')?.scope).toBe('user');
 
-    // The healthy opt-OUT path: the user shadows a built-in with enabled: false.
     fs.writeFileSync(path.join(sysDir, 'off.yml'), monitorYaml('name: off\nenabled: false\n'));
     expect(readMonitor('off')?.enabled).toBe(false);
   });
 
   it('(d) pausing a system built-in writes into the USER dir, never the system dir', () => {
-    // Built-ins ship on; the only toggle is pause/resume (there is no enable/disable
-    // verb). Pausing must materialize a user copy — the system mirror is pull-only.
     fs.writeFileSync(path.join(sysDir, 'builtin.yml'), monitorYaml('name: builtin\n'));
     expect(readMonitor('builtin')?.enabled).toBe(true);
 
-    setMonitorEnabled('builtin', false); // the `pause` write path
+    setMonitorEnabled('builtin', false);
 
-    // The user dir now holds the materialized copy; the system mirror is untouched.
     expect(fs.existsSync(path.join(userDir, 'builtin.yml'))).toBe(true);
     const sysBody = fs.readFileSync(path.join(sysDir, 'builtin.yml'), 'utf-8');
     expect(sysBody).not.toContain('enabled: false');
-    // `scope` is a derived annotation — it must NOT persist into the written YAML,
-    // or a materialized user copy would carry `scope: system`.
     expect(fs.readFileSync(path.join(userDir, 'builtin.yml'), 'utf-8')).not.toContain('scope:');
-    // The user copy now wins and reads disabled, tagged as a user-layer monitor.
     expect(readMonitor('builtin')?.enabled).toBe(false);
     expect(readMonitor('builtin')?.scope).toBe('user');
     expect(getMonitorPath('builtin')).toBe(path.join(userDir, 'builtin.yml'));
 
-    // Editing (write) also lands in the user dir only.
     const cfg = readMonitor('builtin')!;
     cfg.action = { type: 'notify', notifyChannel: 'desktop' };
     writeMonitor(cfg);
     expect(getMonitorsDir()).toBe(userDir);
     expect(getSystemMonitorsDir()).toBe(sysDir);
     expect(readMonitor('builtin')?.action.notifyChannel).toBe('desktop');
-    // The system file's action was not rewritten.
     expect(fs.readFileSync(path.join(sysDir, 'builtin.yml'), 'utf-8')).toContain('notifyChannel: telegram');
   });
 });

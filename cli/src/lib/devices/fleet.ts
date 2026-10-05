@@ -59,7 +59,7 @@ export function fleetHealthSkip(
   currentSkip: FleetSkipReason | string | undefined,
   stats: DeviceStats | undefined,
 ): FleetSkipReason | string | undefined {
-  // Only fleet health trusts its same-route probe failure enough to skip the later version and doctor dials.
+
   if (currentSkip) return currentSkip;
   if (stats?.reachable === false) return 'unreachable';
   return undefined;

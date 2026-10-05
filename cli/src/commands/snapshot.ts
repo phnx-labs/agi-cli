@@ -1,12 +1,3 @@
-/**
- * `agents devices snapshot` — one-process consumer snapshot for pollers.
- *
- * Replaces the N× `view --json` + `sessions --active --json` (+ optional feed)
- * fork storm with a single command. Does NOT replace `agents sync status`, which
- * remains the UnifiedSyncStatus sync contract for menubar / Agency drift.
- *
- * JSON shape: {@link FleetSnapshot} in `lib/snapshot.ts` (version: 1).
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -36,7 +27,6 @@ function resolveAgentFilter(raw: string | undefined): AgentId | undefined {
   return name;
 }
 
-/** Compact human summary — the JSON path is the real contract. */
 function renderHuman(snap: FleetSnapshot): void {
   console.log(chalk.bold('Fleet snapshot') + chalk.gray(`  ·  ${snap.host}  ·  ${snap.capturedAt}`));
 

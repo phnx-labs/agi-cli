@@ -38,25 +38,17 @@ import type { DaemonServiceId } from '../daemon-services.js';
 
 const ATTENTION_NOTIFY_TICK_MS = 5_000;
 const ATTENTION_NOTIFY_DEADLINE_MS = 10_000;
-/** Feed retention: a notified-ledger sidecar older than this is pruned. */
 const LEDGER_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
-/** Prune the ledger at most this often — the dir is tiny, but a dir walk every 5s is waste. */
 const LEDGER_PRUNE_EVERY_MS = 60 * 60 * 1000;
-/** UNUserNotificationCenter caps action buttons; the argv contract is ≤ 6 choices. */
 const MAX_CHOICES = 6;
-/** Body cap — a banner truncates anyway, and a wall of text is noise. */
 const BODY_MAX = 200;
 
-/** Which attention kinds produce a banner, and the category + title verb each carries. */
 const BANNER_KINDS: Partial<Record<AttentionKind, { category: NonNullable<DesktopNotification['category']>; label: string }>> = {
   permission: { category: 'permission', label: 'Command approval' },
   question: { category: 'question', label: 'Question' },
   plan_review: { category: 'plan_review', label: 'Plan review' },
   stall: { category: 'failure', label: 'Failed' },
   failure: { category: 'failure', label: 'Failed' },
-  // A request record the CLI could not confirm is still pending: the `failure`
-  // category is the companion's one button set with no approval action — just
-  // Open terminal — which is exactly the honest offer here.
   unverified: { category: 'failure', label: 'Could not verify request' },
 };
 
@@ -65,12 +57,6 @@ function shorten(text: string, max = BODY_MAX): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/**
- * The banner for one attention item, or `undefined` when its kind does not
- * notify (`done` comes from the run process; `declared`/`review` are surfaced in
- * the feed, not as a native banner). Pure — the service and its test both build
- * through here, so what ships is what is asserted.
- */
 export function buildAttentionNotification(item: AttentionItem, session: ActiveSession): DesktopNotification | undefined {
   const spec = BANNER_KINDS[item.kind];
   if (!spec) return undefined;
@@ -87,8 +73,6 @@ export function buildAttentionNotification(item: AttentionItem, session: ActiveS
   if (item.sessionId) n.sessionId = item.sessionId;
   const subtitle = [item.host, item.project].filter(Boolean).join(' · ');
   if (subtitle) n.subtitle = subtitle;
-  // A stall/failure has no answerable option list — it offers one button that
-  // opens the session's terminal. Everything else carries the reconciled choices.
   const choices =
     spec.category === 'failure'
       ? [{ id: 'open-terminal', label: 'Open terminal' }]
@@ -98,15 +82,10 @@ export function buildAttentionNotification(item: AttentionItem, session: ActiveS
 }
 
 interface AttentionNotifyServiceOptions {
-  /** Live-session source (default: the real active-session query). Injected in tests. */
   getSessions?: () => Promise<ActiveSession[]>;
-  /** Notifier (default: the real desktop notifier). Injected in tests to capture posts. */
   notify?: (n: DesktopNotification) => void;
-  /** Feed store root (default: the real feed dir). Overridden in tests. */
   feedRoot?: string;
-  /** Notified-ledger dir (default: `<feedRoot>/notified`). Overridden in tests. */
   ledgerDir?: string;
-  /** Clock (default: `Date.now`). Injected in tests. */
   now?: () => number;
 }
 
@@ -132,11 +111,9 @@ export class AttentionNotifyService extends BasePeriodicService {
   }
 
   protected async onStart(_ctx: DaemonContext): Promise<void> {
-    // No handles to open — each tick re-reads sessions and the ledger.
   }
 
   protected async onStop(): Promise<void> {
-    // Nothing to release — the supervisor's timer teardown is the only cleanup.
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
@@ -144,8 +121,6 @@ export class AttentionNotifyService extends BasePeriodicService {
     const host = machineId();
     for (const session of sessions) {
       if (!session.sessionId) continue;
-      // ActiveSession.host names the terminal app; the reconciler's host is the
-      // device scope, so the attention key is fleet-routable (mirrors watch.ts).
       const projected: ActiveSession = { ...session, host };
       const blockId = blockIdForSession(session.sessionId);
       const item = reconcileAttention({
@@ -165,13 +140,11 @@ export class AttentionNotifyService extends BasePeriodicService {
     await this.pruneLedger();
   }
 
-  /** Filesystem-safe sidecar name for an attention key (`host/session/generation`). */
   private ledgerPath(key: string): string {
     return path.join(this.ledgerDir, encodeURIComponent(key));
   }
 
   private async hasNotified(key: string): Promise<boolean> {
-    // fs/promises has no existsSync; a stat that rejects with ENOENT is the miss.
     try {
       await fs.promises.stat(this.ledgerPath(key));
       return true;
@@ -193,7 +166,7 @@ export class AttentionNotifyService extends BasePeriodicService {
     try {
       names = await fs.promises.readdir(this.ledgerDir);
     } catch {
-      return; // No ledger dir yet — nothing to prune.
+      return;
     }
     for (const name of names) {
       const filePath = path.join(this.ledgerDir, name);
@@ -201,7 +174,6 @@ export class AttentionNotifyService extends BasePeriodicService {
         const stat = await fs.promises.stat(filePath);
         if (nowMs - stat.mtimeMs > LEDGER_RETENTION_MS) await fs.promises.rm(filePath, { force: true });
       } catch {
-        // A file that vanished mid-walk is already gone; skip it.
       }
     }
   }

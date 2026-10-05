@@ -4,11 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { sessionFileTimes } from './active.js';
 
-// Regression for the "every running agent shows 0s ago" bug: the process-scan and
-// tmux-scan paths stamped no startedAtMs / lastActivityMs, so the Floor rendered every
-// interactive session as "0s ago" even when its transcript was fully resolved.
-// sessionFileTimes is the single stat that feeds both stamps — it must return a real
-// last-write (mtime) for a live transcript, and NOTHING (not epoch 0) for an absent one.
 
 let dir: string;
 let file: string;
@@ -20,17 +15,16 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
 });
 
 describe('sessionFileTimes', () => {
   it('returns a real last-write (mtime) for a live transcript', () => {
-    const before = Date.now() + 1000; // allow for fs mtime granularity/skew
+    const before = Date.now() + 1000;
     const { mtimeMs, birthtimeMs } = sessionFileTimes(file);
     expect(typeof mtimeMs).toBe('number');
     expect(mtimeMs!).toBeGreaterThan(0);
     expect(mtimeMs!).toBeLessThanOrEqual(before);
-    // birthtime is filesystem-dependent; when present it must be a real epoch, never 0.
     if (birthtimeMs !== undefined) expect(birthtimeMs).toBeGreaterThan(0);
   });
 

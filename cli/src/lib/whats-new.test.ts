@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderWhatsNew } from './whats-new.js';
 
-// Strip ANSI so assertions read against plain text (robust under FORCE_COLOR).
 // eslint-disable-next-line no-control-regex
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -52,10 +51,8 @@ describe('renderWhatsNew', () => {
   it('keeps only headings as bullets and drops the verbose sub-bullets', () => {
     const lines = renderWhatsNew(CHANGELOG, '1.20.31', '1.20.34').map(plain);
 
-    // Version header + its single heading, nothing from the detail bullets.
     expect(lines).toContain('v1.20.34');
     expect(lines).toContain('  • Test suite runs remotely on a crabbox VM (#525, #540)');
-    // The detail sub-bullets must be gone.
     expect(lines.some((l) => l.includes('release.sh'))).toBe(false);
     expect(lines.some((l) => l.includes('box acquisition'))).toBe(false);
   });
@@ -69,9 +66,7 @@ describe('renderWhatsNew', () => {
 
   it('bounds the range to (from, to] — excludes from, includes to, skips out-of-range', () => {
     const lines = renderWhatsNew(CHANGELOG, '1.20.31', '1.20.34').map(plain);
-    // from (1.20.31) is excluded ...
     expect(lines).not.toContain('v1.20.31');
-    // ... and versions below from are never shown.
     expect(lines.some((l) => l.includes('Older release'))).toBe(false);
     expect(lines).not.toContain('v1.20.30');
   });
@@ -87,7 +82,6 @@ describe('renderWhatsNew', () => {
       '  • Codex mode flags now match what the mode names promise — only `--mode skip` is yolo.',
     );
     expect(lines).toContain('  • `--add-dir` is now forwarded to Codex (it was silently dropped).');
-    // The verbose prose after the bold heading must be gone.
     expect(lines.some((l) => l.includes('bypass flag wins'))).toBe(false);
     expect(lines.some((l) => l.includes('verbose prose'))).toBe(false);
   });
@@ -106,9 +100,7 @@ describe('renderWhatsNew', () => {
 
   it('a range mixing both formats renders one bullet per heading in each', () => {
     const lines = renderWhatsNew(CHANGELOG, '1.20.28', '1.20.35').map(plain);
-    // Modern section: entries render.
     expect(lines.some((l) => l.includes('Codex mode flags'))).toBe(true);
-    // Old section: heading renders, its bold-led sub-bullet does not.
     expect(lines).toContain('  • An old-format heading with bold-led sub-bullets');
     expect(lines.some((l) => l.includes('A bold-led sub-bullet'))).toBe(false);
   });

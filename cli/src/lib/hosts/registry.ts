@@ -68,7 +68,6 @@ function deviceStatus(device: DeviceProfile): Host['status'] {
 }
 
 function deviceHost(device: DeviceProfile, user: string | undefined, overlay?: HostEntry): ResolvedHost {
-  // Live device identity owns address/auth/presence; overlays add capabilities and unknown-platform OS.
   const resolved = resolveDeviceProfile(device);
   const address = resolved.address.dnsName ?? resolved.address.ip;
   return {
@@ -122,7 +121,6 @@ export interface MatchHostOptions {
 }
 
 export async function matchHost(name: string, opts: MatchHostOptions = {}): Promise<ResolvedHost | null> {
-  // Bare literal fallback is caller-scoped so typos and capability tokens are never silently dialed.
   if (isDeviceInteractive(name)) {
     const pinned = resolveInteractiveDevice();
     if (!pinned) throw new Error(interactiveUnsetError());
@@ -167,7 +165,7 @@ export async function matchHost(name: string, opts: MatchHostOptions = {}): Prom
 }
 
 export async function listAllHosts(): Promise<Host[]> {
-  // Provider precedence preserves live device dispatchability when registrations collide.
+
   const byName = new Map<string, Host>();
   for (const provider of getAllProviders()) {
     for (const host of await provider.list()) {

@@ -14,7 +14,6 @@ import {
 import { resolveWatchdogSessionPath } from './read.js';
 
 
-// Keep these specific: a false positive exits a healthy interactive session.
 const ROTATE_LIMIT_PATTERNS: RegExp[] = [
   /you'?ve hit your [\w-]*\s?limit/i,
   /hit your (weekly|daily|usage|session) limit/i,
@@ -37,7 +36,7 @@ export function classifyTailForRotate(tailLines: string[], nowMs: number): Rotat
 }
 
 export function parseRotateResetMs(text: string, nowMs: number): number | undefined {
-  // Parse explicit UTC timestamps before permissive local/time-zone text.
+
   const iso = /resets\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)\b/i.exec(text);
   if (iso) {
     const parsedIso = Date.parse(iso[1]);
@@ -101,7 +100,6 @@ function nextOccurrenceMs(
 }
 
 
-// These are raw keys sent without Enter; Claude needs Esc before the interrupt sequence.
 export const ROTATE_EXIT_SEQUENCES: Record<string, string[]> = {
   claude: ['\x1b', '\x03', '\x03'],
   codex: ['\x03', '\x03'],
@@ -163,7 +161,6 @@ export interface RotateState {
 
 export const DEFAULT_ROTATE_READINESS_MS = 60_000;
 export const DEFAULT_ROTATE_SKIP_COOLDOWN_MS = 30 * 60_000;
-// Failed destructive attempts are suppressed so later ticks do not repeatedly attack the terminal.
 export const DEFAULT_ROTATE_FAILED_COOLDOWN_MS = 15 * 60_000;
 
 function rotateDir(dir: string): string {
@@ -255,7 +252,7 @@ export interface RotateGateResult {
 }
 
 export async function defaultRotateGate(): Promise<RotateGateResult> {
-  // Mirror run-auto's cache-only health selection before spending an old session on rotation.
+
   const byHarness = await collectHarnessCandidates();
   const pick = pickHarnessWeighted(byHarness);
   if (pick) {
@@ -286,7 +283,7 @@ function normalizeCwd(cwd: string | undefined): string | undefined {
 }
 
 export function isCorrelatedRelaunch(state: RotateState, s: ActiveSession): boolean {
-  // A fresh session counts only on the same host and cwd; busy hosts produce unrelated sessions.
+
   if (!s.sessionId || s.sessionId === state.sessionId) return false;
   if ((s.startedAtMs ?? 0) < state.startedAtMs) return false;
   const cwd = normalizeCwd(state.cwd);

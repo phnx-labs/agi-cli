@@ -47,7 +47,7 @@ interface DetachedHelperRule {
 }
 
 function argv0Basename(args: string): string {
-  // Helper rules anchor argv0; a quoted daemon-like substring in live work is not executable identity.
+
   const m = /^\s*(\S+)/.exec(args);
   const token = m ? m[1] : '';
   const base = token.split(/[\\/]/).pop() ?? '';
@@ -70,7 +70,7 @@ const CLAUDE_BG_DAEMON: DetachedHelperRule = {
 export const DETACHED_HELPER_RULES: DetachedHelperRule[] = [CLAUDE_BG_DAEMON];
 
 export function isProtectedAgentsService(args: string): boolean {
-  // Fleet control, credential broker, and menu processes are never agent-orphan candidates.
+
   return /\b__daemon-run\b/.test(args)
     || /\bsecrets\s+_agent-run\b/.test(args)
     || /\bAGI Menu\b/.test(args)
@@ -105,7 +105,7 @@ export function selectOrphanProcesses(
     ? new Set(descendantsOf(procs, [...opts.livePanePids]))
     : undefined;
   const ownedByLivePane = (p: AgentProcess): boolean => {
-    // Exclude every descendant of every live pane, independent of stale ownership markers.
+
     if (livePaneSubtree?.has(p.pid)) return true;
     if (!p.tmuxSession) return false;
     const owner = owners.get(p.tmuxSession);
@@ -121,7 +121,7 @@ export function selectOrphanProcesses(
   };
 
   if (ownersReliable) {
-    // Tier 1 requires a present owner that is both detached and dead; missing ownership proves nothing.
+
     for (const p of procs) {
       if (!p.tmuxSession || !eligible(p)) continue;
       const owner = owners.get(p.tmuxSession);
@@ -135,7 +135,7 @@ export function selectOrphanProcesses(
   for (const p of procs) {
     if (!eligible(p) || ownedByLivePane(p)) continue;
     for (const rule of DETACHED_HELPER_RULES) {
-      // Detached helpers qualify only when their declared spawner is confirmed dead.
+
       const spawner = rule.spawnerPid(p.args);
       if (spawner === undefined || isAlive(spawner)) continue;
       seeds.push(p);
@@ -295,7 +295,7 @@ async function readAllPaneOwners(
 }
 
 function selfProtectedPids(procs: AgentProcess[]): Set<number> {
-  // Protect the reaper and its full process ancestry from its own destructive selection.
+
   const byPid = new Map(procs.map(p => [p.pid, p]));
   const out = new Set<number>([process.pid]);
   let cursor = process.ppid;
@@ -336,7 +336,7 @@ export async function reapOrphanAgentProcesses(
 
   const { owners, panePids, reliable } = await readAllPaneOwners(opts.socket);
   if (!reliable) {
-    // Query failure disables the ownership tier; an empty map is not proof that sessions vanished.
+
     result.warnings.push('tier 1 (pane-marker) sweep skipped this tick: a tmux session query failed to answer');
   }
   const procs = await readAgentProcesses({ pids: opts.pids });

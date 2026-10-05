@@ -68,12 +68,8 @@ describe('Cursor session parsing and discovery metadata', () => {
   });
 
   test('carries a tool call\'s `description` as its per-call label', () => {
-    // The same signal the Claude arm reads, on the parser Cursor and Droid
-    // share — without it the timeline's now-line falls back to raw command
-    // text (review BLOCKER 3).
     const events = parseCursor(transcriptPath);
     expect(events[5].label).toBe('Audit session commands');
-    // A call that wrote no description gets none, rather than an invented one.
     expect(events[6].label).toBeUndefined();
   });
 
@@ -116,9 +112,6 @@ describe('Cursor session parsing and discovery metadata', () => {
   });
 
   test('collapses a scaffolded chatMeta.title to the skill, matching Claude ai-title', () => {
-    // Cursor writes its own auto-title into chats/.../meta.json independently of
-    // the Claude JSONL ai-title path. The same skill-preamble echo that PR #2995
-    // cleaned for Claude must collapse here too — label wins on every surface.
     const metaPath = path.join(root, '.cursor', 'chats', 'workspace-hash', SESSION_ID, 'meta.json');
     fs.mkdirSync(path.dirname(metaPath), { recursive: true });
     fs.writeFileSync(metaPath, JSON.stringify({

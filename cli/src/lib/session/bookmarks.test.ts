@@ -9,20 +9,12 @@ process.env.HOME = TEST_HOME;
 const { listBookmarks, isBookmarked, setBookmark, toggleBookmark, bookmarksFilePath, clearBookmarksCache } =
   await import('./bookmarks.js');
 
-/**
- * Bookmarks are the one piece of per-session state a human ASSERTS rather than
- * the scanner deriving, so the properties that matter are durability (a real
- * file, atomically written, surviving a reindex of the session cache) and that
- * a corrupt or absent file degrades to "nothing is bookmarked" instead of taking
- * `agents sessions` down with it.
- */
 describe('session bookmarks', () => {
   it('round-trips a bookmark through the real file and reports it back', () => {
     expect(isBookmarked('sid-a')).toBe(false);
     expect(setBookmark('sid-a', true)).toBe(true);
     expect(isBookmarked('sid-a')).toBe(true);
     expect([...listBookmarks()]).toEqual(['sid-a']);
-    // The store is a real file on disk, not process state.
     const onDisk = JSON.parse(fs.readFileSync(bookmarksFilePath(), 'utf8'));
     expect(onDisk.sessionIds).toContain('sid-a');
     expect(onDisk.version).toBe(1);
@@ -47,7 +39,6 @@ describe('session bookmarks', () => {
   it('picks up a file another process rewrote (the memoized read is mtime-keyed)', () => {
     setBookmark('sid-d', true);
     expect(isBookmarked('sid-d')).toBe(true);
-    // Simulate a peer/sync writing the file underneath us.
     fs.writeFileSync(bookmarksFilePath(), JSON.stringify({ version: 1, sessionIds: ['sid-elsewhere'] }));
     clearBookmarksCache();
     expect(isBookmarked('sid-d')).toBe(false);
@@ -58,7 +49,6 @@ describe('session bookmarks', () => {
     fs.writeFileSync(bookmarksFilePath(), '{ this is not json');
     clearBookmarksCache();
     expect(listBookmarks().size).toBe(0);
-    // Non-string entries are dropped, not trusted into the set.
     fs.writeFileSync(bookmarksFilePath(), JSON.stringify({ version: 1, sessionIds: ['ok', 42, null, ''] }));
     clearBookmarksCache();
     expect([...listBookmarks()]).toEqual(['ok']);

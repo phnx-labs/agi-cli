@@ -109,7 +109,7 @@ function issue(stateType: string, msId?: string) {
 const M1 = { id: 'm1', name: 'Beta cut', targetDate: '2026-08-21' };
 const M2 = { id: 'm2', name: 'GA', targetDate: '2026-09-30' };
 
-// Milestones come from declarations, not issue membership; TTL/stale-last-good protect request budget, explicit Linear next beats dates.
+
 describe('nextMilestone', () => {
   it('picks the earliest-dated milestone that still has work', () => {
     expect(

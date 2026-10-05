@@ -12,7 +12,7 @@ function assertName(worktreeName: string): void {
 }
 
 export function remotePathExpr(p: string): string {
-  // Remote paths are shell expressions; validate/quote separately from git argv.
+
   if (p === '~') return '"$HOME"';
   if (p.startsWith('~/')) return '"$HOME"/' + shellQuote(p.slice(2));
   return shellQuote(p);
@@ -134,7 +134,6 @@ export function ensureRemoteRepo(target: string, repo: string, slug: string, opt
         `or run this teammate from a git checkout so origin can be inferred.`,
     );
   }
-  // New clone sources are validated here; executable ext:: transports are forbidden.
   assertSafeGitTransport(repo);
   const clone = sshExec(
     target,

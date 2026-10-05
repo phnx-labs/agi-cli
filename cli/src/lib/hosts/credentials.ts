@@ -12,7 +12,7 @@ export interface HostCredentials {
 }
 
 export function buildHostCredentialScript(opts: HostCredentials): { setup: string; teardown: string } {
-  // Native OAuth/session state is device-bound; portable account sync is the supported transfer path.
+
   const native = opts.runtimes.filter(isNativeOAuthRuntime);
   if (native.length > 0) {
     throw new Error(nativeOAuthTransferRefusal(native));

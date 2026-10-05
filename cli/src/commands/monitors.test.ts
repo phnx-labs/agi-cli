@@ -1,10 +1,3 @@
-/**
- * End-to-end CLI subprocess tests for `agents monitors` inspection output.
- *
- * Each test spawns the real CLI against an isolated HOME with real monitor YAML
- * and history files. This catches Commander flag wiring plus stdout/stderr
- * stream regressions without mocking monitor internals.
- */
 import { describe, it, expect } from 'vitest';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -77,16 +70,7 @@ function run(home: string, args: string[], extraEnv: Record<string, string> = {}
       ...process.env,
       ...extraEnv,
       HOME: home,
-      // os.homedir() reads USERPROFILE on Windows, so HOME alone leaves the
-      // spawned CLI resolving the real profile ('agents-cli is not set up').
       USERPROFILE: home,
-      // The pinned PATH keeps the run hermetic on POSIX — it must NOT be
-      // widened to include the running node's dir, because that also exposes a
-      // second globally-installed `agents` (e.g. /opt/homebrew/bin) and the CLI
-      // then prints "Multiple agents-cli installs detected" on stderr. Fixtures
-      // that need node spell it absolutely instead. The pin can't apply on
-      // Windows, where those directories don't exist and the child would lose
-      // node/git entirely (that failure showed as empty stderr).
       PATH: process.platform === 'win32' ? (process.env.PATH ?? '') : '/usr/local/bin:/usr/bin:/bin',
       AGENTS_SKIP_MIGRATION: '1',
       FORCE_COLOR: '0',
@@ -154,8 +138,6 @@ describe('monitors inspection JSON and stderr', () => {
 
   it('a system built-in is visible, enabled, and tagged (built-in) — PHNX-2506 items 1+2', () => {
     const home = makeHome();
-    // A shipped built-in with no `enabled:` field. Before the fix this listed as
-    // disabled and untagged; now it must read enabled and carry scope=system.
     writeSystemMonitor(home, {
       name: 'pr-merge-on-green',
       source: { type: 'poll', command: 'gh pr list --author @me', interval: '2m' },
@@ -163,7 +145,6 @@ describe('monitors inspection JSON and stderr', () => {
       action: { type: 'notify', notifyChannel: 'telegram' },
     });
 
-    // --local skips the fleet fan-out so the assertion is deterministic.
     const jsonRes = run(home, ['list', '--json', '--local']);
     expect(jsonRes.status).toBe(0);
     const payload = JSON.parse(jsonRes.stdout);
@@ -173,7 +154,6 @@ describe('monitors inspection JSON and stderr', () => {
     expect(row.builtin).toBe(true);
     expect(row.scope).toBe('system');
 
-    // The human listing tags it and does not bury it.
     const textRes = run(home, ['list', '--local']);
     expect(textRes.stdout).toContain('pr-merge-on-green');
     expect(textRes.stdout).toContain('(built-in)');
@@ -181,26 +161,11 @@ describe('monitors inspection JSON and stderr', () => {
 
   it('test --json evaluates once, prints the dry-run decision as JSON, and writes no state', () => {
     const home = makeHome();
-    // The monitor command runs through the host shell, so it has to be
-    // shell-portable. printf doesn't exist on cmd.exe, and node -e "..." loses
-    // its quoting there (node received a literal leading quote and threw
-    // SyntaxError). A script file sidesteps shell quoting entirely: the command
-    // doesn't open with a quote, and run() puts the running node's directory on
-    // PATH so the bare name resolves on both platforms.
     const emitter = path.join(home, 'emit-fixture.cjs');
     fs.writeFileSync(emitter, "process.stdout.write('build fail\\nnext\\n');\n");
     writeMonitor(home, {
       name: 'ci',
       enabled: true,
-      // Unquoted: on Windows the quotes survive into the argument and node
-      // looks for a path with literal quote characters in it. mkdtemp paths
-      // carry no spaces on either platform, so they aren't needed.
-      //
-      // POSIX spells node absolutely because the pinned PATH above deliberately
-      // excludes it. Windows can't: process.execPath there is
-      // "C:\Program Files\nodejs\node.exe" and cmd.exe mangles a command line
-      // opening with a quoted path containing spaces — but PATH is inherited on
-      // Windows, so the bare name resolves.
       source: {
         type: 'command',
         command: process.platform === 'win32' ? `node ${emitter}` : `${process.execPath} ${emitter}`,
@@ -266,7 +231,6 @@ describe('monitors inspection JSON and stderr', () => {
       expect(out).toContain('daemon.enabled=false');
       expect(out).toContain('agents daemon enable');
       expect(out).not.toContain('Daemon started');
-      // Refused auto-start must skip the 12s engine-pickup wait.
       expect(out).not.toContain('waiting for the engine');
       expect(fs.existsSync(path.join(home, '.agents', 'monitors', 'ci.yml'))).toBe(true);
       expect(fs.existsSync(pidPath)).toBe(false);
@@ -275,7 +239,7 @@ describe('monitors inspection JSON and stderr', () => {
         try {
           const pid = Number.parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
           if (Number.isFinite(pid) && pid > 0) process.kill(pid, 'SIGTERM');
-        } catch { /* already gone */ }
+        } catch {  }
       }
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -299,9 +263,6 @@ describe('monitors inspection JSON and stderr', () => {
     const deviceDir = path.join(home, '.agents', 'devices', 'testbox');
     fs.mkdirSync(deviceDir, { recursive: true });
     fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), 'config:\n  daemonEnabled: false\n');
-    // A direct child of THIS test process (not a shell background job) — stays
-    // alive across the synchronous CLI subprocess call below regardless of how
-    // the sandbox reaps orphaned job-control children.
     const child = spawn('sleep', ['30']);
     const pid = child.pid!;
 
@@ -316,7 +277,6 @@ describe('monitors inspection JSON and stderr', () => {
       const written = yaml.parse(fs.readFileSync(path.join(home, '.agents', 'monitors', 'live-watch.yml'), 'utf-8'));
       expect(written.source.type).toBe('command');
       expect(written.source.command).toContain(`kill -0 ${pid}`);
-      // Defaults to firing on exit, not the plain on-change default --watch gets.
       expect(written.condition).toEqual({ mode: 'match', match: 'exited' });
     } finally {
       child.kill('SIGKILL');
@@ -324,13 +284,11 @@ describe('monitors inspection JSON and stderr', () => {
     }
   });
 
-  // POSIX-only: uses `true` as a no-op $EDITOR; cmd.exe has no equivalent.
   it.skipIf(process.platform === 'win32')(
     'edit on a system built-in materializes a user copy and never writes the system mirror',
     () => {
       const home = makeHome();
       const sysFile = path.join(home, '.agents', '.system', 'monitors', 'ci-built-in.yml');
-      // A built-in with no `enabled:` field (enabled by default) and no user copy.
       writeSystemMonitor(home, {
         name: 'ci-built-in',
         source: { type: 'poll', command: 'echo hi', interval: '30s' },
@@ -339,22 +297,16 @@ describe('monitors inspection JSON and stderr', () => {
       });
       const sysBefore = fs.readFileSync(sysFile, 'utf-8');
 
-      // `true` ignores its file arg and exits 0, so the editor is a no-op.
       const res = run(home, ['edit', 'ci-built-in'], { EDITOR: 'true' });
       expect(res.status).toBe(0);
 
-      // A user copy now exists, prefilled from the built-in's own config.
       const userFile = path.join(home, '.agents', 'monitors', 'ci-built-in.yml');
       expect(fs.existsSync(userFile)).toBe(true);
       const userBody = fs.readFileSync(userFile, 'utf-8');
       expect(yaml.parse(userBody).source.command).toBe('echo hi');
-      // The derived `scope` must NOT leak into the materialized YAML, and a
-      // built-in's implicit `enabled: true` is stripped like every other write —
-      // materialization routes through writeMonitor, not a raw yaml.stringify.
       expect(userBody).not.toContain('scope:');
       expect(userBody).not.toContain('enabled: true');
 
-      // The system mirror is byte-for-byte untouched.
       expect(fs.readFileSync(sysFile, 'utf-8')).toBe(sysBefore);
     },
   );
@@ -375,10 +327,8 @@ describe('monitors inspection JSON and stderr', () => {
 
     expect(res.status).toBe(0);
     expect(res.stdout).toContain("Monitor 'ci' removed");
-    // The definition is gone — no longer scheduled, no longer listed.
     expect(fs.existsSync(path.join(home, '.agents', 'monitors', 'ci.yml'))).toBe(false);
     expect(JSON.parse(run(home, ['list', '--json', '--local']).stdout)).toHaveLength(0);
-    // Past state and fire history stay on disk.
     expect(fs.existsSync(statePath(home, 'ci'))).toBe(true);
     expect(
       fs.existsSync(path.join(home, '.agents', '.history', 'monitors', 'ci', 'fires', '2026-07-21T12-01-00-000Z', 'event.json')),
@@ -417,7 +367,6 @@ describe('monitors inspection JSON and stderr', () => {
     expect(res.stdout).toBe('');
     expect(res.stderr).toContain("can't be removed");
     expect(res.stderr).toContain('agents monitors pause pr-merge-on-green');
-    // The system mirror is untouched.
     expect(fs.existsSync(path.join(home, '.agents', '.system', 'monitors', 'pr-merge-on-green.yml'))).toBe(true);
   });
 
@@ -432,13 +381,6 @@ describe('monitors inspection JSON and stderr', () => {
   });
 });
 
-/**
- * PHNX-2842: `agents monitors runs` used to print `ok` for a completed agent
- * that did nothing. Real CLI subprocess against an isolated HOME: fire
- * recorded ok:true off a running snapshot, run later settled completed, and
- * the postcondition (a real node process exiting 1) proves the intended
- * effect did not happen.
- */
 describe('monitors runs postcondition (PHNX-2842)', () => {
   function writeRun(home: string, name: string, runId: string, status: string): void {
     const dir = path.join(home, '.agents', '.history', 'runs', name, runId);
@@ -491,8 +433,6 @@ describe('monitors runs postcondition (PHNX-2842)', () => {
 
     const res = run(home, ['runs', 'merge-pr-1682']);
     expect(res.status).toBe(0);
-    // Before the fix this line was `ok`. After: the postcondition failed, so
-    // the fire is visibly not success.
     expect(res.stdout).toContain('no effect');
     expect(res.stdout).not.toMatch(/\bok\b/);
     expect(res.stdout).toContain('postcondition not met');

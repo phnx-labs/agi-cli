@@ -20,7 +20,6 @@ function windowGone(input: HostLinkInput): boolean {
   return input.windowHeartbeatMs !== undefined && now - input.windowHeartbeatMs >= HOST_HEARTBEAT_STALE_MS;
 }
 
-// Distinguish positive no-client evidence from unknown; deliberate detach is healthy and missing signals prove neither state.
 export function classifyHostLink(input: HostLinkInput): HostLink {
   if (input.deliberatelyDetached) return 'connected';
 
@@ -39,7 +38,6 @@ export function classifyHostLink(input: HostLinkInput): HostLink {
   return 'unknown';
 }
 
-// Only a stale formerly-heartbeating window can orphan a running row; zero clients is normal for unattended remote panes.
 export function hostWindowLost(input: HostLinkInput): boolean {
   if (input.deliberatelyDetached) return false;
   return input.pidAlive && windowGone(input);

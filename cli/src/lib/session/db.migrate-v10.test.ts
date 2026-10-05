@@ -3,16 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db, so the sessions DB path they
-// capture at import time points at our temp dir.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv10-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-// Build a v9-shaped DB (with the old, separate `name` column) on disk, then let
-// db.js's getDB() upgrade it to v10 on first open. Locks the load-bearing
-// invariant: a user's `agents run --name` handle is folded into `label`, never
-// lost, and the redundant column is dropped.
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
@@ -59,12 +53,10 @@ const Database = (await import('../sqlite.js')).default;
     );
     INSERT INTO meta(key, value) VALUES ('schema_version', '9');
   `);
-  // A --name'd run: name set, label still empty (Claude hasn't titled it yet).
   seed.prepare(`INSERT INTO sessions (id, short_id, agent, timestamp, file_path, name)
                 VALUES ('mig-1', 'mig-1', 'claude', '2026-07-01T00:00:00Z', '', 'my-run')`).run();
   seed.prepare(`INSERT INTO session_text (session_id, label, topic, project, content)
                 VALUES ('mig-1', '', '', '', '')`).run();
-  // A run that already had a label (a Claude title): its label must survive as-is.
   seed.prepare(`INSERT INTO sessions (id, short_id, agent, timestamp, file_path, label, name)
                 VALUES ('mig-2', 'mig-2', 'claude', '2026-07-01T00:00:00Z', '', 'Real Title', 'seed-loses')`).run();
   seed.prepare(`INSERT INTO session_text (session_id, label, topic, project, content)
@@ -83,7 +75,6 @@ describe('schema migration v9 -> v10 (name unifies into label)', () => {
 
   it('folds a --name into label where the label was empty (no data loss)', () => {
     expect(getSessionById('mig-1')?.label).toBe('my-run');
-    // ...and it is now fuzzy-searchable via the FTS label column.
     expect(ftsSearch('my-run')[0]?.sessionId).toBe('mig-1');
   });
 

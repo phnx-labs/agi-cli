@@ -1,7 +1,5 @@
 
 
-// Mirrored wire schema owned by @phnx-labs/secrets-cli. Keep these declarations
-// aligned with its schema; this module contributes no runtime implementation.
 export type SecretsBackend = 'keychain' | 'file' | 'vault';
 
 export type SecretProvider = 'keychain' | 'env' | 'file' | 'exec';
@@ -35,8 +33,6 @@ export interface VarMeta {
   note?: string;
 }
 
-// `always` prompts per read, `hold` reuses a broker unlock, and `never` removes
-// the biometric ACL and is reserved for automation credentials.
 export type SecretsPolicy = 'always' | 'hold' | 'never';
 
 export interface SecretsBundle {
@@ -60,7 +56,6 @@ export interface BundleEntryInfo {
 
 
 export interface WriteBundleOptions {
-  // Broker eviction and reserved-store access are privileged system behaviors.
   skipBrokerEviction?: boolean;
   allowReservedStore?: boolean;
 }
@@ -71,7 +66,6 @@ export interface ResolveBundleOptions {
   duration?: string;
   interactiveUnlock?: boolean;
   noAgent?: boolean;
-  // Broker-only resolution must fail before prompting or direct keychain reads.
   agentOnly?: boolean;
   keys?: string[];
   allowExpired?: boolean;
@@ -97,7 +91,6 @@ export interface KeychainReadContext {
   duration?: string;
   defaultPolicy?: 'hold' | 'always' | 'never';
   forceDuration?: boolean;
-  // Caller attests that the item has no biometric ACL; never set for protected items.
   silentNoAcl?: boolean;
 }
 
@@ -115,14 +108,12 @@ export interface AgentStatusEntry {
 export interface PushBundleOptions {
   remoteBackend: RemoteBackend;
   force?: boolean;
-  // Ignored: file export never forwards the local passphrase; the remote owns its key.
   passphrase?: string;
   operation: string;
   policyNever?: boolean;
   agentOnly?: boolean;
   literalValues?: Record<string, string>;
   timeoutMs?: number;
-  // Applies to import, verification, and literal restoration on the remote.
   remoteSecretsHome?: string;
 }
 

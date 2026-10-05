@@ -93,7 +93,6 @@ export function rollupSessionsByProject(
   return map;
 }
 
-// Idle/orphaned/abandoned sessions remain live work; only terminal states count as dead.
 const DEAD_STATUSES = new Set(['closed', 'crashed']);
 
 export function isDeadStatus(status: string): boolean {

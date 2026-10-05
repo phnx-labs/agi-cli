@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Source this only inside the home-base release subprocess: it unlocks the
-# signing keychain and exports the secrets passphrase for that process tree.
-# It does not copy either credential or persist them into configuration.
 set -euo pipefail
 
 _RUSH_SUPPORT="$HOME/Library/Application Support/rush"

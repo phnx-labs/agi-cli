@@ -15,9 +15,6 @@ import { isTmuxInstalled, runTmux } from '../tmux/binary.js';
 import { createSession, killSession } from '../tmux/session.js';
 import * as tmuxPaths from '../tmux/paths.js';
 
-// These are pure functions — the DB dependency is injected — so no fixtures or
-// tmux are needed. The name-based tier is the recovery that makes a detached
-// agent findable when its durable identity records are gone.
 
 describe('agentKindFromName / shortIdFromName (parse ag-<agent>-<shortid>)', () => {
   it('splits a plain agent name', () => {
@@ -39,7 +36,6 @@ describe('agentKindFromName / shortIdFromName (parse ag-<agent>-<shortid>)', () 
     expect(agentKindFromName('main')).toBeUndefined();
     expect(agentKindFromName('bash')).toBeUndefined();
     expect(shortIdFromName('ag-claude-nothex!!')).toBeUndefined();
-    // suffix must be exactly 8 hex chars
     expect(agentKindFromName('ag-claude-2373284')).toBeUndefined();
     expect(agentKindFromName('ag-claude-2373284da')).toBeUndefined();
   });
@@ -57,7 +53,7 @@ describe('resolveNamesToSessionIds (batched short-id -> full UUID)', () => {
     );
     expect(out.get('ag-claude-abcd1234')).toBe('abcd1234-0000-0000-0000-000000000001');
     expect(out.get('main')).toBeUndefined();
-    expect(out.get('ag-codex-ffffffff')).toBeUndefined(); // not returned by the DB
+    expect(out.get('ag-codex-ffffffff')).toBeUndefined();
   });
 
   it('makes exactly ONE batched call regardless of pane count (not per-pane)', () => {
@@ -107,13 +103,6 @@ describe('resolvePaneIdentity — name-based recovery (the fleet fix)', () => {
   });
 });
 
-/**
- * RUSH-2192 — pins the listTmuxAgentSessions *forward* of terminalId, not just
- * that PidSessionEntry can hold the field. Removing
- * `terminalId: liveEntry?.terminalId` from the tmux ActiveSession push must fail
- * this test. Real tmux + real by-pid entry; socket redirected so we never touch
- * the fleet's default server.
- */
 const tmuxSkip = isTmuxInstalled() ? null : 'tmux not installed';
 
 describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)', () => {
@@ -121,8 +110,6 @@ describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)
   const SESS = `ag-grok-${SHORT}`;
   const TERMINAL_ID = 'GK-mid2-test-rush2192';
   const SESSION_ID = '019fd1e3-8859-7f03-a47c-49d64653b404';
-  // High fake pid range reserved for tests — but isPidAlive needs a LIVE pid, so
-  // we bind the registry entry to the pane's real sleep pid after create.
   let tempDir: string;
   let socket: string;
   let paneId: string;
@@ -148,7 +135,6 @@ describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)
     expect(paneId).toMatch(/^%/);
     expect(panePid).toBeGreaterThan(0);
 
-    // Point listTmuxAgentSessions at our throwaway server (not the fleet socket).
     socketSpy = vi.spyOn(tmuxPaths, 'getDefaultSocketPath').mockReturnValue(socket);
 
     writePidSessionEntry({
@@ -174,8 +160,6 @@ describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)
     const rows = await listTmuxAgentSessions();
     const mine = rows.find((r) => r.sessionId === SESSION_ID || r.kind === 'grok');
     expect(mine, `expected a grok row; got ${JSON.stringify(rows.map((r) => ({ kind: r.kind, sessionId: r.sessionId, terminalId: r.terminalId })))}`).toBeDefined();
-    // This is the Factory join key. Dropping `terminalId: liveEntry?.terminalId`
-    // from listTmuxAgentSessions makes this assertion fail.
     expect(mine!.terminalId).toBe(TERMINAL_ID);
     expect(mine!.kind).toBe('grok');
     expect(mine!.host).toBe('tmux');

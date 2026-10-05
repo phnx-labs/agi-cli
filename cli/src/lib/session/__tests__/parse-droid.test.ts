@@ -1,8 +1,3 @@
-/**
- * Verifies parseDroid normalizes Droid's (Factory) message-envelope JSONL to
- * the shared SessionEvent shape, drops injected <system-reminder> context, and
- * detectAgent routes ~/.factory/ paths to the droid parser.
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -11,8 +6,6 @@ import * as path from 'path';
 import { fileURLToPath } from 'node:url';
 import { parseDroid, detectAgent, parseSession } from '@phnx-labs/sessions-cli/reader';
 
-// fileURLToPath (not new URL().pathname) — on Windows the latter yields
-// "/C:/…", so path.join produces a doubled-drive "C:\C:\…" that ENOENTs.
 const TESTDATA = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'testdata');
 
 function writeTmp(content: string): string {
@@ -68,7 +61,6 @@ describe('parseDroid', () => {
     const p = writeTmp(jsonl);
     try {
       const events = parseDroid(p);
-      // session_start skipped; system-reminder block dropped.
       expect(events).toHaveLength(5);
       expect(events[0]).toMatchObject({ type: 'message', agent: 'droid', role: 'user', content: 'How do I run the tests?' });
       expect(events[1]).toMatchObject({ type: 'thinking', content: 'consider the options' });
@@ -100,8 +92,6 @@ describe('parseDroid', () => {
 
 describe('parseDroid Execute and Create tools', () => {
   test('Execute tool_use sets command from fixture', () => {
-    // Uses synthetic fixture: testdata/droid-execute-create.jsonl
-    // Routes through a tmp .factory path so detectAgent works correctly.
     const fixtureContent = fs.readFileSync(path.join(TESTDATA, 'droid-execute-create.jsonl'), 'utf-8');
     const dir = path.join(os.tmpdir(), `droid-exec-${Date.now()}`, '.factory', 'sessions', 'proj');
     fs.mkdirSync(dir, { recursive: true });
@@ -134,9 +124,6 @@ describe('parseDroid Execute and Create tools', () => {
   });
 
   test('Execute tool_use carries its `summary` as the per-call label', () => {
-    // Droid spells the human one-liner `summary` where Claude spells it
-    // `description`. Without it the timeline's now-line renders `ls -la` instead
-    // of "List files" — the harness-parity gap in review BLOCKER 3.
     const fixtureContent = fs.readFileSync(path.join(TESTDATA, 'droid-execute-create.jsonl'), 'utf-8');
     const dir = path.join(os.tmpdir(), `droid-label-${Date.now()}`, '.factory', 'sessions', 'proj');
     fs.mkdirSync(dir, { recursive: true });

@@ -10,10 +10,6 @@ import {
   type CachedUsageSnapshot,
 } from './usage.js';
 
-// Real files, no mocks: the export → ingest → read path is the cross-machine
-// merge contract beneath the fleet-shared user-repo snapshot. A publisher's
-// cache is exported, merged into a worker's cache newest-wins, and read back
-// through the normal reader.
 
 function row(capturedAt: string | null, usedPercent = 12): CachedUsageSnapshot {
   return {
@@ -55,7 +51,7 @@ describe('usage-sync cache export/ingest (newest-wins)', () => {
   it('exports only rows that carry a window', () => {
     seed(src, {
       [KEY_A]: row('2026-08-28T12:00:00.000Z'),
-      [KEY_B]: { capturedAt: '2026-08-28T12:00:00.000Z', windows: [] }, // empty — nothing to teach
+      [KEY_B]: { capturedAt: '2026-08-28T12:00:00.000Z', windows: [] },
     });
     const rows = exportClaudeUsageCacheRows(src);
     expect(Object.keys(rows)).toEqual([KEY_A]);
@@ -67,16 +63,15 @@ describe('usage-sync cache export/ingest (newest-wins)', () => {
     expect(merged).toBe(1);
     const snap = readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:05:00.000Z'));
     expect(snap?.windows[0].usedPercent).toBe(34);
-    // A synced row reads as last-seen (cached), never as a live fetch.
     expect(snap?.source).toBe('last_seen');
   });
 
   it('does NOT overwrite a fresher local row with an older peer push', async () => {
-    seed(dst, { [KEY_A]: row('2026-08-28T12:10:00.000Z', 50) }); // local is newer
+    seed(dst, { [KEY_A]: row('2026-08-28T12:10:00.000Z', 50) });
     const merged = await ingestPeerClaudeUsageRows({ [KEY_A]: row('2026-08-28T12:00:00.000Z', 10) }, dst);
     expect(merged).toBe(0);
     const snap = readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:11:00.000Z'));
-    expect(snap?.windows[0].usedPercent).toBe(50); // fresher local survives
+    expect(snap?.windows[0].usedPercent).toBe(50);
   });
 
   it('accepts a strictly-newer peer push over an older local row', async () => {

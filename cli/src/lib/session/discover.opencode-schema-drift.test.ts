@@ -3,10 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// An OLDER OpenCode schema: no `cost`/`model` columns on `session`, and no `todo`
-// table at all. The scanner must still index the session (selecting NULL for the
-// absent columns and tolerating the missing todo table) rather than throwing
-// "no such column" and dropping every OpenCode row (RUSH-2358 resilience).
 const REAL_HOME = process.env.HOME;
 const REAL_USERPROFILE = process.env.USERPROFILE;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-opencode-drift-'));
@@ -31,7 +27,6 @@ beforeAll(async () => {
 
   fs.mkdirSync(path.dirname(OPENCODE_DB), { recursive: true });
   const oc = new (Database as any)(OPENCODE_DB);
-  // No cost/model columns, no todo table — the pre-RUSH-2358 shape.
   oc.exec(`
     CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, directory TEXT, version TEXT, time_created INTEGER, time_updated INTEGER);
     CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
@@ -48,7 +43,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { db.closeDB?.(); } catch { /* ignore */ }
+  try { db.closeDB?.(); } catch {  }
   if (REAL_HOME === undefined) delete process.env.HOME; else process.env.HOME = REAL_HOME;
   if (REAL_USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = REAL_USERPROFILE;
   fs.rmSync(tmpHome, { recursive: true, force: true });

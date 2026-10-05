@@ -72,7 +72,6 @@ describe('setHelpSections + formatHelpCommandsFirst', () => {
     });
     const help = sub.helpInformation();
 
-    // After dedent + 2-space reindent, both comment and command sit at column 2.
     expect(help).toContain('\n  # comment\n');
     expect(help).toContain('\n  agents demo --flag\n');
   });
@@ -169,9 +168,6 @@ describe('compact root help', () => {
     expect(help).toContain('Most-used:');
     expect(help).toContain('See "agents --help-all" for every command.');
 
-    // Only the front-door commands are listed as entries; the pointer replaces
-    // the remaining Commands section. The regex approximates the acceptance
-    // check from the ticket: indented lowercase command terms.
     const commandEntries = help.match(/^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}/gm) ?? [];
     expect(commandEntries.length).toBeLessThanOrEqual(12);
   });
@@ -196,7 +192,6 @@ describe('compact root help', () => {
     expect(help).toContain('Commands:');
     expect(help).not.toContain('See "agents --help-all" for every command.');
 
-    // The full tree has many more than the front-door groups.
     const commandEntries = help.match(/^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}/gm) ?? [];
     expect(commandEntries.length).toBeGreaterThan(12);
   });

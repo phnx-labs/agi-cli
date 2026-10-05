@@ -40,7 +40,6 @@ function outputHomeHasDotDot(raw: string): boolean {
   return raw.split(/[\\/]/).includes('..');
 }
 
-// A dangling live-home chain is dangerous because the first mkdir recreates its absent target.
 function danglingLinkChainTarget(p: string): string | null {
   let current = path.resolve(p);
   let followed = false;
@@ -57,7 +56,6 @@ function danglingLinkChainTarget(p: string): string | null {
   return current;
 }
 
-// One dangling live harness home makes every materialization destination fail closed.
 function assertNoDanglingLiveHome(realHome: string): void {
   for (const name of PORTABLE_HARNESSES) {
     if (danglingLinkChainTarget(path.join(realHome, `.${name}`)) !== null) {
@@ -91,7 +89,7 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
       throw new MaterializeGuardError(`Path escape: ${raw}`);
     }
   }
-  // Resolve existing ancestors before comparing with $HOME and live harness homes.
+
   const canonical = realpathExistingPrefix(resolved);
   const realHome = realpathExistingPrefix(home);
   assertNoDanglingLiveHome(realHome);

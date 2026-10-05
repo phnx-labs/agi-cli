@@ -10,10 +10,6 @@ import {
   setLinearRateLimitDirForTest,
 } from './linear-rate-limit.js';
 
-// getCacheDir() resolves HOME once at module load, so swapping process.env.HOME
-// would read and WRITE the developer's real cache and throttle their own Linear
-// reads. Point the dedicated dir seam at a temp dir. Real fs, real files, no
-// mocking — exactly the cross-process state the limiter coordinates on.
 let root: string;
 let prevOverride: string | null;
 const KEY = 'lin_api_test_key';
@@ -42,16 +38,12 @@ describe('linear shared request budget', () => {
   });
 
   it('denies once the hourly budget is spent, then re-allows as requests age out', () => {
-    // Fill the budget with reservations stamped at T0.
     for (let i = 0; i < LINEAR_HOURLY_REQUEST_BUDGET; i++) {
       expect(reserveLinearRequest(KEY, T0)).toBe(true);
     }
-    // The next one, still inside the window, is refused — no request goes out.
     expect(reserveLinearRequest(KEY, T0 + 1)).toBe(false);
     expect(linearRequestsInWindow(KEY, T0 + 1)).toBe(LINEAR_HOURLY_REQUEST_BUDGET);
 
-    // Advance just past the window: every T0 stamp ages out and is swept, so the
-    // budget refills and a reservation is allowed again.
     const later = T0 + LINEAR_RATE_WINDOW_MS + 1;
     expect(linearRequestsInWindow(KEY, later)).toBe(0);
     expect(reserveLinearRequest(KEY, later)).toBe(true);
@@ -59,9 +51,8 @@ describe('linear shared request budget', () => {
   });
 
   it('sweeps only the stamps that have aged out, keeping the ones still in window', () => {
-    reserveLinearRequest(KEY, T0);                              // ages out below
-    reserveLinearRequest(KEY, T0 + LINEAR_RATE_WINDOW_MS - 10); // still in window
-    // A moment past T0's window: the first stamp is elapsed, the second is not.
+    reserveLinearRequest(KEY, T0);
+    reserveLinearRequest(KEY, T0 + LINEAR_RATE_WINDOW_MS - 10);
     const now = T0 + LINEAR_RATE_WINDOW_MS + 5;
     expect(linearRequestsInWindow(KEY, now)).toBe(1);
   });
@@ -71,31 +62,21 @@ describe('linear shared request budget', () => {
       reserveLinearRequest(KEY, T0);
     }
     expect(reserveLinearRequest(KEY, T0)).toBe(false);
-    // A different key has spent nothing, so it is free.
     expect(linearRequestsInWindow(OTHER_KEY, T0)).toBe(0);
     expect(reserveLinearRequest(OTHER_KEY, T0)).toBe(true);
   });
 
   it('coordinates across independent module invocations sharing the same dir (the cross-process case)', () => {
-    // Two "processes" here are two reservations against the same on-disk dir; the
-    // second sees the first's stamp file because state is the filesystem, not memory.
     expect(reserveLinearRequest(KEY, T0)).toBe(true);
     expect(reserveLinearRequest(KEY, T0)).toBe(true);
-    // Both stamps survive — same millisecond, different filenames (pid + seq), so
-    // neither clobbered the other.
     expect(linearRequestsInWindow(KEY, T0)).toBe(2);
   });
 
   it('fails OPEN when the cache dir cannot be written — the request still goes out', () => {
-    // Point the state root at a path whose parent is a FILE, so mkdirSync throws
-    // ENOTDIR deterministically (no reliance on chmod, which root ignores). The
-    // reservation cannot be recorded, but the request must not be blocked on a
-    // broken cache dir — the reactive 429 backoff remains the backstop.
     const asFile = path.join(root, 'not-a-dir');
     fs.writeFileSync(asFile, '');
     setLinearRateLimitDirForTest(path.join(asFile, 'under-a-file'));
     expect(reserveLinearRequest(KEY, T0)).toBe(true);
-    // And the read side treats the unreadable dir as simply empty, never throws.
     expect(linearRequestsInWindow(KEY, T0)).toBe(0);
   });
 

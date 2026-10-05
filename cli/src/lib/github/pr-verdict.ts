@@ -22,7 +22,6 @@ export interface MergeablePrInput {
   comments?: PrComment[] | null;
 }
 
-// Mirror merge-guard syntax and reject approvals merely carried from another PR.
 export function hasApproveVerdict(
   reviews: readonly PrReview[] | null | undefined,
   comments: readonly PrComment[] | null | undefined,

@@ -25,7 +25,7 @@ export function isCachedFleetAuthProbeFresh(
   installedTargets: ReadonlySet<string>,
   maxAgeMs: number = AUTH_PROBE_MAX_AGE_MS,
 ): boolean {
-  // Only installed homes participate; stale uninstalled rows cannot pin provider health.
+
   const installed = installedAuthRows(authRows, installedTargets);
   return installed.length > 0 && installed.every((r) => now - r.health.checkedAt < maxAgeMs);
 }
@@ -37,7 +37,7 @@ export function shouldReuseCachedAuthProbe(
   installedTargets: ReadonlySet<string>,
   maxAgeMs: number = AUTH_PROBE_MAX_AGE_MS,
 ): boolean {
-  // Periodic ticks reuse bounded live verdicts to avoid 429 storms; force callers always probe.
+
   return !force && isCachedFleetAuthProbeFresh(cached, now, installedTargets, maxAgeMs);
 }
 

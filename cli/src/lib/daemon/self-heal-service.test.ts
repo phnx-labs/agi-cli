@@ -1,11 +1,3 @@
-/**
- * Self-heal runs in a child process and is not re-run by a daemon restart.
- *
- * The regression: `runSelfHeal` held the daemon's event loop for over a minute
- * on a real box, every other service breached its deadline, the supervisor
- * exited, and the restarted daemon ran self-heal again 30 s later. These tests
- * drive real child processes; only the choice of child is injected.
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -38,7 +30,6 @@ function fakeCtx(): { ctx: DaemonContext; logs: Array<{ level: string; message: 
   return { ctx: { log: (level, message) => logs.push({ level, message }) }, logs };
 }
 
-/** A child that holds its own thread for `ms` (as a heavy heal pass does), then prints a summary. */
 function busyChild(ms: number, summary: object): string {
   return writeFixture(`
 const end = Date.now() + ${ms};
@@ -89,7 +80,6 @@ describe('runSelfHealTick', () => {
     clearInterval(timer);
 
     expect(outcome).toMatchObject({ ran: true, exitCode: 0, cancelled: false, summary });
-    // Inline, this pass would have held the loop for the full 1.5 s.
     expect(maxGap).toBeLessThan(400);
     expect(logs).toContainEqual({ level: 'INFO', message: 'self-heal: resources: 1 fixed' });
   }, 30_000);
@@ -102,14 +92,11 @@ describe('runSelfHealTick', () => {
     expect((await runSelfHealTick(fakeCtx().ctx, new AbortController().signal, depsFor(fixture, clock, calls))).ran).toBe(true);
     expect(await readLastSelfHealAttempt()).toBe(clock.now);
 
-    // A restarted daemon's first tick, 77 s later: the attempt record survives the process.
     clock.now += 77_000;
     expect(await runSelfHealTick(fakeCtx().ctx, new AbortController().signal, depsFor(fixture, clock, calls)))
       .toEqual({ ran: false, reason: 'recent' });
     expect(calls.n).toBe(1);
 
-    // The supervisor's next interval tick, landing a few seconds before the stamp's
-    // 6h mark (the stamp is written ms into a tick): it must run, not slip to 12h.
     clock.now += SIX_HOURS - 77_000 - 5_000;
     expect((await runSelfHealTick(fakeCtx().ctx, new AbortController().signal, depsFor(fixture, clock, calls))).ran).toBe(true);
     expect(calls.n).toBe(2);

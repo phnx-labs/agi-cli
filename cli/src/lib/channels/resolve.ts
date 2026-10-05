@@ -9,7 +9,7 @@ interface TransportLookup {
 }
 
 export function lookupTransport(channel: string, meta: Meta): TransportLookup {
-  // Daemon callers need an error value; only the interactive resolver below may terminate.
+
   const providerName = meta.notify?.transports?.[channel] ?? channel;
   const provider = resolveChannelProvider(providerName);
   if (provider) return { providerName, provider };

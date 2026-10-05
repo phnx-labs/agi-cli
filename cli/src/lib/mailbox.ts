@@ -35,7 +35,7 @@ export interface MailboxMessage {
 }
 
 export function isValidMailboxId(mailboxId: string): boolean {
-  // Mailbox IDs are exactly one path segment.
+
   return /^[A-Za-z0-9._-]+$/.test(mailboxId) && mailboxId !== '.' && mailboxId !== '..';
 }
 
@@ -66,7 +66,7 @@ function ensureDirs(boxDir: string): void {
 let seq = 0;
 
 function newMsgId(): string {
-  // Preserve per-process FIFO while remaining unique across processes.
+
   const s = String(seq++).padStart(6, '0');
   return `${Date.now()}-${s}-${randomUUID().slice(0, 8)}`;
 }
@@ -114,7 +114,6 @@ export function readMessage(file: string): MailboxMessage | null {
   if (typeof m?.msgId !== 'string' || typeof m?.to !== 'string' || typeof m?.text !== 'string') {
     return null;
   }
-  // generation and attempt bind receipts to the exact ask and must survive field-by-field parsing.
   return {
     msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text,
     expiresAt: m.expiresAt, blockId: m.blockId, generation: m.generation, attempt: m.attempt,
@@ -218,7 +217,7 @@ function consumeClaimed(boxDir: string, name: string, expectedTo: string): Mailb
 }
 
 export function drain(boxDir: string, boxId: string = path.basename(boxDir), now: Date = new Date()): MailboxMessage[] {
-  // inbox → processing → consumed is a single-consumer, at-least-once claim; recover processing before new inbox work.
+
   ensureDirs(boxDir);
   sweepExpired(boxDir, boxId, now);
   const out: MailboxMessage[] = [];
@@ -314,7 +313,7 @@ export async function* watchMessages(
   root: string,
   opts: { signal?: AbortSignal; intervalMs?: number; backfill?: boolean },
 ): AsyncGenerator<CommsMsg> {
-  // Establish a baseline unless backfill is requested; bucket moves retain the same key and do not re-emit.
+
   const seen = new Set<string>();
   const requestedInterval = opts.intervalMs ?? 500;
   const intervalMs = Number.isFinite(requestedInterval) ? Math.max(1, requestedInterval) : 500;

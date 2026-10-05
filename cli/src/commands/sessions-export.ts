@@ -53,7 +53,6 @@ import { knownSecretValuesFromEnv } from '../lib/redact.js';
 import { pullBundlesFromHosts } from '../lib/session/remote-bundle.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Default cap when exporting a scope (not explicit ids) and the user gave no -n. */
 const DEFAULT_LIMIT = 500;
 
 export function registerSessionsExportCommand(sessionsCmd: Command): void {
@@ -117,11 +116,6 @@ interface GlobalSelection {
 async function runExport(selectors: string[], command: Command): Promise<void> {
   const g = command.optsWithGlobals() as GlobalSelection;
 
-  // --to-r2 preflight. MANAGED-FIRST: a signed-in user backs up to the managed
-  // Phoenix store with no bucket to set up; --byo (or an unauthenticated user
-  // with an r2.backups bundle) uses their own bucket. isSyncConfigured() is
-  // consulted ONLY on the BYO path (it reads the keychain); the managed path
-  // authenticates with the Phoenix session and skips it entirely.
   let sessionsClient: SessionsBackupClient | undefined;
   let managedClient: SessionsHttpClient | undefined;
   let managedBackupUserId: string | undefined;
@@ -141,9 +135,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
         sessionsClient = managedClient;
         managedBackupUserId = backend.userId;
       } else {
-        // Preserve the explicit BYO gate used by the on-demand backup path and
-        // daemon sync cycle. resolveSessionsBackend already loaded the bundle,
-        // so this is a cached, non-prompting verification.
         const gateErr = r2ExportGateError(g, isSyncConfigured());
         if (gateErr) throw new Error(gateErr);
         sessionsClient = new R2Client(backend.r2);
@@ -154,8 +145,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     }
   }
 
-  // --host: export sessions that live on remote peer(s) — run export there and
-  // stream the bundle back over the existing SSH transport (RUSH-1712).
   if (g.host && g.host.length > 0) {
     await runRemoteExport(g, selectors, command);
     return;
@@ -169,7 +158,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
   const limit = explicitLimit ? Math.max(1, parseInt(String(g.limit), 10) || DEFAULT_LIMIT) : DEFAULT_LIMIT;
   const agentFilter = parseAgentFilter(resolveAgentShorthand(g));
 
-  // 1. Discover candidate sessions in scope.
   const metas = await discoverSessions({
     all: g.all !== false,
     agent: agentFilter.agent ?? undefined,
@@ -177,7 +165,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     limit,
   });
 
-  // 2. Narrow to the selection (ids > query > everything-in-scope).
   const selected = selectSessions(metas, selectors);
   if (selected.length === 0) {
     process.stderr.write(chalk.yellow('No sessions matched the selection.\n'));
@@ -187,7 +174,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     process.stderr.write(chalk.yellow(`Note: capped at ${limit} sessions. Raise -n to bundle more.\n`));
   }
 
-  // 3. Resolve each selected session to its on-disk file(s).
   const index = buildLocalIndex();
   const self = machineId();
   const files: FileToExport[] = [];
@@ -202,8 +188,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
         files.push({ agent: meta.agent, machine, sessionId: meta.id, relKey: f.relKey, absPath: f.absPath, label: meta.label });
       }
     } else if (meta.filePath && fs.existsSync(meta.filePath)) {
-      // Not in the live-home index (e.g. a mirror of another machine): fall back
-      // to the single discovered file, deriving its subdir-relative key.
       const relKey = relKeyFromPath(meta.filePath, meta.agent, machine, spec.subdir);
       files.push({ agent: meta.agent, machine, sessionId: meta.id, relKey, absPath: meta.filePath, label: meta.label });
     }
@@ -216,11 +200,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     process.exit(1);
   }
 
-  // 4. Resolve encryption key (opt-in) + redaction (default on via parent --no-redact).
-  //    A BYO R2 backup uses the fleet-shared R2_SYNC_ENC_KEY (an ephemeral key would
-  //    be unrecoverable on a fresh box). A MANAGED backup resolves a per-account DEK
-  //    that is MANDATORY and never null — the managed path never uploads plaintext —
-  //    minting + escrowing one on first use so a fresh box recovers it with zero setup.
   let encryptKey: Buffer | null;
   if (g.toR2 && managedBackupUserId) {
     encryptKey = await resolveManagedBackupKey(managedClient!, managedBackupUserId);
@@ -232,12 +211,8 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     encryptKey = null;
   }
   const redact = g.redact !== false;
-  // Value-aware redaction: mask live credential values already in the
-  // environment (e.g. an injected secrets bundle) verbatim, whatever their
-  // format. Only meaningful when redacting.
   const knownSecrets = redact ? knownSecretValuesFromEnv() : undefined;
 
-  // 5. Build records + header.
   const records: BundleRecord[] = [];
   for (const f of files) {
     try {
@@ -264,21 +239,6 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
   emitBundle(header, records, g);
 }
 
-/**
- * Upload each record to R2 as its own self-describing one-record bundle, keyed by
- * the surviving object layout (`sessions/<machine>/<agent>/<sessionId>.jsonl`, or
- * `.../<sessionId>/<relKey>` for dir-shaped agents). Each object is independently
- * a valid bundle, so `import --from-r2` restores it through the same parse/place
- * path as a local bundle. Fails loud on the first upload error (no silent
- * partial-success).
- */
-/**
- * `--to-r2` preflight as a pure, unit-testable function: the impossible-combo +
- * not-configured gate. Returns the message to fail loud with, or null when the
- * export may proceed. Only meaningful when `g.toR2` is set (the caller gates on
- * that). Kept pure — no process.exit, no keychain read — so both the command and
- * its test drive the exact same decision.
- */
 export function r2ExportGateError(
   g: Pick<GlobalSelection, 'toR2' | 'host'>,
   isConfigured: boolean,
@@ -302,9 +262,6 @@ export async function uploadToR2(
   records: BundleRecord[],
   resolvedClient?: SessionsBackupClient,
 ): Promise<void> {
-  // The resolved client (managed HTTP or BYO R2) is passed in by the command.
-  // The no-client overload preserves the original BYO-only signature for the
-  // direct unit test (loadR2Config() from the r2.backups bundle).
   let client: SessionsBackupClient;
   if (resolvedClient) {
     client = resolvedClient;
@@ -348,7 +305,6 @@ export async function uploadToR2(
   ));
 }
 
-/** Fail-closed guard at the managed transport boundary, not only at record construction. */
 export function managedUploadEncryptionError(
   header: BundleHeader,
   records: BundleRecord[],
@@ -362,20 +318,12 @@ export function managedUploadEncryptionError(
   return null;
 }
 
-/** R2 object key for one record — dir-shaped agents key by relKey, file-shaped by session. */
 export function r2KeyForRecord(rec: BundleRecord): string {
   const spec = specForAgent(rec.agent);
   const relKey = spec?.dirShaped ? rec.relKey : undefined;
   return objectKey(rec.machine, rec.agent, rec.sessionId, relKey);
 }
 
-/**
- * Resolve the AES key for an R2 backup: the fleet-shared R2_SYNC_ENC_KEY from the
- * r2.backups bundle so any box on the bundle can restore. Unlike a local bundle,
- * an ephemeral key is useless here (it is never stored, so a fresh box could not
- * decrypt), so a missing key means the objects go up unencrypted (R2 server-side
- * encryption only) with a loud warning — never a silent weaker default.
- */
 export function resolveR2BackupKey(): Buffer | null {
   const key = resolveSyncEncKey(loadR2Config());
   if (key) return key;
@@ -387,12 +335,6 @@ export function resolveR2BackupKey(): Buffer | null {
   return null;
 }
 
-/**
- * --host path: run `agents sessions export …` on each peer over SSH, stream the
- * bundles back, merge (dedup by origin machine) and emit one local bundle.
- * Encryption is not combined with a remote pull (each peer would seal under its
- * own key); the SSH transport already encrypts the stream in transit.
- */
 async function runRemoteExport(g: GlobalSelection, selectors: string[], command: Command): Promise<void> {
   if (g.encrypt) {
     process.stderr.write(chalk.yellow('Note: --encrypt is ignored with --device (the SSH stream is already encrypted). Encrypt a local bundle instead.\n'));
@@ -414,7 +356,6 @@ async function runRemoteExport(g: GlobalSelection, selectors: string[], command:
   emitBundle(header, records, g);
 }
 
-/** Reconstruct the export flags to forward to a peer's own `sessions export`. */
 function forwardExportArgs(g: GlobalSelection, selectors: string[], command: Command): string[] {
   const args = [...selectors];
   if (g.since) args.push('--since', g.since);
@@ -426,7 +367,6 @@ function forwardExportArgs(g: GlobalSelection, selectors: string[], command: Com
   return args;
 }
 
-/** Write the assembled bundle to stdout or a file. */
 function emitBundle(header: BundleHeader, records: BundleRecord[], g: GlobalSelection): void {
   const wire = serializeBundle(header, records);
   if (g.stdout) {
@@ -442,7 +382,6 @@ function emitBundle(header: BundleHeader, records: BundleRecord[], g: GlobalSele
   ));
 }
 
-/** Map the parent's agent shorthands (--claude, --codex, …) or -a/--agent to a filter string. */
 function resolveAgentShorthand(g: GlobalSelection): string | undefined {
   if (g.agent) return g.agent;
   if (g.claude) return 'claude';
@@ -454,7 +393,6 @@ function resolveAgentShorthand(g: GlobalSelection): string | undefined {
   return undefined;
 }
 
-/** ids > query > everything-in-scope. Exported for the id-resolution test. */
 export function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[] {
   if (selectors.length === 0) return metas;
 
@@ -462,10 +400,6 @@ export function selectSessions(metas: SessionMeta[], selectors: string[]): Sessi
   const unmatched: string[] = [];
   for (const sel of selectors) {
     const trimmed = sel.trim();
-    // Same reason as resolveSessionQuery: the discovered pool is a minority of
-    // the index, so an id-shaped selector absent from it may still be indexed
-    // here. Gate on looksLikeSessionId, not isCompleteSessionId, so a SHORT id
-    // ("d3470b57") also resolves through the index instead of falling to content.
     const hits = resolveSessionById(metas, trimmed);
     const resolved = hits.length > 0 || !looksLikeSessionId(trimmed) ? hits : findSessionsById(trimmed);
     if (resolved.length > 0) byId.push(...resolved);
@@ -475,21 +409,14 @@ export function selectSessions(metas: SessionMeta[], selectors: string[]): Sessi
     const seen = new Set<string>();
     return byId.filter(s => (seen.has(s.id) ? false : (seen.add(s.id), true)));
   }
-  // A selector that is an id (complete OR a short hex id/prefix) and still missed
-  // cannot be widened: the id is unique, so the text query below could only bundle
-  // sessions that merely mention it. Bundling those would ship unrelated
-  // transcripts to whoever receives the export, so select nothing and let the
-  // caller report it — a short id like "d3470b57" must never content-search.
   const missingIds = unmatched.filter(looksLikeSessionId);
   if (missingIds.length > 0) {
     process.stderr.write(chalk.red(`No session with id ${missingIds.join(', ')} on this machine.\n`));
     return [];
   }
-  // Any selector that isn't an id → treat the whole thing as a text query.
   return filterSessionsByQuery(metas, selectors.join(' '));
 }
 
-/** Build `${agent}:${sessionId}` → LocalTranscript across every sync agent (live home only). */
 function buildLocalIndex(): Map<string, LocalTranscript> {
   const index = new Map<string, LocalTranscript>();
   for (const spec of SYNC_AGENTS) {
@@ -500,24 +427,17 @@ function buildLocalIndex(): Map<string, LocalTranscript> {
   return index;
 }
 
-/** Derive the subdir-relative key for a mirror file path, else fall back to the basename. */
 function relKeyFromPath(filePath: string, agent: string, machine: string, subdir: string): string {
   const prefix = path.join(getHistoryDir(), 'backups', agent, machine, subdir) + path.sep;
   if (filePath.startsWith(prefix)) return filePath.slice(prefix.length);
   return path.basename(filePath);
 }
 
-/**
- * Resolve the AES key for --encrypt: prefer the fleet-shared R2_SYNC_ENC_KEY (so
- * any machine on the sync bundle can decrypt), else mint an ephemeral key and
- * print it once — it is NOT stored in the bundle.
- */
 function resolveExportKey(): Buffer {
   try {
     const key = resolveSyncEncKey(loadR2Config());
     if (key) return key;
   } catch {
-    // sync bundle not configured — fall through to an ephemeral key
   }
   const b64 = generateSyncEncKey();
   process.stderr.write(chalk.yellow(
@@ -527,7 +447,6 @@ function resolveExportKey(): Buffer {
   return Buffer.from(b64, 'base64');
 }
 
-/** Default output file when neither -o nor --stdout is given. */
 function defaultBundlePath(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   return path.join(process.cwd(), `agents-sessions-${stamp}.bundle`);

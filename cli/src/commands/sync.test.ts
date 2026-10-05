@@ -240,7 +240,6 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
 
     expect(stderr).not.toMatch(/unknown option ['"]--json['"]/);
     expect(stdout.trim().length).toBeGreaterThan(0);
-    // Fleet parses all stdout as one JSON object, so any human chatter is a protocol failure.
     expect(stdout).not.toMatch(/Synced:/);
     expect(stdout).not.toMatch(/Registered \d+ hook/);
     expect(stdout).not.toMatch(/Declared CLIs missing/);
@@ -303,7 +302,6 @@ describe('sync --json reports a refused write (RUSH-2700)', () => {
   });
 
   it('umbrella: declined propagates through refresh and stdout stays one JSON object', () => {
-    // Refresh skips agents without a global default; pin Copilot first so this reaches the refusal.
     const home = homeWithRefusableMcp();
     const use = spawnSync('bun', [INDEX, 'use', 'copilot@1.0.0'], {
       encoding: 'utf-8',
@@ -320,7 +318,6 @@ describe('sync --json reports a refused write (RUSH-2700)', () => {
   });
 
   it('agent-all: ok stays true when nothing was refused', () => {
-    // Kimi is the negative control because Droid uses a global binary, not a per-version layout.
     const home = homeWithRefusableMcp();
     const versionDir = path.join(home, '.agents', '.history', 'versions', 'kimi', '1.0.0');
     fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });

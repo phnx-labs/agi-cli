@@ -3,42 +3,21 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate a fresh HOME BEFORE importing state/db. db.ts captures DB_PATH at module
-// load (db.ts:29), so redirecting AGENTS_SESSIONS_DB after the import silently opens
-// the wrong database — which is exactly how an earlier version of this guard passed
-// vacuously. Every migration test in this directory uses this pattern for that reason.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv34-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-/**
- * v33 -> v34: `claude-opus-5` and `claude-sonnet-5` were absent from the pricing table,
- * so their sessions stored `cost_usd = NULL`. Adding the prices does not fix that on its
- * own — cost is computed at scan time and the scanner skips any transcript whose
- * (file_mtime_ms, file_size) is unchanged — and the rows cannot be repaired in place,
- * because they store `token_count` / `output_tokens` but not the uncached-input /
- * cache-read / cache-write split the price table needs.
- *
- * So v34 drops the affected transcripts from `scan_ledger` to force a re-parse. The
- * property under test is that it drops ONLY those: the other migrations in this
- * directory are explicitly tested on the contract that adding a column keeps warm
- * session ledgers warm, and a blanket `DELETE FROM scan_ledger` breaks six of them.
- */
 const { getSessionsDir, getSessionsDbPath } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
 const Database = (await import('../sqlite.js')).default;
 
-/** id, model, cost_usd, file_path — and whether v34 should invalidate it. */
 const SEED: Array<{ id: string; model: string; cost: number | null; file: string; invalidated: boolean }> = [
   { id: 'opus5-null', model: 'claude-opus-5', cost: null, file: '/w/opus5.jsonl', invalidated: true },
   { id: 'opus5-dated', model: 'claude-opus-5-20260714', cost: null, file: '/w/opus5-dated.jsonl', invalidated: true },
   { id: 'sonnet5-null', model: 'claude-sonnet-5', cost: null, file: '/w/sonnet5.jsonl', invalidated: true },
-  // Already has a cost: nothing to recover, must stay warm.
   { id: 'opus5-priced', model: 'claude-opus-5', cost: 1.25, file: '/w/priced.jsonl', invalidated: false },
-  // A different model that was never mispriced, must stay warm.
   { id: 'opus48-null', model: 'claude-opus-4-8', cost: null, file: '/w/opus48.jsonl', invalidated: false },
-  // Fable was always priced; its NULL cost is a different problem and not v34's business.
   { id: 'fable-null', model: 'claude-fable-5', cost: null, file: '/w/fable.jsonl', invalidated: false },
 ];
 
@@ -91,8 +70,6 @@ describe('schema migration v33 -> v34 (reprice the Claude 5 line)', () => {
   });
 
   it('leaves the session rows themselves untouched — the rescan repairs them', () => {
-    // v34 only drops ledger entries. The NULL costs stay NULL until the next scan
-    // re-reads those transcripts and re-derives cost from raw token usage.
     const db = getDB();
     const row = db.prepare(`SELECT cost_usd, model FROM sessions WHERE id = 'opus5-null'`)
       .get() as { cost_usd: number | null; model: string };

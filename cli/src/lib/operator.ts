@@ -69,23 +69,15 @@ export function canPerform(id: string, action: string, root?: string): boolean {
 }
 
 export function isHighConsequenceAllowed(blockConsequence: string | undefined, operatorId: string, root?: string): boolean {
-  // Mailbox from-labels are untrusted; merge/deploy/admin requires a known operator with explicit rights.
+
   if (!blockConsequence || blockConsequence === 'normal') return true;
   if (!isKnownOperator(operatorId, root)) return false;
   if (isAdmin(operatorId, root)) return true;
   return canPerform(operatorId, blockConsequence, root);
 }
 
-/**
- * Prove operator identity for high-consequence answers.
- *
- * Knowing an id listed in operators.yaml is not authentication — any same-user
- * process can pass `--as muqsit`. Require the process environment to claim the
- * same id via AGENTS_OPERATOR_ID (typically injected by `agents secrets` /
- * the human's launch context).
- */
 export function verifyOperatorIdentity(claimedId: string | undefined, root?: string): boolean {
-  // Rights alone are insufficient: the environment must authenticate the same operator id.
+
   if (!claimedId) return false;
   if (!isKnownOperator(claimedId, root)) return false;
   const envId = process.env.AGENTS_OPERATOR_ID?.trim();

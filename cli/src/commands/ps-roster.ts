@@ -86,6 +86,7 @@ export function buildSessionDescription(s: ActiveSession): string {
     if (target) parts.push(target);
     return cleanPreview(parts.filter(Boolean).join(' · '));
   }
+
   // ladder-exempt: compact live preview base, not the row's headline.
   const base = s.preview || s.label || s.topic || '';
   return cleanPreview([todo, base].filter(Boolean).join(' · '));
@@ -167,7 +168,7 @@ export function liveStatusWord(a: ActiveSession | undefined): string {
 
 export function isAwaitingUser(s: ActiveSession): boolean {
   if (s.status === 'crashed' || s.status === 'closed') return false;
-  // Orphans can still await input; dead abandoned rows need relaunch, not an answer.
+
   if (s.status === 'abandoned' && s.pidAlive !== true) return false;
   return s.status === 'input_required' || s.activity === 'waiting_input';
 }
@@ -548,7 +549,7 @@ export async function gatherActiveSessions(
 
   if (opts.local && !scoped) {
     const loaded = await loadLocalActiveSessions({ forceRefresh });
-    // An older daemon's snapshot carries no machine; local rows are this box's.
+
     const self = machineId();
     for (const s of loaded.sessions) if (!s.machine) s.machine = self;
     return { sessions: loaded.sessions, remoteDeviceCount: 0 };

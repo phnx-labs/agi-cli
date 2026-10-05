@@ -57,7 +57,7 @@ export interface PostIdentity {
 export function resolvePostIdentity(
   input: Pick<FeedPostInput, 'sessionId' | 'env' | 'cwd' | 'activityRoot' | 'startPid' | 'getParentPid' | 'readEntry' | 'listEntries'>,
 ): PostIdentity | undefined {
-  // Precedence: explicit/env session, launch-id registry, ancestor PID registry, then launch activity.
+
   const env = input.env ?? process.env;
   const readEntry = input.readEntry ?? readPidSessionEntry;
   const listEntries = input.listEntries ?? listPidSessionEntries;
@@ -135,7 +135,7 @@ export function walkPidRegistry(
   getParent: (pid: number) => number | undefined,
   readEntry: (pid: number) => PidSessionEntry | undefined,
 ): PidSessionEntry | undefined {
-  // Keep a provenance-only first hit while walking for the nearest valid session identity.
+
   let pid: number | undefined = startPid;
   const seen = new Set<number>();
   let firstHit: PidSessionEntry | undefined;
@@ -243,7 +243,7 @@ export function buildAttachment(
   let href = abs;
 
   if (ctx.copyRoot) {
-    // Copy into durable history before worktree cleanup; copy failure preserves the usable source path.
+
     try {
       const destDir = path.join(ctx.copyRoot, ctx.sessionId, ctx.updateId);
       fs.mkdirSync(destDir, { recursive: true });
@@ -318,7 +318,6 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
   }
 
   const ts = input.ts ?? new Date().toISOString();
-  // Attribute through the resolved execution cwd, not the caller's current directory.
   const project = resolveProjectNameForCwd(identity.cwd, listProjectDefs());
   const attachments = buildAttachments(input.attach, {
     copyRoot: input.attachmentsRoot ?? path.join(getHistoryDir(), 'attachments'),
@@ -328,7 +327,7 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
 
   const event: Omit<ActivityEvent, 'v' | 'tier'> = {
     ts,
-    // Blocked is workflow state, not an emphasis level on an ordinary status post.
+
     event: input.blocked ? 'status.blocked' : 'status.posted',
     sessionId: identity.sessionId,
     mailboxId: identity.mailboxId,

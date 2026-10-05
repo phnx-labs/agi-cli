@@ -51,7 +51,6 @@ export function wrapStreamWithBudgetGate(args: {
             outputTokens: event.outputTokens ?? 0,
           });
           if (watcher.breached() && firstBreach) {
-            // Stopping local iteration is insufficient: cancel the provider task server-side.
             try {
               await args.provider.cancel(args.taskId);
             } catch (err) {

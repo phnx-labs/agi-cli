@@ -1578,7 +1578,6 @@ export function seedActiveCursorLoginPerVersion(): void {
   } catch {  }
 }
 
-// Delete only the legacy YAML/paired generated system-markdown shape that proves our ownership.
 export function migrateKimiSubagentsToMarkdown(versionsDir?: string): void {
   const kimiVersions = path.join(versionsDir ?? path.join(HISTORY_DIR, 'versions'), 'kimi');
   let versions: string[];
@@ -1623,7 +1622,6 @@ export function migrateKimiSubagentsToMarkdown(versionsDir?: string): void {
   }
 }
 
-// Remove home rules only when their header or symlink target proves agents-cli generated them.
 export function removeHomeCompiledProjectRules(homeDir: string = HOME): void {
   const agentsPath = path.join(homeDir, 'AGENTS.md');
   let agentsLstat: fs.Stats;
@@ -1660,7 +1658,6 @@ export function removeHomeCompiledProjectRules(homeDir: string = HOME): void {
 }
 
 export async function runMigration(): Promise<void> {
-  // Fold the system tree first so later migrations operate on canonical paths.
   foldLegacySystemRepo();
   const cliMigrateDirs = [USER_DIR, SYSTEM_DIR];
   const projectDotAgents = path.join(process.cwd(), '.agents');
@@ -1719,7 +1716,6 @@ export async function runMigration(): Promise<void> {
   removeHomeCompiledProjectRules();
   pauseUnreadyEnabledRoutines();
 
-  // Repair symlinks last, after every path-moving migration has settled.
   repairAgentConfigSymlinks();
   repairSelfReferentialBinShims();
 

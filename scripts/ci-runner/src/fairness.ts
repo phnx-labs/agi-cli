@@ -12,10 +12,6 @@ export interface AdmissionDecision {
   reason: 'capacity' | 'per-repo' | 'admitted';
 }
 
-/**
- * Fair CPU/memory admission. This is short-lived slot admission, not a
- * machine lease: the box is never exclusively assigned to a run.
- */
 export class FairScheduler {
   constructor(
     readonly capacity: Capacity = DEFAULT_CAPACITY,
@@ -58,11 +54,6 @@ export class FairScheduler {
     if (idx >= 0) this.running.splice(idx, 1);
   }
 
-  /**
-   * Next queued job that fits. Among eligible jobs, pick the repo with the
-   * fewest running jobs, then the oldest enqueue time, so one repo cannot
-   * starve the others when a slot frees.
-   */
   nextEligible(): RunRecord | null {
     const eligible = this.queued.filter((run) =>
       this.canAdmit(run.request.owner, run.request.repo, run.request.resourceClass).admit,

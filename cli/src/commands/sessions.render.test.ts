@@ -139,9 +139,6 @@ describe('agents sessions (render-mode)', () => {
       expect(result.status).toBe(0);
 
       const output = outputOf(result);
-      // The informational "Resolved Claude history entry ... to transcript ..."
-      // status line was removed; the behavior (history ID → transcript
-      // content) still works, so we assert on the loaded transcript instead.
       expect(output).toContain('Loaded resumed transcript');
       expect(output).not.toContain(`No transcript session found matching: ${historyOnlyId}`);
     } finally {

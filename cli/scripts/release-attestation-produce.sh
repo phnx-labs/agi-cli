@@ -117,8 +117,6 @@ suite_green_despite_worker_crash() {
   grep -qE '(^|[^[:alnum:]])passed([^[:alnum:]]|$)' <<<"$tests_line"
 }
 SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
-# Inheritance is valid only for the metadata-only descendant that `derive`
-# verifies below; build and pack still use this exact release tree.
 if [[ -n "$INHERIT_BASE" ]]; then
   green "Inheriting the suite result from $(basename "$INHERIT_BASE") (skipping the full suite)."
   rm -f "$SUITE_LOG"
@@ -133,7 +131,6 @@ else
   die "suite failed for ${SHA:0:12} -- refusing to attest a red tree (log: $SUITE_LOG)"
 fi
 
-# Ordinary CLI releases never sign; signing belongs only to explicit helper runs.
 if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary..."
@@ -166,7 +163,6 @@ if [[ -n "$INHERIT_BASE" ]]; then
       > "$ATTEST_TMP" \
       || die "derive failed for ${SHA:0:12} -- the release tree is not a metadata-only descendant of the base; run the full suite instead"
 else
-  # `selected` is the verifier's suite key for a directly tested candidate tree.
   scripts/release-attestation.sh identity --repo-root "$WT" --commit "$SHA" \
     | jq --arg name "$TGZ_NAME" --arg digest "sha256:$TGZ_DIGEST" \
         '. + {schemaVersion: 1, suite: "selected", conclusion: "pass", tarball: {filename: $name, digest: $digest}}' \
@@ -182,8 +178,6 @@ mv "$TGZ_NAME" "$DEST_DIR/$TGZ_NAME"
 green "Wrote $DEST_JSON"
 green "Tarball at $DEST_DIR/$TGZ_NAME"
 
-# Helper-only releases may be newer than the last CLI manifest, so scan newest
-# to oldest and seed from the newest release that actually carries one.
 newest_release_with_manifest() {
   local tags tag newest=""
   tags="$(gh release list --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null)" || return 1

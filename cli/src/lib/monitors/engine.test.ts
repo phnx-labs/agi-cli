@@ -27,7 +27,7 @@ function uniq(tag: string): string {
 
 afterEach(() => {
   for (const n of names.splice(0)) {
-    try { fs.rmSync(getMonitorHistoryDir(n), { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(getMonitorHistoryDir(n), { recursive: true, force: true }); } catch {  }
   }
 });
 
@@ -73,16 +73,13 @@ describe('decideFire — match mode', () => {
     const name = uniq('match');
     const m = monitor({ name, condition: { mode: 'match', match: 'fail' } });
 
-    // No match → no fire.
     expect(decideFire(m, { raw: 'all green' }).fire).toBe(false);
 
-    // First match fires.
     const first = decideFire(m, { raw: 'build 1 fail' });
     expect(first.fire).toBe(true);
 
-    // Persist the fired value (what the engine does on fire), then re-observe.
     writeState(name, first.value, m.condition.dedupeKey);
-    expect(decideFire(m, { raw: 'build 2 fail' }).fire).toBe(false); // same matched token 'fail'
+    expect(decideFire(m, { raw: 'build 2 fail' }).fire).toBe(false);
   });
 });
 
@@ -93,7 +90,6 @@ describe('evaluateMonitorOnce — real command source, no side effects', () => {
     const { observation, decision } = await evaluateMonitorOnce(m);
     expect(observation?.raw).toBe('alive');
     expect(decision?.fire).toBe(true);
-    // Dry-run must not persist.
     expect(fs.existsSync(getMonitorHistoryDir(name))).toBe(false);
   });
 });
@@ -102,9 +98,6 @@ describe('MonitorEngine.runMonitor — liveness heartbeat (RUSH-2485)', () => {
   const engine = new MonitorEngine();
 
   it('records a heartbeat on a poll that matches NOTHING — the core bug', async () => {
-    // A match-mode monitor whose regex never matches used to leave zero trace:
-    // decideFire returns fire:false/persist:false, so writeState was never called
-    // and `view` showed state:null, indistinguishable from "never polled".
     const name = uniq('nomatch');
     const m = monitor({
       name,
@@ -112,16 +105,13 @@ describe('MonitorEngine.runMonitor — liveness heartbeat (RUSH-2485)', () => {
       condition: { mode: 'match', match: 'FAILURE' },
     });
     await engine.runMonitor(m);
-    // The fix: a liveness heartbeat exists even though nothing fired or persisted.
     const live = readLiveness(name);
     expect(live).not.toBeNull();
     expect(live!.checkCount).toBe(1);
     expect(live!.consecutiveErrors).toBe(0);
     expect(live!.lastError).toBeUndefined();
-    // And change-detection state is still absent — it never fired.
     expect(readState(name)).toBeNull();
 
-    // A second poll advances the heartbeat.
     await engine.runMonitor(m);
     expect(readLiveness(name)!.checkCount).toBe(2);
   });
@@ -132,17 +122,13 @@ describe('MonitorEngine.runMonitor — liveness heartbeat (RUSH-2485)', () => {
       name,
       source: { type: 'command', command: 'echo tick' },
       condition: { mode: 'every' },
-      // Unreachable URL: the action attempt fails fast, no owner is touched, and a
-      // single failure stays below the drought threshold so no owner notify fires.
       action: { type: 'webhook-out', url: 'http://127.0.0.1:1/' },
     });
     await engine.runMonitor(m);
     const live = readLiveness(name);
     expect(live!.checkCount).toBe(1);
-    // The fired action failed, so this check counts as a failure for drought.
     expect(live!.consecutiveErrors).toBe(1);
     expect(live!.lastError).toContain('webhook-out');
-    // It fired, so lastFiredAt is recorded regardless of the action outcome.
     expect(readState(name)!.lastFiredAt).toBeTruthy();
   });
 
@@ -155,9 +141,6 @@ describe('MonitorEngine.runMonitor — liveness heartbeat (RUSH-2485)', () => {
 });
 
 describe('decideFire — a failed observation never fires, in ANY mode (PHNX-3510)', () => {
-  // The guard lives in decideFire (not just runMonitor) so `agents monitors test`
-  // — which calls evaluateMonitorOnce → decideFire — and the match/every modes are
-  // all protected, matching the "Would fire: no" claim in docs/automation.md.
   it('returns no-fire / no-persist for on-change, match, and every', () => {
     const obs = {
       raw: 'GraphQL: API rate limit already exceeded for user ID 13007401.',
@@ -172,7 +155,6 @@ describe('decideFire — a failed observation never fires, in ANY mode (PHNX-351
     for (const m of cases) {
       const d = decideFire(m, obs);
       expect(d.fire, m.condition.mode).toBe(false);
-      // A failed poll must not even establish an on-change baseline.
       expect(d.persist, m.condition.mode).toBe(false);
       expect(d.event, m.condition.mode).toBeNull();
     }
@@ -188,7 +170,6 @@ describe('decideFire — a failed observation never fires, in ANY mode (PHNX-351
     const { observation, decision } = await evaluateMonitorOnce(m);
     expect(observation?.failed).toBe(true);
     expect(decision?.fire).toBe(false);
-    // Dry-run writes nothing.
     expect(fs.existsSync(getMonitorHistoryDir(name))).toBe(false);
   });
 });
@@ -204,50 +185,37 @@ describe('MonitorEngine.runMonitor — a poll FAILURE is not a value change (PHN
     return { command: `sh ${script}`, set: (body: string) => fs.writeFileSync(script, body) };
   }
   afterEach(() => {
-    for (const d of tmpDirs.splice(0)) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } }
+    for (const d of tmpDirs.splice(0)) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {  } }
   });
 
   it('does NOT fire, and leaves the baseline untouched, across empty→error→empty (the exact ticket flap)', async () => {
-    // Reproduces `invdb-pr-land`: `gh pr list … | jq` that in steady state emits
-    // an empty string, but intermittently emits the gh rate-limit error. The pipe
-    // to jq means the shell exit code is 0, so ONLY the error-shape text catches it.
     const name = uniq('pollfail-flap');
     const poll = togglePoll();
     const m = monitor({
       name,
       source: { type: 'command', command: poll.command },
       condition: { mode: 'on-change' },
-      // A run action so a spurious fire would be unmistakable — but the poll never
-      // observes a value, so it must never dispatch.
       action: { type: 'notify', notifyChannel: 'telegram' },
     });
 
-    // Step 1 — empty steady state establishes the silent baseline.
     poll.set("printf ''\n");
     await engine.runMonitor(m);
     expect(readState(name)?.lastValue).toBe('');
     expect(readState(name)?.lastFiredAt).toBeUndefined();
     expect(readLiveness(name)!.consecutiveErrors).toBe(0);
 
-    // Step 2 — the gh rate-limit error (exit 0, piped-through-jq). BEFORE the fix
-    // this read as a value change (''→error) and dispatched the action.
     poll.set("printf 'GraphQL: API rate limit already exceeded for user ID 13007401.\\n'\n");
     await engine.runMonitor(m);
-    // No fire, and the baseline is UNTOUCHED — the error text never became the value.
     expect(readState(name)?.lastValue).toBe('');
     expect(readState(name)?.lastFiredAt).toBeUndefined();
-    // It is recorded as a failed check so a sustained streak escalates as a drought.
     const live = readLiveness(name)!;
     expect(live.consecutiveErrors).toBe(1);
     expect(live.lastError).toContain('API rate limit exceeded');
 
-    // Step 3 — back to empty. BEFORE the fix this was the second half of the flap
-    // (error→'') and fired AGAIN. It must be a no-op against the intact baseline.
     poll.set("printf ''\n");
     await engine.runMonitor(m);
     expect(readState(name)?.lastValue).toBe('');
     expect(readState(name)?.lastFiredAt).toBeUndefined();
-    // A good poll clears the failure streak.
     expect(readLiveness(name)!.consecutiveErrors).toBe(0);
   });
 
@@ -261,12 +229,11 @@ describe('MonitorEngine.runMonitor — a poll FAILURE is not a value change (PHN
     });
 
     poll.set("printf 'up\\n'\n");
-    await engine.runMonitor(m); // baseline 'up'
+    await engine.runMonitor(m);
     expect(readState(name)?.lastValue).toBe('up');
 
     poll.set("printf 'boom\\n' >&2\nexit 2\n");
     await engine.runMonitor(m);
-    // The non-zero exit is skipped: baseline stays 'up', no fire, failed check.
     expect(readState(name)?.lastValue).toBe('up');
     expect(readState(name)?.lastFiredAt).toBeUndefined();
     const live = readLiveness(name)!;
@@ -275,8 +242,6 @@ describe('MonitorEngine.runMonitor — a poll FAILURE is not a value change (PHN
   });
 
   it('a genuine value change on a CLEAN (exit 0, non-error) poll still fires', async () => {
-    // The fix must not muzzle real signals: a clean poll whose value differs from
-    // the baseline fires exactly as before.
     const name = uniq('pollfail-clean');
     const poll = togglePoll();
     const m = monitor({
@@ -287,34 +252,28 @@ describe('MonitorEngine.runMonitor — a poll FAILURE is not a value change (PHN
     });
 
     poll.set("printf 'OPEN\\n'\n");
-    await engine.runMonitor(m); // baseline OPEN, no fire
+    await engine.runMonitor(m);
     expect(readState(name)?.lastFiredAt).toBeUndefined();
 
     poll.set("printf 'MERGED\\n'\n");
-    await engine.runMonitor(m); // OPEN→MERGED is a real change: fires
+    await engine.runMonitor(m);
     expect(readState(name)?.lastValue).toBe('MERGED');
     expect(readState(name)?.lastFiredAt).toBeTruthy();
   });
 });
 
 describe('MonitorEngine.tick — a stopped engine dispatches nothing (PHNX-3608)', () => {
-  // Under the external scheduler the supervisor owns the tick timer, so a
-  // stopped engine (its monitors service disabled) must honour stop() in tick()
-  // itself — otherwise the next supervised tick would still fire the last-loaded
-  // monitors even though the engine is stopped.
   it('tick() runs monitors while started, and no longer dispatches after stop()', async () => {
     const name = uniq('stopgate');
     writeMonitor(monitor({ name, source: { type: 'command', command: 'echo x' }, condition: { mode: 'every' } }));
     try {
       const engine = new MonitorEngine();
-      engine.start({ externalScheduler: true }); // loads the enabled monitor, no internal timer
+      engine.start({ externalScheduler: true });
       await engine.tick();
       const afterFirst = readLiveness(name);
       expect(afterFirst).not.toBeNull();
       expect(afterFirst!.checkCount).toBe(1);
 
-      // Disable the service: the supervisor calls stop(). A subsequent supervised
-      // tick must be a no-op — the heartbeat count does not advance.
       engine.stop();
       await engine.tick();
       expect(readLiveness(name)!.checkCount).toBe(1);
@@ -328,7 +287,7 @@ describe('MonitorEngine.tick — a stopped engine dispatches nothing (PHNX-3608)
     writeMonitor(monitor({ name, source: { type: 'command', command: 'echo x' }, condition: { mode: 'every' } }));
     try {
       const engine = new MonitorEngine();
-      await engine.tick(); // running === false, never loaded
+      await engine.tick();
       expect(readLiveness(name)).toBeNull();
     } finally {
       deleteMonitor(name);

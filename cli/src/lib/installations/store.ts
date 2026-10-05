@@ -25,7 +25,6 @@ export function installationRecordPath(agent: AgentId, label: string): string {
   return path.join(installationDir(agent, label), INSTALLATION_RECORD_FILE);
 }
 
-// IDs are opaque and permanent; repair/update must preserve them.
 export function mintInstallationId(): string {
   return `ins_${crypto.randomBytes(12).toString('hex')}`;
 }
@@ -158,7 +157,6 @@ export function createInstallation(
   return created;
 }
 
-// The label is stable installation identity; releaseVersion is the moving payload.
 export function recordRelease(installation: Installation, releaseVersion: string): Installation {
   const at = nowIso();
   const next: Installation = {

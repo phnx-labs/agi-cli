@@ -188,7 +188,6 @@ export interface HookMatches {
    * (Claude Code) report the live mode — an explicit non-listed value skips.
    */
   permission_mode?: string | string[];
-  // Inverse mode gate; absent mode passes because only some harnesses report it.
   permission_mode_not?: string | string[];
 }
 

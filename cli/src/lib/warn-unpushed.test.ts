@@ -19,7 +19,6 @@ function git(cwd: string, ...args: string[]): string {
   return (res.stdout ?? '').trim();
 }
 
-/** A work repo whose `origin` is a real local bare repo — no network, real push. */
 function makeRepoWithRemote(): { work: string; commit: (subject: string) => void } {
   const remote = makeTempDir('warn-unpushed-remote-');
   git(remote, 'init', '--bare', '-b', 'main');
@@ -64,16 +63,14 @@ describe('getUnpushedState', () => {
   });
 
   it('does not false-positive when commits are on a remote ref but no upstream is set', async () => {
-    // Push, then delete the local tracking config so @{u} is gone but the
-    // commit is still on origin. --remotes must still see it as pushed.
     const { work, commit } = makeRepoWithRemote();
     commit('feat: first');
-    git(work, 'push', 'origin', 'main'); // note: no -u, so no upstream tracking
+    git(work, 'push', 'origin', 'main');
     git(work, 'fetch', 'origin');
 
     const state = await getUnpushedState(work);
     expect(state.hasUpstream).toBe(false);
-    expect(state.unpushed).toEqual([]); // commit is on origin/main -> not "unpushed"
+    expect(state.unpushed).toEqual([]);
   });
 
   it('preserves commit subjects that contain spaces (no truncation)', async () => {
@@ -97,7 +94,7 @@ describe('getUnpushedState', () => {
 
     const state = await getUnpushedState(work);
     expect(state.isRepo).toBe(true);
-    expect(state.unpushed).toEqual([]); // nowhere to push -> no warning
+    expect(state.unpushed).toEqual([]);
   });
 
   it('returns an inert state for a non-git directory', async () => {
@@ -111,7 +108,7 @@ describe('getUnpushedState', () => {
     commit('feat: first');
     commit('feat: second');
     const head = git(work, 'rev-parse', 'HEAD');
-    git(work, 'checkout', head); // detach
+    git(work, 'checkout', head);
 
     const state = await getUnpushedState(work);
     expect(state.branch).toBeNull();
@@ -119,9 +116,6 @@ describe('getUnpushedState', () => {
   });
 
   it('detects unpushed commits inside a git worktree on a feature branch (the target flow)', async () => {
-    // The primary real-world case: an agent creates a worktree on its own
-    // branch and commits there. The commit is NOT reachable from the main
-    // checkout's HEAD, so inspecting the worktree path is what surfaces it.
     const { work, commit } = makeRepoWithRemote();
     commit('chore: base');
     git(work, 'push', '-u', 'origin', 'main');

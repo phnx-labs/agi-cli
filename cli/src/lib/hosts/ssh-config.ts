@@ -93,7 +93,6 @@ interface SshGResult {
 }
 
 export function sshResolve(name: string): SshGResult | undefined {
-  // Validate before `ssh -G`; an option-shaped target must never reach OpenSSH.
   try {
     assertValidSshTarget(name);
   } catch {

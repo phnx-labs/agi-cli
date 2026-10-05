@@ -19,7 +19,7 @@ export function ensureLocalBinSymlink(
   target: string,
   dir: string = localBinDir(),
 ): SymlinkResult {
-  // PATH healing never clobbers a real file or a symlink owned by another installation.
+
   const linkPath = path.join(dir, name);
   const want = path.resolve(target);
   let current: string | null = null;
@@ -56,7 +56,7 @@ function bashPath(): string {
 }
 
 function loginProbeEnv(): NodeJS.ProcessEnv {
-  // Remove inherited PATH/tool-manager state so bash computes a fresh login environment.
+
   const env = { ...process.env };
   delete env.PATH;
   delete env.NVM_BIN;

@@ -17,8 +17,8 @@ export interface Layer {
 }
 
 
-// These caches mirror writer precedence for one stable configuration snapshot.
-// Long-running callers must clearLayerCache after configuration changes.
+
+
 const firstWinsCache = new Map<string, Layer[]>();
 let hookLayersCache: Layer[] | null = null;
 
@@ -28,7 +28,7 @@ export function clearLayerCache(): void {
 }
 
 export function firstWinsLayers(cwd: string): Layer[] {
-  // Match writer order exactly: project, user, system, then enabled extras.
+
   const cached = firstWinsCache.get(cwd);
   if (cached) return cached;
 
@@ -45,7 +45,7 @@ export function firstWinsLayers(cwd: string): Layer[] {
 }
 
 export function hookLayers(): Layer[] {
-  // Executable hooks deliberately exclude untrusted project-local resources.
+
   if (hookLayersCache) return hookLayersCache;
 
   const layers: Layer[] = [];

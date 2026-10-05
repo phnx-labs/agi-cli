@@ -46,7 +46,6 @@ export function parseState(raw: string): SessionState | null {
   ) {
     return null;
   }
-  // Legacy 04-capture hook omits agent + method. Default rather than reject.
   if (typeof o.agent !== 'string') o.agent = 'unknown';
   if (typeof o.method !== 'string') o.method = 'hook-stdin';
   return o as unknown as SessionState;
@@ -63,7 +62,7 @@ export async function writeStateAtomic(
     await fs.promises.writeFile(tmpPath, serializeState(state), 'utf8');
     await fs.promises.rename(tmpPath, finalPath);
   } catch (err) {
-    try { await fs.promises.unlink(tmpPath); } catch { /* best-effort */ }
+    try { await fs.promises.unlink(tmpPath); } catch {  }
     throw err;
   }
 }
@@ -71,9 +70,6 @@ export async function writeStateAtomic(
 const PID_JSON_RE = /^(\d+)\.json$/;
 const PID_TEMP_RE = /^\.(\d+)\.[^.]+$/;
 
-/** Remove stale state files: dead-pid records, zero-byte JSON files, and orphaned
- *  temp files left behind by failed atomic writes. Returns the number of files
- *  removed. Best-effort: individual failures are ignored and do not stop the sweep. */
 export async function cleanupOrphanedStateFiles(stateDir: string = STATE_DIR): Promise<number> {
   let names: string[];
   try {
@@ -90,12 +86,11 @@ export async function cleanupOrphanedStateFiles(stateDir: string = STATE_DIR): P
     } catch {
       continue;
     }
-    // Zero-byte JSON files are never valid state records.
     if (stat.size === 0 && name.endsWith('.json')) {
       try {
         await fs.promises.unlink(full);
         removed++;
-      } catch { /* ignore race */ }
+      } catch {  }
       continue;
     }
     const pidMatch = PID_JSON_RE.exec(name) ?? PID_TEMP_RE.exec(name);
@@ -109,7 +104,7 @@ export async function cleanupOrphanedStateFiles(stateDir: string = STATE_DIR): P
         try {
           await fs.promises.unlink(full);
           removed++;
-        } catch { /* ignore race */ }
+        } catch {  }
       }
     }
   }

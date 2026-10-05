@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { liveStatusWord } from './ps-roster.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
-/** Minimal ActiveSession for the status-word mapping (only the fields it reads). */
 function row(partial: Partial<ActiveSession>): ActiveSession {
   return { context: 'headless', kind: 'grok', status: 'running', ...partial } as ActiveSession;
 }
@@ -15,8 +14,6 @@ describe('liveStatusWord (status text for the default list, not just a glyph)', 
   });
 
   it('a coarse-status row (no rich activity, e.g. an opaque live harness) still reads working', () => {
-    // resolveFallbackStatus now reports `running` for any live process — that must
-    // surface as the word `working`, never a blank or the retired `unknown`.
     expect(liveStatusWord(row({ status: 'running' }))).toBe('working');
   });
 
@@ -30,8 +27,6 @@ describe('liveStatusWord (status text for the default list, not just a glyph)', 
   });
 
   it('lifecycle status (closed/abandoned) wins over any residual parsed activity', () => {
-    // RUSH-2066: a dead session whose stale tail still parses as `idle` (or even
-    // mid-`working`) must read as its lifecycle status, not the parsed activity.
     expect(liveStatusWord(row({ status: 'closed', activity: 'idle' }))).toBe('closed');
     expect(liveStatusWord(row({ status: 'abandoned', activity: 'working' }))).toBe('abandoned');
   });

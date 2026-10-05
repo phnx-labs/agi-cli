@@ -53,10 +53,6 @@ describe('buildSessionLifecycleArgs', () => {
     ]);
   });
 
-  // `resume` is the one entry point for "put me back in that session", so the
-  // attach-only vs attach-or-recover distinction has to be reachable FROM it —
-  // otherwise collapsing the verbs would quietly drop a behaviour focus.test.ts
-  // pins (selectFallback: --attach-only picks refuseFallback, never forks).
   it('forwards --attach-only so the no-fork behaviour survives the collapse', () => {
     expect(buildSessionLifecycleArgs('019fd114', [], true)).toEqual([
       'sessions', 'focus', '019fd114', '--attach-only',
@@ -67,8 +63,6 @@ describe('buildSessionLifecycleArgs', () => {
     expect(buildSessionLifecycleArgs('019fd114')).toEqual(['sessions', 'focus', '019fd114']);
   });
 
-  // apps/ext's remote path shells `agents sessions resume <id> --local` on the
-  // peer; without the flag that call dies on an unknown option.
   it('routes resume <id> --attach-only / --local through focus, not strict resume', () => {
     expect(resumeUsesLifecycleDispatch('019fd114', undefined, { attachOnly: true })).toBe(true);
     expect(resumeUsesLifecycleDispatch('019fd114', undefined, { local: true })).toBe(true);
@@ -139,16 +133,10 @@ describe('resume picker filter (in-memory, no DB)', () => {
   });
 
   it('does not call filterSessionsByQuery (no DB scan per keystroke)', async () => {
-    // Verify the sessions module's FTS function is NOT imported into sessions-resume.
-    // If it were, this dynamic import would expose it as used.
     const resumeMod = await import('./sessions-resume.js');
     const sessionsMod = await import('./sessions.js');
-    // The resume module uses sessionMatchesQuery, not filterSessionsByQuery.
-    // We verify this indirectly: filterSessionsByQuery is not re-exported from sessions-resume.
     expect((resumeMod as Record<string, unknown>)['filterSessionsByQuery']).toBeUndefined();
-    // And sessionMatchesQuery is the correct in-memory function.
     expect(typeof sessionMatchesQuery).toBe('function');
-    // Confirm it does not touch the DB by ensuring it works with plain objects.
     const s = { id: 'x', shortId: 'x', agent: 'claude', topic: 'test topic', cwd: '/tmp' } as SessionMeta;
     expect(sessionMatchesQuery(s, 'test')).toBe(true);
     expect(sessionMatchesQuery(s, 'notfound')).toBe(false);
@@ -156,10 +144,6 @@ describe('resume picker filter (in-memory, no DB)', () => {
 });
 
 describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux socket, no mocking)', () => {
-  // Random suffix so this can never collide with a genuinely live pane on the
-  // machine running the suite. attachLocalLiveSelector reads the REAL default
-  // tmux socket (list-sessions / has-session — read-only), so this alias must
-  // be one no live session will ever hold.
   const randomAlias = (): string => `ag-claude-${randomBytes(4).toString('hex')}`;
 
   it('a bare alias resume with no live local pane falls through to strict resume instead of hanging', async () => {
@@ -167,10 +151,6 @@ describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux so
     const priorExitCode = process.exitCode;
     process.exitCode = undefined;
     try {
-      // No live pane for this alias -> attachLocalLiveSelector returns false ->
-      // falls through to runStrictResume -> resolveSessionMetadataValue finds
-      // nothing locally or on the (empty, sandboxed-HOME) fleet -> reports
-      // "No session matching", never a silent hang or a thrown error.
       await sessionsResumeAction(randomAlias(), undefined, {});
       expect(errSpy.mock.calls.flat().join('\n')).toContain('No session matching');
       expect(process.exitCode).toBe(1);
@@ -185,10 +165,6 @@ describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux so
     const priorExitCode = process.exitCode;
     process.exitCode = undefined;
     try {
-      // shouldAttachLocalTmuxAliasBeforeFleet is false whenever hosts.length > 0
-      // (rule 4: --device skips the local gate entirely) — attachLocalLiveSelector
-      // never touches the local tmux socket here, and the selector still resolves
-      // (as not-found) rather than hanging.
       await sessionsResumeAction(randomAlias(), undefined, { device: 'nonexistent-device-xyz' });
       expect(errSpy.mock.calls.flat().join('\n')).toMatch(/No session matching|unreachable/);
       expect(process.exitCode).toBe(1);
@@ -243,7 +219,6 @@ describe('selected resume terminal surface', () => {
     "finish it's done: literal $(whoami), `id`, and a\nsecond line",
   ])('preserves prompt argv through the production surface and a real shell: %j', (prompt) => {
     const surface = buildSelectedResumeSurface(session(), prompt, { headless: true });
-    // Use Node as an argv probe, preserving the surface's actual argument words.
     const command = [
       shellQuote(process.execPath), '-e',
       shellQuote('process.stdout.write(JSON.stringify(process.argv.slice(1)))'),
@@ -422,7 +397,6 @@ describe('resolveResumeOptions — recovering resume flags the parent command sw
       'resume', '019fd0c8b3e977a2a1a4444698c4d897',
       '--agent', 'codex', '--all', '--teams', '--since', '7d', '--local',
     ]);
-    // None of these reached the subcommand's own opts — the parent ate them.
     expect(captured.agent).toBeUndefined();
     expect(captured.all).toBeUndefined();
     expect(captured.teams).toBeUndefined();

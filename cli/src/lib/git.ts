@@ -8,7 +8,7 @@ import { getPackageLocalPath } from './state.js';
 import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 
 export function assertSafeGitTransport(source: string): void {
-  // Only HTTPS, SSH/SCP, and local paths reach git; remote helpers can execute commands.
+
   const s = source.trim();
 
   if (s.startsWith('-')) {
@@ -54,7 +54,7 @@ export async function pushOrigin(
   branch: string,
   targetBranch?: string,
 ): Promise<void> {
-  // Branch validation and raw `--` jointly prevent option injection; keep them paired.
+
   assertValidBranchName(branch);
   if (targetBranch && targetBranch !== branch) {
     assertValidBranchName(targetBranch);
@@ -65,7 +65,7 @@ export async function pushOrigin(
 }
 
 function githooksEnabled(): boolean {
-  // Cloned hooks execute code, so installation is explicit opt-in for trusted repos.
+
   const v = process.env.AGENTS_ENABLE_GITHOOKS;
   return v === '1' || v === 'true';
 }
@@ -82,7 +82,7 @@ function installGithooksSymlinks(repoDir: string): void {
     return;
   }
 
-  // Repo-local symlinks preserve the sandbox boundary; never set core.hooksPath.
+
   const hooksDir = path.join(repoDir, '.git', 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
 
@@ -371,7 +371,7 @@ export function isSystemRepoRemote(remote: string | null | undefined): boolean {
 }
 
 export function isExpectedSystemRepoRemote(remote: string | null | undefined): boolean {
-  // Automatic pulls are trusted only from the canonical or operator-selected system origin.
+
   if (!remote) return false;
   const override = process.env.AGENTS_SYSTEM_REPO?.trim();
   if (override) {
@@ -946,7 +946,6 @@ export async function pullRepo(
       };
     }
 
-    // Strict/read-model pulls must never mutate executable hook wiring.
     if (!strict) installGithooksSymlinks(dir);
 
     const log = await git.log({ maxCount: 1 });

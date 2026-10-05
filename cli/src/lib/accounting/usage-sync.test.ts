@@ -62,7 +62,6 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     const cached = readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:01:00.000Z'));
     expect(cached?.windows[0].usedPercent).toBe(64);
     expect(cached?.freshness).toEqual({ source: 'sync', poller: 'zion' });
-    // The peer file is the envelope stamped with when it arrived.
     const [peer] = readFleetSharedDeviceStates(worker).states;
     expect(peer.device).toBe('zion');
     expect(peer.receivedAt).toBe(1_700_000_000_000);
@@ -83,7 +82,6 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
       await publishUsageSnapshotToSharedStore({ userAgentsDir: home, cachePath: source, role, device });
       envelopes.push(buildFleetStatePayload({ device, userAgentsDir: home }).state);
     }
-    // The newer (desktop) envelope arrives first; the older laptop one must not displace it.
     expect((await applyPeerFleetState(envelopes[0], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' })).merged).toBe(1);
     expect((await applyPeerFleetState(envelopes[1], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' })).merged).toBe(0);
     expect(readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:06:00.000Z'))?.windows[0].usedPercent).toBe(80);

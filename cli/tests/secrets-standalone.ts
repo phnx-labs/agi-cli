@@ -7,8 +7,6 @@ import { _resetSecretsClientForTest, keychainUsesFileFallback } from '../src/lib
 import { invalidateClaudeSetupTokenCache } from '../src/lib/claude-account-token.js';
 import { SECRETS_CLI_VERSION } from '../src/lib/secrets-cli.js';
 
-// Serialize the real pinned install across forks; POSIX returns its Node shebang shim, not raw dist JS.
-// Fresh SECRETS_HOME clears memoization; keychain suites require isolated file fallback, never a real keychain.
 const STANDALONE_SECRETS_VERSION = SECRETS_CLI_VERSION;
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_WAIT_MS = 5 * 60 * 1000;

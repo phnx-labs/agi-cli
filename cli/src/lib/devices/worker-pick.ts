@@ -31,15 +31,15 @@ interface WorkerPickOptions {
 const POSIX_PLATFORMS = ['linux', 'macos'] as const;
 
 export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise<WorkerPickPlan> {
-  // Offloaded work reuses the role/disable pool and load ranker, not agent/account eligibility.
+
   const local = normalizeHost(opts.localMachine ?? localMachineId());
-  // Local participates only when explicitly in that auto pool; failure never falls back to the operator box.
+
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
   if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);
   if (pool.length === 0) throw new Error(formatEmptyAutoPoolError());
 
   const excluded: WorkerExclusion[] = [];
-  // POSIX is the default, while unknown platforms remain eligible until a real probe resolves them.
+
   const wanted = new Set((opts.platforms ?? POSIX_PLATFORMS).map((p) => p.toLowerCase()));
   const reg = loadDevicesSync();
   const platformOf = (name: string): string | undefined => {
@@ -61,7 +61,7 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
   const signals = await (opts.probe ?? ((p: string[]) => probePoolSignals(p)))(onPlatform);
   const eligible = onPlatform.filter((device) => {
     const signal = signals.get(device);
-    // Preserve timeout separately from a confirmed negative so diagnostics expose relay congestion.
+
     if (signal?.reachable !== true) {
       excluded.push({ device, reason: signal?.timedOut ? 'probe timed out' : 'unreachable' });
       return false;

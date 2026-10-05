@@ -2,14 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { formatFanOut } from './sessions-picker.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
-/**
- * RUSH-3091/3095 regression. A REMOTE or unindexed row renders through
- * `formatMetaOnlyBody`, which has no parsed events — so before this change the
- * sub-agent count silently vanished there and background shells were never shown
- * at all. The counts are persisted columns precisely so this path can render
- * them; these tests pin that, and the zero/undefined distinction that keeps the
- * line from ever asserting "nothing is running".
- */
 function meta(over: Partial<SessionMeta> = {}): SessionMeta {
   return {
     id: 'a'.repeat(36),
@@ -21,7 +13,6 @@ function meta(over: Partial<SessionMeta> = {}): SessionMeta {
   } as SessionMeta;
 }
 
-/** chalk may or may not colour depending on TTY; compare on plain text. */
 const plain = (parts: string[]) =>
   parts.join(' · ').replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '');
 
@@ -38,8 +29,6 @@ describe('formatFanOut — the remote-row path', () => {
   });
 
   it('renders NOTHING for zero — never "0 background shells"', () => {
-    // 0 is "scanned, none found". Printing it would read as a positive claim
-    // that nothing is running.
     expect(formatFanOut(meta({ subAgentCount: 0, backgroundShellCount: 0 }))).toEqual([]);
   });
 
@@ -48,9 +37,6 @@ describe('formatFanOut — the remote-row path', () => {
   });
 
   it('prefers a FRESH derived count over the persisted column', () => {
-    // The persisted column is only as fresh as the last scan; for a live session
-    // it lags the transcript within seconds (observed: persisted 5, live 6). When
-    // the caller has parsed events, that derived value is the accurate one.
     const out = plain(
       formatFanOut(meta({ subAgentCount: 53, backgroundShellCount: 9 }), {
         subAgentCount: 7,

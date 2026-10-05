@@ -37,7 +37,7 @@ function adHocDevice(token: string, host: string, user?: string): DeviceProfile 
 }
 
 async function toResolvedTarget(token: string): Promise<ResolvedSshTarget | undefined> {
-  // Fleet fan-out accepts registered devices, SSH-config hosts, and explicit user@host literals.
+
   const host = await matchHost(token);
   if (!host) return undefined;
   let target: string;
@@ -62,7 +62,7 @@ export async function resolveDeviceTarget(
   token: string,
   opts: Pick<MatchHostOptions, 'resolveAuto'> = {}
 ): Promise<DeviceProfile | undefined> {
-  // Interactive SSH also accepts bare IP/FQDN literals, but not unknown or SSH-config-only bare aliases.
+
   const host = await matchHost(token, { allowBareLiteral: true, ...opts });
   if (!host) return undefined;
   if (host.device) {

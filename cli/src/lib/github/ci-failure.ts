@@ -70,7 +70,6 @@ export function actionsIds(url: string | null): { runId: number | null; jobId: n
   return m ? { runId: Number(m[1]), jobId: Number(m[2]) } : { runId: null, jobId: null };
 }
 
-// gh may preserve escapes for binary-safe output; cleanLine must sanitize the result before display.
 async function readJobLog(repo: string, jobId: number, gh: GhExec): Promise<string> {
   return gh(['api', '--allow-escape-sequences', `repos/${repo}/actions/jobs/${jobId}/logs`]);
 }

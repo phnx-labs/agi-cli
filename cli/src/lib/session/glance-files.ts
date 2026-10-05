@@ -9,9 +9,7 @@ import type { ActiveSession } from './active.js';
 const directoryCache = new Map<string, { mtimeMs: number; files: string[] }>();
 
 interface ChildFold {
-  /** Bytes of the child transcript already folded. A growing child is read from here, never from the start. */
   offset: number;
-  /** Incomplete trailing line held only in memory, capped so one record cannot pin the process. */
   pending: string;
   size: number;
   metaStamp: string;
@@ -27,16 +25,13 @@ interface ChildFold {
 
 const childFolds = new Map<string, ChildFold>();
 
-/** One child read per scan. A multi-megabyte running subagent catches up over scans. */
 const MAX_CHILD_BYTES_PER_READ = 256 * 1024;
 const MAX_CHILD_PENDING_BYTES = 1024 * 1024;
 
-/** This session's own subagent transcripts win. An empty directory is not a count of zero. */
 export function resolvedSubAgentCount(children: readonly string[] | undefined, toolCount: number): number {
   return children && children.length > 0 ? Math.min(30, children.length) : toolCount;
 }
 
-/** Directory membership is cached; child mtimes are checked separately because appends do not touch the directory. */
 export function claudeSubagentFiles(sessionFile: string): string[] | undefined {
   const dir = path.resolve(sessionFile.replace(/\.jsonl$/, ''), 'subagents');
   try {
@@ -117,12 +112,12 @@ export function readSessionSubagents(
       try {
         const metaStat = fs.statSync(metaPath);
         metaStamp = `${metaStat.mtimeMs}:${metaStat.size}`;
-      } catch { /* meta may follow the transcript */ }
+      } catch {  }
       let fold = childFolds.get(file);
       if (!fold || fold.metaStamp !== metaStamp) {
         let meta: Record<string, unknown> = {};
         if (metaStamp) {
-          try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { /* incomplete metadata */ }
+          try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch {  }
         }
         fold = {
           offset: fold?.offset ?? 0,
@@ -159,7 +154,7 @@ export function readSessionSubagents(
         ...(fold.resultExcerpt ? { resultExcerpt: fold.resultExcerpt } : {}),
         transcriptPath: file,
       });
-    } catch { /* A child can disappear between the directory scan and the read. */ }
+    } catch {  }
   }
   return rows.sort((a, b) => (a.startedAtMs ?? 0) - (b.startedAtMs ?? 0) || a.id.localeCompare(b.id)).slice(0, 30);
 }
@@ -168,9 +163,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = { 'image/png': 'png', 'image/jp
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_BASE64 = Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 4;
 
-/** Base64 still arriving for a record larger than one timeline read. Not persisted. */
 const openInlineImages = new Map<string, { base64: string; mediaType: string; dropped: boolean }>();
-/** Files finished before the JSONL record's closing newline, attached when the line completes. */
 const pendingImagePaths = new Map<string, { path: string; size: number }[]>();
 
 export function hasOpenInlineImage(sessionId: string): boolean {
@@ -182,7 +175,6 @@ export function dropOpenInlineImage(sessionId: string): void {
   pendingImagePaths.delete(sessionId);
 }
 
-/** Keep appending one image's base64. A restart mid-image calls this with no open buffer and must not. */
 export function appendInlineImage(sessionId: string, chunk: string, mediaType: string): void {
   if (!chunk) return;
   let open = openInlineImages.get(sessionId);
@@ -215,7 +207,6 @@ export function takePendingImagePaths(sessionId: string): { path: string; size: 
   return list;
 }
 
-/** Exclusive creation preserves existing images across ticks and process restarts. */
 export function cacheInlineImage(sessionId: string, data: string, mediaType: string, root = path.join(getUserAgentsDir(), '.cache', 'attachments')): { path: string; size: number } | undefined {
   const safe = Boolean(sessionId) && path.basename(sessionId) === sessionId && sessionId !== '.' && sessionId !== '..';
   const ext = IMAGE_EXTENSIONS[mediaType];
@@ -241,7 +232,6 @@ export function cacheInlineImage(sessionId: string, data: string, mediaType: str
   }
 }
 
-/** Exclusive creation preserves existing images across ticks and process restarts. */
 export function materializeInlineImages(events: SessionEvent[], sessionId: string, root = path.join(getUserAgentsDir(), '.cache', 'attachments')): void {
   for (const event of events) {
     const data = event._imageData;
@@ -254,7 +244,6 @@ export function materializeInlineImages(events: SessionEvent[], sessionId: strin
   }
 }
 
-/** One artifact walk per active scan, never one per row. */
 export function enrichGlanceFiles(rows: ActiveSession[], nowMs = Date.now()): void {
   const artifacts = indexArtifactSidecars(path.join(getUserAgentsDir(), 'artifacts'), nowMs);
   for (const row of rows) {

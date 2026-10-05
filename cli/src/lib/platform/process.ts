@@ -4,7 +4,7 @@ import * as os from 'os';
 import { sleepSync } from '../fs-atomic.js';
 
 export function killTree(pid: number): void {
-  // Windows taskkill must terminate descendants too; POSIX callers manage process groups separately.
+
   if (!pid || pid <= 0) return;
   if (process.platform === 'win32') {
     try {
@@ -23,7 +23,7 @@ export function backgroundSpawnOptions(
   const platform = opts.platform ?? process.platform;
   const cwd = opts.cwd ?? os.homedir();
   if (platform === 'win32') {
-    // Detached Windows children lose usable stdio unless real descriptors were supplied.
+
     return opts.fdStdio
       ? { cwd, detached: true, windowsHide: true }
       : { cwd, detached: false, windowsHide: true };
@@ -36,7 +36,6 @@ const EXIT_POLL_MS = 50;
 export function hasExited(pid: number): boolean {
   if (!isAlive(pid)) return true;
   if (process.platform === 'win32') return false;
-  // kill(0) reports zombies alive; ps state is needed before bounded shutdown waits can finish.
   try {
     const state = execFileSync('ps', ['-o', 'state=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
     return state.startsWith('Z');
@@ -71,7 +70,7 @@ export function isAlive(pid: number): boolean {
 const startTimeByPid = new Map<number, string | null>();
 
 export function captureProcessStartTime(pid: number, opts: { fresh?: boolean } = {}): string | null {
-  // Persist start identity with a PID so later cleanup cannot kill an unrelated recycled process.
+
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const cached = startTimeByPid.get(pid);
   if (!opts.fresh && cached !== undefined) return cached;

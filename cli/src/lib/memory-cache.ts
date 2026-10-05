@@ -1,23 +1,12 @@
 import { LRUCache } from 'lru-cache';
 
 export interface MemoryCacheOptions<K extends {} = string, V extends {} = {}> {
-  /** Hard entry bound. A cache without a bound is not allowed. */
   max: number;
-  /** Milliseconds before an entry is treated as absent. */
   ttlMs: number;
-  /** Optional async loader. Concurrent fetches for one key are coalesced. */
   fetchMethod?: (key: K, staleValue: V | undefined) => Promise<V>;
-  /** Injectable monotonic clock for deterministic TTL tests. */
   now?: () => number;
 }
 
-/**
- * Correctness-first process-local cache defaults.
- *
- * The cache is always bounded, never returns stale values, and does not extend
- * an entry's life merely because it was read. Durable/cross-process state must
- * continue to live in SQLite or an atomic on-disk snapshot.
- */
 export function createMemoryCache<K extends {}, V extends {}>(
   options: MemoryCacheOptions<K, V>,
 ): LRUCache<K, V> {
@@ -35,8 +24,6 @@ export function createMemoryCache<K extends {}, V extends {}>(
     updateAgeOnGet: false,
     updateAgeOnHas: false,
     ttlAutopurge: false,
-    // A supplied deterministic clock must be read on every operation; the
-    // library's 1ms cached-now optimization follows wall time, not that clock.
     ttlResolution: options.now ? 0 : 1,
     fetchMethod: options.fetchMethod
       ? async (key, staleValue) => options.fetchMethod!(key, staleValue)

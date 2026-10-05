@@ -7,8 +7,6 @@ import * as yaml from 'yaml';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 
-// Each slice owns a unique HOME/PID set; child overrides prevent touching sibling or real sessions.
-// Windows --import receives a file URL because bare drive paths parse as URL schemes.
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);

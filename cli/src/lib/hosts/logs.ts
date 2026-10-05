@@ -44,7 +44,7 @@ export async function showHostTaskLog(id: string, follow: boolean, full = false)
 }
 
 export function hostTaskLogJson(id: string): { found: boolean; task?: HostTask; log?: string | null } {
-  // JSON reports the reconciled record, never the stale task loaded before the remote probe.
+
   const task = loadTask(id);
   if (!task) return { found: false };
   const reconciled = reconcileTask(task);

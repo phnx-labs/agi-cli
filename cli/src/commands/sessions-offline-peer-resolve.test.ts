@@ -1,31 +1,3 @@
-/**
- * RUSH-2492 — `agents sessions focus|attach|resume|exec --resume <id>` (and the
- * `sessions.ts` resolver consumers: `preview`, the bare `agents sessions <id>`,
- * and `--resolve`) must NOT hard-abort session resolution when a fleet peer is
- * offline. All of them switch on the outcome of `resolveSessionMetadataValue`.
- *
- * This drives the REAL call-site action — `resolveSessionMetadata`, the export
- * backing `agents sessions --resolve <selector> --json` — against an injected
- * fan-out (the documented `deps.gatherRemoteList` seam, the same one the
- * RUSH-2203 local-hit test in sessions.test.ts uses). No mocking of the
- * resolution decision itself: the fan-out RESULTS are fed as data, exactly the
- * shape `metadataResolveOutcome` reads. Unlike testing `resolveSessionMetadataValue`
- * directly (which stayed green through all four call sites' original hard-abort
- * bug — the resolver itself never changed), this exercises the branch that DID
- * change: what the call site does with a `partial` outcome.
- *
- *   1. A session that lives on a REACHABLE peer resolves even when an unrelated
- *      device is offline → the action prints the resolved session as JSON and
- *      exits 0. It does NOT abort just because another device didn't answer.
- *   2. A session found on NO reachable device stays `partial` (the offline peer
- *      may be hiding it) → the action now warns + reports not-found with exit
- *      code 1, never the old hard "could not resolve" abort at exit code 2.
- *
- * Acceptance: reverting the `resolveSessionMetadata`/sibling partial-branch
- * fixes in sessions.ts (e.g. `git show main:src/commands/sessions.ts >
- * src/commands/sessions.ts`) restores the old `exit(2)` + "Partial session
- * resolution: ... did not answer." wording, which fails both assertions below.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -34,11 +6,6 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 
-/** Drive the real `resolveSessionMetadata` call site (backs `agents sessions
- * --resolve <selector> --json`) in a child process, so HOME (hence the SQLite
- * session index) is a throwaway temp dir, never the developer's real
- * sessions.db, and so the call site's own `process.exit(...)` cannot kill the
- * test runner. */
 function runResolveSessionMetadata(
   selector: string,
   fanout: { sessions: unknown[]; unreachable: string[] },
@@ -48,8 +15,6 @@ function runResolveSessionMetadata(
     const runner = [
       "const { resolveSessionMetadata } = await import('./src/commands/sessions.ts');",
       `const fanout = ${JSON.stringify(fanout)};`,
-      // The injected fan-out returns the reachable hits + the unreachable peer
-      // list; the real local index (empty temp HOME) contributes nothing.
       'const deps = { gatherRemoteList: async () => fanout };',
       `await resolveSessionMetadata(${JSON.stringify(selector)}, {}, deps);`,
     ].join(' ');
@@ -78,8 +43,6 @@ describe('RUSH-2492 offline-peer session resolution (real call site)', () => {
   };
 
   it('resolves a session on a reachable peer (prints it, exit 0) even while another device is offline', () => {
-    // The exact repro: id lives on reachable yosemite-s1, mac-mini is offline.
-    // The action must NOT treat mac-mini's silence as a blocker.
     const { status, stdout, stderr } = runResolveSessionMetadata('71f4b54c', {
       sessions: [onReachablePeer],
       unreachable: ['mac-mini'],
@@ -92,17 +55,14 @@ describe('RUSH-2492 offline-peer session resolution (real call site)', () => {
   });
 
   it('degrades a genuinely-partial outcome to a warning + not-found at exit 1, never the old exit-2 abort', () => {
-    // Nothing on any reachable box → the offline peer genuinely changes the
-    // answer, so the resolver defers (`partial`). The call site now warns and
-    // reports not-found instead of hard-aborting because a device was down.
     const { status, stdout, stderr } = runResolveSessionMetadata('deadbeef', {
       sessions: [],
       unreachable: ['mac-mini'],
     });
-    expect(status).toBe(1); // was exit(2) before RUSH-2492
-    expect(stdout).toBe(''); // no JSON on a degraded/not-found outcome
+    expect(status).toBe(1);
+    expect(stdout).toBe('');
     expect(stderr).toContain('Warning: 1 device(s) unreachable, not checked: mac-mini');
     expect(stderr).toContain('No session matching "deadbeef" on any reachable device (1 unreachable, not checked).');
-    expect(stderr).not.toContain('Partial session resolution'); // the old hard-abort wording
+    expect(stderr).not.toContain('Partial session resolution');
   });
 });

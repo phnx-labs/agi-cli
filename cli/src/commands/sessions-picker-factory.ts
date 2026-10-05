@@ -1,29 +1,14 @@
-/**
- * Shared interactive-routing + browse loop for the task-first session
- * pickers (`browser-sessions-picker.ts`, `computer-sessions-picker.ts`).
- *
- * Each twin keeps its own row formatter, matcher, and enter-handler; this
- * factory owns the TTY/`--json`/`--no-interactive` (and optional `--open`)
- * gate, the empty-list message, and the cancel-aware `itemPicker` loop.
- */
 import { itemPicker } from '../lib/picker.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
-/** Flag subset both twins share for the interactive-routing gate. */
 interface SessionsPickerGateOpts {
   interactive?: boolean;
   json?: boolean;
-  /** Present only on the browser twin; computer never sets it. */
   open?: string | boolean;
 }
 
 interface SessionsPickerCommandSpec<TRow, TOpts extends SessionsPickerGateOpts> {
-  /**
-   * Browser requires `opts.open === undefined` so `--open` (bare or with a
-   * selector) falls through to the flat printer. Computer has no `--open`.
-   */
   requireOpenUndefined?: boolean;
-  /** May be async — the browser spec's flat path awaits an artifact open. */
   runFlat: (opts: TOpts) => void | Promise<void>;
   buildRows: (opts: TOpts) => TRow[];
   emptyMessage: (opts: TOpts) => string;

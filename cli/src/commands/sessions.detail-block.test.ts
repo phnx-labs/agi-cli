@@ -1,14 +1,3 @@
-/**
- * PHNX-3999: `buildSessionDetailBlock` must materialize real request/timeline/
- * files on demand — bounded, via the daemon's own pure fold pipeline
- * (`foldTimeline`/`projectTimeline`/`projectSessionFiles`) — when the
- * background `session_timelines` cache has not reached this session yet,
- * rather than returning `null` with a vague "not computed" excuse. It must do
- * so both on a COLD read (a fresh parse already produced events) and on a WARM
- * read (a cached digest hit with no fresh events), the latter via a bounded
- * tail read so the "warm cache collapses to a 2-message summary" gap is closed
- * without ever doing a fresh whole-file parse.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -64,8 +53,6 @@ describe('buildSessionDetailBlock on-demand bounded materialization (PHNX-3999)'
       const filePath = claudeFixture(dir);
       const session = meta({ filePath, cwd: dir });
 
-      // Simulate a warm digest-cache hit: no fresh events, but a real
-      // transcript file still on disk for the bounded tail reader to find.
       const detail = buildSessionDetailBlock(session, { schemaVersion: 1, firstUser: '', lastAssistant: '' } as never, []);
 
       expect(detail.partial).toBe(true);

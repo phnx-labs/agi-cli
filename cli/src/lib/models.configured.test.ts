@@ -28,7 +28,7 @@ function setNativeModel(version: string, model: string) {
   );
 }
 
-// Model precedence is run default -> native config -> catalog default.
+
 describe('resolveConfiguredModel precedence', () => {
   beforeEach(() => {
     TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cfgmodel-'));
@@ -68,7 +68,7 @@ describe('resolveConfiguredModel precedence', () => {
   });
 });
 
-// OpenCode reads config JSONC/JSON plus XDG_STATE recent model; .opencode/settings.json is plugin metadata.
+
 describe('resolveConfiguredModel — OpenCode', () => {
   let prevXdgState: string | undefined;
   let prevRealHome: string | undefined;

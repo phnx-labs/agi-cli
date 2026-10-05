@@ -22,15 +22,14 @@ export function recordComputerAction(event: ComputerActionEvent, opts: { device?
     ...rest
   } = event;
 
-  // The engine owns invocation/host/session identity; agents-cli alone writes feed/session state.
+
   const runId = invocationId || COMPUTER_INVOCATION_ID;
   const drivenHost = host ?? opts.device;
 
-  // Bound operator task text before it reaches either durable ledger.
   const extra = typeof rest.task === 'string'
     ? { ...rest, task: truncate(rest.task, TASK_PREVIEW_MAX_CHARS) }
     : rest;
-  // Bookkeeping is best-effort because the desktop action has already succeeded.
+
   try {
     emitEvent('computer.action', {
       command,

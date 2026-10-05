@@ -28,10 +28,6 @@ for (const id of [sessionA, sessionB, sessionC]) {
 let shell: ChildProcess | undefined;
 
 async function startTab(count: number, layout = 'siblings', kind = 'claude'): Promise<number[]> {
-  // A fresh directory per tab: overwriting a binary that an earlier tab's process is
-  // still executing fails with ETXTBSY. The basename stays `claude` because the
-  // scan recognises agents by process name. macOS kills a relocated copy of an
-  // arm64e platform binary at exec (exit 137), so there it is a symlink instead.
   const binary = path.join(root, `bin-${tabCount++}`, 'claude');
   fs.mkdirSync(path.dirname(binary), { recursive: true });
   if (process.platform === 'darwin') fs.symlinkSync('/bin/sleep', binary);
@@ -50,7 +46,6 @@ async function startTab(count: number, layout = 'siblings', kind = 'claude'): Pr
   });
   await once(shell, 'spawn');
   await expect.poll(() => pids.length).toBe(count * (layout === 'nested' ? 2 : 1));
-  // Enroll the isolated test HOME before writing the hook's by-pid records.
   expect(writerProcessView()).toBeDefined();
   fs.mkdirSync(path.dirname(registry), { recursive: true });
   fs.writeFileSync(registry, JSON.stringify({ window: {
@@ -81,7 +76,6 @@ afterEach(async () => {
 });
 afterAll(() => closeDB());
 
-// These exercise real shell ancestry, ps, kernel-verified by-pid files and transcripts.
 describe.skipIf(process.platform === 'win32')('published shell adopts its live agent (PHNX-4218)', () => {
   it('uses B and T through a wrapper, preserves tab metadata and suppresses the duplicate', async () => {
     const [pid] = await startTab(1);
@@ -137,7 +131,6 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
     await expect.poll(() => {
       try { process.kill(child, 0); return true; } catch { return false; }
     }).toBe(false);
-    // Keep A alive after its tool exits, as a real interactive harness would.
     expect((await scan())[0]).toMatchObject(expected);
   });
 

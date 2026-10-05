@@ -1,15 +1,3 @@
-/**
- * `agents sessions optimize` — compact the FTS5 session/tool-call search index.
- *
- * The scanner delete+inserts a session's docs into the `tool_call_text` /
- * `session_text` FTS5 indexes on every rescan (and on every extractor-version
- * bump), and FTS5 never merges the resulting segments on its own. Over thousands
- * of sessions and re-index passes the `%_data` shadow tables bloat with hundreds
- * of thousands of unmerged segments — gigabytes of index for tens of MB of
- * actual content — and `agents sessions` queries slow to a crawl. This runs the
- * FTS5 `'optimize'` command to merge every segment into one and purge tombstones.
- * Non-destructive: no searchable content is lost.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 

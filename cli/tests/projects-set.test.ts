@@ -1,11 +1,3 @@
-/**
- * End-to-end `agents projects set` — the real CLI against real YAML on disk.
- *
- * The behavior worth pinning is what `set` does NOT do: `add --force` rebuilds a
- * definition from flags alone and drops every field not re-passed, which is how
- * a `linear.projectId` gets deleted by someone correcting a repo slug. `set`
- * loads, patches one field, and writes back.
- */
 
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -59,16 +51,12 @@ describe('agents projects set', () => {
     expect(stdout).toContain('Updated agents-cli');
     const y = def('agents-cli');
     expect(y).toContain('repo: phnx-labs/agents-cli');
-    // The fields `add --force` would have silently dropped.
     expect(y).toContain('projectId: lin_1');
     expect(y).toContain('description: the CLI');
     expect(y).toContain('root: ~/src/agents-cli');
   });
 
   it('refuses --path when the def has no root, instead of writing an absolute path', () => {
-    // A `--from-linear` import with no local checkout carries name + linear and
-    // no root. Joining `--path` against '' wrote `/apps/cli` — a path at the
-    // filesystem root that resolves nowhere.
     fs.writeFileSync(path.join(projectsDir, 'rootless.yaml'), 'name: rootless\nlinear:\n  projectId: abc\n');
     const { stdout, status } = runCli(['projects', 'set', 'rootless', '--path', 'apps/cli']);
     expect(status).toBe(1);

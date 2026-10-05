@@ -123,7 +123,6 @@ export function findInPath(command: string, options: NativeBinaryResolutionOptio
       try {
         const stat = fs.statSync(full);
         if (!stat.isFile()) continue;
-        // PATH candidates must be executable before they can represent a native install.
         if (process.platform !== 'win32') fs.accessSync(full, fs.constants.X_OK);
         const native = resolveNativeBinaryPath(command, full, options);
         if (native && (!options.accept || options.accept(native))) return native;
@@ -248,7 +247,6 @@ interface AgentRegistryConfig extends AgentConfig {
   mcpConfigWrite: McpConfigWriteStyle;
 }
 
-// Capability exceptions such as headlessPlan, rulesImports, and interactiveRepl are tested upstream limits.
 export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
   claude: {
     id: 'claude',
@@ -378,14 +376,12 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     commandsDir: '',
     commandsSubdir: '',
     skillsDir: path.join(HOME, '.openclaw', 'skills'),
-    // Gateway owns commands; converting them to skills would create a second runtime.
     nativeCommandRuntime: true,
 
     hooksDir: 'hooks',
     instructionsFile: 'workspace/AGENTS.md',
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
-    // OpenClaw's fixed internal hooks are not a general event-to-shell surface.
     supportsHooks: false,
     capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
@@ -533,7 +529,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       workflows: { since: '0.2.111' },
       memory: true,
       modes: ['plan', 'edit', 'skip'],
-      // Headless plan stalls at Grok's approval gate; interactive plan still works.
       headlessPlan: false,
       rulesImports: true,
       interactiveRepl: true,
@@ -578,7 +573,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       workflows: true,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
-      // Kimi rejects combining its headless prompt and plan flags.
       headlessPlan: false,
       rulesImports: false,
       interactiveRepl: true,
@@ -622,7 +616,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       plugins: true,
       subagents: true,
       rules: { file: 'AGENTS.md' },
-      // Factory Missions are invoke-only; Droid exposes no installable workflow directory.
       workflows: false,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
@@ -654,9 +647,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Hermes uses flat plugin.yaml installs plus plugins.enabled; plugins.disabled wins.
     capabilities: {
-      // Hooks share config.yaml since 0.11.0; permissions persist command globs/deny only.
       hooks: { since: '0.11.0' },
       mcp: true,
       mcpHttp: true,
@@ -698,7 +689,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    // Muse hooks reuse Claude-shaped settings; plugins use the .muse-plugin manifest.
     supportsHooks: true,
     pluginManifestDir: '.muse-plugin',
     capabilities: {
@@ -706,12 +696,10 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       mcp: true,
       mcpHttp: true,
       mcpHeaders: true,
-      // Safety has no tool-name writer; skills replace droppable commands/workflows.
       allowlist: false,
       skills: true,
       commands: false,
       plugins: true,
-      // Runtime subagents are not an installable definition directory.
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
@@ -721,7 +709,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       interactiveRepl: true,
     },
   },
-  // Warp Agent CLI is the self-updating interactive TUI, not the older headless oz runner.
   warp: {
     id: 'warp',
     name: 'Warp',
@@ -745,7 +732,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    // No general hooks or one-shot prompt; conversations and command surfaces are server-owned.
     supportsHooks: false,
     capabilities: {
       hooks: false,
@@ -762,7 +748,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       memory: false,
       modes: ['edit'],
       rulesImports: false,
-      // Bare Warp opens its only run form; there is no local transcript to index.
       interactiveRepl: true,
     },
   },
@@ -770,7 +755,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
 
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
-// Curated headless product set, not every harness that can technically run headlessly.
 export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
   'claude',
   'codex',
@@ -782,14 +766,12 @@ export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
 
 export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
-// Canonical install-model predicate: a script with no VERSION slot is one moving install.
 export function isSelfUpdatingAgent(agent: AgentId): boolean {
   const cfg = AGENTS[agent];
   return !cfg.npmPackage && !!cfg.installScript && !cfg.installScript.includes('VERSION');
 }
 
 export function isAgentHardDeprecated(agent: AgentId): boolean {
-  // Legacy YAML may carry unknown ids; validation rejects them at the owning boundary.
   return AGENTS[agent]?.deprecated?.hard === true;
 }
 
@@ -839,7 +821,6 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
   const agent = AGENTS[agentId];
   let version: string | null = null;
   try {
-    // Probe in a killable process group; cache successes only so transient failures recover.
     const { stdout } = await probeCapture(agent.cliCommand, ['--version'], 3000);
     const versionRe = agent.versionStdoutMatch === 'openclaw'
       ? /openclaw\/(\d+\.\d+\.\d+)/
@@ -939,7 +920,6 @@ interface UnmanagedInstall {
   version: string | null;
 }
 
-// Derive setup discovery from sessionDir so every walkable harness participates.
 export const UNMANAGED_DETECTION_CANDIDATES: AgentId[] = ALL_AGENT_IDS.filter(
   (id) => AGENTS[id].sessionDir !== null,
 );
@@ -992,9 +972,7 @@ export interface AccountInfo {
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   overageCredits: { amount: number; currency: string } | null;
   lastActive: Date | null;
-  // Opaque credentials can be signed in without exposing an email.
   signedIn: boolean;
-  // Claude org identity keeps same-email personal and multi-seat billing buckets distinct.
   organizationType?: string | null;
   organizationName?: string | null;
 }
@@ -1077,7 +1055,6 @@ export function isAccountSlotDir(dir: string): boolean {
 function resolveAccountCredentialPath(base: string, ...segments: string[]): string | null {
   const perVersion = path.join(base, ...segments);
   try { if (fs.existsSync(perVersion)) return perVersion; } catch {  }
-  // An account slot is its own HOME and must not inherit another active account's config.
   if (isAccountSlotDir(base)) return null;
   const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...segments);
   if (active !== perVersion) {
@@ -1106,7 +1083,6 @@ function credentialFileExistsUnder(agentId: AgentId, home: string): boolean {
     try { return fs.existsSync(p); } catch { return false; }
   });
   if (!hasSegment) return false;
-  // Claude metadata alone is not a credential on platforms with file-backed auth.
   if (agentId === 'claude') return !isClaudeCredentialFileBlank(home);
   return true;
 }
@@ -1195,7 +1171,6 @@ export function readAuthAccountIdentity(agent: AgentId, configDir: string): stri
         if (typeof refreshToken !== 'string' || !refreshToken) return null;
         const claims = decodeJwtPayload(refreshToken);
         const sub = normalizeIdentityPart(claims?.sub ?? claims?.user_id);
-        // Opaque tokens are hashed because this identity key is persisted; never persist the secret.
         const fallback = crypto.createHash('sha256').update(refreshToken).digest('hex').slice(0, 16);
         return buildIdentityKey(agent, [['sub', sub ?? fallback]]);
       }
@@ -1248,7 +1223,6 @@ export function __resetAntigravityKeychainCacheForTest(): void {
 }
 
 async function antigravityKeychainSignedIn(): Promise<boolean> {
-  // Test isolation precedes the account-global cache; Linux secret stdout is discarded.
   if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
   if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
 
@@ -1274,7 +1248,6 @@ const OPENCODE_XDG_DIRS = {
   state: { env: 'XDG_STATE_HOME', fallback: ['.local', 'state'] },
 } as const;
 
-// OpenCode uses XDG paths on every platform: version home, explicit override, then real HOME.
 export function resolveOpenCodeXdgPath(
   base: string,
   kind: keyof typeof OPENCODE_XDG_DIRS,
@@ -1516,7 +1489,6 @@ export async function getAccountInfo(
   const configFiles: Partial<Record<AgentId, string>> = {
     claude: path.join(base, '.claude.json'),
     codex: path.join(base, '.codex', 'auth.json'),
-    // OpenCode's sqlite mtime is its activity source even though credentials live elsewhere.
     opencode: resolveOpenCodeXdgPath(base, 'data', 'opencode.db') ?? undefined,
   };
   const lastActive = resolveLastActive(agentId, base, configFiles[agentId]);
@@ -1534,7 +1506,6 @@ export async function getAccountInfo(
           return { ...empty, lastActive };
         }
 
-        // Prefer organizationType; billingType is a compatibility fallback, not throttling state.
         let plan: string | null = formatClaudeOrgLabel(oa?.organizationType);
         if (!plan) {
           if (oa?.billingType === 'stripe_subscription') {
@@ -1615,7 +1586,6 @@ export async function getAccountInfo(
         };
       }
       case 'cursor': {
-        // Identity metadata alone is insufficient: a nonempty access token is the credential floor.
         const cfgPath = resolveAccountCredentialPath(base, '.cursor', 'cli-config.json');
         if (!cfgPath) return { ...empty, lastActive };
         try {
@@ -1639,7 +1609,6 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'grok': {
-        // Accept current nested and legacy flat records, choosing the newest credential record.
         const authPath = resolveAccountCredentialPath(base, '.grok', 'auth.json');
         if (!authPath) return { ...empty, lastActive };
         try {
@@ -1660,7 +1629,6 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'antigravity': {
-        // Antigravity may authenticate from its token file or the platform keyring.
         const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
@@ -1752,7 +1720,6 @@ export async function getAccountInfo(
   }
 }
 
-// Short-lived launch-path cache: never serve stale entries; no-session falls back to config mtime.
 const LAST_ACTIVE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
 const getLastActiveCachePath = () => path.join(getCacheDir(), 'last-active.json');
@@ -1786,7 +1753,6 @@ export function resolveLastActive(
     } else {
       const mtimeMs = latestFileMtimeMs(sessionDir, sessionExt);
       cache[key] = { mtimeMs, computedAt: now.getTime() };
-      // Prune obsolete homes on each best-effort cache write.
       for (const [k, v] of Object.entries(cache)) {
         if (k !== key && !(typeof v?.computedAt === 'number' && now.getTime() - v.computedAt < LAST_ACTIVE_CACHE_FRESH_MS)) {
           delete cache[k];
@@ -1936,9 +1902,7 @@ export async function registerMcp(
       const commandArgs = splitCommandLine(command);
       args = ['mcp', 'add', name, '--', ...commandArgs];
     }
-    // HOME selects the version-owned MCP config for CLI-backed registration.
     const env = options?.home ? { ...process.env, HOME: options.home } : undefined;
-    // Windows wrappers require shell execution; this helper quotes every user-controlled argv.
     const spec = execFileShellSpec(bin, args);
     await execFileAsync(spec.command, spec.args, { ...(env ? { env } : {}), shell: spec.shell });
     return { success: true };
@@ -1972,7 +1936,6 @@ export async function unregisterMcp(
     const bin = options?.binary || agent.cliCommand;
     // HOME selects the version-owned MCP config for CLI-backed removal.
     const env = options?.home ? { ...process.env, HOME: options.home } : undefined;
-    // Keep attacker-controlled names on the same quoted Windows wrapper path.
     const spec = execFileShellSpec(bin, ['mcp', 'remove', name]);
     await execFileAsync(spec.command, spec.args, { ...(env ? { env } : {}), shell: spec.shell });
     return { success: true };
@@ -2304,7 +2267,6 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
   }
 }
 
-// MCP read, write, and staleness paths all derive from the same target declaration.
 export function getUserMcpConfigPath(agentId: AgentId): string {
   return getMcpConfigPathForHome(agentId, HOME);
 }
@@ -2362,7 +2324,6 @@ function parseMcpFromOpenClawConfig(configPath: string): Record<string, McpConfi
 }
 
 export function parseMcpConfig(agentId: AgentId, configPath: string): Record<string, McpConfigEntry> {
-  // Path, writer, parser, and staleness dispatch share MCP_TARGETS' format declaration.
   switch (MCP_TARGETS[agentId]?.format) {
     case 'toml':
       return parseMcpFromTomlConfig(configPath);
@@ -2373,7 +2334,6 @@ export function parseMcpConfig(agentId: AgentId, configPath: string): Record<str
     case 'yaml':
       return parseMcpFromYamlConfig(configPath);
     default:
-      // JSON owns declared Claude/Antigravity/Muse formats and legacy undeclared agents.
       return parseMcpFromJsonConfig(configPath);
   }
 }

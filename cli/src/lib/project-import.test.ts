@@ -49,8 +49,6 @@ describe('matchLocalCheckoutExact', () => {
   });
 
   it('treats a slash in a display name as punctuation, not a path boundary', () => {
-    // "Rush / Web" is one name, not `rush/web`. Keying it the path way (last
-    // segment) yields `web`, which exact-matches an unrelated `web/` checkout.
     expect(matchLocalCheckoutExact('Rush / Web', ['web', 'agents-cli'])).toBeUndefined();
     expect(matchLocalCheckoutExact('Rush / Web', ['rush-web', 'web'])).toBe('rush-web');
   });
@@ -113,11 +111,6 @@ describe('buildLinearImportCandidates', () => {
   });
 
   it('refreshes a stale linear.name when the Linear project was renamed', () => {
-    // The bug on THIS path: import never wrote `linear.name` at all, so a def
-    // re-imported after a board rename (here "Agents CLI" -> "AGI") kept
-    // whatever label an older version had left behind. (The sibling `link`
-    // command had the same outcome via a different mechanism — it spread the
-    // prior block — and is covered in linear-projects.test.ts.)
     const existing = new Map<string, ProjectDef>([
       ['agents-cli', { name: 'agents-cli', linear: { projectId: 'lin_1', name: 'Agents CLI' } }],
     ]);

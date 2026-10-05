@@ -26,8 +26,8 @@ function rulesDirForLayer(scope: LayerScope, cwd: string): string | null {
 }
 
 function activeSources(agent: AgentId, version: string, cwd: string): Record<string, string> {
-  // Fingerprint the composer's actual contributors, including directory-form
-  // rule.md plus adjacent hooks.yaml; reconstructing preset paths misses both.
+
+
   const result: Record<string, string> = {};
   let compose;
   try {

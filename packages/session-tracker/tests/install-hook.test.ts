@@ -62,9 +62,6 @@ describe('session tracker hook installation', () => {
     expect(kimi.hooks[0].command).toContain('hook.sh kimi');
   });
 
-  // RUSH-2205: hermes is newly covered by the writer. Its native config is
-  // ~/.hermes/config.yaml, SessionStart -> `on_session_start`, read-modify-write
-  // so sibling keys (mcp_servers) survive. os.homedir() honours $HOME on POSIX.
   it('registers the Hermes SessionStart hook in config.yaml, preserving siblings', async () => {
     const root = tmpHome();
     const configPath = path.join(root, '.hermes', 'config.yaml');
@@ -79,12 +76,9 @@ describe('session tracker hook installation', () => {
       expect(r.configPath).toBe(configPath);
 
       const cfg = YAML.parse(fs.readFileSync(configPath, 'utf8')) as any;
-      // The managed hook landed under on_session_start...
       expect(cfg.hooks.on_session_start[0].command).toContain('hook.sh hermes');
-      // ...and the pre-existing sibling key was preserved, not clobbered.
       expect(cfg.mcp_servers.demo.command).toBe('x');
 
-      // Idempotent: a second install does not duplicate the managed entry.
       await installHookFor('hermes', { home: root });
       const cfg2 = YAML.parse(fs.readFileSync(configPath, 'utf8')) as any;
       const managed = cfg2.hooks.on_session_start.filter((h: any) =>
@@ -97,9 +91,6 @@ describe('session tracker hook installation', () => {
     }
   });
 
-  // Truthfulness guard (RUSH-2205): no AgentId falls through to a generic
-  // "not yet implemented". Every agent either installs successfully or returns a
-  // SPECIFIC reason it genuinely cannot host the writer hook.
   it('every AgentId is either installable or carries a specific unsupported reason', async () => {
     const root = tmpHome();
     const prevHome = process.env.HOME;
@@ -109,7 +100,6 @@ describe('session tracker hook installation', () => {
       for (const agent of HOOK_AGENTS) {
         const r = await installHookFor(agent, { dryRun: true });
         if (r.configPath) {
-          // Installable agents resolve a real native config path (even on dry-run).
           expect(r.configPath, `${agent} should resolve a config path`).toBeTruthy();
         } else {
           expect(r.error, `${agent} must state a reason`).toBeTruthy();
@@ -135,7 +125,6 @@ describe('session tracker hook installation', () => {
     });
     expect(result.status, result.stderr).toBe(0);
 
-    // Run again; the second install should strip the first entry before adding.
     const result2 = spawnSync(process.execPath, [
       path.join(import.meta.dirname, '..', 'dist', 'install-hook.js'),
       'claude',

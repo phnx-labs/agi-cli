@@ -21,7 +21,6 @@ describe('minSamplesForPercentile', () => {
 
 describe('exactPercentile', () => {
   test('returns an observed sample — never interpolates the midpoint', () => {
-    // Linear interpolation of [10, 20] at p50 is 15. Nearest-rank is 10.
     expect(exactPercentile([10, 20], 50)).toBe(10);
     expect(exactPercentile([10, 20, 30, 40, 50], 50)).toBe(30);
   });

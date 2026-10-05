@@ -1,12 +1,3 @@
-/**
- * Tests for the hook doc-sidecar fix in `listHookEntriesFromDir` (hooks.ts).
- *
- * A `.md`/`.rst` sibling of a hook script (e.g. `git-guard.md` next to
- * `git-guard.sh`) is human documentation the hook never reads — NOT a runtime
- * data file. Treating it as the hook's `dataFile` made the installer's correct
- * omission of docs look like perpetual drift in `agents doctor`. Structured
- * siblings (`.yaml`/`.json`/...) are still real data files.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

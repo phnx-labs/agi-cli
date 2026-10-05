@@ -1,9 +1,3 @@
-/**
- * `agents run <agent> --cloud` — the vendor-cloud placement. These pin the
- * validation contract: placements are mutually exclusive, agents without a
- * native cloud fail loud with the capable list, and local-run flags never
- * ride a cloud dispatch silently.
- */
 import { describe, it, expect } from 'vitest';
 import {
   runCloudConflicts,
@@ -93,7 +87,6 @@ describe('runCloudConflicts', () => {
 
   it('flags an explicit non-default --effort (no provider consumes it)', () => {
     expect(runCloudConflicts({ effort: 'xhigh' })).toContain('--effort');
-    // The run default ('auto') is not a conflict — it was never typed.
     expect(runCloudConflicts({ effort: 'auto' })).toEqual([]);
     expect(runCloudConflicts({})).toEqual([]);
   });

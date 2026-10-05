@@ -11,20 +11,12 @@ import {
 } from './setup-secrets.js';
 import { _resetSecretsClientForTest } from '../lib/secrets-client.js';
 
-/**
- * `agents setup secrets` installs the standalone `secrets` CLI when missing
- * (PHNX-3989), then hands off to `secrets migrate`. DIST-1: agents-cli never
- * rebundles the engine. With PATH empty, npm is unreachable so install fails
- * closed and the wizard still returns false (no throw).
- */
 describe('agents setup secrets', () => {
   const saved: Record<string, string | undefined> = {};
   const ENV_KEYS = ['SECRETS_BIN', 'PATH'];
 
   beforeEach(() => {
     for (const key of ENV_KEYS) saved[key] = process.env[key];
-    // A PATH with no `secrets` on it and no explicit override — deterministic
-    // "not installed" regardless of what's on the real machine running this.
     process.env.SECRETS_BIN = '';
     delete process.env.SECRETS_BIN;
     process.env.PATH = '';
@@ -100,10 +92,6 @@ describe.skipIf(!REAL_BIN)('agents setup secrets — against the real standalone
   });
 
   it('hands off to the real `secrets migrate`, which refuses without an interactive confirmation', async () => {
-    // `secrets migrate` always demands an interactive confirmation before
-    // touching anything, even with nothing to migrate — this test process has
-    // no TTY, so the real spawn exits non-zero. That is the honest outcome:
-    // the wizard hands off faithfully and does not fake success.
     const ok = await runSecretsSetupWizard();
     expect(ok).toBe(false);
     expect(fs.existsSync(setupSecretsPrefsPath())).toBe(false);

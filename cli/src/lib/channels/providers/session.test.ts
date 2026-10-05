@@ -35,7 +35,7 @@ describe.skipIf(!isTmuxInstalled())('agents send --channel session — real tmux
   });
 
   afterEach(async () => {
-    try { await killAll(socket); } catch { /* server already gone */ }
+    try { await killAll(socket); } catch {  }
     fs.rmSync(tempHome, { recursive: true, force: true });
   });
 

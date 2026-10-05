@@ -143,7 +143,6 @@ describe('buildLineageTraceEnvelope — the --json lineage contract', () => {
     expect(envelope.lineage!.nodes[1].toolCount).toBe(31);
     expect(envelope.lineage!.edges).toEqual([{ parent: 'orch-0001', child: 'mate-0001', source: 'parentSessionId' }]);
     expect(envelope.lineage!.teams).toEqual(['fleet-resume']);
-    // An inline Task tool_use in the root transcript is a STEP, never a node.
     expect(envelope.sessions[0].steps[0].delegation).toBe('inline-task');
     expect(envelope.lineage!.nodes).toHaveLength(2);
   });
@@ -176,8 +175,6 @@ describe('command registration', () => {
 
 
 describe('--steps — the narration-anchored step list as text (PHNX-3939)', () => {
-  // A real Claude session (c9d700d5), redacted and value-capped, committed as a
-  // fixture beside the session library.
   const FIXTURE = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     '..', 'lib', 'session', 'testdata', 'timeline-claude.jsonl',
@@ -186,27 +183,17 @@ describe('--steps — the narration-anchored step list as text (PHNX-3939)', () 
   it('prints one line per step with the offset, source, headline and counts', () => {
     const out = renderSessionSteps(meta({ id: 'c9d700d5', shortId: 'c9d700d5', filePath: FIXTURE }));
     const lines = out.trimEnd().split('\n');
-    // The session opened with a `/continue <id>` turn.
     expect(lines[0]).toMatch(/^\s*1\s+\+0s\s+user\s+\/continue 8231082e$/);
-    // A narration beat carries its counts as the sidebar renders them.
     expect(lines.some((line) => /narr\s+.+·\s+\d+ \w+/.test(line))).toBe(true);
-    // Milestones ride the same detail column.
     expect(out).toContain('worktree created');
-    // The footer totals the whole session.
     expect(lines[lines.length - 1]).toMatch(/^\d+ steps · \d+ tools/);
   });
 
   it('says so plainly for a harness that writes no parseable transcript', () => {
-    // OpenClaw: `parseSession` returns no events, so there is nothing to fold —
-    // and the command says that rather than printing an empty, authoritative list.
     const out = renderSessionSteps(meta({ id: 'claw0001', shortId: 'claw0001', agent: 'openclaw', filePath: FIXTURE }));
     expect(out).toContain('No steps folded for claw0001');
   });
 
-  // `--steps` short-circuits before `buildTrajectory`, so it has to honour the
-  // command's own `--redact` default itself — otherwise `trace <id> --steps -o
-  // out.txt` writes an unredacted artifact while `--no-redact` advertises that
-  // redaction is on by default (review BLOCKER 1c).
   const REDACTION_FIXTURE = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     '..', 'lib', 'session', 'testdata', 'timeline-redaction-claude.jsonl',
@@ -222,7 +209,6 @@ describe('--steps — the narration-anchored step list as text (PHNX-3939)', () 
   it('keeps the raw text only when the caller passed --no-redact', () => {
     const out = renderSessionSteps(redactionMeta, { redact: false });
     expect(out).toContain('sk-ant-api03-AAAABBBBCCCC');
-    // --no-redact buys skipping SECRET redaction, never raw control characters.
     expect(out.includes('\u001b')).toBe(false);
   });
 });

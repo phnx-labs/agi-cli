@@ -104,7 +104,6 @@ export function writeHeadroomEntries(entries: Record<string, HeadroomEntry>): vo
     const cachePath = headroomCachePath();
     ensureLockTarget(cachePath, JSON.stringify({ version: 1, entries: {} }, null, 2));
     withFileLock(cachePath, () => {
-      // Re-read under the lock so concurrent refreshers cannot drop each other's rows.
       const merged: HeadroomCacheFile = {
         version: 1,
         entries: { ...readHeadroomCache(), ...entries },
@@ -437,7 +436,6 @@ export async function buildLocalUsageAccounts(
       accounts.push({
         usageKey,
         agentId,
-        // Native file-only credentials avoid worker setup tokens and Touch ID.
         fetch: async (signal?: AbortSignal) => {
           const { getUsageInfoForIdentity } = await import('./accounting/usage.js');
           return getUsageInfoForIdentity({
@@ -504,7 +502,6 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     const entry = cache[account.usageKey] ?? null;
     const network = agentUsesNetworkUsage(account.agentId);
 
-    // Account-specific penalties cannot park siblings; provider-wide penalties still apply.
     if ((deps.backoffUntil(account.agentId, account.usageKey) ?? 0) > now) {
       updates[account.usageKey] = skippedHeadroomEntry(entry, account.usageKey, now, index);
       result.skippedBackoff += 1;
@@ -548,7 +545,6 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
         result.refreshed += 1;
         refreshedKeys.push(account.usageKey);
       } else {
-        // Preserve the last usage snapshot; reschedule and quarantine repeated misses.
         updates[account.usageKey] = failedHeadroomEntry(entry, now);
         result.failed += 1;
       }

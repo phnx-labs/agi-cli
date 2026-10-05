@@ -63,7 +63,7 @@ export async function resolveInstallation(
     if (byLabel.length === 1) return byLabel[0];
     const byRelease = candidates.filter((i) => i.releaseVersion === selector);
     if (byRelease.length === 1) return byRelease[0];
-    // Shared releases remain ambiguous; newest-wins could target the wrong credential home.
+
     if (byRelease.length > 1) throw new InstallationAmbiguousError(agent, selector, byRelease);
     throw new InstallationNotFoundError(agent, selector, all);
   }

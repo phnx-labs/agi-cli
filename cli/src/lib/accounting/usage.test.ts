@@ -54,9 +54,6 @@ import { noteUsageRateLimited, setUsageBackoffDirForTest, usageRateLimitedUntil 
 import { keychainRef, secretsKeychainItem, setKeychainTokenSync, writeBundleWithItemsSync } from '../secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 
-// The Claude keychain service item and the reserved `auth` bundle live behind the
-// real standalone `secrets` CLI (PHNX-3989). The Claude item is a keychain item,
-// so on a headed macOS box these blocks would reach the operator's login keychain.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 describe('renderBar', () => {
@@ -68,12 +65,10 @@ describe('renderBar', () => {
 });
 
 const LEEWAY_MS = 5 * 60 * 1000;
-const NOW = 1_800_000_000_000; // fixed epoch ms so the tests are deterministic
+const NOW = 1_800_000_000_000;
 
 describe('claudeAccessTokenNeedsRefresh', () => {
   it('treats a missing expiry as still-fresh (never force a refresh)', () => {
-    // A token with no known expiry must not trigger a refresh — that is what
-    // kept the health probe from rotating tokens with an unknown lifetime.
     expect(claudeAccessTokenNeedsRefresh(null, NOW)).toBe(false);
     expect(claudeAccessTokenNeedsRefresh(undefined, NOW)).toBe(false);
   });
@@ -83,8 +78,6 @@ describe('claudeAccessTokenNeedsRefresh', () => {
   });
 
   it('is true once the token is within the refresh leeway of expiry', () => {
-    // The stampede fix depends on this comparison direction: a near-expiry
-    // token reports `expired` from the probe (non-fatal) instead of refreshing.
     expect(claudeAccessTokenNeedsRefresh(NOW + LEEWAY_MS - 1, NOW)).toBe(true);
   });
 
@@ -98,8 +91,6 @@ describe('claudeAccessTokenNeedsRefresh', () => {
 });
 
 describe('claudeUsageAccessTokenNoRefresh', () => {
-  // Uses the real Date.now() internally (via claudeAccessTokenNeedsRefresh), so
-  // express expiries relative to now.
   const now = Date.now();
 
   it('returns the token when it is comfortably fresh', () => {
@@ -111,9 +102,6 @@ describe('claudeUsageAccessTokenNoRefresh', () => {
   });
 
   it('returns null (NOT a rotating refresh) for a near-expiry token', () => {
-    // The regression this guards: a usage read must never rotate Claude's
-    // single-use refresh token. A token within the 5-min leeway yields "no usage
-    // now" (null) instead of refreshing and logging every other fleet box out.
     expect(claudeUsageAccessTokenNoRefresh({ accessToken: 'tok-abc', expiresAt: now + 60_000 })).toBeNull();
   });
 
@@ -127,16 +115,6 @@ describe('claudeUsageAccessTokenNoRefresh', () => {
   });
 });
 
-/**
- * Read-only usage/probe callers (accessTokenCache) authenticate ONLY with a
- * file-based setup-token and NEVER read Claude Code's interactive login. Reading
- * that ACL-bound OAuth token and transmitting it to Anthropic's usage API from
- * the daemon's warm loop is what got it revoked (the fleet-wide-logout class,
- * RUSH-1822). The interactive login is seeded in the real standalone store; the
- * contract pinned here is what the caller receives — a probe read gets nothing
- * while a live interactive login is present — since the standalone's raw item
- * reads are not individually observable through the seam.
- */
 describe.skipIf(!fileBacked)('loadClaudeOauth accessTokenCache never hands out the interactive login', () => {
   useFreshSecretsHome();
   const HOME = '/tmp/agents-cli-usage-cache-test';
@@ -151,11 +129,7 @@ describe.skipIf(!fileBacked)('loadClaudeOauth accessTokenCache never hands out t
     );
 
   it('returns null when no setup-token is provisioned, even with a live interactive login present', async () => {
-    // The revocation fix: with no file-based setup-token, a probe/usage caller
-    // (accessTokenCache) must report unprovisioned rather than fall through to the
-    // interactive OAuth credential. Before the fix this handed the interactive
-    // credential to the usage probe, which fired it at api.anthropic.com.
-    seedSource(Date.now() + 60 * 60 * 1000); // a live interactive login IS present
+    seedSource(Date.now() + 60 * 60 * 1000);
 
     const oauth = await loadClaudeOauth(HOME, { accessTokenCache: true });
 
@@ -163,43 +137,27 @@ describe.skipIf(!fileBacked)('loadClaudeOauth accessTokenCache never hands out t
   });
 
   it('without the opt-in, returns the full interactive credential with its refresh token (run/cloud-export contract)', async () => {
-    // isClaudeAuthValid calls loadClaudeOauth WITHOUT accessTokenCache: it
-    // legitimately reads the interactive credential WITH the refresh token to
-    // run/refresh Claude. Regression guard for that path.
-    // NOTE: Rush Cloud dispatch does not call loadClaudeOauth at all (SING-1b
-    // email-only manifest; RUSH-2359 deleted the leftover blob reader).
     seedSource(Date.now() + 60 * 60 * 1000);
 
-    const first = await loadClaudeOauth(HOME); // default: full-credential caller
+    const first = await loadClaudeOauth(HOME);
     const second = await loadClaudeOauth(HOME);
 
-    // Full refresh token every time — never dropped.
     expect(first?.refreshToken).toBe('refresh-secret');
     expect(second?.refreshToken).toBe('refresh-secret');
   });
 
   it('WITH allowInteractiveLogin, an accessTokenCache read with no setup-token DOES return the interactive login (USAGE-READ-1)', async () => {
-    // The regression fix: a foreground human `agents view` on a personal device
-    // sets allowInteractiveLogin, and only then may the usage read fall through to
-    // the interactive login — the sole credential carrying the `user:profile`
-    // scope the usage endpoint requires. No setup-token is provisioned in this
-    // block, so the fall-through is the ONLY way to a credential.
-    seedSource(Date.now() + 60 * 60 * 1000); // interactive login present
+    seedSource(Date.now() + 60 * 60 * 1000);
 
     const oauth = await loadClaudeOauth(HOME, {
       accessTokenCache: true,
       allowInteractiveLogin: true,
     });
 
-    // The interactive credential's access token is returned — the opposite of
-    // the default accessTokenCache behavior.
     expect(oauth?.accessToken).toBe('tok-live');
   });
 
   it('allowInteractiveLogin still yields null when neither a setup-token nor an interactive login exists', async () => {
-    // Fail-safe: the opt-in only PERMITS the fall-through; it does not fabricate a
-    // credential. A signed-out home returns null even with the flag on.
-    // No seedSource(): nothing in the store, no .credentials.json.
     const oauth = await loadClaudeOauth(HOME, {
       accessTokenCache: true,
       allowInteractiveLogin: true,
@@ -211,20 +169,16 @@ describe.skipIf(!fileBacked)('loadClaudeOauth accessTokenCache never hands out t
 describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage read)', () => {
   const EMAIL = 'muqsit@trp.so';
   const SETUP_TOKEN = 'sk-ant-oat01-setup-tok-xyz';
-  // email -> claudeAccountTokenKey(email): upper, @->_AT_, .->_DOT_.
   const KEY = 'CLAUDE_CODE_OAUTH_TOKEN_MUQSIT_AT_TRP_DOT_SO';
   let home: string;
   useFreshSecretsHome();
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-home-'));
-    // Reserved FILE-BASED `auth` bundle carrying the per-account setup-token,
-    // written the way seedReservedAuthToken writes it.
     writeBundleWithItemsSync(
       { name: 'auth', backend: 'file', policy: 'never', vars: { [KEY]: keychainRef(KEY) }, meta: { [KEY]: { type: 'token' } } },
       new Map([[secretsKeychainItem('auth', KEY), SETUP_TOKEN]]),
     );
-    // The account's .claude.json so the resolver maps home -> email -> KEY.
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(home, '.claude', '.claude.json'),
@@ -233,30 +187,21 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
   });
 
   afterEach(() => {
-    try { fs.rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(home, { recursive: true, force: true }); } catch {  }
   });
 
   it('serves the file-based setup-token to accessTokenCache callers', async () => {
     const oauth = await loadClaudeOauth(home, { accessTokenCache: true });
     expect(oauth?.accessToken).toBe(SETUP_TOKEN);
-    // Non-rotating: no expiry => reads as fresh, probe never reports expired.
     expect(oauth?.expiresAt ?? null).toBeNull();
   });
 
   it('ignores the setup-token for full-credential callers (accessTokenCache off)', async () => {
-    // Run/export callers need the real keychain credential (with refresh token),
-    // never the access-token-only setup-token — so this path does NOT short out.
-    // With no keychain item for this home and no .credentials.json, that
-    // resolves to null.
     const oauth = await loadClaudeOauth(home);
     expect(oauth).toBeNull();
   });
 
   it('an accessTokenCache caller with no setup-token reads NEITHER the keychain NOR .credentials.json', async () => {
-    // Strip the email so resolveClaudeSetupToken cannot map home -> setup-token KEY,
-    // and drop an interactive token in .credentials.json. A probe/usage caller
-    // (accessTokenCache) must still report unprovisioned — the interactive login is
-    // untouchable, whether it lives in the keychain or the file (the RUSH-1822 fix).
     fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({}));
     fs.writeFileSync(
       path.join(home, '.claude', '.credentials.json'),
@@ -303,7 +248,6 @@ describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn 
   });
 
   it('projects minutes to the cap from the burn between two samples', () => {
-    // 50% -> 70% over 10 minutes = 2%/min; 30% headroom remains => 15 minutes.
     const curr = sessionSnap(70, NOW);
     const headroom = deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 50 });
     expect(headroom.status).toBe('available');
@@ -320,9 +264,7 @@ describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn 
 
   it('does not project a cap when usage is flat or falling (a reset / idle)', () => {
     const curr = sessionSnap(50, NOW);
-    // Flat since prev: no burn to project from.
     expect(deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 50 }).minutesToLimit).toBeNull();
-    // Fell (window reset): also not "projected to cap".
     expect(deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 80 }).minutesToLimit).toBeNull();
   });
 
@@ -341,19 +283,11 @@ describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn 
 });
 
 describe('readOnly — the `agents run` routing hot path never blocks on the network', () => {
-  // The measured cold-start stall: collectRunCandidates passed maxAgeMs=5min, so
-  // a snapshot older than that fell through to a blocking live provider fetch —
-  // one HTTP round trip per account added to `agents run` startup. readOnly
-  // serves the cache and NEVER fetches. Deterministic + no network: the seam
-  // points the cache at a tmpdir and no live call is made on any assertion.
   let cacheDir: string;
   let prevPath: string | null;
   const usageKey = 'claude:org=readonly-test';
 
   const staleButUnexpired = (): UsageSnapshot => ({
-    // Captured 30 minutes ago: far past USAGE_DECISION_MAX_AGE_MS (5min) so the
-    // router will treat it as unverified — but the week window has not expired,
-    // so deserialization keeps the number rather than zeroing it.
     source: 'live',
     sourceLabel: 'live',
     capturedAt: new Date(Date.now() - 30 * 60 * 1000),
@@ -371,9 +305,6 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
 
   const claudeInput = () => ({
     agentId: 'claude' as const,
-    // A network provider (claude) with a usage key but no reachable token here —
-    // so if readOnly wrongly fell through to getUsageInfo it would hit the
-    // keychain, fail, and stamp an error; error===null proves the short-circuit.
     info: { usageKey } as unknown as AccountInfo,
   });
 
@@ -392,9 +323,6 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
 
     const usage = await getUsageInfoForIdentity(claudeInput());
 
-    // The cache is returned verbatim (no network refetch, no error), even though
-    // it is well past the routing freshness bar — routing around it is
-    // isUsageVerified's job, not a blocking refresh's.
     expect(usage.snapshot?.windows[0]?.usedPercent).toBe(91);
     expect(usage.error).toBeNull();
   });
@@ -407,12 +335,6 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
   });
 
   it('flags an all-expired row as not-collected for --json while still returning the snapshot for the view', async () => {
-    // The row from the freeze: a session + week both captured long enough ago
-    // that BOTH have expired. deserialize now returns a snapshot (windows empty,
-    // last-known on staleWindows) so the TERMINAL view renders the number with
-    // its age — but `agents view --json` projects only `windows`, so usageError
-    // MUST stay non-null or the row reads as a healthy meterless account and a
-    // monitoring consumer loses the staleness signal (the RUSH-2858 case).
     const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     writeClaudeUsageCache(usageKey, {
       source: 'live',
@@ -426,10 +348,8 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
 
     const usage = await getUsageInfoForIdentity(claudeInput());
 
-    // --json contract restored: non-null error, empty `windows`.
     expect(usage.error).toBe(USAGE_NOT_COLLECTED_MARKER);
     expect(usage.snapshot?.windows).toEqual([]);
-    // ...but the view still has the last-known readings to render with an age.
     expect(usage.snapshot?.staleWindows?.map((w) => w.key)).toEqual(['session', 'week']);
   });
 
@@ -459,13 +379,6 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
 });
 
 describe('expired cached windows are unknown, not 0%', () => {
-  // The two-week freeze (2026-08-05..20): Anthropic 429'd every account's
-  // usage read, the cache never refreshed, and the deserializer zeroed each
-  // expired window but KEPT it — so `agents view` drew "S: 0% (now)" and
-  // deriveUsageStatusFromSnapshot said 'available' for accounts that were
-  // actually rate-limited (RUSH-2858). Expired windows must be dropped, and an
-  // all-expired snapshot must read as no-data so the honest "usage unavailable"
-  // path renders instead.
   let cacheDir: string;
   let prevPath: string | null;
   const usageKey = 'claude:org=expired-window-test';
@@ -496,7 +409,6 @@ describe('expired cached windows are unknown, not 0%', () => {
       sourceLabel: 'live',
       capturedAt: new Date(Date.now() - 6 * 60 * 60 * 1000),
       windows: [
-        // Session window reset an hour ago: whatever burned since is unknown.
         window({ key: 'session', shortLabel: 'S', usedPercent: 100, resetsAt: new Date(Date.now() - 60 * 60 * 1000), windowMinutes: 300 }),
         window({}),
       ],
@@ -522,26 +434,16 @@ describe('expired cached windows are unknown, not 0%', () => {
 
     const snapshot = readClaudeUsageCache(usageKey);
 
-    // Routing still sees nothing: no fresh window means the RUSH-2858 property
-    // holds — deriveUsageStatusFromSnapshot is null, so it is never "available".
     expect(snapshot?.windows).toEqual([]);
     expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
-    // But the last-known readings are preserved for the VIEW to render with age.
     expect(snapshot?.staleWindows?.map((w) => w.key)).toEqual(['session', 'week']);
     expect(snapshot?.staleWindows?.find((w) => w.key === 'session')?.usedPercent).toBe(100);
 
-    // The row survives — there is a last-known number worth showing, so it is
-    // NOT pruned the way a truly empty row is.
     const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
     expect(raw[usageKey]).toBeDefined();
   });
 
   it('persists a pre-partitioned staleWindow (Grok) across the cache round-trip', () => {
-    // Grok's collector pre-partitions in the fetch: an ended-period reading lands
-    // on `staleWindows` with `windows` empty. Serializing only `windows` dropped
-    // the number, so the daemon-refreshed cache the next plain `agents view grok`
-    // reads rendered the plan alone (no bar), even though `--refresh` had just
-    // shown "W: 42%* (stale)". The serializer must persist stale readings too.
     const capturedAt = new Date(Date.now() - 60 * 60 * 1000);
     writeClaudeUsageCache(usageKey, {
       source: 'last_seen',
@@ -556,19 +458,14 @@ describe('expired cached windows are unknown, not 0%', () => {
 
     const snapshot = readClaudeUsageCache(usageKey);
 
-    // Routing still sees nothing (no fresh window) — the RUSH-2858 property holds.
     expect(snapshot?.windows).toEqual([]);
     expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
-    // But the last-known 42% survives for the view to render with its age.
     expect(snapshot?.staleWindows?.map((w) => w.key)).toEqual(['week']);
     expect(snapshot?.staleWindows?.[0]?.usedPercent).toBe(42);
     expect(snapshot?.plan).toBe('SuperGrok Heavy');
   });
 
   it('keeps a meterless plan-only row so the cached read matches the refreshed one', () => {
-    // The exact row Grok's collector writes: a subscription tier and no meters.
-    // Dropping it made `agents view grok` print "usage unavailable" on the read
-    // immediately after a successful `--refresh`, and pruned the row as a bonus.
     writeClaudeUsageCache(usageKey, {
       source: 'live',
       sourceLabel: 'live',
@@ -581,29 +478,21 @@ describe('expired cached windows are unknown, not 0%', () => {
 
     expect(snapshot?.plan).toBe('SuperGrok Heavy');
     expect(snapshot?.windows).toEqual([]);
-    // No windows means no throttle claim either way — never a fake 0% bar.
     expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
     expect(formatUsageSummary(snapshot?.plan ?? null, snapshot)).toBe('SuperGrok Heavy');
 
-    // The row survives the read that used to delete it.
     const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
     expect(raw[usageKey]?.plan).toBe('SuperGrok Heavy');
   });
 
   it('renders a stale claude session window as the last-known value with its age', () => {
-    // The freeze case: the 5h session window was last read 6h ago and never
-    // refreshed (Anthropic 429'd the usage endpoint), so it expired; the weekly
-    // window is still fresh. The view must show the last session number + age,
-    // not "S: ┄┄┄┄┄ unavailable".
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
     writeClaudeUsageCache(usageKey, {
       source: 'live',
       sourceLabel: 'live',
       capturedAt: sixHoursAgo,
       windows: [
-        // Session captured 6h ago: its 5h window (300m) has aged out.
         window({ key: 'session', shortLabel: 'S', usedPercent: 30, resetsAt: new Date(sixHoursAgo.getTime() + 5 * 60 * 60 * 1000), windowMinutes: 300 }),
-        // Weekly still fresh (resets 3d out).
         window({ key: 'week', shortLabel: 'W', usedPercent: 62 }),
       ],
     });
@@ -618,8 +507,6 @@ describe('expired cached windows are unknown, not 0%', () => {
         { key: 'week', shortLabel: 'W' },
       ],
     });
-    // The last-known session number is visible with its capture age, and the
-    // fresh weekly bar renders normally beside it.
     expect(rendered).toContain('S:');
     expect(rendered).toContain('30%');
     expect(rendered).toContain('6h old');
@@ -684,8 +571,6 @@ describe('observed Claude session limits', () => {
     const reset = new Date(Date.now() + 60 * 60 * 1000);
     noteClaudeSessionLimit(usageKey, reset);
 
-    // Models a reader that observed an expired row before the real-run writer
-    // replaced it: cleanup executes afterward and must re-read under its lock.
     pruneExpiredClaudeUsageCacheEntry(usageKey, undefined, new Date());
 
     expect(readClaudeUsageCache(usageKey)?.unavailable).toEqual({
@@ -726,11 +611,7 @@ describe('per-model Claude refusal tracking (PHNX-3940)', () => {
     noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
 
     expect(getClaudeModelRefusal(accountA, 'fable')).toEqual({ family: 'Fable', resetsAt: null });
-    // A different model on the SAME account is unaffected.
     expect(getClaudeModelRefusal(accountA, 'sonnet')).toBeNull();
-    // A different account — even one that would share an org-scoped usageKey —
-    // is unaffected: the marker is keyed on the caller-supplied account key,
-    // never a shared org bucket.
     expect(getClaudeModelRefusal(accountB, 'fable')).toBeNull();
   });
 
@@ -741,7 +622,6 @@ describe('per-model Claude refusal tracking (PHNX-3940)', () => {
     expect(getClaudeModelRefusal(accountA, 'fable', resetsAt.getTime() + 1)).toBeNull();
 
     noteClaudeModelRefusal(accountA, 'opus', { family: 'Opus' });
-    // No resetsAt was given — never invent one, and it must not auto-expire.
     expect(getClaudeModelRefusal(accountA, 'opus', Date.now() + 365 * 24 * 60 * 60 * 1000)).toEqual({
       family: 'Opus',
       resetsAt: null,
@@ -765,8 +645,6 @@ describe('per-model Claude refusal tracking (PHNX-3940)', () => {
 
   it('a model-refusal-only row survives readClaudeUsageCache retention (no windows, no plan)', () => {
     noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
-    // The row carries nothing but the model refusal — must not be treated as
-    // an empty/prunable row the way a truly-empty cache entry is.
     expect(readClaudeUsageCache(accountA)).not.toBeNull();
     expect(getClaudeModelRefusal(accountA, 'fable')).toEqual({ family: 'Fable', resetsAt: null });
   });
@@ -877,18 +755,9 @@ describe('explicit refresh publication', () => {
 });
 
 describe.skipIf(!fileBacked)('a Claude usage read reports WHY it produced no snapshot', () => {
-  // Both of these returned `error: null` before, which is what let an account
-  // nobody could read render exactly like a healthy one: the caller fell back to
-  // the SWR cache and drew its bars as fact. On yosemite-s1 that hid five
-  // accounts whose stored token had expired — one of them eleven days earlier —
-  // behind a cache frozen for 26h, and balanced routing launched into an account
-  // that was already at its weekly cap.
-  //
-  // Neither path reaches the network: both return before the fetch, so these
-  // exercise the real code path with no live call.
 
   let home: string;
-  useFreshSecretsHome(); // the store holds exactly what each test seeds — nothing else
+  useFreshSecretsHome();
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-err-'));
@@ -906,11 +775,6 @@ describe.skipIf(!fileBacked)('a Claude usage read reports WHY it produced no sna
   });
 
   it('reports unprovisioned even when an interactive login is present — the probe never reads it', async () => {
-    // A usage read authenticates only with a file-based setup-token and never
-    // touches Claude Code's interactive login (reading it and firing it at
-    // api.anthropic.com is what got the token revoked — RUSH-1822). So an account
-    // with only an interactive credential (here an expired one) reads the same as
-    // an empty home: no usable PROBE credential, unprovisioned.
     setKeychainTokenSync(
       getClaudeKeychainService(home),
       JSON.stringify({
@@ -922,21 +786,11 @@ describe.skipIf(!fileBacked)('a Claude usage read reports WHY it produced no sna
 
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toBe(usageNoClaudeUsageCredentialError());
-    // The message must not send this operator back to a login they already
-    // have: this account IS signed in and the reader still cannot use it
-    // (#2987). The shared wording ("sign in, or provision a long-lived token")
-    // is why the reported remedy loop existed.
     expect(usage.error).not.toContain('sign in');
     expect(classifyUsageErrorKind(usage.error)).toBe('no-usage-credential');
   });
 
   it('WITH allowInteractiveLogin, an EXPIRED interactive login is read but reported expired — never refreshed (USAGE-READ-1)', async () => {
-    // The personal-device path (allowInteractiveLogin) DOES read the interactive
-    // login — proven here because the error flips from "no-usage-credential" to
-    // "expired-credential": getClaudeUsageInfo got PAST the missing-credential
-    // branch to the token-freshness check. And it still never rotates the
-    // single-use refresh token to read usage (RUSH-1822). Stays offline: an
-    // expired token returns before the fetch.
     setKeychainTokenSync(
       getClaudeKeychainService(home),
       JSON.stringify({
@@ -952,9 +806,6 @@ describe.skipIf(!fileBacked)('a Claude usage read reports WHY it produced no sna
   });
 
   it('does NOT read the interactive login when allowInteractiveLogin is unset (background default, RUSH-1822)', async () => {
-    // Same expired-login home, no flag: stays unprovisioned — the interactive
-    // credential is untouched for every background caller. This is the guarantee
-    // that stopped the fleet-wide logouts.
     setKeychainTokenSync(
       getClaudeKeychainService(home),
       JSON.stringify({
@@ -980,9 +831,6 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
   };
 
   it('draws the bars AND says they are unverified', () => {
-    // The incident in one assertion: a cached "48%" must never render the same
-    // as a confirmed one. The number still shows — it is the last thing we saw,
-    // and hiding it would be worse — but it no longer reads as current.
     const out = formatUsageSummary(null, snapshot, 3, { unverified: true });
 
     expect(out).toContain('48%');
@@ -997,9 +845,6 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
   });
 
   it('names the headless scope gap instead of unverified (RUSH-2392)', () => {
-    // Setup-token accounts used to read as "unverified" — the worst-looking
-    // state for the best-provisioned headless credentials. Prefer the scope
-    // phrase so operators do not re-mint.
     const out = formatUsageSummary(null, snapshot, 3, { headless: true, unverified: true });
 
     expect(out).toContain('48%');
@@ -1011,7 +856,6 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
     const out = formatUsageSummary(null, null, 3, { headless: true, unavailable: true });
 
     expect(out).toContain(USAGE_HEADLESS_SCOPE_MARKER);
-    // Prefer the headless phrase over the bare generic "usage unavailable".
     expect(out).toContain('(headless)');
     expect(out).not.toMatch(/usage unavailable(?! \(headless\))/);
   });
@@ -1147,11 +991,6 @@ describe('Claude setup-token usage-scope detection (RUSH-2392)', () => {
 });
 
 describe('every networked provider names the same three failures', () => {
-  // The review that caught this: wiring only Claude would leave `agents view
-  // --refresh` reporting Claude accounts while silently presenting stale Kimi,
-  // Droid, and Cursor readings as confirmed — all four share one cache fallback
-  // in getUsageInfoForIdentity, so a silent null in any of them reproduces the
-  // exact bug this change exists to close.
   const NETWORKED = ['Claude', 'Kimi', 'Droid', 'Cursor'];
 
   it('says which agent could not be read, so a fleet row is actionable', () => {
@@ -1163,8 +1002,6 @@ describe('every networked provider names the same three failures', () => {
   });
 
   it('distinguishes a rejected read from a throttled one', () => {
-    // 429 is the machine being rate-limited on the usage endpoint, not a dead
-    // credential — re-authing would not fix it, so the two must not read alike.
     expect(usageRejectedError('Claude', 429)).toContain('429');
     expect(usageRejectedError('Claude', 429)).toContain('rate-limiting');
     expect(usageRejectedError('Claude', 401)).toContain('401');
@@ -1172,23 +1009,12 @@ describe('every networked provider names the same three failures', () => {
   });
 
   it('says an expired credential will not heal on its own', () => {
-    // The yosemite-s1 state: a usage read never refreshes, so the account stays
-    // unreadable until the agent itself runs. The message has to say so, or the
-    // obvious next action (re-auth) is not obvious.
     expect(usageExpiredCredentialError('Droid')).toContain('never refreshes');
     expect(usageExpiredKimiCredentialError()).toContain('never refreshes');
   });
 });
 
 describe('a usage read that THROWS is still a failed read', () => {
-  // The re-review caught this: every provider swallowed a thrown request into
-  // `error: null`, so a timeout, a TLS failure, or a payload that will not parse
-  // handed the caller a stale snapshot to render as confirmed — the same silence
-  // as an expired token, through a different door.
-  //
-  // Driven through a real provider fetch (Kimi) with a credential file that
-  // cannot be parsed: JSON.parse throws inside the try, so the catch is the code
-  // under test and no network call is made.
   let home: string;
 
   beforeEach(() => {
@@ -1212,12 +1038,7 @@ describe('a usage read that THROWS is still a failed read', () => {
 });
 
 describe('a recorded Retry-After actually suppresses the read', () => {
-  /** Keychain backend holding exactly what the test seeds — nothing else. */
 
-  // End-to-end through the real getUsageInfo path: with a penalty recorded, the
-  // read must return the throttled error WITHOUT making a request. That is the
-  // whole fix — the old code fired again 3 minutes into a 45-minute window and
-  // re-armed the penalty, so the box never recovered and its cache froze.
   let home: string;
   let dir: string;
   let prevPath: string | null;
@@ -1236,12 +1057,6 @@ describe('a recorded Retry-After actually suppresses the read', () => {
   });
 
   it('short-circuits the usage read while the window is open', async () => {
-    // A HEALTHY probe credential — this is the case that matters. The credential
-    // checks ahead of the guard make no request, so they run first and correctly
-    // win for a home that has none; the guard exists to stop the request that a
-    // good credential would otherwise make into a live penalty. The probe reads
-    // only a file-based setup-token (never the interactive login — RUSH-1822), so
-    // provision one here.
     const EMAIL = 'throttle@trp.so';
     const KEY = 'CLAUDE_CODE_OAUTH_TOKEN_THROTTLE_AT_TRP_DOT_SO';
     writeBundleWithItemsSync(
@@ -1253,7 +1068,6 @@ describe('a recorded Retry-After actually suppresses the read', () => {
       path.join(home, '.claude', '.claude.json'),
       JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }),
     );
-    // The exact header the endpoint sent on yosemite-s1.
     noteUsageRateLimited('claude', '2678');
 
     const usage = await getUsageInfo('claude', { home });
@@ -1268,25 +1082,11 @@ describe('a recorded Retry-After actually suppresses the read', () => {
 
     const usage = await getUsageInfo('claude', { home });
 
-    // Falls through to the ordinary credential check for this empty home.
     expect(usage.error).toBe(usageNoClaudeUsageCredentialError());
   });
 });
 
 describe('the throttle guard is exercised beyond Claude', () => {
-  // The review that forced this: with only Claude tested, two real bugs got
-  // through — Cursor's error `return` was left unconditional by a braceless
-  // `if` (so every 200 would have failed), and Kimi's probe guard sat AHEAD of
-  // its missing/expired credential checks, misreporting a broken credential as
-  // merely throttled.
-  //
-  // What this actually covers is Claude and Kimi end-to-end, not all four. Droid
-  // and Cursor are guarded and recorded identically (see the four
-  // usageRateLimitedUntil / noteUsageRateLimited pairs in usage.ts) but are not
-  // driven here: Droid's credential is AES-GCM encrypted with an on-disk key, so
-  // there is no cheap way to seed one without mocking, which this repo does not
-  // do. Naming that is better than a describe() title implying coverage that is
-  // not present.
   let home: string;
   let dir: string;
   let prevPath: string | null;
@@ -1296,11 +1096,6 @@ describe('the throttle guard is exercised beyond Claude', () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-'));
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-throttle-all-cache-'));
     prevPath = setUsageBackoffDirForTest(dir);
-    // resolveKimiCredentialPath falls back to the ACTIVE home when the
-    // per-version one is absent (sign-in is account-global), so without this the
-    // "missing credential" case finds the developer's real Kimi login and the
-    // test passes for the wrong reason. AGENTS_REAL_HOME is the seam the code
-    // itself reads.
     prevRealHome = process.env.AGENTS_REAL_HOME;
     process.env.AGENTS_REAL_HOME = home;
   });
@@ -1313,7 +1108,6 @@ describe('the throttle guard is exercised beyond Claude', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  /** A real, unexpired Kimi credential at the path the resolver looks for. */
   const seedKimi = () => {
     const credDir = path.join(home, '.kimi-code', 'credentials');
     fs.mkdirSync(credDir, { recursive: true });
@@ -1349,9 +1143,6 @@ describe('the throttle guard is exercised beyond Claude', () => {
   });
 
   it('does not let a throttle mask a missing Kimi credential in the probe', async () => {
-    // The misplacement the reviewer caught: with the guard ahead of the local
-    // checks, this returned 429/present and the account read as merely
-    // throttled rather than unconfigured.
     noteUsageRateLimited('kimi', '2678');
 
     const probe = await probeKimiStatus(home);
@@ -1366,7 +1157,6 @@ describe('the throttle guard is exercised beyond Claude', () => {
 
     const probe = await probeKimiStatus(home);
 
-    // 429 without a request: the recorded window is the answer.
     expect(probe.status).toBe(429);
     expect(probe.token).toBe('present');
   });
@@ -1385,19 +1175,10 @@ describe('the throttle guard is exercised beyond Claude', () => {
 
     const usage = await getUsageInfo('kimi', { home });
 
-    // Kimi is free; it fails on its own terms (a live call it cannot complete
-    // in the test environment), never with Claude's throttle message.
     expect(usage.error ?? '').not.toContain('rate-limited this machine');
   });
 });
 
-// RUSH-3040: usage.ts's error scheme was written for "four networked
-// providers" (Claude/Kimi/Droid/Cursor) and Antigravity/Muse were added later
-// with `error: null` on EVERY failure — an unreadable account was
-// indistinguishable from a healthy one with nothing to show. These cover the
-// no-credential and throttle-short-circuit paths for both, which need no live
-// network call (mirrors the Kimi/Claude pattern above — this repo does not
-// mock).
 describe('Antigravity and Muse get the same error scheme as the four original providers', () => {
   let home: string;
   let dir: string;
@@ -1413,13 +1194,8 @@ describe('Antigravity and Muse get the same error scheme as the four original pr
     prevPath = setUsageBackoffDirForTest(dir);
     prevRealHome = process.env.AGENTS_REAL_HOME;
     process.env.AGENTS_REAL_HOME = home;
-    // Antigravity falls back to an OS keyring probe when no file credential
-    // exists; without this guard, "no credential" finds the developer's real
-    // login on a dev machine and the test passes for the wrong reason.
     prevNoKeychainProbe = process.env.AGENTS_NO_KEYCHAIN_PROBE;
     process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';
-    // Muse resolves a key from the environment before it looks at
-    // ~/.config/muse/auth.json — clear both so "no credential" is genuine.
     prevMetaKey = process.env.META_API_KEY;
     prevModelKey = process.env.MODEL_API_KEY;
     delete process.env.META_API_KEY;
@@ -1440,7 +1216,6 @@ describe('Antigravity and Muse get the same error scheme as the four original pr
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  /** A real, unexpired Antigravity `agy` OAuth credential at the file path the resolver looks for. */
   const seedAntigravity = () => {
     const credDir = path.join(home, '.gemini', 'antigravity-cli');
     fs.mkdirSync(credDir, { recursive: true });
@@ -1492,7 +1267,6 @@ describe('Antigravity and Muse get the same error scheme as the four original pr
 
     const usage = await getUsageInfo('muse', { home });
 
-    // The throttle only blocks the live probe — the local fallback still works.
     expect(usage.error).toBeNull();
     expect(usage.snapshot).not.toBeNull();
   });
@@ -1526,7 +1300,6 @@ describe('classifyUsageFetchFailure — shared Antigravity/Muse classification +
     const message = classifyUsageFetchFailure('Antigravity', 'antigravity', 429, '120', null);
     expect(message).toBe(usageRejectedError('Antigravity', 429));
 
-    // The backoff was actually recorded — a second read short-circuits.
     const usage = classifyUsageFetchFailure('Antigravity', 'antigravity', 429, null, null);
     expect(usage).toBe(usageRejectedError('Antigravity', 429));
   });
@@ -1543,14 +1316,6 @@ describe('classifyUsageFetchFailure — shared Antigravity/Muse classification +
 });
 
 describe('classifyUsageErrorKind — the interface for view.ts (RUSH-3040)', () => {
-  // ## Interface for view-render
-  // `classifyUsageErrorKind(usageInfo.error)` returns a `UsageErrorKind | null`
-  // that the `agents view` renderer passes as `FormatUsageSummaryOpts.errorKind`
-  // (plus the raw `usageInfo.error` string as `errorDetail`, used only to pull
-  // the retry-time hint out of a `rate-limited` classification). This table is
-  // the full contract — every UsageInfo.error this file can construct maps to
-  // exactly one of these kinds, so the renderer never has to special-case a
-  // message string itself.
   it('classifies every constructed error string into its documented kind', () => {
     const cases: Array<[string, UsageErrorKind]> = [
       [usageNoCredentialError('Kimi'), 'no-credential'],
@@ -1572,10 +1337,6 @@ describe('classifyUsageErrorKind — the interface for view.ts (RUSH-3040)', () 
   });
 
   it('classifies the read-only cache miss as not-collected, not a rejection (#2987)', () => {
-    // `getUsageInfoForIdentity` returns this sentinel when the read served the
-    // cache and the cache was empty — no request was made, so nothing was
-    // rejected. It had no arm here and fell through to 'rejected', which is
-    // how a cold cache rendered as "usage unavailable".
     expect(classifyUsageErrorKind(USAGE_NOT_COLLECTED_MARKER)).toBe('not-collected');
     expect(classifyUsageErrorKind(USAGE_NOT_COLLECTED_MARKER)).not.toBe('rejected');
   });
@@ -1587,10 +1348,6 @@ describe('classifyUsageErrorKind — the interface for view.ts (RUSH-3040)', () 
 });
 
 describe('usageErrorForDisplay — no internal sentinel leaks into --json (PHNX-3348)', () => {
-  // `agents view --json` emits `usageInfo.error` as the `usageError` field. Without
-  // `--refresh` on a never-cached account the read-only lookup returns the internal
-  // `'stale'` sentinel (USAGE_NOT_COLLECTED_MARKER) — which is a cache signal, not a
-  // human message, and leaking it verbatim contradicts the field's docstring.
   it('maps the internal not-collected sentinel to a human, actionable string', () => {
     const shown = usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER);
     expect(shown).not.toBe(USAGE_NOT_COLLECTED_MARKER);
@@ -1613,9 +1370,6 @@ describe('usageErrorForDisplay — no internal sentinel leaks into --json (PHNX-
 });
 
 describe('formatUsageSummary renders the SPECIFIC error kind, not a generic bucket', () => {
-  // The bug this closes: opts.unavailable used to render the bare string
-  // 'usage unavailable' for ~6 different causes. errorKind lets the no-bars
-  // branch name which one.
   it('renders a distinct human label for each error kind', () => {
     expect(formatUsageSummary(null, null, 3, { unavailable: true, errorKind: 'no-credential' })).toContain(
       'sign in / provision token',
@@ -1641,10 +1395,6 @@ describe('formatUsageSummary renders the SPECIFIC error kind, not a generic buck
   });
 
   it('names the scope gap from errorKind alone, without the headless flag (RUSH-2392, #2987)', () => {
-    // view.ts sets `headless` from the error string, but every other caller
-    // passes only the classified kind. That kind shared the generic bucket, so
-    // the same account read as "usage unavailable" on one surface and
-    // "usage unavailable (headless)" on another.
     const out = formatUsageSummary(null, null, 3, {
       unavailable: true,
       errorKind: 'headless-scope',
@@ -1688,10 +1438,6 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  // Write auth.json whose id_token carries `auth_time` = the login time. The
-  // usage floor comes from that claim, NOT the file mtime — a token refresh
-  // rewrites auth.json but leaves auth_time at the real login. `fileMtimeMs`
-  // lets a test simulate a refresh (file rewritten later than the login).
   function writeAuth(loginMs: number, fileMtimeMs?: number): void {
     const p = path.join(home, '.codex', 'auth.json');
     fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -1724,8 +1470,6 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
   const HOUR = 60 * 60 * 1000;
 
   it('ignores a session written before the current login (prior account is stale)', async () => {
-    // Reproduces the bug: log out, log into a different account. The only
-    // session on disk predates the new login, so its usage is the OLD account's.
     writeAuth(NOW);
     writeSession(NOW - HOUR, 99);
 
@@ -1790,7 +1534,6 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
   });
 
   it('prefers the current account session over a stale pre-login one', async () => {
-    // Old account left a 99% session; the new account then ran a 5% session.
     writeAuth(NOW);
     writeSession(NOW - HOUR, 99);
     writeSession(NOW + HOUR, 5);
@@ -1808,10 +1551,6 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
   });
 
   it('keeps usage after a token refresh rewrites auth.json (floor is auth_time, not mtime)', async () => {
-    // Regression guard: login at NOW, run a session at NOW+1h (42%), then a
-    // background token refresh rewrites auth.json with a NOW+2h file mtime. The
-    // floor is auth_time (NOW), so the NOW+1h session is still counted — a
-    // mtime-based floor (NOW+2h) would wrongly blank the current account.
     writeAuth(NOW, NOW + 2 * HOUR);
     writeSession(NOW + HOUR, 42);
 
@@ -1822,9 +1561,6 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
   it('reports a benign no-recent-usage marker when signed in but nothing was ever recorded (RUSH-3040)', async () => {
     writeAuth(NOW);
-    // No writeSession() call — a fresh account with no rate-limit event on
-    // this machine yet. This used to be silently indistinguishable from a
-    // genuine read failure (both were `error: null`).
     const info = await getUsageInfo('codex', { home });
     expect(info.snapshot).toBeNull();
     expect(info.error).toBeNull();
@@ -1832,17 +1568,10 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
   });
 
   it('skips a stale window and falls back to an earlier session that is still fresh (RUSH-3040)', async () => {
-    // Freshness is judged against the REAL wall clock (isCachedUsageWindowFresh
-    // compares to `new Date()`), so this test uses actual Date.now() rather than
-    // the fixed future `NOW` constant the rest of this suite uses.
     const real = Date.now();
     const HOUR_MS = 60 * 60 * 1000;
     writeAuth(real - 3 * HOUR_MS);
-    // Newest file (checked first): a 30-minute window captured an hour ago —
-    // already expired. Without the freshness filter this stale 80% would win.
     writeSession(real - HOUR_MS, 80, 30);
-    // Older file (checked second, still after the login floor): a 5-hour
-    // window captured 2 hours ago — still fresh.
     writeSession(real - 2 * HOUR_MS, 15, 300);
 
     const info = await getUsageInfo('codex', { home });
@@ -1853,10 +1582,6 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
 describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   let home: string;
-  // Grok's log resolution falls back to the shared real home
-  // (AGENTS_REAL_HOME || os.homedir()), so pin BOTH to a temp dir for the whole
-  // block — otherwise these tests would read the developer's real
-  // ~/.grok/logs/unified.jsonl and go non-deterministic.
   let sharedHome: string;
   let prevHome: string | undefined;
   let prevRealHome: string | undefined;
@@ -1962,9 +1687,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
 
   it('does not invent a 0% bar when creditUsagePercent is missing', async () => {
     const now = Date.now();
-    // Prior period at 100%, then a new period line with no percent yet — the
-    // real fleet case that painted W: 0% on one box while another still
-    // showed a stale expired reading.
     writeBillingLine({
       tsMs: now - 2 * HOUR,
       percent: 100,
@@ -1994,13 +1716,8 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     });
 
     const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
-    // Routing stays honest: the ended-period bar never enters `windows`, so a
-    // stale 100% cannot read as rate-limited.
     expect(info.snapshot?.windows).toEqual([]);
     expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
-    // A last-known reading exists, so the refresh hint no longer stands alone —
-    // and the view renders the number with a "period ended" age instead of the
-    // old numberless "run grok once to refresh usage".
     expect(info.snapshot?.refreshHint).toBeNull();
     expect(info.snapshot?.staleWindows?.[0]?.usedPercent).toBe(100);
     const rendered = formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot);
@@ -2011,8 +1728,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   });
 
   it('reports a benign no-recent-usage marker when no log file exists yet (RUSH-3040)', async () => {
-    // No writeBillingLine() call — a fresh install with no Grok log at all.
-    // This used to be silently indistinguishable from a real read failure.
     const info = await getUsageInfo('grok', { home });
     expect(info.snapshot).toBeNull();
     expect(info.error).toBeNull();
@@ -2020,14 +1735,7 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   });
 
   it('falls back to the shared ~/.grok log when the per-version home has none', async () => {
-    // The live bug: `agents view grok` reads usage per INSTALLED VERSION, passing
-    // each version's isolated home (~/.agents/.history/versions/grok/<ver>), whose
-    // .grok/logs/unified.jsonl never exists — Grok writes its billing log only to
-    // the user's shared real home ~/.grok. So the per-version read came up empty
-    // and every version rendered "run grok@<ver> once to refresh usage" while the
-    // real last-known reading (e.g. week 42%) sat unread in the shared home.
     const now = Date.now();
-    // Shared home has the reading; the per-version home (`home`) has NO log.
     writeBillingLineTo(sharedHome, {
       tsMs: now - HOUR,
       percent: 42,
@@ -2044,7 +1752,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
     const week = info.snapshot?.windows.find((w) => w.key === 'week');
     expect(week?.usedPercent).toBe(42);
-    // A number is present now, so the numberless refresh hint no longer stands alone.
     expect(info.snapshot?.refreshHint).toBeNull();
     const rendered = formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot);
     expect(rendered).toContain('42%');
@@ -2052,10 +1759,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   });
 
   it('keeps a stale shared-home reading for the per-version view (period ended)', async () => {
-    // The exact live case: the shared log's last reading is from an ENDED billing
-    // period, so it is dropped from `windows` (routing stays honest) but kept as a
-    // `staleWindow` the per-version view renders with a "period ended" suffix —
-    // instead of the old numberless "run grok@<ver> once to refresh usage".
     const now = Date.now();
     writeBillingLineTo(sharedHome, {
       tsMs: now - DAY,
@@ -2079,7 +1782,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   });
 
   it('prefers the per-version log over the shared one when both exist', async () => {
-    // If Grok ever does write a per-version log, it must win over the shared home.
     const now = Date.now();
     writeBillingLineTo(sharedHome, {
       tsMs: now - HOUR,
@@ -2100,10 +1802,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   });
 
   it('applies an unattributed shared log to only one of two version homes', async () => {
-    // Live Grok billing lines have no user/email. Two installed version homes
-    // (account A vs account B) must not both inherit the shared 42% meter.
-    // Canonical identity = the version home whose auth.json matches the shared
-    // ~/.grok/auth.json (the account that owns that directory).
     const homeB = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-b-'));
     try {
       const now = Date.now();
@@ -2159,9 +1857,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
 
   describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
     const usageKey = 'claude:org=oocred';
-    // These write Claude refusal markers via note*/clear* — isolate the Claude
-    // usage cache to a temp file so the suite never pollutes the developer's real
-    // ~/.agents/.cache/claude-usage.json (the exact hazard usage-backoff.ts documents).
     let cacheDir: string;
     let prevPath: string | null;
 
@@ -2178,7 +1873,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     it('persists a clock-less refusal that excludes the account and survives time', () => {
       noteClaudeOutOfCredits(usageKey);
       const snap = readClaudeUsageCache(usageKey, undefined, new Date(Date.now() + 30 * 24 * 3600 * 1000));
-      // A month later it is STILL blocking — unlike a session limit, no clock frees it.
       expect(snap?.unavailable).toEqual({ reason: 'out_of_credits' });
       expect(deriveUsageStatusFromSnapshot(snap)).toBe('rate_limited');
       expect(formatUsageSummary('Max', snap)).toContain('out of credits');
@@ -2188,7 +1882,6 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       noteClaudeOutOfCredits(usageKey);
       expect(readClaudeUsageCache(usageKey)?.unavailable).toEqual({ reason: 'out_of_credits' });
       clearClaudeAccountRefusal(usageKey);
-      // Cleared → no longer excluded (no marker, no windows → null snapshot).
       const snap = readClaudeUsageCache(usageKey);
       expect(snap?.unavailable).toBeUndefined();
     });
@@ -2196,10 +1889,8 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     it('a session-limit still recovers on its clock, out_of_credits does not', () => {
       const other = 'claude:org=sess-vs-cred';
       noteClaudeSessionLimit(other, new Date(Date.now() + 60_000));
-      // past the reset → session limit gone
       expect(readClaudeUsageCache(other, undefined, new Date(Date.now() + 61_000))).toBeNull();
       noteClaudeOutOfCredits(other);
-      // out_of_credits ignores the clock entirely
       expect(readClaudeUsageCache(other, undefined, new Date(Date.now() + 10 * 24 * 3600 * 1000))?.unavailable)
         .toEqual({ reason: 'out_of_credits' });
     });

@@ -1,9 +1,3 @@
-/**
- * Migration ledger — real filesystem round-trip (no mocking) against an injected
- * temp ledger file. The ledger is an append-only lineage, so the bugs worth
- * catching are ordering (latest wins), per-session filtering, ignoring a failed
- * hop, and surviving a corrupt/partial line.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -41,7 +35,7 @@ describe('migration ledger', () => {
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   it('round-trips and creates the ledger under a missing dir', () => {
-    expect(readMigrations(ledger)).toEqual([]); // no ledger yet
+    expect(readMigrations(ledger)).toEqual([]);
     recordMigration(rec({ at: '2026-08-01T00:00:01.000Z' }), ledger);
     const all = readMigrations(ledger);
     expect(all.length).toBe(1);
@@ -52,7 +46,6 @@ describe('migration ledger', () => {
     recordMigration(rec({ sessionId: 'sess-a', to: { host: 'box-1' }, at: '2026-08-01T00:00:01.000Z' }), ledger);
     recordMigration(rec({ sessionId: 'sess-b', to: { host: 'box-x' }, at: '2026-08-01T00:00:02.000Z' }), ledger);
     recordMigration(rec({ sessionId: 'sess-a', to: { host: 'box-2' }, at: '2026-08-01T00:00:03.000Z' }), ledger);
-    // A failed hop must not shadow the last good one.
     recordMigration(rec({ sessionId: 'sess-a', to: { host: 'box-3' }, status: 'failed', at: '2026-08-01T00:00:04.000Z' }), ledger);
 
     expect(latestForSession('sess-a', ledger)?.to.host).toBe('box-2');

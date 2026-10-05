@@ -212,11 +212,6 @@ describe('installSubagentToAgent for Antigravity', () => {
   });
 });
 
-// PHNX-3187: git checks text files out with CRLF on Windows (core.autocrlf), so
-// an AGENT.md whose fences read `---\r\n` must still parse. Before the fix,
-// `content.split('\n')` left a trailing '\r' and `'---\r' !== '---'` dropped the
-// subagent from discovery — so `agents doctor --fix` on win-mini could never
-// install or reconcile it (reported an unactionable "hold").
 describe('subagent AGENT.md parsing is CRLF-robust (PHNX-3187)', () => {
   function writeAgentMdRaw(parent: string, name: string, contents: string): string {
     const dir = path.join(parent, name);

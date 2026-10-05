@@ -48,10 +48,8 @@ export interface ModelCatalog {
 
 const CACHE_PATH = getModelsCachePath();
 
-// Bump when cached catalog shape or extraction semantics become incompatible.
 const CACHE_SCHEMA_VERSION = 4;
 
-// Empty extraction is cached only briefly so transient install/source failures recover.
 const EMPTY_CATALOG_RETRY_MS = 24 * 60 * 60 * 1000;
 
 interface CacheEntry {

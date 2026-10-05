@@ -18,7 +18,7 @@ export const hookManifestCheck: HealCheck = {
     }
 
     for (const [name, def] of Object.entries(manifest)) {
-      // A registered critical hook can otherwise be silently omitted when its script vanishes.
+
       if (!def || typeof def.script !== 'string' || def.script.length === 0) continue;
       if (def.enabled === false) continue;
       if (def.script.startsWith('/')) continue;

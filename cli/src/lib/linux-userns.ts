@@ -1,4 +1,3 @@
-// A real unshare probe is ground truth; sysctl is fallback only when the tool is absent, and unknown must never be reported safe.
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 

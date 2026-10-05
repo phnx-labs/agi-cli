@@ -1,11 +1,3 @@
-/**
- * RUSH-2864 — top-level `agents status` moved under `agents sync status`.
- * Pins both directions: the nested path exists with the same flags and JSON
- * contract, and the old top-level name is gone (not a silent auto-correct).
- *
- * The tree assertions use `buildFullCommandTree` (no mocks). The CLI spawn
- * tests drive `src/index.ts` against a disposable HOME, same as sync.test.ts.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import { Command } from 'commander';
@@ -102,8 +94,6 @@ describe('the nested `agents sync status` surface', () => {
       totals: { drifted: number; missing: number; orphan: number };
       mode?: string;
     };
-    // The umbrella sync JSON is `{ ok, mode: 'umbrella', ... }`. If commander
-    // fed "status" to the parent action, this would not be UnifiedSyncStatus.
     expect(parsed.mode).toBeUndefined();
     expect(parsed.system).toBeDefined();
     expect(Array.isArray(parsed.agents)).toBe(true);
@@ -135,8 +125,6 @@ describe('the retired top-level `agents status`', () => {
     const home = guardedHome();
     const { stdout, status } = run(['--help'], home);
     expect(status).toBe(0);
-    // `status` retired to `sync status`; the compact root help never lists it
-    // as a top-level command.
     expect(stdout).not.toMatch(/^\s+status\s+Sync\/drift/m);
   });
 });

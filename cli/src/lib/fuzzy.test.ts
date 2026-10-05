@@ -46,17 +46,16 @@ describe('fuzzyMatch', () => {
   });
 
   it('matches single-edit typos (insertion, deletion, transposition)', () => {
-    expect(fuzzyMatch('cladue', agents, FUZZY_PRESETS.agents)).toBe('claude'); // transposition
-    expect(fuzzyMatch('claud', agents, FUZZY_PRESETS.agents)).toBe('claude');  // deletion
-    expect(fuzzyMatch('codx', agents, FUZZY_PRESETS.agents)).toBe('codex');    // deletion
-    expect(fuzzyMatch('grk', agents, FUZZY_PRESETS.agents)).toBe('grok');      // insertion
-    expect(fuzzyMatch('gemni', agents, FUZZY_PRESETS.agents)).toBe('gemini');  // deletion
+    expect(fuzzyMatch('cladue', agents, FUZZY_PRESETS.agents)).toBe('claude');
+    expect(fuzzyMatch('claud', agents, FUZZY_PRESETS.agents)).toBe('claude');
+    expect(fuzzyMatch('codx', agents, FUZZY_PRESETS.agents)).toBe('codex');
+    expect(fuzzyMatch('grk', agents, FUZZY_PRESETS.agents)).toBe('grok');
+    expect(fuzzyMatch('gemni', agents, FUZZY_PRESETS.agents)).toBe('gemini');
   });
 
   it('returns null for ambiguous or too-distant inputs', () => {
     expect(fuzzyMatch('co', agents, FUZZY_PRESETS.agents)).toBeNull();
     expect(fuzzyMatch('xyz', agents, FUZZY_PRESETS.agents)).toBeNull();
-    // Two substitutions away — outside the 1-edit tolerance for agent names.
     expect(fuzzyMatch('cladxe', agents, FUZZY_PRESETS.agents)).toBeNull();
   });
 

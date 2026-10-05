@@ -55,7 +55,6 @@ export interface MenubarMe {
   avatarSource: 'phoenix' | 'github' | null;
 }
 
-// GitHub may decorate a Phoenix identity only when their email digest matches.
 export function resolveMenubarMe(session: PhoenixSession | null, viewer: GithubViewer | null): MenubarMe | null {
   const sessionEmail = session?.email?.trim() || null;
   const github = !session

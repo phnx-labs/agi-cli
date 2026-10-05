@@ -4,14 +4,6 @@ import { ownerLabel } from './ps-roster.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 
-/**
- * `serializeSessionsJson` is the single seam both the local `agents sessions
- * --json` path and the new `--json --host` remote fan-out serialize through, so
- * a VS Code extension can `JSON.parse` a remote device's recent (historical,
- * non-active) sessions the same way it parses the local list. These assert the
- * output is a parseable `SessionMeta[]` array and that the internal-only
- * search/fan-out bookkeeping fields never leak into that public record.
- */
 
 function meta(over: Partial<SessionMeta> = {}): SessionMeta {
   return {
@@ -39,16 +31,11 @@ describe('serializeSessionsJson', () => {
   });
 
   it('empty input serializes to an empty array (an offline/0-session host)', () => {
-    // The --json --host fan-out contributes [] for a dead or session-less host,
-    // so stdout must still be a valid empty array, never blank or a banner.
     const parsed = JSON.parse(serializeSessionsJson([]));
     expect(parsed).toEqual([]);
   });
 
   it('strips the internal _remote / _matchedTerms / _bm25Score fan-out+search fields', () => {
-    // Remote rows come back tagged `_remote: true` from parseRemoteList; those
-    // and the BM25 search bookkeeping are transient and must not leak to a
-    // scripted consumer.
     const out = serializeSessionsJson([
       meta({ _remote: true, _matchedTerms: ['auth'], _bm25Score: 3.14, machine: 'mac-mini' }),
     ]);
@@ -56,8 +43,6 @@ describe('serializeSessionsJson', () => {
     expect(row).not.toHaveProperty('_remote');
     expect(row).not.toHaveProperty('_matchedTerms');
     expect(row).not.toHaveProperty('_bm25Score');
-    // The real machine tag (a public field, not underscore-prefixed) survives so
-    // a caller can still attribute each remote row to its host.
     expect(row.machine).toBe('mac-mini');
   });
 
@@ -75,12 +60,6 @@ describe('serializeSessionsJson', () => {
   });
 });
 
-/**
- * RUSH-1981: `agents sessions --active --json` is what a supervising watcher
- * joins on. The raw ActiveSession nests the ticket (`ticket.id`) and carries no
- * `project`, so a naive join on ticketId+project drops every row. The serializer
- * must add those join keys plus the PR link as flat, always-present top-level keys.
- */
 describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
   function active(over: Partial<ActiveSession> = {}): ActiveSession {
     return { context: 'terminal', kind: 'agent', status: 'running', ...over } as ActiveSession;
@@ -101,14 +80,10 @@ describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
 
   it('emits every join key (never absent); project buckets a cwd-less row explicitly', () => {
     const [row] = serializeActiveSessionsForJson([active()]);
-    // The keys must EXIST so a `.ticketId`/`.project` join never throws — a
-    // missing property and an explicit null are not the same to a consumer.
     expect(Object.prototype.hasOwnProperty.call(row, 'ticketId')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(row, 'project')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(row, 'prLink')).toBe(true);
     expect(row.ticketId).toBeNull();
-    // A cwd-less non-cloud row buckets to the explicit 'other' key, never the
-    // harness/machine name (RUSH-2688) — not null, so it groups consistently.
     expect(row.project).toBe('other');
     expect(row.prLink).toBeNull();
   });
@@ -124,18 +99,11 @@ describe('serializeActiveSessionsForJson (RUSH-1981 — join keys)', () => {
   });
 
   it('carries the owner field through the JSON serializer (RUSH-2018)', () => {
-    // owner rides the ...s spread, so a watcher/VS Code consumer can join on who
-    // launched each active session without a second lookup.
     const [row] = serializeActiveSessionsForJson([active({ owner: 'ada@example.com' })]);
     expect(row.owner).toBe('ada@example.com');
   });
 });
 
-/**
- * RUSH-2018: the owner column in `agents sessions --active` shortens a resolved
- * actor id to a compact display, and stays honest — an unresolved local run
- * shows no owner rather than inventing one.
- */
 describe('ownerLabel (RUSH-2018 — --active owner column)', () => {
   const s = (owner?: string): ActiveSession =>
     ({ context: 'terminal', kind: 'agent', status: 'running', owner } as ActiveSession);

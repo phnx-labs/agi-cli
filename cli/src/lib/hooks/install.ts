@@ -146,7 +146,7 @@ export function deduplicateVersionHookCommands(
   commands: string[],
   activeVersionHome: string,
 ): string[] {
-  // Active-version entries win; user and non-version-home hooks pass through untouched.
+
   const active = versionHomeIdentity(activeVersionHome);
   if (!active) return [...commands];
 
@@ -507,7 +507,7 @@ function normalizeContent(content: string): string {
 
 export function getHooksDirInHome(agentId: AgentId, home: string): string {
   const config = AGENTS[agentId];
-  // Absolute Grok/Kimi hook dirs become config-relative before joining a version HOME.
+
   const hooksDir = path.isAbsolute(config.hooksDir)
     ? path.relative(config.configDir, config.hooksDir)
     : config.hooksDir;
@@ -922,7 +922,6 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
       : path.join(versionHome, agentConfigDirName(agent), 'settings.json');
   const localHooksDir = getVersionHooksDir(agent, version);
 
-  // Wiring proof resolves only hooks synced into this version home; it never mutates disk.
   const resolveScript = (script: string): string | null => {
     if (path.isAbsolute(script) && fs.existsSync(script)) return script;
     return resolveContainedHookPath(localHooksDir, script);
@@ -2989,7 +2988,7 @@ export function installSessionTrackerHookSync(
 }
 
 function sessionTrackerInstallEnv(agent: AgentId, version?: string, home?: string): NodeJS.ProcessEnv {
-  // The installer inherits the selected account/version HOME, never the ambient global home.
+
   const target = home ?? (version ? getVersionHomePath(agent, version) : undefined);
   if (agent === 'codex' && target && version) {
     const originHome = path.join(target, '.codex');

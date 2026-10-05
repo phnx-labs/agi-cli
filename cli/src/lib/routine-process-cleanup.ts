@@ -13,7 +13,6 @@ interface RoutineProcessCleanupOptions {
   terminate?: (pid: number) => void;
 }
 
-/** Bound the identity probe: a `ps`/`powershell` spawn on the heartbeat tick must never freeze the daemon's event loop. */
 const IDENTITY_PROBE_TIMEOUT_MS = 5_000;
 
 async function processMatchesRun(meta: RunMeta): Promise<boolean> {
@@ -41,7 +40,6 @@ async function processMatchesRun(meta: RunMeta): Promise<boolean> {
   return Math.abs((Date.now() - seconds * 1000) - meta.spawnedAt) < 30_000;
 }
 
-/** Reap process groups whose durable run record is already terminal. */
 export async function reapTerminalRoutineProcesses(opts: RoutineProcessCleanupOptions = {}): Promise<number[]> {
   const runsDir = opts.runsDir ?? getRunsDir();
   const alive = opts.alive ?? isAlive;
@@ -52,7 +50,7 @@ export async function reapTerminalRoutineProcesses(opts: RoutineProcessCleanupOp
   try {
     jobs = await fsp.readdir(runsDir, { withFileTypes: true });
   } catch {
-    return []; // runs dir absent — nothing to reap
+    return [];
   }
 
   const reaped: number[] = [];
@@ -79,7 +77,6 @@ export async function reapTerminalRoutineProcesses(opts: RoutineProcessCleanupOp
         terminate(meta.pid);
         reaped.push(meta.pid);
       } catch {
-        // Corrupt or concurrently-replaced records are left untouched.
       }
     }
   }

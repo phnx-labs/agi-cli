@@ -47,7 +47,6 @@ export async function runSupervisor(
 
   try {
     for (let wave = 1; wave <= maxWaves; wave++) {
-      // Rescan external additions, then prefetch remote state once before per-agent reads.
       await mgr.rescanFromDisk();
       await mgr.prefetchRemoteStatus(team);
       const launched = await mgr.startReady(team);
@@ -77,7 +76,7 @@ export async function runSupervisor(
       }
 
       if (opts.budgetWatcher) {
-        // Poll after output/callbacks, then rescan again before declaring the DAG drained.
+
         await opts.budgetWatcher.poll();
         if (opts.budgetWatcher.breached()) {
           const breach = opts.budgetWatcher.breach();

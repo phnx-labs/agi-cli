@@ -6,7 +6,7 @@ import { mailboxDir, enqueue, drain } from './mailbox.js';
 import { gcMailbox } from './mailbox-gc.js';
 import { blockIdForSession, publishBlock, readBlock } from './feed/feed.js';
 
-// Failed atomic archive writes retain inbox/prior consumed records and leave no temporary file.
+
 function tmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-gc-'));
 }

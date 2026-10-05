@@ -80,9 +80,6 @@ describe('persistToolCalls', () => {
     const beforeRowids = rowids();
     fs.appendFileSync(filePath, '{}\n');
 
-    // The transcript grew, so the scan indexes only the new call. The two calls
-    // already stored keep their rows -- this is the delete-everything-and-reparse
-    // that RUSH-2208 is about, and the rowids prove they were never rewritten.
     persistToolCalls(db, session, [call(2, 'git log')], stamp(), {
       mode: 'append',
       resume: { parserState: '{"v":1,"nextOrdinal":3,"pending":[]}', parsedOffset: 6 },
@@ -92,14 +89,11 @@ describe('persistToolCalls', () => {
     expect(rowids().slice(0, 2)).toEqual(beforeRowids);
     expect(db.prepare(`SELECT call_count, parsed_offset FROM tool_scan_ledger WHERE session_id = ?`).get(session.id))
       .toEqual({ call_count: 3, parsed_offset: 6 });
-    // Every stored call is still searchable through the rowid-addressed FTS rows.
     expect(db.prepare(`
       SELECT count(*) AS n FROM tool_call_text
       WHERE rowid IN (SELECT rowid FROM tool_calls WHERE session_id = ?)
     `).get(session.id)).toEqual({ n: 3 });
 
-    // A replace with no resume point clears the session's evidence and the
-    // resume point with it, so the next scan starts from byte 0.
     persistToolCalls(db, session, [call(0, 'git fetch')], stamp(), { mode: 'replace' });
 
     expect(inputs()).toEqual(['git fetch']);
@@ -225,9 +219,6 @@ describe('persistToolCalls', () => {
     }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
     fs.unlinkSync(filePath);
 
-    // The session has durable content ('deleted'), so it is now SERVED (flagged
-    // archived) instead of dropped, and merely listing it must NOT destroy its
-    // redacted tool-call evidence — that destructive purge-on-read is gone.
     const listed = querySessions({ idExact: session.id });
     expect(listed.map(s => s.id)).toEqual([session.id]);
     expect(listed[0].archived).toBe(true);

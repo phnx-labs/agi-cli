@@ -19,15 +19,10 @@ describe('extractPhaseTimes', () => {
     expect(times!.excludedJobNames).toEqual(['windows']);
     expect(times!.includedJobNames).toEqual(['scope', 'cli-test-shard (1)', 'test']);
 
-    // event 12:07:30 → first job 12:07:33
     expect(times!.queueMs).toBe(3_000);
-    // shard setup: 1s + 5s + 2s + 17s + 2s complete = 27s (max leaf)
     expect(times!.setupMs).toBe(27_000);
-    // vitest 12:08:17 → 12:16:38 = 501s
     expect(times!.executionMs).toBe(501_000);
-    // aggregator 12:16:45 → 12:17:12 = 27s
     expect(times!.reportMs).toBe(27_000);
-    // event → aggregator done 12:17:12 = 582s
     expect(times!.e2eMs).toBe(582_000);
   });
 

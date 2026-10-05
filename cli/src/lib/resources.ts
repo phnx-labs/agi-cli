@@ -97,7 +97,7 @@ function resourceIsActive(kind: ResourceKind, name: string, source: string): boo
 const DOC_BASENAMES = new Set(['readme', 'agents', 'claude', 'gemini']);
 
 export function isDirectoryDoc(kind: ResourceKind, rawName: string): boolean {
-  // Directory docs are never resources; rules/AGENTS.md is the deliberate exception.
+
   if (kind === 'rules') return false;
   return DOC_BASENAMES.has(rawName.toLowerCase());
 }
@@ -107,8 +107,8 @@ export function resolveResource(
   name: string,
   cwd?: string,
 ): ResolvedResource | null {
-  // Resolve canonical names across every layer before alias fallback. Normal
-  // layer precedence wins, and sorted entries make alias collisions deterministic.
+
+
   const projectDir = getProjectAgentsDir(cwd);
   const extraRepos = getEnabledExtraRepos();
 
@@ -183,8 +183,8 @@ export function listResources(
   ];
 
   if (kind === 'hooks') {
-    // Hooks use one event-group level: script children are resources, while a
-    // fixture-only directory remains a bundle so cleanup sees the same shape as sync.
+
+
     const HOOK_SCRIPT_EXTS = new Set([
       '.sh', '.bash', '.zsh', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', '.pl', '.ps1', '.cmd', '.bat',
     ]);

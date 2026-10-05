@@ -9,6 +9,6 @@ export function execOnly(command: string[]): string {
 }
 
 export function iLoginShell(inner: string): string {
-  // Interactive startup files install version shims into PATH; login-only zsh is insufficient.
+
   return `zsh -ilc ${shellQuote(inner)}`;
 }

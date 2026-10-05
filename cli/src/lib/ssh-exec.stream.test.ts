@@ -4,7 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { sshStreamWithArgs, SSH_STREAM_MAX_STDERR } from './ssh-exec.js';
 
-// Use Node so SIGTERM disposition is installed before readiness; Bash may defer the signal.
 const fixtureDirs: string[] = [];
 function fixtureDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-ssh-'));

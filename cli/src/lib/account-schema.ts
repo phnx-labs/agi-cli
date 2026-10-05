@@ -11,8 +11,6 @@ export const ACCOUNT_VARS = {
   token: 'TOKEN',
 } as const;
 
-// Identity fields are literals; only API_KEY/TOKEN are keychain references.
-// Policy never keeps worker/headless reads and fleet sync free of biometric ACLs.
 export const ACCOUNT_POLICY = 'never' as const;
 
 export interface AccountSchemaRecord {
@@ -52,7 +50,6 @@ export function buildAccountBundle(
     [ACCOUNT_VARS.authType]: record.auth,
     [secretVar]: `keychain:${secretVar}`,
   };
-  // Escape BASE_URL as a literal so ref-looking URLs such as env://... stay URLs.
   if (record.baseUrl) vars[ACCOUNT_VARS.baseUrl] = { value: record.baseUrl };
   const bundle: SecretsBundle = { name: record.name, policy: ACCOUNT_POLICY, vars };
   const items = new Map<string, string>([[secretsKeychainItem(record.name, secretVar), secret]]);

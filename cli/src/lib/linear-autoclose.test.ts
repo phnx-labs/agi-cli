@@ -12,13 +12,10 @@ describe('shouldCloseIssue', () => {
   });
 
   it('returns false for a closed-without-merge PR', () => {
-    // gh reports state CLOSED when a PR is closed without merging
     expect(shouldCloseIssue({ state: 'CLOSED', mergedAt: null })).toBe(false);
   });
 
   it('returns false when state is MERGED but mergedAt is null (defensive)', () => {
-    // Belt-and-suspenders: a merged PR should always carry a timestamp,
-    // but guard against malformed API responses.
     expect(shouldCloseIssue({ state: 'MERGED', mergedAt: null })).toBe(false);
   });
 
@@ -27,11 +24,6 @@ describe('shouldCloseIssue', () => {
   });
 
   it('returns true for MERGED with empty-string mergedAt (shell uses -z which also catches this)', () => {
-    // gh pr view never returns '' for mergedAt in practice (only null or a timestamp),
-    // but the shell routine converts null→"" via `jq -r '.mergedAt // ""'` then guards
-    // with `[ -z "$MERGED_AT" ]`. The TypeScript function checks !== null only, so ''
-    // would return true here. Document this divergence — it is intentional: the shell
-    // gate is more defensive; real API data never produces ''.
     expect(shouldCloseIssue({ state: 'MERGED', mergedAt: '' })).toBe(true);
   });
 });

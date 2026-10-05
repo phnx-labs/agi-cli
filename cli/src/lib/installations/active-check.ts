@@ -77,7 +77,7 @@ export async function isInstallationLikelyActive(
     const lines = await snapshot.listCommandLines();
     return installationLooksActive(installation, lines);
   } catch {
-    // An unreadable process table cannot prove that destructive update is safe.
+
     return true;
   }
 }

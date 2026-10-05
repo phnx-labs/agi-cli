@@ -1,13 +1,5 @@
-/**
- * Injectable terminal driver over the standalone `term` CLI.
- *
- * A small seam that lets a flow drive a PTY session — start, exec, write,
- * screen-scrape, stop — through the real `term` CLI in production and a fake in
- * tests. The setup-token mint (`lib/auth-mint.ts`) is the sole consumer today.
- */
 import { termStart, termExec, termWrite, termScreen, termStop } from './term-client.js';
 
-/** The subset of the `term` CLI a screen-scraping drive loop needs — faked in tests. */
 export interface TermDriver {
   start(opts?: { rows?: number; cols?: number }): Promise<string>;
   exec(id: string, command: string): Promise<void>;
@@ -16,7 +8,6 @@ export interface TermDriver {
   stop(id: string): Promise<void>;
 }
 
-/** Real driver over the standalone `term` CLI (`./term-client.js`). */
 export function defaultTermDriver(): TermDriver {
   const expectOk = (res: { ok: boolean; error?: string }, what: string) => {
     if (!res.ok) throw new Error(`term ${what} failed: ${res.error ?? 'unknown'}`);
@@ -45,10 +36,7 @@ export function defaultTermDriver(): TermDriver {
 }
 
 export interface DriveOptions {
-  /** Wait after launching before steering / scraping (default 4000ms). */
   initialDelayMs?: number;
-  /** Poll cadence for the scrape loop (default 1000ms). */
   pollMs?: number;
-  /** Overall scrape deadline (default 90000ms). */
   timeoutMs?: number;
 }

@@ -60,7 +60,6 @@ export function specForAgent(agentId: string): SyncAgentSpec | undefined {
   return SYNC_AGENTS.find(s => s.id === agentId);
 }
 
-// Identity is the post-redaction plaintext; encryption must not change dedup or the imported size.
 export function buildRecord(file: FileToExport, opts: BuildRecordOpts): BundleRecord {
   let body = fs.readFileSync(file.absPath, 'utf-8');
   if (opts.redact) body = redactSecrets(body, opts.knownSecrets);
@@ -128,7 +127,7 @@ export function serializeBundle(header: BundleHeader, records: BundleRecord[]): 
 }
 
 export function writeBundleFile(outPath: string, wire: string): void {
-  // mode only affects creation, so chmod also clamps an existing transcript bundle.
+
   fs.writeFileSync(outPath, wire, { encoding: 'utf-8', mode: 0o600 });
   fs.chmodSync(outPath, 0o600);
 }
@@ -174,7 +173,7 @@ interface PlanImportOpts {
 }
 
 export function planImport(bundle: ParsedBundle, opts: PlanImportOpts): ImportPlanItem[] {
-  // Foreign history uses sync-mirror placement; unknown agents never receive a filesystem target.
+
   return bundle.records.map((record): ImportPlanItem => {
     const spec = specForAgent(record.agent);
     if (!spec) return { record, targetPath: '', status: 'unknown' };
@@ -206,7 +205,7 @@ interface WriteImportOpts {
 }
 
 export function writeImport(plan: ImportPlanItem[], opts: WriteImportOpts): WriteResult {
-  // Existing local content wins: exact duplicates and non-overwrite conflicts are never replaced.
+
   const res: WriteResult = { placed: 0, skipped: 0, overwritten: 0, conflicts: 0, unknown: 0 };
   for (const item of plan) {
     if (item.status === 'unknown') { res.unknown++; continue; }

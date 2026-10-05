@@ -37,7 +37,6 @@ function run(args: string[], extraEnv: Record<string, string> = {}): { stdout: s
     env: {
       ...process.env,
       HOME: testHome,
-      // Windows os.homedir() reads USERPROFILE; pin it so the fixture cannot escape into the real profile.
       USERPROFILE: testHome,
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_NO_USAGE_TRACK: '1',
@@ -82,8 +81,6 @@ describe('devices command', () => {
   });
 });
 
-// Exercise the real standalone client directly: the nested Bun runner cannot preserve
-// its private fd3/fd4 protocol, while runAskpass is only env plumbing around this call.
 const REAL_SECRETS_BIN = process.env.AGENTS_TEST_SECRETS_BIN;
 
 describe.skipIf(!REAL_SECRETS_BIN)('ssh askpass (real standalone)', () => {
@@ -145,8 +142,6 @@ describe('runFleetPing overall-deadline (RUSH-2041)', () => {
     const remote = await raceFleetPingDeadline(hangingFanOut, remoteTargets, OVERALL_TIMEOUT_MS);
     const elapsed = Date.now() - start;
 
-    // This distinguishes eventual deadline enforcement from a hang without making
-    // scheduler load part of the contract; a real hang never settles at 20x.
     expect(elapsed).toBeLessThan(OVERALL_TIMEOUT_MS * 20);
 
     expect(remote).toHaveLength(3);
@@ -203,8 +198,6 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
 });
 
 describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => {
-  // Leased boxes bypass the normal SSH builder, so this path must add its own
-  // AGENTS_FLEET_REMOTE consent marker before browser commands.
   it('stamps AGENTS_FLEET_REMOTE on agents/ag browser drives', () => {
     const a = leasedBoxRemoteCmd(['agents', 'browser', 'navigate', '--url', 'https://example.com']);
     expect(a.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
@@ -233,7 +226,6 @@ describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => 
 });
 
 describe('showLeasedBoxesSection — devices list leased-boxes gate (RUSH-2190)', () => {
-  // Loading this section can touch credential storage and raise Touch ID, so it is opt-in.
   it('is off by default and off for --json-style calls (no flags)', () => {
     expect(showLeasedBoxesSection({})).toBe(false);
     expect(showLeasedBoxesSection({ stats: true })).toBe(false);

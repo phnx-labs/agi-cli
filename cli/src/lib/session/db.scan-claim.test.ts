@@ -1,9 +1,3 @@
-/**
- * RUSH-2682: `scanInProgressByLivePid` is the read-only probe that lets a
- * cold-miss repair wait for a concurrent scan instead of returning the pre-scan
- * snapshot. It must report a scan in progress ONLY when a LIVE process holds the
- * claim within its TTL — a dead-PID or expired claim is not a running scan.
- */
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -16,10 +10,9 @@ process.env.AGENTS_SYNC_MACHINE_ID = 'this-box';
 
 const { tryClaimScan, releaseScan, scanInProgressByLivePid, closeDB } = await import('./db.js');
 
-const DEAD_PID = 2 ** 31 - 1; // out of range / not running — process.kill throws
+const DEAD_PID = 2 ** 31 - 1;
 
 afterEach(() => {
-  // Leave the claim table clean between cases whoever holds it.
   releaseScan(process.pid);
   releaseScan(DEAD_PID);
 });
@@ -43,7 +36,6 @@ describe('scanInProgressByLivePid (RUSH-2682)', () => {
   });
 
   it('is false for a claim held by a dead PID — not an actually-running scan', () => {
-    // No live claim exists, so tryClaimScan writes the claim for the dead pid.
     expect(tryClaimScan(DEAD_PID)).toBe(true);
     expect(scanInProgressByLivePid()).toBe(false);
   });

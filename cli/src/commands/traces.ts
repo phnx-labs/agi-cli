@@ -59,7 +59,7 @@ const SETUP_EXAMPLES = `
 
 
 async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string }): Promise<void> {
-  // Dry-run is wholly local and must not require backend credentials.
+
   const limit = opts.limit !== undefined ? parseInt(opts.limit, 10) : undefined;
   const dryRun = opts.dryRun === true;
 
@@ -97,7 +97,7 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
   if (result.skipped > 0) {
     parts.push(chalk.dim(`${result.skipped} skipped`));
   }
-  // Keep cleaned-transcript history distinct from parse/upload failures that retry.
+
   if (result.errors > 0) {
     const detail: string[] = [];
     if (result.transcriptUnavailable > 0) {
@@ -118,7 +118,6 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
 
   console.log(parts.join(chalk.dim('  ·  ')));
 
-  // Upload success does not hide a stale console index.
   if (result.indexError) {
     console.log(
       chalk.yellow('  ⚠ console index not refreshed') +

@@ -93,11 +93,6 @@ describe('MCP sync execution', () => {
     expect(() => parseMcpServerConfig(configPath)).toThrow('whitespace or control characters');
   });
 
-  // Proves installMcpServers spawns the CLI with an argv array (no shell), so a
-  // `command: "/bin/echo; touch"` payload can't execute. The proof uses a
-  // `#!/bin/sh` argv-logger fake binary, which is POSIX-only — on Windows the
-  // managed binary is a `.cmd` reached via cmd.exe. installMcpServers' Windows
-  // spawn path (.cmd resolution + shell) is hardened in mcp.ts.
   it.skipIf(IS_WINDOWS)('installs Codex MCP servers with argv, not a shell command string', async () => {
     const home = makeTempHome();
     const version = '0.1.0';
@@ -177,9 +172,6 @@ describe('buildWorkflowMcpConfig', () => {
 });
 
 describe('project MCP trust gate (RUSH-1776)', () => {
-  // Run an ESM snippet against the built module with an isolated HOME, so the
-  // trust store (~/.agents/mcp-trust.yaml) and the user MCP dir never touch the
-  // real home. Returns the JSON the snippet prints.
   function probe(home: string, body: string): any {
     const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
@@ -190,8 +182,6 @@ describe('project MCP trust gate (RUSH-1776)', () => {
     return JSON.parse(child.stdout.trim());
   }
 
-  // A temp HOME holding a trusted user-scoped MCP and a hostile project-scoped
-  // MCP (as if from a freshly cloned repo). Returns absolute paths.
   function fixture(): { home: string; proj: string } {
     const home = makeTempHome();
     const userMcp = path.join(home, '.agents', 'mcp');
@@ -220,9 +210,9 @@ describe('project MCP trust gate (RUSH-1776)', () => {
       console.log(JSON.stringify({ enforced, listed, trusted: mcp.isProjectMcpTrusted(${JSON.stringify(path.join(proj, '.agents'))}) }));
     `);
     expect(out.trusted).toBe(false);
-    expect(out.enforced).toEqual([]); // spawn path never sees the hostile server
+    expect(out.enforced).toEqual([]);
     expect(out.listed).not.toContain('evil');
-    expect(out.listed).toContain('user-good'); // user server still resolves
+    expect(out.listed).toContain('user-good');
   });
 
   it('(b) DOES register the project-scoped MCP after explicit opt-in', () => {
@@ -235,7 +225,7 @@ describe('project MCP trust gate (RUSH-1776)', () => {
     `);
     expect(out.before).toEqual([]);
     expect(out.trusted).toBe(true);
-    expect(out.after).toEqual(['evil']); // opt-in lets it through the spawn path
+    expect(out.after).toEqual(['evil']);
     expect(fs.existsSync(path.join(home, '.agents', 'mcp-trust.yaml'))).toBe(true);
   });
 
@@ -260,9 +250,9 @@ describe('project MCP trust gate (RUSH-1776)', () => {
       console.log(JSON.stringify({ scope: evil && evil.scope, command: evil && evil.config.command, args: evil && evil.config.args, enforced }));
     `);
     expect(out.scope).toBe('project');
-    expect(out.command).toBe('/bin/echo'); // user sees exactly what would run
+    expect(out.command).toBe('/bin/echo');
     expect(out.args).toEqual(['pwned']);
-    expect(out.enforced).toEqual([]); // ...but it still does not auto-apply
+    expect(out.enforced).toEqual([]);
   });
 
   it('untrust revokes a previously granted trust', () => {
@@ -656,10 +646,6 @@ describe('installMcpServers handled-agent tracking', () => {
   });
 
   it.skipIf(IS_WINDOWS)('fails loud for an agent whose config format is not implemented', () => {
-    // RUSH-2677: copilot is mcp-capable but agents-cli has no verified schema for
-    // its mcp-config.json. It used to return `success: true` with an empty
-    // `applied` -- a silent no-op the sync surface could not distinguish from a
-    // real write. It must now say why it wrote nothing.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -691,10 +677,6 @@ describe('installMcpServers handled-agent tracking', () => {
   });
 
   it.skipIf(IS_WINDOWS)('writes antigravity MCP into the shared ~/.gemini/config it actually reads', () => {
-    // RUSH-2677: antigravity resolved a config path and then fell through the
-    // writer switch entirely -- no file, no error, reported as success. It also
-    // resolved the per-version .gemini/antigravity-cli/ state dir rather than the
-    // shared .gemini/config/ agy reads MCP from.
     const home = makeTempHome();
     const version = '1.0.16';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -728,25 +710,17 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(result.success).toBe(true);
     expect(result.applied).toEqual(expect.arrayContaining(['local-server', 'remote-server']));
 
-    // agy reads ~/.gemini/config/mcp_config.json from the REAL home — only
-    // ~/.gemini/antigravity-cli is symlinked into a version home — so the write
-    // must land there, NOT under the version home (the child ran with HOME=home).
     const configPath = path.join(home, '.gemini', 'config', 'mcp_config.json');
     expect(fs.existsSync(configPath), `expected agy MCP config at ${configPath}`).toBe(true);
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     expect(config.mcpServers['local-server']).toEqual({ command: 'node', args: ['srv.js'], env: {} });
-    // agy keys a remote server `serverUrl` (SSE), not `url`.
     expect(config.mcpServers['remote-server']).toEqual({ serverUrl: 'https://mcp.example.com/sse' });
 
-    // Neither the per-version state dir nor a version-home copy of the shared
-    // config dir may be where MCP landed — agy opens neither.
     expect(fs.existsSync(path.join(versionHome, '.gemini', 'antigravity-cli', 'mcp_config.json'))).toBe(false);
     expect(fs.existsSync(path.join(versionHome, '.gemini', 'config', 'mcp_config.json'))).toBe(false);
   });
 
   it.skipIf(IS_WINDOWS)('writes kimi MCP where the staleness detector reads it back', () => {
-    // The installer wrote .kimi-code/mcp.json while the path resolver answered
-    // .kimi-code/settings.json, so a synced server was reported as missing forever.
     const home = makeTempHome();
     const version = '0.29.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -774,14 +748,9 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(child.status, child.stderr).toBe(0);
     const { result, detected } = JSON.parse(child.stdout.trim());
     expect(result.applied).toContain('kimi-server');
-    // The write and the read-back must agree on the file.
     expect(detected).toContain('kimi-server');
   });
   it.skipIf(IS_WINDOWS)('refuses a malformed existing config instead of rewriting it from scratch', () => {
-    // The five per-agent installers this replaced parsed unguarded, so a corrupt
-    // config threw and the file survived. writeMcpConfig's catch-and-reset would
-    // have rebuilt hermes' whole config.yaml — which holds far more than MCP —
-    // from `{}`.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -795,7 +764,7 @@ describe('installMcpServers handled-agent tracking', () => {
     const versionHome = path.join(home, '.agents', '.history', 'versions', 'droid', version, 'home');
     const configPath = path.join(versionHome, '.factory', 'mcp.json');
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    const corrupt = '{ "mcpServers": { "keep-me": { "command": "node" } ';  // truncated on purpose
+    const corrupt = '{ "mcpServers": { "keep-me": { "command": "node" } ';
     fs.writeFileSync(configPath, corrupt, 'utf-8');
 
     const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
@@ -808,12 +777,9 @@ describe('installMcpServers handled-agent tracking', () => {
     const result = JSON.parse(child.stdout.trim());
     expect(result.success).toBe(false);
     expect(result.errors.join('\n')).toContain('is not valid');
-    // The user's file is byte-identical — nothing was clobbered.
     expect(fs.readFileSync(configPath, 'utf-8')).toBe(corrupt);
   });
   it.skipIf(IS_WINDOWS)('treats an empty config file as nothing recorded, not corruption', () => {
-    // JSON.parse('') throws, so a bare `touch`ed or half-written config would
-    // have failed the whole sync once malformed configs stopped resetting to {}.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -842,10 +808,6 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers.srv).toBeTruthy();
   });
   it.skipIf(IS_WINDOWS)('keeps a URL inside a JSONC string intact when merging opencode MCP', () => {
-    // A `//`-to-end-of-line regex eats the `//` in
-    // "$schema": "https://opencode.ai/config.json" — which every
-    // opencode-generated config carries — so the writer would refuse a config
-    // the reader parses fine. Both must use the string-literal-aware stripper.
     const home = makeTempHome();
     const version = '0.1.0';
     const userMcpDir = path.join(home, '.agents', 'mcp');
@@ -880,7 +842,6 @@ describe('installMcpServers handled-agent tracking', () => {
     expect(result.applied).toContain('srv');
 
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    // The schema URL survived, the neighbouring keys survived, and MCP landed.
     expect(config.$schema).toBe('https://opencode.ai/config.json');
     expect(config.theme).toBe('tokyonight');
     expect(config.mcp.srv).toBeTruthy();

@@ -82,7 +82,6 @@ function assertCapabilitiesSupported(resources: ResolvedResource[], harness: Age
   }
 }
 
-// Check the existing ancestor before mkdir: mkdir -p follows symlinks into live homes.
 function assertTargetContained(realOutputHome: string, target: string, label: string): void {
   const canonical = realpathExistingPrefix(target);
   if (canonical !== realOutputHome && !canonical.startsWith(realOutputHome + path.sep)) {
@@ -93,7 +92,6 @@ function assertTargetContained(realOutputHome: string, target: string, label: st
   }
 }
 
-// Check the leaf separately because copy/write/chmod follow even dangling leaf symlinks.
 function assertLeafSafe(realOutputHome: string, leaf: string, label: string): void {
   assertTargetContained(realOutputHome, leaf, label);
   let lst: fs.Stats | undefined;
@@ -144,7 +142,6 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
   return path.relative(outputHome, occupied.path);
 }
 
-// MCP shares a harness config with unrelated keys; converge its section in place, never prune the file.
 function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputHome: string, realOutputHome: string): string[] {
   const configPath = getMcpConfigPathForHome(harness, outputHome);
   if (resources.length === 0 && !fs.existsSync(configPath)) return [];
@@ -195,7 +192,6 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
     manifest[r.name] = { script: destScript, events: def.events, matcher: def.matcher, timeout: def.timeout };
     targets.set(r.name, path.relative(outputHome, destScript));
   }
-  // This package manifest owns only its hooks; never sweep unrelated operator shims globally.
   const result = registerHooksToSettings(harness, outputHome, manifest, undefined, { skipGlobalShimSweep: true });
   if (result.errors.length > 0) {
     throw new AgentPackageError(`${harness}: failed to register hook(s) — ${result.errors.join('; ')}`, 'invalid-resource');
@@ -207,7 +203,6 @@ function packageRef(resolved: ResolvedAgentPackage): string {
   return `${resolved.manifest.slug}@${resolved.digest.slice(0, 12)}`;
 }
 
-// Receipt targets are unsigned input: canonicalize before any deletion and fail closed on escape.
 function isSafeContainedTarget(realOutputHome: string, outputHome: string, rel: unknown): boolean {
   if (typeof rel !== 'string' || rel.length === 0 || rel.includes('\0')) return false;
   if (path.isAbsolute(rel)) return false;

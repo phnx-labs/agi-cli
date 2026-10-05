@@ -138,7 +138,6 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
   it('routes a newly-declared device-scoped key to the device doc by default, never central (PHNX-3315 P3)', async () => {
     const { updateMeta, readMeta } = await freshState();
 
-    // Unknown new keys default to device scope unless explicitly declared fleet-shared.
     updateMeta((m) => ({
       ...m,
       probeDeviceKey: { hello: 'world' },
@@ -157,7 +156,6 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
   });
 
   it('leaves a foreign central key (unknown, already on disk) in central — never relocates it (PHNX-3315 P3)', async () => {
-    // Forward compatibility: an unknown key already stored centrally remains fleet-shared.
     writeCentral('futureCentralKey: keep-me-central\n');
     const { updateMeta } = await freshState();
 
@@ -213,8 +211,8 @@ describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
   });
 });
 
-// Exclude a cloned DotAgents repo by repository identity, not pathname, or its stale
-// project layer would outrank the live user layer.
+
+
 describe('getProjectAgentsDir does not treat a DotAgents-repo clone as a project layer (RUSH-2037)', () => {
   function initGitRepo(dir: string, originUrl: string) {
     fs.mkdirSync(dir, { recursive: true });
@@ -345,8 +343,6 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
   });
 });
 
-// Central writes commit only after the metadata lock releases. The daemon must commit
-// too because no later publish tick owns cleanup of the user repository.
 describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
   let TMP2 = '';
   const agentsDir = () => path.join(TMP2, '.agents');
@@ -404,8 +400,6 @@ describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
   });
 });
 
-// Migration may run inside the non-heartbeated metadata lock, so it must neither
-// reacquire that lock nor spawn a git commit before the outer writer releases it.
 describe('legacy meta.yaml migration: lock-safe, commit-free write (PHNX-3968)', () => {
   let TMP3 = '';
   const agentsDir = () => path.join(TMP3, '.agents');
@@ -449,7 +443,6 @@ describe('legacy meta.yaml migration: lock-safe, commit-free write (PHNX-3968)',
     const commitCount = () => git(['rev-list', '--all', '--count']).trim();
     expect(commitCount()).toBe('0');
 
-    // Delete the lock-created agents.yaml in-lock to force the exact reentrant migration path.
     const meta = withMetaLock(() => {
       fs.rmSync(path.join(agentsDir(), 'agents.yaml'), { force: true });
       return readMeta();

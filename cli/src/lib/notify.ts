@@ -1,5 +1,3 @@
-// Owner recipients come from humans.yaml, never hardcoded; use non-exiting transport lookup and per-destination formatting.
-// Delivery is best-effort; only Rush structural failures may hop to a capable peer, while dry-runs and explicit recipients never hop.
 import type { OpenBlock } from './feed/feed.js';
 import type { Meta } from './types.js';
 import { readMeta } from './state.js';

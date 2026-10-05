@@ -809,7 +809,7 @@ function targetDevice(opts?: ConfigTarget): string {
 }
 
 function assertLocalTarget(spec: ConfigKeySpec, device: string): void {
-  // Machine-visible controls belong to that machine; peers may not mutate them through shared state.
+
   if (spec.scope !== 'device' || spec.visibility !== 'machine') return;
   if (device === machineId()) return;
   throw new Error(
@@ -905,7 +905,6 @@ function unsetInFleetDefaults(spec: ConfigKeySpec): void {
 }
 
 function setInDeviceDoc(device: string, spec: ConfigKeySpec, value: unknown): void {
-  // Device documents share meta state, so every read-modify-write holds the meta lock.
   withMetaLock(() => {
     const doc = readDeviceDoc(device) ?? {};
     doc.config = { ...(doc.config as Record<string, unknown> | undefined), [spec.yamlKey]: value };
@@ -985,7 +984,7 @@ export function selfConfiguredDeviceRole(): ConfiguredDeviceRole | undefined {
 }
 
 export function isHeadedDeviceRole(role: ConfiguredDeviceRole | undefined): boolean {
-  // Unmarked is intentionally non-headed/worker-equivalent; it must never receive headed auth semantics.
+
   return role === 'personal' || role === 'desktop';
 }
 
@@ -1112,7 +1111,7 @@ export function assertSchedulerEnabled(): void {
 }
 
 export function isTmuxEnabled(): boolean {
-  // Remote tmux attachment is explicit opt-in, never inferred from availability.
+
   return getConfigValue('tmux.enabled').value === true;
 }
 

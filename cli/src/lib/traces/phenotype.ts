@@ -175,14 +175,14 @@ function reasonOutOfOrder(session: SessionDetail): string {
 }
 
 function workSignature(step: SessionDetail['steps'][number]): string {
-  // Recovery must match the failed work, not an unrelated later command.
+
   const tool = step.tool ?? step.lane;
   if (SHELL_TOOLS.has(tool) && step.program) return `${tool}:${step.program}`;
   return tool;
 }
 
 export function recoveredAfterErrors(session: Pick<SessionDetail, 'steps'>): boolean {
-  // Only a later substantive success with the same signature clears an error.
+
   const substantive = substantiveSteps(session);
   if (substantive.length === 0) return false;
   const last = substantive[substantive.length - 1];

@@ -86,7 +86,6 @@ describePerf('agents perf (manual; run with PERF=1)', () => {
     for (const agentId of ALL_AGENT_IDS) {
       const versions = listInstalledVersions(agentId);
       if (versions.length === 0) {
-        // Try global home
         const start = process.hrtime();
         await getAccountEmail(agentId);
         const ms = timeMs(start);

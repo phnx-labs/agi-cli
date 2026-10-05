@@ -15,7 +15,7 @@ export class RunCloudError extends Error {
 }
 
 const RUN_CLOUD_CONFLICTS: Array<{ field: string; flag: string; set: (v: unknown) => boolean }> = [
-  // Cloud dispatch is shared; local-only controls are errors instead of silently ignored flags.
+
   { field: 'terminal', flag: '--terminal', set: (v) => v !== undefined && v !== false },
   { field: 'interactive', flag: '--interactive', set: (v) => v === true },
   { field: 'acp', flag: '--acp', set: (v) => v === true },
@@ -41,14 +41,10 @@ const RUN_CLOUD_CONFLICTS: Array<{ field: string; flag: string; set: (v: unknown
   { field: 'remoteCwd', flag: '--remote-cwd', set: (v) => v !== undefined },
   { field: 'env', flag: '--env', set: (v) => Array.isArray(v) && (v as string[]).length > 0 },
   { field: 'notify', flag: '--notify', set: (v) => v === true },
-  // effort defaults to 'auto' on run; only an explicit non-default value is a
-  // conflict (no provider consumes an effort option — it would be dropped).
   { field: 'effort', flag: '--effort', set: (v) => v !== undefined && v !== 'auto' },
-  // --name seeds the LOCAL session label; a cloud task has no local session.
   { field: 'name', flag: '--name', set: (v) => v !== undefined },
 ];
 
-/** Flags that refine a cloud dispatch; meaningless without the placement. */
 const CLOUD_ONLY_FLAGS: Array<{ field: string; flag: string; set: (v: unknown) => boolean }> = [
   { field: 'provider', flag: '--provider', set: (v) => v !== undefined },
   { field: 'repo', flag: '--repo', set: (v) => Array.isArray(v) && (v as string[]).length > 0 },
@@ -56,17 +52,14 @@ const CLOUD_ONLY_FLAGS: Array<{ field: string; flag: string; set: (v: unknown) =
   { field: 'cloudEnv', flag: '--cloud-env', set: (v) => v !== undefined },
 ];
 
-/** Flags the user passed that cannot ride a cloud placement. */
 export function runCloudConflicts(options: Record<string, unknown>): string[] {
   return RUN_CLOUD_CONFLICTS.filter((c) => c.set(options[c.field])).map((c) => c.flag);
 }
 
-/** Cloud-only flags passed without the --cloud placement. */
 export function cloudFlagsWithoutCloud(options: Record<string, unknown>): string[] {
   return CLOUD_ONLY_FLAGS.filter((c) => c.set(options[c.field])).map((c) => c.flag);
 }
 
-/** Agents that route to a native cloud provider (the registry's truth). */
 export function cloudCapableAgentIds(): string[] {
   return Object.values(AGENTS)
     .filter((a) => a.cloudProvider)
@@ -75,7 +68,7 @@ export function cloudCapableAgentIds(): string[] {
 }
 
 export function resolveRunCloudProvider(agentId: string, explicitProvider?: string): CloudProvider {
-  // An explicit provider wins; agents without native cloud never inherit the configured default.
+
   if (explicitProvider) return resolveProvider(explicitProvider);
   if (!nativeProviderForAgent(agentId)) {
     throw new RunCloudError(
@@ -86,7 +79,6 @@ export function resolveRunCloudProvider(agentId: string, explicitProvider?: stri
   return resolveProvider(undefined, agentId);
 }
 
-/** Validate the agent half of `agents run <agent> --cloud` and return the registry id. */
 export function resolveRunCloudAgent(agentSpec: string): string {
   if (agentSpec === RUN_AUTO_KEYWORD || agentSpec.startsWith(`${RUN_AUTO_KEYWORD}@`)) {
     throw new RunCloudError(
@@ -137,7 +129,6 @@ export async function handleRunCloud(
       providerOptions: {},
     };
     if (options.cloudEnv) dispatchOptions.providerOptions!.env = options.cloudEnv as string;
-    // Commander defaults must not alter cloud behavior unless the caller supplied --mode.
     if (command.getOptionValueSource('mode') === 'cli') {
       dispatchOptions.providerOptions!.mode = options.mode as string;
     }

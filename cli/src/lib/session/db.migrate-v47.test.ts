@@ -14,9 +14,6 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v46 shape: the PHNX-3792 mirror provenance columns exist, but the
-  // PHNX-3798 phoenix_id column is deliberately absent so getDB must add it
-  // through migrateSchema(46).
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (
@@ -51,8 +48,6 @@ describe('schema migration v46 -> v47 (actor Phoenix id, PHNX-3798)', () => {
     const row = getDB()
       .prepare(`SELECT phoenix_id, actor, file_path FROM sessions WHERE id = 'legacy'`)
       .get() as { phoenix_id: string | null; actor: string | null; file_path: string };
-    // A legacy row indexed before Phoenix-id stamping stays NULL; its actor and
-    // content are untouched by the additive migration.
     expect(row.phoenix_id).toBeNull();
     expect(row.actor).toBe('ada@example.com');
     expect(row.file_path).toBe('/s/legacy.jsonl');

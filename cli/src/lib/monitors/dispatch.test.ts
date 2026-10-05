@@ -8,17 +8,6 @@ import { dispatchAction } from './dispatch.js';
 import type { MonitorConfig, MonitorEvent } from './config.js';
 import type { Meta } from '../types.js';
 
-/**
- * The monitor `notify` action used to exec openclaw directly with no target, so
- * it inherited a hardcoded owner number and had no missing-binary guard (raw
- * ENOENT). It now routes through the one owner-send seam (sendToOwner →
- * lookupTransport). Real path: a fake `openclaw` on PATH records the argv.
- *
- * POSIX-only (RUSH-2215): the openclaw-telegram provider resolves the binary
- * with `which openclaw` and execs it, and the fake is a `#!/bin/sh` recorder —
- * neither works on Windows (no `which`; an extensionless shell script is not
- * executable), so these assertions can only run on a POSIX host.
- */
 describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves the owner, fails loud on a missing binary)', () => {
   let tmp: string;
   let record: string;
@@ -88,7 +77,7 @@ describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves t
   });
 
   it('fails loud with a clean error (not ENOENT) when openclaw is missing', async () => {
-    process.env.PATH = `${tmp}${path.delimiter}/usr/bin${path.delimiter}/bin`; // no openclaw on PATH
+    process.env.PATH = `${tmp}${path.delimiter}/usr/bin${path.delimiter}/bin`;
     const result = await dispatchAction(notifyMonitor(), event, metaWithOwner('monitor-owner'));
     expect(result.ok).toBe(false);
     expect(result.error).toBe('openclaw CLI not found on PATH');
@@ -105,10 +94,6 @@ describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves t
   });
 
   it('an unresolvable notifyChannel returns ok:false — it does not exit the process', async () => {
-    // `agents monitors add --notify <channel>` validates nothing (commands/monitors.ts),
-    // so a typo lands in the config and reaches here. Resolving through the
-    // die()-capable resolveTransport used to process.exit() and take the whole
-    // monitor daemon down with it (engine.ts try/catch can't catch an exit).
     const monitor = {
       ...notifyMonitor(),
       action: { type: 'notify', notifyChannel: 'not-a-real-channel' },
@@ -120,16 +105,6 @@ describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves t
   });
 });
 
-/**
- * RUSH-2500: dispatchAction run/routine must return ok:false (not ok:true) when
- * executeJobDetached returns a skipped/blocked RunMeta. Before the fix the return
- * was unconditionally ok:true, so monitors logs showed "skipped" while monitors
- * runs showed "ok" — the two surfaces disagreed and the action never ran.
- *
- * Uses a child process (same shape as the daemon-survival test) so HOME is set
- * before any module-level state constants are resolved, letting us plant a fake
- * active run without touching the real ~/.agents/.history.
- */
 describe('dispatchAction run (skipped run returns ok:false)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   let home: string;
@@ -141,8 +116,6 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
   afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
   it('returns ok:false and the skip reason when executeJobDetached returns status:skipped', () => {
-    // Plant a fake "running" run so allocateRoutineAttempt hits the active_run
-    // skip gate and returns proceed:false without launching an agent process.
     const monitorName = 'test-skip-monitor';
     const activeRunId = 'fake-run-001';
     const metaDir = path.join(home, '.agents', '.history', 'runs', monitorName, activeRunId);
@@ -152,7 +125,6 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
       runId: activeRunId,
       status: 'running',
       startedAt: new Date().toISOString(),
-      // No pid — triggers the startedAt-within-timeout branch in activeRoutineRun.
     }));
 
     const moduleUrl = pathToFileURL(path.resolve('src/lib/monitors/dispatch.ts')).href;
@@ -183,33 +155,12 @@ describe('dispatchAction run (skipped run returns ok:false)', () => {
 
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim());
-    // Before the fix: ok: true (executeJobDetached's skipped return was ignored).
-    // After the fix: ok: false with the runner's errorMessage.
     expect(result.ok).toBe(false);
     expect(result.kind).toBe('run');
     expect(result.error).toMatch(/skipped/i);
   });
 });
 
-/**
- * RUSH-2681: a monitor's `run` action was refused by the ROUTINES activation
- * manifest. `jobRunsOnThisDevice` (lib/scheduling/routines.ts) consulted
- * `routineEnabledOnThisDevice` FIRST and short-circuited on its answer, and a
- * monitor's synthesized job name is never in that manifest (nothing under
- * monitors/ writes one), so every fire recorded
- * `skipReason: "wrong_owner"` with the empty-allowlist message
- * `Job '<name>' can only run on: ` and no action ever ran — measured 5/5 fires on
- * yosemite-s1 at 1.22.39.
- *
- * Real path, in a child process so HOME is set before the state module resolves
- * its path constants: the manifest is materialized through the real writer
- * (`replaceEnabledRoutines`), then `dispatchAction` runs for real. The assertions
- * are on the two gates this fix opens, not on the agent's exit: the run record
- * must carry neither `skipReason: "wrong_owner"` (the eligibility gate,
- * runner.ts:363) nor `readiness.code: "execution_context_missing"` (the readiness
- * gate behind it). Whatever the spawned agent then does under a temp HOME is not
- * what is being asserted.
- */
 describe('dispatchAction run (the routines activation manifest does not refuse a monitor)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   let home: string;
@@ -220,7 +171,6 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
 
   afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
-  /** Run a fixture with HOME planted; return its parsed stdout JSON. */
   function runFixture(body: string): { result: { ok: boolean; kind: string; error?: string }; skipReason?: string } {
     const fixture = path.join(home, 'fixture.mts');
     fs.writeFileSync(fixture, body);
@@ -229,7 +179,6 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
     return JSON.parse(child.stdout.trim());
   }
 
-  /** The newest run record written for `name`, if any. */
   function latestRunMeta(name: string): { skipReason?: string; readiness?: { code?: string } } {
     const runsDir = path.join(home, '.agents', '.history', 'runs', name);
     if (!fs.existsSync(runsDir)) return {};
@@ -248,7 +197,6 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
     const out = runFixture(
       `import { dispatchAction } from ${JSON.stringify(dispatchUrl)};\n` +
       `import { replaceEnabledRoutines, enabledRoutineNames } from ${JSON.stringify(activationUrl)};\n` +
-      // Materialize a real manifest that does NOT contain the monitor's name.
       `replaceEnabledRoutines(['some-other-routine']);\n` +
       `if (enabledRoutineNames() === null) throw new Error('manifest was not materialized');\n` +
       `const monitor = {\n` +
@@ -263,14 +211,9 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
       `console.log(JSON.stringify({ result }));\n`,
     );
 
-    // Before the fix: "Job 'rush-2681-monitor' can only run on: " (empty allowlist).
     expect(out.result.error ?? '').not.toMatch(/can only run on/);
     const meta = latestRunMeta(monitorName);
     expect(meta.skipReason).not.toBe('wrong_owner');
-    // The gate behind it: a monitor owns no project and had no field able to
-    // supply a cwd, so the run was then blocked with `execution_context_missing`
-    // — inert for a second reason. dispatchAction now defaults the job's cwd to
-    // the target home.
     expect(meta.readiness?.code).not.toBe('execution_context_missing');
   });
 
@@ -286,7 +229,6 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
       `import { writeJob } from ${JSON.stringify(routinesUrl)};\n` +
       `writeJob({ name: ${JSON.stringify(routineName)}, schedule: '0 9 * * *', agent: 'claude',\n` +
       `  mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'hi {event}' } as any);\n` +
-      // Activated: something else. This routine is defined but off on this device.
       `replaceEnabledRoutines(['some-other-routine']);\n` +
       `const monitor = {\n` +
       `  name: 'rush-2681-routine-monitor',\n` +
@@ -300,19 +242,12 @@ describe('dispatchAction run (the routines activation manifest does not refuse a
       `console.log(JSON.stringify({ result }));\n`,
     );
 
-    // The exemption is deliberately narrow: a real routine keeps its activation gate.
     expect(out.result.ok).toBe(false);
     expect(out.result.error).toMatch(/can only run on/);
     expect(latestRunMeta(routineName).skipReason).toBe('wrong_owner');
   });
 });
 
-/**
- * The daemon-survival guarantee, proven in a real child process — the same shape
- * as the review's live repro. An in-process assertion can't distinguish "returned
- * a result" from "would have exited", so this runs dispatchAction for real and
- * requires the process to reach the line after it and exit 0.
- */
 describe('dispatchAction notify (process survives an unresolvable channel)', () => {
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   let fixtureDir: string;
@@ -325,8 +260,6 @@ describe('dispatchAction notify (process survives an unresolvable channel)', () 
 
   it('returns to its caller and exits 0 instead of process.exit()-ing', () => {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/monitors/dispatch.ts')).href;
-    // A file, not `tsx -e`: the inline form compiles to cjs, where the top-level
-    // await this needs is unavailable.
     const fixture = path.join(fixtureDir, 'dispatch-bad-channel.mts');
     fs.writeFileSync(
       fixture,
@@ -354,7 +287,7 @@ describe('dispatchAction notify (process survives an unresolvable channel)', () 
 
     expect(child.status, child.stderr).toBe(0);
     expect(child.stdout).toContain('BEFORE');
-    expect(child.stdout).toContain('AFTER '); // the pre-fix build exited before this
+    expect(child.stdout).toContain('AFTER ');
     const result = JSON.parse(child.stdout.slice(child.stdout.indexOf('AFTER ') + 6).trim());
     expect(result.kind).toBe('notify');
     expect(result.ok).toBe(false);

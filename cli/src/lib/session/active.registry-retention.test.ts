@@ -10,7 +10,6 @@ const { listTerminalsActive, foldHostLink } = await import('./active.js');
 const { HOST_HEARTBEAT_STALE_MS } = await import('./host-link.js');
 
 const REGISTRY = path.join(TEST_HOME, '.agents', '.cache', 'terminals', 'live-terminals.json');
-/** Above any real pid, so `process.kill` throws ESRCH — a genuinely dead process. */
 const DEAD_PID = 2_000_000_003;
 
 function writeRegistry(windowAgeMs: number, pid: number): void {
@@ -29,13 +28,6 @@ function writeRegistry(windowAgeMs: number, pid: number): void {
   );
 }
 
-/**
- * The regression this exists for: a VS Code window that crashed left a dead-pid
- * entry behind, `readLiveTerminals` filtered it out, and the session simply
- * DISAPPEARED from `--active` — indistinguishable from one that had never run.
- * The retention rule is what puts it back, and it has to be narrow enough that an
- * ordinary terminal close doesn't start reporting itself as a crash.
- */
 describe('live-terminals retention for a crashed host', () => {
   beforeEach(() => {
     fs.rmSync(REGISTRY, { force: true });
@@ -46,7 +38,6 @@ describe('live-terminals retention for a crashed host', () => {
     const rows = await listTerminalsActive();
     const row = rows.find((r) => r.sessionId === 'sess-under-test');
     expect(row, 'a crashed session must still reach the listing').toBeDefined();
-    // It arrives as a plain dead process; the fold is what names it a crash.
     expect(row!.status).toBe('closed');
     foldHostLink(rows);
     expect(row!.status).toBe('crashed');

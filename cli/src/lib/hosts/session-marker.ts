@@ -9,7 +9,7 @@ export function sessionIdMarkerLine(sessionId: string): string {
 }
 
 export function parseSessionIdMarker(text: string): string | null {
-  // The last validated frame wins so echoed agent output cannot spoof an earlier identity.
+
   const last = text.lastIndexOf(MARKER_PREFIX);
   if (last === -1) return null;
   const start = last + MARKER_PREFIX.length;

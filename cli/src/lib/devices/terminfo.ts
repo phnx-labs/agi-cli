@@ -42,7 +42,7 @@ export function shouldSyncTerminfo(params: {
 }
 
 export function terminfoHostKey(device: Pick<DeviceProfile, 'user' | 'name'>, addr: string | undefined): string {
-  // Cache per user and dial host: one account's install says nothing about another account's terminfo.
+
   const host = addr ?? device.name;
   return device.user ? `${device.user}@${host}` : host;
 }
@@ -94,7 +94,7 @@ export function syncTerminfoToDevice(opts: {
   sshArgs: string[];
   sshEnv: Record<string, string>;
 }): boolean {
-  // Propagation is an interactive-login optimization; every failure degrades to an ordinary SSH login.
+
   const term = opts.term?.trim();
   if (!term) return false;
   if (terminfoSynced(opts.host, term)) return false;

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DUE_SOON_DAYS, daysUntil, formatVerdict, scheduleVerdict } from './project-schedule.js';
 import type { LinearMilestone } from './linear-project-counts.js';
 
-const NOW = new Date(2026, 7, 3, 12, 0, 0).getTime(); // local noon, 2026-08-03
+const NOW = new Date(2026, 7, 3, 12, 0, 0).getTime();
 const ms = (over: Partial<LinearMilestone> = {}): LinearMilestone => ({ name: 'M', done: 0, total: 0, ...over });
 
 describe('daysUntil', () => {
@@ -13,7 +13,6 @@ describe('daysUntil', () => {
   });
 
   it('does not shift a day for anyone west of Greenwich', () => {
-    // new Date('2026-08-03') is UTC midnight = Aug 2 locally in the Americas.
     expect(daysUntil('2026-08-03', new Date(2026, 7, 3, 23, 59).getTime())).toBe(0);
     expect(daysUntil('2026-08-03', new Date(2026, 7, 3, 0, 1).getTime())).toBe(0);
   });
@@ -29,7 +28,6 @@ describe('scheduleVerdict', () => {
   it('never invents on-track: a healthy dated project reads as scheduled, not "on track"', () => {
     const v = scheduleVerdict([ms({ name: 'GA', targetDate: '2026-10-01', done: 2, total: 8 })], NOW);
     expect(v).toEqual({ kind: 'scheduled', milestone: 'GA', days: 59 });
-    // The union has no on-track/at-risk member at all — it cannot be produced.
     expect(['declared', 'overdue', 'due-soon', 'untracked', 'scheduled', 'no-dates', 'none']).toContain(v.kind);
   });
 
@@ -46,15 +44,11 @@ describe('scheduleVerdict', () => {
     expect(soon).toEqual({ kind: 'due-soon', milestone: 'Cut', days: 7 });
     const later = scheduleVerdict([ms({ name: 'Cut', targetDate: '2026-09-30', done: 1, total: 3 })], NOW);
     expect(later.kind).toBe('scheduled');
-    // Exactly at the boundary still counts as soon.
     const edge = scheduleVerdict([ms({ name: 'Cut', targetDate: '2026-08-17', done: 1, total: 3 })], NOW);
     expect(edge).toEqual({ kind: 'due-soon', milestone: 'Cut', days: DUE_SOON_DAYS });
   });
 
   it('does NOT let untracked hide an approaching deadline', () => {
-    // A milestone due in 2 days with nothing filed against it reported
-    // "untracked" and buried the date. A deadline moves; "nothing is filed"
-    // will still be true tomorrow, so the date wins.
     const v = scheduleVerdict(
       [ms({ name: 'Beta', targetDate: '2026-08-05' }), ms({ name: 'Alpha', targetDate: '2026-08-10' })],
       NOW,
@@ -63,7 +57,6 @@ describe('scheduleVerdict', () => {
   });
 
   it('a completed milestone means the project is not untracked', () => {
-    // Completed implies issues exist, so "no issues filed against any" is false.
     const v = scheduleVerdict(
       [ms({ name: 'Done', targetDate: '2026-07-01', done: 2, total: 2 }), ms({ name: 'Far', targetDate: '2026-12-01' })],
       NOW,
@@ -73,8 +66,6 @@ describe('scheduleVerdict', () => {
   });
 
   it('says untracked when nothing is filed against any milestone', () => {
-    // The real shape of this repo's Linear project: three dated milestones,
-    // zero issues assigned to any of them.
     const v = scheduleVerdict(
       [
         ms({ name: 'A', targetDate: '2026-09-15' }),
@@ -87,7 +78,6 @@ describe('scheduleVerdict', () => {
   });
 
   it('still reports overdue even when nothing is filed', () => {
-    // An overdue date is provable regardless of issue assignment.
     const v = scheduleVerdict([ms({ name: 'A', targetDate: '2026-07-01' })], NOW);
     expect(v).toEqual({ kind: 'overdue', milestone: 'A', days: 33 });
   });

@@ -1,4 +1,4 @@
-// Helper assets use the helper release tag and renamed repository while npm package names stay unchanged; fresh-process imports expose init cycles hidden by Vitest cache.
+
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import * as os from 'os';

@@ -35,7 +35,7 @@ export function shortSessionId(sessionId: string | undefined | null): string | u
 }
 
 export function recordSample(sample: PerfSample): void {
-  // Hot-path append-only spool: never import/open SQLite, throw, or emit warnings.
+
   if (isDisabled()) return;
   if (!sample.label || !Number.isFinite(sample.durationMs)) return;
   try {

@@ -1,4 +1,3 @@
-// Bind only an exact normalized checkout and preserve existing definition fields.
 
 import { isSafeProjectName, type ProjectDef } from './projects.js';
 import { matchLocalCheckoutExact, type LinearProjectLite } from './linear-projects.js';

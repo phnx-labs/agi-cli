@@ -1,4 +1,3 @@
-// Exact agent/version overrides merge over agent wildcards, then auto-ranking; removing the last override removes the empty config container.
 import type { AgentId } from './types.js';
 import { readMeta, updateMeta } from './state.js';
 import { parseRunDefaultSelector } from './run-defaults.js';

@@ -58,7 +58,6 @@ export class ActivityStream {
     this.maxBytesPerRead = options.maxBytesPerRead ?? ACTIVITY_TAIL_BYTES;
     this.sweepMs = options.sweepMs ?? ACTIVITY_SWEEP_MS;
     this.watchRequested = options.watch ?? true;
-    // Arm immediately when the first log appears; failed watchers still recover through sweeps.
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch {  }
     this.sweep(Date.now());
     this.armWatcher();
@@ -105,7 +104,6 @@ export class ActivityStream {
       if (!stat) continue;
       const cursor = this.cursors.get(name);
       if (!cursor) {
-        // Opening discovery registers history at EOF; files discovered later are live work.
         if (this.started) this.dirty.add(name);
         else this.cursors.set(name, {
           identity: stat.identity, offset: stat.size, partial: EMPTY, partialIsFragment: false,
@@ -115,7 +113,6 @@ export class ActivityStream {
       }
       if (changed(cursor, stat)) this.dirty.add(name);
     }
-    // Never cap live cursors: eviction would replay a retained tail as duplicate events.
     for (const name of [...this.cursors.keys()]) if (!seen.has(name)) this.cursors.delete(name);
     this.started = true;
   }
@@ -146,7 +143,6 @@ export class ActivityStream {
     const stat = this.statOf(name);
     if (!stat) { this.cursors.delete(name); return []; }
     let cursor = this.cursors.get(name);
-    // ctime catches same-size rewrites; the trailing anchor catches longer in-place rewrites.
     if (!cursor || cursor.identity !== stat.identity || stat.size < cursor.offset
       || (stat.size === cursor.size && stat.ctimeNs !== cursor.ctimeNs)) {
       cursor = this.freshCursor(stat);
@@ -164,7 +160,6 @@ export class ActivityStream {
     }
     const verify = Math.min(cursor.anchor.length, start);
     const buf = this.readRange(name, start - verify, stat.size - start + verify);
-    // I/O failure never advances the consumed offset, so a future candidate can retry these bytes.
     if (buf === undefined) return [];
     if (verify > 0 && !buf.subarray(0, verify).equals(cursor.anchor.subarray(cursor.anchor.length - verify))) {
       if (restarted) return [];

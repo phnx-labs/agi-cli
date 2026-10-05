@@ -124,7 +124,6 @@ function delegatePath(versionHome: string): string {
 }
 
 export function renderDelegate(payload: string, versionHome: string): string {
-  // Delegation is one-hop, self-reference-safe, and bounded to five seconds.
   if (process.env[DELEGATE_GUARD_ENV]) return '';
   let command = '';
   try { command = fs.readFileSync(delegatePath(versionHome), 'utf8').trim(); } catch { return ''; }

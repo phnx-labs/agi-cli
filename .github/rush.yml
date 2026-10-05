@@ -1,7 +1,3 @@
 version: 1
 
-# prix/code-reviewer remains paused because its upstream authentication capture
-# path can expose live credentials. Keep this empty until that bug is fixed and
-# affected credentials are revoked; AGENTS.md requires an independent subagent
-# review while the automated reviewer is unavailable.
 agents: []

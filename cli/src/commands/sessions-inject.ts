@@ -1,17 +1,4 @@
-/**
- * `agents sessions inject <sessionId> <text>` — deliver text into the terminal a
- * running session lives in. The CLI face of the Terminal Engine's Gap 2 primitive
- * (`injectIntoTerminal`, src/lib/terminal/inject.ts), so a native watchdog
- * (RUSH-1415) can shell out to nudge a stalled agent with "continue".
- *
- * Resolution: find the active session by id, then resolve its exact split through
- * the SAME canonical resolver the watchdog uses — `resolveInjectTargetForSession`
- * (lib/terminal/resolve.ts), precedence tmux > iterm > vscodium. Sharing one
- * resolver keeps the manual unblock path and the watchdog in agreement on which
- * sessions are addressable (a prior duplicate resolver read only `provenance.reply`
- * and could not address a VSCodium/Cursor terminal the watchdog handled fine).
- * `--pane` targets a backend directly when the handle is already known.
- */
+
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -26,37 +13,19 @@ import { normalizeSingleDeviceOption } from './utils.js';
 interface InjectOptions {
   pane?: string;
   socket?: string;
-  /**
-   * The remote device. A single `--device box` arrives here as `['box']` because
-   * the parent `sessions` command's variadic `-D, --device <target...>` shadows
-   * this subcommand's scalar option under `optsWithGlobals()` — normalize it with
-   * {@link normalizeInjectDevice} before use (PHNX-3688).
-   */
+
   device?: string | string[];
   enter?: boolean;
   combined?: boolean;
   json?: boolean;
 }
 
-/**
- * The `--device` selector, normalized to a single host string. `optsWithGlobals()`
- * merges the parent `sessions` command's variadic `-D, --device <target...>` over
- * this subcommand's scalar `--device`, so a single `--device box` arrives as
- * `['box']` — which flowed straight into `sshExec` and crashed on
- * `host.startsWith` (PHNX-3688). Delegates to the shared
- * {@link normalizeSingleDeviceOption} (also used by `sessions resume`,
- * PHNX-3940) rather than re-implementing the array/scalar coercion here.
- */
+
 export function normalizeInjectDevice(value: string | string[] | undefined): string | undefined {
   return normalizeSingleDeviceOption(value, 'sessions inject');
 }
 
-/**
- * The `agents sessions inject` argv to re-run ON a device (its tmux panes live
- * there, so resolution must happen there). Every flag rides along EXCEPT
- * `--device`: the command runs on the device, resolving locally. Pure so the
- * forwarded invocation is asserted without an SSH hop (PHNX-3688).
- */
+
 export function buildRemoteInjectArgv(sessionId: string, text: string, options: InjectOptions): string[] {
   const argv = ['agents', 'sessions', 'inject', sessionId, text];
   if (options.enter === false) argv.push('--no-enter');
@@ -67,20 +36,8 @@ export function buildRemoteInjectArgv(sessionId: string, text: string, options: 
   return argv;
 }
 
-/**
- * Resolve `device` (registry alias or `user@host`) to an ssh target and re-run
- * `agents sessions inject` there, so a bare session id + `--device` resolves on
- * the box that actually holds the session's tmux panes. The tool-native form of
- * the `agents ssh <device> "agents sessions inject <id> …"` workaround (PHNX-3688).
- */
-/**
- * Resolve `--device` to an ssh target. A registered device becomes its
- * `user@dnsName`; a bare unknown name (an ad-hoc `user@host` or ssh_config alias)
- * is handed to ssh verbatim (`resolveHost` returns null for it). A registered
- * device we CANNOT dial — password-auth, addressless — throws its typed error and
- * is NOT degraded to the raw name, which could ssh a coincidentally-matching but
- * unrelated `~/.ssh/config` Host (PHNX-3688 review).
- */
+
+
 export async function resolveInjectSshTarget(device: string): Promise<string> {
   const host = await resolveHost(device);
   return host ? sshTargetFor(host) : device;
@@ -114,16 +71,16 @@ async function runInject(sessionId: string, text: string, options: InjectOptions
     process.exit(1);
   }
 
-  // Direct-target shortcut skips the session lookup — the watchdog often already
-  // holds the pane id it wants to type into. The pane's exact address is known,
-  // so it composes with --device (tmux send-keys over SSH).
+
+
+
   let target: InjectTarget | null = null;
   if (options.pane) {
     target = { backend: 'tmux', pane: options.pane, socket: options.socket };
   } else if (device) {
-    // A bare session id + a device: the session's tmux panes live ON that device,
-    // so getActiveSessions here can't see them. Resolve + deliver THERE by re-running
-    // inject over SSH (the same command, minus --device) — PHNX-3688.
+
+
+
     return injectOnDevice(sessionId, text, options, device);
   } else {
     const resolved = await resolveLiveInjectTarget(sessionId);
@@ -153,7 +110,7 @@ async function runInject(sessionId: string, text: string, options: InjectOptions
   if (!res.ok) process.exit(1);
 }
 
-/** Attach the `inject` subcommand to an existing `sessions` command. */
+
 export function registerSessionsInjectCommand(sessionsCmd: Command): void {
   const injectCmd = sessionsCmd
     .command('inject <sessionId> <text>')
@@ -194,8 +151,8 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
     `,
   });
 
-  // The parent `sessions` command also defines --json, so it binds there;
-  // optsWithGlobals() merges parent + subcommand options so --json is honored.
+
+
   injectCmd.action(async (sessionId: string, text: string, _options: InjectOptions, command: Command) => {
     await runInject(sessionId, text, command.optsWithGlobals() as InjectOptions);
   });

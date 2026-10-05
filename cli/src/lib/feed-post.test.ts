@@ -21,9 +21,6 @@ function tmpActivityDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-post-'));
 }
 
-// postFeedStatus resolves project names against the defs dir — keep every test
-// hermetic (an empty dir) so a developer's real ~/.agents/projects can't flip a
-// label; the canonical-name test overrides this with its own seeded dir.
 let emptyDefsDir: string;
 beforeEach(() => {
   emptyDefsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-post-defs-'));
@@ -303,7 +300,6 @@ describe('buildAttachment', () => {
     expect(att?.mediaType).toBe('audio/wav');
     expect(att?.name).toBe('draft.wav');
     expect(att?.bytes).toBe(8);
-    // href points at the durable copy under <copyRoot>/<sessionId>/<updateId>/
     expect(att?.href).toBe(path.join(copyRoot, 'sess-a', 'up-1', 'draft.wav'));
     expect(fs.existsSync(att!.href)).toBe(true);
   });
@@ -349,7 +345,6 @@ describe('postFeedStatus attachments + project', () => {
     expect(event.attachments?.[0].kind).toBe('audio');
     expect(event.attachments?.[1]).toMatchObject({ kind: 'video', href: 'https://x/preview.mp4' });
 
-    // Parse round-trip preserves attachments + project.
     const stored = readSessionActivity('sess-attach', dir);
     expect(stored).toHaveLength(1);
     expect(stored[0].project).toBe('song-factory');
@@ -361,7 +356,6 @@ describe('postFeedStatus attachments + project', () => {
     const dir = tmpActivityDir();
     const defsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proj-defs-'));
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proj-repo-'));
-    // A multi-repo project: any repo under its root files under the ONE name.
     fs.writeFileSync(path.join(defsDir, 'song-suite.yaml'), `name: song-suite\nroot: ${repo}\n`);
     process.env.AGENTS_PROJECTS_DIR = defsDir;
     try {

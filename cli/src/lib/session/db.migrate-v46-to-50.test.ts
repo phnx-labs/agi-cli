@@ -14,12 +14,6 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v46 shape: the PHNX-3792 mirror provenance columns exist, but NONE
-  // of the PHNX-3798 phoenix_id (v47), PHNX-3939 last_user_message (v48),
-  // PHNX-3940 account_id (v49), or PHNX-3797 generated-title (v50) columns do.
-  // A real box on v46 upgrading straight to v50 (skipping no releases, just
-  // landing four independently-merged migrations at once) must get ALL of
-  // them — the collision-resolution case this whole rebase turned on.
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (
@@ -50,20 +44,14 @@ const { getDB, SCHEMA_VERSION, setSessionGeneratedTitle, getSessionById } = awai
 describe('schema migration v46 -> v50 (four merged migrations land, none dropped)', () => {
   it('adds phoenix_id (<47), last_user_message (<48), account_id (<49), and the generated-title columns (<50) in one upgrade', () => {
     const columns = (getDB().prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name);
-    // PHNX-3798's column (the v47 rung).
     expect(columns).toContain('phoenix_id');
-    // PHNX-3939's column (the v48 rung).
     expect(columns).toContain('last_user_message');
-    // PHNX-3940's column (the v49 rung).
     expect(columns).toContain('account_id');
-    // PHNX-3797's columns (the v50 rung).
     expect(columns).toContain('generated_title');
     expect(columns).toContain('generated_title_key');
     expect(columns).toContain('generated_title_at');
-    // The DB is stamped at the combined head, not stranded partway.
     const version = getDB().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
     expect(version.value).toBe(String(SCHEMA_VERSION));
-    // The four rungs above landed at v50; the head only ever moves past it.
     expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(50);
   });
 
@@ -84,7 +72,6 @@ describe('schema migration v46 -> v50 (four merged migrations land, none dropped
     expect(row.account_id).toBeNull();
     expect(row.generated_title).toBeNull();
     expect(row.generated_title_key).toBeNull();
-    // The user's own words survive to be the ladder's honest fallback headline.
     expect(row.first_user_message).toBe('triage the AGI board');
     expect(row.actor).toBe('ada@example.com');
   });

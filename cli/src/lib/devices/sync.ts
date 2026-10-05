@@ -34,7 +34,7 @@ export function withDefaultUser(
   prevUser: string | undefined,
   localUser: string | undefined,
 ): DeviceInput {
-  // Discovery may supply a default, but it never overwrites an explicit or previously pinned SSH user.
+
   if (input.user || prevUser || !localUser) return input;
   return { ...input, user: localUser };
 }
@@ -50,7 +50,7 @@ interface DeviceSyncResult {
 }
 
 export function discoverableNodes(nodes: TailscaleNode[]): TailscaleNode[] {
-  // Shared ingress nodes are never implicit fleet machines.
+
   return nodes.filter((n) => !n.sharee);
 }
 
@@ -80,7 +80,7 @@ export function selectNodesToUpsert(
   ignored: Set<string>,
   mode: DeviceSyncMode,
 ): TailscaleNode[] {
-  // Bootstrap may enroll own-tailnet peers; refresh may only update routes already in the registry.
+
   return nodes.filter((n) => {
     if (ignored.has(n.name)) return false;
     if (mode === 'refresh' && !registered.has(n.name)) return false;
@@ -112,7 +112,7 @@ export async function runDeviceSync(
 
     return { ok: true, synced: toUpsert.length, syncedNames: toUpsert.map((node) => node.name), pending };
   } catch (err: any) {
-    // Daemon callers request soft mode so every discovery or registry failure is contained in the result.
+
     if (opts.soft) {
       return { ok: false, synced: 0, syncedNames: [], pending: [], reason: err?.message ?? String(err) };
     }
@@ -146,7 +146,7 @@ export function partitionWantedDevices(
 }
 
 export async function ensureDevicesRegistered(wantedNames: string[]): Promise<EnsureDevicesResult> {
-  // Apply resolves missing approved routes from live Tailscale state instead of persisting connection details.
+
   const registryBefore = await loadDevices();
   const registered = new Set(Object.keys(registryBefore));
   const missing = wantedNames.filter((n) => !registered.has(n));

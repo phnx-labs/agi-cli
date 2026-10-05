@@ -21,7 +21,7 @@ export function readCloudflareCreds(
     );
   }
   const { env } = readAndResolveBundleEnv(bundle, {
-    // Background Cloudflare work must never raise an unattended biometric prompt.
+
     caller: 'cloudflare',
     agentOnly: true,
   });

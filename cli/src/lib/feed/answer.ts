@@ -107,7 +107,7 @@ function isPullRequestGeneration(generation: string): boolean {
 
 
 export function classifyReceipt(receipt: MessageReceipt): { delivery: AnswerDelivery; resolved: boolean } {
-  // Queued and unconfirmed delivery remain unresolved; only consumption/continuation is proof.
+
   if (receipt.status === 'consumed' || receipt.status === 'continued') return { delivery: 'receipt', resolved: true };
   if (receipt.status === 'queued') return { delivery: 'receipt', resolved: false };
   return { delivery: 'failed', resolved: false };
@@ -236,7 +236,7 @@ interface ClaimOutcome {
 function adoptStrandedClaim(
   block: OpenBlock, stranded: AnswerRecord, operator: VerifiedOperator, verified: boolean, root?: string,
 ): AnswerRecord | undefined {
-  // Adoption is restricted to the replay-safe mailbox path by claimOrReconcile's caller.
+
   let released: boolean;
   try {
     released = rollbackAnswerClaim(
@@ -318,7 +318,6 @@ async function claimOrReconcile(
     : await awaitHolderReceipt(block.blockId, Math.max(0, Math.min(HOLDER_RECEIPT_WAIT_MS, remainingMs(deadline))), origin, root);
   if (receipt) return { adopted: false, lost: heldClaimResult(block, attentionKey, host, existing, receipt) };
 
-  // Other rails cannot prove whether a timed-out handoff landed, so they must not replay.
   if (stranded && replayable) {
     const adopted = adoptStrandedClaim(block, existing, operator, verified, root);
     if (adopted) return { claim: adopted, adopted: true };
@@ -338,7 +337,6 @@ async function deliverMailbox(
   origin: ReceiptOrigin, mailboxRoot?: string,
 ): Promise<DeliveryOutcome> {
   const dir = mailboxDir(block.mailboxId, mailboxRoot);
-  // A recovered claim reuses its generation-bound queued message instead of duplicating the answer.
   const existing = adopted
     ? readBox(dir).find((msg) => msg.blockId === block.blockId && msg.generation === origin.generation)
     : undefined;

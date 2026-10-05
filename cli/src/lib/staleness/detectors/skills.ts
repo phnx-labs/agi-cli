@@ -10,8 +10,8 @@ import { lazyAgentMap } from '../writers/lazy-map.js';
 const SKILL_COPY_IGNORE = new Set(['.DS_Store', '.git', '.gitignore', '.venv', '__pycache__', 'node_modules']);
 
 export function skillDirsMatch(src: string, dest: string): boolean {
-  // These are different trees: equal mtimes prove nothing, and byte comparison
-  // must support binary assets as well as text.
+
+
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
@@ -51,7 +51,7 @@ function buildSkillsDetector(agent: AgentId): ResourceDetector {
       const synced: string[] = [];
       for (const name of installed) {
         const src = resolveSkillSource(name);
-        // Keep source-less installed names visible so ownership-aware pruning can see orphans.
+
         if (!src) {
           synced.push(name);
           continue;

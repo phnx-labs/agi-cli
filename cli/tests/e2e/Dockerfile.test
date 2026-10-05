@@ -1,7 +1,5 @@
-# Test agents-cli Linux secrets support on Ubuntu
 FROM ubuntu:22.04
 
-# Install dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     unzip \
@@ -11,21 +9,17 @@ RUN apt-get update && apt-get install -y \
     gnome-keyring \
     && rm -rf /var/lib/cache/apt
 
-# Install Bun
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
-# Set up D-Bus and keyring for testing
 ENV DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus"
 
 WORKDIR /app/cli
 COPY . /app
 
-# Install deps and build
 RUN bun install
 RUN bun run build
 
-# Test script that initializes keyring and runs secrets tests
 CMD ["bash", "-c", "\
     eval $(dbus-launch --sh-syntax) && \
     echo 'test' | gnome-keyring-daemon --unlock --components=secrets && \

@@ -3,10 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before db.js loads so its module-level base dir picks up the
-// override. Plain top-level statements run before the dynamic `await import`
-// below, so vi.hoisted is not needed (and is also not supported by Bun's
-// native test runner).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-test-'));
 process.env.HOME = TEST_HOME;
 
@@ -28,10 +24,6 @@ const { costOfUsage } = await import('../../pricing/index.js');
 const { emit } = await import('../../feed/events.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
-// JSONL files live under TEST_HOME so they're isolated and torn down with it.
-// querySessions filters out rows whose file_path no longer exists on disk
-// (defense against phantom rows after a config-symlink swap, see #136), so
-// every seeded row needs a real backing file.
 const SEED_FILES_DIR = path.join(TEST_HOME, 'seed-files');
 fs.mkdirSync(SEED_FILES_DIR, { recursive: true });
 
@@ -208,10 +200,6 @@ describe('usedBrowser/usedComputer — a scoped events-log read, not a transcrip
   });
 
   it('a computer-screenshot-only session sets usedComputer=true (agents computer screenshot / run, not just the explicit verbs)', () => {
-    // Mirrors what computer.ts's screenshot command and dispatch.ts's run-loop
-    // dispatcher now emit — previously neither path emitted computer.action at
-    // all, so a session that only ran `computer screenshot`/`run` read back
-    // usedComputer=false (reviewer-flagged regression on #1864).
     emit('computer.action', { sessionId: 'tool-computer-screenshot', command: 'screenshot', targetPid: 200 });
     const filePath = emptyFile('tool-computer-screenshot');
     const meta: SessionMeta = { id: 'tool-computer-screenshot', shortId: 'tool-scr', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath };
@@ -233,8 +221,6 @@ describe('usedBrowser/usedComputer — a scoped events-log read, not a transcrip
   });
 
   it('a legacy row (used_browser/used_computer still NULL) reads back undefined, not false', () => {
-    // Simulates a row from before this migration that hasn't been rescanned —
-    // NULL, not 0, is what the ALTER TABLE leaves on every pre-existing row.
     const filePath = emptyFile('tool-legacy');
     const db = getDB();
     db.prepare(`
@@ -248,12 +234,8 @@ describe('usedBrowser/usedComputer — a scoped events-log read, not a transcrip
   });
 
   it('upsertSessionsBatch correctly flags multiple sessions in one call without scanning event logs inside the write transaction', () => {
-    // Three sessions in one batch: browser-only, computer-only, and neither.
-    // This exercises the pre-computed queryToolUsageForSessions path that runs
-    // outside the SQLite write transaction (RUSH-2207 fix).
     emit('browser.navigate', { sessionId: 'batch-browser', profile: 'default', url: 'https://a.com' });
     emit('computer.action', { sessionId: 'batch-computer', command: 'click', targetPid: 1 });
-    // 'batch-none' gets no events
 
     const makeMeta = (id: string): SessionMeta => ({
       id,
@@ -370,8 +352,6 @@ describe('session_resource_usage — skill/slash-command usage joined against re
   });
 
   it('counts repeated invocations and a rescan REPLACES rather than accumulates', () => {
-    // A name distinct from the other cases in this describe block ('teams' is
-    // deliberately installed for an earlier test and would resolve here too).
     const filePath = path.join(RES_DIR, 'skill-rescan.jsonl');
     fs.writeFileSync(filePath, [
       JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T00:00:00Z', message: { content: [
@@ -383,7 +363,6 @@ describe('session_resource_usage — skill/slash-command usage joined against re
     upsertSession(meta, '', { fileMtimeMs: 1, fileSize: fs.statSync(filePath).size });
     expect(rowsFor('res-rescan')).toEqual([{ kind: 'skill', name: 'rescan-only-skill', plugin: null, source: null, repo_root: null, snapshot_sha: null, count: 2 }]);
 
-    // Rescan with the SAME file (simulating a bare re-index) must not double the count.
     upsertSession(meta, '', { fileMtimeMs: 2, fileSize: fs.statSync(filePath).size });
     expect(rowsFor('res-rescan')).toEqual([{ kind: 'skill', name: 'rescan-only-skill', plugin: null, source: null, repo_root: null, snapshot_sha: null, count: 2 }]);
   });
@@ -401,13 +380,10 @@ describe('session_resource_usage — skill/slash-command usage joined against re
   });
 
   it('querySessions({ skill }) matches a bare name and a namespaced plugin skill by its short name (#12)', () => {
-    // Reuses the sessions seeded by the earlier tests in this block:
-    // res-skill-user used 'teams', res-skill-plugin used 'rush:design'.
     const byTeams = querySessions({ skill: 'teams' });
     expect(byTeams.map((s) => s.id)).toContain('res-skill-user');
     expect(byTeams.map((s) => s.id)).not.toContain('res-skill-plugin');
 
-    // '--skill design' finds the namespaced 'rush:design' via the short-name fallback.
     const byDesign = querySessions({ skill: 'design' });
     expect(byDesign.map((s) => s.id)).toContain('res-skill-plugin');
     expect(byDesign.map((s) => s.id)).not.toContain('res-skill-user');
@@ -418,20 +394,13 @@ describe('session_resource_usage — skill/slash-command usage joined against re
   it('querySessions({ plugin }) matches sessions that used ANY resource owned by that plugin (#12)', () => {
     const byPlugin = querySessions({ plugin: 'rush' });
     expect(byPlugin.map((s) => s.id)).toContain('res-skill-plugin');
-    // res-command-user used a plain (non-plugin) command — must not match.
     expect(byPlugin.map((s) => s.id)).not.toContain('res-command-user');
 
     expect(querySessions({ plugin: 'no-such-plugin' })).toEqual([]);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Cost + duration (issue #323) — real SQLite, migration v6 columns, sort,
-// rollup grouping for a multi-model session.
-// ---------------------------------------------------------------------------
 
-// Single teardown for the whole file (the per-describe teardown was removed so
-// later describe blocks still have a live DB and an intact TEST_HOME).
 afterAll(() => {
   closeDB();
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
@@ -440,7 +409,6 @@ afterAll(() => {
 const COST_FILES_DIR = path.join(TEST_HOME, 'cost-files');
 fs.mkdirSync(COST_FILES_DIR, { recursive: true });
 
-/** Upsert a costed session through the public API (exercises the v6 schema). */
 function seedCosted(
   id: string,
   agent: SessionMeta['agent'],
@@ -530,10 +498,6 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// last_activity (v8) — the listing sorts and labels by last-message time, not
-// creation time. A session created long ago but active recently must lead.
-// ---------------------------------------------------------------------------
 const ACTIVITY_FILES_DIR = path.join(TEST_HOME, 'activity-files');
 fs.mkdirSync(ACTIVITY_FILES_DIR, { recursive: true });
 
@@ -548,11 +512,10 @@ function seedActive(id: string, timestamp: string, lastActivity: string | undefi
 
 describe('default sort orders by last_activity (v8)', () => {
   beforeAll(() => {
-    // Creation order and activity order deliberately disagree.
     seedActive('la-oldcreate-newactive', '2026-01-01T00:00:00.000Z', '2026-07-04T12:00:00.000Z');
     seedActive('la-midcreate-midactive', '2026-06-01T00:00:00.000Z', '2026-06-15T00:00:00.000Z');
     seedActive('la-newcreate-oldactive', '2026-07-01T00:00:00.000Z', '2026-07-01T00:05:00.000Z');
-    seedActive('la-noactivity', '2026-05-20T00:00:00.000Z', undefined); // no lastActivity → falls back to timestamp
+    seedActive('la-noactivity', '2026-05-20T00:00:00.000Z', undefined);
   });
 
   it('round-trips last_activity through SQLite', () => {
@@ -563,10 +526,10 @@ describe('default sort orders by last_activity (v8)', () => {
   it('ranks by last activity, not creation time (fallback = timestamp)', () => {
     const rows = querySessions({ cwdPrefix: ACTIVITY_FILES_DIR });
     expect(rows.map(r => r.id)).toEqual([
-      'la-oldcreate-newactive', // active Jul 4 (though created back in Jan)
-      'la-newcreate-oldactive', // active Jul 1
-      'la-midcreate-midactive', // active Jun 15
-      'la-noactivity',          // no activity → creation ts May 20
+      'la-oldcreate-newactive',
+      'la-newcreate-oldactive',
+      'la-midcreate-midactive',
+      'la-noactivity',
     ]);
   });
 });
@@ -616,10 +579,8 @@ describe('cost/duration upsert round-trip', () => {
   it('queryUsageRollup groups by project across agents', () => {
     const rows = queryUsageRollup({ cwdPrefix: COST_FILES_DIR, groupBy: 'project' });
     const byKey = new Map(rows.map(r => [r.key, r]));
-    // proj-a = c1-cheap (claude) + c3-mid (codex) = 0.50 + 3.00
     expect(byKey.get('proj-a')!.costUsd).toBeCloseTo(3.50, 10);
     expect(byKey.get('proj-a')!.sessionCount).toBe(2);
-    // proj-b = c2-pricey + c4-null (null cost contributes 0)
     expect(byKey.get('proj-b')!.costUsd).toBeCloseTo(12.34, 10);
     expect(byKey.get('proj-b')!.sessionCount).toBe(2);
   });
@@ -634,8 +595,6 @@ describe('cost/duration upsert round-trip', () => {
 
 describe('multi-model session cost equals sum of per-model usage', () => {
   it('an opus+haiku session sums to the sum of each model cost', () => {
-    // Simulate a session that ran two models; the scanner accumulates per-model
-    // cost into one costUsd. Verify the rollup reflects that exact sum.
     const opus = costOfUsage({ model: 'claude-opus-4', inputTokens: 10_000, outputTokens: 5_000 });
     const haiku = costOfUsage({ model: 'claude-haiku-4', inputTokens: 20_000, outputTokens: 8_000 });
     const sessionCost = opus + haiku;
@@ -648,9 +607,6 @@ describe('multi-model session cost equals sum of per-model usage', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// syncTopics — apply externally-sourced titles (Codex thread_name) by id.
-// ---------------------------------------------------------------------------
 
 const TOPIC_FILES_DIR = path.join(TEST_HOME, 'topic-files');
 fs.mkdirSync(TOPIC_FILES_DIR, { recursive: true });
@@ -668,7 +624,6 @@ function seedTopic(id: string, topic: string): void {
     filePath,
     topic,
   };
-  // Upsert through the public API so session_text (FTS) is populated too.
   upsertSession(meta, 'searchable body text');
 }
 
@@ -682,8 +637,8 @@ describe('syncTopics', () => {
     const updated = syncTopics(
       new Map([
         ['codex-rename', 'Review skill placement'],
-        ['codex-keep', 'Already correct'], // identical -> no update
-        ['codex-missing', 'No such session'], // not in DB -> no update
+        ['codex-keep', 'Already correct'],
+        ['codex-missing', 'No such session'],
       ]),
     );
     expect(updated).toBe(1);
@@ -692,7 +647,6 @@ describe('syncTopics', () => {
     expect(rows.find(r => r.id === 'codex-rename')?.topic).toBe('Review skill placement');
     expect(rows.find(r => r.id === 'codex-keep')?.topic).toBe('Already correct');
 
-    // The new title is searchable via FTS (topic column was updated, not just sessions).
     const hits = ftsSearch('Review skill placement');
     expect(hits.some(h => h.sessionId === 'codex-rename')).toBe(true);
   });
@@ -709,15 +663,10 @@ describe('syncTopics', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// findSessionsById — exact-then-prefix id resolution over the index (the
-// DB-backed equivalent of resolveSessionById, used by `agents run --resume`).
-// ---------------------------------------------------------------------------
 
 const ID_FILES_DIR = path.join(TEST_HOME, 'id-files');
 fs.mkdirSync(ID_FILES_DIR, { recursive: true });
 
-/** Seed a session with explicit id / short_id / agent / version / cwd. */
 function seedId(
   id: string,
   shortId: string,
@@ -741,12 +690,9 @@ describe('findSessionsById', () => {
   const ELSEWHERE = path.join(ID_FILES_DIR, 'elsewhere');
 
   beforeAll(() => {
-    // Two sessions sharing the prefix "80af" in THIS project's cwd.
     seedId('80af76ca-b734-4f45-8833-ef1142219568', '80af76ca', 'claude', '2.1.180', HERE, '2026-06-01T10:00:00.000Z');
     seedId('80af0000-0000-4000-8000-000000000001', '80af0000', 'claude', '2.1.181', HERE, '2026-06-02T10:00:00.000Z');
-    // A non-overlapping id in a DIFFERENT project's cwd (for widen test).
     seedId('cccccccc-0000-4000-8000-000000000002', 'cccccccc', 'claude', '2.1.181', ELSEWHERE, '2026-06-03T10:00:00.000Z');
-    // A codex session whose id collides on prefix with the claude ones.
     seedId('80af9999-0000-4000-8000-000000000003', '80af9999', 'codex', '0.50.0', HERE, '2026-06-04T10:00:00.000Z');
   });
 
@@ -787,7 +733,7 @@ describe('findSessionsById', () => {
 
   it('cwd scope finds in-project, and dropping cwd widens to other projects', () => {
     const scoped = findSessionsById('cccccccc', { agent: 'claude', cwd: HERE });
-    expect(scoped).toEqual([]); // lives in ELSEWHERE, not HERE
+    expect(scoped).toEqual([]);
     const widened = findSessionsById('cccccccc', { agent: 'claude' });
     expect(widened.map(s => s.id)).toEqual(['cccccccc-0000-4000-8000-000000000002']);
   });
@@ -810,8 +756,6 @@ describe('upsertSessionsBatch per-row guard', () => {
       scan: { fileMtimeMs: 0, fileSize: 0 },
     });
     const good = mk('batch-good-0000-4000-8000-000000000001', '2026-07-01T00:00:00.000Z', goodFile);
-    // A NULL timestamp violates `timestamp TEXT NOT NULL`. Before the guard this threw
-    // and rolled back the whole batch; now it must skip just this row.
     const bad = mk('batch-bad-00000-4000-8000-000000000002', null as unknown as string, badFile);
 
     expect(() => upsertSessionsBatch([bad, good])).not.toThrow();
@@ -823,22 +767,12 @@ describe('upsertSessionsBatch per-row guard', () => {
 });
 
 describe('closeDB drops the cached prepared statements', () => {
-  // Regression for the "statement has been finalized" bug: closeDB() finalizes
-  // every prepared statement the connection owns, but the module-level
-  // cachedStmts (upsert/FTS) used to survive the close. The next getDB() opened a
-  // fresh connection while stmts() handed back the stale, finalized statements —
-  // so the first upsertSession() after a closeDB() threw. In host-session
-  // registration (which swallows write errors) that silently dropped the row.
   it('lets upsertSession run again after closeDB without throwing a finalized statement', () => {
     const fileA = path.join(SEED_FILES_DIR, 'reopen-a.jsonl');
     const fileB = path.join(SEED_FILES_DIR, 'reopen-b.jsonl');
     fs.writeFileSync(fileA, '');
     fs.writeFileSync(fileB, '');
 
-    // A first upsert POPULATES cachedStmts with statements bound to this
-    // connection. Without that priming, stmts() would just rebuild fresh after
-    // the close and the bug wouldn't reproduce — the finalized statement only
-    // bites when the cache already holds statements from the closed connection.
     upsertSession(
       { id: 'reopen00-0000-4000-8000-00000000000a', shortId: 'reopen00',
         agent: 'claude', timestamp: '2026-07-05T00:00:00.000Z', cwd: '/x',
@@ -846,12 +780,8 @@ describe('closeDB drops the cached prepared statements', () => {
       '',
     );
 
-    // Close finalizes those cached statements. Pre-fix, cachedStmts survived and
-    // pointed at the finalized handles.
     closeDB();
 
-    // The upsert that used to throw "statement has been finalized": getDB() opens
-    // a fresh connection, but stmts() must NOT hand back the stale cache.
     const meta: SessionMeta = {
       id: 'reopen00-0000-4000-8000-00000000000b', shortId: 'reopen00',
       agent: 'claude', timestamp: '2026-07-05T00:00:01.000Z', cwd: '/x',
@@ -859,7 +789,6 @@ describe('closeDB drops the cached prepared statements', () => {
     } as SessionMeta;
     expect(() => upsertSession(meta, '')).not.toThrow();
 
-    // And the row actually landed against the reopened connection.
     expect(findSessionsById('reopen00-0000-4000-8000-00000000000b')).toHaveLength(1);
   });
 });

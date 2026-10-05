@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSessionsWorkerScript } from './worker-template.js';
 
-// Pure deployment-artifact checks live here; real route, auth, quota, and R2
-// behavior run in worker-template.integration.test.ts under workerd.
 
 describe('renderSessionsWorkerScript', () => {
   const source = renderSessionsWorkerScript();

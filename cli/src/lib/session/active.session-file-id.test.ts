@@ -7,7 +7,6 @@ import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
-// Resolve macOS /var→/private/var so indexed paths match filesystem paths.
 const testHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-active-file-id-')));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
@@ -49,7 +48,6 @@ function indexSession(id: string, agent: string, lastActivity: string): string {
   return filePath;
 }
 
-// Keep activity relative to now so the 24-hour fallback filter remains exercised.
 const minsAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 
 describe('findSessionFileForKind — a known id selects its OWN transcript', () => {

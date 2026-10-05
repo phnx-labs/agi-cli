@@ -17,7 +17,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Strip ANSI so assertions read against the text a user sees. */
 function plain(): string {
   // eslint-disable-next-line no-control-regex
   return lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '');
@@ -42,13 +41,10 @@ describe('renderHarnessBlocks — a custom harness is its own agent type', () =>
     const out = plain();
     expect(out).toMatch(/^ {2}DeepSeek Flash \(custom\)$/m);
     expect(out).toMatch(/deepseek\/deepseek-v4-flash-0731/);
-    // Row now leads with "(forked from <host>)" rather than "via <host>"
     expect(out).toMatch(/forked from claude/);
   });
 
   it('derives the header from the name and ignores a stored label field', () => {
-    // `label` is inert legacy data kept only so old profile YAML still parses —
-    // the header always comes from `name` via the vendor/brand table.
     renderHarnessBlocks(
       [profileSummary({ name: 'spark', label: 'Muse Spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' } })],
       new Set<AgentId>(['opencode']),
@@ -63,9 +59,7 @@ describe('renderHarnessBlocks — a custom harness is its own agent type', () =>
       new Set<AgentId>(['opencode']),
       false,
     );
-    // Version comes first; "forked from" parenthetical follows.
     expect(plain()).toMatch(/1\.16\.0.*forked from opencode/);
-    // The old "via <host> <version>" label must not appear.
     expect(plain()).not.toMatch(/via opencode/);
   });
 
@@ -99,7 +93,6 @@ describe('renderHarnessBlocks — a custom harness is its own agent type', () =>
       forkedFrom: 'deepseek-flash',
     });
     renderHarnessBlocks([child, parent], installed, false);
-    // Header for the child should show the grandparent chain.
     expect(plain()).toMatch(/forked from deepseek-flash -> claude/);
   });
 
@@ -122,7 +115,6 @@ describe('renderHarnessBlocks — a custom harness is its own agent type', () =>
   });
 
   it('3-arg calls compile and run without a budget column', () => {
-    // 4th param is optional; callers that omit it must still work.
     expect(() => renderHarnessBlocks([deepseek], installed, false)).not.toThrow();
     expect(plain()).not.toMatch(/\$:/);
   });

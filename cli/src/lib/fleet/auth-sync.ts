@@ -25,7 +25,6 @@ export const KEYCHAIN_BOUND_ON_MAC: ReadonlySet<string> = new Set(['claude', 'an
 
 export const SINGLE_USE_ROTATING_REFRESH_AGENTS: ReadonlySet<string> = new Set(['droid']);
 
-// Native OAuth/session files are inventory only: rotating refresh tokens must never cross devices.
 export function isCredentialSafeToPropagate(_agent: string): boolean {
   return false;
 }
@@ -43,7 +42,6 @@ export interface SnapshotOptions {
   platform: NodeJS.Platform;
 }
 
-// The portable-file table describes discovery, not permission to sync credentials.
 export function snapshotAuth(agents: string[], opts: SnapshotOptions): AuthSnapshotResult {
   const files: AuthFilePayload[] = [];
   const bound: string[] = [];

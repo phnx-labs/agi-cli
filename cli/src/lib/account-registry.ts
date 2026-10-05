@@ -144,7 +144,6 @@ export function findAccount(name: string, doc = readAccountRegistry()): Credenti
   return doc.accounts[name] ?? Object.values(doc.accounts).find(account => account.name === name) ?? null;
 }
 
-// Device-scoped native identities live only in this box's device doc; that slice wins an id collision with central state.
 export function listNativeAccounts(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>): NativeAccount[] {
   const merged = { ...meta.accounts?.native, ...meta.deviceAccounts?.native };
   return Object.values(merged).map(account => ({ ...account, kind: 'native' as const }));
@@ -182,7 +181,6 @@ function nativeIdentityRows(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, age
   return listNativeAccounts(meta).filter(account => account.agent === agent && account.identityKey === identityKey);
 }
 
-// A bare native label may match several harnesses; `<harness>#<name>` pins management to one.
 export function parseAccountSelector(input: string): { agent?: AgentId; name: string } {
   const hash = input.indexOf('#');
   if (hash < 0) return { name: input };
@@ -220,7 +218,6 @@ function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, 
   return nativeIdentityRows(meta, found.agent, found.identityKey);
 }
 
-// Native labels are unique per harness; provider-account labels remain globally unique.
 function assertUniqueUnifiedName(
   name: string,
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
@@ -334,7 +331,6 @@ export function setDefaultAccountIfAbsent(agent: AgentId, name: string): boolean
 
 export function bindAccount(nameOrId: string, target: string, preferAgent?: AgentId): UnifiedAccount {
   const meta = readMeta();
-  // Resolve in the caller's harness; bindings to device-scoped identities remain machine-local.
   const account = findUnifiedAccount(nameOrId, meta, undefined, preferAgent);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
   if (account.kind === 'native' && account.scope === 'device') {
@@ -440,7 +436,6 @@ export function setAccountSecret(name: string, secret: string, base = getUserAge
   getAccountProvider(account.provider).validate(account.auth, secret);
   const record: AccountSchemaRecord = { id: account.id, name: account.name, provider: account.provider, auth: account.auth, baseUrl: account.baseUrl };
   const { bundle, items } = buildAccountBundle(record, secret);
-  // Secret rotation changes the value, not the bundle's creation provenance.
   bundle.created_at = readBundleSync(account.name).created_at;
   writeBundleWithItemsSync(bundle, items);
 }
@@ -554,7 +549,6 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
   const envVar = account.auth === 'setup-token' ? 'CLAUDE_CODE_OAUTH_TOKEN' : adapter.envFor(host, account.auth);
   if (!hasKeychainTokenSync(account.secretRef)) throw new Error(`Credential for account '${account.name}' is missing on this device. Add it with 'agents accounts set-key ${account.name}'.`);
   const secretVar = secretVarFor(account.auth);
-  // Resolve through the policy-never bundle path so headless reads carry its silentNoAcl attestation instead of looking biometric-gated.
   const secret = readAndResolveBundleEnvSync(account.name, {
     keys: [secretVar],
     keyMode: 'storage',
@@ -580,7 +574,6 @@ export type SpawnAccount =
   | { kind: 'provider'; id: string; name: string; agent: AgentId; env: Record<string, string> }
   | { kind: 'native'; id: string; name: string; agent: AgentId; identityKey: string; scope: 'version' | 'device' };
 
-// Compatibility fallback for native homes created before account registration existed.
 function discoverUnregisteredNativeAccount(
   email: string,
   agent: AgentId,
@@ -628,7 +621,6 @@ export function resolveSpawnAccount(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; provider?: string; base?: string; target?: string } = {},
 ): SpawnAccount | null {
-  // Any provider-backed custom harness rejects native credentials because provider auth would still be injected.
   const target = opts.target ?? (version ? `${agent}@${version}` : agent);
   const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
   if (!selection) return null;

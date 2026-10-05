@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getHistoryDir } from '../state.js';
 
-// Bookmarks are non-derivable human state, so they stay outside rebuildable sessions.db; they are per-machine today.
 interface BookmarksFile {
   version: 1;
   sessionIds: string[];

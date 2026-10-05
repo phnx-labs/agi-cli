@@ -14,7 +14,7 @@ export interface SelfHealChildSummary {
 }
 
 export async function runSelfHealChild(): Promise<number> {
-  // Isolate synchronous repair from the daemon; cancellation is observed at yields and parent-reaped.
+
   process.on('message', (msg: unknown) => {
     if (msg && typeof msg === 'object' && (msg as { type?: unknown }).type === SELF_HEAL_CANCEL_MSG) {
       process.exit(0);
@@ -31,7 +31,7 @@ export async function runSelfHealChild(): Promise<number> {
     needsAttention: selfHealNeedsAttention(report),
     summary: summarizeSelfHeal(report),
   };
-  // Stdout is exactly one machine-readable summary.
+
   process.stdout.write(JSON.stringify(summary));
   return 0;
 }

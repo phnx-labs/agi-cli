@@ -96,7 +96,6 @@ export function orderedMilestones(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
 ): LinearMilestone[] {
-  // Declared milestones are authoritative; zero issues means unfinished.
   const progress = new Map<string, { done: number; total: number }>();
   for (const n of nodes) {
     const id = n?.projectMilestone?.id;
@@ -202,7 +201,6 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey();
   if (!apiKey) return undefined;
-  // Fresh/stale cache, shared reservation, and 429 backoff protect the shared quota.
   if (!reserveLinearRequest(apiKey)) return undefined;
   const issuesSelection =
     'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +

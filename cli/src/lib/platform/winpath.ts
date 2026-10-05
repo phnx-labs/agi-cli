@@ -17,7 +17,7 @@ export function computeNewUserPath(currentRaw: string, dir: string): { changed: 
 }
 
 export function shouldWriteExpandable(originalKind: string | null, rawValue: string): boolean {
-  // Preserve raw %VAR% references and their expandable registry value kind.
+
   if (originalKind === null || originalKind === 'Absent') return true;
   if (originalKind === 'ExpandString') return true;
   return rawValue.includes('%');
@@ -58,7 +58,7 @@ const WRITE_SCRIPT = [
   '  public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);',
   '}',
   '"@',
-  // Broadcast WM_SETTINGCHANGE so future processes observe the updated user environment.
+
   '$res = [UIntPtr]::Zero',
   "[AgentsWinPath]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$res) | Out-Null",
   "Write-Output 'written'",

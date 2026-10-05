@@ -10,8 +10,8 @@ export function followFile(
   onChunk: (text: string) => void,
   opts: FollowOptions = {},
 ): () => void {
-  // Cross-platform tail: poll bytes, reset on rotation/truncation, tolerate read
-  // races, and make the returned stop function own the live timer.
+
+
   const intervalMs = opts.intervalMs ?? 500;
   let pos = 0;
 

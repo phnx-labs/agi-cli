@@ -103,7 +103,6 @@ export function readClaudeAccountEmail(home?: string): string | null {
 }
 
 export function resolveClaudeSetupToken(home?: string): string | null {
-  // Reserved auth is per-account, file-backed, and must never trigger Touch ID.
   const email = readClaudeAccountEmail(home)
     ?? (home ? discoverClaudeAccountEmailFromOauthToken(home) : null);
   if (!email) return null;
@@ -171,7 +170,6 @@ export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string
     const ck = `${cacheKey ?? `email:${trimmed}`}\0${key}`;
     const cached = setupTokenCache.get(ck);
     if (cached && Date.now() - cached.readAt < SETUP_TOKEN_MEMO_TTL_MS) return cached.token;
-    // Wrong reserved-bundle backends must propagate instead of silently falling through to interactive credentials.
     const resolved = readReservedAuthBundle('usage');
     const v = (resolved?.env[key] ?? '').trim();
     const token = v.length > 0 && isValidClaudeSetupToken(v) ? v : null;
@@ -183,7 +181,6 @@ export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string
   }
 }
 
-// Materialize only a validated durable setup-token in the worker slot; rotating OAuth credentials never copy here.
 export function writeClaudeWorkerOauthToken(home: string, token: string): string {
   if (!isValidClaudeSetupToken(token)) {
     throw new Error('Refusing to write a malformed Claude setup-token to a worker slot.');
@@ -194,7 +191,6 @@ export function writeClaudeWorkerOauthToken(home: string, token: string): string
   return tokenPath;
 }
 
-// Reserved stores read their file item directly; ordinary bundles retain ref, expiry, and lease resolution.
 export function readReservedCredential(bundle: string, key: string): string | null {
   try {
     if (isReservedStoreName(bundle) && bundle.startsWith('__')) {
@@ -217,7 +213,6 @@ export function readReservedCredential(bundle: string, key: string): string | nu
   }
 }
 
-// Reconcile locally without transporting credentials; a durable Claude account fails loud if its synced token is absent.
 export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccountSlot {
   const harness = account.agent;
   const durable = harnessWorkerKinds(harness).some(
@@ -251,14 +246,12 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
     writeClaudeWorkerOauthToken(slot.slotDir, token);
     if (account.identityLabel) seedClaudeWorkerHomeIdentity(slot.slotDir, account.identityLabel);
   }
-  // API-key harnesses intentionally materialize no file: spawn injects their credential from the reserved store.
 
   const record: DeviceAccountSlot = { ...slot, authMode: 'durable', verdict: 'unverified', checkedAt };
   recordSlot(account.id, record);
   return record;
 }
 
-// Provisioning is complete only when both the identity email and onboarding flag are present.
 export function isClaudeWorkerHomeSeeded(home: string): boolean {
   for (const p of [path.join(home, '.claude', '.claude.json'), path.join(home, '.claude.json')]) {
     try {
@@ -296,7 +289,6 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string
     try {
       doc = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
     } catch (err) {
-      // Create a missing document, but never overwrite a malformed file that Claude may be rewriting concurrently.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') continue;
     }
     const existing = (doc.oauthAccount && typeof doc.oauthAccount === 'object'
@@ -306,7 +298,6 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string
     if (trimmed) doc.oauthAccount = { ...existing, emailAddress: trimmed };
     doc.hasCompletedOnboarding = true;
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    // Atomic rename prevents readers from observing a truncated identity document.
     const tmp = `${p}.agents-${process.pid}.tmp`;
     try {
       fs.writeFileSync(tmp, JSON.stringify(doc));

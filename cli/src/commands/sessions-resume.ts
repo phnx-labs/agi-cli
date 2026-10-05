@@ -1,15 +1,3 @@
-/**
- * `agents sessions resume` — the one resume surface.
- *
- * - Strict single-session: `sessions resume <id> [prompt]` with optional
- *   --mode/--headless/--interactive/--cwd/--quiet/--here (formerly top-level
- *   `agents resume`). Identity resolution + owner-device hop live in resume.ts.
- * - Multi-select: bare `sessions resume` opens a checkbox picker and fans each
- *   pick into a terminal tab/split via the terminal launch engine.
- * - Direct id/alias always takes the strict path; live-pane attach is
- *   `sessions focus`.
- * - `--device` opens the terminal surface on the session origin only.
- */
 import * as fs from 'fs';
 import chalk from 'chalk';
 import { Option, type Command } from 'commander';
@@ -48,7 +36,6 @@ import { toRemotePortable } from '../lib/project-root.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
-/** Opening more than this many live sessions at once asks for confirmation first. */
 export const CONFIRM_THRESHOLD = 5;
 
 interface ResumeOptions extends StrictResumeOptions {
@@ -62,12 +49,10 @@ interface ResumeOptions extends StrictResumeOptions {
   ghostty?: boolean;
   tmux?: boolean;
   vscodium?: boolean;
-  /** --terminal-app: force macOS Terminal.app. Named to avoid reading as `run --terminal`. */
   terminalApp?: boolean;
   splits?: boolean;
   attachOnly?: boolean;
   local?: boolean;
-  /** Original run argv; only the bare resume selector changes after picking. */
   runArgs?: string[];
 }
 
@@ -150,12 +135,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   });
 }
 
-/** Flag names `sessions resume` declares that also exist on its parent `sessions`
- *  command. Booleans and strings only — `device` collides too but needs its own
- *  array-merge handling below, so it is not in this list. */
 const RESUME_PARENT_COLLISION_FLAGS = ['agent', 'all', 'teams', 'since', 'limit', 'local'] as const;
 
-/** Keep explicit parent options without replacing resume's own defaults. */
 export function resolveResumeOptions(cmd: Command, local: ResumeOptions): ResumeOptions {
   const parent = cmd.parent;
   const { resumeDevice, ...resolved } = local as ResumeOptions & { resumeDevice?: string[] };
@@ -201,19 +182,8 @@ export async function sessionsResumeAction(
   const explicitSurface = !!(options.iterm || options.ghostty || options.tmux || options.vscodium || options.terminalApp || options.device);
   const direct = !!query && (isDirectResumeSelector(query) || wantsStrictResume(prompt, strictOpts));
 
-  // Direct id/alias (or label with prompt/strict flags) → strict resume
-  // (former top-level `agents sessions resume`). `--attach-only` / `--local`
-  // must go through sessions focus so they cannot silently fork a copy
-  // (AGI EXT still shells `sessions resume <id> --local`).
   if (query && direct && !explicitSurface) {
     const hosts = options.device ? [options.device] : [];
-    // PHNX-3292: a live LOCAL tmux pane (the exact alias, or a unique 8-hex
-    // short id) attaches immediately, before any fleet SSH — the product rule
-    // is "first unique match wins," and a pane already on this box is the
-    // fastest possible match. This applies to bare resume too, not just
-    // `--attach-only`: a prompt/mode/headless/cwd override still means the
-    // caller wants strict resume semantics (a scripted continue), so that
-    // case is excluded via wantsStrictResume.
     if (!options.agent && !options.account && !options.model && !wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
       return;
     }
@@ -276,8 +246,6 @@ export async function sessionsResumeAction(
       return;
     }
 
-    // 1. Multi-select the sessions. gutter: 6 = the multi-select cursor + checkbox
-    // ('> [x] ') that multiItemPicker prepends, so rows size to fit without wrapping.
     const cols = { ...pickerColumnsFor(sessions), gutter: 6 };
     try {
       chosen = await multiItemPicker<SessionMeta>({
@@ -311,7 +279,6 @@ export async function sessionsResumeAction(
     }
   }
 
-  // 2. Route every selection through the owning device's recovery resolver.
   const { resumable, skipped } = partitionResumableSelections(chosen, options);
   for (const s of skipped) {
     console.log(chalk.yellow(`Skipping ${s.shortId} — nothing to resume (no transcript was written).`));
@@ -323,12 +290,10 @@ export async function sessionsResumeAction(
   }
   const items = resumable.map((session) => buildSelectedResumeSurface(session, prompt, options));
 
-  // 3. Resolve the backend (and host).
   const ctx = currentContext();
   const backend = await resolveBackend(options, ctx, items.length);
   if (backend === 'cancel') return;
 
-  // 4. Guard against opening a flood of live agents.
   if (items.length > CONFIRM_THRESHOLD) {
     const proceed = await confirm({
       message: `Open ${items.length} live sessions at once?`,
@@ -337,7 +302,6 @@ export async function sessionsResumeAction(
     if (!proceed) return;
   }
 
-  // 5a. No tab-capable backend (off-macOS, not in tmux, local) — resume in place, sequentially.
   if (backend === 'inplace') {
     if (items.length > 1) {
       console.log(chalk.gray(`Resuming ${items.length} sessions one at a time (no tab-capable terminal detected).`));
@@ -346,20 +310,13 @@ export async function sessionsResumeAction(
     return;
   }
 
-  // 5b. Fan out through the engine. Full-width tabs are the default for batch
-  // recovery; callers can explicitly opt into pairs of side-by-side panes.
   const packing = resolveResumePacking(options);
   const where = options.device ? `${backend} on ${options.device}` : backend;
-  // Terminal.app has no scriptable split, so its buildSplit opens a tab. Say so
-  // when the user actually asked for panes — the layout silently not happening
-  // is worse than one line of warning.
   if (backend === 'terminal' && packing === 'two-per-tab') {
     console.log(chalk.yellow('Terminal.app cannot split panes — opening one tab per session instead.'));
   }
   console.log(chalk.gray(`Opening ${items.length} session${items.length === 1 ? '' : 's'} in ${where} (${packing})…`));
 
-  // agent + sessionId ride the SurfaceItem into the vscodium-agent spawn URI
-  // so the extension can set the tab chip without process-tree sniffing (#2478).
   const results = await openSurfaces(
     items.map((it) => ({
       cwd: it.cwd,
@@ -386,7 +343,6 @@ export async function sessionsResumeAction(
   if (opened !== items.length) process.exitCode = 1;
 }
 
-/** Preserve run options and lifecycle intent when the picker opens its selected rows. */
 export function buildSelectedResumeArgs(id: string, prompt: string | undefined, options: ResumeOptions): string[] {
   if (options.runArgs) {
     const args = [...options.runArgs];
@@ -394,7 +350,6 @@ export function buildSelectedResumeArgs(id: string, prompt: string | undefined, 
     const index = args.findIndex((arg, i) => (boundary < 0 || i < boundary) && (arg === '--resume' || arg === '--resume='));
     if (index < 0) throw new Error('The run command did not contain a bare --resume selector.');
     args.splice(index, 1, '--resume', id);
-    // The outer surface already placed this terminal on the selected device.
     if (options.device) {
       let remoteCwd: string | undefined;
       let localCwd: string | undefined;
@@ -434,18 +389,11 @@ export function buildSelectedResumeArgs(id: string, prompt: string | undefined, 
   return args;
 }
 
-/** IDs and tmux aliases are actions, not picker search text. Human phrases keep
- * the existing pre-filtered picker, while an explicit identity resumes directly. */
 export function isDirectResumeSelector(query: string): boolean {
   const selector = query.trim();
   return looksLikeSessionId(selector) || isAgentTmuxAlias(selector);
 }
 
-/**
- * Local preflight cannot inspect a peer's files or index. Leave peer validation
- * to the existing origin-device recovery hop. --here without a remote surface
- * opts into local recovery and therefore uses the local transcript guard.
- */
 export function partitionResumableSelections(
   chosen: SessionMeta[],
   options: Pick<ResumeOptions, 'here' | 'device'> = {},
@@ -459,11 +407,6 @@ export function partitionResumableSelections(
   return { resumable, skipped };
 }
 
-/** Direct identities use focus as the lifecycle dispatcher: it rechecks the
- * live fleet, attaches a healthy pane, and falls through to `agents resume`
- * only when the process is no longer attachable. */
-/** True when `sessions resume <id> --attach-only|--local` must go through
- *  `sessions focus` instead of `runStrictResume` (which can fork a copy). */
 export function resumeUsesLifecycleDispatch(
   query: string | undefined,
   prompt: string | undefined,
@@ -520,7 +463,6 @@ export function resolveResumePacking(options: Pick<ResumeOptions, 'splits'>): Pa
   return options.splits ? 'two-per-tab' : 'tabs';
 }
 
-/** Surface commands use shell words; spawnCliInPlace keeps the original argv. */
 export function buildSelectedResumeSurface(
   session: SessionMeta,
   prompt: string | undefined,
@@ -551,11 +493,6 @@ export function resumeHostMismatch(
     : `Session ${session.shortId} originated on ${origin}; --device ${requestedHost} cannot move recovery to another device.`;
 }
 
-/**
- * Decide which backend to launch into. Returns a concrete backend, `'inplace'`
- * (resume in the current process — no GUI/tmux available), or `'cancel'` (the
- * user dismissed the chooser).
- */
 export async function resolveBackend(
   options: ResumeOptions,
   ctx: EngineContext,
@@ -569,14 +506,12 @@ export async function resolveBackend(
       : options.terminalApp ? 'terminal'
       : undefined;
   if (forced) return forced;
-  // Remote defaults to tmux (headless, no GUI session assumptions); override with a backend flag.
   if (options.device) return 'tmux';
 
   const available = availableBackends(ctx);
   if (available.length === 0) return 'inplace';
 
   const detected = detectCurrentBackend(ctx);
-  // Only one option and it's where we already are → no need to ask.
   if (available.length === 1 && (!detected || detected === available[0].id)) return available[0].id;
 
   interface BackendChoice { id: Backend; label: string; detail: string; }

@@ -17,7 +17,7 @@ function makeTempDir(): string {
 
 afterEach(() => {
   for (const dir of tempDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
   tempDirs.length = 0;
   _resetForTest();
@@ -69,7 +69,6 @@ describe('applyFamilies / readUnifiedEvents', () => {
     });
     const events = rows.map((r) => r.event).sort();
     expect(events).toEqual(['run.dispatched', 'run.launch']);
-    // The pre-launch marker carries the headline logged-out flag.
     const launch = rows.find((r) => r.event === 'run.launch')!;
     expect(launch.launchedLoggedOut).toBe(true);
   });
@@ -146,7 +145,7 @@ describe('applyFamilies / readUnifiedEvents', () => {
     setup();
     emit('run.dispatched', { module: 'run', agent: 'claude', version: '1', mode: 'plan', outcome: 'ok', exitCode: 0 });
     emit('secrets.get', { module: 'secrets' });
-    emit('browser.navigate', { module: 'browser', url: 'https://example.com' }); // info — not audit
+    emit('browser.navigate', { module: 'browser', url: 'https://example.com' });
     const securityOnly = readUnifiedEvents({
       includeFamilies: ['security'],
       limit: 50,
@@ -155,13 +154,10 @@ describe('applyFamilies / readUnifiedEvents', () => {
       includeFamilies: ['security', 'runs'],
       limit: 50,
     });
-    // security alone keeps audit-level rows (secrets.get + run.dispatched)
     expect(securityOnly.some((r) => r.event === 'secrets.get')).toBe(true);
     expect(securityOnly.some((r) => r.event === 'run.dispatched')).toBe(true);
-    // adding runs must not erase security matches (the bug: runs type-filter ate secrets)
     expect(securityAndRuns.some((r) => r.event === 'secrets.get')).toBe(true);
     expect(securityAndRuns.some((r) => r.event === 'run.dispatched')).toBe(true);
-    // info browser.navigate is not in security family
     expect(securityAndRuns.some((r) => r.event === 'browser.navigate')).toBe(false);
   });
 

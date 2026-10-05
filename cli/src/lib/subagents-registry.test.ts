@@ -1,4 +1,3 @@
-// Registry shape is complete; Kimi owns only its markdown, while stale legacy sidecars remain enumerable for orphan cleanup.
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';

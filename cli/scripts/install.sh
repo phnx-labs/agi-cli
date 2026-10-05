@@ -101,13 +101,10 @@ npm install -g "$TARBALL" \
   --ignore-scripts \
   >/dev/null
 
-# Publish only suffixed dev names; production names remain owned by the registry install.
 mkdir -p "$LINK_DIR"
 
 DEV_SHADOW_MARKER='AGENTS_CLI_DEV_SHADOW_LINK'
 
-# Remove only legacy links/wrappers demonstrably owned by this dev prefix. Real
-# binaries and links to any other installation are never touched.
 cleanup_legacy_shadow() {
   local path="$1" raw
   if [[ -L "$path" ]]; then
@@ -134,8 +131,6 @@ for bin in "${PRODUCTION_BINS[@]}"; do
   done
 done
 
-# A removed legacy shadow may still be pinned in the shared daemon manifest.
-# Warn with the repair command, but never restart that service without --bounce-daemon.
 for manifest in \
   "$HOME/.config/systemd/user/agents-daemon.service" \
   "$HOME/Library/LaunchAgents/com.phnx-labs.agents-daemon.plist"

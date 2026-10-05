@@ -7,16 +7,9 @@ const { TEST_REAL_HOME } = vi.hoisted(() => {
   const { tmpdir } = require('node:os');
   const { join } = require('node:path');
   const { realpathSync } = require('node:fs');
-  // Canonicalize the tmp base so the mocked homedir() matches what
-  // realpathSync() returns inside symlinkAllowedDirs. On Windows tmpdir() is an
-  // 8.3 short name (RUNNER~1 vs runneradmin); on macOS /var symlinks to
-  // /private/var. Without this the source's HOME-containment guard sees the two
-  // forms as different and skips the link.
   return { TEST_REAL_HOME: join(realpathSync(tmpdir()), 'agents-cli-sandbox-real-home') };
 });
 
-// vi.importActual / importOriginal are vitest-only; pull the real `os` via
-// `node:os` so this mock works under Bun's native test runner too.
 vi.mock('os', () => {
   const actual = require('node:os') as typeof import('os');
   return {
@@ -121,14 +114,12 @@ describe('generateClaudeConfig', () => {
     );
     const perms = settings.permissions.allow;
 
-    // Scoped to dir, not wildcarded
     expect(perms).toContain('Read(/tmp/test-dir/**)');
     expect(perms).toContain('Write(/tmp/test-dir/**)');
     expect(perms).toContain('Edit(/tmp/test-dir/**)');
     expect(perms).toContain('Glob(/tmp/test-dir/**)');
     expect(perms).toContain('Grep(/tmp/test-dir/**)');
 
-    // No wildcards
     expect(perms).not.toContain('Read(*)');
     expect(perms).not.toContain('Write(*)');
     expect(perms).not.toContain('Edit(*)');
@@ -238,13 +229,9 @@ describe('generateCodexConfig', () => {
   });
 });
 
-// generateGeminiConfig was removed with RUSH-2202: gemini is hard-deprecated
-// and a gemini routine is now rejected in runner.ts before it ever reaches
-// prepareJobHome, so there is no sandbox-config writer left to test here.
 
 describe('symlinkAllowedDirs', () => {
   const overlayHome = join(TEST_DIR, 'symlink-overlay');
-  // Must be inside homedir() so symlinkAllowedDirs treats it as HOME-relative.
   const realDir = join(homedir(), '.agents-cli-test-symlink-target');
 
   beforeEach(() => {
@@ -262,9 +249,6 @@ describe('symlinkAllowedDirs', () => {
 
     const expectedLink = join(overlayHome, relative(homedir(), realDir));
     expect(existsSync(expectedLink)).toBe(true);
-    // Node reports a Windows junction as a symbolic link (a reparse point maps to
-    // S_IFLNK), so isSymbolicLink() holds on both POSIX (symlink) and Windows
-    // (junction).
     expect(lstatSync(expectedLink).isSymbolicLink()).toBe(true);
   });
 
@@ -318,9 +302,6 @@ describe('buildSpawnEnv', () => {
     delete process.env.OPENAI_API_KEY;
   });
 
-  // The daemon holds no Claude token; the sandbox strips CLAUDE_CODE_OAUTH_TOKEN
-  // from the ambient env — routines authenticate via the per-account
-  // CLAUDE_CONFIG_DIR login, not an injected token.
   it('does not forward CLAUDE_CODE_OAUTH_TOKEN', () => {
     const original = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-test';

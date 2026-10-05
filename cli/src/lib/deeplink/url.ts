@@ -22,7 +22,7 @@ export function isDeepLinkSessionId(raw: string): boolean {
 }
 
 export function parseAgentsUrl(input: string): AgentsSessionLink | AgentsUrlError {
-  // Treat URLs as hostile: accept only the strict session grammar before returning identifiers.
+
   const raw = (input ?? '').trim();
   if (!raw) return { error: 'empty URL' };
 

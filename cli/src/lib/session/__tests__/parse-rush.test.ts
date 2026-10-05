@@ -1,8 +1,3 @@
-/**
- * Verifies parseRush normalizes the flat rush messages.jsonl format to the
- * shared SessionEvent shape, and detectAgent routes both local and cloud
- * filename conventions to the right parser.
- */
 
 import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
@@ -162,7 +157,6 @@ describe('detectAgent routes rush paths', () => {
         created_at: '2026-04-22T10:00:00Z',
       }) + '\n';
 
-    // Simulate a cloud cache file — dispatch uses detectAgent on the path.
     const cacheDir = path.join(os.tmpdir(), `cloud-${Date.now()}`);
     fs.mkdirSync(cacheDir, { recursive: true });
     const p = path.join(cacheDir, 'session.rush.jsonl');

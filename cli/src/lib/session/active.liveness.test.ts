@@ -14,7 +14,6 @@ describe('isPidAlive pid-reuse guard', () => {
   });
 
   it('reports a non-existent pid as dead', () => {
-    // 2^31-ish: above any real pid, so process.kill throws ESRCH.
     expect(isPidAlive(2_000_000_000)).toBe(false);
   });
 
@@ -23,15 +22,9 @@ describe('isPidAlive pid-reuse guard', () => {
   });
 
   it('keeps a live process alive within the reuse tolerance', () => {
-    // Session recorded 30s ago, process is still that one — under the 60s window.
     expect(isPidAlive(process.pid, Date.now() - 30_000)).toBe(true);
   });
 
-  // The zombie: the pid is alive, but its process began long AFTER the session's
-  // recorded start — i.e. the OS recycled the pid. Passing an ancient startedAtMs
-  // against our own (just-started) process reproduces exactly that shape.
-  // Skipped on Windows, where processStartMs returns null and we fall back to a
-  // bare existence check by design.
   posixOnly('reports a reused pid as dead (process far newer than recorded start)', () => {
     expect(isPidAlive(process.pid, 1000)).toBe(false);
   });

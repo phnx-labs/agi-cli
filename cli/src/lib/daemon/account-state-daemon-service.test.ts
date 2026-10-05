@@ -1,14 +1,3 @@
-/**
- * Account usage/auth services (PHNX-3608): usage and auth refresh now run as TWO
- * independent supervised PeriodicServices — `AccountUsageService` (`account-state`)
- * and `AccountAuthService` (`account-auth`) — each with its own per-tick deadline,
- * AbortSignal, and circuit breaker, replacing the old un-deadlined dual-`setInterval`
- * loop whose `usageRunning` latch could hang forever (the 12h usage-dark root cause).
- * Independent services mean a run of usage THROWS keeps usage ticking without ever
- * starving the slower auth refresh, and a usage HANG exits the daemon for a
- * supervised restart (PHNX-4116). Driven through the real ServiceSupervisor so the
- * deadline/abort/exit-on-breach path is exercised, not stubbed.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -53,16 +42,14 @@ describe('AccountUsageService / AccountAuthService', () => {
     supervisor.register(new AccountAuthService(auth));
 
     await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // immediate first tick for both
+    await vi.advanceTimersByTimeAsync(0);
     expect(usage).toHaveBeenCalledTimes(1);
     expect(auth).toHaveBeenCalledTimes(1);
 
-    // One usage interval later: usage ticks again, auth does not (slower cadence).
     await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS);
     expect(usage).toHaveBeenCalledTimes(2);
     expect(auth).toHaveBeenCalledTimes(1);
 
-    // Reach the auth interval: auth ticks again.
     await vi.advanceTimersByTimeAsync(AUTH_STATE_TICK_MS - USAGE_STATE_TICK_MS);
     expect(auth).toHaveBeenCalledTimes(2);
 
@@ -93,17 +80,14 @@ describe('AccountUsageService / AccountAuthService', () => {
     supervisor.register(new AccountAuthService(auth));
 
     await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // tick #1 throws
-    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS); // #2 throws
-    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS); // #3 throws
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS);
+    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS);
 
     const health = supervisor.health();
-    // A throw is recoverable — usage keeps ticking on its interval, never parked,
-    // and the daemon is never exited for it.
     expect(health['account-state'].state).toBe('running');
     expect(health['account-state'].consecutiveFailures).toBeGreaterThanOrEqual(3);
     expect(health['account-state'].lastError).toMatch(/usage boom/);
-    // Auth is untouched by usage's failures — the whole point of the split.
     expect(health['account-auth'].state).toBe('running');
     expect(auth).toHaveBeenCalled();
     expect(exit).not.toHaveBeenCalled();
@@ -113,16 +97,14 @@ describe('AccountUsageService / AccountAuthService', () => {
 
   it('a hung usage refresh breaches its deadline and exits the daemon for a supervised restart (12h usage-dark fix, PHNX-4116)', async () => {
     const exit = vi.fn();
-    const usage = vi.fn(async () => new Promise<void>(() => {})); // never settles
+    const usage = vi.fn(async () => new Promise<void>(() => {}));
     const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     supervisor.register(new AccountUsageService(usage));
 
     await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // first tick — usage hangs
+    await vi.advanceTimersByTimeAsync(0);
     expect(usage).toHaveBeenCalledTimes(1);
 
-    // The 2-minute deadline elapses -> the supervisor exits, rather than latching
-    // forever (the old 12h usage-dark wedge) or parking.
     await vi.advanceTimersByTimeAsync(2 * 60_000);
     expect(exit).toHaveBeenCalledWith(70);
 
@@ -181,7 +163,6 @@ describe('account auth transition notification', () => {
     expect(delivered).toHaveLength(1);
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
     expect(Object.keys(state.entries)).toEqual(['claude:acct-work']);
-    // The label stays on the delivered transition for display only.
     expect(delivered[0].account).toBe('shared@example.com');
   });
 
@@ -202,22 +183,17 @@ describe('account auth transition notification', () => {
     }];
 
     await processAccountAuthTransitions(row('live', 1), { stateFile, notify });
-    // The failed delivery throws (the supervisor must see the unhealthy tick)…
     await expect(processAccountAuthTransitions(row('expired', 2), { stateFile, notify }))
       .rejects.toThrow(/kept in the outbox/);
     expect(sent).toEqual([]);
-    // …and the pending entry is durable even though delivery failed.
     expect(JSON.parse(fs.readFileSync(stateFile, 'utf-8')).pending['claude:work'])
       .toMatchObject({ verdict: 'expired' });
 
-    // Next tick: same verdict (expired → expired, no new transition), yet the
-    // outbox entry is retried and now succeeds exactly once.
     fail = false;
     expect(await processAccountAuthTransitions(row('expired', 3), { stateFile, notify })).toHaveLength(1);
     expect(sent).toEqual(['claude:work:expired']);
     expect(JSON.parse(fs.readFileSync(stateFile, 'utf-8')).pending).toEqual({});
 
-    // A later tick does not re-send.
     expect(await processAccountAuthTransitions(row('expired', 4), { stateFile, notify })).toEqual([]);
     expect(sent).toEqual(['claude:work:expired']);
   });
@@ -247,8 +223,6 @@ describe('account auth transition notification', () => {
         sessions: { rows: [] },
         accounts: {
           rows: [{
-            // The stable registry id is the identity; the email rides along as
-            // the display label only.
             accountId: 'acct-work',
             identityLabel: 'work@example.com',
             harness: 'claude',

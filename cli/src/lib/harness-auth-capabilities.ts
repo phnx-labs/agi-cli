@@ -1,5 +1,3 @@
-// This table is complete for every agent: workers may use portable setup/API tokens but never rotating native sessions; headed devices retain native auth.
-// Login invocations contain only finite real commands.
 import type { AgentId } from './types.js';
 
 type HarnessIdentityKind = 'strong' | 'email' | 'opaque';

@@ -137,7 +137,7 @@ function existingDirectory(dir: string | undefined): string | undefined {
 }
 
 function resolveOwnedTranscriptRealpath(filePath: string, homeRoot: string, agent: AgentId): string | null {
-  // Native resume requires the transcript to resolve inside the proven account home; retained backups are continue-only.
+
   let realFile: string;
   try {
     realFile = fs.realpathSync(splitSessionFilePath(filePath).container);
@@ -182,7 +182,7 @@ function candidateHome(candidate: RotateCandidate): string {
 }
 
 function candidateOwnsTranscript(candidate: RotateCandidate, session: SessionMeta): boolean {
-  // A provider credential alone is not transcript-ownership evidence.
+
   if (candidate.providerAccount && !session.accountId) return false;
   const home = candidateHome(candidate);
   const acctId = candidateAccountId(candidate);
@@ -317,7 +317,6 @@ function resolveExplicitAccountRecovery(
   };
 }
 
-// Native rotation is confined to one proven context; signed-out or revoked origins fall back to /continue.
 export function resolveSessionRecoveryFromCandidates(
   session: SessionMeta,
   candidates: RotateCandidate[],
@@ -339,7 +338,7 @@ export function resolveSessionRecoveryFromCandidates(
   const originLimited = !!originReadiness && !originReadiness.ready
     && (originReadiness.reason === 'rate_limited' || originReadiness.reason === 'out_of_credits' || originReadiness.reason === 'model_limited');
   if (originLimited && source && supportsNative(agent, options.executableVersion ?? source.version)) {
-    // Rotation may inject another provider credential only into the same proven native session context.
+
     const originHome = candidateHome(source);
     const inspection = nativeInspection ?? inspectNativeResumeSession(session, originHome);
     if (inspection.available) {

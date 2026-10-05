@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isRushSessionExpired } from './rush-session.js';
 
-// expires_at=0 is non-expiring; every other present value is Unix milliseconds.
+
 describe('isRushSessionExpired', () => {
   it('treats expires_at: 0 as non-expiring (Phoenix pid_ bearer, PHNX-3645)', () => {
     expect(isRushSessionExpired(0)).toBe(false);

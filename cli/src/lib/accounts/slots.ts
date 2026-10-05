@@ -17,7 +17,7 @@ export type { DeviceAccountSlot };
 const AUTH_MODES: readonly AccountAuthMode[] = ['native', 'durable', 'per-device'];
 
 export function slotDir(harness: AgentId, accountId: string): string {
-  // Slots are device-local projections; native OAuth credentials are never copied into them.
+
   if (!isAgentId(harness)) throw new Error(`Unknown harness '${harness}' for a slot dir.`);
   if (!accountId || /[\\/]|\.\./.test(accountId)) {
     throw new Error(`Invalid account id '${accountId}' for a slot dir.`);
@@ -149,7 +149,7 @@ export function projectAccountSlots(harness: AgentId): SlotProjection[] {
 }
 
 export function ensureSlot(harness: AgentId, accountId: string): DeviceAccountSlot {
-  // Project settings/resources only. Authentication is provisioned by the owning flow.
+
   harnessAuth(harness);
   const dir = slotDir(harness, accountId);
   fs.mkdirSync(path.join(dir, agentConfigDirName(harness)), { recursive: true });
