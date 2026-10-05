@@ -1,12 +1,3 @@
-/**
- * Antigravity (`agy`) parser tests.
- *
- * Antigravity's streaming-json mode is unstable upstream
- * (google-antigravity/antigravity-cli#7), so normalizeAntigravity is
- * intentionally defensive: it covers plain-string output, init/message/result
- * shapes if/when JSON streaming lands, and falls back to a raw passthrough for
- * anything unrecognized. These tests pin that contract.
- */
 import { describe, expect, it } from 'vitest';
 import { normalizeEvents } from '../parsers.js';
 

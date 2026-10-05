@@ -19,7 +19,6 @@ describe("bench result storage", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "bench-storage-"));
     saveRun(result("older", "2026-08-05T01:00:00.000Z"), root);
     const target = saveRun(result("newer", "2026-08-05T02:00:00.000Z"), root);
-    // Windows does not implement Unix permission bits the same way.
     if (process.platform !== "win32") {
       expect(fs.statSync(target).mode & 0o777).toBe(0o600);
     }

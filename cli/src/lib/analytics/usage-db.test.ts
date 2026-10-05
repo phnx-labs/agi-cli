@@ -44,7 +44,7 @@ afterEach(() => {
   if (prevSecretsDb === undefined) delete process.env.AGENTS_SECRETS_DB;
   else process.env.AGENTS_SECRETS_DB = prevSecretsDb;
   for (const d of tmpDirs) {
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {  }
   }
   tmpDirs.length = 0;
 });

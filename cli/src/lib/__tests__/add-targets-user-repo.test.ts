@@ -1,10 +1,3 @@
-/**
- * `agents <kind> add` writes to the user repo (~/.agents/<kind>/), not the
- * system repo (~/.agents-system/<kind>/). The system repo is read-only from
- * user commands; npm updates ship its content. This test asserts the target
- * path is the user repo for command and skill installs, which is the
- * load-bearing user-flow change in the foundation refactor.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,12 +7,6 @@ let TEST_ROOT: string;
 let SYSTEM_DIR: string;
 let USER_DIR: string;
 
-// Spread the REAL module and override only the directory resolvers this test
-// needs redirected. The previous form hand-listed every export, so adding one to
-// state.ts broke this file with `No "<name>" export is defined on the mock` --
-// which is how `getCliVersionCachePath` took the whole file down on main. A
-// partial mock that enumerates its surface is a maintenance trap; this one
-// tracks the module automatically.
 vi.mock('../state.js', async (importActual) => ({
   ...(await importActual<typeof import('../state.js')>()),
   get getAgentsDir() { return () => SYSTEM_DIR; },
@@ -70,7 +57,6 @@ describe('agents X add writes to user repo', () => {
     const result = installCommandCentrally(sourcePath, 'mycmd');
 
     expect(result.success).toBe(true);
-    // The target path lives under the user repo, not the system repo.
     expect(result.path.startsWith(USER_DIR)).toBe(true);
     expect(result.path.startsWith(SYSTEM_DIR)).toBe(false);
     expect(fs.existsSync(path.join(USER_DIR, 'commands', 'mycmd.md'))).toBe(true);
@@ -85,7 +71,6 @@ describe('agents X add writes to user repo', () => {
     const result = installCommandCentrally(sourcePath, 'fresh');
 
     expect(result.success).toBe(true);
-    // installCommandCentrally must mkdirp the user dir, not fall back to system.
     expect(fs.existsSync(path.join(USER_DIR, 'commands', 'fresh.md'))).toBe(true);
     expect(fs.existsSync(path.join(SYSTEM_DIR, 'commands', 'fresh.md'))).toBe(false);
   });

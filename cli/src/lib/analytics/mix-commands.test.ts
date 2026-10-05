@@ -1,8 +1,3 @@
-/**
- * Mix tree registration — real commander, no mocks.
- * Covers the insights-owned mix path: the board, `mix <recipe>`, and `mix --list`
- * (the former standalone recipe shortcuts, `recipes`, and `trends` are gone).
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -10,9 +5,6 @@ import * as path from 'path';
 import { Command } from 'commander';
 import Database from '../sqlite.js';
 import { closeUsageDb, recordUsage } from './usage-db.js';
-// Build the FULL `insights` parent (which owns --json/--since/--by) so the
-// parent↔leaf option-name collision these commands hit in production is
-// exercised, not a bare stand-in parent that never collides.
 import { registerInsightsCommand } from '../../commands/insights.js';
 
 const tmpDirs: string[] = [];
@@ -70,7 +62,7 @@ afterEach(() => {
   if (prevSessionsDb === undefined) delete process.env.AGENTS_SESSIONS_DB;
   else process.env.AGENTS_SESSIONS_DB = prevSessionsDb;
   for (const d of tmpDirs) {
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {  }
   }
   tmpDirs.length = 0;
 });
@@ -161,9 +153,6 @@ describe('mix consolidates recipes/trends/shortcuts into one command', () => {
 });
 
 describe('insights subcommands honor --json despite the parent-option collision', () => {
-  // --json collides by long-name with the `insights` parent, so commander binds
-  // it to the parent; each leaf must read optsWithGlobals() or it prints the
-  // human table (invalid for machine callers). Regression for the whole group.
   for (const argv of [['mix'], ['mix', 'harness-mix'], ['mix', '--list'], ['query']]) {
     it(`agents insights ${argv.join(' ')} --json emits parseable JSON`, async () => {
       const program = new Command();

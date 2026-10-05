@@ -1,17 +1,3 @@
-/**
- * Counter / warehouse mix recipes under `agents insights`.
- *
- * These used to live as the top-level `agents trends` tree. That name was a
- * peer of `agents insights` with overlapping "analytics" meaning, so agents and
- * humans kept picking the wrong verb. The cheap counter path (sessions index +
- * usage.db) still exists — it is now `agents insights mix`. Latency stays on
- * `agents insights perf`; quota on `agents view`.
- *
- * One surface, not five: the board is `agents insights mix`, one section is
- * `agents insights mix <recipe>`, and `--list` names the recipe ids. The former
- * per-recipe shortcut commands (`harness-mix`, `model-mix`, …), the `recipes`
- * lister, and the `trends` alias were removed — `mix` already did all three.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -79,15 +65,6 @@ function renderMixDashboard(days: number, asJson: boolean, bannerLabel = 'agents
   for (const section of dash.sections) printMixSection(section);
 }
 
-/**
- * Attach counter-mix subcommands to a parent (typically `insights`).
- *
- * Layout:
- *   <parent> mix                 multi-recipe board
- *   <parent> mix <recipe>        one baked recipe (harness-mix, model-mix, …)
- *   <parent> mix --list          list recipe ids
- *   <parent> query               raw usage.db rows
- */
 export function registerMixCommands(parent: Command): void {
   const banner = 'agents insights mix';
 
@@ -98,9 +75,6 @@ export function registerMixCommands(parent: Command): void {
     .option('--list', 'List baked recipe ids and exit')
     .option('--json', 'Emit JSON instead of tables')
     .action(function summary(this: Command, recipe: string | undefined) {
-      // optsWithGlobals(): --json collides by name with the `insights` parent, so
-      // commander binds it to the parent and this.opts() never sees it. Merging
-      // ancestor opts is what the per-recipe path below already does.
       const o = this.optsWithGlobals() as MixOpts & { list?: boolean };
       if (o.list) {
         const list = listRecipes();

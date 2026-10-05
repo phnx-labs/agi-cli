@@ -79,8 +79,6 @@ describe('generateCodexConfig', () => {
 });
 
 describe('generateCursorConfig', () => {
-  // Symlinks require elevated privileges on Windows; the underlying function
-  // uses a symlink, so the same-host behavior cannot be exercised in CI there.
   it.skipIf(process.platform === 'win32')('links the same-host Cursor auth file into the overlay', () => {
     const overlayHome = createOverlayHome();
     const realHome = createOverlayHome();

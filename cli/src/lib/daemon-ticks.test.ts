@@ -1,13 +1,3 @@
-/**
- * daemon-ticks.ts holds the daemon's account-state tick bodies (usage + fleet
- * auth), which the supervised `AccountStateDaemonService` runs on its tick in-process.
- * `isFreshFleetAuthSnapshot` is the freshness predicate the on-demand fleet auth
- * refresh uses to decide whether a recent daemon publication already satisfies a
- * request or a fresh provider probe is needed — the risky bit worth pinning.
- *
- * `runActiveSessionsWarmTick` is the continuous journal writer `sessions watch`
- * depends on (RUSH-2484). Without it Factory freezes after the initial snapshot.
- */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -48,13 +38,11 @@ describe('isFreshFleetAuthSnapshot', () => {
 describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, does not re-hit /oauth/usage every 3min (RUSH-2998)', () => {
   const now = 100 * 60_000;
   const row = (checkedAt: number, version = '1.0.0') => ({ agent: 'claude' as const, version, health: { verdict: 'live' as const, checkedAt } });
-  /** The (agent, version) homes that still exist on the box — what the probe enumerates. */
   const installed = (...versions: string[]) => new Set(versions.map((v) => authTargetKey('claude', v)));
   const only1_0_0 = installed('1.0.0');
 
   it('reuses a verdict probed within the 20-minute window', () => {
     expect(isCachedFleetAuthProbeFresh([row(now - 5 * 60_000)], now, only1_0_0)).toBe(true);
-    // Exactly at the boundary is stale (strict <), so the tick re-probes.
     expect(isCachedFleetAuthProbeFresh([row(now - AUTH_PROBE_MAX_AGE_MS)], now, only1_0_0)).toBe(false);
     expect(isCachedFleetAuthProbeFresh([row(now - (AUTH_PROBE_MAX_AGE_MS + 60_000))], now, only1_0_0)).toBe(false);
   });
@@ -67,14 +55,10 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
     expect(isCachedFleetAuthProbeFresh([row(now - 60_000), row(now - (AUTH_PROBE_MAX_AGE_MS + 1), '1.1.0')], now, installed('1.0.0', '1.1.0'))).toBe(false);
   });
 
-  // force=true is the on-demand `agents devices ping [--strict]` contract: it must
-  // NEVER reuse the throttled cached verdict, or --strict silently passes a revoked
-  // account whose cache row is still inside the 20-minute window. Both runFleetPing
-  // call sites pass force:true for exactly this reason (RUSH-2998).
   it('force always re-probes, even against a perfectly fresh cache', () => {
     const freshCache = [row(now - 60_000)];
-    expect(shouldReuseCachedAuthProbe(false, freshCache, now, only1_0_0)).toBe(true);  // periodic tick reuses
-    expect(shouldReuseCachedAuthProbe(true, freshCache, now, only1_0_0)).toBe(false);  // on-demand ping re-probes
+    expect(shouldReuseCachedAuthProbe(false, freshCache, now, only1_0_0)).toBe(true);
+    expect(shouldReuseCachedAuthProbe(true, freshCache, now, only1_0_0)).toBe(false);
   });
 
   it('force never rescues an empty or stale cache into a reuse either', () => {
@@ -83,14 +67,6 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
     expect(shouldReuseCachedAuthProbe(false, [row(now - (AUTH_PROBE_MAX_AGE_MS + 1))], now, only1_0_0)).toBe(false);
   });
 
-  // PHNX-4051. The cache holds a row per (agent, version) home ever probed, and
-  // nothing deletes one when its version is uninstalled — the probe only walks
-  // homes that EXIST, so that row's checkedAt freezes. Counting it made this
-  // predicate permanently false on yosemite-m0 (rows dated Sep 2 / Sep 6 for
-  // uninstalled Claude versions), so the 3-minute tick live-probed
-  // /api/oauth/usage for every account forever, re-arming the per-account 429
-  // park (usage-backoff/) that keeps the usage refresher stopped — the exact
-  // RUSH-2998 failure the 20-minute window prevents.
   describe('orphan rows for uninstalled versions (PHNX-4051)', () => {
     const weeksOld = now - 9 * 24 * 60 * 60_000;
 
@@ -117,11 +93,6 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
   });
 });
 
-/**
- * PHNX-4051 — the other half: an orphan must also LEAVE the cache, or `agents
- * view` and fleet status keep rendering a verdict for a version that is gone.
- * Real cache file, real lock, hermetic HOME (tests/setup.ts).
- */
 describe('writeFleetAuthRows prunes this host\'s orphan rows (PHNX-4051)', () => {
   const health = (checkedAt: number) => ({ verdict: 'live' as const, checkedAt });
   const probed = (version: string, checkedAt: number): AuthProbeRow => ({ agent: 'claude', version, health: health(checkedAt) });
@@ -129,7 +100,6 @@ describe('writeFleetAuthRows prunes this host\'s orphan rows (PHNX-4051)', () =>
   it('drops rows whose (agent, version) home is gone, keeps the installed ones and other hosts', () => {
     const self = machineId();
     const now = Date.now();
-    // Seed the cache the way a box that has uninstalled two versions looks.
     writeAuthHealthEntries({
       [authCacheKey(self, 'claude', '1.0.0')]: health(now - 40 * 60_000),
       [authCacheKey(self, 'claude', '0.9.0')]: health(now - 9 * 24 * 60 * 60_000),
@@ -141,8 +111,6 @@ describe('writeFleetAuthRows prunes this host\'s orphan rows (PHNX-4051)', () =>
 
     expect(readFleetAuthRows(self).map((r) => r.version).sort()).toEqual(['1.0.0']);
     expect(readFleetAuthRows(self)[0]!.health.checkedAt).toBe(now);
-    // A peer's rows are written by the fleet-ping fan-out, which cannot enumerate
-    // that box's homes — pruning this host must never touch them.
     expect(readFleetAuthRows('peer-box').map((r) => r.version)).toEqual(['0.9.0']);
   });
 
@@ -187,10 +155,6 @@ describe('runActiveSessionsWarmTick', () => {
   });
 
   it('gathers exactly ONCE per tick', async () => {
-    // The tick is gather -> fold the timelines -> publish (PHNX-3939). The fold
-    // needs the rows, and the publish must not re-gather them: a second live
-    // gather is ~9s of `ps`/`lsof` on this fleet, and it would also mean the
-    // published row was folded from a different snapshot than the one it carries.
     noteActiveSessionsJournalReader();
     let gathers = 0;
     await runActiveSessionsWarmTick({ gather: async () => { gathers++; return []; } });
@@ -202,7 +166,6 @@ describe('runActiveSessionsWarmTick', () => {
     const r = await runActiveSessionsWarmTick({ gather: async () => { gatherCalled = true; return []; } });
     expect(r.sessions).toBe(0);
     expect(gatherCalled).toBe(false);
-    // Snapshot must remain absent — the gather was skipped entirely.
     expect(readActiveSessionsCache('local')).toBeNull();
   });
 
@@ -216,15 +179,12 @@ describe('runActiveSessionsWarmTick', () => {
   });
 
   it('gathers immediately after a reader signals presence mid-idle', async () => {
-    // First tick — idle, no gather.
     const r1 = await runActiveSessionsWarmTick({ gather: async () => [] });
     expect(r1.sessions).toBe(0);
     expect(readActiveSessionsCache('local')).toBeNull();
 
-    // Reader connects and notes itself.
     noteActiveSessionsJournalReader();
 
-    // Next tick — gathers and publishes.
     let gatherCalled = false;
     const r2 = await runActiveSessionsWarmTick({ gather: async () => { gatherCalled = true; return []; } });
     expect(r2.sessions).toBe(0);
@@ -274,9 +234,6 @@ describe('isActiveSessionsJournalReaderRecent', () => {
   });
 });
 
-// `runSessionIndexWarmTick` is covered by daemon-ticks.session-index.test.ts,
-// which must redirect HOME before the session modules load (they capture it at
-// import time) — so it needs its own file rather than a suite here.
 
 describe('runUsageRefreshTick — every host is its own publisher (RUSH-3193 #15)', () => {
   it('runs the local refresh unconditionally, with no primary/subscriber envelope in its report', async () => {
@@ -290,9 +247,6 @@ describe('runUsageRefreshTick — every host is its own publisher (RUSH-3193 #15
     }
     const line = logs.find((l) => l.startsWith('usage refresh:'));
     expect(line).toBeDefined();
-    // The old envelope-shaped report ("imported N account(s) from primary host
-    // X" or "published N account(s)") is gone — this host always ran its own
-    // local refresh, never a cross-host import.
     expect(line).not.toMatch(/imported \d+ account\(s\) from primary host/);
     expect(line).not.toMatch(/published \d+ account\(s\)/);
     expect(line).toMatch(/refreshed, .* failed, .* not-due, .* backed-off, .* capped, .* over-budget, .* statusline-fresh; BYOK/);

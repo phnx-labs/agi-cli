@@ -1,7 +1,3 @@
-/**
- * Brand helpers — reserved names must block agent CLI collisions without
- * pulling agents.ts into the eager bootstrap graph (RUSH-2331).
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -53,7 +49,6 @@ describe('disabledCommandsForActiveBrand', () => {
 describe('eager graph (RUSH-2331)', () => {
   it('brand.ts source does not statically import agents.js', () => {
     const src = fs.readFileSync(brandSrcPath, 'utf-8');
-    // Strip block comments so a doc reference to agents.js does not trip this.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     expect(code).not.toMatch(/from\s+['"]\.\/agents\.js['"]/);
     expect(code).toMatch(/from\s+['"]\.\/agent-cli-commands\.js['"]/);
@@ -68,8 +63,6 @@ describe('reservedBrandNames / validateBrandName (RUSH-2331)', () => {
     for (const cmd of AGENT_CLI_COMMANDS) {
       expect(reserved.has(cmd)).toBe(true);
     }
-    // Live AGENTS table must agree — the leaf list is the source for brand,
-    // but a harness rename that forgets agent-cli-commands.ts must fail here.
     for (const id of ALL_AGENT_IDS) {
       expect(reserved.has(AGENTS[id].cliCommand)).toBe(true);
     }

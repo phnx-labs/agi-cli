@@ -9,8 +9,6 @@ describe('computeActor', () => {
       AGENTS_ACTOR_NAME: 'Bisma',
       AGENTS_ACTOR_EMAIL: 'bisma@example.com',
       AGENTS_ACTOR_GITHUB: 'bisma',
-      // An SSH_CONNECTION is present but must be ignored: inheritance wins so the
-      // whole spawn tree shares one actor and we never shell out again.
       SSH_CONNECTION: '100.64.0.9 51000 100.64.0.1 22',
     };
     expect(computeActor(env)).toEqual<ResolvedActor>({
@@ -58,8 +56,6 @@ describe('computeActor', () => {
   });
 
   it('does not shell out (whois or self) when SSH_CONNECTION is present but malformed', () => {
-    // SSH_CONNECTION is set, so this is an SSH session, not a local run: the self
-    // fallback must stay off even though the connection string is unparseable.
     const actor = computeActor(
       { SSH_CONNECTION: 'garbage' },
       { whois: () => ({ login: 'x' }), self: () => ({ login: 'boxowner@example.com' }), session: () => null },
@@ -86,10 +82,10 @@ describe('actorFromIdentity (the SSH-resolved enrich/override path)', () => {
       'muqsitnawaz@gmail.com': { name: 'Muqsit Nawaz', email: 'muqsit@company.com', github: 'muqsitnawaz' },
     };
     const actor = actorFromIdentity(whoMuqsit, 'h', actors);
-    expect(actor.name).toBe('Muqsit Nawaz');       // overrides DisplayName
-    expect(actor.email).toBe('muqsit@company.com'); // overrides the login email
+    expect(actor.name).toBe('Muqsit Nawaz');
+    expect(actor.email).toBe('muqsit@company.com');
     expect(actor.github).toBe('muqsitnawaz');
-    expect(actor.id).toBe('muqsitnawaz@gmail.com'); // id stays the tailnet login
+    expect(actor.id).toBe('muqsitnawaz@gmail.com');
   });
 
   it('matches an entry by its explicit login field, case-insensitively', () => {
@@ -109,7 +105,7 @@ describe('actorFromIdentity (the SSH-resolved enrich/override path)', () => {
     const actors = { 'muqsitnawaz@gmail.com': { email: 'muqsit@getrush.ai', phoenixId: 'muqsit' } };
     const actor = actorFromIdentity(whoMuqsit, 'h', actors);
     expect(actor.phoenixId).toBe('muqsit');
-    expect(actor.id).toBe('muqsitnawaz@gmail.com'); // id stays the tailnet login
+    expect(actor.id).toBe('muqsitnawaz@gmail.com');
   });
 
   it('leaves phoenixId undefined for a login with no actors entry', () => {
@@ -177,7 +173,6 @@ describe('actorEnv', () => {
     };
     const env = actorEnv(actor);
     expect(env.AGENTS_ACTOR_PHOENIX_ID).toBe('muqsit');
-    // Inheritance wins before any tailscale shell-out, so no resolvers needed.
     expect(computeActor(env)).toEqual(actor);
   });
 
@@ -192,7 +187,6 @@ describe('actorEnv', () => {
     const env = actorEnv(actor);
     expect(env.AGENTS_ACTOR_AVATAR).toBe('https://lh3.googleusercontent.com/a/abc=s96-c');
     expect(computeActor(env)).toEqual(actor);
-    // A non-https inherited value is not an avatar.
     expect(computeActor({ ...env, AGENTS_ACTOR_AVATAR: 'javascript:alert(1)' }).avatarUrl).toBeUndefined();
   });
 
@@ -207,10 +201,6 @@ describe('actorEnv', () => {
     expect(computeActor(actorEnv(actor))).toEqual(actor);
   });
 
-  // RUSH-2017/2028: two distinct origin identities must forward two distinct
-  // git-author credits across the SSH hop. Before the dispatch fix both runs
-  // re-resolved on the remote from the shared box's SSH_CONNECTION and collapsed
-  // to one actor — this pins that they stay separate through actorEnv.
   it('two different resolved actors produce two different forwarded git identities', () => {
     const alice = actorEnv(computeActor({
       AGENTS_ACTOR: 'alice@example.com', AGENTS_ACTOR_KIND: 'human',

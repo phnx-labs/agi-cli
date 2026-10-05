@@ -3,10 +3,6 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-// Regression guard for the menu-bar "not installed" bug: a launchd/cron process
-// runs with a minimal PATH that omits ~/.agents/.cache/shims, so a bare PATH
-// lookup false-flags every shim-based CLI as missing. Detection must resolve the
-// canonical shims dir directly, independent of PATH.
 describe('checkCliAvailable — shims-dir detection', () => {
   let tmpHome: string;
   let origHome: string | undefined;
@@ -53,10 +49,6 @@ describe('checkCliAvailable — shims-dir detection', () => {
     expect(err).toMatch(/not found in PATH/);
   });
 
-  // The false-positive that made `teams doctor` say installed:true while the agent
-  // ENOENT'd at spawn: a shim file exists, but the resolved default version has no
-  // real binary (a partial/raced npm extract left a stub version dir). Doctor must
-  // report the truth, not just "a shim file is present".
   it('reports NOT installed when the shim exists but the default version binary is missing', async () => {
     process.env.HOME = tmpHome;
     process.env.PATH = '';
@@ -66,7 +58,7 @@ describe('checkCliAvailable — shims-dir detection', () => {
 
     vi.resetModules();
     const versions = await import('../installations/versions.js');
-    versions.setGlobalDefault('claude', '9.9.9'); // pinned default with no installed binary
+    versions.setGlobalDefault('claude', '9.9.9');
     const { checkCliAvailable } = await import('./agents.js');
     const [installed, err] = checkCliAvailable('claude' as never);
 

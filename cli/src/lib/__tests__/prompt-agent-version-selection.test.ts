@@ -1,14 +1,3 @@
-/**
- * Tests for promptAgentVersionSelection's non-interactive behavior.
- *
- * The prompt path is interactive-only; previously, non-TTY callers were
- * silently routed into the auto-pick path. That hid scripted misuse (no
- * --agents, no --yes, piped stdin) behind a "default version" pick that
- * users couldn't predict from the docs.
- *
- * After PR 3 (matches @all syntax), non-TTY + !skipPrompts must throw
- * with a message that points at --agents claude@all / all.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -80,9 +69,6 @@ describe('promptAgentVersionSelection — non-interactive guards', () => {
     Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
 
     const prompt = await loadPrompt();
-    // The exact version picked depends on global meta state we don't mock
-    // here. What this test guarantees is that skipPrompts: true bypasses
-    // the non-TTY throw and returns claude in the agent set.
     const result = await prompt(['claude'], { skipPrompts: true });
 
     expect(result.selectedAgents).toEqual(['claude']);
@@ -90,8 +76,6 @@ describe('promptAgentVersionSelection — non-interactive guards', () => {
   });
 
   it('returns empty selections when no capable agents are installed', async () => {
-    // No installs at all — both interactive and non-interactive paths short-
-    // circuit before hitting the TTY check.
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
     Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
 

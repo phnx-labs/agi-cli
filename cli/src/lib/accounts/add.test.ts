@@ -178,8 +178,6 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
   beforeEach(() => {
     prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
     process.env.AGENTS_SYNC_MACHINE_ID = DEVICE;
-    // Headed role so the worker gate does not break the happy path when this
-    // file runs on a worker or unmarked box.
     setConfiguredDeviceRole(DEVICE, 'personal');
     reset();
   });
@@ -190,7 +188,7 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
     if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
     else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
     for (const dir of createdSlotDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
-    for (const name of createdNames.splice(0)) { try { removeAccount(name); } catch { /* already gone */ } }
+    for (const name of createdNames.splice(0)) { try { removeAccount(name); } catch {  } }
   });
 
   function trackResult(result: { slotDir: string; name: string }): void {
@@ -230,13 +228,11 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
     trackResult(result);
 
     expect(result).toMatchObject({ mode: 'new', name: 'work', identityKey: 'claude:user=1', becameDefault: true, provisioning: 'per-device', workerCredential: 'skipped' });
-    expect(runners.installs).toBe(1);               // the ONE managed installation, reused
+    expect(runners.installs).toBe(1);
     expect(runners.logins).toHaveLength(1);
     expect(result.slotDir).toBe(slotDir('claude', result.accountId));
     expect(fs.existsSync(path.join(result.slotDir, '.claude'))).toBe(true);
-    // The login ran with HOME = the slot (pending id, renamed onto the account id).
     expect(runners.logins[0]!.home).toContain(path.join(getHistoryDir(), 'accounts', 'claude'));
-    // No per-account installation dir was minted.
     expect(fs.existsSync(versionsDir) ? fs.readdirSync(versionsDir).sort() : []).toEqual(beforeVersions);
 
     const row = listNativeAccounts(readMeta()).find(a => a.name === 'work')!;
@@ -270,11 +266,10 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
   it('add of an already-registered IDENTITY under a new name points at login and removes the slot', async () => {
     const r1 = await runAdd('claude', 'work', { meta: readMeta(), noWorkerToken: true }, fakeRunners());
     trackResult(r1);
-    // Same identity signs in again under a different requested name.
     const runners = fakeRunners();
     await expect(runAdd('claude', 'other', { meta: readMeta(), noWorkerToken: true }, runners))
       .rejects.toThrow(/already added as 'work'.*accounts login claude#work/);
-    expect(runners.logins).toHaveLength(1); // the login ran; the slot was cleaned up
+    expect(runners.logins).toHaveLength(1);
     expect(listNativeAccounts(readMeta()).filter(a => a.agent === 'claude')).toHaveLength(1);
   });
 
@@ -320,17 +315,13 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
     const r1 = await runAdd('claude', 'work', { meta: readMeta(), noWorkerToken: true }, fakeRunners());
     trackResult(r1);
 
-    // Same identity: reuses the slot.
     const relogin = fakeRunners();
     const r2 = await runLogin('claude', 'work', { meta: readMeta(), noWorkerToken: true }, relogin);
     expect(r2.mode).toBe('reconnect');
     expect(r2.slotDir).toBe(r1.slotDir);
     expect(relogin.logins[0]!.home).toBe(r1.slotDir);
 
-    // Different identity in the slot: refused, account untouched.
     const stranger = fakeRunners({ defaultObserved: { identityKey: 'claude:user=OTHER', email: 'x@x.com', signedIn: true } });
-    // Pre-launch guard: the slot is signed in as claude:user=1 from r1, and the
-    // stranger's login never lands. Simulate by observing the stranger identity.
     await expect(runLogin('claude', 'work', { meta: readMeta(), noWorkerToken: true }, stranger))
       .rejects.toThrow(/currently signed in|different identity/);
     expect(listNativeAccounts(readMeta()).find(a => a.name === 'work')).toMatchObject({ identityKey: 'claude:user=1' });
@@ -362,10 +353,6 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
   });
 
   describe('worker credential minting (real reserved store, isolated backend)', () => {
-    // Each case gets its own SECRETS_HOME (real standalone). Reserved `__<harness>__`
-    // stores are raw file items, read back via readReservedCredential — the same
-    // path the worker slot uses — since the standalone rejects a `__`-wrapped bundle
-    // name. The legacy `auth` bundle is a plain name read through the client.
     useFreshSecretsHome();
 
     it('claude: mints the setup-token into __claude__ keyed by account id (+ legacy auth key) and records workerCredential', async () => {
@@ -378,7 +365,6 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
       expect(result.workerCredentialRef).toEqual({ bundle: '__claude__', key });
       expect(readReservedCredential('__claude__', key)).toBe('sk-ant-oat01-testtoken');
 
-      // Legacy `auth` bundle key for this release's pre-v2 readers.
       const legacyKey = claudeAccountTokenKey('a@example.com');
       expect(bundleExistsSync(AUTH_BUNDLE)).toBe(true);
       const legacy = readAndResolveBundleEnvSync(AUTH_BUNDLE, { keys: [legacyKey], keyMode: 'storage', agentOnly: true, caller: 'add.test' });
@@ -428,7 +414,6 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
       await expect(runAdd('codex', 'nokey', { meta: readMeta() },
         fakeRunners({ defaultObserved: { identityKey: 'codex:user=8', email: 'n@x.com', signedIn: true } })))
         .rejects.toThrow(/--api-key/);
-      // The account registered (the login completed); only the mint failed loud.
       const row = listNativeAccounts(readMeta()).find(a => a.name === 'nokey')!;
       createdNames.push(row.name);
       createdSlotDirs.push(slotDir('codex', row.id));

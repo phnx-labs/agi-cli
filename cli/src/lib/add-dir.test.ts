@@ -1,6 +1,3 @@
-/**
- * Cross-harness --add-dir / project directory grants.
- */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -74,7 +71,6 @@ describe('applyAddDirs — native-flag harnesses', () => {
 
   it('codex is handled outside applyAddDirs (policy path)', () => {
     const cmd = ['codex'];
-    // strategy is codex-policy — applyAddDirs is a no-op by design
     expect(applyAddDirs('codex', cmd, ['/a'])).toBe(false);
     expect(cmd).toEqual(['codex']);
   });
@@ -95,7 +91,7 @@ describe('applyAddDirs — grok', () => {
     const cmd = ['grok'];
     applyAddDirs('grok', cmd, ['/sib/a', '/sib/b'], {
       cwd: tmp,
-      env: {}, // sandbox off
+      env: {},
     });
     const i = cmd.indexOf('--rules');
     expect(i).toBeGreaterThan(-1);

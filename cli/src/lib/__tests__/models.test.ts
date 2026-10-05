@@ -19,7 +19,6 @@ function pickInstalledVersion(agent: 'claude' | 'codex' | 'gemini' | 'opencode' 
   return chosen || versions[0] || null;
 }
 
-// Use explicit find (no fallback) so the variable is null when no matching version exists.
 const claudeBundleVer = listInstalledVersions('claude').find((v) =>
   fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'))
 ) ?? null;
@@ -27,9 +26,6 @@ const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
   fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')) &&
   !fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'))
 ) ?? null;
-// Prefer a version whose model source actually resolves on this host — partial
-// installs (e.g. ones missing the vendored binary) would otherwise short-circuit
-// the catalog tests with null catalogs.
 const firstLocatable = (agent: 'codex' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi' | 'grok'): string | null =>
   listInstalledVersions(agent).find((v) => locateModelSource(agent, v) !== null) ?? null;
 
@@ -42,7 +38,7 @@ const grokVer = firstLocatable('grok');
 
 describe('locateModelSource', () => {
   it('finds the JS bundle for Claude versions that ship one', () => {
-    if (!claudeBundleVer) return; // host doesn't have a bundle-era Claude installed
+    if (!claudeBundleVer) return;
     const src = locateModelSource('claude', claudeBundleVer);
     expect(src).not.toBeNull();
     expect(src!.kind).toBe('bundle');
@@ -62,7 +58,6 @@ describe('locateModelSource', () => {
     const src = locateModelSource('codex', codexVer);
     expect(src).not.toBeNull();
     expect(src!.kind).toBe('binary');
-    // Old layout: vendor/<triple>/codex/codex; new layout (0.134+): vendor/<triple>/bin/codex.
     expect(src!.path).toMatch(/\/(?:codex|bin)\/codex$/);
   });
 
@@ -78,7 +73,6 @@ describe('getModelCatalog (claude)', () => {
     const catalog = getModelCatalog('claude', ver);
     expect(catalog).not.toBeNull();
     expect(catalog!.models.length).toBeGreaterThan(0);
-    // 2.1.62+ exposes the alias map; 2.0.65 does not. Either way the call must not crash.
     if (Object.keys(catalog!.aliases).length > 0) {
       expect(catalog!.aliases.opus).toMatch(/^claude-opus-/);
       expect(catalog!.aliases.sonnet).toMatch(/^claude-sonnet-/);
@@ -91,11 +85,6 @@ describe('getModelCatalog (claude)', () => {
     if (!ver) return;
     const catalog = getModelCatalog('claude', ver)!;
     const withCloud = catalog.models.filter((m) => m.perCloud);
-    // Per-cloud routing is parsed out of the installed claude CLI's bundle, and
-    // not every version embeds it in the parseable `{firstParty:...,bedrock:...}`
-    // form (newer 2.1.x builds on some hosts don't). When the picked version
-    // exposes none, there is nothing to shape-check here — skip rather than fail.
-    // The parse itself is still verified whenever a version does expose it.
     if (withCloud.length === 0) return;
     const sample = withCloud[0];
     expect(sample.perCloud!.firstParty).toBe(sample.id);
@@ -154,7 +143,7 @@ describe('resolveModel', () => {
     const catalog = getModelCatalog('claude', ver)!;
     if (!catalog.aliases.opus) return;
     const r = resolveModel('claude', ver, 'opus');
-    expect(r.forwarded).toBe('opus'); // forward the alias as-is, the CLI resolves it
+    expect(r.forwarded).toBe('opus');
     expect(r.canonical).toBe(catalog.aliases.opus);
     expect(r.warning).toBeUndefined();
   });
@@ -188,9 +177,6 @@ describe('resolveModel', () => {
   });
 });
 
-// gemini is hard-deprecated: locateModelSource/getModelCatalog no longer parse
-// its bundle at all (RUSH-2202 — a dead, unreachable catalog surface for a
-// harness with no launch path left), so there is no describe block for it here.
 
 describe('getModelCatalog (opencode)', () => {
   it('delegates to `opencode models --verbose` and returns provider/id keys', () => {
@@ -201,9 +187,6 @@ describe('getModelCatalog (opencode)', () => {
 
     const catalog = getModelCatalog('opencode', opencodeVer);
     if (!catalog || catalog.models.length === 0) return;
-    // opencode 1.16+ only lists free zen models in its local catalog (currently 5);
-    // older builds shipped the full models.dev snapshot. Either way the parser must
-    // surface a non-trivial set of provider/id keys.
     expect(catalog!.models.length).toBeGreaterThanOrEqual(5);
     for (const m of catalog!.models) {
       expect(m.id).toMatch(/^[a-z0-9][a-z0-9.-]*\/.+$/i);
@@ -219,11 +202,8 @@ describe('getModelCatalog (openclaw)', () => {
     expect(src!.kind).toBe('cli');
 
     const catalog = getModelCatalog('openclaw', openclawVer);
-    // The openclaw CLI may time out or be unavailable in restricted environments
-    // (e.g. vitest sandbox). Skip rather than fail when the CLI produces nothing.
     if (!catalog || catalog.models.length === 0) return;
     expect(catalog.models.length).toBeGreaterThan(50);
-    // OpenClaw always scopes models by provider.
     for (const m of catalog.models) {
       expect(m.id).toContain('/');
     }
@@ -238,16 +218,11 @@ describe('getModelCatalog (antigravity)', () => {
     expect(src!.kind).toBe('cli');
 
     const catalog = getModelCatalog('antigravity', antigravityVer);
-    // `agy` may be unavailable/timing out in restricted environments; skip
-    // rather than fail when the CLI produces nothing.
     if (!catalog || catalog.models.length === 0) return;
-    // Antigravity prints display names only; those strings ARE the accepted
-    // --model values, so id === displayName and each has a parenthesized level.
     for (const m of catalog.models) {
       expect(m.id).toBe(m.displayName);
       expect(m.id).toMatch(/\([^)]+\)\s*$/);
     }
-    // Exactly one default, and it is the first row.
     const defaults = catalog.models.filter((m) => m.isDefault);
     expect(defaults.length).toBe(1);
     expect(catalog.models[0].isDefault).toBe(true);
@@ -263,11 +238,9 @@ describe('getModelCatalog (kimi)', () => {
 
     const catalog = getModelCatalog('kimi', kimiVer);
     if (!catalog || catalog.models.length === 0) return;
-    // Kimi ids are `provider/model` keys from the config JSON.
     for (const m of catalog.models) {
       expect(m.id).toContain('/');
     }
-    // At most one default may be flagged (the "Default model:" line).
     expect(catalog.models.filter((m) => m.isDefault).length).toBeLessThanOrEqual(1);
   });
 });
@@ -309,7 +282,6 @@ describe('getModelCatalog (grok)', () => {
     expect(src!.path).toMatch(/[/\\]\.grok[/\\]downloads[/\\]grok-/);
 
     const catalog = getModelCatalog('grok', grokVer);
-    // `grok models` may fail when offline / not signed in; skip rather than fail.
     if (!catalog || catalog.models.length === 0) return;
     for (const m of catalog.models) {
       expect(m.id).toMatch(/^grok[-_]/i);
@@ -317,7 +289,6 @@ describe('getModelCatalog (grok)', () => {
     const defaults = catalog.models.filter((m) => m.isDefault);
     expect(defaults.length).toBe(1);
 
-    // agents view / resolveConfiguredModel should surface that default.
     const configured = resolveConfiguredModel('grok', grokVer);
     expect(configured).not.toBeNull();
     expect(configured!.model).toBe(defaults[0].id);
@@ -348,20 +319,6 @@ describe('buildReasoningFlags', () => {
   });
 });
 
-// Reproduces the RUSH bug: extractClaudeCatalog's regexes miss on claude
-// >=2.1.207 bundles, so getModelCatalog extracted 0 models and (before this
-// fix) never cached that result -- forcing a full extractStrings() scan of
-// the whole binary (~1.85s per installed version) on every `agents view`.
-//
-// Unlike the rest of this file (which reads real installed agent versions),
-// these tests point HOME at a throwaway temp dir and re-import models.ts
-// fresh so the on-disk cache file and version dirs are isolated -- same
-// pattern as state.test.ts. Each test uses fake timers to control Date.now()
-// exactly and reads `attemptedAt` back off the on-disk cache file: a
-// re-extraction is the only thing that stamps a fresh attemptedAt (the
-// cache-hit read path returns the stored catalog untouched), so an
-// unchanged attemptedAt across calls is direct, unambiguous proof that
-// extraction did NOT re-run.
 describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', () => {
   let TMP = '';
 
@@ -409,12 +366,10 @@ describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', 
     try {
       fs.rmSync(TMP, { recursive: true, force: true });
     } catch {
-      /* best-effort */
     }
   });
 
   it('persists a 0-model catalog with attemptedAt and does not re-extract on the next call', async () => {
-    // No text here matches any of extractClaudeCatalog's regexes -> 0 models.
     writeFakeBundle('2.1.207', 'this bundle has no recognizable model constants in it');
 
     vi.useFakeTimers();
@@ -427,14 +382,11 @@ describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', 
     expect(first?.models).toHaveLength(0);
     expect(attemptedAtOnDisk(key)).toBe(new Date('2026-01-01T00:00:00Z').getTime());
 
-    // A little later, well inside the retry TTL, with the bundle untouched.
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'));
     const second = getCatalog('claude', '2.1.207');
 
     expect(second?.models).toHaveLength(0);
     expect(second).toEqual(first);
-    // attemptedAt on disk is unchanged -- proof the second call served the
-    // cached entry rather than re-running extractStrings + saveCache.
     expect(attemptedAtOnDisk(key)).toBe(new Date('2026-01-01T00:00:00Z').getTime());
   });
 
@@ -451,15 +403,11 @@ describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', 
     expect(first?.models).toHaveLength(0);
     const attemptedAtT0 = attemptedAtOnDisk(key);
 
-    // Just under the 24h TTL, bundle (and its mtime) untouched: the cached
-    // empty catalog is served, so attemptedAt on disk does not move.
     vi.setSystemTime(new Date('2026-01-01T23:59:00Z'));
     const stillCached = getCatalog('claude', '2.1.208');
     expect(stillCached?.models).toHaveLength(0);
     expect(attemptedAtOnDisk(key)).toBe(attemptedAtT0);
 
-    // Past the TTL: retries extraction (even though mtime never changed) and
-    // stamps a fresh attemptedAt.
     vi.setSystemTime(new Date('2026-01-02T00:00:01Z'));
     const reExtracted = getCatalog('claude', '2.1.208');
     expect(reExtracted?.models).toHaveLength(0);
@@ -474,9 +422,6 @@ describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', 
     const first = getCatalog('claude', '2.1.209');
     expect(first?.models).toHaveLength(0);
 
-    // An upgrade/reinstall: new content AND a new mtime (the normal write
-    // path). The existing mtime-keyed cache check already handles this;
-    // confirm the new empty-catalog caching doesn't regress it.
     writeFakeBundle(
       '2.1.209',
       '{OPUS_ID:"claude-opus-5",OPUS_NAME:"Opus",SONNET_ID:"claude-sonnet-5",SONNET_NAME:"Sonnet",HAIKU_ID:"claude-haiku-5",HAIKU_NAME:"Haiku"'
@@ -487,15 +432,6 @@ describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', 
   });
 });
 
-// Reproduces issue #1820: extractClaudeCatalog's structured-map regexes
-// (the alias map, the OPUS_ID/... const record, the per-cloud record) miss
-// entirely on claude>=2.1.207 bundles, which stopped embedding those literal
-// shapes -- the extractor fell back to 0 models for every 2.1.207+ install.
-// The fallback id scan (models.ts, `if (models.length < 2)`) is what
-// recovers a real catalog on those builds; these tests pin its behavior with
-// synthetic bundle text so the regression is caught in CI even when no real
-// claude>=2.1.207 binary is installed on the runner (the `getModelCatalog
-// (claude)` suite above is gated on one being present locally).
 describe('getModelCatalog falls back to a raw id scan (issue #1820)', () => {
   let TMP = '';
 
@@ -533,20 +469,15 @@ describe('getModelCatalog falls back to a raw id scan (issue #1820)', () => {
     try {
       fs.rmSync(TMP, { recursive: true, force: true });
     } catch {
-      /* best-effort */
     }
   });
 
   it('recovers a real catalog when the structured alias/const/perCloud maps are absent', async () => {
-    // No `{opus:"...",sonnet:"...",haiku:"..."}`, no `{OPUS_ID:...}`, no
-    // `{firstParty:...,bedrock:...}` -- exactly what changed on 2.1.207+.
-    // The only signal left is bare `claude-<family>-<version>` strings
-    // scattered in the binary, same as the real fallback scan targets.
     const bundle = [
       'some unrelated minified JS noise, no structured model maps in here',
-      'claude-opus-4', // bare legacy -- has a specific sibling below, must be dropped
+      'claude-opus-4',
       'claude-opus-4-8',
-      'claude-sonnet-5', // bare, no sibling -- must be kept (a real current id, #1892)
+      'claude-sonnet-5',
       'claude-haiku-4-5',
       'claude-fable-5',
       'more unrelated noise',
@@ -559,20 +490,13 @@ describe('getModelCatalog falls back to a raw id scan (issue #1820)', () => {
     expect(catalog).not.toBeNull();
     const ids = catalog!.models.map((m) => m.id).sort();
     expect(ids).toEqual(['claude-fable-5', 'claude-haiku-4-5', 'claude-opus-4-8', 'claude-sonnet-5']);
-    expect(ids).not.toContain('claude-opus-4'); // dropped by dropBareLegacyIds
+    expect(ids).not.toContain('claude-opus-4');
   });
 
   it('does not promote a foundry bare-minor to models[].id when its dated firstParty sibling is present (#2233)', async () => {
-    // Force the text-scan fallback: no alias/const map, and only ONE structured
-    // perCloud record (extractClaudeCatalog only falls back when models < 2).
-    // The second model family appears only as raw id strings, with the foundry
-    // short form sitting next to the dated firstParty form the way the native
-    // binary packs them.
     const bundle = [
       'no structured {opus:...,sonnet:...,haiku:...} alias map',
-      // one structured hit only — keeps models.length at 1 so fallback runs
       '{firstParty:"claude-haiku-4-5-20251001",bedrock:"x",vertex:"y",foundry:"claude-haiku-4-5"}',
-      // raw packing of firstParty + foundry short form (scan path)
       'firstParty claude-opus-4-1-20250805 foundry claude-opus-4-1',
       'firstParty claude-sonnet-4-6-20250514 foundry claude-sonnet-4-6',
       'claude-fable-5',
@@ -592,16 +516,13 @@ describe('getModelCatalog falls back to a raw id scan (issue #1820)', () => {
     ]);
     expect(ids).not.toContain('claude-opus-4-1');
     expect(ids).not.toContain('claude-sonnet-4-6');
-    expect(ids).not.toContain('claude-haiku-4-5'); // foundry short form of the structured record
+    expect(ids).not.toContain('claude-haiku-4-5');
   });
 
   it('does not fall back when the structured maps already yield >=2 models', async () => {
-    // A pre-2.1.207-shaped bundle with the real alias map, plus a stray raw
-    // id that is NOT part of that map: the curated set must win outright,
-    // and the fallback scan (unused here) must not leak the stray id in.
     const bundle =
       '{opus:"claude-opus-4-1",sonnet:"claude-sonnet-4-5",haiku:"claude-haiku-4-1"} ' +
-      'claude-fable-5'; // stray id, not part of the alias map
+      'claude-fable-5';
     writeFakeBundle('2.1.186', bundle);
 
     const { getModelCatalog: getCatalog } = await freshModels();

@@ -23,7 +23,6 @@ describe('parseAgentsUrl', () => {
 
   it('carries a valid host hint and drops an invalid one', () => {
     expect(parseAgentsUrl(`agents://session/${UUID}?host=yosemite-s1`)).toEqual({ kind: 'session', id: UUID, host: 'yosemite-s1' });
-    // A host with shell metacharacters is dropped, not passed through.
     expect(parseAgentsUrl(`agents://session/${UUID}?host=a;b`)).toEqual({ kind: 'session', id: UUID });
   });
 
@@ -48,7 +47,7 @@ describe('parseAgentsUrl', () => {
       'agents://session/;rm -rf ~',
       'agents://session/`id`',
       'agents://session/..%2F..%2Fetc',
-      'agents://session/', // no id
+      'agents://session/',
     ]) {
       expect(parseAgentsUrl(bad)).toHaveProperty('error');
     }
@@ -62,7 +61,7 @@ describe('isDeepLinkSessionId', () => {
     expect(isDeepLinkSessionId('ag-claude-1a2b3c4d')).toBe(true);
     expect(isDeepLinkSessionId('hello world')).toBe(false);
     expect(isDeepLinkSessionId('$(touch x)')).toBe(false);
-    expect(isDeepLinkSessionId('abc')).toBe(false); // too short
+    expect(isDeepLinkSessionId('abc')).toBe(false);
     expect(isDeepLinkSessionId('')).toBe(false);
   });
 });

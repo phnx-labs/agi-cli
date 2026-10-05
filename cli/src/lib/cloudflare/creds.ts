@@ -1,10 +1,3 @@
-// Cloudflare API credential glue, shared by the commands that provision or read
-// Cloudflare-backed endpoints (`agents traces`, `agents sessions backup`).
-//
-// This used to live in `lib/share/config.ts` alongside the embedded artifact
-// share engine. The share engine moved out to `@phnx-labs/artifacts-cli`
-// (PHNX-3992); `readCloudflareCreds` stayed because it is a generic Cloudflare
-// util that `traces`/`sessions backup` borrow, unrelated to sharing.
 
 import {
   bundleExistsSync as bundleExists,
@@ -13,19 +6,13 @@ import {
 
 export const DEFAULT_CF_BUNDLE = 'cloudflare';
 
-/** Cloudflare API credentials for provisioning, read from `cloudflare` (or a
- * user-named bundle). Fuzzy-matches key names so it works across bundle layouts. */
 export function readCloudflareCreds(
   bundle = DEFAULT_CF_BUNDLE,
   override?: { apiToken?: string; accountId?: string },
 ): { apiToken: string; accountId: string } {
-  // Explicit --token/--account bypass the bundle entirely (robust escape hatch).
   if (override?.apiToken) {
     return { apiToken: override.apiToken, accountId: override.accountId ?? '' };
   }
-  // Check existence first: resolving a missing bundle through the process client
-  // surfaces an opaque transport code (e.g. LOCKED), never naming the bundle the
-  // user typed — so name it here.
   if (!bundleExists(bundle)) {
     throw new Error(
       `The '${bundle}' bundle does not exist. ` +
@@ -34,8 +21,8 @@ export function readCloudflareCreds(
     );
   }
   const { env } = readAndResolveBundleEnv(bundle, {
+    // Background Cloudflare work must never raise an unattended biometric prompt.
     caller: 'cloudflare',
-    // Setup is still a read; only `agents secrets unlock` may authenticate.
     agentOnly: true,
   });
   const find = (re: RegExp): string => {

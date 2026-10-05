@@ -4,8 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 
-// Keep this legacy-definition suite independent of the developer machine's
-// device manifest. Device activation itself has a dedicated adjacent suite.
 vi.mock('./routine-activation.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../routine-activation.js')>();
   return {
@@ -19,7 +17,6 @@ import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } fro
 import * as state from '../state.js';
 import { ROUTINE_AGENT_IDS } from '../agents.js';
 
-/** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
   return {
     name: 'j',
@@ -31,9 +28,6 @@ function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
 
 describe('serializeJob — committed flow-sequence formatting (RUSH-2505)', () => {
   it('re-serializes an unchanged flow sequence without adding [ a, b ] padding', () => {
-    // Committed routine YAML uses unpadded flow sequences. The yaml emitter
-    // defaults to padded output, which would flip the tracked file to a no-op
-    // diff and block ~/.agents pulls fleet-wide.
     const committed = 'name: j\nschedule: 0 9 * * *\nagent: claude\nprompt: hi\ndevices: [yosemite-s0, zion]\n';
     const output = { name: 'j', schedule: '0 9 * * *', agent: 'claude', prompt: 'hi', devices: ['yosemite-s0', 'zion'] };
     const out = serializeJob(output, committed);
@@ -127,11 +121,6 @@ describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
   });
 
   it('rejects a real agent the local daemon cannot fire, at add time', () => {
-    // opencode is a real, installable agent (ALL_AGENT_IDS) but has no entry in
-    // ROUTINE_AGENT_IDS/AGENT_COMMANDS, so the daemon can't build a command for
-    // it. Before this fix, validateJob only checked ALL_AGENT_IDS and let this
-    // through, and it would only fail later when the scheduled job fired
-    // (runner.ts buildJobCommand: "Unsupported agent for daemon jobs: opencode").
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'opencode' }));
     expect(errors.some((e) => e.includes("agent 'opencode' is not supported by the local routine daemon"))).toBe(true);
     expect(errors.some((e) => e.includes(ROUTINE_AGENT_IDS.join(', ')))).toBe(true);
@@ -144,9 +133,6 @@ describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
   });
 
   it('accepts a custom harness (profile) name for a local routine (RUSH-2930)', () => {
-    // A custom harness like `deepseek` is delegated to `agents run <name>` by
-    // the runner (the workflow-job path), so it needs neither ALL_AGENT_IDS
-    // membership nor a ROUTINE_AGENT_COMMANDS template.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routines-harness-'));
     fs.mkdirSync(path.join(dir, 'profiles'), { recursive: true });
     fs.writeFileSync(
@@ -156,7 +142,6 @@ describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
     const spy = vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(dir);
     try {
       expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'deepseek' }))).toEqual([]);
-      // Still rejects a name that is neither native nor an existing profile.
       const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'no-such-harness' }));
       expect(errors.some((e) => e.startsWith('agent must be one of:'))).toBe(true);
     } finally {
@@ -166,9 +151,6 @@ describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
   });
 
   it('does not restrict a real agent outside ROUTINE_AGENT_IDS when explicitly host-placed', () => {
-    // hostStrategy: host dispatches via `agents run <agent>` on the remote
-    // machine (hosts/run-target.ts), never through the daemon's AGENT_COMMANDS
-    // table, so opencode is legitimate there — this must not regress.
     const errors = validateJob(baseJob({
       schedule: '0 3 * * *', agent: 'opencode', host: 'gpu-box', devices: ['zion'],
     }));
@@ -213,7 +195,6 @@ describe('validateJob — command', () => {
   });
 
   it('rejects an empty-string command as a missing target', () => {
-    // '' is falsy, so hasCommand is false → the "exactly one required" guard fires.
     const errors = validateJob({ name: 'j', schedule: '0 3 * * *', command: '' } as Partial<JobConfig>);
     expect(errors.some((e) => /exactly one of agent, workflow, or command is required/.test(e))).toBe(true);
   });
@@ -276,7 +257,6 @@ describe('default execution mode (RUSH-1595: plan -> auto)', () => {
     const name = '__test-default-mode-rush1595__';
     const file = path.join(getRoutinesDir(), name + '.yml');
     try {
-      // Write a raw config that omits `mode` entirely, exercising JOB_DEFAULTS.
       fs.writeFileSync(file, `name: ${name}\nschedule: '0 3 * * *'\nagent: claude\nprompt: do it\n`, 'utf-8');
       const read = readJob(name);
       expect(read).not.toBeNull();
@@ -321,20 +301,17 @@ describe('system-layer routines (built-ins from ~/.agents/.system/routines/)', (
     const sysFile = path.join(sysDir, `${name}.yml`);
     fs.mkdirSync(sysDir, { recursive: true });
     try {
-      // A built-in shipped via the system repo — enabled, on a schedule.
       fs.writeFileSync(
         sysFile,
         `name: ${name}\nschedule: '0 9 * * 1'\nenabled: true\nagent: claude\nprompt: check for updates\n`,
         'utf-8'
       );
 
-      // Daemon-style call (no cwd) must see the system routine.
       let found = listJobs().find((j) => j.name === name);
       expect(found).toBeDefined();
       expect(found!.enabled).toBe(true);
       expect(readJob(name)?.prompt).toBe('check for updates');
 
-      // A user routine of the same name overrides it (here: disables the built-in).
       writeJob({
         name,
         schedule: '0 9 * * 1',
@@ -348,14 +325,13 @@ describe('system-layer routines (built-ins from ~/.agents/.system/routines/)', (
 
       found = listJobs().find((j) => j.name === name);
       expect(found).toBeDefined();
-      expect(found!.enabled).toBe(false);          // a new definition is inactive until device activation
+      expect(found!.enabled).toBe(false);
       expect(fs.readFileSync(path.join(getRoutinesDir(), `${name}.yml`), 'utf-8')).not.toContain('enabled:');
       expect(found!.prompt).toBe('overridden');
-      // Only one entry for the name — user shadows system, no duplicate.
       expect(listJobs().filter((j) => j.name === name).length).toBe(1);
     } finally {
-      deleteJob(name);                              // removes the user override
-      try { fs.unlinkSync(sysFile); } catch { /* already gone */ }
+      deleteJob(name);
+      try { fs.unlinkSync(sysFile); } catch {  }
     }
   });
 });
@@ -399,15 +375,11 @@ describe('writeJob atomic persistence', () => {
     try {
       writeJob({ name, schedule: '0 3 * * *', agent: 'claude', prompt: 'p' } as JobConfig);
       const created = readJob(name);
-      // A fresh routine gets the current resolver stamped (non-empty id).
       expect(created?.actor).toBeTruthy();
-      // An edit re-writes the loaded config (which already carries actor) — the
-      // original creator is preserved, not overwritten with the editor.
       writeJob({ ...created!, prompt: 'edited' } as JobConfig);
       const after = readJob(name);
       expect(after?.prompt).toBe('edited');
       expect(after?.actor).toBe(created?.actor);
-      // An explicit actor on a new config is kept as-is.
       writeJob({ name: name2, schedule: '0 3 * * *', agent: 'claude', prompt: 'p', actor: 'pinned@example.com' } as JobConfig);
       expect(readJob(name2)?.actor).toBe('pinned@example.com');
     } finally {
@@ -437,9 +409,6 @@ describe('validateJob — devices', () => {
     expect(validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0'] }))).toEqual([]);
   });
 
-  // Was 'accepts a job with multiple devices'. A multi-device pin fired the
-  // routine once per listed device — duplicate agent runs on every schedule —
-  // so it is now a validation error, not an accepted config.
   it('rejects a job with multiple devices', () => {
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0', 'mac-mini'] }));
     expect(errors.some((e) => e.includes('runs on exactly one'))).toBe(true);
@@ -466,10 +435,6 @@ describe('validateJob — devices', () => {
   });
 });
 
-// A routine pinned to several devices used to fire once PER device: on the live
-// fleet `security-sweep` ran at 15:30:02 on one box and 15:30:03 on the other,
-// two full agent sessions doing identical work. Ownership is now singular and
-// derived from config alone, so every daemon agrees without coordination.
 describe('routineOwnerDevice / single-device ownership', () => {
   it('picks one owner deterministically, whatever the list order', () => {
     expect(routineOwnerDevice({ devices: ['yosemite-s1', 'yosemite-s0'] })).toBe('yosemite-s0');
@@ -494,14 +459,9 @@ describe('routineOwnerDevice / single-device ownership', () => {
     expect(hasAmbiguousDevicePin({ devices: ['yosemite-s0', 'yosemite-s1'] })).toBe(true);
     expect(hasAmbiguousDevicePin({ devices: ['yosemite-s0'] })).toBe(false);
     expect(hasAmbiguousDevicePin({ devices: [] })).toBe(false);
-    // Same machine spelled two ways is one device, not an ambiguous pin.
     expect(hasAmbiguousDevicePin({ devices: ['Yosemite-S0', 'yosemite-s0.tailnet.ts.net'] })).toBe(false);
   });
 
-  // The daemon's load path never calls validateJob, and ownership treats a
-  // non-array `devices` as "no pin" — so without a guard a YAML typo
-  // (`devices: yosemite-s0`, a scalar) would silently promote the routine to
-  // fleet-wide and fire it on EVERY box. Inert-and-loud beats unrestricted.
   it('refuses to load a routine whose devices is not a list', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-malformed-'));
     const prevHome = process.env.HOME;
@@ -548,8 +508,6 @@ describe('jobRunsOnThisDevice', () => {
   it('matches when the allowlist includes this machine', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
     expect(jobRunsOnThisDevice({ devices: ['yosemite-s0'] })).toBe(true);
-    // A multi-device pin no longer matches every listed device — only its owner
-    // (lowest normalized name) fires, so the routine runs once, not once per box.
     expect(jobRunsOnThisDevice({ devices: ['mac-mini', 'yosemite-s0'] })).toBe(false);
     expect(jobRunsOnThisDevice({ devices: ['yosemite-s0', 'zion'] })).toBe(true);
   });
@@ -591,9 +549,6 @@ describe('checkJobDeviceEligibility', () => {
     expect(result).not.toBeNull();
     expect(result!.message).toBe("Job 'backup' can only run on: yosemite-s0, mac-mini");
     expect(result!.allowedLabel).toBe('yosemite-s0, mac-mini');
-    // The suggested host is the OWNER (lowest normalized name), not the first
-    // entry as written. Suggesting yosemite-s0 here would send the operator to
-    // a box that refuses the run for exactly the same reason.
     expect(result!.firstHost).toBe('mac-mini');
     expect(result!.suggestion).toBe("agents routines run backup --device mac-mini");
   });
@@ -615,14 +570,6 @@ describe('readJobFile fails closed on legacy singular device key', () => {
   });
 });
 
-/**
- * `dispatchedBy: 'monitor'` makes jobRunsOnThisDevice skip this device's routine
- * activation manifest (RUSH-2681). That is correct for the job a monitor
- * synthesizes at dispatch, which has no definition file — but a routine YAML
- * carrying the key would fire on every box regardless of activation, on every
- * path, since the daemon's load path never calls validateJob. Both ends of the
- * schema boundary are closed.
- */
 describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () => {
   it('returns null for a YAML file that contains dispatchedBy:', () => {
     ensureAgentsDir();
@@ -649,7 +596,6 @@ describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () 
         dispatchedBy: 'monitor',
       } as JobConfig);
       expect(fs.readFileSync(file, 'utf-8')).not.toContain('dispatchedBy');
-      // Still readable — the marker was dropped, not turned into an inert file.
       expect(readJob(name)?.prompt).toBe('hi');
     } finally {
       if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -780,9 +726,6 @@ describe('routine name path containment (C4)', () => {
     expect(validateJob(baseJob({ schedule: '0 3 * * *', name: 'daily-standup' }))).toEqual([]);
   });
 
-  // getRunDir is the run-directory sink reached on the daemon's load/schedule
-  // path (runner.ts executeJob/executeJobDetached) — which never calls
-  // validateJob — so it must contain the untrusted name itself.
   it('getJobRunsDir / getRunDir contain a benign name under the runs dir', () => {
     const p = getRunDir('daily-standup', 'run-1');
     expect(p).toBe(path.join(runsDir, 'daily-standup', 'run-1'));
@@ -854,9 +797,6 @@ describe('finalizeRunMeta', () => {
 });
 
 describe('getLatestCompletedRun / {last_report} poison-stop', () => {
-  // Unique job name under the real runs dir; cleaned up after each test. runIds
-  // are chosen so the FAILED run sorts LAST (most recent) — the exact shape that
-  // used to poison the next prompt.
   const jobName = `__authtest_poison_${process.pid}`;
 
   function seedRun(runId: string, status: RunMeta['status'], report: string): void {
@@ -968,13 +908,12 @@ describe('routineStats', () => {
     seedRun('r3', 'completed', 30);
     seedRun('r4', 'failed', 40);
     seedRun('r5', 'timeout', 50);
-    seedRun('r6', 'missed'); // no duration — a fire that never ran
+    seedRun('r6', 'missed');
 
     const stats = routineStats(jobName);
     expect(stats.count).toBe(6);
-    expect(stats.failed).toBe(2); // failed + timeout
+    expect(stats.failed).toBe(2);
     expect(stats.missed).toBe(1);
-    // avg of the 5 durations that have one (10+20+30+40+50)/5 = 30
     expect(stats.avgMs).toBe(30);
     expect(stats.p50).toBeGreaterThan(0);
     expect(stats.p95).toBeGreaterThanOrEqual(stats.p50);
@@ -987,8 +926,6 @@ describe('routineStats', () => {
     const stats = routineStats(jobName);
     expect(stats.count).toBe(2);
     expect(stats.missed).toBe(1);
-    // Only one real duration sample (100ms) — p50/p95 both collapse to it,
-    // not diluted by the missed run's absent duration.
     expect(stats.avgMs).toBe(100);
     expect(stats.p50).toBe(100);
     expect(stats.p95).toBe(100);
@@ -1138,7 +1075,6 @@ describe('computeProjectGroupKind — discriminated buckets never collide with s
     const special = computeProjectGroupKind(undefined, known);
     expect(named).toEqual({ kind: 'named', name: 'Operations' });
     expect(special).toEqual({ kind: 'operations' });
-    // Same human title, but different discriminated keys — so they never merge.
     expect(projectGroupTitle(named)).toBe('Operations');
     expect(projectGroupTitle(special)).toBe('Operations');
     expect(projectGroupKey(named)).toBe('named:Operations');
@@ -1195,7 +1131,6 @@ describe('duplicate project names in a file-created YAML routine', () => {
     const file = path.join(getRoutinesDir(), name + '.yml');
     try {
       ensureAgentsDir();
-      // Hand-authored YAML that never went through the add command: duplicate names.
       fs.writeFileSync(
         file,
         `name: ${name}\nschedule: '0 3 * * *'\nagent: claude\nprompt: do it\nprojects:\n  - myapp\n  - myapp\n`,
@@ -1205,11 +1140,9 @@ describe('duplicate project names in a file-created YAML routine', () => {
       const known = new Set(['myapp']);
       const read = readJob(name);
       expect(read).not.toBeNull();
-      // Grouping treats the duplicated file as one named project, not Cross-project.
       expect(computeProjectGroupKind(read!.projects, known)).toEqual({ kind: 'named', name: 'myapp' });
       expect(computeProjectGroup(read!.projects, known)).toBe('myapp');
 
-      // Rewriting through the schema boundary canonicalizes persistence.
       writeJob(read!);
       const persisted = yaml.parse(fs.readFileSync(file, 'utf-8'));
       expect(persisted.projects).toEqual(['myapp']);

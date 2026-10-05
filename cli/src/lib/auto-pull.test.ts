@@ -12,8 +12,6 @@ import {
   type FetchStatusMarker,
 } from './auto-pull.js';
 
-// Tests pass an explicit fetchDir to readRepoBehindMarkers() / the spawn-gate
-// helpers so they never touch the real ~/.agents/.cache/.fetch/ state.
 
 let fetchDir: string;
 
@@ -76,8 +74,6 @@ describe('readRepoBehindMarkers', () => {
   it('does NOT delete markers after reading (markers persist for repeated doctor runs)', () => {
     const file = writeMarker('user', { behind: 1 });
     readRepoBehindMarkers(fetchDir);
-    // The file must still be present — markers persist until the background fetch
-    // worker overwrites them with fresh data. The read path must not consume them.
     expect(fs.existsSync(file)).toBe(true);
   });
 
@@ -110,12 +106,6 @@ describe('readRepoBehindMarkers', () => {
   });
 });
 
-/**
- * RUSH-2324: parent-side recency gate for spawnDetachedSync. The spawn itself
- * costs ~7ms mean; the worker is almost always a no-op when a cycle finished
- * in the last five minutes. These tests exercise the real fs paths against a
- * temp fetch dir — no mocks.
- */
 describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => {
   const NOW = 1_700_000_000_000;
 
@@ -131,7 +121,6 @@ describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => 
   it('returns true after markDetachedSyncComplete within the TTL window', () => {
     markDetachedSyncComplete(fetchDir);
     expect(fs.existsSync(lastSyncStampPath(fetchDir))).toBe(true);
-    // Use the real stamp mtime via Date.now()-style now slightly after write.
     const stampedAt = fs.statSync(lastSyncStampPath(fetchDir)).mtimeMs;
     expect(shouldSkipDetachedSync(fetchDir, stampedAt + 1_000)).toBe(true);
     expect(shouldSkipDetachedSync(fetchDir, stampedAt + SYNC_LOCK_TTL_MS - 1)).toBe(true);
@@ -147,7 +136,6 @@ describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => 
   it('returns true when every existing *.lock is within the TTL (mid-flight worker)', () => {
     fs.writeFileSync(lockFilePath('user', fetchDir), '123');
     fs.writeFileSync(lockFilePath('system', fetchDir), '456');
-    // Fresh locks: touch mtimes to NOW via utimes.
     const lockUser = lockFilePath('user', fetchDir);
     const lockSystem = lockFilePath('system', fetchDir);
     const sec = NOW / 1000;
@@ -170,7 +158,6 @@ describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => 
 
   it('prefers a fresh last-sync stamp over a missing/stale lock set', () => {
     markDetachedSyncComplete(fetchDir);
-    // No locks at all — stamp alone is enough.
     const stampedAt = fs.statSync(lastSyncStampPath(fetchDir)).mtimeMs;
     expect(shouldSkipDetachedSync(fetchDir, stampedAt + 500)).toBe(true);
   });

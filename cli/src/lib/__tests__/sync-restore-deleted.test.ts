@@ -1,15 +1,3 @@
-/**
- * Regression tests for #2398: `agents sync <agent>@<version>` must restore a
- * managed resource that was DELETED from the version home, without `--force`.
- *
- * The staleness fast-guard used to decide sync-ness from source fingerprints
- * alone, so a deleted target read as "Already in sync" and only `--force`
- * restored it. The manifest now records the artifact paths the last full sync
- * wrote (`writtenTargets`) and `isStale` treats a missing path as stale.
- *
- * Runs the REAL code path (no mocking) in an isolated `$HOME` via
- * `bun --eval`, mirroring src/lib/__tests__/extras-sync.test.ts.
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -19,7 +7,6 @@ import { fileURLToPath } from 'url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** Run `scriptBody` under a throwaway $HOME; returns the parsed last JSON line. */
 function runInTempHome(scriptBody: string): Record<string, unknown> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-restore-'));
   try {

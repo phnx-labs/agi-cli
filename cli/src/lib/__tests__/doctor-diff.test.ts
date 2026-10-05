@@ -22,7 +22,6 @@ beforeEach(() => {
   fs.mkdirSync(systemDir, { recursive: true });
   fs.mkdirSync(projectDir, { recursive: true });
 
-  // Avoid the migrator running and failing on a missing legacy state.
   fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
 });
 
@@ -76,10 +75,9 @@ describe('diffVersionResources — commands', () => {
     fs.writeFileSync(path.join(userDir, 'commands', 'plan.md'), 'plan body\n');
     fs.writeFileSync(path.join(userDir, 'commands', 'design.md'), 'fresh design\n');
 
-    fs.writeFileSync(path.join(cmdsHome, 'recap.md'), 'recap body\n'); // ok
-    fs.writeFileSync(path.join(cmdsHome, 'design.md'), 'stale design\n'); // diff
-    fs.writeFileSync(path.join(cmdsHome, 'orphan.md'), 'no source\n'); // extra
-    // plan.md missing in home
+    fs.writeFileSync(path.join(cmdsHome, 'recap.md'), 'recap body\n');
+    fs.writeFileSync(path.join(cmdsHome, 'design.md'), 'stale design\n');
+    fs.writeFileSync(path.join(cmdsHome, 'orphan.md'), 'no source\n');
 
     const report = runDiff(projectDir, 'claude', '2.0.0', ['commands']);
     const byName = Object.fromEntries(report.kinds.commands.map((r) => [r.name, r]));
@@ -114,23 +112,15 @@ describe('diffVersionResources — hooks ignore project layer', () => {
     fs.writeFileSync(path.join(projectDir, '.agents', 'hooks', 'evil.sh'), '#!/bin/sh\necho boom\n');
 
     const report = runDiff(projectDir, 'claude', '2.0.0', ['hooks']);
-    // 'evil' should not appear as a missing-source from the project layer.
     const evil = report.kinds.hooks.find((r) => r.name === 'evil');
     expect(evil).toBeUndefined();
   });
 });
 
 describe('diffVersionResources — rules', () => {
-  // The instruction file (CLAUDE.md/GEMINI.md/AGENTS.md) is COMPOSED from
-  // `subrules/` for the active preset — the same rendering the rules writer
-  // emits. The diff must compare against that composition, not the raw
-  // `rules/AGENTS.md` whole-repo doc (which a preset composition deliberately
-  // never equals), or a correctly-synced home file is held as drift forever.
   function seedRules(body: string, extra = 'the whole-repo AGENTS doc, deliberately different\n'): void {
     const rulesDir = path.join(userDir, 'rules');
     fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
-    // Presence of AGENTS.md makes the row exist and fixes its source layer; its
-    // content is intentionally NOT what the home file is compared against.
     fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), extra);
     fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: [core]\n');
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), body);
@@ -140,8 +130,6 @@ describe('diffVersionResources — rules', () => {
     const home = makeVersionHome('claude', '2.0.0');
     const configDir = path.join(home, '.claude');
     seedRules('rules body\n');
-    // Home matches the COMPOSED preset (what the writer emits) → ok, even though
-    // it differs from the longer raw AGENTS.md.
     fs.writeFileSync(path.join(configDir, 'CLAUDE.md'), 'rules body\n');
 
     const report = runDiff(projectDir, 'claude', '2.0.0', ['rules']);
@@ -153,7 +141,6 @@ describe('diffVersionResources — rules', () => {
     const home = makeVersionHome('claude', '2.0.0');
     const configDir = path.join(home, '.claude');
     seedRules('composed body\n');
-    // Stale content matching neither the raw AGENTS.md nor the composition.
     fs.writeFileSync(path.join(configDir, 'CLAUDE.md'), 'stale body\n');
 
     const report = runDiff(projectDir, 'claude', '2.0.0', ['rules']);
@@ -164,8 +151,6 @@ describe('diffVersionResources — rules', () => {
     const home = makeVersionHome('codex', '0.100.0');
     const configDir = path.join(home, '.codex');
     seedRules('plain rules\n');
-    // codex's instruction file is AGENTS.md; the writer composes the SAME bytes
-    // (no compiled header), so a plain composed copy reconciles as ok.
     fs.writeFileSync(path.join(configDir, 'AGENTS.md'), 'plain rules\n');
 
     const report = runDiff(projectDir, 'codex', '0.100.0', ['rules']);
@@ -174,13 +159,8 @@ describe('diffVersionResources — rules', () => {
 });
 
 describe('diffVersionResources — native ~/.agents/skills agents', () => {
-  // Goose reads central skills directly; the orchestrator deletes its
-  // version-home skills dir and registers no skills writer. diffSkills must
-  // return no rows, or every central skill is false-reported `missing` and held
-  // as unreconcilable forever (drift never clears).
   it('reports no skill rows for a nativeAgentsSkillsDir agent even with a central source skill', () => {
     makeVersionHome('goose', '1.0.0');
-    // A central source skill that a non-native agent WOULD report as missing.
     const skillDir = path.join(systemDir, 'skills', 'demo');
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: demo\n---\nbody\n');
@@ -191,9 +171,6 @@ describe('diffVersionResources — native ~/.agents/skills agents', () => {
 });
 
 describe('diffVersionResources — command-as-skill agents', () => {
-  // Kimi (and Codex >= 0.117, Grok) install commands as SKILL wrappers, not
-  // native command files. The diff must compare against the wrapper or it
-  // false-reports every command as drifted forever.
   function installKimiCommandSkill(version: string, name: string, srcPath: string): void {
     const agentDir = path.join(userDir, '.history', 'versions', 'kimi', version, 'home', '.kimi-code');
     const skillDir = path.join(agentDir, 'skills', commandSkillName(name));
@@ -218,7 +195,6 @@ describe('diffVersionResources — command-as-skill agents', () => {
     const srcPath = path.join(srcCmds, 'foo.md');
     fs.writeFileSync(srcPath, '# Foo\nrun foo\n');
     installKimiCommandSkill('0.19.0', 'foo', srcPath);
-    // Source changed after install — the wrapper no longer matches.
     fs.writeFileSync(srcPath, '# Foo v2\nrun foo differently\n');
 
     const report = runDiff(projectDir, 'kimi', '0.19.0', ['commands']);
@@ -226,10 +202,6 @@ describe('diffVersionResources — command-as-skill agents', () => {
   });
 
   it('reports a source command as missing for goose (now a recipe-backed command agent)', () => {
-    // Goose gained commands support (RUSH-1572): a slash command is a recipe YAML
-    // registered in config.yaml. With commands:true a source command that is not
-    // yet installed reports as missing (previously goose held commands neither
-    // natively nor as skills, so nothing was reported).
     fs.mkdirSync(path.join(userDir, 'commands'), { recursive: true });
     fs.writeFileSync(path.join(userDir, 'commands', 'foo.md'), '# Foo\n');
     fs.mkdirSync(path.join(userDir, '.history', 'versions', 'goose', '1.0.0', 'home'), { recursive: true });
@@ -239,12 +211,6 @@ describe('diffVersionResources — command-as-skill agents', () => {
   });
 });
 
-// PHNX-3187: rules/CLAUDE.md and rules/GEMINI.md are symlinks to AGENTS.md in
-// the DotAgents repos. On Windows without symlink support git checks them out
-// as PLAIN TEXT FILES whose whole content is the target path ("AGENTS.md"), so
-// lstat().isSymbolicLink() is false and they were mistaken for independent
-// rule sources no sync could ever produce — a permanent doctor "hold".
-// isCheckedOutSymlink is the platform-agnostic detector that closes it.
 describe('isCheckedOutSymlink (PHNX-3187)', () => {
   let dir: string;
   beforeEach(() => {
@@ -255,7 +221,6 @@ describe('isCheckedOutSymlink (PHNX-3187)', () => {
 
   it('flags a git-checked-out symlink text file that resolves to a sibling', async () => {
     const { isCheckedOutSymlink } = await import('../doctor-diff.js');
-    // A git symlink blob is the bare target with no trailing newline.
     fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'AGENTS.md');
     expect(isCheckedOutSymlink(path.join(dir, 'CLAUDE.md'))).toBe(true);
   });
@@ -277,15 +242,12 @@ describe('isCheckedOutSymlink (PHNX-3187)', () => {
     try {
       fs.symlinkSync('AGENTS.md', path.join(dir, 'GEMINI.md'));
     } catch {
-      return; // filesystem without symlink support — the checked-out-text case covers it
+      return;
     }
     expect(isCheckedOutSymlink(path.join(dir, 'GEMINI.md'))).toBe(false);
   });
 });
 
-// ── PHNX-3504: content-aware coverage for the previously presence-only /
-//    untracked kinds. Each edits the SOURCE (name unchanged) and asserts the
-//    home copy flips to `diff`, matching the live-driver acceptance runs.
 
 function seedGroup(name: string, allow: string[]): void {
   const dir = path.join(userDir, 'permissions', 'groups');
@@ -308,7 +270,6 @@ describe('diffVersionResources — mcp content-aware (PHNX-3504)', () => {
     writeHomeMcp(home, 'node', ['old.js']);
     expect(runDiff(projectDir, 'claude', '2.0.0', ['mcp']).kinds.mcp.find((r) => r.name === 'foo')?.status).toBe('ok');
 
-    // Same server name, changed command + args → invisible before PHNX-3504.
     seedMcp('python', ['NEW.js']);
     expect(runDiff(projectDir, 'claude', '2.0.0', ['mcp']).kinds.mcp.find((r) => r.name === 'foo')?.status).toBe('diff');
   });
@@ -316,7 +277,7 @@ describe('diffVersionResources — mcp content-aware (PHNX-3504)', () => {
   it('reports missing (source only) and extra (home only)', () => {
     const home = makeVersionHome('claude', '2.0.0');
     seedMcp('node', ['a.js']);
-    writeHomeMcp(home, 'node', ['b.js']); // wrong name below; overwrite with a different server
+    writeHomeMcp(home, 'node', ['b.js']);
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { orphan: { command: 'node', args: ['x'] } } }));
     const rows = runDiff(projectDir, 'claude', '2.0.0', ['mcp']).kinds.mcp;
     expect(rows.find((r) => r.name === 'foo')?.status).toBe('missing');
@@ -331,8 +292,6 @@ describe('diffVersionResources — permissions content-aware (PHNX-3504)', () =>
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(git *)', 'Bash(ls *)'], deny: [] } }));
     expect(runDiff(projectDir, 'claude', '2.0.0', ['permissions']).kinds.permissions.find((r) => r.name === 'mygroup')?.status).toBe('ok');
 
-    // Swap ls → rm: the detector still calls the group applied (git * matches),
-    // but the new rule never reached the home → diff (was a false `ok` before).
     seedGroup('mygroup', ['Bash(git *)', 'Bash(rm -rf *)']);
     expect(runDiff(projectDir, 'claude', '2.0.0', ['permissions']).kinds.permissions.find((r) => r.name === 'mygroup')?.status).toBe('diff');
   });
@@ -363,7 +322,6 @@ describe('diffVersionResources — subagents content-aware (PHNX-3504)', () => {
     fs.writeFileSync(path.join(home, '.claude', 'agents', 'rev.md'), transformSubagentForClaude(src));
     expect(runDiff(projectDir, 'claude', '2.0.0', ['subagents']).kinds.subagents.find((r) => r.name === 'rev')?.status).toBe('ok');
 
-    // Prompt-body edit, filename unchanged → invisible before PHNX-3504.
     seedSubagent('EDITED prompt body\n');
     expect(runDiff(projectDir, 'claude', '2.0.0', ['subagents']).kinds.subagents.find((r) => r.name === 'rev')?.status).toBe('diff');
   });
@@ -417,7 +375,6 @@ describe('diffVersionResources — memory (knowledge facts) content-aware (PHNX-
 
   it('reports a managed fact removed from source as extra, never a stray native file', () => {
     const home = makeVersionHome('claude', '2.0.0');
-    // No source fact of this name, but the manifest says we wrote it → orphan.
     seedHomeMemory(home, '# fact\nstale\n', ['MEMORY', 'fact']);
     const rows = runDiff(projectDir, 'claude', '2.0.0', ['memory']).kinds.memory;
     expect(rows.find((r) => r.name === 'fact')?.status).toBe('extra');
@@ -432,27 +389,15 @@ describe('diffVersionResources — rules sub-rule drift regression (PHNX-3504)',
     fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), 'whole-repo doc\n');
     fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: [core]\n');
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'composed body\n');
-    // Home matches the composition of the fragment.
     fs.writeFileSync(path.join(home, '.claude', 'CLAUDE.md'), 'composed body\n');
     expect(runDiff(projectDir, 'claude', '2.0.0', ['rules']).kinds.rules.find((r) => r.name === 'AGENTS')?.status).toBe('ok');
 
-    // Edit only the FRAGMENT (the whole-repo AGENTS.md never changes) → the
-    // recomposed expectation changes → diff.
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'EDITED fragment body\n');
     expect(runDiff(projectDir, 'claude', '2.0.0', ['rules']).kinds.rules.find((r) => r.name === 'AGENTS')?.status).toBe('diff');
   });
 });
 
 describe('DOCTOR_ALL_KINDS completeness (PHNX-3504)', () => {
-  // Bound to the REAL writer registry (`ALL_RESOURCE_KINDS`, the source of truth
-  // for what `syncResourcesToVersion` writes) — NOT a second hand-typed literal
-  // that would go stale in lockstep with `DOCTOR_ALL_KINDS` and defeat the guard.
-  // Doctor covers exactly that registry PLUS `memory` (the knowledge-fact fan-out
-  // via `syncMemoryToVersionHome`, which is a separate sync call, not a writer-
-  // registry kind). Excluded on purpose: `promptcuts` (a single version-unscoped
-  // file, not per-home) and Claude's NATIVE per-project auto-memory (unmanaged).
-  // A future synced kind added to the registry but forgotten in DOCTOR_ALL_KINDS
-  // fails this test rather than silently becoming a doctor blind spot.
   const SYNCED_KINDS = [...ALL_RESOURCE_KINDS, 'memory'].sort();
 
   it('covers exactly the version-synced kinds (no promptcuts, includes workflows + memory)', () => {

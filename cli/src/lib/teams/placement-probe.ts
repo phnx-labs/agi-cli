@@ -1,29 +1,3 @@
-/**
- * Live pool probing for the teams placement scheduler (RUSH-2002).
- *
- * Gathers one {@link DevicePlacementSignal} per pool device so the pure pick in
- * {@link ./scheduler} can filter unreachable / overloaded / not-installed
- * devices and rank the rest. Two concerns, both best-effort:
- *
- *   - reachability + headroom + load  ← {@link probeFleetStats} (one parallel
- *     SSH fan-out over the pool; the local box is measured directly).
- *   - requested agent installed + account eligibility (when known) ← a one-shot
- *     readiness probe per remote device ({@link buildReadyProbeCommand} →
- *     `agents view`), with the same candidate-readiness gate evaluated locally.
- *
- * The result is cached briefly per (pool, agent-or-any) so a `teams start` wave that
- * places N teammates probes the pool ONCE, not N times — the roster-count part
- * of the rank stays live (the pure pick recounts the roster each call), only the
- * SSH-measured load/harness snapshot is reused within the TTL.
- *
- * All SSH here is via `spawn` (async, kill-bounded) so the whole pool is probed
- * in parallel; a slow or wedged box degrades to "no signal" instead of blocking
- * the launch. The readiness payload is `agents view --json`, so remote and local
- * candidates carry the same installed/sign-in verdict. The dispatcher's usage
- * envelope rides the same round-trip on stdin (`agents __usage-ingest` runs
- * first in the probe, PHNX-4116), so the worker the pick lands on holds current
- * usage numbers at dispatch rather than at the next usage-sync tick.
- */
 import { spawn } from 'child_process';
 import { buildFleetStatePayload } from '../accounting/usage-sync.js';
 import { probeFleetStats, headroom } from '../devices/health.js';
@@ -45,13 +19,8 @@ import { normalizeHost } from '../machine-id.js';
 import { checkCliAvailable, type AgentType } from './agents.js';
 import type { DevicePlacementSignal } from './scheduler.js';
 
-/** Per-remote readiness probe budget — matches the health probe's short window
- * (`agents view` on a warm box is sub-second; a wedged one degrades to unknown). */
 export const READY_PROBE_TIMEOUT_MS = 8_000;
 
-/** How long a probed pool snapshot is reused within a `teams start` wave. Short
- * enough that a device coming online / going overloaded is seen next wave, long
- * enough that placing a wave of teammates does not re-fan-out per teammate. */
 export const SIGNAL_TTL_MS = 15_000;
 
 interface CacheEntry {
@@ -64,17 +33,10 @@ function cacheKey(pool: string[], agent?: string): string {
   return `${agent ?? 'any-agent'}::${[...pool].map(normalizeHost).sort().join(',')}`;
 }
 
-/** Clear the probe cache — for tests and after a device-registry change. */
 export function clearPlacementSignalCache(): void {
   cache.clear();
 }
 
-/**
- * Whether the requested agent is installed on a REMOTE device, via one SSH
- * readiness probe. `undefined` when the probe could not answer (ssh/login
- * failure) — reachability is then left to {@link probeFleetStats}; `false` when
- * the box answered but agents-cli or the agent is absent (a genuine can't-run).
- */
 function probeRemoteReadiness(
   device: DeviceProfile,
   agent: string,
@@ -90,8 +52,6 @@ function probeRemoteReadiness(
   try {
     const shim = writeAskpassShim();
     const cmd = buildReadyProbeCommand(device.shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
-    // agentOnly: a read-only probe must never force a foreground Touch ID sheet
-    // on a password-auth device (mirrors probeDeviceStats in devices/health).
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
     return Promise.resolve(unknown);
@@ -111,8 +71,6 @@ function probeRemoteReadiness(
       clearTimeout(killTimer);
       resolve(value);
     };
-    // A wedged box degrades to "no signal": SIGTERM at the budget, SIGKILL shortly
-    // after, so one dead peer can never hold the whole placement wave open.
     const timer = setTimeout(() => child.kill('SIGTERM'), READY_PROBE_TIMEOUT_MS);
     const killTimer = setTimeout(() => { if (!settled) child.kill('SIGKILL'); }, READY_PROBE_TIMEOUT_MS + 250);
     killTimer.unref?.();
@@ -131,17 +89,11 @@ function probeRemoteReadiness(
         : { signedIn: false, pickerEligible: false };
       finish({ installed, ...eligibility });
     });
-    child.stdin.on('error', () => { /* peer closed early; the close handler reports it */ });
+    child.stdin.on('error', () => {  });
     child.stdin.end(usagePayload);
   });
 }
 
-/**
- * Probe every device in the team pool and return a name→signal map for the pure
- * placement pick. Devices with no data at all are omitted (the pick then neither
- * excludes nor prefers them). Never throws — a probe failure degrades to a
- * missing/partial signal.
- */
 export async function probePoolSignals(
   pool: string[],
   agent?: AgentType,
@@ -169,8 +121,6 @@ export async function probePoolSignals(
 
   const selfProfile = profiles.find((d) => normalizeHost(d.name) === self);
   const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
-  // Built once per wave: this box's current usage rows (headed only — a worker
-  // dispatcher has none to give), ingested by every remote candidate it probes.
   const usagePayload = JSON.stringify(buildFleetStatePayload({ usageOnly: true }));
 
   type InstalledInfo = {
@@ -207,7 +157,7 @@ export async function probePoolSignals(
     const d = lookup(name);
     const s = d ? stats.get(d.name) : undefined;
     const inst = d ? installed.get(d.name) : undefined;
-    if (!s && !inst) continue; // fully unknown device — leave it out of the map
+    if (!s && !inst) continue;
     signals.set(name, {
       reachable: s?.reachable,
       timedOut: s?.timedOut,

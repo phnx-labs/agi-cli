@@ -1,6 +1,3 @@
-/**
- * Unit tests for daemon service catalog and toggle config.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -29,7 +26,7 @@ describe('daemon-services', () => {
   afterEach(() => {
     if (originalConfigDir !== undefined) process.env.AGENTS_DAEMON_CONFIG_DIR = originalConfigDir;
     else delete process.env.AGENTS_DAEMON_CONFIG_DIR;
-    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch {  }
   });
 
   it('defaults every known service to enabled when config is missing', () => {
@@ -46,7 +43,6 @@ describe('daemon-services', () => {
 
     const cfg = readDaemonServicesConfig();
     expect(cfg.services['monitors']).toBe(false);
-    // Other services stay enabled.
     expect(cfg.services['scheduler']).toBe(true);
   });
 
@@ -63,13 +59,10 @@ describe('daemon-services', () => {
 
   it('ignores unknown service ids without throwing', () => {
     const filePath = getDaemonServicesConfigPath();
-    // `browser-ipc` is a now-removed id (PHNX-4101), so it is exactly an unknown
-    // key: read must ignore it, never resurrect it.
     fs.writeFileSync(filePath, 'services:\n  monitors: false\n  browser-ipc: false\n  unknown-service: false\n', 'utf-8');
     const cfg = readDaemonServicesConfig();
     expect(cfg.services['monitors']).toBe(false);
     expect((cfg.services as Record<string, boolean>)['browser-ipc']).toBeUndefined();
-    // Unknown key is ignored, not crashed on.
     expect(cfg.services['scheduler']).toBe(true);
   });
 

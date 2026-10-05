@@ -1,12 +1,3 @@
-/**
- * Exit-code sentinel: a teammate whose process exits cleanly but whose stream
- * emits no parsed terminal event (kimi, antigravity, droid) must resolve to
- * COMPLETED — not the false FAILED the old hardcoded `reapProcess` produced.
- *
- * These spawn real processes through the production wrapper (buildSentinelCommand)
- * and drive the real updateStatusFromProcess(), so they exercise the actual
- * critical path with no mocking.
- */
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -29,7 +20,7 @@ function makeAgent(base: string, id: string): AgentProcess {
   return new AgentProcess(
     id,
     'test-team',
-    'kimi', // an agent whose parser emits NO `type:'result'` event
+    'kimi',
     'do a thing',
     null,
     'plan',
@@ -37,17 +28,10 @@ function makeAgent(base: string, id: string): AgentProcess {
     AgentStatus.RUNNING,
     new Date(),
     null,
-    base, // baseDir -> getAgentDir() = base/id
+    base,
   );
 }
 
-/**
- * Spawn a teammate exactly the way launchProcess does: a detached shell that
- * runs `cmd`, streams stdout to the agent log, and (when `sentinel`) records
- * the real exit code to the sentinel file. Resolves once the process has exited
- * so the caller can assert the resolved status. `sentinel: false` simulates a
- * process killed before it could record $? (SIGKILL on timeout/stop).
- */
 function spawnTeammate(
   agent: AgentProcess,
   agentDir: string,
@@ -68,27 +52,18 @@ function spawnTeammate(
   agent.status = AgentStatus.RUNNING;
   return new Promise((resolve) => {
     child.on('exit', () => {
-      try { fs.closeSync(stdoutFd); } catch { /* already closed */ }
+      try { fs.closeSync(stdoutFd); } catch {  }
       resolve();
     });
   });
 }
 
-// The teammate launcher records the real exit status via a detached `/bin/sh`
-// that appends `; echo $? > sentinel` (buildSentinelCommand). That process-group
-// + POSIX-shell sentinel mechanism — and the `echo`/`sh -c 'exit 3'`/`true`
-// fixtures below — are POSIX-only; there is no `/bin/sh` on Windows, so these
-// spawn-real-process cases are skipped there. The pure-string buildSentinelCommand
-// suite below still runs on every OS.
 describe.skipIf(IS_WINDOWS)('teams exit-code sentinel', () => {
   it('marks a clean exit COMPLETED even when the stream has no terminal event', async () => {
     const base = tmpBase();
     const agentDir = path.join(base, 'a1');
     const agent = makeAgent(base, 'a1');
 
-    // Plain, non-JSON stdout: readNewEvents() parses no `result`/`turn.completed`
-    // event, so the verdict comes entirely from the exit code. This is the kimi/
-    // antigravity case that used to be falsely FAILED.
     await spawnTeammate(agent, agentDir, ['echo', 'plain-text-not-json']);
     await agent.updateStatusFromProcess();
 
@@ -116,7 +91,6 @@ describe.skipIf(IS_WINDOWS)('teams exit-code sentinel', () => {
     const agentDir = path.join(base, 'a3');
     const agent = makeAgent(base, 'a3');
 
-    // No sentinel written -> mimics SIGKILL mid-run. Absence must read as failure.
     await spawnTeammate(agent, agentDir, ['true'], false);
     expect(fs.existsSync(path.join(agentDir, 'exit_code'))).toBe(false);
     await agent.updateStatusFromProcess();
@@ -136,7 +110,6 @@ describe('buildSentinelCommand', () => {
 
   it('single-quotes args so shell metacharacters cannot inject', () => {
     const wrapped = buildSentinelCommand(['echo', '$(rm -rf /); `boom`'], '/tmp/exit_code');
-    // The dangerous arg is fully single-quoted; no unquoted $() or backticks.
     expect(wrapped).toContain(`'$(rm -rf /); \`boom\`'`);
     expect(wrapped.startsWith(`'echo' '`)).toBe(true);
   });

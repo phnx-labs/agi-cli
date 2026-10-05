@@ -22,23 +22,16 @@ beforeEach(() => {
   projectDir = path.join(tmpDir, 'project');
   projectRoutinesDir = path.join(projectDir, '.agents', 'routines');
   userRoutinesDir = path.join(tmpDir, 'user-routines');
-  // Isolated (empty) system-routines dir so real built-ins shipped to
-  // ~/.agents/.system/routines/ (e.g. check-updates.yml) never leak into these
-  // exact-match job-list assertions.
   systemRoutinesDir = path.join(tmpDir, 'system-routines');
 
   fs.mkdirSync(projectRoutinesDir, { recursive: true });
   fs.mkdirSync(userRoutinesDir, { recursive: true });
   fs.mkdirSync(systemRoutinesDir, { recursive: true });
 
-  // Route the routines helpers at the temp dirs. ensureAgentsDir() is also
-  // called from listJobs/readJob — stub it to a no-op so it doesn't touch
-  // the real ~/.agents/ during tests.
   vi.spyOn(state, 'getRoutinesDir').mockReturnValue(userRoutinesDir);
   vi.spyOn(state, 'getSystemRoutinesDir').mockReturnValue(systemRoutinesDir);
   vi.spyOn(state, 'getProjectRoutinesDir').mockImplementation((cwd?: string) => {
     if (!cwd) return null;
-    // Only return the project dir when called from inside our temp project.
     if (cwd.startsWith(projectDir)) return projectRoutinesDir;
     return null;
   });

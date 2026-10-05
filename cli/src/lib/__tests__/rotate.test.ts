@@ -12,10 +12,6 @@ function usage(usedPercent: number): UsageSnapshot {
   return {
     source: 'live',
     sourceLabel: 'test',
-    // Fresh so the snapshot passes isUsageVerified at pick time — these tests
-    // exercise capacity WEIGHTING, which only applies to a verified snapshot
-    // (an unverified one weights as the UNVERIFIED_WEIGHT floor). Freshness-vs-
-    // staleness routing is covered in accounting/rotate.test.ts.
     capturedAt: new Date(),
     windows: [
       {
@@ -34,10 +30,6 @@ function claudeUsage(sessionUsedPercent: number, weekUsedPercent: number, sonnet
   return {
     source: 'live',
     sourceLabel: 'test',
-    // Fresh so the snapshot passes isUsageVerified at pick time — these tests
-    // exercise capacity WEIGHTING, which only applies to a verified snapshot
-    // (an unverified one weights as the UNVERIFIED_WEIGHT floor). Freshness-vs-
-    // staleness routing is covered in accounting/rotate.test.ts.
     capturedAt: new Date(),
     windows: [
       {
@@ -186,7 +178,6 @@ describe('pickBalancedCandidate', () => {
       lastActive: new Date('2026-04-15T00:00:00Z'),
     });
 
-    // Both eligible — stale flag overridden by live snapshot at 15% used.
     const result = pickBalancedCandidate([staleFlag, busier]);
     expect(result!.healthy).toHaveLength(2);
     expect(result!.healthy.map((c) => c.version).sort()).toEqual(['2.1.118', '2.1.121']);
@@ -202,8 +193,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('weights selection by remaining capacity — fresher account wins more often', () => {
-    // 10% used vs 90% used → weights 90 vs 10. Over 2000 trials, 10%-used
-    // should win ~9× more often than 90%-used. Allow generous tolerance.
     const fresh = cand({ version: '2.1.113', email: 'a@x.com', usageSnapshot: usage(10) });
     const tired = cand({ version: '2.1.112', email: 'b@x.com', usageSnapshot: usage(90) });
 
@@ -213,16 +202,13 @@ describe('pickBalancedCandidate', () => {
       const result = pickBalancedCandidate([fresh, tired]);
       counts[result!.picked.version] += 1;
     }
-    // Expected: fresh wins ~90% of trials. Allow [80%, 95%].
     const freshRatio = counts['2.1.113'] / iterations;
     expect(freshRatio).toBeGreaterThan(0.8);
     expect(freshRatio).toBeLessThan(0.95);
-    // Tired is still picked sometimes — never zero.
     expect(counts['2.1.112']).toBeGreaterThan(0);
   });
 
   it('distributes roughly evenly across equal-capacity candidates', () => {
-    // Four candidates all at 0% used → equal weights → uniform random.
     const accounts = [
       { version: '2.1.110', email: 'a@x.com' },
       { version: '2.1.111', email: 'b@x.com' },
@@ -240,7 +226,6 @@ describe('pickBalancedCandidate', () => {
       counts[result!.picked.version] += 1;
     }
 
-    // Expected: ~25% each. Allow [15%, 35%].
     for (const a of accounts) {
       const ratio = counts[a.version] / iterations;
       expect(ratio).toBeGreaterThan(0.15);
@@ -249,8 +234,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('still picks a near-exhausted-but-eligible account occasionally', () => {
-    // 99% used has weight 1; 0% used has weight 100. The 99% account should
-    // be picked roughly 1% of the time — small but nonzero.
     const almost = cand({ version: '2.1.113', email: 'a@x.com', usageSnapshot: usage(99) });
     const fresh = cand({ version: '2.1.112', email: 'b@x.com', usageSnapshot: usage(0) });
 
@@ -260,17 +243,11 @@ describe('pickBalancedCandidate', () => {
       const result = pickBalancedCandidate([almost, fresh]);
       counts[result!.picked.version] += 1;
     }
-    // Sanity: never zero. The fresh one dominates but we don't starve the other.
     expect(counts['2.1.113']).toBeGreaterThan(0);
     expect(counts['2.1.112']).toBeGreaterThan(counts['2.1.113'] * 10);
   });
 
   it('weights by weekly headroom, not session, among eligible accounts', () => {
-    // A high — but not maxed — session% must not distort the weight: routing
-    // capacity is driven by the weekly window. sessionBusy has lots of weekly
-    // headroom despite a near-full session, so it should win most trials. (When
-    // session actually hits 100 the account is instead excluded outright — see
-    // the next test.)
     const sessionBusy = cand({
       version: '2.1.112',
       email: 'icloud@example.com',
@@ -284,9 +261,6 @@ describe('pickBalancedCandidate', () => {
       lastActive: new Date('2026-04-15T00:00:00Z'),
     });
 
-    // sessionBusy: routing usage = max(15, 0) = 15 → weight 85
-    // weeklyBusy:  routing usage = max(80, 7) = 80 → weight 20
-    // Expected: sessionBusy wins ~85/(85+20) = 81% of trials.
     const counts: Record<string, number> = { '2.1.112': 0, '2.1.110': 0 };
     const iterations = 2000;
     for (let i = 0; i < iterations; i++) {
@@ -299,10 +273,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('excludes a session-maxed account even when its weekly window has headroom', () => {
-    // The real bug: 2.1.187 with session=100 but week=60 was deemed eligible
-    // (routing looked at weekly only) and kept getting picked, while `ag view`
-    // showed it rate-limited. A session-maxed account cannot serve the next
-    // request, so balanced must skip it and route to the healthy account.
     const sessionMaxed = cand({
       version: '2.1.187',
       email: 'getrush@example.com',
@@ -322,15 +292,11 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('excludes a server-revoked account even at full headroom, routing to the live one', () => {
-    // signedIn only means "a credential file exists"; a token the daemon's live
-    // probe saw rejected (401/403 -> authVerdict 'revoked') will fail auth at
-    // spawn. It must be excluded BEFORE usage weighting, however empty it looks —
-    // otherwise `agents run` auto-picks a dead account (the RUSH audit's #1 bug).
     const revoked = cand({
       version: '2.1.220',
       email: 'revoked@example.com',
       authVerdict: 'revoked',
-      usageSnapshot: claudeUsage(0, 0, 0), // full headroom — the most tempting pick
+      usageSnapshot: claudeUsage(0, 0, 0),
       lastActive: new Date('2026-04-20T10:00:00Z'),
     });
     const live = cand({
@@ -352,9 +318,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('fail-open: a null or non-revoked auth verdict never gates on its own', () => {
-    // Only `revoked` (isDeadVerdict) excludes. A cold cache (null), a benign
-    // `unverified` (harness with no live probe), a self-healing `expired`, `live`,
-    // or an indeterminate `error` must all stay eligible — usage is a separate gate.
     for (const v of [null, 'unverified', 'expired', 'live', 'error'] as const) {
       const c = cand({ version: '2.1.219', authVerdict: v, usageSnapshot: claudeUsage(10, 10, 0) });
       const result = pickBalancedCandidate([c]);
@@ -364,9 +327,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('readinessFromCandidate reports `revoked` in lockstep with the pick gate', () => {
-    // The pick gate (isRotationEligible) is defined in terms of this function, so
-    // the two can never disagree: what rotation excludes, the pre-flight warning
-    // names with the same reason.
     const r = readinessFromCandidate(
       cand({ version: '2.1.220', authVerdict: 'revoked', usageSnapshot: claudeUsage(0, 0, 0) }),
     );
@@ -374,17 +334,10 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('keeps a sonnet-week-maxed account eligible (router mirrors the `ag view` badge)', () => {
-    // Deliberate design choice — router eligibility == the badge's signal
-    // (deriveUsageStatusFromSnapshot), which EXCLUDES the model-specific
-    // sonnet_week sub-limit: hitting it throttles one model, not the account, so
-    // the row stays "available" and the account can still serve Opus/Haiku. This
-    // locks in the behavior: a sonnet_week=100 / session,week-healthy account must
-    // NOT be excluded (the earlier design that also gated on getRoutingUsedPercent
-    // would wrongly exclude it, reintroducing router-vs-badge disagreement).
     const sonnetMaxed = cand({
       version: '2.1.187',
       email: 'getrush@example.com',
-      usageSnapshot: claudeUsage(30, 40, 100), // sonnet_week=100, session/week healthy
+      usageSnapshot: claudeUsage(30, 40, 100),
       lastActive: new Date('2026-04-20T10:00:00Z'),
     });
     const result = pickBalancedCandidate([sonnetMaxed]);
@@ -393,9 +346,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('dedupes by email — same account on two versions collapses to one candidate', () => {
-    // user-a@example.com installed under 2.1.118 and 2.1.110. Without dedup,
-    // weighted random could pick 2.1.118 OR 2.1.110 even though they're the
-    // same Anthropic account — both calls would land on the same quota.
     const a = cand({ version: '2.1.110', email: 'user-a@example.com', lastActive: new Date('2026-04-20T10:00:00Z') });
     const b = cand({ version: '2.1.118', email: 'user-a@example.com', lastActive: new Date('2026-04-20T05:00:00Z') });
     const c = cand({ version: '2.1.111', email: 'other@x.com', lastActive: new Date('2026-04-20T08:00:00Z') });
@@ -404,18 +354,12 @@ describe('pickBalancedCandidate', () => {
     expect(result!.healthy).toHaveLength(2);
     const emails = result!.healthy.map((x) => x.email).sort();
     expect(emails).toEqual(['other@x.com', 'user-a@example.com']);
-    // The duplicate (newer of the two user-a@example.com versions) lands in excluded.
     expect(result!.excluded.map((x) => x.version)).toContain('2.1.110');
-    // Among the user-a@example.com versions, the older lastActive wins.
     const survivor = result!.healthy.find((x) => x.email === 'user-a@example.com');
     expect(survivor!.version).toBe('2.1.118');
   });
 
   it('keeps two orgs under one email as distinct candidates (dedup by org, not email)', () => {
-    // Same Google identity signed into a Personal org on one version and an
-    // Enterprise org on another. Quota is per-org, so these are separate
-    // rate-limit buckets and must both stay healthy — the email collision is
-    // not an account collision. Regression for #309.
     const personal = cand({
       version: '2.1.170',
       email: 'taylor@example.com',
@@ -436,9 +380,6 @@ describe('pickBalancedCandidate', () => {
   });
 
   it('still collapses two versions sharing one org (same usage key)', () => {
-    // Two installed versions, same org → same quota bucket → must dedup to one
-    // even though they are distinct versions. The lower-used / older-active one
-    // survives per compareCandidates.
     const a = cand({
       version: '2.1.170',
       email: 'taylor@example.com',
@@ -455,14 +396,11 @@ describe('pickBalancedCandidate', () => {
     const result = pickBalancedCandidate([a, b]);
     expect(result!.healthy).toHaveLength(1);
     expect(result!.excluded).toHaveLength(1);
-    // Older lastActive wins (compareCandidates tiebreak), newer is excluded.
     expect(result!.healthy[0].version).toBe('2.1.183');
     expect(result!.excluded[0].version).toBe('2.1.170');
   });
 
   it('parallel selection fans out across unique accounts even when versions share emails', () => {
-    // 6 versions, 5 unique accounts. After dedup, 5 candidates with equal
-    // capacity (no usage data) get ~20% each.
     const candidates = [
       { version: '2.1.118', email: 'user-a@example.com' },
       { version: '2.1.110', email: 'user-a@example.com' },
@@ -481,7 +419,6 @@ describe('pickBalancedCandidate', () => {
       emailCounts[email] = (emailCounts[email] ?? 0) + 1;
     }
 
-    // 5 unique accounts → expected ~20% each. Allow each to land within [10%, 35%].
     expect(Object.keys(emailCounts)).toHaveLength(5);
     for (const email of Object.keys(emailCounts)) {
       const ratio = emailCounts[email] / iterations;
@@ -510,10 +447,6 @@ describe('pickAvailableCandidate', () => {
   });
 
   it('switches away from a session-maxed pinned version (live window, weekly headroom)', () => {
-    // Same shape as the 2.1.187 bug but exercised through `available`: the
-    // pinned/preferred version is session-maxed via a live snapshot while its
-    // weekly window still has room. It must NOT be preferred — route to the
-    // healthy account instead.
     const preferred = cand({
       version: '2.1.187',
       email: 'getrush@example.com',

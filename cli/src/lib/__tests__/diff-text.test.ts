@@ -21,8 +21,6 @@ describe('colorizeUnifiedDiff', () => {
     const patch = unifiedDiff('a\n', 'b\n', { fromLabel: 'src' });
     const coloured = colorizeUnifiedDiff(patch, '>>>');
     for (const line of coloured.split('\n')) {
-      // The function strips ANSI before the prefix, so plain prefix must be at start.
-      // chalk wraps the line *content*, the prefix itself is uncoloured.
       expect(line.startsWith('>>>')).toBe(true);
     }
   });

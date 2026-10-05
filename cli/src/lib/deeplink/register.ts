@@ -1,22 +1,3 @@
-/**
- * Register the `agents://` URL scheme with the OS so a click in an artifact
- * routes to the machine-only `agents _callback <url>` verb (see url.ts +
- * commands/open.ts). Humans manage the handler with `agents setup url-scheme`.
- *
- * A browser page cannot spawn a shell; a registered URL scheme is the
- * OS-sanctioned hand-off. Each platform gets its own handler:
- *   - Linux:   a `.desktop` entry claiming `x-scheme-handler/agents`, made the
- *              default via `xdg-mime`.
- *   - macOS:   a tiny AppleScript app whose `on open location` runs the CLI;
- *              its Info.plist declares the `agents` scheme, registered with
- *              LaunchServices via `lsregister`.
- *   - Windows: `HKCU\Software\Classes\agents` shell-open-command registry keys.
- *
- * The content generators below are pure and unit-tested. The `register*` /
- * `unregister*` / `status*` functions apply them and never throw — they return a
- * {@link SchemeStatus} so callers (setup, `agents setup url-scheme register`,
- * doctor) can report without a try/catch.
- */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -31,30 +12,14 @@ const MAC_APP_NAME = 'AgentsURLHandler.app';
 interface SchemeStatus {
   registered: boolean;
   platform: NodeJS.Platform;
-  /** One human line: where the handler is, or why it is not registered. */
   detail: string;
 }
 
-// ---------------------------------------------------------------------------
-// Invocation resolution — the absolute command the handler runs.
-// ---------------------------------------------------------------------------
 
-/**
- * POSIX single-quote a path so a space or metacharacter in it can never break
- * out of the handler command.
- */
 export function shQuote(p: string): string {
   return `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Resolve how the OS handler should invoke this CLI, as an already-quoted
- * command prefix (without the `open <url>` suffix).
- *
- * A macOS GUI app does NOT inherit the shell PATH, so the handler must use an
- * absolute path. Prefer the `agents` shim on PATH (directly executable); fall
- * back to `<node> <entry>` for a bare JS install.
- */
 function resolveAgentsInvocation(platform: NodeJS.Platform = os.platform()): string {
   const onPath = whichAgents(platform);
   if (onPath) return platform === 'win32' ? `"${onPath}"` : shQuote(onPath);
@@ -74,11 +39,7 @@ function whichAgents(platform: NodeJS.Platform): string | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Pure content generators (unit-tested).
-// ---------------------------------------------------------------------------
 
-/** The freedesktop `.desktop` entry that claims `x-scheme-handler/agents`. */
 export function linuxDesktopEntry(invocation: string): string {
   return [
     '[Desktop Entry]',
@@ -93,14 +54,8 @@ export function linuxDesktopEntry(invocation: string): string {
   ].join('\n');
 }
 
-/**
- * AppleScript whose `on open location` handler fires when macOS routes an
- * `agents://` URL to the app. `quoted form of` makes the URL a single safe
- * shell argument — the URL is never concatenated unquoted.
- */
 export function macAppleScriptSource(invocation: string): string {
-  // Escape the (already shell-quoted) invocation for an AppleScript double-quoted
-  // string literal, so a `"` or `\` in the install path cannot break osacompile.
+  // Escape the validated executable literal; pass the hostile URL as quoted argv data.
   const literal = invocation.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return [
     'on open location this_URL',
@@ -109,7 +64,6 @@ export function macAppleScriptSource(invocation: string): string {
   ].join('\n');
 }
 
-/** PlistBuddy commands that add the `agents` URL type to a compiled app's Info.plist. */
 export function macPlistBuddyCommands(plistPath: string): string[][] {
   const b = ['/usr/libexec/PlistBuddy', '-c'];
   return [
@@ -122,7 +76,6 @@ export function macPlistBuddyCommands(plistPath: string): string[][] {
   ];
 }
 
-/** `reg add` argv lists that register the scheme under HKCU on Windows. */
 export function windowsRegistryCommands(invocation: string): string[][] {
   const base = 'HKCU\\Software\\Classes\\agents';
   return [
@@ -132,9 +85,6 @@ export function windowsRegistryCommands(invocation: string): string[][] {
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Paths.
-// ---------------------------------------------------------------------------
 
 export function linuxDesktopPath(home = os.homedir()): string {
   return path.join(home, '.local', 'share', 'applications', LINUX_DESKTOP_FILE);
@@ -144,11 +94,7 @@ function macAppPath(home = os.homedir()): string {
   return path.join(home, 'Applications', MAC_APP_NAME);
 }
 
-// ---------------------------------------------------------------------------
-// Status.
-// ---------------------------------------------------------------------------
 
-/** Whether the handler artifact exists on disk (a cheap, side-effect-free check). */
 export function agentsUrlSchemeStatus(platform: NodeJS.Platform = os.platform(), home = os.homedir()): SchemeStatus {
   if (platform === 'linux') {
     const p = linuxDesktopPath(home);
@@ -180,14 +126,10 @@ function windowsSchemeRegistered(): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Register / unregister (side-effecting, never throw).
-// ---------------------------------------------------------------------------
 
 interface RegisterOptions {
   platform?: NodeJS.Platform;
   home?: string;
-  /** Skip if already present (used by best-effort callers like setup). */
   ifMissing?: boolean;
 }
 
@@ -235,7 +177,6 @@ function registerLinux(home: string): SchemeStatus {
   const dest = linuxDesktopPath(home);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, linuxDesktopEntry(invocation), 'utf8');
-  // Make it the default handler for the scheme; best-effort DB refresh.
   run('xdg-mime', ['default', LINUX_DESKTOP_FILE, 'x-scheme-handler/agents'], true);
   run('update-desktop-database', [path.dirname(dest)], true);
   return { registered: true, platform: 'linux', detail: `handler: ${dest}` };
@@ -247,7 +188,6 @@ function registerMac(home: string): SchemeStatus {
   fs.mkdirSync(path.dirname(app), { recursive: true });
   fs.rmSync(app, { recursive: true, force: true });
 
-  // Compile the AppleScript into an .app, then inject the URL scheme into its plist.
   const scriptFile = path.join(os.tmpdir(), `agents-url-handler-${process.pid}.applescript`);
   fs.writeFileSync(scriptFile, macAppleScriptSource(invocation), 'utf8');
   try {
@@ -256,10 +196,7 @@ function registerMac(home: string): SchemeStatus {
     fs.rmSync(scriptFile, { force: true });
   }
   const plist = path.join(app, 'Contents', 'Info.plist');
-  // Non-optional: if the URL type is not written, the scheme is never claimed —
-  // registerAgentsUrlScheme must report failure, not a false "registered".
   for (const cmd of macPlistBuddyCommands(plist)) run(cmd[0], cmd.slice(1), false);
-  // Register with LaunchServices so the scheme resolves without a reboot.
   const lsregister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
   run(lsregister, ['-f', app], true);
   return { registered: true, platform: 'darwin', detail: `handler: ${app}` };
@@ -271,7 +208,6 @@ function registerWindows(platform: NodeJS.Platform): SchemeStatus {
   return { registered: true, platform, detail: 'handler: HKCU\\Software\\Classes\\agents' };
 }
 
-/** Run a helper command. `optional` swallows failures (best-effort DB refreshes). */
 function run(cmd: string, args: string[], optional: boolean): void {
   try {
     execFileSync(cmd, args, { stdio: 'ignore' });

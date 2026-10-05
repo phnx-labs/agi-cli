@@ -79,7 +79,6 @@ describe('mint flow table', () => {
 
   it('fails loud for a harness with no setup-token mint', () => {
     expect(() => getMintFlow('kimi')).toThrow(/Cannot mint a setup-token for 'kimi'/);
-    // api-key harnesses have no derivable token — the error names the collection path.
     expect(() => getMintFlow('grok')).toThrow(/no derivable token.*agents accounts add grok/);
     expect(() => getMintFlow('codex')).toThrow(/OPENAI_API_KEY/);
     expect(() => getMintFlow('not-an-agent')).toThrow(/Unknown harness/);
@@ -251,14 +250,8 @@ describe('driveSetupTokenMint', () => {
   });
 });
 
-// A named provider account (seedNamedAccount → addAccount) is a bundle with no
-// explicit backend, which the real standalone would put in the operator's login
-// keychain on a headed macOS box; those blocks run only where keychain items
-// are file-backed (headless Linux/Windows, CI). The reserved `auth` bundle is
-// written with `backend: 'file'` and runs everywhere.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
-/** A real version home signed into EMAIL (writes .claude.json), removed after each test. */
 function useSignedInHome(): () => string {
   let home = '';
   beforeEach(() => {
@@ -296,39 +289,28 @@ describe('seedReservedAuthToken — the reserved file-backed auth bundle', () =>
     const key = workerCredentialStoreKey('claude', accountId);
     const first = seedReservedStoreKey('claude', 'setup-token', key, TOKEN);
     expect(first).toEqual({ bundle: '__claude__', key });
-    // The worker slot reads the raw item (readReservedCredential) …
     expect(readReservedCredential('__claude__', key)).toBe(TOKEN);
-    // … and the daemon push reads the store AS A BUNDLE (pushBundleToHost →
-    // readAndResolveBundleEnv). A bare raw item with no bundle record made every
-    // reserved-store push fail with "Invalid bundle name" / OPERATION_FAILED and
-    // left every worker without a Cursor/Codex/Grok key — so this is the read
-    // that must succeed, on a FILE-backed, policy-never bundle.
     expect(bundleExistsSync('__claude__')).toBe(true);
     expect(bundleBackendSync('__claude__')).toBe('file');
     const resolved = readAndResolveBundleEnvSync('__claude__', { caller: 'test', agentOnly: true, keyMode: 'storage' });
     expect(resolved.env[key]).toBe(TOKEN);
     expect(resolved.bundle.policy).toBe('never');
 
-    // Rotation: same key, new value (re-mint after expiry).
     seedReservedStoreKey('claude', 'setup-token', key, `${TOKEN}rotated`);
     expect(readReservedCredential('__claude__', key)).toBe(`${TOKEN}rotated`);
     expect(readAndResolveBundleEnvSync('__claude__', { caller: 'test', agentOnly: true, keyMode: 'storage' }).env[key]).toBe(`${TOKEN}rotated`);
 
-    // A second harness gets its own store and value.
     const grokKey = workerCredentialStoreKey('grok', accountId);
     seedReservedStoreKey('grok', 'api-key', grokKey, 'xai-test');
     expect(readReservedCredential('__grok__', grokKey)).toBe('xai-test');
     expect(bundleBackendSync('__grok__')).toBe('file');
     expect(readAndResolveBundleEnvSync('__grok__', { caller: 'test', agentOnly: true, keyMode: 'storage' }).env[grokKey]).toBe('xai-test');
 
-    // The write boundary refuses a rotating OAuth/session credential (RUSH-1958).
     expect(() => seedReservedStoreKey('codex', 'oauth-session' as never, 'OPENAI_API_KEY_x', 'v'))
       .toThrow(/rotating session/);
   });
 
   it('adoptLegacyReservedStoreItems folds a pre-bundle raw reserved item into its file-backed bundle, once', () => {
-    // The shape 1.22.84–1.22.89 left behind: the value sits at the item name the
-    // bundle would use, but no bundle record exists, so the push cannot read it.
     const accountId = '3dbc408e-a885-4571-8137-2c7ddc84a2ad';
     const key = workerCredentialStoreKey('cursor', accountId);
     storeSetSync('file', secretsKeychainItem('__cursor__', key), 'crsr_legacy_value');
@@ -342,18 +324,12 @@ describe('seedReservedAuthToken — the reserved file-backed auth bundle', () =>
     const resolved = readAndResolveBundleEnvSync('__cursor__', { caller: 'test', agentOnly: true, keyMode: 'storage' });
     expect(resolved.env[key]).toBe('crsr_legacy_value');
     expect(resolved.bundle.policy).toBe('never');
-    // The raw reader keeps working on the adopted item (same name).
     expect(readReservedCredential('__cursor__', key)).toBe('crsr_legacy_value');
 
-    // Idempotent: the bundle now carries the key, so a second pass adopts nothing.
     expect(adoptLegacyReservedStoreItems(meta)).toEqual({ adopted: [], errors: [] });
   });
 
   it('reports not-ready instead of crashing when the standalone secrets CLI is unreachable (PHNX-3385)', () => {
-    // `agents setup` / `agents doctor` call this as a read-only probe; both the
-    // account-registry read and the auth-bundle read go through the client, so
-    // a missing / unspawnable `secrets` executable must degrade to "cannot
-    // confirm", never throw out of the status command.
     const savedBin = process.env.SECRETS_BIN;
     process.env.SECRETS_BIN = path.join(os.tmpdir(), 'no-such-secrets-cli');
     _resetSecretsClientForTest();

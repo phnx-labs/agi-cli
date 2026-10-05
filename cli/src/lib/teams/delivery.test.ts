@@ -68,7 +68,6 @@ describe('resolveTeammateDelivery (RUSH-2380)', () => {
   });
 
   it('a running teammate with a PR URL is still in_progress (not PR OPEN yet)', () => {
-    // Process not finished — do not claim delivery state.
     expect(
       resolveTeammateDelivery({
         status: AgentStatus.RUNNING,

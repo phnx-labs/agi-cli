@@ -52,8 +52,6 @@ describe('fillGaps', () => {
   });
 
   it('does not re-append stale array entries the target has since mutated', () => {
-    // Factory sync merges system hooks INTO the user's entry; a union would
-    // re-add the stale pre-mutation copy from the source and fire it twice.
     const mutated = {
       matcher: 'Bash',
       hooks: [{ type: 'command', command: 'echo guard' }, { type: 'command', command: 'system-guard.sh' }],
@@ -74,13 +72,11 @@ describe('carryForwardSettings (claude)', () => {
     };
     writeJson(path.join(fromHome, '.claude/settings.json'), userSettings);
 
-    // Fresh home: file lands verbatim.
     const first = carryForwardSettings('claude', fromHome, toHome);
     expect(first.applied).toContain('.claude/settings.json');
     const fresh = JSON.parse(fs.readFileSync(path.join(toHome, '.claude/settings.json'), 'utf-8'));
     expect(fresh).toEqual(userSettings);
 
-    // Populated home: target values win, gaps fill.
     writeJson(path.join(toHome, '.claude/settings.json'), {
       env: { FOO: 'newer' },
       model: 'opus',
@@ -141,9 +137,7 @@ describe('carryForwardSettings (claude)', () => {
 
     const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
     expect(target.projects['/repos/trusted']).toEqual({ hasTrustDialogAccepted: true });
-    // A stamped-default false is not a decision — it must not be carried.
     expect(target.projects['/repos/never-accepted']).toBeUndefined();
-    // The login and machine state stay per-version.
     expect(target.oauthAccount).toBeUndefined();
     expect(target.hasCompletedOnboarding).toBeUndefined();
   });
@@ -152,8 +146,6 @@ describe('carryForwardSettings (claude)', () => {
     writeJson(path.join(fromHome, '.claude.json'), {
       projects: { '/repos/app': { hasTrustDialogAccepted: true } },
     });
-    // Headless runs create the project entry with the flag defaulted to false
-    // without ever showing the dialog — trust granted elsewhere must win.
     writeJson(path.join(toHome, '.claude.json'), {
       hasCompletedOnboarding: true,
       projects: {
@@ -189,7 +181,6 @@ describe('carryForwardSettings (claude)', () => {
     expect(again.applied).toEqual([]);
     expect(again.backupDir).toBeUndefined();
 
-    // A source with no accepted projects must not create the target file at all.
     const emptyTo = path.join(tmpDir, 'to-empty');
     fs.mkdirSync(emptyTo, { recursive: true });
     writeJson(path.join(fromHome, '.claude.json'), {
@@ -227,7 +218,6 @@ describe('carryForwardSettings (claude)', () => {
     expect(result.applied).toContain('.claude.json');
 
     const target = JSON.parse(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8'));
-    // The target keeps ITS login; nothing from the source but the flag arrives.
     expect(target.oauthAccount).toEqual({ emailAddress: 'target@example.com' });
     expect(target.hasCompletedOnboarding).toBeUndefined();
     expect(target.projects['/repos/app']).toEqual({ hasTrustDialogAccepted: true });
@@ -245,7 +235,6 @@ describe('carryForwardSettings (claude)', () => {
       expect(fs.readFileSync(path.join(toHome, '.claude.json'), 'utf-8')).toBe(broken);
     }
 
-    // An object target whose `projects` is not an object is equally not ours to repair.
     writeJson(path.join(toHome, '.claude.json'), { projects: 'corrupt' });
     const result = carryForwardSettings('claude', fromHome, toHome);
     expect(result.applied).toEqual([]);
@@ -280,8 +269,6 @@ describe('carryForwardSettings (codex)', () => {
     expect(merged.projects['/root/work'].trust_level).toBe('trusted');
     expect(merged.notice).toBeUndefined();
 
-    // The credential is deliberately excluded from carry-forward so each Codex
-    // version keeps its own account — a fresh version installs signed-out.
     expect(result.applied).not.toContain('.codex/auth.json');
     expect(fs.existsSync(path.join(toHome, '.codex/auth.json'))).toBe(false);
   });

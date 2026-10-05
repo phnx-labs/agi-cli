@@ -133,9 +133,6 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     deviceAccounts: undefined,
     agents: { ...m.agents, claude: undefined },
   }));
-  // A managed Claude install the sandboxed HOME can call its default: the
-  // package.json + bin file listInstalledVersions checks, and a version home
-  // carrying one skill (`alpha`) as the projection source.
   const seedManagedClaude = () => {
     const versionDir = path.dirname(versionHome());
     const pkgDir = path.join(versionDir, 'node_modules', '@anthropic-ai', 'claude-code');
@@ -143,8 +140,6 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: VERSION, bin: { claude: 'bin/claude' } }));
     fs.writeFileSync(path.join(pkgDir, 'bin', 'claude'), '#!/bin/sh\n');
     fs.chmodSync(path.join(pkgDir, 'bin', 'claude'), 0o755);
-    // The rules writer composes the `default` preset from the active layers;
-    // the sandboxed HOME has no system layer, so the user layer declares it.
     const rulesDir = path.join(os.homedir(), '.agents', 'rules');
     fs.mkdirSync(rulesDir, { recursive: true });
     fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: []\n');
@@ -167,8 +162,6 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
   it('re-projects every claude slot from the default version home and prunes a skill the source no longer has', () => {
     expect(getGlobalDefault('claude')).toBe(VERSION);
     const created = addNativeAccount('work', 'claude', 'claude:user=slot-2', 'work@example.com', 'version');
-    // Deliberately NOT recorded: a slot dir with no device-doc record (an add
-    // that stopped before recordSlot, or an older build) is still projected.
     const slot = ensureSlot('claude', created.id);
     expect(readSlots(readMeta())[created.id]).toBeUndefined();
     try {
@@ -186,7 +179,6 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
       expect(fs.existsSync(path.join(skillsDir, 'zz-stale-skill'))).toBe(false);
       expect(fs.existsSync(path.join(slot.slotDir, '.claude', '.credentials.json'))).toBe(false);
 
-      // Idempotent: a second pass has nothing left to prune.
       expect(projectAccountSlots('claude').find((p) => p.accountId === created.id)?.pruned).toEqual([]);
     } finally {
       removeAccount('work');
@@ -206,7 +198,6 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
       expect(fs.readlinkSync(slotRules)).toBe(path.join(versionHome(), '.claude', 'CLAUDE.md'));
       expect(fs.readFileSync(slotRules, 'utf8')).toBe(rulesContent);
 
-      // Idempotent: re-projection keeps the symlink.
       projectAccountSlots('claude');
       const st2 = fs.lstatSync(slotRules);
       expect(st2.isSymbolicLink()).toBe(true);

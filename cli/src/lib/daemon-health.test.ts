@@ -11,8 +11,6 @@ import {
   readAllSubsystemHealth,
 } from './daemon-health.js';
 
-// getDaemonDir() (state.ts) reads AGENTS_DAEMON_DIR fresh on every call, so no
-// module reset is needed between tests — only the env var + a clean tmp dir.
 describe('daemon-health', () => {
   let dir: string;
   let originalEnv: string | undefined;
@@ -29,24 +27,18 @@ describe('daemon-health', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  // RUSH-2418: a daemon start is COUNTED when it is issued, before its outcome
-  // is known, then refined if it fails outright. That refinement must not count
-  // the same start twice — the whole circuit breaker is a comparison against a
-  // threshold, so a double-count halves the limit it enforces.
   describe('recordSubsystemErrorReason', () => {
     it('replaces the reason without bumping the streak', () => {
       recordSubsystemError('daemon-start', 'start issued', '2026-01-01T00:00:00.000Z');
       recordSubsystemErrorReason('daemon-start', 'start failed: no PID', '2026-01-01T00:00:01.000Z');
 
       const rec = readSubsystemHealth('daemon-start');
-      expect(rec?.consecutiveFailures).toBe(1); // one start, one failure
+      expect(rec?.consecutiveFailures).toBe(1);
       expect(rec?.lastError).toBe('start failed: no PID');
       expect(rec?.lastErrorAt).toBe('2026-01-01T00:00:01.000Z');
     });
 
     it('leaves a subsystem that never reported untouched', () => {
-      // Writing here would mint a record with a lastError and a zero streak —
-      // a failure described but never counted.
       recordSubsystemErrorReason('daemon-start', 'orphan reason');
       expect(readSubsystemHealth('daemon-start')).toBeNull();
     });
@@ -92,8 +84,6 @@ describe('daemon-health', () => {
     const record = readSubsystemHealth('monitors');
     expect(record?.consecutiveFailures).toBe(0);
     expect(record?.lastOkAt).toBe('2026-01-01T00:02:00.000Z');
-    // lastError is a record of what LAST happened, not cleared on recovery —
-    // status/doctor distinguish "healthy now" via consecutiveFailures === 0.
     expect(record?.lastError).toBe('boom again');
   });
 
@@ -136,24 +126,11 @@ describe('daemon-health', () => {
   it('a malformed health.json is treated as empty rather than throwing', () => {
     fs.writeFileSync(path.join(dir, 'health.json'), 'not json');
     expect(readAllSubsystemHealth()).toEqual([]);
-    // And writing still recovers cleanly afterward.
     recordSubsystemOk('monitors');
     expect(readSubsystemHealth('monitors')?.consecutiveFailures).toBe(0);
   });
 
-  // Review finding on PR #3037 (RUSH-3193 P1): recordSubsystemOk/Error are
-  // called from inside ServiceSupervisor.runTick's own catch block (and from
-  // recordFailure, its catch-of-a-catch). If the write here threw, that throw
-  // would escape as an unhandled rejection past every enclosing try/catch,
-  // hit the process-wide handler, and process.exit the WHOLE daemon —
-  // exactly the failure mode the supervisor exists to prevent. A disk-full,
-  // permission-denied, or (per this daemon's own state-dir self-check) a
-  // removed state directory must all degrade to a silently dropped health
-  // update instead.
   it('recordSubsystemOk/Error never throw even when the health file cannot be written', () => {
-    // health.json's parent dir is itself a FILE, so mkdirSync/writeFileSync
-    // both fail — this simulates disk-full/permission-denied without needing
-    // real filesystem quota tricks.
     fs.rmSync(dir, { recursive: true, force: true });
     fs.writeFileSync(dir, 'not a directory', 'utf-8');
 

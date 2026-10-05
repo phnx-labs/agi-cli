@@ -1,10 +1,3 @@
-/**
- * Tests for discoverMcpConfigsFromRepo + installMcpConfigCentrally.
- *
- * The repo-source `mcp add gh:...` form and `agents install gh:... --types mcp`
- * both rely on these two helpers. Without them, MCP configs from
- * multi-resource repos can't land in ~/.agents/mcp/ at all.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -68,13 +61,11 @@ describe('discoverMcpConfigsFromRepo', () => {
       'url: https://api.figma.com/mcp',
     ].join('\n'));
 
-    // Missing transport — must be rejected by parseMcpServerConfig.
     writeYaml(path.join(REPO_DIR, 'mcp', 'broken.yaml'), [
       'name: broken',
       'command: foo',
     ].join('\n'));
 
-    // Wrong extension — must be ignored.
     writeYaml(path.join(REPO_DIR, 'mcp', 'README.md'), '# not a config');
 
     const discovered = discoverMcpConfigsFromRepo(REPO_DIR);
@@ -94,10 +85,6 @@ describe('discoverMcpConfigsFromRepo', () => {
   it('skips a config whose validation THROWS, without losing its valid siblings', async () => {
     const { discoverMcpConfigsFromRepo } = await loadLib();
 
-    // validateMcpYamlConfig returns null for some malformed shapes but THROWS
-    // for these three. The throw escaped the scan loop, so one bad file under
-    // <repo>/mcp/ took down all of `agents inspect <repo>` with an unhandled
-    // stack trace — and the valid configs beside it never rendered.
     writeYaml(path.join(REPO_DIR, 'mcp', 'ok.yaml'), [
       'name: ok', 'transport: stdio', 'command: uvx',
     ].join('\n'));
@@ -145,7 +132,7 @@ describe('discoverMcpConfigsFromRepo', () => {
   it('installMcpConfigCentrally returns an error for invalid source files', async () => {
     const { installMcpConfigCentrally } = await loadLib();
     const bad = path.join(REPO_DIR, 'bad.yaml');
-    writeYaml(bad, 'name: x\n'); // missing transport
+    writeYaml(bad, 'name: x\n');
 
     const result = installMcpConfigCentrally(bad);
     expect(result.success).toBe(false);

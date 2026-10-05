@@ -23,7 +23,6 @@ export const ADDRESS_SCHEMES = ['ssh', 'cdp', 'vnc', 'tcp', 'wss', 'ws', 'firefo
 
 export type AddressScheme = (typeof ADDRESS_SCHEMES)[number];
 
-/** Ports a scheme implies when the address carries none. `tcp` has no default. */
 export const DEFAULT_PORTS: Readonly<Partial<Record<AddressScheme, number>>> = {
   ssh: 22,
   cdp: 9222,
@@ -34,18 +33,14 @@ export interface Address {
   scheme: AddressScheme;
   user?: string;
   host: string;
-  /** The port written in the authority, if any. See {@link addressPort} for the default. */
   port?: number;
-  /** A non-root path (`wss://hub/devtools` → `/devtools`). */
   path?: string;
   query: Record<string, string>;
-  /** The trimmed input, for messages. */
   raw: string;
 }
 
 const SCHEME_SET = new Set<string>(ADDRESS_SCHEMES);
 
-/** A bare OpenSSH target: `host` or `user@host`, letters, digits, `.`, `_`, `-`. */
 const IMPLICIT_SSH = /^[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?$/;
 
 export function parseAddress(input: string): Address {
@@ -108,12 +103,10 @@ export function parseAddress(input: string): Address {
   };
 }
 
-/** The effective port: written, else the scheme's default, else undefined. */
 export function addressPort(addr: Address): number | undefined {
   return addr.port ?? DEFAULT_PORTS[addr.scheme];
 }
 
-/** `user@host` (or bare `host`) for an `ssh` address — what OpenSSH is given. */
 export function sshTarget(addr: Address): string {
   if (addr.scheme !== 'ssh') {
     throw new Error(`expected ssh:// or user@host, got ${addr.scheme}:// (${addr.raw})`);
@@ -121,10 +114,6 @@ export function sshTarget(addr: Address): string {
   return addr.user ? `${addr.user}@${addr.host}` : addr.host;
 }
 
-/**
- * OpenSSH options carrying a non-default SSH port. `-o Port=N` rather than
- * `-p`/`-P` so the same argv serves both `ssh` and `scp`.
- */
 export function sshPortArgs(addr: Address): string[] {
   if (addr.scheme !== 'ssh') {
     throw new Error(`expected ssh:// or user@host, got ${addr.scheme}:// (${addr.raw})`);
@@ -132,7 +121,6 @@ export function sshPortArgs(addr: Address): string[] {
   return addr.port === undefined ? [] : ['-o', `Port=${addr.port}`];
 }
 
-/** `host:port` for a `vnc` address, defaulting the RFB display port. */
 export function vncEndpoint(addr: Address): string {
   if (addr.scheme !== 'vnc') {
     throw new Error(`expected vnc://, got ${addr.scheme}:// (${addr.raw})`);
@@ -140,7 +128,6 @@ export function vncEndpoint(addr: Address): string {
   return `${addr.host}:${addressPort(addr)}`;
 }
 
-/** `host:port` for a `tcp` address. A helper RPC endpoint has no default port. */
 export function tcpEndpoint(addr: Address): string {
   if (addr.scheme !== 'tcp') {
     throw new Error(`expected tcp://, got ${addr.scheme}:// (${addr.raw})`);
@@ -151,11 +138,6 @@ export function tcpEndpoint(addr: Address): string {
   return `${addr.host}:${addr.port}`;
 }
 
-/**
- * The DevTools port a browser endpoint means. On `ssh://` the authority port is
- * the SSH port, so the DevTools port comes only from `?port=`; `cdp://` and
- * `ssh://` default to 9222, path-addressed sockets (`wss://`) have none.
- */
 export function browserEndpointPort(addr: Address): number | undefined {
   const fromQuery = addr.query.port ? Number.parseInt(addr.query.port, 10) : undefined;
   if (fromQuery !== undefined) {

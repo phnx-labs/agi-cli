@@ -51,9 +51,7 @@ import { findInPath } from './agent-spec/agents.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/computer-cli';
 
-/** fd the engine reads its one-shot JSON context from. */
 export const COMPUTER_CONTEXT_FD = 3;
-/** fd the engine writes NDJSON action events to. */
 export const COMPUTER_EVENTS_FD = 4;
 
 export class ComputerClientError extends Error {
@@ -79,19 +77,10 @@ function computerEntrypoint(bin: string): string {
 
 export function isStandaloneComputer(bin: string): boolean {
   let real = computerEntrypoint(bin);
-  try { real = realpathSync(real); } catch { /* spawn reports missing explicit paths */ }
+  try { real = realpathSync(real); } catch {  }
   return !/\.(cmd|ps1)$/i.test(real) && !real.endsWith(path.join('dist', 'computer.js'));
 }
 
-/**
- * Resolve the standalone executable. `COMPUTER_BIN` wins so a dev build can be
- * driven without touching PATH.
- *
- * Resolution uses `findInPath`, which skips `~/.agents/.cache/shims`. That skip
- * is load-bearing here for the same reason it is in `sessions-client.ts`: a
- * leftover `computer` alias shim execs `agents computer`, and resolving it would
- * recurse into this process (the 1.22.85 secrets fork bomb, agi-cli#3532).
- */
 export function resolveComputerBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.COMPUTER_BIN?.trim();
@@ -108,55 +97,26 @@ export function resolveComputerBin(): string {
   return cachedBin;
 }
 
-/** A `.js` bin is run through this runtime; a real executable is exec'd directly. */
 export function invocation(bin: string): { command: string; prefix: string[] } {
   if (/\.[mc]?js$/.test(bin)) return { command: process.execPath, prefix: [bin] };
   return { command: bin, prefix: [] };
 }
 
-/**
- * One action the engine performed, as it appears on the NDJSON events fd.
- *
- * This is the engine's wire shape, not a translation of it: the engine emits
- * `{event: "computer.action", command, invocationId, pid, targetPid, bundle,
- * host, task, sessionId, launchId, actor}`. `command` — not `verb` — is the
- * field that names the action, and it is what marks a line as an action event.
- */
 export interface ComputerActionEvent {
-  /** Always `computer.action` on this stream. */
   event?: string;
-  /** The verb the engine ran (`click`, `type`, `screenshot`, …). */
   command: string;
-  /** The engine's own id for this run — the grouping key for a session row. */
   invocationId?: string;
-  /** The engine process's pid. */
   pid?: number;
-  /** pid of the app the action targeted, when the engine resolved one. */
   targetPid?: number;
-  /** Bundle id / app identifier the action targeted. */
   bundle?: string;
-  /** The driven device for a `--device` invocation; absent when local. */
   host?: string;
-  /** `run --task` description, only on the task marker. */
   task?: string;
-  /** Identity, echoed back from the context this CLI handed the engine. */
   sessionId?: string;
   launchId?: string;
   actor?: string;
-  /** Free-form detail the engine attaches (coordinates, text length, …). */
   [key: string]: unknown;
 }
 
-/**
- * Split a growing buffer into complete NDJSON lines. Pure so the framing rules —
- * blank lines skipped, a non-JSON line dropped rather than crashing the CLI, a
- * trailing partial line carried forward — are unit-testable without a spawn.
- *
- * A malformed line is dropped, not thrown: these events are telemetry riding
- * alongside a user-visible action that already happened. Failing the command
- * because its receipt was unreadable would be strictly worse than losing the
- * receipt. The action itself already failed loud on its own channel if it failed.
- */
 export function parseEventLines(
   buffer: string,
 ): { events: ComputerActionEvent[]; rest: string } {
@@ -172,44 +132,23 @@ export function parseEventLines(
         events.push(parsed as ComputerActionEvent);
       }
     } catch {
-      // Unreadable receipt — see above.
     }
   }
   return { events, rest };
 }
 
 interface RunComputerOptions {
-  /** argv handed to the standalone, after the program name. */
   argv: string[];
-  /** The consumer context serialized onto fd 3. */
   context: unknown;
-  /** Called once per action event the engine reports on fd 4. */
   onEvent?: (event: ComputerActionEvent) => void;
-  /**
-   * Capture the engine's stdout instead of inheriting the terminal.
-   *
-   * Used only where agents-cli must READ an answer rather than show it — the
-   * `agents setup computer` wizard polling `status --json` for trust. Verbs
-   * never capture: re-printing engine output would make agents-cli a formatter
-   * for a surface it no longer owns.
-   */
   capture?: boolean;
 }
 
 interface RunComputerResult {
   exitCode: number;
-  /** Engine stdout, only when `capture` was set. */
   stdout: string;
 }
 
-/**
- * Run the standalone engine with the consumer context on fd 3 and the action
- * event stream on fd 4. Resolves with the engine's exit code; the caller
- * propagates it so `agents computer` exits exactly as the engine did.
- *
- * Throws `COMPUTER_BIN_MISSING` when the standalone is not installed. Every
- * other failure is the engine's own, reported on the inherited stderr.
- */
 export async function runComputer(opts: RunComputerOptions): Promise<RunComputerResult> {
   const bin = resolveComputerBin();
   const { command, prefix } = invocation(bin);
@@ -227,8 +166,6 @@ export async function runComputer(opts: RunComputerOptions): Promise<RunComputer
   const eventsPipe = child.stdio[COMPUTER_EVENTS_FD] as NodeJS.ReadableStream | null;
 
   if (contextPipe) {
-    // An engine that exits before reading the context (bad argv, `--help`)
-    // closes fd 3 and we get EPIPE. That is a normal race, not a failure.
     contextPipe.on('error', () => {});
     contextPipe.end(JSON.stringify(opts.context) + '\n');
   }
@@ -252,7 +189,6 @@ export async function runComputer(opts: RunComputerOptions): Promise<RunComputer
     });
     eventsPipe.on('error', () => resolve());
     eventsPipe.on('end', () => {
-      // A final line with no trailing newline still counts.
       const { events } = parseEventLines(pending.endsWith('\n') ? pending : pending + '\n');
       pending = '';
       for (const event of events) opts.onEvent?.(event);
@@ -265,8 +201,6 @@ export async function runComputer(opts: RunComputerOptions): Promise<RunComputer
       reject(new ComputerClientError('COMPUTER_SPAWN_FAILED', `Could not run \`${bin}\`: ${err.message}`));
     });
     child.on('close', (code, signal) => {
-      // A signalled child has no exit code; report the conventional 128+n so
-      // callers and shells see a non-zero status instead of a false success.
       if (code == null) return resolve(signal ? 128 + (osSignalNumber(signal) ?? 0) : 1);
       resolve(code);
     });
@@ -276,9 +210,6 @@ export async function runComputer(opts: RunComputerOptions): Promise<RunComputer
   return { exitCode, stdout };
 }
 
-/** Signal name → number for the 128+n exit convention. Only the ones a tunnelled
- * or interrupted engine realistically dies on; anything else contributes 0 and
- * still yields a non-zero status. */
 function osSignalNumber(signal: NodeJS.Signals): number | undefined {
   const table: Partial<Record<NodeJS.Signals, number>> = {
     SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGPIPE: 13, SIGTERM: 15,
@@ -286,7 +217,6 @@ function osSignalNumber(signal: NodeJS.Signals): number | undefined {
   return table[signal];
 }
 
-/** Test seam: drop the memoized bin so PATH fixtures can re-resolve. */
 export function _resetComputerClientForTest(): void {
   cachedBin = undefined;
 }

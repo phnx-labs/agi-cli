@@ -13,19 +13,8 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-/**
- * Writable roots for Codex's `edit` profile: the managed user `.agents` dir, the
- * baseline toolchain caches, and — when `cwd` is inside a repo — that repo's
- * `.agents` directory. The last entry is what lets an in-repo build write under
- * `.agents/worktrees/`; Codex's `workspace-write` sandbox hardcodes `.agents/`
- * read-only, and naming the directory as an explicit writable root is the only
- * thing that overrides it (a nested sub-path does not — bwrap refuses the mount).
- */
 export function codexEditWritableRoots(cwd?: string): string[] {
   const repoAgents = repoAgentsDirForCwd(cwd);
-  // Only widen the sandbox for a `.agents` that actually exists — most repos
-  // have none, and there is no point naming a directory that isn't there. (Codex
-  // tolerates a missing writable root, so this is tidiness, not a hard guard.)
   const repoRoots = repoAgents && fs.existsSync(repoAgents) ? [repoAgents] : [];
   return unique([getUserAgentsDir(), ...codexDefaultWritableRoots(), ...repoRoots]);
 }
@@ -84,7 +73,6 @@ export function codexPolicyArgs(
   ];
 }
 
-/** Preserve whether --mode was omitted when a run is re-dispatched remotely. */
 export function modeForRemoteDispatch(
   mode: string,
   source: string | undefined,
@@ -92,7 +80,6 @@ export function modeForRemoteDispatch(
   return source === 'default' ? undefined : mode;
 }
 
-/** Only the untouched Commander default selects Codex's writable default. */
 export function modeWasImplicit(
   source: string | undefined,
   hasConfiguredDefault: boolean,

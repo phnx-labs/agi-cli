@@ -40,10 +40,6 @@ import {
 import { deleteKeychainTokenSync, setKeychainTokenSync } from '../secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 
-// Claude's `Claude Code-credentials*` service items are keychain items in the
-// standalone — on a headed macOS box that is the operator's login keychain, so
-// the tests that write or probe one run only where the standalone routes
-// keychain items to its encrypted file store (headless Linux/Windows, CI).
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {
@@ -119,7 +115,7 @@ describe('usage formatting', () => {
           label: 'Current session',
           shortLabel: 'S',
           usedPercent: 34,
-          resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2h out
+          resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
           windowMinutes: 300,
         },
         {
@@ -127,7 +123,7 @@ describe('usage formatting', () => {
           label: 'Current week',
           shortLabel: 'W',
           usedPercent: 58,
-          resetsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3d out
+          resetsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
           windowMinutes: 10080,
         },
       ],
@@ -139,12 +135,9 @@ describe('usage formatting', () => {
   });
 
   it('shows "usage unavailable" only when the opt is set and there is no snapshot', () => {
-    // A signed-in account we could not fetch: explicit label, not a fake-empty bar.
     expect(stripAnsi(formatUsageSummary('Max', null, 3, { unavailable: true })))
       .toContain('usage unavailable');
-    // Without the opt, a null snapshot renders just the plan (legacy behaviour).
     expect(stripAnsi(formatUsageSummary('Max', null, 3))).not.toContain('usage unavailable');
-    // A real snapshot never shows the placeholder even if the opt is set.
     const snapshot: UsageSnapshot = {
       source: 'live',
       sourceLabel: 'live account data',
@@ -156,7 +149,6 @@ describe('usage formatting', () => {
   });
 
   it('caps overview meters so multi-window agents cannot blow out column width', () => {
-    // Claude-style: session + week preferred even when a later window is hotter.
     const snapshot: UsageSnapshot = {
       source: 'live',
       sourceLabel: 'live',
@@ -174,14 +166,12 @@ describe('usage formatting', () => {
     const summary = stripAnsi(formatUsageSummary(null, snapshot, 3, { maxWindows: 2 }));
     expect(summary).toContain('S:');
     expect(summary).toContain('W:');
-    expect(summary).toContain('+1'); // month only; sonnet_week already filtered
+    expect(summary).toContain('+1');
     expect(summary).not.toContain('M:');
     expect(summary).not.toContain('So:');
   });
 
   it('still fills maxWindows when every window shares key: session (Antigravity)', () => {
-    // Antigravity maps each model quota to key:'session'. Picking by key-set
-    // would keep only the first; identity-based fill keeps the hottest rest.
     const windows: UsageWindow[] = [
       { key: 'session', label: '2.5F', shortLabel: '2.5F', usedPercent: 10, resetsAt: null, windowMinutes: null },
       { key: 'session', label: '2.5FL', shortLabel: '2.5FL', usedPercent: 20, resetsAt: null, windowMinutes: null },
@@ -218,7 +208,6 @@ describe('usage formatting', () => {
   });
 
   it('normalizeCursorUsage builds a monthly request bar for request-capped plans', () => {
-    // Free / legacy plans carry a maxRequestUsage on the premium bucket.
     const windows = normalizeCursorUsage({
       'gpt-4': { numRequests: 120, maxRequestUsage: 500 },
       startOfMonth: '2026-07-22T11:35:59.000Z',
@@ -226,31 +215,26 @@ describe('usage formatting', () => {
     expect(windows).toHaveLength(1);
     expect(windows[0]?.key).toBe('month');
     expect(windows[0]?.shortLabel).toBe('M');
-    expect(windows[0]?.usedPercent).toBe(24); // 120 / 500
-    // Resets one calendar month after startOfMonth.
+    expect(windows[0]?.usedPercent).toBe(24);
     expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date('2026-08-22T11:35:59.000Z').toISOString());
   });
 
   it('normalizeCursorUsage clamps a month-end reset instead of overflowing into the next month', () => {
-    // A Jan-31 period start: +1 month must land in February, not spill into March
-    // (naive setMonth(m+1) yields Feb 31 -> Mar 3).
     const [w] = normalizeCursorUsage({
       'gpt-4': { numRequests: 10, maxRequestUsage: 100 },
       startOfMonth: '2026-01-31T12:00:00.000Z',
     });
-    expect(w?.resetsAt?.getMonth()).toBe(1); // February (1), not March (2)
+    expect(w?.resetsAt?.getMonth()).toBe(1);
     expect(w?.resetsAt?.getDate()).toBeGreaterThanOrEqual(28);
   });
 
   it('normalizeCursorUsage returns no window for usage-based plans (no request cap)', () => {
-    // Real usage-based Pro shape: maxRequestUsage is null, so there is no bar to draw.
     expect(
       normalizeCursorUsage({
         'gpt-4': { numRequests: 0, numRequestsTotal: 0, maxRequestUsage: null } as never,
         startOfMonth: '2026-07-22T11:35:59.000Z',
       })
     ).toEqual([]);
-    // Missing premium bucket entirely -> no window, no throw.
     expect(normalizeCursorUsage({ startOfMonth: '2026-07-22T11:35:59.000Z' })).toEqual([]);
     expect(normalizeCursorUsage({})).toEqual([]);
   });
@@ -274,7 +258,6 @@ describe('usage formatting', () => {
       billingCycleEnd: '1771077734000',
       planUsage: { autoPercentUsed: 0, apiPercentUsed: null, totalPercentUsed: 15.48 },
     });
-    // apiPercentUsed is missing -> only the two finite windows render, no empty gauge for API.
     expect(windows).toHaveLength(2);
     expect(windows.map((w) => w.key)).toEqual(['session', 'month']);
     expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date(1771077734000).toISOString());
@@ -299,9 +282,6 @@ describe('usage formatting', () => {
   });
 
   it('normalizeCursorUsageSummary returns no windows for an unlimited plan with no usable percents', () => {
-    // Non-tiered unlimited plans omit the percent fields entirely (Cursor's admin
-    // API forum confirms this: undocumented percent fields only populate for
-    // tiered self-serve accounts).
     expect(
       normalizeCursorUsageSummary({
         isUnlimited: true,
@@ -314,7 +294,6 @@ describe('usage formatting', () => {
   });
 
   it('parseAntigravityOauthPayload reads the raw JSON and the go-keyring-base64 wrapper', () => {
-    // Linux file-fallback shape: raw { token: {…} } JSON.
     const raw = JSON.stringify({
       token: { access_token: 'ya29.x', refresh_token: 'rt', expiry: '2026-08-01T21:06:25Z' },
       auth_method: 'consumer',
@@ -325,11 +304,9 @@ describe('usage formatting', () => {
       expiry: '2026-08-01T21:06:25Z',
     });
 
-    // macOS Keychain shape: go-keyring prefixes the same JSON with base64.
     const wrapped = `go-keyring-base64:${Buffer.from(raw, 'utf-8').toString('base64')}`;
     expect(parseAntigravityOauthPayload(wrapped)?.refresh_token).toBe('rt');
 
-    // Malformed / empty / token-less payloads => null, never a throw.
     expect(parseAntigravityOauthPayload('not json')).toBeNull();
     expect(parseAntigravityOauthPayload('{}')).toBeNull();
     expect(parseAntigravityOauthPayload(JSON.stringify({ token: {} }))).toBeNull();
@@ -337,10 +314,9 @@ describe('usage formatting', () => {
 
   it('antigravityTokenNeedsRefresh gates on the RFC3339 expiry with a leeway', () => {
     const now = Date.parse('2026-08-03T06:00:00Z');
-    expect(antigravityTokenNeedsRefresh('2026-08-03T07:00:00Z', now)).toBe(false); // 1h out
-    expect(antigravityTokenNeedsRefresh('2026-08-03T06:00:30Z', now)).toBe(true); // inside leeway
-    expect(antigravityTokenNeedsRefresh('2026-08-01T21:06:25Z', now)).toBe(true); // expired
-    // Missing/unparseable expiry reads as still-fresh (the quota call is the truth).
+    expect(antigravityTokenNeedsRefresh('2026-08-03T07:00:00Z', now)).toBe(false);
+    expect(antigravityTokenNeedsRefresh('2026-08-03T06:00:30Z', now)).toBe(true);
+    expect(antigravityTokenNeedsRefresh('2026-08-01T21:06:25Z', now)).toBe(true);
     expect(antigravityTokenNeedsRefresh(null, now)).toBe(false);
     expect(antigravityTokenNeedsRefresh('not-a-date', now)).toBe(false);
   });
@@ -349,39 +325,30 @@ describe('usage formatting', () => {
     expect(antigravityModelShortLabel('gemini-2.5-flash-lite')).toBe('2.5FL');
     expect(antigravityModelShortLabel('gemini-2.5-pro')).toBe('2.5P');
     expect(antigravityModelShortLabel('gemini-3.1-flash-lite')).toBe('3.1FL');
-    // Unknown ids pass through untouched rather than rendering a blank tag.
     expect(antigravityModelShortLabel('custom-model')).toBe('customM');
   });
 
   it('normalizeAntigravityWindows builds one bar per model, most-used first', () => {
-    // Real :retrieveUserQuota shape (plus a duplicated model and a junk bucket).
     const windows = normalizeAntigravityWindows([
       { modelId: 'gemini-2.5-flash', tokenType: 'REQUESTS', remainingFraction: 1, resetTime: '2026-08-04T07:07:52Z' },
       { modelId: 'gemini-3.1-pro', tokenType: 'REQUESTS', remainingFraction: 0.42, resetTime: '2026-08-04T07:07:52Z' },
       { modelId: 'gemini-3.1-pro', tokenType: 'REQUESTS', remainingFraction: 0.5, resetTime: '2026-08-04T07:07:52Z' },
       { modelId: 'gemini-2.5-pro', remainingFraction: 0 },
-      { modelId: null, remainingFraction: 0.5 }, // no model id -> dropped
-      { modelId: 'gemini-2.5-flash-lite' }, // no fraction -> dropped
+      { modelId: null, remainingFraction: 0.5 },
+      { modelId: 'gemini-2.5-flash-lite' },
     ]);
 
     expect(windows.map((w) => w.label)).toEqual(['gemini-2.5-pro', 'gemini-3.1-pro', 'gemini-2.5-flash']);
     const pro = windows.find((w) => w.label === 'gemini-3.1-pro');
-    // Duplicate buckets keep the LOWEST remaining fraction.
     expect(pro?.usedPercent).toBeCloseTo(58, 5);
     expect(pro?.shortLabel).toBe('3.1P');
     expect(pro?.key).toBe('session');
     expect(pro?.resetsAt?.toISOString()).toBe('2026-08-04T07:07:52.000Z');
-    // Unknown window length stays null (never an inferred 5h session).
     expect(pro?.windowMinutes).toBeNull();
-    // A fully drained bucket reads as 100% used.
     expect(windows[0]?.usedPercent).toBe(100);
   });
 
   it('getUsageInfo(antigravity) reports a specific no-credential error, not silent null (RUSH-3040)', async () => {
-    // No credential file in the temp home, keyring probe disabled -> a named
-    // no-credential error, no throw. Antigravity used to swallow every
-    // failure into `error: null`, indistinguishable from a healthy account
-    // with nothing to show.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-usage-'));
     const prev = process.env.AGENTS_NO_KEYCHAIN_PROBE;
     const prevRealHome = process.env.AGENTS_REAL_HOME;
@@ -405,12 +372,9 @@ describe('usage formatting', () => {
     try {
       const logDir = path.join(home, '.grok', 'logs');
       fs.mkdirSync(logDir, { recursive: true });
-      // Relative dates so the fixture stays in-period under the freshness filter
-      // (absolute Aug 2026 ends were already expired when this PR landed).
       const now = Date.now();
       const day = 24 * 60 * 60 * 1000;
       const periodEnd = new Date(now + 6 * day).toISOString();
-      // Two billing lines; the parser keeps the LAST one seen.
       const lines = [
         JSON.stringify({
           ts: new Date(now - 2 * day).toISOString(),
@@ -423,7 +387,6 @@ describe('usage formatting', () => {
             subscriptionTier: 'X Premium',
           },
         }),
-        // Real-world shape captured from ~/.grok/logs/unified.jsonl.
         JSON.stringify({
           ts: new Date(now - 60_000).toISOString(),
           src: 'shell',
@@ -446,7 +409,6 @@ describe('usage formatting', () => {
       expect(snapshot?.plan).toBe('X Premium+');
       const week = snapshot?.windows.find((w) => w.key === 'week');
       expect(week?.shortLabel).toBe('W');
-      // Real credit consumption is surfaced, not a hardcoded 0%.
       expect(week?.usedPercent).toBe(100);
       expect(week?.resetsAt?.toISOString()).toBe(new Date(periodEnd).toISOString());
     } finally {
@@ -543,8 +505,6 @@ describe('deriveUsageStatusFromSnapshot', () => {
   });
 
   it('does not regress to "out of credits" for a usable account with overage disabled', () => {
-    // The real-world bug: a Pro account at 5% weekly usage whose pay-as-you-go
-    // overage is disabled must read as available, never out_of_credits.
     expect(deriveUsageStatusFromSnapshot(snap([win('session', 2), win('week', 5)]))).toBe('available');
   });
 });
@@ -612,16 +572,6 @@ describe('usage identity deduping', () => {
 });
 
 describe('Claude usage scoping', () => {
-  // RUSH-2639 sandboxed HOME for the whole suite, and macOS resolves the login
-  // keychain FROM $HOME — so `security` had no keychain to write and failed with
-  // "SecKeychainItemCreateFromContent (<default>): The authorization was
-  // canceled". That surfaced only in the release matrix (PR CI is Linux, which
-  // has no keychain), which is why it halted a release rather than a PR.
-  //
-  // Writing to the developer's REAL login keychain was never acceptable here —
-  // it is the same class of bug RUSH-2639 exists to stop. The keychain tests
-  // below therefore run only where the real standalone is file-backed (the
-  // `fileBacked` gate), against a fresh SECRETS_HOME per test.
   useFreshSecretsHome();
 
   it('uses the shared keychain service without a managed home', () => {
@@ -654,19 +604,7 @@ describe('Claude usage scoping', () => {
     }
   });
 
-  // Linux/CI-scoped regression guard for `agents view --device <linux>`: the fallback
-  // exists because a headless Linux Claude CLI writes its OAuth to .credentials.json
-  // instead of a keychain. On Windows CI loadClaudeOauth returns undefined here (a
-  // runner-environment divergence, not a product path this test targets), so assert
-  // it only where it's meaningful — matching the posix-only stance in mailboxes.test.ts.
-  // The keychain miss is a real standalone lookup of the hashed service, so it is
-  // also gated to a file-backed standalone: on a headed macOS box the probe would
-  // reach the operator's login keychain, which this Linux-scoped guard never needs.
   it.skipIf(process.platform === 'win32' || !fileBacked)('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
-    // A fresh temp home yields a unique hashed keychain service, so the keychain
-    // read misses and loadClaudeOauth must fall back to the file the Linux Claude
-    // CLI writes. This is the regression guard for `agents view --device <linux>`
-    // rendering no usage bars.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-oauth-file-'));
     const claudeDir = path.join(home, '.claude');
     fs.mkdirSync(claudeDir, { recursive: true });
@@ -758,7 +696,7 @@ describe('Claude usage cache', () => {
       const snapshot: UsageSnapshot = {
         source: 'live',
         sourceLabel: 'live account data',
-        capturedAt: new Date(Date.now() - 30_000), // 30 s old — fresh.
+        capturedAt: new Date(Date.now() - 30_000),
         windows: [
           { key: 'session', label: 'S', shortLabel: 'S', usedPercent: 10, resetsAt: null, windowMinutes: 300 },
         ],
@@ -802,12 +740,6 @@ describe('Claude usage cache', () => {
       });
       const elapsedMs = Date.now() - t0;
 
-      // The foreground must NOT block on any I/O — not network, not the
-      // synchronous `security` CLI call that loadClaudeOauth makes under
-      // the hood. The fix is that triggerBackgroundUsageRefresh defers its
-      // entire body to setImmediate, so the caller returns before any of
-      // that runs. 100 ms is a generous ceiling for the in-process cache
-      // read + serialization.
       expect(elapsedMs).toBeLessThan(100);
       expect(result.error).toBeNull();
       expect(result.snapshot?.windows[0]?.usedPercent).toBe(42);
@@ -852,10 +784,6 @@ describe('Claude usage cache', () => {
         new Date('2026-04-17T14:00:00Z')
       );
 
-      // The session window reset two hours before the read: what burned since
-      // is unknown, and a zeroed bar reads as "0% used, fresh" (the two-week
-      // fleet freeze rendered every throttled account as an idle candidate,
-      // RUSH-2858). Only the still-valid week window survives.
       expect(cached?.windows.map((window) => window.shortLabel)).toEqual(['W']);
       expect(cached?.windows.find((w) => w.shortLabel === 'W')?.usedPercent).toBe(80);
     } finally {
@@ -865,9 +793,6 @@ describe('Claude usage cache', () => {
 });
 
 describe('normalizeKimiWindows', () => {
-  // A real /usages response body captured live from api.kimi.com. Numbers arrive
-  // as strings; the short limit is a 300-minute bucket, and `usage` is the
-  // rolling account quota.
   const payload: KimiUsagesResponse = {
     user: { userId: 'd483kfq783mkn8of1gtg', membership: { level: 'LEVEL_INTERMEDIATE' } },
     usage: { limit: '100', used: '1', remaining: '99', resetTime: '2026-07-06T03:47:50.921944Z' },
@@ -885,10 +810,8 @@ describe('normalizeKimiWindows', () => {
     expect(windows.map((w) => w.shortLabel)).toEqual(['S', 'W']);
     const session = windows.find((w) => w.key === 'session')!;
     const week = windows.find((w) => w.key === 'week')!;
-    // used/limit as a percentage: 4/100 and 1/100.
     expect(session.usedPercent).toBe(4);
     expect(week.usedPercent).toBe(1);
-    // 300-minute window (TIME_UNIT_MINUTE) carries through as-is.
     expect(session.windowMinutes).toBe(300);
     expect(session.resetsAt?.toISOString()).toBe('2026-07-01T13:47:50.921Z');
   });
@@ -896,7 +819,7 @@ describe('normalizeKimiWindows', () => {
   it('drops a bucket with a zero or missing limit rather than dividing by zero', () => {
     const windows = normalizeKimiWindows({
       usage: { limit: '0', used: '5' },
-      limits: [{ detail: { used: '4' } }], // no limit
+      limits: [{ detail: { used: '4' } }],
     });
     expect(windows).toEqual([]);
   });
@@ -909,9 +832,6 @@ describe('normalizeKimiWindows', () => {
 });
 
 describe('normalizeDroidWindows', () => {
-  // The shape droid itself consumes from GET /api/billing/limits: token-rate-
-  // limit billing exposes fiveHour/weekly/monthly windows, each with a
-  // usedPercent and a windowEnd timestamp.
   const payload: DroidBillingLimitsResponse = {
     usesTokenRateLimitsBilling: true,
     limits: {
@@ -952,7 +872,7 @@ describe('normalizeDroidWindows', () => {
       usesTokenRateLimitsBilling: true,
       limits: {
         standard: {
-          fiveHour: { windowEnd: '2026-07-15T18:00:00.000Z' }, // no usedPercent
+          fiveHour: { windowEnd: '2026-07-15T18:00:00.000Z' },
           weekly: { usedPercent: 250 },
         },
       },
@@ -971,9 +891,6 @@ describe('normalizeDroidWindows', () => {
     const summary = stripAnsi(formatUsageSummary(null, snapshot));
     expect(summary).toContain('S:');
     expect(summary).toContain('W:');
-    // Month is a blocking window (an exhausted month throttles the account),
-    // so the compact row must show it — otherwise a droid account can read as
-    // rate-limited with no visible bar explaining why.
     expect(summary).toContain('M:');
     const exhausted = normalizeDroidWindows({
       ...payload,

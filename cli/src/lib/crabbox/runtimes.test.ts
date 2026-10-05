@@ -19,7 +19,6 @@ describe('inferLeaseRuntime', () => {
   });
 
   it('returns null when the named runtime is not signed in — never substitutes another', () => {
-    // `run codex --lease` while only claude is signed in must NOT provision claude.
     expect(inferLeaseRuntime('codex', [signedIn('claude', 'a@b.com')])).toBeNull();
     expect(inferLeaseRuntime('grok', [
       { id: 'grok', label: 'Grok CLI', email: null, signedIn: false, credPath: null },
@@ -54,7 +53,6 @@ describe('inferLeaseRuntime', () => {
 
 describe('buildCredentialScript — native OAuth transfer is refused (SING-1b)', () => {
   const detected = (id: AgentId): DetectedRuntime => ({ id, label: id, email: `${id}@x.com`, signedIn: true, credPath: `/tmp/${id}.json` });
-  // The exact OAuth blob --lease used to write onto the box; it must never surface.
   const OAUTH_BLOB = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET","refreshToken":"rt-SECRET"}}';
 
   it('classifies every LEASE_RUNTIMES entry as native OAuth (nothing slips through)', () => {
@@ -69,8 +67,6 @@ describe('buildCredentialScript — native OAuth transfer is refused (SING-1b)',
   });
 
   it('refuses BEFORE reading any file or emitting the OAuth blob, and steers to accounts sync', () => {
-    // credPath points nowhere; the refusal must precede the fs read, so the box's
-    // token never enters a --script-stdin body.
     try {
       buildCredentialScript(['claude'], [detected('claude')], { claudeCredentialsJson: OAUTH_BLOB });
       throw new Error('expected a refusal');
@@ -88,9 +84,6 @@ describe('buildCredentialScript — native OAuth transfer is refused (SING-1b)',
   });
 
   it('does NOT refuse a native runtime that is not signed in locally (nothing to copy)', () => {
-    // credPath null and no claude blob → nothing would transfer → no refusal, so a
-    // --lease of a not-signed-in runtime still bootstraps. This is why the fail-fast
-    // guard keys on refusedNativeOAuthRuntimes, not on the runtime id alone.
     const notSignedIn: DetectedRuntime[] = [
       { id: 'claude', label: 'Claude Code', email: null, signedIn: false, credPath: null },
     ];
@@ -103,7 +96,6 @@ describe('buildCredentialScript — native OAuth transfer is refused (SING-1b)',
     const signedIn: DetectedRuntime[] = [detected('claude'), detected('codex')];
     expect(refusedNativeOAuthRuntimes(['claude', 'codex'], signedIn).sort()).toEqual(['claude', 'codex']);
     expect(() => assertNoNativeOAuthTransfer(['claude'], signedIn)).toThrow(/Refusing to copy native OAuth/i);
-    // A Claude OAuth blob alone (no credPath) is also enough to refuse.
     expect(refusedNativeOAuthRuntimes(['claude'], [{ id: 'claude', label: 'c', email: null, signedIn: true, credPath: null }], { claudeCredentialsJson: OAUTH_BLOB })).toEqual(['claude']);
   });
 });
@@ -150,7 +142,6 @@ describe('profileNeedsBaseRuntimeCredentials', () => {
 
 describe('resolveClaudeCredentialsBlob', () => {
   const WRAPPED = '{"claudeAiOauth":{"accessToken":"tok"}}';
-  // Only the darwin branch is unit-tested (the Linux branch reads a real file).
   const itDarwin = process.platform === 'darwin' ? it : it.skip;
 
   itDarwin('returns the bare-service payload for a default native install', async () => {
@@ -183,7 +174,6 @@ describe('resolveClaudeCredentialsBlob', () => {
       readItem: (svc) => {
         reads.push(svc);
         if (svc === 'bare') throw new Error('miss');
-        // Both managed homes have a token; the matching one must be read first.
         return WRAPPED;
       },
       listVersions: () => ['other', 'match'],
@@ -191,7 +181,6 @@ describe('resolveClaudeCredentialsBlob', () => {
       accountEmail: async (home) => (home === '/home/match' ? 'want@x.com' : 'no@x.com'),
     });
     expect(blob).toBe(WRAPPED);
-    // After the bare miss, the matching home is tried before the non-matching one.
     expect(reads.filter((r) => r !== 'bare')[0]).toBe('svc:/home/match');
   });
 
@@ -292,7 +281,6 @@ describe('pickRuntimes', () => {
     const codex = captured.find((c) => c.value === 'codex');
     expect(claude.checked).toBe(true);
     expect(codex.checked).toBe(false);
-    // No local credential → disabled with an explanation.
     expect(typeof codex.disabled).toBe('string');
   });
 

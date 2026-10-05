@@ -14,13 +14,11 @@ import {
 describe('codex-home SUN_LEN helpers', () => {
   it('models the macOS socket-path constants', () => {
     expect(SUN_LEN).toBe(104);
-    // The measured suffix codex appends to CODEX_HOME.
     expect(CODEX_CONTROL_SOCKET_SUFFIX).toBe('/app-server-control/app-server-control.sock');
     expect(CODEX_CONTROL_SOCKET_SUFFIX.length).toBe(43);
   });
 
   it('flags a home only when its derived socket path exceeds SUN_LEN', () => {
-    // 61-char home -> socket 104 (fits); 62-char home -> socket 105 (overflows).
     const fits = 'x'.repeat(SUN_LEN - CODEX_CONTROL_SOCKET_SUFFIX.length);
     expect(fits.length).toBe(61);
     expect(codexHomeOverflowsSunLen(fits)).toBe(false);
@@ -35,8 +33,6 @@ describe('codex-home SUN_LEN helpers', () => {
 
   it('derives a short, per-version home under ~/.agents/.codex-homes', () => {
     const short = shortCodexHome('/Users/muqsit/.agents', '0.143.0');
-    // path.join is platform-native (backslashes on Windows), so compare against
-    // the same join rather than a hardcoded POSIX literal.
     expect(short).toBe(path.join('/Users/muqsit/.agents', '.codex-homes', '0.143.0', '.codex'));
     expect(codexHomeOverflowsSunLen(short)).toBe(false);
   });
@@ -47,19 +43,11 @@ describe('resolveCodexHome', () => {
   let agentsUserDir: string;
   let versionedHome: string;
 
-  // A short tmp base so shortCodexHome() paths stay under SUN_LEN in-test. Unlike
-  // os.tmpdir() — long on macOS/Windows CI (/var/folders/… , D:\a\_temp\…), long
-  // enough that even the migrated "short" home overflows — /tmp keeps the derived
-  // socket path under the 104-byte cap, matching a real short ~/.agents. POSIX-only:
-  // SUN_LEN is a darwin constraint and Windows has no comparably short base, so the
-  // callers skip win32.
   const shortTmpRoot = () => fs.mkdtempSync(path.join('/tmp', 'cx-'));
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
     agentsUserDir = path.join(root, '.agents');
-    // Build a versioned home long enough to overflow SUN_LEN regardless of the
-    // tmp prefix, so the darwin branch actually triggers.
     versionedHome = path.join(
       agentsUserDir,
       '.history/versions/codex/0.143.0',
@@ -85,7 +73,7 @@ describe('resolveCodexHome', () => {
     try {
       const shortHome = path.join(shortRoot, '.codex');
       fs.mkdirSync(shortHome, { recursive: true });
-      expect(codexHomeOverflowsSunLen(shortHome)).toBe(false); // the base really is short
+      expect(codexHomeOverflowsSunLen(shortHome)).toBe(false);
       const out = resolveCodexHome(shortHome, path.join(shortRoot, '.agents'), '0.143.0', 'darwin');
       expect(out).toBe(shortHome);
     } finally {
@@ -93,11 +81,6 @@ describe('resolveCodexHome', () => {
     }
   });
 
-  // Skipped on Windows: SUN_LEN is a macOS-only Unix-socket constraint and
-  // resolveCodexHome no-ops off darwin, so there is nothing Windows-specific to
-  // cover. Uses a short tmp base (shortTmpRoot) because os.tmpdir() on macOS/Windows
-  // CI is itself long enough that the migrated "short" home would still overflow —
-  // a test-env artifact, not a resolver bug.
   it.skipIf(process.platform === 'win32')('migrates an overflowing home to a short real dir and symlinks the old path', () => {
     const shortRoot = shortTmpRoot();
     try {
@@ -111,11 +94,9 @@ describe('resolveCodexHome', () => {
 
       expect(out).toBe(expectedShort);
       expect(codexHomeOverflowsSunLen(out)).toBe(false);
-      // The real home moved; its socket dir will now bind under SUN_LEN.
       expect(fs.lstatSync(expectedShort).isDirectory()).toBe(true);
       expect(fs.existsSync(path.join(expectedShort, 'auth.json'))).toBe(true);
       expect(fs.readFileSync(path.join(expectedShort, 'auth.json'), 'utf8')).toContain('real');
-      // The versioned path is now a symlink to the short real home.
       expect(fs.lstatSync(vHome).isSymbolicLink()).toBe(true);
       expect(fs.realpathSync(vHome)).toBe(fs.realpathSync(expectedShort));
     } finally {

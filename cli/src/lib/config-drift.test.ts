@@ -3,9 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// config-drift.ts reads the top-level user agents.yaml through state.ts, which
-// resolves HOME at import time — so point HOME at a throwaway dir and re-import
-// fresh per test. Exercises the REAL detector against real files.
 let TMP = '';
 
 async function freshDrift() {
@@ -18,8 +15,6 @@ function writeCentral(text: string) {
   fs.writeFileSync(path.join(TMP, '.agents', 'agents.yaml'), text);
 }
 
-// Byte-for-byte the canonical META_HEADER (state.ts) — a file carrying it is NOT
-// header-stale.
 const CANONICAL_HEADER = `# agents-cli metadata
 # Auto-generated - do not edit manually
 # https://github.com/phnx-labs/agi-cli
@@ -35,7 +30,7 @@ describe('config drift detection (PHNX-3315 P3)', () => {
   });
   afterEach(() => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
-    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {  }
   });
 
   it('a drained box shows NO drift (canonical header, no central device-scoped blocks)', async () => {
@@ -55,8 +50,6 @@ describe('config drift detection (PHNX-3315 P3)', () => {
   });
 
   it('flags a STALE top-level header (the P1 frozen-header case)', async () => {
-    // A pre-rename header: repo `agents-cli`, no $schema line — what a box written
-    // before the agi-cli rename keeps until its next central write heals it.
     writeCentral(
       '# agents-cli metadata\n' +
       '# Auto-generated - do not edit manually\n' +
@@ -99,7 +92,6 @@ describe('config drift detection (PHNX-3315 P3)', () => {
     const { detectConfigDrift } = await freshDrift();
     expect(detectConfigDrift().centralLeaks).toContain('accounts (device-scoped)');
 
-    // A version-scoped identity is NOT a leak — it belongs in the shared file.
     writeCentral(
       CANONICAL_HEADER + 'accounts:\n  native:\n    acct-2:\n      scope: version\n      handle: shared\n',
     );

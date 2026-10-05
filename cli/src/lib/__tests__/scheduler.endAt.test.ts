@@ -28,7 +28,7 @@ afterEach(() => {
 function makeJob(overrides: Partial<JobConfig> = {}): JobConfig {
   return {
     name: 'test-end-at',
-    schedule: '* * * * * *', // every second (croner extension)
+    schedule: '* * * * * *',
     agent: 'claude',
     mode: 'plan',
     effort: 'auto',
@@ -53,14 +53,12 @@ describe('JobScheduler endAt enforcement', () => {
     });
     scheduler.schedule(config);
 
-    // Give croner one tick to fire.
     await new Promise((r) => setTimeout(r, 1300));
     scheduler.stopAll();
 
     expect(fired).toBe(0);
     const reloaded = readJob('past-end');
     expect(reloaded).not.toBeNull();
-    // Activation is device metadata now; the shared definition remains immutable.
     expect(reloaded!.enabled).toBe(true);
   });
 
@@ -78,10 +76,6 @@ describe('JobScheduler endAt enforcement', () => {
     });
     scheduler.schedule(config);
 
-    // Poll until the job fires rather than sleeping a fixed 1300ms then asserting:
-    // on a loaded CI runner the scheduler's fire can land later than a short fixed
-    // window, so the fixed sleep flaked ("expected 0 to be >= 1"). We stop the
-    // instant it fires, so the ceiling only bounds a genuinely non-firing job.
     const deadline = Date.now() + 8000;
     while (fired < 1 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));

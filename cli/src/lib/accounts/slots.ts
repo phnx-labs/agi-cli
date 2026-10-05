@@ -1,16 +1,3 @@
-/**
- * Per-device account slots (PHNX-3940).
- *
- * An account is a credential slot, not an installation. The binary lives in
- * the one managed harness install; each account gets a HOME-shaped dir under
- * `~/.agents/.history/accounts/<harness>/<accountId>/` with no binary in it.
- * Native OAuth files stay in this dir on the device that minted them and are
- * never copied. Settings and resources are projected through the same writers
- * version homes use (`carryForwardSettings`, `getWriter`) — credentials are
- * excluded by those writers.
- *
- * Slot records live in the device doc (`deviceAccounts.slots`), never central.
- */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { AGENTS, agentConfigDirName } from '../agents.js';
@@ -30,6 +17,7 @@ export type { DeviceAccountSlot };
 const AUTH_MODES: readonly AccountAuthMode[] = ['native', 'durable', 'per-device'];
 
 export function slotDir(harness: AgentId, accountId: string): string {
+  // Slots are device-local projections; native OAuth credentials are never copied into them.
   if (!isAgentId(harness)) throw new Error(`Unknown harness '${harness}' for a slot dir.`);
   if (!accountId || /[\\/]|\.\./.test(accountId)) {
     throw new Error(`Invalid account id '${accountId}' for a slot dir.`);
@@ -41,13 +29,6 @@ export function readSlots(meta: Pick<Meta, 'deviceAccounts'>): Record<string, De
   return { ...(meta.deviceAccounts?.slots ?? {}) };
 }
 
-/**
- * Remove slot records from THIS box's device doc (`deviceAccounts.slots`).
- * Symmetric with {@link recordSlot}. The slot DIRECTORY is not touched — a
- * caller that also wants the on-disk home gone removes it separately; a stale
- * worker slot keeps its dir because `.claude/projects` holds transcripts
- * (PHNX-4116). A no-op for an empty list or an id with no record.
- */
 export function dropSlots(accountIds: readonly string[]): void {
   if (accountIds.length === 0) return;
   updateMeta((current) => {
@@ -88,11 +69,6 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
     const writer = getWriter(kind, harness);
     if (!writer) continue;
     if (kind === 'rules') {
-      // Symlink to the version home's rules instead of composing a duplicate.
-      // Harnesses whose shim pins a separate config dir (e.g. CLAUDE_CONFIG_DIR
-      // → account slot) cause the harness to load rules from both the version
-      // home (~/.claude/) and the slot, doubling ~5 K tokens per session.
-      // A symlink gives both paths the same inode so the harness can dedup.
       const cap = AGENTS[harness].capabilities.rules;
       if (typeof cap !== 'object') continue;
       const srcFile = path.join(fromHome, agentConfigDirName(harness), cap.file);
@@ -105,7 +81,7 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
       try {
         const st = fs.lstatSync(destFile);
         if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(destFile);
-      } catch { /* did not exist */ }
+      } catch {  }
       try {
         createLink(srcFile, destFile);
       } catch (err) {
@@ -128,20 +104,12 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
 
 export interface SlotProjection {
   accountId: string;
-  /** Account name as registered (`agents accounts list`). */
   name: string;
   slotDir: string;
-  /** The version home the slot was projected from. */
   from: string;
-  /** `<kind>/<name>` artifacts removed because the source no longer has them. */
   pruned: string[];
 }
 
-/**
- * Remove slot artifacts whose source name is gone. Only the name-keyed kinds
- * that implement `remove` (commands, skills, hooks) are pruned; wholesale kinds
- * (rules, permissions) are rewritten by the projection itself.
- */
 function pruneSlotResources(harness: AgentId, version: string, slotHome: string, fromHome: string): string[] {
   const cwd = process.cwd();
   const pruned: string[] = [];
@@ -159,14 +127,6 @@ function pruneSlotResources(harness: AgentId, version: string, slotHome: string,
   return pruned;
 }
 
-/**
- * Re-project settings and resources into every account slot this device holds
- * for `harness`, from the harness's default version home. `ensureSlot` does
- * this once at `agents accounts add`; every reconcile calls this so a slot
- * never lags the version home it was cloned from (PHNX-3940). Credentials are
- * never touched: `carryForwardSettings` and the resource writers exclude them.
- * A slot whose directory is gone is skipped, not recreated.
- */
 export function projectAccountSlots(harness: AgentId): SlotProjection[] {
   const version = sourceVersion(harness);
   if (!version) return [];
@@ -178,9 +138,6 @@ export function projectAccountSlots(harness: AgentId): SlotProjection[] {
   const projected: SlotProjection[] = [];
   for (const account of Object.values(native)) {
     if (account.agent !== harness) continue;
-    // The slot record is device-local and written after identity capture; a
-    // slot dir minted by an earlier build, or an add that stopped short of
-    // recording, is still the HOME an account run uses — project it too.
     const dir = slots[account.id]?.slotDir ?? slotDir(harness, account.id);
     if (!fs.existsSync(path.join(dir, agentConfigDirName(harness)))) continue;
     carryForwardSettings(harness, fromHome, dir);
@@ -191,14 +148,8 @@ export function projectAccountSlots(harness: AgentId): SlotProjection[] {
   return projected;
 }
 
-/**
- * Create the HOME-shaped slot dir and project settings/resources from the
- * managed install. Does not copy credentials (carryForwardSettings excludes
- * them; resource writers write skills/hooks/commands, never OAuth files).
- * Does not persist the slot record — call {@link recordSlot} after identity
- * is captured.
- */
 export function ensureSlot(harness: AgentId, accountId: string): DeviceAccountSlot {
+  // Project settings/resources only. Authentication is provisioned by the owning flow.
   harnessAuth(harness);
   const dir = slotDir(harness, accountId);
   fs.mkdirSync(path.join(dir, agentConfigDirName(harness)), { recursive: true });

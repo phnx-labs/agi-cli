@@ -3,10 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// auth-health.ts -> state.ts resolves HOME (and thus the auth-health cache dir)
-// at import time, so pin HOME to a throwaway dir BEFORE the module is loaded,
-// then a single dynamic import picks it up. Mirrors star-nudge.test.ts; no mocks
-// of our own modules — this exercises the real cache read/write path (PHNX-4116).
 const savedHome = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-facts-test-'));
 process.env.HOME = TMP_HOME;
@@ -14,7 +10,6 @@ fs.mkdirSync(path.join(TMP_HOME, '.agents', '.cache'), { recursive: true });
 
 type AuthHealthMod = typeof import('./auth-health.js');
 let authHealth: AuthHealthMod;
-// The real auth-failure detector + reason parser from the execution engine.
 type ExecMod = typeof import('./exec.js');
 let exec: ExecMod;
 
@@ -33,7 +28,6 @@ afterAll(() => {
 describe('formatAuthFact (per-box auth FACT, never a verdict word)', () => {
   it('reads "not used on this box yet" with no evidence', () => {
     expect(authHealth.formatAuthFact(null)).toBe('not used on this box yet');
-    // A present-credential-no-evidence verdict is still just a fact-of-absence.
     expect(authHealth.formatAuthFact({ verdict: 'no_evidence', checkedAt: Date.now() }))
       .toBe('not used on this box yet');
     expect(authHealth.formatAuthFact({ verdict: 'unverified', checkedAt: Date.now() }))
@@ -47,7 +41,7 @@ describe('formatAuthFact (per-box auth FACT, never a verdict word)', () => {
   });
 
   it('reads "last auth failure <detail> <time>" for a server rejection', () => {
-    const at = new Date(2026, 8, 20, 14, 2).getTime(); // Sep 20 14:02 local
+    const at = new Date(2026, 8, 20, 14, 2).getTime();
     const fact = authHealth.formatAuthFact({ verdict: 'revoked', source: 'run', checkedAt: at, detail: '401' });
     expect(fact).toBe('last auth failure 401 Sep 20 14:02');
   });
@@ -73,12 +67,6 @@ describe('runOutcomeVersionKey (pure fallback key)', () => {
 
 describe('probeAuthHealth — the row a non-headed box drops (why the host path needs launchability, PHNX-4116)', () => {
   it('a signed-in claude account on a non-headed box yields no_evidence, not a probe verdict', async () => {
-    // The temp HOME has no configured role, so it is not headed and cannot read
-    // the usage endpoint (RUSH-2392). With no usageKey there is no fresh-usage
-    // shortcut either, so the honest verdict is "we did not look" — no_evidence.
-    // `probeLocalFleetAuth` DROPS that row, which is exactly why the host
-    // readiness path must fall back to launchability rather than read the absent
-    // row as 'unconfigured'. Real behavior: no network probe is issued on this path.
     const info = {
       accountKey: 'acct-1', usageKey: null, accountId: null, organizationId: null,
       userId: null, email: 'bot@example.com', plan: null, usageStatus: null,
@@ -104,7 +92,6 @@ describe('recordRunAuthOutcome -> the auth cache -> the fact (real IO, temp HOME
       '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":401,"error":"authentication_failed","session_id":"x"}',
       '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"completed","result":"Failed to authenticate. API Error: 401 OAuth access token has been revoked.","num_turns":1}',
     ].join('\n');
-    // The real detector classifies it, and the real reason parser names it.
     expect(exec.isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: false })).toBe(true);
     const reason = exec.authFailureReason(LOGGED_OUT_CLAUDE_LOG) ?? 'authentication_failed';
     authHealth.recordRunAuthOutcome({ agent: 'claude', version: 'ver-401', host: HOST, outcome: { ok: false, verdict: 'revoked', detail: reason }, now: new Date(2026, 8, 20, 14, 2).getTime() });

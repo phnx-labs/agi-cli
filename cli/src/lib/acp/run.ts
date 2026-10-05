@@ -1,10 +1,3 @@
-/**
- * Headless ACP runner.
- *
- * Glue between the `agents run <agent> "prompt" --acp` command and the ACP
- * client. Emits either a human-readable stream of agent messages or newline-
- * delimited JSON events, depending on `--json`.
- */
 
 import type { SessionNotification } from '@zed-industries/agent-client-protocol';
 import { runAcp } from './client.js';
@@ -19,7 +12,6 @@ interface HeadlessAcpOptions {
   json: boolean;
 }
 
-/** Runs a prompt turn over ACP, streaming output to stdout per `json` mode. */
 export async function runAcpHeadless(opts: HeadlessAcpOptions): Promise<number> {
   const onUpdate = opts.json ? emitJsonLine : emitTextChunk;
   const result = await runAcp({

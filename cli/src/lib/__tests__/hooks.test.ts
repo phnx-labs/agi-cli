@@ -16,9 +16,6 @@ import type { ManifestHook } from '../types.js';
 let agentsDir: string;
 let tmpDir: string;
 
-// The registrar stores the portable command form (~/ + forward slashes) so the
-// path expands in bash on every OS. Expand the tilde and posix-fold both sides
-// so the assertion is separator-agnostic and survives Windows' backslashes.
 function resolvedCommand(command: string): string {
   const expanded = command.startsWith('~/')
     ? path.join(os.homedir(), command.slice(2))
@@ -43,13 +40,11 @@ function makeVersionHome(): string {
 describe('unmanagedHookNames', () => {
   it('flags installed hooks whose name matches no source script basename (PHNX-2693)', () => {
     const installed = [
-      'permission-handler', // helper present in source → NOT an orphan
-      'dead-hook', // absent from every source → orphan
-      '03-linear-inject-tasks-context', // source-present → NOT an orphan
-      'git-guard', // source-present → NOT an orphan
+      'permission-handler',
+      'dead-hook',
+      '03-linear-inject-tasks-context',
+      'git-guard',
     ];
-    // The resolved SOURCE set (not the registered manifest): helper scripts sync
-    // copies into a version home appear here too, so they are not orphans.
     const sourceScripts = [
       'permission-handler.sh',
       '03-linear-inject-tasks-context.sh',
@@ -60,7 +55,6 @@ describe('unmanagedHookNames', () => {
   });
 
   it('matches on script basename regardless of extension (.sh, .py)', () => {
-    // Source scripts can carry any extension; the installed name is ext-stripped.
     expect(unmanagedHookNames(['guard'], ['guard.py'])).toEqual([]);
     expect(unmanagedHookNames(['guard'], ['guard.sh'])).toEqual([]);
   });
@@ -106,17 +100,13 @@ describe('registerHooksToSettings - Codex', () => {
       fs.readFileSync(path.join(versionHome, '.codex', 'hooks.json'), 'utf-8')
     );
 
-    // Top-level "hooks" wrapper must exist
     expect(hooksJson).toHaveProperty('hooks');
 
-    // Event array holds matcher-group objects
     const groups = hooksJson.hooks.UserPromptSubmit;
     expect(groups).toHaveLength(1);
 
-    // UserPromptSubmit groups must NOT have a matcher field
     expect(groups[0]).not.toHaveProperty('matcher');
 
-    // Nested hooks array holds the actual command entry
     expect(groups[0].hooks).toHaveLength(1);
     expect(resolvedCommand(groups[0].hooks[0].command)).toBe(toPosix(scriptPath));
     expect(groups[0].hooks[0].timeout).toBe(30);
@@ -146,8 +136,6 @@ describe('registerHooksToSettings - Codex', () => {
     const groups = hooksJson.hooks.PreToolUse;
     expect(groups).toHaveLength(1);
     expect(groups[0].matcher).toBe('Bash');
-    // Matcher-only hook (no cache/matches) — resolves through the generated
-    // pass-through-timing shim (resolveHookCommand), not the raw script path.
     expect(resolvedCommand(groups[0].hooks[0].command)).toBe(resolvedCommand(getHookShimPath('bash-hook')));
   });
 
@@ -165,8 +153,6 @@ describe('registerHooksToSettings - Codex', () => {
     expect(fs.existsSync(configPath)).toBe(true);
 
     const content = fs.readFileSync(configPath, 'utf-8');
-    // Codex 0.116+ feature flag is `hooks`; the legacy `codex_hooks` name is
-    // an unrecognized key that Codex ignores with a deprecation error.
     expect(content).toContain('hooks = true');
     expect(content).not.toContain('codex_hooks');
   });
@@ -193,7 +179,6 @@ describe('registerHooksToSettings - Codex', () => {
     const versionHome = makeVersionHome();
     makeScript('on-prompt.sh');
 
-    // Simulate a config written by an older agents-cli build.
     const configPath = path.join(versionHome, '.codex', 'config.toml');
     fs.writeFileSync(configPath, '[features]\ncodex_hooks = true\n', 'utf-8');
 
@@ -250,7 +235,6 @@ describe('registerHooksToSettings - Codex', () => {
     const versionHome = makeVersionHome();
     makeScript('on-prompt.sh');
 
-    // Pre-seed hooks.json with a user-authored hook in the correct nested format
     const hooksPath = path.join(versionHome, '.codex', 'hooks.json');
     const userHook = { type: 'command', command: '/usr/local/bin/my-hook.sh', timeout: 10 };
     fs.writeFileSync(
@@ -266,7 +250,6 @@ describe('registerHooksToSettings - Codex', () => {
 
     const hooksJson = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
     const group = hooksJson.hooks.UserPromptSubmit[0];
-    // User hook and managed hook share the no-matcher group; user entry is untouched
     expect(group.hooks).toHaveLength(2);
     expect(group.hooks[0]).toEqual(userHook);
   });
@@ -339,16 +322,10 @@ describe('registerHooksToSettings - Codex', () => {
     expect(commands).not.toContain(oldVersionHook.command);
     expect(commands).toContain(currentVersionHook.command);
     expect(commands).toContain(customHook.command);
-    // git-guard is matcher-only (no cache/matches) — the freshly resolved
-    // command is the generated pass-through-timing shim, not the raw script.
     expect(commands.map((c: string) => resolvedCommand(c))).toContain(resolvedCommand(getHookShimPath('git-guard')));
   });
 
   it('ignores the deprecated agents: field — capability table decides registration', () => {
-    // The `agents:` field on a hook entry is deprecated. Registration is
-    // driven by the agent capability table now. So a hook authored as
-    // `agents: ['claude']` still registers on codex if codex supports the
-    // declared event — the field is parsed for back-compat but ignored.
     const versionHome = makeVersionHome();
     makeScript('claude-only.sh');
 
@@ -370,7 +347,6 @@ describe('registerHooksToSettings - Codex', () => {
     const versionHome = makeVersionHome();
     makeScript('on-prompt.sh');
 
-    // Manifest has a matcher — for UserPromptSubmit it must be dropped
     const manifest: Record<string, ManifestHook> = {
       'on-prompt': {
         script: 'on-prompt.sh',
@@ -386,7 +362,6 @@ describe('registerHooksToSettings - Codex', () => {
     const hooksJson = JSON.parse(
       fs.readFileSync(path.join(versionHome, '.codex', 'hooks.json'), 'utf-8')
     );
-    // Group for UserPromptSubmit must not have matcher field
     expect(hooksJson.hooks.UserPromptSubmit[0]).not.toHaveProperty('matcher');
   });
 
@@ -435,10 +410,6 @@ describe('registerHooksToSettings - Codex', () => {
     expect(resolvedCommand(hooksJson.hooks.UserPromptSubmit[0].hooks[0].command)).toBe(toPosix(scriptPath));
   });
 
-  // Codex only runs a non-managed hook when it is enabled AND its trusted_hash
-  // in [hooks.state] matches the hash Codex recomputes. In `codex exec` mode
-  // there is no TUI prompt, so an untrusted hook is silently dropped — which is
-  // why agents-cli must pre-compute and persist the hash.
   it('writes a [hooks.state] trusted_hash for each registered hook', () => {
     const versionHome = makeVersionHome();
     const scriptPath = makeScript('bash-tool-hook.sh');
@@ -464,16 +435,11 @@ describe('registerHooksToSettings - Codex', () => {
 
     const key = `${hooksJsonPath}:pre_tool_use:0:0`;
     expect(state[key]).toBeDefined();
-    // The persisted hash must equal what Codex recomputes for this exact hook.
-    // The registrar hashes the portable command it wrote into hooks.json, so
-    // re-hash that exact string (not the raw native scriptPath, which diverges
-    // on Windows where tmpdir lives under home and folds to a ~/-relative path).
     const hooksJson = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf-8'));
     const registeredCommand = hooksJson.hooks.PreToolUse[0].hooks[0].command;
     expect(state[key].trusted_hash).toBe(
       computeCodexHookTrustHash('pre_tool_use', registeredCommand, 5, 'Bash')
     );
-    // Default-enabled: we must NOT write enabled = true (absence == enabled).
     expect(state[key].enabled).toBeUndefined();
   });
 
@@ -485,13 +451,11 @@ describe('registerHooksToSettings - Codex', () => {
       'on-prompt': { script: 'on-prompt.sh', events: ['UserPromptSubmit'] },
     };
 
-    // First pass writes the trust hash.
     registerHooksToSettings('codex', versionHome, manifest, agentsDir);
     const configPath = path.join(versionHome, '.codex', 'config.toml');
     const hooksJsonPath = path.join(versionHome, '.codex', 'hooks.json');
     const key = `${hooksJsonPath}:user_prompt_submit:0:0`;
 
-    // User disables the hook from their side.
     const config = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
     const state = (config.hooks as Record<string, unknown>).state as Record<
       string,
@@ -500,7 +464,6 @@ describe('registerHooksToSettings - Codex', () => {
     state[key].enabled = false;
     fs.writeFileSync(configPath, TOML.stringify(config as Parameters<typeof TOML.stringify>[0]), 'utf-8');
 
-    // Re-register; enabled = false must survive.
     registerHooksToSettings('codex', versionHome, manifest, agentsDir);
     const after = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
     const afterState = (after.hooks as Record<string, unknown>).state as Record<
@@ -508,8 +471,6 @@ describe('registerHooksToSettings - Codex', () => {
       { trusted_hash?: string; enabled?: boolean }
     >;
     expect(afterState[key].enabled).toBe(false);
-    // Hash the portable command the registrar wrote, not the native scriptPath
-    // (separator/tilde divergence on Windows — see the PreToolUse test above).
     const hooksJson = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf-8'));
     const registeredCommand = hooksJson.hooks.UserPromptSubmit[0].hooks[0].command;
     expect(afterState[key].trusted_hash).toBe(
@@ -517,10 +478,6 @@ describe('registerHooksToSettings - Codex', () => {
     );
   });
 
-  // Ground-truth fixtures: these hashes were written into a real config.toml by
-  // the Codex 0.134.0 binary's own trust flow for these exact hook definitions.
-  // If canonicalization (key ordering, field omission, always-present
-  // `async:false`, TOML null-drop of an absent matcher) regresses, they break.
   describe('computeCodexHookTrustHash — Codex 0.134.0 ground truth', () => {
     const HOOK_DIR = '~/.agents/.history/versions/codex/0.134.0/home/.codex/hooks';
 
@@ -631,10 +588,6 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).toContain('"matcher": "Bash|bash"');
   });
 
-  // #1869 — OpenCode timeout-sample spool dir must use path.dirname, not a
-  // hardcoded '/'. On Windows getPerfDir() is backslash-separated; lastIndexOf('/')
-  // returns -1 and slice drops one character, so mkdir never creates the real dir
-  // (fail-silent catch) and the timeout sample is lost.
   it('derives the timeout-sample spool dir with path.dirname (Windows-safe)', () => {
     makeScript('slow.sh');
     const versionHome = path.join(tmpDir, 'home');
@@ -656,13 +609,11 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).not.toContain("PERF_SPOOL.lastIndexOf('/')");
     expect(plugin).not.toMatch(/PERF_SPOOL\.slice\(0,\s*PERF_SPOOL\.lastIndexOf\(/);
 
-    // Document the bug class the old slice broke: dirname keeps the parent on
-    // both separators; lastIndexOf('/') on a backslash path returns -1.
     const winSpool = 'C:\\Users\\me\\.agents\\.cache\\perf\\spool.jsonl';
     expect(path.win32.dirname(winSpool)).toBe('C:\\Users\\me\\.agents\\.cache\\perf');
     expect(winSpool.lastIndexOf('/')).toBe(-1);
     expect(winSpool.slice(0, winSpool.lastIndexOf('/'))).toBe(
-      'C:\\Users\\me\\.agents\\.cache\\perf\\spool.json', // drops one char (the trailing 'l')
+      'C:\\Users\\me\\.agents\\.cache\\perf\\spool.json',
     );
     expect(winSpool.slice(0, winSpool.lastIndexOf('/'))).not.toBe(path.win32.dirname(winSpool));
   });
@@ -766,13 +717,6 @@ describe('registerHooksToSettings - OpenCode', () => {
   });
 
   it('enforces the manifest timeout', async () => {
-    // Timeout must be long enough for Bun.spawn to actually start the child on
-    // slow Windows CI. With 10ms the timer often fires before the process is
-    // live, taskkill fails on a not-yet-running PID, the child then finishes
-    // and writes the side-effect — flake: timeout error + sideEffect:true.
-    // 150ms gives spawn room. The side-effect is delayed far past timeout +
-    // the post-kill observation window, so a late kill on a slow runner still
-    // cannot write before we sample sideEffect.
     const homeScopedDir = fs.mkdtempSync(path.join(os.homedir(), '.opencode-hook-test-'));
     const homeAgentsDir = path.join(homeScopedDir, '.agents');
     fs.mkdirSync(path.join(homeAgentsDir, 'hooks'), { recursive: true });
@@ -878,7 +822,6 @@ describe('registerHooksToSettings - Grok', () => {
   it('omits the matcher on SessionStart / Stop / UserPromptSubmit (lifecycle events reject it)', () => {
     makeScript('life.sh');
     const manifest: Record<string, ManifestHook> = {
-      // A matcher on the manifest must NOT leak onto lifecycle events.
       life: {
         script: 'life.sh',
         events: ['SessionStart', 'Stop', 'UserPromptSubmit'],
@@ -943,11 +886,8 @@ describe('registerHooksToSettings - Grok', () => {
     const dir = grokHooksDir(versionHome);
     fs.mkdirSync(dir, { recursive: true });
 
-    // Simulate the old double-registration output: a per-event file whose
-    // command is a managed path (under agentsDir/hooks).
     const stale = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: scriptPath, timeout: 30 }] }] } };
     fs.writeFileSync(path.join(dir, 'pretooluse.json'), JSON.stringify(stale));
-    // A user's own hand-authored file with an unmanaged command must survive.
     const userFile = { hooks: { PostToolUse: [{ hooks: [{ type: 'command', command: '/usr/local/bin/mine.sh', timeout: 5 }] }] } };
     fs.writeFileSync(path.join(dir, 'user-custom.json'), JSON.stringify(userFile));
 
@@ -1023,7 +963,6 @@ describe('registerHooksToSettings - Copilot', () => {
       fs.readFileSync(path.join(versionHome, '.copilot', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
     );
     expect(parsed.hooks.preToolUse[0].matcher).toBe('bash|edit');
-    // SessionStart does not accept matcher — must not be present
     expect(parsed.hooks.sessionStart[0].matcher).toBeUndefined();
   });
 
@@ -1315,7 +1254,6 @@ describe('registerHooksToSettings - Cursor', () => {
     expect(parsed.hooks.preToolUse).toHaveLength(1);
     expect(parsed.hooks.preToolUse[0].matcher).toBe('Shell');
 
-    // Matcher change — old Shell entry must not linger.
     registerHooksToSettings(
       'cursor',
       versionHome,
@@ -1326,7 +1264,6 @@ describe('registerHooksToSettings - Cursor', () => {
     expect(parsed.hooks.preToolUse).toHaveLength(1);
     expect(parsed.hooks.preToolUse[0].matcher).toBe('Write');
 
-    // Event change — PreToolUse managed entry must go when only PostToolUse remains.
     registerHooksToSettings(
       'cursor',
       versionHome,
@@ -1572,7 +1509,6 @@ describe('registerHooksToSettings - Antigravity', () => {
     makeScript('tool.sh');
 
     const manifest: Record<string, ManifestHook> = {
-      // UserPromptSubmit has no agy equivalent — must not error, must not register
       prompt: { script: 'prompt.sh', events: ['UserPromptSubmit'] },
       tool: { script: 'tool.sh', events: ['PreToolUse'] },
     };
@@ -1625,7 +1561,6 @@ describe('registerHooksToSettings - Antigravity', () => {
     let settings = readAgySettings(versionHome);
     expect(settings.hooks.before_tool_call).toHaveLength(2);
 
-    // Smaller manifest — 'b' was deleted upstream
     const secondManifest: Record<string, ManifestHook> = {
       a: { script: 'a.sh', events: ['PreToolUse'] },
     };
@@ -1637,11 +1572,6 @@ describe('registerHooksToSettings - Antigravity', () => {
   });
 
   it('prunes managed entries when the hooks root is reached through a symlink (GC realpath invariant)', () => {
-    // Deterministic, cross-platform repro of the macOS bug where the managed
-    // prefix points through a symlink: isManagedHookCommand realpath-resolves
-    // the command dir, so the raw prefix must be realpath-resolved too or GC
-    // silently no-ops. Build an explicit symlinked hooks root so this fails on
-    // Linux CI too (not just where TMPDIR is /var -> /private/var).
     const realRoot = path.join(tmpDir, 'real-agents');
     fs.mkdirSync(path.join(realRoot, 'hooks'), { recursive: true });
     for (const n of ['a.sh', 'b.sh']) {
@@ -1661,7 +1591,6 @@ describe('registerHooksToSettings - Antigravity', () => {
     let settings = readAgySettings(versionHome);
     expect(settings.hooks.before_tool_call).toHaveLength(2);
 
-    // 'b' removed upstream — must be pruned despite the symlinked managed root.
     const secondManifest: Record<string, ManifestHook> = {
       a: { script: 'a.sh', events: ['PreToolUse'] },
     };
@@ -1675,7 +1604,6 @@ describe('registerHooksToSettings - Antigravity', () => {
     const versionHome = makeAgyVersionHome();
     const settingsPath = path.join(versionHome, '.gemini', 'antigravity-cli', 'settings.json');
 
-    // Pre-seed with a user-authored hook outside the managed hooks dir
     fs.writeFileSync(
       settingsPath,
       JSON.stringify({
@@ -1692,7 +1620,6 @@ describe('registerHooksToSettings - Antigravity', () => {
     registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
 
     const settings = readAgySettings(versionHome);
-    // Both entries should coexist — user hook untouched, managed hook added
     expect(settings.hooks.before_tool_call).toHaveLength(2);
     expect(settings.hooks.before_tool_call[0].command).toBe('/usr/local/bin/my-user-hook.sh');
   });
@@ -1785,8 +1712,6 @@ describe('registerHooksToSettings - Claude', () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash');
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
-    // Matcher-only hook (no cache/matches) — resolves through the generated
-    // pass-through-timing shim (resolveHookCommand), not the raw script path.
     expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(resolvedCommand(getHookShimPath('pre-tool')));
     expect(settings.hooks.PreToolUse[0].hooks[0].type).toBe('command');
   });
@@ -1865,8 +1790,6 @@ describe('registerHooksToSettings - Droid', () => {
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
     expect(settings.hooks.PreToolUse[0].hooks[0].type).toBe('command');
     expect(settings.hooks.PreToolUse[0].hooks[0].timeout).toBe(45);
-    // Matcher-only hook (no cache/matches) — resolves through the generated
-    // pass-through-timing shim (resolveHookCommand), not the raw script path.
     expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(resolvedCommand(getHookShimPath('pre-tool')));
   });
 
@@ -1995,13 +1918,6 @@ describe('registerHooksToSettings - Muse Code', () => {
   });
 });
 
-// Regression for the Windows hook-path bug: hook commands stored as absolute
-// Windows paths with backslashes ("C:\\Users\\...\\06-attention-sentinel.sh")
-// break at exec time because Claude runs hooks via bash, which strips the
-// backslashes -> "No such file or directory". The registrar must store the
-// portable "~/..." form. `sep` is injected so the Windows case is exercised on
-// a POSIX CI host (where path.sep is '/'), which is the only way the required
-// Linux `test` gate can catch a Windows-only path regression.
 describe('toPortableCommand — portable hook commands (Windows path regression)', () => {
   const WIN_SEP = '\\';
   const winHome = 'C:\\Users\\me';
@@ -2024,8 +1940,6 @@ describe('toPortableCommand — portable hook commands (Windows path regression)
 
   it('forward-slashes a Windows path OUTSIDE HOME (no verbatim backslashes)', () => {
     const out = toPortableCommand('D:\\tools\\hooks\\g.sh', winHome, WIN_SEP);
-    // Not under HOME, so no ~/ fold — but it must still be backslash-free so
-    // bash does not mangle it.
     expect(out).toBe('D:/tools/hooks/g.sh');
     expect(out).not.toContain('\\');
   });
@@ -2036,16 +1950,7 @@ describe('toPortableCommand — portable hook commands (Windows path regression)
   });
 });
 
-// Regression for the per-version hook accumulation bug: because sync registers
-// each guard hook by a version-scoped path
-// (~/.agents/.history/versions/claude/<version>/home/.claude/hooks/git-guard.sh),
-// entries for every version installed over time piled up in one settings.json —
-// string-level dedup can't collapse them (paths differ), and `agents remove`
-// deleted a version's files without ever cleaning its settings entries, leaving
-// dead hooks that error on every tool call.
 describe('per-version hook entry pruning (settings accumulation regression)', () => {
-  // Portable version-home guard-hook command for a given version (the form sync
-  // actually writes — see toPortableCommand).
   function guardCmd(version: string): string {
     return `~/.agents/.history/versions/claude/${version}/home/.claude/hooks/git-guard.sh`;
   }
@@ -2099,22 +2004,19 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
     });
 
     it('drops sibling-version entries, keeps the current version + .system + custom hooks', () => {
-      // A version-home-shaped path so registrar knows which version it is syncing.
       const versionHome = path.join(
         tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
       );
       const settingsPath = path.join(versionHome, '.claude', 'settings.json');
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
 
-      // Seed: three version homes (two stale, one current) + a system hook + a
-      // user's own custom hook, all in one PreToolUse/Bash matcher group.
       fs.writeFileSync(settingsPath, JSON.stringify({
         hooks: preToolUseGroup([
-          guardCmd('2.1.186'),   // stale sibling -> prune
-          guardCmd('2.1.191'),   // stale sibling -> prune
-          guardCmd('2.1.201'),   // current version -> keep
-          SYSTEM_HOOK,           // .system path -> keep (never a prune target)
-          CUSTOM_HOOK,           // user's own hook -> keep (never a prune target)
+          guardCmd('2.1.186'),
+          guardCmd('2.1.191'),
+          guardCmd('2.1.201'),
+          SYSTEM_HOOK,
+          CUSTOM_HOOK,
         ]),
       }, null, 2));
 
@@ -2129,23 +2031,15 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       const commands = collectCommands(settings);
 
-      // Both sibling versions gone.
       expect(commands).not.toContain(guardCmd('2.1.186'));
       expect(commands).not.toContain(guardCmd('2.1.191'));
-      // Exactly one version-home guard entry survives, and it is the current one.
       const versionHomeCmds = commands.filter((c) => c.includes('.history/versions/claude/'));
       expect(versionHomeCmds).toEqual([guardCmd('2.1.201')]);
-      // System + custom hooks untouched.
       expect(commands).toContain(SYSTEM_HOOK);
       expect(commands).toContain(CUSTOM_HOOK);
     });
 
     it('collapses an exact-duplicate entry of the CURRENT version to a single hook', () => {
-      // The sibling-version prune (isStaleSiblingVersionCommand) only removes a
-      // DIFFERENT version's path; it can't collapse two identical current-version
-      // entries. Seeding the same current-version command twice is what a
-      // membership-Set wiring let both survive — Claude Code then fires the hook
-      // twice. Deduplication must leave exactly one.
       const versionHome = path.join(
         tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
       );
@@ -2154,9 +2048,9 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
 
       fs.writeFileSync(settingsPath, JSON.stringify({
         hooks: preToolUseGroup([
-          guardCmd('2.1.201'),   // current version
-          guardCmd('2.1.201'),   // EXACT duplicate of the current version -> collapse
-          CUSTOM_HOOK,           // user's own hook -> keep untouched
+          guardCmd('2.1.201'),
+          guardCmd('2.1.201'),
+          CUSTOM_HOOK,
         ]),
       }, null, 2));
 
@@ -2169,9 +2063,7 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       expect(result.errors).toHaveLength(0);
 
       const commands = collectCommands(JSON.parse(fs.readFileSync(settingsPath, 'utf-8')));
-      // Exactly one current-version guard entry — the duplicate is gone.
       expect(commands.filter((c) => c === guardCmd('2.1.201'))).toEqual([guardCmd('2.1.201')]);
-      // The user's own hook is left exactly as-is.
       expect(commands).toContain(CUSTOM_HOOK);
     });
   });
@@ -2189,7 +2081,7 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       fs.writeFileSync(settingsPath, JSON.stringify({
         hooks: preToolUseGroup([
           guardCmd('2.1.186'),
-          guardCmd('2.1.191'),   // removed version -> prune
+          guardCmd('2.1.191'),
           guardCmd('2.1.201'),
           SYSTEM_HOOK,
           CUSTOM_HOOK,
@@ -2212,7 +2104,6 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       const settingsPath = path.join(tmpDir, 'settings.json');
       fs.writeFileSync(settingsPath, JSON.stringify({
         hooks: preToolUseGroup([
-          // Same version number but a DIFFERENT agent — must not be pruned.
           '~/.agents/.history/versions/droid/2.1.191/home/.factory/hooks/git-guard.sh',
           SYSTEM_HOOK,
           CUSTOM_HOOK,
@@ -2260,7 +2151,7 @@ describe('registerHooksToSettings - grok + antigravity subrule hooks (RUSH-1353)
   });
 
   afterEach(() => {
-    try { fs.rmSync(localTmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(localTmp, { recursive: true, force: true }); } catch {  }
   });
 
   function subruleManifest(): Record<string, ManifestHook> {
@@ -2286,7 +2177,6 @@ describe('registerHooksToSettings - grok + antigravity subrule hooks (RUSH-1353)
     const flat = groups.flatMap((g: any) =>
       (g.hooks ?? []).map((h: any) => ({ command: h.command as string, matcher: g.matcher as string | undefined })),
     );
-    // Command paths go through toPortableCommand (POSIX/~/ form) — match by basename.
     expect(flat.some((e) => e.command.replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
     expect(flat.some((e) => e.matcher === 'Write|Edit')).toBe(true);
   });

@@ -1,7 +1,3 @@
-/**
- * Real-filesystem tests for folding N per-account installations into 1 install
- * + N slots (PHNX-3940 T7). Uses the fork-private HOME from tests/setup.ts.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -136,7 +132,7 @@ function dropClaudeBindings(): void {
   const bindings = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
   for (const [target, id] of Object.entries(bindings)) {
     if (target === 'claude' || target.startsWith('claude@')) {
-      try { unbindAccount(id, target, 'claude'); } catch { /* already gone */ }
+      try { unbindAccount(id, target, 'claude'); } catch {  }
     }
   }
 }
@@ -157,13 +153,13 @@ async function registerHomeAccount(label: string, name: string, email: string) {
 function cleanup(prevDefault: string | null): void {
   try {
     getDB().prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
-  } catch { /* db may not exist */ }
+  } catch {  }
   dropClaudeBindings();
   for (const name of plantedAccounts.splice(0)) {
-    try { removeAccount(`claude#${name}`); } catch { /* already gone */ }
+    try { removeAccount(`claude#${name}`); } catch {  }
   }
   for (const row of listNativeAccounts(readMeta()).filter((a) => a.identityLabel === gmail || a.identityLabel === icloud)) {
-    try { removeAccount(`claude#${row.name}`); } catch { /* already gone */ }
+    try { removeAccount(`claude#${row.name}`); } catch {  }
   }
   for (const label of [...allLabels, ...extraCleanupLabels.splice(0)]) {
     const dir = getVersionDir('claude', label);
@@ -177,7 +173,7 @@ function cleanup(prevDefault: string | null): void {
   if (fs.existsSync(accountsDir)) {
     for (const id of fs.readdirSync(accountsDir)) {
       const p = path.join(accountsDir, id);
-      try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
+      try { fs.rmSync(p, { recursive: true, force: true }); } catch {  }
     }
   }
   const manifests = path.join(getHistoryDir(), 'accounts');
@@ -355,10 +351,6 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     const gmailAcct = natives.find((a) => a.identityLabel === gmail)!;
     const slotBefore = fs.readdirSync(slotDir('claude', gmailAcct.id));
     expect(slotBefore.length).toBeGreaterThan(0);
-    // Canonical is the newest signed-in install, so plant a newer icloud home
-    // to hold that role: it also already has a slot, which exercises the
-    // canonical branch (binary kept, home left in place) while the older gmail
-    // home below takes the trash branch.
     const pinnedDefault = `9.9.9-${suffix}-def`;
     extraCleanupLabels.push(pinnedDefault);
     plantInstall(pinnedDefault, '9.9.9', { email: icloud });
@@ -382,13 +374,9 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     expect(fs.existsSync(getVersionDir('claude', extra))).toBe(false);
     expect(fs.existsSync(path.join(getHistoryDir(), 'trash', 'versions', 'claude', extra))).toBe(true);
     expect(result.manifest.harnesses.claude?.trashed.find((t) => t.label === extra)?.reason).toMatch(/already holds a provisioned slot/);
-    // The slot the account already owned is untouched, and the binding that
-    // named the trashed version now names the account.
     expect(fs.readdirSync(slotDir('claude', gmailAcct.id))).toEqual(slotBefore);
     const bindings = { ...readMeta().accounts?.bindings, ...readMeta().deviceAccounts?.bindings };
     expect(bindings[`claude@${extra}`]).toBe(gmailAcct.id);
-    // The canonical install keeps its binary with an empty home; its stale
-    // credential copy went to the homes trash and the manifest names the path.
     const canonicalHome = path.join(getVersionDir('claude', pinnedDefault), 'home');
     expect(fs.existsSync(canonicalHome)).toBe(true);
     expect(fs.readdirSync(canonicalHome)).toEqual([]);
@@ -434,8 +422,6 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     invalidateInstalledVersionsCache('claude');
     const acctA = await registerHomeAccount(labelA, `crash-a-${suffix}`, emailA);
     const acctB = await registerHomeAccount(labelB, `crash-b-${suffix}`, emailB);
-    // A regular file at the slot path is not a provisioned slot, so the plan
-    // still routes B to `slot` and the apply-time guard is what fails.
     const destB = slotDir('claude', acctB.id);
     fs.mkdirSync(path.dirname(destB), { recursive: true, mode: 0o700 });
     fs.writeFileSync(destB, 'preexisting');

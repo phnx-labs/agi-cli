@@ -1,22 +1,3 @@
-/**
- * RUSH-2366 — a dead `--device` teammate reported RUNNING forever. The old
- * liveness probe only had two states: an `.exit` sentinel present ("DEAD") or
- * absent ("ALIVE"). A remote process that is genuinely gone but never got the
- * chance to WRITE its `.exit` sentinel — killed, the box lost, OOM — collapsed
- * into the same "no sentinel" bucket as a still-running teammate, so it stayed
- * RUNNING forever and `agents teams resume` refused to relaunch it (a RUNNING
- * teammate routes to steer/mailbox, never resume).
- *
- * The fix adds a third state, GONE (process confirmed dead AND no sentinel at
- * all), resolved in one round-trip via remoteLivenessSnippet/
- * parseRemoteLivenessState — kept distinct from EXITED (sentinel present,
- * possibly still mid-write) so a momentarily-empty `.exit` never misfires as a
- * spurious FAILED.
- *
- * These tests exercise the real AgentManager/AgentProcess lifecycle against a
- * temp meta.json dir (no mocking of the code under test) and stub only the ssh
- * network boundary — same pattern as agents.remote-poll.test.ts.
- */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -70,8 +51,6 @@ describe('remote GONE detection — a killed --device teammate resolves terminal
     await makeRemoteRunning(base, id);
 
     sshExecRawMock.mockReturnValue({ code: 0, stdout: Buffer.alloc(0), stderr: '' });
-    // remoteLivenessSnippet emits "<id> GONE" when the sentinel is absent and
-    // `kill -0 <remotePid>` fails — the wrapper never got to write $?.
     sshExecMock.mockReturnValue({ code: 0, stdout: `${id} GONE\n`, stderr: '' });
 
     const mgr = new AgentManager(50, base);
@@ -104,7 +83,6 @@ describe('remote GONE detection — a killed --device teammate resolves terminal
     await makeRemoteRunning(base, id);
 
     sshExecRawMock.mockReturnValue({ code: 0, stdout: Buffer.alloc(0), stderr: '' });
-    // Sentinel file exists (EXITED) but its contents haven't landed yet.
     sshExecMock.mockReturnValue({ code: 0, stdout: `${id} EXITED\n`, stderr: '' });
 
     const mgr = new AgentManager(50, base);
@@ -143,13 +121,6 @@ describe('remote GONE detection — a killed --device teammate resolves terminal
     expect(all[0].status).toBe(AgentStatus.RUNNING);
   });
 
-  // RUSH-2356 sibling bug: a staged (--after) DISTRIBUTED teammate has
-  // hostName set but no PID (it hasn't launched yet). Without an explicit
-  // PENDING guard, updateStatusFromProcess's `!== RUNNING` fallback stamped a
-  // completedAt on it — which the age-based reap in loadExistingAgents() would
-  // later use to delete it outright, once it aged past cleanupAgeDays, despite
-  // never having started. The mirror-local guard (`if PENDING return`) that
-  // already protected a local staged teammate now protects the remote one too.
   it('a staged (--after) distributed teammate is left untouched — no ssh call, no completedAt stamped', async () => {
     const base = tmpBase();
     dirs.push(base);
@@ -161,7 +132,7 @@ describe('remote GONE detection — a killed --device teammate resolves terminal
     );
     agent.hostName = 'yosemite-s0';
     agent.hostTarget = 'yosemite-s0.tail1a85a1.ts.net';
-    agent.remotePid = null as unknown as number; // never launched — no remote pid yet
+    agent.remotePid = null as unknown as number;
     await agent.saveMeta();
 
     const mgr = new AgentManager(50, base);

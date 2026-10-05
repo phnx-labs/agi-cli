@@ -1,16 +1,3 @@
-/**
- * Declarative dynamic fan-out (issue #343).
- *
- * The `for_each:` construct is a declarative layer over the existing teams
- * substrate: a producer emits a list at runtime, one stage teammate runs per
- * item, optionally gated by a verify panel. These tests exercise the real
- * critical path with no mocking:
- *
- *   - `parseForEachBlock` / `parseVerifyBlock` — the defensive frontmatter parse.
- *   - `expandForEach` — the pure expansion into teammate descriptors.
- *   - Real `AgentProcess` + `AgentManager` persistence — proving the expansion
- *     stages a valid `--after` DAG the supervisor can pick up mid-flight.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -90,10 +77,8 @@ describe('parseForEachBlock — defensive coercion (issue #343)', () => {
   it('parseVerifyBlock defaults votes to 1 and keep_if to majority', () => {
     expect(parseVerifyBlock({ agent: 'skeptic' }))
       .toEqual({ agent: 'skeptic', votes: 1, keep_if: 'majority' });
-    // An unknown keep_if falls back to majority; a bad votes falls back to 1.
     expect(parseVerifyBlock({ agent: 'skeptic', votes: -3, keep_if: 'whenever' }))
       .toEqual({ agent: 'skeptic', votes: 1, keep_if: 'majority' });
-    // No agent -> no panel.
     expect(parseVerifyBlock({ votes: 3 })).toBeUndefined();
   });
 
@@ -130,7 +115,6 @@ describe('expandForEach — one stage per produced item + verify (issue #343)', 
     expect(stages).toHaveLength(items.length);
     expect(stages.map((t) => t.item)).toEqual(items);
     expect(stages.map((t) => t.name)).toEqual(['audit-1', 'audit-2', 'audit-3']);
-    // Template substitution happened per item.
     expect(stages[0].prompt).toBe('Audit src/routes/a.ts for missing auth checks');
     expect(producedCount).toBe(3);
     expect(usedCount).toBe(3);
@@ -142,10 +126,8 @@ describe('expandForEach — one stage per produced item + verify (issue #343)', 
     const { teammates } = expandForEach(spec, items);
 
     const verifiers = teammates.filter((t) => t.role === 'verify');
-    // 2 items * 3 votes.
     expect(verifiers).toHaveLength(6);
 
-    // Each item's skeptics wait on ONLY that item's stage teammate.
     const forA = verifiers.filter((t) => t.item === 'a');
     expect(forA.map((t) => t.name)).toEqual(['audit-1-verify-1', 'audit-1-verify-2', 'audit-1-verify-3']);
     expect(forA.every((t) => t.after.length === 1 && t.after[0] === 'audit-1')).toBe(true);
@@ -248,7 +230,6 @@ describe('produceItems — real producer command executes and parses (issue #343
   });
 
   it('applies max_items truncation to a real producer list and surfaces the drop count', async () => {
-    // Producer emits 5 items; max_items caps the fan-out at 2.
     const spec: ForEachSpec = {
       produce: `printf '["a","b","c","d","e"]'`,
       agent: 'claude',
@@ -261,7 +242,7 @@ describe('produceItems — real producer command executes and parses (issue #343
     const { teammates, producedCount, usedCount, truncated } = expandForEach(spec, items);
     expect(producedCount).toBe(5);
     expect(usedCount).toBe(2);
-    expect(truncated).toBe(3); // surfaced so the CLI can log "3 dropped"
+    expect(truncated).toBe(3);
     expect(teammates.filter((t) => t.role === 'stage')).toHaveLength(2);
     expect(teammates.filter((t) => t.role === 'stage').map((t) => t.item)).toEqual(['a', 'b']);
   });
@@ -277,10 +258,10 @@ describe('evaluateKeepIf — vote tally gate (issue #343)', () => {
     expect(evaluateKeepIf([false, false, false], 'any')).toBe(false);
   });
   it('majority: strictly more than half (a tie does not pass)', () => {
-    expect(evaluateKeepIf([true, true, false], 'majority')).toBe(true); // 2/3
-    expect(evaluateKeepIf([true, false, false], 'majority')).toBe(false); // 1/3
-    expect(evaluateKeepIf([true, false], 'majority')).toBe(false); // 1/2 tie
-    expect(evaluateKeepIf([true, true], 'majority')).toBe(true); // 2/2
+    expect(evaluateKeepIf([true, true, false], 'majority')).toBe(true);
+    expect(evaluateKeepIf([true, false, false], 'majority')).toBe(false);
+    expect(evaluateKeepIf([true, false], 'majority')).toBe(false);
+    expect(evaluateKeepIf([true, true], 'majority')).toBe(true);
   });
   it('an empty panel drops the item (nothing affirms it)', () => {
     expect(evaluateKeepIf([], 'any')).toBe(false);
@@ -300,7 +281,6 @@ describe('tallyForEach — per-item gate over expanded teammates (issue #343)', 
   it('keeps the item whose panel reaches the keep_if gate, drops the other', () => {
     const items = ['keepme', 'dropme'];
     const { teammates } = expandForEach(spec, items);
-    // keepme's skeptics all vote keep; dropme's none do.
     const verdicts = tallyForEach(teammates, (v) => v.item === 'keepme');
     const byItem = new Map(verdicts.map((v) => [v.item, v]));
     expect(byItem.get('keepme')!.kept).toBe(true);
@@ -329,12 +309,6 @@ describe('expandForEach stages a valid teams DAG through real persistence', () =
     fs.rmSync(tmpBase, { recursive: true, force: true });
   });
 
-  /**
-   * Persist an expanded descriptor as a real `AgentProcess` meta.json — the
-   * same on-disk shape `AgentManager.spawn` writes and the supervisor rescans.
-   * (We plant directly rather than `spawn` so the test needs no installed CLI,
-   * exactly like supervisor.test.ts's `plantAgent`.)
-   */
   async function plant(team: string, t: ForEachTeammate): Promise<void> {
     const agent = new AgentProcess(
       `agent-${t.name}`,
@@ -367,7 +341,6 @@ describe('expandForEach stages a valid teams DAG through real persistence', () =
     const items = ['src/routes/a.ts', 'src/routes/b.ts'];
     const { teammates } = expandForEach(spec, items, { producerName: 'endpoints' });
 
-    // Plant the producer plus every expanded teammate as the substrate would.
     const producer = new AgentProcess(
       'agent-endpoints', 'sweep', 'claude' as AgentType, 'produce list',
       null, 'edit', null, AgentStatus.COMPLETED,
@@ -378,25 +351,19 @@ describe('expandForEach stages a valid teams DAG through real persistence', () =
     await producer.saveMeta();
     for (const t of teammates) await plant('sweep', t);
 
-    // A fresh manager reads the persisted DAG back off disk — the real path
-    // the supervisor uses via rescanFromDisk().
     const mgr = new AgentManager(50, tmpBase);
     const loaded = await mgr.listByTask('sweep');
     const byName = new Map(loaded.map((a) => [a.name, a]));
 
-    // 2 stages + (2 items * 2 votes) verifiers + 1 producer.
     expect(loaded).toHaveLength(2 + 4 + 1);
 
-    // Stages depend on the producer.
     expect(byName.get('audit-1')!.after).toEqual(['endpoints']);
     expect(byName.get('audit-2')!.after).toEqual(['endpoints']);
 
-    // Skeptics depend only on their own item's stage — the verify gate.
     expect(byName.get('audit-1-verify-1')!.after).toEqual(['audit-1']);
     expect(byName.get('audit-1-verify-2')!.after).toEqual(['audit-1']);
     expect(byName.get('audit-2-verify-1')!.after).toEqual(['audit-2']);
 
-    // Everything staged PENDING, waiting on its deps.
     expect(loaded.filter((a) => a.status === AgentStatus.PENDING)).toHaveLength(6);
   });
 });

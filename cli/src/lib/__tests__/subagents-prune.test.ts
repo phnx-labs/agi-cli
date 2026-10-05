@@ -1,12 +1,3 @@
-/**
- * Tests for subagent soft-delete (prune) logic:
- *   - removeSubagentFromVersion: moves orphan subagents to trash (Claude + OpenClaw)
- *   - diffVersionSubagents: detects orphan subagent names against discovered set
- *   - listSubagentsForAgent: discovers installed subagents in both formats
- *
- * No mocking — all operations use real temp directories on the actual filesystem.
- * Tests that touch real agent version dirs (getVersionsDir) always clean up in finally.
- */
 
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -23,7 +14,6 @@ import {
 } from '../subagents.js';
 import { getVersionsDir, getTrashSubagentsDir } from '../state.js';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const tempDirs: string[] = [];
 function mkTemp(prefix: string): string {
@@ -38,7 +28,6 @@ afterEach(() => {
   }
 });
 
-/** Build a minimal subagent source directory with AGENT.md frontmatter. */
 function makeSubagentSourceDir(base: string, name: string, description = 'Test agent'): string {
   const dir = path.join(base, name);
   fs.mkdirSync(dir, { recursive: true });
@@ -49,7 +38,6 @@ function makeSubagentSourceDir(base: string, name: string, description = 'Test a
   return dir;
 }
 
-// ── removeSubagentFromVersion — Claude format ─────────────────────────────────
 
 describe('removeSubagentFromVersion (claude)', () => {
   it('soft-deletes a Claude subagent .md file to trash and returns success', () => {
@@ -62,7 +50,6 @@ describe('removeSubagentFromVersion (claude)', () => {
     const trashDir = path.join(getTrashSubagentsDir(), agent, testVersion, subagentName);
 
     try {
-      // Set up a fake Claude agents dir with a subagent file.
       fs.mkdirSync(agentsDir, { recursive: true });
       fs.writeFileSync(
         agentFile,
@@ -73,14 +60,11 @@ describe('removeSubagentFromVersion (claude)', () => {
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
 
-      // Original file is gone.
       expect(fs.existsSync(agentFile)).toBe(false);
 
-      // Trash received exactly one timestamped copy of the .md file.
       expect(fs.existsSync(trashDir)).toBe(true);
       const entries = fs.readdirSync(trashDir);
       expect(entries.length).toBe(1);
-      // Entry should be named {subagentName}.md.{timestamp}
       expect(entries[0]).toMatch(new RegExp(`^${subagentName}\\.md\\.`));
     } finally {
       if (fs.existsSync(versionDir)) {
@@ -96,7 +80,6 @@ describe('removeSubagentFromVersion (claude)', () => {
     const agent = 'claude';
     const testVersion = `0.0.0-test-${crypto.randomBytes(4).toString('hex')}`;
 
-    // No setup — the file simply does not exist.
     const result = removeSubagentFromVersion(agent, testVersion, 'ghost-agent');
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
@@ -120,7 +103,6 @@ describe('removeSubagentFromVersion (claude)', () => {
       expect(fs.existsSync(expectedTrashDir)).toBe(true);
       const entries = fs.readdirSync(expectedTrashDir);
       expect(entries.length).toBe(1);
-      // Stamp format: ISO datetime with colons/dots replaced by dashes.
       const stamp = entries[0].replace(`${subagentName}.md.`, '');
       expect(stamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/);
     } finally {
@@ -134,7 +116,6 @@ describe('removeSubagentFromVersion (claude)', () => {
   });
 });
 
-// ── removeSubagentFromVersion — OpenClaw format ───────────────────────────────
 
 describe('removeSubagentFromVersion (openclaw)', () => {
   it('soft-deletes an OpenClaw subagent directory to trash and returns success', () => {
@@ -147,7 +128,6 @@ describe('removeSubagentFromVersion (openclaw)', () => {
     const trashDir = path.join(getTrashSubagentsDir(), agent, testVersion, subagentName);
 
     try {
-      // Set up a fake OpenClaw subagent directory with AGENTS.md.
       fs.mkdirSync(subagentDir, { recursive: true });
       fs.writeFileSync(
         path.join(subagentDir, 'AGENTS.md'),
@@ -162,18 +142,13 @@ describe('removeSubagentFromVersion (openclaw)', () => {
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
 
-      // Original directory is gone.
       expect(fs.existsSync(subagentDir)).toBe(false);
 
-      // Trash received one timestamped subdirectory containing the full directory.
       expect(fs.existsSync(trashDir)).toBe(true);
       const stamps = fs.readdirSync(trashDir);
       expect(stamps.length).toBe(1);
 
-      // The renamed directory (at trashDir/stamp) is the original subagent dir
-      // containing both files.
       const trashedContents = path.join(trashDir, stamps[0]);
-      // OpenClaw: the entire directory was moved, so AGENTS.md should be inside.
       expect(fs.existsSync(path.join(trashedContents, 'AGENTS.md'))).toBe(true);
       expect(fs.existsSync(path.join(trashedContents, 'extra.md'))).toBe(true);
     } finally {
@@ -196,7 +171,6 @@ describe('removeSubagentFromVersion (openclaw)', () => {
   });
 });
 
-// ── listSubagentsForAgent ─────────────────────────────────────────────────────
 
 describe('listSubagentsForAgent', () => {
   it('discovers Claude subagents from flat .md files in .claude/agents/', () => {
@@ -204,7 +178,6 @@ describe('listSubagentsForAgent', () => {
     const agentsDir = path.join(home, '.claude', 'agents');
     fs.mkdirSync(agentsDir, { recursive: true });
 
-    // Write two valid subagent .md files.
     fs.writeFileSync(
       path.join(agentsDir, 'researcher.md'),
       '---\nname: researcher\ndescription: Research agent\n---\n\nDo research.',
@@ -214,7 +187,6 @@ describe('listSubagentsForAgent', () => {
       '---\nname: writer\ndescription: Writing agent\n---\n\nWrite things.',
     );
 
-    // Non-.md file should be ignored.
     fs.writeFileSync(path.join(agentsDir, 'ignore.txt'), 'not an agent');
 
     const subagents = listSubagentsForAgent('claude', home);
@@ -229,12 +201,10 @@ describe('listSubagentsForAgent', () => {
     const agentsDir = path.join(home, '.claude', 'agents');
     fs.mkdirSync(agentsDir, { recursive: true });
 
-    // Valid file.
     fs.writeFileSync(
       path.join(agentsDir, 'valid.md'),
       '---\nname: valid\ndescription: OK\n---\n\nInstructions.',
     );
-    // File with no frontmatter.
     fs.writeFileSync(
       path.join(agentsDir, 'no-front.md'),
       'Just plain markdown without frontmatter.',
@@ -248,7 +218,6 @@ describe('listSubagentsForAgent', () => {
 
   it('returns empty array when .claude/agents/ does not exist', () => {
     const home = mkTemp('subagents-claude-empty-');
-    // Do NOT create .claude/agents/
 
     const subagents = listSubagentsForAgent('claude', home);
     expect(subagents).toEqual([]);
@@ -258,7 +227,6 @@ describe('listSubagentsForAgent', () => {
     const home = mkTemp('subagents-openclaw-list-');
     const openclawDir = path.join(home, '.openclaw');
 
-    // Set up two valid OpenClaw subagent directories.
     for (const name of ['coder', 'reviewer']) {
       const dir = path.join(openclawDir, name);
       fs.mkdirSync(dir, { recursive: true });
@@ -268,12 +236,10 @@ describe('listSubagentsForAgent', () => {
       );
     }
 
-    // A directory without AGENTS.md should be skipped.
     const emptyDir = path.join(openclawDir, 'no-agents-md');
     fs.mkdirSync(emptyDir, { recursive: true });
     fs.writeFileSync(path.join(emptyDir, 'something.txt'), 'not an agent');
 
-    // A file (not a directory) should be skipped.
     fs.writeFileSync(path.join(openclawDir, 'flat-file.md'), 'flat');
 
     const subagents = listSubagentsForAgent('openclaw', home);
@@ -314,14 +280,12 @@ describe('listSubagentsForAgent', () => {
 
   it('returns empty array when .openclaw/ does not exist', () => {
     const home = mkTemp('subagents-openclaw-empty-');
-    // Do NOT create .openclaw/
 
     const subagents = listSubagentsForAgent('openclaw', home);
     expect(subagents).toEqual([]);
   });
 });
 
-// ── transformSubagentForClaude ────────────────────────────────────────────────
 
 describe('transformSubagentForClaude', () => {
   it('produces valid Claude .md with YAML frontmatter + body', () => {
@@ -330,19 +294,15 @@ describe('transformSubagentForClaude', () => {
 
     const result = transformSubagentForClaude(subagentDir);
 
-    // Must start with ---
     expect(result.startsWith('---\n')).toBe(true);
-    // Must include name and description from frontmatter
     expect(result).toContain('name: coder');
     expect(result).toContain('description: Coding specialist');
-    // Must include the body text
     expect(result).toContain('Instructions here.');
   });
 
   it('appends additional .md files as titled sections', () => {
     const base = mkTemp('subagents-transform-extra-');
     const subagentDir = makeSubagentSourceDir(base, 'tester');
-    // Add an extra .md file.
     fs.writeFileSync(
       path.join(subagentDir, 'SOUL.md'),
       'Be thorough. Be honest.',
@@ -350,7 +310,6 @@ describe('transformSubagentForClaude', () => {
 
     const result = transformSubagentForClaude(subagentDir);
 
-    // SOUL.md should appear as a section.
     expect(result).toContain('## Soul');
     expect(result).toContain('Be thorough. Be honest.');
   });
@@ -365,13 +324,11 @@ describe('transformSubagentForClaude', () => {
   });
 });
 
-// ── syncSubagentToOpenclaw ────────────────────────────────────────────────────
 
 describe('syncSubagentToOpenclaw', () => {
   it('copies all files and renames AGENT.md to AGENTS.md', () => {
     const base = mkTemp('subagents-sync-openclaw-');
     const subagentDir = makeSubagentSourceDir(base, 'analyst');
-    // Add an extra file.
     fs.writeFileSync(path.join(subagentDir, 'SOUL.md'), 'Soul content.');
 
     const targetDir = path.join(base, 'target');
@@ -379,10 +336,8 @@ describe('syncSubagentToOpenclaw', () => {
     const result = syncSubagentToOpenclaw(subagentDir, targetDir);
 
     expect(result.success).toBe(true);
-    // AGENT.md renamed to AGENTS.md.
     expect(fs.existsSync(path.join(targetDir, 'AGENTS.md'))).toBe(true);
     expect(fs.existsSync(path.join(targetDir, 'AGENT.md'))).toBe(false);
-    // Extra file preserved.
     expect(fs.existsSync(path.join(targetDir, 'SOUL.md'))).toBe(true);
   });
 
@@ -398,7 +353,6 @@ describe('syncSubagentToOpenclaw', () => {
   });
 });
 
-// ── parseSubagentFrontmatter edge cases ──────────────────────────────────────
 
 describe('parseSubagentFrontmatter', () => {
   it('returns null for a non-existent file', () => {

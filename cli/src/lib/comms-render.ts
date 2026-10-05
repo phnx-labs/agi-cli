@@ -17,7 +17,6 @@ export const GLYPH = {
 
 type Accent = 'cyan' | 'amber';
 
-/** Render the shared one-line comms header, with `right` aligned to the terminal edge. */
 export function masthead(o: {
   title: string;
   host: string;
@@ -39,7 +38,6 @@ export function masthead(o: {
 
 const SPARK_LEVELS = '▁▂▃▄▅▆▇█';
 
-/** Normalize non-negative counts across the eight Unicode sparkline levels. */
 export function sparkline(counts: number[]): string {
   if (counts.length === 0) return ' ';
   const normalized = counts.map((count) => Number.isFinite(count) ? Math.max(0, count) : 0);
@@ -50,7 +48,6 @@ export function sparkline(counts: number[]): string {
     .join('');
 }
 
-/** Flatten mailbox histories into one newest-first communication stream. */
 export function aggregate(boxes: {
   id: string;
   label: string;
@@ -74,7 +71,6 @@ export function aggregate(boxes: {
 
 const HOUR_MS = 60 * 60 * 1_000;
 
-/** Count messages in rolling one-hour buckets, ordered oldest to newest. */
 export function hourlyCounts(msgs: CommsMsg[], hours: number, now: Date = new Date()): number[] {
   const bucketCount = Number.isFinite(hours) ? Math.max(0, Math.floor(hours)) : 0;
   const counts = Array.from({ length: bucketCount }, () => 0);
@@ -91,7 +87,6 @@ export function hourlyCounts(msgs: CommsMsg[], hours: number, now: Date = new Da
   return counts;
 }
 
-/** Aggregate the human-readable sender-to-recipient routes, busiest first. */
 export function graphEdges(msgs: CommsMsg[]): { from: string; to: string; count: number }[] {
   const edges = new Map<string, { from: string; to: string; count: number }>();
   for (const message of msgs) {

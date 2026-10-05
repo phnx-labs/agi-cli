@@ -1,11 +1,3 @@
-/**
- * Tests for layered hook manifest resolution: system + user merged, user wins.
- *
- * The registrar reads ~/.agents-system/hooks.yaml (npm-shipped defaults) and
- * the `hooks:` section of ~/.agents/agents.yaml (user). A user entry with
- * the same name as a system entry overrides it wholesale. A user entry with
- * `enabled: false` disables the system-shipped hook.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -123,8 +115,6 @@ describe('parseHookManifest layering', () => {
     );
   });
 
-  // #1555: a duration-string timeout in agents.yaml normalizes to a seconds
-  // number, so every downstream serializer keeps reading a number.
   it('normalizes a duration-string timeout to seconds', () => {
     fs.writeFileSync(
       path.join(USER_DIR, 'agents.yaml'),
@@ -206,11 +196,6 @@ describe('parseHookManifest layering', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  // Regression for #602: an enabled extra repo declaring a hook (with its
-  // event, e.g. SessionStart) must surface in parseHookManifest so the event
-  // actually registers. Before the fix parseHookManifest read only the system
-  // and user agents.yaml, so extra-repo hook scripts resolved but their events
-  // never wired.
   it('includes hook events declared in an enabled extra repo (#602)', () => {
     const extraDir = path.join(TEST_ROOT, 'extra-work');
     fs.mkdirSync(extraDir, { recursive: true });
@@ -244,10 +229,8 @@ describe('parseHookManifest layering', () => {
     );
     ENABLED_EXTRAS = [{ alias: 'work', dir: extraDir, url: 'gh:me/.agents-work' }];
 
-    // Extra beats system.
     expect(parseHookManifest()['shared'].script).toBe('extra.sh');
 
-    // User beats extra.
     fs.writeFileSync(
       path.join(USER_DIR, 'agents.yaml'),
       'hooks:\n  shared:\n    override: true\n    script: user.sh\n    events: [Stop]\n',

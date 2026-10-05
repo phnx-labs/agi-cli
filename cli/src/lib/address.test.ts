@@ -11,9 +11,6 @@ import {
   vncEndpoint,
 } from './address.js';
 
-// Shared vectors (PHNX-4090). This file is identical in agents-cli, computer-cli,
-// browser-cli and secrets-cli apart from the test-runner import; a vector added
-// here is added to all four.
 
 describe('parseAddress', () => {
   it('parses ssh://user@host and never invents a DevTools port', () => {

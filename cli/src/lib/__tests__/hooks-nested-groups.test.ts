@@ -1,6 +1,3 @@
-/**
- * Nested hook group dirs (hooks/session-starts/) — discovery, source resolve, register.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -54,7 +51,6 @@ describe('hooks group subdirs (session-starts layout)', () => {
     writeHook('top.sh');
     writeHook('session-starts/04-session-identity.sh');
     writeHook('session-starts/05-session-start-autosync.sh');
-    // Fixture-only dir (no top-level scripts) is a directory bundle, not a group.
     const fixtures = path.join(SYSTEM_DIR, 'hooks', 'tests', 'fixtures');
     fs.mkdirSync(fixtures, { recursive: true });
     fs.writeFileSync(path.join(fixtures, 'input.json'), '{"ok":true}\n');

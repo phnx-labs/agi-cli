@@ -1,18 +1,3 @@
-/**
- * RUSH-2366 — a dead teammate reported RUNNING forever. One of the two root
- * causes was a stale-manager race: a long-lived manager (the `teams start
- * --watch` supervisor) caches a teammate as RUNNING and never re-reads its
- * own cache slot, so an explicit `agents teams stop` from a SEPARATE CLI
- * invocation writes STOPPED to disk and the long-lived manager's next poll —
- * seeing the (still genuinely alive, from ITS point of view) cached copy —
- * would re-persist the stale RUNNING right back over the explicit stop.
- *
- * Exercises the real AgentManager/AgentProcess persistence + reconciliation
- * path against a temp meta.json dir, with a genuinely alive local pid (this
- * test process's own) so the ordinary liveness check alone would report
- * RUNNING — isolating the assertion to the disk-terminal-adoption guard
- * specifically. No mocking.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -45,22 +30,16 @@ describe('stale-manager race never clobbers an explicit stop (RUSH-2366)', () =>
     const id = 'stale-1';
     await makeRunningLocal(base, id);
 
-    // A long-lived manager (the watch supervisor) loads it into its cache.
     const mgr = new AgentManager(50, base);
     const first = await mgr.get(id);
     expect(first?.status).toBe(AgentStatus.RUNNING);
 
-    // A SEPARATE CLI invocation (`agents teams stop`) writes STOPPED straight
-    // to disk — this manager's cache never sees that write happen.
     const onDisk = await AgentProcess.loadFromDisk(id, base);
     expect(onDisk).not.toBeNull();
     onDisk!.status = AgentStatus.STOPPED;
     onDisk!.completedAt = new Date();
     await onDisk!.saveMeta();
 
-    // The long-lived manager polls again. Its cached copy's pid is (from its
-    // own point of view) still genuinely alive — without the stale-manager
-    // guard this would re-persist RUNNING right over the explicit stop.
     const polled = await mgr.get(id);
     expect(polled?.status).toBe(AgentStatus.STOPPED);
 
@@ -75,7 +54,7 @@ describe('stale-manager race never clobbers an explicit stop (RUSH-2366)', () =>
     await makeRunningLocal(base, id);
 
     const mgr = new AgentManager(50, base);
-    await mgr.get(id); // cache it as RUNNING
+    await mgr.get(id);
 
     const onDisk = await AgentProcess.loadFromDisk(id, base);
     onDisk!.status = AgentStatus.FAILED;
@@ -83,7 +62,7 @@ describe('stale-manager race never clobbers an explicit stop (RUSH-2366)', () =>
     await onDisk!.saveMeta();
 
     const added = await mgr.rescanFromDisk();
-    expect(added).toBe(0); // a refresh of a cached entry, not a newly-discovered one
+    expect(added).toBe(0);
 
     const all = await mgr.listByTask('stale-team');
     expect(all.find((a) => a.agentId === id)?.status).toBe(AgentStatus.FAILED);
@@ -99,7 +78,6 @@ describe('stale-manager race never clobbers an explicit stop (RUSH-2366)', () =>
     const cached = await mgr.get(id);
     expect(cached?.status).toBe(AgentStatus.RUNNING);
 
-    // No external write this time — disk still says RUNNING too.
     await mgr.rescanFromDisk();
 
     const all = await mgr.listByTask('stale-team');

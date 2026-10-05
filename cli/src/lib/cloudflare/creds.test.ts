@@ -7,9 +7,6 @@ describe('readCloudflareCreds', () => {
   });
 
   it('an explicit --token/--account override bypasses the bundle entirely', () => {
-    // The escape hatch: with a token passed directly, the function never touches
-    // the secrets store (no bundle needs to exist), so this is deterministic and
-    // needs no secrets backend.
     expect(readCloudflareCreds('cloudflare', { apiToken: 'cf-tok', accountId: 'acct-1' })).toEqual({
       apiToken: 'cf-tok',
       accountId: 'acct-1',
@@ -24,8 +21,6 @@ describe('readCloudflareCreds', () => {
   });
 
   it('a missing bundle fails loud naming the bundle (no override, no store)', () => {
-    // Points SECRETS_HOME at an empty throwaway dir so the `cloudflare` bundle
-    // genuinely does not exist; the error must name it and the remediation.
     const prev = process.env.SECRETS_HOME;
     process.env.SECRETS_HOME = '/nonexistent/agents-cf-creds-test';
     try {

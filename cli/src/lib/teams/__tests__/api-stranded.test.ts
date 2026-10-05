@@ -1,10 +1,3 @@
-/**
- * Real-path tests for PHNX-2951: detecting completed teammates whose work is
- * stranded in a dirty worktree with no PR.
- *
- * These tests create actual git repositories and worktrees so the stranded
- * detection exercises the same `git status --porcelain` probe the CLI uses.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';

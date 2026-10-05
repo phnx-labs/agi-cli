@@ -67,10 +67,6 @@ describe('expandPatterns', () => {
     const proper = expandPatterns(['system:*', 'user:*'], available);
     expect(proper.sort()).toEqual(['brain-scan', 'browser-generate', 'creative', 'ragent']);
 
-    // "system:* user:*" is ONE token containing a space, not two patterns. The
-    // result used to be assigned and never asserted, so the invalid-token
-    // branch had no coverage at all — it must expand to nothing rather than
-    // silently behaving like the two-element form above.
     expect(expandPatterns(['system:* user:*'], available)).toEqual([]);
   });
 
@@ -122,9 +118,6 @@ describe('expandPatterns', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildSelection kind filtering (added by agents/core per-kind flag surface)
-// ---------------------------------------------------------------------------
 
 describe('buildSelection kind filtering', () => {
   it('no restrictions → every kind is "all"', () => {
@@ -174,8 +167,6 @@ describe('buildSelection kind filtering', () => {
   });
 
   describe('collision cases: same name in different kinds resolves independently', () => {
-    // "sessions" exists as both a system plugin and a system skill on this fleet.
-    // The kind flag determines WHICH resource is targeted — they are independent.
 
     it('--plugin sessions selects plugins only, not skills', () => {
       const pluginSel = buildSelection([], { plugins: ['sessions'] });
@@ -192,21 +183,16 @@ describe('buildSelection kind filtering', () => {
     it('--plugin sessions and --skill sessions produce different ResourceSelections', () => {
       const pluginSel = buildSelection([], { plugins: ['sessions'] });
       const skillSel = buildSelection([], { skills: ['sessions'] });
-      // They differ in which kind key carries the name
       expect(Object.keys(pluginSel)).not.toEqual(Object.keys(skillSel));
       expect(pluginSel).not.toEqual(skillSel);
     });
 
-    // "browser" exists as a skill in both the user repo and the system repo.
-    // --skill browser targets the skill kind regardless of repo scope;
-    // repo scope is a separate dimension that constrains the source layer.
     it('--skill browser selects the skill kind, not the plugin kind', () => {
       const sel = buildSelection([], { skills: ['browser'] });
       expect(sel.skills).toEqual(['browser']);
       expect(sel.plugins).toBeUndefined();
     });
 
-    // "swarm" exists as both a system plugin and a system command.
     it('--plugin swarm selects plugins only, not commands', () => {
       const sel = buildSelection([], { plugins: ['swarm'] });
       expect(sel.plugins).toEqual(['swarm']);

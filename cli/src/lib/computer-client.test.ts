@@ -1,13 +1,3 @@
-/**
- * The pure half of the fd-3 / fd-4 contract: bin resolution, how a bin is
- * invoked, and the NDJSON framing rules.
- *
- * The wiring half — real pipes, real fds, real exit codes — is
- * `computer-client.e2e.test.ts`, which drives the REAL compiled `computer`
- * engine. There is deliberately no stand-in engine fixture: a fake implements
- * whatever protocol we assumed, so it proves the client agrees with itself
- * rather than with the thing it has to talk to.
- */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -74,7 +64,6 @@ describe('resolveComputerBin', () => {
 
   it('fails LOUD with install guidance when the standalone is absent — there is no fallback engine', () => {
     process.env.COMPUTER_BIN = '';
-    // An empty PATH is the honest "not installed" shape; findInPath finds nothing.
     const prevPath = process.env.PATH;
     process.env.PATH = path.join(path.sep, 'definitely-not-here');
     try {
@@ -95,8 +84,6 @@ describe('invocation', () => {
 
 describe('the fd numbers the engine is told to use', () => {
   it('are 3 for the context and 4 for the events', () => {
-    // The engine reads these by number out of COMPUTER_CONTEXT_FD /
-    // COMPUTER_EVENTS_FD, so changing either is a wire-protocol break.
     expect(COMPUTER_CONTEXT_FD).toBe(3);
     expect(COMPUTER_EVENTS_FD).toBe(4);
   });

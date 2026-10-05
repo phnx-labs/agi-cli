@@ -39,8 +39,6 @@ describe('resolveResource', () => {
 
     const resolved = resolveResource('commands', 'shared', tmpDir);
 
-    // repoRoot is always present (#12 — provenance); snapshotSha is undefined
-    // for these plain (non-git) temp dirs, and toEqual ignores undefined keys.
     expect(resolved).toEqual({
       name: 'shared',
       path: path.join(projectAgentsDir, 'commands', 'shared.md'),

@@ -69,15 +69,13 @@ describe('daemon webhooks config', () => {
       getDaemonWebhooksConfigPath(),
       yaml.stringify({
         receivers: [
-          { port: 9000 },                                        // no bundle -> unusable, dropped
-          { bundle: 'gh', port: 8790, funnel: { publicPort: 9999 } }, // 9999 is not a Funnel port
+          { port: 9000 },
+          { bundle: 'gh', port: 8790, funnel: { publicPort: 9999 } },
         ],
       }),
       'utf-8',
     );
     const { receivers } = readDaemonWebhooksConfig();
-    // The bundle-less entry is gone entirely; the bad funnel port is dropped but
-    // the receiver still binds localhost rather than being silently discarded.
     expect(receivers).toEqual([{ bundle: 'gh', port: 8790 }]);
   });
 
@@ -101,8 +99,6 @@ describe('daemon webhooks config', () => {
   });
 
   it('returns the removed entry so the caller can take its public Funnel down', () => {
-    // The Funnel is brought up per receiver; dropping the receiver without
-    // dropping the Funnel leaves a public HTTPS route pointed at a dead port.
     addHostedReceiver({ bundle: 'gh', port: 8790, funnel: { publicPort: 8443 } });
     expect(removeHostedReceiver(8790)).toEqual({ bundle: 'gh', port: 8790, funnel: { publicPort: 8443 } });
   });
@@ -130,18 +126,11 @@ describe('startHostedWebhookReceivers', () => {
   });
 
   it('survives a bind failure: the conflicting receiver is skipped, the rest still bind', async () => {
-    // A REAL occupied port. `server.listen()` reports EADDRINUSE as an async
-    // 'error' event, not a throw — so before this was awaited, the event reached
-    // the process-level uncaughtException handler and killed the whole daemon
-    // (with it: the secrets broker, scheduler, monitors, browser IPC, self-heal).
-    // Nothing here is mocked: the squatter is an actual listening HTTP server.
     const squatter = http.createServer(() => {});
     await new Promise<void>((resolve) => squatter.listen(0, '127.0.0.1', resolve));
     const takenPort = (squatter.address() as AddressInfo).port;
     const freePort = takenPort + 1;
 
-    // Two receivers whose secrets DO resolve, so the only difference between
-    // them is the bind: one port is taken, the other is not.
     const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'daemon-webhooks-secrets-'));
     const previousStateDir = process.env.AGENTS_STATE_DIR;
     process.env.AGENTS_STATE_DIR = bundleDir;
@@ -154,13 +143,11 @@ describe('startHostedWebhookReceivers', () => {
     const onUncaught = (err: Error) => uncaught.push(err);
     process.on('uncaughtException', onUncaught);
 
-    // Resolve both bundles to a fixed secret without touching the real keychain.
     const hosted = await startHostedWebhookReceivers({
       log: (level, message) => logs.push({ level, message }),
       resolveSecrets: () => ({ linear: 'test-secret' }),
     });
     try {
-      // One bound, one skipped — and the process is still alive to assert it.
       expect(hosted.count).toBe(1);
       const warn = logs.find((l) => l.level === 'WARN');
       expect(warn?.message).toContain(`:${takenPort} failed to bind`);
@@ -240,12 +227,6 @@ describe('startHostedWebhookReceivers', () => {
   });
 
   it('fails a receiver LOUD when its signing secret cannot be resolved', async () => {
-    // A bundle whose secret can't be resolved (here: no standalone `secrets`
-    // executable at all — DIST-1, no fallback engine) must NOT bind unverifiable
-    // ingress, and the reason must reach the daemon log rather than being
-    // swallowed. This holds regardless of WHY the resolve failed, so it runs
-    // without needing the real standalone installed; the exact "bundle absent"
-    // failure text is covered by the real-standalone block below.
     addHostedReceiver({ bundle: 'daemon-webhooks-test-absent-bundle', port: 8791 });
     const logs: { level: string; message: string }[] = [];
     const hosted = await startHostedWebhookReceivers({ log: (level, message) => logs.push({ level, message }) });

@@ -13,7 +13,6 @@ import {
   copySetupToBox,
 } from './setup-copy.js';
 
-/** Make a real git repo with the given files, returning its path. */
 function makeGitRepo(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-copy-'));
   spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf-8' });
@@ -39,7 +38,6 @@ describe('enumerateTrackedFiles', () => {
       spawnSync('git', ['-C', dir, 'add', 'skills/foo.md', '.gitignore']);
       const files = enumerateTrackedFiles(dir).sort();
       expect(files).toEqual(['.gitignore', 'skills/foo.md']);
-      // The gitignored / untracked noise is never enumerated.
       expect(files).not.toContain('.history/log.txt');
       expect(files).not.toContain('cache.tmp');
     } finally {
@@ -95,10 +93,8 @@ describe('buildSetupRsyncArgs', () => {
     expect(args).toContain('--files-from');
     expect(args).toContain('/tmp/list');
     expect(args).toContain('--from0');
-    // Source gets a trailing slash so contents (not the dir) land in the remote.
     expect(args).toContain('/home/u/.agents/');
     expect(args).toContain('crabbox@203.0.113.5:.agents/');
-    // The -e transport is crabbox's own ssh command (per-lease key).
     const eIdx = args.indexOf('-e');
     expect(eIdx).toBeGreaterThan(-1);
     expect(args[eIdx + 1]).toBe('ssh -i /k/id_ed25519 -p 2222');
@@ -117,20 +113,8 @@ describe('buildSetupRsyncArgs', () => {
 });
 
 describe('copySetupToBox', () => {
-  // The fake transport below is a set of `#!/bin/sh` scripts dropped on PATH
-  // without a .cmd/.exe extension, which Windows can neither resolve nor
-  // execute: any case that actually reaches the transport dies in findCrabbox
-  // (cli.ts:74) with "crabbox is not installed or not on PATH" before testing
-  // the behavior it claims to. Those cases carry `itPosix`. Cases that return
-  // before the transport (the empty-file-set early return, setup-copy.ts:141)
-  // still run everywhere — don't widen this to the whole suite.
   const itPosix = it.skipIf(process.platform === 'win32');
 
-  // Hermetic lease-bundle resolution: copySetupToBox → crabboxSshArgv → crabboxEnv
-  // would otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a
-  // locked `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
-  // dev-machine-only failure unrelated to the rsync/ssh copy flow under test. Pin
-  // readMeta → {} and the process client's listBundlesSync → [] so no lease bundle is found.
   beforeEach(() => {
     resetCrabboxSecretsMemosForTest();
     vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
@@ -141,11 +125,6 @@ describe('copySetupToBox', () => {
     resetCrabboxSecretsMemosForTest();
   });
 
-  /**
-   * Install a fake `crabbox` (emits the ssh command for `ssh --id`), `rsync`, and
-   * `ssh` on PATH — matching the real transport: copySetupToBox first asks crabbox
-   * for its per-lease ssh invocation, then rsyncs over it.
-   */
   function withFakeTransport(
     exit: { rsync: number; ssh: number; crabboxResolves?: boolean },
     fn: (ctx: { rsyncLog: string; sshLog: string }) => Promise<void>,
@@ -153,8 +132,6 @@ describe('copySetupToBox', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-copy-fake-'));
     const rsyncLog = path.join(dir, 'rsync.log');
     const sshLog = path.join(dir, 'ssh.log');
-    // crabbox: `--help` (findCrabbox) exits 0; `ssh --id … --reclaim` prints the
-    // shell-quoted ssh command carrying the per-lease key + crabbox@host endpoint.
     const crabboxResolves = exit.crabboxResolves !== false;
     fs.writeFileSync(
       path.join(dir, 'crabbox'),
@@ -198,7 +175,6 @@ describe('copySetupToBox', () => {
         expect(result.files.sort()).toEqual(['commands/b.md', 'skills/a.md']);
         expect(result.pushExitCode).toBe(0);
         expect(result.refreshExitCode).toBe(0);
-        // rsync targets the crabbox@host endpoint crabbox emitted, over its key.
         const rlog = fs.readFileSync(rsyncLog, 'utf-8');
         expect(rlog).toContain('crabbox@203.0.113.7:.agents/');
         expect(rlog).toContain('/fake/id_ed25519');
@@ -217,7 +193,7 @@ describe('copySetupToBox', () => {
         const result = await copySetupToBox({ slug: 'blue-box', userAgentsDir: repo, refresh: false });
         expect(result.pushExitCode).toBe(0);
         expect(result.refreshExitCode).toBeNull();
-        expect(fs.existsSync(sshLog)).toBe(false); // refresh handled in-bootstrap
+        expect(fs.existsSync(sshLog)).toBe(false);
       });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
@@ -253,7 +229,7 @@ describe('copySetupToBox', () => {
         const result = await copySetupToBox({ slug: 'blue-box', userAgentsDir: repo });
         expect(result.pushExitCode).toBe(23);
         expect(result.refreshExitCode).toBeNull();
-        expect(fs.existsSync(sshLog)).toBe(false); // ssh never invoked
+        expect(fs.existsSync(sshLog)).toBe(false);
       });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
@@ -268,7 +244,7 @@ describe('copySetupToBox', () => {
         const result = await copySetupToBox({ slug: 'gone', userAgentsDir: repo });
         expect(result.pushExitCode).toBeNull();
         expect(result.refreshExitCode).toBeNull();
-        expect(fs.existsSync(rsyncLog)).toBe(false); // no transport → no rsync
+        expect(fs.existsSync(rsyncLog)).toBe(false);
       });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });

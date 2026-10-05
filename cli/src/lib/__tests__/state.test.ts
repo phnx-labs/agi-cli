@@ -51,7 +51,6 @@ describe('state paths', () => {
   it('keeps definitions/configs at the top of ~/.agents', () => {
     const userRoot = path.join(os.homedir(), '.agents');
     expect(getRoutinesDir()).toBe(path.join(userRoot, 'routines'));
-    // Plugins are user-authored resources, alongside skills/, commands/, etc.
     expect(getPluginsDir()).toBe(path.join(userRoot, 'plugins'));
   });
 });
@@ -61,9 +60,6 @@ describe('readMeta merges agents.yaml from both repos', () => {
   let userDir: string;
   let systemDir: string;
   const modulePath = path.resolve(process.cwd(), 'src/lib/state.ts');
-  // pins + registry live under AGENTS_DEVICES_DIR (vitest setup.ts pins a
-  // fork-wide dir). Point every child at THIS test home so a sibling test's
-  // pins-<host>.json cannot shadow the central agents.yaml under test.
   const MACHINE = 'state-testbox';
   function hermeticEnv(home: string): NodeJS.ProcessEnv {
     return {
@@ -100,9 +96,6 @@ describe('readMeta merges agents.yaml from both repos', () => {
     }).trim();
   }
 
-  // Uses Node.js instead of Bun because the rename-failure test needs
-  // syncBuiltinESMExports() to propagate a monkey-patched fs.renameSync
-  // across ESM module boundaries — a Node.js-only API not available in Bun.
   function runStateScriptWithNode(home: string, script: string): string {
     return execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', script], {
       cwd: process.cwd(),
@@ -148,12 +141,10 @@ describe('readMeta merges agents.yaml from both repos', () => {
   });
 
   it('merges agents from both system and user repos, user wins on conflict', () => {
-    // System repo has claude@1.0.0 and codex@2.0.0
     fs.writeFileSync(
       path.join(systemDir, 'agents.yaml'),
       'agents:\n  claude: "1.0.0"\n  codex: "2.0.0"\n'
     );
-    // User repo has claude@3.0.0 (overrides) and gemini@1.0.0 (new)
     fs.writeFileSync(
       path.join(userDir, 'agents.yaml'),
       'agents:\n  claude: "3.0.0"\n  gemini: "1.0.0"\n'
@@ -162,11 +153,8 @@ describe('readMeta merges agents.yaml from both repos', () => {
     const meta = runReadMeta(testDir);
     const agents = meta.agents as Record<string, string>;
 
-    // claude should be 3.0.0 (user wins)
     expect(agents.claude).toBe('3.0.0');
-    // codex should be 2.0.0 (from system, not in user)
     expect(agents.codex).toBe('2.0.0');
-    // gemini should be 1.0.0 (from user, not in system)
     expect(agents.gemini).toBe('1.0.0');
   });
 
@@ -195,17 +183,11 @@ describe('readMeta merges agents.yaml from both repos', () => {
   });
 
   it('preserves an unknown top-level key on write, but still deletes a cleared known key', () => {
-    // On disk: an unknown key (as if a newer CLI version wrote it) + a known
-    // central key.
     fs.writeFileSync(
       path.join(userDir, 'agents.yaml'),
       'futureUnknownKey: keep-me\nprojectRoot: ~/old\n',
     );
 
-    // Simulate a CLI whose Meta predates `futureUnknownKey`: its write path never
-    // surfaces that key, and it clears projectRoot. The old delete loop dropped
-    // BOTH (and synced the deletion fleet-wide); the fix must keep the unmodeled
-    // key and only delete the known one.
     runStateScript(testDir, `
       const { updateMeta } = await import(${JSON.stringify(modulePath)});
       updateMeta((meta) => {
@@ -215,9 +197,9 @@ describe('readMeta merges agents.yaml from both repos', () => {
     `);
 
     const out = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf8');
-    expect(out).toContain('futureUnknownKey: keep-me'); // unmodeled key survives
-    expect(out).not.toContain('projectRoot'); // cleared KNOWN central key removed
-    expect(out).toContain('source: set-by-write'); // the write that triggered it landed
+    expect(out).toContain('futureUnknownKey: keep-me');
+    expect(out).not.toContain('projectRoot');
+    expect(out).toContain('source: set-by-write');
   });
 
   it('does not drop share: when a partial writeMeta omits it (RUSH-2837)', () => {
@@ -243,10 +225,6 @@ describe('readMeta merges agents.yaml from both repos', () => {
   });
 
   it('does not lose concurrent updateMeta callback writes', async () => {
-    // Hold the meta lock through the callback longer than the old count-bounded
-    // retry budget (~750ms). The loser of the race must wait this out and still
-    // land its write; on the pre-fix lock it would exhaust its retries, throw,
-    // and silently drop a write — so this deterministically guards #306.
     const HOLD_MS = 1_000;
     const makeUpdate = (agent: string, version: string) => `
       const { updateMeta } = await import(${JSON.stringify(modulePath)});
@@ -344,9 +322,6 @@ describe('readMeta merges agents.yaml from both repos', () => {
       'utf-8',
     );
 
-    // Spawn a single process that reads readMeta three times back-to-back AND counts how
-    // many readFileSync calls hit agents.yaml. If the cache works, only the FIRST call
-    // should read the file; subsequent calls should be served from memory.
     const output = runStateScriptWithNode(testDir, `
       import fs from 'fs';
       import path from 'path';
@@ -371,8 +346,6 @@ describe('readMeta merges agents.yaml from both repos', () => {
     `);
     const counts = JSON.parse(output) as { readsAfterFirst: number; readsTotal: number };
 
-    // After the first read, the cache should be primed. The next two reads must add zero
-    // new yaml file reads against either source path.
     expect(counts.readsTotal).toBe(counts.readsAfterFirst);
     expect(counts.readsAfterFirst).toBeGreaterThan(0);
   });
@@ -400,9 +373,6 @@ describe('readMeta merges agents.yaml from both repos', () => {
 
   it('refreshes the cache when the device pin file is modified out-of-band', () => {
     const moduleUrl = pathToFileURL(modulePath).href;
-    // A central pin is transitional (still overlays until a write routes it).
-    // Out-of-band edits to the untracked pins JSON must invalidate the cache —
-    // that file is the authoritative machine-local pin source.
     fs.writeFileSync(
       path.join(userDir, 'agents.yaml'),
       'agents:\n  claude: "1.0.0"\n',
@@ -536,7 +506,6 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
     expect(r.commentSurvived).toBe(true);
     expect(r.inlineCommentSurvived).toBe(true);
     expect(r.hostsSurvived).toBe(true);
-    // The churn fix: a write that changes no central field leaves agents.yaml byte-identical.
     expect(r.byteIdentical).toBe(true);
   });
 
@@ -574,8 +543,6 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
   });
 
   it('invalidates the cache when the history version-resources file changes out-of-band', () => {
-    // Regression guard: the cache stamp must detect changes to the history file
-    // at full mtime resolution (a numeric-sum stamp rounded these away).
     const out = execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', `
       import fs from 'fs';
       import { readMeta, writeMeta, getVersionResourcesPath } from ${JSON.stringify(moduleUrl)};

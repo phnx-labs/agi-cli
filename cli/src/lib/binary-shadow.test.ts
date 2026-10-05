@@ -12,7 +12,6 @@ describe('detectAgentsBinaryShadows', () => {
   });
 
   function withSystemPath(tmpDir: string): string {
-    // Keep the platform resolver (`which` / `where`) available.
     return `${tmpDir}${path.delimiter}${savedPath ?? ''}`;
   }
 

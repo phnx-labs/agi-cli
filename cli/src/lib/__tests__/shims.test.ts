@@ -23,10 +23,6 @@ interface ShimFixtureCase {
   alreadyPresent?: boolean;
 }
 
-// The shim PATH-block rewrite (addShimsToPath) is POSIX shell-rc logic and
-// operates on LF-delimited lines. Git can check these text fixtures out with
-// CRLF on Windows, so fold to LF on read — otherwise the comparison fails on a
-// pure line-ending difference that never occurs in a real POSIX rc file.
 const toLF = (s: string): string => s.replace(/\r\n/g, '\n');
 
 function readShimFixture(name: string): { meta: ShimFixtureCase; before: string; after: string } {
@@ -109,12 +105,6 @@ describe('generateShimScript — configDirName derivation', () => {
   });
 
   it('points the antigravity alias at that version home, not a shared one', () => {
-    // The previous name claimed this checked a nested ".gemini/antigravity-cli"
-    // config path, but the only assertion was on "versions/antigravity/1.0.1"
-    // — the generated script contains no ".gemini" segment at all, so the
-    // regression it advertised was never guarded. Assert what the script
-    // actually has to get right: the binary resolves inside the requested
-    // version home, so per-version sync cannot land in a shared install.
     const script = generateVersionedAliasScript('antigravity', '1.0.1');
     expect(script).toContain('versions/antigravity/1.0.1/');
   });
@@ -134,10 +124,6 @@ describe('generateShimScript — config-dir env vars', () => {
     expect(script).not.toContain('export CLAUDE_CONFIG_DIR=');
   });
 
-  // RUSH-1866: the deep versioned CODEX_HOME overflows macOS's 104-byte
-  // SUN_LEN cap for codex's app-server control socket, breaking every codex
-  // spawn. The shim must guard on Darwin + overflow and relocate to a short
-  // home, while still honoring a caller-set CODEX_HOME.
   it('guards CODEX_HOME against the macOS SUN_LEN limit', () => {
     const script = generateShimScript('codex');
     expect(script).toContain('if [ -z "${CODEX_HOME:-}" ]; then');
@@ -152,10 +138,6 @@ describe('generateShimScript — config-dir env vars', () => {
     expect(script).toContain('"$VERSION_DIR/home/.kimi-code"');
   });
 
-  // Regression (re-exec loop): the dispatcher must resolve kimi through the
-  // generic node_modules/.bin branch, never the old ~/.kimi-code/bin path whose
-  // `command -v kimi` fallback resolves to this dispatcher itself (the shims dir
-  // sits ahead of ~/.local/bin on PATH) and re-execs forever.
   it('resolves kimi from node_modules/.bin in the dispatcher, without a command -v loop', () => {
     const script = generateShimScript('kimi');
     expect(script).toContain('"$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"');
@@ -178,10 +160,6 @@ describe('generateVersionedAliasScript', () => {
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
 
-  // Regression: node_modules/.bin is correct for npm-packaged agents, but Grok,
-  // Kimi, and Droid ship their binaries elsewhere. Hardcoding node_modules made
-  // every versioned alias for these three (the path `agents teams` takes once it
-  // pins a teammate) fail with "<agent>@<version> not installed".
   it('resolves npm-packaged agents from node_modules/.bin', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
     expect(script).toContain('node_modules/.bin/codex');
@@ -206,19 +184,12 @@ describe('generateVersionedAliasScript', () => {
 
   it('resolves grok from the versioned home first, global ~/.grok/downloads as fallback, and exports GROK_HOME', () => {
     const script = generateVersionedAliasScript('grok', '0.2.33');
-    // Versioned home is the primary location — where the binary lands when the
-    // installer runs with GROK_HOME set or grok self-updates under the shim.
     expect(script).toContain('GROK_DOWNLOADS="$AGENTS_REAL_HOME/.agents/.history/versions/grok/0.2.33/home/.grok/downloads"');
-    // Global dir stays as the fallback for pre-fix installs.
     expect(script).toContain('GROK_GLOBAL_DOWNLOADS="$AGENTS_REAL_HOME/.grok/downloads"');
     expect(script).not.toContain('node_modules/.bin/grok');
     expect(script).toContain('export GROK_HOME=');
   });
 
-  // Regression (re-exec loop): when ~/.grok/downloads is empty, the grok
-  // fallback runs `command -v grok`, which resolves to this alias's sibling
-  // dispatcher shim (shims dir ahead of ~/.local/bin on PATH). Without a guard
-  // it exec-loops forever. The guard must null out any shims-dir match.
   it('guards grok command -v fallback against the shims dir (alias)', () => {
     const script = generateVersionedAliasScript('grok', '0.2.33');
     expect(script).toContain('command -v grok');
@@ -234,21 +205,11 @@ describe('generateVersionedAliasScript', () => {
   it('resolves grok for the pinned version', () => {
     const script = generateVersionedAliasScript('grok', '0.1.218');
     expect(script).toContain('$AGENTS_REAL_HOME/.grok/downloads');
-    // RUSH-2459: no more raw "grep -i <version>" against ls's full path output
-    // (which always matched, since the versioned home's own path contains the
-    // version string) — resolution now runs through the shared, filename-scoped
-    // _resolve_grok_binary helper, called with the pinned version.
     expect(script).toContain('_resolve_grok_binary() {');
     expect(script).toContain('_resolve_grok_binary "$GROK_DOWNLOADS" "0.1.218"');
     expect(script).not.toContain('node_modules/.bin');
   });
 
-  // Regression (re-exec loop): kimi npm-installs @moonshot-ai/kimi-code, so its
-  // binary is at node_modules/.bin/kimi — NOT ~/.kimi-code/bin (that path only
-  // exists for a curl install, and even then installVersion symlinks it into
-  // node_modules/.bin). The old ~/.kimi-code/bin special-case fell back to
-  // `command -v kimi`, which resolves to the sibling dispatcher shim and
-  // re-execs forever. Resolve via node_modules; keep KIMI_CODE_HOME isolation.
   it('resolves kimi from node_modules/.bin, not ~/.kimi-code/bin', () => {
     const script = generateVersionedAliasScript('kimi', '0.12.1');
     expect(script).toContain('node_modules/.bin/kimi');
@@ -285,7 +246,6 @@ describe('removeLegacyUserShim', () => {
 
     expect(removeLegacyUserShim('claude', { homeDir: home })).toBe(true);
     expect(fs.existsSync(legacyShim)).toBe(false);
-    // Empty dir cleanup is best-effort — verify it was removed too.
     expect(fs.existsSync(legacyShimsDir)).toBe(false);
   });
 
@@ -336,8 +296,6 @@ describe('generateShimScript', () => {
   it('does not run foreground project resource sync on the launch hot path', () => {
     const script = generateShimScript('claude');
     expect(script).not.toContain('find_project_agents_dir');
-    // sync IS allowed on the hot path, but only with --launch (filesystem-only,
-    // sub-50ms, non-blocking). A foreground sync without --launch is forbidden.
     expect(script).not.toMatch(/\bsync --agent "\$AGENT"(?![^\n]*--launch)/);
     expect(script).not.toContain('refresh-rules --agent "$AGENT"');
   });
@@ -382,8 +340,6 @@ describe('generateShimScript', () => {
     expect(script).toContain('"$AGENTS_BIN" add "$AGENT@$VERSION" --yes');
     expect(script).not.toMatch(/^\s*agents (refresh-rules|use|add|sync)\b/m);
     expect(script).not.toContain('"$AGENTS_BIN" refresh-rules');
-    // sync IS called on the hot path, but only with --launch (filesystem-only,
-    // sub-50ms, non-blocking). A foreground sync without --launch is forbidden.
     expect(script).not.toMatch(/"\$AGENTS_BIN" sync\b(?![^\n]*--launch)/);
   });
 
@@ -396,11 +352,8 @@ describe('generateShimScript', () => {
 
   it('self-recovers a vanished dispatcher via `agents` on PATH before erroring', () => {
     const script = generateShimScript('claude');
-    // When the baked AGENTS_BIN is gone (removed/moved dev build), resolve the
-    // real `agents` on PATH and use it, rather than bricking the launch.
     expect(script).toContain('RECOVERED_BIN="$(command -v agents 2>/dev/null || true)"');
     expect(script).toContain('AGENTS_BIN="$RECOVERED_BIN"');
-    // The recovery must sit INSIDE the not-executable guard, before exit 127.
     const guard = script.indexOf('[ ! -x "$AGENTS_BIN" ]; then');
     const recover = script.indexOf('command -v agents');
     const bail = script.indexOf('exit 127');
@@ -451,12 +404,6 @@ describe('hasAliasShadowingShim', () => {
   });
 });
 
-// Regression: two agents-cli installs with different SHIM_SCHEMA_VERSION sharing
-// ~/.agents/.cache/shims/ used to ping-pong — each regenerated every shim whose
-// embedded marker !== its own constant, so they took turns rewriting all shims
-// on every launch. ensureShimCurrent is now upgrade-only: it never downgrades a
-// shim stamped by a newer install. (SHIMS_DIR is derived from HOME at module
-// load, so re-import under a temp HOME to keep the real shims dir untouched.)
 describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
   let home: string;
 
@@ -478,12 +425,6 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
     fs.writeFileSync(shimPath, `#!/bin/bash\n# ${marker}\nexec true\n`, { mode: 0o755 });
   }
 
-  // The file createShim actually writes on this platform: `<cmd>.cmd` on Windows,
-  // the bare script on POSIX. Fixtures must land here — since #543, shimExists /
-  // readShimSchemaVersion key off the on-disk filename (onDiskShimFile), while
-  // getShimPath returns the logical (extensionless) launch path that isn't a real
-  // file on Windows. Writing the fixture to getShimPath left Windows looking for a
-  // `.cmd` that never existed, so ensureShimCurrent always returned 'created'.
   function onDiskShimPath(mod: typeof import('../installations/shims.js'), agent: 'claude'): string {
     const logical = mod.getShimPath(agent);
     return path.join(path.dirname(logical), mod.onDiskShimFile(path.basename(logical), process.platform));
@@ -497,7 +438,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
     const before = fs.readFileSync(shimPath, 'utf8');
 
     expect(mod.ensureShimCurrent('claude')).toBe('current');
-    expect(fs.readFileSync(shimPath, 'utf8')).toBe(before); // left untouched
+    expect(fs.readFileSync(shimPath, 'utf8')).toBe(before);
   });
 
   it('regenerates a shim from an older install (upgrade)', async () => {
@@ -526,12 +467,6 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
   });
 });
 
-// Regression (#windows-alias-shadow): a bash alias written next to the
-// versioned `.cmd` hijacks Windows name resolution — the dotted version suffix
-// makes cmd.exe/PowerShell read `claude@2.1.201` as a complete filename with
-// extension `.201`, the exact match wins over PATHEXT probing, and the shell
-// ShellExecutes the bash script to the `.sh` editor association. `agents
-// sessions` resume then "succeeds" (rc=0) while the editor, not Claude, opens.
 describe('versioned alias — platform on-disk artifacts', () => {
   let home: string;
 
@@ -582,7 +517,6 @@ describe('versioned alias — platform on-disk artifacts', () => {
       expect(fs.existsSync(aliasPath)).toBe(false);
       expect(fs.existsSync(aliasPath + '.cmd')).toBe(true);
     } else {
-      // POSIX overwrites the script in place — the bash alias IS the artifact.
       expect(fs.readFileSync(aliasPath, 'utf8')).toContain(
         `agents-versioned-alias-version: ${mod.VERSIONED_ALIAS_SCHEMA_VERSION}`,
       );
@@ -601,7 +535,6 @@ describe('versioned alias — platform on-disk artifacts', () => {
     mod.createVersionedAlias('claude', '2.1.201');
     expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('current');
 
-    // An older agents-cli sharing the shims dir re-created the bash alias.
     fs.writeFileSync(aliasPath, '#!/bin/bash\nexec true\n', { mode: 0o755 });
 
     expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('updated');
@@ -613,7 +546,6 @@ describe('versioned alias — platform on-disk artifacts', () => {
     const mod = await import('../installations/shims.js');
     const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
     mod.createVersionedAlias('claude', '2.1.201');
-    // Legacy leftover from a pre-v12 Windows install alongside the .cmd.
     if (onWindows) fs.writeFileSync(aliasPath, '#!/bin/bash\nexec true\n', { mode: 0o755 });
 
     expect(mod.removeVersionedAlias('claude', '2.1.201')).toBe(true);
@@ -658,8 +590,6 @@ describe('readCodexConfiguredModel', () => {
   });
 
   it('ignores a model set only inside a [profile.*] table', () => {
-    // The CLI uses the top-level model as its default; a profile model must not
-    // masquerade as the default, or we would forward a model the run never uses.
     writeConfig('model_reasoning_effort = "high"\n\n[profiles.fast]\nmodel = "gpt-5.3-codex"\n');
     expect(readCodexConfiguredModel()).toBeUndefined();
   });

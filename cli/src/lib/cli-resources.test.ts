@@ -73,11 +73,6 @@ post_install: |
   });
 
   it('tolerates a double-quoted Windows-style path in a display-only field', () => {
-    // A double-quoted YAML string containing "C:\Users\..." trips the strict parser
-    // because \U is not a valid YAML escape sequence. parseCliManifest uses
-    // strict:false so the manifest loads and falls through to the field validators.
-    // description is display-only and not passed to any child process, so the
-    // recovered (possibly mangled) value is acceptable — the manifest must not throw.
     const raw = 'name: gh\ndescription: "Binary at C:\\Users\\foo"\ninstall:\n  - brew: gh\n';
     const parsed = parseCliManifest(raw, { name: 'gh', source: 'user', path: '/tmp/g.yaml' });
     expect(parsed.name).toBe('gh');
@@ -85,8 +80,6 @@ post_install: |
   });
 
   it('rejects a Windows-style path in check.cmd even after tolerant parse', () => {
-    // Even with strict:false the security validator runs on check.cmd.
-    // Backslash and colon are not in SAFE_CHECK_TOKEN, so the path is rejected.
     const raw =
       'name: gh\ncheck:\n  kind: version\n  cmd: "C:\\\\bin\\\\gh"\ninstall:\n  - brew: gh\n';
     expect(() =>
@@ -162,8 +155,6 @@ describe('resolveBinDir', () => {
   const key = `${process.platform}-${process.arch}`;
   const savedBinDirEnv = process.env.AGENTS_CLI_BIN_DIR;
   const savedHome = process.env.HOME;
-  // os.homedir() reads USERPROFILE on Windows and HOME elsewhere, so pinning
-  // only HOME leaves resolveBinDir() pointing at the runner's real profile.
   const savedUserProfile = process.env.USERPROFILE;
   let tmpHome: string;
 
@@ -199,9 +190,6 @@ describe('resolveBinDir', () => {
   });
 
   it('falls back off ~/.local/bin when it cannot be created (e.g. path is a file)', () => {
-    // Force `mkdirSync(~/.local/bin, { recursive: true })` to fail with ENOTDIR
-    // by making ~/.local a regular file instead of a directory. tmpHome already
-    // exists (mkdtempSync created it above).
     fs.writeFileSync(path.join(tmpHome, '.local'), 'not a directory');
 
     let usrLocalBinWritable = true;
@@ -214,9 +202,6 @@ describe('resolveBinDir', () => {
     if (usrLocalBinWritable) {
       expect(resolveBinDir()).toBe('/usr/local/bin');
     } else {
-      // Matches the reported bug: /usr/local/bin not user-writable (e.g. on
-      // Apple Silicon Macs). The failure must be an actionable error, not a
-      // raw EACCES surfaced later from curl/tar.
       expect(() => resolveBinDir()).toThrow(/AGENTS_CLI_BIN_DIR/);
       expect(() => resolveBinDir()).toThrow(/\.local\/bin/);
     }
@@ -241,16 +226,12 @@ describe('resolveBinDir', () => {
 });
 
 describe('selectInstallMethod', () => {
-  // selectInstallMethod calls hasCommand() which probes the real host.
-  // We can still validate the "no compatible method" path deterministically.
   it('returns null when only an unsupported-platform binary is declared', () => {
     const m = manifest([{ binary: { 'plan9-mips': { url: 'http://x' } } }]);
     expect(selectInstallMethod(m)).toBeNull();
   });
 
   it('returns the only npm method on a host with npm (this dev box has npm)', () => {
-    // We rely on the dev environment having npm; if it doesn't, this test is
-    // skipped at the assertion level rather than failing.
     const m = manifest([{ npm: 'foo' }]);
     const picked = selectInstallMethod(m);
     if (picked) {
@@ -261,7 +242,6 @@ describe('selectInstallMethod', () => {
 
 describe('host detection', () => {
   it('hasCommand finds node and rejects garbage on every platform', () => {
-    // node is guaranteed: it is running this test.
     expect(hasCommand('node')).toBe(true);
     expect(hasCommand('definitely-not-a-real-command-xyz')).toBe(false);
   });
@@ -273,7 +253,6 @@ describe('host detection', () => {
   });
 
   it('isCliInstalledAsync (RUSH-2136) matches the sync check on real commands', async () => {
-    // node is guaranteed (it runs this test): a version check exits 0 => installed.
     const present = manifest([{ npm: 'foo' }]);
     present.check = { kind: 'version', cmd: 'node', args: ['--version'] };
     expect(await isCliInstalledAsync(present)).toBe(true);
@@ -284,16 +263,12 @@ describe('host detection', () => {
     expect(await isCliInstalledAsync(missing)).toBe(false);
     expect(isCliInstalled(missing)).toBe(false);
 
-    // A present command that exits non-zero is NOT installed (a failed run, not a
-    // missing binary) — same verdict as the sync path.
     const nonZero = manifest([{ npm: 'foo' }]);
     nonZero.check = { kind: 'version', cmd: 'node', args: ['--definitely-not-a-flag'] };
     expect(await isCliInstalledAsync(nonZero)).toBe(false);
   });
 
   describe.runIf(process.platform === 'win32')('win32 .cmd shims', () => {
-    // npm installs and script installers put `.cmd`/`.bat` shims on PATH, which
-    // Node cannot spawn without a shell — the version check must still pass.
     let tmpDir: string | undefined;
     const savedPath = process.env.Path ?? process.env.PATH;
 

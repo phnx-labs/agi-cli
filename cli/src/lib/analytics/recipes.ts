@@ -2,7 +2,6 @@ import Database from '../sqlite.js';
 import { getSessionsDbPath } from '../state.js';
 import { topNamesByKind, kindMix } from './usage-db.js';
 
-/** Time window for mix recipes under `agents insights mix`. */
 export interface AnalyticsWindow {
   days: number;
   sinceIso: string;
@@ -67,7 +66,7 @@ export function recipeHarnessMix(win: AnalyticsWindow): RecipeSection {
   } catch {
     return { id, title, store: 'sessions', rows: [], empty: true };
   } finally {
-    try { db.close(); } catch { /* ignore */ }
+    try { db.close(); } catch {  }
   }
 }
 
@@ -92,7 +91,7 @@ function recipeModelMix(win: AnalyticsWindow): RecipeSection {
   } catch {
     return { id, title, store: 'sessions', rows: [], empty: true };
   } finally {
-    try { db.close(); } catch { /* ignore */ }
+    try { db.close(); } catch {  }
   }
 }
 
@@ -102,11 +101,6 @@ export function recipeToolsPerSession(win: AnalyticsWindow): RecipeSection {
   const title = 'Tools per session';
   if (!db) return { id, title, store: 'sessions', rows: [], empty: true };
   try {
-    // Counts come from tool_scan_ledger — one row per session the tool indexer
-    // has scanned, carrying that session's true call_count (0 included). The
-    // sessions.tool_call_count column is NOT the source: only the teams
-    // summarizer ever writes it (lib/teams/summarizer.ts), so reading it scored
-    // every non-teams session as 0 and pinned p50 at 0 fleet-wide.
     const tables = db.prepare(
       `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tool_scan_ledger'`,
     ).all() as Array<{ name: string }>;
@@ -148,7 +142,7 @@ export function recipeToolsPerSession(win: AnalyticsWindow): RecipeSection {
   } catch {
     return { id, title, store: 'sessions', rows: [], empty: true };
   } finally {
-    try { db.close(); } catch { /* ignore */ }
+    try { db.close(); } catch {  }
   }
 }
 
@@ -198,7 +192,7 @@ function recipeTokenRatio(win: AnalyticsWindow): RecipeSection {
   } catch {
     return { id, title, store: 'sessions', rows: [], empty: true };
   } finally {
-    try { db.close(); } catch { /* ignore */ }
+    try { db.close(); } catch {  }
   }
 }
 
@@ -229,7 +223,7 @@ function recipeSessionVolume(win: AnalyticsWindow): RecipeSection {
   } catch {
     return { id, title, store: 'sessions', rows: [], empty: true };
   } finally {
-    try { db.close(); } catch { /* ignore */ }
+    try { db.close(); } catch {  }
   }
 }
 
