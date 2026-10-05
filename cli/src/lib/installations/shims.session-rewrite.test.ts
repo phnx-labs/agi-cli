@@ -33,7 +33,6 @@ function makeTempHome(): string {
 }
 
 afterEach(() => {
-  // Clean up any DB rows we inserted (the DB is the user's real sessions DB).
   if (insertedSessionIds.length > 0) {
     try {
       const db = getDB();
@@ -42,7 +41,6 @@ afterEach(() => {
         db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
       }
     } catch {
-      /* ignore */
     }
   }
 
@@ -65,9 +63,6 @@ describe('switchConfigSymlink — rewrites session file_paths after backup renam
     versionHome = path.join(TEST_VERSIONS_DIR, 'claude', '2.0.65', 'home');
     fs.mkdirSync(versionHome, { recursive: true });
 
-    // Seed a real-directory ~/.claude with a session JSONL the indexer would
-    // discover. This is the exact first-install state that triggers #136 —
-    // the dir is a real dir, not yet a symlink.
     const projectsDir = path.join(claudeConfigDir, 'projects', '-Users-test-repo');
     fs.mkdirSync(projectsDir, { recursive: true });
     sessionId = `9c1f${Math.random().toString(16).slice(2, 10)}-test-${Date.now()}`;
@@ -77,8 +72,6 @@ describe('switchConfigSymlink — rewrites session file_paths after backup renam
       JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }) + '\n',
     );
 
-    // Insert a matching DB row pointing at the OLD path — this is the row
-    // that goes phantom after the rename if updateSessionFilePaths is skipped.
     const db = getDB();
     db.prepare(`
       INSERT OR REPLACE INTO sessions
@@ -99,11 +92,9 @@ describe('switchConfigSymlink — rewrites session file_paths after backup renam
     expect(result.success).toBe(true);
     expect(result.backupPath).toBeDefined();
 
-    // ~/.claude is now a symlink pointing at the version home.
     const stat = fs.lstatSync(claudeConfigDir);
     expect(stat.isSymbolicLink()).toBe(true);
 
-    // The JSONL has moved to backupPath/projects/<encoded>/<id>.jsonl
     const expectedNewPath = path.join(
       result.backupPath!,
       'projects',
@@ -112,7 +103,6 @@ describe('switchConfigSymlink — rewrites session file_paths after backup renam
     );
     expect(fs.existsSync(expectedNewPath)).toBe(true);
 
-    // DB row file_path must have been rewritten — not stale, not deleted.
     const db = getDB();
     const row = db
       .prepare(`SELECT file_path FROM sessions WHERE id = ?`)
@@ -121,9 +111,6 @@ describe('switchConfigSymlink — rewrites session file_paths after backup renam
     expect(row!.file_path).toBe(expectedNewPath);
     expect(fs.existsSync(row!.file_path)).toBe(true);
 
-    // querySessions must surface the row (existsSync filter keeps it).
-    // We can't filter the entire DB to just our row, so look it up explicitly
-    // among the returned set.
     const sessions = querySessions({ limit: 5000 });
     const hit = sessions.find(s => s.id === sessionId);
     expect(hit).toBeDefined();
@@ -131,12 +118,9 @@ describe('switchConfigSymlink — rewrites session file_paths after backup renam
   });
 
   it('querySessions filters out rows whose JSONL has vanished (defensive)', () => {
-    // Point the seed row at a path we then delete — simulates any future
-    // migration path that forgets to call updateSessionFilePaths.
     const db = getDB();
     const ghostPath = path.join(home, 'ghost', `${sessionId}.jsonl`);
     db.prepare(`UPDATE sessions SET file_path = ? WHERE id = ?`).run(ghostPath, sessionId);
-    // Ensure the file does not exist.
     expect(fs.existsSync(ghostPath)).toBe(false);
 
     const sessions = querySessions({ limit: 5000 });
