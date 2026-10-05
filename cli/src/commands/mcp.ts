@@ -1,11 +1,3 @@
-/**
- * MCP (Model Context Protocol) server management commands.
- *
- * Implements `agents mcp` -- list, add, remove, view, and register MCP
- * servers that give agents runtime access to databases, APIs, and external
- * services. Servers are declared in ~/.agents/mcp/ YAML files or the
- * agents.yaml manifest, then registered into each agent version's config.
- */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -68,20 +60,6 @@ import {
   type SyncTarget,
 } from './resource-view.js';
 
-/**
- * Parse a comma-separated --agents string into validated agent IDs and
- * optional version targets in the manifest shape.
- *
- * Supports the same selector syntax as resolveAgentVersionTargets:
- *   - bare `agent`        → manifest agents:[agent] (no version pin)
- *   - `agent@default`     → manifest agents:[agent] (no version pin)
- *   - `agent@x.y.z`       → manifest agentVersions[agent] = ['x.y.z']
- *   - `agent@all`         → manifest agentVersions[agent] = every installed version
- *   - literal `all`       → expand to all MCP-capable agents (each as `@all`)
- *
- * Throws VersionNotInstalledError for unknown specific versions so callers
- * can prompt-and-install before retrying.
- */
 function parseMcpAgentTargets(value: string): {
   agents: AgentId[];
   agentVersions?: Partial<Record<AgentId, string[]>>;
@@ -93,8 +71,6 @@ function parseMcpAgentTargets(value: string): {
     .map((item) => item.trim())
     .filter(Boolean);
 
-  // Expand literal `all` / `all@all` into per-agent @all. Skip agents with no
-  // installed versions so `all` is lenient — mirrors resolveAgentVersionTargets.
   const targets: string[] = [];
   for (const t of rawTargets) {
     if (t === 'all' || t === 'all@all') {
@@ -186,7 +162,6 @@ function formatTargetLabel(agentId: AgentId, version?: string): string {
   return version ? `${agentLabel(agentId)}@${version}` : agentLabel(agentId);
 }
 
-/** Register the `agents mcp` command tree (list, add, remove, view, register). */
 export function registerMcpCommands(program: Command): void {
   const mcpCmd = program
     .command('mcp')
@@ -327,19 +302,12 @@ Examples:
   agents mcp add gh:phnx-labs/.agents-system --names notion,figma --agents claude
 `)
     .action(async (name: string, commandOrUrl: string[], options) => {
-      // Repo-source form: `agents mcp add gh:user/repo [--names a,b] [--agents …]`
-      // Mirrors `agents skills add gh:…`. Discovers <repoPath>/mcp/*.yaml,
-      // copies to ~/.agents/mcp/, and syncs to selected agent versions.
       const isRepoSource = /^(gh:|git:|ssh:|https?:\/\/)/.test(name);
       if (isRepoSource && commandOrUrl.length === 0) {
         await installMcpsFromRepoSource(name, options);
         return;
       }
 
-      // Registry resolution: if the user just typed `agents mcp add <name>`,
-      // try looking up `<name>` in any configured MCP registry (by default the
-      // official MCP Registry at registry.modelcontextprotocol.io) and derive
-      // the install spec automatically.
       if (commandOrUrl.length === 0) {
         const { getMcpServerInfo, mcpEntryToInstallSpec } = await import('../lib/registry.js');
         const spinner = ora(`Looking up '${name}' in MCP registries…`).start();
@@ -379,8 +347,6 @@ Examples:
 
       manifest.mcp = manifest.mcp || {};
 
-      // Pre-flight: prompt-and-install any requested agent@version that isn't
-      // installed yet, before parseMcpAgentTargets validates the selector.
       const okInstall = await ensureAgentVersionsInstalled(options.agents, capableAgents('mcp'), { yes: options.yes });
       if (!okInstall) {
         console.log(chalk.gray('Cancelled.'));
@@ -446,7 +412,6 @@ Examples:
       const cwd = process.cwd();
       const cliStates = await getAllCliStates();
 
-      // Build map of MCP -> targets for all installed agents
       type McpTargetInfo = { name: string; targets: Array<{ agentId: AgentId; version: string; home: string }> };
       const mcpTargetMap = new Map<string, McpTargetInfo>();
 
@@ -472,7 +437,6 @@ Examples:
       if (name) {
         mcpsToRemove = [name];
       } else {
-        // Interactive picker for MCP selection
         if (mcpTargetMap.size === 0) {
           console.log(chalk.yellow('No MCP servers configured.'));
           return;
@@ -512,7 +476,6 @@ Examples:
         }
       }
 
-      // Execute removals with target selection
       let removed = 0;
       for (const mcpName of mcpsToRemove) {
         const mcpInfo = mcpTargetMap.get(mcpName);
@@ -521,7 +484,6 @@ Examples:
           continue;
         }
 
-        // If --agents was specified, filter targets
         let availableTargets = mcpInfo.targets;
         if (options?.agents) {
           const requestedTargets = resolveInstalledAgentTargets(options.agents, capableAgents('mcp'));
@@ -544,7 +506,6 @@ Examples:
           continue;
         }
 
-        // Show target picker if multiple targets and no --agents flag
         const removalTargets: RemovalTarget[] = availableTargets.map((t) => ({
           agent: t.agentId,
           version: t.version,
@@ -560,7 +521,6 @@ Examples:
           continue;
         }
 
-        // Build targets structure for unregister
         const versionSelections = new Map<AgentId, string[]>();
         for (const t of selectedTargets) {
           const versions = versionSelections.get(t.agent as AgentId) || [];
@@ -605,7 +565,6 @@ Examples:
       const cwd = process.cwd();
       const cliStates = await getAllCliStates();
 
-      // Gather all unique MCPs across agents
       const mcpMap = new Map<string, { name: string; agents: string[]; command?: string; scope: string }>();
       for (const agentId of capableAgents('mcp')) {
         if (!cliStates[agentId]?.installed) continue;
@@ -630,7 +589,6 @@ Examples:
         return;
       }
 
-      // If no name provided, show interactive select
       if (!name) {
         if (!isInteractiveTerminal()) {
           requireInteractiveSelection('Selecting an MCP server to view', [
@@ -727,9 +685,6 @@ async function installMcpsFromRepoSource(
   }
   installSpinner.succeed(`Installed ${installed} MCP config(s) to ~/.agents/mcp/`);
 
-  // Agent/version selection — same default as the non-repo form: every
-  // MCP-capable agent. Routes through resolveAgentTargetsAutoInstalling so
-  // a typo'd `claude@2.1.999` prompts to install (and --yes auto-installs).
   const agentsValue = options.agents ?? capableAgents('mcp').join(',');
   let targets;
   try {
@@ -767,7 +722,6 @@ interface McpTargetPair {
   home: string;
 }
 
-/** Enumerate (agent, version) pairs that support MCP and have a version home. */
 function iterMcpCapableVersions(filter?: { agent?: AgentId; version?: string }): McpTargetPair[] {
   const out: McpTargetPair[] = [];
   const agents = filter?.agent ? [filter.agent] : capableAgents('mcp');
@@ -784,16 +738,6 @@ function iterMcpCapableVersions(filter?: { agent?: AgentId; version?: string }):
 
 type McpSource = 'central' | 'manifest' | 'unmanaged';
 
-/**
- * Build the row data for `agents mcp list`. Rows come from three sources,
- * in priority order:
- *   1. central  — ~/.agents/mcp/*.yaml (primary source of truth)
- *   2. manifest — agents.yaml#mcp (legacy/alternate declaration)
- *   3. unmanaged — found only in an agent's own config file
- *
- * Sync targets reflect the physical state: whether the server is actually
- * registered in each (agent, version) config.
- */
 function buildMcpRows(opts: {
   filterAgent?: AgentId;
   filterVersion?: string;
@@ -809,7 +753,6 @@ function buildMcpRows(opts: {
     version: opts.filterVersion,
   });
 
-  // Read each target's config once.
   const installedByTarget = new Map<string, Record<string, { command?: string; url?: string }>>();
   for (const { agent, version, home } of targetPairs) {
     const configPath = getMcpConfigPathForHome(agent, home);
@@ -824,7 +767,6 @@ function buildMcpRows(opts: {
     installedByTarget.set(`${agent}@${version}`, normalized);
   }
 
-  // Union: central + manifest + anything found in a target config.
   const allNames = new Set<string>();
   for (const name of centralServers.keys()) allNames.add(name);
   for (const name of Object.keys(manifestEntries)) allNames.add(name);
@@ -859,8 +801,6 @@ function buildMcpRows(opts: {
       });
     }
 
-    // Prefer the declared command/url from central or manifest over whatever
-    // happened to land in some version's config.
     const declaredCommand = centralConfig
       ? formatCentralCommand(centralConfig)
       : manifestConfig?.command || manifestConfig?.url;
@@ -930,8 +870,6 @@ function formatMcpDetail(
     lines.push(`  ${chalk.gray('command:')} ${chalk.white(command)}`);
   }
 
-  // A project-scoped server is an arbitrary command from a (possibly cloned)
-  // repo. Show exactly what would run and how to opt in (RUSH-1776).
   if (isUntrustedProject) {
     lines.push('');
     lines.push('  ' + chalk.yellow('This project is untrusted — its MCP servers are skipped on sync and workflow runs.'));

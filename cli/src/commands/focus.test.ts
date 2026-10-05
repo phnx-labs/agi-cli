@@ -37,9 +37,6 @@ describe('focusTargetForResolved — an id resolves fleet-wide, no --device need
     machine: 'yosemite-s0', timestamp: '2026-08-10T00:00:00Z', filePath: '/s/a.jsonl',
   };
   it('focuses the fleet-resolved session when it is outside the display pool', () => {
-    // The candidate pool (project/window/device-filtered) did not contain the
-    // peer-owned session, but the fleet resolver found it — focus it anyway,
-    // rather than the old "does not match the selected focus filters" rejection.
     expect(focusTargetForResolved(undefined, resolved)).toBe(resolved);
   });
   it('prefers the pool row when present (it carries already-gathered live status)', () => {
@@ -78,7 +75,6 @@ describe('inheritFocusOptions — parent sessions flags reach focus', () => {
   });
 });
 
-/** Portable recovery command a focus tab can execute locally or over SSH. */
 const localResume = (sess: ActiveSession): string[] => [
   'agents', 'run', 'auto', '--resume', sess.sessionId ?? '', '--interactive',
 ];
@@ -120,11 +116,6 @@ describe('selectFallback — --attach-only (old `go`) vs default resume', () => 
 });
 
 describe('focusResolvedSession --attach-only Path D (PHNX-3356)', () => {
-  // `agents focus <id> --attach-only` against a live IDE row that has not
-  // registered a sessionId yet: isAttachableLiveSession is true (pid liveness
-  // only), jumpTo takes Path D (no tmux/Ghostty rail), refuseFallback prints
-  // the recovery hint. The indexed id the user passed must appear in that hint
-  // — not the literal `<id>` placeholder.
   const id = 'ffffffff-1111-2222-3333-444444444444';
   const meta: SessionMeta = {
     id, shortId: 'ffffffff', agent: 'codex', version: '0.1.0', mode: 'edit',
@@ -188,8 +179,6 @@ describe('isAttachableLiveSession', () => {
     expect(isAttachableLiveSession(s({ machine: 'zion', pid: 111, pidAlive: true, status: 'running' }))).toBe(true);
   });
 
-  // RUSH-2336: a pane can only be attached once it's positively located — a
-  // machine, a positive pid, and verified liveness, not merely "not dead".
   it('rejects a pane whose liveness was never positively verified', () => {
     expect(isAttachableLiveSession(s({ machine: 'zion', pid: 111, status: 'running' }))).toBe(false);
     expect(isAttachableLiveSession(s({ pid: 111, pidAlive: true, status: 'running' }))).toBe(false);
@@ -293,7 +282,6 @@ describe('planFocusSurface — attach a live pane, or resume a copy (never a sil
 });
 
 describe('openFocusTabs — N selected sessions → N tab requests through the engine', () => {
-  /** Record every openSurfaces call so the engine boundary is asserted, not mocked away. */
   function recorder() {
     const calls: Array<{ items: SurfaceItem[]; opts: { backend: string; host?: string; packing?: string } }> = [];
     const open = vi.fn(async (items: SurfaceItem[], opts: never): Promise<LaunchResult[]> => {
@@ -317,7 +305,6 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
     });
     expect(open).toHaveBeenCalledTimes(1);
     expect(calls[0].items).toHaveLength(2);
-    // Tabs open locally (no host) — the remote join, when any, rides inside the command.
     expect(calls[0].opts.packing).toBe('tabs');
     expect(calls[0].opts.host).toBeUndefined();
     for (const command of calls[0].items.map((i) => i.command)) {
@@ -383,10 +370,6 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
 });
 
 describe('shouldAttachLocalTmuxAliasBeforeFleet — local pane, no SSH', () => {
-  // Measured: `sessions resume ag-claude-0145ab8f --attach-only` on yosemite-s0
-  // printed two unreachable-device lists and waited ~2 min on offline peers
-  // before attaching a pane that `agents tmux ls` already showed on this box.
-  // The alias is the pane name; a fleet sweep cannot add information.
   it('is true for a tmux alias with no --device scope', () => {
     expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-claude-0145ab8f', [])).toBe(true);
     expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-kimi-632c1fbc', [])).toBe(true);
@@ -403,12 +386,6 @@ describe('shouldAttachLocalTmuxAliasBeforeFleet — local pane, no SSH', () => {
 });
 
 describe('resolveTmuxAliasState — a tmux alias is classified against the REAL server', () => {
-  // RUSH-2498: `sessions focus ag-kimi-632c1fbc` used to fall through to the
-  // metadata resolver, which treats an unmatched alias as a keyword query and
-  // returned 13 unrelated text hits while that pane was alive and attachable.
-  // The alias's hex is the LAUNCH id, not the harness session id, so for a
-  // harness that writes no state/sessions/<pid>.json there is no mapping back
-  // to a SessionMeta at all — the pane name is the only handle that works.
   it('rejects selectors that are not alias-shaped', () => {
     expect(looksLikeTmuxAlias('87e2bc83')).toBe(false);
     expect(looksLikeTmuxAlias('87e2bc83-d1e8-499b-9f54-d8cf98abe51b')).toBe(false);
@@ -423,7 +400,6 @@ describe('resolveTmuxAliasState — a tmux alias is classified against the REAL 
 
   it('reports absent for an alias with no such session on the server', async () => {
     const sock = path.join(os.tmpdir(), `agents-alias-${process.pid}-${Date.now()}.sock`);
-    // No server was ever started on this socket.
     expect(await resolveTmuxAliasState('ag-claude-deadbeef', sock)).toBe('no-server');
   });
 
@@ -432,19 +408,16 @@ describe('resolveTmuxAliasState — a tmux alias is classified against the REAL 
     const live = 'ag-claude-aa11bb22';
     const dead = 'ag-claude-cc33dd44';
     try {
-      // A long-lived pane, and one whose command exits immediately. remain-on-exit
-      // keeps the corpse, which is exactly the state the fleet accumulates.
       execFileSync('tmux', ['-S', sock, 'set-option', '-g', 'remain-on-exit', 'on', ';',
         'new-session', '-d', '-s', live, 'sleep 300']);
       execFileSync('tmux', ['-S', sock, 'new-session', '-d', '-s', dead, 'true']);
-      // Let the short-lived one exit and be marked dead.
       await new Promise(r => setTimeout(r, 700));
 
       expect(await resolveTmuxAliasState(live, sock)).toBe('live');
       expect(await resolveTmuxAliasState(dead, sock)).toBe('dead');
       expect(await resolveTmuxAliasState('ag-claude-99999999', sock)).toBe('absent');
     } finally {
-      try { execFileSync('tmux', ['-S', sock, 'kill-server']); } catch { /* already gone */ }
+      try { execFileSync('tmux', ['-S', sock, 'kill-server']); } catch {  }
     }
   });
 });
@@ -456,9 +429,6 @@ describe('dedupeSessionsByLogicalId — synced copies are ONE session (SES-IF-2a
   };
   const id = '87e2bc83-d1e8-499b-9f54-d8cf98abe51b';
 
-  // RUSH-2498: `focus <full-uuid>` answered "is ambiguous (2 sessions). Use more
-  // of the id." — with no longer id to give. The duplicate was the same session
-  // indexed on a second machine, one copy of which had no transcript left.
   it('collapses the same full id seen on two machines', () => {
     const rows = [
       { ...base, id, machine: 'yosemite-s0', filePath: '/s/a.jsonl' },

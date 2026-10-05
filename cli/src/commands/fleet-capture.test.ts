@@ -5,9 +5,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-// CLI-level tests for `agents fleet capture --from-pins` semantics: pins are
-// machine-local (`.history/devices/pins-<host>.json`), so only THIS machine's
-// pins can be recorded — targeting a peer must fail loud, not record nothing.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
 
@@ -100,7 +97,6 @@ describe('fleet capture --from-pins (machine-local pins)', () => {
     const r = run(['devices', 'capture', '--from-pins', '--device', 'mac-mini'], env());
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('peer pins are machine-local');
-    // Fail-loud path must not create a capture manifest.
     const centralPath = path.join(testHome, '.agents', 'agents.yaml');
     if (fs.existsSync(centralPath)) {
       expect(fs.readFileSync(centralPath, 'utf-8')).not.toContain('claude@latest');

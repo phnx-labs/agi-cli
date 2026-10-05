@@ -3,7 +3,6 @@ import { buildModelChoices, chooseModelFromCatalog, pickModel } from './harness-
 import type { ModelInfo } from '../lib/models.js';
 import type { WizardIO, WizardChoice } from './harness-wizard.js';
 
-/** Minimal scripted {@link WizardIO} — answers a select/input by a matcher. */
 function fakeIO(respond: (kind: string, message: string, choices?: WizardChoice<unknown>[]) => unknown): WizardIO {
   return {
     async select<T>(o: { message: string; choices: WizardChoice<T>[] }): Promise<T> {
@@ -18,13 +17,6 @@ function fakeIO(respond: (kind: string, message: string, choices?: WizardChoice<
   };
 }
 
-/**
- * The model catalog pick (RUSH-2220) turns a host's `getModelCatalog` list into
- * `select` choices. `buildModelChoices` is the pure labelling core — the catalog
- * probe itself shells out and is exercised end-to-end, but the choice shape (the
- * always-present escape hatch, the edit-mode keep row, tier/alias hints) is
- * asserted here with no probe.
- */
 const model = (over: Partial<ModelInfo>): ModelInfo => ({ id: 'x', ...over });
 
 describe('buildModelChoices — catalog list → select choices', () => {
@@ -33,8 +25,6 @@ describe('buildModelChoices — catalog list → select choices', () => {
     const values = choices.map((c) => c.value);
     expect(values).toContain('a');
     expect(values).toContain('b');
-    // The last row is always the free-text escape, so a model the catalog omits
-    // is still reachable.
     expect(choices[choices.length - 1].name).toMatch(/custom model id/i);
   });
 

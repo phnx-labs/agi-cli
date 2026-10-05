@@ -68,7 +68,7 @@ const children: ChildProcess[] = [];
 afterEach(() => {
   for (const child of children.splice(0)) {
     if (child.pid && child.exitCode === null) {
-      try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+      try { process.kill(child.pid, 'SIGKILL'); } catch {  }
     }
   }
 });
@@ -140,8 +140,6 @@ describe('loadSessionMetasForFeedEnrichment (RUSH-2006)', () => {
   });
 
   it('returns empty metas and skippedLock on a lock error instead of throwing', async () => {
-    // Real lock-shaped failure from the loader (no module mock). Before the
-    // guard, discoverSessions throwing here crashed `agents feed --local`.
     const locked = await loadSessionMetasForFeedEnrichment(async () => {
       throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
     });
@@ -281,10 +279,6 @@ describe('controlFeedSession', () => {
 
     expect(result).toBe(`killed pid ${child.pid}`);
     await new Promise((resolve) => child.once('exit', resolve));
-    // The process is dead either way; how the death is reported is
-    // platform-specific. Windows has no POSIX signals — a terminated process
-    // surfaces as an exit code with signalCode null, so only assert the
-    // SIGTERM shape where signals actually exist.
     if (process.platform === 'win32') {
       expect(child.exitCode).not.toBeNull();
     } else {

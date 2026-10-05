@@ -1,17 +1,3 @@
-/**
- * `agents events` — read the unified event stream (the one ops/timeline product).
- *
- * One stream over BOTH operational events (`~/.agents/.history/events/YYYY-MM-DD/`:
- * every `agents <module> <cmd>` invocation plus typed events like secrets access,
- * browser/computer, daemon lifecycle, version installs) AND agent-semantic events
- * (per-session activity: plans, PRs, worktrees, sub-agents, artifacts). Run-dispatch
- * outcomes land here as `run.dispatched` (readable via `--include runs`).
- *
- * `agents events audit` and `agents logs` are thin aliases of this command.
- *
- * Filter with sessions-style `--include` / `--exclude` families (ops, activity,
- * commands, runs, security) plus field filters (`--module`, `--event`, …).
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -23,17 +9,8 @@ import { ingestBatch } from '../lib/events-ingest.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerAuditCommands } from './audit.js';
 
-/**
- * Resolve `--limit` into a record cap. `0` means "no cap" — without it there is
- * no way to read the whole stream, and any aggregation (group-by failure, count
- * per module) silently ranks the newest 50 records instead of the real set.
- * A non-numeric or negative value is a usage error, not a quiet fallback.
- */
 export function resolveEventsLimit(raw: string | undefined): number | undefined {
   const token = raw ?? '50';
-  // Number('') and Number('   ') are both 0, which would read as "no cap" — an
-  // empty --limit (an unset "$LIMIT" in a script) must be rejected, not silently
-  // turned into the unbounded read.
   const value = token.trim() === '' ? NaN : Number(token);
   if (!Number.isInteger(value) || value < 0) {
     throw new RangeError(`Invalid --limit ${raw} — pass a whole number, or 0 for no cap.`);
@@ -41,11 +18,6 @@ export function resolveEventsLimit(raw: string | undefined): number | undefined 
   return value === 0 ? undefined : value;
 }
 
-/**
- * Cap `fetched` (read with `limit + 1`) to `limit`, reporting whether records
- * were dropped. The caller announces the cap so a truncated read is never
- * mistaken for the complete set.
- */
 export function capRecords<T>(fetched: T[], limit: number | undefined): { records: T[]; truncated: boolean } {
   if (limit === undefined || fetched.length <= limit) return { records: fetched, truncated: false };
   return { records: fetched.slice(0, limit), truncated: true };
@@ -68,7 +40,6 @@ export interface EventsOptions {
   exclude?: string;
 }
 
-/** Parse `--since`: relative offsets (30s/5m/2h/7d/4w) or an ISO/absolute date. */
 function parseSince(s: string): Date {
   const m = s.match(/^(\d+)([smhdw])$/);
   if (m) {
@@ -83,7 +54,6 @@ function parseSince(s: string): Date {
   return new Date(ms);
 }
 
-/** How the run reached this host — 'local' or 'ssh 203.0.113.7'. */
 function originLabel(r: EventRecord): string {
   if (r.transport === 'ssh') {
     return chalk.yellow(`ssh${r.sshClientIp ? ' ' + r.sshClientIp : ''}`);
@@ -91,18 +61,15 @@ function originLabel(r: EventRecord): string {
   return chalk.gray('local');
 }
 
-/** The most useful one-line detail for a record, by event family. */
 function detailFor(r: EventRecord): string {
   if (r.command) return r.command;
   const bits: string[] = [];
-  // Agent-semantic (activity) events carry detail/url instead of a command.
   if (typeof r.detail === 'string') bits.push(r.detail);
   if (typeof r.url === 'string') bits.push(chalk.gray(r.url));
   if (typeof r.team === 'string') bits.push(`team=${r.team}`);
   if (typeof r.bundle === 'string') bits.push(`bundle=${r.bundle}`);
   if (typeof r.skill === 'string') bits.push(`skill=${r.skill}`);
   if (typeof r.version === 'string') bits.push(`v=${r.version}`);
-  // run.dispatched (and similar) — mode / outcome / exit / repo are the audit line.
   if (typeof r.mode === 'string') bits.push(`mode=${r.mode}`);
   if (typeof r.outcome === 'string') bits.push(`outcome=${r.outcome}`);
   if (typeof r.exitCode === 'number') bits.push(`exit=${r.exitCode}`);
@@ -120,7 +87,6 @@ function renderRow(r: EventRecord): string {
   return `${time}  ${originLabel(r).padEnd(24)} ${user.padEnd(22)} ${ev.padEnd(26)}${agent}  ${detailFor(r)}`;
 }
 
-/** Read all of stdin. Returns '' when nothing is piped. */
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) return '';
   const chunks: Buffer[] = [];
@@ -139,11 +105,6 @@ function registerEmitSubcommand(events: Command): void {
       opts: { source: string; dryRun?: boolean; json?: boolean },
       cmd?: { parent?: { opts: () => { json?: boolean } } },
     ) => {
-      // The parent `events` command also declares `--json` (for its read view).
-      // Commander binds a flag declared on BOTH to the parent, so a bare
-      // `events emit … --json` lands on parent.opts().json and the child sees
-      // undefined — the human string would print where a caller expects JSON.
-      // Read both, same as `feed post`.
       const wantJson = Boolean(opts?.json ?? cmd?.parent?.opts?.().json);
       const input = await readStdin();
       if (input.trim() === '') {
@@ -170,8 +131,6 @@ function registerEmitSubcommand(events: Command): void {
         console.error(`rejected ${result.rejected.length} line(s):`);
         for (const r of result.rejected) console.error(`  line ${r.line}: ${r.reason}`);
       }
-      // Valid siblings are already written; a non-zero exit reports that the
-      // batch was not fully accepted without pretending nothing landed.
       if (result.rejected.length > 0) process.exitCode = 1;
     });
 
@@ -206,7 +165,6 @@ function registerEmitSubcommand(events: Command): void {
   });
 }
 
-/** Add the one canonical event-reader option surface to a command or alias. */
 export function addEventsReadOptions(command: Command): Command {
   command
     .option('--include <families>', `Only these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
@@ -226,7 +184,6 @@ export function addEventsReadOptions(command: Command): Command {
   return command;
 }
 
-/** Canonical reader used by `agents events`, `agents events audit`, and `agents logs`. */
 export async function runEventsCommand(options: EventsOptions, forceAudit: boolean = false): Promise<void> {
   if (options.follow) {
     await followLog();
@@ -251,8 +208,6 @@ export async function runEventsCommand(options: EventsOptions, forceAudit: boole
     return;
   }
 
-  // forceAudit (`events audit` / `logs`) = ops-only when no family flags. Families
-  // own the source selection via applyFamilies — never override includeActivity after.
   const includeActivity = (includeFamilies !== undefined || excludeFamilies !== undefined)
     ? true
     : !forceAudit;
@@ -304,7 +259,6 @@ function levelColor(level: string): string {
   return chalk.blue(level);
 }
 
-/** Shared by `events stats` and the `logs stats` alias. */
 export async function runEventsStats(opts: { since?: string; json?: boolean }): Promise<void> {
   let days = 7;
   if (opts.since) {
@@ -370,8 +324,6 @@ Examples:
     .action((_options: EventsOptions, command: Command) =>
       runEventsCommand(command.optsWithGlobals() as EventsOptions));
 
-  // `events` both reads (its own action, above) and writes (this subcommand) —
-  // the same shape as `feed` / `feed post`.
   registerEmitSubcommand(events);
 
   events
@@ -391,7 +343,6 @@ Examples:
   registerAuditCommands(events);
 }
 
-/** Shared by `events rotate` and the `logs rotate` alias. */
 export function runEventsRotate(opts: { days?: string; maxMb?: string }): void {
   const days = Math.max(1, parseInt(opts.days ?? '7', 10) || 7);
   const maxMb = Math.max(1, parseInt(opts.maxMb ?? '50', 10) || 50);
@@ -408,19 +359,16 @@ export function runEventsRotate(opts: { days?: string; maxMb?: string }): void {
   }
 }
 
-/** commander repeatable-option collector. */
 function collect(value: string, previous: string[]): string[] {
   return previous.concat([value]);
 }
 
-/** Tail today's event file, printing new lines as they land. */
 async function followLog(): Promise<void> {
   let file = getLogsPath();
   let offset = 0;
   try {
     offset = fs.statSync(file).size;
   } catch {
-    // File may not exist yet — start at 0 and pick it up on first write.
   }
   console.log(chalk.gray(`Tailing ${file} — Ctrl-C to stop`));
   const drain = () => {
@@ -437,7 +385,7 @@ async function followLog(): Promise<void> {
       return;
     }
     if (size <= offset) {
-      if (size < offset) offset = 0; // rotated/truncated
+      if (size < offset) offset = 0;
       return;
     }
     const fd = fs.openSync(file, 'r');
@@ -449,14 +397,12 @@ async function followLog(): Promise<void> {
         try {
           console.log(renderRow(JSON.parse(line) as EventRecord));
         } catch {
-          // Skip malformed lines.
         }
       }
     } finally {
       fs.closeSync(fd);
     }
   };
-  // Poll — simpler and more portable than fs.watch across platforms/editors.
   await new Promise<void>(() => {
     setInterval(drain, 500);
   });

@@ -1,12 +1,3 @@
-/**
- * Real-path contract test: fork builds its recap from the REAL output of
- * `agents sessions preview <id> --json`, so a drift in that JSON's shape (e.g.
- * dropping `topic`, the field the recap's label falls back to) must fail a test —
- * not silently degrade every unnamed session's recap. This seeds a real session
- * (real temp HOME, real sqlite row, real transcript), runs the real
- * `renderSessionPreview` producer, and feeds its real stdout into the real
- * `buildForkRecap` consumer — no hand-written fixture between them.
- */
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -27,7 +18,6 @@ afterAll(() => {
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-/** Seed a real Claude transcript + index row with a TOPIC and NO explicit label. */
 function seedUnnamed(id: string): SessionMeta {
   const proj = path.join(TEST_HOME, '.claude', 'projects', '-tmp-fork');
   fs.mkdirSync(proj, { recursive: true });
@@ -46,7 +36,6 @@ function seedUnnamed(id: string): SessionMeta {
   return meta;
 }
 
-/** Capture console.log as one joined string. */
 function captureLog() {
   const lines: string[] = [];
   const spy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(' ')); });
@@ -58,18 +47,14 @@ describe('fork ↔ preview --json contract (real path)', () => {
     const src = seedUnnamed('c0ffee00-1111-2222-3333-444444444444');
 
     const out = captureLog();
-    // local scope keeps it on this box (no fan-out) — the real producer.
     await renderSessionPreview(src.id, { json: true, local: true });
     out.restore();
 
     const data = JSON.parse(out.text);
-    // The field the recap's label falls back to MUST be on the wire.
     expect(data.session.topic).toBe('wire up the evals console');
     expect(data.session.label ?? '').toBe('');
-    // The digest carries the last assistant line the recap surfaces.
     expect(data.preview.lastAssistant).toContain('insight widgets need gaps');
 
-    // Feed the REAL producer output through the REAL consumer.
     const label = forkLabelFor({ label: data.session.label, topic: data.session.topic, shortId: data.session.shortId });
     const recap = buildForkRecap({
       agent: data.session.agent,

@@ -1,9 +1,3 @@
-/**
- * Software Factory CLI — submits Linear issues to a remote orchestrator.
- *
- * Requires FACTORY_FLOOR_URL pointing at a Factory-compatible endpoint.
- * Beta-gated; enable with `agents setup beta enable factory`.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die } from '../lib/format.js';
@@ -75,7 +69,6 @@ Examples:
 `);
 
   factory.hook('preAction', (_thisCommand, actionCommand) => {
-    // Foreman must be able to read its tick input before any beta-gated action.
     if (enabled || actionCommand.name() === 'snapshot') return;
     console.error(chalk.red('agents factory is in beta.'));
     console.error(chalk.gray(betaEnableHint('factory')));
@@ -105,7 +98,6 @@ Examples:
         console.log(JSON.stringify(result, null, 2));
         return;
       }
-      // Register locally so `agents cloud logs <id>` can find it.
       const now = new Date().toISOString();
       insertTask({
         id: result.cloud_execution_id,

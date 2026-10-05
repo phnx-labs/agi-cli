@@ -1,9 +1,3 @@
-/**
- * `agents memory` — first-class knowledge/facts resource (not rules).
- *
- * Mirrors the skills surface at list / add / remove / view / sync scale.
- * Canonical storage: ~/.agents/memory/ (project > user > system layering).
- */
 
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
@@ -27,7 +21,6 @@ import {
 import { supports } from '../lib/capabilities.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Register the `agents memory` command tree. */
 export function registerMemoryCommands(program: Command): void {
   const memoryCmd = program
     .command('memory')

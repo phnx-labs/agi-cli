@@ -1,7 +1,3 @@
-/**
- * `agents insights` end to end: real transcripts on disk, a real sqlite index, the
- * registered commander action. No mocking, per the repo rule.
- */
 
 import { describe, expect, it, beforeAll } from 'vitest';
 import * as fs from 'fs';
@@ -11,7 +7,6 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-insights-cmd-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
-// Answer only for this machine: the fan-out would otherwise try to reach peers.
 process.env.AGENTS_SESSIONS_LOCAL = '1';
 
 const HISTORY = path.join(TEST_HOME, '.agents', '.history');
@@ -33,7 +28,6 @@ function writeHome(version: string, acct: Acct): string {
   return home;
 }
 
-/** A transcript with enough substance to survive the min-messages/duration filter. */
 function writeTranscript(home: string, id: string, version: string, opts: {
   startIso: string;
   minutes: number;
@@ -83,12 +77,10 @@ beforeAll(async () => {
     { startIso: recent, minutes: 4, commits: 2 });
   writeTranscript(betaHome, 'bbbbbbbb-0000-0000-0000-00000000000c', '9.0.2',
     { startIso: recent, minutes: 6, interrupts: 1 });
-  // Too short to be substantive — must be filtered and counted, not reported.
   writeTranscript(betaHome, 'bbbbbbbb-0000-0000-0000-00000000000d', '9.0.2',
     { startIso: recent, minutes: 0 });
 });
 
-/** Run the registered command, capturing stdout. */
 async function runInsights(args: string[]): Promise<string> {
   const { Command } = await import('commander');
   const { registerInsightsCommand } = await import('./insights.js');
@@ -140,7 +132,6 @@ describe('agents insights', () => {
     const byLabel = new Map<string, { sessions: number }>(
       payload.groups.map((g: { label: string; sessions: number }) => [g.label, g]),
     );
-    // Two distinct accounts, each with only its own sessions — the whole point.
     expect(byLabel.get('Alpha Inc <dev@alpha.example>')?.sessions).toBe(2);
     expect(byLabel.get('Beta Ltd <dev@beta.example>')?.sessions).toBe(1);
   });
@@ -155,13 +146,11 @@ describe('agents insights', () => {
   it('carries the behavioural facets that motivated the command', async () => {
     const payload = JSON.parse(await runInsights(['--json', '--since', 'all']));
     const alpha = payload.groups.find((g: { label: string }) => g.label.startsWith('Alpha Inc'));
-    // 2 interrupts in one alpha session, 1 + 2 commits across both.
     expect(alpha.interruptions).toBe(2);
     expect(alpha.gitCommits).toBe(3);
     expect(alpha.languages.TypeScript).toBe(2);
-    expect(alpha.models['opus-5']).toBeGreaterThan(0);   // shortened, like every renderer
+    expect(alpha.models['opus-5']).toBeGreaterThan(0);
     expect(alpha.messageHours).toHaveLength(24);
-    // The raw gap sample is dropped from JSON in favour of percentiles + buckets.
     expect(alpha.responseGaps).toBeUndefined();
     expect(alpha.responseGapBuckets).toHaveLength(7);
   });
@@ -177,12 +166,10 @@ describe('agents insights', () => {
     const byProject = JSON.parse(await runInsights(['--json', '--since', 'all', '--by', 'project']));
     expect(byProject.by).toBe('project');
     expect(byProject.analyzed).toBe(byAccount.analyzed);
-    expect(byProject.groups).toHaveLength(1);   // every fixture shares one cwd
+    expect(byProject.groups).toHaveLength(1);
   });
 
   it('accepts --all as an alias for --since all', async () => {
-    // The spelling people reach for. Before this it was `unknown option '--all'`,
-    // which is a hard exit in the middle of a report they asked for.
     const viaAlias = JSON.parse(await runInsights(['--json', '--all']));
     const viaSince = JSON.parse(await runInsights(['--json', '--since', 'all']));
     expect(viaAlias.window.since).toBeNull();
@@ -209,8 +196,6 @@ describe('agents insights', () => {
 
   it('marks facets unmeasurable rather than zero for an unknown harness vocabulary', async () => {
     const payload = JSON.parse(await runInsights(['--json', '--since', 'all']));
-    // Every fixture uses Claude's Write, so editingToolCalls proves the signal exists
-    // and is non-zero here; the renderer keys "not measurable" off it being 0.
     const alpha = payload.groups.find((g: { label: string }) => g.label.startsWith('Alpha Inc'));
     expect(alpha.editingToolCalls).toBeGreaterThan(0);
   });
@@ -224,7 +209,6 @@ describe('agents insights', () => {
 
     await runInsights(['--json', '--since', 'all']);
     const after = db.prepare(`SELECT computed_at FROM session_insights ORDER BY session_id`).all();
-    // Untouched transcripts are not recomputed, so the stamps do not move.
     expect(after).toEqual(before);
   });
 
@@ -236,14 +220,12 @@ describe('agents insights', () => {
     const before = db.prepare(`SELECT computed_at, facets FROM session_insights WHERE session_id = ?`)
       .get(id) as { computed_at: number; facets: string };
 
-    // Invalidate by changing the stored stamp, exactly as a re-scan of a grown
-    // transcript would.
     db.prepare(`UPDATE session_insights SET file_size = file_size + 1 WHERE session_id = ?`).run(id);
     await runInsights(['--json', '--since', 'all']);
 
     const after = db.prepare(`SELECT computed_at, facets FROM session_insights WHERE session_id = ?`)
       .get(id) as { computed_at: number; facets: string };
-    expect(after.facets).toBe(before.facets);          // same input, same answer
+    expect(after.facets).toBe(before.facets);
     expect(after.computed_at).toBeGreaterThanOrEqual(before.computed_at);
   });
 

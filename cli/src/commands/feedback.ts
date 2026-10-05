@@ -1,8 +1,3 @@
-/**
- * `agents feedback` — frictionless, in-CLI feedback. Opens a Discussion
- * pre-filled with version + OS + agent inventory; falls back to printing the
- * URL when no browser is available.
- */
 
 import { spawnSync } from 'node:child_process';
 import { arch, platform, release } from 'node:os';

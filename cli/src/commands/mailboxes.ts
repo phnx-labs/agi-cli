@@ -1,21 +1,3 @@
-/**
- * `agents mailboxes` — fleet comms: a read-only window onto the agent mailbox spool.
- *
- * The mailbox spool (`~/.agents/.history/mailbox/<id>/{inbox,processing,consumed}`)
- * is the transport under `agents message` / `agents feed` / `agents teams message`:
- * one box per logical agent (session UUID / teams agentId / loop runId). This
- * command surfaces which boxes exist, how much mail each holds, the messages that
- * flowed BETWEEN agents (including already-consumed ones), and — with `--watch` —
- * the live stream as it happens. Rendering rides the shared comms engine
- * (`lib/comms-render.ts`): masthead, sparkline, aggregate, graphEdges.
- *
- *   agents mailboxes                     overview: masthead + 24h sparkline + boxes + recent log
- *   agents mailboxes <id>                one box in full (inbox / processing / consumed)
- *   agents mailboxes --watch             live tail of cross-box traffic until ⌃C
- *   agents mailboxes --between <a> <b>   one relationship as a thread, either direction
- *   agents mailboxes --graph             who-talks-to-whom adjacency, busiest first
- *   --from/--to/--since                  filter the overview log and the --watch stream
- */
 import type { Command } from 'commander';
 import * as os from 'os';
 import * as path from 'path';
@@ -44,7 +26,6 @@ import { getMailboxRootDir } from '../lib/state.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 
-/** A box plus its messages and a resolved human label. */
 interface BoxView {
   id: string;
   label: string;
@@ -52,14 +33,12 @@ interface BoxView {
   messages: StoredMessage[];
 }
 
-/** Recency/sender/recipient filter shared by the overview log, --watch, and --graph. */
 interface Filters {
   from?: string;
   to?: string;
   sinceMs?: number;
 }
 
-/** Short, human label for a box id — the live session's topic when running, else the id stem. */
 function labelForBox(id: string, byMailbox: Map<string, ActiveSession>): { label: string; live: boolean } {
   const s = byMailbox.get(id);
   if (s) {
@@ -69,13 +48,11 @@ function labelForBox(id: string, byMailbox: Map<string, ActiveSession>): { label
   return { label: id.slice(0, 8), live: false };
 }
 
-/** Build the per-box views, resolving live-session labels once. */
 async function collectBoxes(root: string): Promise<BoxView[]> {
   let sessions: ActiveSession[] = [];
   try {
     sessions = await getActiveSessions();
   } catch {
-    // Label enrichment is best-effort; a box with no live session still lists.
   }
   const byMailbox = new Map<string, ActiveSession>();
   for (const s of sessions) {
@@ -92,7 +69,6 @@ function pending(box: BoxView): number {
   return box.messages.filter((m) => m.state !== 'consumed').length;
 }
 
-/** `from` label for a message — agents stamp `claude/<slug>`; operator sends may omit it. */
 function senderOf(m: StoredMessage): string {
   return m.from || 'operator';
 }
@@ -103,12 +79,6 @@ const STATE_TAG: Record<StoredMessage['state'], string> = {
   consumed: chalk.dim('delivered'),
 };
 
-/**
- * The watching agent's own box id. Spawn wiring (`buildExecEnv`,
- * lib/exec.ts) hands every agent `AGENTS_MAILBOX_DIR` keyed by its box, so
- * `basename` is the id that resolves to "you". Unset for a human operator at
- * a plain terminal — nothing in the spool is addressed to them.
- */
 function selfMailboxId(): string | undefined {
   const dir = process.env.AGENTS_MAILBOX_DIR;
   if (!dir) return undefined;
@@ -116,7 +86,6 @@ function selfMailboxId(): string | undefined {
   return id || undefined;
 }
 
-/** Parse `--since`: relative offsets (30s/5m/2h/7d/4w) or an ISO/absolute date. Returns epoch ms. */
 function parseSinceArg(s: string): number {
   const m = s.match(/^(\d+)([smhdw])$/);
   if (m) {
@@ -143,7 +112,6 @@ function hasFilters(f: Filters): boolean {
   return Boolean(f.from || f.to || f.sinceMs != null);
 }
 
-/** Sender substring on `from`, recipient substring on box id/label, recency cutoff — all case-insensitive. */
 function matchesFilters(msg: { from: string; ts: string }, toLabel: string, boxId: string, f: Filters): boolean {
   if (f.sinceMs != null) {
     const t = Date.parse(msg.ts);
@@ -154,7 +122,6 @@ function matchesFilters(msg: { from: string; ts: string }, toLabel: string, boxI
   return true;
 }
 
-/** HH:MM:SS local wall-clock for the --watch stream; unparseable stamps render as dashes. */
 function clockTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '--:--:--';
@@ -169,7 +136,6 @@ function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void
     return;
   }
 
-  // 1. Masthead + 24h volume sparkline over the whole spool.
   const msgs = aggregate(nonEmpty);
   const live = boxes.filter((b) => b.live).length;
   const awaiting = msgs.filter((m) => m.state !== 'consumed').length;
@@ -183,7 +149,6 @@ function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void
   console.log(`  ${chalk.dim('24h')} ${chalk.cyan(sparkline(hourlyCounts(msgs, 24)))}`);
   console.log();
 
-  // 2. Box summary — one row per box that has ever held mail.
   const rows = [...nonEmpty].sort((a, b) => lastTs(b) - lastTs(a));
   for (const box of rows) {
     const p = pending(box);
@@ -197,7 +162,6 @@ function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void
     console.log(`    ${chalk.dim(box.id)}`);
   }
 
-  // 3. Recent cross-box message log — the agent-to-agent chatter, newest first.
   const all = msgs
     .filter((m) => matchesFilters(m, m.toLabel, m.box, filters))
     .slice(0, limit);
@@ -216,12 +180,6 @@ function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void
   console.log(chalk.dim('Tip: `agents mailboxes <id>` one box · `--watch` live tail · `--between <a> <b>` thread · `--graph` routes · `--json` machine output'));
 }
 
-/**
- * --watch: the money shot. Stream every new cross-box message as it lands,
- * resolved to live labels; a message addressed to the watching agent's own
- * box (AGENTS_MAILBOX_DIR) renders as `▲ you` so an orchestrator sees its
- * replies light up. ⌃C aborts the poller cleanly via AbortController.
- */
 async function runWatch(root: string, opts: { json?: boolean; filters: Filters }): Promise<void> {
   const boxes = await collectBoxes(root);
   const labels = new Map(boxes.map((b) => [b.id, b.label]));
@@ -240,8 +198,6 @@ async function runWatch(root: string, opts: { json?: boolean; filters: Filters }
         stats: ['watching — ⌃C to stop'],
       }));
     }
-    // --since backfills: the watcher replays existing mail and the recency
-    // filter keeps only the requested window, then the tail continues live.
     for await (const m of watchMessages(root, {
       signal: controller.signal,
       backfill: opts.filters.sinceMs != null,
@@ -265,7 +221,6 @@ async function runWatch(root: string, opts: { json?: boolean; filters: Filters }
   }
 }
 
-/** Sender stamp match: `from` is freeform, so match the counterpart's full id, an id prefix, or its resolved label. */
 function senderIsBox(from: string, box: BoxView): boolean {
   if (from === box.id) return true;
   if (from.length >= 4 && box.id.startsWith(from)) return true;
@@ -284,7 +239,6 @@ function renderBetween(boxes: BoxView[], a: string, b: string, json?: boolean): 
   const boxB = resolveBox(b);
   if (boxA.id === boxB.id) die('--between needs two different boxes.');
 
-  // Both directions, each stamped with its route so the thread reads chronologically.
   const thread: CommsMsg[] = [
     ...boxB.messages.filter((m) => senderIsBox(senderOf(m), boxA)).map((m) => ({
       from: senderOf(m), to: boxB.id, toLabel: boxB.label, ts: m.ts, text: m.text, state: m.state, box: boxB.id,
@@ -433,7 +387,6 @@ export function registerMailboxesCommand(program: Command): void {
         die(`--between takes exactly two boxes: \`agents mailboxes --between <a> <b>\`.`);
       }
 
-      // The views are mutually exclusive — never silently drop a flag.
       const viewCount = (id ? 1 : 0) + (opts.between ? 1 : 0) + (opts.graph ? 1 : 0);
       if (opts.watch && viewCount > 0) {
         die('--watch streams the whole fleet and combines with no other view. Drop <id>/--between/--graph, or use --from/--to/--since to filter the stream.');
@@ -472,8 +425,6 @@ export function registerMailboxesCommand(program: Command): void {
       }
 
       if (opts.json) {
-        // Unfiltered output keeps the legacy shape byte-for-byte; with filters
-        // the JSON mirrors the filtered overview log — pending/total recount.
         console.log(JSON.stringify(
           boxes.map((b) => {
             const messages = hasFilters(filters)

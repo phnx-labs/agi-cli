@@ -1,22 +1,3 @@
-/**
- * `agents daemon` — runtime, hosted services, and failure visibility for the
- * always-on daemon (RUSH-2354).
- *
- * The daemon holds the routines scheduler, the session/usage sync, and the
- * watchdog pass — but until this command group existed it had no user-facing
- * surface: no way to see it, restart it, or turn it off. The secrets broker
- * moved out of this daemon entirely with the standalone `secrets` engine
- * (PHNX-3989 OWN-1), and the browser IPC server with the standalone `browser`
- * CLI (PHNX-4101); `agents daemon status` only probes the broker's reachability.
- * `daemon.ts` (the runtime) has always implemented every mechanism this file
- * wires up; nothing here is new machinery, only the missing CLI surface.
- *
- * There is deliberately no `agents daemon jobs` — scheduled work is
- * `agents routines`, always (see RUSH-2353, which migrates the daemon's
- * hardcoded timers onto routines). `status`/`services` point at
- * `agents routines stats` for per-routine failure detail instead of
- * duplicating it.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -69,16 +50,7 @@ import {
 } from '../lib/daemon-webhooks.js';
 import { parseFunnelPort } from '../lib/funnel.js';
 
-// ─── Process scanning — which install owns the pid, and every duplicate ──────
 
-/**
- * startDaemon for the explicit start/restart commands: the redirected-HOME
- * refusal (W4, PHNX-3736) is user-actionable, not an engineering bug, so it
- * prints without a stack and exits 1. Anything else (a genuinely unspawnable
- * binary) still throws. Kept local to this command rather than in bootstrap's
- * catch list — a bootstrap.ts edit selects the 54s non-interactive suite into
- * the required impact gate, and this change's budget cannot carry it.
- */
 function startDaemonClean(): { pid: number | null; method: string } {
   try {
     return startDaemon();
@@ -93,35 +65,15 @@ function startDaemonClean(): { pid: number | null; method: string } {
 
 interface DaemonProcess {
   pid: number;
-  /** The entry file/binary the process was launched from, best-effort. */
   entry: string | null;
-  /** Resolved package version for `entry`, or null if it couldn't be found. */
   version: string | null;
-  /**
-   * Whether `entry` is provably ABSENT (`ENOENT`). Null when we cannot tell —
-   * a permission error on a parent directory, or any other stat failure. See
-   * {@link entryIsGone}: "we cannot see it" must never be reported as "deleted".
-   */
   entryMissing: boolean | null;
-  /** Owning uid from `ps`, or null when unavailable. */
   uid: number | null;
 }
 
-/**
- * Provably absent, or null when unknowable.
- *
- * `fs.existsSync` cannot express the difference: it returns false for ANY failed
- * stat, so `EACCES` on a parent directory is indistinguishable from deletion.
- * The feeding scan is box-wide `ps` with no uid filter, so that gap is reachable
- * on any shared box — `/root` is mode 700, and a stat of a root-owned daemon's
- * entry from an ordinary uid returns false while the file is perfectly present.
- * Reporting that would tell the user to `kill` a healthy daemon they do not own,
- * with a command that would `EPERM` anyway.
- *
- * `statSync(p, { throwIfNoEntry: false })` returns `undefined` only for `ENOENT`
- * and throws for everything else, which is exactly the distinction needed.
- */
 function entryAbsent(p: string): boolean | null {
+  // Only ENOENT proves an entry is gone; an unreadable shared-user path must
+  // never become advice to kill a healthy process.
   try {
     return fs.statSync(p, { throwIfNoEntry: false }) === undefined;
   } catch {
@@ -129,71 +81,17 @@ function entryAbsent(p: string): boolean | null {
   }
 }
 
-/**
- * A daemon whose launch entry is provably gone from disk (RUSH-2493).
- *
- * This predicate answers only "is this one's code gone?". WHO may be told about
- * it, and whether that report is actionable, is {@link staleDaemons}'s job — a
- * separation reached the hard way: an early revision reported every box-wide
- * `ps` match as actionable (re-opening RUSH-2368), and the correction then
- * over-swung to registry-only, which silently excluded the very incident below.
- *
- * Observed 2026-08-10 on yosemite-s0: a daemon ran for 4h14m from
- * `.agents/worktrees/rush-2431-binary-shadow/apps/cli/dist/index.js` after that
- * worktree was deleted. `systemctl --user is-active` said `active`,
- * `agents daemon status` reported healthy, and nothing anywhere named it —
- * while it held a second routine scheduler, the double-fire class the
- * one-scheduler-one-executor rule exists to prevent. A restart would also have
- * failed, since the manifest pointed at the same missing path.
- *
- * ABSOLUTE PATHS ONLY. `entryFromTokens` returns the second-to-last argv token,
- * which is the entry for a real daemon (`getDaemonLaunch` always spawns an
- * absolute one) but is arbitrary text for anything else — `node -e '<code>'
- * __daemon-run` yields the code blob, which of course does not exist on disk.
- * Requiring absoluteness keeps a non-path token from being reported as deleted
- * code, the same false-positive class RUSH-2368 had to correct for duplicates.
- *
- * That guard also covers an entry path containing SPACES, which `ps` renders
- * unquoted and the tokenizer therefore splits: `/tmp/ghost space/sub/index.js`
- * yields `space/sub/index.js`, not absolute, so a healthy daemon on such a path
- * is never accused (verified live). The cost is a false NEGATIVE — a genuinely
- * deleted entry containing a space is not reported either. That is the safe
- * direction to fail: missing one detection is a silence we already lived with,
- * whereas telling someone to `kill` a healthy shared daemon is a new harm.
- */
 function entryIsGone(p: DaemonProcess): boolean {
   return p.entry !== null && path.isAbsolute(p.entry) && p.entryMissing === true;
 }
 
-/**
- * Stale daemons split into two tiers, because DETECTION and ACCUSATION are
- * different acts with different blast radii.
- *
- * RUSH-2368's harm was the accusation, not the sighting: a leaked fixture "was
- * reported as a stray to `kill`". So the narrow registry scope is what gates
- * anything actionable — a `doctor` problem, a non-zero exit, a `kill` — while a
- * same-uid sighting is merely shown.
- *
- * That split is not academic. The incident this feature exists to catch was
- * neither the tracked pid nor in the registry: it ran under an ephemeral `/tmp`
- * cwd from a deleted worktree, and `lib/daemon/daemon.ts` documents that such a process
- * "registers under its own state dir and is invisible here" BY DESIGN. Gating
- * the display on the registry too would have made this command silent on the
- * exact 4h14m ghost that motivated it.
- *
- *   `actionable` — this device's daemon, or this install's registry. Drives
- *                  `doctor` problems and the `kill`/`restart` remediation.
- *   `visible`    — additionally any daemon running as THIS uid. Shown in
- *                  `status`, never exits non-zero, never told to kill.
- *
- * A different uid is never named at all: we cannot reliably stat its entry
- * ({@link entryAbsent}), and we could not signal it if we tried.
- */
 function staleDaemons(
   processes: DaemonProcess[],
   ownerPid: number | null,
   registered: Set<number>,
 ): { actionable: DaemonProcess[]; visible: DaemonProcess[] } {
+  // Kill/restart advice is limited to this device's registry. Same-uid ghosts
+  // may be shown for diagnosis, but are not actionable.
   const isOurs = (p: DaemonProcess) => p.pid === ownerPid || registered.has(p.pid);
   const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
   const gone = processes.filter(entryIsGone);
@@ -203,42 +101,25 @@ function staleDaemons(
   };
 }
 
-/**
- * Resolve the working directory a live process was started from, or null if
- * unavailable. Linux only (`/proc/<pid>/cwd`) — there is no equivalent
- * zero-dependency primitive on macOS/BSD.
- */
 function processCwd(pid: number): string | null {
   try { return fs.realpathSync(`/proc/${pid}/cwd`); } catch { return null; }
 }
 
-/**
- * Walk up from `entryPath` looking for the nearest `package.json` and read its
- * version. A relative `entryPath` (the common shape for a dev `node --import
- * tsx <entry> __daemon-run` invocation) is meaningless resolved against the
- * CALLING process's cwd — it must be anchored to the OWNING process's own cwd
- * instead, via `processCwd(pid)`. Getting this wrong silently reports another
- * process's version as this one's (observed live: a relative `src/index.ts`
- * resolved against the caller's cwd instead of the stray daemon's actual
- * ephemeral `/tmp` cwd, reporting a version that process was not running).
- * Absolute entries (every production launch — `getAgentsBinPath()` always
- * returns one) need no anchoring and resolve the same either way.
- */
 function resolveVersionNear(entryPath: string, pid: number): string | null {
   let resolved = entryPath;
   if (!path.isAbsolute(resolved)) {
     const cwd = processCwd(pid);
-    if (!cwd) return null; // cannot anchor a relative entry — do not guess
+    if (!cwd) return null;
     resolved = path.join(cwd, resolved);
   }
-  try { resolved = fs.realpathSync(resolved); } catch { /* shim/symlink may be broken or entry may not exist locally */ }
+  try { resolved = fs.realpathSync(resolved); } catch {  }
   let dir = path.dirname(resolved);
   for (let i = 0; i < 6; i++) {
     const candidate = path.join(dir, 'package.json');
     try {
       const pkg = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
       if (typeof pkg.version === 'string') return pkg.version;
-    } catch { /* keep walking */ }
+    } catch {  }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -246,57 +127,21 @@ function resolveVersionNear(entryPath: string, pid: number): string | null {
   return null;
 }
 
-/**
- * Extract the launch entry from a tokenized `ps` args line ending in
- * `__daemon-run`: the token immediately before it is always the entry —
- * `<node> [node flags...] <entry> __daemon-run` (a dev `node --import tsx
- * <entry> __daemon-run` or the production `node <entry> __daemon-run`) or a
- * compiled standalone binary (`<binary> __daemon-run`, 2 tokens). Reading the
- * second-to-last token is robust to however many node flags precede the entry,
- * unlike guessing a fixed position from the front.
- */
 function entryFromTokens(tokens: string[]): string | null {
   return tokens.length >= 2 ? tokens[tokens.length - 2] : null;
 }
 
-/**
- * Every live `__daemon-run` process on this box, enriched with display
- * metadata (entry/version/entryMissing). The raw `ps` scan and its
- * last-token `__daemon-run` invariant live in
- * `lib/daemon/leaked-daemons.ts` (`listDaemonRunProcesses`) — shared with the
- * doctor's leaked-daemon detection so the two can never disagree on what a
- * daemon process is.
- *
- * This box-wide scan is deliberately NOT the duplicate-detection scope
- * (RUSH-2368): a `__daemon-run` under a different HOME serves a different
- * `getDaemonDir()` and is not a duplicate of THIS device's daemon, however
- * `ps` sees it — a leaked vitest fixture under its own `/tmp` HOME matched
- * this scan and was reported as a stray to `kill`. It is used only to attach
- * display metadata (entry/version) to pids the registry-scoped
- * `findSurvivingStateDirDaemons` has already confirmed as real duplicates.
- */
 function scanDaemonProcesses(): DaemonProcess[] {
   const found: DaemonProcess[] = [];
   for (const p of listDaemonRunProcesses()) {
     const entry = entryFromTokens(p.tokens);
     const version = entry ? resolveVersionNear(entry, p.pid) : null;
-    // Asks whether the code is on disk for the NEXT launch -- what a restart and
-    // every other reader will see -- not what this pid currently has mapped.
     const entryMissing = entry ? entryAbsent(entry) : false;
     found.push({ pid: p.pid, entry, version, entryMissing, uid: p.uid });
   }
   return found;
 }
 
-/**
- * Duplicates of THIS device's daemon, scoped to the same instance registry the
- * reaper and the stop postcondition use (RUSH-2368) — never a raw `ps` match.
- * `processes` (from `scanDaemonProcesses`) supplies display metadata
- * (entry/version); `findSurvivingStateDirDaemons` supplies the actual scope, so
- * a `__daemon-run` under a different HOME (a different `getDaemonDir()`) —
- * whether a leaked test fixture or a genuinely separate install — never shows
- * up here even though it is visible to the box-wide `ps` scan.
- */
 function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number | null): DaemonProcess[] {
   const exclude = new Set<number>();
   if (ownerPid) exclude.add(ownerPid);
@@ -304,7 +149,6 @@ function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number |
   return processes.filter((p) => registered.has(p.pid));
 }
 
-/** Parse a `ps -o etime=` value (`[[dd-]hh:]mm:ss`) into elapsed seconds. */
 function parseEtimeToSeconds(raw: string): number | null {
   const m = raw.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
   if (!m) return null;
@@ -316,14 +160,9 @@ function parseEtimeToSeconds(raw: string): number | null {
   return ((days * 24 + hours) * 60 + mins) * 60 + secs;
 }
 
-/** Elapsed wall-clock seconds since `pid` started, or null if unavailable (best-effort, POSIX only). */
 export function uptimeSeconds(pid: number): number | null {
   if (process.platform === 'win32') return null;
   try {
-    // `-o etimes=` is a GNU/procps keyword macOS/BSD `ps` rejects with a
-    // non-zero exit (`ps: etimes: keyword not found`), so `agents daemon status`
-    // errored out entirely on macOS. `etime` (`[[dd-]hh:]mm:ss`) is the portable
-    // POSIX field; `parseEtimeToSeconds` above parses it.
     const out = execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
     return parseEtimeToSeconds(out);
   } catch {
@@ -338,35 +177,15 @@ function humanDuration(seconds: number): string {
   return `${Math.round(seconds / 86400)}d`;
 }
 
-// ─── Health probes for the two hosted services ───────────────────────────────
 
 interface SecretsBrokerHealth {
   reachable: boolean;
-  /**
-   * True when this box routes `keychain`-backend items to the standalone's
-   * encrypted file store (a headless worker with no reachable keyring). The
-   * broker exists only to hold an UNLOCKED keychain across reads without a
-   * Touch ID prompt — a file-backed box reads every secret one-shot with no
-   * broker at all, so an absent broker there is normal, not a fault (PHNX-4116).
-   */
   fileBacked: boolean;
-  /**
-   * Always `null` — the broker's socket now lives entirely inside the
-   * standalone `secrets` engine's own process (PHNX-3989 OWN-1); the daemon
-   * neither hosts it nor knows its transport details. Kept in the shape for
-   * `--json` compatibility.
-   */
   socketPath: string | null;
   heldBundles: number | null;
-  /**
-   * Always `null` — no daemon service writes a health record for the broker
-   * anymore (the daemon does not host or supervise it). Kept in the shape for
-   * `--json` compatibility.
-   */
   record: SubsystemHealth | null;
 }
 
-/** Reachability probe only — the daemon does not host, supervise, or take over the broker (OWN-1). */
 async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
   const { agentPing, agentStatus, keychainUsesFileFallback } = await import('../lib/secrets-client.js');
   try {
@@ -375,16 +194,12 @@ async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
       const entries = await agentStatus();
       return { reachable: true, fileBacked: false, socketPath: null, heldBundles: entries.length, record: null };
     }
-  } catch { /* fall through to the unreachable classification below */ }
-  // Unreachable: distinguish "broker needed and absent" (a keychain-backed box)
-  // from "no broker needed" (a file-backed worker reads secrets one-shot). An
-  // unknown store defaults to broker-needed, the louder verdict.
+  } catch {  }
   let fileBacked = false;
-  try { fileBacked = await keychainUsesFileFallback(); } catch { /* unknown → not file-backed */ }
+  try { fileBacked = await keychainUsesFileFallback(); } catch {  }
   return { reachable: false, fileBacked, socketPath: null, heldBundles: null, record: null };
 }
 
-// ─── Scheduler summary (routine count / next fire / failing count) ──────────
 
 interface SchedulerSummary {
   routineCount: number;
@@ -404,7 +219,7 @@ function schedulerSummary(): SchedulerSummary {
       if (job.nextRun && (!nextFire || job.nextRun < nextFire)) nextFire = job.nextRun;
     }
     scheduler.stopAll();
-  } catch { /* best-effort */ }
+  } catch {  }
   const failingCount = enabled.filter((j) => {
     const last = getLatestRun(j.name);
     return last?.status === 'failed' || last?.status === 'timeout';
@@ -412,19 +227,7 @@ function schedulerSummary(): SchedulerSummary {
   return { routineCount: jobs.length, enabledCount: enabled.length, nextFire, failingCount };
 }
 
-// ─── Rendering ────────────────────────────────────────────────────────────
 
-/**
- * Render one service's health line. `live` is the verdict — a probe run RIGHT
- * NOW against the actual socket/binding — and is the only thing allowed to say
- * `healthy` (RUSH-2368). `record` is the daemon's persisted last-ok/last-error
- * history: supporting context, never the verdict. Before this fix the verdict
- * came from `record.consecutiveFailures`, which the daemon only updates at its
- * own startup (`recordSubsystemOk`/`recordSubsystemError` in daemon.ts) — a
- * broker that went unreachable hours into a still-running daemon rendered
- * `healthy (unreachable)` on one line, a contradiction that is exactly the
- * silent-success pattern this command exists to remove.
- */
 function healthLine(label: string, live: boolean, record: SubsystemHealth | null): string {
   if (live) {
     const ok = record?.lastOkAt ? chalk.gray(`(last ok ${record.lastOkAt})`) : '';
@@ -438,14 +241,6 @@ function healthLine(label: string, live: boolean, record: SubsystemHealth | null
   return `  ${chalk.red('down')}  ${label} ${detail}`;
 }
 
-/**
- * The `secrets broker` health line. Reachable → healthy. Unreachable is a FAULT
- * (`down`) only when the store is keychain-backed — there the broker is what
- * holds the unlocked keychain across reads. On a file-backed box (every
- * headless worker) no broker is needed: secrets read one-shot, so an absent
- * broker is expected and reads as INFO, not `down` (PHNX-4116). Pure, so the
- * three cases are unit-tested with no live daemon.
- */
 export function secretsBrokerHealthLine(secrets: SecretsBrokerHealth): string {
   if (secrets.reachable) {
     return healthLine(`secrets broker  (${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)`, true, secrets.record);
@@ -468,13 +263,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   const processes = scanDaemonProcesses();
   const owner = pid ? processes.find((p) => p.pid === pid) : undefined;
   const duplicates = registryScopedDuplicates(processes, pid ?? null);
-  // Every daemon whose code is gone from disk, including this device's own if
-  // it is one. Not filtered by the duplicate scope — see entryIsGone.
-  // Deliberately its own read, NOT shared with registryScopedDuplicates above.
-  // That one passes `exclude` INTO findSurvivingStateDirDaemons to drop the
-  // owner, so handing it a shared empty-exclude snapshot would put ownerPid back
-  // in the set and report this device's daemon as its own duplicate. The saving
-  // would be one `ps` spawn per registered pid, at the 1-3 that actually run.
   const registeredPids = new Set(findSurvivingStateDirDaemons(new Set()));
   const staleTiers = staleDaemons(processes, pid ?? null, registeredPids);
   const stale = staleTiers.visible;
@@ -497,10 +285,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
       binaryVersion: owner?.version ?? null,
       binaryMissing: ownerEntryGone,
       duplicates: duplicates.map((d) => ({ pid: d.pid, entry: d.entry, version: d.version })),
-      // `actionable` is part of the contract, not decoration: a routine or
-      // monitor reading this must be able to tell a ghost it may act on from one
-      // that is merely visible. Without it the machine surface re-opens exactly
-      // what the two-tier split closed for the text surface.
       staleBinaries: stale.map((d) => ({
         pid: d.pid,
         entry: d.entry,
@@ -560,10 +344,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
       '\n  These run code that no longer exists on disk, so a restart fails and their',
       '  behaviour is whatever was loaded when the file was deleted.',
     ];
-    // Only offer a remedy when a row here is one we may act on. Printing
-    // `kill <pid>` under a section whose only rows are visibility-tier is
-    // RUSH-2368's harm re-entering through the render layer after the data
-    // layer stopped producing it.
     if (staleTiers.actionable.length > 0) {
       advice.push(`  Yours: ${chalk.white('agents daemon restart')}   A stray this install owns: ${chalk.white('kill <pid>')}`);
     } else {
@@ -591,22 +371,12 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   }
 }
 
-// ─── Full service roster (RUSH-3193 P4) ──────────────────────────────────────
 
-/** One row of the roster every registered daemon service — supervisor-managed or legacy — renders in `agents daemon services`. */
 interface DaemonServiceRow {
   id: DaemonServiceId;
   title: string;
   description: string;
   enabled: boolean;
-  /**
-   * `ServiceSupervisor`'s real lifecycle state when `supervised` is true
-   * (`idle`/`running`/`stopped`, written cross-process via
-   * `recordSubsystemState`). A legacy `setInterval`-driven service has no such
-   * record, so its state is inferred from `enabled` + whether the daemon
-   * process is up — labelled distinctly so a reader can't mistake it for a
-   * measured value.
-   */
   state: string;
   supervised: boolean;
   lastRunMs: number | null;
@@ -614,23 +384,12 @@ interface DaemonServiceRow {
   consecutiveFailures: number;
 }
 
-/**
- * Combine the persisted enable/disable toggles with whatever health the
- * `ServiceSupervisor` (or a legacy subsystem) has reported. Pure — reads two
- * on-disk files, makes no probes — so it's cheap to call from both the
- * non-interactive renderer and the interactive picker's refresh tick.
- */
 function buildServiceRows(daemonRunning: boolean): DaemonServiceRow[] {
   const states = listDaemonServiceStates();
   const healthById = new Map(readAllSubsystemHealth().map((h) => [h.subsystem, h]));
   return states.map((s) => {
     const h = healthById.get(s.id);
     const supervised = h?.state !== undefined;
-    // A persisted supervisor state (health.json) is only trustworthy while the
-    // daemon is actually up. If it is not running (crash / kill -9 / never
-    // started), every service is stopped no matter what the last-written record
-    // says — trusting a stale 'running'/'idle' here would print a report that
-    // contradicts the live-probed socket rows below (RUSH-2368).
     const state = daemonRunning
       ? (h?.state ?? (s.enabled ? 'running (unsupervised)' : 'stopped'))
       : 'stopped';
@@ -652,7 +411,7 @@ function serviceStateLabel(state: string): string {
   if (state === 'running') return chalk.green('running');
   if (state === 'stopped') return chalk.gray('stopped');
   if (state === 'idle') return chalk.gray('idle');
-  return chalk.yellow(state); // 'running (unsupervised)' or any future label
+  return chalk.yellow(state);
 }
 
 async function runServices(opts: { json?: boolean }): Promise<void> {
@@ -660,9 +419,7 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
   const rows = buildServiceRows(isDaemonRunning());
   if (opts.json) {
     console.log(JSON.stringify({
-      // Existing fields — unchanged shape, agents/CI consume these directly.
       secretsBroker: { reachable: secrets.reachable, socketPath: secrets.socketPath, heldBundles: secrets.heldBundles, health: secrets.record },
-      // Additive: every registered service, supervised or legacy.
       services: rows,
     }, null, 2));
     return;
@@ -682,7 +439,6 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
   console.log(chalk.gray('agents daemon services enable|disable|restart <id> apply live for supervised services.'));
 }
 
-// ─── Logs ────────────────────────────────────────────────────────────────
 
 interface DaemonLogEntry {
   ts: string;
@@ -697,7 +453,7 @@ function parseLogLines(raw: string): DaemonLogEntry[] {
     try {
       const entry = JSON.parse(line);
       if (entry && typeof entry.ts === 'string' && typeof entry.level === 'string') out.push(entry);
-    } catch { /* skip malformed line */ }
+    } catch {  }
   }
   return out;
 }
@@ -752,7 +508,6 @@ async function runLogs(opts: { lines?: string; follow?: boolean; level?: string;
   for (const entry of entries) printLogEntry(entry);
 }
 
-// ─── Doctor ──────────────────────────────────────────────────────────────
 
 async function runDoctor(opts: { json?: boolean }): Promise<void> {
   const status = getDaemonStatus();
@@ -761,11 +516,6 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
 
   if (!status.running && enabled) problems.push('Daemon is not running. Start it: agents daemon start');
 
-  // RUSH-2418: an open auto-start circuit breaker is the FIRST thing to report
-  // for a stopped daemon — otherwise the only advice is "agents daemon start",
-  // which is the exact action the breaker just refused, with no hint that a
-  // breaker exists or what the underlying failure was. This is where the
-  // breaker's own message sends the operator, so it has to answer them.
   const startHealth = readSubsystemHealth(SUBSYSTEM_DAEMON_START);
   if (isDaemonAutostartCircuitOpen()) {
     problems.push(
@@ -773,11 +523,6 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
       `${startHealth?.lastError ?? 'no reason recorded'}. Fix the cause, then retry with: agents daemon start`,
     );
   } else if (!status.running && startHealth && startHealth.consecutiveFailures > 0) {
-    // Only while the daemon is DOWN. A start is marked as failed the moment it
-    // is issued and cleared once the daemon finishes booting, so a running
-    // daemon with a non-zero streak is just the boot window (or a daemon
-    // launched outside startDaemon) — reporting it there is a false alarm that
-    // clears itself a second later.
     problems.push(`Daemon start has ${startHealth.consecutiveFailures} consecutive failure(s): ${startHealth.lastError}`);
   }
 
@@ -787,10 +532,8 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
     problems.push(`${duplicates.length} duplicate daemon process(es) running: ${duplicates.map((d) => d.pid).join(', ')}. Stop the stray(s).`);
   }
 
-  // A daemon whose entry is gone from disk is a problem even when it answers
-  // every probe: it cannot restart, and it is running whatever was loaded
-  // before the file was deleted (RUSH-2493).
   for (const p of staleDaemons(healthProcesses, status.pid, new Set(findSurvivingStateDirDaemons(new Set()))).actionable) {
+    // `actionable` is registry-scoped; never recommend killing a raw ps match.
     const own = status.pid !== null && p.pid === status.pid;
     problems.push(
       `Daemon pid ${p.pid} runs code deleted from disk (${p.entry}). ` +
@@ -824,9 +567,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   process.exitCode = 1;
 }
 
-// ─── Hosted webhook receivers ────────────────────────────────────────────
 
-/** Parse a positive-integer option, failing loud rather than silently defaulting. */
 function requirePositiveInt(raw: string, label: string): number {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -836,13 +577,6 @@ function requirePositiveInt(raw: string, label: string): number {
   return parsed;
 }
 
-/**
- * `agents daemon webhooks` — which signed receivers THIS box hosts (RUSH-2548).
- *
- * The entries land in `daemon/webhooks.yaml`, which the daemon's
- * `webhook-receiver` service reads at start; nothing binds until the daemon
- * picks the change up, so every mutation says how to apply it.
- */
 function registerWebhooksSubcommand(parent: Command): void {
   const webhooks = parent
     .command('webhooks')
@@ -930,9 +664,6 @@ function registerWebhooksSubcommand(parent: Command): void {
       }
       console.log(chalk.green(`Removed the webhook receiver on port ${port}.`));
       if (removed.funnel) {
-        // Leaving the Funnel up would keep a public HTTPS route pointed at a port
-        // nothing serves, so say what to run — this box may not be the tailnet
-        // node, and `funnel down` names the host explicitly.
         console.log(chalk.yellow(`  public ingress is still up on :${removed.funnel.publicPort} — take it down:`));
         console.log(chalk.gray(`    agents daemon funnel down <host> --port ${removed.funnel.publicPort}`));
       }
@@ -967,7 +698,6 @@ function runWebhooksList(json: boolean): void {
   console.log(chalk.gray('Changes take effect on the next daemon restart.'));
 }
 
-// ─── Command registration ────────────────────────────────────────────────
 
 export function registerDaemonCommand(program: Command): void {
   const cmd = program
@@ -1086,8 +816,6 @@ export function registerDaemonCommand(program: Command): void {
         }
         return;
       }
-      // SING-12 / RUSH-2355: stop asserts its postcondition and returns what
-      // released vs survived — surface it and exit non-zero on an unclean stop.
       const result = stopDaemon();
       if (asJson) {
         console.log(JSON.stringify(result, null, 2));
@@ -1204,15 +932,6 @@ export function registerDaemonCommand(program: Command): void {
       console.log(chalk.gray('Changes take effect on the next daemon reload or restart.'));
     });
 
-  /**
-   * Apply an enable/disable toggle live (RUSH-3193 P4): persist it, then signal
-   * the running daemon to reload — its handler diffs the toggle and drives
-   * `supervisor.start/stop(id)` for a supervised service, so no restart is
-   * needed for supervisor-managed services registered at boot. The inline
-   * scheduler re-evaluates its toggle on reload. webhook-receiver,
-   * monitors' on-transition, and other boot-disabled services still need a
-   * deliberate operator restart — the daemon's own reload log says so.
-   */
   function applyServiceToggleLive(service: string): void {
     if (!isDaemonRunning()) return;
     const ok = signalDaemonReload();

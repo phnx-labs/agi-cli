@@ -16,10 +16,6 @@ import {
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { addAccount, findAccount } from '../lib/account-registry.js';
 
-// Profile tokens (`agents-cli.<provider>.token`) and account bundles are
-// keychain items in the standalone — on a headed macOS box that is the
-// operator's login keychain, so the blocks that write them run only where the
-// standalone routes keychain items to its encrypted file store.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 let TEST_ROOT: string;
@@ -60,7 +56,6 @@ describe('addProfile — host + model one-shot (custom harness)', () => {
   it('refuses to overwrite an existing harness without --force', async () => {
     await addProfile('spark', { host: 'opencode', model: 'meta/muse-spark-1.1' });
     await expect(addProfile('spark', { host: 'claude', model: 'x' })).rejects.toThrow(/already exists/i);
-    // --force overwrites
     await addProfile('spark', { host: 'claude', model: 'claude-x', force: true });
     expect(readProfile('spark').env.ANTHROPIC_MODEL).toBe('claude-x');
   });
@@ -112,8 +107,6 @@ describe('buildFork — one verb over two kinds of source', () => {
   });
 
   it('prefers an existing custom harness over a native id of the same name', async () => {
-    // A harness may legally be named after a native agent; the custom one wins
-    // so `fork claude my-claude` copies the user's tuning, not a bare host.
     await addProfile('claude', { host: 'opencode', model: 'meta/muse-spark-1.1' }, 'Harness');
     expect(buildFork('claude', 'copy', {}).host.agent).toBe('opencode');
   });
@@ -130,8 +123,6 @@ describe('buildFork — one verb over two kinds of source', () => {
     addAccount('corp-key', 'openrouter', 'api-key', 'test-key', USER_DIR);
     const forked = buildFork('claude', 'corp', { model: 'gpt-x', baseUrl: 'https://gw.corp/v1', account: 'corp-key' });
     expect(forked.env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
-    // The portable NAME is stored, not the per-device id — a profile synced to
-    // another machine must still resolve its account there (RUSH-2930).
     expect(forked.account).toBe('corp-key');
     expect(forked.auth).toBeUndefined();
   });
@@ -144,7 +135,6 @@ describe('buildEdit — pure builder for `agents harness edit`', () => {
 
   it('changes exactly the given field and leaves the rest untouched', () => {
     const before = readProfile('deepseek-flash');
-    // --description alone touches only the description — model, version, host stay put.
     const edited = buildEdit('deepseek-flash', { description: 'new description' });
     expect(edited.description).toBe('new description');
     expect(edited.env.ANTHROPIC_MODEL).toBe(before.env.ANTHROPIC_MODEL);
@@ -248,14 +238,6 @@ describe('forkNeedsWizard / addNeedsWizard — when the interactive wizard shoul
 });
 
 describe('the wizard-vs-error gate uses isInteractiveTerminal(), not a stdout-only check', () => {
-  // Regression test: the `add`/`fork` actions originally gated the wizard on
-  // `process.stdout.isTTY` alone. That hangs for real — piped stdin with a
-  // forced/inherited stdout TTY (e.g. `agents harness add < /dev/null` under a
-  // process-substitution or captured-stdout runner) reads as "interactive",
-  // launches the wizard, and @inquirer/prompts' select() then blocks forever
-  // reading a stdin that never delivers a keypress. `isInteractiveTerminal()`
-  // (../commands/utils.ts) requires BOTH stdin and stdout to be a TTY, closing
-  // that gap. This test pins the split-TTY case the hang was found in.
   const origIn = process.stdin.isTTY;
   const origOut = process.stdout.isTTY;
   afterEach(() => {
@@ -325,7 +307,6 @@ describe.skipIf(!fileBacked)('applyFromSecrets — copy a value out of an agents
     };
     await applyFromSecrets(profile, 'prod');
     expect(getKeychainTokenSync('agents-cli.corp.token')).toBe('sk-test-secret');
-    // Existing auth binding is left exactly as it was — only the value rotated.
     expect(profile.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
 

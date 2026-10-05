@@ -33,7 +33,6 @@ import { stringWidth } from '../lib/session/width.js';
 
 const tempDirs: string[] = [];
 
-/** A fake project repo: <root>/.agents/ with commands + a skill bundle. */
 function makeProjectRepo(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-inspect-'));
   tempDirs.push(root);
@@ -126,10 +125,6 @@ describe('collectRepoKind', () => {
   });
 
   it('keeps the first-line description for non-Markdown resources', () => {
-    // Guarding the shebang inside readFirstProseLine was the wrong layer: it is
-    // shared by every kind, and readResourceDir enumerates .yaml/.yml/.toml/
-    // .json too, so an extension test blanked all of them. A `# comment` on
-    // line 1 of an mcp yaml is a real description and must survive.
     const root = makeProjectRepo();
     const mcpDir = path.join(root, '.agents', 'mcp');
     fs.mkdirSync(mcpDir, { recursive: true });
@@ -138,20 +133,13 @@ describe('collectRepoKind', () => {
     const linear = collectRepoKind(repo, 'mcp').find(m => m.name === 'linear')!;
     expect(linear.description).toBe('Linear issue tracker over http');
 
-    // Markdown resources keep their frontmatter description.
     const ship = collectRepoKind(repo, 'commands').find(c => c.name === 'ship')!;
     expect(ship.description).toBe('Ship the thing');
   });
 
   it('agrees with its own row about whether a repo hook is wired', () => {
-    // The row read the repo's agents.yaml while the preview re-resolved the
-    // CENTRAL one, so a hook the repo wires showed "PreToolUse(Bash)" in the
-    // table and "not registered" in the pane directly below it.
     const root = makeProjectRepo();
     fs.mkdirSync(path.join(root, '.agents', 'hooks'), { recursive: true });
-    // A name no central manifest would plausibly carry: with a plain `guard`,
-    // a developer whose own ~/.agents/agents.yaml registered a guard.sh would
-    // see the reverted code pass, and the test would prove nothing.
     fs.writeFileSync(path.join(root, '.agents', 'hooks', 'repo-only-guard.sh'), '#!/usr/bin/env bash\nexit 0\n');
     fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'),
       'hooks:\n  my-guard:\n    script: repo-only-guard.sh\n    events:\n      - PreToolUse\n    matcher: Bash\n');
@@ -160,16 +148,12 @@ describe('collectRepoKind', () => {
     const guard = collectRepoKind(repo, 'hooks').find(h => h.name === 'repo-only-guard')!;
     const manifest = hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')));
 
-    // What the row shows.
     const hook = manifest.get('repo-only-guard')!;
     expect(summarizeHook(hook)).toBe('PreToolUse(Bash)');
-    // What the pane shows, given the same manifest.
     const pane = stripAnsi(previewFor('hooks', guard, manifest));
     expect(pane).toContain('PreToolUse(Bash)');
     expect(pane).not.toContain('not registered');
 
-    // And the mirror: a hook absent from this repo's manifest must not be
-    // credited a central registration.
     fs.writeFileSync(path.join(root, '.agents', 'hooks', 'orphan.sh'), '#!/usr/bin/env bash\nexit 0\n');
     const orphan = collectRepoKind(repo, 'hooks').find(h => h.name === 'orphan')!;
     expect(stripAnsi(previewFor('hooks', orphan, manifest))).toContain('not registered');
@@ -186,14 +170,11 @@ describe('collectRepoKind', () => {
   it('skips directory-doc files (README/AGENTS/CLAUDE/GEMINI), including symlinks', () => {
     const root = makeProjectRepo();
     const commandsDir = path.join(root, '.agents', 'commands');
-    // Every resource dir carries README.md + AGENTS.md by convention, with
-    // CLAUDE.md/GEMINI.md symlinked to AGENTS.md. None is a command.
     fs.writeFileSync(path.join(commandsDir, 'README.md'), '# Commands\n');
     fs.writeFileSync(path.join(commandsDir, 'AGENTS.md'), '# Maintenance\n');
     fs.symlinkSync('AGENTS.md', path.join(commandsDir, 'CLAUDE.md'));
     fs.symlinkSync('AGENTS.md', path.join(commandsDir, 'GEMINI.md'));
     const repo = resolveRepoTarget(root)!;
-    // Only the real commands remain — the four doc files are filtered out.
     expect(collectRepoKind(repo, 'commands').map(c => c.name)).toEqual(['plain', 'ship']);
   });
 
@@ -201,18 +182,13 @@ describe('collectRepoKind', () => {
     const root = makeProjectRepo();
     const rulesDir = path.join(root, '.agents', 'rules');
     fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
-    // The composed output + its symlinks + the maintenance doc + the preset file.
-    // None of these is a rule you can drill into by name.
     fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), '# Composed ruleset\n');
     fs.symlinkSync('AGENTS.md', path.join(rulesDir, 'CLAUDE.md'));
     fs.writeFileSync(path.join(rulesDir, 'README.md'), '# Rules\n');
     fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: []\n');
-    // The addressable fragments.
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'foundations.md'), '# Foundations\n\nF1.\n');
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'code-quality.md'), '# Code Quality\n\nTactics.\n');
     const repo = resolveRepoTarget(root)!;
-    // Before this fix `subrules` came back as a single opaque leaf alongside the
-    // doc files, so `--rule foundations` could never resolve.
     expect(collectRepoKind(repo, 'rules').map(r => r.name)).toEqual(['code-quality', 'foundations']);
   });
 
@@ -220,9 +196,6 @@ describe('collectRepoKind', () => {
     const root = makeProjectRepo();
     const dir = path.join(root, '.agents', 'plugins', 'noauthor', '.claude-plugin');
     fs.mkdirSync(dir, { recursive: true });
-    // loadPluginManifest is a bare JSON cast, so `author.name` is typed required
-    // but never validated. An author object without a name used to push
-    // `undefined` into the row list and crash the renderer on stripAnsi.
     fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
       name: 'noauthor', version: '1.0.0', description: 'no author name', author: { email: 'x@y.z' },
     }));
@@ -230,7 +203,6 @@ describe('collectRepoKind', () => {
     const [plugin] = collectRepoKind(repo, 'plugins');
     expect(plugin.name).toBe('noauthor');
     expect(plugin.extra?.map(([k]) => k)).not.toContain('author');
-    // Every emitted value must be a string — the crash was an undefined here.
     for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
   });
 
@@ -238,11 +210,6 @@ describe('collectRepoKind', () => {
     const root = makeProjectRepo();
     const dir = path.join(root, '.agents', 'plugins', 'wrongtypes', '.claude-plugin');
     fs.mkdirSync(dir, { recursive: true });
-    // loadPluginManifest validates only name/version, so every other field is
-    // whatever the JSON says. `dependencies` as a bare string is the sharp one:
-    // `.length` is truthy on a string and `.join` does not exist, which threw
-    // inside pluginToItem — i.e. while BUILDING THE LIST, taking down `inspect .`,
-    // `--plugins`, and even a query for a different, valid plugin.
     fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
       name: 'wrongtypes', version: 2, description: 'd', dependencies: 'some-plugin',
     }));
@@ -250,7 +217,6 @@ describe('collectRepoKind', () => {
     const items = collectRepoKind(repo, 'plugins');
     expect(items.map(i => i.name)).toContain('wrongtypes');
     const plugin = items.find(i => i.name === 'wrongtypes')!;
-    // A non-array `dependencies` still renders, and a numeric version coerces.
     expect(plugin.extra).toEqual(
       expect.arrayContaining([['version', '2'], ['depends on', 'some-plugin']]),
     );
@@ -261,7 +227,6 @@ describe('collectRepoKind', () => {
     const root = makeProjectRepo();
     const dir = path.join(root, '.agents', 'rules', 'subrules', 'gh-merge-guard');
     fs.mkdirSync(dir, { recursive: true });
-    // The directory form documented in lib/rules/compose.ts (SUBRULE_RULE_FILE).
     fs.writeFileSync(path.join(dir, 'rule.md'), '# Merge & Admin-Bypass Guard\n\nNever bypass.\n');
     const repo = resolveRepoTarget(root)!;
     const [rule] = collectRepoKind(repo, 'rules');
@@ -281,9 +246,6 @@ describe('collectRepoKind', () => {
   it('reads hooks through the grouped reader, matching the summary view', () => {
     const root = makeProjectRepo();
     const hooksDir = path.join(root, '.agents', 'hooks');
-    // Hooks nest under event directories, and a script pairs with its data
-    // sidecar. A flat readdir returned the event dir itself ('pre-tool-use') and
-    // counted the sidecar separately, so `--hooks` and the summary disagreed.
     fs.mkdirSync(path.join(hooksDir, 'pre-tool-use'), { recursive: true });
     fs.writeFileSync(path.join(hooksDir, 'pre-tool-use', 'guard.sh'), '#!/usr/bin/env bash\necho ok\n');
     fs.writeFileSync(path.join(hooksDir, 'pre-tool-use', 'guard.yaml'), 'matches: {}\n');
@@ -291,11 +253,7 @@ describe('collectRepoKind', () => {
 
     const repo = resolveRepoTarget(root)!;
     const names = collectRepoKind(repo, 'hooks').map(h => h.name);
-    // The nested script is found, its sidecar collapses into it, and neither the
-    // event directory nor the directory doc is reported as a hook.
     expect(names).toEqual(['guard']);
-    // The drill and the summary must never report different counts again — both
-    // now go through listHookEntriesFromDir.
     expect(names).toEqual(listHookEntriesFromDir(hooksDir).map(h => h.name));
   });
 });
@@ -328,10 +286,9 @@ describe('pathSize', () => {
   it('sums file bytes and counts, recursing dirs and ignoring symlinks', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-size-'));
     tempDirs.push(dir);
-    fs.writeFileSync(path.join(dir, 'a.txt'), 'hello');          // 5 bytes
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'hello');
     fs.mkdirSync(path.join(dir, 'sub'));
-    fs.writeFileSync(path.join(dir, 'sub', 'b.txt'), 'world!!');  // 7 bytes
-    // A symlink to a real file must not be followed/counted.
+    fs.writeFileSync(path.join(dir, 'sub', 'b.txt'), 'world!!');
     fs.symlinkSync(path.join(dir, 'a.txt'), path.join(dir, 'link.txt'));
 
     const size = pathSize(dir);
@@ -364,9 +321,6 @@ describe('wrapJoined', () => {
 
 describe('summaryLine', () => {
   it('drops the trigger clause so the row says what the thing does', () => {
-    // 15 of 20 skills in .system append "Triggers on: …" to their description.
-    // In a one-line row that clause is what survived truncation, so the row
-    // showed trigger keywords instead of the purpose.
     expect(summaryLine(
       "Manage AI coding agent CLIs with agents-cli. Triggers on: 'agents add', 'agents use', installing agent versions",
     )).toBe('Manage AI coding agent CLIs with agents-cli.');
@@ -382,7 +336,6 @@ describe('summaryLine', () => {
   });
 
   it('does not chop a description to a fragment on an early abbreviation', () => {
-    // A naive first-sentence split would cut at "e.g." and leave three words.
     const d = 'Publish artifacts, e.g. Plans and reports, to a shareable link on your own storage.';
     expect(summaryLine(d)).toBe(d);
   });
@@ -392,8 +345,6 @@ describe('summaryLine', () => {
   });
 
   it('never blanks a row when the description OPENS with the trigger clause', () => {
-    // The split yields an empty head here. Returning it would render an empty
-    // cell while --json still carried the full text — showing less than we have.
     const d = 'Triggers on: reflect, step back, reconsider, recall feedback.';
     expect(summaryLine(d)).toBe(d);
     expect(summaryLine('Use this skill when rewriting a draft.'))
@@ -412,31 +363,22 @@ describe('summarizeHook', () => {
   });
 
   it('survives agents.yaml values whose YAML type contradicts the declared type', () => {
-    // A hook entry is an unvalidated yaml.parse cast. `events` as a scalar is
-    // neither null nor an array, so `(hook.events ?? []).join()` threw — killing
-    // bare `agents inspect <repo>`, and via the central manifest every box's
-    // `agents inspect <agent>`. Renders the scalar rather than dropping it.
     expect(summarizeHook({ script: 'x.sh', events: 'PreToolUse' } as unknown as ManifestHook))
       .toBe('PreToolUse');
-    // Predicates reach `truncate`, which calls `.slice`.
     expect(summarizeHook({
       script: 'x.sh',
       events: ['Stop'],
       matches: { prompt_contains: 12345, cwd_includes: 99 },
     } as unknown as ManifestHook)).toBe('Stop · prompt~"12345" · cwd~99');
-    // An object carries no one-line form: dropped, never `[object Object]`.
     expect(summarizeHook({
       script: 'x.sh', events: [{ a: 1 }, 'Stop'],
     } as unknown as ManifestHook)).toBe('Stop');
     expect(summarizeHook({ script: 'x.sh', events: {} } as unknown as ManifestHook))
       .toBe('(no event)');
-    // `cache: 5` has no `.ttl` and `{ttl: {…}}` has a non-scalar one; both used
-    // to render a tail reading `(undefined cache)` / `([object Object] cache)`.
     for (const cache of [5, [1, 2], { ttl: { a: 1 } }, {}]) {
       expect(summarizeHook({ script: 'x.sh', events: ['Stop'], cache } as unknown as ManifestHook))
         .toBe('Stop');
     }
-    // A well-formed ttl still renders.
     expect(summarizeHook({ script: 'x.sh', events: ['Stop'], cache: { ttl: '5m' } } as unknown as ManifestHook))
       .toBe('Stop (5m cache)');
   });
@@ -488,10 +430,8 @@ describe('hookManifestByScript', () => {
       'git-guard': { script: 'git-guard.sh', events: ['PreToolUse'], matcher: 'Bash' },
     };
     const byScript = hookManifestByScript(manifest);
-    // Installed hook names equal the script basename, so that is the join key.
     expect(byScript.get('04-capture-session-start-metadata')?.events).toEqual(['SessionStart']);
     expect(byScript.get('git-guard')?.matcher).toBe('Bash');
-    // The manifest key itself is NOT a lookup key.
     expect(byScript.get('capture-session-start-metadata')).toBeUndefined();
   });
 });
@@ -507,7 +447,7 @@ describe('repoGitInfo', () => {
     fs.writeFileSync(path.join(dir, 'a.txt'), 'one');
     g(['add', 'a.txt']);
     g(['commit', '-q', '-m', 'first commit']);
-    fs.writeFileSync(path.join(dir, 'a.txt'), 'two');   // make the tree dirty
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'two');
 
     const info = repoGitInfo(dir)!;
     expect(info.branch).toBe('main');
@@ -517,11 +457,6 @@ describe('repoGitInfo', () => {
     expect(info.dirty).toBe(1);
   });
 
-  // The `$(touch …)` payload is POSIX-shell syntax and embeds an absolute
-  // sentinel path (which contains `:` / `\` on Windows — illegal in a filename),
-  // so the demonstrator runs on POSIX only. The fix (argv-form execFileSync)
-  // removes the shell on every platform, so Windows is covered by construction,
-  // not by this sh-specific probe.
   it.skipIf(process.platform === 'win32')('treats a repo path with shell metacharacters as a literal argument', () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-inject-'));
     tempDirs.push(base);
@@ -543,9 +478,7 @@ describe('repoGitInfo', () => {
   });
 });
 
-// ─── Routines ────────────────────────────────────────────────────────────────
 
-/** A DotAgents repo whose routines/ dir also holds sandbox overlay HOMEs. */
 function makeRoutinesRepo(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-routines-'));
   tempDirs.push(root);
@@ -562,7 +495,6 @@ function repoAt(root: string) {
   return { label: 'fixture', root };
 }
 
-/** Live state a test controls, so nothing reads the developer's real fleet. */
 function fakeLive(overrides: Partial<RoutineLiveState> = {}): (name: string) => RoutineLiveState {
   return () => ({
     devices: [], materialized: false, thisDevice: 'testbox', enabledHere: null,
@@ -570,7 +502,6 @@ function fakeLive(overrides: Partial<RoutineLiveState> = {}): (name: string) => 
   });
 }
 
-/** One `extra` row's value, or '' — mirrors the renderers' accessor. */
 function extraValue(item: { extra?: Array<[string, string]> }, key: string): string {
   return item.extra?.find(([k]) => k === key)?.[1] ?? '';
 }
@@ -580,7 +511,6 @@ const AGENT_ROUTINE = 'name: daily\nschedule: "0 9 * * *"\nagent: claude\nprompt
 describe('collectRepoRoutines', () => {
   it('reads *.yml only, ignoring the <name>/home/ sandbox overlays', () => {
     const root = makeRoutinesRepo({ 'daily.yml': AGENT_ROUTINE });
-    // Both a matching overlay and an orphan left behind by a removed routine.
     fs.mkdirSync(path.join(root, 'routines', 'daily', 'home'), { recursive: true });
     fs.mkdirSync(path.join(root, 'routines', 'gone', 'home'), { recursive: true });
 
@@ -597,8 +527,6 @@ describe('collectRepoRoutines', () => {
   it('takes the name from the YAML, not the filename', () => {
     const root = makeRoutinesRepo({ 'renamed-file.yml': AGENT_ROUTINE });
     const [item] = collectRepoRoutines(repoAt(root), fakeLive());
-    // Everything downstream (device allowlist, run history, sandbox home) keys
-    // on the declared name, so a disagreeing basename is worth surfacing.
     expect(item.name).toBe('daily');
     expect(item.extra).toContainEqual(['file', 'renamed-file.yml']);
   });
@@ -628,8 +556,6 @@ describe('collectRepoRoutines', () => {
   });
 
   it('flags a .yml/.yaml collision and describes the file the loader actually loads', () => {
-    // readJobFromDir tries `.yml` before `.yaml`, so `.yml` is what fires. A plain
-    // alphabetical sort described `.yaml` — the wrong schedule and command.
     const root = makeRoutinesRepo({
       'dup.yaml': 'name: dup\nschedule: "0 9 * * *"\ncommand: echo FROM_YAML\n',
       'dup.yml': 'name: dup\nschedule: "0 3 * * *"\ncommand: echo FROM_YML\n',
@@ -639,13 +565,11 @@ describe('collectRepoRoutines', () => {
     expect(items[0].path).toMatch(/dup\.yml$/);
     expect(items[0].json?.command).toBe('echo FROM_YML');
     expect(items[0].json?.scheduleHuman).toBe('daily at 3:00 AM');
-    // The problem reaches BOTH renderers: extra for the panes, json for --json.
     expect(items[0].extra?.find(([k]) => k === 'problem')?.[1]).toMatch(/both \.yml and \.yaml/);
     expect(String(items[0].json?.problem)).toMatch(/both \.yml and \.yaml/);
   });
 
   it('keeps a collided routine\'s schedule and status in the overview row', () => {
-    // A duplicate sibling must not blank an otherwise-healthy routine's row.
     const root = makeRoutinesRepo({
       'dup.yml': 'name: dup\nschedule: "0 3 * * *"\ncommand: echo hi\n',
       'dup.yaml': 'name: dup\ncommand: echo bye\n',
@@ -680,7 +604,6 @@ describe('collectRepoRoutines', () => {
 
   it('reports enablement for THIS device, matching `agents routines list`', () => {
     const root = makeRoutinesRepo({ 'daily.yml': AGENT_ROUTINE });
-    // enabledHere is this device's own answer — the same one applyDeviceActivation asks.
     const [off] = collectRepoRoutines(repoAt(root), fakeLive({ devices: ['other'], materialized: true, enabledHere: false }));
     expect(off.json?.enabled).toBe(false);
 
@@ -689,9 +612,6 @@ describe('collectRepoRoutines', () => {
   });
 
   it('keeps the file value when THIS device has no allowlist, even if a peer does', () => {
-    // The freshly-synced-member case. `materialized` is fleet-wide, so keying
-    // `enabled` on it reported `no` for routines the daemon was actively firing.
-    // applyDeviceActivation only overrides when THIS device answers non-null.
     const root = makeRoutinesRepo({
       'on.yml': 'name: on\nschedule: "0 9 * * *"\nagent: claude\nenabled: true\n',
       'off.yml': 'name: off\nschedule: "0 9 * * *"\nagent: claude\nenabled: false\n',
@@ -716,7 +636,6 @@ describe('collectRepoRoutines', () => {
       'pinned.yml': 'name: pinned\nschedule: "0 9 * * *"\nagent: claude\ndevices:\n  - zion\n',
     });
     const [item] = collectRepoRoutines(repoAt(root), fakeLive({ materialized: true }));
-    // The exact inversion that let 22 routines go dark unnoticed.
     expect(item.json?.devices).toEqual(['zion']);
     expect(item.json?.enabledDevices).toEqual([]);
   });
@@ -810,7 +729,6 @@ describe('routineHealthTier', () => {
   });
 
   it('cannot leave a dark routine behind the …(+N) tail', () => {
-    // printExpandedSection shows only the first 6, so the sort IS the section.
     const healthy = Array.from({ length: 20 }, (_, i) => ({
       name: `aaa-healthy-${i}`, source: 'fixture', path: '', linkTarget: '', description: '',
       extra: [['devices', 'zion'], ['enabled', 'yes'], ['last', 'completed · 1h ago']] as Array<[string, string]>,
