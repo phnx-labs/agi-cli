@@ -1,42 +1,6 @@
-/**
- * Routine execution context + readiness resolution.
- *
- * A scheduled routine has to run *somewhere*. This module is the single,
- * target-aware answer to "which directory does this routine's run land in, and
- * is the chosen harness able to start there?" — computed for the eventual
- * execution TARGET, never from the daemon process's own cwd.
- *
- * Two layers, both pure of global state (every input is injected, so a test
- * exercises the real code path against real temp directories rather than a mock):
- *
- *  - {@link resolveRoutineExecutionContext} — resolve the working directory from
- *    the routine's singular `project` anchor and/or portable `cwd`, following the
- *    locked resolution table (see below), and verify the structural + filesystem
- *    readiness of that directory (existence, portability, writability, cloud
- *    portability). This layer owns the *context* readiness codes.
- *  - {@link evaluateRoutineReadiness} — take a resolved context and layer the
- *    *harness/target* readiness codes (agent installed, Codex workspace trust,
- *    live auth, target reachability) via injected probes.
- *
- * Resolution table (target `$HOME` = the execution device's home):
- *
- *  | project | cwd            | resolved dir            | readiness |
- *  |---------|----------------|-------------------------|-----------|
- *  | usable  | —              | project base            | continue  |
- *  | usable  | relative       | base + cwd (inside base)| continue if inside base + exists |
- *  | rootless| relative       | $HOME + cwd             | continue if exists |
- *  | —       | relative       | $HOME + cwd             | continue if exists |
- *  | —       | ~/…            | $HOME-relative          | continue if exists |
- *  | —       | abs under home | normalized to ~/…       | continue  |
- *  | —       | abs outside home| local-pinned only      | pause (cwd_not_portable) for host/fleet/cloud |
- *  | named+unusable | —       | no fallback             | pause (project_path_missing) |
- *  | —       | — (agent/workflow) | no implicit home     | pause (execution_context_missing) |
- *  | —       | — (command)    | $HOME                   | continue (housekeeping) |
- */
 
 import * as path from 'path';
 
-/** Stable, machine-readable readiness codes. A routine is activated only when ready. */
 export type RoutineReadinessCode =
   | 'project_not_found'
   | 'project_path_missing'
@@ -55,28 +19,18 @@ export type RoutineReadinessCode =
 
 export interface RoutineReadiness {
   code: RoutineReadinessCode;
-  /** Human-readable one-line explanation of the failing check. */
   message: string;
-  /** A single safe command that repairs the blocker, when one exists. */
   repair?: string;
 }
 
-/** Where the routine body executes — mirrors {@link HostStrategy} placement. */
 export type PlacementMode = 'local' | 'host' | 'fleet' | 'cloud';
 
-/**
- * What the caller resolved about the routine's singular `project` anchor.
- * `undefined` (the field on the input) means the routine names no project.
- */
 export type ProjectResolution =
   | { defined: false }
-  /** Defined project; `base` is its portable base dir (`~/…` or absolute), or
-   *  undefined for a rootless Linear-imported project with no checkout. */
   | { defined: true; base?: string };
 
 export type RoutineKind = 'agent' | 'workflow' | 'command';
 
-/** A filesystem probe against the execution TARGET. */
 export interface ContextFsProbe {
   exists(absPath: string): boolean;
   isDirectory(absPath: string): boolean;
@@ -84,61 +38,31 @@ export interface ContextFsProbe {
 }
 
 export interface ExecutionContextInput {
-  /** Routine name (for messages only). */
   name?: string;
-  /** Singular execution anchor (`JobConfig.project`). */
   project?: string;
-  /** Portable execution directory (`JobConfig.cwd`). */
   cwd?: string;
-  /** Exactly one of agent/workflow/command determines the fallback rules. */
   kind: RoutineKind;
-  /** Placement of the run — governs portability enforcement and cloud rules. */
   mode: PlacementMode;
-  /** Execution target's absolute `$HOME`. Local: `os.homedir()`; remote: the target home. */
   targetHome: string;
-  /** Resolution of the `project` anchor; omit when the routine names no project. */
   projectResolution?: ProjectResolution;
-  /**
-   * Filesystem probe for the target, present only when this process can inspect
-   * it (a local run, or add/edit/doctor invoked on the target box). Absent for a
-   * remote/cloud target we cannot reach — then only structural + portability
-   * checks run (existence is deferred, never assumed).
-   */
   probe?: ContextFsProbe;
 }
 
 export interface ResolvedExecutionContext {
   project?: string;
-  /** `config.cwd` echoed for the run record. */
   requestedCwd?: string;
-  /** Portable resolved cwd for the run record: `~/…` when under target home, else absolute. */
   resolvedCwd?: string;
-  /** The resolved cwd expanded to an absolute path on the target. Undefined when unresolved. */
   absoluteCwd?: string;
   targetHome: string;
   ready: boolean;
-  /** Present when `ready` is false. */
   readiness?: RoutineReadiness;
 }
 
-// --- target-aware path helpers (do NOT use project-root.ts's local-HOME-bound
-// forms: resolution must root at the execution target's home, not this box's) ---
 
-/**
- * Path flavour of the EXECUTION TARGET, inferred from its own home string.
- *
- * The target home belongs to whichever machine will run the routine, which need
- * not be this one — a Windows box can schedule onto a Linux target. Joining with
- * the LOCAL separator therefore built `\home\user\svc` for a POSIX target (and
- * would build `C:/Users/x/svc` the other way), so these helpers key off the home
- * path's shape instead of `process.platform`. Same-platform behaviour is
- * unchanged; only the cross-platform case is fixed.
- */
 function targetPath(home: string): typeof path.posix {
   return /^[A-Za-z]:[\\/]/.test(home) || home.includes('\\') ? path.win32 : path.posix;
 }
 
-/** Expand a leading `~`/`$HOME` against the target home; pass other values through. */
 function expandTargetHome(home: string, p: string): string {
   if (p === '~' || p === '$HOME') return home;
   const tp = targetPath(home);
@@ -147,7 +71,6 @@ function expandTargetHome(home: string, p: string): string {
   return p;
 }
 
-/** Rewrite an absolute path under the target home to its portable `~/…` form; pass others through. */
 function toTargetPortable(home: string, abs: string): string {
   const tp = targetPath(home);
   const rel = tp.relative(home, abs);
@@ -156,25 +79,10 @@ function toTargetPortable(home: string, abs: string): string {
   return abs;
 }
 
-/**
- * True for a bare relative path (not absolute, not home-anchored) ON THE TARGET.
- *
- * `isAbsolute` is evaluated in the TARGET's own path flavour (see
- * {@link targetPath}), not this process's platform — a Windows-shaped absolute
- * cwd (`C:\Users\x\override`) dispatched from a POSIX daemon must still be
- * recognized as absolute, or it is misread as project-relative.
- */
 export function isBareRelative(home: string, p: string): boolean {
   return !targetPath(home).isAbsolute(p) && !p.startsWith('~') && !p.startsWith('$HOME');
 }
 
-/**
- * True when `child` is `base` or strictly beneath it (no `..` escape).
- *
- * Compares in the BASE's own path flavour (see {@link targetPath}) — both
- * arguments are target-side paths, and comparing a POSIX pair with Windows
- * semantics (or the reverse) answers about the wrong filesystem.
- */
 function isInside(baseAbs: string, childAbs: string): boolean {
   const tp = targetPath(baseAbs);
   const rel = tp.relative(baseAbs, childAbs);
@@ -188,26 +96,16 @@ function pause(
   return { ...ctx, ready: false, readiness };
 }
 
-/**
- * Resolve the working directory a routine's run lands in and verify its
- * structural + filesystem readiness for the given placement. Pure of global
- * state — every dependency (target home, project resolution, filesystem probe)
- * is injected.
- */
 export function resolveRoutineExecutionContext(input: ExecutionContextInput): ResolvedExecutionContext {
   const { project, cwd, kind, mode, targetHome, projectResolution, probe } = input;
   const requestedCwd = cwd;
   const base = { project, requestedCwd, targetHome };
   const hasProjectBinding = projectResolution?.defined === true;
 
-  // Finalize a resolved portable dir: run the cloud/portability/filesystem gates
-  // and return either a ready context or a paused one.
   const finalize = (portable: string, missingCode: RoutineReadinessCode): ResolvedExecutionContext => {
     const absoluteCwd = expandTargetHome(targetHome, portable);
     const ctx = { ...base, resolvedCwd: portable, absoluteCwd };
 
-    // Cloud: a filesystem-only cwd (no project/repo binding) has no provider
-    // repository to map onto. A project binding selects the provider repo.
     if (mode === 'cloud' && !hasProjectBinding) {
       return pause(ctx, {
         code: 'cloud_context_unsupported',
@@ -243,7 +141,6 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
     return { ...ctx, ready: true };
   };
 
-  // 1. Explicit project anchor.
   if (project !== undefined) {
     if (!projectResolution || projectResolution.defined === false) {
       return pause(base, {
@@ -254,15 +151,11 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
     }
     const projBase = projectResolution.base;
     if (projBase) {
-      // Usable base path.
       if (cwd === undefined) {
         return finalize(projBase, 'project_path_missing');
       }
       if (isBareRelative(targetHome, cwd)) {
         const baseAbs = expandTargetHome(targetHome, projBase);
-        // Target-side join: `path.resolve` would use this host's separator and,
-        // for a target home this host does not consider absolute, prepend the
-        // local process cwd.
         const joinedAbs = targetPath(targetHome).resolve(baseAbs, cwd);
         if (!isInside(baseAbs, joinedAbs)) {
           return pause(base, {
@@ -272,31 +165,20 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
         }
         return finalize(toTargetPortable(targetHome, joinedAbs), 'cwd_missing');
       }
-      // Absolute or home-anchored cwd alongside a project: fall through to the
-      // cwd-first handling below (the project base is not the anchor then).
     } else if (cwd === undefined) {
-      // Rootless project (Linear import), no cwd: there is nothing to run in.
       return pause(base, {
         code: 'project_path_missing',
         message: `project '${project}' has no checkout path — give it a cwd (anchored at the target home) or set the project's root`,
         repair: `agents routines edit ${input.name ?? '<name>'} --cwd <path>`,
       });
     }
-    // Rootless project + a cwd, or usable project + a non-relative cwd: the cwd
-    // itself is the anchor. A bare relative cwd anchors at the target home.
   }
 
-  // 2. cwd without a (usable relative-anchoring) project.
   if (cwd !== undefined) {
     if (cwd.startsWith('~') || cwd.startsWith('$HOME')) {
       const abs = expandTargetHome(targetHome, cwd);
       return finalize(toTargetPortable(targetHome, abs), 'cwd_missing');
     }
-    // Absolute in EITHER path flavour — a Windows daemon resolving a POSIX
-    // target cwd (or the reverse) must not fall through to bare-relative join.
-    // Do not `path.resolve` on the local platform: on win32 that rewrites
-    // `/home/u/override` to `D:\home\u\override` and falsely flags
-    // cwd_not_portable (Windows CI, cross-platform schedule).
     const cwdIsAbsolute =
       targetPath(targetHome).isAbsolute(cwd) ||
       path.posix.isAbsolute(cwd) ||
@@ -304,11 +186,8 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
     if (cwdIsAbsolute) {
       const resolved = cwd;
       if (isInside(targetHome, resolved)) {
-        // Normalize an absolute-under-home path to its portable form on save.
         return finalize(toTargetPortable(targetHome, resolved), 'cwd_missing');
       }
-      // Absolute path outside the target home: only a local-pinned routine can
-      // use it; host/fleet/cloud placement cannot carry a non-portable path.
       if (mode === 'local') {
         return finalize(resolved, 'cwd_missing');
       }
@@ -317,15 +196,10 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
         message: `absolute cwd '${cwd}' is outside the target home and cannot travel to ${mode} placement — use a home-relative path`,
       });
     }
-    // Bare relative cwd (no usable project base): anchor at the target home,
-    // in the target's own path flavour (see the joinedAbs note above).
     return finalize(toTargetPortable(targetHome, targetPath(targetHome).resolve(targetHome, cwd)), 'cwd_missing');
   }
 
-  // 3. Neither field.
   if (kind === 'command') {
-    // Command routines are deterministic housekeeping — the target home is a
-    // safe implicit cwd, so a version-check / notify routine keeps working.
     return finalize(toTargetPortable(targetHome, targetHome), 'cwd_missing');
   }
   return pause(base, {
@@ -335,17 +209,11 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
   });
 }
 
-// --- harness/target readiness layering ---
 
-/** Injected harness/target probes for {@link evaluateRoutineReadiness}. */
 interface HarnessReadinessProbes {
-  /** Is the resolved agent+version installed on the target? */
   agentInstalled?(): boolean;
-  /** Is the absolute execution dir a trusted Codex workspace? (Codex agent only.) */
   codexTrusted?(absoluteCwd: string): boolean;
-  /** Live auth verdict for the resolved account/version. `ok:false` → agent_auth_failed. */
   authOk?(): { ok: boolean; reason?: string };
-  /** Is the execution target reachable? (host/fleet/cloud placement only.) */
   targetReachable?(): boolean;
 }
 
@@ -355,13 +223,6 @@ export interface RoutineReadinessResult {
   readiness?: RoutineReadiness;
 }
 
-/**
- * Layer the harness/target readiness codes onto a resolved execution context.
- * Context blockers short-circuit (no point probing auth for a routine that has
- * no directory to run in). Every probe is optional and injected; an omitted
- * probe is treated as "not applicable / passes" so a caller only pays for the
- * checks it wires up.
- */
 export function evaluateRoutineReadiness(
   context: ResolvedExecutionContext,
   probes: HarnessReadinessProbes = {},
@@ -379,8 +240,6 @@ export function evaluateRoutineReadiness(
   }
 
   if (probes.agentInstalled && !probes.agentInstalled()) {
-    // A pinned version names its exact miss — "no usable version" would send the
-    // operator hunting for a harness that IS installed, just not at the pin.
     const pinned = opts.version && opts.agent ? `${opts.agent}@${opts.version}` : undefined;
     return withBlocker(context, {
       code: 'agent_unavailable',

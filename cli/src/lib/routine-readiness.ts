@@ -1,14 +1,3 @@
-/**
- * Activation readiness for a routine, composed from the target-aware execution
- * context ({@link resolveJobExecutionContext}) plus the harness/target checks a
- * caller can perform on this box (agent installed). This is the gate `add`,
- * `edit`, `doctor`, and `resume` all run before activating a routine: ready →
- * active, any proven blocker → saved paused with a stable code + repair command.
- *
- * Structural context readiness is synchronous for the scheduler. Interactive
- * add/edit/doctor/resume additionally call the live variant below, which probes
- * authentication and Codex's native workspace-trust record before activation.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,19 +31,6 @@ function fireBlockingAuthVerdict(verdict: AuthVerdict): boolean {
   return verdict === 'revoked' || verdict === 'unconfigured';
 }
 
-/**
- * Fire-time auth preflight: read the daemon-warmed auth-health cache for the
- * exact (agent, version) a routine has resolved to run, and return an
- * `agent_auth_failed` blocker when that account is provably signed out — so the
- * daemon records a terminal `blocked` run (with the re-login repair) instead of
- * spawning a doomed run that 401s and burns a session (PHNX-3415).
- *
- * Cache-only (no network, no prompt — the daemon refreshes the cache
- * periodically and `fleet ping` writes it), and fails OPEN on a missing or
- * non-blocking verdict so a stale/absent probe never wedges a routine. It is
- * checked AFTER version rotation resolves the account (`launch.chain[0]`), so it
- * judges the identity the run will actually use, never a rotated-past dead pin.
- */
 export function fireTimeAuthReadiness(agent: string, version: string): RoutineReadiness | null {
   const health = readAuthHealth(machineId(), agent, version);
   if (!health || !fireBlockingAuthVerdict(health.verdict)) return null;
@@ -66,29 +42,17 @@ export function fireTimeAuthReadiness(agent: string, version: string): RoutineRe
   };
 }
 
-/**
- * Evaluate whether a routine is ready to activate on this box. `probeAgent`
- * defaults to "is a version of the routine's agent resolvable" via
- * {@link resolveVersion}; pass a stub in tests to exercise the availability path
- * without an installed harness.
- */
 export function evaluateActivationReadiness(
   config: JobConfig,
   deps: { probeAgent?: (agent: string) => boolean } = {},
 ): RoutineReadinessResult {
   const strategy = resolveHostStrategy(config);
   const mode: PlacementMode = strategy;
-  // Local placement inspects this box's filesystem; a remote/cloud target defers
-  // existence (its filesystem is unreachable here) and checks portability only.
   const context = resolveJobExecutionContext(config, {
     mode,
     probe: mode === 'local' ? undefined : null,
   });
 
-  // A pinned version on LOCAL placement must exist here — accepting a routine
-  // whose exact pin is absent just moves the failure to fire time (RUSH-2719).
-  // Remote host/fleet targets defer the check: their installs are unreachable
-  // from this box until the RUSH-2290 execution-context-on-target resolver.
   const pinnedLocally = mode === 'local' ? config.version : undefined;
   const probeAgent = deps.probeAgent ?? ((agent: string) =>
     pinnedLocally
@@ -97,8 +61,6 @@ export function evaluateActivationReadiness(
   return evaluateRoutineReadiness(
     context,
     {
-      // Command routines have no agent to install; workflow routines dispatch
-      // through `agents run` (claude under the hood) and are checked at run time.
       agentInstalled: config.agent && !config.workflow && !config.command
         ? () => probeAgent(config.agent!)
         : undefined,
@@ -113,7 +75,6 @@ interface RemoteProjectDefinition {
   defaultPath?: string;
 }
 
-/** Parse the target HOME sentinel and the project catalog returned by one SSH call. */
 export function parseRemoteProjectSnapshot(stdout: string): { home: string; projects: RemoteProjectDefinition[] } | undefined {
   const lines = stdout.split(/\r?\n/);
   const homeLine = lines.shift();
@@ -132,7 +93,6 @@ export function parseRemoteProjectSnapshot(stdout: string): { home: string; proj
   }
 }
 
-/** Build a target-native probe that creates and removes a file in the workspace. */
 export function buildRemoteWorkspaceProbe(cwd: string, windows: boolean): string {
   if (windows) {
     return `powershell -NoProfile -EncodedCommand ${encodePowershell(`$d=${powershellQuote(cwd)}; if (-not (Test-Path -LiteralPath $d -PathType Container)) { exit 1 }; $p=Join-Path $d ([IO.Path]::GetRandomFileName()); try { New-Item -ItemType File -Path $p -ErrorAction Stop | Out-Null; Remove-Item -LiteralPath $p -Force -ErrorAction Stop; exit 0 } catch { exit 1 }`)}`;
@@ -141,7 +101,6 @@ export function buildRemoteWorkspaceProbe(cwd: string, windows: boolean): string
   return `probe_path=$(mktemp ${shellQuote(pattern)}) && rm -f "$probe_path"`;
 }
 
-/** A successful probe must contain the exact requested postcondition, not merely exit zero. */
 export function probeOutputHasSentinel(stdout: string, sentinel: string): boolean {
   const containsExact = (value: unknown): boolean => {
     if (value === sentinel) return true;
@@ -171,31 +130,10 @@ function codexWorkspaceTrusted(version: string, cwd: string): boolean {
   }
 }
 
-/**
- * Verdicts a routine's activation auth check accepts as usable. `no_evidence` is
- * here for robustness (a payload that still carries one), but a box that cannot
- * probe DROPS it in {@link probeLocalFleetAuth}, so the real path for those boxes
- * is the absent-row + launchability fallback in {@link decideRoutineAuthReadiness}
- * (PHNX-4116).
- */
 const ROUTINE_AUTH_ACCEPTED: ReadonlySet<AuthVerdict> = new Set<AuthVerdict>([
   'live', 'rate_limited', 'unverified', 'no_evidence',
 ]);
 
-/**
- * ONE decision the local ({@link evaluateActivationReadinessLive}) and host
- * ({@link evaluateHostActivationReadiness}) readiness paths share, so both reach
- * the SAME answer for the same box (PHNX-4116). `row` is that box's probe verdict
- * for the routine's agent — ABSENT when the box could not probe (a worker's
- * setup-token box, or a headed box that spent its hourly usage-endpoint budget,
- * both drop `no_evidence` in `probeLocalFleetAuth`). `launchable` is whether the
- * box holds a launchable signed-in credential, from the SAME
- * `collectRunCandidates`/`isLaunchableSignedIn` the run router uses — so a
- * token-backed routine on a box that cannot probe stays activatable, a box with
- * no credential at all fails `unconfigured`, and a server rejection (`revoked` —
- * the only present-but-not-accepted verdict these force-probed paths produce)
- * blocks regardless of a token on disk.
- */
 export function decideRoutineAuthReadiness(
   row: { verdict: AuthVerdict } | undefined,
   launchable: boolean,
@@ -205,16 +143,6 @@ export function decideRoutineAuthReadiness(
   return { ok: false, reason: row.verdict };
 }
 
-/**
- * Decide a host-placed routine's auth readiness from the REMOTE box's `devices
- * ping --local --json` payload (PHNX-4116). Pure over the payload TEXT so it is
- * unit-tested without SSH: it finds this agent's probe row (ABSENT when the box
- * dropped its `no_evidence` row) and reads the box's per-agent launchability the
- * ping now carries, then runs {@link decideRoutineAuthReadiness} — so a host box
- * that could not probe but holds a token is ready, exactly as the local path
- * decides for the same box. Returns null when the payload cannot be parsed; the
- * caller treats that as a probe failure, never as "no credential".
- */
 export function decideHostAuthFromPing(
   stdout: string,
   agent: string,
@@ -231,11 +159,6 @@ export function decideHostAuthFromPing(
   return decideRoutineAuthReadiness(row, launchable?.includes(agent) ?? false);
 }
 
-/**
- * Interactive setup/repair readiness. Unlike the scheduler's deterministic
- * structural gate, this completes a real local auth request and reads Codex's
- * native trust record before add/edit/resume can activate the definition.
- */
 export async function evaluateActivationReadinessLive(config: JobConfig): Promise<RoutineReadinessResult> {
   const structural = evaluateActivationReadiness(config);
   if (!structural.ready) return structural;
@@ -247,9 +170,6 @@ export async function evaluateActivationReadinessLive(config: JobConfig): Promis
   if (!version) return structural;
   const context = resolveJobExecutionContext(config, { mode: 'local' });
 
-  // The probe row (absent when this box could not probe — a worker's setup-token
-  // box drops `no_evidence`) plus the run-router launchability, run through the
-  // ONE decision the host path also uses so both agree for the same box.
   const rows = await probeLocalFleetAuth({ agents: [config.agent as never] });
   const row = rows.find((candidate) => candidate.version === version);
   const { collectRunCandidates } = await import('./accounting/rotate.js');
@@ -265,7 +185,6 @@ export async function evaluateActivationReadinessLive(config: JobConfig): Promis
   }, { agent: config.agent });
 }
 
-/** Resolve and probe the actual SSH target used by a host-placed routine. */
 export async function evaluateHostActivationReadiness(config: JobConfig): Promise<RoutineReadinessResult> {
   const host = await resolveHostRunTarget(config.host!);
   const target = sshTargetFor(host);
@@ -330,11 +249,6 @@ export async function evaluateHostActivationReadiness(config: JobConfig): Promis
         ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`${POWERSHELL_PROGRESS_SILENCE}; & agents ${pingArgs.map(powershellQuote).join(' ')}`)}`
         : `agents ${pingArgs.map(shellQuote).join(' ')}`;
       const probe = sshExec(target, command, { timeoutMs: 30_000, extraSshArgs: identity });
-      // A ping that could not run or parse is a probe FAILURE, never mistaken for
-      // "no credential": block with the failure so the operator sees it. A parsed
-      // payload runs the shared decision — an ABSENT row (the remote dropped its
-      // `no_evidence`) plus the launchability the ping now carries is ready,
-      // exactly as the local path decides for the same box (PHNX-4116).
       const decision = probe.code === 0 ? decideHostAuthFromPing(probe.stdout, config.agent) : null;
       if (!decision) {
         return evaluateRoutineReadiness(unprobed, {

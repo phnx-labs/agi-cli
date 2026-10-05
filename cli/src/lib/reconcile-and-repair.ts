@@ -1,21 +1,3 @@
-/**
- * Post-reconcile repair — the shared "make it whole" pass `agents sync` runs
- * after its prune+write, so sync is a true superset of the old `doctor --fix`.
- *
- * `syncResourcesToVersion` reconciles resource FILES (and, with a caller
- * selection, prunes orphans). It does NOT: fill live-home gaps the staleness
- * manifest can't see, generate/repair the managed hook runtime shims, or re-wire
- * a present-but-unwired hook into settings.json. `doctor --fix` used to do all of
- * that; now sync does, by calling this one routine at the tail of every reconcile.
- * (The destructive stale-CLI purge `doctor --fix` also ran is NOT automatic here
- * — it runs only via the explicit `agents sync --prune-clis`, see `pruneClis`.)
- *
- * Ordering matters: sync's own prune+write happens FIRST (unchanged), THEN this
- * repair pass. Prune stays sync's job; heal only FILLS and FIXES (never deletes),
- * so the two never fight. Pure of stdout — returns a structured report;
- * `renderRepairAfterSync` prints it only when the caller is neither `--json` nor
- * `--quiet`.
- */
 import type { AgentId } from './types.js';
 import { AGENTS, ALL_AGENT_IDS } from './agents.js';
 import chalk from 'chalk';
@@ -49,20 +31,14 @@ const AGENT_NAMES: Record<string, string> = Object.fromEntries(
   ALL_AGENT_IDS.map((id) => [id, AGENTS[id].name]),
 );
 
-// Claude-family agents whose native hook wiring `checkVersionHookWiring` can
-// verify (and `registerHooksToSettings` re-wire).
 const HOOK_WIRING_FIX_AGENTS: AgentId[] = ['claude', 'droid'];
 
-// ─── result shapes ─────────────────────────────────────────────────────────
 
 interface HookRewireResult {
   agent: AgentId;
   version: string;
-  /** Hooks newly wired into settings.json by this pass. */
   rewired: number;
-  /** Hooks still unwired after re-registering (source/home mismatch). */
   remaining: number;
-  /** Stable failure class; never expose a generated temporary shim pathname. */
   failure?: 'register-failed';
 }
 
@@ -70,23 +46,11 @@ interface RepairAfterSyncReport {
   heal: HealResult;
   hookRewire: HookRewireResult[];
   hookRuntimeRepair: HookRuntimeRepairReport;
-  /** Only populated on the umbrella (no-agent) path; null otherwise. */
   staleInstallPurge: RemediateStaleInstallsResult | null;
-  /**
-   * Account slots re-projected from their harness's default version home
-   * (PHNX-3940): one entry per slot, with the artifacts pruned because the
-   * source no longer carries them. Errors are per-harness sentences.
-   */
   slotProjection: SlotProjection[];
   slotProjectionErrors: string[];
 }
 
-/**
- * Test/override hook that scopes the destructive stale-CLI purge to injected
- * paths so it NEVER touches real machine installs. `findAgentsCliInstalls`
- * hard-codes `/usr/local/lib/node_modules` et al. when `globalNodeModulesDirs` is
- * absent, so a purge is unsafe to run unscoped in a test — inject sandbox paths.
- */
 interface PurgeInjection {
   runningRoot?: string;
   runningVersion?: string;
@@ -96,44 +60,20 @@ interface PurgeInjection {
 }
 
 interface RepairAfterSyncOptions {
-  /** Scope the repair to one agent; omit for the umbrella sweep across all
-   *  installed agents. (The purge is NOT tied to this — see `pruneClis`.) */
   agent?: AgentId;
-  /** The versions of `agent` the sync just reconciled. Passing them scopes
-   *  heal + rewire + runtime-repair to exactly those homes; omitting lets heal
-   *  apply its own non-isolated sweep. */
   versions?: string[];
-  /** Resolution cwd for heal's diff. Defaults to heal's neutral home dir. */
   cwd?: string;
-  /** Run the DESTRUCTIVE machine-wide stale-CLI purge (`fs.rmSync`s other
-   *  agents-cli installs). Default false — the purge is NEVER automatic; it runs
-   *  only on the umbrella (no-agent) path AND only when the caller passed
-   *  `agents sync --prune-clis`. */
   pruneClis?: boolean;
-  /** Scope the purge scan+delete to injected paths (tests only). */
   purgeInjection?: PurgeInjection;
 }
 
-// ─── hook re-wire (files reconciled but not referenced in settings.json) ─────
 
-/**
- * Re-wire hooks that reconcile as files but are absent from settings.json.
- *
- * heal() only re-syncs resources the diff flags missing/diff; a hook whose file
- * is byte-identical to source but never referenced in settings.json is neither,
- * so heal walks past it. registerHooksToSettings (the same call `agents sync`
- * makes at versions.ts) regenerates the wiring, so run it for any Claude-family
- * version this repair targets that has unwired hooks. Only claude/droid — the
- * set checkVersionHookWiring can verify.
- */
 function rewireUnwiredHooks(agent: AgentId | undefined, versions: string[] | undefined): HookRewireResult[] {
   const out: HookRewireResult[] = [];
   const agents = agent
     ? (HOOK_WIRING_FIX_AGENTS.includes(agent) ? [agent] : [])
     : HOOK_WIRING_FIX_AGENTS;
   for (const a of agents) {
-    // Explicit versions (the sync's reconcile targets) are honoured as-is; a
-    // sweep excludes isolated copies, mirroring heal().
     const vers = agent && versions && versions.length > 0
       ? versions
       : listInstalledVersions(a).filter((v) => !isVersionIsolated(a, v));
@@ -152,9 +92,6 @@ function rewireUnwiredHooks(agent: AgentId | undefined, versions: string[] | und
         const remaining = after.unwired.length + (after.settingsMissing ? (after.expected ?? 0) : 0);
         out.push({ agent: a, version, rewired: Math.max(0, need - remaining), remaining });
       } catch {
-        // A shim write can fail before the native config writer returns its own
-        // errors. Record the same stable class and keep the repair moving to the
-        // one bounded runtime repair pass below.
         out.push({ agent: a, version, rewired: 0, remaining: need, failure: 'register-failed' });
       }
     }
@@ -167,8 +104,6 @@ function runtimeRepairFilter(
   versions: string[] | undefined,
 ): { agent?: AgentId; version?: string } | undefined {
   if (!agent) return undefined;
-  // A single concrete target narrows to that version. Broad selectors (@all,
-  // agent-only) still make one bounded repair pass for that harness.
   return {
     agent,
     ...(versions && versions.length === 1 ? { version: versions[0] } : {}),
@@ -185,7 +120,6 @@ function purgeStaleAgentsCliCopies(injection?: PurgeInjection): RemediateStaleIn
   let runningRoot = injection?.runningRoot;
   if (!runningRoot) {
     try {
-      // resolveRunningPackageRoot walks up until package.json names this package.
       runningRoot = resolveRunningPackageRoot(__moduleDirname);
     } catch {
       return null;
@@ -200,16 +134,7 @@ function purgeStaleAgentsCliCopies(injection?: PurgeInjection): RemediateStaleIn
   });
 }
 
-// ─── public entrypoint ────────────────────────────────────────────────────────
 
-/**
- * Run the post-reconcile repair pass over the agents/versions a sync just
- * touched: heal live-home gaps (mode 'full', matching the old `doctor --fix`),
- * re-wire hooks the diff-driven heal leaves behind, run one bounded managed-hook
- * runtime repair, and — ONLY when `pruneClis` is set on the umbrella (no-agent)
- * path — purge stale/legacy agents-cli copies. The purge is never automatic.
- * Returns a full account; never writes to stdout.
- */
 export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<RepairAfterSyncReport> {
   const healResult = await heal({
     mode: 'full',
@@ -218,25 +143,16 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });
 
-  // Re-wire hooks the diff-driven heal leaves behind (present file, not wired).
   const hookRewire = rewireUnwiredHooks(opts.agent, opts.versions);
 
-  // One inspect→generate→verify pass after resource + native-wiring repair have
-  // settled. This routine never calls sync/register and never retries.
   const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({
     filter: runtimeRepairFilter(opts.agent, opts.versions),
   });
 
-  // The stale-CLI purge is DESTRUCTIVE and NEVER automatic: it runs only on the
-  // umbrella (no-agent) path AND only when the caller opted in via
-  // `agents sync --prune-clis`. Drift-fixers above always run; this does not.
   const staleInstallPurge = (!opts.agent && opts.pruneClis === true)
     ? purgeStaleAgentsCliCopies(opts.purgeInjection)
     : null;
 
-  // Account slots follow the version home (PHNX-3940). `agents accounts add`
-  // projects a slot once; without this every later sync would update the
-  // version home and leave each slot on the resources it was cloned with.
   const slotProjection: SlotProjection[] = [];
   const slotProjectionErrors: string[] = [];
   const slotAgents = opts.agent ? [opts.agent] : ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);
@@ -261,7 +177,6 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
   return report;
 }
 
-/** True when the repair pass changed (or attempted to change) anything. */
 export function repairChangedAnything(report: RepairAfterSyncReport): boolean {
   return (
     healChangedAnything(report.heal) ||
@@ -274,19 +189,6 @@ export function repairChangedAnything(report: RepairAfterSyncReport): boolean {
   );
 }
 
-/**
- * True when the RECONCILE repair left a per-version problem a human must fix — an
- * unresolvable managed hook runtime shim, or a hook that could not be re-wired.
- * These gate a sync's `ok`/exit code (the yosemite-s1 class the old
- * `doctor --fix` surfaced).
- *
- * The machine-wide stale-CLI purge is deliberately EXCLUDED: a purge that could
- * not delete a system-wide install (typically `EACCES` on `/usr/local/...`, which
- * needs sudo) is a hygiene issue unrelated to whether the reconcile succeeded, so
- * it must not flip a fleet peer's `agents sync --json` to `ok: false`. Purge
- * failures stay fully visible — in the JSON `repair.staleInstallPurge.failed` and
- * the rendered `hold`/`manual` lines.
- */
 export function repairHadFailures(report: RepairAfterSyncReport): boolean {
   return (
     report.hookRewire.some((r) => r.failure !== undefined) ||
@@ -294,13 +196,6 @@ export function repairHadFailures(report: RepairAfterSyncReport): boolean {
   );
 }
 
-/**
- * Serialize the repair pass for a `--json` sync payload — the machine surface the
- * deleted `doctor --fix --json` used to carry (heal detail + hook rewire + hook
- * runtime repair + the umbrella stale-CLI purge). Attached under the `repair` key
- * so fleet fan-out sees what the reconcile fixed and whether anything still needs
- * a human (mirror `repairHadFailures`).
- */
 export function repairAfterSyncJson(report: RepairAfterSyncReport): Record<string, unknown> {
   return {
     heal: report.heal,
@@ -313,7 +208,6 @@ export function repairAfterSyncJson(report: RepairAfterSyncReport): Record<strin
   };
 }
 
-// ─── rendering (human output; sync calls this only when !json && !quiet) ─────
 
 function renderHealText(result: HealResult, log: (s: string) => void): void {
   for (const r of result.repairedManifests) {
@@ -388,11 +282,6 @@ function renderStaleInstallPurgeText(purge: RemediateStaleInstallsResult, log: (
   }
 }
 
-/**
- * Print the repair pass's human-readable detail. Sync calls this only on the
- * interactive / non-json path; the header is emitted only when something actually
- * changed, so a clean sync stays quiet.
- */
 export function renderRepairAfterSync(
   report: RepairAfterSyncReport,
   log: (s: string) => void = (s) => console.log(s),
