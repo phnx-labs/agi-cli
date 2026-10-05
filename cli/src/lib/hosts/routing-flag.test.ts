@@ -55,8 +55,6 @@ describe('hasHostRoutingFlag', () => {
   });
 
   it('does not treat --remote-cwd alone as a routing flag (local-only companion)', () => {
-    // remote-cwd is only meaningful with --device; alone it must not
-    // force-load the passthrough graph on a pure-local invocation.
     expect(hasHostRoutingFlag(['view', '--remote-cwd', '/srv'])).toBe(false);
   });
 });

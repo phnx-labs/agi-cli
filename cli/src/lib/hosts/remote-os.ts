@@ -1,28 +1,9 @@
-/**
- * Resolve a remote host's OS family so the SSH command layer can pick the right
- * shell dialect (POSIX `bash -lc` vs Windows PowerShell). See `remoteShellFor`
- * in `remote-cmd.ts` for how the string is consumed.
- *
- * Three sources, in priority order:
- *   1. The config `platform` key (the per-device doc's config.platform,
- *      over the `fleet.defaults.config` fleet default) — the operator's
- *      explicit override, set with `agents devices config <name> platform <os>`.
- *   2. The device registry `platform` (`windows`/`linux`/`macos`), which is
- *      populated fleet-wide by Tailscale sync — the reliable answer for a box
- *      like `win-mini` that was discovered, not hand-enrolled.
- *   3. The enrolled `HostEntry.os` overlay in agents.yaml (the `uname` captured
- *      when the overlay entry was written), for hosts that live only in that overlay.
- *
- * Missing/unknown from all three → `undefined`, which `remoteShellFor` maps to
- * POSIX. Kept synchronous so the sync `agents sessions --device` fan-out can use it.
- */
 
 import { loadDevicesSync } from '../devices/registry.js';
 import { readDeviceConfigValues } from '../device-config.js';
 import { readMeta } from '../state.js';
 import { unionDeviceHosts } from '../devices/device-docs.js';
 
-/** Resolve the OS/platform string for a host name, or undefined if unknown. */
 export function resolveRemoteOsSync(name: string): string | undefined {
   try {
     const configured = readDeviceConfigValues(name).platform;
@@ -30,9 +11,6 @@ export function resolveRemoteOsSync(name: string): string | undefined {
     const platform = loadDevicesSync()[name]?.platform;
     if (platform && platform !== 'unknown') return platform;
   } catch {
-    // A corrupt/unreadable device registry must never break command building —
-    // fall through to the host overlay and ultimately the POSIX default.
   }
-  // Cross-box union of the device-scoped host overlays, central legacy as base.
   return ({ ...readMeta().hosts, ...unionDeviceHosts() }[name])?.os;
 }

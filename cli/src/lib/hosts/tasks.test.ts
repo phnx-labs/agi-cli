@@ -3,8 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate the hosts cache under a temp HOME before state.js captures HOME at
-// import time.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hosttasks-'));
 process.env.HOME = TEST_HOME;
 
@@ -41,7 +39,7 @@ describe('findTaskBySessionId', () => {
   });
 
   it('returns null for an empty query and never matches tasks with no session id', () => {
-    saveTask(task('cc')); // no sessionId
+    saveTask(task('cc'));
     expect(findTaskBySessionId('')).toBeNull();
   });
 });
@@ -54,14 +52,13 @@ describe('findTaskByName', () => {
   });
 
   it('returns the newest task when a name was reused across dispatches', () => {
-    // 'e2' sorts after 'e1' by createdAt (parseInt base36), so it is newer.
     saveTask(task('e1', 'sess-e1', 'probe'));
     saveTask(task('e2', 'sess-e2', 'probe'));
     expect(findTaskByName('probe')?.id).toBe('e2');
   });
 
   it('returns null for an unknown name, an empty query, and unnamed tasks', () => {
-    saveTask(task('f1', 'sess-f1')); // no name
+    saveTask(task('f1', 'sess-f1'));
     expect(findTaskByName('nope')).toBeNull();
     expect(findTaskByName('')).toBeNull();
   });

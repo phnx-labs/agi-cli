@@ -5,11 +5,6 @@ import { tmpdir } from 'os';
 import * as state from '../state.js';
 import { sshReachable } from '../ssh-exec.js';
 
-// Redirect the cache dir to a temp tree (real fs, no service mocking) so
-// reconcile can read/write real task sidecars the way a dispatch would.
-// Initialized eagerly (not just in beforeEach) so the module-load reachability
-// probe below sees a valid dir for ssh's control socket; beforeEach reassigns it
-// per test.
 let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-reconcile-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
@@ -21,10 +16,6 @@ it('uses a valid reachability command for each remote shell', () => {
 });
 import { saveTask, loadTask, terminalPatch, type HostTask } from './tasks.js';
 
-// The heal path needs a real ssh round-trip (no mocking, per repo policy). Gate
-// it on localhost being ssh-reachable so it exercises the true path where a host
-// is available (dev machines, self-hosted runners) and skips cleanly where it
-// isn't (hosted CI), rather than flaking.
 const LOCALHOST_SSH = sshReachable('localhost', 5000);
 
 function makeTask(overrides: Partial<HostTask> = {}): HostTask {
@@ -45,9 +36,6 @@ function makeTask(overrides: Partial<HostTask> = {}): HostTask {
 beforeEach(() => {
   CACHE_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-reconcile-'));
   mkdirSync(join(CACHE_ROOT, 'hosts'), { recursive: true });
-  // ssh's control-socket dir lives under getCacheDir(); ssh-exec only ensures it
-  // once (module-level flag), so with a fresh cache dir per test we must create
-  // it ourselves or multiplexed ssh can't open its socket and reports 255.
   mkdirSync(join(CACHE_ROOT, 'ssh'), { recursive: true, mode: 0o700 });
 });
 
@@ -55,9 +43,6 @@ afterEach(() => {
   rmSync(CACHE_ROOT, { recursive: true, force: true });
 });
 
-// The classifier is where every bug-prone branch lives; readRemoteExit is just a
-// thin ssh wrapper around it, so exercising it with plain SshExecResult-shaped
-// data (NOT a mocked ssh layer) covers the real decision logic.
 describe('classifyExit', () => {
   it('ssh connection failure (code 255) → unreachable, never a guessed status', () => {
     expect(classifyExit({ code: 255, stdout: '', timedOut: false })).toEqual({ state: 'unreachable' });
@@ -105,7 +90,6 @@ describe('terminalPatch', () => {
 });
 
 describe('reconcileTask — terminal records are immutable (no ssh)', () => {
-  // A non-'running' status short-circuits before any ssh, so these run offline.
   it('leaves a completed record untouched', () => {
     const task = makeTask({ status: 'completed', exitCode: 0 });
     saveTask(task);
@@ -138,9 +122,6 @@ describe('reconcileRunningTasks — no running tasks means no ssh', () => {
   });
 });
 
-// The literal bug the PR fixes: a 'running' record whose remote `.exit` now
-// holds a code must be healed to a terminal status AND persisted to disk. Driven
-// over a real `ssh localhost` cat of a real `.exit` file — no mocking.
 describe.skipIf(!LOCALHOST_SSH)('reconcile over real ssh (localhost)', () => {
   let exitFile: string;
 
@@ -157,7 +138,7 @@ describe.skipIf(!LOCALHOST_SSH)('reconcile over real ssh (localhost)', () => {
 
     expect(out.status).toBe('completed');
     expect(out.exitCode).toBe(0);
-    expect(loadTask('heal0000')?.status).toBe('completed'); // written through to disk
+    expect(loadTask('heal0000')?.status).toBe('completed');
   });
 
   it('heals a non-zero .exit to failed with the code preserved', () => {

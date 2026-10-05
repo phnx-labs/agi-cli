@@ -1,46 +1,19 @@
-/**
- * Devices host provider: the Tailscale fleet as dispatch targets.
- *
- * Bridges the devices registry (`agents devices`, ~/.agents/.history/devices/
- * registry.json) into the host pool behind the same `HostProvider` seam as
- * `local` — the Tailscale-backed device provider described in docs/fleet.md. With
- * it, a machine registered once via `agents devices sync` becomes a resolvable
- * `--device`/`--device` dispatch target, participates in capability routing, and
- * is enumerable by target pickers — not just resolvable by exact name.
- *
- * Password-auth devices are listed (the pool stays honest about what exists)
- * but marked `dispatchable: false`; resolving one for dispatch throws the same
- * typed `DeviceOffloadUnsupportedError` as before — offload rides `sshExec`,
- * whose SSH_OPTS force `BatchMode=yes`.
- *
- * Precedence is unchanged: this provider registers AFTER `local`, so an
- * enrolled host shadows a same-name device in both list dedup and resolve
- * order, exactly like the old tier-2 devices fall-through in resolveHost.
- */
 
 import { loadDevices, getDevice, type DeviceProfile } from '../../devices/registry.js';
 import { resolveDeviceProfile } from '../../devices/resolve-profile.js';
 import type { Host, HostProvider, HostProviderCapabilities, HostStatus } from '../types.js';
 import { DeviceOffloadUnsupportedError } from '../types.js';
 
-/** Tailscale's own presence bit, when the sync captured one. */
 function statusOf(device: DeviceProfile): HostStatus {
   if (!device.tailscale) return 'unknown';
   return device.tailscale.online ? 'online' : 'offline';
 }
 
-/**
- * Bridge a device profile into a `Host`. dnsName (stable across IP churn) is
- * preferred over ip; `source: 'inline'` makes `sshTargetFor` emit `user@address`.
- * Capability tags come from an enrolled overlay entry for the device in
- * agents.yaml (`Meta.hosts`) — that entry shadows this row by provider
- * precedence, carrying the caps.
- */
 function deviceToPoolHost(rawDevice: DeviceProfile): Host | null {
-  // Effective profile: central config (ssh.*/platform) overlays discovery.
+  // Password-auth devices remain visible but are never dispatchable in BatchMode.
   const device = resolveDeviceProfile(rawDevice);
   const address = device.address.dnsName ?? device.address.ip;
-  if (!address) return null; // unreachable profile — nothing to dispatch to
+  if (!address) return null;
   return {
     name: device.name,
     provider: 'devices',
@@ -59,7 +32,6 @@ export class DevicesHostProvider implements HostProvider {
   readonly id = 'devices' as const;
 
   capabilities(): HostProviderCapabilities {
-    // mutate stays false: `agents devices sync/add/set` own the registry.
     return { directory: true, mutate: false, presence: true, relay: false, lease: false };
   }
 
@@ -76,11 +48,7 @@ export class DevicesHostProvider implements HostProvider {
   async resolve(name: string): Promise<Host | null> {
     const raw = await getDevice(name);
     if (!raw) return null;
-    // Effective profile: central config (ssh.*/platform) overlays discovery —
-    // the password-auth refusal and the dial shape both follow the config.
     const device = resolveDeviceProfile(raw);
-    // Keep the long-standing typed refusal for password auth (BatchMode=yes
-    // can't answer a prompt).
     if (device.auth.method === 'password') {
       throw new DeviceOffloadUnsupportedError(device.name);
     }
