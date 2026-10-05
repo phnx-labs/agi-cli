@@ -78,6 +78,7 @@ function pickContentText(content: unknown): string | null {
   return parts.length ? parts.join('\n') : null;
 }
 
+// Harness/tool envelopes are not user claims and must never drive watchdog decisions.
 const SYNTHETIC_TAG_PREFIXES = [
   '<local-command-caveat',
   '<local-command-stdout',

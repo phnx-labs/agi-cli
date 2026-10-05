@@ -192,6 +192,7 @@ export function resolveHandlerHost(host: string | undefined): HandlerHostResolut
   const { base, platform } = parseHostPlatform(host);
   const isFleet = base === '' || base === 'fleet';
   if (isFleet) {
+    // Fleet expressions fail closed: silently running locally would cross the handler's trust boundary.
     const picked = pickFleetDevice(undefined, platform);
     if (!picked) {
       throw new Error(`handler host '${host}': no eligible online fleet device`);
@@ -251,10 +252,12 @@ export function handlerMatchesWebhook(handler: WebhookHandler, webhook: Incoming
   if (webhook.source === 'linear') {
     if (handler.teamKey && linearTeamKey(webhook.payload) !== handler.teamKey) return false;
     if (handler.label) {
+      // Linear webhook labels are flat payload objects, not GraphQL connection nodes.
       const expected = handler.label.toLowerCase();
       if (!linearLabels(webhook.payload).some((name) => name.toLowerCase() === expected)) return false;
     }
     if (handler.stateTo) {
+      // stateTo is a transition predicate, so a matching current state alone is insufficient.
       const data = webhook.payload.data as Record<string, unknown> | undefined;
       const current = (data?.state as Record<string, unknown> | undefined)?.name;
       if (current !== handler.stateTo) return false;
@@ -299,6 +302,7 @@ const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
   const cleaned = asString(payload.text).replace(/^\s*<@[^>]+>\s*/, '').trim();
+  // Project is one safe path segment; the grammar intentionally excludes path separators.
   const m = /^([A-Za-z0-9][\w.-]*)\s*:\s+([\s\S]+)$/.exec(cleaned);
   return {
     text: cleaned,
@@ -430,6 +434,7 @@ async function executeHandlerAction(
       ...(substitutedCwd ? { cwd: substitutedCwd } : {}),
       ...(hostFields.host ? { host: hostFields.host } : {}),
       ...(hostFields.hostStrategy ? { hostStrategy: hostFields.hostStrategy } : {}),
+      // Direct handlers bypass activation; delegated routines retain their own ownership gate.
       dispatchedBy: 'webhook',
     };
     const dispatch = handler.run.agent
@@ -448,6 +453,7 @@ async function executeHandlerAction(
   }
 
   if (handler.routine) {
+    // Do not add dispatchedBy here: the delegated routine must enforce its normal activation ownership.
     const routine = readJob(handler.routine);
     if (!routine) throw new Error(`routine '${handler.routine}' not found`);
     const config: JobConfig = {

@@ -11,6 +11,7 @@ interface WatchdogHistoryEntry {
   nudgeText?: string;
 }
 
+// History deliberately excludes raw transcript tails; only bounded summaries/actions leave the log layer.
 interface WatchdogHistoryOptions {
   limit?: number;
   sinceMs?: number;
@@ -58,6 +59,7 @@ export function selectWatchdogHistory(
     .sort((a, b) => b.ts - a.ts);
   if (matching.length <= limit) return matching;
 
+  // Inspection bursts may fill the limit; reserve one slot for the newest real action.
   const newest = matching.slice(0, limit);
   if (newest.some((entry) => entry.kind !== 'inspection')) return newest;
   const newestAction = matching.find((entry) => entry.kind !== 'inspection');

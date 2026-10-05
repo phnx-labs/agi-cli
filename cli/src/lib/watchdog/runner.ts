@@ -239,6 +239,7 @@ function planDelivery(
   const resolution = resolveInjectTargetForSession(session, { allowGhosttyFocus });
   const route = resolveAnswerRoute({ mailboxId, answer: chosenText, session, block });
 
+  // A precise terminal rail wins; mailbox delivery is safe only for a live open-question block.
   if (resolution.addressable) {
     return { via: 'inject', rail: resolution.rail, target: resolution.target };
   }
@@ -664,6 +665,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
           updatedAtMs: nowMs,
           deadlineMs: nowMs + rotateReadinessMs,
         };
+        // Persist ownership before terminal side effects so the next tick can recover every phase.
         writeRotateState(dir, state);
         advancedRotates.add(sid);
 
@@ -747,6 +749,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
 
     if (!decision.nudge) {
       if (decision.needsHuman) {
+        // Confirmed human need may page the owner; ordinary refusal and hands-off stalls only flag.
         const lastNudgeMs = ledger[session.sessionId ?? ''] ?? 0;
         const cooldownMs = thresholds.cooldownMs;
         const withinCooldown = nowMs - lastNudgeMs < cooldownMs;
@@ -881,6 +884,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     }
   }
 
+  // Advance owned rotations even after the old session vanishes or rotation is disabled.
   for (const inflight of listInflightRotates(dir)) {
     if (advancedRotates.has(inflight.sessionId)) continue;
     await advanceRotate(inflight, rotateDeps);
@@ -891,6 +895,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     const ledgerLock = path.join(dir, '.ledger.lock');
     try {
       ensureLockTarget(ledgerLock);
+      // Merge into a fresh locked read so concurrent ticks cannot erase cooldown timestamps.
       withFileLock(ledgerLock, () => {
         const current = readNudgeLedger(dir);
         for (const [sid, ts] of Object.entries(ledgerUpdates)) current[sid] = ts;
