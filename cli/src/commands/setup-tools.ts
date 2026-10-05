@@ -1,9 +1,3 @@
-/**
- * `agents setup tools` — install or upgrade the standalone CLIs this release is
- * tested against (sessions, browser, secrets, computer, term) to their pinned
- * floors in `lib/standalone-tools.ts`. Idempotent: a tool at or above its floor
- * is left alone, so it is safe to run on every device of the fleet.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';

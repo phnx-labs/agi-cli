@@ -1,9 +1,3 @@
-/**
- * `agents send --channel session` end to end: a real tmux server under a temp
- * HOME hosts an `ag-claude-<shortid>` pane running `cat`, the real CLI resolves
- * the selector through the live roster and types into it, and the bytes are
- * read back from the pane.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -33,7 +27,6 @@ describe.skipIf(!isTmuxInstalled())('agents send --channel session — real tmux
   let socket: string;
 
   beforeEach(() => {
-    // Short prefix: the tmux socket path must fit sun_path (~104 bytes).
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-send-'));
     writeUpdateCache(tempHome);
     const tmuxDir = path.join(tempHome, '.agents', '.cache', 'helpers', 'tmux');

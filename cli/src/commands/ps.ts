@@ -1,10 +1,3 @@
-/**
- * `agents ps` — the live agent roster and the verbs that act on a running agent
- * (stop, focus, detach, migrate). Agents owns live processes, so this group is
- * their home once `agents sessions` leaves for the standalone `sessions` CLI
- * (PHNX-4227, decision D1). Release R1 only adds it: `agents sessions --active`
- * and the `sessions` verbs run the same code until callers switch in R2.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
@@ -34,10 +27,6 @@ interface PsOptions {
   interactive?: boolean;
 }
 
-/**
- * Map `--status` values onto the live-state flags `runLiveRoster` reads. An
- * unknown value throws rather than widening the roster to everything.
- */
 export function statusFlags(values: string[] | undefined): LiveStatusFlags {
   const flags: LiveStatusFlags = {};
   for (const raw of values ?? []) {
@@ -52,7 +41,6 @@ export function statusFlags(values: string[] | undefined): LiveStatusFlags {
   return flags;
 }
 
-/** `-D all`/`-D fleet` means the whole fleet, which is already the default scope. */
 export function deviceScope(devices: string[] | undefined): string[] | undefined {
   const hosts = (devices ?? []).filter((d) => !['all', 'fleet'].includes(d.toLowerCase()));
   return hosts.length > 0 ? hosts : undefined;
@@ -61,8 +49,6 @@ export function deviceScope(devices: string[] | undefined): string[] | undefined
 export function registerPsCommand(program: Command): void {
   const ps = program
     .command('ps')
-    // Leaf verbs own --local/--device; stop scanning ps's options at the verb so
-    // `agents ps stop <id> --local` reaches stop instead of being swallowed here.
     .enablePositionalOptions()
     .description('List running agents on this machine and across the fleet; stop, focus, detach, or migrate one')
     .option('--json', 'Print the roster as JSON (one row per live session)')

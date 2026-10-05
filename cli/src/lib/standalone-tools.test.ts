@@ -53,7 +53,6 @@ describePosix('ensureToolPins — real executables on PATH', () => {
 
   it('upgrades an outdated tool through npm install -g <pkg>@<floor> and re-reads it', async () => {
     writeExecutable(path.join(bin, 'sessions'), 'echo "0.4.2"');
-    // A real `npm` on PATH that records its argv and installs the pinned binary.
     writeExecutable(
       path.join(bin, 'npm'),
       `echo "$@" >> "${bin}/npm.log"\nprintf '#!/bin/sh\\necho 0.5.0\\n' > "${bin}/sessions"\nchmod 755 "${bin}/sessions"`,

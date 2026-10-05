@@ -49,8 +49,6 @@ describeLive('agents ps — real CLI against a live process', () => {
   }
 
   it('lists the same live roster as sessions --active, and filters by --status', () => {
-    // A terminal window gone quiet for 11 minutes: the live pid reads orphaned
-    // and the dead one crashed, the two states --status has to tell apart.
     const { tempHome, cwd, liveId, crashedId, sleeper } = fixture(11 * 60_000);
     try {
       const ps = runAgents(['ps', '--json', '--local'], cwd, tempHome);
@@ -89,8 +87,6 @@ describeLive('agents ps — real CLI against a live process', () => {
   it('reads a daemon-published snapshot as live (rows carry their machine)', () => {
     const { tempHome, cwd, liveId, sleeper } = fixture();
     try {
-      // Publish the local snapshot exactly as the daemon's warm tick does, then
-      // read it back through the cache (no force-refresh) as `ps` does.
       const publish = spawnSync(process.execPath, [
         '--import', tsxLoaderUrl, '-e',
         `const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/session-cache.ts'))});
