@@ -176,7 +176,7 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
     const [status, setStatus] = useState<'idle' | 'done'>('idle');
     const [searchTerm, setSearchTerm] = useState(cfg.initialSearch ?? '');
     const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
-    // The ref counter makes every repaint callback observable despite stale render closures.
+    // The ref counter prevents a stale callback from making the second async preview repaint a no-op.
     const [, setPreviewNonce] = useState(0);
     const previewNonce = useRef(0);
     useEffect(() => {

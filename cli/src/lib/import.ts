@@ -154,7 +154,7 @@ export function importInstallScriptBinary(
 ): ImportBinaryResult {
   const binaryLink = path.join(versionDir, 'node_modules', '.bin', spec.cliCommand);
 
-  // lstat keeps a dangling destination link from being mistaken for an empty install slot.
+  // Use lstat so a dangling shim still counts as an existing install.
   let alreadyExists = false;
   try {
     fs.lstatSync(binaryLink);
