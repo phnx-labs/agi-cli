@@ -1560,6 +1560,7 @@ export function isClaudeCredentialFileBlank(
   base: string,
   platform: NodeJS.Platform = process.platform
 ): boolean {
+  // macOS uses Keychain; on Linux absence means logged out while corrupt data fails open.
   if (platform === 'darwin') return false;
   // A per-version setup-token is a real credential on Linux even without `.credentials.json` (the
   // shim's `$CLAUDE_CONFIG_DIR/.oauth_token`), so treat it as signed in or rotation skips such
@@ -1568,7 +1569,6 @@ export function isClaudeCredentialFileBlank(
     const token = fs.readFileSync(path.join(base, '.claude', '.oauth_token'), 'utf-8').trim();
     if (token.length > 0) return false;
   } catch {
-    /* absent — fall through to the credentials.json floor */
   }
   try {
     const raw = fs.readFileSync(path.join(base, '.claude', '.credentials.json'), 'utf-8');
@@ -1600,13 +1600,10 @@ export interface ClaudeHomeIdentity {
    * personal Max plan under one email are separate buckets and must stay distinct (see
    * `candidateIdentity` in lib/rotate.ts). */
   usageKey: string | null;
-  /** Account+org identity, narrower than `usageKey`. */
   accountKey: string | null;
 }
 
-/** A version home's `.claude.json` plus the identity derived from it. */
 interface ClaudeHomeConfig {
-  /** The config file actually read. */
   path: string;
   config: Record<string, any>;
   identity: ClaudeHomeIdentity;
@@ -1621,6 +1618,7 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
   // launched without the shim.
   const configDirFile = path.join(base, '.claude', '.claude.json');
   const homeLevelFile = path.join(base, '.claude.json');
+  // Version-home config takes precedence over the legacy home-level file.
   const activeFile = fs.existsSync(configDirFile) ? configDirFile : homeLevelFile;
 
   let config: Record<string, any>;
@@ -1641,6 +1639,7 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
   // (seedClaudeWorkerHomeIdentity), so the row reads "not connected here" (PHNX-3940). Complete
   // the identity from the fleet-synced registry row, for email-only homes; else fail closed.
   if (email && !accountId && !organizationId) {
+    // Email-only worker homes accept one exact registry match; ambiguity fails closed.
     const registered = registeredNativeAccountForEmail(readMeta(), 'claude', email);
     const parts = registered ? parseNativeIdentityKey('claude', registered.identityKey) : null;
     if (parts) {
@@ -1658,6 +1657,7 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
       organizationId,
       organizationName: oa.organizationName ?? null,
       organizationType: oa.organizationType ?? null,
+      // Usage is org-scoped; account routing is account+org scoped.
       usageKey: buildIdentityKey('claude', [['org', organizationId]]),
       accountKey: buildIdentityKey('claude', [
         ['account', accountId],
@@ -1671,6 +1671,7 @@ export async function getAccountInfo(
   agentId: AgentId,
   home?: string
 ): Promise<AccountInfo> {
+  // Group accounts by stable provider/org identity, never display text or stale metadata.
   const base = home || os.homedir();
   const empty: AccountInfo = {
     accountKey: null,
@@ -1730,6 +1731,7 @@ export async function getAccountInfo(
         // windows (deriveUsageStatusFromSnapshot); here only signed-in is reported.
         const usageStatus: AccountInfo['usageStatus'] = email ? 'available' : null;
 
+        // Overage credit display is independent of the subscription throttle status.
         let overageCredits: AccountInfo['overageCredits'] = null;
         const orgId = oa?.organizationUuid;
         const creditCache = orgId && data.overageCreditGrantCache?.[orgId];
@@ -1764,7 +1766,6 @@ export async function getAccountInfo(
         if (!decoded) return { ...empty, lastActive };
         const email = decoded.email || null;
 
-        // Plan and subscription from OpenAI auth claim
         const authClaim = decoded['https://api.openai.com/auth'] || {};
         const accountId = normalizeIdentityPart(authClaim.chatgpt_account_id);
         const userId = normalizeIdentityPart(authClaim.chatgpt_user_id || authClaim.user_id);
@@ -1777,7 +1778,6 @@ export async function getAccountInfo(
         const rawPlan = authClaim.chatgpt_plan_type;
         const plan = rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1) : null;
 
-        // Subscription status: expired = out_of_credits
         let usageStatus: AccountInfo['usageStatus'] = null;
         const activeUntil = authClaim.chatgpt_subscription_active_until;
         if (activeUntil) {
@@ -1817,11 +1817,8 @@ export async function getAccountInfo(
             try {
               const tok = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
               hasToken = typeof tok?.accessToken === 'string' && tok.accessToken.length > 0;
-            } catch { /* unreadable token file */ }
+            } catch {  }
           }
-          // cli-config survives logout and may describe a different keychain
-          // account. Without this version's file token, its identity is stale
-          // metadata rather than a usable managed login.
           if (!hasToken) return { ...empty, lastActive };
           const accountKey = buildIdentityKey(agentId, [['user', accountId]]);
           return { ...empty, email, accountId, accountKey, signedIn: true, lastActive };
@@ -1859,17 +1856,11 @@ export async function getAccountInfo(
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
           if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
-            // A stable account/usage key (derived from the refresh token — see
-            // readAuthAccountIdentity) lets `agents view` dedupe and cache the
-            // per-model quota bars for this login.
             const identity = readAuthAccountIdentity('antigravity', path.dirname(tokenPath));
             return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
           }
         }
         if (await antigravityKeychainSignedIn()) {
-          // Keyring-only login (the macOS case): the OS keyring holds exactly
-          // ONE antigravity credential, so a stable singleton key identifies it
-          // for usage-cache dedup without reading the secret value here.
           const identity = buildIdentityKey('antigravity', [['sub', 'keychain']]);
           return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
         }
@@ -1907,6 +1898,7 @@ export async function getAccountInfo(
             lastActive,
           };
         }
+        // An unreadable encrypted payload still counts conservatively when its auth file exists.
         const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
@@ -1917,9 +1909,6 @@ export async function getAccountInfo(
         // plan. Only JWT claims are read.
         const identity = resolveOpenCodeIdentity(base);
         if (!identity) return { ...empty, lastActive };
-        // Keyed on providers, not email: OpenCode bills through whichever
-        // provider credentials are configured, so two installs sharing one
-        // email but different provider sets are genuinely different accounts.
         const accountKey = buildIdentityKey(agentId, [['providers', identity.providers]]);
         return {
           ...empty,
@@ -1932,9 +1921,6 @@ export async function getAccountInfo(
         };
       }
       case 'muse': {
-        // Muse Code authenticates with META_API_KEY (env, highest priority) or
-        // a stored OAuth/API credential at ~/.config/muse/auth.json. Live file
-        // shape nests under providers.meta (access_token + optional user_email).
         if (process.env.META_API_KEY?.trim() || process.env.MODEL_API_KEY?.trim()) {
           const accountKey = buildIdentityKey(agentId, [['auth', 'env']]);
           return { ...empty, signedIn: true, accountId: 'env', accountKey, lastActive };
@@ -1962,21 +1948,17 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
     }
   } catch {
-    /* auth/config file missing or unreadable */
     return { ...empty, lastActive };
   }
 }
 
-// Fresh window for the cached session walk. Matches USAGE_CACHE_FRESH_MS in
-// usage.ts (5 minutes) so a launch storm reuses both probes for the same period.
+// Short-lived launch-path cache: never serve stale entries; no-session falls back to config mtime.
 const LAST_ACTIVE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
 const getLastActiveCachePath = () => path.join(getCacheDir(), 'last-active.json');
 
 interface LastActiveCacheEntry {
-  /** Newest session-file mtime (ms), or null when the home had no sessions. */
   mtimeMs: number | null;
-  /** When the walk that produced this entry ran (ms since epoch). */
   computedAt: number;
 }
 
@@ -2004,13 +1986,10 @@ export function resolveLastActive(
 
     if (fresh) {
       if (entry.mtimeMs !== null) return new Date(entry.mtimeMs);
-      // Fresh entry with no sessions: fall through to the config mtime below.
     } else {
       const mtimeMs = latestFileMtimeMs(sessionDir, sessionExt);
       cache[key] = { mtimeMs, computedAt: now.getTime() };
-      // Stale entries are never served, so drop them on write — keeps homes
-      // that no longer exist (removed versions, test temp dirs) from
-      // accumulating in the file.
+      // Prune obsolete homes on each best-effort cache write.
       for (const [k, v] of Object.entries(cache)) {
         if (k !== key && !(typeof v?.computedAt === 'number' && now.getTime() - v.computedAt < LAST_ACTIVE_CACHE_FRESH_MS)) {
           delete cache[k];
@@ -2029,7 +2008,6 @@ export function resolveLastActive(
   }
 }
 
-/** Read the entire last-active cache file. Missing or corrupt file reads as empty. */
 function readLastActiveCacheFile(cachePath: string): Record<string, LastActiveCacheEntry> {
   if (!fs.existsSync(cachePath)) return {};
   try {
@@ -2040,23 +2018,19 @@ function readLastActiveCacheFile(cachePath: string): Record<string, LastActiveCa
   }
 }
 
-/** Write the entire last-active cache. Best-effort; a failed write just means the next call walks again. */
 function writeLastActiveCacheFile(cache: Record<string, LastActiveCacheEntry>, cachePath: string): void {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     fs.writeFileSync(cachePath, JSON.stringify(cache), 'utf-8');
   } catch {
-    /* best-effort */
   }
 }
 
-/** Return the root directory where the agent stores session files, or null if unknown. */
 function getSessionDir(agentId: AgentId, base: string): string | null {
   const rel = AGENTS[agentId].sessionDir;
   return rel ? path.join(base, ...rel) : null;
 }
 
-/** Return the file extension used for session files by the given agent. */
 function getSessionExtension(agentId: AgentId): string | null {
   return AGENTS[agentId].sessionFileExt;
 }
@@ -2080,14 +2054,12 @@ export function countSessionFiles(agentId: AgentId): number {
         }
       }
     } catch {
-      // Permission denied or other error
     }
   };
   walk(sessionDir);
   return count;
 }
 
-/** Decode the payload section of a JWT token without verifying its signature. */
 export function decodeJwtPayload(token: string): Record<string, any> | null {
   const payload = token.split('.')[1];
   if (!payload) return null;
@@ -2098,7 +2070,6 @@ export function decodeJwtPayload(token: string): Record<string, any> | null {
   }
 }
 
-/** Extract the default organization ID from a Codex/OpenAI auth claim. */
 function getCodexDefaultOrgId(authClaim: any): string | null {
   const organizations = authClaim?.organizations;
   if (!Array.isArray(organizations)) return null;
@@ -2106,14 +2077,12 @@ function getCodexDefaultOrgId(authClaim: any): string | null {
   return typeof first?.id === 'string' ? first.id : null;
 }
 
-/** Trim and normalize an identity string, returning null for empty or non-string values. */
 function normalizeIdentityPart(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed || null;
 }
 
-/** Build a composite identity key like "claude:account=abc:org=xyz" from labeled parts. */
 function buildIdentityKey(
   agentId: AgentId,
   parts: Array<[label: string, value: string | null]>
@@ -2125,7 +2094,6 @@ function buildIdentityKey(
   return `${agentId}:${encoded.join(':')}`;
 }
 
-/** Register an MCP server with an agent's CLI via `mcp add`. */
 export async function registerMcp(
   agentId: AgentId,
   name: string,
@@ -2157,7 +2125,6 @@ export async function registerMcp(
   }
 
   try {
-    // Use explicit binary path when provided (bypasses shim for version-managed agents)
     const bin = options?.binary || agent.cliCommand;
     let args: string[];
     if (transport === 'http') {
