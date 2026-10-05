@@ -4,27 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// End-to-end isolation boundary for the LAUNCH-path self-heal (ensureAgentRunnable).
-// `agents run <agent>@<version>` calls it on every dispatch (commands/exec.ts) and the
-// daemon calls it unattended every ~6h (healBrokenDefaultLaunches), so its two mutating
-// steps — "adopt another installed version as the default" and "install latest and pin
-// it" — are the places where an isolated copy can bleed into the user's normal setup.
-//
-// Driven in a subprocess with a planted temp HOME: state paths resolve from
-// process.env.HOME at module-eval, the pattern used by self-heal.integration.test.ts.
-// No mocks — the repair genuinely calls npm (which fails on these synthetic versions,
-// whether by 404 online or by network error offline; both land on the same branch).
 
-// POSIX-only: the launch probe resolves node_modules/.bin/<cli> directly on POSIX but
-// the `.cmd` wrapper on Windows, where a missing wrapper is deliberately treated as
-// healthy — so a "gutted install" can't be planted the same way.
 describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation boundary', () => {
   let home: string;
 
   const versionDir = (version: string) =>
     path.join(home, '.agents', '.history', 'versions', 'codex', version);
 
-  /** Plant a codex version. `runnable: false` = gutted install (wrapper dir, no binary). */
   function plant(version: string, opts: { runnable: boolean; isolated?: boolean }) {
     const dir = versionDir(version);
     const binDir = path.join(dir, 'node_modules', '.bin');
@@ -69,8 +55,6 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
       env: {
         ...process.env,
         HOME: home,
-        // Pins write through getDevicesDir(); pin under this HOME so the vitest
-        // hermetic AGENTS_DEVICES_DIR does not swallow (or leak) agent pins.
         AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
         AGENTS_SYNC_MACHINE_ID: 'testbox',
       },
@@ -86,70 +70,48 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
   afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 
   it('leaves the normal default alone when an ISOLATED target cannot be repaired', () => {
-    plant('9.9.1', { runnable: true });                    // the user's normal default
-    plant('9.9.3', { runnable: true });                    // a healthy normal version
-    plant('9.9.2', { runnable: false, isolated: true });   // broken isolated copy
+    plant('9.9.1', { runnable: true });
+    plant('9.9.3', { runnable: true });
+    plant('9.9.2', { runnable: false, isolated: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
 
     const r = runEnsure('9.9.2', '9.9.2');
 
-    // Failure is surfaced, not papered over with someone else's install.
     expect(r.healed).toBeNull();
-    // The normal default is untouched — this is the whole point of --isolated.
     expect(r.defaultAfter).toBe('9.9.1');
-    // No silent adoption of 9.9.3, and no `latest` materialized behind the user's back.
     expect(r.installedAfter.sort()).toEqual(['9.9.1', '9.9.3']);
-    // The clean reinstall must not strip the marker: losing it would demote the copy
-    // to a normal install, which shim self-heal would then hand a bare `codex` shim.
     expect(r.stillIsolated).toBe(true);
   }, 180_000);
 
   it('never adopts an ISOLATED version as the fallback default, but still adopts a normal one', () => {
-    plant('9.9.1', { runnable: false });                   // broken normal default
-    plant('9.9.9', { runnable: true, isolated: true });     // healthy — but isolated
-    plant('9.9.3', { runnable: true });                    // healthy normal
+    plant('9.9.1', { runnable: false });
+    plant('9.9.9', { runnable: true, isolated: true });
+    plant('9.9.3', { runnable: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
 
     const r = runEnsure('9.9.1', '9.9.9');
 
-    // Candidates are tried newest-first, so the isolated 9.9.9 is what an unfiltered
-    // fallback would reach for. Only the isolation filter keeps it out — promoting it
-    // is exactly what `agents use` refuses and what removeVersion excludes.
     expect(r.healed).toBe('9.9.3');
     expect(r.defaultAfter).toBe('9.9.3');
     expect(r.defaultAfter).not.toBe('9.9.9');
-    // The isolated copy is untouched and still isolated.
     expect(r.stillIsolated).toBe(true);
   }, 180_000);
 
-  // The daemon's unattended 6-hourly launch-health pass runs with
-  // allowDefaultSwitch:false. A broken default that can't be repaired IN PLACE
-  // must NOT be silently swapped to another installed version — repointing the
-  // default installs/points at a different version home, which for Claude is a
-  // fresh empty credential scope (the "unprovoked logout"). It must fail closed
-  // and leave the default for the user to choose.
   it('does not repoint the default in unattended mode (allowDefaultSwitch: false)', () => {
-    plant('9.9.1', { runnable: false });   // broken normal default
-    plant('9.9.3', { runnable: true });    // a healthy normal version it COULD adopt
+    plant('9.9.1', { runnable: false });
+    plant('9.9.3', { runnable: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
 
     const r = runEnsure('9.9.1', '9.9.3', { allowDefaultSwitch: false });
 
-    // In-place repair fails (synthetic 9.9.1 → npm 404) and, crucially, the
-    // healthy 9.9.3 is NOT adopted: the default pointer stays put and the failure
-    // is surfaced (null) so the daemon can alert instead of silently switching.
-    // (The failed clean-reinstall guts 9.9.1's node_modules so it drops off the
-    // installed list — orthogonal to the point here, which is the DEFAULT pointer.)
     expect(r.healed).toBeNull();
     expect(r.defaultAfter).toBe('9.9.1');
     expect(r.defaultAfter).not.toBe('9.9.3');
   }, 180_000);
 
-  // Control: the SAME broken default, with the default (interactive) behavior,
-  // DOES adopt the healthy version — proving the flag is what changes it.
   it('still repoints the default in interactive mode (default behavior unchanged)', () => {
-    plant('9.9.1', { runnable: false });   // broken normal default
-    plant('9.9.3', { runnable: true });    // a healthy normal version
+    plant('9.9.1', { runnable: false });
+    plant('9.9.3', { runnable: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
 
     const r = runEnsure('9.9.1', '9.9.3');
@@ -158,28 +120,21 @@ describe.skipIf(process.platform === 'win32')('ensureAgentRunnable — isolation
     expect(r.defaultAfter).toBe('9.9.3');
   }, 180_000);
 
-  // The last-resort step ("install latest and pin it") reuses the version dir of
-  // whatever `latest` resolves to. If the user already holds THAT version as an
-  // isolated copy, installing would commandeer it and pinning would hand an
-  // isolated install the global default — the leak the candidate filter above
-  // blocks, arriving through a different door.
   it('refuses to pin `latest` when the user holds that exact version as an isolated copy', () => {
     const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
     const latest = execFileSync('npm', ['view', '@openai/codex', 'version'], { encoding: 'utf-8' }).trim();
     expect(latest).toMatch(/^\d+\.\d+\.\d+/);
 
-    plant('9.9.1', { runnable: false });        // broken normal default
-    plant(latest, { runnable: true, isolated: true }); // the ONLY other install — isolated
+    plant('9.9.1', { runnable: false });
+    plant(latest, { runnable: true, isolated: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  codex: "9.9.1"\n');
 
     const before = fs.readFileSync(path.join(versionDir(latest), '.isolated'), 'utf-8');
     const r = runEnsure('9.9.1', latest);
 
-    // No default is better than an isolated default; the caller reports the failure.
     expect(r.healed).toBeNull();
     expect(r.defaultAfter).toBe('9.9.1');
     expect(r.defaultAfter).not.toBe(latest);
-    // Resolved before installing, so the isolated copy was not even rebuilt.
     expect(r.stillIsolated).toBe(true);
     expect(fs.readFileSync(path.join(versionDir(latest), '.isolated'), 'utf-8')).toBe(before);
   }, 300_000);

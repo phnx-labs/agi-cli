@@ -1,21 +1,3 @@
-/**
- * E2E: confirm each agent natively loads cwd/<INSTRUCTIONS_FILE>.
- *
- * Two passes per agent:
- *   1. Plain workspace file: writes cwd/<INSTRUCTIONS_FILE> directly with a
- *      unique token, runs the agent, asserts the token appears in the reply.
- *      Confirms the load-bearing assumption behind compileRulesForProject:
- *      an agent launched in a workspace with cwd/<INSTRUCTIONS_FILE> reads
- *      it natively, no shim help required.
- *
- *   2. Project rules pipeline: writes cwd/.agents/rules/AGENTS.md with an
- *      @-import to a fragment, runs compileRulesForProject(cwd), then runs
- *      the agent and asserts the inlined fragment token appears. Proves the
- *      whole pipeline: project rules dir → compiled cwd/AGENTS.md → agent.
- *
- * Real $HOME, real auth, real user-level rules in effect — no HOME override.
- * Opt-in: AGENTS_E2E=1 (real LLM calls; costs API tokens).
- */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -36,7 +18,6 @@ interface Probe {
   args: (prompt: string) => string[];
 }
 
-// Non-interactive args per agent, with safest read-only mode where applicable.
 const PROBES: Probe[] = [
   {
     id: 'claude',
@@ -112,7 +93,6 @@ d('agents native cwd rules loading (AGENTS_E2E=1)', () => {
         const token = newToken('PIPE');
         const rulesDir = path.join(tmp, '.agents', 'rules');
         fs.mkdirSync(rulesDir, { recursive: true });
-        // Source AGENTS.md with an @-import to a fragment containing the token.
         fs.writeFileSync(
           path.join(rulesDir, 'AGENTS.md'),
           [
@@ -133,11 +113,9 @@ d('agents native cwd rules loading (AGENTS_E2E=1)', () => {
 
         const compileResult = compileRulesForProject(tmp);
         expect(compileResult.compiled).toBe(true);
-        // Compiled file at workspace root with the token inlined
         const compiled = fs.readFileSync(path.join(tmp, 'AGENTS.md'), 'utf-8');
         expect(compiled).toContain(token);
         expect(compiled).not.toContain('@./secret.md');
-        // Per-agent file present (symlink or copy)
         if (instructionsFile !== 'AGENTS.md') {
           expect(fs.existsSync(path.join(tmp, instructionsFile))).toBe(true);
         }

@@ -45,7 +45,7 @@ describe('parseLoopBlock — defensive coercion (issue #332)', () => {
     expect(parseLoopBlock({ max_iterations: 2.5 })).toBeUndefined();
     expect(parseLoopBlock({ max_iterations: 0 })).toBeUndefined();
     expect(parseLoopBlock({ max_iterations: -3 })).toBeUndefined();
-    expect(parseLoopBlock({ max_iterations: '5' })).toBeUndefined(); // string, not number
+    expect(parseLoopBlock({ max_iterations: '5' })).toBeUndefined();
   });
 
   it('drops a non-positive or non-numeric budget', () => {
@@ -75,32 +75,23 @@ describe('pruneStaleWorkflowSubagents — fail-closed cleanup (issue #401)', () 
   }
 
   it('removes a stale non-permitted workflow subagent while preserving the user\'s own', () => {
-    // Shared per-agent agents dir as left by a PRIOR unrestricted run: it holds
-    // a workflow subagent (`danger.md`) that this scoped run does NOT permit,
-    // plus the user's own hand-placed subagent (`myhelper.md`) and the permitted
-    // `security.md`.
     const shared = makeSharedDir({
       'security.md': 'stale security',
       'danger.md': 'leftover from unrestricted run',
       'myhelper.md': 'user hand-placed subagent',
     });
 
-    // The workflow declares subagents security + danger, but allows only security.
     const workflowSubagentFiles = ['security.md', 'danger.md'];
     const { allowedStems } = resolveAllowedSubagents(workflowSubagentFiles, ['security']);
     expect(allowedStems).toEqual(['security']);
 
     const pruned = pruneStaleWorkflowSubagents(shared, workflowSubagentFiles, allowedStems);
 
-    // The unlisted workflow subagent is gone (fail-closed); it can no longer be
-    // dispatched despite lingering from a prior run.
     expect(pruned).toEqual(['danger.md']);
     expect(fs.existsSync(path.join(shared, 'danger.md'))).toBe(false);
 
-    // The user's own subagent — NOT part of the workflow's subagents/ — survives.
     expect(fs.existsSync(path.join(shared, 'myhelper.md'))).toBe(true);
 
-    // The permitted subagent is left in place for the copy step to (re)write.
     expect(fs.existsSync(path.join(shared, 'security.md'))).toBe(true);
 
     fs.rmSync(shared, { recursive: true, force: true });
@@ -121,7 +112,6 @@ describe('pruneStaleWorkflowSubagents — fail-closed cleanup (issue #401)', () 
     expect(pruned.sort()).toEqual(['danger.md', 'security.md']);
     expect(fs.existsSync(path.join(shared, 'security.md'))).toBe(false);
     expect(fs.existsSync(path.join(shared, 'danger.md'))).toBe(false);
-    // The user's own file is untouched.
     expect(fs.existsSync(path.join(shared, 'notes.md'))).toBe(true);
 
     fs.rmSync(shared, { recursive: true, force: true });
@@ -129,13 +119,11 @@ describe('pruneStaleWorkflowSubagents — fail-closed cleanup (issue #401)', () 
 
   it('prunes nothing on a fresh dir or when all subagents are permitted', () => {
     const shared = makeSharedDir({ 'security.md': 'present' });
-    // allowedAgents absent -> everything permitted -> nothing pruned.
     const { allowedStems } = resolveAllowedSubagents(['security.md'], undefined);
     expect(pruneStaleWorkflowSubagents(shared, ['security.md'], allowedStems)).toEqual([]);
     expect(fs.existsSync(path.join(shared, 'security.md'))).toBe(true);
     fs.rmSync(shared, { recursive: true, force: true });
 
-    // A shared dir that does not exist yet is a no-op, never a throw.
     expect(pruneStaleWorkflowSubagents(path.join(os.tmpdir(), 'agents-missing-xyz-401'), ['a.md'], [])).toEqual([]);
   });
 });
@@ -144,9 +132,6 @@ describe('ensureSubagentDispatchTool — keep Task for orchestrators', () => {
   const base = ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write', 'WebFetch'];
 
   it('appends Task when the workflow ships subagents and Task is missing', () => {
-    // This is the doc-gaps / blog-engine bug: a `tools:` list that omits Task
-    // while shipping a subagents/ dir strips the orchestrator's only dispatch
-    // path, so the run silently no-ops.
     expect(ensureSubagentDispatchTool(base, true)).toEqual([...base, 'Task']);
   });
 
@@ -265,11 +250,9 @@ describe('workflow native projections', () => {
 
     const workflow = transformWorkflowForAntigravity(dir, 'ship-flow');
 
-    // Required `description` frontmatter (agy's discovery contract) + ownership marker.
     expect(workflow).toContain('description: Ship safely');
     expect(workflow).toContain('name: Ship Flow');
     expect(workflow).toContain('agents_workflow: ship-flow');
-    // Numbered-step body preserved verbatim below the frontmatter.
     expect(workflow).toContain('1. Test');
     expect(workflow).toContain('2. Release');
   });
@@ -278,16 +261,12 @@ describe('workflow native projections', () => {
     const dir = writeWorkflow('---\nname: Global Flow\ndescription: Global projection\n---\n\nRun the steps.');
     const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-home-'));
     const realHome = process.env.HOME;
-    // Antigravity workflows are HOME-global (agy scans ~/.gemini/config/global_workflows/),
-    // not version-isolated — so the writer ignores versionHome and resolves from $HOME.
     process.env.HOME = fakeHome;
 
     try {
       const globalDir = path.join(fakeHome, '.gemini', 'config', 'global_workflows');
       fs.mkdirSync(globalDir, { recursive: true });
-      // A user-authored workflow of the same name (no ownership marker) must not be clobbered.
       fs.writeFileSync(path.join(globalDir, 'global-flow.md'), '---\ndescription: User-owned\n---\n\nHand-written.\n');
-      // versionHome is intentionally unused for antigravity; pass a dummy to prove it.
       expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(false);
       expect(listWorkflowsForAgent('antigravity', '/nonexistent-version-home')).toEqual([]);
 
@@ -295,7 +274,6 @@ describe('workflow native projections', () => {
       expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(true);
       expect(fs.existsSync(path.join(globalDir, 'global-flow.md'))).toBe(true);
       expect(listWorkflowsForAgent('antigravity', '/nonexistent-version-home')).toEqual(['global-flow']);
-      // Re-syncing an agents-cli-managed file is idempotent (marker matches).
       expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(true);
     } finally {
       if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;

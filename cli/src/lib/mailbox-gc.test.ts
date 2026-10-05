@@ -37,7 +37,6 @@ describe('mailbox GC', () => {
         ts: new Date().toISOString(),
         questions: [{ text: 'Dead?' }],
       }, feedDir);
-      // The block is stale (>24h) so GC removes it after dropping the message.
       backdateFile(blockFile, '2020-01-01T00:00:00.000Z');
 
       const result = gcMailbox(new Set(), { root, feedRoot: feedDir });
@@ -79,7 +78,6 @@ describe('mailbox GC', () => {
       const result = gcMailbox(new Set(), { root, feedRoot: feedDir });
 
       expect(result.messagesDroppedDead).toBe(1);
-      // The block is kept so the bounce receipt is visible.
       expect(result.blocksRemoved).toBe(0);
       const block = readBlock(blockId, feedDir);
       expect(block).toBeDefined();
@@ -107,7 +105,6 @@ describe('mailbox GC', () => {
     const box = mailboxDir(BOX, root);
     enqueue(box, { to: BOX, text: 'old' });
     drain(box);
-    // backdate the consumed file
     const consumedFile = path.join(box, 'consumed', fs.readdirSync(path.join(box, 'consumed'))[0]);
     const oldTime = new Date('2020-01-01T00:00:00.000Z');
     fs.utimesSync(consumedFile, oldTime, oldTime);
@@ -123,7 +120,6 @@ describe('mailbox GC', () => {
     const box = mailboxDir(BOX, root);
     const msgId = enqueue(box, { to: BOX, text: 'stale', ttlSeconds: 1 });
     const inboxFile = path.join(box, 'inbox', `${msgId}.json`);
-    // Force expiry in the past so GC sees it without sleeping.
     const raw = JSON.parse(fs.readFileSync(inboxFile, 'utf-8'));
     raw.expiresAt = '2000-01-01T00:00:00.000Z';
     fs.writeFileSync(inboxFile, JSON.stringify(raw, null, 2), 'utf-8');
@@ -138,17 +134,6 @@ describe('mailbox GC', () => {
     expect(archived.dropped).toBe('expired');
   });
 
-  // RUSH-2840: archiveAllPending() used to hand-roll its own write-tmp-then-
-  // rename inline; it now routes through the shared atomicWriteJsonSync. This
-  // pins that the archive write is still atomic: a write that cannot complete
-  // must leave both the not-yet-archived inbox message AND any pre-existing
-  // consumed record untouched, with no stray tmp file -- never a torn record
-  // silently swallowed by archiveAllPending's own best-effort catch. Only a
-  // NEW-file create can be blocked by directory permissions (renaming over an
-  // existing entry is not), so this pre-seeds a same-named consumed file and
-  // makes the consumed dir read-only, forcing the write's first fs call (the
-  // tmp-file create) to fail. Skipped where chmod cannot block a create
-  // (Windows / root).
   const canBlockFileCreate =
     process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
   const itBlocksCreate = canBlockFileCreate ? it : it.skip;
@@ -169,20 +154,13 @@ describe('mailbox GC', () => {
     try {
       const result = gcMailbox(new Set(), { root });
 
-      // The write into `consumed` failed (blocked create), so archiveAllPending's
-      // own catch swallowed it -- this message was NOT counted as archived.
       expect(result.messagesDroppedDead).toBe(0);
-      // The inbox message was never deleted: unlinkSync(src) sits after the
-      // atomic write and never runs when that write throws.
       expect(fs.existsSync(inboxFile)).toBe(true);
-      // The pre-existing consumed record is exactly as it was -- not
-      // overwritten, not torn.
       expect(fs.readFileSync(consumedFile, 'utf-8')).toBe(priorConsumed);
     } finally {
       fs.chmodSync(consumedDir, 0o755);
     }
 
-    // And no stray tmp file was left behind in consumed/.
     expect(fs.readdirSync(consumedDir)).toEqual([`${msgId}.json`]);
   });
 
@@ -205,7 +183,6 @@ describe('mailbox GC', () => {
       }, feedDir);
       const msgId = enqueue(box, { to: BOX, text: 'stale default ttl', from: 'operator', blockId });
       const inboxFile = path.join(box, 'inbox', `${msgId}.json`);
-      // Backdate the record so the default 24h TTL has passed.
       const raw = JSON.parse(fs.readFileSync(inboxFile, 'utf-8'));
       raw.ts = '2000-01-01T00:00:00.000Z';
       raw.expiresAt = '2000-01-02T00:00:01.000Z';

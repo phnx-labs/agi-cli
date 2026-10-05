@@ -43,13 +43,8 @@ function commit(p: string, msg: string): void {
   git(p, ['commit', '-m', msg]);
 }
 
-/** A repo with an upstream set to a local bare remote, pushed and even. */
 function repoWithUpstream(name: string): { repo: string; remote: string } {
   const remote = path.join(dir, `${name}.git`);
-  // `-b main` on the bare init too: its HEAD symref decides what a clone checks
-  // out, and CI's init.defaultBranch is master — a bare HEAD→master leaves the
-  // sibling clone branchless and its push fails with "src refspec main does not
-  // match any".
   git(dir, ['init', '--bare', '-b', 'main', remote]);
   const repo = path.join(dir, name);
   initRepo(repo);
@@ -89,8 +84,6 @@ describe('probeRepoWorkspace', () => {
 
   it('counts behind commits against the last-fetched upstream (no fetch in the probe)', () => {
     const { repo, remote } = repoWithUpstream('behind');
-    // Advance the remote from a sibling clone, then fetch so the remote-tracking
-    // ref moves — the probe itself must never fetch.
     const other = path.join(dir, 'behind-other');
     git(dir, ['clone', remote, other]);
     git(other, ['config', 'user.email', 'probe@example.com']);
@@ -150,8 +143,6 @@ describe('probeProjectWorkspaces', () => {
     const repo = path.join(dir, 'home-rel');
     initRepo(repo);
     commit(repo, 'initial');
-    // A tmp dir is never under HOME, so the home-relative echo is the path
-    // itself; home-relative expansion is covered by toHomeRelative's own tests.
     const [s, missing] = probeProjectWorkspaces([repo, path.join(dir, 'absent')]);
     expect(s.present).toBe(true);
     expect(s.path).toBe(repo);
@@ -166,17 +157,13 @@ describe('workspaceTargetsForDef', () => {
       root: '~/src/rush',
       repos: [
         { slug: 'phnx-labs/rush-infra', path: '~/src/rush-infra' },
-        { slug: 'phnx-labs/rush-docs', path: '~/src/rush' }, // dup of root
-        { slug: 'phnx-labs/slug-only' }, // no path — not probed
+        { slug: 'phnx-labs/rush-docs', path: '~/src/rush' },
+        { slug: 'phnx-labs/slug-only' },
       ],
     })).toEqual(['~/src/rush', '~/src/rush-infra']);
   });
 
   it('anchors on root, NOT defaultPath — a monorepo subproject probes its checkout', () => {
-    // The probe asks "is this checkout clean / behind?", which is a
-    // whole-repository question. Anchoring on defaultPath would probe
-    // ~/src/rush/apps/web — not a git root — and report every monorepo
-    // subproject on the fleet as missing or errored.
     expect(workspaceTargetsForDef({
       name: 'rush-web',
       root: '~/src/rush',
@@ -185,8 +172,6 @@ describe('workspaceTargetsForDef', () => {
   });
 
   it('does NOT join repos[].subpath — the probe wants the repo root', () => {
-    // subpath names the directory an agent working this project cares about;
-    // git status still has to run against the checkout that contains it.
     expect(workspaceTargetsForDef({
       name: 'rush',
       root: '~/src/rush',
@@ -199,9 +184,6 @@ describe('workspaceTargetsForDef', () => {
   });
 
   it('normalizes hand-edited def paths to the same home-relative form the probe echoes', () => {
-    // Defs are hand-editable YAML — an absolute path under home (or a trailing
-    // slash) must still match the probe row's `~/…` echo, or the row silently
-    // drops out of the fleet line.
     const abs = path.join(os.homedir(), 'src', 'rush');
     expect(workspaceTargetsForDef({ name: 'rush', root: abs })).toEqual(['~/src/rush']);
     expect(workspaceTargetsForDef({ name: 'rush', root: '~/src/rush/' })).toEqual(['~/src/rush']);
@@ -212,7 +194,7 @@ describe('parseRemoteProbe', () => {
   it('host-tags valid rows and drops malformed ones', () => {
     const rows = parseRemoteProbe(JSON.stringify([
       { path: '~/src/rush', present: true, branch: 'main', dirty: 0 },
-      { path: 42, present: true }, // malformed path
+      { path: 42, present: true },
       'nope',
     ]), 'mac-mini');
     expect(rows).toEqual([{ path: '~/src/rush', present: true, branch: 'main', dirty: 0, host: 'mac-mini' }]);
@@ -296,7 +278,6 @@ describe('workspaceWarnings', () => {
     expect(stripAnsi(w[0].text)).toBe(
       '3 hosts behind origin/main (~/src/x) — yosemite-m2 ↓217, mac-mini ↓172, yosemite-m1 ↓8',
     );
-    // ANY host ≥10 behind makes the whole group critical.
     expect(w[0].severity).toBe('critical');
     expect(w[0].remediation).toBe('pull (or rebase) before agents on these hosts open PRs against a stale base');
   });
@@ -354,7 +335,6 @@ describe('workspaceWarnings', () => {
       { host: 'a', path: '~/src/x', present: true, behind: 12, upstream: 'origin/main' },
       { host: 'b', path: '~/src/y', present: true, behind: 15, upstream: 'origin/main' },
     ]);
-    // One behind warning per path, not one merged "2 hosts behind".
     expect(w).toHaveLength(2);
     expect(w.map((x) => stripAnsi(x.text)).sort()).toEqual([
       'a is 12 commits behind origin/main (~/src/x)',

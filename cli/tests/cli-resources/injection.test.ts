@@ -1,19 +1,3 @@
-/**
- * Regression test for the manifest-driven RCE in src/lib/cli-resources.ts.
- *
- * Pre-fix, both `isCliInstalled` (via spawnSync({shell:true}) on `manifest.check`)
- * and `installCli` (via execSync of a built `npm install -g ${name}` string)
- * concatenated free-form manifest text into a shell command — a malicious
- * manifest could trivially smuggle `; touch /tmp/agents-rce-test`.
- *
- * Post-fix:
- *  - parseCliManifest rejects unsafe `check:` tokens up front.
- *  - isCliInstalled dispatches a structured CheckSpec to spawnSync with argv.
- *  - installCli routes `npm` through spawnSync('npm', ['install','-g', name])
- *    after re-validating the package name allowlist.
- *
- * Whichever sink an attacker hits, the canary file MUST NOT be created.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -33,10 +17,10 @@ function readCanary(): boolean {
 }
 
 beforeEach(() => {
-  try { fs.unlinkSync(CANARY); } catch { /* ignore */ }
+  try { fs.unlinkSync(CANARY); } catch {  }
 });
 afterEach(() => {
-  try { fs.unlinkSync(CANARY); } catch { /* ignore */ }
+  try { fs.unlinkSync(CANARY); } catch {  }
 });
 
 const PAYLOAD_CHECK = `echo a; touch ${CANARY}`;
@@ -77,14 +61,8 @@ describe('cli-resources injection hardening', () => {
   });
 
   it('isCliInstalled does not evaluate a shell payload when given a malicious CheckSpec directly', () => {
-    // Bypass parse-time validation by constructing the CheckSpec inline — this
-    // simulates a future programmatic caller and proves isCliInstalled's
-    // runtime dispatch never opens a shell.
     const checkAsObj: CheckSpec = {
       kind: 'version',
-      // spawnSync receives this as argv[0] — execve gets a literal program
-      // name with no shell interpretation, so `;` is part of the filename
-      // and the process simply fails to start.
       cmd: `echo a; touch ${CANARY}`,
       args: [],
     };
@@ -103,7 +81,6 @@ describe('cli-resources injection hardening', () => {
     const m: CliManifest = {
       name: 'evil',
       check: { kind: 'which', cmd: 'evil' },
-      // Bypass parse and hand installCli a hostile method directly.
       install: [{ npm: PAYLOAD_NPM }],
       source: 'user',
       path: '/x',

@@ -15,7 +15,6 @@ export interface SpawnOpts {
   trackerTimeoutMs?: number;
   env?: Record<string, string>;
   args?: string[];
-  /** If true, do NOT create a fresh tmpdir cwd — use the user's actual one. */
   reuseCwd?: boolean;
 }
 
@@ -39,7 +38,6 @@ export async function spawnAndDetect(opts: SpawnOpts): Promise<SpawnRun> {
   const cwd = opts.cwd ?? (opts.reuseCwd ? process.cwd() : await makeFreshCwd());
   const launchId = randomUUID();
 
-  // Ground-truth snapshot BEFORE spawn (Claude only for now).
   const beforeFiles =
     opts.agent === 'claude' ? await snapshotSessions(cwd) : new Set<string>();
 
@@ -61,11 +59,6 @@ export async function spawnAndDetect(opts: SpawnOpts): Promise<SpawnRun> {
     throw new Error(`spawn agents ${opts.agent} failed: no pid`);
   }
 
-  // Tracker polls for the state file at <agentPid>.json.
-  // The hook writes to $PPID which IS the agent process pid; in our spawn
-  // chain agents-cli -> agent CLI so we need to walk descendants.
-  // Use shellPid path (findStateInTree) via the index re-export — but
-  // trackSpawn polls a SPECIFIC pid. For early validation, walk the tree.
   const trackerTimeoutMs = opts.trackerTimeoutMs ?? 6000;
   const truthTimeoutMs = opts.truthTimeoutMs ?? 6000;
 
@@ -90,9 +83,6 @@ export async function spawnAndDetect(opts: SpawnOpts): Promise<SpawnRun> {
   };
 }
 
-// Wait up to timeoutMs for ANY pid in the tree under shellPid to have a state file.
-// This is the right primitive: the actual agent process is a descendant of the
-// `agents run ...` wrapper, and the hook writes under that agent pid.
 async function trackByShellTree(
   shellPid: number,
   timeoutMs: number,
@@ -125,7 +115,6 @@ export async function killAndCleanup(run: SpawnRun): Promise<void> {
           try {
             proc.kill('SIGKILL');
           } catch {
-            /* ignore */
           }
           resolve();
         }, 2000);
@@ -136,10 +125,8 @@ export async function killAndCleanup(run: SpawnRun): Promise<void> {
       });
     }
   } catch {
-    /* ignore */
   }
 
-  // Clean up any state files written by this run.
   try {
     const { descendantPids } = await import('../src/reader.js');
     if (run.proc.pid) {
@@ -149,27 +136,18 @@ export async function killAndCleanup(run: SpawnRun): Promise<void> {
       }
     }
   } catch {
-    /* ignore */
   }
 
-  // A tmux-wrapped `agents run --interactive` on a worker (tmux.enabled)
-  // used to leave the pane alive after this SIGTERM — the wrapper died,
-  // the detached session did not (PHNX-3293, 100+ week-old Claudes on s0
-  // sitting on "trust this folder" in /tmp/session-tracker-test-*). Kill
-  // any pane whose cwd is this run's directory.
   killTmuxSessionsForCwd(run.cwd);
 
-  // Remove the temp cwd we created (if we created one).
   if (run.cwd.startsWith(path.join(os.tmpdir(), 'session-tracker-test-'))) {
     try {
       await fs.promises.rm(run.cwd, { recursive: true, force: true });
     } catch {
-      /* ignore */
     }
   }
 }
 
-/** Tear down leftover agents-cli tmux panes whose working directory is `cwd`. */
 function killTmuxSessionsForCwd(cwd: string): void {
   const sock = path.join(os.homedir(), '.agents/.cache/helpers/tmux/server.sock');
   if (!fs.existsSync(sock)) return;

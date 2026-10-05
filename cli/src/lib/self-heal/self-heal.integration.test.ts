@@ -4,25 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// End-to-end: plant a temp HOME with one installed agent and a symlink launcher that
-// shadows the shim, then drive the real runSelfHeal (shims + shadowing + path) in a
-// subprocess (state paths resolve from process.env.HOME at module-eval — the pattern
-// from doctor-diff.test.ts). No mocks: real shim generation, real launcher adoption,
-// real rc-file edit — all confined to the temp home.
 
-// POSIX-only: exercises symlink-launcher adoption (the `shadowing` check is gated to
-// darwin/linux) plus a `/bin/echo` symlink and a bash rc-file edit — none of which
-// apply on Windows, where PATH lives in the registry and adoption is a no-op.
 describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/path against a planted home', () => {
   let home: string;
   let binDir: string;
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'self-heal-int-'));
-    // Installed agent: a claude version dir (only its existence matters here) + default pin.
     fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.0'), { recursive: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
-    // A launcher symlink that shadows the shim, first on PATH (the grok/claude shape).
     binDir = path.join(home, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
     fs.symlinkSync('/bin/echo', path.join(binDir, 'claude'));
@@ -51,7 +41,6 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/p
         launcherPointsAtShim,
       }));
     `;
-    // shims dir (HOME/.agents/.cache/shims) is deliberately NOT on PATH; binDir is first.
     const out = execFileSync('bun', ['-e', script], {
       cwd: process.cwd(),
       env: { ...process.env, HOME: home, PATH: `${binDir}:${process.env.PATH}`, SHELL: '/bin/bash' },
@@ -64,25 +53,19 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/p
     const { run1, run2, shimExists, launcherPointsAtShim } = runTwice();
 
     const c1 = byId(run1);
-    // shim regenerated
     expect(c1.shims.fixed.join(' ')).toContain('claude shim');
-    // symlink launcher adopted (not flagged as a real-binary shadow)
     expect(c1.shadowing.fixed.join(' ')).toContain('claude');
     expect(c1.shadowing.needsAttention).toEqual([]);
-    // PATH added
     expect(c1.path.fixed.join(' ')).toMatch(/added shims to PATH/i);
 
-    // physical proof
     expect(shimExists).toBe(true);
     expect(launcherPointsAtShim).toBe(true);
-    // the rc file actually got the managed line
     expect(fs.readFileSync(path.join(home, '.bashrc'), 'utf-8')).toContain('.agents');
 
-    // idempotency: nothing re-written on the second pass
     const c2 = byId(run2);
     expect(c2.shims.fixed).toEqual([]);
-    expect(c2.shadowing.fixed).toEqual([]); // already-adopted -> no-op
-    expect(c2.path.fixed).toEqual([]);       // already in rc -> no double-append
+    expect(c2.shadowing.fixed).toEqual([]);
+    expect(c2.path.fixed).toEqual([]);
   });
 });
 
@@ -156,8 +139,6 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — generated hook ru
       const hooksDir = path.join(versionDir, 'home', '.claude', 'hooks');
       fs.mkdirSync(hooksDir, { recursive: true });
       fs.writeFileSync(path.join(hooksDir, 'runtime-guard.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-      // listInstalledVersions intentionally requires a real launch binary;
-      // provide the minimal executable fixture so the unattended sweep sees it.
       const bin = path.join(versionDir, 'node_modules', '.bin', 'claude');
       fs.mkdirSync(path.dirname(bin), { recursive: true });
       fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -202,7 +183,7 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — generated hook ru
     const first = byId(result.run1)['hook-runtime'];
     const second = byId(result.run2)['hook-runtime'];
 
-    expect(first.fixed).toHaveLength(1); // two versions, one global shim destination
+    expect(first.fixed).toHaveLength(1);
     expect(first.needsAttention).toEqual([]);
     expect(result.executable).toBe(true);
     expect(second.fixed).toEqual([]);
@@ -245,11 +226,6 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — generated hook ru
   });
 });
 
-// The `resources` check runs UNATTENDED from the daemon (~30s after start, then every
-// ~6h) and reconciles every installed version home against the shared DotAgents
-// definitions. `agents add --isolated` promises the opposite — "no settings carry-over,
-// no resource sync" — so the sweep must walk straight past an isolated home while still
-// healing the normal one beside it.
 describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never sync into isolated homes', () => {
   let home: string;
 
@@ -264,8 +240,6 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never s
       fs.mkdirSync(path.dirname(binPath), { recursive: true });
       fs.writeFileSync(binPath, '#!/bin/sh\nexit 0\n');
       fs.chmodSync(binPath, 0o755);
-      // A real version home with the agent config dir already materialized, so the
-      // only thing separating the two is the marker.
       fs.mkdirSync(path.join(versionDir, 'home', '.claude'), { recursive: true });
     }
     fs.writeFileSync(
@@ -305,10 +279,8 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never s
       report: Report; normalHealed: boolean; isolatedHealed: boolean;
     };
 
-    // The sweep still does its job on normal installs…
     expect(result.normalHealed).toBe(true);
     expect(byId(result.report).resources.fixed.join(' ')).toContain('resource');
-    // …and never crosses the isolation boundary.
     expect(result.isolatedHealed).toBe(false);
     expect(fs.readdirSync(versionHome('9.9.2'), { recursive: true })).toEqual(['.claude']);
   }, 120_000);

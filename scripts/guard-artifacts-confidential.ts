@@ -1,24 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Server-enforced guard against committing confidential GTM/monetization content
- * to the PUBLIC `.agents/artifacts/` tree (PHNX-3033).
- *
- * `.agents/artifacts/<yyyy-mm-dd>/` is committed by design; anything in it is
- * public. `.agents/artifacts/private/` is gitignored and is the only artifacts
- * subtree that may hold confidential/personal strategy material.
- *
- * The guard inspects added/modified files under `.agents/artifacts/` (excluding
- * the private subtree) and fails loud if a filename or content matches
- * sensitive-strategy signals. It is intentionally conservative: an ambiguous
- * file is rejected with an actionable error that points the author to the
- * private dir or a private repo.
- *
- * Usage in CI:
- *   bun scripts/guard-artifacts-confidential.ts --base <sha> --head <sha>
- *
- * Local / pre-commit usage:
- *   git diff --cached --name-only | bun scripts/guard-artifacts-confidential.ts
- */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -38,10 +18,6 @@ export interface Violation {
 const ARTIFACTS_PREFIX = '.agents/artifacts/';
 const PRIVATE_PREFIX = '.agents/artifacts/private/';
 
-// Filename signals. Case-insensitive; short tokens require word boundaries to
-// avoid false positives on engineering terms (e.g. "array", "churn" in
-// "churn-test" is fine, but "churn" alone is flagged). Longer tokens are
-// distinctive enough to match as substrings.
 const FILENAME_SIGNALS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bgtm\b/, label: 'go-to-market / GTM' },
   { pattern: /monetiz/, label: 'monetization' },
@@ -56,7 +32,6 @@ const FILENAME_SIGNALS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bchurn\b/, label: 'churn' },
 ];
 
-// Explicit content phrases that are inherently confidential strategy.
 const EXPLICIT_CONTENT_SIGNALS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bmonetization\b/i, label: 'monetization' },
   { pattern: /\bgtm\b/i, label: 'GTM' },
@@ -69,9 +44,6 @@ const EXPLICIT_CONTENT_SIGNALS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bhow-winners-charge\b/i, label: 'pricing strategy' },
 ];
 
-// Strategy context words that, when combined with a dollar figure, indicate
-// confidential business/financial planning. Word boundaries prevent false
-// positives on engineering terms (e.g. "array" contains "arr").
 const STRATEGY_CONTEXT_RES: RegExp[] = [
   /\brevenue\b/i,
   /\barr\b/i,
@@ -120,10 +92,9 @@ function gitDiffNameStatus(base: string, head: string, cwd: string): string[] {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // name-status format: "<status>\t<path>" or rename "R100\told\tnew".
     const parts = trimmed.split('\t');
     const status = parts[0]![0]!;
-    if (status === 'D') continue; // deleted files are not new leaks
+    if (status === 'D') continue;
     const path = parts[parts.length - 1];
     if (path) out.push(posix(path));
   }
@@ -165,7 +136,6 @@ export function checkContent(text: string): string | null {
     }
   }
 
-  // Revenue/ARR/MRR/etc. next to a dollar figure.
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
     if (DOLLAR_FIGURE_RE.test(line) && hasStrategyContext(line)) {

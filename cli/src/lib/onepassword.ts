@@ -1,6 +1,3 @@
-/**
- * 1Password CLI (op) integration for importing secrets from vaults.
- */
 
 import { spawnSync } from 'child_process';
 
@@ -28,11 +25,6 @@ interface ImportableSecret {
   itemTitle: string;
   fieldLabel: string;
   value: string;
-  /**
-   * The item's free-form notes (1Password's `notesPlain` / any NOTES-purpose
-   * field), carried as descriptive metadata for the imported secret. Never the
-   * secret value — omitted when the item has no notes.
-   */
   description?: string;
 }
 
@@ -109,16 +101,13 @@ function pickBestField(fields: OpField[]): OpField | null {
   );
   if (dominated.length === 0) return null;
 
-  // Prefer concealed fields (credentials/passwords)
   const concealed = dominated.find((f) => f.type.toLowerCase() === 'concealed');
   if (concealed) return concealed;
 
-  // Then prefer fields labeled credential/password/secret/key/token
   const secretLabels = ['credential', 'password', 'secret', 'key', 'token', 'api_key', 'apikey'];
   const labeled = dominated.find((f) => secretLabels.includes(f.label?.toLowerCase() || ''));
   if (labeled) return labeled;
 
-  // Fall back to first importable field
   return dominated[0];
 }
 
@@ -141,12 +130,6 @@ function pickNotes(fields: OpField[]): string | undefined {
   return value ? value : undefined;
 }
 
-/**
- * Pure transform from a fetched 1Password item to an importable secret (or the
- * reason it was skipped). Split out of extractSecrets so the field-selection
- * and notes-extraction logic is exercised directly by tests without shelling
- * out to `op`.
- */
 export function itemToSecret(
   item: OpItem
 ): { secret: ImportableSecret } | { skipped: SkippedField } {

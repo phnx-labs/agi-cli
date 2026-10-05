@@ -26,8 +26,6 @@ function stubSessions(): string {
   return bin;
 }
 
-/** A stub `sessions` that reports `version` for `--version` (so the fast-path's
- *  gated-flag probe sees a real floor) and otherwise records the argv it got. */
 function stubSessionsVersioned(version: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-fastpath-'));
   temps.push(dir);
@@ -40,10 +38,6 @@ function stubSessionsVersioned(version: string): string {
   return bin;
 }
 
-/** A stub `sessions` reporting `version` for `--version` but exiting 127 (with a
- *  unique marker on stderr) for any real invocation — the exact signal the
- *  standalone's `--host` transport returns when the PEER has no `sessions` on
- *  PATH (`bash -lc` command-not-found). */
 function stubSessionsHost127(version: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-fastpath-'));
   temps.push(dir);
@@ -56,10 +50,6 @@ function stubSessionsHost127(version: string): string {
   return bin;
 }
 
-/** Register one or more devices in an isolated registry dir so the fast-path's
- *  `resolveRemoteDevice(<name>)` resolves to `me@<name>.invalid`. Returns the dir
- *  to pass as `AGENTS_DEVICES_DIR` (the state.ts test escape hatch). `.invalid`
- *  never resolves in DNS, so the in-repo fan-out's fall-through SSH fails fast. */
 function writeDeviceRegistry(home: string, names: string[]): string {
   const dir = path.join(home, 'devices-reg');
   fs.mkdirSync(dir, { recursive: true });
@@ -94,8 +84,6 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
   });
 
   it('falls through to the in-repo engine when no standalone sessions binary is installed', () => {
-    // An empty SESSIONS_BIN skips the dependency bin, and PATH has no `sessions`.
-    // That box must still answer, not refuse with "not installed".
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-fallback-'));
     try {
       writeUpdateCache(home);
@@ -150,10 +138,6 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     writeUpdateCache(home);
     const devicesDir = writeDeviceRegistry(home, ['box', 'mac-mini']);
     const bin = stubSessionsVersioned('0.2.1');
-    // Variadic `--device box mac-mini` is two devices; `--host` is point-to-one,
-    // so the whole query must stay on the in-repo fan-out (which answers with a
-    // merged array, [] for the unreachable peers) — the standalone is never
-    // handed a `--host` read, so its argv-recording branch never runs.
     const r = runAgents(['sessions', 'auth', '--device', 'box', 'mac-mini', '--json'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
       AGENTS_DEVICES_DIR: devicesDir,
@@ -175,9 +159,6 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
       AGENTS_DEVICES_DIR: devicesDir,
       AGENTS_NO_AUTOPULL: '1',
     });
-    // The read still succeeds: the in-repo fan-out answers with a valid JSON
-    // array (a dead peer contributes []), exit 0. Crucially the standalone's
-    // command-not-found is NOT surfaced — it was captured and discarded on 127.
     expect(r.status, r.stderr).toBe(0);
     expect(() => JSON.parse(r.stdout)).not.toThrow();
     expect(r.stdout).not.toContain('STUB_HOST_127_NOTFOUND');
@@ -197,8 +178,6 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     });
     expect(r.status, r.stderr).toBe(0);
     expect(() => JSON.parse(r.stdout)).not.toThrow();
-    // A 0.2.0 standalone must never receive a `--host` read — only its --version
-    // was probed, so the argv-recording branch never ran.
     expect(fs.existsSync(path.join(path.dirname(bin), 'argv'))).toBe(false);
   });
 
@@ -213,8 +192,6 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
       AGENTS_DEVICES_DIR: devicesDir,
       AGENTS_NO_AUTOPULL: '1',
     });
-    // The standalone is never invoked for a lifecycle verb — not even --version,
-    // since the device-read plan bails before the version probe.
     expect(r.stdout).not.toContain('STUB_SESSIONS_OK');
     expect(fs.existsSync(path.join(path.dirname(bin), 'argv'))).toBe(false);
   });

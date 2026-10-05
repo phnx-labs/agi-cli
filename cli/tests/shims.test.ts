@@ -4,8 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { generateShimScript, generateVersionedAliasScript } from '../src/lib/installations/shims.js';
 
-// We need to mock the versions directory, so we'll test the logic directly
-// by creating temp directories that mimic the version structure
 
 describe('shims - resource comparison', () => {
   let tempDir: string;
@@ -21,7 +19,6 @@ describe('shims - resource comparison', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  // Helper to create a version directory structure
   function createVersionDir(version: string, resources: {
     commands?: string[];
     skills?: string[];
@@ -32,7 +29,6 @@ describe('shims - resource comparison', () => {
     const versionPath = path.join(versionsDir, version, 'home', '.claude');
     fs.mkdirSync(versionPath, { recursive: true });
 
-    // Create commands
     if (resources.commands?.length) {
       const commandsDir = path.join(versionPath, 'commands');
       fs.mkdirSync(commandsDir, { recursive: true });
@@ -41,7 +37,6 @@ describe('shims - resource comparison', () => {
       }
     }
 
-    // Create skills
     if (resources.skills?.length) {
       const skillsDir = path.join(versionPath, 'skills');
       fs.mkdirSync(skillsDir, { recursive: true });
@@ -52,7 +47,6 @@ describe('shims - resource comparison', () => {
       }
     }
 
-    // Create hooks
     if (resources.hooks?.length) {
       const hooksDir = path.join(versionPath, 'hooks');
       fs.mkdirSync(hooksDir, { recursive: true });
@@ -61,14 +55,12 @@ describe('shims - resource comparison', () => {
       }
     }
 
-    // Create memory files
     if (resources.memory?.length) {
       for (const mem of resources.memory) {
         fs.writeFileSync(path.join(versionPath, mem.file), mem.content);
       }
     }
 
-    // Create settings.json with MCP servers
     if (resources.mcp?.length) {
       const mcpServers: Record<string, { command: string }> = {};
       for (const server of resources.mcp) {
@@ -83,7 +75,6 @@ describe('shims - resource comparison', () => {
     return versionPath;
   }
 
-  // Helper to compare resources (mirrors the logic in shims.ts)
   function compareResources(currentPath: string, targetPath: string) {
     const listDir = (dir: string): string[] => {
       if (!fs.existsSync(dir)) return [];
@@ -106,22 +97,18 @@ describe('shims - resource comparison', () => {
       }
     };
 
-    // Commands
     const currentCommands = listDir(path.join(currentPath, 'commands'));
     const targetCommands = new Set(listDir(path.join(targetPath, 'commands')));
     const commandsDiff = currentCommands.filter(c => !targetCommands.has(c)).map(c => c.replace(/\.md$/, ''));
 
-    // Skills
     const currentSkills = listDir(path.join(currentPath, 'skills'));
     const targetSkills = new Set(listDir(path.join(targetPath, 'skills')));
     const skillsDiff = currentSkills.filter(s => !targetSkills.has(s));
 
-    // Hooks
     const currentHooks = listDir(path.join(currentPath, 'hooks'));
     const targetHooks = new Set(listDir(path.join(targetPath, 'hooks')));
     const hooksDiff = currentHooks.filter(h => !targetHooks.has(h));
 
-    // Memory
     const memoryFile = 'CLAUDE.md';
     const currentLines = countLines(path.join(currentPath, memoryFile));
     const targetLines = countLines(path.join(targetPath, memoryFile));
@@ -129,7 +116,6 @@ describe('shims - resource comparison', () => {
       ? [{ file: memoryFile, currentLines, targetLines }]
       : [];
 
-    // MCP
     const currentMcp = readMcpServers(currentPath);
     const targetMcp = new Set(readMcpServers(targetPath));
     const mcpDiff = currentMcp.filter(m => !targetMcp.has(m));
@@ -202,7 +188,7 @@ describe('shims - resource comparison', () => {
     expect(diff.memory.length).toBe(1);
     expect(diff.memory[0].file).toBe('CLAUDE.md');
     expect(diff.memory[0].currentLines).toBe(5);
-    expect(diff.memory[0].targetLines).toBe(1); // empty file has 1 line
+    expect(diff.memory[0].targetLines).toBe(1);
   });
 
   test('detects missing MCP servers in target', () => {
@@ -244,7 +230,6 @@ describe('shims - resource comparison', () => {
     const v1Path = createVersionDir('1.0.0', {
       commands: ['deploy'],
     });
-    // v2 has no resources at all
     const v2Path = path.join(versionsDir, '2.0.0', 'home', '.claude');
     fs.mkdirSync(v2Path, { recursive: true });
 
@@ -273,11 +258,11 @@ describe('shims - resource comparison', () => {
 
     const diff = compareResources(v1Path, v2Path);
 
-    expect(diff.commands.length).toBe(2); // test, lint
-    expect(diff.skills.length).toBe(2); // code-review, testing
-    expect(diff.hooks.length).toBe(1); // pre-commit.sh
-    expect(diff.memory.length).toBe(1); // CLAUDE.md differs
-    expect(diff.mcp.length).toBe(2); // github, slack
+    expect(diff.commands.length).toBe(2);
+    expect(diff.skills.length).toBe(2);
+    expect(diff.hooks.length).toBe(1);
+    expect(diff.memory.length).toBe(1);
+    expect(diff.mcp.length).toBe(2);
   });
 });
 
@@ -349,10 +334,8 @@ describe('shims - generateShimScript', () => {
 
   test('parses flat agents format', () => {
     const script = generateShimScript('claude');
-    // Should look for ^agents: section, not ^versions:
     expect(script).toContain('^agents:');
     expect(script).not.toContain('^versions:');
-    // Should not look for nested default: key
     expect(script).not.toContain('default:');
   });
 
@@ -373,8 +356,6 @@ describe('shims - generateShimScript', () => {
   test('does not include foreground project sync in shim', () => {
     const script = generateShimScript('claude');
     expect(script).not.toContain('find_project_agents_dir');
-    // sync IS called on the hot path, but only with --launch (filesystem-only,
-    // sub-50ms, non-blocking). A foreground sync without --launch is forbidden.
     expect(script).not.toMatch(/"\$AGENTS_BIN" sync\b(?![^\n]*--launch)/);
   });
 
@@ -384,10 +365,6 @@ describe('shims - generateShimScript', () => {
   });
 
   test('shim does not use --version flag, which collides with the top-level CLI version flag', () => {
-    // Commander's `.version()` on the top-level program intercepts any
-    // `--version <value>` before subcommands see it — passing --version to
-    // `sync` or `refresh-rules` would silently print the CLI version and
-    // exit 0 instead of running the subcommand. Guard against regression.
     for (const agent of ['claude', 'codex', 'cursor', 'opencode', 'openclaw'] as const) {
       const script = generateShimScript(agent);
       expect(script, `${agent} shim must not pass --version to subcommands`).not.toMatch(/--version[ =]"?\$VERSION/);
@@ -415,8 +392,6 @@ describe('shims - generateShimScript', () => {
 describe('shims - generateVersionedAliasScript', () => {
   test('scopes Claude version aliases to their config dir', () => {
     const script = generateVersionedAliasScript('claude', '2.1.110');
-    // The alias now reuses the main shim's adapter block, keyed off VERSION_DIR, so
-    // CLAUDE_CONFIG_DIR resolves to the same per-version config dir as before.
     expect(script).toContain('VERSION_DIR="$AGENTS_REAL_HOME/.agents/.history/versions/claude/2.1.110"');
     expect(script).toContain('export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/.claude"');
   });

@@ -12,11 +12,8 @@ const PACKAGE_VERSION = JSON.parse(
 
 function makeTempHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-non-interactive-'));
-  // User dir: commands, agents.yaml live here
   const userDir = path.join(home, '.agents');
   fs.mkdirSync(userDir, { recursive: true });
-  // System dir: update-check and versions live here.
-  // Needs a .git dir so ensureInitialized() doesn't block commands.
   const systemDir = path.join(userDir, '.system');
   fs.mkdirSync(systemDir, { recursive: true });
   fs.mkdirSync(path.join(systemDir, '.git'), { recursive: true });
@@ -74,9 +71,6 @@ function writeFakeNpmInstaller(home: string, version: string): string {
     npmPath,
     [
       '#!/bin/sh',
-      // Production install probes `npm --version` before `npm install` —
-      // respond so the install path proceeds instead of bailing with
-      // "npm is not installed". See src/lib/installations/versions.ts:1124.
       'if [ "$1" = "--version" ]; then',
       '  echo "10.0.0"',
       '  exit 0',
@@ -106,7 +100,6 @@ function writeLocalPackageRepo(): string {
   return repo;
 }
 
-/** Version pins live in untracked JSON under .history/devices (not the tracked device doc). */
 const DEVICE_ID = 'testdev';
 function devicesRuntimeDir(home: string): string {
   return path.join(home, '.agents', '.history', 'devices');
@@ -125,19 +118,7 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
       AGENTS_REAL_HOME: home,
       SHELL: '/bin/zsh',
       AGENTS_SYNC_MACHINE_ID: DEVICE_ID,
-      // Own pins dir — vitest setup.ts pins AGENTS_DEVICES_DIR fork-wide.
       AGENTS_DEVICES_DIR: devicesRuntimeDir(home),
-      // This suite exercises real CLI usage against on-disk fixtures, including
-      // legacy pre-migration `agents.yaml` layouts (`versions:`/`agents:` still
-      // central rather than split into the machine-local history/device files) --
-      // migration running is part of what a real non-dev install does on first
-      // touch, and some fixtures below depend on it actually running. Dev builds
-      // (this repo's own tsx/dist invocations, detectDevBuild()) default
-      // AGENTS_SKIP_MIGRATION on to protect a real developer's ~/.agents/ while
-      // iterating; override that default here since these are throwaway temp
-      // homes, not a real developer's, and the whole point is exercising the
-      // real non-dev-build behavior (RUSH-2749). A specific test can still force
-      // it off via extraEnv.
       AGENTS_SKIP_MIGRATION: '0',
       ...extraEnv,
     },
@@ -246,10 +227,6 @@ afterEach(() => {
   }
 });
 
-// Every case here drives the CLI through fake managed-version binaries written
-// as `#!/bin/sh` scripts + `chmod 0o755` (writeFakeManagedVersion / fake npm
-// installer). Shebang scripts don't execute on Windows and chmod is a no-op
-// there, so the spawn path can't be exercised — this is a POSIX-tooling suite.
 describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () => {
   it('shows a plain hint instead of opening a picker', () => {
     const home = makeTempHome();
@@ -300,7 +277,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const storedPath = readSessionFilePath(home, sessionId);
     expect(storedPath).toBe(trashedSessionFile);
     expect(fs.existsSync(storedPath!)).toBe(true);
-    // versions: tracking now lives in the machine-local history file.
     expect(
       fs.readFileSync(path.join(home, '.agents', '.history', 'version-resources.json'), 'utf-8'),
     ).toContain(version);
@@ -353,10 +329,8 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
 
     expect(result.status).toBe(0);
     expect(combined).toContain(`Restored Codex@${version}`);
-    // Version directory is back where it was, binary intact.
     expect(fs.existsSync(versionDir)).toBe(true);
     expect(fs.existsSync(path.join(versionDir, 'node_modules', '.bin', 'codex'))).toBe(true);
-    // Trash entry for this version is emptied out after the move.
     const trashVersionDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'codex', version);
     expect(fs.existsSync(trashVersionDir)).toBe(false);
   });
@@ -490,10 +464,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
-    // Mark it isolated the way `agents add --isolated` does: a `.isolated` marker
-    // in the version dir. `use` records which isolated copy a bare `agents run
-    // codex` should reach — it must NOT repoint the real ~/.codex at (or carry
-    // settings into) an isolated home, nor pin it as the global default.
     fs.writeFileSync(
       path.join(home, '.agents', '.history', 'versions', 'codex', '0.1.0', '.isolated'),
       '',
@@ -504,12 +474,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('default ISOLATED copy');
-    // The isolation guarantee, unchanged: the real ~/.codex is never created or
-    // repointed...
     expect(fs.existsSync(codexSymlink)).toBe(false);
-    // ...and the pointer is recorded under `isolatedAgents:`, never as a global
-    // `agents:` pin — the separation that keeps getGlobalDefault unable to return
-    // an isolated version.
     const pins = fs.readFileSync(devicePinsPath(home), 'utf-8');
     expect(pins).toContain('isolatedAgents');
     expect(pins).not.toMatch(/"agents"\s*:\s*\{[^}]*"codex"/);
@@ -532,12 +497,10 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     );
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    // No second home: the managed install itself moved to the pinned release…
     expect(fs.readdirSync(versionsDir)).toEqual(['0.1.0']);
     expect(record.releaseVersion).toBe('0.2.0');
     expect(record.updatePolicy).toBe('pinned');
     expect(fs.existsSync(path.join(versionsDir, '0.1.0', 'node_modules', '.bin', 'codex'))).toBe(true);
-    // …and the default pointer never moved.
     expect(agentsYaml).toContain('"codex": "0.1.0"');
     expect(result.stdout).toContain("agents update codex --to 0.2.0");
     expect(result.stdout).toContain('--isolated');
@@ -715,8 +678,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       'codex@0.2.0',
     ]);
     expect(addResult.status).toBe(0);
-    // Only the reconcile stage's calls count: bare `agents sync` reaches MCP
-    // registration through refresh(), which skipped every HTTP server.
     fs.writeFileSync(logPath, '');
 
     const syncResult = runAgents(home, ['sync', '--local', '--yes']);
@@ -735,7 +696,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     writeLoggingManagedVersion(home, 'codex', '0.1.0', 'codex', logPath);
     writeLoggingManagedVersion(home, 'codex', '0.2.0', 'codex', logPath);
 
-    // Pre-register 'demo' in codex 0.2.0's MCP config so mcp remove can find it.
     const versionHome02 = path.join(home, '.agents', '.history', 'versions', 'codex', '0.2.0', 'home');
     const codexConfigDir = path.join(versionHome02, '.codex');
     fs.mkdirSync(codexConfigDir, { recursive: true });
@@ -769,11 +729,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     tempHomes.push(home);
     seedNewerUpdateCache(home, '99.0.0');
 
-    // tsx src/index.ts trips the dev-build auto-detect (.git at repo root)
-    // and disables the update prompt by default. This test verifies the
-    // update prompt itself, so override the auto-detect with an explicit
-    // empty env var (falsy — doesn't trip the disable guard, doesn't
-    // satisfy the "undefined" check in src/index.ts that would re-set it).
     const result = runAgents(home, ['view'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '' });
     const combined = `${result.stdout}\n${result.stderr}`;
 
@@ -801,14 +756,9 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status, combined).toBe(0);
-    // No separate "Profiles" section header — a harness gets a name header of
-    // its own, exactly like Claude/Codex above it.
     expect(combined).not.toMatch(/^Profiles\s*$/m);
-    // The header is derived from the harness name via the vendor/brand table:
-    // 'test-proxy' -> 'Test Proxy', 'ollama' -> 'Ollama'.
     expect(combined).toMatch(/^ {2}Test Proxy \(custom\)$/m);
     expect(combined).toMatch(/^ {2}Ollama \(custom\)$/m);
-    // The model + the host that executes it sit on the harness's own row.
     expect(combined).toMatch(/truefoundry\/qwen3-coder\s.*forked from claude/);
     expect(combined).toMatch(/qwen3-coder:30b\s.*forked from codex/);
   }, 30_000);
@@ -869,7 +819,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    // `view <agent> --json` emits a single object, not an array.
     const claudeEntry = JSON.parse(result.stdout) as {
       agent: string;
       harnesses: Array<{ name: string; agent: string; model: string; provider: string }>;
@@ -926,9 +875,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
           path.join(configDir, '.claude.json'),
           JSON.stringify({ oauthAccount: { emailAddress: email } }),
         );
-        // Off macOS, a missing `.credentials.json` is signed out even when
-        // `.claude.json` still names an email (PHNX-2685). Seed a token so
-        // the human view still has emails to sort by.
         fs.writeFileSync(
           path.join(configDir, '.credentials.json'),
           JSON.stringify({ claudeAiOauth: { accessToken: 'at-test', refreshToken: 'rt-test' } }),
