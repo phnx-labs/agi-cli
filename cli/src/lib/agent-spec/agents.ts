@@ -1,14 +1,3 @@
-/**
- * Core agent configuration and detection module.
- *
- * Defines the canonical registry of current and legacy AI coding agents (Claude,
- * Codex, Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Goose, Grok)
- * with their CLI commands, config paths, capability flags, and MCP integration
- * points.
- *
- * Provides functions for detecting installed CLIs, resolving version-managed binaries,
- * reading account/auth info, and managing MCP server registrations across agents.
- */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as crypto from 'crypto';
@@ -30,7 +19,6 @@ import { supports } from '../capabilities.js';
 import { MCP_TARGETS } from '../mcp-registry.js';
 import { VERSION_RE } from './primitives.js';
 
-/** Represents the installation state of an agent's CLI binary. */
 export interface CliState {
   installed: boolean;
   version: string | null;
@@ -41,11 +29,6 @@ const execFileAsync = promisify(execFile);
 
 const HOME = os.homedir();
 
-/**
- * Minimum Codex CLI version that supports hooks.
- * Mirrored on `AGENTS.codex.capabilities.hooks.since` -- kept exported for
- * legacy import sites that haven't migrated to `supports()` yet.
- */
 export const CODEX_HOOKS_MIN_VERSION = '0.116.0';
 
 const CLI_VERSION_CACHE_PATH = getCliVersionCachePath();
@@ -63,7 +46,6 @@ function loadCliVersionCache(): Record<string, CliVersionCacheEntry> {
   try {
     cliVersionCache = JSON.parse(fs.readFileSync(CLI_VERSION_CACHE_PATH, 'utf-8'));
   } catch {
-    /* missing or corrupt cache, rebuild */
     cliVersionCache = {};
   }
   return cliVersionCache!;
@@ -76,20 +58,9 @@ function saveCliVersionCache(): void {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CLI_VERSION_CACHE_PATH, JSON.stringify(cliVersionCache));
   } catch {
-    /* best-effort cache persist */
   }
 }
 
-/**
- * Synchronous PATH search -- no subprocess. Returns first matching binary path.
- *
- * Skips our own shims dir (`~/.agents/.cache/shims/`) — those shims are
- * dispatch helpers, not real installs. Counting them as installed produced a
- * false positive where agents with NO real binary on the host (e.g. a
- * never-installed Cursor whose only PATH entry was our `cursor-agent` shim
- * dispatcher) showed up under `agents view`'s "Not Managed by Agents CLI"
- * section, even though the user had nothing to import.
- */
 interface NativeBinaryResolutionOptions {
   accept?: (candidate: string) => boolean;
   shimsDir?: string;
@@ -101,12 +72,6 @@ function pathIsWithin(candidate: string, directory: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-/**
- * Resolve a PATH candidate to the immutable native executable agents-cli may
- * safely register. An adopted launcher can live outside the shims directory
- * while resolving back into it; in that case its durable adoption record is
- * the source of truth for the original executable.
- */
 export function resolveNativeBinaryPath(
   command: string,
   candidate: string,
@@ -126,11 +91,11 @@ export function resolveNativeBinaryPath(
   try {
     canonicalShimsDir = fs.realpathSync(shimsDir);
   } catch {
-    /* An absent shims dir cannot make an existing native binary invalid. */
   }
 
   if (!pathIsWithin(canonicalCandidate, canonicalShimsDir)) return canonicalCandidate;
 
+  // A shim resolves only to its recorded original; never recurse into the shim tree.
   const recordPath = path.join(historyDir, 'adopted-launchers', command);
   try {
     const [original] = fs.readFileSync(recordPath, 'utf-8').split(/\r?\n/, 1);
@@ -158,26 +123,17 @@ export function findInPath(command: string, options: NativeBinaryResolutionOptio
       try {
         const stat = fs.statSync(full);
         if (!stat.isFile()) continue;
-        // A shell only runs an executable file; `which` skips a mode-644 namesake and
-        // so must this, or a stray non-executable `secrets`/`claude` file earlier on
-        // PATH would shadow the real binary further down. On win32 the mode bit is
-        // meaningless (PATHEXT decides), so the check is POSIX-only.
+        // PATH candidates must be executable before they can represent a native install.
         if (process.platform !== 'win32') fs.accessSync(full, fs.constants.X_OK);
         const native = resolveNativeBinaryPath(command, full, options);
         if (native && (!options.accept || options.accept(native))) return native;
       } catch {
-        /* not in this dir */
       }
     }
   }
   return null;
 }
 
-/** Grok-specific binary resolution.
- * Grok does not live in node_modules/.bin. Its versioned binaries live in each
- * managed version home under `.grok/downloads/`, so detection must not follow
- * the host ~/.grok config symlink.
- */
 function resolveGrokBinary(version?: string): string | null {
   if (version && version !== 'latest') {
     const binaryPath = getBinaryPath('grok', version);
@@ -274,15 +230,6 @@ function splitCommandLine(command: string): string[] {
   return args;
 }
 
-/**
- * Per-harness dispatch data that used to live in `if (agentId === …)` /
- * `switch (agentId)` arms inside this file. These are stable properties of a
- * harness, not per-call-site quirks — a new AgentId must declare every field
- * (the completeness test in agents.test.ts pins that).
- *
- * Left as call-site specials (not registry data): `getAccountInfo` and
- * `readAuthAccountIdentity` — those are parsers, not flags.
- */
 type VersionStdoutMatch = 'semver' | 'openclaw';
 type UnmanagedBinaryResolver = 'path' | 'grok-downloads';
 type McpRegisterPath = 'cli' | 'config';
@@ -291,37 +238,17 @@ type McpAddStdioStyle = 'scope' | 'simple';
 type McpConfigWriteStyle = 'json-mcpServers' | 'yaml-mcp_servers';
 
 interface AgentRegistryConfig extends AgentConfig {
-  /**
-   * Session-transcript directory as path segments under a HOME root, or null
-   * when this harness has no local session tree `agents` can walk.
-   */
   sessionDir: string[] | null;
-  /** File extension of session transcripts, or null when unknown. */
   sessionFileExt: '.jsonl' | '.json' | null;
-  /** How to parse `cli --version` stdout. */
   versionStdoutMatch: VersionStdoutMatch;
-  /** How to find an unmanaged (non-version-home) binary. */
   unmanagedBinary: UnmanagedBinaryResolver;
-  /**
-   * How `registerMcp` / `unregisterMcp` talk to the harness. `config` writes
-   * the file directly (no `mcp add` CLI); `cli` shells out.
-   */
   mcpRegister: McpRegisterPath;
-  /** Argv shape for `mcp add` over HTTP. */
   mcpAddHttp: McpAddHttpStyle;
-  /** Argv shape for `mcp add` over stdio. */
   mcpAddStdio: McpAddStdioStyle;
-  /** On-disk map key + serialization when writing MCP config directly. */
   mcpConfigWrite: McpConfigWriteStyle;
 }
 
-/**
- * Master registry of all supported agents keyed by AgentId.
- *
- * Each entry defines the agent's CLI command, npm package, config directory layout,
- * instructions file name, slash-command format, and capability flags. This is the
- * single source of truth for agent metadata consumed throughout the codebase.
- */
+// Capability exceptions such as headlessPlan, rulesImports, and interactiveRepl are tested upstream limits.
 export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
   claude: {
     id: 'claude',
@@ -348,15 +275,11 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
     nativePluginSkills: true,
+    // Harness-owned skill directories survive orphan cleanup.
     ownedSkillDirs: ['synced'],
-    // Claude Code grew a native `claude --cloud "<prompt>"` (Anthropic-managed
-    // infra, claude.ai/code; requires claude.ai subscription auth). Routing
-    // still goes to Rush Cloud deliberately — it keeps cloud tasks in one
-    // tracked fleet (agents cloud list/status/logs) regardless of harness.
     cloudProvider: 'rush',
     capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true, interactiveRepl: true },
   },
-  // codex hooks: gated to >= 0.116.0 (introduced [features] codex_hooks flag).
   codex: {
     id: 'codex',
     name: 'Codex',
@@ -382,8 +305,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
     cloudProvider: 'codex',
-    // Subagents: multi-agent plumbing since 0.117.0; custom agents as
-    // ~/.codex/agents/*.toml (name, description, developer_instructions).
     capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: { since: '0.138.0' }, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], interactiveRepl: true },
   },
   cursor: {
@@ -406,28 +327,13 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     commandsDir: path.join(HOME, '.cursor', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.cursor', 'skills'),
-    // Hooks: ~/.cursor/hooks.json (`{ "version": 1, "hooks": { event: [{ command }] } }`).
-    // CLI hooks since 2026-01-16. See registerHooksForCursor — only CLI-fired events.
     hooksDir: 'hooks',
-    // Plugins: `.cursor-plugin/plugin.json` (re-enabled in CLI 2026-05). Mirror the
-    // Claude marketplace layout into ~/.cursor/plugins/ and copy the manifest into
-    // pluginManifestDir so Cursor's native loader sees it (same pattern as droid/
-    // codex).
     pluginManifestDir: '.cursor-plugin',
     instructionsFile: '.cursorrules',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Subagents: `.cursor/agents/<name>.md` (project) or `~/.cursor/agents/<name>.md`
-    // (user), Markdown with YAML frontmatter (name, description, model, readonly,
-    // is_background — no `color`). Shipped in cursor-agent CLI 2026.01 (Cursor 2.4,
-    // 2026-01-22); cursor-agent uses CalVer build tags (e.g. 2025.11.25-<hash>), so
-    // gate at `>= 2026.1.22`. The `agents sync` path enforces this (versions.ts skips
-    // + warns for pre-2.4 installs); the direct `subagents add --agents cursor` path
-    // writes unconditionally, same as the other since-gated agents.
-    // See transformSubagentForCursor / https://cursor.com/docs/subagents.
-    // Current cursor-agent builds open their interactive TUI with no argv.
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: true }, // allowlist: ~/.cursor/cli-config.json
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
   opencode: {
     id: 'opencode',
@@ -447,11 +353,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     commandsDir: path.join(HOME, '.opencode', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.opencode', 'skills'),
-    // Plugins: TS/JS modules auto-loaded from ~/.config/opencode/plugins/ (global)
-    // and .opencode/plugins/ (project). Not Claude marketplace format — see
-    // installOpenCodePlugin in plugins.ts. OpenCode v1.18.4 exposes lifecycle
-    // hooks through plugin modules (event/tool/etc. functions), not a native
-    // opencode.json shell-command hooks block.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
@@ -474,30 +375,18 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     cliCommand: 'openclaw',
     npmPackage: 'openclaw',
     configDir: path.join(HOME, '.openclaw'),
-    commandsDir: '', // OpenClaw uses Gateway-based slash commands, not file-based
+    commandsDir: '',
     commandsSubdir: '',
     skillsDir: path.join(HOME, '.openclaw', 'skills'),
-    nativeCommandRuntime: true, // Gateway resolves slash commands — don't convert commands to skills
+    // Gateway owns commands; converting them to skills would create a second runtime.
+    nativeCommandRuntime: true,
 
     hooksDir: 'hooks',
-    instructionsFile: 'workspace/AGENTS.md', // Primary memory file (also has SOUL.md, IDENTITY.md, etc.)
+    instructionsFile: 'workspace/AGENTS.md',
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
-    // hooks: NOT supported. OpenClaw only exposes a fixed set of internal,
-    // named hooks (e.g. `boot-md`, which runs BOOT.md on gateway restart) —
-    // there is no general event->shell-command registration surface (no
-    // PreToolUse/PostToolUse/UserPromptSubmit equivalent an agents-cli
-    // hooks.yaml manifest could target). registerHooksToSettings has no
-    // `openclaw` case and silently no-ops (RUSH-2122: capability claimed
-    // hooks:true with zero hooks ever installed). Flip back to `true` only
-    // alongside a real registerHooksForOpenClaw implementation.
+    // OpenClaw's fixed internal hooks are not a general event-to-shell surface.
     supportsHooks: false,
-    // allowlist: maps blanket (whole-tool) rules to ~/.openclaw/openclaw.json
-    // tools.alsoAllow (allow) / tools.deny (deny). OpenClaw gates at tool
-    // granularity only, so sub-command/path/domain patterns are skipped.
-    // OpenClaw is self-updating (no pinned since), so `true` is correct.
-    // Workflows sync as Lobster `.lobster` files under `.openclaw/workflows/`;
-    // the Lobster tool runs them by receiving the file path as `pipeline`.
     capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
   copilot: {
@@ -518,21 +407,12 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     commandsDir: path.join(HOME, '.copilot', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.copilot', 'skills'),
-    // Hooks: user-level `~/.copilot/hooks/*.json` (GA @github/copilot, every
-    // 1.x). Schema `{ "version": 1, "hooks": { event: [...] } }` with camelCase
-    // event names (sessionStart, preToolUse, …). See registerHooksForCopilot.
     hooksDir: 'hooks',
-    // Copilot reads a plugin's manifest from the plugin ROOT (plugin.json),
-    // not `.claude-plugin/plugin.json`. Mirror it there. Verified against the
-    // GitHub Copilot CLI (1.0.56): `copilot plugin install` produces an
-    // installed plugin dir whose manifest sits at the root.
     pluginManifestDir: '.',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // interactiveRepl: false — copilot requires a prompt for meaningful work; bare invocation
-    // opens a welcome screen but not a persistent coding REPL suitable for agents focus.
     capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '0.0.353' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'], interactiveRepl: false },
   },
   amp: {
@@ -558,7 +438,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    // interactiveRepl: false — amp requires a prompt; bare invocation exits immediately.
     capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'], interactiveRepl: false },
   },
   goose: {
@@ -579,38 +458,15 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     configDir: path.join(HOME, '.config', 'goose'),
     commandsDir: path.join(HOME, '.config', 'goose', 'commands'),
     commandsSubdir: 'commands',
-    // Goose reads skills directly from central ~/.agents/skills/ via the Summon
-    // extension (block-goose-cli ≥ 1.25.0). No per-version copy is written.
     skillsDir: path.join(HOME, '.agents', 'skills'),
     nativeAgentsSkillsDir: true,
-    // Hooks: Open Plugins format — auto-discovered from
-    // ~/.agents/plugins/<name>/hooks/hooks.json (shipped block-goose-cli
-    // ≥ 1.34.0). See registerHooksForGoose.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
-    // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    // Workflows sync as Goose recipe YAML. Permissions are NOT supported:
-    // permission.yaml gates whole tools, so canonical rules cannot round-trip.
-    // Commands: a Goose slash command is a recipe YAML under
-    // ~/.config/goose/commands/<name>.yaml, registered in ~/.config/goose/config.yaml
-    // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).
-    // Subagents: recipe YAML named agents under ~/.config/goose/agents/<name>.yaml
-    // (goose auto-discovers and delegates to them by name in autonomous mode).
     capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'], interactiveRepl: true },
   },
-  // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
-  // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
-  // CLI but isolates its own state in the `antigravity-cli/` subdir. Per-version HOME
-  // isolation works because the shim's configDirName carries the full nested path.
-  // Auth: Google OAuth on first launch, or ANTIGRAVITY_API_KEY env var for headless.
-  // Hooks: JSON entries under a top-level `hooks` key in settings.json; events are
-  // before_tool_call, after_model_call, on_loop_stop, on_error. Plugins are the
-  // renamed Gemini CLI extensions. Permissions live in settings.json under a
-  // `permissions` key with allow/deny arrays.
   antigravity: {
     id: 'antigravity',
     name: 'Antigravity',
@@ -637,16 +493,8 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false, interactiveRepl: true }, // workflows: markdown files in the shared, HOME-global ~/.gemini/config/global_workflows/ (agy scans it at startup; not version-isolated — see workflows.ts), invoked as /<name> slash commands
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false, interactiveRepl: true },
   },
-  // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
-  // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
-  // under [mcp_servers] in ~/.grok/config.toml. Hooks auto-discovered from
-  // ~/.grok/hooks/ (+ project .grok/hooks/) — events PreToolUse, PostToolUse, etc.
-  // Plugins live in ~/.grok/plugins/ with marketplaces. Permissions: --allow/--deny
-  // CLI flags or [permission] TOML block in ~/.grok/config.toml.
-  // Workflows (native Rhai orchestration) enabled by default as of v0.2.111 —
-  // projected into ~/.grok/workflows/<name>.rhai (under GROK_HOME isolation).
   grok: {
     id: 'grok',
     name: 'Grok',
@@ -663,10 +511,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     npmPackage: '',
     installScript: 'curl -fsSL https://x.ai/cli/install.sh | bash',
     configDir: path.join(HOME, '.grok'),
-    // Grok discovers file-based slash commands from ~/.agents/commands/ (the
-    // cross-agent compat dir it mirrors from Claude Code) as well as the legacy
-    // ~/.claude/commands/ symlink. We write there directly so the per-agent
-    // install path and the central user repo stay in sync.
     commandsDir: path.join(HOME, '.agents', 'commands'),
     commandsSubdir: path.join('..', '.agents', 'commands'),
     skillsDir: path.join(HOME, '.grok', 'skills'),
@@ -680,30 +524,21 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       mcp: true,
       mcpHttp: false,
       mcpHeaders: false,
-      allowlist: true, // maps to Grok's granular Bash/Edit/Write/Read/Grep/WebFetch/MCPTool rules
+      allowlist: true,
       skills: true,
-      commands: true, // Grok >= 0.2.111: file-based slash commands from ~/.agents/commands/ (docs) + ~/.claude/commands/ (Claude Code compat)
+      commands: true,
       plugins: true,
-      subagents: true, // ~/.grok/agents/*.md (Claude-compatible agent defs)
+      subagents: true,
       rules: { file: 'AGENTS.md' },
-      // Native workflows (`.rhai` under ~/.grok/workflows/) shipped on-by-default
-      // in v0.2.111 (2026-07-22). See transformWorkflowForGrok in workflows.ts.
       workflows: { since: '0.2.111' },
       memory: true,
       modes: ['plan', 'edit', 'skip'],
-      // grok's `--permission-mode plan` silently stalls a headless `-p` run at
-      // its ExitPlanMode gate (no TTY to approve). Headless plan auto-downgrades
-      // to auto (→ edit via resolveMode). Interactive plan is unaffected.
+      // Headless plan stalls at Grok's approval gate; interactive plan still works.
       headlessPlan: false,
       rulesImports: true,
       interactiveRepl: true,
     },
   },
-  // Kimi Code CLI (`kimi`) — Moonshot AI coding agent.
-  // Install: `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash`
-  //    or: `npm install -g @moonshot-ai/kimi-code`
-  // Config: `~/.kimi-code/config.toml`, `~/.kimi-code/mcp.json`,
-  //         `~/.kimi-code/skills/`, `~/.kimi-code/hooks/`
   kimi: {
     id: 'kimi',
     name: 'Kimi',
@@ -738,66 +573,17 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       skills: true,
       commands: false,
       plugins: true,
-      // Claude-shaped agent markdown under ~/.kimi-code/agents/. kimi-code
-      // discovers that dir from `USER_BRAND_DIRS = ["agents"]` (agent-file
-      // discovery, added in 0.29.0); 0.28.x and older compile their four agent
-      // profiles into the bundle with no filesystem loader at all, so a synced
-      // file there is never read.
       subagents: { since: '0.29.0' },
       rules: { file: 'AGENTS.md' },
       workflows: true,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
-      // kimi's headless `-p` refuses to combine with `--plan` (`Cannot combine
-      // --prompt with --plan`). Headless plan auto-downgrades to auto (kimi -p
-      // auto-runs). Interactive plan is unaffected.
+      // Kimi rejects combining its headless prompt and plan flags.
       headlessPlan: false,
       rulesImports: false,
       interactiveRepl: true,
     },
   },
-  // Factory AI Droid CLI (`droid`) — agentic coding CLI from factory.ai.
-  // Install: `curl -fsSL https://app.factory.ai/cli | sh` (no npm package).
-  // Binary is NOT in node_modules/.bin — the shim resolves the fixed install
-  // path ~/.local/bin/droid directly (see the droid branch in shims.ts).
-  // Config: `~/.factory/` (settings.json, mcp.json, droids/, commands/, hooks/,
-  // plugins/). Memory: native AGENTS.md. Subagents = custom droids (top-level
-  // .md files in ~/.factory/droids/). Config isolation rides the ~/.factory
-  // symlink switch (no FACTORY_HOME env var exists). Headless:
-  // `droid exec "<prompt>"` with --auto low|medium|high, -o stream-json,
-  // -m <model>, -r <effort>.
-  //
-  // Hooks: Claude-shaped. settings.json carries a top-level `hooks` object keyed
-  // by event (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart,
-  // SessionEnd, Stop, SubagentStop, Notification, PreCompact), each an array of
-  // `{ matcher?, hooks: [{ type: "command", command, timeout? }] }` matcher
-  // groups — verified against the droid binary's zod schema. So the Claude
-  // registrar is reused verbatim, just targeting `.factory/settings.json`.
-  //
-  // Plugins: native `droid plugin` command group + ~/.factory/plugins/ with the
-  // same marketplace layout Claude uses (known_marketplaces.json +
-  // marketplaces/<name>/plugins/<plugin>/). Droid's plugin manifest dir is
-  // `.factory-plugin/` (it also reads `.claude-plugin/` for compatibility) — set
-  // pluginManifestDir so syncPluginToVersion mirrors the manifest into it, the
-  // same pattern codex uses with `.codex-plugin`.
-  //
-  // Workflows / Factory Missions (RUSH-1864, probed droid v0.177.0; ticket cited
-  // v0.161.0 — self-updating, no pinnable semver): Factory ships genuine multi-
-  // step orchestration ("Missions") via `/missions` (interactive) and
-  // `droid exec --mission` (headless; optional `-f <prompt.md>` is a *prompt*
-  // file, not a named mission template). Docs:
-  // https://docs.factory.ai/cli/features/missions and
-  // https://docs.factory.ai/docs/droid-exec/overview (Mission Mode).
-  //
-  // Mission state may land under `~/.factory/missions/<sessionId>/` at runtime
-  // (`getMissionsDir` = join(home, ".factory", "missions") + per-session
-  // mission.md / features.json / progress_log.jsonl) — that is **session
-  // runtime state**, not a discovery directory of installable named workflows.
-  // There is no discoverMission / template registry, and a cold install has no
-  // `~/.factory/missions/` until a mission is run. agents-cli's workflows
-  // capability means "sync WORKFLOW.md into an auto-discovered dir" — Droid
-  // has no such dir, so workflows stays false (invoke-only; do not fabricate a
-  // writer target).
   droid: {
     id: 'droid',
     name: 'Droid',
