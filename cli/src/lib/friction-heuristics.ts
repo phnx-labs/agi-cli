@@ -17,6 +17,8 @@ export function detectRepeatedGuardBlocks(
   events: EventRecord[],
   opts: { minRepeats?: number } = {},
 ): RepeatedGuardBlockFinding[] {
+  // Repeated session/surface/failureId denials mean retrying instead of adapting;
+  // unrelated or malformed records are ignored defensively.
   const minRepeats = opts.minRepeats ?? 3;
   const groups = new Map<string, EventRecord[]>();
 

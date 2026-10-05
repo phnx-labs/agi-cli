@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as yaml from 'yaml';
 import { stringifyDoc } from './yaml-io.js';
 
+// All agents.yaml writers share this fixed-point serializer: normalize legacy flow roots and empty maps once, while preserving committed flow sequences.
 describe('stringifyDoc', () => {
   it('preserves committed flow sequences byte-identically', () => {
     const src =

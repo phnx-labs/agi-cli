@@ -15,6 +15,7 @@ import {
 
 
 describeRoutines('routines devices --set persists', () => {
+  // First empty-device materialization seeds every enabled routine.
   it('writes activation to the target device manifest without changing definition metadata', () => {
     const home = makeHome({ jobs: [baseJob], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
@@ -117,6 +118,8 @@ describeRoutines('routines devices --set unknown is nonzero/no mutation', () => 
 });
 
 describeRoutines('routines devices --set skips unreachable non-targets (#2118)', () => {
+  // Non-target failures warn after target success; failure to enable the target
+  // remains nonzero even if a local pause already committed.
   it('enables on the local target and warns about an offline peer that cannot be paused', () => {
     const offlinePeer = {
       name: 'offline-box',

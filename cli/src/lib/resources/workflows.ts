@@ -76,6 +76,8 @@ function layerForWorkflowPath(workflowPath: string, cwd?: string): Layer {
 }
 
 class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
+  // Workflow precedence is project→user→plugin→extra→system; aliases use the
+  // same resolveWorkflowRef path as canonical names.
   readonly kind = 'workflow' as const;
 
   listAll(_agent: AgentId, cwd?: string): ResolvedItem<WorkflowItem>[] {
@@ -126,6 +128,7 @@ class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   }
 
   sync(_agent: AgentId, _versionHome: string, _cwd?: string): void {
+    // Version copies belong to versions.ts; exec resolves source directories directly.
   }
 
   format(_agent: AgentId): 'md' {

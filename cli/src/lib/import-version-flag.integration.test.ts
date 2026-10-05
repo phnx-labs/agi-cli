@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// --as must reach import because top-level Commander owns --version; the Bun subprocess also pins cpSync(filter) overwrite behavior.
 describe.skipIf(process.platform === 'win32')('agents import --as', () => {
   let home: string;
 

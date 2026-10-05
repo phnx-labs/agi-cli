@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isMissingBinarySignature, probeSpawnSpec } from './installations/versions.js';
 
+// Missing-binary signatures gate install acceptance; ordinary nonzero --version exits do not.
 describe('isMissingBinarySignature (gutted-install detector)', () => {
   it('flags the real codex ENOENT crash (wrapper present, native binary missing)', () => {
     const blob =
@@ -26,6 +27,7 @@ describe('isMissingBinarySignature (gutted-install detector)', () => {
   });
 });
 
+// Windows probes quote the whole spaced .cmd command and pass no args to avoid false repair.
 describe('probeSpawnSpec (launch-probe quoting)', () => {
   it('fully quotes a SPACED Windows .cmd path and empties the args array', () => {
     const spaced =

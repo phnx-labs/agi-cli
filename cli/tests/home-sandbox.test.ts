@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { getHomeDir, getUserAgentsDir } from '../src/lib/state.js';
 
+// tests/setup redirects HOME before imports so modules and child environments cannot touch real homes.
 describe('vitest HOME sandbox (RUSH-2639)', () => {
   it('process.env.HOME is redirected to a fork-private sandbox, not the real OS home', () => {
     const home = process.env.HOME;

@@ -11,6 +11,8 @@ import {
 
 
 describeRoutines('routines status --json', () => {
+  // Status combines this device's last fire with live spawn state. A null-pid
+  // pre-spawn claim is not in flight, and another device's run is not local history.
   it('emits a scheduler block plus per-routine owner device, last fire, and last error', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({

@@ -9,6 +9,7 @@ export function parseSha256Asset(text: string): string {
 }
 
 export function sha256File(file: string): Promise<string> {
+  // Keep this crypto/fs-only leaf cycle-free; stream release assets instead of buffering.
   return new Promise((resolve, reject) => {
     const hash = createHash('sha256');
     fs.createReadStream(file)

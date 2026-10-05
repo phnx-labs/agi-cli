@@ -46,6 +46,8 @@ export async function maybePickInteractiveHost(): Promise<boolean> {
 export async function maybePickBrowserProfile(deps: {
   interactive?: boolean;
 } = {}): Promise<boolean> {
+  // Preserve an existing choice. Standalone browser owns discovery/profile creation;
+  // absent, headless, or cancelled setup is a no-op and fleet routing remains valid.
   const interactive = deps.interactive ?? isInteractiveTerminal();
   if (!interactive) return false;
   if ((getConfigValue('browser.profile').value as string | undefined)) return false;
@@ -66,6 +68,7 @@ export async function maybePickBrowserProfile(deps: {
 }
 
 export async function runPreferencesStep(): Promise<void> {
+  // Preference prompts are optional; cancellation must not fail setup.
   if (!isInteractiveTerminal()) return;
   try {
     const pickedHost = await maybePickInteractiveHost();

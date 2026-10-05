@@ -79,6 +79,7 @@ describe('notableSnippet', () => {
   });
 });
 
+// Workflow notifications use Claude identity; deterministic command routines have no avatar, but failures still close every start.
 describe('routineStartNotification — threshold', () => {
   it('notifies for agent and workflow routines', () => {
     expect(routineStartNotification(agentConfig())).toMatchObject({

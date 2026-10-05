@@ -17,6 +17,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
 }
 
 async function readWebhookSecrets(bundleName: string): Promise<WebhookSecrets> {
+  // Background startup is agentOnly: never raise biometric UI; locked secrets fail loud.
   const { env } = await readAndResolveBundleEnv(bundleName, {
     caller: 'webhooks serve',
     agentOnly: true,
@@ -69,9 +70,11 @@ export function registerWebhooksCommand(program: Command): void {
           port,
           secrets,
           rateLimitPerMinute: rateLimit,
+          // Delivery dedup survives restarts.
           deliveryStore: createFileDeliveryStore(
             path.join(getRuntimeStateDir(), 'webhook', 'deliveries.json'),
           ),
+          // Log matches before blocking dispatch work begins.
           onMatch: (webhook, matchedJobNames, matchedHandlerNames) => {
             const parts: string[] = [];
             if (matchedJobNames.length) parts.push(`routines ${matchedJobNames.join(', ')}`);
@@ -81,6 +84,7 @@ export function registerWebhooksCommand(program: Command): void {
               (parts.length ? `fired ${parts.join('; ')}` : 'no match'),
             );
           },
+          // HTTP is acked before dispatch, so post-ack failures must stay visible.
           onDeliveryError: (webhook, err) => {
             console.error(chalk.red(
               `${new Date().toISOString()} ${webhook.source}:${webhook.event} dispatch failed after ack: ${err.message}`,
